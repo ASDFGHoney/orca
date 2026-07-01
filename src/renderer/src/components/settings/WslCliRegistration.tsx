@@ -31,6 +31,8 @@ export function WslCliRegistration({
   const [loading, setLoading] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [busyAction, setBusyAction] = useState<'install' | 'remove' | null>(null)
+  // Why: WSL registration can fail behind a transient toast too; keep the
+  // last action failure visible until the user refreshes or a later action works.
   const [actionError, setActionError] = useState<string | null>(null)
   const mountedRef = useMountedRef()
   const { wslAvailable } = useWindowsTerminalCapabilities(currentPlatform === 'win32')
