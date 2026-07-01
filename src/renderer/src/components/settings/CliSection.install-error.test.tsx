@@ -9,12 +9,29 @@ import { CliSection } from './CliSection'
 
 const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
+  toastMessage: vi.fn(),
   toastSuccess: vi.fn(),
-  dialog: { onInstall: null as null | (() => Promise<void>) }
+  toastWarning: vi.fn(),
+  ensurePrerequisite: vi.fn(),
+  dialog: { onInstall: null as null | (() => Promise<void>) },
+  panel: { onBeforeOpenTerminal: null as null | (() => Promise<void>) }
 }))
 
 vi.mock('sonner', () => ({
-  toast: { error: mocks.toastError, success: mocks.toastSuccess }
+  toast: {
+    error: mocks.toastError,
+    message: mocks.toastMessage,
+    success: mocks.toastSuccess,
+    warning: mocks.toastWarning
+  }
+}))
+
+vi.mock('@/lib/agent-skill-cli-prerequisite', () => ({
+  AGENT_SKILL_CLI_PREREQUISITE_NOTICE:
+    'Before opening setup, Orca may show a system prompt to register the Orca CLI command on PATH.',
+  ensureOrcaCliAvailableForAgentSkillTerminal: mocks.ensurePrerequisite,
+  isOrcaCliAvailableOnPath: (status: CliInstallStatus | null | undefined) =>
+    status?.state === 'installed' && status.pathConfigured
 }))
 
 vi.mock('@/hooks/useInstalledAgentSkills', () => ({
@@ -28,15 +45,26 @@ vi.mock('@/hooks/useInstalledAgentSkills', () => ({
 }))
 
 vi.mock('./AgentSkillSetupPanel', () => ({
-  AgentSkillSetupPanel: () => <div data-testid="agent-skill-setup-panel" />
+  AgentSkillSetupPanel: (props: { onBeforeOpenTerminal: () => Promise<void> }) => {
+    mocks.panel.onBeforeOpenTerminal = props.onBeforeOpenTerminal
+    return <div data-testid="agent-skill-setup-panel" />
+  }
 }))
 
 // Capture the dialog's install callback so the test can trigger the install
 // flow without driving the Radix dialog portal.
 vi.mock('./CliRegistrationDialog', () => ({
-  CliRegistrationDialog: (props: { onInstall: () => Promise<void> }) => {
+  CliRegistrationDialog: (props: {
+    actionError: string | null
+    onInstall: () => Promise<void>
+    open: boolean
+  }) => {
     mocks.dialog.onInstall = props.onInstall
-    return null
+    return props.open && props.actionError ? (
+      <p data-testid="registration-dialog-error" role="alert">
+        {props.actionError}
+      </p>
+    ) : null
   }
 }))
 
@@ -77,8 +105,12 @@ async function renderSection(): Promise<void> {
 describe('CliSection persistent install error', () => {
   beforeEach(() => {
     mocks.toastError.mockReset()
+    mocks.toastMessage.mockReset()
     mocks.toastSuccess.mockReset()
+    mocks.toastWarning.mockReset()
+    mocks.ensurePrerequisite.mockReset()
     mocks.dialog.onInstall = null
+    mocks.panel.onBeforeOpenTerminal = null
     getInstallStatus.mockReset()
     install.mockReset()
     getInstallStatus.mockResolvedValue(NOT_INSTALLED_STATUS)
@@ -102,7 +134,9 @@ describe('CliSection persistent install error', () => {
 
   it('persists a failed install reason inline and clears it on a successful refresh', async () => {
     install.mockRejectedValueOnce(
-      new Error('Directory /usr/local/bin does not exist on this system')
+      new Error(
+        "Error invoking remote method 'cli:install': Error: Directory /usr/local/bin does not exist on this system"
+      )
     )
     await renderSection()
 
@@ -129,6 +163,32 @@ describe('CliSection persistent install error', () => {
     await act(async () => {})
 
     expect(container?.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('keeps a persisted install error when refreshing status fails', async () => {
+    install.mockRejectedValueOnce(new Error('Failed to create /usr/local/bin'))
+    await renderSection()
+
+    await act(async () => {
+      await mocks.dialog.onInstall?.()
+    })
+    await act(async () => {})
+    expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
+      'Failed to create /usr/local/bin'
+    )
+
+    getInstallStatus.mockRejectedValueOnce(new Error('Failed to load CLI status.'))
+    const refreshButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.getAttribute('aria-label') === 'Refresh CLI status'
+    )
+    await act(async () => {
+      refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {})
+
+    expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
+      'Failed to create /usr/local/bin'
+    )
   })
 
   it('clears a persisted install error after a later install succeeds', async () => {
@@ -159,5 +219,54 @@ describe('CliSection persistent install error', () => {
 
     expect(container?.querySelector('[role="alert"]')).toBeNull()
     expect(mocks.toastSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a failed install reason visible while the registration dialog stays open', async () => {
+    install.mockRejectedValueOnce(new Error('Failed to create /usr/local/bin'))
+    await renderSection()
+
+    const cliSwitch = container?.querySelector<HTMLButtonElement>('button[role="switch"]')
+    expect(cliSwitch).toBeDefined()
+    await act(async () => {
+      cliSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {
+      await mocks.dialog.onInstall?.()
+    })
+    await act(async () => {})
+
+    expect(container?.querySelector('[data-testid="registration-dialog-error"]')?.textContent).toBe(
+      'Failed to create /usr/local/bin'
+    )
+  })
+
+  it('clears a persisted install error when agent skill setup registers the CLI', async () => {
+    install.mockRejectedValueOnce(new Error('Failed to create /usr/local/bin'))
+    mocks.ensurePrerequisite.mockImplementationOnce(
+      async ({ onStatusChange }: { onStatusChange?: (status: CliInstallStatus) => void }) => {
+        onStatusChange?.({
+          ...NOT_INSTALLED_STATUS,
+          state: 'installed',
+          pathConfigured: true,
+          detail: 'Registered /usr/local/bin/orca.'
+        })
+      }
+    )
+    await renderSection()
+
+    await act(async () => {
+      await mocks.dialog.onInstall?.()
+    })
+    await act(async () => {})
+    expect(container?.querySelector('[role="alert"]')?.textContent).toBe(
+      'Failed to create /usr/local/bin'
+    )
+
+    await act(async () => {
+      await mocks.panel.onBeforeOpenTerminal?.()
+    })
+    await act(async () => {})
+
+    expect(container?.querySelector('[role="alert"]')).toBeNull()
   })
 })

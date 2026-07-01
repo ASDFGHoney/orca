@@ -1,7 +1,3 @@
-// Platform-specific copy for the CLI Settings section: reveal-in-file-manager
-// label, default install description, and the fallback command name shown
-// before install status resolves.
-
 export function getRevealLabel(platform: string): string {
   if (platform === 'darwin') {
     return 'Show in Finder'

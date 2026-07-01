@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
+import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import { useWindowsTerminalCapabilities } from '@/lib/windows-terminal-capabilities'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { Button } from '../ui/button'
@@ -19,15 +20,18 @@ import { translate } from '@/i18n/i18n'
 
 type WslCliRegistrationProps = {
   currentPlatform: string
+  refreshSignal?: number
 }
 
 export function WslCliRegistration({
-  currentPlatform
+  currentPlatform,
+  refreshSignal = 0
 }: WslCliRegistrationProps): React.JSX.Element | null {
   const [status, setStatus] = useState<CliInstallStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [busyAction, setBusyAction] = useState<'install' | 'remove' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const mountedRef = useMountedRef()
   const { wslAvailable } = useWindowsTerminalCapabilities(currentPlatform === 'win32')
   const showWslCli = currentPlatform === 'win32' && wslAvailable
@@ -38,6 +42,7 @@ export function WslCliRegistration({
       const next = await window.api.cli.getWslInstallStatus()
       if (mountedRef.current) {
         setStatus(next)
+        setActionError(null)
       }
     } catch (error) {
       if (mountedRef.current) {
@@ -61,7 +66,7 @@ export function WslCliRegistration({
     if (showWslCli) {
       void refreshStatus()
     }
-  }, [refreshStatus, showWslCli])
+  }, [refreshSignal, refreshStatus, showWslCli])
 
   if (!showWslCli) {
     return null
@@ -79,6 +84,7 @@ export function WslCliRegistration({
         return
       }
       setStatus(next)
+      setActionError(null)
       setDialogOpen(false)
       toast.success(
         translate(
@@ -89,15 +95,16 @@ export function WslCliRegistration({
       )
     } catch (error) {
       if (mountedRef.current) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : translate(
-                'auto.components.settings.WslCliRegistration.6f91ad1333',
-                'Failed to register `{{value0}}` in WSL.',
-                { value0: commandName }
-              )
+        const message = extractIpcErrorMessage(
+          error,
+          translate(
+            'auto.components.settings.WslCliRegistration.6f91ad1333',
+            'Failed to register `{{value0}}` in WSL.',
+            { value0: commandName }
+          )
         )
+        setActionError(message)
+        toast.error(message)
       }
     } finally {
       if (mountedRef.current) {
@@ -114,6 +121,7 @@ export function WslCliRegistration({
         return
       }
       setStatus(next)
+      setActionError(null)
       setDialogOpen(false)
       toast.success(
         translate(
@@ -124,15 +132,16 @@ export function WslCliRegistration({
       )
     } catch (error) {
       if (mountedRef.current) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : translate(
-                'auto.components.settings.WslCliRegistration.52d990420e',
-                'Failed to remove `{{value0}}` from WSL.',
-                { value0: commandName }
-              )
+        const message = extractIpcErrorMessage(
+          error,
+          translate(
+            'auto.components.settings.WslCliRegistration.52d990420e',
+            'Failed to remove `{{value0}}` from WSL.',
+            { value0: commandName }
+          )
         )
+        setActionError(message)
+        toast.error(message)
       }
     } finally {
       if (mountedRef.current) {
@@ -221,6 +230,12 @@ export function WslCliRegistration({
             <code>{status.currentTarget}</code>
           </p>
         ) : null}
+
+        {actionError && !dialogOpen ? (
+          <p role="alert" className="text-xs text-destructive">
+            {actionError}
+          </p>
+        ) : null}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -256,6 +271,11 @@ export function WslCliRegistration({
             <p className="text-xs text-muted-foreground">
               {translate('auto.components.settings.WslCliRegistration.119fef6cd2', 'Target path:')}{' '}
               <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{status.commandPath}</code>
+            </p>
+          ) : null}
+          {actionError ? (
+            <p role="alert" className="text-xs text-destructive">
+              {actionError}
             </p>
           ) : null}
           <DialogFooter>

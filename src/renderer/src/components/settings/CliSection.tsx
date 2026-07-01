@@ -8,6 +8,7 @@ import {
   ORCA_CLI_SKILL_NAME,
   ORCA_CLI_SKILL_UPDATE_COMMAND
 } from '@/lib/agent-feature-install-commands'
+import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import {
   AGENT_SKILL_CLI_PREREQUISITE_NOTICE,
   ensureOrcaCliAvailableForAgentSkillTerminal,
@@ -58,6 +59,7 @@ export function CliSection({
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [busyAction, setBusyAction] = useState<'install' | 'remove' | null>(null)
+  const [wslCliRefreshSignal, setWslCliRefreshSignal] = useState(0)
   // Why: toasts vanish, leaving an install failure indistinguishable from
   // "never attempted". Persist the last action error inline so the user can
   // still read and act on it (e.g. permission/missing-directory guidance).
@@ -106,6 +108,9 @@ export function CliSection({
     (nextStatus: CliInstallStatus): void => {
       if (mountedRef.current) {
         setStatus(nextStatus)
+        if (nextStatus.state === 'installed') {
+          setActionError(null)
+        }
       }
     },
     [mountedRef]
@@ -113,9 +118,11 @@ export function CliSection({
 
   const refreshStatus = useCallback(async (): Promise<void> => {
     setLoading(true)
-    setActionError(null)
     try {
       handleStatusChange(await window.api.cli.getInstallStatus())
+      if (mountedRef.current) {
+        setActionError(null)
+      }
     } catch (error) {
       if (mountedRef.current) {
         toast.error(
@@ -164,14 +171,14 @@ export function CliSection({
       }
     } catch (error) {
       if (mountedRef.current) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : translate(
-                'auto.components.settings.CliSection.a2b13efa94',
-                'Failed to register `{{value0}}` in PATH.',
-                { value0: commandName }
-              )
+        const message = extractIpcErrorMessage(
+          error,
+          translate(
+            'auto.components.settings.CliSection.a2b13efa94',
+            'Failed to register `{{value0}}` in PATH.',
+            { value0: commandName }
+          )
+        )
         setActionError(message)
         toast.error(message)
       }
@@ -200,14 +207,14 @@ export function CliSection({
       }
     } catch (error) {
       if (mountedRef.current) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : translate(
-                'auto.components.settings.CliSection.d77352f2df',
-                'Failed to remove `{{value0}}` from PATH.',
-                { value0: commandName }
-              )
+        const message = extractIpcErrorMessage(
+          error,
+          translate(
+            'auto.components.settings.CliSection.d77352f2df',
+            'Failed to remove `{{value0}}` from PATH.',
+            { value0: commandName }
+          )
+        )
         setActionError(message)
         toast.error(message)
       }
@@ -320,7 +327,7 @@ export function CliSection({
           <p className="text-xs text-muted-foreground">{status.detail}</p>
         ) : null}
 
-        {actionError ? (
+        {actionError && !dialogOpen ? (
           <p role="alert" className="text-xs text-destructive">
             {actionError}
           </p>
@@ -376,11 +383,16 @@ export function CliSection({
               getPrerequisiteStatus={getCliSkillPrerequisiteStatus}
               isPrerequisiteAvailable={isOrcaCliAvailableOnPath}
               onBeforeOpenTerminal={async () => {
-                await (agentRuntime.runtime === 'wsl'
-                  ? ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
-                  : ensureOrcaCliAvailableForAgentSkillTerminal({
-                      onStatusChange: handleStatusChange
-                    }))
+                if (agentRuntime.runtime === 'wsl') {
+                  const next = await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
+                  if (next && isOrcaCliAvailableOnPath(next)) {
+                    setWslCliRefreshSignal((signal) => signal + 1)
+                  }
+                  return
+                }
+                await ensureOrcaCliAvailableForAgentSkillTerminal({
+                  onStatusChange: handleStatusChange
+                })
               }}
               onRecheck={refreshCliSkill}
             />
@@ -388,9 +400,10 @@ export function CliSection({
         ) : null}
       </div>
 
-      <WslCliRegistration currentPlatform={currentPlatform} />
+      <WslCliRegistration currentPlatform={currentPlatform} refreshSignal={wslCliRefreshSignal} />
 
       <CliRegistrationDialog
+        actionError={actionError}
         busyAction={busyAction}
         commandName={commandName}
         commandPath={status?.commandPath}
