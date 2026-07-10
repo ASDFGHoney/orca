@@ -59,10 +59,8 @@ export function CliSection({
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [busyAction, setBusyAction] = useState<'install' | 'remove' | null>(null)
-  const [wslCliRefreshSignal, setWslCliRefreshSignal] = useState(0)
-  // Why: toasts vanish, leaving an install failure indistinguishable from
-  // "never attempted". Persist the last action error inline so the user can
-  // still read and act on it (e.g. permission/missing-directory guidance).
+  // Why: toasts vanish, so persist actionable install failures until the user
+  // refreshes status or completes a later action successfully.
   const [actionError, setActionError] = useState<string | null>(null)
   const mountedRef = useMountedRef()
   const agentRuntime = useMemo(
@@ -383,16 +381,11 @@ export function CliSection({
               getPrerequisiteStatus={getCliSkillPrerequisiteStatus}
               isPrerequisiteAvailable={isOrcaCliAvailableOnPath}
               onBeforeOpenTerminal={async () => {
-                if (agentRuntime.runtime === 'wsl') {
-                  const next = await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
-                  if (next && isOrcaCliAvailableOnPath(next)) {
-                    setWslCliRefreshSignal((signal) => signal + 1)
-                  }
-                  return
-                }
-                await ensureOrcaCliAvailableForAgentSkillTerminal({
-                  onStatusChange: handleStatusChange
-                })
+                await (agentRuntime.runtime === 'wsl'
+                  ? ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
+                  : ensureOrcaCliAvailableForAgentSkillTerminal({
+                      onStatusChange: handleStatusChange
+                    }))
               }}
               onRecheck={refreshCliSkill}
             />
@@ -400,7 +393,7 @@ export function CliSection({
         ) : null}
       </div>
 
-      <WslCliRegistration currentPlatform={currentPlatform} refreshSignal={wslCliRefreshSignal} />
+      <WslCliRegistration currentPlatform={currentPlatform} />
 
       <CliRegistrationDialog
         actionError={actionError}

@@ -20,12 +20,10 @@ import { translate } from '@/i18n/i18n'
 
 type WslCliRegistrationProps = {
   currentPlatform: string
-  refreshSignal?: number
 }
 
 export function WslCliRegistration({
-  currentPlatform,
-  refreshSignal = 0
+  currentPlatform
 }: WslCliRegistrationProps): React.JSX.Element | null {
   const [status, setStatus] = useState<CliInstallStatus | null>(null)
   const [loading, setLoading] = useState(false)
@@ -68,7 +66,7 @@ export function WslCliRegistration({
     if (showWslCli) {
       void refreshStatus()
     }
-  }, [refreshSignal, refreshStatus, showWslCli])
+  }, [refreshStatus, showWslCli])
 
   if (!showWslCli) {
     return null

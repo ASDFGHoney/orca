@@ -67,19 +67,12 @@ const getWslInstallStatus = vi.fn()
 const installWsl = vi.fn()
 const removeWsl = vi.fn()
 
-async function renderSection(refreshSignal = 0): Promise<void> {
+async function renderSection(): Promise<void> {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   await act(async () => {
-    root?.render(<WslCliRegistration currentPlatform="win32" refreshSignal={refreshSignal} />)
-  })
-  await act(async () => {})
-}
-
-async function rerenderSection(refreshSignal: number): Promise<void> {
-  await act(async () => {
-    root?.render(<WslCliRegistration currentPlatform="win32" refreshSignal={refreshSignal} />)
+    root?.render(<WslCliRegistration currentPlatform="win32" />)
   })
   await act(async () => {})
 }
@@ -156,7 +149,7 @@ describe('WslCliRegistration persistent install error', () => {
     ).toEqual(['Failed to create /home/user/.local/bin'])
   })
 
-  it('clears a persisted WSL install error after an external successful registration', async () => {
+  it('clears a persisted WSL install error after a successful refresh', async () => {
     installWsl.mockRejectedValueOnce(new Error('Failed to create /home/user/.local/bin'))
     await renderSection()
 
@@ -189,7 +182,14 @@ describe('WslCliRegistration persistent install error', () => {
       pathConfigured: true,
       detail: 'Registered orca-ide in WSL.'
     })
-    await rerenderSection(1)
+    const refreshButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.getAttribute('aria-label') === 'Refresh WSL CLI status'
+    )
+    expect(refreshButton).toBeDefined()
+    await act(async () => {
+      refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {})
 
     expect(container?.querySelector('[role="alert"]')).toBeNull()
   })
