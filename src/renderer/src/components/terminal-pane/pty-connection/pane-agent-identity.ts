@@ -14,7 +14,8 @@ import { dispatchTerminalCommandFinishedEvent } from '@/hooks/terminal-command-f
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import type { TuiAgent } from '../../../../../shared/tui-agent'
-import { isTuiAgent, TUI_AGENT_CONFIG } from '../../../../../shared/tui-agent-config'
+import { isTuiAgent } from '../../../../../shared/tui-agent-config'
+import { resolveTuiAgentConfig } from '../../../../../shared/custom-tui-agents'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 
@@ -234,7 +235,13 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     session.paneForegroundAgentTracker.onCommandStarted(agent)
   }
   session.requestKnownWindowsShiftEnterReconfirmation = () => {
-    const foreground = useAppStore.getState().paneForegroundAgentByPaneKey[session.cacheKey]
+    const state = useAppStore.getState()
+    const foreground = state.paneForegroundAgentByPaneKey[session.cacheKey]
+    const foregroundConfig = resolveTuiAgentConfig(
+      foreground?.agent,
+      state.settings?.customTuiAgents,
+      state.settings?.deletedCustomTuiAgents
+    )
     // Why: daemon reattach/launch metadata is display-only until a live
     // provider read confirms it. Submit/interrupt/title-exit evidence must
     // revoke that launch-only hint too, otherwise Shift+Enter can route bytes
@@ -242,7 +249,7 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     if (
       !foreground?.agent ||
       foreground.routingTrusted !== true ||
-      TUI_AGENT_CONFIG[foreground.agent].windowsShiftEnterEncoding !== 'csi-u'
+      foregroundConfig?.windowsShiftEnterEncoding !== 'csi-u'
     ) {
       return
     }

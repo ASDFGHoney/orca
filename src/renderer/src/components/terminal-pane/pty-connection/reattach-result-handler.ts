@@ -1,5 +1,7 @@
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import type { PtyBufferSnapshot, PtyConnectResult } from '../pty-transport'
+import type { PtyConnectAgentLaunchFailure } from '../pty-transport-types'
+import { agentLaunchOutcomeErrorMessage } from '@/lib/agent-launch-failure-copy'
 import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 // Why: a restored pane's stale-account prompt can only be raised once a PTY is
 // actually attached — nothing is inspectable while the session hydrates.
@@ -26,6 +28,7 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'authoritativeReattachGeneration'
     | 'capturedDirectSshRetryPtyAccepted'
     | 'cacheKey'
+    | 'clearRegisteredStartupLaunchConfig'
     | 'connectionId'
     | 'deps'
     | 'directSshRetryAttempt'
@@ -33,11 +36,13 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'getSshMainModelSnapshotProbe'
     | 'handleReattachResult'
     | 'mountFollowsTerminalPark'
+    | 'launchToken'
     | 'registerEffectiveLaunchConfig'
     | 'registerPaneSerializerFor'
     | 'registerSideEffectFactConsumerForPty'
     | 'rejectObsoleteDirectSshReattach'
     | 'reportPanePtyVisibility'
+    | 'reportError'
     | 'sampleVisiblePaneForegroundAgent'
     | 'scheduleReattachIdleAgentCursorReset'
     | 'serializeHiddenOutputSnapshot'
@@ -51,7 +56,7 @@ type ReattachResultSession = ReattachPayloadSession &
 export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): void {
   const session = sessionBag as unknown as ReattachResultSession
   session.handleReattachResult = async (
-    result: PtyConnectResult | string | void,
+    result: PtyConnectResult | PtyConnectAgentLaunchFailure | string | void,
     staleSessionId?: string | null,
     coldRestoreStartup?: ColdRestoreAgentResumeStartup | null,
     attemptGeneration = session.transportStreamGeneration
@@ -60,6 +65,13 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       return false
     }
     if (attemptGeneration !== session.transportStreamGeneration) {
+      return false
+    }
+    if (result && typeof result === 'object' && !('id' in result) && 'agentLaunch' in result) {
+      session.reportError(agentLaunchOutcomeErrorMessage(result.agentLaunch))
+      if (coldRestoreStartup) {
+        session.clearRegisteredStartupLaunchConfig()
+      }
       return false
     }
     // Why: bump only once this attempt owns the stream, or a superseded result
@@ -108,13 +120,31 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       })
       return false
     }
+    let reattachPayloadCommitted = false
+    const reattachLaunchReceipt = connectResult?.agentLaunch?.receipt ?? null
+    if (reattachLaunchReceipt) {
+      session.launchToken = reattachLaunchReceipt.launchToken
+      useAppStore
+        .getState()
+        .backfillTabLaunchAgent(session.deps.tabId, reattachLaunchReceipt.requestedAgent)
+      if (reattachLaunchReceipt.notices.length > 0) {
+        useAppStore.getState().attachLaunchNotices({
+          worktreeId: session.deps.worktreeId,
+          tabId: session.deps.tabId,
+          launchToken: reattachLaunchReceipt.launchToken,
+          notices: reattachLaunchReceipt.notices
+        })
+      }
+    }
     session.registerEffectiveLaunchConfig(connectResult?.launchConfig, {
-      ...(coldRestoreStartup ? { launchToken: coldRestoreStartup.launchToken } : {}),
+      ...(reattachLaunchReceipt ? { launchToken: reattachLaunchReceipt.launchToken } : {}),
       ...(connectResult?.launchAgent
         ? { launchAgent: connectResult.launchAgent }
-        : coldRestoreStartup
-          ? { launchAgent: coldRestoreStartup.agent }
-          : {})
+        : reattachLaunchReceipt
+          ? { launchAgent: reattachLaunchReceipt.baseAgent }
+          : coldRestoreStartup
+            ? { launchAgent: coldRestoreStartup.agent }
+            : {})
     })
     if (connectResult?.sessionExpired) {
       if (staleSessionId) {
@@ -136,7 +166,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       return (
         !session.disposed &&
         attemptGeneration === session.transportStreamGeneration &&
-        currentPtyId === ptyId
+        (!reattachPayloadCommitted || currentPtyId === ptyId)
       )
     }
     if (!isCurrentReattachPayload()) {
@@ -183,6 +213,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     } else {
       session.deps.updateTabPtyId(session.deps.tabId, ptyId)
     }
+    reattachPayloadCommitted = true
     session.agentCompletionCoordinator.startProcessTracking()
     session.sampleVisiblePaneForegroundAgent()
 
