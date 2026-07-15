@@ -73,6 +73,10 @@ function countRunningBoundPtyIds(
   return boundPtyIds.size - dead
 }
 
+// Why: the pre-ready branch runs on every store notification during startup;
+// a shared constant keeps it allocation-free.
+const EMPTY_BOUND_PTY_IDS: ReadonlySet<string> = new Set()
+
 export function createClosedResourceSessionCountSelector(
   buildBindingIndex: BuildResourceSessionBindingIndex = buildResourceSessionBindingIndex
 ): ClosedResourceSessionCountSelector {
@@ -84,7 +88,7 @@ export function createClosedResourceSessionCountSelector(
   let previousTerminalLayoutsByTabId: AppState['terminalLayoutsByTabId'] = {}
   let previousWorkspaceSessionReady = false
   let previousDeadPtyIds: AppState['deadPtyIds'] = {}
-  let boundPtyIds: ReadonlySet<string> = new Set()
+  let boundPtyIds: ReadonlySet<string> = EMPTY_BOUND_PTY_IDS
   let count = 0
 
   return (state): number => {
@@ -113,7 +117,7 @@ export function createClosedResourceSessionCountSelector(
       boundPtyIds = buildBindingIndex(state).boundPtyIds
       count = countRunningBoundPtyIds(boundPtyIds, state.deadPtyIds)
     } else if (!state.workspaceSessionReady) {
-      boundPtyIds = new Set()
+      boundPtyIds = EMPTY_BOUND_PTY_IDS
       count = 0
     } else if (deadPtyIdsChanged) {
       count = countRunningBoundPtyIds(boundPtyIds, state.deadPtyIds)
