@@ -13,6 +13,7 @@ function createSnapshot(
     tabsByWorktree: {},
     ptyIdsByTabId: {},
     terminalLayoutsByTabId: {},
+    deadPtyIds: {},
     activeTabIdByWorktree: {},
     openFiles: [],
     editorDrafts: {},

@@ -42,6 +42,7 @@ function makeState(
     ptyIdsByTabId: {},
     terminalLayoutsByTabId: {},
     workspaceSessionReady: true,
+    deadPtyIds: {},
     ...overrides
   }
 }
@@ -215,5 +216,45 @@ describe('closed resource session count selector', () => {
     state = { ...state, workspaceSessionReady: false }
     expect(selectCount(state)).toBe(0)
     expect(buildIndex).toHaveBeenCalledTimes(5)
+  })
+
+  it('subtracts proven-dead bound ids without rebuilding the binding index', () => {
+    const buildIndex = vi.fn(buildResourceSessionBindingIndex)
+    const selectCount = createClosedResourceSessionCountSelector(buildIndex)
+    let state = makeState({
+      tabsByWorktree: {
+        'wt-1': [makeTab('tab-1', 'pty-wake')]
+      },
+      ptyIdsByTabId: {
+        'tab-1': ['pty-live']
+      },
+      terminalLayoutsByTabId: {
+        'tab-1': makeLayout({ 'leaf-1': 'pty-sleeping' })
+      }
+    })
+
+    expect(selectCount(state)).toBe(3)
+    expect(buildIndex).toHaveBeenCalledTimes(1)
+
+    // A dead wake hint stops counting the moment evidence lands, and the
+    // subtraction must not pay for an index rebuild.
+    state = { ...state, deadPtyIds: { 'pty-sleeping': true } }
+    expect(selectCount(state)).toBe(2)
+    expect(buildIndex).toHaveBeenCalledTimes(1)
+
+    // Dead ids that are not bound never push the count negative or below truth.
+    state = { ...state, deadPtyIds: { 'pty-sleeping': true, 'pty-unrelated': true } }
+    expect(selectCount(state)).toBe(2)
+    expect(buildIndex).toHaveBeenCalledTimes(1)
+
+    // Wake resurrection: the id leaves the dead record and counts again.
+    state = { ...state, deadPtyIds: {} }
+    expect(selectCount(state)).toBe(3)
+    expect(buildIndex).toHaveBeenCalledTimes(1)
+
+    // Unrelated writes with a stable dead record stay scalar-cheap.
+    const stable = { ...state }
+    expect(selectCount(stable)).toBe(3)
+    expect(buildIndex).toHaveBeenCalledTimes(1)
   })
 })

@@ -16,6 +16,7 @@ function createSnapshot(overrides: Partial<AppState> = {}): AppState {
       'tab-1': ['pty-1'],
       'tab-2': []
     },
+    deadPtyIds: {},
     terminalLayoutsByTabId: {
       'tab-1': { root: null, activeLeafId: null, expandedLeafId: null }
     },

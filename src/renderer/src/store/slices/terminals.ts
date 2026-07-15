@@ -49,6 +49,7 @@ import { forgetAgentHibernationTabOutput } from '@/lib/agent-hibernation-output-
 import { forgetForegroundTerminalTabs } from '@/lib/foreground-terminal-tabs'
 import { forgetAgentStartupDeliveriesForTabs } from '@/lib/agent-startup-delivery-guards'
 import { clearTransientTerminalState, emptyLayoutSnapshot } from './terminal-helpers'
+import { markPtySessionsExited as recordExitedPtySessions } from './pty-session-liveness'
 import { isClaudeAgent } from '@/lib/agent-status'
 import { classifyTitleActivity } from '@/lib/pane-agent-evidence'
 import { buildOrphanTerminalCleanupPatch, getOrphanTerminalIds } from './terminal-orphan-helpers'
@@ -476,6 +477,10 @@ export type TerminalSlice = {
   // Remote guard keys must use renderer-visible, environment-scoped PTY ids;
   // raw runtime handles are only valid at the RPC boundary.
   suppressedPtyExitIds: Record<string, true>
+  /** Claimed session ids proven not-running (exit events, authoritative
+   *  listings). Claims stay for wake/cold-restore; running-count surfaces
+   *  subtract this instead (#8372). Persisted so restarts keep the badge honest. */
+  deadPtyIds: Record<string, true>
   pendingCodexPaneRestartIds: Record<string, true>
   codexRestartNoticeByPtyId: Record<
     string,
@@ -648,6 +653,7 @@ export type TerminalSlice = {
   setTabColor: (tabId: string, color: string | null) => void
   updateTabPtyId: (tabId: string, ptyId: string) => void
   clearTabPtyId: (tabId: string, ptyId?: string) => void
+  markPtySessionsExited: (ptyIds: readonly string[]) => void
   shutdownWorktreeTerminals: (
     worktreeId: string,
     opts?: {
@@ -776,6 +782,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   unreadTerminalPanes: {},
   unreadAgentCompletionPanes: {},
   suppressedPtyExitIds: {},
+  deadPtyIds: {},
   pendingCodexPaneRestartIds: {},
   codexRestartNoticeByPtyId: {},
   expandedPaneByTabId: {},
@@ -2033,6 +2040,16 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       if (legacyRemotePtyId) {
         delete nextSuppressedPtyExitIds[legacyRemotePtyId]
       }
+      // Why: a live pane registering this id is the only resurrection path a
+      // dead-marked session has (wake respawns reuse the old session id).
+      let nextDeadPtyIds = s.deadPtyIds
+      if (nextDeadPtyIds[ptyId] || (legacyRemotePtyId && nextDeadPtyIds[legacyRemotePtyId])) {
+        nextDeadPtyIds = { ...nextDeadPtyIds }
+        delete nextDeadPtyIds[ptyId]
+        if (legacyRemotePtyId) {
+          delete nextDeadPtyIds[legacyRemotePtyId]
+        }
+      }
       const hasLegacyPendingRestart = legacyRemotePtyId
         ? legacyRemotePtyId in s.pendingCodexPaneRestartIds
         : false
@@ -2081,6 +2098,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           [tabId]: ptyId
         },
         suppressedPtyExitIds: nextSuppressedPtyExitIds,
+        ...(nextDeadPtyIds !== s.deadPtyIds ? { deadPtyIds: nextDeadPtyIds } : {}),
         pendingCodexPaneRestartIds: nextPendingCodexPaneRestartIds,
         codexRestartNoticeByPtyId: nextCodexRestartNoticeByPtyId,
         migrationUnsupportedByPtyId: nextMigrationUnsupportedByPtyId,
@@ -2096,6 +2114,16 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     if (worktreeId && !wasActivationSpawn && !isRemoteRuntimeMirror) {
       get().bumpWorktreeActivity(worktreeId)
     }
+  },
+
+  markPtySessionsExited: (ptyIds) => {
+    if (ptyIds.length === 0) {
+      return
+    }
+    set((s) => {
+      const next = recordExitedPtySessions(s.deadPtyIds, ptyIds, s)
+      return next ? { deadPtyIds: next } : {}
+    })
   },
 
   clearTabPtyId: (tabId, ptyId) => {
@@ -3401,6 +3429,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           Object.values(tabsByWorktree)
             .flat()
             .map((tab) => [tab.id, []] as const)
+        ),
+        // Why: dead-session evidence must survive restart or the closed badge
+        // re-counts reconnect-restored wake hints for sessions that died in a
+        // previous run (#8372). Save-time already intersected with claims.
+        deadPtyIds: Object.fromEntries(
+          (session.deadPtyIds ?? []).slice(0, 4096).map((id) => [id, true] as const)
         ),
         // Why: with the daemon backend, ptyIds are daemon session IDs that
         // survive app restart. Preserve ptyIdsByLeafId so that

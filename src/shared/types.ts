@@ -1057,6 +1057,11 @@ export type WorkspaceSessionState = {
    *  Used on startup to eagerly re-spawn PTY processes so the Active filter
    *  works immediately after restart. */
   activeWorktreeIdsOnShutdown?: string[]
+  /** Session ids still claimed by tab/layout wake hints but proven not
+   *  running (exit events, authoritative daemon listings). Restored so the
+   *  closed Resource Manager badge stays honest across restarts; the hints
+   *  themselves are kept for wake/cold-restore. */
+  deadPtyIds?: string[]
   /** Editor files that were open at shutdown, keyed by worktree ID.
    *  Only edit-mode files are persisted — diffs and conflict views are
    *  transient and not restored. */

@@ -12,6 +12,7 @@ function createSnapshot(
     tabsByWorktree: {},
     ptyIdsByTabId: {},
     terminalLayoutsByTabId: {},
+    deadPtyIds: {},
     activeTabIdByWorktree: {},
     openFiles: [],
     editorDrafts: {},
@@ -90,5 +91,30 @@ describe('workspace session live PTY persistence', () => {
 
     expect(payload.activeWorktreeIdsOnShutdown).toEqual([])
     expect(payload.remoteSessionIdsByTabId).toBeUndefined()
+  })
+
+  it('persists dead session marks only while their wake hints are still claimed', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        tabsByWorktree: {
+          'wt-1': [
+            {
+              id: 'tab-1',
+              title: 'shell',
+              ptyId: 'claimed-dead-hint',
+              worktreeId: 'wt-1'
+            } as never
+          ]
+        },
+        ptyIdsByTabId: { 'tab-1': [] },
+        deadPtyIds: { 'claimed-dead-hint': true, 'released-dead-id': true }
+      })
+    )
+
+    expect(payload.deadPtyIds).toEqual(['claimed-dead-hint'])
+  })
+
+  it('omits the dead-mark field entirely when empty', () => {
+    expect(buildWorkspaceSessionPayload(createSnapshot()).deadPtyIds).toBeUndefined()
   })
 })

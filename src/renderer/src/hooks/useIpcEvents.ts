@@ -855,6 +855,16 @@ export function useIpcEvents(): void {
 
     unsubs.push(attachMobileMarkdownBridge())
 
+    // Why: exits for unmounted panes have no pane-level owner, so nothing else
+    // records that the session stopped running and the closed Resource Manager
+    // badge keeps counting it (#8372). Wake hints stay intact for cold restore;
+    // only the liveness record changes.
+    unsubs.push(
+      window.api.pty.onExit(({ id }) => {
+        useAppStore.getState().markPtySessionsExited([id])
+      })
+    )
+
     const handleWorktreesChanged = async (
       repoId: string,
       renamed?: { oldWorktreeId: string; newWorktreeId: string }

@@ -254,6 +254,7 @@ export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.o
   tabsByWorktree: z.record(z.string(), z.array(terminalTabSchema)),
   terminalLayoutsByTabId: z.record(terminalTabIdSchema, terminalLayoutSnapshotSchema),
   activeWorktreeIdsOnShutdown: z.array(z.string()).optional(),
+  deadPtyIds: z.array(z.string()).optional(),
   openFilesByWorktree: z.record(z.string(), z.array(persistedOpenFileSchema)).optional(),
   activeFileIdByWorktree: z.record(z.string(), z.string().nullable()).optional(),
   markdownFrontmatterVisible: z.record(z.string(), z.boolean()).optional(),

@@ -78,6 +78,10 @@ import {
   type ResourceSessionBindingInputs
 } from './resource-session-bindings'
 import { createClosedResourceSessionCountSelector } from './resource-session-count-selector'
+import {
+  collectClaimedPtyIds,
+  deriveExitedPtyIdsFromListing
+} from '../../store/slices/pty-session-liveness'
 import { translate } from '@/i18n/i18n'
 
 const POLL_MS = 2_000
@@ -837,6 +841,17 @@ export function ResourceUsageStatusSegment({
   )
 
   const refreshSessions = useCallback(async () => {
+    // Why: a successful listing is the daemon's fail-closed local inventory,
+    // so claims it omits are dead and the closed badge must stop counting
+    // them (#8372). Snapshot claims/attachments before the RPC so a session
+    // spawned or woken mid-flight is never declared dead by an older listing.
+    const stateBefore = useAppStore.getState()
+    const livenessSnapshot = stateBefore.workspaceSessionReady
+      ? {
+          claimedBeforeRequest: collectClaimedPtyIds(stateBefore),
+          attachedBeforeRequest: new Set(Object.values(stateBefore.ptyIdsByTabId).flat())
+        }
+      : null
     try {
       const result = await window.api.pty.listSessions()
       if (!mountedRef.current) {
@@ -844,6 +859,16 @@ export function ResourceUsageStatusSegment({
       }
       setSessions(result)
       setSessionsError(false)
+      if (livenessSnapshot) {
+        const stateNow = useAppStore.getState()
+        stateNow.markPtySessionsExited(
+          deriveExitedPtyIdsFromListing({
+            ...livenessSnapshot,
+            attachedNow: new Set(Object.values(stateNow.ptyIdsByTabId).flat()),
+            listedSessionIds: new Set(result.map((session) => session.id))
+          })
+        )
+      }
     } catch {
       if (mountedRef.current) {
         setSessionsError(true)

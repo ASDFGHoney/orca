@@ -18,6 +18,7 @@ function createSnapshot(
       'tab-1': ['pty-1'],
       'tab-2': []
     },
+    deadPtyIds: {},
     terminalLayoutsByTabId: {
       'tab-1': { root: null, activeLeafId: null, expandedLeafId: null }
     },
@@ -206,6 +207,8 @@ describe('buildWorkspaceSessionPatch', () => {
     expect(Object.keys(patch).sort()).toEqual(
       [
         'activeWorktreeIdsOnShutdown',
+        // Why: tab topology bounds which dead-session marks stay persisted.
+        'deadPtyIds',
         'remoteSessionIdsByTabId',
         'tabsByWorktree',
         'terminalLayoutsByTabId'

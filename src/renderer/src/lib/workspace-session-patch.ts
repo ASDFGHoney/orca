@@ -6,10 +6,13 @@ import {
   buildEditorSessionData,
   buildPersistedBrowserPagesByWorkspace,
   buildPersistedBrowserTabsByWorktree,
-  buildSanitizedTabsByWorktree,
-  buildTerminalSessionData,
   type WorkspaceSessionSnapshot
 } from './workspace-session'
+import {
+  buildSanitizedTabsByWorktree,
+  buildTerminalSessionData
+} from './workspace-session-terminal-shutdown'
+import { collectPersistableDeadPtyIds } from '../store/slices/pty-session-liveness'
 import { buildPersistedUnifiedTabSessionData } from './workspace-session-unified-tabs'
 import { buildLastVisitedAtByWorktreeId } from './workspace-session-focus-recency'
 import { buildSleepingAgentSessionData } from './workspace-session-sleeping-agents'
@@ -73,6 +76,18 @@ export function buildWorkspaceSessionPatch(
     ] as const)
   ) {
     Object.assign(patch, buildTerminalSessionData(snapshot))
+  }
+  if (
+    hasAnyChangedField(changed, [
+      'deadPtyIds',
+      'tabsByWorktree',
+      'ptyIdsByTabId',
+      'terminalLayoutsByTabId'
+    ] as const)
+  ) {
+    // Why: [] rather than undefined — JSON IPC drops undefined keys, and a
+    // fully-cleared record must overwrite a previously persisted list.
+    patch.deadPtyIds = collectPersistableDeadPtyIds(snapshot.deadPtyIds, snapshot) ?? []
   }
   if (changed.has('sshConnectionStates')) {
     patch.activeConnectionIdsAtShutdown = buildActiveConnectionIdsAtShutdown(snapshot)

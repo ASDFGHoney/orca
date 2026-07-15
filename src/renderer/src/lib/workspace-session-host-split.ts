@@ -65,6 +65,10 @@ const FIELD_OWNERSHIP = {
   defaultTerminalTabsAppliedByWorktreeId: 'worktreeKeyed',
   activeWorkspaceKey: 'global',
   activeWorktreeIdsOnShutdown: 'worktreeArray',
+  // Why: session ids are host-namespaced, so marks for another host's
+  // sessions are inert in that host's slice and get dropped by the
+  // claim-bounded GC on the next liveness write.
+  deadPtyIds: 'global',
   terminalLayoutsByTabId: 'tabKeyed',
   remoteSessionIdsByTabId: 'tabKeyed',
   browserPagesByWorkspace: 'browserWorkspaceKeyed',

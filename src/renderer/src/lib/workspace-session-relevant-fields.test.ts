@@ -12,6 +12,7 @@ describe('SESSION_RELEVANT_FIELDS', () => {
     tabsByWorktree: true,
     ptyIdsByTabId: true,
     terminalLayoutsByTabId: true,
+    deadPtyIds: true,
     activeTabIdByWorktree: true,
     openFiles: true,
     editorDrafts: true,

@@ -7,7 +7,11 @@ import {
 
 export type ClosedResourceSessionCountState = Pick<
   AppState,
-  'tabsByWorktree' | 'ptyIdsByTabId' | 'terminalLayoutsByTabId' | 'workspaceSessionReady'
+  | 'tabsByWorktree'
+  | 'ptyIdsByTabId'
+  | 'terminalLayoutsByTabId'
+  | 'workspaceSessionReady'
+  | 'deadPtyIds'
 >
 
 type BuildResourceSessionBindingIndex = (
@@ -53,6 +57,22 @@ function haveSameTabBindings(
   return true
 }
 
+// Why: bound wake hints can reference sessions that already exited (they are
+// kept for cold-restore/wake). The badge counts RUNNING sessions, so proven
+// dead ids are subtracted rather than counted (#8372).
+function countRunningBoundPtyIds(
+  boundPtyIds: ReadonlySet<string>,
+  deadPtyIds: AppState['deadPtyIds']
+): number {
+  let dead = 0
+  for (const ptyId of Object.keys(deadPtyIds)) {
+    if (boundPtyIds.has(ptyId)) {
+      dead += 1
+    }
+  }
+  return boundPtyIds.size - dead
+}
+
 export function createClosedResourceSessionCountSelector(
   buildBindingIndex: BuildResourceSessionBindingIndex = buildResourceSessionBindingIndex
 ): ClosedResourceSessionCountSelector {
@@ -63,6 +83,8 @@ export function createClosedResourceSessionCountSelector(
   let previousPtyIdsByTabId: AppState['ptyIdsByTabId'] = {}
   let previousTerminalLayoutsByTabId: AppState['terminalLayoutsByTabId'] = {}
   let previousWorkspaceSessionReady = false
+  let previousDeadPtyIds: AppState['deadPtyIds'] = {}
+  let boundPtyIds: ReadonlySet<string> = new Set()
   let count = 0
 
   return (state): number => {
@@ -85,17 +107,23 @@ export function createClosedResourceSessionCountSelector(
     const shouldRebuild =
       state.workspaceSessionReady &&
       (!initialized || bindingMapChanged || readinessChanged || tabBindingsChanged)
+    const deadPtyIdsChanged = state.deadPtyIds !== previousDeadPtyIds
 
     if (shouldRebuild) {
-      count = buildBindingIndex(state).boundPtyIds.size
+      boundPtyIds = buildBindingIndex(state).boundPtyIds
+      count = countRunningBoundPtyIds(boundPtyIds, state.deadPtyIds)
     } else if (!state.workspaceSessionReady) {
+      boundPtyIds = new Set()
       count = 0
+    } else if (deadPtyIdsChanged) {
+      count = countRunningBoundPtyIds(boundPtyIds, state.deadPtyIds)
     }
 
     previousTabsByWorktree = state.tabsByWorktree
     previousPtyIdsByTabId = state.ptyIdsByTabId
     previousTerminalLayoutsByTabId = state.terminalLayoutsByTabId
     previousWorkspaceSessionReady = state.workspaceSessionReady
+    previousDeadPtyIds = state.deadPtyIds
     initialized = true
     return count
   }
