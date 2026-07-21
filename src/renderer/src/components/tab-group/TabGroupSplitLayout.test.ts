@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const setTabGroupSplitRatioMock = vi.fn()
 const recordFeatureInteractionMock = vi.fn()
 const setDragRootNodeMock = vi.fn()
+const { useRefitOnSplitCollapseMock } = vi.hoisted(() => ({
+  useRefitOnSplitCollapseMock: vi.fn()
+}))
 const useAppStoreMock = vi.fn(
   (
     selector: (state: {
@@ -51,7 +54,7 @@ vi.mock('./useTabDragSplit', () => ({
 // calls would throw. Stub the side-effect-only refit hook out — its behavior
 // is covered directly in use-refit-on-split-collapse.test.tsx.
 vi.mock('./use-refit-on-split-collapse', () => ({
-  useRefitOnSplitCollapse: vi.fn()
+  useRefitOnSplitCollapse: useRefitOnSplitCollapseMock
 }))
 
 import TabGroupSplitLayout from './TabGroupSplitLayout'
@@ -77,6 +80,7 @@ describe('TabGroupSplitLayout', () => {
     setTabGroupSplitRatioMock.mockClear()
     recordFeatureInteractionMock.mockClear()
     setDragRootNodeMock.mockClear()
+    useRefitOnSplitCollapseMock.mockClear()
     useAppStoreMock.mockClear()
   })
 
@@ -150,6 +154,19 @@ describe('TabGroupSplitLayout', () => {
     })
 
     expect(asElement(getLayoutWrapper(element)).props.ref).toBe(setDragRootNodeMock)
+  })
+
+  it('wires split-collapse refits to the current layout visibility', () => {
+    const layout = { type: 'leaf', groupId: 'group-1' } as const
+
+    TabGroupSplitLayout({
+      layout,
+      worktreeId: 'wt-1',
+      focusedGroupId: 'group-1',
+      isWorktreeActive: false
+    })
+
+    expect(useRefitOnSplitCollapseMock).toHaveBeenCalledWith(layout, false)
   })
 
   it('only reserves top-right header space for the floating explorer toggle', () => {
