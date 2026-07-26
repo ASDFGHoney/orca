@@ -14,7 +14,19 @@ export function relayEndpointForHost(
   sockName: string
 ): string {
   if (!isWindowsRemoteHost(hostPlatform)) {
-    return joinRemotePath(hostPlatform, remoteDir, sockName)
+    const fullPath = joinRemotePath(hostPlatform, remoteDir, sockName)
+    if (Buffer.byteLength(fullPath, 'utf8') > 107) {
+      const parentDir = remoteDir.includes('/relay-')
+        ? remoteDir.substring(0, remoteDir.lastIndexOf('/'))
+        : remoteDir
+      const hash = createHash('sha256').update(fullPath).digest('hex').slice(0, 12)
+      const shortened = joinRemotePath(hostPlatform, parentDir, `${hash}.sock`)
+      if (Buffer.byteLength(shortened, 'utf8') <= 107) {
+        return shortened
+      }
+      return `/tmp/orca-${hash}.sock`
+    }
+    return fullPath
   }
   const endpointHash = createHash('sha256')
     .update(`${remoteDir}\0${sockName}`)
