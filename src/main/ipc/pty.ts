@@ -7337,7 +7337,7 @@ export function registerPtyHandlers(
           ptyId: result.id,
           isDaemonHostSpawn,
           isReattach: result.isReattach === true,
-          pinnedByResume: codexResumeHomeSelected,
+          pinnedByResume: Boolean(codexResumeHome),
           launchCodexHomePath: selectedCodexHomePath,
           launchEnv: baseEnv,
           target: codexSelectionTarget,
