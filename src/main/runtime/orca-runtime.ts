@@ -2180,7 +2180,7 @@ type RuntimeNotifier = {
   renameTerminal(tabId: string, title: string | null): void
   focusTerminal(tabId: string, worktreeId: string, leafId?: string | null): void
   focusEditorTab?(tabId: string, worktreeId: string): void
-  closeSessionTab?(tabId: string, worktreeId: string): void
+  closeSessionTab?(tabId: string, worktreeId: string): void | Promise<void>
   moveSessionTab?(worktreeId: string, move: RuntimeMobileSessionTabMove): void
   openFile?(
     worktreeId: string,
@@ -9238,9 +9238,9 @@ export class OrcaRuntimeService {
       await this.closeHeadlessMobileBrowserTab(worktreeId, snapshot!, tab)
     } else {
       if (!this.notifier?.closeSessionTab) {
-        return { closed: true }
+        throw new Error('runtime_unavailable')
       }
-      this.notifier.closeSessionTab(tab.id, worktreeId)
+      await this.notifier.closeSessionTab(tab.id, worktreeId)
     }
     forgetClosedSelection()
     return { closed: true }

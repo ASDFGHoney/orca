@@ -2001,6 +2001,44 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
+      window.api.ui.onSessionTabCloseRequest(({ requestId, tabId, worktreeId }) => {
+        const store = useAppStore.getState()
+        const browserTarget = resolveBrowserSessionTabTarget(store, worktreeId, tabId)
+        const closeAndRespond = (): void => {
+          try {
+            let closed: boolean
+            if (browserTarget) {
+              useAppStore.getState().closeBrowserTab(browserTarget.workspaceId)
+              closed = true
+            } else {
+              closed = closeMobileSessionTabInStore(useAppStore.getState(), worktreeId, tabId)
+            }
+            window.api.ui.respondSessionTabClose({
+              requestId,
+              ...(!closed ? { error: 'session_tab_not_found' } : {})
+            })
+          } catch (error) {
+            window.api.ui.respondSessionTabClose({
+              requestId,
+              error: error instanceof Error ? error.message : 'session_tab_close_failed'
+            })
+          }
+        }
+        const visibleId = browserTarget?.workspaceId ?? tabId
+        guardPinnedTabClose({
+          isPinned: isPinnedSessionTab(store, worktreeId, visibleId),
+          tabLabel: resolvePinnedTabLabel(store, worktreeId, visibleId),
+          onClose: closeAndRespond,
+          onCancel: () =>
+            window.api.ui.respondSessionTabClose({
+              requestId,
+              error: 'session_tab_close_canceled'
+            })
+        })
+      })
+    )
+
+    unsubs.push(
       window.api.ui.onMoveSessionTab((move) => {
         const { tabId, targetGroupId } = move
         const store = useAppStore.getState()
