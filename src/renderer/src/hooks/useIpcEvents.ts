@@ -165,6 +165,11 @@ import type {
 import { translate } from '@/i18n/i18n'
 import { redactKagiSessionToken } from '../../../shared/browser-url'
 import { closeTerminalTab } from '@/components/terminal/terminal-tab-actions'
+import {
+  SESSION_TAB_CLOSE_CANCELED_ERROR,
+  SESSION_TAB_CLOSE_FAILED_ERROR,
+  SESSION_TAB_NOT_FOUND_ERROR
+} from '../../../shared/session-tab-close'
 import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
 import { getConnectionIdFromState } from '@/lib/connection-context'
 import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
@@ -2015,12 +2020,12 @@ export function useIpcEvents(): void {
             }
             window.api.ui.respondSessionTabClose({
               requestId,
-              ...(!closed ? { error: 'session_tab_not_found' } : {})
+              ...(!closed ? { error: SESSION_TAB_NOT_FOUND_ERROR } : {})
             })
           } catch (error) {
             window.api.ui.respondSessionTabClose({
               requestId,
-              error: error instanceof Error ? error.message : 'session_tab_close_failed'
+              error: error instanceof Error ? error.message : SESSION_TAB_CLOSE_FAILED_ERROR
             })
           }
         }
@@ -2032,7 +2037,7 @@ export function useIpcEvents(): void {
           onCancel: () =>
             window.api.ui.respondSessionTabClose({
               requestId,
-              error: 'session_tab_close_canceled'
+              error: SESSION_TAB_CLOSE_CANCELED_ERROR
             })
         })
       })
