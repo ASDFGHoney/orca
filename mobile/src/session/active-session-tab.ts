@@ -1,9 +1,5 @@
-// Pure resolver for the phone's active session tab. Kept free of react-native
-// imports so it stays unit-testable in the node test env.
-
 type SessionTabLike = {
   id: string
-  type: 'terminal' | 'markdown' | 'file' | 'browser'
   isActive: boolean
 }
 
@@ -17,15 +13,9 @@ export type ResolveActiveSessionTabResult<T extends SessionTabLike> = {
   activeTab: T | null
   selectionSource: ActiveSessionTabSelectionSource
   clearPendingActiveSessionTabId: boolean
-  /** The device's pick vanished for this snapshot only; keep it so the tab re-binds when it returns. */
   retainSelectedSessionTabId: boolean
 }
 
-/**
- * Decides which tab the phone shows for an accepted snapshot. The phone owns its
- * own view: an ordinary state republication (agent turn, desktop focus change,
- * browser command bootstrap) must not move the user off the tab they are on.
- */
 export function resolveActiveSessionTab<T extends SessionTabLike>(
   tabs: readonly T[],
   opts: {
@@ -54,7 +44,6 @@ export function resolveActiveSessionTab<T extends SessionTabLike>(
         retainSelectedSessionTabId: false
       }
     }
-    // Why: snapshots lag a mobile tap while the activate RPC is in flight; keep the local pick.
     const pendingTab = tabs.find((tab) => tab.id === pendingActiveSessionTabId) ?? null
     if (pendingTab) {
       return {
@@ -66,29 +55,14 @@ export function resolveActiveSessionTab<T extends SessionTabLike>(
     }
   }
   const clearPendingActiveSessionTabId = pendingActiveSessionTabId !== null
-  if (opts.selectedSessionTabId) {
-    const selectedTab = tabs.find((tab) => tab.id === opts.selectedSessionTabId) ?? null
-    if (selectedTab) {
-      return {
-        activeTab: selectedTab,
-        selectionSource: 'selected-tab',
-        clearPendingActiveSessionTabId,
-        retainSelectedSessionTabId: false
-      }
-    }
-    // Why: a browser guest process swap drops its tab from one snapshot; show the
-    // fallback but remember the pick so the tab reclaims focus when it reappears.
-    return {
-      activeTab: snapshotActive,
-      selectionSource: 'snapshot',
-      clearPendingActiveSessionTabId,
-      retainSelectedSessionTabId: true
-    }
-  }
+  const selectedTab = opts.selectedSessionTabId
+    ? (tabs.find((tab) => tab.id === opts.selectedSessionTabId) ?? null)
+    : null
   return {
-    activeTab: snapshotActive,
-    selectionSource: 'snapshot',
+    activeTab: selectedTab ?? snapshotActive,
+    selectionSource: selectedTab ? 'selected-tab' : 'snapshot',
     clearPendingActiveSessionTabId,
-    retainSelectedSessionTabId: false
+    // Why: transient browser guest swaps must not erase the device's explicit pick.
+    retainSelectedSessionTabId: Boolean(opts.selectedSessionTabId) && !selectedTab
   }
 }

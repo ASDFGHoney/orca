@@ -934,8 +934,7 @@ export default function SessionScreen() {
   const activeHandleRef = useRef<string | null>(null)
   const activeSessionTabTypeRef = useRef<MobileSessionTabType | null>(null)
   const pendingActiveSessionTabIdRef = useRef<string | null>(null)
-  // Why: this device's own tab pick. Unlike activeSessionTabId it survives a snapshot that
-  // transiently drops the tab (browser guest process swap), so focus re-binds when it returns.
+  // Why: survive transient snapshot gaps so the device's own tab pick can re-bind.
   const selectedSessionTabIdRef = useRef<string | null>(null)
   const pendingActiveTerminalHandleRef = useRef<string | null>(null)
   // Why: remember the page id to activate its session tab once it syncs (bridge auto-activate flags only webContents, not the app-level active tab).
