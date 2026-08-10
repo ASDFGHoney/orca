@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { VirtualItem } from '@tanstack/react-virtual'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import {
+  HOST_STICKY_GROUP_TOP_PX,
   HOST_STICKY_PINNED_HEIGHT,
   buildLineageRowRekeyMap,
+  estimateRenderRowSize,
   extractWorktreeVirtualRowIndexes,
   getActiveStickyIndexesForScroll,
   getStickyHeaderIndexes,
@@ -192,6 +194,111 @@ describe('getActiveStickyIndexesForScroll', () => {
     })
     expect(result.hostIndex).toBe(0)
     expect(result.groupIndex).toBe(1)
+  })
+
+  it('estimates host headers with HostSectionHeader inner padding so sticky geometry matches paint (#12300)', () => {
+    // Why: HostSectionHeader is always pt-1 + h-8. Under-estimating the first host
+    // by 4px pulled later group starts forward and made sticky tiers collide.
+    const multiGroupRows: RenderRow[] = [
+      hostRow('ssh:a'),
+      groupRow('a1'),
+      itemStub('wt-1'),
+      hostRow('ssh:b'),
+      groupRow('b1'),
+      itemStub('wt-2')
+    ]
+    expect(estimateRenderRowSize(multiGroupRows, 0, 0, null)).toBe(HOST_STICKY_PINNED_HEIGHT)
+    expect(estimateRenderRowSize(multiGroupRows, 3, 0, null)).toBe(HOST_STICKY_PINNED_HEIGHT + 4)
+    expect(HOST_STICKY_GROUP_TOP_PX).toBe(HOST_STICKY_PINNED_HEIGHT - 1)
+
+    const multiSticky = getStickyHeaderIndexes(multiGroupRows)
+    const gap = 6
+    const hostSize = estimateRenderRowSize(multiGroupRows, 0, 0, null)
+    const groupStart = hostSize + gap
+    const virtualItems = [
+      virtualItem(0, 0),
+      virtualItem(1, groupStart),
+      virtualItem(2, groupStart + 100),
+      virtualItem(3, groupStart + 200),
+      virtualItem(4, groupStart + 300),
+      virtualItem(5, groupStart + 400)
+    ]
+
+    // Cold first paint: host pin only; first group stays in flow.
+    const cold = getActiveStickyIndexesForScroll({
+      rows: multiGroupRows,
+      rangeStartIndex: 0,
+      scrollOffset: 0,
+      stickyHeaderIndexes: multiSticky,
+      virtualItems
+    })
+    expect(cold).toEqual({ hostIndex: 0, groupIndex: null })
+
+    // Group must not pin until scrollOffset + HOST_STICKY_PINNED_HEIGHT reaches start.
+    const earlyScroll = groupStart - HOST_STICKY_PINNED_HEIGHT - 1
+    const early = getActiveStickyIndexesForScroll({
+      rows: multiGroupRows,
+      rangeStartIndex: 1,
+      scrollOffset: earlyScroll,
+      stickyHeaderIndexes: multiSticky,
+      virtualItems
+    })
+    expect(early.groupIndex).toBeNull()
+
+    const onSlot = getActiveStickyIndexesForScroll({
+      rows: multiGroupRows,
+      rangeStartIndex: 1,
+      scrollOffset: groupStart - HOST_STICKY_PINNED_HEIGHT,
+      stickyHeaderIndexes: multiSticky,
+      virtualItems
+    })
+    expect(onSlot).toEqual({ hostIndex: 0, groupIndex: 1 })
+  })
+
+  it('keeps single-tier cold first render free of double group pins', () => {
+    const flatRows: RenderRow[] = [
+      groupRow('project-group:infra'),
+      itemStub('wt-1'),
+      groupRow('project-group:projects'),
+      itemStub('wt-2')
+    ]
+    const flatSticky = getStickyHeaderIndexes(flatRows)
+    const sizes = flatRows.map((_, index) => estimateRenderRowSize(flatRows, index, 0, null))
+    let start = 0
+    const flatItems = sizes.map((size, index) => {
+      const item = virtualItem(index, start)
+      start += size + 6
+      return item
+    })
+
+    const cold = getActiveStickyIndexesForScroll({
+      rows: flatRows,
+      rangeStartIndex: 0,
+      scrollOffset: 0,
+      stickyHeaderIndexes: flatSticky,
+      virtualItems: flatItems
+    })
+    expect(cold).toEqual({ hostIndex: null, groupIndex: 0 })
+
+    // Second group must not share the pin until it reaches the top.
+    const mid = getActiveStickyIndexesForScroll({
+      rows: flatRows,
+      rangeStartIndex: 1,
+      scrollOffset: flatItems[2].start - 1,
+      stickyHeaderIndexes: flatSticky,
+      virtualItems: flatItems
+    })
+    expect(mid.groupIndex).toBe(0)
+  })
+
+  it('scopes host-stamped project-group header keys so multi-host sections stay unique', () => {
+    expect(getRenderRowKey(groupRow('project-group:infra', 'local'))).toBe(
+      'hdr:local:project-group:infra'
+    )
+    expect(getRenderRowKey(groupRow('project-group:infra', 'ssh:builder'))).toBe(
+      'hdr:ssh:builder:project-group:infra'
+    )
+    expect(getRenderRowKey(groupRow('project-group:infra'))).toBe('hdr:project-group:infra')
   })
 })
 
