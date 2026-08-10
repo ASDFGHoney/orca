@@ -284,21 +284,18 @@ importers:
       marked:
         specifier: ^17.0.1
         version: 17.0.6
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
       mdast-util-math:
         specifier: ^3.0.0
         version: 3.0.0
       mermaid:
         specifier: ^11.16.1
         version: 11.16.1
-      micromark:
-        specifier: ^4.0.2
-        version: 4.0.2
       micromark-extension-math:
         specifier: ^3.1.0
         version: 3.1.0
+      micromark-util-types:
+        specifier: ^2.0.2
+        version: 2.0.2
       monaco-editor:
         specifier: ^0.55.1
         version: 0.55.1

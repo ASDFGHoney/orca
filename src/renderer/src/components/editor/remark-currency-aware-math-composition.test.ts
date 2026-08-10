@@ -24,14 +24,14 @@ function currencyAwareMathAlias(this: Processor): undefined {
   return remarkCurrencyAwareMath.call(this)
 }
 
-function constructName(value: unknown): string | undefined {
+function containsConstruct(value: unknown, name: string): boolean {
   if (Array.isArray(value)) {
-    return value.length === 1 ? constructName(value[0]) : undefined
+    return value.some((item) => containsConstruct(item, name))
   }
   if (typeof value !== 'object' || value === null || !('name' in value)) {
-    return undefined
+    return false
   }
-  return typeof value.name === 'string' ? value.name : undefined
+  return value.name === name
 }
 
 function isMathMicromarkExtension(extension: unknown): boolean {
@@ -43,8 +43,8 @@ function isMathMicromarkExtension(extension: unknown): boolean {
     text?: Record<number, unknown>
   }
   return (
-    constructName(candidate.flow?.[36]) === 'mathFlow' &&
-    constructName(candidate.text?.[36]) === 'mathText'
+    containsConstruct(candidate.flow?.[36], 'mathFlow') &&
+    containsConstruct(candidate.text?.[36], 'mathText')
   )
 }
 
