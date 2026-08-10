@@ -4,13 +4,24 @@
 
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import { setBoundedScopeCacheEntry } from './native-chat-composer-scope-cache'
+import type { NativeChatTranscriptOrder } from './native-chat-transcript-order'
+
+export type NativeChatClearBoundary = {
+  clearAfterMessageId: string | null
+  clearTranscriptGeneration: number
+  clearTranscriptHighWater: number
+}
 
 export type NativeChatCommandMarker = {
   id: string
   /** The command as typed, e.g. `/clear`. */
   command: string
   sentAt: number
-  /** Transcript message ids visible when `/clear` was issued (host-agnostic hide set). */
+  /** Last ordered transcript row visible when `/clear` was issued. */
+  clearAfterMessageId?: string | null
+  clearTranscriptGeneration?: number
+  clearTranscriptHighWater?: number
+  /** Pre-boundary cache shape retained for hot-reload compatibility. */
   clearedMessageIds?: readonly string[]
 }
 
@@ -38,7 +49,7 @@ export function appendCommandMarkerCache(
   scope: NativeChatCommandMarkerScope,
   command: string,
   sentAt = Date.now(),
-  clearedMessageIds?: readonly string[]
+  clearBoundary?: NativeChatClearBoundary
 ): NativeChatCommandMarker[] {
   commandMarkerCounter += 1
   const key = commandMarkerScopeKey(scope)
@@ -50,7 +61,7 @@ export function appendCommandMarkerCache(
       id: `${sentAt}-${commandMarkerCounter}`,
       command,
       sentAt,
-      ...(clearedMessageIds !== undefined ? { clearedMessageIds: [...clearedMessageIds] } : {})
+      ...clearBoundary
     }
   ].slice(-COMMAND_MARKER_LIMIT)
   // Why: the per-key array is capped at 8, but the KEY (paneKey\0agent\0sessionId,
@@ -70,54 +81,66 @@ export function isNativeChatClearCommand(command: string): boolean {
   return command.trim().toLowerCase().split(/\s+/)[0] === '/clear'
 }
 
-/** Message ids to hide for a `/clear`; undefined for non-clear commands. */
-export function clearedMessageIdsForSlashCommand(
+/** Ordered transcript boundary for a `/clear`; undefined for other commands. */
+export function clearBoundaryForSlashCommand(
   command: string,
-  messages: readonly Pick<NativeChatMessage, 'id'>[]
-): readonly string[] | undefined {
+  messages: readonly Pick<NativeChatMessage, 'id'>[],
+  transcriptOrder: NativeChatTranscriptOrder
+): NativeChatClearBoundary | undefined {
   if (!isNativeChatClearCommand(command)) {
     return undefined
   }
-  return messages.map((message) => message.id)
+  return {
+    clearAfterMessageId: messages.at(-1)?.id ?? null,
+    clearTranscriptGeneration: transcriptOrder.generation,
+    clearTranscriptHighWater: transcriptOrder.highWater
+  }
 }
 
 function latestClearMarker(
   markers: readonly NativeChatCommandMarker[]
 ): NativeChatCommandMarker | null {
-  let latest: NativeChatCommandMarker | null = null
-  for (const marker of markers) {
-    if (
-      isNativeChatClearCommand(marker.command) &&
-      (latest === null || marker.sentAt > latest.sentAt)
-    ) {
-      latest = marker
+  for (let index = markers.length - 1; index >= 0; index -= 1) {
+    const marker = markers[index]
+    if (marker && isNativeChatClearCommand(marker.command)) {
+      return marker
     }
   }
-  return latest
+  return null
 }
 
 export function applyCommandMarkerBoundaries(
   messages: readonly NativeChatMessage[],
-  markers: readonly NativeChatCommandMarker[]
+  markers: readonly NativeChatCommandMarker[],
+  transcriptOrder?: NativeChatTranscriptOrder
 ): NativeChatMessage[] {
   const clearMarker = latestClearMarker(markers)
   if (clearMarker === null) {
     return messages as NativeChatMessage[]
   }
-  // Why: `/clear` mutates the TUI/transcript asynchronously. Hide the rows that
-  // were visible at clear time by id so we never compare renderer `sentAt` to
-  // host/provider `message.timestamp` (cross-clock on remote runtimes).
-  if (clearMarker.clearedMessageIds !== undefined) {
-    if (clearMarker.clearedMessageIds.length === 0) {
-      return messages as NativeChatMessage[]
+  const boundaryId =
+    clearMarker.clearAfterMessageId !== undefined
+      ? clearMarker.clearAfterMessageId
+      : (clearMarker.clearedMessageIds?.at(-1) ?? null)
+  if (boundaryId !== null) {
+    const boundaryIndex = messages.findIndex((message) => message.id === boundaryId)
+    if (boundaryIndex >= 0) {
+      return messages.slice(boundaryIndex + 1)
     }
-    const hide = new Set(clearMarker.clearedMessageIds)
-    return messages.filter((message) => !hide.has(message.id))
   }
-  // Legacy in-memory markers without an id snapshot: keep prior local-clock filter.
-  return messages.filter(
-    (message) => message.timestamp !== null && message.timestamp > clearMarker.sentAt
-  )
+  if (
+    transcriptOrder !== undefined &&
+    clearMarker.clearTranscriptGeneration === transcriptOrder.generation &&
+    clearMarker.clearTranscriptHighWater !== undefined
+  ) {
+    return messages.filter(
+      (message) =>
+        (transcriptOrder.messageSequenceById.get(message.id) ?? 0) >
+        clearMarker.clearTranscriptHighWater!
+    )
+  }
+  // A missing boundary can mean an empty read, pagination, or replacement.
+  return []
 }
 
 /** Render command markers as compact `system` messages. The `system` role draws

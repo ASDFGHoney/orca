@@ -23,6 +23,7 @@ import {
   readCommandMarkerCache
 } from './native-chat-command-markers'
 import { stripNoiseMessages } from './native-chat-noise'
+import type { NativeChatTranscriptOrder } from './native-chat-transcript-order'
 
 function userMessage(id: string, text: string, timestamp = 1): NativeChatMessage {
   return {
@@ -55,6 +56,14 @@ function imageMessage(id: string, ...paths: string[]): NativeChatMessage {
 }
 
 const pendingOf = (id: string, text: string): NativeChatPendingSend => ({ id, text, sentAt: 100 })
+
+function transcriptOrder(
+  generation: number,
+  highWater: number,
+  sequences: Readonly<Record<string, number>> = {}
+): NativeChatTranscriptOrder {
+  return { generation, highWater, messageSequenceById: new Map(Object.entries(sequences)) }
+}
 
 describe('prunePendingSends', () => {
   it('returns the same reference when there is nothing pending', () => {
@@ -165,13 +174,22 @@ describe('prunePendingSends', () => {
   })
 
   it('prunes a first send against a timestampless transcript turn (grok)', () => {
-    const pending = [{ ...pendingOf('p1', 'rename it'), afterMessageId: null }]
+    const pending = [
+      {
+        ...pendingOf('p1', 'rename it'),
+        afterMessageId: null,
+        afterTranscriptGeneration: 1,
+        afterTranscriptHighWater: 0
+      }
+    ]
     const transcript = [
       { ...userMessage('u1', 'rename it'), timestamp: null },
       { ...assistantMessage('a1', 'done'), timestamp: null }
     ]
 
-    expect(prunePendingSends(pending, transcript)).toEqual([])
+    expect(prunePendingSends(pending, transcript, transcriptOrder(1, 2, { u1: 1, a1: 2 }))).toEqual(
+      []
+    )
   })
 
   it('prunes only one of two identical pending sends for one completed turn', () => {
@@ -434,28 +452,63 @@ describe('pendingSendsAsMessages', () => {
   it('retires a first empty-transcript send when the host clock is behind the renderer', () => {
     // pending.sentAt is renderer time; transcript timestamps are host time.
     const pending = [
-      { ...pendingOf('p1', 'hello remote'), sentAt: 1_000_000, afterMessageId: null }
+      {
+        ...pendingOf('p1', 'hello remote'),
+        sentAt: 1_000_000,
+        afterMessageId: null,
+        afterTranscriptGeneration: 3,
+        afterTranscriptHighWater: 0
+      }
     ]
     const hostBehindTranscript = [
       { ...userMessage('u1', 'hello remote'), timestamp: 50 },
       { ...assistantMessage('a1', 'hi'), timestamp: 60 }
     ]
 
-    expect(pendingSendsAsMessages(pending, hostBehindTranscript)).toEqual([])
-    expect(prunePendingSends(pending, hostBehindTranscript)).toEqual([])
+    const order = transcriptOrder(3, 2, { u1: 1, a1: 2 })
+    expect(pendingSendsAsMessages(pending, hostBehindTranscript, order)).toEqual([])
+    expect(prunePendingSends(pending, hostBehindTranscript, order)).toEqual([])
   })
 
-  it('lets occurrence matching claim an unbound empty-at-send echo against older identical history', () => {
-    // No host-domain bound: full-list occurrence matching applies. That is the
-    // same outcome the old renderer-sentAt filter already produced when the host
-    // clock was ahead; we no longer pretend sentAt protects this case.
-    const pending = [{ ...pendingOf('p1', 'run tests'), sentAt: 100, afterMessageId: null }]
+  it('keeps an empty-at-send echo against older host-ahead identical history', () => {
+    const pending = [
+      {
+        ...pendingOf('p1', 'run tests'),
+        sentAt: 100,
+        afterMessageId: null,
+        afterTranscriptGeneration: 4,
+        afterTranscriptHighWater: 0
+      }
+    ]
     const olderCompleted = [
       { ...userMessage('old-user', 'run tests'), timestamp: 10_000_000 },
       { ...assistantMessage('old-answer', 'passed'), timestamp: 10_000_100 }
     ]
-    expect(pendingSendsAsMessages(pending, olderCompleted)).toEqual([])
-    expect(prunePendingSends(pending, olderCompleted)).toEqual([])
+    const order = transcriptOrder(4, 0)
+    expect(pendingSendsAsMessages(pending, olderCompleted, order)).toHaveLength(1)
+    expect(prunePendingSends(pending, olderCompleted, order)).toEqual(pending)
+  })
+
+  it('retires an empty-at-send echo only against its live-appended host-ahead turn', () => {
+    const pending = [
+      {
+        ...pendingOf('p1', 'run tests'),
+        sentAt: 100,
+        afterMessageId: null,
+        afterTranscriptGeneration: 4,
+        afterTranscriptHighWater: 0
+      }
+    ]
+    const transcript = [
+      { ...userMessage('old-user', 'run tests'), timestamp: 10_000_000 },
+      { ...assistantMessage('old-answer', 'passed'), timestamp: 10_000_100 },
+      { ...userMessage('new-user', 'run tests'), timestamp: 10_000_200 },
+      { ...assistantMessage('new-answer', 'passed'), timestamp: 10_000_300 }
+    ]
+    const order = transcriptOrder(4, 2, { 'new-user': 1, 'new-answer': 2 })
+
+    expect(pendingSendsAsMessages(pending, transcript, order)).toEqual([])
+    expect(prunePendingSends(pending, transcript, order)).toEqual([])
   })
 
   it('retires against the post-send turn when host timestamps sit far ahead of renderer sentAt', () => {
@@ -478,11 +531,39 @@ describe('pendingSendsAsMessages', () => {
   })
 
   it('hides a first send while its timestampless transcript turn is visible (grok)', () => {
-    const pending = [{ ...pendingOf('p1', 'rename it'), afterMessageId: null }]
+    const pending = [
+      {
+        ...pendingOf('p1', 'rename it'),
+        afterMessageId: null,
+        afterTranscriptGeneration: 7,
+        afterTranscriptHighWater: 0
+      }
+    ]
 
     expect(
-      pendingSendsAsMessages(pending, [{ ...userMessage('u1', 'rename it'), timestamp: null }])
+      pendingSendsAsMessages(
+        pending,
+        [{ ...userMessage('u1', 'rename it'), timestamp: null }],
+        transcriptOrder(7, 1, { u1: 1 })
+      )
     ).toEqual([])
+  })
+
+  it('keeps an empty-at-send echo when local ordering is absent or replaced', () => {
+    const pending = [
+      {
+        ...pendingOf('p1', 'rename it'),
+        afterMessageId: null,
+        afterTranscriptGeneration: 7,
+        afterTranscriptHighWater: 0
+      }
+    ]
+    const transcript = [userMessage('u1', 'rename it')]
+
+    expect(pendingSendsAsMessages(pending, transcript)).toHaveLength(1)
+    expect(
+      pendingSendsAsMessages(pending, transcript, transcriptOrder(8, 1, { u1: 1 }))
+    ).toHaveLength(1)
   })
 
   it('hides only one of two identical pending sends for one real user turn', () => {
@@ -683,10 +764,21 @@ describe('command marker cache', () => {
     clearCommandMarkerCacheForTests()
     const scope = { paneKey: 'tab-a:leaf-a', agent: 'codex', sessionId: 'session-1' }
 
-    const appended = appendCommandMarkerCache(scope, '/clear', 10, ['m1', 'm2'])
+    const appended = appendCommandMarkerCache(scope, '/clear', 10, {
+      clearAfterMessageId: 'm2',
+      clearTranscriptGeneration: 3,
+      clearTranscriptHighWater: 4
+    })
 
     expect(appended).toEqual([
-      { id: '10-1', command: '/clear', sentAt: 10, clearedMessageIds: ['m1', 'm2'] }
+      {
+        id: '10-1',
+        command: '/clear',
+        sentAt: 10,
+        clearAfterMessageId: 'm2',
+        clearTranscriptGeneration: 3,
+        clearTranscriptHighWater: 4
+      }
     ])
     expect(readCommandMarkerCache(scope)).toEqual(appended)
     expect(readCommandMarkerCache({ ...scope, sessionId: 'session-2' })).toEqual([])
@@ -722,7 +814,7 @@ describe('applyCommandMarkerBoundaries', () => {
 
     expect(
       applyCommandMarkerBoundaries(messages, [
-        { id: 'c1', command: '/clear', sentAt: 10, clearedMessageIds: ['before'] }
+        { id: 'c1', command: '/clear', sentAt: 10, clearAfterMessageId: 'before' }
       ])
     ).toEqual([{ ...assistantMessage('after', 'new answer'), timestamp: 20 }])
   })
@@ -744,18 +836,95 @@ describe('applyCommandMarkerBoundaries', () => {
 
     expect(
       applyCommandMarkerBoundaries(messages, [
-        { id: 'c1', command: '/clear', sentAt: 10, clearedMessageIds: ['old'] },
+        { id: 'c1', command: '/clear', sentAt: 10, clearAfterMessageId: 'old' },
         {
           id: 'c2',
           command: '/clear',
           sentAt: 20,
-          clearedMessageIds: ['old', 'middle']
+          clearAfterMessageId: 'middle'
         }
       ]).map((message) => message.id)
     ).toEqual(['new'])
   })
 
-  it('shows replacement-session messages when the host clock is behind clear sentAt', () => {
+  it('uses append order when clear markers have equal renderer timestamps', () => {
+    const messages = [userMessage('old', 'old'), userMessage('middle', 'middle')]
+
+    expect(
+      applyCommandMarkerBoundaries(messages, [
+        { id: 'c1', command: '/clear', sentAt: 100, clearAfterMessageId: 'old' },
+        { id: 'c2', command: '/clear', sentAt: 100, clearAfterMessageId: 'middle' }
+      ])
+    ).toEqual([])
+  })
+
+  it('keeps prepended pagination behind the ordered clear boundary', () => {
+    const messages = [
+      userMessage('older-unseen', 'older'),
+      userMessage('old-tail', 'old'),
+      userMessage('new', 'new')
+    ]
+
+    expect(
+      applyCommandMarkerBoundaries(messages, [
+        { id: 'c1', command: '/clear', sentAt: 10, clearAfterMessageId: 'old-tail' }
+      ]).map((message) => message.id)
+    ).toEqual(['new'])
+  })
+
+  it('hides late backfill after clear on an empty snapshot', () => {
+    const lateBackfill = [userMessage('old-u', 'old')]
+
+    expect(
+      applyCommandMarkerBoundaries(
+        lateBackfill,
+        [
+          {
+            id: 'c1',
+            command: '/clear',
+            sentAt: 10,
+            clearAfterMessageId: null,
+            clearTranscriptGeneration: 3,
+            clearTranscriptHighWater: 0
+          }
+        ],
+        transcriptOrder(3, 0)
+      )
+    ).toEqual([])
+  })
+
+  it('shows same-generation live rows after clear on an empty snapshot', () => {
+    const messages = [userMessage('new-u', 'new')]
+
+    expect(
+      applyCommandMarkerBoundaries(
+        messages,
+        [
+          {
+            id: 'c1',
+            command: '/clear',
+            sentAt: 10,
+            clearAfterMessageId: null,
+            clearTranscriptGeneration: 3,
+            clearTranscriptHighWater: 0
+          }
+        ],
+        transcriptOrder(3, 1, { 'new-u': 1 })
+      )
+    ).toEqual(messages)
+  })
+
+  it('hides conservatively when a paged boundary is missing', () => {
+    const messages = [userMessage('older', 'older'), userMessage('newer', 'newer')]
+
+    expect(
+      applyCommandMarkerBoundaries(messages, [
+        { id: 'c1', command: '/clear', sentAt: 10, clearAfterMessageId: 'missing' }
+      ])
+    ).toEqual([])
+  })
+
+  it('shows post-boundary messages when the host clock is behind clear sentAt', () => {
     // Renderer recorded clear at 1_000_000; host JSONL stamps sit far below that.
     const messages = [
       { ...userMessage('pre-clear', 'old'), timestamp: 10 },
@@ -768,7 +937,7 @@ describe('applyCommandMarkerBoundaries', () => {
           id: 'c1',
           command: '/clear',
           sentAt: 1_000_000,
-          clearedMessageIds: ['pre-clear']
+          clearAfterMessageId: 'pre-clear'
         }
       ]).map((message) => message.id)
     ).toEqual(['post-clear'])
@@ -786,13 +955,13 @@ describe('applyCommandMarkerBoundaries', () => {
           id: 'c1',
           command: '/clear',
           sentAt: 100,
-          clearedMessageIds: ['pre-clear']
+          clearAfterMessageId: 'pre-clear'
         }
       ]).map((message) => message.id)
     ).toEqual(['post-clear'])
   })
 
-  it('falls back to sentAt only for legacy clear markers without an id snapshot', () => {
+  it('conservatively hides rows for a legacy clear marker without a boundary', () => {
     const messages = [
       { ...userMessage('before', 'old'), timestamp: 5 },
       { ...userMessage('after', 'new'), timestamp: 20 }
@@ -801,7 +970,7 @@ describe('applyCommandMarkerBoundaries', () => {
       applyCommandMarkerBoundaries(messages, [{ id: 'c1', command: '/clear', sentAt: 10 }]).map(
         (message) => message.id
       )
-    ).toEqual(['after'])
+    ).toEqual([])
   })
 })
 

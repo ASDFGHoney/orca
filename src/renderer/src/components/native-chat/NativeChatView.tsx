@@ -187,6 +187,7 @@ function NativeChatResolvedView({
   // immediately and pruned once its real user turn lands in the transcript, so
   // the message never vanishes between send and transcript catch-up.
   const pendingScope = useMemo(() => ({ paneKey, agent }), [paneKey, agent])
+  const order = session.transcriptOrder
   const [pending, setPending] = useState<NativeChatPendingSend[]>(() =>
     readPendingSendCache(pendingScope)
   )
@@ -196,6 +197,7 @@ function NativeChatResolvedView({
     agent,
     sessionId,
     messages: session.messages,
+    transcriptOrder: order,
     onWorkingInterruptReset: resetWorkingInterrupted
   })
   // Reset the optimistic queue only when the pane/agent changes. A fresh launch
@@ -209,9 +211,9 @@ function NativeChatResolvedView({
   // Prune echoes whose real user turn is now in the transcript.
   useEffect(() => {
     setPending((prev) =>
-      writePendingSendCache(pendingScope, prunePendingSends(prev, session.messages))
+      writePendingSendCache(pendingScope, prunePendingSends(prev, session.messages, order))
     )
-  }, [session.messages, pendingScope])
+  }, [session.messages, order, pendingScope])
   useEffect(() => {
     if (!paneLaunchPrompt || !shouldPruneLaunchPrompt(paneLaunchPrompt, session.messages)) {
       return
@@ -229,12 +231,14 @@ function NativeChatResolvedView({
         sentAt,
         afterMessageId: boundary?.id ?? null,
         afterMessageTimestamp: boundary?.timestamp ?? null,
+        afterTranscriptGeneration: order.generation,
+        afterTranscriptHighWater: order.highWater,
         ...(imagePaths ? { imagePaths } : {})
       }
       setPending(appendPendingSendCache(pendingScope, entry))
       return entry.id
     },
-    [pendingScope, session.messages]
+    [pendingScope, session.messages, order]
   )
   const onOptimisticSendCanceled = useCallback(
     (pendingId: string) => {
@@ -258,11 +262,15 @@ function NativeChatResolvedView({
   }, [launchPromptMessage, session])
 
   const sessionAfterCommandBoundaries = useMemo<typeof session>(() => {
-    const messages = applyCommandMarkerBoundaries(sessionWithLaunchPrompt.messages, commandMarkers)
+    const messages = applyCommandMarkerBoundaries(
+      sessionWithLaunchPrompt.messages,
+      commandMarkers,
+      order
+    )
     return messages === sessionWithLaunchPrompt.messages
       ? sessionWithLaunchPrompt
       : { ...sessionWithLaunchPrompt, messages }
-  }, [sessionWithLaunchPrompt, commandMarkers])
+  }, [sessionWithLaunchPrompt, commandMarkers, order])
   const failedLaunchPromptMessageIds = useMemo(() => {
     const id = paneLaunchPrompt?.failed ? launchPromptMessage?.id : null
     if (!id || !sessionAfterCommandBoundaries.messages.some((message) => message.id === id)) {
@@ -274,8 +282,8 @@ function NativeChatResolvedView({
   // The streaming preview bubble (if any) sits after the transcript but before
   // the optimistic user echoes — same order mobile uses.
   const pendingMessages = useMemo(
-    () => pendingSendsAsMessages(pending, sessionAfterCommandBoundaries.messages),
-    [pending, sessionAfterCommandBoundaries.messages]
+    () => pendingSendsAsMessages(pending, sessionAfterCommandBoundaries.messages, order),
+    [pending, sessionAfterCommandBoundaries.messages, order]
   )
   const streamingText = useMemo(() => {
     return deriveNativeChatStreamingText({

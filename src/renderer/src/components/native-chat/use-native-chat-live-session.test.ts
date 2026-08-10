@@ -383,6 +383,42 @@ describe('useNativeChatLiveSession — transport routing', () => {
     expect(latest?.messages.map((message) => message.id)).toEqual(['u-live'])
   })
 
+  it('orders only same-generation live appends after the snapshot high-water', async () => {
+    const transport = getMockTransport('env-1')
+    await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
+    await act(async () =>
+      transport.emit({
+        type: 'snapshot',
+        messages: [user('old', 'same')],
+        hasMore: false
+      })
+    )
+    const generation = latest?.transcriptOrder.generation
+    expect(latest?.transcriptOrder.highWater).toBe(0)
+    expect(latest?.transcriptOrder.messageSequenceById.has('old')).toBe(false)
+
+    await act(async () =>
+      transport.emit({
+        type: 'appended',
+        messages: [user('new-user', 'same'), assistant('new-answer', 'done')]
+      })
+    )
+
+    expect(latest?.transcriptOrder).toMatchObject({ generation, highWater: 2 })
+    expect(latest?.transcriptOrder.messageSequenceById.get('new-user')).toBe(1)
+    expect(latest?.transcriptOrder.messageSequenceById.get('new-answer')).toBe(2)
+
+    await act(async () =>
+      transport.emit({
+        type: 'replacement',
+        messages: [user('replacement', 'fresh')],
+        hasMore: false
+      })
+    )
+    expect(latest?.transcriptOrder.generation).toBeGreaterThan(generation ?? 0)
+    expect(latest?.transcriptOrder.highWater).toBe(0)
+  })
+
   it("self-heals a stale 'working' hook once the turn-complete marker lands", async () => {
     useAppStore.setState({
       agentStatusByPaneKey: { [PANE]: { state: 'working', stateStartedAt: 1 } as never }
