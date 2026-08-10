@@ -119,15 +119,17 @@ describe('Claude stream-json connection', () => {
   it('fails closed on malformed provider output', async () => {
     const process = fakeSpawn()
     const onExit = vi.fn()
+    const onMessage = vi.fn()
     await openClaudeStreamJsonConnection(
       { command: 'claude', args: [], cwd: '/work' },
-      { onExit },
+      { onExit, onMessage },
       process.spawnImpl
     )
-    process.child.stdout.write('{not-json}\n')
+    process.child.stdout.write('{not-json}\n{"type":"assistant"}\n')
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(process.child.kill).toHaveBeenCalled()
+    expect(process.child.kill).toHaveBeenCalledTimes(1)
+    expect(onMessage).not.toHaveBeenCalled()
     expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }))
   })
 

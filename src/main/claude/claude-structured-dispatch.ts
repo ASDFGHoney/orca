@@ -1,5 +1,5 @@
 import { extname } from 'node:path'
-import { readFile, stat } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
@@ -13,6 +13,33 @@ const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
 type ImageBudget = {
   count: number
   localBytes: number
+}
+
+async function readClaudeImage(path: string): Promise<Buffer> {
+  const file = await open(path, 'r')
+  try {
+    const info = await file.stat()
+    if (!info.isFile()) {
+      throw new Error('Claude image must be a file')
+    }
+    const buffer = Buffer.allocUnsafe(MAX_IMAGE_BYTES + 1)
+    let bytesRead = 0
+    while (bytesRead < buffer.length) {
+      const result = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead)
+      if (result.bytesRead === 0) {
+        break
+      }
+      bytesRead += result.bytesRead
+    }
+    if (bytesRead === 0 || bytesRead > MAX_IMAGE_BYTES) {
+      throw new Error(
+        `Claude image must be a non-empty file no larger than ${MAX_IMAGE_BYTES} bytes`
+      )
+    }
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await file.close()
+  }
 }
 
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
@@ -56,11 +83,8 @@ async function imageContent(
   if (!block.path) {
     throw new Error('image reference has neither a path nor a URL')
   }
-  const info = await stat(block.path)
-  if (!info.isFile() || info.size > MAX_IMAGE_BYTES) {
-    throw new Error(`Claude image must be a file no larger than ${MAX_IMAGE_BYTES} bytes`)
-  }
-  budget.localBytes += info.size
+  const data = await readClaudeImage(block.path)
+  budget.localBytes += data.byteLength
   if (budget.localBytes > MAX_TOTAL_IMAGE_BYTES) {
     throw new Error(`Claude images must total no more than ${MAX_TOTAL_IMAGE_BYTES} bytes`)
   }
@@ -73,7 +97,7 @@ async function imageContent(
     source: {
       type: 'base64',
       media_type: mediaType,
-      data: (await readFile(block.path)).toString('base64')
+      data: data.toString('base64')
     }
   }
 }

@@ -64,4 +64,24 @@ describe('Claude structured dispatch image limits', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('rejects a local image by actual bytes read beyond the per-image cap', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'orca-claude-image-'))
+    try {
+      const path = join(directory, 'oversized.png')
+      await writeFile(path, Buffer.alloc(5 * 1024 * 1024 + 1))
+      const session = sessionFor()
+      const body = userMessage([{ type: 'image-ref', path }])
+
+      await expect(
+        dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
+      ).resolves.toEqual({
+        state: 'rejected',
+        reason: `Claude image must be a non-empty file no larger than ${5 * 1024 * 1024} bytes`
+      })
+      expect(session.connection.send).not.toHaveBeenCalled()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

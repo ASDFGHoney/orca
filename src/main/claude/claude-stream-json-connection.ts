@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
+import { attachClaudeStreamJsonStdout } from './claude-stream-json-stdout'
 
 export type ClaudeStreamJsonLaunch = {
   command: string
@@ -64,17 +65,14 @@ type PendingRequest = {
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
 }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
-
 function exitError(stderrTail: string, cause?: Error): Error {
   const detail = stderrTail.trim()
   const message = detail ? `claude stream-json exited: ${detail}` : 'claude stream-json exited'
   return cause ? new Error(message, { cause }) : new Error(message)
 }
-
 export async function openClaudeStreamJsonConnection(
   launch: ClaudeStreamJsonLaunch,
   handlers: ClaudeStreamJsonConnectionHandlers = {},
@@ -89,7 +87,6 @@ export async function openClaudeStreamJsonConnection(
   const pending = new Map<string, PendingRequest>()
   let nextRequestId = 1
   let stderrTail = ''
-  let stdoutBuffer = ''
   let exited = false
   let closing = false
   let terminalError: Error | null = null
@@ -179,41 +176,13 @@ export async function openClaudeStreamJsonConnection(
     }
     handlers.onMessage?.(message)
   }
-
-  const parseLine = (line: string): void => {
-    if (!line.trim()) {
-      return
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(line)
-    } catch (error) {
+  const stdout = attachClaudeStreamJsonStdout({
+    stdout: child.stdout,
+    maxLineBytes: STDOUT_LINE_MAX_BYTES,
+    onMessage: dispatchMessage,
+    onFailure: (error) => {
       killCodexAppServerProcessTree(child)
-      handleUnexpectedEnd(new Error('claude emitted invalid stream-json', { cause: error }))
-      return
-    }
-    if (isRecord(parsed)) {
-      dispatchMessage(parsed)
-    }
-  }
-
-  child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-    stdoutBuffer += chunk
-    let newline = stdoutBuffer.indexOf('\n')
-    while (newline !== -1) {
-      const line = stdoutBuffer.slice(0, newline)
-      stdoutBuffer = stdoutBuffer.slice(newline + 1)
-      if (Buffer.byteLength(line, 'utf8') > STDOUT_LINE_MAX_BYTES) {
-        killCodexAppServerProcessTree(child)
-        handleUnexpectedEnd(new Error('claude emitted an oversized stream-json line'))
-        return
-      }
-      parseLine(line)
-      newline = stdoutBuffer.indexOf('\n')
-    }
-    if (Buffer.byteLength(stdoutBuffer, 'utf8') > STDOUT_LINE_MAX_BYTES) {
-      killCodexAppServerProcessTree(child)
-      handleUnexpectedEnd(new Error('claude emitted an oversized stream-json line'))
+      handleUnexpectedEnd(error)
     }
   })
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
@@ -225,10 +194,7 @@ export async function openClaudeStreamJsonConnection(
   })
   child.on('close', () => {
     markExited()
-    if (stdoutBuffer.trim()) {
-      parseLine(stdoutBuffer)
-      stdoutBuffer = ''
-    }
+    stdout.flush()
     handleUnexpectedEnd()
   })
   child.stdin.on('error', (error) => {
