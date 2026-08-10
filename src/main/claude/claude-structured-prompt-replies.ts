@@ -57,10 +57,15 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
   if (decoded.questionId === `q${questionIndex + 1}` && label) {
     return label
   }
+  if (decoded.questionId === `q${questionIndex + 1}`) {
+    return decoded.answer
+  }
   const legacyChoice = options.some(
     (candidate) => isRecord(candidate) && readString(candidate.label) === decoded.answer
   )
-  return decoded.questionId === questionId && legacyChoice ? decoded.answer : optionId
+  return decoded.questionId === questionId && (legacyChoice || decoded.answer.trim().length > 0)
+    ? decoded.answer
+    : optionId
 }
 
 function questionId(question: Record<string, unknown>, index: number): string {

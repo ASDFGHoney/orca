@@ -3,6 +3,7 @@ import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key
 import { claudeQuestionItems } from './claude-structured-prompt-items'
 import {
   applyClaudePromptAnswer,
+  encodeClaudeQuestionOptionId,
   type ClaudePendingPrompt
 } from './claude-structured-prompt-replies'
 
@@ -50,7 +51,9 @@ describe('Claude structured question addressing', () => {
     }
     const answer = 'https://example.test:8443/path'
 
-    expect(applyClaudePromptAnswer({ prompt }, answer)).toMatchObject({
+    expect(
+      applyClaudePromptAnswer({ prompt }, encodeClaudeQuestionOptionId('q1', answer))
+    ).toMatchObject({
       updatedInput: { answers: { [questionId]: answer } }
     })
   })
@@ -71,7 +74,9 @@ describe('Claude structured question addressing', () => {
     }
     const answer = 'frontend, backend'
 
-    expect(applyClaudePromptAnswer({ prompt, questionId }, answer)).toMatchObject({
+    expect(
+      applyClaudePromptAnswer({ prompt, questionId }, encodeClaudeQuestionOptionId('q1', answer))
+    ).toMatchObject({
       updatedInput: { answers: { [questionId]: answer } }
     })
   })
