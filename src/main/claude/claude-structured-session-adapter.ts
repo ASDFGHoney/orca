@@ -15,9 +15,9 @@ import {
   claudeAuthDiagnostic,
   readClaudeFrameString,
   readClaudeInit,
-  readClaudeModels,
-  type ClaudeInitObservation
+  readClaudeModels
 } from './claude-structured-init-proof'
+import { createClaudeInitDeadline } from './claude-structured-init-deadline'
 import { supportsClaudeStructuredLocation } from './claude-structured-location-support'
 import { CLAUDE_SPAWN_TOKEN_ENV, claudeProcessIdentity } from './claude-structured-owner-identity'
 import { setClaudeStructuredOption } from './claude-structured-options'
@@ -66,22 +66,12 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
     let observedLeafUuid: string | null = null
-    let settleInit = (_init: ClaudeInitObservation): void => {}
-    let rejectInit = (_error: Error): void => {}
-    const initialized = new Promise<ClaudeInitObservation>((resolve, reject) => {
-      settleInit = resolve
-      rejectInit = reject
-    })
-    const initTimer = setTimeout(
-      () => rejectInit(new Error(`claude session ${sessionId} did not emit system/init`)),
-      INIT_TIMEOUT_MS
-    )
-    initTimer.unref?.()
+    const initDeadline = createClaudeInitDeadline(sessionId, INIT_TIMEOUT_MS)
 
     const onMessage = (message: Record<string, unknown>): void => {
       const init = readClaudeInit(message)
       if (init) {
-        settleInit(init)
+        initDeadline.resolve(init)
       }
       observedLeafUuid = readClaudeFrameString(message, 'uuid') ?? observedLeafUuid
       if (liveSession) {
@@ -139,7 +129,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
           },
           onExit: (error) => {
             if (!attempt.published) {
-              rejectInit(error)
+              initDeadline.reject(error)
             }
             this.handleExit(sessionId, attempt, error)
           }
@@ -147,19 +137,20 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       )
       attempt.connection = connection
       this.acquisitions.assertCurrent(sessionId, attempt)
+      initDeadline.start()
       const [initialization, init] = await Promise.all([
         connection.request(
           'initialize',
           { supportedDialogKinds: [] },
           { timeoutMs: this.deps.requestTimeoutMs }
         ),
-        initialized
+        initDeadline.promise
       ])
       const models = readClaudeModels(initialization)
       this.deliver(attempt, sessionId, () =>
         this.emit(liveSession, input.events, { type: 'options', sessionId, models })
       )
-      clearTimeout(initTimer)
+      initDeadline.clear()
       this.acquisitions.assertCurrent(sessionId, attempt)
       if (init.providerSessionId !== launch.providerSessionId) {
         throw new Error(
@@ -208,7 +199,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       }
       return acquired
     } catch (error) {
-      clearTimeout(initTimer)
+      initDeadline.clear()
       this.acquisitions.deleteIfCurrent(sessionId, attempt)
       if (this.sessions.get(sessionId)?.connection !== attempt.connection) {
         prompts.clear()
