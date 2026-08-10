@@ -91,6 +91,10 @@ type ClaudeRuntimeCredentialCandidate = {
   credentialsJson: string
   runtimeOauthAccount: unknown
 }
+type ClaudeRuntimeCredentialObservation = {
+  candidates: ClaudeRuntimeCredentialCandidate[]
+  keychainReadFailed: boolean
+}
 
 const RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR = Symbol('runtime-oauth-account-parse-error')
 
@@ -363,13 +367,24 @@ export class ClaudeRuntimeAuthService {
     const preferManagedSnapshot = this.skipNextReadBackForAccountId === activeAccount.id
 
     // Why: the CLI writes refreshed tokens to .credentials.json; if runtime differs from our last write, preserve them to managed storage before overwriting.
+    let runtimeCredentialObservation: ClaudeRuntimeCredentialObservation | undefined
     if (this.lastSyncedAccountId === activeAccount.id) {
       if (preferManagedSnapshot) {
         this.skipNextReadBackForAccountId = null
       } else {
-        const readBackResult = await this.readBackRefreshedTokens(credentialsJson, {
-          updateLastWrittenCredentialsJson: true
-        })
+        try {
+          runtimeCredentialObservation =
+            await this.readRuntimeCredentialCandidatesForReadBack(credentialsJson)
+        } catch {
+          runtimeCredentialObservation = undefined
+        }
+        const readBackResult = await this.readBackRefreshedTokens(
+          credentialsJson,
+          {
+            updateLastWrittenCredentialsJson: true
+          },
+          runtimeCredentialObservation
+        )
         if (readBackResult.status === 'persisted') {
           const updatedCredentialsJson = await this.readManagedCredentials(activeAccount)
           if (updatedCredentialsJson && this.isValidCredentialsJsonObject(updatedCredentialsJson)) {
@@ -426,11 +441,32 @@ export class ClaudeRuntimeAuthService {
 
     const paths = this.pathResolver.getRuntimePaths()
     // Why: shared ~/.claude + keychain are multi-writer; refuse same-identity regressions so a stale managed snapshot cannot clobber a fresher CLI/login token.
+    let runtimeCredentialsToAdopt: string | null = null
+    const managedCredentialsJson = credentialsJson
+    const preferCandidateOnEqual = this.lastSyncedAccountId !== activeAccount.id
     if (!preferManagedSnapshot) {
-      credentialsJson = await this.applyMonotonicRuntimeMaterializationGuard(
+      const guardedCredentialsJson = await this.applyMonotonicRuntimeMaterializationGuard(
         activeAccount,
-        credentialsJson
+        credentialsJson,
+        runtimeCredentialObservation,
+        preferCandidateOnEqual
       )
+      if (guardedCredentialsJson !== credentialsJson) {
+        runtimeCredentialsToAdopt = guardedCredentialsJson
+        credentialsJson = guardedCredentialsJson
+      }
+    }
+    if (!preferManagedSnapshot) {
+      const protectedCredentialsJson = this.protectRuntimeFileCredentialWrite(
+        activeAccount,
+        credentialsJson,
+        managedCredentialsJson,
+        preferCandidateOnEqual
+      )
+      if (protectedCredentialsJson !== credentialsJson) {
+        runtimeCredentialsToAdopt = protectedCredentialsJson
+        credentialsJson = protectedCredentialsJson
+      }
     }
     this.writeRuntimeCredentials(credentialsJson)
     if (process.platform === 'darwin') {
@@ -453,6 +489,16 @@ export class ClaudeRuntimeAuthService {
       this.lastWrittenOauthAccount = null
       this.hasLastWrittenOauthAccount = false
     }
+    if (runtimeCredentialsToAdopt) {
+      try {
+        await this.writeManagedCredentials(activeAccount, runtimeCredentialsToAdopt)
+      } catch {
+        // Why: Keychain write errors can echo command arguments, including the credential payload.
+        console.warn(
+          '[claude-runtime-auth] Failed to adopt fresher shared Claude credentials into managed storage'
+        )
+      }
+    }
     this.lastSyncedAccountId = activeAccount.id
     this.hasMaterializedRuntimeAuth = true
   }
@@ -469,11 +515,24 @@ export class ClaudeRuntimeAuthService {
 
   private async readBackRefreshedTokens(
     baselineCredentialsJson: string,
-    options: { updateLastWrittenCredentialsJson: boolean }
+    options: { updateLastWrittenCredentialsJson: boolean },
+    observation?: ClaudeRuntimeCredentialObservation
   ): Promise<ClaudeReadBackResult> {
     try {
-      const candidates =
-        await this.readRuntimeCredentialCandidatesForReadBack(baselineCredentialsJson)
+      const observed =
+        observation ??
+        (await this.readRuntimeCredentialCandidatesForReadBack(baselineCredentialsJson))
+      const { candidates } = observed
+      if (observed.keychainReadFailed) {
+        return {
+          status: 'rejected',
+          runtimeCredentialsChanged:
+            this.runtimeCredentialsChangedSinceLastWrite(baselineCredentialsJson),
+          hasValidChangedRuntimeCredentials: candidates.some((candidate) =>
+            this.isValidCredentialsJsonObject(candidate.credentialsJson)
+          )
+        }
+      }
       if (candidates.length === 0) {
         return { status: 'unchanged' }
       }
@@ -579,13 +638,11 @@ export class ClaudeRuntimeAuthService {
 
   private async readRuntimeCredentialCandidatesForReadBack(
     baselineCredentialsJson: string
-  ): Promise<ClaudeRuntimeCredentialCandidate[]> {
+  ): Promise<ClaudeRuntimeCredentialObservation> {
     const paths = this.pathResolver.getRuntimePaths()
-    const fileCredentials = existsSync(paths.credentialsPath)
-      ? readFileSync(paths.credentialsPath, 'utf-8')
-      : null
     const runtimeOauthAccount = this.readRuntimeOauthAccount()
     const candidates: ClaudeRuntimeCredentialCandidate[] = []
+    let keychainReadFailed = false
     const pushCandidate = (credentialsJson: string | null): void => {
       if (
         credentialsJson &&
@@ -595,23 +652,39 @@ export class ClaudeRuntimeAuthService {
       }
     }
     if (process.platform === 'darwin') {
-      const scopedKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort(
+      const scopedKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot(
         paths.configDir
       )
-      const legacyKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort()
+      const legacyKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot()
+      keychainReadFailed = scopedKeychain.status === 'failed' || legacyKeychain.status === 'failed'
+      const scopedKeychainCredentials =
+        scopedKeychain.status === 'captured' ? scopedKeychain.credentialsJson : null
+      const legacyKeychainCredentials =
+        legacyKeychain.status === 'captured' ? legacyKeychain.credentialsJson : null
+      const fileCredentials = existsSync(paths.credentialsPath)
+        ? readFileSync(paths.credentialsPath, 'utf-8')
+        : null
       if (this.lastWrittenCredentialsJson === null) {
         pushCandidate(scopedKeychainCredentials)
         pushCandidate(legacyKeychainCredentials)
         pushCandidate(fileCredentials)
-        return candidates.filter(
-          (candidate) => candidate.credentialsJson !== baselineCredentialsJson
-        )
+        return {
+          candidates: candidates.filter(
+            (candidate) => candidate.credentialsJson !== baselineCredentialsJson
+          ),
+          keychainReadFailed
+        }
       }
       pushCandidate(scopedKeychainCredentials)
       pushCandidate(legacyKeychainCredentials)
+      pushCandidate(fileCredentials)
+      return { candidates, keychainReadFailed }
     }
+    const fileCredentials = existsSync(paths.credentialsPath)
+      ? readFileSync(paths.credentialsPath, 'utf-8')
+      : null
     pushCandidate(fileCredentials)
-    return candidates
+    return { candidates, keychainReadFailed }
   }
 
   private getPreparation(target?: ClaudeAccountSelectionTarget): ClaudeRuntimeAuthPreparation {
@@ -1019,7 +1092,8 @@ export class ClaudeRuntimeAuthService {
     if (
       decideMonotonicCredentialWrite({
         candidateJson: credentialsJson,
-        existingJson: existingManagedCredentialsJson
+        existingJson: existingManagedCredentialsJson,
+        equalExpiry: 'write'
       }) === 'keep-existing'
     ) {
       return
@@ -1038,13 +1112,20 @@ export class ClaudeRuntimeAuthService {
    */
   private async applyMonotonicRuntimeMaterializationGuard(
     account: ClaudeManagedAccount,
-    candidateCredentialsJson: string
+    candidateCredentialsJson: string,
+    observation: ClaudeRuntimeCredentialObservation | undefined,
+    preferCandidateOnEqual: boolean
   ): Promise<string> {
-    const existingRuntimeCredentialsJson = await this.readFreshestSharedRuntimeCredentials()
+    const existingRuntimeCredentialsJson = await this.readFreshestSharedRuntimeCredentials(
+      account,
+      candidateCredentialsJson,
+      observation
+    )
     if (
       decideMonotonicCredentialWrite({
         candidateJson: candidateCredentialsJson,
-        existingJson: existingRuntimeCredentialsJson
+        existingJson: existingRuntimeCredentialsJson,
+        equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing'
       }) === 'write' ||
       existingRuntimeCredentialsJson === null
     ) {
@@ -1054,43 +1135,171 @@ export class ClaudeRuntimeAuthService {
     console.warn(
       '[claude-runtime-auth] Refusing to materialize older Claude credentials over a fresher shared runtime snapshot'
     )
-    try {
-      await this.writeManagedCredentials(account, existingRuntimeCredentialsJson)
-    } catch (error) {
-      console.warn(
-        '[claude-runtime-auth] Failed to adopt fresher shared Claude credentials into managed storage:',
-        error
-      )
-    }
     return existingRuntimeCredentialsJson
   }
 
-  private async readFreshestSharedRuntimeCredentials(): Promise<string | null> {
+  private protectRuntimeFileCredentialWrite(
+    account: ClaudeManagedAccount,
+    candidateCredentialsJson: string,
+    managedCredentialsJson: string,
+    preferCandidateOnEqual: boolean
+  ): string {
     const paths = this.pathResolver.getRuntimePaths()
+    const currentCredentialsJson = existsSync(paths.credentialsPath)
+      ? readFileSync(paths.credentialsPath, 'utf-8')
+      : null
+    if (
+      !currentCredentialsJson ||
+      currentCredentialsJson === candidateCredentialsJson ||
+      !this.runtimeCredentialsUniquelyMatchAccount(
+        currentCredentialsJson,
+        this.readRuntimeOauthAccount(),
+        account,
+        managedCredentialsJson,
+        this.readManagedOauthAccount(account)
+      )
+    ) {
+      return candidateCredentialsJson
+    }
+    return decideMonotonicCredentialWrite({
+      candidateJson: candidateCredentialsJson,
+      existingJson: currentCredentialsJson,
+      equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing'
+    }) === 'keep-existing'
+      ? currentCredentialsJson
+      : candidateCredentialsJson
+  }
+
+  private async readFreshestSharedRuntimeCredentials(
+    account: ClaudeManagedAccount,
+    managedCredentialsJson: string,
+    observation?: ClaudeRuntimeCredentialObservation
+  ): Promise<string | null> {
+    const paths = this.pathResolver.getRuntimePaths()
+    const runtimeOauthAccount = this.readRuntimeOauthAccount()
+    const managedOauthAccount = this.readManagedOauthAccount(account)
+    const candidates = observation ? [...observation.candidates] : []
+    if (observation?.keychainReadFailed) {
+      throw new Error('Cannot verify shared Claude Keychain credential freshness')
+    }
+    if (process.platform === 'darwin' && !observation) {
+      const scopedKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot(
+        paths.configDir
+      )
+      const legacyKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot()
+      if (scopedKeychain.status === 'failed' || legacyKeychain.status === 'failed') {
+        throw new Error('Cannot verify shared Claude Keychain credential freshness')
+      }
+      candidates.push(
+        {
+          credentialsJson: scopedKeychain.credentialsJson ?? '',
+          runtimeOauthAccount
+        },
+        {
+          credentialsJson: legacyKeychain.credentialsJson ?? '',
+          runtimeOauthAccount
+        }
+      )
+    }
     let fileCredentials: string | null = null
     try {
       if (existsSync(paths.credentialsPath)) {
         fileCredentials = readFileSync(paths.credentialsPath, 'utf-8')
       }
     } catch (error) {
-      // Why: unreadable runtime files still need materialization (atomic rewrite); the guard fails open.
       console.warn(
         '[claude-runtime-auth] Failed to read shared Claude credentials for freshness guard:',
         error
       )
+      throw new Error('Cannot verify shared Claude file credential freshness')
     }
-    if (process.platform !== 'darwin') {
-      return pickFreshestCredentialsJson([fileCredentials])
+    if (fileCredentials) {
+      candidates.unshift({ credentialsJson: fileCredentials, runtimeOauthAccount })
     }
-    const scopedKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort(
-      paths.configDir
-    )
-    const legacyKeychainCredentials = await this.readActiveClaudeKeychainCredentialsBestEffort()
-    return pickFreshestCredentialsJson([
-      fileCredentials,
-      scopedKeychainCredentials,
-      legacyKeychainCredentials
-    ])
+    const sameAccountCandidates = candidates
+      .filter(
+        (candidate) =>
+          candidate.credentialsJson !== '' &&
+          this.runtimeCredentialsUniquelyMatchAccount(
+            candidate.credentialsJson,
+            candidate.runtimeOauthAccount,
+            account,
+            managedCredentialsJson,
+            managedOauthAccount
+          )
+      )
+      .map((candidate) => candidate.credentialsJson)
+    return pickFreshestCredentialsJson(sameAccountCandidates)
+  }
+
+  private runtimeCredentialsUniquelyMatchAccount(
+    runtimeCredentialsJson: string,
+    runtimeOauthAccount: unknown,
+    account: ClaudeManagedAccount,
+    managedCredentialsJson: string,
+    managedOauthAccount: unknown
+  ): boolean {
+    const credentialIdentity = this.readIdentityFromCredentials(runtimeCredentialsJson)
+    const managedIdentity = this.readIdentityFromCredentials(managedCredentialsJson)
+    const runtimeOauthIdentity = this.readIdentityFromOauthAccount(runtimeOauthAccount)
+    const managedAccountUuid =
+      managedIdentity?.accountUuid ??
+      this.readIdentityFromOauthAccount(managedOauthAccount).accountUuid
+    if (
+      credentialIdentity?.email &&
+      managedIdentity?.email &&
+      credentialIdentity.email !== managedIdentity.email
+    ) {
+      return false
+    }
+    if (
+      credentialIdentity?.organizationUuid &&
+      managedIdentity?.organizationUuid &&
+      credentialIdentity.organizationUuid !== managedIdentity.organizationUuid
+    ) {
+      return false
+    }
+    if (
+      this.runtimeCredentialsMatchAccount(
+        runtimeCredentialsJson,
+        runtimeOauthAccount,
+        account,
+        managedCredentialsJson,
+        managedOauthAccount
+      ) !== 'match'
+    ) {
+      return false
+    }
+    if (credentialIdentity?.accountUuid && managedAccountUuid) {
+      return credentialIdentity.accountUuid === managedAccountUuid
+    }
+    if (
+      runtimeOauthIdentity.accountUuid &&
+      managedAccountUuid &&
+      runtimeOauthIdentity.accountUuid !== managedAccountUuid
+    ) {
+      return false
+    }
+    const runtimeEmail = credentialIdentity?.email ?? runtimeOauthIdentity.email
+    if (!runtimeEmail) {
+      return this.compareRefreshTokens(runtimeCredentialsJson, managedCredentialsJson) === 'same'
+    }
+    const runtimeOrganizationUuid =
+      credentialIdentity?.organizationUuid ?? runtimeOauthIdentity.organizationUuid
+    const possibleAccounts = this.store
+      .getSettings()
+      .claudeManagedAccounts.filter((candidateAccount) => {
+        if (this.normalizeField(candidateAccount.email) !== runtimeEmail) {
+          return false
+        }
+        const organizationUuid = this.normalizeField(candidateAccount.organizationUuid)
+        return (
+          !runtimeOrganizationUuid ||
+          !organizationUuid ||
+          runtimeOrganizationUuid === organizationUuid
+        )
+      })
+    return possibleAccounts.length === 1 && possibleAccounts[0].id === account.id
   }
 
   /**

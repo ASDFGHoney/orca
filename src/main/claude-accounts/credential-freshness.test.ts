@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  credentialsShareComparableIdentity,
   decideMonotonicCredentialWrite,
   pickFreshestCredentialsJson,
   readCredentialExpiresAt
@@ -34,33 +33,16 @@ function credentials(input: {
 }
 
 describe('credential-freshness', () => {
-  it('reads expiresAt and expires_at aliases', () => {
-    expect(readCredentialExpiresAt(credentials({ expiresAt: 5_000 }))).toBe(5_000)
+  it('normalizes seconds and milliseconds while rejecting non-numeric expiry', () => {
+    expect(readCredentialExpiresAt(credentials({ expiresAt: 5_000 }))).toBe(5_000_000)
     expect(
       readCredentialExpiresAt(
         JSON.stringify({ claudeAiOauth: { accessToken: 't', expires_at: 7_000 } })
       )
-    ).toBe(7_000)
+    ).toBe(7_000_000)
+    expect(readCredentialExpiresAt(credentials({ expiresAt: '7000' }))).toBeNull()
     expect(readCredentialExpiresAt('not-json')).toBeNull()
     expect(readCredentialExpiresAt(credentials({ expiresAt: 'bad' }))).toBeNull()
-  })
-
-  it('treats distinct emails as different identity so account switches can write', () => {
-    expect(
-      credentialsShareComparableIdentity(
-        credentials({ email: 'a@example.com', expiresAt: 1_000 }),
-        credentials({ email: 'b@example.com', expiresAt: 9_000 })
-      )
-    ).toBe(false)
-  })
-
-  it('keeps same-email credentials comparable for monotonic writes', () => {
-    expect(
-      credentialsShareComparableIdentity(
-        credentials({ email: 'a@example.com', expiresAt: 1_000 }),
-        credentials({ email: 'a@example.com', expiresAt: 9_000 })
-      )
-    ).toBe(true)
   })
 
   it('writes when there is no existing credential', () => {
@@ -98,12 +80,25 @@ describe('credential-freshness', () => {
     ).toBe('write')
   })
 
-  it('writes when expiries are equal (not a freshness regression)', () => {
+  it('keeps equal-expiry lineages unless the caller knows the candidate direction', () => {
+    const candidateJson = credentials({
+      email: 'a@example.com',
+      accessToken: 'a',
+      expiresAt: 5_000
+    })
+    const existingJson = credentials({
+      email: 'a@example.com',
+      accessToken: 'b',
+      expiresAt: 5_000
+    })
     expect(
       decideMonotonicCredentialWrite({
-        candidateJson: credentials({ email: 'a@example.com', accessToken: 'a', expiresAt: 5_000 }),
-        existingJson: credentials({ email: 'a@example.com', accessToken: 'b', expiresAt: 5_000 })
+        candidateJson,
+        existingJson
       })
+    ).toBe('keep-existing')
+    expect(
+      decideMonotonicCredentialWrite({ candidateJson, existingJson, equalExpiry: 'write' })
     ).toBe('write')
   })
 
@@ -138,6 +133,21 @@ describe('credential-freshness', () => {
     ).toBe('keep-existing')
   })
 
+  it('keeps existing when neither lineage has a trustworthy expiry', () => {
+    expect(
+      decideMonotonicCredentialWrite({
+        candidateJson: credentials({ accessToken: 'candidate', omitExpiresAt: true }),
+        existingJson: credentials({ accessToken: 'existing', omitExpiresAt: true })
+      })
+    ).toBe('keep-existing')
+    expect(
+      decideMonotonicCredentialWrite({
+        candidateJson: credentials({ accessToken: 'candidate', expiresAt: 'bad' }),
+        existingJson: credentials({ accessToken: 'existing', expiresAt: 'also-bad' })
+      })
+    ).toBe('keep-existing')
+  })
+
   it('writes candidate when existing has no usable expiresAt', () => {
     expect(
       decideMonotonicCredentialWrite({
@@ -151,15 +161,6 @@ describe('credential-freshness', () => {
           accessToken: 'missing',
           omitExpiresAt: true
         })
-      })
-    ).toBe('write')
-  })
-
-  it('writes across different identities even when candidate expires earlier', () => {
-    expect(
-      decideMonotonicCredentialWrite({
-        candidateJson: credentials({ email: 'b@example.com', accessToken: 'b', expiresAt: 1_000 }),
-        existingJson: credentials({ email: 'a@example.com', accessToken: 'a', expiresAt: 9_000 })
       })
     ).toBe('write')
   })
