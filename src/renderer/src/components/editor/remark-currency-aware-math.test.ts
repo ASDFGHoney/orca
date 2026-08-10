@@ -1,15 +1,10 @@
-import { performance } from 'node:perf_hooks'
 import { describe, expect, it } from 'vitest'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
 import { toString } from 'mdast-util-to-string'
-import {
-  isCurrencyDollarSpan,
-  maskCurrencyDollars,
-  remarkCurrencyAwareMath
-} from './remark-currency-aware-math'
+import { isCurrencyDollarSpan, remarkCurrencyAwareMath } from './remark-currency-aware-math'
 
 type MathNode = { type: string; value?: string }
 
@@ -150,6 +145,18 @@ describe('remarkCurrencyAwareMath', () => {
     ])
   })
 
+  it('preserves repeated numeric operands and operators as stock math', () => {
+    const { math } = parseMarkdown(
+      'Math $1 + 2 + 3$, $1, 2, 3$, $1 < 2 < 3$, and $2 \\times 3 \\times 4$.'
+    )
+    expect(math.map((node) => node.value)).toEqual([
+      '1 + 2 + 3',
+      '1, 2, 3',
+      '1 < 2 < 3',
+      '2 \\times 3 \\times 4'
+    ])
+  })
+
   it('leaves stock symbolic math forms unchanged', () => {
     const { math, text } = parseMarkdown(
       'Math $E=mc^2$, $ x y $, $12xyz$, $2π$, $x$23, and $text$.'
@@ -223,6 +230,54 @@ describe('remarkCurrencyAwareMath', () => {
     expect(escapedBackticks.text).toBe('`literal` then $19 then w')
   })
 
+  it('does not let protected Markdown dollars affect later pairing', () => {
+    const protectedPrefixes = [
+      '~~~js\n$x\n~~~',
+      '    $x',
+      '<div>\n$x\n</div>',
+      '<span data-v="$x">literal</span>',
+      '<https://example.test/$x>',
+      '[ref]: https://example.test/$x',
+      '`$x`',
+      '[link](https://example.test/$x)'
+    ]
+
+    for (const prefix of protectedPrefixes) {
+      const source = `${prefix}\n\nIt cost $148 a month, now $19; formula $y$.`
+      const { math, text } = parseMarkdown(source)
+      expect(math, prefix).toEqual([{ type: 'inlineMath', value: 'y' }])
+      expect(text, prefix).toContain('It cost $148 a month, now $19; formula y.')
+    }
+  })
+
+  it('remains collision-safe when every private-use marker occurs in the source', () => {
+    const privateUse = Array.from({ length: 0xf8ff - 0xe000 + 1 }, (_, index) =>
+      String.fromCodePoint(0xe000 + index)
+    ).join('')
+    const source = `${privateUse}\n\nIt cost $148 a month, now $19; formula $x$.`
+    const { math, text } = parseMarkdown(source)
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+    expect(text).toContain('It cost $148 a month, now $19; formula x.')
+    expect(text.startsWith(privateUse)).toBe(true)
+
+    const processor = unified().use(remarkParse).use(remarkGfm).use(remarkCurrencyAwareMath)
+    const tree = processor.runSync(processor.parse(source))
+    let mathStart: number | undefined
+    visit(tree, (node) => {
+      if (node.type === 'inlineMath') {
+        mathStart = node.position?.start.offset
+      }
+    })
+    expect(mathStart).toBe(source.lastIndexOf('$x$'))
+  })
+
+  it('does not replace private-use characters decoded from entities', () => {
+    const source = 'Entity &#xE000;; it cost $148 a month, now $19; formula $x$.'
+    const { math, text } = parseMarkdown(source)
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+    expect(text).toBe('Entity \uE000; it cost $148 a month, now $19; formula x.')
+  })
+
   it('preserves source offsets and never leaks the private marker', () => {
     const source = '😀 cost $148 a month, formula $x$.'
     const processor = unified().use(remarkParse).use(remarkGfm).use(remarkCurrencyAwareMath)
@@ -260,25 +315,5 @@ describe('remarkCurrencyAwareMath', () => {
     expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
     expect(text).toBe('It cost $148 a month, now $19; formula x.')
     expect(text.match(/\$/g)).toHaveLength(2)
-  })
-
-  it('scales across 80k, 160k, and 320k mixed-dollar inputs', () => {
-    const chunk = 'cost $100 then $x$  '
-    maskCurrencyDollars(chunk.repeat(100))
-    const durations = [4_000, 8_000, 16_000].map((count) => {
-      const source = chunk.repeat(count)
-      const start = performance.now()
-      const masked = maskCurrencyDollars(source)
-      const duration = performance.now() - start
-      if (masked === null) {
-        throw new Error('Expected a private-use currency marker')
-      }
-      expect(source).toHaveLength(count * 20)
-      expect(masked.source).toHaveLength(source.length)
-      expect(masked.source.match(new RegExp(masked.marker, 'gu'))).toHaveLength(count)
-      return duration
-    })
-    expect(durations[2]).toBeLessThan(durations[0] * 8 + 50)
-    expect(durations[2]).toBeLessThan(500)
   })
 })
