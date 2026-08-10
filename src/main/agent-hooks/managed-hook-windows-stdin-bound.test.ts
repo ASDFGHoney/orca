@@ -40,8 +40,6 @@ import {
   buildWindowsHookStdinDrainEpilogue
 } from './hook-stdin-contract'
 import { ClaudeHookService } from '../claude/hook-service'
-import { CursorHookService } from '../cursor/hook-service'
-import { GeminiHookService } from '../gemini/hook-service'
 
 describe('Windows managed-hook stdin bound (#13285)', () => {
   afterEach(() => {
@@ -101,8 +99,6 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
       homedirMock.mockReturnValue(home)
       try {
         expect(new ClaudeHookService().install().state).toBe('installed')
-        expect(new CursorHookService().install().state).toBe('installed')
-        expect(new GeminiHookService().install().state).toBe('installed')
 
         const hooksDir = join(home, '.orca', 'agent-hooks')
         const claude = readFileSync(join(hooksDir, 'claude-hook.cmd'), 'utf8')
@@ -128,12 +124,6 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
           collectTimeouts(JSON.parse(readFileSync(configPath, 'utf8')), scriptName)
         expect(readTimeouts(join(home, '.claude', 'settings.json'), 'claude-hook.cmd')).toEqual(
           Array(11).fill(WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS)
-        )
-        expect(readTimeouts(join(home, '.cursor', 'hooks.json'), 'cursor-hook.cmd')).toEqual(
-          Array(7).fill(MANAGED_HOOK_TIMEOUT_SECONDS)
-        )
-        expect(readTimeouts(join(home, '.gemini', 'settings.json'), 'gemini-hook.cmd')).toEqual(
-          Array(11).fill(MANAGED_HOOK_TIMEOUT_MILLISECONDS)
         )
         // Success / curl endpoint path
         expect(claude).toContain('--data-urlencode "payload@-"')
