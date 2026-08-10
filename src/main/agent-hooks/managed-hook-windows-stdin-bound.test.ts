@@ -2,7 +2,7 @@
 // budget, missing-env exit without more.com, Devin drain that still honors #8419,
 // curl form + payload@- endpoint path, and cleanup/exit fidelity.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as osModule from 'node:os'
@@ -99,6 +99,26 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
       process.env.GROK_HOME = join(home, 'grok-home')
       homedirMock.mockReturnValue(home)
       try {
+        const claudeConfigPath = join(home, '.claude', 'settings.json')
+        mkdirSync(join(home, '.claude'), { recursive: true })
+        writeFileSync(
+          claudeConfigPath,
+          JSON.stringify({
+            hooks: {
+              Stop: [
+                {
+                  hooks: [
+                    {
+                      type: 'command',
+                      command: 'C:\\old\\.orca\\agent-hooks\\claude-hook.cmd',
+                      timeout: MANAGED_HOOK_TIMEOUT_SECONDS
+                    }
+                  ]
+                }
+              ]
+            }
+          })
+        )
         expect(new ClaudeHookService().install().state).toBe('installed')
         expect(openClaudeHookService.install().state).toBe('installed')
 
@@ -124,7 +144,7 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
         }
         const readTimeouts = (configPath: string, scriptName: string): number[] =>
           collectTimeouts(JSON.parse(readFileSync(configPath, 'utf8')), scriptName)
-        expect(readTimeouts(join(home, '.claude', 'settings.json'), 'claude-hook.cmd')).toEqual(
+        expect(readTimeouts(claudeConfigPath, 'claude-hook.cmd')).toEqual(
           Array(11).fill(WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS)
         )
         expect(
