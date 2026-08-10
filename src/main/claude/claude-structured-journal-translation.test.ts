@@ -5,6 +5,10 @@ import type {
 } from '../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import {
+  boundInlineText,
+  DEFAULT_JOURNAL_PAYLOAD_LIMITS
+} from '../native-chat/agent-session-journal/journal-payload-bounds'
 import type { ClaudePendingPrompt } from './claude-structured-prompt-replies'
 import { createClaudeJournalTranslator } from './claude-structured-journal-translation'
 
@@ -139,6 +143,19 @@ describe('Claude structured journal translation', () => {
     })
   })
 
+  it('bounds persisted thinking text to the shared journal payload limit', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+    const thinking = 'considering '.repeat(20_000)
+
+    translator.handle(message('assistant', 'assistant-thinking', [{ type: 'thinking', thinking }]))
+
+    expect(state.items.at(-1)?.body).toEqual({
+      kind: 'status',
+      text: boundInlineText(thinking, DEFAULT_JOURNAL_PAYLOAD_LIMITS).text
+    })
+  })
+
   it('creates addressable approval and multi-question cards and cancels them durably', () => {
     const state = sinkState()
     const bindings: unknown[][] = []
@@ -187,6 +204,31 @@ describe('Claude structured journal translation', () => {
       'questions-1',
       'Ship?'
     ])
+
+    const multiSelect = prompt({
+      requestId: 'questions-multi',
+      promptKey: 'questions-multi',
+      toolUseId: 'tool-multi',
+      toolName: 'AskUserQuestion',
+      kind: 'question',
+      input: {
+        questions: [
+          {
+            question: 'Libraries?',
+            multiSelect: true,
+            options: [{ label: 'Luxon' }, { label: 'Temporal' }]
+          }
+        ]
+      },
+      questionIds: ['Libraries?']
+    })
+    translator.handle({ type: 'prompt', sessionId: 'orca-session', prompt: multiSelect })
+    expect(state.items.at(-1)?.body).toMatchObject({
+      kind: 'question',
+      question: 'Libraries?\n\nEnter one or more choices separated by commas.',
+      options: [],
+      freeTextQuestionId: 'Libraries?'
+    })
 
     translator.handle({
       type: 'prompt-cancelled',

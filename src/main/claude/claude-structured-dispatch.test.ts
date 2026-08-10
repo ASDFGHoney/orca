@@ -16,7 +16,8 @@ function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession 
     dispatchWaiters: [],
     options: new Map(),
     reportedOptions: {},
-    events: undefined
+    events: undefined,
+    translator: null
   }
 }
 

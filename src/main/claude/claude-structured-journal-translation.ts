@@ -5,6 +5,10 @@ import {
   type AgentSessionDeltaCoalescerDeps
 } from '../native-chat/agent-session-wire/agent-session-delta-coalescer'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import {
+  boundInlineText,
+  DEFAULT_JOURNAL_PAYLOAD_LIMITS
+} from '../native-chat/agent-session-journal/journal-payload-bounds'
 import type { ClaudeStructuredSessionEvent } from './claude-structured-session-state'
 import {
   claudeMessageBody,
@@ -187,7 +191,7 @@ export function createClaudeJournalTranslator(
     if (thinking) {
       deps.sink.appendItem(claudeThinkingIdentity(envelope.sessionId, envelope.uuid), {
         kind: 'status',
-        text: thinking
+        text: boundInlineText(thinking, DEFAULT_JOURNAL_PAYLOAD_LIMITS).text
       })
       changed = true
     }

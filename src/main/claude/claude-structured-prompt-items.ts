@@ -85,6 +85,7 @@ export function claudeQuestionItems(input: {
     const question = claudeRecord(value)
     const questionId = input.prompt.questionIds[index]
     const text = claudeText(question?.question) ?? claudeText(question?.header)
+    const multiSelect = question?.multiSelect === true
     return question && questionId && text
       ? [
           {
@@ -96,8 +97,10 @@ export function claudeQuestionItems(input: {
             }),
             body: {
               kind: 'question',
-              question: text,
-              options: questionOptions(question, questionId),
+              question: multiSelect
+                ? `${text}\n\nEnter one or more choices separated by commas.`
+                : text,
+              options: multiSelect ? [] : questionOptions(question, questionId),
               freeTextQuestionId: questionId,
               resolution: { ...PENDING }
             }

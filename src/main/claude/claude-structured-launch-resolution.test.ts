@@ -29,11 +29,12 @@ function record(overrides: Partial<AgentSessionRecord> = {}): AgentSessionRecord
   } as AgentSessionRecord
 }
 
-function resolverFor(value: AgentSessionRecord | null) {
+function resolverFor(value: AgentSessionRecord | null, resolveEnv?: () => Record<string, string>) {
   return createClaudeStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
     resolveWorkspacePath: async (id) => `/repos/${id}`,
-    resolveCommand: () => '/usr/local/bin/claude'
+    resolveCommand: () => '/usr/local/bin/claude',
+    ...(resolveEnv ? { resolveEnv } : {})
   })
 }
 
@@ -81,6 +82,22 @@ describe('claude structured launch resolution', () => {
       resumed: true
     })
     expect(launch.args.slice(-2)).toEqual(['--resume', 'provider-current'])
+  })
+
+  it('resolves configured environment live without storing it in the session record', async () => {
+    let token = 'first-token'
+    const resolver = resolverFor(record(), () => ({
+      ANTHROPIC_AUTH_TOKEN: token,
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test'
+    }))
+
+    expect((await resolver({ identity: IDENTITY })).env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: 'first-token',
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test'
+    })
+    token = 'rotated-token'
+    expect((await resolver({ identity: IDENTITY })).env?.ANTHROPIC_AUTH_TOKEN).toBe('rotated-token')
+    expect(JSON.stringify(record())).not.toContain('token')
   })
 
   it('refuses other hosts, WSL, providers, and account-home variables', async () => {

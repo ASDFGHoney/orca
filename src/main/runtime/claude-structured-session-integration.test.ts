@@ -13,6 +13,7 @@ import type {
   openClaudeStreamJsonConnection
 } from '../claude/claude-stream-json-connection'
 import { claudeSessionIdForOrcaSession } from '../claude/claude-structured-launch-resolution'
+import { CLAUDE_SPAWN_TOKEN_ENV } from '../claude/claude-structured-owner-identity'
 import { attachFingerprintFields } from '../native-chat/agent-session-wire/structured-agent-session-attach'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import type { OrcaRuntimeService } from './orca-runtime'
@@ -244,6 +245,10 @@ beforeEach(async () => {
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
         resolveClaudeCommand: () => '/usr/local/bin/claude',
+        resolveClaudeLaunchEnv: () => ({
+          ANTHROPIC_AUTH_TOKEN: 'configured-token',
+          ANTHROPIC_BASE_URL: 'https://gateway.example.test'
+        }),
         openClaudeConnection: claude.openConnection
       }).then(() => undefined),
     registerSubscriptionCleanup: (id: string, dispose: () => void) => cleanups.set(id, dispose),
@@ -266,6 +271,12 @@ describe('a structured Claude session over agentSession.*', () => {
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
     expect(claude.live().launch.args).toContain('--session-id')
     expect(claude.live().launch.args).toContain(PROVIDER_SESSION)
+    expect(claude.live().launch.env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: 'configured-token',
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+      CLAUDE_CONFIG_DIR: '/accounts/claude',
+      [CLAUDE_SPAWN_TOKEN_ENV]: expect.any(String)
+    })
     const stream = await subscribe()
 
     const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'List files' }] }
