@@ -172,7 +172,8 @@ import { closeTerminalTab } from '@/components/terminal/terminal-tab-actions'
 import {
   SESSION_TAB_CLOSE_CANCELED_ERROR,
   SESSION_TAB_CLOSE_FAILED_ERROR,
-  SESSION_TAB_NOT_FOUND_ERROR
+  SESSION_TAB_NOT_FOUND_ERROR,
+  SESSION_TAB_CLOSE_TIMEOUT_ERROR
 } from '../../../shared/session-tab-close'
 import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
 import { getConnectionIdFromState } from '@/lib/connection-context'
@@ -2004,13 +2005,36 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
-      window.api.ui.onSessionTabCloseRequest(({ requestId, tabId, worktreeId }) => {
+      window.api.ui.onSessionTabCloseRequest(({ requestId, tabId, worktreeId, expiresAt }) => {
         const store = useAppStore.getState()
         const browserTarget = resolveBrowserSessionTabTarget(store, worktreeId, tabId)
+        let cancelConfirmation: (() => void) | undefined
+        let timeout: ReturnType<typeof setTimeout> | undefined
+        let settled = false
         const respond = (error?: string): void => {
+          if (settled) {
+            return
+          }
+          settled = true
+          if (timeout !== undefined) {
+            clearTimeout(timeout)
+          }
           window.api.ui.respondSessionTabClose({ requestId, ...(error ? { error } : {}) })
         }
+        if (expiresAt !== undefined) {
+          timeout = setTimeout(
+            () => {
+              cancelConfirmation?.()
+              respond(SESSION_TAB_CLOSE_TIMEOUT_ERROR)
+            },
+            Math.max(0, expiresAt - Date.now())
+          )
+        }
         const closeAndRespond = (): void => {
+          if (expiresAt !== undefined && Date.now() >= expiresAt) {
+            respond(SESSION_TAB_CLOSE_TIMEOUT_ERROR)
+            return
+          }
           try {
             if (browserTarget) {
               useAppStore.getState().closeBrowserTab(browserTarget.workspaceId)
@@ -2024,7 +2048,7 @@ export function useIpcEvents(): void {
           }
         }
         const visibleId = browserTarget?.workspaceId ?? tabId
-        guardPinnedTabClose({
+        cancelConfirmation = guardPinnedTabClose({
           isPinned: isUnifiedTabPinned(store, worktreeId, visibleId),
           tabLabel: resolvePinnedTabLabel(store, worktreeId, visibleId),
           onClose: closeAndRespond,
