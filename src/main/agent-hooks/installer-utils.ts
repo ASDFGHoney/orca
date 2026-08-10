@@ -42,13 +42,11 @@ export type HooksConfig = {
   [key: string]: unknown
 }
 
-// Why (#4633/#13285): host-level backstop for status hooks, independent of curl --max-time and
-// Copilot's timeoutSec. On Windows, curl `payload@-` and more.com both block until stdin EOF
-// outside --max-time, and batch has no bounded reader without PowerShell startup cost — so this
-// host timeout is the only safe cap. Keep it near the 1.5s curl budget (not 10s) so a held-open
-// pipe cannot stall PreToolUse for ~12s per fire.
-export const MANAGED_HOOK_TIMEOUT_SECONDS = 2
+// Why: host-level backstop timeout for status hooks, independent of the curl --max-time and Copilot's timeoutSec (#4633).
+export const MANAGED_HOOK_TIMEOUT_SECONDS = 10
 export const MANAGED_HOOK_TIMEOUT_MILLISECONDS = MANAGED_HOOK_TIMEOUT_SECONDS * 1000
+// Why (#13285): Windows Claude's batch reader can block until stdin EOF outside curl's budget.
+export const WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS = 2
 
 // Nested command hook for the Claude-shaped `hooks: [...]` schema (Claude, Codex, Gemini, Droid, Grok, Command Code, Devin).
 export function buildManagedCommandHook(
@@ -165,7 +163,7 @@ export function buildWindowsAgentHookPostCommand(
   // Why: PowerShell startup makes inline per-turn Codex hooks visibly slow, so mirror the POSIX curl path.
   // Why: fully-qualify curl so a repo-local curl.exe can't hijack hook payloads.
   // Why (#13285): `payload@-` assembles the body before --max-time applies; closed stdin is fine,
-  // held-open is capped by MANAGED_HOOK_TIMEOUT_SECONDS (not by these curl flags).
+  // held-open is capped by the provider's host timeout (not by these curl flags).
   return [
     `"%SystemRoot%\\System32\\curl.exe" -sS -X POST "http://127.0.0.1:%ORCA_AGENT_HOOK_PORT%/hook/${source}" ^`,
     '  --connect-timeout 0.5 --max-time 1.5 ^',

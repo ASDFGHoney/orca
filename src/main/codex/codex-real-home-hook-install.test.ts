@@ -14,7 +14,6 @@ import {
 import type * as NodeOs from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MANAGED_HOOK_TIMEOUT_SECONDS } from '../agent-hooks/installer-utils'
 import type { CodexManagedTrustGrantPlan } from './codex-hook-trust-grant'
 import {
   computeTrustKey,
@@ -498,11 +497,7 @@ describe('ensureRealHomeCodexHookState (opt-out sweep)', () => {
               {
                 hooks: [
                   { type: 'command', command: userCommand },
-                  {
-                    type: 'command',
-                    command: material.command,
-                    timeout: MANAGED_HOOK_TIMEOUT_SECONDS
-                  }
+                  { type: 'command', command: material.command, timeout: 10 }
                 ]
               }
             ]
@@ -527,7 +522,7 @@ describe('ensureRealHomeCodexHookState (opt-out sweep)', () => {
         groupIndex: 0,
         handlerIndex: 1,
         command: material.command,
-        timeoutSec: MANAGED_HOOK_TIMEOUT_SECONDS
+        timeoutSec: 10
       }
     ]
     writeFileSync(getRealConfigTomlPath(), upsertHookTrustEntriesInContent('', entries), 'utf-8')

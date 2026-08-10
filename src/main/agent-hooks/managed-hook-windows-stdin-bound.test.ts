@@ -28,6 +28,7 @@ vi.mock('os', async (importOriginal) => {
 import {
   MANAGED_HOOK_TIMEOUT_MILLISECONDS,
   MANAGED_HOOK_TIMEOUT_SECONDS,
+  WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS,
   buildWindowsAgentHookCurlPostCommand,
   buildWindowsAgentHookPostCommand
 } from './installer-utils'
@@ -48,12 +49,10 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
     homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
   })
 
-  it('keeps the host timeout near the 1.5s curl budget so held-open stdin cannot stall for ~12s', () => {
-    // Why: revert of this constant alone reintroduces the residual of #7323.
-    expect(MANAGED_HOOK_TIMEOUT_SECONDS).toBe(2)
-    expect(MANAGED_HOOK_TIMEOUT_MILLISECONDS).toBe(2000)
-    expect(MANAGED_HOOK_TIMEOUT_SECONDS).toBeLessThanOrEqual(3)
-    expect(MANAGED_HOOK_TIMEOUT_SECONDS).toBeGreaterThanOrEqual(2)
+  it('limits only local Windows Claude hooks while preserving the global provider budget', () => {
+    expect(WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS).toBe(2)
+    expect(MANAGED_HOOK_TIMEOUT_SECONDS).toBe(10)
+    expect(MANAGED_HOOK_TIMEOUT_MILLISECONDS).toBe(10_000)
   })
 
   it('exits missing-Orca-env guards without entering the more.com drain', () => {
@@ -109,6 +108,38 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
 
         const hooksDir = join(home, '.orca', 'agent-hooks')
         const claude = readFileSync(join(hooksDir, 'claude-hook.cmd'), 'utf8')
+        const collectTimeouts = (value: unknown, scriptName: string): number[] => {
+          if (Array.isArray(value)) {
+            return value.flatMap((entry) => collectTimeouts(entry, scriptName))
+          }
+          if (!value || typeof value !== 'object') {
+            return []
+          }
+          const record = value as Record<string, unknown>
+          const own =
+            typeof record.command === 'string' &&
+            record.command.includes(scriptName) &&
+            typeof record.timeout === 'number'
+              ? [record.timeout]
+              : []
+          return own.concat(
+            Object.values(record).flatMap((entry) => collectTimeouts(entry, scriptName))
+          )
+        }
+        const readTimeouts = (configPath: string, scriptName: string): number[] =>
+          collectTimeouts(JSON.parse(readFileSync(configPath, 'utf8')), scriptName)
+        expect(readTimeouts(join(home, '.claude', 'settings.json'), 'claude-hook.cmd')).toEqual(
+          Array(11).fill(WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS)
+        )
+        expect(readTimeouts(join(home, '.codex', 'hooks.json'), 'codex-hook.cmd')).toEqual(
+          Array(8).fill(MANAGED_HOOK_TIMEOUT_SECONDS)
+        )
+        expect(readTimeouts(join(home, '.cursor', 'hooks.json'), 'cursor-hook.cmd')).toEqual(
+          Array(7).fill(MANAGED_HOOK_TIMEOUT_SECONDS)
+        )
+        expect(readTimeouts(join(home, '.gemini', 'settings.json'), 'gemini-hook.cmd')).toEqual(
+          Array(11).fill(MANAGED_HOOK_TIMEOUT_MILLISECONDS)
+        )
         // Success / curl endpoint path
         expect(claude).toContain('--data-urlencode "payload@-"')
         expect(claude).toContain('--connect-timeout 0.5 --max-time 1.5')
