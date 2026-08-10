@@ -2,6 +2,7 @@ import { mathFromMarkdown } from 'mdast-util-math'
 import { math } from 'micromark-extension-math'
 import { toString } from 'mdast-util-to-string'
 import type { Root } from 'mdast'
+import type { Code, Construct, State, TokenType } from 'micromark-util-types'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import type { Processor } from 'unified'
@@ -11,6 +12,33 @@ import { describe, expect, it } from 'vitest'
 import { remarkCurrencyAwareMath } from './remark-currency-aware-math'
 
 const SOURCE = 'Cost $30 now $40; math $x$.'
+const COMPOUND_SOURCE = 'before @@ after $x$; cost $10 to $20'
+const COMPOUND_AT = 'compoundAt' as TokenType
+
+const compoundAt: Construct = {
+  name: 'compoundAt',
+  tokenize(effects, ok, nok) {
+    return start
+
+    function start(code: Code): State | undefined {
+      if (code !== 64) {
+        return nok(code)
+      }
+      effects.enter(COMPOUND_AT)
+      effects.consume(code)
+      return close
+    }
+
+    function close(code: Code): State | undefined {
+      if (code !== 64) {
+        return nok(code)
+      }
+      effects.consume(code)
+      effects.exit(COMPOUND_AT)
+      return ok
+    }
+  }
+}
 
 function stockMath(this: Processor): undefined {
   const data = this.data()
@@ -22,6 +50,29 @@ function stockMath(this: Processor): undefined {
 
 function currencyAwareMathAlias(this: Processor): undefined {
   return remarkCurrencyAwareMath.call(this)
+}
+
+function compoundMath(this: Processor): undefined {
+  const micromarkExtension = math()
+  micromarkExtension.text = { ...micromarkExtension.text, 64: compoundAt }
+  const mdastExtension = mathFromMarkdown()
+  mdastExtension.enter = {
+    ...mdastExtension.enter,
+    compoundAt(token) {
+      this.enter({ type: 'text', value: 'CUSTOM' }, token)
+    }
+  }
+  mdastExtension.exit = {
+    ...mdastExtension.exit,
+    compoundAt(token) {
+      this.exit(token)
+    }
+  }
+  const data = this.data()
+  const micromarkExtensions = data.micromarkExtensions ?? (data.micromarkExtensions = [])
+  const fromMarkdownExtensions = data.fromMarkdownExtensions ?? (data.fromMarkdownExtensions = [])
+  micromarkExtensions.push(micromarkExtension)
+  fromMarkdownExtensions.push(mdastExtension)
 }
 
 function containsConstruct(value: unknown, name: string): boolean {
@@ -134,5 +185,34 @@ describe('remarkCurrencyAwareMath composition', () => {
     expect(
       data.fromMarkdownExtensions?.flat().filter((extension) => !isMathMdastExtension(extension))
     ).toEqual([beforeMdast, afterMdast])
+  })
+
+  it('preserves unrelated syntax bundled with replaced stock math', () => {
+    const processors = [
+      unified().use(remarkParse).use(compoundMath).use(remarkCurrencyAwareMath).freeze(),
+      unified().use(remarkParse).use(remarkCurrencyAwareMath).use(compoundMath).freeze()
+    ]
+
+    for (const base of processors) {
+      for (const processor of [base, base()]) {
+        const tree = processor.parse(COMPOUND_SOURCE)
+        expect(toString(tree)).toBe('before CUSTOM after x; cost $10 to $20')
+        expect(
+          processor.data().micromarkExtensions?.some((extension) => extension.text?.[64])
+        ).toBe(true)
+        expect(
+          processor
+            .data()
+            .fromMarkdownExtensions?.flat()
+            .some((extension) => typeof extension.enter?.compoundAt === 'function')
+        ).toBe(true)
+        expect(processor.data().micromarkExtensions?.filter(isMathMicromarkExtension)).toHaveLength(
+          1
+        )
+        expect(
+          processor.data().fromMarkdownExtensions?.flat().filter(isMathMdastExtension)
+        ).toHaveLength(1)
+      }
+    }
   })
 })
