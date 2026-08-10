@@ -40,7 +40,6 @@ import {
   buildWindowsHookStdinDrainEpilogue
 } from './hook-stdin-contract'
 import { ClaudeHookService } from '../claude/hook-service'
-import { CodexHookService } from '../codex/hook-service'
 import { CursorHookService } from '../cursor/hook-service'
 import { GeminiHookService } from '../gemini/hook-service'
 
@@ -102,7 +101,6 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
       homedirMock.mockReturnValue(home)
       try {
         expect(new ClaudeHookService().install().state).toBe('installed')
-        expect(new CodexHookService().install().state).toBe('installed')
         expect(new CursorHookService().install().state).toBe('installed')
         expect(new GeminiHookService().install().state).toBe('installed')
 
@@ -130,9 +128,6 @@ describe('Windows managed-hook stdin bound (#13285)', () => {
           collectTimeouts(JSON.parse(readFileSync(configPath, 'utf8')), scriptName)
         expect(readTimeouts(join(home, '.claude', 'settings.json'), 'claude-hook.cmd')).toEqual(
           Array(11).fill(WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS)
-        )
-        expect(readTimeouts(join(home, '.codex', 'hooks.json'), 'codex-hook.cmd')).toEqual(
-          Array(8).fill(MANAGED_HOOK_TIMEOUT_SECONDS)
         )
         expect(readTimeouts(join(home, '.cursor', 'hooks.json'), 'cursor-hook.cmd')).toEqual(
           Array(7).fill(MANAGED_HOOK_TIMEOUT_SECONDS)
