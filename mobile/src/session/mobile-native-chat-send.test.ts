@@ -5,12 +5,17 @@ import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-clien
 import {
   MOBILE_NATIVE_CHAT_SEND_TIMEOUT_MS,
   openMobileNativeChatSendBudget,
+  buildMobileNativeChatBodyText,
   clearMobileNativeChatInput,
   sendMobileNativeChatMessage,
   sendMobileNativeChatMessageWithOutcome,
   typeMobileNativeChatCommandWithOutcome
 } from './mobile-native-chat-send'
 import { buildAgentTuiClearInputForText } from '../../../src/shared/agent-tui-input-clear'
+import {
+  BRACKETED_PASTE_END,
+  BRACKETED_PASTE_START
+} from '../../../src/shared/terminal-bracketed-paste-text'
 
 afterEach(() => vi.useRealTimers())
 
@@ -19,6 +24,18 @@ function clientWithResponse(response: unknown): RpcClient {
     sendRequest: vi.fn().mockResolvedValue(response)
   } as unknown as RpcClient
 }
+
+describe('buildMobileNativeChatBodyText', () => {
+  it('leaves single-line text unframed', () => {
+    expect(buildMobileNativeChatBodyText('hello')).toBe('hello')
+  })
+
+  it('bracket-pastes multi-line text so agent composers keep the full payload', () => {
+    expect(buildMobileNativeChatBodyText('line one\nline two')).toBe(
+      `${BRACKETED_PASTE_START}line one\rline two${BRACKETED_PASTE_END}`
+    )
+  })
+})
 
 describe('sendMobileNativeChatMessage', () => {
   it('returns true only when the terminal accepts the send', async () => {
@@ -46,6 +63,30 @@ describe('sendMobileNativeChatMessage', () => {
         enter: true,
         resolvedLaunchDraft: { text: 'seed', createdAt: 7 },
         client: { id: 'device', type: 'mobile' }
+      },
+      { timeoutMs: MOBILE_NATIVE_CHAT_SEND_TIMEOUT_MS, budgetSpansConnect: true }
+    )
+  })
+
+  it('sends multi-line chat bodies as one bracketed paste frame', async () => {
+    const client = clientWithResponse({
+      id: 'request',
+      ok: true,
+      result: { send: { accepted: true } },
+      _meta: { runtimeId: 'runtime' }
+    })
+
+    await sendMobileNativeChatMessage({
+      client,
+      terminal: 'term',
+      text: 'line one\nline two'
+    })
+    expect(client.sendRequest).toHaveBeenCalledWith(
+      'terminal.send',
+      {
+        terminal: 'term',
+        text: `${BRACKETED_PASTE_START}line one\rline two${BRACKETED_PASTE_END}`,
+        enter: true
       },
       { timeoutMs: MOBILE_NATIVE_CHAT_SEND_TIMEOUT_MS, budgetSpansConnect: true }
     )

@@ -3,6 +3,7 @@ import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { isTerminalSendRpcAccepted } from '../terminal/terminal-send-rpc-response'
 import { typeAgentTuiCommand } from '../../../src/shared/agent-tui-command-typing'
+import { wrapTerminalBracketedPasteText } from '../../../src/shared/terminal-bracketed-paste-text'
 
 type MobileTerminalClient = {
   id: string
@@ -18,6 +19,19 @@ type MobileTerminalClient = {
 // one is parked must call clearMobileNativeChatInput FIRST — see
 // src/shared/agent-tui-input-clear.ts for the measured 2N-1 law.
 const CLEAR_UNSUBMITTED_INPUT = '\x15'
+
+/** Desktop native-chat parity: multi-line bodies need a single bracketed-paste
+ *  frame so agent composers do not treat OS-sized PTY chunks as separate pastes
+ *  and silently keep only the tail fragment.
+ *
+ *  Single-line stays raw: this path also carries control keystrokes (e.g. Esc
+ *  cancel), which must not be sanitized into printable substitutes. */
+export function buildMobileNativeChatBodyText(text: string): string {
+  if (/[\r\n]/.test(text)) {
+    return wrapTerminalBracketedPasteText(text)
+  }
+  return text
+}
 
 type MobileNativeChatSendArgs = {
   client: RpcClient
@@ -61,11 +75,14 @@ export async function sendMobileNativeChatMessageWithOutcome(
     return 'rejected'
   }
   try {
+    const body = buildMobileNativeChatBodyText(args.text)
     const response = await args.client.sendRequest(
       'terminal.send',
       {
         terminal: args.terminal,
-        text: args.clearInputFirst ? `${CLEAR_UNSUBMITTED_INPUT}${args.text}` : args.text,
+        // Why: Ctrl+U must stay OUTSIDE the bracketed frame — inside it becomes
+        // literal text in the agent composer instead of a clear keypress.
+        text: args.clearInputFirst ? `${CLEAR_UNSUBMITTED_INPUT}${body}` : body,
         enter: args.enter ?? true,
         ...(args.resolvedLaunchDraft ? { resolvedLaunchDraft: args.resolvedLaunchDraft } : {}),
         ...(args.mobileClient ? { client: args.mobileClient } : {})
