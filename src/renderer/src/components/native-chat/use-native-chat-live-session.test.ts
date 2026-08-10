@@ -52,7 +52,12 @@ const { transportFactory, getMockTransport, resetMockTransports } = vi.hoisted((
 })
 
 vi.mock('./native-chat-session-transport', () => ({
-  getNativeChatSessionTransport: transportFactory
+  getNativeChatSessionTransport: transportFactory,
+  subscribeNativeChatSession: (
+    transport: { subscribe: (...args: unknown[]) => unknown },
+    args: unknown,
+    onFrame: unknown
+  ) => transport.subscribe(args, onFrame)
 }))
 
 // Imported after vi.mock is hoisted, so it binds to the mocked transport.

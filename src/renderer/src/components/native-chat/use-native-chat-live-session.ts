@@ -17,7 +17,10 @@ import {
 import { mergeNativeChatLiveSession } from './native-chat-live-status'
 import { prepareNativeChatLiveMessages } from './native-chat-live-message-preparation'
 import { hasMoreNativeChatHistory, NATIVE_CHAT_INITIAL_LIMIT } from './native-chat-pagination'
-import { getNativeChatSessionTransport } from './native-chat-session-transport'
+import {
+  getNativeChatSessionTransport,
+  subscribeNativeChatSession
+} from './native-chat-session-transport'
 import { useNativeChatTranscriptLifecycle } from './use-native-chat-transcript-lifecycle'
 import { useNativeChatHookStatus } from './use-native-chat-hook-status'
 import { useNativeChatLoadEarlier } from './use-native-chat-load-earlier'
@@ -27,7 +30,7 @@ import {
   createNativeChatAuthoritativeSettle,
   isNativeChatSessionIdAdoption,
   NATIVE_CHAT_NOTFOUND_RETRY_WINDOW_MS,
-  nativeChatNotFoundRetryDelayMs,
+  scheduleNativeChatNotFoundRetry,
   teardownNativeChatSubscription,
   type NativeChatAssemblerCache
 } from './native-chat-live-session-order'
@@ -124,116 +127,125 @@ export function useNativeChatLiveSession(
     }
     setLoadingEarlier(false)
     transcriptLifecycleControl.reset()
+
+    let cancelled = false
+    // Set by the first authoritative frame so the readSession seed below can't clobber a live snapshot.
+    let frameArrived = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let unsubscribe: unknown
+
     if (!sessionId) {
       // No session id yet: surface live hook state on an empty transcript; backfills once the id arrives.
       setRead({ phase: 'ready', messages: [] })
       replaceList(appendMergerRef.current, [])
       setAppended([])
       setHasMore(false)
-      return
-    }
+    } else {
+      const retryStartedAt = Date.now()
+      // Re-bound as a const: TS drops the `!sessionId` narrowing inside the hoisted nested function.
+      const activeSessionId = sessionId
+      limitRef.current = NATIVE_CHAT_INITIAL_LIMIT
+      setRead({ phase: 'loading' })
+      replaceList(appendMergerRef.current, [])
+      setAppended([])
+      setHasMore(false)
 
-    let cancelled = false
-    // Set by the first authoritative frame so the readSession seed below can't clobber a live snapshot.
-    let frameArrived = false
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
-    const retryStartedAt = Date.now()
-    // Re-bound as a const: TS drops the `!sessionId` narrowing inside the hoisted nested function.
-    const activeSessionId = sessionId
-    limitRef.current = NATIVE_CHAT_INITIAL_LIMIT
-    setRead({ phase: 'loading' })
-    replaceList(appendMergerRef.current, [])
-    setAppended([])
-    setHasMore(false)
-
-    // Independent initial seed in case subscribe never delivers a snapshot; applied only until an authoritative frame lands so a live snapshot wins.
-    function loadSession(attempt: number): void {
-      if (frameArrived) {
-        return
-      }
-      void transport
-        .readSession(agent, activeSessionId, limitRef.current, transcriptPath ?? undefined)
-        .then((result) => {
-          if (cancelled || frameArrived) {
-            return
-          }
-          if (result && 'error' in result) {
-            // A not-yet-flushed transcript: stay in 'loading' and retry with backoff instead of a permanent error (#8401).
-            if (
-              result.notFound &&
-              Date.now() - retryStartedAt < NATIVE_CHAT_NOTFOUND_RETRY_WINDOW_MS
-            ) {
-              retryTimer = setTimeout(() => {
-                retryTimer = null
-                loadSession(attempt + 1)
-              }, nativeChatNotFoundRetryDelayMs(attempt))
-              return
-            }
-            setRead({ phase: 'error', error: result.error })
-            return
-          }
-          const messages = result?.messages ?? []
-          transcriptLifecycleControl.replace(result?.lifecycle)
-          authoritativeSettle.settleFrame(messages, false)
-          setRead({ phase: 'ready', messages })
-          setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current))
-        })
-        .catch((err: unknown) => {
-          if (!cancelled && !frameArrived) {
-            setRead({ phase: 'error', error: err instanceof Error ? err.message : String(err) })
-          }
-        })
-    }
-
-    loadSession(0)
-
-    subscriptionCounter += 1
-    const subscriptionId = `native-chat-${subscriptionCounter}-${Date.now()}`
-    const unsubscribe = transport.subscribe(
-      {
-        subscriptionId,
-        agent,
-        sessionId,
-        transcriptPath: transcriptPath ?? undefined,
-        limit: limitRef.current
-      },
-      (frame) => {
-        if (!cancelled) {
-          if (frame.type === 'snapshot' || frame.type === 'replacement') {
-            // Why: snapshots/replacements advance the message list + pagination
-            // epoch. Order generation stays put so empty-boundary pending/clear
-            // keep matching; only adoption and inode replacements settle rows.
-            frameArrived = true
-            transcriptEpochRef.current += 1
-            setLoadingEarlier(false)
-            if ('error' in frame && frame.error) {
-              setRead({ phase: 'error', error: frame.error })
-              return
-            }
-            transcriptLifecycleControl.replace(frame.lifecycle)
-            replaceList(appendMergerRef.current, frame.messages)
-            setAppended([])
-            authoritativeSettle.settleFrame(frame.messages, frame.type === 'replacement')
-            setRead({ phase: 'ready', messages: appendMergerRef.current.list })
-            setHasMore(frame.hasMore)
-            return
-          }
-          transcriptLifecycleControl.append(frame.lifecycle)
-          // Merge by id then bound to the window; the base read + assembler re-dedup mean trimming the append tail can't drop a covered turn (#6).
-          const retained = applyAppend(appendMergerRef.current, frame.messages, limitRef.current)
-          appendTranscriptOrder(frame.messages, retained.length)
-          setAppended(retained)
+      // Independent initial seed in case subscribe never delivers a snapshot; applied only until an authoritative frame lands so a live snapshot wins.
+      function loadSession(attempt: number): void {
+        if (frameArrived) {
+          return
         }
+        void transport
+          .readSession(agent, activeSessionId, limitRef.current, transcriptPath ?? undefined)
+          .then((result) => {
+            if (cancelled || frameArrived) {
+              return
+            }
+            if (result && 'error' in result) {
+              // A not-yet-flushed transcript: stay in 'loading' and retry with backoff instead of a permanent error (#8401).
+              if (
+                result.notFound &&
+                Date.now() - retryStartedAt < NATIVE_CHAT_NOTFOUND_RETRY_WINDOW_MS
+              ) {
+                retryTimer = scheduleNativeChatNotFoundRetry({
+                  attempt,
+                  onRetry: () => {
+                    retryTimer = null
+                    loadSession(attempt + 1)
+                  }
+                })
+                return
+              }
+              setRead({ phase: 'error', error: result.error })
+              return
+            }
+            const messages = result?.messages ?? []
+            transcriptLifecycleControl.replace(result?.lifecycle)
+            authoritativeSettle.settleFrame(messages, false)
+            setRead({ phase: 'ready', messages })
+            setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current))
+          })
+          .catch((err: unknown) => {
+            if (!cancelled && !frameArrived) {
+              setRead({ phase: 'error', error: err instanceof Error ? err.message : String(err) })
+            }
+          })
       }
-    )
 
+      loadSession(0)
+
+      subscriptionCounter += 1
+      const subscriptionId = `native-chat-${subscriptionCounter}-${Date.now()}`
+      unsubscribe = subscribeNativeChatSession(
+        transport,
+        {
+          subscriptionId,
+          agent,
+          sessionId,
+          transcriptPath: transcriptPath ?? undefined,
+          limit: limitRef.current
+        },
+        (frame) => {
+          if (!cancelled) {
+            if (frame.type === 'snapshot' || frame.type === 'replacement') {
+              // Why: snapshots/replacements advance the message list + pagination
+              // epoch. Order generation stays put so empty-boundary pending/clear
+              // keep matching; only adoption and inode replacements settle rows.
+              frameArrived = true
+              transcriptEpochRef.current += 1
+              setLoadingEarlier(false)
+              if ('error' in frame && frame.error) {
+                setRead({ phase: 'error', error: frame.error })
+                return
+              }
+              transcriptLifecycleControl.replace(frame.lifecycle)
+              replaceList(appendMergerRef.current, frame.messages)
+              setAppended([])
+              authoritativeSettle.settleFrame(frame.messages, frame.type === 'replacement')
+              setRead({ phase: 'ready', messages: appendMergerRef.current.list })
+              setHasMore(frame.hasMore)
+              return
+            }
+            transcriptLifecycleControl.append(frame.lifecycle)
+            // Merge by id then bound to the window; the base read + assembler re-dedup mean trimming the append tail can't drop a covered turn (#6).
+            const retained = applyAppend(appendMergerRef.current, frame.messages, limitRef.current)
+            appendTranscriptOrder(frame.messages, retained.length)
+            setAppended(retained)
+          }
+        }
+      )
+    }
+
+    // Always return a disposer so every allocation path is owned (effect-needs-cleanup).
     return () => {
       cancelled = true
       if (retryTimer) {
         clearTimeout(retryTimer)
         retryTimer = null
       }
-      teardownNativeChatSubscription(unsubscribe)
+      if (unsubscribe !== undefined) {
+        teardownNativeChatSubscription(unsubscribe)
+      }
     }
     // `transport` identity changes on an owner flip, re-running this effect to re-subscribe against the new host.
   }, [

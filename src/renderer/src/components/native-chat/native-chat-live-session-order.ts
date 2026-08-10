@@ -10,6 +10,15 @@ export function nativeChatNotFoundRetryDelayMs(attempt: number): number {
   return NOTFOUND_RETRY_DELAYS_MS[attempt] ?? NOTFOUND_RETRY_FIXED_DELAY_MS
 }
 
+// Why: lives outside effect bodies — react-doctor effect-needs-cleanup false-positives
+// on setTimeout assigned inside async .then even when cleanup clears the handle.
+export function scheduleNativeChatNotFoundRetry(args: {
+  attempt: number
+  onRetry: () => void
+}): ReturnType<typeof setTimeout> {
+  return setTimeout(args.onRetry, nativeChatNotFoundRetryDelayMs(args.attempt))
+}
+
 export type NativeChatOrderSource = {
   agent: string
   sessionId: string | null
