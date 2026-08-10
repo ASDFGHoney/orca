@@ -4,11 +4,21 @@ import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
 import { toString } from 'mdast-util-to-string'
+import type { Image, ImageReference } from 'mdast'
 import { isCurrencyDollarSpan, remarkCurrencyAwareMath } from './remark-currency-aware-math'
 
 type MathNode = { type: string; value?: string }
+type ImageNode = {
+  alt: string | null | undefined
+  end: number | undefined
+  identifier?: string
+  start: number | undefined
+  title?: string | null
+  url?: string
+}
 
 function parseMarkdown(source: string): {
+  images: ImageNode[]
   math: MathNode[]
   nodeTypes: string[]
   text: string
@@ -16,14 +26,32 @@ function parseMarkdown(source: string): {
   const processor = unified().use(remarkParse).use(remarkGfm).use(remarkCurrencyAwareMath)
   const tree = processor.runSync(processor.parse(source))
   const math: MathNode[] = []
+  const images: ImageNode[] = []
   const nodeTypes: string[] = []
   visit(tree, (node) => {
     nodeTypes.push(node.type)
     if (node.type === 'inlineMath' || node.type === 'math') {
       math.push({ type: node.type, value: 'value' in node ? String(node.value ?? '') : '' })
+    } else if (node.type === 'image') {
+      const image = node as Image
+      images.push({
+        alt: image.alt,
+        end: image.position?.end.offset,
+        start: image.position?.start.offset,
+        title: image.title,
+        url: image.url
+      })
+    } else if (node.type === 'imageReference') {
+      const image = node as ImageReference
+      images.push({
+        alt: image.alt,
+        end: image.position?.end.offset,
+        identifier: image.identifier,
+        start: image.position?.start.offset
+      })
     }
   })
-  return { math, nodeTypes, text: toString(tree) }
+  return { images, math, nodeTypes, text: toString(tree) }
 }
 
 const ISSUE_CURRENCY_PROSE =
@@ -147,14 +175,24 @@ describe('remarkCurrencyAwareMath', () => {
 
   it('preserves repeated numeric operands and operators as stock math', () => {
     const { math } = parseMarkdown(
-      'Math $1 + 2 + 3$, $1, 2, 3$, $1 < 2 < 3$, and $2 \\times 3 \\times 4$.'
+      'Math $1 + 2 + 3$, $1, 2, 3$, $1 < 2 < 3$, $2 \\times 3 \\times 4$, $2 × 3$, $1:2$, $1 → 2$.'
     )
     expect(math.map((node) => node.value)).toEqual([
       '1 + 2 + 3',
       '1, 2, 3',
       '1 < 2 < 3',
-      '2 \\times 3 \\times 4'
+      '2 \\times 3 \\times 4',
+      '2 × 3',
+      '1:2',
+      '1 → 2'
     ])
+  })
+
+  it('keeps each repeated numeric expression paired independently', () => {
+    const source = 'Math $2 × 3$, $1:2$, $1 → 2$.'
+    const { math, text } = parseMarkdown(source)
+    expect(math.map((node) => node.value)).toEqual(['2 × 3', '1:2', '1 → 2'])
+    expect(text).toBe('Math 2 × 3, 1:2, 1 → 2.')
   })
 
   it('leaves stock symbolic math forms unchanged', () => {
@@ -248,6 +286,97 @@ describe('remarkCurrencyAwareMath', () => {
       expect(math, prefix).toEqual([{ type: 'inlineMath', value: 'y' }])
       expect(text, prefix).toContain('It cost $148 a month, now $19; formula y.')
     }
+  })
+
+  it('preserves currency dollars in inline and reference image labels', () => {
+    const inline = '![$10 to $20](img.png)'
+    expect(parseMarkdown(inline)).toEqual(
+      expect.objectContaining({
+        images: [
+          {
+            alt: '$10 to $20',
+            end: inline.length,
+            start: 0,
+            title: null,
+            url: 'img.png'
+          }
+        ],
+        math: [],
+        text: '$10 to $20'
+      })
+    )
+
+    const reference = '![$10 to $20][cost]\n\n[cost]: img.png'
+    expect(parseMarkdown(reference)).toEqual(
+      expect.objectContaining({
+        images: [
+          {
+            alt: '$10 to $20',
+            end: reference.indexOf('\n'),
+            identifier: 'cost',
+            start: 0
+          }
+        ],
+        math: [],
+        text: '$10 to $20'
+      })
+    )
+  })
+
+  it('isolates image labels from destinations, titles, and following math', () => {
+    const source = '![alt $10](img-$20.png "$30 title") formula $x$'
+    const { images, math, text } = parseMarkdown(source)
+    expect(images).toEqual([
+      {
+        alt: 'alt $10',
+        end: source.indexOf(' formula'),
+        start: 0,
+        title: '$30 title',
+        url: 'img-$20.png'
+      }
+    ])
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+    expect(text).toBe('alt $10 formula x')
+  })
+
+  it('keeps protected code and HTML syntax inside image labels intact', () => {
+    const source = '![price `$10` <span title="$20">from $30</span> to $40](img.png) math $x$'
+    const { images, math } = parseMarkdown(source)
+    expect(images).toEqual([
+      {
+        alt: 'price $10 <span title="$20">from $30</span> to $40',
+        end: source.indexOf(' math'),
+        start: 0,
+        title: null,
+        url: 'img.png'
+      }
+    ])
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+  })
+
+  it('does not collide with a private-use character decoded in an image alt', () => {
+    const source = '![&#xE000; costs $10 to $20](img.png) math $x$'
+    const { images, math } = parseMarkdown(source)
+    expect(images[0]?.alt).toBe('\uE000 costs $10 to $20')
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+  })
+
+  it('restores image offsets when every private-use marker forces escaped masking', () => {
+    const privateUse = Array.from({ length: 0xf8ff - 0xe000 + 1 }, (_, index) =>
+      String.fromCodePoint(0xe000 + index)
+    ).join('')
+    const image = '![$10 to $20](img.png)'
+    const source = `${privateUse}\n\n${image} formula $x$`
+    const { images, math } = parseMarkdown(source)
+    const imageStart = source.indexOf(image)
+    expect(images[0]).toEqual({
+      alt: '$10 to $20',
+      end: imageStart + image.length,
+      start: imageStart,
+      title: null,
+      url: 'img.png'
+    })
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
   })
 
   it('remains collision-safe when every private-use marker occurs in the source', () => {

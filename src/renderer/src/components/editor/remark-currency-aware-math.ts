@@ -1,197 +1,116 @@
 import { mathFromMarkdown } from 'mdast-util-math'
+import type { Options as FromMarkdownOptions } from 'mdast-util-from-markdown'
 import { math } from 'micromark-extension-math'
 import type { Nodes, Root } from 'mdast'
 import type { Point } from 'unist'
 import type { Processor } from 'unified'
 import {
-  analyzeMarkdownTextScopes,
-  type MarkdownSourceRange,
-  type MarkdownTextScope
-} from './markdown-text-source-ranges'
+  maskCurrencyDollars,
+  type CurrencyEscape,
+  type MaskedMarkdown
+} from './currency-dollar-mask'
+import { analyzeMarkdownTextScopes } from './markdown-text-source-ranges'
 
-const SIGN = '[+\\-−＋－]?'
-const DIGIT = '\\p{Nd}'
-const NUMBER_SEPARATOR = "[.,，．'’\\u00a0\\u202f ]"
-const NUMBER_BODY = `(?:${DIGIT}+(?:${NUMBER_SEPARATOR}${DIGIT}+)*|[.．]${DIGIT}+)`
-const EXPONENT = `(?:[eE]${SIGN}${DIGIT}+)?`
-const NUMERIC_LITERAL = `${SIGN}${NUMBER_BODY}${EXPONENT}`
-const LEADING_NUMERIC_LITERAL = new RegExp(`^${NUMERIC_LITERAL}`, 'u')
-const PURE_NUMERIC_LITERAL = new RegExp(`^${NUMERIC_LITERAL}$`, 'u')
-const STRONG_MATH_SYNTAX = /[\\^_={}]/u
-const SYMBOLIC_OPERAND = `(?:\\\\[A-Za-z]+|[\\p{L}\\p{Nl}](?:[_^][\\p{L}\\p{Nl}\\p{Nd}{}]+)?)`
-const MATH_OPERAND = `(?:${NUMERIC_LITERAL}|${SYMBOLIC_OPERAND})`
-const MATH_OPERATOR = '(?:[+\\-−＋－*/<>=]|,|\\\\[A-Za-z]+|mod|div)'
-const NUMERIC_MATH_EXPRESSION = new RegExp(
-  `^${NUMERIC_LITERAL}(?:\\s*${MATH_OPERATOR}\\s*${MATH_OPERAND})+$`,
-  'u'
-)
-const CURRENCY_RANGE_SYNTAX = /[→~～〜–—]/u
-const PROSE_BOUNDARY = /[\s;:；：,，。！？!?、]/u
-const COMPACT_VALUE = /^[^\s$]+$/u
-const FIRST_CURRENCY_MARKER = 0xe000
-const LAST_CURRENCY_MARKER = 0xf8ff
+export {
+  isCurrencyDollarSpan,
+  maskCurrencyDollars,
+  type CurrencyMaskDiagnostics
+} from './currency-dollar-mask'
 
-type CurrencyEscape = { maskedOffset: number; line: number }
-type MaskedMarkdown = {
-  escapes: CurrencyEscape[]
-  marker: string | null
-  maskedCount: number
-  source: string
+const CURRENCY_AWARE_BASE_PARSER = Symbol('currencyAwareBaseParser')
+type MarkdownParser = NonNullable<Processor['parser']>
+type CurrencyAwareParser = MarkdownParser & {
+  [CURRENCY_AWARE_BASE_PARSER]?: MarkdownParser
 }
-type SourceRange = MarkdownSourceRange
-type TextScope = MarkdownTextScope
 
-export function isCurrencyDollarSpan(value: string, closed: boolean): boolean {
-  const trimmed = value.trim()
-  const numericPrefix = LEADING_NUMERIC_LITERAL.exec(trimmed)?.[0]
-  if (numericPrefix === undefined) {
+function constructName(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? constructName(value[0]) : undefined
+  }
+  if (typeof value !== 'object' || value === null || !('name' in value)) {
+    return undefined
+  }
+  return typeof value.name === 'string' ? value.name : undefined
+}
+
+function isMathMicromarkExtension(extension: unknown): boolean {
+  if (typeof extension !== 'object' || extension === null) {
     return false
   }
-  if (!closed) {
-    return true
+  const candidate = extension as {
+    flow?: Record<number, unknown>
+    text?: Record<number, unknown>
   }
-  if (PURE_NUMERIC_LITERAL.test(trimmed)) {
+  return (
+    constructName(candidate.flow?.[36]) === 'mathFlow' &&
+    constructName(candidate.text?.[36]) === 'mathText'
+  )
+}
+
+function hasFunction(record: unknown, key: string): boolean {
+  return (
+    typeof record === 'object' && record !== null && typeof Reflect.get(record, key) === 'function'
+  )
+}
+
+function isMathMdastExtension(extension: unknown): boolean {
+  if (typeof extension !== 'object' || extension === null) {
     return false
   }
-
-  const suffix = trimmed.slice(numericPrefix.length)
-  if (STRONG_MATH_SYNTAX.test(suffix) || NUMERIC_MATH_EXPRESSION.test(trimmed)) {
-    return false
-  }
-  if (CURRENCY_RANGE_SYNTAX.test(suffix)) {
-    return true
-  }
-  if (!PROSE_BOUNDARY.test(suffix)) {
-    return /[.,，．'’\u00a0\u202f ]/u.test(numericPrefix)
-  }
-  return true
+  const candidate = extension as { enter?: unknown; exit?: unknown }
+  return (
+    hasFunction(candidate.enter, 'mathFlow') &&
+    hasFunction(candidate.enter, 'mathText') &&
+    hasFunction(candidate.exit, 'mathFlow') &&
+    hasFunction(candidate.exit, 'mathText')
+  )
 }
 
-function isEscaped(source: string, index: number): boolean {
-  let slashCount = 0
-  for (let cursor = index - 1; cursor >= 0 && source[cursor] === '\\'; cursor -= 1) {
-    slashCount += 1
-  }
-  return slashCount % 2 === 1
-}
-
-function closesEscapedCompactValue(source: string, index: number): boolean {
-  let valueStart = index
-  while (valueStart > 0 && COMPACT_VALUE.test(source[valueStart - 1])) {
-    valueStart -= 1
-  }
-  const escapedOpener = valueStart - 1
-  return valueStart < index && source[escapedOpener] === '$' && isEscaped(source, escapedOpener)
-}
-
-function findSingleDollarOffsets(source: string, ranges: SourceRange[]): number[] {
-  const offsets: number[] = []
-  for (const range of ranges) {
-    for (let index = range.start; index < range.end; index += 1) {
-      if (
-        source[index] === '$' &&
-        !isEscaped(source, index) &&
-        source[index - 1] !== '$' &&
-        source[index + 1] !== '$'
-      ) {
-        offsets.push(index)
+function normalizeExtensions<T>(
+  extensions: T[] | undefined,
+  current: T,
+  isMathExtension: (extension: unknown) => boolean
+): T[] {
+  const normalized: T[] = []
+  let includedCurrent = false
+  for (const extension of extensions ?? []) {
+    if (extension === current) {
+      if (!includedCurrent) {
+        normalized.push(extension)
+        includedCurrent = true
       }
+    } else if (!isMathExtension(extension)) {
+      normalized.push(extension)
     }
   }
-  return offsets
+  if (!includedCurrent) {
+    normalized.push(current)
+  }
+  return normalized
 }
 
-function chooseCurrencyMarker(source: string, decodedCharacters: Set<string>): string | null {
-  const usedCharacters = new Set(source)
-  for (const character of decodedCharacters) {
-    usedCharacters.add(character)
-  }
-  for (let code = FIRST_CURRENCY_MARKER; code <= LAST_CURRENCY_MARKER; code += 1) {
-    const marker = String.fromCodePoint(code)
-    if (!usedCharacters.has(marker)) {
-      return marker
-    }
-  }
-  return null
-}
-
-function collectMaskedOffsets(source: string, scopes: TextScope[]): Set<number> {
-  const maskedOffsets = new Set<number>()
-  for (const ranges of scopes) {
-    const offsets = findSingleDollarOffsets(source, ranges)
-    const protectedClosers = new Set<number>()
-    for (let index = 0; index < offsets.length; index += 1) {
-      const offset = offsets[index]
-      if (protectedClosers.has(offset)) {
-        continue
-      }
-      if (closesEscapedCompactValue(source, offset)) {
-        maskedOffsets.add(offset)
-        continue
-      }
-
-      const closer = offsets[index + 1]
-      const value = source.slice(offset + 1, closer)
-      if (isCurrencyDollarSpan(value, closer !== undefined)) {
-        maskedOffsets.add(offset)
-      } else if (closer !== undefined) {
-        protectedClosers.add(closer)
-      }
-    }
-  }
-  return maskedOffsets
-}
-
-function escapeCurrencyDollars(source: string, offsets: number[]): MaskedMarkdown {
-  const chunks: string[] = []
-  const escapes: CurrencyEscape[] = []
-  let cursor = 0
-  let line = 1
-  let scanCursor = 0
-  for (const [index, offset] of offsets.entries()) {
-    for (; scanCursor < offset; scanCursor += 1) {
-      if (source[scanCursor] === '\n' || source[scanCursor] === '\r') {
-        if (source[scanCursor] === '\r' && source[scanCursor + 1] === '\n') {
-          scanCursor += 1
-        }
-        line += 1
-      }
-    }
-    chunks.push(source.slice(cursor, offset), '\\$')
-    escapes.push({
-      line,
-      maskedOffset: offset + index
-    })
-    cursor = offset + 1
-  }
-  chunks.push(source.slice(cursor))
-  return { escapes, marker: null, maskedCount: offsets.length, source: chunks.join('') }
-}
-
-export function maskCurrencyDollars(
-  source: string,
-  scopes: TextScope[] = [[{ start: 0, end: source.length }]],
-  decodedCharacters = new Set<string>()
-): MaskedMarkdown | null {
-  const maskedOffsets = collectMaskedOffsets(source, scopes)
-  if (maskedOffsets.size === 0) {
-    return null
-  }
-  const offsets = [...maskedOffsets].sort((left, right) => left - right)
-  const marker = chooseCurrencyMarker(source, decodedCharacters)
-  if (marker === null) {
-    return escapeCurrencyDollars(source, offsets)
-  }
-  const characters = source.split('')
-  for (const offset of offsets) {
-    characters[offset] = marker
-  }
-  return {
-    escapes: [],
-    marker,
-    maskedCount: offsets.length,
-    source: characters.join('')
-  }
+function normalizeProcessorMathExtensions(
+  processor: Processor,
+  mathMicromarkExtension: NonNullable<ReturnType<typeof math>>,
+  mathMdastExtension: ReturnType<typeof mathFromMarkdown>
+): {
+  mdast: NonNullable<FromMarkdownOptions['mdastExtensions']>
+  micromark: NonNullable<FromMarkdownOptions['extensions']>
+} {
+  const data = processor.data()
+  const micromark = normalizeExtensions(
+    data.micromarkExtensions,
+    mathMicromarkExtension,
+    isMathMicromarkExtension
+  )
+  const mdast = normalizeExtensions(
+    (data.fromMarkdownExtensions ?? []).flat(),
+    mathMdastExtension,
+    isMathMdastExtension
+  )
+  data.micromarkExtensions = micromark
+  data.fromMarkdownExtensions = mdast
+  return { mdast, micromark }
 }
 
 function restoreCurrencyDollars(node: Nodes, marker: string): number {
@@ -199,6 +118,12 @@ function restoreCurrencyDollars(node: Nodes, marker: string): number {
   if (node.type === 'text') {
     restored = node.value.split(marker).length - 1
     node.value = node.value.replaceAll(marker, '$')
+  } else if (
+    (node.type === 'image' || node.type === 'imageReference') &&
+    typeof node.alt === 'string'
+  ) {
+    restored = node.alt.split(marker).length - 1
+    node.alt = node.alt.replaceAll(marker, '$')
   }
   if ('children' in node) {
     restored += node.children.reduce(
@@ -257,42 +182,64 @@ function restoreEscapedPositions(tree: Root, escapes: CurrencyEscape[]): void {
   visitNode(tree)
 }
 
+function parseCurrencyAwareMarkdown(
+  parser: MarkdownParser,
+  processor: Processor,
+  mathMicromarkExtension: ReturnType<typeof math>,
+  mathMdastExtension: ReturnType<typeof mathFromMarkdown>,
+  document: Parameters<MarkdownParser>[0],
+  file: Parameters<MarkdownParser>[1]
+): ReturnType<MarkdownParser> {
+  const source = String(document)
+  const normalized = normalizeProcessorMathExtensions(
+    processor,
+    mathMicromarkExtension,
+    mathMdastExtension
+  )
+  if (!source.includes('$')) {
+    return parser(document, file)
+  }
+  const analysis = analyzeMarkdownTextScopes(source, {
+    ...processor.data('settings'),
+    extensions: normalized.micromark.filter((extension) => !isMathMicromarkExtension(extension)),
+    mdastExtensions: normalized.mdast.filter((extension) => !isMathMdastExtension(extension))
+  })
+  const masked: MaskedMarkdown | null = maskCurrencyDollars(
+    source,
+    analysis.scopes,
+    analysis.decodedCharacters
+  )
+  const tree = parser(masked?.source ?? document, file)
+  if (masked?.marker !== null && masked?.marker !== undefined) {
+    const restored = restoreCurrencyDollars(tree as Root, masked.marker)
+    if (restored !== masked.maskedCount) {
+      throw new Error('Currency marker restoration count did not match the mask')
+    }
+  } else if (masked !== null) {
+    restoreEscapedPositions(tree as Root, masked.escapes)
+  }
+  return tree
+}
+
 export function remarkCurrencyAwareMath(this: Processor): undefined {
-  const parser = this.parser
-  if (parser === undefined) {
+  const configuredParser = this.parser as CurrencyAwareParser | undefined
+  if (configuredParser === undefined) {
     throw new Error('remarkCurrencyAwareMath must run after remarkParse')
   }
-  const data = this.data()
-  const settings = this.data('settings')
-  const micromarkExtensions = data.micromarkExtensions || (data.micromarkExtensions = [])
-  const fromMarkdownExtensions = data.fromMarkdownExtensions || (data.fromMarkdownExtensions = [])
-
+  const parser = configuredParser[CURRENCY_AWARE_BASE_PARSER] ?? configuredParser
   const mathMicromarkExtension = math()
   const mathMdastExtension = mathFromMarkdown()
-  micromarkExtensions.push(mathMicromarkExtension)
-  fromMarkdownExtensions.push(mathMdastExtension)
-  this.parser = (document, file) => {
-    const source = String(document)
-    if (!source.includes('$')) {
-      return parser(document, file)
-    }
-    const analysis = analyzeMarkdownTextScopes(source, {
-      ...settings,
-      extensions: micromarkExtensions.filter((extension) => extension !== mathMicromarkExtension),
-      mdastExtensions: fromMarkdownExtensions.filter(
-        (extension) => extension !== mathMdastExtension
-      )
-    })
-    const masked = maskCurrencyDollars(source, analysis.scopes, analysis.decodedCharacters)
-    const tree = parser(masked?.source ?? document, file)
-    if (masked?.marker !== null && masked?.marker !== undefined) {
-      const restored = restoreCurrencyDollars(tree as Root, masked.marker)
-      if (restored !== masked.maskedCount) {
-        throw new Error('Currency marker restoration count did not match the mask')
-      }
-    } else if (masked !== null) {
-      restoreEscapedPositions(tree as Root, masked.escapes)
-    }
-    return tree
-  }
+  normalizeProcessorMathExtensions(this, mathMicromarkExtension, mathMdastExtension)
+
+  const currencyAwareParser = ((document, file) =>
+    parseCurrencyAwareMarkdown(
+      parser,
+      this,
+      mathMicromarkExtension,
+      mathMdastExtension,
+      document,
+      file
+    )) as CurrencyAwareParser
+  currencyAwareParser[CURRENCY_AWARE_BASE_PARSER] = parser
+  this.parser = currencyAwareParser
 }
