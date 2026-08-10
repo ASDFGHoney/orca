@@ -291,8 +291,6 @@ export function useNativeChatLiveSession(
         resetAssembler,
         sharesPrefix: sharesNativeChatMessagePrefix
       }),
-    // baseMessages/appended are the only message-set inputs; sessionId/agent gate the reset.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [baseMessages, appended, sessionId, agent]
   )
 
