@@ -30,9 +30,19 @@ describe('buildMobileNativeChatBodyText', () => {
     expect(buildMobileNativeChatBodyText('hello')).toBe('hello')
   })
 
+  it('neutralizes escapes in single-line composer text', () => {
+    expect(buildMobileNativeChatBodyText('before\x1b[201~after')).toBe('before␛[201~after')
+  })
+
   it('bracket-pastes multi-line text so agent composers keep the full payload', () => {
     expect(buildMobileNativeChatBodyText('line one\nline two')).toBe(
       `${BRACKETED_PASTE_START}line one\rline two${BRACKETED_PASTE_END}`
+    )
+  })
+
+  it('preserves Unicode while normalizing CRLF and neutralizing escapes', () => {
+    expect(buildMobileNativeChatBodyText('café 😀\r\nnext\x1b[201~tail')).toBe(
+      `${BRACKETED_PASTE_START}café 😀\rnext␛[201~tail${BRACKETED_PASTE_END}`
     )
   })
 })
@@ -88,6 +98,29 @@ describe('sendMobileNativeChatMessage', () => {
         text: `${BRACKETED_PASTE_START}line one\rline two${BRACKETED_PASTE_END}`,
         enter: true
       },
+      { timeoutMs: MOBILE_NATIVE_CHAT_SEND_TIMEOUT_MS, budgetSpansConnect: true }
+    )
+  })
+
+  it('leaves control keystrokes unframed', async () => {
+    const client = clientWithResponse({
+      id: 'request',
+      ok: true,
+      result: { send: { accepted: true } },
+      _meta: { runtimeId: 'runtime' }
+    })
+
+    await sendMobileNativeChatMessage({
+      client,
+      terminal: 'term',
+      text: '\r',
+      enter: false,
+      rawTerminalInput: true
+    })
+
+    expect(client.sendRequest).toHaveBeenCalledWith(
+      'terminal.send',
+      { terminal: 'term', text: '\r', enter: false },
       { timeoutMs: MOBILE_NATIVE_CHAT_SEND_TIMEOUT_MS, budgetSpansConnect: true }
     )
   })
@@ -275,7 +308,8 @@ describe('sendMobileNativeChatMessage', () => {
       client,
       terminal: 'term',
       text: String.fromCharCode(27),
-      enter: false
+      enter: false,
+      rawTerminalInput: true
     })
     expect(client.sendRequest).toHaveBeenCalledWith(
       'terminal.send',

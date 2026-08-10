@@ -1,15 +1,13 @@
-// Pure bracketed-paste framing for paths that write PTY bytes directly
-// (mobile clipboard paste, shared send helpers). Renderer/xterm keeps its own
-// terminal-object helpers; keep these free of DOM so mobile can import them.
+// DOM-free framing shared by desktop and mobile PTY write paths.
 
 export const BRACKETED_PASTE_START = '\x1b[200~'
 export const BRACKETED_PASTE_END = '\x1b[201~'
 
 const ESCAPE = '\x1b'
-// Why: U+241B is the printable ESC substitute xterm/desktop paste uses.
+// U+241B is the printable ESC substitute used by desktop paste.
 const INERT_ESCAPE = '\u241b'
 
-/** Strip/neutralize bytes that would close a bracketed-paste frame early. */
+/** Neutralize bytes that could close a bracketed-paste frame early. */
 export function sanitizeBracketedPasteText(text: string): string {
   let escapeIndex = text.indexOf(ESCAPE)
   if (escapeIndex === -1) {
@@ -26,7 +24,7 @@ export function sanitizeBracketedPasteText(text: string): string {
   return sanitized + text.slice(start)
 }
 
-// Why: xterm's native paste converts newlines to CR; ConPTY TUIs treat raw LF as submit.
+// Match xterm paste; some ConPTY TUIs treat raw LF as submit.
 export function normalizeTerminalPasteLineEndings(text: string): string {
   return text.replace(/\r?\n/g, '\r')
 }
@@ -41,14 +39,7 @@ export type TerminalBracketedPasteModes = {
   altScreen?: boolean
 }
 
-/**
- * Frame clipboard text for a direct terminal.send paste.
- *
- * Gate only on DECSET 2004. Full-screen TUIs (Claude Code, etc.) enable
- * bracketed paste while on the alternate screen; also requiring `!altScreen`
- * left those pastes unframed so the host OS delivered them as ~1 KiB chunks
- * that some agent composers silently collapse to the final fragment.
- */
+/** Frame clipboard text when the foreground program enabled DECSET 2004. */
 export function buildTerminalClipboardPasteText(
   text: string,
   modes: TerminalBracketedPasteModes | undefined

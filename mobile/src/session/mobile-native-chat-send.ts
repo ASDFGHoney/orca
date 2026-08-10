@@ -3,7 +3,10 @@ import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import { isTerminalSendRpcAccepted } from '../terminal/terminal-send-rpc-response'
 import { typeAgentTuiCommand } from '../../../src/shared/agent-tui-command-typing'
-import { wrapTerminalBracketedPasteText } from '../../../src/shared/terminal-bracketed-paste-text'
+import {
+  sanitizeBracketedPasteText,
+  wrapTerminalBracketedPasteText
+} from '../../../src/shared/terminal-bracketed-paste-text'
 
 type MobileTerminalClient = {
   id: string
@@ -20,17 +23,12 @@ type MobileTerminalClient = {
 // src/shared/agent-tui-input-clear.ts for the measured 2N-1 law.
 const CLEAR_UNSUBMITTED_INPUT = '\x15'
 
-/** Desktop native-chat parity: multi-line bodies need a single bracketed-paste
- *  frame so agent composers do not treat OS-sized PTY chunks as separate pastes
- *  and silently keep only the tail fragment.
- *
- *  Single-line stays raw: this path also carries control keystrokes (e.g. Esc
- *  cancel), which must not be sanitized into printable substitutes. */
+/** Match desktop native-chat framing for multi-line composer bodies. */
 export function buildMobileNativeChatBodyText(text: string): string {
   if (/[\r\n]/.test(text)) {
     return wrapTerminalBracketedPasteText(text)
   }
-  return text
+  return sanitizeBracketedPasteText(text)
 }
 
 type MobileNativeChatSendArgs = {
@@ -38,6 +36,7 @@ type MobileNativeChatSendArgs = {
   terminal: string
   text: string
   enter?: boolean
+  rawTerminalInput?: boolean
   clearInputFirst?: boolean
   /** Exact host launch draft this submitting write resolves when accepted. */
   resolvedLaunchDraft?: { text: string; createdAt: number }
@@ -75,13 +74,12 @@ export async function sendMobileNativeChatMessageWithOutcome(
     return 'rejected'
   }
   try {
-    const body = buildMobileNativeChatBodyText(args.text)
+    const body = args.rawTerminalInput ? args.text : buildMobileNativeChatBodyText(args.text)
     const response = await args.client.sendRequest(
       'terminal.send',
       {
         terminal: args.terminal,
-        // Why: Ctrl+U must stay OUTSIDE the bracketed frame — inside it becomes
-        // literal text in the agent composer instead of a clear keypress.
+        // Ctrl+U must stay outside the frame or the composer inserts it literally.
         text: args.clearInputFirst ? `${CLEAR_UNSUBMITTED_INPUT}${body}` : body,
         enter: args.enter ?? true,
         ...(args.resolvedLaunchDraft ? { resolvedLaunchDraft: args.resolvedLaunchDraft } : {}),

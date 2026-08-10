@@ -58,13 +58,6 @@ const resizeMobileClipboardImage: MobileClipboardImageResizer = async (source, t
   }
 }
 
-function buildMobileTerminalClipboardTextPayload(
-  text: string,
-  modes: TerminalModes | undefined
-): string {
-  return buildTerminalClipboardPasteText(text, modes)
-}
-
 type UseMobileTerminalPasteOptions = {
   readonly activeHandle: string | null
   readonly activeHandleRef: RefObject<string | null>
@@ -111,10 +104,7 @@ export function useMobileTerminalPaste({
       const text = await Clipboard.getStringAsync()
       let payload: string | null = null
       if (text.length > 0) {
-        payload = buildMobileTerminalClipboardTextPayload(
-          text,
-          ptyModesRef.current.get(targetHandle)
-        )
+        payload = buildTerminalClipboardPasteText(text, ptyModesRef.current.get(targetHandle))
       } else {
         const image = await Clipboard.getImageAsync({ format: 'png' })
         if (!image) {
