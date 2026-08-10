@@ -177,6 +177,28 @@ describe('remarkCurrencyAwareMath', () => {
     expect(text).toBe(source)
   })
 
+  it('keeps a prose currency range literal', () => {
+    const source = 'From $148 a month to $19'
+    const { math, text } = parseMarkdown(source)
+    expect(math).toEqual([])
+    expect(text).toBe(source)
+  })
+
+  it('keeps compact CJK monthly currency before real math', () => {
+    const { math, text } = parseMarkdown('成本$1,550/月公式$x$')
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+    expect(text).toBe('成本$1,550/月公式x')
+  })
+
+  it('parses signed numeric values in mathematical prose', () => {
+    const { math, text } = parseMarkdown('The roots are $-1$ and $1$.')
+    expect(math).toEqual([
+      { type: 'inlineMath', value: '-1' },
+      { type: 'inlineMath', value: '1' }
+    ])
+    expect(text).toBe('The roots are -1 and 1.')
+  })
+
   it('separates adjacent currency and math spans', () => {
     const { math, text } = parseMarkdown('cost $100$$x$')
     expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])

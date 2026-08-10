@@ -9,14 +9,17 @@ const PURE_CURRENCY_AMOUNT =
 const RANGE_SEPARATOR = /[+\-−＋－–—→~～〜]$/u
 const CURRENCY_RANGE_PREFIX =
   /^\s*[-−－–—→~～〜]\s*[+\-−＋－]?(?:(?:\p{Nd}{1,3}(?:[,，]\p{Nd}{3})+|\p{Nd}+)(?:[.．]\p{Nd}+)?|[.．]\p{Nd}+)/u
-const ENGLISH_CURRENCY_RANGE_SUFFIX = /^[+\-−＋－]?\s+to$/iu
+const ENGLISH_CURRENCY_RANGE_SUFFIX = /^[+\-−＋－]?\s+(?:\p{L}+\s+)*to$/iu
 const COMPACT_ESCAPED_VALUE = /^[^\s$]+$/u
-const CJK_PROSE_AFTER_AMOUNT = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
+const CJK_PROSE_AFTER_AMOUNT = /^(?:[/／])?[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
 const CJK_PROSE_AFTER_PUNCTUATION =
   /[;:；：,，。！？!?、][\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
 const MARKDOWN_PROSE_AFTER_CURRENCY = /`|\]\([^)]*\)/u
 const MATH_SIGNAL = /[\\^_={}+]|(?:^|\s)[*/](?:\s|$)/u
+const NUMERIC_MATH_PROSE = /\b(?:roots?|solutions?|zeros?|eigenvalues?)\s+(?:are|is)\s*$/iu
+const NUMERIC_MATH_CONNECTOR = /^\s*(?:,|and|or)\s*$/iu
 const PROSE_AFTER_CLOSER = /[\s,.;:!?，。；：！？、]/u
+const MAX_NUMERIC_MATH_CONTEXT_LENGTH = 80
 
 type MathTextConstruct = Exclude<
   NonNullable<NonNullable<ReturnType<typeof math>['text']>[36]>,
@@ -66,6 +69,53 @@ function openingClosesEscapedCompactValue(context: MathTokenizeContext): boolean
   return false
 }
 
+function openingHasNumericMathContext(context: MathTokenizeContext): boolean {
+  const dataExit = context.events.at(-1)
+  if (
+    dataExit?.[0] !== 'exit' ||
+    dataExit[1].type !== 'data' ||
+    dataExit[1].end.offset !== context.now().offset
+  ) {
+    return false
+  }
+  let dataStart = dataExit[1].start.offset
+  let preceding = context.sliceSerialize(dataExit[1])
+  if (preceding.length >= MAX_NUMERIC_MATH_CONTEXT_LENGTH) {
+    preceding = preceding.slice(-MAX_NUMERIC_MATH_CONTEXT_LENGTH)
+  } else {
+    for (let index = context.events.length - 2; index >= 0; index -= 1) {
+      const [eventType, token] = context.events[index]
+      if (eventType === 'exit' && token.type === 'data' && token.end.offset === dataStart) {
+        preceding = context.sliceSerialize(token) + preceding
+        dataStart = token.start.offset
+        if (preceding.length >= MAX_NUMERIC_MATH_CONTEXT_LENGTH) {
+          preceding = preceding.slice(-MAX_NUMERIC_MATH_CONTEXT_LENGTH)
+          break
+        }
+      } else if (token.end.offset < dataStart) {
+        break
+      }
+    }
+  }
+  if (NUMERIC_MATH_PROSE.test(preceding)) {
+    return true
+  }
+  if (!NUMERIC_MATH_CONNECTOR.test(preceding)) {
+    return false
+  }
+  for (let index = context.events.length - 2; index >= 0; index -= 1) {
+    const [eventType, token] = context.events[index]
+    if (token.end.offset < dataStart) {
+      break
+    }
+    if (eventType === 'exit' && token.type === 'mathText' && token.end.offset === dataStart) {
+      const raw = context.sliceSerialize(token)
+      return raw.startsWith('$') && raw.endsWith('$') && PURE_CURRENCY_AMOUNT.test(raw.slice(1, -1))
+    }
+  }
+  return false
+}
+
 function isTrailingCurrencyProse(value: string, trimmed: string): boolean {
   if (/^\s/u.test(value) || !/\s$/u.test(value)) {
     return false
@@ -91,7 +141,11 @@ function isTrailingCurrencyProse(value: string, trimmed: string): boolean {
   return !suffix.split(/\s+/u).some((part) => /^\p{L}$/u.test(part))
 }
 
-export function isIntentionalInlineMath(value: string, nextCode: number | null): boolean {
+export function isIntentionalInlineMath(
+  value: string,
+  nextCode: number | null,
+  numericMathContext = false
+): boolean {
   const trimmed = value.trim()
   if (trimmed.length === 0) {
     return false
@@ -101,7 +155,7 @@ export function isIntentionalInlineMath(value: string, nextCode: number | null):
     return true
   }
   if (PURE_CURRENCY_AMOUNT.test(trimmed)) {
-    return false
+    return numericMathContext
   }
   const suffix = trimmed.slice(numericPrefix.length)
   if (CJK_PROSE_AFTER_AMOUNT.test(suffix)) {
@@ -169,6 +223,7 @@ function createCurrencyAwareMathExtension(): ReturnType<typeof math> {
       return nok
     }
     const closesEscapedCompactValue = openingClosesEscapedCompactValue(this)
+    const numericMathContext = openingHasNumericMathContext(this)
     let mathToken: ReturnType<typeof effects.enter> | undefined
     let openingSequence: ReturnType<typeof effects.enter> | undefined
     let closingSequence: ReturnType<typeof effects.enter> | undefined
@@ -207,7 +262,7 @@ function createCurrencyAwareMathExtension(): ReturnType<typeof math> {
         }
         const raw = this.sliceSerialize(mathToken)
         const value = raw.slice(1, -1)
-        if (isIntentionalInlineMath(value, code)) {
+        if (isIntentionalInlineMath(value, code, numericMathContext)) {
           return ok(code)
         }
         if (
