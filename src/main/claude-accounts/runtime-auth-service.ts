@@ -613,13 +613,26 @@ export class ClaudeRuntimeAuthService {
       const { credentialsJson: runtimeContents, match } =
         this.chooseFreshestReadBackCandidate(acceptedCandidates)
 
+      const runtimeCredentialsBeforeManagedWrite = this.readRuntimeCredentialsFile()
       await this.writeManagedCredentials(match.account, runtimeContents)
       if (options.updateLastWrittenCredentialsJson) {
-        this.writeRuntimeCredentials(runtimeContents)
-        this.lastWrittenCredentialsJson = runtimeContents
+        // Why: managed persistence awaits Keychain, so re-read the file before publishing the observed snapshot.
+        const runtimeCredentialsChangedWhilePersisting =
+          this.readRuntimeCredentialsFile() !== runtimeCredentialsBeforeManagedWrite
+        const credentialsToPublish = this.protectRuntimeFileCredentialWrite(
+          match.account,
+          runtimeContents,
+          match.managedCredentialsJson,
+          !runtimeCredentialsChangedWhilePersisting
+        )
+        this.writeRuntimeCredentials(credentialsToPublish)
+        this.lastWrittenCredentialsJson = credentialsToPublish
         if (process.platform === 'darwin') {
           const paths = this.pathResolver.getRuntimePaths()
-          await writeActiveClaudeKeychainCredentialsForRuntime(runtimeContents, paths.configDir)
+          await writeActiveClaudeKeychainCredentialsForRuntime(
+            credentialsToPublish,
+            paths.configDir
+          )
         }
       }
       return { status: 'persisted' }
@@ -844,6 +857,10 @@ export class ClaudeRuntimeAuthService {
         runtimeOauthIdentity.organizationUuid &&
         identity.organizationUuid !== runtimeOauthIdentity.organizationUuid)
     if (credentialOauthConflict) {
+      return 'mismatch'
+    }
+    const managedAccountUuid = managedIdentity?.accountUuid ?? managedOauthIdentity.accountUuid
+    if (managedAccountUuid && identity.accountUuid && identity.accountUuid !== managedAccountUuid) {
       return 'mismatch'
     }
 
@@ -1093,7 +1110,8 @@ export class ClaudeRuntimeAuthService {
       decideMonotonicCredentialWrite({
         candidateJson: credentialsJson,
         existingJson: existingManagedCredentialsJson,
-        equalExpiry: 'write'
+        equalExpiry: 'write',
+        unknownExistingExpiry: 'write'
       }) === 'keep-existing'
     ) {
       return

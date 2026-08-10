@@ -148,19 +148,37 @@ describe('credential-freshness', () => {
     ).toBe('keep-existing')
   })
 
-  it('writes candidate when existing has no usable expiresAt', () => {
+  it('keeps an unknown-expiry existing credential unless candidate direction is trusted', () => {
+    const candidateJson = credentials({
+      email: 'a@example.com',
+      accessToken: 'dated',
+      expiresAt: 1_000
+    })
+    const missingExpiryJson = credentials({
+      email: 'a@example.com',
+      accessToken: 'missing',
+      omitExpiresAt: true
+    })
+    const stringExpiryJson = credentials({
+      email: 'a@example.com',
+      accessToken: 'string-expiry',
+      expiresAt: '9999999999999'
+    })
+
     expect(
       decideMonotonicCredentialWrite({
-        candidateJson: credentials({
-          email: 'a@example.com',
-          accessToken: 'dated',
-          expiresAt: 9_000
-        }),
-        existingJson: credentials({
-          email: 'a@example.com',
-          accessToken: 'missing',
-          omitExpiresAt: true
-        })
+        candidateJson,
+        existingJson: missingExpiryJson
+      })
+    ).toBe('keep-existing')
+    expect(decideMonotonicCredentialWrite({ candidateJson, existingJson: stringExpiryJson })).toBe(
+      'keep-existing'
+    )
+    expect(
+      decideMonotonicCredentialWrite({
+        candidateJson,
+        existingJson: missingExpiryJson,
+        unknownExistingExpiry: 'write'
       })
     ).toBe('write')
   })

@@ -21,11 +21,13 @@ export function readCredentialExpiresAt(credentialsJson: string): number | null 
 
 /**
  * Identity/account-switch decisions belong to the caller, which has account metadata.
+ * Unknown existing expiry is preserved unless the caller proves candidate direction.
  */
 export function decideMonotonicCredentialWrite(input: {
   candidateJson: string
   existingJson: string | null
   equalExpiry?: 'write' | 'keep-existing'
+  unknownExistingExpiry?: 'write' | 'keep-existing'
 }): CredentialWriteDecision {
   const { candidateJson, existingJson } = input
   if (existingJson === null || existingJson === '') {
@@ -47,7 +49,7 @@ export function decideMonotonicCredentialWrite(input: {
     return 'keep-existing'
   }
   if (existingExpiresAt === null) {
-    return 'write'
+    return input.unknownExistingExpiry ?? 'keep-existing'
   }
   if (candidateExpiresAt < existingExpiresAt) {
     return 'keep-existing'
