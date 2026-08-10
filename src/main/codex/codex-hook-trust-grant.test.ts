@@ -17,6 +17,7 @@ import {
 } from './codex-hook-trust-grant'
 import { setCodexTrustGrantTelemetry } from './codex-trust-grant-telemetry'
 import { readCodexTrustGrantLedgerHome } from './codex-trust-grant-ledger'
+import { MANAGED_HOOK_TIMEOUT_SECONDS } from '../agent-hooks/installer-utils'
 import {
   computeTrustKey,
   computeTrustedHash,
@@ -66,7 +67,7 @@ function managedEntry(eventLabel: CodexTrustEntry['eventLabel']): CodexTrustEntr
     groupIndex: 0,
     handlerIndex: 0,
     command: MANAGED_COMMAND,
-    timeoutSec: 10
+    timeoutSec: MANAGED_HOOK_TIMEOUT_SECONDS
   }
 }
 
