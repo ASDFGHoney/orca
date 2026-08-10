@@ -201,4 +201,12 @@ describe('credential-freshness', () => {
     expect(pickFreshestCredentialsJson([stale, null, fresh, mid, 'not-json'])).toBe(fresh)
     expect(pickFreshestCredentialsJson([null, undefined, ''])).toBeNull()
   })
+
+  it('preserves store precedence when finite and unknown expiries are incomparable', () => {
+    const unknown = credentials({ accessToken: 'unknown', expiresAt: '9999999999999' })
+    const finite = credentials({ accessToken: 'finite', expiresAt: 1_000 })
+
+    expect(pickFreshestCredentialsJson([unknown, finite])).toBe(unknown)
+    expect(pickFreshestCredentialsJson([finite, unknown])).toBe(finite)
+  })
 })

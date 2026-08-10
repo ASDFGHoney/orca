@@ -87,6 +87,7 @@ type ClaudeKeychainSnapshotValue =
   | { status: 'captured'; credentialsJson: string | null }
   | { status: 'unknown' }
 type ClaudeRefreshTokenComparison = 'same' | 'different' | 'missing'
+type ClaudeCredentialCandidateProvenance = 'unverified' | 'verified-refresh' | 'verified-adoption'
 type ClaudeRuntimeCredentialCandidate = {
   credentialsJson: string
   runtimeOauthAccount: unknown
@@ -368,6 +369,7 @@ export class ClaudeRuntimeAuthService {
 
     // Why: the CLI writes refreshed tokens to .credentials.json; if runtime differs from our last write, preserve them to managed storage before overwriting.
     let runtimeCredentialObservation: ClaudeRuntimeCredentialObservation | undefined
+    let candidateProvenance: ClaudeCredentialCandidateProvenance = 'unverified'
     if (this.lastSyncedAccountId === activeAccount.id) {
       if (preferManagedSnapshot) {
         this.skipNextReadBackForAccountId = null
@@ -389,6 +391,7 @@ export class ClaudeRuntimeAuthService {
           const updatedCredentialsJson = await this.readManagedCredentials(activeAccount)
           if (updatedCredentialsJson && this.isValidCredentialsJsonObject(updatedCredentialsJson)) {
             credentialsJson = updatedCredentialsJson
+            candidateProvenance = 'verified-adoption'
           }
         } else if (
           readBackResult.status === 'rejected' &&
@@ -409,6 +412,7 @@ export class ClaudeRuntimeAuthService {
             // Why: this Claude launched under the active managed account, but persistence still needs positive account proof.
             await this.writeManagedCredentials(activeAccount, readBackResult.runtimeCredentialsJson)
             credentialsJson = readBackResult.runtimeCredentialsJson
+            candidateProvenance = 'verified-adoption'
           } else {
             // Why: while Claude runs, an unknown refresh may belong to a live session; rewriting stale managed auth logs it out.
             console.warn(
@@ -436,6 +440,7 @@ export class ClaudeRuntimeAuthService {
       )
       if (refreshed) {
         credentialsJson = refreshed
+        candidateProvenance = 'verified-refresh'
       }
     }
 
@@ -449,7 +454,8 @@ export class ClaudeRuntimeAuthService {
         activeAccount,
         credentialsJson,
         runtimeCredentialObservation,
-        preferCandidateOnEqual
+        preferCandidateOnEqual,
+        candidateProvenance
       )
       if (guardedCredentialsJson !== credentialsJson) {
         runtimeCredentialsToAdopt = guardedCredentialsJson
@@ -461,7 +467,8 @@ export class ClaudeRuntimeAuthService {
         activeAccount,
         credentialsJson,
         managedCredentialsJson,
-        preferCandidateOnEqual
+        preferCandidateOnEqual,
+        candidateProvenance
       )
       if (protectedCredentialsJson !== credentialsJson) {
         runtimeCredentialsToAdopt = protectedCredentialsJson
@@ -623,7 +630,8 @@ export class ClaudeRuntimeAuthService {
           match.account,
           runtimeContents,
           match.managedCredentialsJson,
-          !runtimeCredentialsChangedWhilePersisting
+          !runtimeCredentialsChangedWhilePersisting,
+          'verified-adoption'
         )
         this.writeRuntimeCredentials(credentialsToPublish)
         this.lastWrittenCredentialsJson = credentialsToPublish
@@ -1132,7 +1140,8 @@ export class ClaudeRuntimeAuthService {
     account: ClaudeManagedAccount,
     candidateCredentialsJson: string,
     observation: ClaudeRuntimeCredentialObservation | undefined,
-    preferCandidateOnEqual: boolean
+    preferCandidateOnEqual: boolean,
+    candidateProvenance: ClaudeCredentialCandidateProvenance
   ): Promise<string> {
     const existingRuntimeCredentialsJson = await this.readFreshestSharedRuntimeCredentials(
       account,
@@ -1143,7 +1152,8 @@ export class ClaudeRuntimeAuthService {
       decideMonotonicCredentialWrite({
         candidateJson: candidateCredentialsJson,
         existingJson: existingRuntimeCredentialsJson,
-        equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing'
+        equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing',
+        unknownExistingExpiry: candidateProvenance === 'unverified' ? 'keep-existing' : 'write'
       }) === 'write' ||
       existingRuntimeCredentialsJson === null
     ) {
@@ -1160,7 +1170,8 @@ export class ClaudeRuntimeAuthService {
     account: ClaudeManagedAccount,
     candidateCredentialsJson: string,
     managedCredentialsJson: string,
-    preferCandidateOnEqual: boolean
+    preferCandidateOnEqual: boolean,
+    candidateProvenance: ClaudeCredentialCandidateProvenance
   ): string {
     const paths = this.pathResolver.getRuntimePaths()
     const currentCredentialsJson = existsSync(paths.credentialsPath)
@@ -1182,7 +1193,8 @@ export class ClaudeRuntimeAuthService {
     return decideMonotonicCredentialWrite({
       candidateJson: candidateCredentialsJson,
       existingJson: currentCredentialsJson,
-      equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing'
+      equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing',
+      unknownExistingExpiry: candidateProvenance === 'unverified' ? 'keep-existing' : 'write'
     }) === 'keep-existing'
       ? currentCredentialsJson
       : candidateCredentialsJson

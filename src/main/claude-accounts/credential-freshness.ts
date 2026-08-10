@@ -75,7 +75,8 @@ export function pickFreshestCredentialsJson(
       freshestExpiresAt = expiresAt
       continue
     }
-    if (expiresAt !== null && (freshestExpiresAt === null || expiresAt > freshestExpiresAt)) {
+    // Why: an unknown expiry is incomparable; preserve the caller's store precedence.
+    if (expiresAt !== null && freshestExpiresAt !== null && expiresAt > freshestExpiresAt) {
       freshest = candidate
       freshestExpiresAt = expiresAt
     }
