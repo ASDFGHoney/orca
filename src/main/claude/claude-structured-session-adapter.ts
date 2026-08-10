@@ -17,7 +17,10 @@ import {
   readClaudeInit,
   readClaudeModels
 } from './claude-structured-init-proof'
-import { createClaudeInitDeadline } from './claude-structured-init-deadline'
+import {
+  createClaudeInitDeadline,
+  requestClaudeInitialization
+} from './claude-structured-init-deadline'
 import { supportsClaudeStructuredLocation } from './claude-structured-location-support'
 import { CLAUDE_SPAWN_TOKEN_ENV, claudeProcessIdentity } from './claude-structured-owner-identity'
 import { setClaudeStructuredOption } from './claude-structured-options'
@@ -45,7 +48,7 @@ export type {
   ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
 
-const INIT_TIMEOUT_MS = 30_000
+export const CLAUDE_STRUCTURED_INIT_TIMEOUT_MS = 10_000
 const DISPATCH_ACK_TIMEOUT_MS = 10_000
 
 export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAdapter {
@@ -68,7 +71,8 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
     let observedLeafUuid: string | null = null
-    const initDeadline = createClaudeInitDeadline(sessionId, INIT_TIMEOUT_MS)
+    const initTimeoutMs = this.deps.initTimeoutMs ?? CLAUDE_STRUCTURED_INIT_TIMEOUT_MS
+    const initDeadline = createClaudeInitDeadline(sessionId, initTimeoutMs)
 
     const onMessage = (message: Record<string, unknown>): void => {
       const init = readClaudeInit(message)
@@ -141,11 +145,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       this.acquisitions.assertCurrent(sessionId, attempt)
       initDeadline.start()
       const [initialization, init] = await Promise.all([
-        connection.request(
-          'initialize',
-          { supportedDialogKinds: [] },
-          { timeoutMs: this.deps.requestTimeoutMs }
-        ),
+        requestClaudeInitialization(connection, sessionId, initTimeoutMs),
         initDeadline.promise
       ])
       const models = readClaudeModels(initialization)

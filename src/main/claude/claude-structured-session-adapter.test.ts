@@ -3,6 +3,7 @@ import type {
   AgentJournalMessageItem,
   AgentSessionJournalIdentity
 } from '../../shared/agent-session-journal-types'
+import { AgentSessionAcquisitionRefusal } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type {
   ClaudeStreamJsonConnection,
   ClaudeStreamJsonConnectionHandlers,
@@ -13,6 +14,7 @@ import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import { CLAUDE_SPAWN_TOKEN_ENV } from './claude-structured-owner-identity'
 import { encodeClaudeQuestionOptionId } from './claude-structured-prompt-replies'
 import {
+  CLAUDE_STRUCTURED_INIT_TIMEOUT_MS,
   ClaudeStructuredSessionAdapter,
   type ClaudeStructuredLaunch,
   type ClaudeStructuredSessionEvent
@@ -54,6 +56,8 @@ function fakeClaude(
     initUuid?: string
     initModel?: string
     initEffort?: string
+    initProof?: 'init' | 'session-start' | 'none'
+    initAccount?: unknown
     exitBeforeInit?: string
     settings?: unknown
     replayUuid?: string | null
@@ -83,16 +87,29 @@ function fakeClaude(
             handlers.onExit?.(new Error(options.exitBeforeInit))
             return { models: [] }
           }
-          handlers.onMessage?.({
-            type: 'system',
-            subtype: 'init',
-            session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
-            uuid: options.initUuid ?? 'init-uuid',
-            model: options.initModel ?? 'claude-sonnet-5',
-            effortLevel: options.initEffort ?? 'high',
-            apiKeySource: 'none'
-          })
-          return { models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }] }
+          if (options.initProof === 'session-start') {
+            handlers.onMessage?.({
+              type: 'system',
+              subtype: 'hook_started',
+              hook_name: 'SessionStart:startup',
+              session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
+              uuid: options.initUuid ?? 'init-uuid'
+            })
+          } else if (options.initProof !== 'none') {
+            handlers.onMessage?.({
+              type: 'system',
+              subtype: 'init',
+              session_id: options.initSessionId ?? PROVIDER_SESSION_ID,
+              uuid: options.initUuid ?? 'init-uuid',
+              model: options.initModel ?? 'claude-sonnet-5',
+              effortLevel: options.initEffort ?? 'high',
+              apiKeySource: 'none'
+            })
+          }
+          return {
+            models: [{ value: 'claude-sonnet', displayName: 'Sonnet' }],
+            ...(options.initAccount === undefined ? {} : { account: options.initAccount })
+          }
         }
         if (subtype === 'get_settings') {
           return options.settings ?? { env: {} }
@@ -130,7 +147,8 @@ function adapterFor(
   claude: ReturnType<typeof fakeClaude>,
   launch: Partial<ClaudeStructuredLaunch> = {},
   events: ClaudeStructuredSessionEvent[] = [],
-  persistedHandles: unknown[] = []
+  persistedHandles: unknown[] = [],
+  initTimeoutMs?: number
 ): ClaudeStructuredSessionAdapter {
   return new ClaudeStructuredSessionAdapter({
     resolveLaunch: async () => ({
@@ -147,6 +165,7 @@ function adapterFor(
     openConnection: claude.openConnection,
     readProcessStartTime: async () => 1_700_000_000_000,
     now: () => 1_700_000_000_500,
+    ...(initTimeoutMs === undefined ? {} : { initTimeoutMs }),
     dispatchAckTimeoutMs: 10,
     persistHandle: async (handle) => {
       persistedHandles.push(handle)
@@ -165,6 +184,10 @@ async function acquired(
 }
 
 describe('ClaudeStructuredSessionAdapter.acquire', () => {
+  it('finishes its startup deadline before the paired mobile request deadline', () => {
+    expect(CLAUDE_STRUCTURED_INIT_TIMEOUT_MS).toBeLessThan(30_000)
+  })
+
   it('pins the account, proves init, and reports the process and chain leaf', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
@@ -221,6 +244,28 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
       CLAUDE_CONFIG_DIR: '/accounts/claude',
       [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
+    })
+  })
+
+  it('accepts SessionStart as the pre-turn session proof from the real CLI protocol', async () => {
+    const claude = fakeClaude({ initProof: 'session-start', initUuid: 'session-start-uuid' })
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events)
+
+    const acquisition = await adapter.acquire({
+      identity: identityFor(),
+      fence: 7,
+      spawnToken: 'spawn-9'
+    })
+
+    expect(acquisition.link.handle).toEqual({
+      provider: 'claude',
+      sessionId: PROVIDER_SESSION_ID,
+      leafUuid: 'session-start-uuid'
+    })
+    expect(events[0]).toMatchObject({
+      type: 'message',
+      message: { subtype: 'hook_started', hook_name: 'SessionStart:startup' }
     })
   })
 
@@ -285,6 +330,38 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     await expect(
       adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
     ).rejects.toThrow('Claude login required')
+    expect(claude.connections[0].closeCount).toBe(1)
+  })
+
+  it('closes a silent unauthenticated startup with actionable account guidance', async () => {
+    const claude = fakeClaude({ initProof: 'none' })
+    const adapter = adapterFor(claude, {}, [], [], 20)
+
+    const error = await adapter
+      .acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+      .catch((cause: unknown) => cause)
+
+    expect(error).toBeInstanceOf(AgentSessionAcquisitionRefusal)
+    expect(error).toMatchObject({
+      message: expect.stringMatching(/selected Claude account is signed in.*CLAUDE_CONFIG_DIR/s)
+    })
+    expect(claude.connections[0].calls[0]).toEqual({
+      subtype: 'initialize',
+      params: { supportedDialogKinds: [] }
+    })
+    expect(claude.connections[0].closeCount).toBe(1)
+  })
+
+  it('refuses an unauthenticated initialize response even when SessionStart runs', async () => {
+    const claude = fakeClaude({
+      initProof: 'session-start',
+      initAccount: { apiProvider: 'firstParty', tokenSource: 'none' }
+    })
+    const adapter = adapterFor(claude)
+
+    await expect(
+      adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    ).rejects.toThrow(/not signed in.*Claude CLI.*CLAUDE_CONFIG_DIR/s)
     expect(claude.connections[0].closeCount).toBe(1)
   })
 })

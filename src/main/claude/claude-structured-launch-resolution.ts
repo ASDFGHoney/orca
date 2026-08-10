@@ -8,7 +8,7 @@ import { getSpawnArgsForWindows } from '../win32-utils'
 
 export const CLAUDE_DEFAULT_SETTING_SOURCES = ['user', 'project', 'local'] as const
 
-const BASE_ARGS = [
+export const CLAUDE_STRUCTURED_BASE_ARGS = [
   '-p',
   '--input-format',
   'stream-json',
@@ -81,7 +81,10 @@ export function createClaudeStructuredLaunchResolver(
         ? ['--resume', providerSessionId]
         : ['--session-id', providerSessionId]
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
-    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [...BASE_ARGS, ...providerArgs])
+    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
+      ...CLAUDE_STRUCTURED_BASE_ARGS,
+      ...providerArgs
+    ])
     return {
       command: spawnCmd,
       args: spawnArgs,

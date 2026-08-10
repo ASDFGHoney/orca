@@ -44,6 +44,7 @@ type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
 
 function fakeClaude() {
   const connections: FakeClaudeConnection[] = []
+  let initializeAccount: unknown
   const openConnection = (async (launch, handlers = {}) => {
     const connection: FakeClaudeConnection = {
       launch,
@@ -64,7 +65,10 @@ function fakeClaude() {
             model: 'claude-sonnet-5',
             apiKeySource: 'none'
           })
-          return { models: [{ value: 'sonnet', displayName: 'Sonnet' }] }
+          return {
+            models: [{ value: 'sonnet', displayName: 'Sonnet' }],
+            ...(initializeAccount === undefined ? {} : { account: initializeAccount })
+          }
         }
         return subtype === 'get_settings' ? { env: {} } : {}
       },
@@ -92,7 +96,14 @@ function fakeClaude() {
     }
     return connection
   }
-  return { connections, openConnection, live }
+  return {
+    connections,
+    openConnection,
+    live,
+    setInitializeAccount: (account: unknown) => {
+      initializeAccount = account
+    }
+  }
 }
 
 let operations = 0
@@ -267,6 +278,27 @@ afterEach(async () => {
 })
 
 describe('a structured Claude session over agentSession.*', () => {
+  it('durably returns actionable sign-in guidance when initialization has no credentials', async () => {
+    claude.setInitializeAccount({ apiProvider: 'firstParty', tokenSource: 'none' })
+    const params = createIntentParams()
+
+    const first = await call('agentSession.create', params)
+    const retry = await call('agentSession.create', params)
+
+    expect(first).toMatchObject({
+      ok: true,
+      result: {
+        ok: false,
+        refusal: {
+          code: 'agent_session_operation_invalid',
+          message: expect.stringMatching(/not signed in.*Claude CLI.*CLAUDE_CONFIG_DIR/s)
+        }
+      }
+    })
+    expect((retry as { result: unknown }).result).toEqual((first as { result: unknown }).result)
+    expect(claude.connections).toHaveLength(1)
+  })
+
   it('creates, sends, streams, approves, interrupts, and resumes from the chain head', async () => {
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
     expect(claude.live().launch.args).toContain('--session-id')

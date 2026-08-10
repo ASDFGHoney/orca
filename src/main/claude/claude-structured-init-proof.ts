@@ -1,5 +1,6 @@
 import { CLAUDE_DEFAULT_SETTING_SOURCES } from './claude-structured-launch-resolution'
 import type { ClaudeAuthDiagnostic } from './claude-structured-session-state'
+import { AgentSessionAcquisitionRefusal } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 
 export type ClaudeInitObservation = {
   providerSessionId: string
@@ -17,14 +18,20 @@ export function readClaudeFrameString(source: Record<string, unknown>, key: stri
 }
 
 export function readClaudeInit(message: Record<string, unknown>): ClaudeInitObservation | null {
-  if (message.type !== 'system' || message.subtype !== 'init') {
+  const hookName = readClaudeFrameString(message, 'hook_name')
+  const isInit = message.type === 'system' && message.subtype === 'init'
+  const isSessionStart =
+    message.type === 'system' &&
+    (message.subtype === 'hook_started' || message.subtype === 'hook_response') &&
+    hookName?.startsWith('SessionStart:') === true
+  if (!isInit && !isSessionStart) {
     return null
   }
   const providerSessionId = readClaudeFrameString(message, 'session_id')
   return providerSessionId
     ? {
         providerSessionId,
-        uuid: readClaudeFrameString(message, 'uuid'),
+        uuid: isInit ? readClaudeFrameString(message, 'uuid') : null,
         message
       }
     : null
@@ -34,6 +41,18 @@ export function readClaudeModels(initialization: unknown): unknown[] {
   return isRecord(initialization) && Array.isArray(initialization.models)
     ? initialization.models
     : []
+}
+
+export function claudeInitializationAuthError(
+  initialization: unknown
+): AgentSessionAcquisitionRefusal | null {
+  const account =
+    isRecord(initialization) && isRecord(initialization.account) ? initialization.account : null
+  return readClaudeFrameString(account ?? {}, 'tokenSource') === 'none'
+    ? new AgentSessionAcquisitionRefusal(
+        'Claude is not signed in for the selected account. Sign in with the Claude CLI for this CLAUDE_CONFIG_DIR, then retry.'
+      )
+    : null
 }
 
 export function claudeAuthDiagnostic(

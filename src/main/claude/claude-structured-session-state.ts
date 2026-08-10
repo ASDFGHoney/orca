@@ -41,6 +41,7 @@ export type ClaudeStructuredSessionAdapterDeps = {
   mintLinkId?: () => string
   now?: () => number
   requestTimeoutMs?: number
+  initTimeoutMs?: number
   dispatchAckTimeoutMs?: number
   persistHandle?: (input: {
     sessionId: string

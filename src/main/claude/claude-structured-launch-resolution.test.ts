@@ -4,6 +4,7 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import {
   CLAUDE_DEFAULT_SETTING_SOURCES,
+  CLAUDE_STRUCTURED_BASE_ARGS,
   claudeSessionIdForOrcaSession,
   createClaudeStructuredLaunchResolver
 } from './claude-structured-launch-resolution'
@@ -58,6 +59,7 @@ describe('claude structured launch resolution', () => {
     expect(first.args).toContain('stdio')
     expect(first.args).toContain('--setting-sources')
     expect(first.args).toContain(CLAUDE_DEFAULT_SETTING_SOURCES.join(','))
+    expect(CLAUDE_STRUCTURED_BASE_ARGS).toContain('--verbose')
   })
 
   it('resumes the session and leaf at the durable chain head', async () => {

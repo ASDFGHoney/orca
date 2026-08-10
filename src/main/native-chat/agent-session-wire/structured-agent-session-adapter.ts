@@ -16,8 +16,21 @@ import type {
   AgentSessionExecutionLocation,
   AgentSessionProcessIdentity
 } from '../../../shared/agent-session-record'
-import type { AgentSessionOptionsResult } from '../../../shared/agent-session-wire'
+import type {
+  AgentSessionOptionsResult,
+  AgentSessionWireRefusalCode
+} from '../../../shared/agent-session-wire'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
+
+export class AgentSessionAcquisitionRefusal extends Error {
+  constructor(
+    message: string,
+    readonly code: AgentSessionWireRefusalCode = 'agent_session_operation_invalid'
+  ) {
+    super(message)
+    this.name = 'AgentSessionAcquisitionRefusal'
+  }
+}
 
 /** What a reservation turns into once something is actually running under it:
  *  the process the host can probe, and the provider handle it was minted with. */
