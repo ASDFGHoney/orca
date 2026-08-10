@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { VirtualItem } from '@tanstack/react-virtual'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import {
+  HOST_HEADER_INNER_TOP_PADDING,
   HOST_STICKY_GROUP_TOP_PX,
   HOST_STICKY_PINNED_HEIGHT,
   buildLineageRowRekeyMap,
@@ -207,9 +208,11 @@ describe('getActiveStickyIndexesForScroll', () => {
       groupRow('b1'),
       itemStub('wt-2')
     ]
-    expect(estimateRenderRowSize(multiGroupRows, 0, 0, null)).toBe(HOST_STICKY_PINNED_HEIGHT)
-    expect(estimateRenderRowSize(multiGroupRows, 3, 0, null)).toBe(HOST_STICKY_PINNED_HEIGHT + 4)
-    expect(HOST_STICKY_GROUP_TOP_PX).toBe(HOST_STICKY_PINNED_HEIGHT - 1)
+    expect(HOST_HEADER_INNER_TOP_PADDING).toBe(4)
+    expect(HOST_STICKY_PINNED_HEIGHT).toBe(36)
+    expect(estimateRenderRowSize(multiGroupRows, 0, 0, null)).toBe(36)
+    expect(estimateRenderRowSize(multiGroupRows, 3, 0, null)).toBe(40)
+    expect(HOST_STICKY_GROUP_TOP_PX).toBe(35)
 
     const multiSticky = getStickyHeaderIndexes(multiGroupRows)
     const gap = 6
