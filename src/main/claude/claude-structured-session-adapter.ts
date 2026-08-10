@@ -24,6 +24,7 @@ import { setClaudeStructuredOption } from './claude-structured-options'
 import { ClaudePromptRegistry } from './claude-structured-prompt-replies'
 import { readClaudeStructuredSessionOptions } from './claude-structured-session-options'
 import { createClaudeSessionPublication } from './claude-structured-session-publication'
+import { createClaudeSessionJournalTranslator } from './claude-structured-journal-translation'
 import {
   cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
@@ -34,7 +35,7 @@ import {
 } from './claude-structured-session-state'
 import {
   closeClaudePublishedSession,
-  settleClaudeDispatchWaiters
+  settleClaudeExitedSession
 } from './claude-structured-session-close'
 
 export type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
@@ -63,6 +64,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
   }): Promise<AgentSessionAcquisition> {
     const sessionId = input.identity.sessionId
     const prompts = new ClaudePromptRegistry()
+    const translator = createClaudeSessionJournalTranslator(input.events, prompts)
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
     let observedLeafUuid: string | null = null
@@ -183,6 +185,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         fence: input.fence,
         resumed: launch.resumed,
         prompts,
+        translator,
         events: input.events,
         process,
         ...(this.deps.mintLinkId ? { linkId: this.deps.mintLinkId() } : {}),
@@ -202,6 +205,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       initDeadline.clear()
       this.acquisitions.deleteIfCurrent(sessionId, attempt)
       if (this.sessions.get(sessionId)?.connection !== attempt.connection) {
+        translator?.dispose()
         prompts.clear()
         await attempt.connection?.close()
       }
@@ -227,9 +231,8 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       return
     }
     this.sessions.delete(sessionId)
-    settleClaudeDispatchWaiters(session)
-    session.prompts.clear()
     this.emit(session, session.events, { type: 'ended', sessionId, reason: error.message })
+    settleClaudeExitedSession(session)
   }
 
   private emit(
@@ -237,6 +240,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     _events: StructuredAgentSessionEventSink | undefined,
     event: ClaudeStructuredSessionEvent
   ): void {
+    _session?.translator?.handle(event)
     this.deps.onEvent?.(event)
   }
 

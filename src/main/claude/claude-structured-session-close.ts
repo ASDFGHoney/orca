@@ -7,6 +7,12 @@ export function settleClaudeDispatchWaiters(session: ClaudeSession): void {
   }
 }
 
+export function settleClaudeExitedSession(session: ClaudeSession): void {
+  settleClaudeDispatchWaiters(session)
+  session.prompts.clear()
+  session.translator?.dispose()
+}
+
 export async function closeClaudePublishedSession(input: {
   sessions: Map<string, ClaudeSession>
   sessionId: string
@@ -53,11 +59,14 @@ export async function closeClaudePublishedSession(input: {
   } catch (error) {
     persistenceError = error
   } finally {
-    input.onEvent?.({
+    const ended = {
       type: 'ended',
       sessionId: input.sessionId,
       reason: 'claude session closed'
-    })
+    } as const
+    session.translator?.handle(ended)
+    input.onEvent?.(ended)
+    session.translator?.dispose()
     await session.connection.close()
   }
   if (persistenceError) {

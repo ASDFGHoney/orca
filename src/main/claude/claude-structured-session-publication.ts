@@ -2,6 +2,7 @@ import type { AgentSessionAcquisition } from '../native-chat/agent-session-wire/
 import { readClaudeFrameString, type ClaudeInitObservation } from './claude-structured-init-proof'
 import { claudeProviderHandleLink } from './claude-structured-owner-identity'
 import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 export function createClaudeSessionPublication(input: {
@@ -11,6 +12,7 @@ export function createClaudeSessionPublication(input: {
   fence: number
   resumed: boolean
   prompts: ClaudePromptRegistry
+  translator: ClaudeJournalTranslator | null
   events: ClaudeSession['events']
   process: AgentSessionAcquisition['process']
   linkId?: string
@@ -42,6 +44,7 @@ export function createClaudeSessionPublication(input: {
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {})
       },
+      translator: input.translator,
       events: input.events
     }
   }

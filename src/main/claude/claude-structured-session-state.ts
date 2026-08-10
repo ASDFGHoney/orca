@@ -5,6 +5,7 @@ import type {
   openClaudeStreamJsonConnection
 } from './claude-stream-json-connection'
 import type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
+import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
 import type { ClaudePendingPrompt, ClaudePromptRegistry } from './claude-structured-prompt-replies'
 
 export type ClaudeAuthDiagnostic = {
@@ -63,6 +64,7 @@ export type ClaudeSession = {
   dispatchWaiters: ClaudeDispatchWaiter[]
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
+  translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
 }
 
