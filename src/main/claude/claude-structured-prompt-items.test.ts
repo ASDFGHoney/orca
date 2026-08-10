@@ -33,4 +33,46 @@ describe('Claude structured question addressing', () => {
       updatedInput: { answers: { [questionId]: label } }
     })
   })
+
+  it('preserves colon-containing free-text answers', () => {
+    const questionId = 'Where should this run?'
+    const prompt: ClaudePendingPrompt = {
+      requestId: 'question-1',
+      promptKey: 'question-1',
+      toolUseId: 'tool-1',
+      toolName: 'AskUserQuestion',
+      kind: 'question',
+      input: { questions: [{ question: questionId }] },
+      suggestions: [],
+      questionIds: [questionId],
+      answers: new Map(),
+      request: { subtype: 'can_use_tool' }
+    }
+    const answer = 'https://example.test:8443/path'
+
+    expect(applyClaudePromptAnswer({ prompt }, answer)).toMatchObject({
+      updatedInput: { answers: { [questionId]: answer } }
+    })
+  })
+
+  it('preserves comma-separated multi-select answers', () => {
+    const questionId = 'Which targets?'
+    const prompt: ClaudePendingPrompt = {
+      requestId: 'question-1',
+      promptKey: 'question-1',
+      toolUseId: 'tool-1',
+      toolName: 'AskUserQuestion',
+      kind: 'question',
+      input: { questions: [{ question: questionId, multiSelect: true }] },
+      suggestions: [],
+      questionIds: [questionId],
+      answers: new Map(),
+      request: { subtype: 'can_use_tool' }
+    }
+    const answer = 'frontend, backend'
+
+    expect(applyClaudePromptAnswer({ prompt, questionId }, answer)).toMatchObject({
+      updatedInput: { answers: { [questionId]: answer } }
+    })
+  })
 })

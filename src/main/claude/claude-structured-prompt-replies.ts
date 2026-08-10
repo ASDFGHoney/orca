@@ -45,12 +45,22 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
     return optionId
   }
   const questionIndex = prompt.questionIds.indexOf(questionId)
+  if (questionIndex < 0) {
+    return optionId
+  }
   const choice = /^choice-([1-9]\d*)$/.exec(decoded.answer)
   const optionIndex = choice ? Number(choice[1]) - 1 : -1
   const question = questionsFrom(prompt.input)[questionIndex]
-  const option = Array.isArray(question?.options) ? question.options[optionIndex] : null
+  const options = Array.isArray(question?.options) ? question.options : []
+  const option = options[optionIndex]
   const label = isRecord(option) ? readString(option.label) : null
-  return decoded.questionId === `q${questionIndex + 1}` && label ? label : decoded.answer
+  if (decoded.questionId === `q${questionIndex + 1}` && label) {
+    return label
+  }
+  const legacyChoice = options.some(
+    (candidate) => isRecord(candidate) && readString(candidate.label) === decoded.answer
+  )
+  return decoded.questionId === questionId && legacyChoice ? decoded.answer : optionId
 }
 
 function questionId(question: Record<string, unknown>, index: number): string {
@@ -180,10 +190,13 @@ function questionResponse(
   boundQuestionId?: string
 ): Record<string, unknown> | null {
   const decoded = decodeClaudeQuestionOptionId(optionId)
+  const decodedQuestionId = decoded
+    ? (questionIdFromAddress(prompt, decoded.questionId) ??
+      (prompt.questionIds.includes(decoded.questionId) ? decoded.questionId : null))
+    : null
   const selectedQuestionId =
     boundQuestionId ??
-    (decoded ? questionIdFromAddress(prompt, decoded.questionId) : null) ??
-    decoded?.questionId ??
+    decodedQuestionId ??
     (prompt.questionIds.length === 1 ? prompt.questionIds[0] : null)
   if (!selectedQuestionId || !prompt.questionIds.includes(selectedQuestionId)) {
     throw new Error(`${optionId} does not name a question on Claude prompt ${prompt.promptKey}`)
