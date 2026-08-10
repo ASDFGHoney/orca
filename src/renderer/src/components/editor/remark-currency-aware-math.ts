@@ -2,308 +2,276 @@ import { mathFromMarkdown } from 'mdast-util-math'
 import { math } from 'micromark-extension-math'
 import type { Processor } from 'unified'
 
-const NUMERIC_PREFIX =
-  /^[+\-−＋－]?(?:(?:\p{Nd}{1,3}(?:[,，]\p{Nd}{3})+|\p{Nd}+)(?:[.．]\p{Nd}+)?|[.．]\p{Nd}+)/u
-const PURE_CURRENCY_AMOUNT =
-  /^[+\-−＋－]?(?:(?:\p{Nd}{1,3}(?:[,，]\p{Nd}{3})+|\p{Nd}+)(?:[.．]\p{Nd}+)?|[.．]\p{Nd}+)$/u
-const RANGE_SEPARATOR = /[+\-−＋－–—→~～〜]$/u
-const CURRENCY_RANGE_PREFIX =
-  /^\s*[-−－–—→~～〜]\s*[+\-−＋－]?(?:(?:\p{Nd}{1,3}(?:[,，]\p{Nd}{3})+|\p{Nd}+)(?:[.．]\p{Nd}+)?|[.．]\p{Nd}+)/u
-const ENGLISH_CURRENCY_RANGE_SUFFIX = /^[+\-−＋－]?\s+(?:\p{L}+\s+)*to$/iu
-const COMPACT_ESCAPED_VALUE = /^[^\s$]+$/u
-const CJK_PROSE_AFTER_AMOUNT = /^(?:[/／])?[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
-const CJK_PROSE_AFTER_PUNCTUATION =
-  /[;:；：,，。！？!?、][\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
-const MARKDOWN_PROSE_AFTER_CURRENCY = /`|\]\([^)]*\)/u
-const MATH_SIGNAL = /[\\^_={}+]|(?:^|\s)[*/](?:\s|$)/u
-const NUMERIC_MATH_PROSE = /\b(?:roots?|solutions?|zeros?|eigenvalues?)\s+(?:are|is)\s*$/iu
-const NUMERIC_MATH_CONNECTOR = /^\s*(?:,|and|or)\s*$/iu
-const PROSE_AFTER_CLOSER = /[\s,.;:!?，。；：！？、]/u
-const MAX_NUMERIC_MATH_CONTEXT_LENGTH = 80
+const SIGN = '[+\\-−＋－]?'
+const DIGIT = '\\p{Nd}'
+const NUMBER_SEPARATOR = "[.,，．'’\\u00a0\\u202f ]"
+const NUMBER_BODY = `(?:${DIGIT}+(?:${NUMBER_SEPARATOR}${DIGIT}+)*|[.．]${DIGIT}+)`
+const EXPONENT = `(?:[eE]${SIGN}${DIGIT}+)?`
+const NUMERIC_LITERAL = `${SIGN}${NUMBER_BODY}${EXPONENT}`
+const LEADING_NUMERIC_LITERAL = new RegExp(`^${NUMERIC_LITERAL}`, 'u')
+const PURE_NUMERIC_LITERAL = new RegExp(`^${NUMERIC_LITERAL}$`, 'u')
+const STRONG_MATH_SYNTAX = /[\\^_={}]/u
+const NUMERIC_BINARY_EXPRESSION = new RegExp(
+  `^\\s*(?:[+\\-−＋－*/<>→~～〜–—]|\\p{L}+)\\s*${NUMERIC_LITERAL}\\s*$`,
+  'u'
+)
+const SYMBOLIC_BINARY_EXPRESSION =
+  /^\s*[+\-−＋－*/<>]\s*[\p{L}\p{Nl}](?:[_^][\p{L}\p{Nl}\p{Nd}{}]+)?\s*$/u
+const CURRENCY_RANGE_SYNTAX = /[→~～〜–—]/u
+const PROSE_BOUNDARY = /[\s;:；：,，。！？!?、]/u
+const COMPACT_VALUE = /^[^\s$]+$/u
+const FIRST_CURRENCY_MARKER = 0xe000
+const LAST_CURRENCY_MARKER = 0xf8ff
 
-type MathTextConstruct = Exclude<
-  NonNullable<NonNullable<ReturnType<typeof math>['text']>[36]>,
-  unknown[]
->
-type MathTextTokenizer = MathTextConstruct['tokenize']
-type MathTokenizeContext = ThisParameterType<MathTextTokenizer>
+type MaskedMarkdown = { marker: string; source: string }
+type SourceRange = { end: number; start: number }
 
-function startsNumericPrefix(code: number | null): boolean {
-  return code !== null && code >= 0 && /[+\-−＋－.．\p{Nd}]/u.test(String.fromCodePoint(code))
-}
-
-function continuesCurrencyAmount(code: number | null): boolean {
-  return code !== null && code >= 0 && /[+\-−＋－.．,，\p{Nd}]/u.test(String.fromCodePoint(code))
-}
-
-function startsProseAfterCloser(code: number | null): boolean {
-  return code === null || code < 0 || PROSE_AFTER_CLOSER.test(String.fromCodePoint(code))
-}
-
-function openingClosesEscapedCompactValue(context: MathTokenizeContext): boolean {
-  const dataExit = context.events.at(-1)
-  if (dataExit?.[0] !== 'exit' || dataExit[1].type !== 'data') {
+export function isCurrencyDollarSpan(value: string, closed: boolean): boolean {
+  const trimmed = value.trim()
+  const numericPrefix = LEADING_NUMERIC_LITERAL.exec(trimmed)?.[0]
+  if (numericPrefix === undefined) {
+    return false
+  }
+  if (!closed) {
+    return true
+  }
+  if (PURE_NUMERIC_LITERAL.test(trimmed)) {
     return false
   }
 
-  const data = dataExit[1]
-  if (data.end.offset !== context.now().offset) {
-    return false
-  }
-
-  const value = context.sliceSerialize(data)
-
-  for (let index = context.events.length - 2; index >= 0; index -= 1) {
-    const [eventType, token] = context.events[index]
-    if (token.end.offset < data.start.offset) {
-      break
-    }
-    if (
-      eventType === 'exit' &&
-      token.type === 'characterEscape' &&
-      token.end.offset === data.start.offset
-    ) {
-      return context.sliceSerialize(token) === '\\$' && COMPACT_ESCAPED_VALUE.test(value)
-    }
-  }
-  return false
-}
-
-function openingHasNumericMathContext(context: MathTokenizeContext): boolean {
-  const dataExit = context.events.at(-1)
+  const suffix = trimmed.slice(numericPrefix.length)
   if (
-    dataExit?.[0] !== 'exit' ||
-    dataExit[1].type !== 'data' ||
-    dataExit[1].end.offset !== context.now().offset
+    STRONG_MATH_SYNTAX.test(suffix) ||
+    NUMERIC_BINARY_EXPRESSION.test(suffix) ||
+    SYMBOLIC_BINARY_EXPRESSION.test(suffix)
   ) {
     return false
   }
-  let dataStart = dataExit[1].start.offset
-  let preceding = context.sliceSerialize(dataExit[1])
-  if (preceding.length >= MAX_NUMERIC_MATH_CONTEXT_LENGTH) {
-    preceding = preceding.slice(-MAX_NUMERIC_MATH_CONTEXT_LENGTH)
-  } else {
-    for (let index = context.events.length - 2; index >= 0; index -= 1) {
-      const [eventType, token] = context.events[index]
-      if (eventType === 'exit' && token.type === 'data' && token.end.offset === dataStart) {
-        preceding = context.sliceSerialize(token) + preceding
-        dataStart = token.start.offset
-        if (preceding.length >= MAX_NUMERIC_MATH_CONTEXT_LENGTH) {
-          preceding = preceding.slice(-MAX_NUMERIC_MATH_CONTEXT_LENGTH)
+  if (CURRENCY_RANGE_SYNTAX.test(suffix)) {
+    return true
+  }
+  if (!PROSE_BOUNDARY.test(suffix)) {
+    return /[.,，．'’\u00a0\u202f ]/u.test(numericPrefix)
+  }
+  return true
+}
+
+function isEscaped(source: string, index: number): boolean {
+  let slashCount = 0
+  for (let cursor = index - 1; cursor >= 0 && source[cursor] === '\\'; cursor -= 1) {
+    slashCount += 1
+  }
+  return slashCount % 2 === 1
+}
+
+function closesEscapedCompactValue(source: string, index: number): boolean {
+  let valueStart = index
+  while (valueStart > 0 && COMPACT_VALUE.test(source[valueStart - 1])) {
+    valueStart -= 1
+  }
+  const escapedOpener = valueStart - 1
+  return valueStart < index && source[escapedOpener] === '$' && isEscaped(source, escapedOpener)
+}
+
+function findBacktickCodeRanges(source: string): SourceRange[] {
+  const runs: (SourceRange & { size: number })[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] !== '`') {
+      continue
+    }
+    if (isEscaped(source, index)) {
+      continue
+    }
+    const start = index
+    while (source[index + 1] === '`') {
+      index += 1
+    }
+    runs.push({ start, end: index + 1, size: index + 1 - start })
+  }
+
+  const nextRuns: (number | undefined)[] = []
+  const nextRunBySize = new Map<number, number>()
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    nextRuns[index] = nextRunBySize.get(runs[index].size)
+    nextRunBySize.set(runs[index].size, index)
+  }
+
+  const ranges: SourceRange[] = []
+  for (let index = 0; index < runs.length; index += 1) {
+    const closeIndex = nextRuns[index]
+    if (closeIndex === undefined) {
+      continue
+    }
+    ranges.push({ start: runs[index].start, end: runs[closeIndex].end })
+    index = closeIndex
+  }
+  return ranges
+}
+
+function findLinkDestinationRanges(source: string): SourceRange[] {
+  const ranges: SourceRange[] = []
+  for (let index = 0; index < source.length - 1; index += 1) {
+    if (source[index] !== ']' || source[index + 1] !== '(') {
+      continue
+    }
+    const start = index + 1
+    let depth = 0
+    let consumedThrough = source.length
+    for (let cursor = start; cursor < source.length; cursor += 1) {
+      if (source[cursor] === '\\') {
+        cursor += 1
+        continue
+      }
+      if (source[cursor] === '(') {
+        depth += 1
+      } else if (source[cursor] === ')') {
+        depth -= 1
+        if (depth === 0) {
+          ranges.push({ start, end: cursor + 1 })
+          consumedThrough = cursor
           break
         }
-      } else if (token.end.offset < dataStart) {
+      } else if (source[cursor] === '\n' || source[cursor] === '\r') {
+        consumedThrough = cursor
         break
       }
     }
+    index = consumedThrough
   }
-  if (NUMERIC_MATH_PROSE.test(preceding)) {
-    return true
-  }
-  if (!NUMERIC_MATH_CONNECTOR.test(preceding)) {
-    return false
-  }
-  for (let index = context.events.length - 2; index >= 0; index -= 1) {
-    const [eventType, token] = context.events[index]
-    if (token.end.offset < dataStart) {
-      break
-    }
-    if (eventType === 'exit' && token.type === 'mathText' && token.end.offset === dataStart) {
-      const raw = context.sliceSerialize(token)
-      return raw.startsWith('$') && raw.endsWith('$') && PURE_CURRENCY_AMOUNT.test(raw.slice(1, -1))
-    }
-  }
-  return false
+  return ranges
 }
 
-function isTrailingCurrencyProse(value: string, trimmed: string): boolean {
-  if (/^\s/u.test(value) || !/\s$/u.test(value)) {
-    return false
-  }
-  const prefix = NUMERIC_PREFIX.exec(trimmed)?.[0]
-  if (prefix === undefined) {
-    return false
-  }
-  let suffix = trimmed.slice(prefix.length)
-  const rangePrefix = CURRENCY_RANGE_PREFIX.exec(suffix)?.[0]
-  if (rangePrefix !== undefined) {
-    suffix = suffix.slice(rangePrefix.length)
-  }
-  if (suffix.length === 0) {
-    return false
-  }
-  if (ENGLISH_CURRENCY_RANGE_SUFFIX.test(suffix)) {
-    return true
-  }
-  if (MATH_SIGNAL.test(suffix) || /\p{Nd}/u.test(suffix) || /^(?:[*/]\s*)?\p{L}+$/u.test(suffix)) {
-    return false
-  }
-  return !suffix.split(/\s+/u).some((part) => /^\p{L}$/u.test(part))
-}
-
-export function isIntentionalInlineMath(
-  value: string,
-  nextCode: number | null,
-  numericMathContext = false
-): boolean {
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return false
-  }
-  const numericPrefix = NUMERIC_PREFIX.exec(trimmed)?.[0]
-  if (numericPrefix === undefined) {
-    return true
-  }
-  if (PURE_CURRENCY_AMOUNT.test(trimmed)) {
-    return numericMathContext
-  }
-  const suffix = trimmed.slice(numericPrefix.length)
-  if (CJK_PROSE_AFTER_AMOUNT.test(suffix)) {
-    return false
-  }
-  if (CJK_PROSE_AFTER_PUNCTUATION.test(trimmed) || MARKDOWN_PROSE_AFTER_CURRENCY.test(trimmed)) {
-    return false
-  }
-  if (isTrailingCurrencyProse(value, trimmed)) {
-    return false
-  }
-  if (!startsNumericPrefix(nextCode)) {
-    return true
-  }
-  return !RANGE_SEPARATOR.test(trimmed)
-}
-
-function createCurrencyAwareMathExtension(): ReturnType<typeof math> {
-  const extension = math()
-  const textConstruct = extension.text?.[36]
-  if (textConstruct === undefined || Array.isArray(textConstruct)) {
-    throw new Error('Expected one micromark math text construct')
-  }
-  const rejectedCloserOffsets = new WeakMap<MathTokenizeContext, Set<number>>()
-
-  const adjacentCurrencyConstruct: MathTextConstruct = {
-    name: 'adjacentCurrencyText',
-    previous: textConstruct.previous,
-    tokenize(effects, ok, nok) {
-      let token: ReturnType<typeof effects.enter> | undefined
-      const start = (code: number | null) => {
-        if (code !== 36) {
-          return nok(code)
-        }
-        token = effects.enter('data')
-        effects.consume(code)
-        return inside
-      }
-      const inside = (code: number | null) => {
-        if (code === 36) {
-          effects.consume(code)
-          effects.exit('data')
-          return afterClose
-        }
-        if (!continuesCurrencyAmount(code)) {
-          return nok(code)
-        }
-        effects.consume(code)
-        return inside
-      }
-      const afterClose = (code: number | null) => {
-        if (code !== 36 || token === undefined) {
-          return nok(code)
-        }
-        const raw = this.sliceSerialize(token)
-        return PURE_CURRENCY_AMOUNT.test(raw.slice(1, -1)) ? ok(code) : nok(code)
-      }
-      return start
-    }
-  }
-
-  const tokenize: MathTextTokenizer = function (effects, ok, nok) {
-    const blockedOffsets = rejectedCloserOffsets.get(this)
-    if (blockedOffsets?.delete(this.now().offset) === true) {
-      return nok
-    }
-    const closesEscapedCompactValue = openingClosesEscapedCompactValue(this)
-    const numericMathContext = openingHasNumericMathContext(this)
-    let mathToken: ReturnType<typeof effects.enter> | undefined
-    let openingSequence: ReturnType<typeof effects.enter> | undefined
-    let closingSequence: ReturnType<typeof effects.enter> | undefined
-    const enter: typeof effects.enter = (...args) => {
-      const token = effects.enter(...args)
-      if (args[0] === 'mathText') {
-        mathToken = token
-      } else if (args[0] === 'mathTextSequence') {
-        if (openingSequence === undefined) {
-          openingSequence = token
-        } else {
-          closingSequence = token
-        }
-      }
-      return token
-    }
-    const guardedEffects = { ...effects, enter }
-    const upstreamContext =
-      this.previous === 36
-        ? Object.assign(Object.create(this) as MathTokenizeContext, { previous: 0 })
-        : this
-
-    return textConstruct.tokenize.call(
-      upstreamContext,
-      guardedEffects,
-      (code) => {
-        if (mathToken === undefined || openingSequence === undefined) {
-          return nok(code)
-        }
-        const delimiterWidth = openingSequence.end.offset - openingSequence.start.offset
-        if (delimiterWidth > 1) {
-          return ok(code)
-        }
-        if (closesEscapedCompactValue) {
-          return nok(code)
-        }
-        const raw = this.sliceSerialize(mathToken)
-        const value = raw.slice(1, -1)
-        if (isIntentionalInlineMath(value, code, numericMathContext)) {
-          return ok(code)
-        }
-        if (
-          closingSequence !== undefined &&
-          (PURE_CURRENCY_AMOUNT.test(value.trim()) || startsProseAfterCloser(code))
-        ) {
-          const offsets = blockedOffsets ?? new Set<number>()
-          offsets.add(closingSequence.start.offset)
-          rejectedCloserOffsets.set(this, offsets)
-        }
-        return nok(code)
-      },
-      nok
-    )
-  }
-
-  const previous: NonNullable<MathTextConstruct['previous']> = function (code) {
-    const lastEvent = this.events.at(-1)
+function mergeSourceRanges(left: SourceRange[], right: SourceRange[]): SourceRange[] {
+  const ranges: SourceRange[] = []
+  let leftIndex = 0
+  let rightIndex = 0
+  while (leftIndex < left.length || rightIndex < right.length) {
     if (
-      code === 36 &&
-      lastEvent?.[0] === 'exit' &&
-      lastEvent[1].type === 'data' &&
-      lastEvent[1].end.offset === this.now().offset
+      rightIndex >= right.length ||
+      (leftIndex < left.length && left[leftIndex].start <= right[rightIndex].start)
     ) {
-      const raw = this.sliceSerialize(lastEvent[1])
-      if (raw.startsWith('$') && raw.endsWith('$') && PURE_CURRENCY_AMOUNT.test(raw.slice(1, -1))) {
-        return true
-      }
+      ranges.push(left[leftIndex])
+      leftIndex += 1
+    } else {
+      ranges.push(right[rightIndex])
+      rightIndex += 1
     }
-    return textConstruct.previous?.call(this, code) ?? true
+  }
+  return ranges
+}
+
+function findSingleDollarOffsets(source: string): number[] {
+  const offsets: number[] = []
+  const excludedRanges = mergeSourceRanges(
+    findBacktickCodeRanges(source),
+    findLinkDestinationRanges(source)
+  )
+  let excludedRangeIndex = 0
+  let slashRun = 0
+  for (let index = 0; index < source.length; index += 1) {
+    while (excludedRanges[excludedRangeIndex]?.end <= index) {
+      excludedRangeIndex += 1
+    }
+    const excludedRange = excludedRanges[excludedRangeIndex]
+    const character = source[index]
+    if (character === '\\') {
+      slashRun += 1
+      continue
+    }
+    if (
+      character === '$' &&
+      slashRun % 2 === 0 &&
+      !(excludedRange !== undefined && excludedRange.start <= index) &&
+      source[index - 1] !== '$' &&
+      source[index + 1] !== '$'
+    ) {
+      offsets.push(index)
+    }
+    slashRun = 0
+  }
+  return offsets
+}
+
+function chooseCurrencyMarker(source: string): string | null {
+  const usedCharacters = new Set(source)
+  for (let code = FIRST_CURRENCY_MARKER; code <= LAST_CURRENCY_MARKER; code += 1) {
+    const marker = String.fromCodePoint(code)
+    if (!usedCharacters.has(marker)) {
+      return marker
+    }
+  }
+  return null
+}
+
+export function maskCurrencyDollars(source: string): MaskedMarkdown | null {
+  const offsets = findSingleDollarOffsets(source)
+  const maskedOffsets = new Set<number>()
+  const protectedClosers = new Set<number>()
+
+  for (let index = 0; index < offsets.length; index += 1) {
+    const offset = offsets[index]
+    if (protectedClosers.has(offset)) {
+      continue
+    }
+    if (closesEscapedCompactValue(source, offset)) {
+      maskedOffsets.add(offset)
+      continue
+    }
+
+    const closer = offsets[index + 1]
+    const value = source.slice(offset + 1, closer)
+    if (isCurrencyDollarSpan(value, closer !== undefined)) {
+      maskedOffsets.add(offset)
+    } else if (closer !== undefined) {
+      protectedClosers.add(closer)
+    }
   }
 
-  extension.text![36] = [adjacentCurrencyConstruct, { ...textConstruct, tokenize, previous }]
-  return extension
+  if (maskedOffsets.size === 0) {
+    return null
+  }
+  const marker = chooseCurrencyMarker(source)
+  if (marker === null) {
+    return null
+  }
+  const characters = source.split('')
+  for (const offset of maskedOffsets) {
+    characters[offset] = marker
+  }
+  return { marker, source: characters.join('') }
+}
+
+function restoreCurrencyDollars(value: unknown, marker: string): void {
+  if (!value || typeof value !== 'object') {
+    return
+  }
+  const record = value as Record<string, unknown>
+  for (const [key, child] of Object.entries(record)) {
+    if (typeof child === 'string') {
+      record[key] = child.replaceAll(marker, '$')
+    } else {
+      restoreCurrencyDollars(child, marker)
+    }
+  }
 }
 
 export function remarkCurrencyAwareMath(this: Processor): undefined {
+  const parser = this.parser
+  if (parser === undefined) {
+    throw new Error('remarkCurrencyAwareMath must run after remarkParse')
+  }
   const data = this.data()
   const micromarkExtensions = data.micromarkExtensions || (data.micromarkExtensions = [])
   const fromMarkdownExtensions = data.fromMarkdownExtensions || (data.fromMarkdownExtensions = [])
 
-  micromarkExtensions.push(createCurrencyAwareMathExtension())
+  micromarkExtensions.push(math())
   fromMarkdownExtensions.push(mathFromMarkdown())
+  this.parser = (document, file) => {
+    const masked = maskCurrencyDollars(String(document))
+    const tree = parser(masked?.source ?? document, file)
+    if (masked !== null) {
+      restoreCurrencyDollars(tree, masked.marker)
+    }
+    return tree
+  }
 }

@@ -1,10 +1,15 @@
+import { performance } from 'node:perf_hooks'
 import { describe, expect, it } from 'vitest'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
 import { toString } from 'mdast-util-to-string'
-import { isIntentionalInlineMath, remarkCurrencyAwareMath } from './remark-currency-aware-math'
+import {
+  isCurrencyDollarSpan,
+  maskCurrencyDollars,
+  remarkCurrencyAwareMath
+} from './remark-currency-aware-math'
 
 type MathNode = { type: string; value?: string }
 
@@ -29,32 +34,29 @@ function parseMarkdown(source: string): {
 const ISSUE_CURRENCY_PROSE =
   '月成本 **$148+ → $19**（省 **87%**，年省 ~$1,550）；后续释放老 EIP 可再降到 $15.4/月'
 
-describe('isIntentionalInlineMath', () => {
-  it('rejects currency amounts and closers before digits', () => {
-    expect(isIntentionalInlineMath('100', null)).toBe(false)
-    expect(isIntentionalInlineMath('1,550', null)).toBe(false)
-    expect(isIntentionalInlineMath('148+ → ', '1'.codePointAt(0)!)).toBe(false)
-    expect(isIntentionalInlineMath('-5 → ', '-'.codePointAt(0)!)).toBe(false)
-    expect(isIntentionalInlineMath('.99→', '.'.codePointAt(0)!)).toBe(false)
-    expect(isIntentionalInlineMath('１００→', '１'.codePointAt(0)!)).toBe(false)
-    expect(isIntentionalInlineMath('＋１００～', '１'.codePointAt(0)!)).toBe(false)
-    expect(isIntentionalInlineMath('1,550；公式', 'x'.codePointAt(0)!)).toBe(false)
+describe('isCurrencyDollarSpan', () => {
+  it('claims numeric openers whose next dollar closes prose', () => {
+    expect(isCurrencyDollarSpan('148 a month to ', true)).toBe(true)
+    expect(isCurrencyDollarSpan('1,550/月公式', true)).toBe(true)
+    expect(isCurrencyDollarSpan('1,550원 현재', true)).toBe(true)
+    expect(isCurrencyDollarSpan('148+ → ', true)).toBe(true)
   })
 
-  it('accepts stock single-dollar math forms', () => {
-    expect(isIntentionalInlineMath('E=mc^2', null)).toBe(true)
-    expect(isIntentionalInlineMath('2+2', null)).toBe(true)
-    expect(isIntentionalInlineMath(' x y ', null)).toBe(true)
-    expect(isIntentionalInlineMath('2 mod 3', null)).toBe(true)
-    expect(isIntentionalInlineMath('12xyz', null)).toBe(true)
-    expect(isIntentionalInlineMath('2π', null)).toBe(true)
-    expect(isIntentionalInlineMath('2+2 ', null)).toBe(true)
-    expect(isIntentionalInlineMath('2 mod 3 ', null)).toBe(true)
+  it('leaves balanced numeric and numeric-leading expressions to stock math', () => {
+    for (const value of ['-1', '3.14', '.5', '6.022e23', '1,000', '１２３', '2+2', '2 mod 3']) {
+      expect(isCurrencyDollarSpan(value, true), value).toBe(false)
+    }
+  })
+
+  it('claims an unbalanced numeric opener without classifying its locale suffix', () => {
+    expect(isCurrencyDollarSpan('19', false)).toBe(true)
+    expect(isCurrencyDollarSpan('1.550,00/month', false)).toBe(true)
+    expect(isCurrencyDollarSpan('x', false)).toBe(false)
   })
 })
 
 describe('remarkCurrencyAwareMath', () => {
-  it('preserves the issue currency string as CJK prose', () => {
+  it('preserves the issue currency string as plain text', () => {
     const { math, text } = parseMarkdown(ISSUE_CURRENCY_PROSE)
     expect(math).toEqual([])
     expect(text).toBe(
@@ -63,168 +65,132 @@ describe('remarkCurrencyAwareMath', () => {
     expect(text.match(/\$/g)).toHaveLength(4)
   })
 
-  it('parses true inline math without narrowing stock syntax', () => {
-    const { math, text } = parseMarkdown(
-      'Math $E=mc^2$, $ x y $, $2 mod 3$, $12xyz$, $2π$, $x$23, and $text$.'
+  it('passes all required currency and numeric-math regressions', () => {
+    expect(parseMarkdown('From $148 a month to $19')).toEqual(
+      expect.objectContaining({ math: [], text: 'From $148 a month to $19' })
     )
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'E=mc^2' },
-      { type: 'inlineMath', value: 'x y' },
-      { type: 'inlineMath', value: '2 mod 3' },
-      { type: 'inlineMath', value: '12xyz' },
-      { type: 'inlineMath', value: '2π' },
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: 'text' }
-    ])
-    expect(text).toBe('Math E=mc^2, x y, 2 mod 3, 12xyz, 2π, x23, and text.')
+    expect(parseMarkdown('成本$1,550/月公式$x$')).toEqual(
+      expect.objectContaining({
+        math: [{ type: 'inlineMath', value: 'x' }],
+        text: '成本$1,550/月公式x'
+      })
+    )
+    expect(parseMarkdown('The roots are $-1$ and $1$.')).toEqual(
+      expect.objectContaining({
+        math: [
+          { type: 'inlineMath', value: '-1' },
+          { type: 'inlineMath', value: '1' }
+        ],
+        text: 'The roots are -1 and 1.'
+      })
+    )
   })
 
-  it('parses inline and block double-dollar math', () => {
-    const source = 'Inline $$x^2$$.\n\n$$\n\\int_0^1 x\\,dx\n$$\n'
-    const { math } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x^2' },
-      { type: 'math', value: '\\int_0^1 x\\,dx' }
-    ])
+  it('preserves common English and Korean currency prose', () => {
+    for (const source of [
+      'It cost $148 a month, now $19.',
+      'Pay $148 for a month and then $19.',
+      'Pay $148 on a monthly plan, then $19.',
+      '비용$1,550원 현재$19원',
+      '월 비용$1,550/월 현재$19/월',
+      '월 비용$1,550달러 현재$19달러'
+    ]) {
+      const { math, text } = parseMarkdown(source)
+      expect(math, source).toEqual([])
+      expect(text, source).toBe(source)
+    }
   })
 
-  it('leaves unbalanced and numeric dollar spans literal', () => {
-    const source = 'Cost is $1,550 total, later $15.4/月, or exactly $100$.'
+  it('preserves locale-shaped amounts and CJK currency suffixes', () => {
+    for (const source of [
+      'Cost $1 550 now, then $19.',
+      'Cost $1’550 now, then $19.',
+      'Cost $1.550,00 now, then $19.',
+      '成本$1,550円、現在$19円',
+      '成本$1,550ウォン、現在$19ウォン',
+      '成本$1,550/月，現在$19/月',
+      '成本$1,550每月，現在$19每月'
+    ]) {
+      const { math, text } = parseMarkdown(source)
+      expect(math, source).toEqual([])
+      expect(text, source).toBe(source)
+    }
+  })
+
+  it('preserves stock numeric math without prose-context exceptions', () => {
+    const source = 'The values are $1$, $-2.5$, $.5$, $6.022e23$, $-2.5e-4$, $1,000$, and $１２３$.'
     const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([])
-    expect(text).toBe(source)
+    expect(math.map((node) => node.value)).toEqual([
+      '1',
+      '-2.5',
+      '.5',
+      '6.022e23',
+      '-2.5e-4',
+      '1,000',
+      '１２３'
+    ])
+    expect(text).toBe('The values are 1, -2.5, .5, 6.022e23, -2.5e-4, 1,000, and １２３.')
+    expect(parseMarkdown('Use $3.14$ radians.').math).toEqual([
+      { type: 'inlineMath', value: '3.14' }
+    ])
   })
 
-  it('preserves signed, leading-decimal, and full-width currency ranges', () => {
-    const source = 'Ranges $-5 → $-2, $.99→$.19, $１００→$１９, and $＋１００～$１９ stay literal.'
+  it('preserves stock numeric-leading expression forms', () => {
+    const { math } = parseMarkdown(
+      'Math $2+2$, $10-20$, $2 mod 3$, $1 + x$, $1/x$, $12xyz$, and $2π$.'
+    )
+    expect(math.map((node) => node.value)).toEqual([
+      '2+2',
+      '10-20',
+      '2 mod 3',
+      '1 + x',
+      '1/x',
+      '12xyz',
+      '2π'
+    ])
+  })
+
+  it('leaves stock symbolic math forms unchanged', () => {
+    const { math, text } = parseMarkdown(
+      'Math $E=mc^2$, $ x y $, $12xyz$, $2π$, $x$23, and $text$.'
+    )
+    expect(math.map((node) => node.value)).toEqual(['E=mc^2', 'x y', '12xyz', '2π', 'x', 'text'])
+    expect(text).toBe('Math E=mc^2, x y, 12xyz, 2π, x23, and text.')
+  })
+
+  it('lets the next dollar open math after a currency opener is claimed', () => {
+    const source = 'cost $100 and math $x$; 成本$1,550/月公式$y$; 비용$19원 수식$z$'
     const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([])
-    expect(text).toBe(source)
+    expect(math.map((node) => node.value)).toEqual(['x', 'y', 'z'])
+    expect(text).toBe('cost $100 and math x; 成本$1,550/月公式y; 비용$19원 수식z')
   })
 
-  it('preserves escaped dollars without stealing neighboring math delimiters', () => {
+  it('preserves currency ranges while closed numeric ranges remain math', () => {
+    const source =
+      'Ranges $-5 → $-2, $.99→$.19, $１００→$１９, and $＋１００～$１９ stay literal; math $10-20$.'
+    const { math, text } = parseMarkdown(source)
+    expect(math).toEqual([{ type: 'inlineMath', value: '10-20' }])
+    expect(text).toBe(
+      'Ranges $-5 → $-2, $.99→$.19, $１００→$１９, and $＋１００～$１９ stay literal; math 10-20.'
+    )
+  })
+
+  it('preserves escaped dollars without stealing later math delimiters', () => {
     const source = 'Escaped \\$19 and \\$x$ stay literal; \\$19$ and $y$ stays math.'
     const { math, text } = parseMarkdown(source)
     expect(math).toEqual([{ type: 'inlineMath', value: 'y' }])
     expect(text).toBe('Escaped $19 and $x$ stay literal; $19$ and y stays math.')
   })
 
-  it('does not reuse rejected currency closers as math openers', () => {
-    const source = 'cost $100$ and math $x$; also $-5$ then $y$ and $１００$ then $z$'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: 'y' },
-      { type: 'inlineMath', value: 'z' }
+  it('keeps inline and display double-dollar math unchanged', () => {
+    const source = 'Inline $$x^2$$.\n\n$$\n\\int_0^1 x\\,dx\n$$\n'
+    expect(parseMarkdown(source).math).toEqual([
+      { type: 'inlineMath', value: 'x^2' },
+      { type: 'math', value: '\\int_0^1 x\\,dx' }
     ])
-    expect(text).toBe('cost $100$ and math x; also $-5$ then y and $１００$ then z')
   })
 
-  it('keeps pure currency closed before adjacent Markdown and CJK', () => {
-    const source = [
-      'cost $100$[link](https://example.com) then $x$',
-      'cost $100$**bold** then $y$',
-      'cost $100$`code` then $z$',
-      'cost $100$后续 then $w$'
-    ].join('\n')
-    const { math, nodeTypes, text } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: 'y' },
-      { type: 'inlineMath', value: 'z' },
-      { type: 'inlineMath', value: 'w' }
-    ])
-    expect(text).toContain('cost $100$link then x')
-    expect(text).toContain('cost $100$bold then y')
-    expect(text).toContain('cost $100$code then z')
-    expect(text).toContain('cost $100$后续 then w')
-    expect(nodeTypes).toContain('link')
-    expect(nodeTypes).toContain('strong')
-    expect(nodeTypes).toContain('inlineCode')
-  })
-
-  it('separates currency range prose from later numeric math', () => {
-    const source = 'Budget $10–20 and formula $x$; math $10-20$ and $2 mod 3$ remain formulas.'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: '10-20' },
-      { type: 'inlineMath', value: '2 mod 3' }
-    ])
-    expect(text).toBe('Budget $10–20 and formula x; math 10-20 and 2 mod 3 remain formulas.')
-  })
-
-  it('does not pair unbalanced currency with later CJK math', () => {
-    const source = '成本$1,550；公式$x$；月费$15.4/月；公式$E=mc^2$'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: 'E=mc^2' }
-    ])
-    expect(text).toBe('成本$1,550；公式x；月费$15.4/月；公式E=mc^2')
-  })
-
-  it('keeps compact CJK currency prose before real math', () => {
-    const { math, text } = parseMarkdown('成本$1,550元公式$x$')
-    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
-    expect(text).toBe('成本$1,550元公式x')
-  })
-
-  it('keeps an English currency range literal', () => {
-    const source = 'From $148+ to $19'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([])
-    expect(text).toBe(source)
-  })
-
-  it('keeps a prose currency range literal', () => {
-    const source = 'From $148 a month to $19'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([])
-    expect(text).toBe(source)
-  })
-
-  it('keeps compact CJK monthly currency before real math', () => {
-    const { math, text } = parseMarkdown('成本$1,550/月公式$x$')
-    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
-    expect(text).toBe('成本$1,550/月公式x')
-  })
-
-  it('parses signed numeric values in mathematical prose', () => {
-    const { math, text } = parseMarkdown('The roots are $-1$ and $1$.')
-    expect(math).toEqual([
-      { type: 'inlineMath', value: '-1' },
-      { type: 'inlineMath', value: '1' }
-    ])
-    expect(text).toBe('The roots are -1 and 1.')
-  })
-
-  it('separates adjacent currency and math spans', () => {
-    const { math, text } = parseMarkdown('cost $100$$x$')
-    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
-    expect(text).toBe('cost $100$x')
-  })
-
-  it('handles micromark virtual codes after numeric-leading math', () => {
-    const source = '$2+2$\nnext\n\n$2 mod 3$\tmore'
-    const { math, text } = parseMarkdown(source)
-    expect(math).toEqual([
-      { type: 'inlineMath', value: '2+2' },
-      { type: 'inlineMath', value: '2 mod 3' }
-    ])
-    expect(text).toBe('2+2\nnext2 mod 3\tmore')
-  })
-
-  it('keeps multiple formulas after currency paired independently', () => {
-    const { math, text } = parseMarkdown('pay $1,550 then $x$ and $y$')
-    expect(math).toEqual([
-      { type: 'inlineMath', value: 'x' },
-      { type: 'inlineMath', value: 'y' }
-    ])
-    expect(text).toBe('pay $1,550 then x and y')
-  })
-
-  it('preserves neighboring bold, links, code spans, and fences', () => {
+  it('preserves Markdown structure around currency and math', () => {
     const source = [
       '**from $10 to $20** and [linked $30](https://example.com) plus `$notmath$`',
       '',
@@ -240,16 +206,79 @@ describe('remarkCurrencyAwareMath', () => {
     expect(text).toContain('linked $30')
     expect(text).toContain('$notmath$')
     expect(text).toContain('$100 and $y$')
-    expect(nodeTypes).toContain('strong')
-    expect(nodeTypes).toContain('link')
+    expect(nodeTypes).toEqual(expect.arrayContaining(['strong', 'link', 'inlineCode', 'code']))
+
+    const codeBeforeCurrency = parseMarkdown('`$ignored` then $19 then $y$')
+    expect(codeBeforeCurrency.math).toEqual([{ type: 'inlineMath', value: 'y' }])
+    expect(codeBeforeCurrency.text).toBe('$ignored then $19 then y')
+
+    const linkBeforeCurrency = parseMarkdown(
+      '[link](https://example.test/$ignored) then $19 then $z$'
+    )
+    expect(linkBeforeCurrency.math).toEqual([{ type: 'inlineMath', value: 'z' }])
+    expect(linkBeforeCurrency.text).toBe('link then $19 then z')
+
+    const escapedBackticks = parseMarkdown('\\`literal\\` then $19 then $w$')
+    expect(escapedBackticks.math).toEqual([{ type: 'inlineMath', value: 'w' }])
+    expect(escapedBackticks.text).toBe('`literal` then $19 then w')
   })
 
-  it('handles large mixed documents with stable output counts', () => {
-    const chunk = '月成本 **$148+ → $19** and math $a+b$ plus lone ~$1,550 then $E=mc^2$.\n\n'
-    const { math, text } = parseMarkdown(chunk.repeat(2_000))
-    expect(math.filter((node) => node.value === 'a+b')).toHaveLength(2_000)
-    expect(math.filter((node) => node.value === 'E=mc^2')).toHaveLength(2_000)
-    expect(text).toContain('$148+ → $19')
-    expect(text).toContain('~$1,550')
+  it('preserves source offsets and never leaks the private marker', () => {
+    const source = '😀 cost $148 a month, formula $x$.'
+    const processor = unified().use(remarkParse).use(remarkGfm).use(remarkCurrencyAwareMath)
+    const tree = processor.runSync(processor.parse(source))
+    let mathOffsets: { end?: number; start?: number } | undefined
+    visit(tree, (node) => {
+      if (node.type === 'inlineMath') {
+        mathOffsets = { start: node.position?.start.offset, end: node.position?.end.offset }
+      }
+    })
+    const mathStart = source.indexOf('$x$')
+    expect(mathOffsets).toEqual({ start: mathStart, end: mathStart + 3 })
+    expect(JSON.stringify(tree)).not.toMatch(/[\uE000-\uF8FF]/u)
+    expect(toString(tree)).toBe('😀 cost $148 a month, formula x.')
+  })
+
+  it('keeps unbalanced and pathological dollar runs bounded', () => {
+    expect(parseMarkdown('$x')).toEqual(expect.objectContaining({ math: [], text: '$x' }))
+    expect(parseMarkdown('$100 and then $x$')).toEqual(
+      expect.objectContaining({
+        math: [{ type: 'inlineMath', value: 'x' }],
+        text: '$100 and then x'
+      })
+    )
+    expect(parseMarkdown('$100$$x$').math).toEqual([{ type: 'inlineMath', value: '100$$x' }])
+    const dollars = '$'.repeat(20_000)
+    expect(parseMarkdown(dollars)).toEqual(
+      expect.objectContaining({ math: [{ type: 'math', value: '' }], text: '' })
+    )
+  })
+
+  it('keeps currency dollars in plain-text extraction', () => {
+    const source = 'It cost **$148 a month**, now $19; formula $x$.'
+    const { math, text } = parseMarkdown(source)
+    expect(math).toEqual([{ type: 'inlineMath', value: 'x' }])
+    expect(text).toBe('It cost $148 a month, now $19; formula x.')
+    expect(text.match(/\$/g)).toHaveLength(2)
+  })
+
+  it('scales across 80k, 160k, and 320k mixed-dollar inputs', () => {
+    const chunk = 'cost $100 then $x$  '
+    maskCurrencyDollars(chunk.repeat(100))
+    const durations = [4_000, 8_000, 16_000].map((count) => {
+      const source = chunk.repeat(count)
+      const start = performance.now()
+      const masked = maskCurrencyDollars(source)
+      const duration = performance.now() - start
+      if (masked === null) {
+        throw new Error('Expected a private-use currency marker')
+      }
+      expect(source).toHaveLength(count * 20)
+      expect(masked.source).toHaveLength(source.length)
+      expect(masked.source.match(new RegExp(masked.marker, 'gu'))).toHaveLength(count)
+      return duration
+    })
+    expect(durations[2]).toBeLessThan(durations[0] * 8 + 50)
+    expect(durations[2]).toBeLessThan(500)
   })
 })
