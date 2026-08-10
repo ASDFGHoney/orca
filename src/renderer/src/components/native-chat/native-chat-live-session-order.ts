@@ -26,7 +26,7 @@ export type NativeChatOrderSource = {
   transport: unknown
 }
 
-/** True when only the session id is adopted after a null placeholder (keep order gen). */
+/** True when a null placeholder adopts its session metadata (keep order gen). */
 export function isNativeChatSessionIdAdoption(
   previous: NativeChatOrderSource,
   next: NativeChatOrderSource
@@ -35,7 +35,7 @@ export function isNativeChatSessionIdAdoption(
     previous.sessionId === null &&
     next.sessionId != null &&
     previous.agent === next.agent &&
-    previous.transcriptPath === next.transcriptPath &&
+    (previous.transcriptPath === next.transcriptPath || previous.transcriptPath === null) &&
     previous.transport === next.transport
   )
 }

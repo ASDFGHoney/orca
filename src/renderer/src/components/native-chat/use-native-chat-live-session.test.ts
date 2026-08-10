@@ -427,8 +427,8 @@ describe('useNativeChatLiveSession — transport routing', () => {
     expect(latest?.transcriptOrder.highWater).toBe(3)
   })
 
-  it('null-session send then session-id initial snapshot retires the pending turn', async () => {
-    // Harness: null → send boundary capture → session id → mandatory snapshot.
+  it('null-session send then session metadata initial snapshot retires the pending turn', async () => {
+    // Harness: null → send boundary capture → session id + path → mandatory snapshot.
     // Bad: snapshotVisible=[pending:p1], snapshotPruned=[p1]
     // Good: snapshot settles the first turn so visible/prune both drop p1.
     const root = await render({
@@ -454,6 +454,7 @@ describe('useNativeChatLiveSession — transport routing', () => {
       paneKey: PANE,
       agent: AGENT,
       sessionId: SESSION,
+      transcriptPath: '/host/transcript.jsonl',
       runtimeEnvironmentId: 'env-1'
     })
     // Adoption must not mint a new generation (pending still matches).

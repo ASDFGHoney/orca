@@ -5,7 +5,6 @@
 
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import { setBoundedScopeCacheEntry } from './native-chat-composer-scope-cache'
-import type { NativeChatLaunchPrompt } from '@/lib/native-chat-launch-prompt'
 import {
   advancedNativeChatUserContentCounts,
   advancedNativeChatUserTexts,
@@ -320,55 +319,7 @@ export function isPendingMessageId(id: string): boolean {
   return id.startsWith('pending:')
 }
 
-// Why: the seeded prompt has a synthetic id that never matches the real turn's,
-// so dedup/prune match on normalized user-message text instead — this hides the
-// optimistic bubble once the transcript's own copy of the turn catches up.
-export function launchPromptAsMessage(
-  entry: NativeChatLaunchPrompt | null,
-  existingMessages: NativeChatMessage[] = []
-): NativeChatMessage | null {
-  if (!entry) {
-    return null
-  }
-  // Why: a launch prompt seeds a brand-new session, so a matching user turn
-  // with no timestamp (e.g. Grok transcripts) can only be its own delivery.
-  const represented = matchingNativeChatUserContentCounts(
-    existingMessages.filter(
-      (message) => message.timestamp === null || message.timestamp >= entry.createdAt
-    )
-  )
-  if ((represented.get(nativeChatPendingContentKey(entry)) ?? 0) > 0) {
-    return null
-  }
-  return {
-    id: `launch-pending:${entry.tabId}`,
-    role: 'user' as const,
-    blocks: entry.text.trim().length > 0 ? [{ type: 'text' as const, text: entry.text }] : [],
-    timestamp: entry.createdAt,
-    source: 'scrape' as const
-  }
-}
-
-// Why: prune only once an assistant turn has landed after the matching user
-// text — keeping the optimistic bubble through the user-only phase avoids a
-// first-turn flash before the transcript's own copy of the turn catches up.
-export function shouldPruneLaunchPrompt(
-  entry: NativeChatLaunchPrompt,
-  messages: NativeChatMessage[]
-): boolean {
-  const relevant = messages.filter(
-    (message) => message.timestamp === null || message.timestamp >= entry.createdAt
-  )
-  return (
-    (advancedNativeChatUserContentCounts(relevant).get(nativeChatPendingContentKey(entry)) ?? 0) > 0
-  )
-}
-
 export function nextNativeChatPendingSendId(now = Date.now()): string {
   pendingSendCounter += 1
   return `${now}-${pendingSendCounter}`
-}
-
-export function isLaunchPromptMessageId(id: string): boolean {
-  return id.startsWith('launch-pending:')
 }

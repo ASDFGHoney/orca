@@ -3,14 +3,11 @@ import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import {
   appendPendingSendCache,
   clearPendingSendCacheForTests,
-  isLaunchPromptMessageId,
   isPendingMessageId,
-  launchPromptAsMessage,
   nextNativeChatPendingSendId,
   pendingSendsAsMessages,
   prunePendingSends,
   readPendingSendCache,
-  shouldPruneLaunchPrompt,
   writePendingSendCache,
   type NativeChatPendingSend
 } from './native-chat-pending'
@@ -611,123 +608,6 @@ describe('pendingSendsAsMessages', () => {
   })
 })
 
-describe('launchPromptAsMessage', () => {
-  it('maps a launch prompt to a tab-keyed scrape-source user message', () => {
-    expect(
-      launchPromptAsMessage({
-        tabId: 'tab-1',
-        agent: 'codex',
-        text: 'Fix failing checks',
-        createdAt: 42
-      })
-    ).toEqual({
-      id: 'launch-pending:tab-1',
-      role: 'user',
-      blocks: [{ type: 'text', text: 'Fix failing checks' }],
-      timestamp: 42,
-      source: 'scrape'
-    })
-  })
-
-  it('hides the launch prompt while its transcript user turn is visible', () => {
-    expect(
-      launchPromptAsMessage(
-        {
-          tabId: 'tab-1',
-          agent: 'codex',
-          text: 'Fix failing checks',
-          createdAt: 42
-        },
-        [{ ...userMessage('u1', 'Fix failing checks'), timestamp: 43 }]
-      )
-    ).toBeNull()
-  })
-
-  it('uses pending-send normalization for large multiline generated prompts', () => {
-    const prompt = [
-      '[Image #1] Resolve the failing checks:',
-      '',
-      'Resolve the failing checks:',
-      '',
-      '- lint failed',
-      '  fix spacing'
-    ].join('\n')
-    const transcript = [
-      {
-        ...userMessage(
-          'u1',
-          'Resolve the failing checks: Resolve the failing checks: - lint failed fix spacing'
-        ),
-        timestamp: 43
-      },
-      { ...assistantMessage('a1', 'I will fix it'), timestamp: 44 }
-    ]
-
-    expect(
-      shouldPruneLaunchPrompt(
-        {
-          tabId: 'tab-1',
-          agent: 'codex',
-          text: prompt,
-          createdAt: 42
-        },
-        transcript
-      )
-    ).toBe(true)
-  })
-
-  it('keeps the launch prompt until the transcript advances past the user turn', () => {
-    const prompt = {
-      tabId: 'tab-1',
-      agent: 'claude' as const,
-      text: 'Fix failing checks',
-      createdAt: 42
-    }
-
-    expect(
-      shouldPruneLaunchPrompt(prompt, [
-        { ...userMessage('u1', 'Fix failing checks'), timestamp: 43 }
-      ])
-    ).toBe(false)
-    expect(
-      shouldPruneLaunchPrompt(prompt, [
-        { ...userMessage('u1', 'Fix failing checks'), timestamp: 43 },
-        { ...assistantMessage('a1', 'working'), timestamp: 44 }
-      ])
-    ).toBe(true)
-  })
-
-  // Grok transcripts carry no timestamps; before the null-matchable rule the
-  // seeded bubble was never hidden or pruned and sat rank-pinned at the list
-  // tail forever, reading as the conversation reordering.
-  it('hides and prunes the launch prompt against a timestampless transcript (grok)', () => {
-    const entry = { tabId: 'tab-1', agent: 'grok' as const, text: 'rename it', createdAt: 42 }
-    const transcript = [
-      { ...userMessage('u1', 'rename it'), timestamp: null },
-      { ...assistantMessage('a1', 'done'), timestamp: null }
-    ]
-
-    expect(launchPromptAsMessage(entry, transcript)).toBeNull()
-    expect(shouldPruneLaunchPrompt(entry, transcript)).toBe(true)
-  })
-
-  it('does not bind a launch prompt to an older identical completed turn', () => {
-    const entry = {
-      tabId: 'tab-1',
-      agent: 'claude' as const,
-      text: 'run tests',
-      createdAt: 100
-    }
-    const oldHistory = [
-      { ...userMessage('old-user', 'run tests'), timestamp: 10 },
-      { ...assistantMessage('old-answer', 'passed'), timestamp: 20 }
-    ]
-
-    expect(launchPromptAsMessage(entry, oldHistory)).not.toBeNull()
-    expect(shouldPruneLaunchPrompt(entry, oldHistory)).toBe(false)
-  })
-})
-
 describe('pending send cache', () => {
   it('persists optimistic sends for the same pane and agent', () => {
     clearPendingSendCacheForTests()
@@ -762,13 +642,6 @@ describe('isPendingMessageId', () => {
   it('recognizes the pending id prefix', () => {
     expect(isPendingMessageId('pending:p1')).toBe(true)
     expect(isPendingMessageId('transcript-123')).toBe(false)
-  })
-})
-
-describe('isLaunchPromptMessageId', () => {
-  it('recognizes the launch prompt id prefix', () => {
-    expect(isLaunchPromptMessageId('launch-pending:tab-1')).toBe(true)
-    expect(isLaunchPromptMessageId('pending:p1')).toBe(false)
   })
 })
 
