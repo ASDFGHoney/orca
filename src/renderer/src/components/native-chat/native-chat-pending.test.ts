@@ -2,24 +2,26 @@ import { describe, expect, it } from 'vitest'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import {
   appendPendingSendCache,
-  appendCommandMarkerCache,
-  applyCommandMarkerBoundaries,
-  clearCommandMarkerCacheForTests,
   clearPendingSendCacheForTests,
-  commandMarkersAsMessages,
-  isCommandMarkerId,
   isLaunchPromptMessageId,
   isPendingMessageId,
   launchPromptAsMessage,
   nextNativeChatPendingSendId,
   pendingSendsAsMessages,
   prunePendingSends,
-  readCommandMarkerCache,
   readPendingSendCache,
   shouldPruneLaunchPrompt,
   writePendingSendCache,
   type NativeChatPendingSend
 } from './native-chat-pending'
+import {
+  appendCommandMarkerCache,
+  applyCommandMarkerBoundaries,
+  clearCommandMarkerCacheForTests,
+  commandMarkersAsMessages,
+  isCommandMarkerId,
+  readCommandMarkerCache
+} from './native-chat-command-markers'
 import { stripNoiseMessages } from './native-chat-noise'
 
 function userMessage(id: string, text: string, timestamp = 1): NativeChatMessage {
@@ -389,12 +391,21 @@ describe('pendingSendsAsMessages', () => {
     ])
   })
 
-  it('keeps a loading-time send visible when older matching history arrives later', () => {
+  it('keeps a loading-time send visible when older matching history has a host-domain boundary', () => {
+    // History was visible at send time; the host-domain boundary excludes it.
+    // Renderer sentAt alone must not be the bound (#11519 cross-clock).
     const history = [
       { ...userMessage('old-user', 'run tests'), timestamp: 10 },
       { ...assistantMessage('old-answer', 'passed'), timestamp: 20 }
     ]
-    const pending = [{ ...pendingOf('new-send', 'run tests'), sentAt: 100, afterMessageId: null }]
+    const pending = [
+      {
+        ...pendingOf('new-send', 'run tests'),
+        sentAt: 100,
+        afterMessageId: 'old-answer',
+        afterMessageTimestamp: 20
+      }
+    ]
 
     expect(pendingSendsAsMessages(pending, history).map((message) => message.id)).toEqual([
       'pending:new-send'
@@ -418,6 +429,52 @@ describe('pendingSendsAsMessages', () => {
 
     expect(pendingSendsAsMessages(pending, remoteTranscript)).toEqual([])
     expect(prunePendingSends(pending, remoteTranscript)).toEqual([])
+  })
+
+  it('retires a first empty-transcript send when the host clock is behind the renderer', () => {
+    // pending.sentAt is renderer time; transcript timestamps are host time.
+    const pending = [
+      { ...pendingOf('p1', 'hello remote'), sentAt: 1_000_000, afterMessageId: null }
+    ]
+    const hostBehindTranscript = [
+      { ...userMessage('u1', 'hello remote'), timestamp: 50 },
+      { ...assistantMessage('a1', 'hi'), timestamp: 60 }
+    ]
+
+    expect(pendingSendsAsMessages(pending, hostBehindTranscript)).toEqual([])
+    expect(prunePendingSends(pending, hostBehindTranscript)).toEqual([])
+  })
+
+  it('lets occurrence matching claim an unbound empty-at-send echo against older identical history', () => {
+    // No host-domain bound: full-list occurrence matching applies. That is the
+    // same outcome the old renderer-sentAt filter already produced when the host
+    // clock was ahead; we no longer pretend sentAt protects this case.
+    const pending = [{ ...pendingOf('p1', 'run tests'), sentAt: 100, afterMessageId: null }]
+    const olderCompleted = [
+      { ...userMessage('old-user', 'run tests'), timestamp: 10_000_000 },
+      { ...assistantMessage('old-answer', 'passed'), timestamp: 10_000_100 }
+    ]
+    expect(pendingSendsAsMessages(pending, olderCompleted)).toEqual([])
+    expect(prunePendingSends(pending, olderCompleted)).toEqual([])
+  })
+
+  it('retires against the post-send turn when host timestamps sit far ahead of renderer sentAt', () => {
+    const pending = [
+      {
+        ...pendingOf('p1', 'run tests'),
+        sentAt: 100,
+        afterMessageId: 'boundary',
+        afterMessageTimestamp: 10_000_000
+      }
+    ]
+    const hostAhead = [
+      { ...userMessage('old', 'run tests'), timestamp: 9_999_000 },
+      { ...assistantMessage('boundary', 'ok'), timestamp: 10_000_000 },
+      { ...userMessage('new', 'run tests'), timestamp: 10_000_500 },
+      { ...assistantMessage('new-a', 'ok'), timestamp: 10_000_600 }
+    ]
+    expect(pendingSendsAsMessages(pending, hostAhead)).toEqual([])
+    expect(prunePendingSends(pending, hostAhead)).toEqual([])
   })
 
   it('hides a first send while its timestampless transcript turn is visible (grok)', () => {
@@ -626,9 +683,11 @@ describe('command marker cache', () => {
     clearCommandMarkerCacheForTests()
     const scope = { paneKey: 'tab-a:leaf-a', agent: 'codex', sessionId: 'session-1' }
 
-    const appended = appendCommandMarkerCache(scope, '/clear', 10)
+    const appended = appendCommandMarkerCache(scope, '/clear', 10, ['m1', 'm2'])
 
-    expect(appended).toEqual([{ id: '10-1', command: '/clear', sentAt: 10 }])
+    expect(appended).toEqual([
+      { id: '10-1', command: '/clear', sentAt: 10, clearedMessageIds: ['m1', 'm2'] }
+    ])
     expect(readCommandMarkerCache(scope)).toEqual(appended)
     expect(readCommandMarkerCache({ ...scope, sessionId: 'session-2' })).toEqual([])
   })
@@ -655,14 +714,16 @@ describe('command marker cache', () => {
 })
 
 describe('applyCommandMarkerBoundaries', () => {
-  it('hides existing transcript messages after a local /clear marker', () => {
+  it('hides existing transcript messages after a local /clear marker by id', () => {
     const messages = [
       userMessage('before', 'old prompt'),
       { ...assistantMessage('after', 'new answer'), timestamp: 20 }
     ]
 
     expect(
-      applyCommandMarkerBoundaries(messages, [{ id: 'c1', command: '/clear', sentAt: 10 }])
+      applyCommandMarkerBoundaries(messages, [
+        { id: 'c1', command: '/clear', sentAt: 10, clearedMessageIds: ['before'] }
+      ])
     ).toEqual([{ ...assistantMessage('after', 'new answer'), timestamp: 20 }])
   })
 
@@ -683,10 +744,64 @@ describe('applyCommandMarkerBoundaries', () => {
 
     expect(
       applyCommandMarkerBoundaries(messages, [
-        { id: 'c1', command: '/clear', sentAt: 10 },
-        { id: 'c2', command: '/clear', sentAt: 20 }
+        { id: 'c1', command: '/clear', sentAt: 10, clearedMessageIds: ['old'] },
+        {
+          id: 'c2',
+          command: '/clear',
+          sentAt: 20,
+          clearedMessageIds: ['old', 'middle']
+        }
       ]).map((message) => message.id)
     ).toEqual(['new'])
+  })
+
+  it('shows replacement-session messages when the host clock is behind clear sentAt', () => {
+    // Renderer recorded clear at 1_000_000; host JSONL stamps sit far below that.
+    const messages = [
+      { ...userMessage('pre-clear', 'old'), timestamp: 10 },
+      { ...userMessage('post-clear', 'fresh'), timestamp: 20 }
+    ]
+
+    expect(
+      applyCommandMarkerBoundaries(messages, [
+        {
+          id: 'c1',
+          command: '/clear',
+          sentAt: 1_000_000,
+          clearedMessageIds: ['pre-clear']
+        }
+      ]).map((message) => message.id)
+    ).toEqual(['post-clear'])
+  })
+
+  it('hides pre-clear rows when the host clock is ahead of clear sentAt', () => {
+    const messages = [
+      { ...userMessage('pre-clear', 'old'), timestamp: 10_000_000 },
+      { ...userMessage('post-clear', 'fresh'), timestamp: 10_000_100 }
+    ]
+
+    expect(
+      applyCommandMarkerBoundaries(messages, [
+        {
+          id: 'c1',
+          command: '/clear',
+          sentAt: 100,
+          clearedMessageIds: ['pre-clear']
+        }
+      ]).map((message) => message.id)
+    ).toEqual(['post-clear'])
+  })
+
+  it('falls back to sentAt only for legacy clear markers without an id snapshot', () => {
+    const messages = [
+      { ...userMessage('before', 'old'), timestamp: 5 },
+      { ...userMessage('after', 'new'), timestamp: 20 }
+    ]
+    expect(
+      applyCommandMarkerBoundaries(messages, [{ id: 'c1', command: '/clear', sentAt: 10 }]).map(
+        (message) => message.id
+      )
+    ).toEqual(['after'])
   })
 })
 

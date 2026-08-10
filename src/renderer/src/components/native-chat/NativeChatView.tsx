@@ -18,21 +18,21 @@ import {
   shouldShowNativeChatWorking
 } from './native-chat-working-suppression'
 import {
-  applyCommandMarkerBoundaries,
   appendPendingSendCache,
-  commandMarkersAsMessages,
-  appendCommandMarkerCache,
   launchPromptAsMessage,
   pendingSendsAsMessages,
   nextNativeChatPendingSendId,
   prunePendingSends,
-  readCommandMarkerCache,
   readPendingSendCache,
   shouldPruneLaunchPrompt,
   writePendingSendCache,
-  type NativeChatCommandMarker,
   type NativeChatPendingSend
 } from './native-chat-pending'
+import {
+  applyCommandMarkerBoundaries,
+  commandMarkersAsMessages
+} from './native-chat-command-markers'
+import { useNativeChatCommandMarkers } from './use-native-chat-command-markers'
 import {
   deriveNativeChatStreamingText,
   nativeChatStreamingMessage
@@ -186,19 +186,18 @@ function NativeChatResolvedView({
   // Optimistic "queued" sends (mobile parity): a composer send is echoed
   // immediately and pruned once its real user turn lands in the transcript, so
   // the message never vanishes between send and transcript catch-up.
-  const commandMarkerScope = useMemo(
-    () => ({ paneKey, agent, sessionId }),
-    [paneKey, agent, sessionId]
-  )
   const pendingScope = useMemo(() => ({ paneKey, agent }), [paneKey, agent])
   const [pending, setPending] = useState<NativeChatPendingSend[]>(() =>
     readPendingSendCache(pendingScope)
   )
-  // Slash commands aren't chat turns, so they get a small local "Ran /clear"
-  // system line instead of a user bubble. Capped + cached per conversation.
-  const [commandMarkers, setCommandMarkers] = useState<NativeChatCommandMarker[]>(() =>
-    readCommandMarkerCache(commandMarkerScope)
-  )
+  const resetWorkingInterrupted = useCallback(() => setWorkingInterrupted(false), [])
+  const { commandMarkers, onSlashCommand } = useNativeChatCommandMarkers({
+    paneKey,
+    agent,
+    sessionId,
+    messages: session.messages,
+    onWorkingInterruptReset: resetWorkingInterrupted
+  })
   // Reset the optimistic queue only when the pane/agent changes. A fresh launch
   // often learns its provider session id after the first send; clearing pending
   // on that transition briefly flashes the empty state before the transcript
@@ -207,12 +206,6 @@ function NativeChatResolvedView({
     setPending(readPendingSendCache(pendingScope))
     setWorkingInterrupted(false)
   }, [pendingScope])
-  // Command markers are session-scoped because slash commands like /clear are
-  // local feedback for a specific transcript boundary.
-  useEffect(() => {
-    setCommandMarkers(readCommandMarkerCache(commandMarkerScope))
-    setWorkingInterrupted(false)
-  }, [commandMarkerScope])
   // Prune echoes whose real user turn is now in the transcript.
   useEffect(() => {
     setPending((prev) =>
@@ -251,12 +244,6 @@ function NativeChatResolvedView({
       setPending(writePendingSendCache(pendingScope, next))
     },
     [pendingScope]
-  )
-  const onSlashCommand = useCallback(
-    (command: string) => {
-      setCommandMarkers(appendCommandMarkerCache(commandMarkerScope, command))
-    },
-    [commandMarkerScope]
   )
 
   const launchPromptMessage = useMemo(
