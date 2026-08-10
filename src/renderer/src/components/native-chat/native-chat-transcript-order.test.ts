@@ -3,7 +3,8 @@ import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import {
   appendNativeChatTranscriptOrder,
   createNativeChatTranscriptOrder,
-  replaceNativeChatTranscriptOrder
+  replaceNativeChatTranscriptOrder,
+  settleNativeChatTranscriptOrder
 } from './native-chat-transcript-order'
 
 function message(id: string): NativeChatMessage {
@@ -11,7 +12,7 @@ function message(id: string): NativeChatMessage {
 }
 
 describe('native chat transcript order', () => {
-  it('does not sequence snapshot or pagination baseline rows', () => {
+  it('starts a generation with no sequenced rows', () => {
     const initial = createNativeChatTranscriptOrder(3)
     expect(initial).toMatchObject({ generation: 3, highWater: 0 })
     expect(initial.messageSequenceById.size).toBe(0)
@@ -43,7 +44,7 @@ describe('native chat transcript order', () => {
     expect(order.messageSequenceById.size).toBe(8)
   })
 
-  it('resets ordering across an authoritative replacement', () => {
+  it('resets ordering across a source rebind replace', () => {
     const appended = appendNativeChatTranscriptOrder(
       createNativeChatTranscriptOrder(3),
       [message('a')],
@@ -55,5 +56,42 @@ describe('native chat transcript order', () => {
       highWater: 0,
       messageSequenceById: new Map()
     })
+  })
+
+  it('settles first-seen authoritative rows without bumping generation', () => {
+    const settled = settleNativeChatTranscriptOrder(
+      createNativeChatTranscriptOrder(3),
+      [message('u1'), message('a1')],
+      8
+    )
+
+    expect(settled).toMatchObject({ generation: 3, highWater: 2 })
+    expect([...settled.messageSequenceById]).toEqual([
+      ['u1', 1],
+      ['a1', 2]
+    ])
+
+    const again = settleNativeChatTranscriptOrder(
+      settled,
+      [message('u1'), message('a1'), message('u2')],
+      8
+    )
+    expect(again).toMatchObject({ generation: 3, highWater: 3 })
+    expect(again.messageSequenceById.get('u1')).toBe(1)
+    expect(again.messageSequenceById.get('u2')).toBe(3)
+  })
+
+  it('bounds settled sequence memory to the retained window', () => {
+    let order = createNativeChatTranscriptOrder(1)
+    for (let index = 0; index < 20; index += 1) {
+      order = settleNativeChatTranscriptOrder(
+        order,
+        Array.from({ length: index + 1 }, (_unused, n) => message(`m-${n}`)),
+        4
+      )
+    }
+    expect(order.messageSequenceById.size).toBe(4)
+    // highWater is monotonic across re-sequenced window slides; only the map is bounded.
+    expect(order.highWater).toBeGreaterThanOrEqual(20)
   })
 })

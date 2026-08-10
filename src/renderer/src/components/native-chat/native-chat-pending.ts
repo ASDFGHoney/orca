@@ -116,11 +116,11 @@ function messagesAfterPendingBoundary(
     )
   }
   const boundaryIndex = messages.findIndex((message) => message.id === pending.afterMessageId)
-  if (boundaryIndex !== -1) {
+  if (boundaryIndex >= 0) {
     return messages.slice(boundaryIndex + 1)
   }
-  // A bounded authoritative read can page the boundary out. Fall back to the
-  // send time instead of matching an arbitrary older identical prompt.
+  // A bounded authoritative read can page the boundary out. Use the pending
+  // host-domain timestamp when available; otherwise match by identity/occurrence.
   return messages.filter((message) => messageIsAfterPendingTimestamp(message, pending))
 }
 
@@ -150,26 +150,6 @@ function messageIsAfterPendingTimestamp(
 }
 
 /**
- * Rows a glue match may consume. Glue always starts at the oldest still-open
- * echo, so that echo's send boundary is the floor: unbounded, an older turn
- * whose text happens to split across the queue ("fix the bug" vs "fix the" +
- * "bug") would retire sends issued long after it. A missing message boundary
- * falls back to send time — a fuzzy match must never reach further back than
- * an exact one.
- */
-function gluedCandidateMessages(
-  messages: readonly NativeChatMessage[],
-  open: readonly NativeChatPendingSend[]
-): readonly NativeChatMessage[] {
-  const oldest = open[0]
-  if (!oldest) {
-    return []
-  }
-  const anchor = oldest.afterMessageId === undefined ? { ...oldest, afterMessageId: null } : oldest
-  return messagesAfterPendingBoundary(messages, anchor)
-}
-
-/**
  * Drop any pending send only after the transcript has advanced beyond its real
  * user turn. Keeping the echo through the user-only transcript phase prevents a
  * first-turn empty-state flash if the live transcript briefly reports [] before
@@ -196,20 +176,24 @@ export function prunePendingSends(
     consumed.set(key, Math.max(used, occurrence))
     return occurrence > available
   })
-  // Why: when a lost Enter glued two optimistic sends onto one input line, the
-  // transcript carries one row ("joke"+"continue"→"jokecontinue") that no exact
-  // key matches. Drop those echoes once an assistant turn advances past it.
+  // Why: when rapid body writes glued two optimistic sends into one transcript
+  // user row ("joke"+"continue"→"jokecontinue"), exact keys never match. Drop
+  // those echoes once an assistant turn advances past the glued user text.
+  // Boundary-filter per send so a pre-watermark "tellagain" cannot prune a
+  // fresh tell+again pair after the new high-water.
   const stillOpen = pending.filter((_, index) => exactKeep[index])
-  const gluedRepresented = selectPendingIndicesRepresentedByUserTexts(
+  const gluedRepresented = gluedPendingIndicesAfterBoundaries(
     stillOpen,
-    advancedNativeChatUserTexts(gluedCandidateMessages(messages, stillOpen))
+    messages,
+    transcriptOrder,
+    advancedNativeChatUserTexts
   )
   const next = pending.filter((entry, index) => {
     if (!exactKeep[index]) {
       return false
     }
     const openIndex = stillOpen.indexOf(entry)
-    return openIndex === -1 || !gluedRepresented.has(openIndex)
+    return openIndex < 0 || !gluedRepresented.has(openIndex)
   })
   return next.length === pending.length ? pending : next
 }
@@ -244,9 +228,11 @@ export function pendingSendsAsMessages(
   // Hide optimistic echoes that were glued into a single transcript user row
   // even before the assistant reply lands (matching, not advanced).
   const stillVisible = pending.filter((_, index) => exactVisible[index])
-  const gluedRepresented = selectPendingIndicesRepresentedByUserTexts(
+  const gluedRepresented = gluedPendingIndicesAfterBoundaries(
     stillVisible,
-    matchingNativeChatUserTexts(gluedCandidateMessages(existingMessages, stillVisible))
+    existingMessages,
+    transcriptOrder,
+    matchingNativeChatUserTexts
   )
   return pending
     .filter((entry, index) => {
@@ -254,7 +240,7 @@ export function pendingSendsAsMessages(
         return false
       }
       const openIndex = stillVisible.indexOf(entry)
-      return openIndex === -1 || !gluedRepresented.has(openIndex)
+      return openIndex < 0 || !gluedRepresented.has(openIndex)
     })
     .map((entry) => ({
       id: `pending:${entry.id}`,
@@ -266,6 +252,67 @@ export function pendingSendsAsMessages(
       timestamp: entry.sentAt,
       source: 'scrape' as const
     }))
+}
+
+function pendingBoundaryKey(pending: NativeChatPendingSend): string {
+  return [
+    String(pending.afterMessageId),
+    String(pending.afterTranscriptGeneration),
+    String(pending.afterTranscriptHighWater),
+    String(nativeChatPendingMatchingAfter(pending))
+  ].join('\0')
+}
+
+/** Glue-match only inside each send's post-boundary window (never full history). */
+function gluedPendingIndicesAfterBoundaries(
+  open: readonly NativeChatPendingSend[],
+  messages: readonly NativeChatMessage[],
+  transcriptOrder: NativeChatTranscriptOrder | undefined,
+  userTextsOf: (window: readonly NativeChatMessage[]) => readonly string[]
+): Set<number> {
+  const represented = new Set<number>()
+  if (open.length < 2) {
+    return represented
+  }
+  const groups = new Map<string, number[]>()
+  for (let index = 0; index < open.length; index += 1) {
+    const entry = open[index]
+    if (!entry) {
+      continue
+    }
+    const key = pendingBoundaryKey(entry)
+    const group = groups.get(key)
+    if (group) {
+      group.push(index)
+    } else {
+      groups.set(key, [index])
+    }
+  }
+  for (const indices of groups.values()) {
+    if (indices.length < 2) {
+      continue
+    }
+    const headIndex = indices[0]
+    const head = headIndex === undefined ? undefined : open[headIndex]
+    if (!head) {
+      continue
+    }
+    const groupPending = indices.flatMap((index) => {
+      const entry = open[index]
+      return entry ? [entry] : []
+    })
+    const local = selectPendingIndicesRepresentedByUserTexts(
+      groupPending,
+      userTextsOf(messagesAfterPendingBoundary(messages, head, transcriptOrder))
+    )
+    for (const localIndex of local) {
+      const openIndex = indices[localIndex]
+      if (openIndex !== undefined) {
+        represented.add(openIndex)
+      }
+    }
+  }
+  return represented
 }
 
 /** True when a message id was minted for an optimistic pending send. */

@@ -208,6 +208,43 @@ describe('prunePendingSends', () => {
       ])
     ).toEqual(pending)
   })
+
+  it('does not glue-prune a fresh tell+again against a pre-boundary tellagain row', () => {
+    // Harness: old completed "tellagain" must not prune newly sent tell+again
+    // after the watermark. Bad: visible=[], pruned=[].
+    const watermark = assistantMessage('wm', 'done')
+    const pending = [
+      { ...pendingOf('p1', 'tell'), afterMessageId: watermark.id, afterMessageTimestamp: 2 },
+      { ...pendingOf('p2', 'again'), afterMessageId: watermark.id, afterMessageTimestamp: 2 }
+    ]
+    const transcript = [
+      userMessage('old', 'tellagain'),
+      assistantMessage('old-a', 'old joke'),
+      watermark
+    ]
+    expect(pendingSendsAsMessages(pending, transcript).map((message) => message.id)).toEqual([
+      'pending:p1',
+      'pending:p2'
+    ])
+    expect(prunePendingSends(pending, transcript)).toEqual(pending)
+  })
+
+  it('still glue-prunes tell+again once the post-boundary glued turn completes', () => {
+    const watermark = assistantMessage('wm', 'done')
+    const pending = [
+      { ...pendingOf('p1', 'tell'), afterMessageId: watermark.id, afterMessageTimestamp: 2 },
+      { ...pendingOf('p2', 'again'), afterMessageId: watermark.id, afterMessageTimestamp: 2 }
+    ]
+    const transcript = [
+      userMessage('old', 'tellagain'),
+      assistantMessage('old-a', 'old joke'),
+      watermark,
+      userMessage('glued', 'tellagain'),
+      assistantMessage('new-a', 'new joke')
+    ]
+    expect(pendingSendsAsMessages(pending, transcript)).toEqual([])
+    expect(prunePendingSends(pending, transcript)).toEqual([])
+  })
 })
 
 // A glued row is written by the agent AFTER the sends that produced it, so every

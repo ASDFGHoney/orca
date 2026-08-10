@@ -4,12 +4,14 @@ import {
   appendNativeChatTranscriptOrder,
   createNativeChatTranscriptOrder,
   replaceNativeChatTranscriptOrder,
+  settleNativeChatTranscriptOrder,
   type NativeChatTranscriptOrder
 } from './native-chat-transcript-order'
 
 export function useNativeChatTranscriptOrder(): readonly [
   NativeChatTranscriptOrder,
   () => void,
+  (messages: readonly NativeChatMessage[], retainedCount: number) => void,
   (messages: readonly NativeChatMessage[], retainedCount: number) => void
 ] {
   const currentRef = useRef(createNativeChatTranscriptOrder())
@@ -26,5 +28,13 @@ export function useNativeChatTranscriptOrder(): readonly [
     )
     setCurrent(currentRef.current)
   }, [])
-  return [current, replace, append]
+  const settle = useCallback((messages: readonly NativeChatMessage[], retainedCount: number) => {
+    currentRef.current = settleNativeChatTranscriptOrder(
+      currentRef.current,
+      messages,
+      retainedCount
+    )
+    setCurrent(currentRef.current)
+  }, [])
+  return [current, replace, append, settle]
 }
