@@ -15,6 +15,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import remarkFrontmatter from 'remark-frontmatter'
 import remarkMath from 'remark-math'
+import { remarkDemoteCurrencyMath } from './remark-demote-currency-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
@@ -342,6 +343,8 @@ const MARKDOWN_REMARK_PLUGINS: MarkdownPluginList = [
   remarkBreaks,
   remarkFrontmatter,
   remarkMath,
+  // Why: remark-math treats `$148+ → $19` as math; demote currency false positives after parse.
+  remarkDemoteCurrencyMath,
   remarkMarkdownDocLinks
 ]
 // Why: sanitize raw HTML before KaTeX/highlight expand it, so their generated markup needn't be whitelisted in the schema.
