@@ -117,6 +117,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
           args: launch.args,
           cwd: launch.cwd,
           env: {
+            ...launch.env,
             [CLAUDE_SPAWN_TOKEN_ENV]: input.spawnToken,
             CLAUDE_CONFIG_DIR: launch.claudeConfigDir
           }

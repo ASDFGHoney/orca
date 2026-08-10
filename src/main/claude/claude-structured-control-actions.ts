@@ -1,4 +1,5 @@
 import { applyClaudePromptAnswer } from './claude-structured-prompt-replies'
+import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 export async function cancelClaudeTurn(
@@ -8,8 +9,11 @@ export async function cancelClaudeTurn(
   try {
     await session.connection.request('interrupt', {}, { timeoutMs })
     return { cancelled: true }
-  } catch {
-    return { cancelled: false }
+  } catch (error) {
+    if (error instanceof ClaudeControlRequestError) {
+      return { cancelled: false }
+    }
+    throw error
   }
 }
 

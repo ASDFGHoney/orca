@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { spawn } from 'node:child_process'
 import {
   openClaudeStreamJsonConnection,
@@ -22,8 +22,11 @@ function fakeSpawn() {
   child.stdout = new PassThrough()
   child.stderr = new PassThrough()
   child.kill = vi.fn(() => true)
-  const spawnImpl = vi.fn(() => child) as unknown as typeof spawn
-  return { child, spawnImpl }
+  const spawnMock = vi.fn(
+    (_command: string, _args: readonly string[], _options: { env?: NodeJS.ProcessEnv }) => child
+  )
+  const spawnImpl = spawnMock as unknown as typeof spawn
+  return { child, spawnImpl, spawnMock }
 }
 
 function writtenFrames(child: FakeChild): Promise<Record<string, unknown>[]> {
@@ -42,6 +45,8 @@ function writtenFrames(child: FakeChild): Promise<Record<string, unknown>[]> {
 }
 
 describe('Claude stream-json connection', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
   it('spawns in the pinned workspace and routes acknowledged control requests', async () => {
     const process = fakeSpawn()
     const connection = await openClaudeStreamJsonConnection(
@@ -124,5 +129,52 @@ describe('Claude stream-json connection', () => {
 
     expect(process.child.kill).toHaveBeenCalled()
     expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }))
+  })
+
+  it('uses configured auth and strips inherited auth and child-session stamps', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'inherited-key')
+    vi.stubEnv('CLAUDE_CODE_CHILD_SESSION', '1')
+    vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'inherited-session')
+    const process = fakeSpawn()
+
+    await openClaudeStreamJsonConnection(
+      {
+        command: 'claude',
+        args: [],
+        cwd: '/work',
+        env: {
+          ANTHROPIC_AUTH_TOKEN: 'configured-token',
+          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+          CLAUDE_CODE_SESSION_ID: 'configured-session'
+        }
+      },
+      {},
+      process.spawnImpl
+    )
+
+    const env = process.spawnMock.mock.calls[0]?.[2]?.env
+    expect(env).toMatchObject({
+      ANTHROPIC_AUTH_TOKEN: 'configured-token',
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+      CLAUDE_CODE_SESSION_ID: 'configured-session'
+    })
+    expect(env?.ANTHROPIC_API_KEY).toBeUndefined()
+    expect(env?.CLAUDE_CODE_CHILD_SESSION).toBeUndefined()
+  })
+
+  it('settles concurrent and repeated closes after a spawn failure', async () => {
+    const process = fakeSpawn()
+    const connection = await openClaudeStreamJsonConnection(
+      { command: 'missing-claude', args: [], cwd: '/work' },
+      {},
+      process.spawnImpl
+    )
+    process.child.emit('error', new Error('spawn missing-claude ENOENT'))
+
+    await expect(Promise.all([connection.close(), connection.close()])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
+    await expect(connection.close()).resolves.toBeUndefined()
   })
 })

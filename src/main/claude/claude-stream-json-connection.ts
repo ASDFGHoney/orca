@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
+import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
 
 export type ClaudeStreamJsonLaunch = {
   command: string
@@ -81,7 +82,7 @@ export async function openClaudeStreamJsonConnection(
 ): Promise<ClaudeStreamJsonConnection> {
   const child = spawnImpl(launch.command, launch.args, {
     cwd: launch.cwd,
-    env: { ...process.env, ...launch.env },
+    env: buildClaudeChildProcessEnv(launch.env),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true
   }) as ChildProcessWithoutNullStreams
@@ -93,13 +94,17 @@ export async function openClaudeStreamJsonConnection(
   let closing = false
   let terminalError: Error | null = null
   let writeChain: Promise<void> = Promise.resolve()
+  let closePromise: Promise<void> | null = null
 
+  let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
-    child.on('exit', () => {
-      exited = true
-      resolve()
-    })
+    settleExit = resolve
   })
+  const markExited = (): void => {
+    exited = true
+    settleExit()
+  }
+  child.on('exit', markExited)
 
   const failPending = (error: Error): void => {
     for (const waiter of pending.values()) {
@@ -215,10 +220,11 @@ export async function openClaudeStreamJsonConnection(
     stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_BYTES)
   })
   child.on('error', (error) => {
-    exited = true
+    markExited()
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
+    markExited()
     if (stdoutBuffer.trim()) {
       parseLine(stdoutBuffer)
       stdoutBuffer = ''
@@ -261,25 +267,24 @@ export async function openClaudeStreamJsonConnection(
     return promise
   }
 
-  const close = async (): Promise<void> => {
-    if (closing) {
-      await exitPromise
-      return
-    }
-    closing = true
-    try {
-      child.stdin.end()
-    } catch {
-      // The reap below still owns the process.
-    }
-    if (!exited) {
-      await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
-      if (!exited) {
-        killCodexAppServerProcessTree(child)
-        await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      closing = true
+      try {
+        child.stdin.end()
+      } catch {
+        // The reap below still owns the process.
       }
-    }
-    failPending(new Error('claude stream-json connection closed'))
+      if (!exited) {
+        await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
+        if (!exited) {
+          killCodexAppServerProcessTree(child)
+          await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+        }
+      }
+      failPending(new Error('claude stream-json connection closed'))
+    })()
+    return closePromise
   }
 
   return {

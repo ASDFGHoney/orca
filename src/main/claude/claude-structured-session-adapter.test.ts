@@ -9,6 +9,7 @@ import type {
   ClaudeStreamJsonLaunch,
   openClaudeStreamJsonConnection
 } from './claude-stream-json-connection'
+import { ClaudeControlRequestError } from './claude-stream-json-connection'
 import { CLAUDE_SPAWN_TOKEN_ENV } from './claude-structured-owner-identity'
 import { encodeClaudeQuestionOptionId } from './claude-structured-prompt-replies'
 import {
@@ -202,6 +203,27 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(events[0]).toMatchObject({ type: 'message', message: { subtype: 'init' } })
   })
 
+  it('forwards configured launch environment while keeping ownership pins authoritative', async () => {
+    const claude = fakeClaude()
+    const adapter = adapterFor(claude, {
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'configured-token',
+        ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+        CLAUDE_CONFIG_DIR: '/wrong/account',
+        [CLAUDE_SPAWN_TOKEN_ENV]: 'wrong-token'
+      }
+    })
+
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    expect(claude.connections[0].launch.env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: 'configured-token',
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+      CLAUDE_CONFIG_DIR: '/accounts/claude',
+      [CLAUDE_SPAWN_TOKEN_ENV]: 'spawn-9'
+    })
+  })
+
   it('records only non-secret effective auth-lane diagnostics', async () => {
     const claude = fakeClaude({
       settings: {
@@ -319,11 +341,18 @@ describe('ClaudeStructuredSessionAdapter turns and controls', () => {
     ])
 
     claude.routes.interrupt = () => {
-      throw new Error('not running')
+      throw new ClaudeControlRequestError('interrupt', 'not running')
     }
     await expect(
       adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-2', fence: 7 })
     ).resolves.toEqual({ cancelled: false })
+
+    claude.routes.interrupt = () => {
+      throw new Error('claude interrupt request timed out')
+    }
+    await expect(
+      adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-3', fence: 7 })
+    ).rejects.toThrow('timed out')
   })
 
   it('hydrates live model choices and maps the resolved current model to its CLI id', async () => {

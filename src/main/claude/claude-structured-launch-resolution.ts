@@ -27,6 +27,7 @@ export type ClaudeStructuredLaunch = {
   command: string
   args: string[]
   cwd: string
+  env?: Record<string, string>
   claudeConfigDir: string
   providerSessionId: string
   resumeLeafUuid: string | null

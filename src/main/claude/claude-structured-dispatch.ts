@@ -7,6 +7,13 @@ import type { ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_COUNT = 20
+const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
+
+type ImageBudget = {
+  count: number
+  localBytes: number
+}
 
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.gif': 'image/gif',
@@ -36,8 +43,13 @@ export function resolveClaudeReplayWaiter(
 }
 
 async function imageContent(
-  block: Extract<NativeChatBlock, { type: 'image-ref' }>
+  block: Extract<NativeChatBlock, { type: 'image-ref' }>,
+  budget: ImageBudget
 ): Promise<unknown> {
+  budget.count += 1
+  if (budget.count > MAX_IMAGE_COUNT) {
+    throw new Error(`Claude messages support at most ${MAX_IMAGE_COUNT} images`)
+  }
   if (block.url) {
     return { type: 'image', source: { type: 'url', url: block.url } }
   }
@@ -47,6 +59,10 @@ async function imageContent(
   const info = await stat(block.path)
   if (!info.isFile() || info.size > MAX_IMAGE_BYTES) {
     throw new Error(`Claude image must be a file no larger than ${MAX_IMAGE_BYTES} bytes`)
+  }
+  budget.localBytes += info.size
+  if (budget.localBytes > MAX_TOTAL_IMAGE_BYTES) {
+    throw new Error(`Claude images must total no more than ${MAX_TOTAL_IMAGE_BYTES} bytes`)
   }
   const mediaType = IMAGE_MIME_BY_EXTENSION[extname(block.path).toLowerCase()]
   if (!mediaType) {
@@ -67,11 +83,12 @@ async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]>
     throw new Error('Claude dispatch accepts only user messages')
   }
   const content: unknown[] = []
+  const imageBudget: ImageBudget = { count: 0, localBytes: 0 }
   for (const block of body.blocks as NativeChatBlock[]) {
     if (block.type === 'text' && block.text.length > 0) {
       content.push({ type: 'text', text: block.text })
     } else if (block.type === 'image-ref') {
-      content.push(await imageContent(block))
+      content.push(await imageContent(block, imageBudget))
     }
   }
   if (content.length === 0) {
