@@ -33,6 +33,26 @@ function questionsFrom(input: Record<string, unknown>): Record<string, unknown>[
   return Array.isArray(input.questions) ? input.questions.filter(isRecord) : []
 }
 
+function questionIdFromAddress(prompt: ClaudePendingPrompt, address: string): string | null {
+  const match = /^q([1-9]\d*)$/.exec(address)
+  const index = match ? Number(match[1]) - 1 : -1
+  return index >= 0 ? (prompt.questionIds[index] ?? null) : null
+}
+
+function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionId: string): string {
+  const decoded = decodeClaudeQuestionOptionId(optionId)
+  if (!decoded) {
+    return optionId
+  }
+  const questionIndex = prompt.questionIds.indexOf(questionId)
+  const choice = /^choice-([1-9]\d*)$/.exec(decoded.answer)
+  const optionIndex = choice ? Number(choice[1]) - 1 : -1
+  const question = questionsFrom(prompt.input)[questionIndex]
+  const option = Array.isArray(question?.options) ? question.options[optionIndex] : null
+  const label = isRecord(option) ? readString(option.label) : null
+  return decoded.questionId === `q${questionIndex + 1}` && label ? label : decoded.answer
+}
+
 function questionId(question: Record<string, unknown>, index: number): string {
   return readString(question.question) ?? readString(question.header) ?? `question-${index + 1}`
 }
@@ -161,13 +181,14 @@ function questionResponse(
 ): Record<string, unknown> | null {
   const decoded = decodeClaudeQuestionOptionId(optionId)
   const selectedQuestionId =
-    decoded?.questionId ??
     boundQuestionId ??
+    (decoded ? questionIdFromAddress(prompt, decoded.questionId) : null) ??
+    decoded?.questionId ??
     (prompt.questionIds.length === 1 ? prompt.questionIds[0] : null)
-  const answer = decoded?.answer ?? optionId
   if (!selectedQuestionId || !prompt.questionIds.includes(selectedQuestionId)) {
     throw new Error(`${optionId} does not name a question on Claude prompt ${prompt.promptKey}`)
   }
+  const answer = questionAnswer(prompt, selectedQuestionId, optionId)
   prompt.answers.set(selectedQuestionId, answer)
   if (prompt.questionIds.some((id) => !prompt.answers.has(id))) {
     return null

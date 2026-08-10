@@ -156,6 +156,23 @@ describe('Claude structured journal translation', () => {
     })
   })
 
+  it('starts a cancellable lifecycle for image-only root user replays', () => {
+    const state = sinkState()
+    const translator = createClaudeJournalTranslator({ sink: state.sink })
+
+    translator.handle(
+      message('user', 'user-image', [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }
+      ])
+    )
+
+    expect(state.items.at(-1)?.body).toEqual({
+      kind: 'status',
+      text: 'Claude is working…',
+      turnLifecycle: { turnId: 'user-image', state: 'running' }
+    })
+  })
+
   it('creates addressable approval and multi-question cards and cancels them durably', () => {
     const state = sinkState()
     const bindings: unknown[][] = []
@@ -200,7 +217,7 @@ describe('Claude structured journal translation', () => {
     translator.handle({ type: 'prompt', sessionId: 'orca-session', prompt: questions })
     expect(state.items.filter((item) => item.body.kind === 'question')).toHaveLength(2)
     expect(bindings.at(-1)).toEqual([
-      'orca:claude-prompt%3Aorca-session%3Aquestions-1%3AShip%3F',
+      'orca:claude-prompt%3Aorca-session%3Aquestions-1%3Aq2',
       'questions-1',
       'Ship?'
     ])
@@ -227,7 +244,7 @@ describe('Claude structured journal translation', () => {
       kind: 'question',
       question: 'Libraries?\n\nEnter one or more choices separated by commas.',
       options: [],
-      freeTextQuestionId: 'Libraries?'
+      freeTextQuestionId: 'q1'
     })
 
     translator.handle({

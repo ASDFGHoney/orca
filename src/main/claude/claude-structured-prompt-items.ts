@@ -64,15 +64,17 @@ export type ClaudeQuestionItem = {
 
 function questionOptions(
   question: Record<string, unknown>,
-  questionId: string
+  questionAddress: string
 ): AgentJournalPromptOption[] {
   if (!Array.isArray(question.options)) {
     return []
   }
-  return question.options.flatMap((value) => {
+  return question.options.flatMap((value, index) => {
     const option = claudeRecord(value)
     const label = claudeText(option?.label)
-    return label ? [{ id: encodeClaudeQuestionOptionId(questionId, label), label }] : []
+    return label
+      ? [{ id: encodeClaudeQuestionOptionId(questionAddress, `choice-${index + 1}`), label }]
+      : []
   })
 }
 
@@ -84,6 +86,7 @@ export function claudeQuestionItems(input: {
   return questions.flatMap((value, index) => {
     const question = claudeRecord(value)
     const questionId = input.prompt.questionIds[index]
+    const questionAddress = `q${index + 1}`
     const text = claudeText(question?.question) ?? claudeText(question?.header)
     const multiSelect = question?.multiSelect === true
     return question && questionId && text
@@ -93,15 +96,15 @@ export function claudeQuestionItems(input: {
             identity: claudePromptIdentity({
               sessionId: input.sessionId,
               promptKey: input.prompt.promptKey,
-              questionId
+              questionId: questionAddress
             }),
             body: {
               kind: 'question',
               question: multiSelect
                 ? `${text}\n\nEnter one or more choices separated by commas.`
                 : text,
-              options: multiSelect ? [] : questionOptions(question, questionId),
-              freeTextQuestionId: questionId,
+              options: multiSelect ? [] : questionOptions(question, questionAddress),
+              freeTextQuestionId: questionAddress,
               resolution: { ...PENDING }
             }
           }
