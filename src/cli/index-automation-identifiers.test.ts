@@ -42,6 +42,8 @@ vi.mock('child_process', async () => {
 
 import { main } from './index'
 import { okFixture, queueFixtures } from './test-fixtures'
+
+const SELF_OWNER = { selector: { kind: 'self' } }
 import { useWorktreeAwarenessEnvironment } from './index-test-harness'
 
 describe('orca cli worktree awareness', () => {
@@ -57,8 +59,11 @@ describe('orca cli worktree awareness', () => {
   it('passes positional automation ids to edit, remove, run, and show', async () => {
     queueFixtures(
       callMock,
+      okFixture('req_owner_edit', { automation: { id: 'auto-1' }, owner: SELF_OWNER }),
       okFixture('req_edit', { automation: { id: 'auto-1', name: 'Paused' } }),
+      okFixture('req_owner_remove', { automation: { id: 'auto-1' }, owner: SELF_OWNER }),
       okFixture('req_remove', { removed: true, id: 'auto-1' }),
+      okFixture('req_owner_run', { automation: { id: 'auto-1' }, owner: SELF_OWNER }),
       okFixture('req_run', {
         run: {
           id: 'run-1',
@@ -88,8 +93,9 @@ describe('orca cli worktree awareness', () => {
     await main(['automations', 'run', 'auto-1', '--json'], '/tmp/repo')
     await main(['automations', 'show', 'auto-1', '--json'], '/tmp/repo')
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'automation.update', {
+    expect(callMock).toHaveBeenNthCalledWith(2, 'automation.update', {
       id: 'auto-1',
+      expectedOwner: SELF_OWNER,
       updates: {
         name: undefined,
         prompt: undefined,
@@ -103,13 +109,16 @@ describe('orca cli worktree awareness', () => {
         missedRunGraceMinutes: undefined
       }
     })
-    expect(callMock).toHaveBeenNthCalledWith(2, 'automation.delete', {
-      id: 'auto-1'
+    expect(callMock).toHaveBeenNthCalledWith(4, 'automation.delete', {
+      id: 'auto-1',
+      expectedOwner: SELF_OWNER
     })
-    expect(callMock).toHaveBeenNthCalledWith(3, 'automation.runNow', {
-      id: 'auto-1'
+    expect(callMock).toHaveBeenNthCalledWith(6, 'automation.runNow', {
+      id: 'auto-1',
+      expectedOwner: SELF_OWNER
     })
-    expect(callMock).toHaveBeenNthCalledWith(4, 'automation.show', {
+    // A read stays a single call: nothing to fence, so nothing to look up first.
+    expect(callMock).toHaveBeenNthCalledWith(7, 'automation.show', {
       id: 'auto-1'
     })
   })

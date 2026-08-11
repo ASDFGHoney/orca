@@ -41,7 +41,9 @@ vi.mock('child_process', async () => {
 })
 
 import { main } from './index'
-import { okFixture, queueFixtures } from './test-fixtures'
+import { localRepoDestinationFixtures, okFixture, queueFixtures } from './test-fixtures'
+
+const SELF_OWNER = { selector: { kind: 'self' } }
 import { useWorktreeAwarenessEnvironment } from './index-test-harness'
 
 describe('orca cli worktree awareness', () => {
@@ -67,6 +69,7 @@ describe('orca cli worktree awareness', () => {
     }
     queueFixtures(
       callMock,
+      ...localRepoDestinationFixtures('repo-gpu'),
       okFixture('req_automation_create', {
         automation: { id: 'auto-1', name: 'GPU task review' }
       })
@@ -95,7 +98,7 @@ describe('orca cli worktree awareness', () => {
     )
 
     expect(callMock).toHaveBeenNthCalledWith(
-      1,
+      2,
       'automation.create',
       expect.objectContaining({
         repo: 'id:repo-gpu',
@@ -107,6 +110,7 @@ describe('orca cli worktree awareness', () => {
   it('clears automation source context on edit with null', async () => {
     queueFixtures(
       callMock,
+      okFixture('req_owner', { automation: { id: 'auto-1' }, owner: SELF_OWNER }),
       okFixture('req_edit', {
         automation: { id: 'auto-1', name: 'GPU task review' }
       })
@@ -116,7 +120,7 @@ describe('orca cli worktree awareness', () => {
     await main(['automations', 'edit', 'auto-1', '--source-context', 'null', '--json'], '/tmp/repo')
 
     expect(callMock).toHaveBeenNthCalledWith(
-      1,
+      2,
       'automation.update',
       expect.objectContaining({
         id: 'auto-1',

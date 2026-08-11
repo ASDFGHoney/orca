@@ -21,6 +21,7 @@ import type {
   WorkspaceHostScope,
   WorktreeCardProperty
 } from './ui-chrome-types'
+import type { PersistedAutomationHostFilter } from './automation-host-filter'
 import type { WorkspaceStatusDefinition } from './worktree/types'
 
 export type PersistedUIState = {
@@ -49,6 +50,8 @@ export type PersistedUIState = {
   visibleWorkspaceHostIds?: VisibleWorkspaceHostIds
   /** User-defined sidebar order for host sections; missing/new hosts append in discovered order. */
   workspaceHostOrder?: WorkspaceHostOrder
+  /** Automations page host filter. Stores only the stable form (a canonical `hostStableKey`); an unparseable value degrades to All hosts. */
+  automationHostFilter?: PersistedAutomationHostFilter
   /** Desktop-owned all-host repo order; host-qualified identities keep a manual cross-host interleaving while each host owns its local permutation. */
   manualRepoOrder?: ManualRepoOrderEntry[]
   /** Deprecated legacy positive-form setting. Ignored on hydration. */

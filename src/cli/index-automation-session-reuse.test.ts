@@ -41,7 +41,15 @@ vi.mock('child_process', async () => {
 })
 
 import { main } from './index'
-import { buildWorktree, okFixture, queueFixtures, worktreeListFixture } from './test-fixtures'
+import {
+  buildWorktree,
+  okFixture,
+  queueFixtures,
+  workspaceDestinationFixtures,
+  worktreeListFixture
+} from './test-fixtures'
+
+const SELF_OWNER = { selector: { kind: 'self' } }
 import { useWorktreeAwarenessEnvironment } from './index-test-harness'
 
 describe('orca cli worktree awareness', () => {
@@ -58,9 +66,11 @@ describe('orca cli worktree awareness', () => {
     queueFixtures(
       callMock,
       worktreeListFixture([buildWorktree('/tmp/repo/feature', 'feature/foo', 'abc', 'repo-1')]),
+      ...workspaceDestinationFixtures(),
       okFixture('req_create', {
         automation: { id: 'auto-1', name: 'Daily review' }
       }),
+      okFixture('req_owner', { automation: { id: 'auto-1' }, owner: SELF_OWNER }),
       okFixture('req_edit', {
         automation: { id: 'auto-1', name: 'Daily review' }
       })
@@ -92,7 +102,7 @@ describe('orca cli worktree awareness', () => {
       limit: 10_000
     })
     expect(callMock).toHaveBeenNthCalledWith(
-      2,
+      4,
       'automation.create',
       expect.objectContaining({
         workspace: 'id:repo-1::/tmp/repo/feature',
@@ -100,8 +110,10 @@ describe('orca cli worktree awareness', () => {
         reuseSession: true
       })
     )
-    expect(callMock).toHaveBeenNthCalledWith(3, 'automation.update', {
+    expect(callMock).toHaveBeenNthCalledWith(5, 'automation.show', { id: 'auto-1' })
+    expect(callMock).toHaveBeenNthCalledWith(6, 'automation.update', {
       id: 'auto-1',
+      expectedOwner: SELF_OWNER,
       updates: expect.objectContaining({ reuseSession: false })
     })
   })
