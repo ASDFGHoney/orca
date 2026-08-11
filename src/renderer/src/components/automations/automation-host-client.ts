@@ -1,21 +1,10 @@
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import type {
   Automation,
-  AutomationCreateInput,
   AutomationRun,
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
 import { parseExecutionHostId } from '../../../../shared/execution-host'
-import type { GlobalSettings } from '../../../../shared/global-settings-types'
-
-type RuntimeAutomationCreateInput = Omit<
-  AutomationCreateInput,
-  'projectId' | 'workspaceId' | 'timezone'
-> & {
-  repo?: string
-  workspace?: string
-  timezone?: string
-}
 
 type RuntimeAutomationUpdateInput = Omit<AutomationUpdateInput, 'projectId' | 'workspaceId'> & {
   repo?: string
@@ -49,13 +38,6 @@ export function getAutomationTargetFromHostId(
     : { kind: 'local' }
 }
 
-export function getAutomationListTarget(
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
-): AutomationHostTarget {
-  const environmentId = settings?.activeRuntimeEnvironmentId?.trim()
-  return environmentId ? { kind: 'environment', environmentId } : { kind: 'local' }
-}
-
 export function getAutomationOwnerTarget(
   automation: Pick<Automation, 'runContext'>,
   sourceTarget?: AutomationHostTarget | null
@@ -64,21 +46,6 @@ export function getAutomationOwnerTarget(
     return sourceTarget
   }
   return getAutomationTargetFromHostId(automation.runContext?.hostId)
-}
-
-export function getAutomationCreateTarget(input: AutomationCreateInput): AutomationHostTarget {
-  return getAutomationTargetFromHostId(input.runContext?.hostId)
-}
-
-function toRuntimeAutomationCreateInput(
-  input: AutomationCreateInput
-): RuntimeAutomationCreateInput {
-  const { projectId, workspaceId, ...rest } = input
-  return {
-    ...rest,
-    repo: projectId,
-    workspace: input.workspaceMode === 'existing' ? (workspaceId ?? undefined) : undefined
-  }
 }
 
 function toRuntimeAutomationUpdateInput(
@@ -107,34 +74,25 @@ export async function listAutomationsForTarget(
   return result.automations
 }
 
+/**
+ * One automation's history, never a host's. Usage totals for the list come from
+ * the authority's own list projection; fetching every run to compute them made
+ * the page's cost scale with retained history rather than with what is on screen.
+ */
 export async function listAutomationRunsForTarget(
   target: AutomationHostTarget,
-  automationId?: string
+  automationId: string
 ): Promise<AutomationRun[]> {
   if (target.kind === 'local') {
-    return await window.api.automations.listRuns(automationId ? { automationId } : undefined)
+    return await window.api.automations.listRuns({ automationId })
   }
   const result = await callRuntimeRpc<{ runs: AutomationRun[] }>(
     target,
     'automation.runs',
-    automationId ? { automationId } : {},
+    { automationId },
     { timeoutMs: 15_000 }
   )
   return result.runs
-}
-
-export async function createAutomationForTarget(input: AutomationCreateInput): Promise<Automation> {
-  const target = getAutomationCreateTarget(input)
-  if (target.kind === 'local') {
-    return await window.api.automations.create(input)
-  }
-  const result = await callRuntimeRpc<{ automation: Automation }>(
-    target,
-    'automation.create',
-    toRuntimeAutomationCreateInput(input),
-    { timeoutMs: 15_000 }
-  )
-  return result.automation
 }
 
 export async function updateAutomationForTarget(

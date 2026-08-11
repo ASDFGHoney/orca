@@ -196,6 +196,7 @@ describe('useIpcEvents zoom routing', () => {
       clearTimeout: vi.fn(),
       api: {
         repos: makeEvents(),
+        automations: makeEvents(),
         worktrees: makeEvents(),
         keybindings: makeEvents(),
         settings: makeEvents(),
@@ -339,6 +340,7 @@ describe('useIpcEvents zoom routing', () => {
       clearTimeout: vi.fn(),
       api: {
         repos: makeEvents(),
+        automations: makeEvents(),
         worktrees: makeEvents(),
         keybindings: makeEvents(),
         settings: makeEvents(),
