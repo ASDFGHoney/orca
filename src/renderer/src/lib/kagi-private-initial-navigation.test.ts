@@ -1,22 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import {
   discardKagiPrivateInitialNavigation,
-  queueKagiPrivateInitialNavigation,
-  takeKagiPrivateInitialNavigation
+  getKagiPrivateInitialNavigation,
+  queueKagiPrivateInitialNavigation
 } from './kagi-private-initial-navigation'
 
 describe('Kagi private initial navigation', () => {
-  it('keeps the bearer URL separate from the browser model and consumes it once', () => {
+  it('keeps the bearer URL separate from the model until navigation commits', () => {
     const modelUrl = 'https://kagi.com/search?q=private+project'
     const privateUrl = 'https://kagi.com/search?token=session-secret&q=private+project'
 
     queueKagiPrivateInitialNavigation('page-1', privateUrl)
 
-    expect(takeKagiPrivateInitialNavigation('page-1', modelUrl)).toEqual({
+    expect(getKagiPrivateInitialNavigation('page-1', modelUrl)).toEqual({
       modelUrl,
       navigationUrl: privateUrl
     })
-    expect(takeKagiPrivateInitialNavigation('page-1', modelUrl)).toEqual({
+    expect(getKagiPrivateInitialNavigation('page-1', modelUrl)).toEqual({
+      modelUrl,
+      navigationUrl: privateUrl
+    })
+    discardKagiPrivateInitialNavigation('page-1')
+    expect(getKagiPrivateInitialNavigation('page-1', modelUrl)).toEqual({
       modelUrl,
       navigationUrl: modelUrl
     })
@@ -28,12 +33,45 @@ describe('Kagi private initial navigation', () => {
       queueKagiPrivateInitialNavigation(`page-${index}`, `${privateUrl}-${index}`)
     }
 
-    expect(takeKagiPrivateInitialNavigation('page-0', 'about:blank').navigationUrl).toBe(
+    expect(getKagiPrivateInitialNavigation('page-0', 'https://kagi.com/search').navigationUrl).toBe(
       `${privateUrl}-0`
     )
-    for (let index = 1; index < 64; index += 1) {
+    for (let index = 0; index < 64; index += 1) {
       discardKagiPrivateInitialNavigation(`page-${index}`)
     }
+  })
+
+  it('bounds credentials retained for pages that never mount', () => {
+    const modelUrl = 'https://kagi.com/search'
+    for (let index = 0; index < 129; index += 1) {
+      queueKagiPrivateInitialNavigation(
+        `bounded-page-${index}`,
+        `https://kagi.com/search?token=session-secret-${index}`
+      )
+    }
+
+    expect(getKagiPrivateInitialNavigation('bounded-page-0', modelUrl).navigationUrl).toBe(modelUrl)
+    expect(getKagiPrivateInitialNavigation('bounded-page-128', modelUrl).navigationUrl).toContain(
+      'session-secret-128'
+    )
+    for (let index = 0; index < 129; index += 1) {
+      discardKagiPrivateInitialNavigation(`bounded-page-${index}`)
+    }
+  })
+
+  it('drops a stale credential when the page target changes before mount', () => {
+    const privateUrl = 'https://kagi.com/search?token=session-secret&q=old'
+    queueKagiPrivateInitialNavigation('page-changed', privateUrl)
+
+    expect(
+      getKagiPrivateInitialNavigation('page-changed', 'https://example.com/new-target')
+    ).toEqual({
+      modelUrl: 'https://example.com/new-target',
+      navigationUrl: 'https://example.com/new-target'
+    })
+    expect(getKagiPrivateInitialNavigation('page-changed', 'about:blank').navigationUrl).toBe(
+      'about:blank'
+    )
   })
 
   it('rejects non-Kagi URLs and discards closed pages', () => {
@@ -44,18 +82,18 @@ describe('Kagi private initial navigation', () => {
     queueKagiPrivateInitialNavigation('page-closed', 'https://kagi.com/search?token=session-secret')
     discardKagiPrivateInitialNavigation('page-closed')
 
-    expect(takeKagiPrivateInitialNavigation('page-closed', 'about:blank')).toEqual({
+    expect(getKagiPrivateInitialNavigation('page-closed', 'about:blank')).toEqual({
       modelUrl: 'about:blank',
       navigationUrl: 'about:blank'
     })
   })
 
-  it('redacts a defensive model fallback without changing the private navigation', () => {
+  it('redacts a defensive model fallback', () => {
     const privateUrl = 'https://kagi.com/search?token=session-secret&q=private+project'
 
-    expect(takeKagiPrivateInitialNavigation('page-missing', privateUrl)).toEqual({
+    expect(getKagiPrivateInitialNavigation('page-missing', privateUrl)).toEqual({
       modelUrl: 'https://kagi.com/search?q=private+project',
-      navigationUrl: privateUrl
+      navigationUrl: 'https://kagi.com/search?q=private+project'
     })
   })
 })

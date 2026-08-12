@@ -6,7 +6,6 @@ import {
 } from '../../../shared/execution-host'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
-import { takeKagiPrivateInitialNavigation } from './kagi-private-initial-navigation'
 import {
   canOpenWorkspaceBrowserTabOnRuntime,
   openWorkspaceBrowserTab
@@ -408,12 +407,7 @@ describe('openWorkspaceBrowserTab', () => {
   })
 
   it('preserves private Kagi navigation with the desktop provider', async () => {
-    const createBrowserTab = vi.fn(
-      (_workspaceId: string, _url: string, options: { browserPageId?: string }) => ({
-        activePageId: options.browserPageId ?? 'page-1',
-        pageIds: [options.browserPageId ?? 'page-1']
-      })
-    )
+    const createBrowserTab = vi.fn()
     const sshHost = toSshExecutionHostId('ssh-target')
     const privateUrl = 'https://kagi.com/search?token=secret&q=private+project'
     mocks.state = {
@@ -433,20 +427,9 @@ describe('openWorkspaceBrowserTab', () => {
     expect(mocks.createRemote).not.toHaveBeenCalled()
     expect(createBrowserTab).toHaveBeenCalledWith(
       WORKSPACE_ID,
-      'https://kagi.com/search?q=private+project',
-      expect.objectContaining({
-        browserPageId: expect.any(String),
-        sessionProfileId: 'ssh-profile'
-      })
+      privateUrl,
+      expect.objectContaining({ sessionProfileId: 'ssh-profile' })
     )
-    const pageId = createBrowserTab.mock.calls[0]?.[2].browserPageId
-    if (!pageId) {
-      throw new Error('Expected a private initial-navigation page ID.')
-    }
-    expect(takeKagiPrivateInitialNavigation(pageId, 'about:blank')).toEqual({
-      modelUrl: 'about:blank',
-      navigationUrl: privateUrl
-    })
   })
 
   it('fails closed for invalid targets and unresolved owners, then falls back locally', async () => {
@@ -494,57 +477,10 @@ describe('openWorkspaceBrowserTab', () => {
     expect(mocks.state.createBrowserTab).not.toHaveBeenCalled()
   })
 
-  it('keeps a Kagi private-session URL out of persisted page state while preserving navigation', async () => {
-    const createBrowserTab = vi.fn(
-      (_workspaceId: string, _url: string, options: { browserPageId?: string }) => ({
-        activePageId: options.browserPageId ?? 'page-1',
-        pageIds: [options.browserPageId ?? 'page-1']
-      })
-    )
-    mocks.state = {
-      ...ownerState('local'),
-      createBrowserTab,
-      defaultBrowserSessionProfileId: null,
-      defaultBrowserSessionProfileIdByHostId: {}
-    }
-    const privateUrl = 'https://kagi.com/search?token=secret&q=private+project'
-
-    await openWorkspaceBrowserTab({
-      workspaceId: WORKSPACE_ID,
-      url: privateUrl,
-      intent: { kind: 'search', engine: 'kagi' }
+  it('surfaces client tab creation failures', async () => {
+    const createBrowserTab = vi.fn(() => {
+      throw new Error('create failed')
     })
-
-    expect(createBrowserTab).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      'https://kagi.com/search?q=private+project',
-      expect.objectContaining({ browserPageId: expect.any(String) })
-    )
-    expect(JSON.stringify(createBrowserTab.mock.calls)).not.toContain('secret')
-    const pageId = createBrowserTab.mock.calls[0]?.[2].browserPageId
-    if (!pageId) {
-      throw new Error('Expected a private initial-navigation page ID.')
-    }
-    expect(
-      takeKagiPrivateInitialNavigation(pageId, 'https://kagi.com/search?q=private+project')
-    ).toEqual({
-      modelUrl: 'https://kagi.com/search?q=private+project',
-      navigationUrl: privateUrl
-    })
-    expect(takeKagiPrivateInitialNavigation(pageId, 'about:blank')).toEqual({
-      modelUrl: 'about:blank',
-      navigationUrl: 'about:blank'
-    })
-  })
-
-  it('discards a queued Kagi credential when tab creation fails', async () => {
-    let privatePageId: string | undefined
-    const createBrowserTab = vi.fn(
-      (_workspaceId: string, _url: string, options: { browserPageId?: string }) => {
-        privatePageId = options.browserPageId
-        throw new Error('create failed')
-      }
-    )
     mocks.state = {
       ...ownerState('local'),
       createBrowserTab,
@@ -559,12 +495,5 @@ describe('openWorkspaceBrowserTab', () => {
         intent: { kind: 'search', engine: 'kagi' }
       })
     ).rejects.toThrow('Unable to search with Kagi.')
-
-    if (!privatePageId) {
-      throw new Error('Expected a private initial-navigation page ID.')
-    }
-    expect(takeKagiPrivateInitialNavigation(privatePageId, 'about:blank').navigationUrl).toBe(
-      'about:blank'
-    )
   })
 })

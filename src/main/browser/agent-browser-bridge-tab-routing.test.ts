@@ -176,6 +176,22 @@ describe('AgentBrowserBridge', () => {
       })
     })
 
+    it('redacts Kagi session credentials from listed tabs', () => {
+      const tabs = new Map([['tab-a', 1]])
+      const wc = mockWebContents(
+        1,
+        'https://kagi.com/search?token=session-secret&q=private+project',
+        'https://kagi.com/search?token=session-secret&q=private+project'
+      )
+      webContentsFromIdMock.mockReturnValue(wc)
+
+      const result = new AgentBrowserBridge(mockBrowserManager(tabs)).tabList()
+
+      expect(result.tabs[0]?.url).toBe('https://kagi.com/search?q=private+project')
+      expect(result.tabs[0]?.title).toBe('https://kagi.com/search?q=private+project')
+      expect(JSON.stringify(result)).not.toContain('session-secret')
+    })
+
     it('does not mutate active-tab routing when tab-list infers the first live tab', () => {
       const tabs = new Map([
         ['tab-a', 1],
