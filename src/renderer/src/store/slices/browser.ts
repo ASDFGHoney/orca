@@ -42,6 +42,7 @@ import type {
   BrowserProfileListResult
 } from '../../../../shared/runtime-types'
 import { createBrowserUuid } from '@/lib/browser-uuid'
+import { discardKagiPrivateInitialNavigation } from '@/lib/kagi-private-initial-navigation'
 import { translate } from '@/i18n/i18n'
 import {
   getExecutionHostLabel,
@@ -805,6 +806,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   },
   closeBrowserTab: (tabId) => {
     let remotePagesToClose: { worktreeId: string; handle: RemoteBrowserPageHandle }[] = []
+    let closedPageIds: string[] = []
     set((s) => {
       let owningWorktreeId: string | null = null
       let closedWorkspace: BrowserWorkspace | null = null
@@ -825,6 +827,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       }
 
       const closedPages = s.browserPagesByWorkspace[tabId] ?? []
+      closedPageIds = closedPages.map((page) => page.id)
       const nextBrowserPagesByWorkspace = { ...s.browserPagesByWorkspace }
       delete nextBrowserPagesByWorkspace[tabId]
       const nextBrowserAnnotationsByPageId = { ...s.browserAnnotationsByPageId }
@@ -932,6 +935,10 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         browserAnnotationsByPageId: nextBrowserAnnotationsByPageId
       }
     })
+
+    for (const pageId of closedPageIds) {
+      discardKagiPrivateInitialNavigation(pageId)
+    }
 
     for (const remotePage of remotePagesToClose) {
       closeRemoteBrowserPageInOwningEnvironment(remotePage.worktreeId, remotePage.handle)
@@ -1168,6 +1175,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   },
 
   closeBrowserPage: (pageId) => {
+    discardKagiPrivateInitialNavigation(pageId)
     let closedWorkspaceIdForLabel: string | null = null
     const remotePagesToClose: { worktreeId: string; handle: RemoteBrowserPageHandle }[] = []
     set((s) => {

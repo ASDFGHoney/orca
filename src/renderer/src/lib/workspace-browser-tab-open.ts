@@ -7,13 +7,22 @@ import {
   parseExecutionHostId,
   type ExecutionHostId
 } from '../../../shared/execution-host'
-import { SEARCH_ENGINE_LABELS, type SearchEngine } from '../../../shared/browser-url'
+import {
+  redactKagiSessionToken,
+  SEARCH_ENGINE_LABELS,
+  type SearchEngine
+} from '../../../shared/browser-url'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
+import { createBrowserUuid } from './browser-uuid'
 import {
   getClientCreationActionPolicy,
   type ClientCreationActionAvailability
 } from './client-creation-action-policy'
+import {
+  discardKagiPrivateInitialNavigation,
+  queueKagiPrivateInitialNavigation
+} from './kagi-private-initial-navigation'
 import { resolveWorktreeOperationRoute } from './worktree-operation-route'
 
 export type WorkspaceBrowserTabIntent = { kind: 'url' } | { kind: 'search'; engine: SearchEngine }
@@ -139,18 +148,30 @@ function createClientBrowserTab(
   hostId: ExecutionHostId,
   presentation: { error: string; title: string }
 ): void {
+  const modelUrl = redactKagiSessionToken(request.url)
+  const privatePageId = modelUrl === request.url ? null : createBrowserUuid()
   try {
-    state.createBrowserTab(request.workspaceId, request.url, {
+    if (privatePageId) {
+      queueKagiPrivateInitialNavigation(privatePageId, request.url)
+    }
+    const created = state.createBrowserTab(request.workspaceId, modelUrl, {
       activate: true,
       browserRuntimeEnvironmentId: null,
       focusAddressBar: false,
+      ...(privatePageId ? { browserPageId: privatePageId } : {}),
       sessionProfileId:
         state.defaultBrowserSessionProfileIdByHostId[hostId] ??
         state.defaultBrowserSessionProfileId,
       targetGroupId: request.targetGroupId,
       title: presentation.title
     })
+    if (privatePageId && created.activePageId !== privatePageId) {
+      throw new Error('Browser page was not created.')
+    }
   } catch (error) {
+    if (privatePageId) {
+      discardKagiPrivateInitialNavigation(privatePageId)
+    }
     throw openFailure(presentation.error, 'client tab creation rejected', error)
   }
 }
