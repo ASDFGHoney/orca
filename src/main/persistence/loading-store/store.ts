@@ -27,6 +27,17 @@ import type {
   AutomationRunTrigger,
   AutomationUpdateInput
 } from '../../../shared/automations-types'
+import type {
+  AutomationCapturedHostIssue,
+  AutomationChangeSelector,
+  AutomationListParams,
+  AutomationListResult
+} from '../../../shared/automation-list-scope'
+import type {
+  AutomationDestination,
+  AutomationOwnerFenceOperation,
+  AutomationOwnerPrecondition
+} from '../../../shared/automation-owner-precondition'
 import { normalizeProxyUrl } from '../../../shared/network-proxy'
 import { normalizeKagiSessionLink } from '../../../shared/browser-url'
 import type { FolderWorkspace, WorkspaceKey } from '../../../shared/folder-workspace-types'
@@ -258,6 +269,7 @@ import {
   removeClaudeLivePtySessionId as removeClaudeLivePtySessionIdOperation,
   removeDeletedSshConfigAlias as removeDeletedSshConfigAliasOperation,
   removeRemovedSshTargetTombstone as removeRemovedSshTargetTombstoneOperation,
+  releaseRemovedSshTargetTombstone as releaseRemovedSshTargetTombstoneOperation,
   removeSshTarget as removeSshTargetOperation,
   updateSshTarget as updateSshTargetOperation
 } from '../leasing-ssh-ptys/ssh-target-state'
@@ -331,6 +343,7 @@ import {
 import {
   createAutomationRun as createAutomationRunOperation,
   listAutomationRuns as listAutomationRunsOperation,
+  recordRepeatedAutomationSkip as recordRepeatedAutomationSkipOperation,
   snapshotAutomationRunWorkspaceDisplayName as snapshotAutomationRunWorkspaceDisplayNameOperation,
   updateAutomationRun as updateAutomationRunOperation,
   type AutomationRunOperations
@@ -358,6 +371,17 @@ import {
 import { hydrateRepo as hydrateRepoOperation } from '../tracking-repos/repo-hydration'
 import { RepoUpdatePersistenceOperations } from '../tracking-repos/repo-update-operations'
 import { ProjectHostSetupPersistenceOperations } from '../tracking-repos/project-host-setup-update'
+import { migrateAutomationOwners } from '../../automations/automation-owner-migration'
+import {
+  allocateSshTargetGeneration as allocateSshTargetGenerationOperation,
+  assertAutomationOwnerFence as assertAutomationOwnerFenceOperation,
+  automationCapturedHostIssue as automationCapturedHostIssueOperation,
+  automationChangeSelector as automationChangeSelectorOperation,
+  automationOwnerPrecondition as automationOwnerPreconditionOperation,
+  listAutomationsForScope as listAutomationsForScopeOperation,
+  type AutomationListProjectionCache,
+  type AutomationStorageAuthority
+} from '../scheduling-automations/automation-owner-projection'
 
 // Why (issue #1158): keep 5 rolling backups at >=1h spacing so a corrupt/empty write leaves an earlier copy recoverable.
 const BACKUP_COUNT = 5
@@ -498,6 +522,7 @@ function deleteRemovedTerminalScrollbackSnapshots(
 
 export type StoreOptions = {
   dataFile?: string
+  storageAuthority?: AutomationStorageAuthority
 }
 
 export type PtyBindingSourceExpectation = {
@@ -512,6 +537,7 @@ export class Store {
   // Why readonly: the operations wrappers below capture this reference once and are memoized.
   private readonly state: PersistedState
   private readonly dataFile: string
+  private readonly storageAuthority: AutomationStorageAuthority
   private readonly activeViewPreference: ActiveViewPreference
   private readonly terminalScrollbackSnapshotStorage: TerminalScrollbackSnapshotStorage
   private writeTimer: ReturnType<typeof setTimeout> | null = null
@@ -546,10 +572,12 @@ export class Store {
     ) => void
   >()
   private uiChangeListeners = new Set<(ui: PersistedState['ui']) => void>()
+  private automationListProjectionCache: AutomationListProjectionCache | null = null
 
   constructor(options: StoreOptions = {}) {
     // Why: profile switching yields multiple state paths; capture per Store so late async writes can't follow a global path.
     this.dataFile = options.dataFile ?? getDataFile()
+    this.storageAuthority = options.storageAuthority ?? 'desktop'
     this.staleTempCleanup = removeStaleDurableWriteTempFiles(this.dataFile, {
       minimumAgeMs: STALE_DURABLE_WRITE_TEMP_AGE_MS
     })
@@ -1605,6 +1633,28 @@ export class Store {
       automationRuns: automationContextMigration.state.automationRuns
     }
 
+    const automationOwnerMigration = migrateAutomationOwners({
+      automations: result.automations,
+      sshTargets: result.sshTargets,
+      repos,
+      folderWorkspaces: result.folderWorkspaces,
+      projectGroups: result.projectGroups,
+      removedSshTargetTombstones: result.removedSshTargetTombstones ?? [],
+      sshTargetGenerationCounter: result.sshTargetGenerationCounter,
+      storageAuthority: this.storageAuthority,
+      now: Date.now()
+    })
+    if (automationOwnerMigration.changed) {
+      this.loadNeedsSave = true
+    }
+    result = {
+      ...result,
+      automations: automationOwnerMigration.automations,
+      sshTargets: automationOwnerMigration.sshTargets,
+      removedSshTargetTombstones: automationOwnerMigration.removedSshTargetTombstones,
+      sshTargetGenerationCounter: automationOwnerMigration.sshTargetGenerationCounter
+    }
+
     const folderScopeConnectionMigration = backfillFolderScopeConnectionIds({
       ...result,
       repos,
@@ -1715,6 +1765,7 @@ export class Store {
   private static SAVE_MAX_WAIT_MS = 5_000
 
   private scheduleSave(): void {
+    this.automationListProjectionCache = null
     // Why: once the quit flush has snapshotted, a newly debounced write would fire during
     // teardown with nothing awaiting it, and the process can exit mid-rename. The quit
     // flush is the last write by construction.
@@ -2403,6 +2454,7 @@ export class Store {
   private getAutomationDefinitionOperations(): AutomationDefinitionOperations {
     return {
       state: this.state,
+      storageAuthority: this.storageAuthority,
       flush: () => this.flush(),
       recordCreated: () => this.recordFeatureInteraction('automation-created')
     }
@@ -2422,20 +2474,67 @@ export class Store {
     return listAutomationsOperation(this.state)
   }
 
+  listAutomationsForScope(params?: AutomationListParams | null): AutomationListResult {
+    const projection = listAutomationsForScopeOperation({
+      state: this.state,
+      storageAuthority: this.storageAuthority,
+      automations: this.listAutomations(),
+      params,
+      cache: this.automationListProjectionCache
+    })
+    this.automationListProjectionCache = projection.cache
+    return projection.result
+  }
+
+  automationOwnerPrecondition(id: string): AutomationOwnerPrecondition | null {
+    return automationOwnerPreconditionOperation(this.state, this.storageAuthority, id)
+  }
+
+  automationChangeSelector(id: string): AutomationChangeSelector | null {
+    return automationChangeSelectorOperation(this.state, this.storageAuthority, id)
+  }
+
+  automationCapturedHostIssue(automation: Automation): AutomationCapturedHostIssue | null {
+    return automationCapturedHostIssueOperation(this.state, this.storageAuthority, automation)
+  }
+
+  assertAutomationOwnerFence(input: {
+    id: string
+    expectedOwner?: AutomationOwnerPrecondition
+    operation: AutomationOwnerFenceOperation
+  }): Automation {
+    return assertAutomationOwnerFenceOperation({
+      state: this.state,
+      storageAuthority: this.storageAuthority,
+      ...input
+    })
+  }
+
+  allocateSshTargetGeneration(): number {
+    return allocateSshTargetGenerationOperation(this.state, () => this.scheduleSave())
+  }
+
   listAutomationRuns(automationId?: string): AutomationRun[] {
     return listAutomationRunsOperation(this.state, automationId)
   }
 
-  createAutomation(input: AutomationCreateInput): Automation {
-    return createAutomationOperation(this.getAutomationDefinitionOperations(), input)
+  createAutomation(
+    input: AutomationCreateInput,
+    options?: { destination?: AutomationDestination }
+  ): Automation {
+    return createAutomationOperation(this.getAutomationDefinitionOperations(), input, options)
   }
 
-  updateAutomation(id: string, updates: AutomationUpdateInput): Automation {
-    return updateAutomationOperation(this.getAutomationDefinitionOperations(), id, updates)
+  updateAutomation(
+    id: string,
+    updates: AutomationUpdateInput,
+    options?: { expectedOwner?: AutomationOwnerPrecondition; destination?: AutomationDestination }
+  ): Automation {
+    return updateAutomationOperation(this.getAutomationDefinitionOperations(), id, updates, options)
   }
 
-  deleteAutomation(id: string): void {
-    deleteAutomationOperation(this.getAutomationDefinitionOperations(), id)
+  deleteAutomation(id: string, options?: { expectedOwner?: AutomationOwnerPrecondition }): void {
+    deleteAutomationOperation(this.getAutomationDefinitionOperations(), id, options)
   }
 
   createAutomationRun(
@@ -2448,6 +2547,19 @@ export class Store {
       automation,
       scheduledFor,
       trigger
+    )
+  }
+
+  recordRepeatedAutomationSkip(
+    automationId: string,
+    error: string,
+    scheduledFor: number
+  ): AutomationRun | null {
+    return recordRepeatedAutomationSkipOperation(
+      this.getAutomationRunOperations(),
+      automationId,
+      error,
+      scheduledFor
     )
   }
 
@@ -3557,6 +3669,10 @@ export class Store {
     addRemovedSshTargetTombstoneOperation(this.getSshTargetStateOperations(), tombstone)
   }
 
+  releaseRemovedSshTargetTombstone(oldTargetId: string): void {
+    releaseRemovedSshTargetTombstoneOperation(this.getSshTargetStateOperations(), oldTargetId)
+  }
+
   removeRemovedSshTargetTombstone(oldTargetId: string): void {
     removeRemovedSshTargetTombstoneOperation(this.getSshTargetStateOperations(), oldTargetId)
   }
@@ -3686,6 +3802,7 @@ export class Store {
   // ── Flush (for shutdown) ───────────────────────────────────────────
 
   flush(): void {
+    this.automationListProjectionCache = null
     if (this.quitFlushStarted) {
       return
     }

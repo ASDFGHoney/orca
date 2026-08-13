@@ -4,6 +4,7 @@ import type {
   SshTarget
 } from '../../../shared/ssh-types'
 import { LEGACY_DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS } from '../../../shared/ssh-types'
+import { sanitizeSshTargetGeneration } from '../../../shared/ssh-target-generation'
 
 export type LegacySshTarget = SshTarget & {
   remoteWorkspaceSyncEnabled?: unknown
@@ -32,6 +33,9 @@ export function normalizeSshTarget(t: SshTarget): SshTarget {
   const normalized: SshTarget = {
     ...target,
     configHost: target.configHost ?? target.label ?? target.host
+  }
+  if (sanitizeSshTargetGeneration(target.generation) === undefined) {
+    delete normalized.generation
   }
   // Why: old SSH form persisted 10800 even without a user choice; treat that legacy default as the new implicit default.
   if (

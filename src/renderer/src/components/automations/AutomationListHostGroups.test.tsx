@@ -77,6 +77,7 @@ async function render(options: {
         searchActive={options.searchActive ?? false}
         selectedRowKey={null}
         isSelectedLocal
+        lastRunByAutomationId={new Map()}
         relativeNow={0}
         repoMap={new Map()}
         worktreeMap={new Map()}
