@@ -73,6 +73,8 @@ type AutomationsListPanelProps = {
   relativeNow: number
   repoMap: ReadonlyMap<string, Repo>
   worktreeMap: ReadonlyMap<string, Worktree>
+  repoForRow?: (row: AutomationListRow) => Repo | undefined
+  worktreeForRow?: (row: AutomationListRow, repo: Repo | undefined) => Worktree | undefined
   projectHostSetups: readonly ProjectHostSetup[]
   sshConnectionStates: ReadonlyMap<string, Pick<SshConnectionState, 'status'>>
   runtimeStatusByEnvironmentId: ReadonlyMap<
@@ -129,6 +131,8 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     relativeNow,
     repoMap,
     worktreeMap,
+    repoForRow,
+    worktreeForRow,
     projectHostSetups,
     sshConnectionStates,
     runtimeStatusByEnvironmentId,
@@ -222,6 +226,8 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     relativeNow,
     repoMap,
     worktreeMap,
+    repoForRow,
+    worktreeForRow,
     projectHostSetups,
     sshConnectionStates,
     runtimeStatusByEnvironmentId,
