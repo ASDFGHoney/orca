@@ -229,7 +229,12 @@ describe('registerPtyHandlers', () => {
         mockProc.emitData('\x1b]133;A\x07% ')
         await Promise.resolve()
         vi.runAllTimers()
-        expect(mockProc.proc.write).toHaveBeenCalledWith('claude\n')
+        // Why the pin: a Claude launch carries a minted --session-id so a
+        // daemon-hosted session's hooks can still be traced to this pane (#9236).
+        expect(mockProc.proc.write).toHaveBeenCalledTimes(1)
+        expect(mockProc.proc.write.mock.calls[0][0]).toMatch(
+          /^claude --session-id [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n$/
+        )
       } finally {
         vi.useRealTimers()
       }
