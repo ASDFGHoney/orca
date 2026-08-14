@@ -1,11 +1,10 @@
 import type { Session, WebContents } from 'electron'
-import { ORCA_BROWSER_BLANK_URL } from '../../shared/constants'
-import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
 import {
   browserRoutePageKey,
+  type BrowserRouteGuestLifecycleClaim,
   type BrowserRoutePageAuthority,
   type BrowserRoutePageAuthorityRetirement,
-  type BrowserRoutePageGuestIdentity,
+  type BrowserRoutePageGuestIdentity as GuestIdentity,
   type BrowserRoutePageOwnerIdentity
 } from './browser-route-page-authority'
 import {
@@ -17,6 +16,14 @@ import {
   isValidRoutePageRegistration,
   isValidRoutePageRetirement
 } from './browser-route-guest-guard'
+import { claimBrowserRouteGuestLifecycle } from './browser-route-guest-lifecycle-claim'
+import {
+  beginBrowserRouteGuestRetirement,
+  createBrowserRouteGuestState,
+  installBrowserRouteGuestQuarantine,
+  isBrowserRouteGuestNavigationAllowed,
+  navigateBrowserRouteGuest
+} from './browser-route-guest-lifecycle'
 import type { BrowserRouteGuestState as GuestState } from './browser-route-webcontents-state'
 import { enforceBrowserRouteWebRtcPolicy } from './browser-route-webrtc-policy'
 
@@ -54,7 +61,7 @@ export class BrowserRouteWebContentsRegistry {
     }
     const state = this.createGuestState(guest, partition)
     try {
-      this.installGuestQuarantine(state)
+      installBrowserRouteGuestQuarantine(state)
     } catch {
       closeRouteGuest(guest)
       return false
@@ -78,7 +85,7 @@ export class BrowserRouteWebContentsRegistry {
     return true
   }
 
-  registerGuest(registration: BrowserRoutePageGuestIdentity): boolean {
+  registerGuest(registration: GuestIdentity): boolean {
     if (!isValidRoutePageRegistration(registration)) {
       return false
     }
@@ -115,7 +122,14 @@ export class BrowserRouteWebContentsRegistry {
     return true
   }
 
-  grantNavigation(registration: BrowserRoutePageGuestIdentity): boolean {
+  claimGuestLifecycle(registration: GuestIdentity): BrowserRouteGuestLifecycleClaim | null {
+    const state = this.guests.get(registration.webContentsId)
+    return claimBrowserRouteGuestLifecycle(registration, state, () =>
+      Boolean(state && this.registrationMatchesGuest(state, registration))
+    )
+  }
+
+  grantNavigation(registration: GuestIdentity): boolean {
     if (!isValidRoutePageRegistration(registration)) {
       return false
     }
@@ -131,6 +145,32 @@ export class BrowserRouteWebContentsRegistry {
     }
     state.navigationGranted = true
     return true
+  }
+
+  async navigateGuest(claim: BrowserRouteGuestLifecycleClaim, rawUrl: string): Promise<boolean> {
+    const registration = claim.registration
+    const state = this.guests.get(registration.webContentsId)
+    const isCurrent = Boolean(
+      state &&
+      state.guestAuthority === claim.guestAuthority &&
+      this.registrationMatchesGuest(state, registration) &&
+      this.hasLivePageAuthority(state)
+    )
+    return navigateBrowserRouteGuest(registration, rawUrl, state, () => isCurrent)
+  }
+
+  beginGuestRetirement(claim: BrowserRouteGuestLifecycleClaim): Promise<void> | null {
+    const registration = claim.registration
+    const state = this.guests.get(registration.webContentsId)
+    return beginBrowserRouteGuestRetirement({
+      claim,
+      state,
+      registrationMatches: () =>
+        Boolean(state && this.registrationMatchesGuest(state, registration)),
+      hasPreparedAuthority: () => this.dependencies.getPreparedPageAuthority(registration) !== null,
+      retireRegistered: (guestState) => this.retireGuestPage(guestState),
+      revokeUnregistered: (guestState) => this.revokeGuest(guestState)
+    })
   }
 
   retirePageAuthority(retirement: BrowserRoutePageAuthorityRetirement): boolean {
@@ -171,59 +211,24 @@ export class BrowserRouteWebContentsRegistry {
   }
 
   private createGuestState(guest: WebContents, partition: string): GuestState {
-    const state: GuestState = {
-      guest,
-      partition,
-      registration: null,
-      pageAuthority: null,
-      navigationGranted: false,
-      retirementRequested: false,
-      retirementCallback: null,
-      onNavigate: (event, url) => {
-        if (!this.navigationAllowed(state, url)) {
-          event.preventDefault()
-        }
-      },
-      onRenderProcessGone: () => this.retireGuestPage(state),
-      onDestroyed: () => {
-        this.retireGuestPage(state)
-        this.releaseGuest(state)
-      }
-    }
-    return state
-  }
-
-  private installGuestQuarantine(state: GuestState): void {
-    state.guest.setWindowOpenHandler(() => ({ action: 'deny' }))
-    state.guest.on('will-navigate', state.onNavigate)
-    state.guest.on('will-redirect', state.onNavigate)
-    state.guest.on('render-process-gone', state.onRenderProcessGone)
-    state.guest.on('destroyed', state.onDestroyed)
+    return createBrowserRouteGuestState(guest, partition, {
+      navigationAllowed: (state, url) => this.navigationAllowed(state, url),
+      retire: (state) => this.retireGuestPage(state),
+      release: (state) => this.releaseGuest(state)
+    })
   }
 
   private navigationAllowed(state: GuestState, url: string): boolean {
-    try {
-      const normalized = normalizeBrowserNavigationUrl(url)
-      if (normalized === ORCA_BROWSER_BLANK_URL) {
-        return true
-      }
-      return Boolean(
-        normalized &&
-        !normalized.startsWith('file:') &&
-        state.navigationGranted &&
+    return isBrowserRouteGuestNavigationAllowed(state, url, () =>
+      Boolean(
         state.registration &&
         this.registrationMatchesGuest(state, state.registration) &&
         this.hasLivePageAuthority(state)
       )
-    } catch {
-      return false
-    }
+    )
   }
 
-  private registrationMatchesGuest(
-    state: GuestState,
-    registration: BrowserRoutePageGuestIdentity
-  ): boolean {
+  private registrationMatchesGuest(state: GuestState, registration: GuestIdentity): boolean {
     try {
       const guest = state.guest
       return (
@@ -309,6 +314,7 @@ export class BrowserRouteWebContentsRegistry {
     } catch {}
     const callback = state.retirementCallback
     state.retirementCallback = null
+    state.resolveDestroyed()
     if (callback) {
       try {
         callback()
