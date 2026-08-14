@@ -89,7 +89,21 @@ export type RemoteRuntimeSubscriptionOptions = RemoteRuntimeSocketLivenessOption
     softCapBytes: number
     maxQueuedBytes: number
     maxQueuedFrames: number
+    maxDrainFramesPerTurn?: number
   }
+  outboundMemoryBudget?: RemoteRuntimeOutboundMemoryBudget
+}
+
+export type RemoteRuntimeOutboundSocketMemory = {
+  canSend: (bytes: number, alreadyRetained?: boolean) => boolean
+  release: () => void
+}
+
+export type RemoteRuntimeOutboundMemoryBudget = {
+  claimQueuedBytes: (bytes: number) => (() => void) | null
+  registerBufferedAmount: (
+    readBufferedAmount: () => number
+  ) => RemoteRuntimeOutboundSocketMemory | null
 }
 
 export function sendRemoteRuntimeRequest<TResult>(
@@ -549,14 +563,40 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
     let settled = false
     let ws: WebSocket | null = null
     let liveness: RemoteRuntimeSocketLivenessMonitor | null = null
+    let outboundSocketMemoryCloseSource: WebSocket | null = null
+
+    const releaseOutboundQueueMemory = (): void => {
+      sendQueue?.dispose()
+      sendQueue = null
+    }
+
+    const releaseOutboundSocketMemory = (): void => {
+      outboundSocketMemory?.release()
+      outboundSocketMemory = null
+      outboundSocketMemoryCloseSource = null
+    }
+
+    const retainOutboundSocketMemoryUntilClose = (socket: WebSocket): void => {
+      if (socket.readyState === WebSocket.CLOSED) {
+        releaseOutboundSocketMemory()
+        return
+      }
+      if (outboundSocketMemoryCloseSource === socket) {
+        return
+      }
+      outboundSocketMemoryCloseSource = socket
+      socket.once('close', releaseOutboundSocketMemory)
+    }
 
     const cleanupSocketListeners = (): WebSocket | null => {
       liveness?.stop()
       liveness = null
-      sendQueue?.dispose()
-      sendQueue = null
+      releaseOutboundQueueMemory()
       const socket = ws
       if (!socket) {
+        if (!outboundSocketMemoryCloseSource) {
+          releaseOutboundSocketMemory()
+        }
         return null
       }
       socket.off('open', onOpen)
@@ -566,6 +606,7 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
       socket.off('pong', onLivenessSignal)
       socket.off('ping', onLivenessSignal)
       ws = null
+      retainOutboundSocketMemoryUntilClose(socket)
       // Why: startup failures detach Orca callbacks before closing the ws,
       // but ws can still emit a late transport error while close is in flight.
       if (socket.readyState !== WebSocket.CLOSED) {
@@ -593,6 +634,12 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
     }, timeoutMs)
 
     const close = (): void => {
+      releaseOutboundQueueMemory()
+      if (ws) {
+        retainOutboundSocketMemoryUntilClose(ws)
+      } else if (!outboundSocketMemoryCloseSource) {
+        releaseOutboundSocketMemory()
+      }
       try {
         ws?.close()
       } catch {
@@ -605,10 +652,24 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
     // drain as it clears; a wedged link (hard cap) fails the socket so the
     // renderer resubscribes and replays a fresh snapshot.
     let sendQueue: ReturnType<typeof createWsOutboundBackpressureQueue<Buffer>> | null = null
+    let outboundSocketMemory: RemoteRuntimeOutboundSocketMemory | null = null
     const ensureSendQueue = (
       socket: WebSocket
-    ): ReturnType<typeof createWsOutboundBackpressureQueue<Buffer>> => {
+    ): ReturnType<typeof createWsOutboundBackpressureQueue<Buffer>> | null => {
       if (!sendQueue) {
+        const memoryBudget = options?.outboundMemoryBudget
+        if (memoryBudget && !outboundSocketMemory) {
+          outboundSocketMemory = memoryBudget.registerBufferedAmount(() => socket.bufferedAmount)
+          if (!outboundSocketMemory) {
+            fail(
+              new RemoteRuntimeClientError(
+                'remote_runtime_unavailable',
+                'Remote Orca runtime outbound memory admission failed; reconnecting.'
+              )
+            )
+            return null
+          }
+        }
         sendQueue = createWsOutboundBackpressureQueue<Buffer>({
           send: (frame) => socket.send(frame, { binary: true }),
           byteLengthOf: (frame) => frame.byteLength,
@@ -621,7 +682,14 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
                 'Remote Orca runtime send buffer overflow; reconnecting.'
               )
             ),
-          ...options?.outboundQueue
+          ...options?.outboundQueue,
+          canSend: (bytes, alreadyRetained) =>
+            outboundSocketMemory?.canSend(bytes, alreadyRetained) ?? true,
+          ...(memoryBudget
+            ? {
+                claimQueuedBytes: (bytes: number) => memoryBudget.claimQueuedBytes(bytes)
+              }
+            : {})
         })
       }
       return sendQueue
@@ -636,7 +704,7 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
       ) {
         return false
       }
-      return ensureSendQueue(ws).enqueue(Buffer.from(encryptBytes(bytes, sharedKey)))
+      return ensureSendQueue(ws)?.enqueue(Buffer.from(encryptBytes(bytes, sharedKey))) ?? false
     }
 
     const succeed = (): void => {
