@@ -12231,6 +12231,105 @@
         "Platform-named bundles are loaded on macOS locally; physical Linux and Windows evidence is not yet recorded."
       ],
       "demotionRule": "Demote if any shipped companion stops loading on Node 18, selected installers mutate outside the isolated home, or the CI lane no longer runs the built artifact with Node 18."
+    },
+    {
+      "id": "terminal-history.daemon-checkpoint-session-isolation",
+      "title": "Daemon history checkpoints isolate stalled terminal sessions",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "daemon-terminal",
+      "layer": "main-process-daemon-history",
+      "surfaces": [
+        "warm daemon terminal reattach",
+        "deep daemon buffer snapshots",
+        "periodic and final durable-history checkpoints"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local-daemon", "ssh-daemon", "wsl-daemon", "paired-runtime-host"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local-daemon"],
+      "coverageNotes": "A real daemon server and adapter on macOS cover per-session isolation, same-session deadlines, post-deadline commit, aggregate overlay admission, and live-window fallback. The provider-neutral adapter has no new path or wire assumptions; a live Linux SSH-relay journey covers the unchanged remote consumer, while live Linux daemon, Windows, WSL, and paired-runtime-host journeys remain gaps.",
+      "motivatingLinks": [
+        "https://linear.app/stably/issue/STA-4173",
+        "https://github.com/stablyai/orca/pull/14346"
+      ],
+      "invariant": "A stalled durable-history checkpoint may delay only its own daemon session. Warm reattach and deep snapshots degrade to the live window after five seconds, non-final background checkpoints defer after fifteen seconds, same-session writes remain serialized, non-final running plus queued work stays bounded to three per session, overlay compacts stay bounded to four across sessions, and final sleep or disconnect checkpoints remain deadline-free.",
+      "oracle": "Park one session inside the real history checkpoint write, then require an unrelated warm reattach to return within two seconds with its own output while the first write remains parked. Require the stalled session to return its live window after the overlay deadline and later commit the abandoned write. Park four distinct overlay compacts, require a fifth reattach to return its live window without starting another compact, and require fast non-final RPC rejection plus both deadlines to leave diagnostic breadcrumbs.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-checkpoint-session-queue.test.ts src/main/daemon/daemon-reattach-checkpoint-isolation.test.ts src/main/daemon/daemon-pty-adapter.test.ts --reporter=dot"
+      ],
+      "testFiles": [
+        "src/main/daemon/daemon-checkpoint-session-queue.test.ts",
+        "src/main/daemon/daemon-reattach-checkpoint-isolation.test.ts",
+        "src/main/daemon/daemon-pty-adapter.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/daemon/daemon-checkpoint-session-queue.test.ts",
+          "assertions": [
+            "same-session operations serialize while unrelated sessions run independently",
+            "deadline fallback leaves the operation running and retains later waiter ordering",
+            "operation rejection remains distinct from a deadline",
+            "running plus queued work is bounded per session and drains"
+          ]
+        },
+        {
+          "file": "src/main/daemon/daemon-reattach-checkpoint-isolation.test.ts",
+          "assertions": [
+            "an unrelated session reattaches while another checkpoint remains parked",
+            "same-session deadline fallback returns the live window and logs a breadcrumb",
+            "an abandoned checkpoint commits when the stalled write resumes",
+            "four parked overlays turn away a fifth compact without blocking its reattach"
+          ]
+        },
+        {
+          "file": "src/main/daemon/daemon-pty-adapter.test.ts",
+          "assertions": [
+            "periodic checkpoint work caps concurrent snapshot, disk operations, and admission probes at four",
+            "non-final checkpoint RPC failures retain the existing warning path",
+            "final checkpoints bypass cooldown and remain awaited"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-13",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-checkpoint-session-queue.test.ts src/main/daemon/daemon-reattach-checkpoint-isolation.test.ts src/main/daemon/daemon-pty-adapter.test.ts --reporter=dot",
+          "durationSeconds": 15,
+          "summary": "Three focused files passed, including unrelated-session reattach, five-second fallback, post-deadline durable commit, aggregate non-final admission, late-rejection diagnostics, and final-checkpoint behavior."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 30,
+        "scope": "focused queue, real daemon-adapter isolation, and daemon adapter regression suite"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "Fresh deterministic local runs pass; CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "Origin main routes the parked overlay through one process-wide checkpoint tail, while the candidate oracle observes unrelated reattach at about 79 milliseconds. The exact reverted-source oracle was not executed in this review worktree."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Non-final work holds one admission per session and four globally; a full admission set stops the current periodic pass after four probes, and its diagnostic state stays bounded to the active admissions plus one global marker. Deadline timers are unrefed, abandoned waits retain admission until the actual write settles, dirty-gated polling remains unchanged, final checkpoints remain deadline-free, and the change adds no subprocess, renderer, store, startup probe, or wire work."
+      },
+      "promotionCriteria": [
+        "Execute the oracle against an affected baseline and retain the exact red result.",
+        "Collect 100 consecutive focused CI passes or 14 days of soak history.",
+        "Collect live Linux daemon, Windows, WSL, and paired-runtime-host reattach evidence.",
+        "Keep per-session and aggregate admission, deadline, diagnostics, and final-checkpoint assertions green."
+      ],
+      "knownGaps": [
+        "Live Electron evidence covers the unchanged Linux SSH-relay consumer rather than a daemon running on the SSH host.",
+        "Physical Windows, WSL, Linux daemon, and paired-runtime-host journeys were not run.",
+        "The reverted-source failure is established from the old process-wide call path but was not executed."
+      ],
+      "demotionRule": "Demote if unrelated reattach joins a stalled session tail, overlay or periodic work exceeds its admission bound, a deadline cancels durable work, final checkpoints defer, or failures and deadline fallbacks lose their diagnostic breadcrumbs."
     }
   ]
 }
