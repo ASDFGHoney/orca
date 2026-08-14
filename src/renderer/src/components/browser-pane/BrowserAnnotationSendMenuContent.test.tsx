@@ -94,12 +94,17 @@ describe('BrowserAnnotationSendMenuContent', () => {
   })
 
   it('is wired into both browser annotation send surfaces', () => {
-    const browserPaneSource = readFileSync(
-      fileURLToPath(new URL('./BrowserPane.tsx', import.meta.url)),
+    const bannerSource = readFileSync(
+      fileURLToPath(new URL('./browser-page/browser-page-chrome-banners.tsx', import.meta.url)),
       'utf8'
     )
+    const traySource = readFileSync(
+      fileURLToPath(new URL('./browser-page/browser-page-annotation-tray.tsx', import.meta.url)),
+      'utf8'
+    )
+    const sendSurfaces = `${bannerSource}\n${traySource}`
 
-    expect(browserPaneSource.match(/<BrowserAnnotationSendMenuContent\b/g)).toHaveLength(2)
-    expect(browserPaneSource).not.toContain('<QuickLaunchAgentMenuItems')
+    expect(sendSurfaces.match(/<BrowserAnnotationSendMenuContent\b/g)).toHaveLength(2)
+    expect(sendSurfaces).not.toContain('<QuickLaunchAgentMenuItems')
   })
 })
