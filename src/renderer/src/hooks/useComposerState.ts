@@ -21,6 +21,7 @@ import {
   type WorktreeCreationRequest
 } from '@/lib/pending-worktree-creation'
 import { buildAgentDraftLaunchPlan, buildAgentStartupPlan } from '@/lib/tui-agent-startup'
+import { areAgentStatusHooksEnabledForAgent } from '../../../shared/agent-status-hooks-for-agent'
 import { filterEnabledTuiAgents, isTuiAgentEnabled } from '../../../shared/tui-agent-selection'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
 import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
@@ -1213,6 +1214,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     () => (detectedAgentList ? new Set(detectedAgentList) : null),
     [detectedAgentList]
   )
+
+  // Why (#11941): a remote Codex launch needs to know whether Orca's managed
+  // hooks are on for that agent, and the launch callbacks already track the
+  // derived disabled list rather than the whole settings object.
+  const statusHooksEnabledSetting = settings?.agentStatusHooksEnabled !== false
 
   const [yamlHooks, setYamlHooks] = useState<OrcaHooks | null>(null)
   const [checkedHooksContextKey, setCheckedHooksContextKey] = useState<string | null>(null)
@@ -3497,6 +3503,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           quickAgent: agent,
           autoRenameBranchFromWork: settings?.autoRenameBranchFromWork,
           agentCmdOverrides: settings?.agentCmdOverrides,
+          agentStatusHooksEnabled: agent
+            ? areAgentStatusHooksEnabledForAgent(
+                { agentStatusHooksEnabled: statusHooksEnabledSetting, disabledTuiAgents },
+                agent
+              )
+            : undefined,
           agentArgs: agent
             ? resolveTuiAgentLaunchArgs(agent, settings?.agentDefaultArgs)
             : undefined,
@@ -3562,6 +3574,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       clearNewWorkspaceDraft,
       createFolderWorkspace,
       disabledTuiAgents,
+      statusHooksEnabledSetting,
       folderCreateDisabled,
       folderTargetConnectionId,
       folderTargetIsRemote,
@@ -3846,7 +3859,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         ),
         platform: selectedRepoAgentLaunchPlatform,
         shell: selectedRepoStartupShell,
-        isRemote: selectedRepoIsRemote
+        isRemote: selectedRepoIsRemote,
+        agentStatusHooksEnabled: areAgentStatusHooksEnabledForAgent(
+          { agentStatusHooksEnabled: statusHooksEnabledSetting, disabledTuiAgents },
+          tuiAgent
+        )
       })
       const shouldSeedInitialAgentStatus =
         tuiAgent === 'command-code' && submitStartupPrompt.trim().length > 0
@@ -4065,6 +4082,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     telemetrySource,
     fallbackDefaultAgent,
     disabledTuiAgents,
+    statusHooksEnabledSetting,
     tuiAgent,
     shouldWaitForIssueAutomationCheck,
     shouldWaitForSetupCheck,
@@ -4423,7 +4441,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
                 sessionOptions: quickSessionOptions,
                 platform: selectedRepoAgentLaunchPlatform,
                 shell: selectedRepoStartupShell,
-                isRemote: selectedRepoIsRemote
+                isRemote: selectedRepoIsRemote,
+                agentStatusHooksEnabled: areAgentStatusHooksEnabledForAgent(
+                  { agentStatusHooksEnabled: statusHooksEnabledSetting, disabledTuiAgents },
+                  agent
+                )
               })
 
         let startupPlan: ReturnType<typeof buildAgentStartupPlan> = null
@@ -4453,6 +4475,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
             platform: selectedRepoAgentLaunchPlatform,
             shell: selectedRepoStartupShell,
             isRemote: selectedRepoIsRemote,
+            agentStatusHooksEnabled: areAgentStatusHooksEnabledForAgent(
+              { agentStatusHooksEnabled: statusHooksEnabledSetting, disabledTuiAgents },
+              agent
+            ),
             allowEmptyPromptLaunch: true
           })
           if (startupPlan && quickDraftPrompt) {
@@ -4657,6 +4683,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       settings?.agentCmdOverrides,
       settings?.agentDefaultArgs,
       settings?.agentDefaultEnv,
+      statusHooksEnabledSetting,
       settings?.autoRenameBranchFromWork,
       settings?.experimentalNativeChat,
       settings?.nativeChatSessionOptions,

@@ -55,6 +55,8 @@ export function buildAgentStartupPlan(args: {
   /** Why: SSH remotes deploy the CLI shim as plain `orca`, so the Linux-only
    * `orca-ide` rename must be skipped for remote launches. */
   isRemote?: boolean
+  /** Orca's managed status hooks are enabled for this agent (#11941). */
+  agentStatusHooksEnabled?: boolean
 }): AgentStartupPlan | null {
   const { agent, prompt, cmdOverrides, platform, allowEmptyPromptLaunch = false } = args
   const shell = resolveStartupShell(platform, args.shell)
@@ -69,7 +71,8 @@ export function buildAgentStartupPlan(args: {
     agentArgs: usesQuery ? null : args.agentArgs,
     sessionOptions: args.sessionOptions,
     sessionOptionsOverrideAgentArgs: args.sessionOptionsOverrideAgentArgs,
-    isRemote: args.isRemote
+    isRemote: args.isRemote,
+    agentStatusHooksEnabled: args.agentStatusHooksEnabled
   })
   if (!baseCommand.ok) {
     return null
@@ -254,6 +257,9 @@ export function buildAgentDraftLaunchPlan(args: {
   sessionOptions?: Record<string, SessionOptionValue>
   /** Why: see buildAgentStartupPlan — remote launches use the plain `orca` shim. */
   isRemote?: boolean
+  /** Why: see buildAgentStartupPlan — a remote Codex draft launch needs the
+   *  same hooks override as a prompt launch (#11941). */
+  agentStatusHooksEnabled?: boolean
 }): AgentDraftLaunchPlan | null {
   const { agent, draft, cmdOverrides, platform } = args
   const shell = resolveStartupShell(platform, args.shell)
@@ -269,7 +275,8 @@ export function buildAgentDraftLaunchPlan(args: {
     shell,
     agentArgs: args.agentArgs,
     sessionOptions: args.sessionOptions,
-    isRemote: args.isRemote
+    isRemote: args.isRemote,
+    agentStatusHooksEnabled: args.agentStatusHooksEnabled
   })
   if (!baseCommand.ok) {
     return null

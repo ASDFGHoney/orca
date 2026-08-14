@@ -18,6 +18,7 @@ import {
 import { translate } from '@/i18n/i18n'
 import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
 import type { PersistedNativeChatSessionOptions } from '../../../shared/native-chat-session-options'
+import { areAgentStatusHooksEnabledForAgent } from '../../../shared/agent-status-hooks-for-agent'
 
 export function buildDirectWorkItemAgentStartupPlan(args: {
   agent: TuiAgent | null
@@ -70,6 +71,7 @@ export function buildDirectWorkItemAgentStartupPlan(args: {
           cmdOverrides: args.settings?.agentCmdOverrides ?? {},
           platform: args.launchPlatform,
           isRemote: args.isRemote,
+          agentStatusHooksEnabled: areAgentStatusHooksEnabledForAgent(args.settings, args.agent),
           agentArgs: effectiveAgentArgs,
           agentEnv: effectiveAgentEnv,
           sessionOptions
@@ -102,6 +104,7 @@ export function buildDirectWorkItemAgentStartupPlan(args: {
     cmdOverrides: args.settings?.agentCmdOverrides ?? {},
     platform: args.launchPlatform,
     isRemote: args.isRemote,
+    agentStatusHooksEnabled: areAgentStatusHooksEnabledForAgent(args.settings, args.agent),
     agentArgs: effectiveAgentArgs,
     agentEnv: effectiveAgentEnv,
     sessionOptions,

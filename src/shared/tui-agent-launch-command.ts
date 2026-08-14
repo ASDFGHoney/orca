@@ -11,6 +11,7 @@ import {
   type AgentStartupShell
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
+import { planCodexRemoteHookLaunchArgs } from './codex-remote-hook-launch'
 
 export type ResolvedAgentLaunchCommand =
   | {
@@ -30,9 +31,13 @@ export function resolveAgentLaunchCommand(args: {
   sessionOptions?: Record<string, SessionOptionValue>
   sessionOptionsOverrideAgentArgs?: boolean
   isRemote?: boolean
+  /** Orca's managed status hooks are enabled for this agent. Remote Codex
+   *  launches carry a launch-scoped hooks override so the TUI does not attach
+   *  to a pre-existing app-server that never saw the pane's hook env (#11941). */
+  agentStatusHooksEnabled?: boolean
 }): ResolvedAgentLaunchCommand {
   const override = args.cmdOverrides[args.agent]
-  const command =
+  const baseLaunchCommand =
     override ||
     getTuiAgentLaunchCommand(TUI_AGENT_CONFIG[args.agent], args.platform, {
       isRemote: args.isRemote
@@ -76,6 +81,16 @@ export function resolveAgentLaunchCommand(args: {
       }
     }
   }
+  const hookArgs = planCodexRemoteHookLaunchArgs({
+    agent: args.agent,
+    platform: args.platform,
+    isRemote: args.isRemote,
+    hooksEnabled: args.agentStatusHooksEnabled,
+    launchTokens: [...tokenizeCommandOverride(override, args.shell), ...trailingTokens.tokens]
+  })
+  const command = hookArgs.length
+    ? `${baseLaunchCommand} ${hookArgs.map((arg) => quoteStartupArg(arg, args.shell)).join(' ')}`
+    : baseLaunchCommand
   const optionSuffix = resolvedOptions.args.map((arg) => quoteStartupArg(arg, args.shell)).join(' ')
   const commandWithoutSessionOptions = suffix.suffix ? `${command} ${suffix.suffix}` : command
   const commandWithOptions = optionSuffix ? `${command} ${optionSuffix}` : command
@@ -106,4 +121,18 @@ function insertBeforeTerminator(tokens: readonly string[], inserted: readonly st
     return [...tokens, ...inserted]
   }
   return [...tokens.slice(0, terminator), ...inserted, ...tokens.slice(terminator)]
+}
+
+// Why: an override can name the agent's own hooks decision, so its tokens have
+// to be visible to the remote-hook planner. A malformed override is not this
+// function's error to raise — it is reported by the existing override check.
+function tokenizeCommandOverride(
+  override: string | undefined,
+  shell: AgentStartupShell
+): readonly string[] {
+  if (!override) {
+    return []
+  }
+  const tokens = tokenizeStartupCommand(override, shell)
+  return tokens.ok ? tokens.tokens : []
 }
