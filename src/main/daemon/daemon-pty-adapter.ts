@@ -176,6 +176,40 @@ function remainingRequestTimeoutMs(deadlineMs: number | undefined): number | und
   return deadlineMs === undefined ? undefined : Math.max(1, deadlineMs - Date.now())
 }
 
+// Why a distinct error: teardown callers must read this as "not proven stopped" and leave the PTY
+// alive, not as a kill that failed. It never matches isPtyAlreadyGoneError, so `stopAndWait` reports
+// the pty unverified and worktree sleep declines to commit it.
+export class FinalCheckpointWaitExpiredError extends Error {
+  constructor(sessionId: string) {
+    super(`Final history checkpoint did not settle within the teardown deadline: ${sessionId}`)
+    this.name = 'FinalCheckpointWaitExpiredError'
+  }
+}
+
+// Why only the caller's wait is bounded and never the work itself: cancelling durable work would
+// silently drop what the user left on screen. This decides how long a caller blocks, nothing more —
+// `work` keeps running behind an abandoned wait and still commits. False means the caller gave up.
+// A rejection before the deadline still propagates, so a genuinely failed operation is not masked.
+async function awaitWithinCallerDeadline(
+  work: Promise<void>,
+  deadlineMs: number
+): Promise<boolean> {
+  // Why up front: once the race is abandoned nothing observes a later rejection here.
+  void work.catch(() => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), Math.max(1, deadlineMs - Date.now()))
+        timer.unref?.()
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export class TerminalKilledError extends Error {
   constructor(sessionId: string) {
     super(`Session "${sessionId}" was explicitly killed`)
@@ -1121,16 +1155,27 @@ export class DaemonPtyAdapter implements IPtyProvider {
     opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
   ): Promise<void> {
     // Why: shutdown can be the first lazy-client operation after restart; connect
-    // before killing so a healthy daemon session is not orphaned (#7742). Connect
-    // and kill share the caller's one absolute deadline, so a wedged handshake
-    // cannot burn the whole teardown budget before the kill even starts.
+    // before killing so a healthy daemon session is not orphaned (#7742). Connect,
+    // the final-checkpoint wait, and kill all share the caller's one absolute
+    // deadline, so neither a wedged handshake nor a stalled history write can burn
+    // the whole teardown budget before the kill even starts. Only the waits are
+    // bounded — the checkpoint itself stays deadline-free and lossless (STA-4228).
     await this.ensureConnected(opts.deadlineMs)
     // Why: sleep/exact-stop kills the live PTY before the periodic checkpoint may run.
     // Force a final snapshot so wake can restore the pane users left.
     if (opts.keepHistory) {
-      await this.runExclusiveCheckpoint(async () => {
-        await this.checkpointSessions([id], { final: true, teardown: true })
-      })
+      const committed = await this.runExclusiveCheckpoint(
+        async () => {
+          await this.checkpointSessions([id], { final: true, teardown: true })
+        },
+        { callerDeadlineMs: opts.deadlineMs }
+      )
+      // Why throw instead of killing anyway: the snapshot the caller asked us to prove is still
+      // being written. Killing here would race the wake-time restore source to disk, so report the
+      // pty unverified and leave it alive — worktree sleep declines to commit it and retries.
+      if (!committed) {
+        throw new FinalCheckpointWaitExpiredError(id)
+      }
       const wslDistro = this.wslDistrosBySessionId.get(id)
       const detection = await this.historyReader?.detectColdRestoreState(id, { wslDistro })
       const detected = detection?.status === 'restored' ? detection.restoreInfo : null
@@ -2136,25 +2181,43 @@ export class DaemonPtyAdapter implements IPtyProvider {
     this.stopCheckpointTimerIfIdle()
   }
 
+  /** False only when `callerDeadlineMs` expired first; the checkpoint itself keeps running. */
   private async runExclusiveCheckpoint(
     operation: () => Promise<void>,
-    options: { rescheduleDirty?: boolean } = {}
-  ): Promise<void> {
+    options: { rescheduleDirty?: boolean; callerDeadlineMs?: number } = {}
+  ): Promise<boolean> {
     this.stopCheckpointTimer()
     // Why: a promise tail keeps every waiter ordered; awaiting one active operation lets sibling waiters resume together.
     const previous = this.checkpointInFlight ?? Promise.resolve()
     const checkpoint = previous.catch(() => {}).then(operation)
     this.checkpointInFlight = checkpoint
-    try {
-      await checkpoint
-    } finally {
-      if (this.checkpointInFlight === checkpoint) {
-        this.checkpointInFlight = null
+    // Why the release rides the checkpoint instead of the caller's await: a caller that walks away
+    // at its deadline must leave this checkpoint as the tail, so the durable write still runs to
+    // completion, still commits, and the next waiter still queues behind it (STA-4228).
+    const settled = checkpoint.then(
+      () => this.releaseExclusiveCheckpoint(checkpoint, options.rescheduleDirty),
+      (err: unknown) => {
+        this.releaseExclusiveCheckpoint(checkpoint, options.rescheduleDirty)
+        throw err
       }
-      this.stopCheckpointTimer()
-      if (options.rescheduleDirty !== false) {
-        this.scheduleCheckpointTimer()
-      }
+    )
+    if (options.callerDeadlineMs === undefined) {
+      await settled
+      return true
+    }
+    return await awaitWithinCallerDeadline(settled, options.callerDeadlineMs)
+  }
+
+  private releaseExclusiveCheckpoint(
+    checkpoint: Promise<void>,
+    rescheduleDirty: boolean | undefined
+  ): void {
+    if (this.checkpointInFlight === checkpoint) {
+      this.checkpointInFlight = null
+    }
+    this.stopCheckpointTimer()
+    if (rescheduleDirty !== false) {
+      this.scheduleCheckpointTimer()
     }
   }
 
