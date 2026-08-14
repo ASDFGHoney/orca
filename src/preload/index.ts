@@ -265,6 +265,7 @@ import {
   type KeyboardLayoutChangeEvent
 } from '../shared/keyboard-layout-events'
 import { createBrowserFindSubscriptions } from './browser-find-subscriptions'
+import { createBrowserClientPageRendererRequests } from './browser-client-page-renderer-requests'
 import { createUsageProviderApi } from './usage-provider-api'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
@@ -524,6 +525,10 @@ document.addEventListener(
 
 const startupDiagnosticsEnabled = process.env.ORCA_STARTUP_DIAGNOSTICS === '1'
 const browserFindSubscriptions = createBrowserFindSubscriptions()
+const browserClientPageRendererRequests = createBrowserClientPageRendererRequests({
+  ipc: ipcRenderer,
+  isTopFrame: () => window.top === window
+})
 
 ipcRenderer.on('ui:findInBrowserPage', (_event, source: unknown) => {
   browserFindSubscriptions.dispatch(source)
@@ -2675,6 +2680,7 @@ const api = {
   },
 
   browser: {
+    onClientPageRendererRequest: browserClientPageRendererRequests.subscribe,
     registerGuest: (args: {
       browserPageId: string
       workspaceId: string
