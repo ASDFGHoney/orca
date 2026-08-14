@@ -192,6 +192,28 @@ describe('AgentBrowserBridge', () => {
       expect(JSON.stringify(result)).not.toContain('session-secret')
     })
 
+    it('redacts Kagi session credentials from a listed load error', () => {
+      const tabs = new Map([['tab-a', 1]])
+      const wc = mockWebContents(1, 'chrome-error://chromewebdata/', '')
+      webContentsFromIdMock.mockReturnValue(wc)
+      const loadError = {
+        code: -105,
+        description: 'Name not resolved',
+        validatedUrl: 'https://kagi.com/search?token=session-secret&q=private+project'
+      }
+
+      const result = new AgentBrowserBridge(
+        mockBrowserManager(tabs, new Map(), {
+          getBrowserPageLoadError: vi.fn((tabId: string) => (tabId === 'tab-a' ? loadError : null))
+        })
+      ).tabList()
+
+      expect(result.tabs[0]?.loadError?.validatedUrl).toBe(
+        'https://kagi.com/search?q=private+project'
+      )
+      expect(JSON.stringify(result)).not.toContain('session-secret')
+    })
+
     it('does not mutate active-tab routing when tab-list infers the first live tab', () => {
       const tabs = new Map([
         ['tab-a', 1],

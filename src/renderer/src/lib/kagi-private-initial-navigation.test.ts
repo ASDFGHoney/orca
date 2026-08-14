@@ -88,6 +88,20 @@ describe('Kagi private initial navigation', () => {
     })
   })
 
+  it('queues a single bearer token when the link carries duplicates', () => {
+    const modelUrl = 'https://kagi.com/search?q=private+project'
+    queueKagiPrivateInitialNavigation(
+      'page-duplicate',
+      'https://kagi.com/search?token=first-secret&q=private+project&token=second-secret'
+    )
+
+    expect(getKagiPrivateInitialNavigation('page-duplicate', modelUrl)).toEqual({
+      modelUrl,
+      navigationUrl: 'https://kagi.com/search?token=first-secret&q=private+project'
+    })
+    discardKagiPrivateInitialNavigation('page-duplicate')
+  })
+
   it('redacts a defensive model fallback', () => {
     const privateUrl = 'https://kagi.com/search?token=session-secret&q=private+project'
 

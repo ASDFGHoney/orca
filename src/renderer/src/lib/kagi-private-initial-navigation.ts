@@ -25,13 +25,29 @@ function prunePendingNavigations(now: number): void {
   }
 }
 
+// Why: queue the validator's canonical link so duplicate `token` params can't send a second bearer to Kagi.
+function canonicalizeKagiNavigationUrl(url: string): string | null {
+  const normalized = normalizeKagiSessionLink(url)
+  if (!normalized) {
+    return null
+  }
+  const query = new URL(url).searchParams.get('q')
+  if (query === null) {
+    return normalized
+  }
+  const canonical = new URL(normalized)
+  canonical.searchParams.set('q', query)
+  return canonical.toString()
+}
+
 export function queueKagiPrivateInitialNavigation(pageId: string, url: string): void {
-  if (!normalizeKagiSessionLink(url)) {
+  const canonicalUrl = canonicalizeKagiNavigationUrl(url)
+  if (!canonicalUrl) {
     throw new Error('Expected a Kagi private-session URL.')
   }
   const now = Date.now()
   pendingNavigations.delete(pageId)
-  pendingNavigations.set(pageId, { queuedAt: now, url })
+  pendingNavigations.set(pageId, { queuedAt: now, url: canonicalUrl })
   prunePendingNavigations(now)
 }
 

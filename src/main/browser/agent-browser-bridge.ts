@@ -751,7 +751,9 @@ export class AgentBrowserBridge {
         url: redactKagiSessionToken(loadError?.validatedUrl ?? wc.getURL() ?? ''),
         title: redactKagiSessionToken(wc.getTitle() ?? ''),
         active: wcId === activeWcId,
-        loadError,
+        loadError: loadError
+          ? { ...loadError, validatedUrl: redactKagiSessionToken(loadError.validatedUrl) }
+          : loadError,
         certificateFailure
       })
     }
