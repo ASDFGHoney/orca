@@ -35,6 +35,7 @@ export function useVisibleSidebarWorktrees(args: {
   const {
     showSleepingWorkspaces,
     filterRepoIds,
+    filterWorkspaceStatuses,
     hideDefaultBranchWorkspace,
     hideAutomationGeneratedWorkspaces,
     hideCliCreatedWorkspaces,
@@ -45,6 +46,12 @@ export function useVisibleSidebarWorktrees(args: {
     workspaceHostScope
   } = filterState
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
+  // Why read the catalog only while a status filter is set: subscribing
+  // unconditionally would rerun this pipeline on every status rename/recolor
+  // for the majority of users who never filter by status.
+  const workspaceStatuses = useAppStore((s) =>
+    filterWorkspaceStatuses?.length ? s.workspaceStatuses : undefined
+  )
   const agentStatusEpoch = useAppStore((s) => (!showSleepingWorkspaces ? s.agentStatusEpoch : 0))
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
@@ -70,6 +77,8 @@ export function useVisibleSidebarWorktrees(args: {
     void agentStatusEpoch
     return computeVisibleWorktrees(worktreesByRepo, sortedIds, {
       filterRepoIds,
+      filterWorkspaceStatuses,
+      workspaceStatuses,
       showSleepingWorkspaces,
       tabsByWorktree,
       ptyIdsByTabId,
@@ -102,6 +111,8 @@ export function useVisibleSidebarWorktrees(args: {
     args.agentSendTargetWorktreeId,
     agentStatusEpoch,
     filterRepoIds,
+    filterWorkspaceStatuses,
+    workspaceStatuses,
     showSleepingWorkspaces,
     hideDefaultBranchWorkspace,
     hideAutomationGeneratedWorkspaces,

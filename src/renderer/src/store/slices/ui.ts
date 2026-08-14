@@ -29,7 +29,7 @@ import type {
   WorktreeCardProperty
 } from '../../../../shared/ui-chrome-types'
 import type { ChangelogData, UpdateStatus } from '../../../../shared/update-status-types'
-import type { WorkspaceStatusDefinition } from '../../../../shared/worktree/types'
+import type { WorkspaceStatus, WorkspaceStatusDefinition } from '../../../../shared/worktree/types'
 import {
   applyManualRepoOrder,
   normalizeManualRepoOrder
@@ -99,7 +99,8 @@ import {
   clampWorkspaceBoardColumnWidth,
   clampWorkspaceBoardOpacity,
   cloneDefaultWorkspaceStatuses,
-  normalizeWorkspaceStatuses
+  normalizeWorkspaceStatuses,
+  sanitizeFilterWorkspaceStatuses
 } from '../../../../shared/workspace-statuses'
 import { clampMarkdownTocPanelWidth } from '../../../../shared/markdown-toc-panel-width'
 import { clampCombinedDiffFileTreeWidth } from '../../../../shared/combined-diff-file-tree-width'
@@ -914,6 +915,9 @@ export type UISlice = {
   toggleShowDotfilesForWorktree: (worktreeId: string) => void
   filterRepoIds: readonly string[]
   setFilterRepoIds: (ids: readonly string[]) => void
+  /** Selected workspace-status ids; empty means every status is shown. */
+  filterWorkspaceStatuses: readonly WorkspaceStatus[]
+  setFilterWorkspaceStatuses: (ids: readonly WorkspaceStatus[]) => void
   collapsedGroups: Set<string>
   toggleCollapsedGroup: (key: string) => void
   worktreeCardProperties: WorktreeCardProperty[]
@@ -2161,6 +2165,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   filterRepoIds: [],
   setFilterRepoIds: (ids) => set({ filterRepoIds: ids }),
 
+  // Why bare set, like filterRepoIds: persistence rides the debounced
+  // usePersistedUIWriter save rather than a write per checkbox click.
+  filterWorkspaceStatuses: [],
+  setFilterWorkspaceStatuses: (ids) => set({ filterWorkspaceStatuses: ids }),
+
   collapsedGroups: new Set<string>(),
   toggleCollapsedGroup: (key) =>
     set((s) => {
@@ -2209,8 +2218,17 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   workspaceStatuses: cloneDefaultWorkspaceStatuses(),
   setWorkspaceStatuses: (statuses) => {
     const normalized = normalizeWorkspaceStatuses(statuses)
-    window.api.ui.set({ workspaceStatuses: normalized }).catch(console.error)
-    set({ workspaceStatuses: normalized })
+    // Why prune here: an edit that deletes or renames a status would otherwise
+    // leave a filter id matching nothing, emptying the sidebar with the menu
+    // still reading "All statuses".
+    const filterWorkspaceStatuses = sanitizeFilterWorkspaceStatuses(
+      get().filterWorkspaceStatuses,
+      normalized
+    )
+    window.api.ui
+      .set({ workspaceStatuses: normalized, filterWorkspaceStatuses: [...filterWorkspaceStatuses] })
+      .catch(console.error)
+    set({ workspaceStatuses: normalized, filterWorkspaceStatuses })
   },
 
   workspaceBoardOpacity: 1,
@@ -2434,6 +2452,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       const validRepoIds = new Set(s.repos.map((repo) => repo.id))
       const validRepoHostIdentities = new Set(s.repos.map(getRepoHostIdentity))
       const persistedFilterRepoIds = sanitizePersistedRepoIds(ui.filterRepoIds)
+      const persistedWorkspaceStatuses = normalizeWorkspaceStatuses(ui.workspaceStatuses)
       // Why: pre-rename builds used sidekick* keys; read as fallback only so new pet* writes win after upgrade.
       const customPets = Array.isArray(ui.customPets)
         ? ui.customPets
@@ -2546,7 +2565,14 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         worktreeCardProperties: normalizeWorktreeCardProperties(ui.worktreeCardProperties),
         _worktreeCardModeDefaulted: ui._worktreeCardModeDefaulted === true,
         agentActivityDisplayMode: normalizeAgentActivityDisplayMode(ui.agentActivityDisplayMode),
-        workspaceStatuses: normalizeWorkspaceStatuses(ui.workspaceStatuses),
+        workspaceStatuses: persistedWorkspaceStatuses,
+        // Why validate against the same normalized catalog: a filter naming a
+        // since-deleted custom status would hide every workspace on restart,
+        // with no visible cause and no obvious way back.
+        filterWorkspaceStatuses: sanitizeFilterWorkspaceStatuses(
+          ui.filterWorkspaceStatuses,
+          persistedWorkspaceStatuses
+        ),
         workspaceBoardOpacity: clampWorkspaceBoardOpacity(ui.workspaceBoardOpacity),
         workspaceBoardColumnWidth: clampWorkspaceBoardColumnWidth(ui.workspaceBoardColumnWidth),
         syncTaskStatusFromWorkspaceBoard: ui.syncTaskStatusFromWorkspaceBoard === true,

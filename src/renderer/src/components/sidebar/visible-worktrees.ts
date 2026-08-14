@@ -21,7 +21,12 @@ import {
   getVisibleWorkspaceHostIdSet,
   worktreeMatchesVisibleHost
 } from './visible-worktree-host-scope'
-import type { Worktree } from '../../../../shared/worktree/types'
+import type {
+  Worktree,
+  WorkspaceStatus,
+  WorkspaceStatusDefinition
+} from '../../../../shared/worktree/types'
+import { getWorkspaceStatus } from '../../../../shared/workspace-statuses'
 import { buildWorktreeComparator, sortWorktreesSmart } from './smart-sort'
 import { getWorktreeIdsWithLiveAgent, isInactiveWorkspace } from '@/lib/worktree-activity-state'
 import { useAppStore } from '@/store'
@@ -63,6 +68,17 @@ import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualif
  */
 type VisibleWorktreeOptions = {
   filterRepoIds: readonly string[]
+  /**
+   * Selected workspace-status ids; empty shows every status.
+   *
+   * Why optional, and why paired with `workspaceStatuses`: resolving a
+   * worktree's effective status needs the live catalog to fall back on. A
+   * caller that passes ids without the catalog would resolve every row to the
+   * default id and narrow the list to one status, so the pair fails *open* —
+   * omit either and no status filtering happens.
+   */
+  filterWorkspaceStatuses?: readonly WorkspaceStatus[]
+  workspaceStatuses?: readonly WorkspaceStatusDefinition[]
   showSleepingWorkspaces: boolean
   tabsByWorktree: Record<string, Pick<TerminalTab, 'id'>[]> | null
   ptyIdsByTabId: Record<string, string[]> | null
@@ -139,6 +155,16 @@ export function computeVisibleWorktrees(
   if (opts.filterRepoIds.length > 0) {
     const selectedRepoIds = new Set(opts.filterRepoIds)
     all = all.filter((w) => selectedRepoIds.has(w.repoId))
+  }
+
+  // Filter by workspace (card) status. Empty selection shows every status.
+  // Why here and not per row at render time: workspaceStatus is a plain field
+  // on the worktree, so this is one O(worktrees) pass with a Set lookup inside
+  // the pipeline that already runs once per filter/sort snapshot.
+  if (opts.filterWorkspaceStatuses?.length && opts.workspaceStatuses) {
+    const selectedStatusIds = new Set(opts.filterWorkspaceStatuses)
+    const statuses = opts.workspaceStatuses
+    all = all.filter((w) => selectedStatusIds.has(getWorkspaceStatus(w, statuses)))
   }
 
   if (!opts.showSleepingWorkspaces) {
@@ -301,6 +327,8 @@ export function getVisibleWorktreeIds(): string[] {
 
   const visibleIds = computeVisibleWorktreeIds(state.worktreesByRepo, sortedIds, {
     filterRepoIds: state.filterRepoIds,
+    filterWorkspaceStatuses: state.filterWorkspaceStatuses,
+    workspaceStatuses: state.workspaceStatuses,
     showSleepingWorkspaces: state.showSleepingWorkspaces,
     tabsByWorktree: state.tabsByWorktree,
     ptyIdsByTabId: state.ptyIdsByTabId,
