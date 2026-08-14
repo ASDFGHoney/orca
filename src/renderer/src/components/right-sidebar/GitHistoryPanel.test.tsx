@@ -95,6 +95,10 @@ describe('GitHistoryPanel', () => {
       />
     )
 
+    expect(markup).toContain('Fix tab overflow')
+    expect(markup).toContain('main')
+    expect(markup).toContain('feature')
+    expect(markup).toContain('+1')
     expect(markup).not.toContain('title="Fix tab overflow"')
     expect(markup).not.toContain('title="main"')
     expect(markup).not.toContain('title="feature"')
