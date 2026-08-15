@@ -21,6 +21,30 @@ export function getAutomationPromptEditorRoot(
     : null
 }
 
+function installPromptEditorEscapeDismiss(
+  target: HTMLElement,
+  onDismissRef: { current?: () => void }
+): () => void {
+  const handleEscape = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || event.repeat) {
+      return
+    }
+    if (isMonacoFindWidgetOpen(target)) {
+      return
+    }
+    // Why: Monaco swallows Escape even with find closed; the wrapping
+    // dialog still needs the same dismiss path a textarea used to have.
+    if (!onDismissRef.current) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    onDismissRef.current()
+  }
+  target.addEventListener('keydown', handleEscape, true)
+  return () => target.removeEventListener('keydown', handleEscape, true)
+}
+
 type AutomationEditorPromptEditorProps = {
   value: string
   placeholder: string
@@ -76,23 +100,7 @@ export function AutomationEditorPromptEditor({
     editorRef.current = editorInstance
     const editorDomNode = editorInstance.getContainerDomNode()
     const cleanupFindShortcut = installMonacoEditorFindShortcut(editorInstance)
-    const handleEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.repeat) {
-        return
-      }
-      if (isMonacoFindWidgetOpen(editorDomNode)) {
-        return
-      }
-      // Why: Monaco swallows Escape even with find closed; the wrapping
-      // dialog still needs the same dismiss path a textarea used to have.
-      if (!onDismissRef.current) {
-        return
-      }
-      event.preventDefault()
-      event.stopPropagation()
-      onDismissRef.current()
-    }
-    editorDomNode.addEventListener('keydown', handleEscape, true)
+    const cleanupEscapeDismiss = installPromptEditorEscapeDismiss(editorDomNode, onDismissRef)
     isApplyingProgrammaticContentRef.current = true
     try {
       if (syncContentOnMount(editorInstance, contentRef.current)) {
@@ -103,7 +111,7 @@ export function AutomationEditorPromptEditor({
     }
     editorInstance.onDidDispose(() => {
       cleanupFindShortcut()
-      editorDomNode.removeEventListener('keydown', handleEscape, true)
+      cleanupEscapeDismiss()
       if (editorRef.current === editorInstance) {
         editorRef.current = null
       }
