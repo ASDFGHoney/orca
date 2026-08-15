@@ -221,6 +221,8 @@ function renderCard(
         onReuseSelectedBranchChange={() => {}}
         branchNameOverride=""
         onBranchNameOverrideChange={() => {}}
+        parentWorktreeId={null}
+        onParentWorktreeIdChange={() => {}}
         forkPushWarning={null}
         detectedAgentIds={null}
         onOpenAgentSettings={() => {}}
@@ -568,6 +570,21 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
     })
 
     expect(findInputByLabel(current.container, 'Branch name')).toBeTruthy()
+  })
+
+  it('places the parent workspace picker immediately after the branch name field', () => {
+    current = renderCard({
+      advancedOpen: true,
+      branchesEnabled: true
+    })
+
+    const branchInput = findInputByLabel(current.container, 'Branch name')
+    expect(branchInput).toBeTruthy()
+    const branchBlock = branchInput?.closest('div.space-y-1')
+    const nextField = branchBlock?.nextElementSibling
+    expect(nextField?.textContent).toContain('Parent workspace')
+    expect(nextField?.textContent).not.toContain('Note')
+    expect(nextField?.nextElementSibling?.textContent).toContain('Note')
   })
 
   it('does not disable folder workspace creation when only source lookup needs SSH', () => {

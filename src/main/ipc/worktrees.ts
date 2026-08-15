@@ -130,7 +130,8 @@ import {
   createRemoteWorktree,
   cleanupUnusedWorktreePushTargetRemote,
   cleanupUnusedWorktreePushTargetRemoteSsh,
-  notifyWorktreesChanged
+  notifyWorktreesChanged,
+  recordWorkspaceLineageForCreatedWorktree
 } from './worktree-remote'
 import { registerWorktreeChangeInvalidator } from './worktree-change-invalidators'
 import {
@@ -2345,6 +2346,36 @@ export function registerWorktreeHandlers(
           throw error
         }
         finishAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)
+        // Why: adoption builds its own result rather than going through the create helpers,
+        // so without this the composer's parent pick — and a folder workspace's own
+        // attachment — are dropped silently on this path.
+        const adoptedLineage = recordWorkspaceLineageForCreatedWorktree(
+          store,
+          args,
+          result.worktree,
+          Date.now()
+        )
+        if (adoptedLineage.lineage || adoptedLineage.workspaceLineage) {
+          result = {
+            ...result,
+            worktree: {
+              ...result.worktree,
+              ...(adoptedLineage.workspaceLineage
+                ? { workspaceLineage: adoptedLineage.workspaceLineage }
+                : {}),
+              ...(adoptedLineage.lineage
+                ? {
+                    lineage: adoptedLineage.lineage,
+                    parentWorktreeId: adoptedLineage.lineage.parentWorktreeId
+                  }
+                : {})
+            },
+            ...(adoptedLineage.lineage ? { lineage: adoptedLineage.lineage } : {}),
+            ...(adoptedLineage.workspaceLineage
+              ? { workspaceLineage: adoptedLineage.workspaceLineage }
+              : {})
+          }
+        }
         track('workspace_created', {
           source,
           from_existing_branch: false,

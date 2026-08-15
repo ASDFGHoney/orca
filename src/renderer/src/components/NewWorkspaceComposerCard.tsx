@@ -42,6 +42,7 @@ import type { OrcaHooks, SetupAgentStartupPolicy } from '../../../shared/orca-ya
 import type { TuiAgent } from '../../../shared/tui-agent'
 import type { SparsePreset } from '../../../shared/worktree/create-types'
 import SparseCheckoutPresetSelect from '@/components/sparse/SparseCheckoutPresetSelect'
+import { ComposerParentWorktreePicker } from '@/components/new-workspace/ComposerParentWorktreePicker'
 import SmartWorkspaceNameField, {
   type SmartWorkspaceNameSelection
 } from '@/components/new-workspace/SmartWorkspaceNameField'
@@ -108,6 +109,11 @@ type NewWorkspaceComposerCardProps = {
   onNameValueChange: (value: string) => void
   branchNameOverride: string | undefined
   onBranchNameOverrideChange: (value: string | undefined) => void
+  /** Sidebar nesting only — no effect on the base branch or start point. */
+  parentWorktreeId: string | null
+  onParentWorktreeIdChange: (value: string | null) => void
+  /** Folder workspace the create runs inside, if any; constrains eligible parents. */
+  activeFolderWorkspaceId?: string | null
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
   onSmartGitLabItemSelect: (item: GitLabWorkItem) => void
   onSmartBranchSelect: (refName: string, localBranchName: string) => void
@@ -322,6 +328,9 @@ export default function NewWorkspaceComposerCard({
   onNameValueChange,
   branchNameOverride,
   onBranchNameOverrideChange,
+  parentWorktreeId,
+  onParentWorktreeIdChange,
+  activeFolderWorkspaceId = null,
   onSmartGitHubItemSelect,
   onSmartGitLabItemSelect,
   onSmartBranchSelect,
@@ -989,6 +998,16 @@ export default function NewWorkspaceComposerCard({
                     className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   />
                 </div>
+              ) : null}
+
+              {selectedRepoIsGit && branchesEnabled ? (
+                <ComposerParentWorktreePicker
+                  repoId={repoId}
+                  value={parentWorktreeId}
+                  onChange={onParentWorktreeIdChange}
+                  activeFolderWorkspaceId={activeFolderWorkspaceId}
+                  disabled={!advancedOpen}
+                />
               ) : null}
 
               <div className="space-y-1">

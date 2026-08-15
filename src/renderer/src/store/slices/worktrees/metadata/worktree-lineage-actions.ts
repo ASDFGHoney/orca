@@ -29,7 +29,7 @@ export function createFetchWorktreeLineage(
       const settings = ownerSettings
         ? { ...ownerSettings, activeRuntimeEnvironmentId }
         : ({ activeRuntimeEnvironmentId } as AppState['settings'])
-      await refreshWorktreeLineageForSettings(settings, set, {
+      await refreshWorktreeLineageForSettings(settings, set, get, {
         reuseRecentCompatibilityFailure: true
       })
     } catch (err) {
@@ -52,7 +52,7 @@ export function createUpdateWorktreeLineage(
       )
     } catch (err) {
       console.error('Failed to update worktree lineage:', err)
-      await refreshWorktreeLineageForSettings(ownerSettings, set)
+      await refreshWorktreeLineageForSettings(ownerSettings, set, get)
     }
   }
 }
@@ -71,7 +71,7 @@ export function createAssignWorktreeParent(
       )
     } catch (err) {
       console.error('Failed to assign worktree parent:', err)
-      await refreshWorktreeLineageForSettings(ownerSettings, set)
+      await refreshWorktreeLineageForSettings(ownerSettings, set, get)
       throw err
     }
   }

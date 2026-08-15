@@ -110,6 +110,7 @@ import {
   resolveGitHubWorkItemIdentity,
   type GitHubWorkItemIdentity
 } from '@/lib/github-work-item-identity'
+import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { resolveGitHubPrStartPointForRepo } from '@/lib/github-pr-start-point'
 import { isWorkItemLookupText } from '@/lib/work-item-lookup-text'
 import {
@@ -216,6 +217,8 @@ import { buildTrustedComposerIssueCommand } from '@/lib/composer-issue-command'
 import { settleComposerSubmit } from '@/lib/composer-submit-cancellation'
 
 const NEVER_CANCEL_COMPOSER_SUBMIT = (): boolean => false
+/** Stable identity so the memo'd picker's props don't change on every composer render. */
+const NOOP_PARENT_WORKTREE_CHANGE = (): void => {}
 
 export function canResolveFolderSmartGitHubSubmit({
   hasFolderSourceRepos
@@ -292,6 +295,9 @@ export type ComposerCardProps = {
   onNameValueChange: (value: string) => void
   branchNameOverride: string | undefined
   onBranchNameOverrideChange: (value: string | undefined) => void
+  parentWorktreeId: string | null
+  onParentWorktreeIdChange: (value: string | null) => void
+  activeFolderWorkspaceId: string | null
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
   onSmartGitLabItemSelect: (item: GitLabWorkItem) => void
   onSmartBranchSelect: (refName: string, localBranchName: string) => void
@@ -658,6 +664,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const projectGroups = useAppStore((s) => s.projectGroups)
   const projectHostSetups = useAppStore((s) => s.projectHostSetups)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
+  // Why: a create inside a folder workspace can only name one workspace parent, so the parent
+  // picker must stay inside that folder's subtree or the new worktree falls out of the folder.
+  const activeFolderWorkspaceId = useAppStore((s) => {
+    const scope = parseWorkspaceKey(s.activeWorkspaceKey ?? '')
+    return scope?.type === 'folder' ? scope.folderWorkspaceId : null
+  })
   const settings = useAppStore((s) => s.settings)
   const newWorkspaceDraft = useAppStore((s) => s.newWorkspaceDraft)
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
@@ -1155,6 +1167,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const [branchNameOverridePreservesNameEdits, setBranchNameOverridePreservesNameEdits] = useState(
     Boolean(initialLinearBranchName)
   )
+  // Why: repo-scoped and staleable, so it follows branchNameOverride in not being persisted to the draft.
+  const [parentWorktreeId, setParentWorktreeId] = useState<string | null>(null)
   const [smartNameMode, setSmartNameMode] = useState<SmartNameMode>('smart')
   // Why: a pasted Jira URL is not a workspace name yet — block create until it resolves to an issue.
   const sourceIntentBlocksCreate = !linkedWorkItem && isBlockingJiraUrlIntent(smartNameMode, name)
@@ -2754,6 +2768,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setSparseDirectories('')
       // Why: presets are repo-scoped, so a prior-repo selection is meaningless after a switch.
       setSparseSelectedPresetId(null)
+      // Why: lineage edges can't cross repos, so a parent from the prior repo would be dropped silently.
+      setParentWorktreeId(null)
       // Why: Start-from is repo-scoped; reset to undefined so the field falls back to the new repo's effective base ref.
       if (!options.preserveStartFrom) {
         setBaseBranch(undefined)
@@ -2842,6 +2858,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         setSparseEnabled(false)
         setSparseDirectories('')
         setSparseSelectedPresetId(null)
+        setParentWorktreeId(null)
         setBaseBranch(undefined)
         setPushTarget(undefined)
         setBranchNameOverride(undefined)
@@ -3906,7 +3923,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           nameWasGenerated,
           ...(!backendStartup && startupPlan?.draftPrompt
             ? { startupDraft: startupPlan.draftPrompt }
-            : {})
+            : {}),
+          ...(selectedRepoIsGit && parentWorktreeId ? { parentWorktreeId } : {})
         }
       )
       const worktree = result.worktree
@@ -4013,6 +4031,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     normalizedSparseDirectories,
     note,
     onCreated,
+    parentWorktreeId,
     parsedLinkedIssueNumber,
     persistSetupAgentStartupPolicy,
     persistDraft,
@@ -4551,6 +4570,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           ...(effectiveBranchNameOverride
             ? { branchNameOverride: effectiveBranchNameOverride }
             : {}),
+          ...(selectedRepoIsGit && parentWorktreeId ? { parentWorktreeId } : {}),
           ...(resolvedInitialWorkspaceStatus
             ? { workspaceStatus: resolvedInitialWorkspaceStatus }
             : {}),
@@ -4614,6 +4634,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       normalizedSparseDirectories,
       note,
       onCreated,
+      parentWorktreeId,
       parsedLinkedIssueNumber,
       persistSetupAgentStartupPolicy,
       persistDraft,
@@ -4707,6 +4728,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     onNameValueChange: handleNameValueChange,
     branchNameOverride: isProjectGroupTarget ? undefined : branchNameOverride,
     onBranchNameOverrideChange: isProjectGroupTarget ? () => {} : handleBranchNameOverrideChange,
+    parentWorktreeId: isProjectGroupTarget ? null : parentWorktreeId,
+    onParentWorktreeIdChange: isProjectGroupTarget
+      ? NOOP_PARENT_WORKTREE_CHANGE
+      : setParentWorktreeId,
+    activeFolderWorkspaceId,
     onSmartGitHubItemSelect: handleSmartGitHubItemSelect,
     onSmartGitLabItemSelect: handleSmartGitLabItemSelect,
     onSmartBranchSelect: isProjectGroupTarget ? () => {} : handleSmartBranchSelect,
