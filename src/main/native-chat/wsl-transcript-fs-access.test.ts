@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as NodeFsModule from 'node:fs'
 import type * as NodeFsPromisesModule from 'node:fs/promises'
 import type * as GateModule from './wsl-transcript-fs-gate'
-import type * as ProcessClientModule from './wsl-transcript-fs-process-client'
+import type * as ProcessDispatchModule from './wsl-transcript-fs-process-dispatch'
 
 const UNC_PATH = '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.codex\\sessions\\a.jsonl'
 const OTHER_DISTRO_UNC_PATH = '\\\\wsl.localhost\\Debian\\home\\ada\\.codex\\sessions\\a.jsonl'
@@ -41,8 +41,8 @@ vi.mock('./wsl-transcript-fs-gate', async (importOriginal) => {
   return { ...original, runWslTranscriptFsTask: mocks.runTask }
 })
 
-vi.mock('./wsl-transcript-fs-process-client', async (importOriginal) => ({
-  ...(await importOriginal<typeof ProcessClientModule>()),
+vi.mock('./wsl-transcript-fs-process-dispatch', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProcessDispatchModule>()),
   runWslTranscriptFsProcess: mocks.runProcess
 }))
 

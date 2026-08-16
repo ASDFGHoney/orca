@@ -11,7 +11,7 @@ import {
   readWslTranscriptFsProcess,
   runWslTranscriptFsProcess,
   type WslTranscriptFsProcessHandle
-} from './wsl-transcript-fs-process-client'
+} from './wsl-transcript-fs-process-dispatch'
 import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 
 /** Never nest a gated call inside another — that deadlocks the scan slot. */
@@ -164,7 +164,9 @@ export function wslGatedRead(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<{ bytesRead: number; buffer: Buffer }> {
-  if (!isWslUncPath(path)) {
+  // Handle kind decides before path spelling: a process-owned handle must never
+  // hit the FileHandle branch even if a caller re-derives the path off-UNC.
+  if (!isWslUncPath(path) && !isWslTranscriptFsProcessHandle(handle)) {
     return (handle as FileHandle).read(buffer, offset, length, position)
   }
   return runWslTranscriptFsTask(

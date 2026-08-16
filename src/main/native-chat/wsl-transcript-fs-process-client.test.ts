@@ -5,9 +5,13 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS,
+  WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS,
   WslTranscriptFsProcessClient
 } from './wsl-transcript-fs-process-client'
-import { resolveWslTranscriptFsProcessEntryPath } from './wsl-transcript-fs-process-spawn'
+import {
+  resolveWslTranscriptFsProcessEntryPath,
+  wslTranscriptFsProcessForkEnv
+} from './wsl-transcript-fs-process-spawn'
 import type {
   WslTranscriptFsProcessRequest,
   WslTranscriptFsProcessResponse
@@ -212,6 +216,54 @@ describe('WSL transcript filesystem process client', () => {
     }
   })
 
+  it('reaps an idle process after the idle deadline and forks a fresh one later', async () => {
+    vi.useFakeTimers()
+    const child = new FakeProcess()
+    const replacement = new FakeProcess()
+    const factory = vi
+      .fn<() => ChildProcess>()
+      .mockReturnValueOnce(fakeChild(child))
+      .mockReturnValueOnce(fakeChild(replacement))
+    const client = new WslTranscriptFsProcessClient(factory)
+    try {
+      const first = client.run<boolean>(
+        { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\one' },
+        new AbortController().signal
+      )
+      child.respond({ id: child.sent[0].id, ok: true, value: true })
+      await expect(first).resolves.toBe(true)
+
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS)
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+
+      const later = client.run<boolean>(
+        { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\two' },
+        new AbortController().signal
+      )
+      replacement.respond({ id: replacement.sent[0].id, ok: true, value: true })
+      await expect(later).resolves.toBe(true)
+      expect(factory).toHaveBeenCalledTimes(2)
+    } finally {
+      client.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('surfaces child transport faults as unavailable gate refusals', async () => {
+    const child = new FakeProcess()
+    const client = new WslTranscriptFsProcessClient(() => fakeChild(child))
+    const pending = client.run(
+      { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\dead' },
+      new AbortController().signal
+    )
+    child.emit('exit', 9)
+    await expect(pending).rejects.toMatchObject({
+      name: 'WslTranscriptFsError',
+      code: 'unavailable'
+    })
+    client.dispose()
+  })
+
   it('reconstructs filesystem errors with their Node error code', async () => {
     const child = new FakeProcess()
     const client = new WslTranscriptFsProcessClient(() => fakeChild(child))
@@ -292,5 +344,32 @@ describe('WSL transcript filesystem process entry resolution', () => {
     ).toBe(
       join(moduleDir.replace('app.asar', 'app.asar.unpacked'), 'wsl-transcript-fs-process-entry.js')
     )
+  })
+
+  // Why: this module compiles into a shared rollup chunk under out/main/chunks,
+  // and the scanner service child has no process.resourcesPath to fall back on.
+  it('resolves the entry from a shared chunk one level below out/main', () => {
+    const moduleDir = join('root', 'out', 'main', 'chunks')
+    const target = join('root', 'out', 'main', 'wsl-transcript-fs-process-entry.js')
+    const exists = vi.fn((path: string) => path === target)
+
+    expect(resolveWslTranscriptFsProcessEntryPath(moduleDir, undefined, exists)).toBe(target)
+  })
+
+  it('excludes ambient NODE_OPTIONS and secrets from the fork env', () => {
+    const env = wslTranscriptFsProcessForkEnv({
+      PATH: 'C:\\bin',
+      SYSTEMROOT: 'C:\\WINDOWS',
+      NODE_OPTIONS: '--inspect-brk',
+      SECRET_TOKEN: 'shh'
+    })
+
+    expect(env).toMatchObject({
+      ELECTRON_RUN_AS_NODE: '1',
+      PATH: 'C:\\bin',
+      SYSTEMROOT: 'C:\\WINDOWS'
+    })
+    expect(env).not.toHaveProperty('NODE_OPTIONS')
+    expect(env).not.toHaveProperty('SECRET_TOKEN')
   })
 })

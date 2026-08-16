@@ -408,6 +408,60 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
+  // Why: production tasks reject promptly on abort (the isolated process is
+  // killed). The sole waiter's timeout must not pre-empt the deadline timer —
+  // that would settle the task first and skip the route quarantine entirely.
+  it('quarantines the route when a sole-waiter abort-responsive task hits the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const path = '\\\\wsl.localhost\\Ubuntu\\solo-stall'
+      const stalled = runWslTranscriptFsTask(
+        { operation: 'open', path, priority: 'exact', dedupe: false },
+        (signal) =>
+          new Promise<string>((_resolve, reject) =>
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          )
+      )
+      const stalledRejected = expect(stalled).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
+      await stalledRejected
+      const retryTask = vi.fn(async () => 'retry')
+      await expect(run(path, 'exact', retryTask)).rejects.toMatchObject({ code: 'unavailable' })
+      expect(retryTask).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets abandoned running work finish instead of aborting its process', async () => {
+    const work = deferred<string>()
+    const controller = new AbortController()
+    const sawAbort = vi.fn()
+    const task = vi.fn((signal: AbortSignal) => {
+      signal.addEventListener('abort', sawAbort, { once: true })
+      return work.promise
+    })
+    const pending = runWslTranscriptFsTask(
+      {
+        operation: 'read',
+        path: '\\\\wsl.localhost\\Ubuntu\\abandoned-read',
+        priority: 'exact',
+        dedupe: false,
+        signal: controller.signal
+      },
+      task
+    )
+    await vi.waitFor(() => expect(task).toHaveBeenCalledOnce())
+    const reason = new Error('caller moved on')
+    controller.abort(reason)
+    await expect(pending).rejects.toBe(reason)
+    // A healthy in-flight process op keeps running; only the deadline kills.
+    expect(sawAbort).not.toHaveBeenCalled()
+    work.resolve('late')
+    await Promise.resolve()
+  })
+
   it('quarantines an expired route while keeping healthy routes usable', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()

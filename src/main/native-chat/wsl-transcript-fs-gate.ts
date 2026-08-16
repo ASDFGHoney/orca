@@ -87,10 +87,13 @@ function abandonTaskIfUnused(task: UnknownScheduledTask, reason?: unknown): void
   if (task.waiters.size > 0 || task.state === 'settled') {
     return
   }
-  task.controller.abort(reason)
-  // Running I/O keeps its permit; new callers need a reusable controller.
+  // Running I/O keeps its permit and its process: aborting here would fire
+  // before the same-duration deadline timer, killing a healthy child on every
+  // caller abandonment and settling the task before the deadline can quarantine
+  // a genuinely stalled route. Only the deadline may abort running work.
   clearTask(task)
   if (task.state === 'queued') {
+    task.controller.abort(reason)
     task.state = 'settled'
     removeQueuedTask(task)
     pumpTasks()
