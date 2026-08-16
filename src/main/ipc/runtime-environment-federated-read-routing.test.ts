@@ -128,6 +128,7 @@ describe('federated read RPC transport routing', () => {
       { dispatchId: 'dispatch-1', throughSequence: 4 },
       15_000,
       envelope,
+      undefined,
       ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES
     )
     expect(sendRemoteRuntimeSharedControlRequestMock).not.toHaveBeenCalled()
@@ -171,6 +172,7 @@ describe('federated read RPC transport routing', () => {
       { dispatchId: 'dispatch-1', afterSequence: 0, limit: 50 },
       15_000,
       envelope,
+      undefined,
       ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES
     )
     expect(sendRemoteRuntimeSharedControlRequestMock).not.toHaveBeenCalled()
