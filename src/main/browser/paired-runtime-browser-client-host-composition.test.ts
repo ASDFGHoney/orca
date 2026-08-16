@@ -61,6 +61,20 @@ describe('PairedRuntimeBrowserClientHostComposition', () => {
     expect(rig.executor.snapshotPageInventory).toHaveBeenCalledTimes(2)
   })
 
+  it('coalesces page availability losses into one inventory refresh', async () => {
+    const rig = createRig()
+    rig.createComposition()
+
+    rig.reportPageUnavailable()
+    rig.reportPageUnavailable()
+
+    expect(rig.host.refreshPageInventory).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    await Promise.resolve()
+    rig.reportPageUnavailable()
+    expect(rig.host.refreshPageInventory).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves inventory while replacing authority with fresh routes', async () => {
     const rig = createRig()
     const composition = rig.createComposition()
@@ -339,6 +353,7 @@ function createRig(
   } = {}
 ) {
   const order: string[] = []
+  let onPageUnavailable = (_browserPageId: string, _pageHostGeneration: number): void => {}
   let settleHandlers = (): void => {}
   const handlersSettled = new Promise<void>((resolve) => {
     settleHandlers = resolve
@@ -405,6 +420,7 @@ function createRig(
     retirePage: ReturnType<typeof vi.fn>
     forgetPage: ReturnType<typeof vi.fn>
     whenHandlersSettled: ReturnType<typeof vi.fn>
+    refreshPageInventory: ReturnType<typeof vi.fn>
     close: ReturnType<typeof vi.fn>
   }[] = []
   let replacementInventory: readonly unknown[] = []
@@ -429,6 +445,7 @@ function createRig(
       return true
     }),
     whenHandlersSettled: vi.fn(() => handlersSettled),
+    refreshPageInventory: vi.fn(async () => {}),
     close: vi.fn(async () => {
       order.push(replacement ? 'close-replacement-host' : 'close-host')
       return replacement ? true : (options.hostSettled ?? true)
@@ -443,6 +460,7 @@ function createRig(
     hosts,
     hostOptionsHistory,
     onError,
+    reportPageUnavailable: () => onPageUnavailable('page-a', 7),
     settleHandlers,
     get hostOptions() {
       return hostOptionsHistory.at(-1) ?? {}
@@ -464,7 +482,10 @@ function createRig(
           order.push(replacement ? 'activate-replacement-routes' : 'activate-routes')
           return replacement ? replacementRoutes : routes
         },
-        createExecutor: () => executor,
+        createExecutor: (_input, executorOptions) => {
+          onPageUnavailable = executorOptions.onPageUnavailable
+          return executor
+        },
         createHost: (input, callbacks) => {
           const replacement = input === replacementInput
           hostOptionsHistory.push(callbacks)

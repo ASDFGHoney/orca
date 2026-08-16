@@ -76,7 +76,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     expect(route.close).toHaveBeenCalledTimes(3)
   })
 
-  it('rejects a native route for a different authority runtime', async () => {
+  it('rejects native and WSL routes for a different authority runtime', async () => {
     const routeFactory = vi.fn(() => createRoute())
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
@@ -89,6 +89,15 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     })
 
     await expect(registry.retain(key, signal())).rejects.toThrow(
+      'browser_client_network_route_authority_mismatch'
+    )
+    const wslKey = browserNetworkExecutionHostKey({
+      kind: 'wsl',
+      runtimeId: 'runtime-b',
+      revision: 1,
+      distro: 'Ubuntu'
+    })
+    await expect(registry.retain(wslKey, signal())).rejects.toThrow(
       'browser_client_network_route_authority_mismatch'
     )
     expect(routeFactory).not.toHaveBeenCalled()

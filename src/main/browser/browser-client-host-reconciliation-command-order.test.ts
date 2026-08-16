@@ -256,6 +256,7 @@ describe('browser reconciliation command ordering', () => {
     const close = ledger.issue({
       browserPageId: 'page-b',
       pageHostGeneration: 9,
+      resultAdmission: 'reconciliation',
       command: {
         type: 'closePage',
         targetAuthority: { ...previousAuthority, pageHostGeneration: 9 }

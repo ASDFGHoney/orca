@@ -39,6 +39,7 @@ import type { RemoteServerUpdateSupport } from './remote-server-update'
 import type { ExecutionHostId } from './execution-host'
 import type { PtyIncarnationId } from './pty-incarnation'
 import type { RasterImageDimensions } from './raster-image-dimensions'
+import type { RuntimeBrowserPlacement } from './runtime-browser-placement'
 
 export type { RuntimeMarkdownReadTabResult, RuntimeMarkdownSaveTabResult }
 
@@ -246,6 +247,9 @@ export type RuntimeMobileSessionBrowserTab = {
   title: string
   browserWorkspaceId: string
   browserPageId: string | null
+  browserProfileId?: string
+  executionHostKey?: string
+  placement?: RuntimeBrowserPlacement
   url: string
   loading: boolean
   canGoBack: boolean

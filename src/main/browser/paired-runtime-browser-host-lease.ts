@@ -8,9 +8,9 @@ import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-err
 import { assertBrowserClientHostAttachOptions } from './browser-client-host-attach-request'
 import {
   BrowserHostReconnectDelay,
-  nextBrowserHostReconnectDelay,
   resolveBrowserHostReconnectDelay
 } from './browser-host-lease-reconnect-delay'
+import { reconnectBrowserHostLeaseUntil } from './browser-host-lease-reconnect-attempts'
 import { submitBrowserHostCommandResult } from './browser-host-command-result-submission'
 import {
   BrowserHostCommandResultSettler,
@@ -66,6 +66,32 @@ export class PairedRuntimeBrowserHostLease {
     this.reconnectDelay.release()
     this.closePromise = this.closeLease(error)
     return this.closePromise
+  }
+
+  refreshPageInventory(): Promise<void> {
+    if (this.closed) {
+      return Promise.reject(new Error('Browser host lease is closed'))
+    }
+    if (this.reconnectPromise) {
+      return this.reconnectPromise
+    }
+    if (this.authority?.leaseReconnectProtocolVersion !== 1 || !this.options.getPageInventory) {
+      return Promise.reject(new Error('Browser host inventory refresh is unavailable'))
+    }
+    const connection = this.connection
+    if (!connection?.active) {
+      return Promise.reject(new Error('Browser host lease connection is unavailable'))
+    }
+    connection.fail(
+      new RemoteRuntimeClientError(
+        'remote_runtime_unavailable',
+        'Browser host page inventory refresh requested.'
+      )
+    )
+    return (
+      this.reconnectPromise ??
+      Promise.reject(new Error('Browser host inventory refresh did not start'))
+    )
   }
 
   private async startLease(): Promise<BrowserClientHostLeaseAuthority> {
@@ -147,45 +173,16 @@ export class PairedRuntimeBrowserHostLease {
   }
 
   private async reconnectUntil(deadline: number): Promise<void> {
-    let lastError: Error | null = null
-    let attempt = 0
-    while (!this.closed) {
-      const beforeDelay = deadline - Date.now()
-      if (beforeDelay <= 0) {
-        break
-      }
-      await this.reconnectDelay.wait(
-        nextBrowserHostReconnectDelay({
-          baseDelayMs: this.reconnectRetryDelayMs,
-          attempt,
-          remainingMs: beforeDelay,
-          browserHostClientId: this.options.browserHostClientId
-        })
-      )
-      attempt += 1
-      if (this.closed) {
-        return
-      }
-      const remaining = deadline - Date.now()
-      if (remaining <= 0) {
-        break
-      }
-      try {
-        await this.attach(true, Math.min(this.options.timeoutMs ?? 15_000, remaining))
-        return
-      } catch (error) {
-        lastError = asError(error)
-        if (!this.canReconnect(lastError)) {
-          throw lastError
-        }
-      }
-    }
-    throw new RemoteRuntimeClientError(
-      'runtime_timeout',
-      lastError
-        ? `Browser host lease reconnect grace expired: ${lastError.message}`
-        : 'Browser host lease reconnect grace expired.'
-    )
+    return reconnectBrowserHostLeaseUntil({
+      deadline,
+      delay: this.reconnectDelay,
+      retryDelayMs: this.reconnectRetryDelayMs,
+      browserHostClientId: this.options.browserHostClientId,
+      timeoutMs: this.options.timeoutMs ?? 15_000,
+      isClosed: () => this.closed,
+      attach: (timeoutMs) => this.attach(true, timeoutMs).then(() => undefined),
+      canReconnect: (error) => this.canReconnect(error)
+    })
   }
 
   private canReconnect(error: Error): boolean {

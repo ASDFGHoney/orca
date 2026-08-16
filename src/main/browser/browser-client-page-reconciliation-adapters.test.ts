@@ -117,6 +117,8 @@ function createHarness() {
     retainNetworkRoute: vi.fn(async () => route),
     selectRenderer: vi.fn(() => renderer),
     routeSessions: { preparePage: vi.fn(async () => routeSession) },
+    executeAutomation: vi.fn(async () => undefined),
+    retireAutomation: vi.fn(async () => {}),
     routeWebContents
   }
   return {

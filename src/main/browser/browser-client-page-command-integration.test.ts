@@ -63,6 +63,8 @@ describe('BrowserClientPageCommandExecutor integration', () => {
         retirePage: rendererRetire
       }),
       routeSessions: sessionRegistry,
+      executeAutomation: vi.fn(async () => undefined),
+      retireAutomation: vi.fn(async () => {}),
       routeWebContents: webContentsRegistry
     })
 

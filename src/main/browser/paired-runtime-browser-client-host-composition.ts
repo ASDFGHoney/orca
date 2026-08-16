@@ -33,6 +33,7 @@ type ComposedClientHost = {
   retirePage(browserPageId: string, pageHostGeneration: number): Promise<boolean>
   forgetPage(browserPageId: string, pageHostGeneration: number): boolean
   whenHandlersSettled(): Promise<void>
+  refreshPageInventory(): Promise<void>
   close(error?: Error): Promise<boolean>
 }
 
@@ -63,6 +64,7 @@ type PairedRuntimeBrowserClientHostCompositionOptions<
         executionHostKey: string,
         signal: AbortSignal
       ): Promise<BrowserClientPageNetworkRoute>
+      onPageUnavailable(browserPageId: string, pageHostGeneration: number): void
     }
   ): ComposedPageExecutor
   createHost(input: Start, callbacks: ClientHostCallbacks): ComposedClientHost
@@ -81,6 +83,7 @@ export class PairedRuntimeBrowserClientHostComposition<
   private hostGeneration = 0
   private closed = false
   private errorReported = false
+  private inventoryRefreshPromise: Promise<void> | null = null
 
   constructor(private readonly options: PairedRuntimeBrowserClientHostCompositionOptions<Start>) {
     this.routeSets = new PairedRuntimeBrowserClientHostRouteSets({
@@ -89,7 +92,8 @@ export class PairedRuntimeBrowserClientHostComposition<
       onCleanupError: (error) => this.handleHostError(error)
     })
     this.executor = options.createExecutor(options.initialInput, {
-      retainNetworkRoute: (key, signal) => this.routeSets.retain(key, signal)
+      retainNetworkRoute: (key, signal) => this.routeSets.retain(key, signal),
+      onPageUnavailable: () => this.requestPageInventoryRefresh()
     })
     this.host = this.createHost(options.initialInput, false)
   }
@@ -228,6 +232,21 @@ export class PairedRuntimeBrowserClientHostComposition<
       throw new Error('browser_client_host_command_aborted')
     }
     return this.executor.handle(event, signal)
+  }
+
+  private requestPageInventoryRefresh(): void {
+    if (this.closed || this.inventoryRefreshPromise) {
+      return
+    }
+    const refresh = this.host.refreshPageInventory()
+    this.inventoryRefreshPromise = refresh
+    void refresh
+      .catch((error) => this.handleHostError(asError(error)))
+      .finally(() => {
+        if (this.inventoryRefreshPromise === refresh) {
+          this.inventoryRefreshPromise = null
+        }
+      })
   }
 
   private fenceTerminalAuthority(error: Error): void {

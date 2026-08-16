@@ -91,6 +91,8 @@ function createHarness(options: { maxPages?: number } = {}) {
         return routeSession
       })
     },
+    executeAutomation: vi.fn(async () => ({ clicked: true })),
+    retireAutomation: vi.fn(async () => {}),
     routeWebContents: {
       claimGuestLifecycle: vi.fn((registration: BrowserRoutePageGuestIdentity) => {
         order.push('claim-guest')
@@ -210,6 +212,35 @@ describe('BrowserClientPageCommandExecutor', () => {
         currentUrl: 'https://example.internal/path'
       }
     ])
+  })
+
+  it('executes one automation envelope against the exact retained page', async () => {
+    const { dependencies, executor } = createHarness()
+    await executor.handle(createCommand('createPage'), new AbortController().signal)
+    const command = createCommand('navigate', {
+      commandId: 'automation-a',
+      command: {
+        type: 'automation',
+        method: 'browser.click',
+        params: { element: 'Submit' }
+      }
+    })
+
+    await expect(executor.handle(command, new AbortController().signal)).resolves.toEqual({
+      status: 'completed',
+      value: { clicked: true }
+    })
+    expect(dependencies.executeAutomation).toHaveBeenCalledWith(
+      {
+        browserPageId: 'page-a',
+        pageHostGeneration: 7,
+        browserProfileId: 'profile-a',
+        method: 'browser.click',
+        params: { element: 'Submit' },
+        registration: expect.objectContaining({ browserPageId: 'page-a', webContentsId: 41 })
+      },
+      expect.any(AbortSignal)
+    )
   })
 
   it('keeps legacy-valid command identities when inventory cannot encode them', async () => {

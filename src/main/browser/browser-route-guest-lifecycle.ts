@@ -30,6 +30,7 @@ export function createBrowserRouteGuestState(
     pageAuthority: null,
     navigationGranted: false,
     retirementRequested: false,
+    availabilityLossReported: false,
     retirementCallback: null,
     whenDestroyed,
     resolveDestroyed,

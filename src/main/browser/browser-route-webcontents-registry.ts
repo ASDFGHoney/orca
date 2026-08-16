@@ -35,12 +35,18 @@ import {
   type BrowserRouteGuestLifecycleRekey
 } from './browser-route-webcontents-rekey'
 import { registerBrowserRouteGuest } from './browser-route-webcontents-registration'
+import {
+  BrowserRoutePageAvailability,
+  reportBrowserRoutePageAvailabilityLoss
+} from './browser-route-page-availability'
 import type { BrowserRouteWebContentsRegistryDependencies } from './browser-route-webcontents-registry-dependencies'
 
 export class BrowserRouteWebContentsRegistry {
   private readonly maxGuests: number
   private readonly guests = new Map<number, GuestState>()
   private readonly guestsByPage = new Map<string, GuestState>()
+  private readonly pageAvailability = new BrowserRoutePageAvailability()
+  readonly watchPageAvailability = this.pageAvailability.watch
 
   constructor(private readonly dependencies: BrowserRouteWebContentsRegistryDependencies) {
     this.maxGuests = dependencies.maxGuests ?? 256
@@ -216,6 +222,7 @@ export class BrowserRouteWebContentsRegistry {
     }
     for (const state of this.guests.values()) {
       if (isRouteGuestOwnedByRenderer(state.guest, state.registration, rendererWebContentsId)) {
+        reportBrowserRoutePageAvailabilityLoss(state, this.pageAvailability)
         this.retireGuestPage(state)
       }
     }
@@ -229,7 +236,10 @@ export class BrowserRouteWebContentsRegistry {
   private createGuestState(guest: WebContents, partition: string): GuestState {
     return createBrowserRouteGuestState(guest, partition, {
       navigationAllowed: (state, url) => this.navigationAllowed(state, url),
-      retire: (state) => this.retireGuestPage(state),
+      retire: (state) => {
+        reportBrowserRoutePageAvailabilityLoss(state, this.pageAvailability)
+        this.retireGuestPage(state)
+      },
       release: (state) => this.releaseGuest(state)
     })
   }

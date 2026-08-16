@@ -9,6 +9,7 @@ export type BrowserRouteGuestState = {
   pageAuthority: symbol | null
   navigationGranted: boolean
   retirementRequested: boolean
+  availabilityLossReported: boolean
   retirementCallback: (() => void) | null
   whenDestroyed: Promise<void>
   resolveDestroyed: () => void

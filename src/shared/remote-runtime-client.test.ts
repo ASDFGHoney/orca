@@ -14,7 +14,12 @@ import {
 import { sendRemoteRuntimeRequest, subscribeRemoteRuntimeRequest } from './remote-runtime-client'
 import { remoteRuntimeClientCapabilities } from './remote-runtime-client-capabilities'
 import { MAX_TIMER_DELAY_MS } from './timer-delay'
-import { BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY } from './protocol-version'
+import {
+  BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
+  BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
+  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
+  ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES
+} from './protocol-version'
 
 const servers: WebSocketServer[] = []
 
@@ -282,6 +287,52 @@ describe('subscribeRemoteRuntimeRequest', () => {
 })
 
 describe('sendRemoteRuntimeRequest', () => {
+  it('keeps generic native authentication free of Electron placement support', async () => {
+    let receivedAuth: Record<string, unknown> | null = null
+    const server = await createOneShotServer({
+      onAuth: (auth) => {
+        receivedAuth = auth
+      }
+    })
+
+    await sendRemoteRuntimeRequest(
+      server.pairing,
+      'session.tabs.list',
+      { worktree: 'id:worktree-a' },
+      1000
+    )
+
+    expect(receivedAuth).toMatchObject({
+      clientCapabilities: remoteRuntimeClientCapabilities()
+    })
+  })
+
+  it('advertises browser placement support only when the Electron caller opts in', async () => {
+    let receivedAuth: Record<string, unknown> | null = null
+    const server = await createOneShotServer({
+      onAuth: (auth) => {
+        receivedAuth = auth
+      }
+    })
+
+    await sendRemoteRuntimeRequest(
+      server.pairing,
+      'session.tabs.list',
+      { worktree: 'id:worktree-a' },
+      1000,
+      undefined,
+      undefined,
+      ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES
+    )
+
+    expect(receivedAuth).toMatchObject({
+      clientCapabilities: expect.arrayContaining([
+        BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
+        BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY
+      ])
+    })
+  })
+
   it.each([-1, 1.5, MAX_TIMER_DELAY_MS + 1, Number.MAX_SAFE_INTEGER + 1])(
     'rejects invalid timer delay %s before reading pairing data',
     async (timeoutMs) => {
@@ -603,6 +654,7 @@ async function createInvalidHandshakeServer(): Promise<{ pairing: PairingOffer }
 async function createOneShotServer(
   options: {
     response?: (requestId: string) => unknown
+    onAuth?: (auth: Record<string, unknown>) => void
     onRequest?: (request: Record<string, unknown>) => void
     sendUndecryptableResponse?: boolean
   } = {}
@@ -635,6 +687,7 @@ async function createOneShotServer(
         return
       }
       if (!authenticated) {
+        options.onAuth?.(JSON.parse(plaintext) as Record<string, unknown>)
         authenticated = true
         sendEncrypted(ws, sharedKey, { type: 'e2ee_authenticated' })
         return

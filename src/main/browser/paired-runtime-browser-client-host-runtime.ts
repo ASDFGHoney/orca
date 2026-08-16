@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY } from '../../shared/browser-client-automation-protocol'
 import type { BrowserClientHostLeaseAuthority } from '../../shared/browser-client-host-protocol'
 import type { PairingOffer } from '../../shared/pairing'
 import {
@@ -7,6 +8,10 @@ import {
 } from '../../shared/runtime-environments'
 import { BrowserClientNetworkRouteRegistry } from './browser-client-network-route-registry'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
+import {
+  executeBrowserClientPageAutomation,
+  retireBrowserClientPageAutomation
+} from './browser-client-page-automation-runtime'
 import { selectBrowserClientPageRenderer } from './browser-client-page-renderer-runtime'
 import { PairedRuntimeBrowserClientHostComposition } from './paired-runtime-browser-client-host-composition'
 import { PairedRuntimeBrowserClientHost } from './paired-runtime-browser-client-host'
@@ -35,14 +40,17 @@ const browserClientHosts =
       new PairedRuntimeBrowserClientHostComposition({
         initialInput: input,
         createRoutes: (next, authority) => createNetworkRoutes(next.pairing, authority),
-        createExecutor: (next, { retainNetworkRoute }) =>
+        createExecutor: (next, { retainNetworkRoute, onPageUnavailable }) =>
           new BrowserClientPageCommandExecutor({
             orcaProfileId: next.orcaProfileId,
             authorityConnectionIdentity: next.authorityConnectionIdentity,
             retainNetworkRoute,
             selectRenderer: selectBrowserClientPageRenderer,
             routeSessions: browserRouteSessionRegistry,
-            routeWebContents: browserRouteWebContentsRegistry
+            routeWebContents: browserRouteWebContentsRegistry,
+            executeAutomation: executeBrowserClientPageAutomation,
+            retireAutomation: retireBrowserClientPageAutomation,
+            onPageUnavailable
           }),
         createHost: (
           next,
@@ -52,7 +60,7 @@ const browserClientHosts =
             pairing: next.pairing,
             authorityRuntimeId: next.authorityRuntimeId,
             browserHostClientId,
-            hostCapabilities: ['webview'],
+            hostCapabilities: ['webview', BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY],
             handler,
             getPageInventory,
             pageReconciliationProtocolVersion: 1,

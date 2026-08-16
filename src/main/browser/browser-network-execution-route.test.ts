@@ -21,6 +21,14 @@ describe('browser network execution route', () => {
     })
 
     expect(first).not.toBe(second)
+    expect(
+      browserNetworkExecutionHostKey({
+        kind: 'wsl',
+        runtimeId: 'runtime-a',
+        revision: 2,
+        distro: 'Ubuntu:Dev'
+      })
+    ).toBe('["wsl","runtime-a",2,"Ubuntu:Dev"]')
   })
 
   it('accepts only this runtime native revision', () => {
@@ -51,11 +59,20 @@ describe('browser network execution route', () => {
     const key = browserNetworkExecutionHostKey(host)
 
     expect(parseBrowserNetworkExecutionHostKey(key)).toEqual(host)
+    const wsl = {
+      kind: 'wsl' as const,
+      runtimeId: 'runtime-a',
+      revision: 4,
+      distro: 'Ubuntu'
+    }
+    expect(parseBrowserNetworkExecutionHostKey(browserNetworkExecutionHostKey(wsl))).toEqual(wsl)
     for (const malformed of [
       'ssh:ssh-a:provider-a:3',
       ' ["ssh","ssh-a","provider-a",3]',
       '["ssh","ssh-a","provider-a",3,4]',
-      '["native","runtime-a",-1]'
+      '["native","runtime-a",-1]',
+      '["wsl","runtime-a",4,""]',
+      '["wsl","runtime-a",4,"Ubuntu","extra"]'
     ]) {
       expect(() => parseBrowserNetworkExecutionHostKey(malformed)).toThrow(
         'browser_tunnel_execution_host_key_invalid'

@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  BrowserClientAutomationCommand,
+  BrowserClientAutomationResult
+} from './browser-client-automation-protocol'
 
 const Generation = z.number().int().min(1).max(0xffff_ffff)
 const Identity = z.string().min(1).max(256)
@@ -180,9 +184,17 @@ const BrowserNetworkSshExecutionHost = z.object({
   connectionGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 })
 
+const BrowserNetworkWslExecutionHost = z.object({
+  kind: z.literal('wsl'),
+  runtimeId: Identity,
+  revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  distro: Identity
+})
+
 export const BrowserNetworkExecutionHost = z.discriminatedUnion('kind', [
   BrowserNetworkNativeExecutionHost,
-  BrowserNetworkSshExecutionHost
+  BrowserNetworkSshExecutionHost,
+  BrowserNetworkWslExecutionHost
 ])
 
 export type BrowserNetworkExecutionHost = z.infer<typeof BrowserNetworkExecutionHost>
@@ -230,14 +242,19 @@ export const BrowserClientHostPageCommand = z.discriminatedUnion('type', [
   BrowserClientHostNavigateCommand,
   BrowserClientHostReclaimPageCommand,
   BrowserClientHostClosePageCommand,
-  BrowserClientHostRestorePageCommand
+  BrowserClientHostRestorePageCommand,
+  BrowserClientAutomationCommand
 ])
 
 export const BrowserClientHostCommandEvent = BrowserClientPageCommandAuthority.extend({
   type: z.literal('command'),
   command: BrowserClientHostPageCommand
 }).superRefine((event, context) => {
-  if (event.command.type === 'createPage' || event.command.type === 'navigate') {
+  if (
+    event.command.type === 'createPage' ||
+    event.command.type === 'navigate' ||
+    event.command.type === 'automation'
+  ) {
     return
   }
   if (event.pageReconciliationProtocolVersion !== 1) {
@@ -271,10 +288,7 @@ export const BrowserClientHostCommandEvent = BrowserClientPageCommandAuthority.e
 
 export type BrowserClientHostCommandEvent = z.infer<typeof BrowserClientHostCommandEvent>
 
-export const BrowserClientHostCommandResult = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('completed') }),
-  z.object({ status: z.literal('failed'), errorCode: Identity })
-])
+export const BrowserClientHostCommandResult = BrowserClientAutomationResult
 
 export type BrowserClientHostCommandResult = z.infer<typeof BrowserClientHostCommandResult>
 

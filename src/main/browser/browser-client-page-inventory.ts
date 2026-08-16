@@ -41,6 +41,7 @@ export function snapshotBrowserClientPageInventory(
     ...inventory,
     state:
       !forceOutcomeUnknown &&
+      inventory.state === 'active' &&
       browserClientPageRendererIsCurrent(renderer) &&
       browserRouteGuestLifecycleClaimIsCurrent(lifecycleClaim)
         ? 'active'

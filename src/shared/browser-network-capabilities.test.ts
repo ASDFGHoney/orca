@@ -17,10 +17,10 @@ describe('browser network capabilities', () => {
     expect(BROWSER_SCREENCAST_RUNTIME_CAPABILITY).toBe('browser.screencast.v1')
   })
 
-  it('does not advertise unregistered client-host or tunnel implementations', () => {
-    expect(RUNTIME_CAPABILITIES).not.toContain(BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY)
-    expect(RUNTIME_CAPABILITIES).not.toContain(BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY)
-    expect(RUNTIME_CAPABILITIES).not.toContain(BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY)
+  it('advertises the registered client-host and tunnel implementations independently', () => {
+    expect(RUNTIME_CAPABILITIES).toContain(BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY)
+    expect(RUNTIME_CAPABILITIES).toContain(BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY)
+    expect(RUNTIME_CAPABILITIES).toContain(BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY)
     expect(RUNTIME_CAPABILITIES).toContain(BROWSER_SCREENCAST_RUNTIME_CAPABILITY)
   })
 })

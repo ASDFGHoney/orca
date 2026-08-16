@@ -19,7 +19,7 @@ export type BrowserClientPageLifecycleRegistry = Pick<
   | 'navigateGuest'
   | 'beginGuestRetirement'
 > &
-  Partial<Pick<BrowserRouteWebContentsRegistry, 'rekeyGuestLifecycle'>> &
+  Partial<Pick<BrowserRouteWebContentsRegistry, 'rekeyGuestLifecycle' | 'watchPageAvailability'>> &
   Partial<Pick<BrowserRouteWebContentsRegistry, 'grantReconciledNavigation'>>
 
 export type BrowserClientRetainedPage = {
@@ -32,4 +32,5 @@ export type BrowserClientRetainedPage = {
   routeSession: BrowserRouteSessionHandle
   retiring: Promise<void> | null
   reconciling: boolean
+  releaseAvailabilityWatch?: () => void
 }

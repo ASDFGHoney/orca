@@ -2,6 +2,8 @@ import type { BrowserRouteGuestLifecycleClaim } from './browser-route-page-autho
 import type { BrowserRouteSessionHandle } from './browser-route-session-state'
 import type { BrowserRouteProxyEndpoint } from './browser-route-session-policy'
 import type { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
+import { browserClientPageIdentity } from './browser-client-page-command-admission'
+import type { BrowserClientRetainedPage } from './browser-client-page-retained-state'
 
 export type BrowserClientPageNetworkRoute = {
   key: string
@@ -76,6 +78,59 @@ export async function cleanupBrowserClientPage(
   }
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Browser client page cleanup failed')
+  }
+}
+
+export async function cleanupRetainedBrowserClientPage(
+  page: BrowserClientRetainedPage,
+  dependencies: {
+    routeWebContents: Pick<BrowserRouteWebContentsRegistry, 'beginGuestRetirement'>
+    retireAutomation(input: {
+      browserPageId: string
+      pageHostGeneration: number
+      registration: BrowserClientRetainedPage['registration']
+    }): Promise<void>
+  },
+  previousRendererPage?: BrowserClientPageRendererIdentity
+): Promise<void> {
+  const failures: unknown[] = []
+  try {
+    await dependencies.retireAutomation({
+      browserPageId: page.inventory.browserPageId,
+      pageHostGeneration: page.generation,
+      registration: page.registration
+    })
+  } catch (error) {
+    failures.push(error)
+  }
+  const currentRendererPage = browserClientPageIdentity(
+    page.registration,
+    page.registration.partition
+  )
+  try {
+    await cleanupBrowserClientPage(dependencies.routeWebContents, {
+      guestMayExist: true,
+      lifecycleClaim: page.lifecycleClaim,
+      renderer: browserClientPageRendererIsCurrent(page.renderer) ? page.renderer : null,
+      rendererPages: previousRendererPage
+        ? [currentRendererPage, previousRendererPage]
+        : [currentRendererPage],
+      route: page.route,
+      routeSession: page.routeSession
+    })
+  } catch (error) {
+    failures.push(error)
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Browser client page cleanup failed')
+  }
+}
+
+function browserClientPageRendererIsCurrent(renderer: BrowserClientPageRenderer): boolean {
+  try {
+    return renderer.isCurrent()
+  } catch {
+    return false
   }
 }
 

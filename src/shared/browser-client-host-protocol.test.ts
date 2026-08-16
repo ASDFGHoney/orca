@@ -416,6 +416,21 @@ describe('browser client-host control protocol', () => {
         connectionGeneration: 2
       }
     })
+
+    expect(
+      BrowserNetworkTunnelAttachParams.parse({
+        authorityRuntimeId: 'runtime-a',
+        authorityEpoch: 'epoch-a',
+        browserHostClientId: 'client-a',
+        browserHostGeneration: 1,
+        executionHost: {
+          kind: 'wsl',
+          runtimeId: 'runtime-a',
+          revision: 8,
+          distro: 'Ubuntu'
+        }
+      }).executionHost
+    ).toEqual({ kind: 'wsl', runtimeId: 'runtime-a', revision: 8, distro: 'Ubuntu' })
   })
 
   it('rejects invalid server-owned route generations', () => {

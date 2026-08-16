@@ -22,6 +22,7 @@ export type PairedRuntimeBrowserClientHostOptions = {
   pageReconciliationProtocolVersion?: 1
   dispatcher?: DispatcherLimits
   timeoutMs?: number
+  reconnectRetryDelayMs?: number
   subscription?: RemoteRuntimeSubscriptionOptions
   maxConcurrentCommandResults?: number
   maxUnsettledCommandResults?: number
@@ -60,6 +61,7 @@ export class PairedRuntimeBrowserClientHost {
       onReconnected: options.onReconnected,
       onPageCommand: (command) => this.dispatch(command),
       timeoutMs: options.timeoutMs,
+      reconnectRetryDelayMs: options.reconnectRetryDelayMs,
       subscription: options.subscription,
       maxConcurrentCommandResults: options.maxConcurrentCommandResults,
       maxUnsettledCommandResults: options.maxUnsettledCommandResults,
@@ -84,6 +86,13 @@ export class PairedRuntimeBrowserClientHost {
       return Promise.reject(new Error('Browser client host dispatcher is unavailable'))
     }
     return this.dispatcher.retirePage(browserPageId, pageHostGeneration)
+  }
+
+  refreshPageInventory(): Promise<void> {
+    if (this.closed) {
+      return Promise.reject(new Error('Browser client host is closed'))
+    }
+    return this.lease.refreshPageInventory()
   }
 
   forgetPage(browserPageId: string, pageHostGeneration: number): boolean {

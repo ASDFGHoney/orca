@@ -52,7 +52,7 @@ export class BrowserClientNetworkRouteRegistry {
     this.assertAdmission(signal)
     const executionHost = parseBrowserNetworkExecutionHostKey(key)
     if (
-      executionHost.kind === 'native' &&
+      (executionHost.kind === 'native' || executionHost.kind === 'wsl') &&
       executionHost.runtimeId !== this.options.authority.authorityRuntimeId
     ) {
       throw new Error('browser_client_network_route_authority_mismatch')

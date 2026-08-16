@@ -47,6 +47,7 @@ export function executeBrowserClientPageReconciliationCommand(
       return restorePage(context, event, signal)
     case 'createPage':
     case 'navigate':
+    case 'automation':
       throw new BrowserClientPageCommandError('browser_client_page_command_invalid')
   }
 }

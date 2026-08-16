@@ -595,6 +595,41 @@ describe('BrowserRouteWebContentsRegistry', () => {
     expect(navigation.preventDefault).toHaveBeenCalledOnce()
   })
 
+  it('reports one exact availability loss for a crashed guest generation', () => {
+    const { registry, routeSession } = createHarness()
+    const guest = createGuest({ session: routeSession, closeDestroys: false })
+    const unavailable = vi.fn()
+    registry.watchPageAvailability(page.browserPageId, unavailable)
+    registry.attachGuest(guest.guest)
+    registry.registerGuest(page)
+    registry.grantNavigation(page)
+
+    guest.emit('render-process-gone', {}, { reason: 'crashed' })
+    guest.destroy()
+
+    expect(unavailable).toHaveBeenCalledOnce()
+    expect(unavailable).toHaveBeenCalledWith(page)
+  })
+
+  it('does not report explicit page retirement as an availability loss', () => {
+    const { getPageAuthority, registry, routeSession } = createHarness()
+    const guest = createGuest({ session: routeSession, closeDestroys: false })
+    const unavailable = vi.fn()
+    registry.watchPageAvailability(page.browserPageId, unavailable)
+    registry.attachGuest(guest.guest)
+    registry.registerGuest(page)
+    registry.grantNavigation(page)
+
+    registry.retirePageAuthority({
+      ...page,
+      pageAuthority: getPageAuthority(),
+      onRetired: vi.fn()
+    })
+    guest.destroy()
+
+    expect(unavailable).not.toHaveBeenCalled()
+  })
+
   it('retires every page owned by a crashed host renderer', () => {
     const { registry, retirePreparedPagesOwnedByRenderer, routeSession } = createHarness()
     const first = createGuest({ session: routeSession })
@@ -613,6 +648,21 @@ describe('BrowserRouteWebContentsRegistry', () => {
     expect(unrelated.guest.close).not.toHaveBeenCalled()
     expect(registry.grantNavigation(page)).toBe(false)
     expect(retirePreparedPagesOwnedByRenderer).toHaveBeenCalledWith(page.rendererWebContentsId)
+  })
+
+  it('reports registered pages owned by a crashed host renderer', () => {
+    const { registry, routeSession } = createHarness()
+    const guest = createGuest({ session: routeSession, closeDestroys: false })
+    const unavailable = vi.fn()
+    registry.watchPageAvailability(page.browserPageId, unavailable)
+    registry.attachGuest(guest.guest)
+    registry.registerGuest(page)
+    registry.grantNavigation(page)
+
+    registry.retireRenderer(page.rendererWebContentsId)
+
+    expect(unavailable).toHaveBeenCalledOnce()
+    expect(unavailable).toHaveBeenCalledWith(page)
   })
 
   it('keeps renderer retirement fail-closed when logical-owner cleanup throws', () => {

@@ -128,7 +128,8 @@ export function sendRemoteRuntimeRequest<TResult>(
   params: unknown,
   timeoutMs: number,
   envelope?: RuntimeOrchestrationEnvelope,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  clientCapabilities: readonly RuntimeCapability[] = []
 ): Promise<RuntimeRpcResponse<TResult>> {
   return sendRemoteRuntimeRequestOnSocket(
     pairing,
@@ -137,7 +138,8 @@ export function sendRemoteRuntimeRequest<TResult>(
     timeoutMs,
     envelope,
     undefined,
-    signal
+    signal,
+    clientCapabilities
   )
 }
 
@@ -147,7 +149,8 @@ export function sendRemoteRuntimeRequestWithStatusPreflight<TResult>(
   params: unknown,
   timeoutMs: number,
   validateStatus: (response: RuntimeRpcResponse<RuntimeStatus>) => void,
-  envelope?: RuntimeOrchestrationEnvelope
+  envelope?: RuntimeOrchestrationEnvelope,
+  clientCapabilities: readonly RuntimeCapability[] = []
 ): Promise<RuntimeRpcResponse<TResult>> {
   return sendRemoteRuntimeRequestOnSocket(
     pairing,
@@ -155,7 +158,9 @@ export function sendRemoteRuntimeRequestWithStatusPreflight<TResult>(
     params,
     timeoutMs,
     envelope,
-    validateStatus
+    validateStatus,
+    undefined,
+    clientCapabilities
   )
 }
 
@@ -166,7 +171,8 @@ async function sendRemoteRuntimeRequestOnSocket<TResult>(
   timeoutMs: number,
   envelope?: RuntimeOrchestrationEnvelope,
   validateStatus?: (response: RuntimeRpcResponse<RuntimeStatus>) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  clientCapabilities: readonly RuntimeCapability[] = []
 ): Promise<RuntimeRpcResponse<TResult>> {
   throwIfSignalAborted(signal)
   if (!isSafeTimerDelayMs(timeoutMs)) {
@@ -187,7 +193,7 @@ async function sendRemoteRuntimeRequestOnSocket<TResult>(
   const serializedAuth = serializeRemoteRuntimePayload({
     type: 'e2ee_auth',
     deviceToken: pairing.deviceToken,
-    clientCapabilities: remoteRuntimeClientCapabilities()
+    clientCapabilities: remoteRuntimeClientCapabilities(clientCapabilities)
   })
   const pendingRequest = {
     preparedRequest: prepareRemoteRuntimeRequest(new Map(), () =>
@@ -567,9 +573,7 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
   const serializedAuth = serializeRemoteRuntimePayload({
     type: 'e2ee_auth',
     deviceToken: pairing.deviceToken,
-    clientCapabilities: Array.from(
-      new Set([...remoteRuntimeClientCapabilities(), ...(options?.clientCapabilities ?? [])])
-    )
+    clientCapabilities: remoteRuntimeClientCapabilities(options?.clientCapabilities)
   })
   return await new Promise((resolve, reject) => {
     const keyPair = generateKeyPair()
