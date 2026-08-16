@@ -43,11 +43,12 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft and correctly based in
-  sequence; CI is running.
-- The landing tip before this ledger-only update is `df7e7d616b`. Its tree
+  sequence; every required check is green.
+- The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
-  `sta-4150-safety-rebased-validated-cumulative-20260816`, and all non-ledger paths remain equal
-  after this update.
+  `sta-4150-safety-rebased-validated-cumulative-20260816`. The final implementation tip before this
+  ledger-only update is `61dbe1b74b`; its only product delta from that safety tree is the
+  CI-proven React render-purity correction described below.
 - A fresh review reproduced two blockers before publication: an unnegotiated replacement could
   retain old-runtime inventory indefinitely, and an in-flight create could commit after authority
   transition began. The candidate now requires exact reconciliation echo before activating
@@ -259,11 +260,11 @@ package-contract evidence is green.
 
 The remaining ownership work, in execution order, is:
 
-1. Let all five draft PRs finish CI and investigate any actionable failure.
-2. Attach the activation PR to STA-4150, post one concise checkpoint, and keep Linear In Progress.
-3. Update the Orca worktree checkpoint and stop without merging or marking any PR ready.
-4. Close superseded development drafts only after the replacement stack is green and its mapping
-   remains durable.
+1. Obtain human review for the five green landing PRs without marking them ready or merging here.
+2. Before release, run or explicitly accept the physical Windows/Linux/mobile and packaged
+   mixed-release validation gaps.
+3. Close superseded development drafts only after reviewers accept the replacement stack; their
+   complete mapping is already durable in #14957.
 
 ### Phase B: replace development history with the landing stack — completed
 
@@ -338,13 +339,13 @@ ownership.
 
 ### Landing stack
 
-| Order | Draft PR                                              | Branch and pre-ledger head                          | Validation at layer tip                         |
-| ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3e1e607b3a`   | Typecheck, full lint, 3 focused tests           |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@7e18471346` | Typecheck, full lint, 74 focused tests          |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@6d2b5d2794`    | Typecheck, full lint, 66 focused tests          |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@dd4e08a215`     | Typecheck, full lint, 107 focused tests         |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@df7e7d616b`    | Full cumulative validation and paired E2E green |
+| Order | Draft PR                                              | Published head before final ledger                  | Validation at layer tip                                  |
+| ----- | ----------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------- |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3e1e607b3a`   | Typecheck, full lint, 3 focused tests; 44 checks green   |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@7e18471346` | Typecheck, full lint, 74 focused tests; 47 checks green  |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@c0ae154891`    | Typecheck, full lint, 66 focused tests; 43 checks green  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@f36b2b48f3`     | Typecheck, full lint, 107 focused tests; 46 checks green |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@61dbe1b74b`    | Full cumulative and paired E2E proof; 46 checks green    |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1221,6 +1222,20 @@ topology, versions, and explicit gaps at every later checkpoint.
 - Reshaped the exact validated tree into draft PRs #14953-#14957, pushed the five landing branches,
   created GitHub stack #14958, and updated every PR title/body with scope, validation, compatibility,
   and the complete old-to-new mapping. All PRs remain draft; none was merged or marked ready.
+- PR #14955 CI deterministically exposed a misplaced renderer-id test fixture. The exact test was
+  red 1/9, the corrected test passed 9/9, and the matching Node 24 shard passed 3,407 tests with
+  seven skips. Moving that correction to the lifecycle layer and cascading the upper branches
+  preserved the prior top tree exactly.
+- PR #14957 CI's updated React Doctor found two render-time callback-ref writes. Replacing them with
+  React 19 effect events passed the focused component tests 4/4, web typecheck, the exact changed
+  React Doctor gate, and all 46 required PR checks. A transient Windows daemon socket observation
+  failed on the superseded run; the fresh run passed without a code change to that subsystem.
+- All five replacement PRs are green. GitHub auto-attached #14957 to STA-4150, so no duplicate
+  attachment was created. One Linear checkpoint comment (`7b65415a-ec0d-4cb4-836d-ea13dcc4893f`)
+  was posted, the ticket remains In Progress, and the Orca worktree comment records the green stack
+  and explicit validation gaps.
+- The superseded development drafts remain open until human reviewers accept the replacement
+  stack. Their mapping is durable in #14957; closing them now would remove useful review evidence.
 - No PR was merged or marked ready.
 
 ## Completion rule
