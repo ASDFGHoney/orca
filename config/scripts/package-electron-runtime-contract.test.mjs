@@ -204,6 +204,8 @@ describe('Electron runtime package contract', () => {
     expect(relayBuild).toContain("readFileSync(join(outDir, 'relay-watcher.js'))")
     expect(relayBuild).toContain("outfile: join(outDir, 'relay-ai-vault-service.js')")
     expect(relayBuild).toContain("readFileSync(join(outDir, 'relay-ai-vault-service.js'))")
+    expect(relayBuild).toContain("outfile: join(outDir, 'wsl-browser-network-relay.js')")
+    expect(relayBuild).toContain("join(outDir, '.browser-network-version')")
     expect(builderConfig).toContain("from: 'out/relay'")
     expect(remoteCommands).toContain("joinRemotePath(host, remoteRelayDir, 'relay-watcher.js')")
     expect(remoteCommands).toContain(
