@@ -53,6 +53,10 @@ import type {
   BrowserCertificateProceedResult,
   BrowserSessionUserAgentMode
 } from '../../shared/browser-workspace-types'
+import type { BrowserNetworkExecutionHost } from '../../shared/browser-client-host-protocol'
+import type { BrowserPageCreationPlacement } from '../../shared/browser-client-host-placement'
+import type { ExecutionHostId } from '../../shared/execution-host'
+import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
@@ -70,6 +74,16 @@ import {
   waitForWorktreeTabRegistration
 } from '../ipc/browser-tab-registration-wait'
 import { sendRemoteBrowserScreencastFrame } from './remote-browser-screencast-frame-admission'
+import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
+import {
+  closeRuntimeBrowserClientPage,
+  createRuntimeBrowserClientPage,
+  navigateRuntimeBrowserClientPage
+} from './runtime-browser-client-page-creation'
+import type {
+  RuntimeBrowserClientPage,
+  RuntimeBrowserPageRegistry
+} from './runtime-browser-page-registry'
 
 export type BrowserCommandTargetParams = {
   worktree?: string
@@ -146,7 +160,23 @@ function clampOptionalNumber(
 
 export type RuntimeBrowserCommandHost = {
   getAgentBrowserBridge(): AgentBrowserBridge | null
-  resolveWorktreeSelector(selector: string): Promise<{ id: string }>
+  resolveWorktreeSelector(selector: string): Promise<{
+    id: string
+    repoId?: string
+    hostId?: ExecutionHostId
+  }>
+  resolveBrowserWorkspace(selector: string): Promise<{
+    id: string
+    repoId?: string
+    hostId?: ExecutionHostId
+  }>
+  resolveBrowserNetworkExecutionHost(worktree?: {
+    id: string
+    repoId?: string
+    hostId?: ExecutionHostId
+  }): BrowserNetworkExecutionHost | Promise<BrowserNetworkExecutionHost>
+  getBrowserHostLeaseRegistry(): BrowserHostLeaseRegistry
+  getRuntimeBrowserPageRegistry(): RuntimeBrowserPageRegistry
   getAuthoritativeWindow(): BrowserWindow
   getAvailableAuthoritativeWindow(): BrowserWindow | null
   // Why: headless serve backs pages with a main-process offscreen backend; null when the environment can't support offscreen browsing.
@@ -158,6 +188,7 @@ export type RuntimeBrowserCommandHost = {
     targetGroupId?: string
   ): void
   notifyHeadlessBrowserSessionTabsChanged?(worktreeId: string): void
+  retireRuntimeOwnedBrowserSessionTab?(worktreeId: string, browserPageId: string): void
 }
 
 export class RuntimeBrowserCommands {
@@ -461,6 +492,12 @@ export class RuntimeBrowserCommands {
       emit?: (event: BrowserScreencastResult) => void
     }
   ): Promise<BrowserScreencastStartResult> {
+    if (await this.resolveClientHostedBrowserPage(params)) {
+      throw new BrowserError(
+        'browser_error',
+        'Client-hosted browser pages do not support server screencast.'
+      )
+    }
     const target = await this.resolveBrowserCommandTarget(params)
     const { browserPageId, webContents: guest } = this.resolveBrowserPageWebContents(
       target.worktreeId,
@@ -593,11 +630,21 @@ export class RuntimeBrowserCommands {
   }
 
   async browserTabList(params: { worktree?: string }): Promise<BrowserTabListResult> {
-    const worktreeId = await this.resolveBrowserWorktreeId(params.worktree)
-    const result = this.requireAgentBrowserBridge().tabList(worktreeId)
-    return {
-      tabs: result.tabs.map((tab) => this.enrichBrowserTabInfo(tab))
+    const workspaceId = params.worktree
+      ? (await this.host.resolveBrowserWorkspace(params.worktree)).id
+      : undefined
+    const clientPages = this.host.getRuntimeBrowserPageRegistry().listPages(workspaceId)
+    let bridgeWorktreeId = workspaceId
+    if (this.host.getAgentBrowserBridge()) {
+      try {
+        bridgeWorktreeId = await this.resolveBrowserWorktreeId(params.worktree)
+      } catch (error) {
+        if (clientPages.length === 0) {
+          throw error
+        }
+      }
     }
+    return { tabs: this.listLogicalBrowserTabs(bridgeWorktreeId, clientPages) }
   }
 
   async browserProceedCertificate(
@@ -611,17 +658,28 @@ export class RuntimeBrowserCommands {
   }
 
   async browserTabShow(params: { page: string; worktree?: string }): Promise<BrowserTabShowResult> {
+    const clientPage = this.host.getRuntimeBrowserPageRegistry().getPage(params.page)
+    if (clientPage) {
+      await this.assertClientPageWorkspace(clientPage, params.worktree)
+      const tab = this.listLogicalBrowserTabs(
+        clientPage.workspaceId,
+        this.host.getRuntimeBrowserPageRegistry().listPages(clientPage.workspaceId)
+      ).find((candidate) => candidate.browserPageId === clientPage.browserPageId)
+      if (!tab) {
+        throw new BrowserError('browser_tab_not_found', `Browser page ${params.page} was not found`)
+      }
+      return { tab }
+    }
     const target = await this.resolveBrowserCommandTarget(params)
     return { tab: this.describeBrowserTab(params.page, target.worktreeId) }
   }
 
   async browserTabCurrent(params: { worktree?: string }): Promise<BrowserTabCurrentResult> {
-    const worktreeId = await this.resolveBrowserWorktreeId(params.worktree)
-    const browserPageId = this.requireAgentBrowserBridge().getActivePageId(worktreeId)
-    if (!browserPageId) {
+    const tab = (await this.browserTabList(params)).tabs.find((candidate) => candidate.active)
+    if (!tab) {
       throw new BrowserError('browser_no_tab', 'No browser tab open in this worktree')
     }
-    return { tab: this.describeBrowserTab(browserPageId, worktreeId) }
+    return { tab }
   }
 
   async browserTabSwitch(
@@ -630,16 +688,45 @@ export class RuntimeBrowserCommands {
       focus?: boolean
     } & BrowserCommandTargetParams
   ): Promise<BrowserTabSwitchResult> {
-    const target = await this.resolveBrowserCommandTarget(params)
+    const listed = await this.browserTabList({ worktree: params.worktree })
+    const switchedIndex = params.page
+      ? listed.tabs.findIndex((tab) => tab.browserPageId === params.page)
+      : (params.index ?? -1)
+    const selected = listed.tabs[switchedIndex]
+    if (!selected) {
+      const label = params.page ? `Browser page ${params.page}` : `Tab index ${params.index}`
+      throw new BrowserError(
+        'browser_tab_not_found',
+        `${label} out of range (0-${listed.tabs.length - 1})`
+      )
+    }
+    const clientPage = this.host.getRuntimeBrowserPageRegistry().getPage(selected.browserPageId)
+    if (clientPage) {
+      this.host
+        .getRuntimeBrowserPageRegistry()
+        .activatePage(clientPage.browserPageId, clientPage.placement)
+      this.host.notifyHeadlessBrowserSessionTabsChanged?.(clientPage.workspaceId)
+      return { switched: switchedIndex, browserPageId: clientPage.browserPageId }
+    }
     const bridge = this.requireAgentBrowserBridge()
-    const result = await bridge.tabSwitch(params.index, target.worktreeId, target.browserPageId)
+    const worktreeId =
+      typeof selected.worktreeId === 'string'
+        ? selected.worktreeId
+        : params.worktree
+          ? (await this.host.resolveBrowserWorkspace(params.worktree)).id
+          : undefined
+    const result = await bridge.tabSwitch(undefined, worktreeId, selected.browserPageId)
+    this.host.getRuntimeBrowserPageRegistry().deactivateGlobal()
+    if (worktreeId) {
+      this.host.getRuntimeBrowserPageRegistry().deactivateWorkspace(worktreeId)
+    }
     if (params.focus) {
       // Why: scope focus to the tab's owning worktree; the renderer never yanks the user across worktrees on this signal (see focusBrowserTabInWorktree).
-      const worktreeId =
-        target.worktreeId ?? browserManager.getWorktreeIdForTab(result.browserPageId) ?? undefined
-      this.notifyRendererBrowserPaneFocus(worktreeId, result.browserPageId)
+      const focusWorktreeId =
+        worktreeId ?? browserManager.getWorktreeIdForTab(result.browserPageId) ?? undefined
+      this.notifyRendererBrowserPaneFocus(focusWorktreeId, result.browserPageId)
     }
-    return result
+    return { ...result, switched: switchedIndex }
   }
 
   async browserHover(
@@ -1296,25 +1383,83 @@ export class RuntimeBrowserCommands {
     )
   }
 
-  async browserTabCreate(params: {
-    url?: string
-    worktree?: string
-    page?: string
-    profileId?: string
-    waitForRegistration?: boolean
-    activate?: boolean
-    targetGroupId?: string
-  }): Promise<{ browserPageId: string }> {
+  async browserTabCreate(
+    params: {
+      url?: string
+      worktree?: string
+      page?: string
+      profileId?: string
+      waitForRegistration?: boolean
+      activate?: boolean
+      targetGroupId?: string
+      placement?: BrowserPageCreationPlacement
+    },
+    caller?: { pairedDeviceId?: string }
+  ): Promise<{ browserPageId: string }> {
     const url = params.url ?? 'about:blank'
-    const worktreeId = params.worktree
-      ? (await this.host.resolveWorktreeSelector(params.worktree)).id
+    const worktree = params.worktree
+      ? params.placement?.kind === 'client'
+        ? await this.host.resolveBrowserWorkspace(params.worktree)
+        : await this.host.resolveWorktreeSelector(params.worktree)
       : undefined
+    const worktreeId = worktree?.id
     const sessionPartition = browserSessionRegistry.resolveKnownPartition(params.profileId)
     if (!sessionPartition) {
       throw new BrowserError(
         'invalid_argument',
         `Browser profile ${params.profileId} was not found`
       )
+    }
+    if (params.placement?.kind === 'client') {
+      if (!caller?.pairedDeviceId) {
+        throw new BrowserError(
+          'forbidden',
+          'Client-hosted browser pages require an authenticated paired runtime.'
+        )
+      }
+      if (!worktree) {
+        throw new BrowserError(
+          'invalid_argument',
+          'Client-hosted browser pages require an explicit workspace.'
+        )
+      }
+      const browserPageId = params.page ?? randomUUID()
+      const executionHost = await this.host.resolveBrowserNetworkExecutionHost(worktree)
+      const authority = this.host.getBrowserHostLeaseRegistry()
+      const browserProfileId = params.profileId ?? browserSessionRegistry.getDefaultProfile().id
+      const created = await createRuntimeBrowserClientPage(authority, {
+        browserPageId,
+        browserHostClientId: params.placement.browserHostClientId,
+        pairedDeviceId: caller.pairedDeviceId,
+        browserProfileId,
+        executionHost
+      })
+      const pages = this.host.getRuntimeBrowserPageRegistry()
+      pages.publishClientPage({
+        browserPageId,
+        workspaceId: worktree.id,
+        browserProfileId,
+        executionHostKey: browserNetworkExecutionHostKey(executionHost),
+        placement: created.placement,
+        url: 'about:blank',
+        loading: url !== 'about:blank',
+        active: params.activate !== false
+      })
+      this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktree.id)
+      if (url !== 'about:blank') {
+        try {
+          await navigateRuntimeBrowserClientPage(authority, {
+            browserPageId,
+            placement: created.placement,
+            url
+          })
+          pages.updatePage(browserPageId, created.placement, { url, loading: false })
+        } catch {
+          pages.updatePage(browserPageId, created.placement, { loading: false })
+        }
+        this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktree.id)
+      }
+      return { browserPageId }
     }
     // Why: headless serve has no renderer <webview>, so back the page with a main-process offscreen WebContents instead.
     if (!this.host.getAvailableAuthoritativeWindow()) {
@@ -1604,6 +1749,41 @@ export class RuntimeBrowserCommands {
     page?: string
     worktree?: string
   }): Promise<{ closed: boolean }> {
+    const pages = this.host.getRuntimeBrowserPageRegistry()
+    let clientPage = params.page ? pages.getPage(params.page) : undefined
+    if (clientPage) {
+      await this.assertClientPageWorkspace(clientPage, params.worktree)
+    } else if (!params.page) {
+      const workspaceId = params.worktree
+        ? (await this.host.resolveBrowserWorkspace(params.worktree)).id
+        : undefined
+      if (pages.listPages(workspaceId).length > 0) {
+        const tab =
+          params.index !== undefined
+            ? (await this.browserTabList({ worktree: params.worktree })).tabs[params.index]
+            : (await this.browserTabCurrent({ worktree: params.worktree })).tab
+        clientPage = tab ? pages.getPage(tab.browserPageId) : undefined
+      }
+    }
+    if (clientPage) {
+      const authority = this.host.getBrowserHostLeaseRegistry()
+      await closeRuntimeBrowserClientPage(authority, {
+        browserPageId: clientPage.browserPageId,
+        placement: clientPage.placement
+      })
+      if (!pages.retirePage(clientPage.browserPageId, clientPage.placement)) {
+        throw new Error('browser_page_placement_stale')
+      }
+      if (this.host.retireRuntimeOwnedBrowserSessionTab) {
+        this.host.retireRuntimeOwnedBrowserSessionTab(
+          clientPage.workspaceId,
+          clientPage.browserPageId
+        )
+      } else {
+        this.host.notifyHeadlessBrowserSessionTabsChanged?.(clientPage.workspaceId)
+      }
+      return { closed: true }
+    }
     const bridge = this.requireAgentBrowserBridge()
     const explicitPage = typeof params.page === 'string' && params.page.length > 0
     const worktreeId = explicitPage
@@ -1705,6 +1885,76 @@ export class RuntimeBrowserCommands {
       profileId: profile.id,
       profileLabel: profile.label
     }
+  }
+
+  private listLogicalBrowserTabs(
+    worktreeId: string | undefined,
+    clientPages: readonly RuntimeBrowserClientPage[]
+  ): BrowserTabListResult['tabs'] {
+    const clientPageActive = clientPages.some((page) => page.active)
+    const bridge = this.host.getAgentBrowserBridge()
+    const serverTabs =
+      bridge && typeof bridge.tabList === 'function'
+        ? bridge.tabList(worktreeId).tabs.map((tab) => ({
+            ...this.enrichBrowserTabInfo(tab),
+            active: clientPageActive ? false : tab.active
+          }))
+        : []
+    const clientTabs = clientPages.map((page, offset) => {
+      const profile =
+        browserSessionRegistry.getProfile(page.browserProfileId) ??
+        browserSessionRegistry.getDefaultProfile()
+      return {
+        browserPageId: page.browserPageId,
+        index: serverTabs.length + offset,
+        url: page.url,
+        title: page.title,
+        active: page.active,
+        loadError: null,
+        certificateFailure: null,
+        worktreeId: page.workspaceId,
+        profileId: profile.id,
+        profileLabel: profile.label
+      }
+    })
+    const tabs = [...serverTabs, ...clientTabs]
+    if (tabs.length > 0 && !tabs.some((tab) => tab.active)) {
+      tabs[0] = { ...tabs[0]!, active: true }
+    }
+    return tabs.map((tab, index) => ({ ...tab, index }))
+  }
+
+  private async assertClientPageWorkspace(
+    page: RuntimeBrowserClientPage,
+    selector: string | undefined
+  ): Promise<void> {
+    if (!selector) {
+      return
+    }
+    const workspace = await this.host.resolveBrowserWorkspace(selector)
+    if (workspace.id !== page.workspaceId) {
+      throw new BrowserError(
+        'browser_tab_not_found',
+        `Browser page ${page.browserPageId} was not found in this worktree`
+      )
+    }
+  }
+
+  private async resolveClientHostedBrowserPage(
+    params: BrowserCommandTargetParams
+  ): Promise<RuntimeBrowserClientPage | undefined> {
+    const pages = this.host.getRuntimeBrowserPageRegistry()
+    if (params.page) {
+      const page = pages.getPage(params.page)
+      if (page) {
+        await this.assertClientPageWorkspace(page, params.worktree)
+      }
+      return page
+    }
+    const workspaceId = params.worktree
+      ? (await this.host.resolveBrowserWorkspace(params.worktree)).id
+      : undefined
+    return pages.listPages(workspaceId).find((page) => page.active)
   }
 
   private describeBrowserTab(

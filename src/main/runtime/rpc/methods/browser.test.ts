@@ -17,6 +17,35 @@ function makeRequest(method: string, params?: unknown): RpcRequest {
 }
 
 describe('browser RPC methods', () => {
+  it('passes authenticated caller identity to client page creation outside the payload', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      browserTabCreate: vi.fn().mockResolvedValue({ browserPageId: 'page-1' })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: BROWSER_CORE_METHODS })
+    const replies: string[] = []
+    const params = {
+      worktree: 'id:wt-1',
+      placement: { kind: 'client', browserHostClientId: 'host-a' }
+    }
+
+    await dispatcher.dispatchStreaming(
+      makeRequest('browser.tabCreate', params),
+      (reply) => {
+        replies.push(reply)
+      },
+      {
+        clientKind: 'runtime',
+        pairedDeviceId: 'device-a'
+      }
+    )
+
+    expect(JSON.parse(replies[0]!)).toMatchObject({ ok: true })
+    expect(runtime.browserTabCreate).toHaveBeenCalledWith(params, {
+      pairedDeviceId: 'device-a'
+    })
+  })
+
   it('validates profile user-agent modes', () => {
     expect(
       ProfileCreate.safeParse({ label: 'Google', scope: 'isolated', userAgentMode: 'native' })

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { OptionalString } from '../schemas'
+import { BrowserPageCreationPlacement } from '../../../../shared/browser-client-host-placement'
 
 export const BrowserTabCreateParams = z.object({
   url: OptionalString,
@@ -8,5 +9,6 @@ export const BrowserTabCreateParams = z.object({
   profileId: OptionalString,
   waitForRegistration: z.boolean().optional(),
   activate: z.boolean().optional(),
-  targetGroupId: OptionalString
+  targetGroupId: OptionalString,
+  placement: BrowserPageCreationPlacement.optional()
 })

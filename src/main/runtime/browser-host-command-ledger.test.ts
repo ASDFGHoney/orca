@@ -203,6 +203,32 @@ describe('BrowserHostCommandLedger', () => {
     )
   })
 
+  it('admits close-first only for reconciliation of imported inventory', async () => {
+    const ledger = new BrowserHostCommandLedger({ authority })
+    ledger.attach(vi.fn())
+    const input = {
+      browserPageId: 'page-a',
+      pageHostGeneration: 1,
+      command: {
+        type: 'closePage' as const,
+        targetAuthority: {
+          authorityRuntimeId: 'runtime-a',
+          authorityEpoch: 'epoch-a',
+          browserHostClientId: 'host-a',
+          browserHostGeneration: 1,
+          pageHostGeneration: 1
+        }
+      }
+    }
+
+    expect(() => ledger.issue(input)).toThrow('browser_host_command_create_required')
+    const issued = ledger.issue({ ...input, resultAdmission: 'reconciliation' })
+
+    expect(issued.event.commandSequence).toBe(1)
+    ledger.settle(resultParams(issued.event, { status: 'completed' }))
+    await expect(issued.result).resolves.toEqual({ status: 'completed' })
+  })
+
   it('admits page state transactionally and releases exact retired generations', async () => {
     const ledger = new BrowserHostCommandLedger({ authority, maxPages: 1 })
     ledger.attach(vi.fn())

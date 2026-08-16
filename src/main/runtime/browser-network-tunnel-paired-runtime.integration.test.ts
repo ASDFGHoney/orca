@@ -6,12 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PairedRuntimeBrowserNetworkRoute } from '../browser/paired-runtime-browser-network-route'
 import { PairedRuntimeBrowserHostLease } from '../browser/paired-runtime-browser-host-lease'
 import { parsePairingCode } from '../../shared/pairing'
-import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry'
+import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
 import { OrcaRuntimeService } from './orca-runtime'
 import { OrcaRuntimeRpcServer } from './runtime-rpc'
 import { ALL_RPC_METHODS } from './rpc/methods'
-import { BROWSER_NETWORK_TUNNEL_METHODS } from './rpc/methods/browser-network-tunnel'
-import { BROWSER_CLIENT_HOST_METHODS } from './rpc/methods/browser-client-host'
 
 const resources: (() => Promise<void> | void)[] = []
 
@@ -31,7 +29,7 @@ describe('paired runtime browser network tunnel', () => {
       userDataPath,
       enableWebSocket: true,
       wsPort: 0,
-      methods: [...ALL_RPC_METHODS, ...BROWSER_CLIENT_HOST_METHODS]
+      methods: ALL_RPC_METHODS
     })
     await rpc.start()
     resources.push(() => rpc.stop())
@@ -112,7 +110,7 @@ describe('paired runtime browser network tunnel', () => {
       userDataPath,
       enableWebSocket: true,
       wsPort: 0,
-      methods: [...ALL_RPC_METHODS, ...BROWSER_CLIENT_HOST_METHODS]
+      methods: ALL_RPC_METHODS
     })
     await rpc.start()
     resources.push(() => rpc.stop())
@@ -208,11 +206,7 @@ describe('paired runtime browser network tunnel', () => {
       userDataPath,
       enableWebSocket: true,
       wsPort: 0,
-      methods: [
-        ...ALL_RPC_METHODS,
-        ...BROWSER_CLIENT_HOST_METHODS,
-        ...BROWSER_NETWORK_TUNNEL_METHODS
-      ]
+      methods: ALL_RPC_METHODS
     })
     await rpc.start()
     resources.push(() => rpc.stop())

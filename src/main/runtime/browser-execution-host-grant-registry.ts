@@ -1,5 +1,6 @@
 type GrantState = {
   token: symbol
+  owners: Set<symbol>
   revocations: Map<symbol, () => void>
 }
 
@@ -11,9 +12,15 @@ export class BrowserExecutionHostGrantRegistry {
     if (existing) {
       this.revoke(key, existing)
     }
-    const state = { token: Symbol(key), revocations: new Map<symbol, () => void>() }
+    const state = this.createState(key)
     this.grants.set(key, state)
-    return { release: () => this.revoke(key, state) }
+    return this.acquire(key, state)
+  }
+
+  retain(key: string): { release: () => void } {
+    const state = this.grants.get(key) ?? this.createState(key)
+    this.grants.set(key, state)
+    return this.acquire(key, state)
   }
 
   require(key: string): void {
@@ -38,11 +45,31 @@ export class BrowserExecutionHostGrantRegistry {
     }
   }
 
+  private createState(key: string): GrantState {
+    return { token: Symbol(key), owners: new Set(), revocations: new Map() }
+  }
+
+  private acquire(key: string, state: GrantState): { release: () => void } {
+    const owner = Symbol(key)
+    state.owners.add(owner)
+    return { release: () => this.release(key, state, owner) }
+  }
+
+  private release(key: string, state: GrantState, owner: symbol): void {
+    if (this.grants.get(key)?.token !== state.token || !state.owners.delete(owner)) {
+      return
+    }
+    if (state.owners.size === 0) {
+      this.revoke(key, state)
+    }
+  }
+
   private revoke(key: string, state: GrantState): void {
     if (this.grants.get(key)?.token !== state.token) {
       return
     }
     this.grants.delete(key)
+    state.owners.clear()
     const revocations = [...state.revocations.values()]
     state.revocations.clear()
     for (const revoke of revocations) {

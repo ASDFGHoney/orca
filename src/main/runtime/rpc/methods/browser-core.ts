@@ -113,7 +113,10 @@ export const BROWSER_CORE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'browser.tabCreate',
     params: BrowserTabCreateParams,
-    handler: async (params, { runtime }) => runtime.browserTabCreate(params)
+    handler: async (params, { runtime, pairedDeviceId }) =>
+      pairedDeviceId
+        ? runtime.browserTabCreate(params, { pairedDeviceId })
+        : runtime.browserTabCreate(params)
   }),
   defineMethod({
     name: 'browser.tabSetProfile',

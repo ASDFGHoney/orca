@@ -4,7 +4,7 @@ import {
   BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
   BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
-import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry'
+import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import type { BrowserHostLease } from '../../browser-host-lease-records'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { BrowserNetworkTunnelOutboundMemoryBudgetRegistry } from '../../../browser/browser-network-tunnel-outbound-memory-budget'
@@ -75,8 +75,8 @@ const negotiatedCapabilities = [
 ]
 
 describe('network.browserTunnel RPC', () => {
-  it('remains outside the production RPC registry until route authorization exists', () => {
-    expect(ALL_RPC_METHODS.some((method) => method.name === 'network.browserTunnel')).toBe(false)
+  it('registers the authenticated execution-host tunnel in production', () => {
+    expect(ALL_RPC_METHODS.some((method) => method.name === 'network.browserTunnel')).toBe(true)
   })
 
   it('rejects missing capabilities before registering binary traffic', async () => {
@@ -115,7 +115,7 @@ describe('network.browserTunnel RPC', () => {
     expect(registerBinaryMessageHandler).not.toHaveBeenCalled()
   })
 
-  it('rejects SSH routing without the execution-host capability', async () => {
+  it('rejects SSH and WSL routing without the execution-host capability', async () => {
     const hostRuntime = runtime()
     const lease = attachLease(hostRuntime)
     const dispatcher = new RpcDispatcher({
@@ -144,15 +144,40 @@ describe('network.browserTunnel RPC', () => {
         registerBinaryMessageHandler
       }
     )
+    await dispatcher.dispatchStreaming(
+      request(lease, {
+        executionHost: {
+          kind: 'wsl',
+          runtimeId: 'runtime-a',
+          revision: 1,
+          distro: 'Ubuntu'
+        }
+      }),
+      (reply) => replies.push(reply),
+      {
+        connectionId: 'connection-a',
+        clientKind: 'runtime',
+        pairedDeviceId: 'device-a',
+        clientCapabilities: negotiatedCapabilities,
+        sendBinary: vi.fn(() => true),
+        registerBinaryMessageHandler
+      }
+    )
 
-    expect(JSON.parse(replies[0]!)).toEqual(
+    expect(replies.map((reply) => JSON.parse(reply))).toEqual([
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({
+          message: 'browser_tunnel_execution_hosts_capability_required'
+        })
+      }),
       expect.objectContaining({
         ok: false,
         error: expect.objectContaining({
           message: 'browser_tunnel_execution_hosts_capability_required'
         })
       })
-    )
+    ])
     expect(registerBinaryMessageHandler).not.toHaveBeenCalled()
   })
 

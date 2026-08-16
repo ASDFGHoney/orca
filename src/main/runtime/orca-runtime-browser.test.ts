@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import { REMOTE_RUNTIME_MAX_OUTBOUND_BINARY_FRAME_BYTES } from '../../shared/remote-runtime-memory-limits'
 import type { RuntimeBrowserCommandHost } from './orca-runtime-browser'
+import { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 
 const {
   ipcMainOnMock,
@@ -77,25 +78,28 @@ function deferred<T>() {
 }
 
 function createHost(overrides: Partial<RuntimeBrowserCommandHost> = {}): RuntimeBrowserCommandHost {
-  const bridge =
-    overrides.getAgentBrowserBridge?.() ??
-    ({
-      getRegisteredTabs: vi.fn(() => new Map([['page-1', 100]])),
-      getActivePageId: vi.fn(() => 'page-1'),
-      tabList: vi.fn(() => ({
-        tabs: [
-          {
-            browserPageId: 'page-1',
-            index: 0,
-            url: 'about:blank',
-            title: 'Browser',
-            active: true
-          }
-        ]
-      }))
-    } as unknown as AgentBrowserBridge)
+  const runtimeBrowserPages = new RuntimeBrowserPageRegistry()
+  const bridge = overrides.getAgentBrowserBridge
+    ? overrides.getAgentBrowserBridge()
+    : ({
+        getRegisteredTabs: vi.fn(() => new Map([['page-1', 100]])),
+        getActivePageId: vi.fn(() => 'page-1'),
+        tabList: vi.fn(() => ({
+          tabs: [
+            {
+              browserPageId: 'page-1',
+              index: 0,
+              url: 'about:blank',
+              title: 'Browser',
+              active: true
+            }
+          ]
+        }))
+      } as unknown as AgentBrowserBridge)
   return {
     resolveWorktreeSelector: async (selector) => ({ id: selector.replace(/^id:/, '') }),
+    resolveBrowserWorkspace: async (selector) => ({ id: selector.replace(/^id:/, '') }),
+    getRuntimeBrowserPageRegistry: () => runtimeBrowserPages,
     getAuthoritativeWindow: vi.fn(),
     getAvailableAuthoritativeWindow: vi.fn(() => null),
     getOffscreenBrowserBackend: vi.fn(() => null),

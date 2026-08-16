@@ -644,6 +644,14 @@ import {
 import { advertisedUrlWatcher } from '../ports/advertised-url-watcher'
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
+import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
+import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
+import {
+  routeRuntimeBrowserClientAutomation,
+  type ClientHostedBrowserRpcRoute
+} from './runtime-browser-client-automation'
+import { resolveRuntimeBrowserNetworkExecutionHost } from './runtime-browser-network-execution-host'
+import { sameRuntimeBrowserPlacement } from '../../shared/runtime-browser-placement'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
 import {
@@ -7022,6 +7030,7 @@ export class OrcaRuntimeService {
     if (
       options.onlyRuntimeOwnedTerminals === true &&
       !this.offscreenBrowserBackend &&
+      getRuntimeBrowserPageRegistry(this).listPages(worktreeId ?? '').length === 0 &&
       options.runtimeOwnedTerminalCandidateKnown !== true &&
       !(worktreeId
         ? this.workspaceSessionWorktreeHasRuntimeOwnedPtyCandidate(
@@ -7272,9 +7281,6 @@ export class OrcaRuntimeService {
     worktreeId: string,
     existing: RuntimeMobileSessionTabsSnapshot
   ): void {
-    if (!this.offscreenBrowserBackend) {
-      return
-    }
     const liveBrowserTabs = this.buildHeadlessMobileSessionBrowserTabs(worktreeId)
     const liveIds = liveBrowserTabs.map((tab) => tab.id)
     const existingBrowserTabs = existing.tabs.filter(
@@ -8154,10 +8160,11 @@ export class OrcaRuntimeService {
   private buildHeadlessMobileSessionBrowserTabs(
     worktreeId: string
   ): RuntimeMobileSessionBrowserTab[] {
-    if (!this.offscreenBrowserBackend || !this.agentBrowserBridge?.tabList) {
-      return []
-    }
-    return this.agentBrowserBridge.tabList(worktreeId).tabs.map((tab) => {
+    const serverTabs =
+      this.offscreenBrowserBackend && this.agentBrowserBridge?.tabList
+        ? this.agentBrowserBridge.tabList(worktreeId).tabs
+        : []
+    const publishedServerTabs = serverTabs.map((tab) => {
       const persistedProps = this.getPersistedUnifiedSessionTabProps(worktreeId, tab.browserPageId)
       return {
         type: 'browser' as const,
@@ -8178,6 +8185,24 @@ export class OrcaRuntimeService {
         isActive: tab.active === true
       }
     })
+    const publishedClientTabs = getRuntimeBrowserPageRegistry(this)
+      .listPages(worktreeId)
+      .map((page) => ({
+        type: 'browser' as const,
+        id: page.browserPageId,
+        title: page.title || page.url || 'Browser',
+        browserWorkspaceId: page.browserPageId,
+        browserPageId: page.browserPageId,
+        browserProfileId: page.browserProfileId,
+        executionHostKey: page.executionHostKey,
+        placement: page.placement,
+        url: page.url,
+        loading: page.loading,
+        canGoBack: page.canGoBack,
+        canGoForward: page.canGoForward,
+        isActive: page.active
+      }))
+    return [...publishedServerTabs, ...publishedClientTabs]
   }
 
   // Why: change detection for headless browser tabs. Compares the fields that
@@ -8197,6 +8222,15 @@ export class OrcaRuntimeService {
         tab.id === prev.id &&
         tab.title === prev.title &&
         tab.url === prev.url &&
+        tab.loading === prev.loading &&
+        tab.canGoBack === prev.canGoBack &&
+        tab.canGoForward === prev.canGoForward &&
+        tab.browserProfileId === prev.browserProfileId &&
+        tab.executionHostKey === prev.executionHostKey &&
+        ((tab.placement === undefined && prev.placement === undefined) ||
+          (tab.placement !== undefined &&
+            prev.placement !== undefined &&
+            sameRuntimeBrowserPlacement(tab.placement, prev.placement))) &&
         tab.isActive === prev.isActive &&
         (tab.isPinned ?? false) === (prev.isPinned ?? false) &&
         (tab.color ?? null) === (prev.color ?? null) &&
@@ -9194,11 +9228,21 @@ export class OrcaRuntimeService {
         this.notifier?.closeTerminal(tab.parentTabId)
         this.clearRuntimeSessionOwnershipForMobileTab(worktreeId, snapshot!, tab.parentTabId)
       }
-    } else if (tab.type === 'browser' && this.offscreenBrowserBackend) {
-      // Why: headless browser tabs are offscreen WebContents with no renderer to
-      // route closeSessionTab to. Close the page directly and drop it from the
-      // snapshot so paired clients stop showing it.
-      await this.closeHeadlessMobileBrowserTab(worktreeId, snapshot!, tab)
+    } else if (tab.type === 'browser') {
+      const clientPage = tab.browserPageId
+        ? getRuntimeBrowserPageRegistry(this).getPage(tab.browserPageId)
+        : undefined
+      if (clientPage) {
+        await this.browserTabClose({
+          worktree: `id:${worktreeId}`,
+          page: clientPage.browserPageId
+        })
+      } else if (this.isOffscreenMobileSessionBrowserTab(snapshot!, tab)) {
+        await this.offscreenBrowserBackend!.closeTab(tab.browserPageId!).catch(() => {})
+        this.retireRuntimeOwnedBrowserSessionTab(worktreeId, tab.browserPageId!)
+      } else {
+        this.notifier?.closeSessionTab?.(tab.id, worktreeId)
+      }
     } else {
       this.notifier?.closeSessionTab?.(tab.id, worktreeId)
     }
@@ -9243,15 +9287,40 @@ export class OrcaRuntimeService {
     }
   }
 
-  private async closeHeadlessMobileBrowserTab(
-    worktreeId: string,
+  private isOffscreenMobileSessionBrowserTab(
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionBrowserTab
-  ): Promise<void> {
-    if (tab.browserPageId) {
-      await this.offscreenBrowserBackend?.closeTab(tab.browserPageId).catch(() => {})
+  ): boolean {
+    if (!this.offscreenBrowserBackend || !tab.browserPageId) {
+      return false
     }
-    const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== tab.id)
+    if (this.isHeadlessBuiltMobileSessionPublicationBase(snapshot.publicationEpoch)) {
+      return true
+    }
+    const accepted = this.acceptedRendererMobileSnapshotByWorktree.get(snapshot.worktree)
+    return (
+      snapshot.publicationEpoch.includes(':headless-merge:') &&
+      accepted !== undefined &&
+      !this.getMobileSessionSnapshotTabIdentityKeys(tab).some((id) =>
+        accepted.rendererTabIdentityKeys.has(id)
+      ) &&
+      this.getLiveBrowserTabsByPageId(snapshot.worktree).has(tab.browserPageId)
+    )
+  }
+
+  private retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): void {
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    if (!snapshot) {
+      return
+    }
+    const retiredTab = snapshot.tabs.find(
+      (candidate): candidate is RuntimeMobileSessionBrowserTab =>
+        candidate.type === 'browser' && candidate.browserPageId === browserPageId
+    )
+    if (!retiredTab) {
+      return
+    }
+    const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== retiredTab.id)
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
       ...snapshot,
@@ -9261,8 +9330,8 @@ export class OrcaRuntimeService {
       activeTabType: active?.type ?? null,
       tabGroups: (snapshot.tabGroups ?? []).map((group) => ({
         ...group,
-        tabOrder: group.tabOrder.filter((id) => id !== tab.id),
-        activeTabId: group.activeTabId === tab.id ? null : group.activeTabId
+        tabOrder: group.tabOrder.filter((id) => id !== retiredTab.id),
+        activeTabId: group.activeTabId === retiredTab.id ? null : group.activeTabId
       })),
       tabs: nextTabs
     }
@@ -30585,6 +30654,13 @@ export class OrcaRuntimeService {
       : (await this.resolveWorktreeSelector(selector)).id
   }
 
+  private async resolveBrowserWorkspace(selector: string): Promise<ResolvedWorktree> {
+    const folderScope = await this.resolveFolderWorkspaceLaunchScope(selector)
+    return folderScope?.folderWorkspace
+      ? this.folderWorkspaceToResolvedWorktree(folderScope.folderWorkspace)
+      : this.resolveWorktreeSelector(selector)
+  }
+
   private async resolveEmulatorCleanupWorkspaceId(selector: string): Promise<string> {
     const workspaceSelector = selector.startsWith('id:') ? selector.slice(3) : selector
     const parsed = parseWorkspaceKey(workspaceSelector)
@@ -32621,8 +32697,19 @@ export class OrcaRuntimeService {
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionSnapshotTab
   ): boolean {
-    // Why: headless offscreen browser tabs exist only server-side, so a renderer-graph merge must keep them, not prune as "not in the graph".
     if (tab.type === 'browser') {
+      const liveClientPage =
+        typeof tab.browserPageId === 'string'
+          ? getRuntimeBrowserPageRegistry(this).getPage(tab.browserPageId)
+          : undefined
+      if (
+        liveClientPage?.workspaceId === snapshot.worktree &&
+        tab.placement?.kind === 'client' &&
+        sameRuntimeBrowserPlacement(liveClientPage.placement, tab.placement)
+      ) {
+        return true
+      }
+      // Why: headless offscreen browser tabs exist only server-side, so a renderer-graph merge must keep them, not prune as "not in the graph".
       if (!this.offscreenBrowserBackend) {
         return false
       }
@@ -32714,8 +32801,15 @@ export class OrcaRuntimeService {
       this.notifyMobileSessionTabSnapshots()
       return
     }
-    if (this.offscreenBrowserBackend) {
-      const reconciled = this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
+    const hasClientBrowserPages =
+      getRuntimeBrowserPageRegistry(this).listPages(worktreeId).length > 0
+    if (this.offscreenBrowserBackend || hasClientBrowserPages) {
+      const reconciled = this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(
+        worktreeId,
+        hasClientBrowserPages
+          ? { allowAttachedWindow: true, onlyRuntimeOwnedTerminals: true }
+          : undefined
+      )
       // Why: hydrate already reconciles an existing snapshot in place; only reconcile here when it didn't (fresh build or early-returned hydrate).
       if (!reconciled.has(worktreeId)) {
         const existing = this.mobileSessionTabsByWorktree.get(worktreeId)
@@ -32816,11 +32910,22 @@ export class OrcaRuntimeService {
   }
 
   private getLiveBrowserTabsByPageId(worktreeId: string): Map<string, BrowserTabInfo> {
-    if (!this.agentBrowserBridge?.tabList) {
-      return new Map()
+    const liveTabs = this.agentBrowserBridge?.tabList?.(worktreeId).tabs ?? []
+    const byPageId = new Map(liveTabs.map((tab) => [tab.browserPageId, tab]))
+    for (const [index, page] of getRuntimeBrowserPageRegistry(this)
+      .listPages(worktreeId)
+      .entries()) {
+      byPageId.set(page.browserPageId, {
+        browserPageId: page.browserPageId,
+        index: liveTabs.length + index,
+        url: page.url,
+        title: page.title,
+        active: page.active,
+        worktreeId,
+        profileId: page.browserProfileId
+      })
     }
-    const liveTabs = this.agentBrowserBridge.tabList(worktreeId).tabs
-    return new Map(liveTabs.map((tab) => [tab.browserPageId, tab]))
+    return byPageId
   }
 
   private collectReturnedSessionTabIds(
@@ -37297,16 +37402,57 @@ export class OrcaRuntimeService {
 
   // ── Browser automation ──
 
+  routeClientHostedBrowserRpc(
+    method: string,
+    params: unknown
+  ): Promise<ClientHostedBrowserRpcRoute> {
+    return routeRuntimeBrowserClientAutomation({
+      method,
+      params,
+      pages: getRuntimeBrowserPageRegistry(this),
+      leases: getBrowserHostLeaseRegistry(this),
+      resolveWorkspace: (selector) => this.resolveBrowserWorkspace(selector)
+    })
+  }
+
   private readonly browserCommands = new RuntimeBrowserCommands({
     getAgentBrowserBridge: () => this.agentBrowserBridge,
     resolveWorktreeSelector: (selector) => this.resolveWorktreeSelector(selector),
+    resolveBrowserWorkspace: (selector) => this.resolveBrowserWorkspace(selector),
+    getBrowserHostLeaseRegistry: () => getBrowserHostLeaseRegistry(this),
+    getRuntimeBrowserPageRegistry: () => getRuntimeBrowserPageRegistry(this),
+    resolveBrowserNetworkExecutionHost: (worktree) => {
+      const repo = worktree?.repoId ? this.requireStore().getRepo(worktree.repoId) : undefined
+      const executionHostId = worktree
+        ? getWorktreeExecutionHostId(worktree, repo)
+        : LOCAL_EXECUTION_HOST_ID
+      const parsedHost = parseExecutionHostId(executionHostId)
+      return resolveRuntimeBrowserNetworkExecutionHost({
+        runtimeId: this.getRuntimeId(),
+        runtimeRevision: this.getStartedAt(),
+        executionHostId,
+        ...(worktree
+          ? {
+              projectRuntime: resolveLocalProjectRuntimeForWorktreeId(
+                this.requireStore(),
+                worktree.id
+              )
+            }
+          : {}),
+        ...(parsedHost?.kind === 'ssh'
+          ? { sshState: getRegisteredSshState(parsedHost.targetId) }
+          : {})
+      })
+    },
     getAuthoritativeWindow: () => this.getAuthoritativeWindow(),
     getAvailableAuthoritativeWindow: () => this.getAvailableAuthoritativeWindow(),
     getOffscreenBrowserBackend: () => this.offscreenBrowserBackend,
     // Why: bind directly, not a wrapper arrow — a hand-listed wrapper dropped targetGroupId, so a right-split browser landed in the left.
     markHeadlessBrowserSessionTabActive: this.markHeadlessBrowserSessionTabActive.bind(this),
     notifyHeadlessBrowserSessionTabsChanged: (worktreeId) =>
-      this.notifyMobileSessionTabsChanged(worktreeId)
+      this.notifyMobileSessionTabsChanged(worktreeId),
+    retireRuntimeOwnedBrowserSessionTab: (worktreeId, browserPageId) =>
+      this.retireRuntimeOwnedBrowserSessionTab(worktreeId, browserPageId)
   })
 
   private readonly emulatorCommands = new RuntimeEmulatorCommands({

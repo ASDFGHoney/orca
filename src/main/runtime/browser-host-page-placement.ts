@@ -1,17 +1,24 @@
-import type { BrowserHostLeaseState } from './browser-host-lease-records'
+import type {
+  RuntimeBrowserClientPlacement,
+  RuntimeBrowserPlacement,
+  RuntimeBrowserServerPlacement
+} from '../../shared/runtime-browser-placement'
+import {
+  assertBrowserHostPlacementIdentity,
+  assertBrowserPageGeneration,
+  assertBrowserPageIdentity,
+  MAX_BROWSER_PAGE_GENERATION,
+  type BrowserHostPlacementIdentity
+} from './browser-host-page-placement-validation'
 
-const MAX_GENERATION = 0xffff_ffff
-const MAX_IDENTITY_LENGTH = 256
+export type {
+  RuntimeBrowserClientPlacement,
+  RuntimeBrowserPlacement,
+  RuntimeBrowserServerPlacement
+} from '../../shared/runtime-browser-placement'
+
 const DEFAULT_MAX_PAGE_PLACEMENTS = 256
 
-export type RuntimeBrowserServerPlacement = { kind: 'server' }
-export type RuntimeBrowserClientPlacement = {
-  kind: 'client'
-  browserHostClientId: string
-  browserHostGeneration: number
-  pageHostGeneration: number
-}
-export type RuntimeBrowserPlacement = RuntimeBrowserServerPlacement | RuntimeBrowserClientPlacement
 export type BrowserPageRetirement = Readonly<{
   browserPageId: string
   placement: RuntimeBrowserPlacement
@@ -28,11 +35,6 @@ export type BrowserClientPageAuthority = Readonly<{
   browserHostClientId: string
   browserHostGeneration: number
   pageHostGeneration: number
-}>
-
-type BrowserHostPlacementIdentity = Readonly<{
-  browserHostClientId: string
-  browserHostGeneration: number
 }>
 
 type BrowserPagePlacementState = {
@@ -116,6 +118,13 @@ export class BrowserHostPagePlacementRegistry {
       this.claimReservationSlot(reservation)
     }
     return reservation
+  }
+
+  reserveNewClientPage(
+    browserPageId: string,
+    host: BrowserHostPlacementIdentity
+  ): BrowserClientPagePlacementReservation {
+    return this.reserveClientPage(browserPageId, host, this.nextPageGeneration)
   }
 
   commitClientPageReservation(
@@ -251,7 +260,7 @@ export class BrowserHostPagePlacementRegistry {
 
   private takePageGeneration(): number {
     const value = this.nextPageGeneration
-    if (value > MAX_GENERATION) {
+    if (value > MAX_BROWSER_PAGE_GENERATION) {
       throw new Error('browser_page_generation_exhausted')
     }
     this.nextPageGeneration += 1
@@ -269,57 +278,5 @@ export class BrowserHostPagePlacementRegistry {
     if (this.reservationSlotClaims.delete(reservation)) {
       this.reservedPlacementSlots -= 1
     }
-  }
-}
-
-export function requireLiveBrowserClientPage(
-  placements: BrowserHostPagePlacementRegistry,
-  leasesByClientId: Map<string, BrowserHostLeaseState>,
-  authority: BrowserClientPageAuthority
-): RuntimeBrowserClientPlacement {
-  const placement = placements.requireClientPage(authority)
-  const lease = leasesByClientId.get(authority.browserHostClientId)
-  if (!lease) {
-    throw new Error('browser_host_lease_required')
-  }
-  if (lease.lease.browserHostGeneration !== authority.browserHostGeneration) {
-    throw new Error('browser_host_lease_stale')
-  }
-  if (lease.status !== 'active') {
-    throw new Error('browser_host_lease_reconnecting')
-  }
-  return placement
-}
-
-function assertBrowserPageIdentity(browserPageId: string): void {
-  if (
-    typeof browserPageId !== 'string' ||
-    browserPageId.length === 0 ||
-    browserPageId.length > MAX_IDENTITY_LENGTH
-  ) {
-    throw new Error('browser_page_identity_invalid')
-  }
-}
-
-function assertBrowserPageGeneration(pageHostGeneration: number): void {
-  if (
-    !Number.isInteger(pageHostGeneration) ||
-    pageHostGeneration < 1 ||
-    pageHostGeneration > MAX_GENERATION
-  ) {
-    throw new Error('browser_page_generation_stale')
-  }
-}
-
-function assertBrowserHostPlacementIdentity(host: BrowserHostPlacementIdentity): void {
-  if (
-    typeof host.browserHostClientId !== 'string' ||
-    host.browserHostClientId.length === 0 ||
-    host.browserHostClientId.length > MAX_IDENTITY_LENGTH ||
-    !Number.isInteger(host.browserHostGeneration) ||
-    host.browserHostGeneration < 1 ||
-    host.browserHostGeneration > MAX_GENERATION
-  ) {
-    throw new Error('browser_host_identity_invalid')
   }
 }

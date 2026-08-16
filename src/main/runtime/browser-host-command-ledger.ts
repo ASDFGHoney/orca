@@ -17,7 +17,6 @@ import {
   type BrowserHostCommandInput,
   type BrowserHostCommandLedgerOptions,
   type BrowserHostCommandPageState,
-  type BrowserHostCommandRecord,
   type BrowserHostCommandResultParams,
   positiveBrowserHostCommandLimit,
   recordBrowserHostCommandOrder,
@@ -27,19 +26,19 @@ import { replayOutstandingBrowserHostCommands } from './browser-host-command-rep
 import {
   hasOutstandingBrowserHostReconciliation,
   isBrowserHostReconciliationResult,
+  isBrowserHostUnplacedPageResult,
   replaySettledBrowserHostCommand
 } from './browser-host-command-result-replay'
+import { BrowserHostCommandResultCache } from './browser-host-command-result-cache'
 
 export class BrowserHostCommandLedger {
   private readonly authority: BrowserClientHostLeaseAuthority
   private readonly createCommandId: (commandSequence: number) => string
   private readonly maxOutstandingCommands: number
   private readonly maxOutstandingCommandsPerPage: number
-  private readonly maxCachedResults: number
-  private readonly maxCachedResultsPerPage: number
   private readonly maxPages: number
   private readonly pages = new Map<string, BrowserHostCommandPageState>()
-  private readonly settledRecords = new Map<BrowserHostCommandRecord, BrowserHostCommandPageState>()
+  private readonly resultCache: BrowserHostCommandResultCache
   private delivery: ((event: BrowserClientHostCommandEvent) => void) | undefined
   private outstandingCommands = 0
   private activePages = 0
@@ -59,13 +58,13 @@ export class BrowserHostCommandLedger {
       options.maxOutstandingCommandsPerPage,
       DEFAULT_MAX_OUTSTANDING_COMMANDS_PER_PAGE
     )
-    this.maxCachedResults = positiveBrowserHostCommandLimit(
-      options.maxCachedResults,
-      DEFAULT_MAX_CACHED_RESULTS
-    )
-    this.maxCachedResultsPerPage = positiveBrowserHostCommandLimit(
-      options.maxCachedResultsPerPage,
-      DEFAULT_MAX_CACHED_RESULTS_PER_PAGE
+    this.resultCache = new BrowserHostCommandResultCache(
+      positiveBrowserHostCommandLimit(options.maxCachedResults, DEFAULT_MAX_CACHED_RESULTS),
+      positiveBrowserHostCommandLimit(
+        options.maxCachedResultsPerPage,
+        DEFAULT_MAX_CACHED_RESULTS_PER_PAGE
+      ),
+      (browserPageId) => this.pages.delete(browserPageId)
     )
     this.maxPages = positiveBrowserHostCommandLimit(options.maxPages, DEFAULT_MAX_PAGES)
   }
@@ -114,7 +113,7 @@ export class BrowserHostCommandLedger {
     if (page.outstanding >= this.maxOutstandingCommandsPerPage) {
       throw new Error('browser_host_page_command_capacity')
     }
-    assertBrowserHostCommandOrder(page, command)
+    assertBrowserHostCommandOrder(page, command, input.resultAdmission ?? 'placed-page')
     admission.commit()
     recordBrowserHostCommandOrder(page, command)
     const commandSequence = page.nextIssueSequence
@@ -144,6 +143,10 @@ export class BrowserHostCommandLedger {
 
   isReconciliationResult(params: BrowserHostCommandResultParams): boolean {
     return isBrowserHostReconciliationResult(this.pages, params)
+  }
+
+  isUnplacedPageResult(params: BrowserHostCommandResultParams): boolean {
+    return isBrowserHostUnplacedPageResult(this.pages, params)
   }
 
   hasOutstandingReconciliation(): boolean {
@@ -176,8 +179,7 @@ export class BrowserHostCommandLedger {
     page.outstanding -= 1
     this.outstandingCommands -= 1
     page.settledSequences.push(params.commandSequence)
-    this.settledRecords.set(record, page)
-    this.evictResults(page)
+    this.resultCache.remember(page, record)
     if (record.event.command.type === 'closePage' && result.status === 'failed') {
       page.terminalCommandIssued = false
     } else if (record.event.command.type === 'closePage' && !page.activeCapacityReleased) {
@@ -201,7 +203,7 @@ export class BrowserHostCommandLedger {
       }
     }
     this.pages.clear()
-    this.settledRecords.clear()
+    this.resultCache.clear()
     this.outstandingCommands = 0
     this.activePages = 0
   }
@@ -224,7 +226,7 @@ export class BrowserHostCommandLedger {
     if (!page.activeCapacityReleased) {
       this.activePages -= 1
     }
-    this.releasePageResults(page)
+    this.resultCache.releasePage(page)
     return this.pages.delete(browserPageId)
   }
 
@@ -260,52 +262,13 @@ export class BrowserHostCommandLedger {
       page,
       commit: () => {
         if (existing) {
-          this.releasePageResults(existing)
+          this.resultCache.releasePage(existing)
         }
         this.pages.set(input.browserPageId, page)
         if (claimsActivePage) {
           this.activePages += 1
         }
       }
-    }
-  }
-
-  private evictResults(page: BrowserHostCommandPageState): void {
-    while (page.settledSequences.length > this.maxCachedResultsPerPage) {
-      this.evict(page, page.settledSequences[0])
-    }
-    while (this.settledRecords.size > this.maxCachedResults) {
-      const oldest = this.settledRecords.entries().next().value
-      if (!oldest) {
-        break
-      }
-      this.evict(oldest[1], oldest[0].event.commandSequence, oldest[0])
-    }
-  }
-
-  private releasePageResults(page: BrowserHostCommandPageState): void {
-    for (const sequence of page.settledSequences.slice()) {
-      this.evict(page, sequence)
-    }
-  }
-
-  private evict(
-    page: BrowserHostCommandPageState,
-    sequence: number,
-    expected?: BrowserHostCommandRecord
-  ): void {
-    const record = page.records.get(sequence)
-    if (!record?.settled || (expected && record !== expected)) {
-      return
-    }
-    page.records.delete(sequence)
-    this.settledRecords.delete(record)
-    const index = page.settledSequences.indexOf(sequence)
-    if (index !== -1) {
-      page.settledSequences.splice(index, 1)
-    }
-    if (page.activeCapacityReleased && page.records.size === 0) {
-      this.pages.delete(record.event.browserPageId)
     }
   }
 }

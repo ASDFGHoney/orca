@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry'
+import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { RpcDispatcher } from '../dispatcher'
 import { BROWSER_CLIENT_HOST_METHODS } from './browser-client-host'
@@ -38,13 +38,14 @@ function runtime(cleanups = new Map<string, () => void>()): OrcaRuntimeService {
 }
 
 describe('browser.clientHost.attach RPC', () => {
-  it('remains outside the production registry while Electron hosting is inactive', () => {
-    expect(ALL_RPC_METHODS.some((method) => method.name === 'browser.clientHost.attach')).toBe(
-      false
-    )
+  it('registers the authenticated client-host methods in production', () => {
+    expect(ALL_RPC_METHODS.some((method) => method.name === 'browser.clientHost.attach')).toBe(true)
     expect(
       ALL_RPC_METHODS.some((method) => method.name === 'browser.clientHost.commandResult')
-    ).toBe(false)
+    ).toBe(true)
+    expect(
+      ALL_RPC_METHODS.some((method) => method.name === 'browser.clientHost.pageMetadata')
+    ).toBe(true)
   })
 
   it('requires an authenticated negotiated paired-runtime connection', async () => {

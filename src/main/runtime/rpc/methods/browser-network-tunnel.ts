@@ -11,7 +11,7 @@ import {
   BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
   BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
-import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry'
+import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import { defineStreamingMethod, type RpcAnyMethod } from '../core'
 
 const outboundMemoryBudgets = new BrowserNetworkTunnelOutboundMemoryBudgetRegistry()
@@ -244,6 +244,10 @@ async function resolveBrowserNetworkExecutionRoute(
 ) {
   if (context.executionHost.kind === 'native') {
     return resolveNativeBrowserNetworkExecutionRoute(context)
+  }
+  if (context.executionHost.kind === 'wsl') {
+    const wslRoute = await import('../../../browser/wsl-browser-network-execution-route')
+    return wslRoute.resolveWslBrowserNetworkExecutionRoute(context)
   }
   const [{ getSshConnectionManager }, authority, sshRoute] = await Promise.all([
     import('../../../ipc/ssh'),

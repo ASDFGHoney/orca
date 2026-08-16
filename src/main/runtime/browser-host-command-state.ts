@@ -10,11 +10,13 @@ export const DEFAULT_MAX_CACHED_RESULTS = 1_024
 export const DEFAULT_MAX_CACHED_RESULTS_PER_PAGE = 64
 export const DEFAULT_MAX_PAGES = 256
 
+export type BrowserHostCommandResultAdmission = 'placed-page' | 'reserved-page' | 'reconciliation'
+
 export type BrowserHostCommandInput = {
   browserPageId: string
   pageHostGeneration: number
   command: BrowserClientHostCommandEvent['command']
-  resultAdmission?: 'placed-page' | 'reconciliation'
+  resultAdmission?: BrowserHostCommandResultAdmission
 }
 
 export type BrowserHostCommandResultParams = Omit<
@@ -26,7 +28,7 @@ export type BrowserHostCommandResultParams = Omit<
 
 export type BrowserHostCommandRecord = {
   event: BrowserClientHostCommandEvent
-  resultAdmission: 'placed-page' | 'reconciliation'
+  resultAdmission: BrowserHostCommandResultAdmission
   result: Promise<BrowserClientHostCommandResult>
   resolve: (result: BrowserClientHostCommandResult) => void
   reject: (error: Error) => void
@@ -46,9 +48,18 @@ export type BrowserHostCommandPageState = {
 
 export function assertBrowserHostCommandOrder(
   page: BrowserHostCommandPageState,
-  command: BrowserClientHostCommandEvent['command']
+  command: BrowserClientHostCommandEvent['command'],
+  resultAdmission: BrowserHostCommandResultAdmission
 ): void {
-  if (page.nextIssueSequence === 1 && command.type === 'navigate') {
+  const closesImportedInventory =
+    command.type === 'closePage' && resultAdmission === 'reconciliation'
+  if (
+    page.nextIssueSequence === 1 &&
+    command.type !== 'createPage' &&
+    command.type !== 'reclaimPage' &&
+    command.type !== 'restorePage' &&
+    !closesImportedInventory
+  ) {
     throw new Error('browser_host_command_create_required')
   }
   if (page.nextIssueSequence > 1) {

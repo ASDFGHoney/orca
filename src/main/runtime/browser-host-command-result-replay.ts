@@ -17,6 +17,19 @@ export function isBrowserHostReconciliationResult(
   )
 }
 
+export function isBrowserHostUnplacedPageResult(
+  pages: ReadonlyMap<string, BrowserHostCommandPageState>,
+  params: BrowserHostCommandResultParams
+): boolean {
+  const page = pages.get(params.browserPageId)
+  const record = page?.records.get(params.commandSequence)
+  return (
+    page?.generation === params.pageHostGeneration &&
+    record?.event.commandId === params.commandId &&
+    record.resultAdmission !== 'placed-page'
+  )
+}
+
 export function hasOutstandingBrowserHostReconciliation(
   pages: ReadonlyMap<string, BrowserHostCommandPageState>
 ): boolean {
