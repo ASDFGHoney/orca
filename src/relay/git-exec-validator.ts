@@ -55,7 +55,10 @@ const BRANCH_DESTRUCTIVE_FLAGS = new Set([
   '--move',
   '-c',
   '-C',
-  '--copy'
+  '--copy',
+  '--set-upstream-to',
+  '-u',
+  '--unset-upstream'
 ])
 
 // Why: these flags are dangerous across ALL subcommands — --output writes to
@@ -124,8 +127,17 @@ function matchesDeniedFlag(arg: string, denySet: Set<string>): boolean {
     return true
   }
   const eqIdx = arg.indexOf('=')
-  if (eqIdx > 0) {
-    return denySet.has(arg.slice(0, eqIdx))
+  const option = eqIdx > 0 ? arg.slice(0, eqIdx) : arg
+  for (const denied of denySet) {
+    if (denied.startsWith('--')) {
+      // Git accepts unambiguous long-option abbreviations.
+      if (option.length > 2 && option.startsWith('--') && denied.startsWith(option)) {
+        return true
+      }
+    } else if (denied.length === 2 && option.startsWith(denied)) {
+      // Short options that take values accept attached arguments, e.g. -uorigin/main.
+      return true
+    }
   }
   return false
 }

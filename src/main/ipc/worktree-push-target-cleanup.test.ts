@@ -1,14 +1,11 @@
-import { describe, expect, it, vi, type Mock } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { GitPushTarget } from '../../shared/worktree/types'
 import {
-  cleanupUnusedWorktreePushTargetRemoteWithExec,
+  cleanupUnusedWorktreePushTargetRemoteWithGit,
   sameGitHubRemoteUrl,
-  type GitRemoteExec,
   type WorktreePushTargetStore
 } from './worktree-push-target-cleanup'
-
-type ExecMock = Mock<GitRemoteExec>
 
 const REPO_PATH = '/repo-root'
 const FORK_URL = 'git@github.com:contributor/orca.git'
@@ -37,93 +34,99 @@ function storeOf(entries: Record<string, GitPushTarget | undefined>): WorktreePu
   return { getAllWorktreeMeta: () => meta }
 }
 
-type ExecScript = {
+type GitState = {
   branchConfig?: string
   getUrl?: string
   getUrlThrows?: boolean
 }
 
-function makeExec(script: ExecScript = {}): ExecMock {
-  const { branchConfig = '', getUrl = FORK_URL, getUrlThrows = false } = script
-  return vi.fn<GitRemoteExec>(async (args: string[]) => {
-    if (args[0] === 'config') {
-      return { stdout: branchConfig, stderr: '' }
+function makeGit(state: GitState = {}) {
+  const { branchConfig = '', getUrl = FORK_URL, getUrlThrows = false } = state
+  const getRemoteUrl = vi.fn(async () => {
+    if (getUrlThrows) {
+      throw new Error('No such remote')
     }
-    if (args[0] === 'remote' && args[1] === 'get-url') {
-      if (getUrlThrows) {
-        throw new Error('No such remote')
-      }
-      return { stdout: `${getUrl}\n`, stderr: '' }
-    }
-    if (args[0] === 'remote' && args[1] === 'remove') {
-      return { stdout: '', stderr: '' }
-    }
-    return { stdout: '', stderr: '' }
+    return getUrl
   })
+  const removedRemote = vi.fn(async (_repoPath: string, _target: GitPushTarget) => {})
+  return {
+    validateTarget: vi.fn(async () => {}),
+    listRemotes: vi.fn(async () => []),
+    getRemoteUrl,
+    addRemote: vi.fn(async () => {}),
+    fetchRemoteTrackingRef: vi.fn(async () => {}),
+    configureUpstream: vi.fn(async () => {}),
+    readBranchRemoteConfig: vi.fn(async () => branchConfig),
+    removeRemoteIfMatches: vi.fn(async (repoPath: string, target: GitPushTarget) => {
+      try {
+        if (sameGitHubRemoteUrl(await getRemoteUrl(), target.remoteUrl!)) {
+          await removedRemote(repoPath, target)
+        }
+      } catch {
+        // Mirrors the best-effort adapter boundary.
+      }
+    }),
+    removedRemote
+  }
 }
 
-function removeCalls(exec: ExecMock): string[][] {
-  return exec.mock.calls
-    .map(([args]) => args)
-    .filter((args) => args[0] === 'remote' && args[1] === 'remove')
-}
-
-describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
+describe('cleanupUnusedWorktreePushTargetRemoteWithGit', () => {
   it('removes an Orca-created fork remote that nothing else uses', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
       storeOf({ 'repo-1::/wt/a': forkTarget() }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([['remote', 'remove', FORK_REMOTE]])
+    expect(git.removedRemote).toHaveBeenCalledWith(REPO_PATH, forkTarget())
+    expect(git.getRemoteUrl).toHaveBeenCalledOnce()
   })
 
   it('keeps a remote Orca did not create (remoteCreated falsy)', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget({ remoteCreated: false }),
       storeOf({ 'repo-1::/wt/a': forkTarget({ remoteCreated: false }) }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
     // No probing at all when we won't act.
-    expect(exec).not.toHaveBeenCalled()
+    expect(git.getRemoteUrl).not.toHaveBeenCalled()
   })
 
   it('never touches origin or upstream', async () => {
     for (const remoteName of ['origin', 'upstream']) {
-      const exec = makeExec()
-      await cleanupUnusedWorktreePushTargetRemoteWithExec(
+      const git = makeGit()
+      await cleanupUnusedWorktreePushTargetRemoteWithGit(
         REPO_PATH,
         'repo-1::/wt/a',
         forkTarget({ remoteName }),
         storeOf({}),
-        exec
+        git
       )
-      expect(removeCalls(exec)).toEqual([])
+      expect(git.removedRemote).not.toHaveBeenCalled()
     }
   })
 
   it('skips when the target has no remoteUrl', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget({ remoteUrl: undefined }),
       storeOf({}),
-      exec
+      git
     )
-    expect(exec).not.toHaveBeenCalled()
+    expect(git.getRemoteUrl).not.toHaveBeenCalled()
   })
 
   it('keeps the remote when another worktree in the same repo uses the same remote name (multi-fork)', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
@@ -131,14 +134,14 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
         'repo-1::/wt/a': forkTarget(),
         'repo-1::/wt/b': forkTarget({ branchName: 'contributor/other' })
       }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
   })
 
   it('keeps the remote when another worktree points at the same fork via a differently-named remote', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
@@ -150,14 +153,14 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
           remoteUrl: 'https://github.com/contributor/orca.git'
         })
       }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
   })
 
   it('removes the remote even if a same-named remote exists in a DIFFERENT repo (remotes are repo-local)', async () => {
-    const exec = makeExec()
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit()
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
@@ -165,27 +168,27 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
         'repo-1::/wt/a': forkTarget(),
         'repo-2::/wt/c': forkTarget()
       }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([['remote', 'remove', FORK_REMOTE]])
+    expect(git.removedRemote).toHaveBeenCalledWith(REPO_PATH, forkTarget())
   })
 
   it('keeps the remote when a branch config still tracks it', async () => {
-    const exec = makeExec({
+    const git = makeGit({
       branchConfig: `branch.contributor/fix.remote ${FORK_REMOTE}`
     })
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
       storeOf({ 'repo-1::/wt/a': forkTarget() }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
   })
 
   it('checks branch config without line-array or whitespace-regex splitting', async () => {
-    const exec = makeExec({
+    const git = makeGit({
       branchConfig: [
         `branch.contributor/fix.pushRemote\tunused`,
         `  branch.contributor/fix.remote    ${FORK_REMOTE}  `
@@ -193,12 +196,12 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
     })
     const splitSpy = vi.spyOn(String.prototype, 'split')
     try {
-      await cleanupUnusedWorktreePushTargetRemoteWithExec(
+      await cleanupUnusedWorktreePushTargetRemoteWithGit(
         REPO_PATH,
         'repo-1::/wt/a',
         forkTarget(),
         storeOf({ 'repo-1::/wt/a': forkTarget() }),
-        exec
+        git
       )
       const usedUnboundedOutputSplit = splitSpy.mock.calls.some(([separator]) => {
         return (
@@ -206,7 +209,7 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
           (separator.source === '\\r?\\n' || separator.source === '\\s+')
         )
       })
-      expect(removeCalls(exec)).toEqual([])
+      expect(git.removedRemote).not.toHaveBeenCalled()
       expect(usedUnboundedOutputSplit).toBe(false)
     } finally {
       splitSpy.mockRestore()
@@ -214,27 +217,27 @@ describe('cleanupUnusedWorktreePushTargetRemoteWithExec', () => {
   })
 
   it('keeps the remote when its URL no longer matches the fork (repurposed by the user)', async () => {
-    const exec = makeExec({ getUrl: 'git@github.com:someone-else/orca.git' })
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit({ getUrl: 'git@github.com:someone-else/orca.git' })
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
       storeOf({ 'repo-1::/wt/a': forkTarget() }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
   })
 
   it('does nothing when the remote is already gone (get-url throws)', async () => {
-    const exec = makeExec({ getUrlThrows: true })
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    const git = makeGit({ getUrlThrows: true })
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       REPO_PATH,
       'repo-1::/wt/a',
       forkTarget(),
       storeOf({ 'repo-1::/wt/a': forkTarget() }),
-      exec
+      git
     )
-    expect(removeCalls(exec)).toEqual([])
+    expect(git.removedRemote).not.toHaveBeenCalled()
   })
 })
 
@@ -244,6 +247,15 @@ describe('sameGitHubRemoteUrl', () => {
       sameGitHubRemoteUrl(
         'git@github.com:contributor/orca.git',
         'https://github.com/contributor/orca.git'
+      )
+    ).toBe(true)
+  })
+
+  it('matches an existing GitHub remote without a .git suffix', () => {
+    expect(
+      sameGitHubRemoteUrl(
+        'https://github.com/contributor/orca',
+        'git@github.com:contributor/orca.git'
       )
     ).toBe(true)
   })
@@ -277,6 +289,15 @@ describe('sameGitHubRemoteUrl', () => {
       sameGitHubRemoteUrl(
         'git@gitlab.com:contributor/orca.git',
         'https://gitlab.com/contributor/orca.git'
+      )
+    ).toBe(false)
+  })
+
+  it('does not ignore non-default HTTPS ports', () => {
+    expect(
+      sameGitHubRemoteUrl(
+        'https://github.com:8443/contributor/orca.git',
+        'https://github.com/contributor/orca.git'
       )
     ).toBe(false)
   })

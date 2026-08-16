@@ -11,6 +11,68 @@ describe('SshGitProvider', () => {
     provider = new SshGitProvider('conn-1', mux as never)
   })
 
+  it('uses narrow relay methods for worktree push-target mutations', async () => {
+    const target = {
+      remoteName: 'pr-contributor-orca',
+      branchName: 'contributor/fix',
+      remoteUrl: 'git@github.com:contributor/orca.git'
+    }
+
+    await provider.addWorktreePushTargetRemote('/home/user/repo', target)
+    await provider.configureWorktreePushTarget('/home/user/repo-fix', 'local-fix', target)
+    await provider.removeWorktreePushTargetRemote('/home/user/repo', target)
+
+    expect(mux.request.mock.calls).toEqual([
+      ['git.addWorktreePushTargetRemote', { repoPath: '/home/user/repo', target }],
+      [
+        'git.configureWorktreePushTarget',
+        { worktreePath: '/home/user/repo-fix', branchName: 'local-fix', target }
+      ],
+      ['git.removeWorktreePushTargetRemote', { repoPath: '/home/user/repo', target }]
+    ])
+  })
+
+  it('probes and caches worktree push-target relay support', async () => {
+    await Promise.all([
+      provider.ensureWorktreePushTargetMutationSupport(),
+      provider.ensureWorktreePushTargetMutationSupport()
+    ])
+    await provider.ensureWorktreePushTargetMutationSupport()
+
+    expect(mux.request).toHaveBeenCalledTimes(1)
+    expect(mux.request).toHaveBeenCalledWith('git.worktreePushTargetCapabilities', {})
+  })
+
+  it('rejects old relays during the worktree push-target support probe', async () => {
+    mux.request.mockRejectedValueOnce(
+      Object.assign(new Error('Method not found: git.worktreePushTargetCapabilities'), {
+        code: -32601
+      })
+    )
+
+    await expect(provider.ensureWorktreePushTargetMutationSupport()).rejects.toThrow(
+      'This SSH host is running an older Orca relay that cannot configure review worktrees. Reconnect to deploy the latest relay, then try again.'
+    )
+  })
+
+  it('maps old worktree push-target relays to a reconnect message', async () => {
+    mux.request.mockRejectedValueOnce(
+      Object.assign(new Error('Method not found: git.addWorktreePushTargetRemote'), {
+        code: -32601
+      })
+    )
+
+    await expect(
+      provider.addWorktreePushTargetRemote('/home/user/repo', {
+        remoteName: 'fork',
+        branchName: 'fix',
+        remoteUrl: 'git@github.com:contributor/orca.git'
+      })
+    ).rejects.toThrow(
+      'This SSH host is running an older Orca relay that cannot configure review worktrees. Reconnect to deploy the latest relay, then try again.'
+    )
+  })
+
   it('listWorktrees sends git.listWorktrees request', async () => {
     const worktrees = [
       {

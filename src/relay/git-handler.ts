@@ -96,6 +96,11 @@ import { endSubprocessStdin } from '../shared/subprocess-stdin-write'
 import { clearGitStatusLineStatsCache } from '../shared/git-status-line-stats-cache'
 import { invalidateGitBranchLineTotalInFlight } from '../shared/git-branch-line-total'
 import { streamRelayGitStdout } from './git-stdout-stream'
+import {
+  addWorktreePushTargetRemoteOp,
+  configureWorktreePushTargetOp,
+  removeWorktreePushTargetRemoteOp
+} from './git-handler-worktree-push-target'
 
 const execFileAsync = promisify(execFile)
 const MAX_GIT_BUFFER = 10 * 1024 * 1024
@@ -231,6 +236,16 @@ export class GitHandler {
     this.dispatcher.onRequest('git.fetch', (p) => this.fetch(p))
     this.dispatcher.onRequest('git.forkSync', (p, context) => this.forkSync(p, context))
     this.dispatcher.onRequest('git.fetchRemoteTrackingRef', (p) => this.fetchRemoteTrackingRef(p))
+    this.dispatcher.onRequest('git.worktreePushTargetCapabilities', async () => ({ version: 1 }))
+    this.dispatcher.onRequest('git.addWorktreePushTargetRemote', (p) =>
+      this.runWithGitReadCacheClear(() => addWorktreePushTargetRemoteOp(this.git.bind(this), p))
+    )
+    this.dispatcher.onRequest('git.configureWorktreePushTarget', (p) =>
+      this.runWithGitReadCacheClear(() => configureWorktreePushTargetOp(this.git.bind(this), p))
+    )
+    this.dispatcher.onRequest('git.removeWorktreePushTargetRemote', (p) =>
+      this.runWithGitReadCacheClear(() => removeWorktreePushTargetRemoteOp(this.git.bind(this), p))
+    )
     this.dispatcher.onRequest('git.fetchGitHubPullRequestHead', (p) =>
       this.fetchGitHubPullRequestHead(p)
     )

@@ -39,8 +39,6 @@ import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import { getHostedReviewForBranch } from '../source-control/hosted-review'
 import type { ForgeProviderId } from '../source-control/forge-provider'
-import { validateGitPushTarget } from '../git/push-target-validation'
-import { assertGitPushTargetShape } from '../../shared/git-push-target-validation'
 import { gitExecFileAsync } from '../git/runner'
 import type {
   OrcaRuntimeService,
@@ -91,17 +89,16 @@ import type { BranchPrefixSettings } from '../../shared/branch-prefix'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../shared/workspace-scope'
 import {
-  cleanupUnusedWorktreePushTargetRemoteWithExec,
+  cleanupUnusedWorktreePushTargetRemoteWithGit,
   sameGitHubRemoteUrl,
-  type GitRemoteExec,
   type WorktreePushTargetStore
 } from './worktree-push-target-cleanup'
 import {
-  configureCreatedWorktreePushTargetWithExec,
-  ensureUniqueRemoteName,
-  findRemoteForUrl,
-  prepareWorktreePushTargetWithExec
+  configureCreatedWorktreePushTargetWithGit,
+  prepareWorktreePushTargetWithGit
 } from './worktree-push-target-setup'
+import { createLocalWorktreePushTargetGit } from './worktree-push-target-git'
+import { createSshWorktreePushTargetGit } from './ssh-worktree-push-target-git'
 import { isENOENT } from './filesystem-path-containment'
 import { registerWorktreeRootsForRepo } from './registered-worktree-roots-cache'
 import {
@@ -996,9 +993,8 @@ export async function prepareWorktreePushTarget(
   repoId?: string,
   gitOptions: { wslDistro?: string } = {}
 ): Promise<GitPushTarget> {
-  await validateGitPushTarget(repoPath, target, gitOptions)
-  return prepareWorktreePushTargetWithExec(
-    (args, cwd) => gitExecFileAsync(args, { cwd, ...gitOptions }),
+  return prepareWorktreePushTargetWithGit(
+    createLocalWorktreePushTargetGit(gitOptions),
     repoPath,
     target,
     (existingRemote) =>
@@ -1043,12 +1039,12 @@ export async function cleanupUnusedWorktreePushTargetRemote(
   gitOptions: { wslDistro?: string } = {}
 ): Promise<void> {
   try {
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       repoPath,
       removedWorktreeId,
       target,
       store,
-      (args, cwd) => gitExecFileAsync(args, { cwd, ...gitOptions })
+      createLocalWorktreePushTargetGit(gitOptions)
     )
   } catch (error) {
     console.warn(`[worktrees] Failed to clean up fork PR remote for ${removedWorktreeId}`, error)
@@ -1061,58 +1057,15 @@ export async function configureCreatedWorktreePushTarget(
   target: GitPushTarget,
   gitOptions: { wslDistro?: string } = {}
 ): Promise<GitPushTarget> {
-  return configureCreatedWorktreePushTargetWithExec(
-    (args, cwd) => gitExecFileAsync(args, { cwd, ...gitOptions }),
+  return configureCreatedWorktreePushTargetWithGit(
+    createLocalWorktreePushTargetGit(gitOptions),
     worktreePath,
     branchName,
     target
   )
 }
 
-async function prepareWorktreePushTargetSsh(
-  provider: SshGitProvider,
-  repoPath: string,
-  target: GitPushTarget,
-  store?: WorktreePushTargetStore,
-  repoId?: string
-): Promise<GitPushTarget> {
-  assertGitPushTargetShape(target)
-  const execGit: GitRemoteExec = (args, cwd) => provider.exec(args, cwd)
-  const { remoteCreated: _ignoredRemoteCreated, ...sanitizedTarget } = target
-  await provider.exec(['check-ref-format', '--branch', target.branchName], repoPath)
-  let remoteName = target.remoteName
-  let remoteCreated = false
-  if (target.remoteUrl) {
-    const existingRemote = await findRemoteForUrl(execGit, repoPath, target.remoteUrl)
-    if (existingRemote) {
-      remoteName = existingRemote
-      // Why: a reused Orca-created fork remote must inherit ownership so deleting the final user can remove it.
-      remoteCreated = store
-        ? isPushTargetRemoteCreatedByKnownWorktree(
-            store,
-            {
-              ...target,
-              remoteName: existingRemote
-            },
-            repoId
-          )
-        : false
-    } else {
-      remoteName = await ensureUniqueRemoteName(execGit, repoPath, target.remoteName)
-      await provider.exec(['remote', 'add', remoteName, target.remoteUrl], repoPath)
-      remoteCreated = true
-    }
-  }
-  await provider.fetchRemoteTrackingRef(
-    repoPath,
-    remoteName,
-    target.branchName,
-    `refs/remotes/${remoteName}/${target.branchName}`
-  )
-  return { ...sanitizedTarget, remoteName, ...(remoteCreated ? { remoteCreated: true } : {}) }
-}
-
-export async function cleanupUnusedWorktreePushTargetRemoteSsh(
+export async function cleanupUnusedRemoteWorktreePushTarget(
   provider: SshGitProvider,
   repoPath: string,
   removedWorktreeId: string,
@@ -1120,12 +1073,12 @@ export async function cleanupUnusedWorktreePushTargetRemoteSsh(
   store: WorktreePushTargetStore
 ): Promise<void> {
   try {
-    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+    await cleanupUnusedWorktreePushTargetRemoteWithGit(
       repoPath,
       removedWorktreeId,
       target,
       store,
-      (args, cwd) => provider.exec(args, cwd)
+      createSshWorktreePushTargetGit(provider)
     )
   } catch (error) {
     console.warn(
@@ -1721,13 +1674,18 @@ export async function createRemoteWorktree(
 
   let preparedPushTarget: GitPushTarget | undefined
   if (args.pushTarget) {
+    const pushTarget = args.pushTarget
     // Why: fork-PR SSH worktrees need contributor-remote setup before create, else Push/Sync target origin.
-    preparedPushTarget = await prepareWorktreePushTargetSsh(
-      provider,
+    preparedPushTarget = await prepareWorktreePushTargetWithGit(
+      createSshWorktreePushTargetGit(provider),
       repo.path,
-      args.pushTarget,
-      store,
-      repo.id
+      pushTarget,
+      (existingRemote) =>
+        isPushTargetRemoteCreatedByKnownWorktree(
+          store,
+          { ...pushTarget, remoteName: existingRemote },
+          repo.id
+        )
     )
   }
 
@@ -1812,8 +1770,8 @@ export async function createRemoteWorktree(
   const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
   let configuredPushTarget: GitPushTarget | undefined
   if (preparedPushTarget) {
-    configuredPushTarget = await configureCreatedWorktreePushTargetWithExec(
-      (args, cwd) => provider.exec(args, cwd),
+    configuredPushTarget = await configureCreatedWorktreePushTargetWithGit(
+      createSshWorktreePushTargetGit(provider),
       created.path,
       branchName,
       preparedPushTarget

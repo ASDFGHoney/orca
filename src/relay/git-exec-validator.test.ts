@@ -137,15 +137,34 @@ describe('validateGitExecArgs', () => {
       expectAllowed(['branch', '-r'])
     })
 
-    it.each(['-d', '-D', '--delete', '-m', '-M', '--move', '-c', '-C', '--copy'])(
-      'rejects branch %s',
-      (flag) => {
-        expectBlocked(['branch', flag, 'name'], 'Destructive git branch flags')
-      }
-    )
+    it.each([
+      '-d',
+      '-D',
+      '--delete',
+      '-m',
+      '-M',
+      '--move',
+      '-c',
+      '-C',
+      '--copy',
+      '--set-upstream-to',
+      '-u',
+      '--unset-upstream'
+    ])('rejects branch %s', (flag) => {
+      expectBlocked(['branch', flag, 'name'], 'Destructive git branch flags')
+    })
 
     it('catches --delete=value compound syntax', () => {
       expectBlocked(['branch', '--delete=feature'], 'Destructive git branch flags')
+    })
+
+    it.each([
+      ['-uorigin/main', 'feature'],
+      ['--set-upstream-t=origin/main', 'feature'],
+      ['--unset-upstrea', 'feature'],
+      ['-Dfeature']
+    ])('rejects attached or abbreviated branch option %s', (...args) => {
+      expectBlocked(['branch', ...args], 'Destructive git branch flags')
     })
   })
 
