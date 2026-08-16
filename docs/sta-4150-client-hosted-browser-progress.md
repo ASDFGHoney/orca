@@ -42,13 +42,13 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14954](https://github.com/stablyai/orca/pull/14954), Electron lifecycle
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
-  [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft and correctly based in
-  sequence. Every pre-rebase required check was green; the stack is now resubmitted on
-  `origin/main@9e3e583a83` and its refreshed GitHub checks are running.
+  [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
+  sequence, and locally rebased onto `origin/main@17ef6ccce6`; the preceding implementation-base
+  CI is green and refreshed latest-main CI is pending.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final implementation tip before this
-  ledger-only update is `61dbe1b74b`; its only product delta from that safety tree is the
+  ledger-only update is `d769eaf308`; its only product delta from that safety tree is the
   CI-proven React render-purity correction described below.
 - A fresh review reproduced two blockers before publication: an unnegotiated replacement could
   retain old-runtime inventory indefinitely, and an in-flight create could commit after authority
@@ -228,7 +228,7 @@ Subsequent review and full-suite evidence found and fixed the remaining activati
 
 Current validation is green on the cumulative tree:
 
-- The landing stack was rebased onto `origin/main@9e3e583a83`, which added private skill sharing
+- The earlier landing rebase onto `origin/main@9e3e583a83` added private skill sharing
   and regional relay placement. `git range-diff` marks 45/49 patches identical; the four contextual
   patches preserve upstream capability centralization, abort-signal ordering, renderer bootstrap,
   and STA-4150's additive Electron capability advertisement. Safety tag
@@ -240,6 +240,22 @@ Current validation is green on the cumulative tree:
   and 54,341 tests with 164 skips, each leaving one unrelated timing cleanup test red. The macOS
   helper cleanup passed 21/21 in isolation, and the daemon checkpoint cleanup passed 4/4 three
   consecutive times; both also passed in another aggregate run.
+- Refreshed landing CI found one deterministic stale exact-array expectation from the upstream
+  `skills.install-result.v2` capability centralization. The fix belongs to #14954: optional tunnel
+  capabilities now compose through the canonical defaults, so later additive defaults cannot be
+  omitted from the assertion. The affected three-file transport package passes 50/50 with Node
+  typecheck. One unrelated #14953 runtime-metadata timing race passed 3/3 in isolation and its
+  failed job rerun recovered. Final CI is green: #14953 passed 43 checks, #14954/#14956/#14957 each
+  passed 46, and #14955 passed 43; only intentional skips remain.
+- A later `origin/main@b6ea3f17a9` shell-portability merge overlapped only
+  `src/main/runtime/orca-runtime.ts`, its test, and `src/shared/global-settings-types.ts`. The
+  five-branch cascade rebase was conflict-free, and `git range-diff` marked all 53 patches
+  identical. Safety tag `sta-4150-safety-pre-b6e-rebase-20260816` retains the prior published tip.
+- The final rebase onto `origin/main@17ef6ccce6` was conflict-free. `git range-diff` marked 52
+  patches identical; the only contextual patch changed import placement in `createMainWindow.ts`
+  around upstream crash-breadcrumb imports, without changing STA-4150 behavior. The seven-file
+  overlap package passes 99 tests, full Node/CLI/web typecheck and lint pass, and safety tag
+  `sta-4150-safety-pre-17e-rebase-20260816` retains the prior tip.
 
 - Latest-main full repository suite: 5,749 files passed, 53,861 tests passed, 126 skipped, zero
   failures.
@@ -265,9 +281,9 @@ Current validation is green on the cumulative tree:
   defects above; all are fixed. Its final post-fix rereview found no remaining proven P0/P1/P2 and
   passed 1,188 focused tests with one intentional skip.
 
-The 50-commit cumulative tree is rebased onto latest `origin/main@9e3e583a83`. The implementation
-tip before this ledger-only update is `a4be155791`. The pre-rebase checkpoint and explicit safety
-refs preserve the prior exact validated tree.
+The cumulative tree is rebased onto latest `origin/main@17ef6ccce6`. The implementation tip before
+this ledger-only update is `d769eaf308`. The pre-rebase checkpoint and explicit safety refs
+preserve the prior exact validated tree.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, and packaged mixed-release client/server browser
 journeys. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless, mixed-version, and
@@ -354,13 +370,13 @@ ownership.
 
 ### Landing stack
 
-| Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                  |
-| ----- | ----------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@a49d24d646`   | Typecheck, full lint, 3 focused tests; CI rerunning      |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@a3625652df` | Typecheck, full lint, 74 focused tests; CI rerunning     |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@cb04a85cfa`    | Typecheck, full lint, 66 focused tests; CI rerunning     |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@6e0f6b6697`     | Typecheck, full lint, 107 focused tests; CI rerunning    |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@a4be155791`    | Full cumulative and paired E2E proof; CI rerunning       |
+| Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                     |
+| ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3ec226167e`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@767b9aca96` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@d402d88897`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@323d347a77`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@bb831583eb`    | Full cumulative and paired E2E proof; latest CI pending     |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
