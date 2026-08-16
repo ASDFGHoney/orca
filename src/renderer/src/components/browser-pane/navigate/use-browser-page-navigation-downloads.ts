@@ -77,7 +77,6 @@ export function useBrowserPageNavigationDownloads({
   handleInternalFileDropRef: MutableRefObject<(event: DragEvent<HTMLDivElement>) => void>
 } {
   const [addressBarValue, setAddressBarValue] = useState(browserTabUrl)
-  addressBarValueRef.current = addressBarValue
   const { downloadStates, setDownloadStates } = useBrowserPageDownloadEvents({
     browserTabId,
     setResourceNotice
@@ -92,6 +91,10 @@ export function useBrowserPageNavigationDownloads({
     }
     setAddressBarValue(toDisplayUrl(browserTabUrl))
   }, [addressBarInputRef, browserTabUrl])
+
+  useEffect(() => {
+    addressBarValueRef.current = addressBarValue
+  }, [addressBarValue, addressBarValueRef])
 
   const navigateToUrl = useCallback(
     (url: string): void => {

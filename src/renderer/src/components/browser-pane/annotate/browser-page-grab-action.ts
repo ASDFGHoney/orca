@@ -5,8 +5,7 @@ import type {
 } from '../../../../../shared/browser-grab-types'
 import { formatGrabPayloadAsText } from './GrabConfirmationSheet'
 import type { GrabModeHook } from './useGrabMode'
-import type { GrabIntent } from '../describe-page/browser-page-types'
-import type { BrowserPageGrabToastState } from '../describe-page/browser-page-types'
+import type { BrowserPageGrabToastState, GrabIntent } from '../describe-page/browser-page-types'
 
 export function runBrowserGrabActionShortcut({
   key,
