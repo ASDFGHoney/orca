@@ -36,12 +36,18 @@ Old clients and callers that omit placement must retain current server-hosted be
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
-- Latest published stack tip: `sta-4150-browser-client-executor-authority-transition`, draft PR
-  [#14876](https://github.com/stablyai/orca/pull/14876), stacked exactly on corrected
-  reconciliation-orchestration PR [#14769](https://github.com/stablyai/orca/pull/14769). It
-  preserves the concrete client executor and retained Electron inventory across a same-pairing
-  runtime change. The 40-patch series is based directly on `origin/main@1b6d2403cb`; #14876 CI is
-  running.
+- The reviewable replacement is published as draft stack
+  [#14958](https://github.com/stablyai/orca/stacks/14958): contracts
+  [#14953](https://github.com/stablyai/orca/pull/14953), paired tunnel/routing
+  [#14954](https://github.com/stablyai/orca/pull/14954), Electron lifecycle
+  [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
+  [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
+  [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft and correctly based in
+  sequence; CI is running.
+- The landing tip before this ledger-only update is `df7e7d616b`. Its tree
+  (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
+  `sta-4150-safety-rebased-validated-cumulative-20260816`, and all non-ledger paths remain equal
+  after this update.
 - A fresh review reproduced two blockers before publication: an unnegotiated replacement could
   retain old-runtime inventory indefinitely, and an in-flight create could commit after authority
   transition began. The candidate now requires exact reconciliation echo before activating
@@ -251,14 +257,15 @@ ordering, physical mobile-client validation, and packaged mixed-release client/s
 journeys. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless, mixed-version, and
 package-contract evidence is green.
 
-The remaining work, in execution order, is:
+The remaining ownership work, in execution order, is:
 
-1. Repeat the required validation on the latest-main rebase.
-2. Reshape that exact final tree into at most five locally validated draft stacked PRs.
-3. Record the old-to-new PR mapping, update draft metadata and Linear/worktree checkpoints, and
-   stop without merging or marking any PR ready.
+1. Let all five draft PRs finish CI and investigate any actionable failure.
+2. Attach the activation PR to STA-4150, post one concise checkpoint, and keep Linear In Progress.
+3. Update the Orca worktree checkpoint and stop without merging or marking any PR ready.
+4. Close superseded development drafts only after the replacement stack is green and its mapping
+   remains durable.
 
-### Phase B: replace development history with the landing stack
+### Phase B: replace development history with the landing stack — completed
 
 The 37 draft PRs remain development and evidence history while Phase A is changing. Do not relink,
 rebase, or individually production-harden that chain. After the activated tip is green, preserve it
@@ -328,6 +335,21 @@ must be byte-for-byte equivalent to the preserved validated tip before any draft
 
 All entries below remain staged and reviewable; do not merge or mark ready as part of autonomous
 ownership.
+
+### Landing stack
+
+| Order | Draft PR                                              | Branch and pre-ledger head                          | Validation at layer tip                         |
+| ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3e1e607b3a`   | Typecheck, full lint, 3 focused tests           |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@7e18471346` | Typecheck, full lint, 74 focused tests          |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@6d2b5d2794`    | Typecheck, full lint, 66 focused tests          |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@dd4e08a215`     | Typecheck, full lint, 107 focused tests         |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@df7e7d616b`    | Full cumulative validation and paired E2E green |
+
+GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
+The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
+
+### Historical development/evidence drafts
 
 | PR                                                    | Stage              | What it establishes                                                       |
 | ----------------------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
@@ -778,36 +800,21 @@ Validation and review:
 
 ## Acceptance matrix
 
-| Requirement                                                        | State                     | Evidence or blocker                                                                                               |
-| ------------------------------------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Negotiated client-host and tunnel contracts                        | Partial                   | Schemas/RPC methods exist; runtime capabilities are intentionally not advertised                                  |
-| Runtime placement, leases, authority epochs, host/page generations | Partial                   | Deterministic registries exist; normal browser creation does not call them                                        |
-| Main browser-host registry                                         | Partial                   | Environment-scoped lease/executor/route composition exists but has no production caller                           |
-| Renderer-owned retained webview registry and surface               | Partial                   | Local exact-tuple preload/registry stage passes deterministic and Electron proof; no BrowserPane adoption exists  |
-| Route/profile-scoped partition before first request                | Partial                   | Deterministic policy ordering passes; real Electron worker/popup/speculation proof is missing                     |
-| SOCKS5 tunnel with remote DNS and bounded flow control             | Partial                   | Native and SSH route foundations exist; WSL and production route retention are incomplete                         |
-| Agent/CLI routing by placement                                     | Missing                   | Only create/navigate command foundations exist; public browser methods still use current server behavior          |
-| Inventory/reconciliation after ambiguous outcomes and restart      | Partial                   | Concrete client adapters exist; server action issuance, proof-driven placement rekey, and restart recovery remain |
-| Independent bounded control/tunnel/mirror/binary channels          | Partial                   | Control and tunnel are separate/bounded; mirror and large-result paths are incomplete                             |
-| Mixed client/server compatibility                                  | Partial                   | Optional/capability-gated contracts and cross-version tests exist; activated rolling-upgrade behavior is unproven |
-| Local pointer/keyboard/chrome with no runtime round trip           | Missing                   | Requires the renderer surface and interaction-owner fencing                                                       |
-| No screencast for client placement                                 | Missing                   | No live client placement exists yet                                                                               |
-| Remote localhost/private DNS/subresources/workers/WebSockets       | Unproven                  | Requires real Electron CDP plus traffic/DNS evidence                                                              |
-| Tunnel loss fails closed with no desktop fallback                  | Partial                   | State-machine route fencing exists; live Electron/network-service proof is missing                                |
-| Browserless runtime can serve client-hosted pages                  | Unproven                  | Needs a real paired browserless runtime journey                                                                   |
-| Server/offscreen placement remains stable                          | Preserved so far          | Entire draft stack is inert; activation and rollback tests remain                                                 |
-| Headed paired-Electron terminal-link journey                       | Missing                   | Must prove page load, stable PTY/multiplex identity, and no reconnect UI                                          |
-| macOS/Linux/Windows, SSH/WSL, worktree/folder, multi-client        | Mostly missing live proof | Deterministic platform-neutral contracts exist; physical and paired topology matrix remains                       |
+| Requirement                                             | State       | Evidence or remaining gap                                                         |
+| ------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------- |
+| Negotiated contracts, placement, leases and generations | Implemented | Optional/capability-gated wire matrix and deterministic authority tests are green |
+| Fail-closed tunnel and native/SSH/WSL execution routes  | Implemented | Bounded route, remote-DNS, reconnect, Docker/OpenSSH, and WSL gates are green     |
+| Electron partition, retained guest and local UI/input   | Implemented | Lifecycle tests, Electron/CDP proof, and headed paired product journey are green  |
+| Agent/CLI routing and reconciliation                    | Implemented | Bounded automation, lost-ack, replacement, reconnect, and restart gates are green |
+| No client-placement screencast or duplicate server page | Proven      | Headed and headless paired E2E assert zero host guest and no screencast           |
+| Old/mobile/web/ineligible and explicit-server behavior  | Preserved   | Omitted placement stays server-hosted; compatibility and fallback tests are green |
+| Cross-platform and packaged rolling releases            | Partial     | Physical Windows/Linux/mobile and packaged mixed-release journeys remain gaps     |
 
 ## Remaining implementation order
 
-1. Implement the complete activated desktop slice directly above authority transition; do not add
-   another inert substrate layer.
-2. Run deterministic, paired-Electron, containment, rolling-version, execution-host, workspace,
-   browserless, and physical-platform acceptance against that activated tip.
-3. If acceptance does not require a secondary transport, stop at the desktop feature boundary.
-4. Rebuild the proven tree as the five-PR landing stack above, verify exact final-tree equality, and
-   preserve an auditable old-to-new PR mapping and range-diff.
+1. Finish replacement-stack CI and fix only reproducible, actionable failures.
+2. Obtain reviewer sign-off for the five landing layers.
+3. Before release, run the four explicit physical/packaged journeys above or accept their risk.
 
 ## Compatibility costs and risks
 
@@ -1207,6 +1214,13 @@ topology, versions, and explicit gaps at every later checkpoint.
   then cascade-rebased all 40 patches and 37 local stack refs onto `origin/main@d2ffe1f362` with an
   exact 40/40 range-diff. No rewritten branch, new PR, GitHub comment, Linear mutation, or status
   change has been published at this checkpoint.
+- Rebased the activated cumulative feature onto `origin/main@9f3a912c1e`, preserved safety refs,
+  and proved the final tree with 53,861 tests, full typecheck/lint/audits, 89 reliability gates,
+  a fresh desktop build, paired headed Electron E2E, real headless `orca serve` E2E, Electron/CDP
+  inspection, and three independent final reviews with no remaining proven P0/P1/P2.
+- Reshaped the exact validated tree into draft PRs #14953-#14957, pushed the five landing branches,
+  created GitHub stack #14958, and updated every PR title/body with scope, validation, compatibility,
+  and the complete old-to-new mapping. All PRs remain draft; none was merged or marked ready.
 - No PR was merged or marked ready.
 
 ## Completion rule
