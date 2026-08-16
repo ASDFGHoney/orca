@@ -43,7 +43,6 @@ describe('createMainWindow', () => {
   it('clears the quit latch when the renderer prevents unload', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
-      id: 71,
       on: vi.fn((event, handler) => {
         windowHandlers[event] = handler
       }),
@@ -91,6 +90,7 @@ describe('createMainWindow', () => {
   it('allows close after the renderer process is gone', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
+      id: 71,
       on: vi.fn((event, handler) => {
         windowHandlers[event] = handler
       }),
