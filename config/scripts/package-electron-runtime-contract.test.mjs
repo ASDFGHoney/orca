@@ -434,6 +434,18 @@ describe('Electron runtime package contract', () => {
     expect(installStep.run).toBe('node config/scripts/install-electron-package-binary.mjs')
   })
 
+  it('runs client-hosted Electron lifecycle coverage on Windows', () => {
+    const prWorkflow = readFileSync(join(projectDir, '.github/workflows/pr.yml'), 'utf8')
+    const parsedWorkflow = parse(prWorkflow)
+    const testStep = parsedWorkflow.jobs.package_windows.steps.find(
+      (step) => step.name === 'Test Windows-specific boundaries'
+    )
+
+    expect(testStep.run).toContain(
+      'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
+    )
+  })
+
   it('smokes the packaged CLI from outside the checkout in PR checks', () => {
     const prWorkflow = readFileSync(join(projectDir, '.github/workflows/pr.yml'), 'utf8')
     const parsedWorkflow = parse(prWorkflow)
