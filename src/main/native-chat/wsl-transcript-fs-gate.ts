@@ -1,6 +1,7 @@
 import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 
 const MAX_CONCURRENT_WSL_TRANSCRIPT_FS_TASKS = 2
+const ROUTE_RETRY_DELAY_MULTIPLIER = 2
 export const WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS = 30_000
 export const WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS = 60_000
 // Burst bounds keep polling fan-out from growing retained tasks or callers indefinitely.
@@ -52,10 +53,7 @@ type ScheduledTask<T> = {
   controller: AbortController
   waiters: Set<TaskWaiter<T>>
   state: 'queued' | 'running' | 'settled'
-  // Set by the deadline timer, sharing the waiters' monotonic clock — wall time
-  // would misjudge stuckness across laptop sleep or NTP steps.
-  stuck: boolean
-  stuckTimer?: ReturnType<typeof setTimeout>
+  deadlineTimer?: ReturnType<typeof setTimeout>
 }
 
 type UnknownScheduledTask = ScheduledTask<unknown>
@@ -66,6 +64,7 @@ const activeLaneKeys = new Set<string>()
 const queuedTasks: UnknownScheduledTask[] = []
 const inFlightTasks = new Map<string, UnknownScheduledTask>()
 const activeTasks = new Set<UnknownScheduledTask>()
+const blockedRoutes = new Map<string, number>()
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new Error('WSL transcript filesystem task aborted')
@@ -129,23 +128,13 @@ function unavailableError(): WslTranscriptFsError {
   return new WslTranscriptFsError('unavailable', WSL_TRANSCRIPT_FS_SLOW_MESSAGE)
 }
 
-/**
- * The stuck running task that would doom a new task's admission: one on the
- * same route (the whole distro mount is hung, whatever the priority — spending
- * the other permit on it escalates one bad distro into a global outage), one
- * holding the single scan slot, or (with every permit stuck) any permit.
- */
-function stuckBlocker(
-  route: string,
-  priority: WslTranscriptFsTaskPriority
-): UnknownScheduledTask | undefined {
-  const stuck = [...activeTasks].filter((task) => task.stuck)
-  if (stuck.length === MAX_CONCURRENT_WSL_TRANSCRIPT_FS_TASKS) {
-    return stuck[0]
+function routeIsBlocked(route: string): boolean {
+  const blockedUntil = blockedRoutes.get(route)
+  if (blockedUntil === undefined || performance.now() < blockedUntil) {
+    return blockedUntil !== undefined
   }
-  return stuck.find(
-    (task) => task.route === route || (priority === 'scan' && task.priority === 'scan')
-  )
+  blockedRoutes.delete(route)
+  return false
 }
 
 // Caller-abort pre-checks live in runWslTranscriptFsTask; nothing here yields
@@ -170,8 +159,7 @@ function attachWaiter<T>(task: ScheduledTask<T>, signal?: AbortSignal): Promise<
       }
       signal.addEventListener('abort', waiter.onAbort, { once: true })
     }
-    // UNC/9P calls cannot be aborted; two blocked calls can retain both slots until settling or
-    // Orca restarts, while caller and queue retention remains bounded.
+    // The task deadline also replaces the isolated process; this bounds each caller's own wait.
     waiter.timeout = setTimeout(() => {
       const error = timeoutError()
       if (!removeWaiter(task, waiter)) {
@@ -186,6 +174,9 @@ function attachWaiter<T>(task: ScheduledTask<T>, signal?: AbortSignal): Promise<
 
 function settleTask<T>(task: ScheduledTask<T>, result: { value: T } | { error: unknown }): void {
   if (task.state !== 'running') {
+    if ('value' in result || result.error !== task.controller.signal.reason) {
+      blockedRoutes.delete(task.route)
+    }
     return
   }
   task.state = 'settled'
@@ -194,7 +185,7 @@ function settleTask<T>(task: ScheduledTask<T>, result: { value: T } | { error: u
   }
   activeLaneKeys.delete(task.laneKey)
   activeTasks.delete(task as UnknownScheduledTask)
-  clearTimeout(task.stuckTimer)
+  clearTimeout(task.deadlineTimer)
   clearTask(task as UnknownScheduledTask)
   // Why: an unabortable syscall can still succeed after its last waiter timed
   // out or cancelled. A resource-valued result (open's FileHandle) then has no
@@ -222,11 +213,6 @@ function settleTask<T>(task: ScheduledTask<T>, result: { value: T } | { error: u
 }
 
 function nextTaskIndex(): number {
-  // Tasks queued before their route hung must not be fed the other permit;
-  // their waiters drain by deadline while healthy routes use the slot.
-  const stuckRoutes = new Set(
-    [...activeTasks].filter((task) => task.stuck).map((task) => task.route)
-  )
   for (const priority of ['exact', 'scan'] as const) {
     // Why: keep one libuv slot available for a live transcript probe.
     if (priority === 'scan' && activeScanCount > 0) {
@@ -236,7 +222,7 @@ function nextTaskIndex(): number {
       (task) =>
         task.priority === priority &&
         !activeLaneKeys.has(task.laneKey) &&
-        !stuckRoutes.has(task.route)
+        !routeIsBlocked(task.route)
     )
     if (index !== -1) {
       return index
@@ -261,16 +247,21 @@ function pumpTasks(): void {
     }
     activeLaneKeys.add(task.laneKey)
     activeTasks.add(task)
-    // Anchored at run start: queue wait says nothing about the I/O itself, so
-    // the fail-fast may lag admission by at most one deadline period.
-    task.stuckTimer = setTimeout(() => {
-      task.stuck = true
+    task.deadlineTimer = setTimeout(() => {
+      const error = timeoutError()
       console.warn(
-        `[wsl-transcript-fs-gate] ${task.priority} filesystem task still running after ` +
-          `${timeoutMs(task.priority)}ms and holding a permit: ${task.key}`
+        `[wsl-transcript-fs-gate] ${task.priority} filesystem task exceeded ` +
+          `${timeoutMs(task.priority)}ms; replacing its I/O process: ${task.key}`
       )
+      // Keep polling from churning replacement processes on the same stalled mount.
+      blockedRoutes.set(
+        task.route,
+        performance.now() + timeoutMs(task.priority) * ROUTE_RETRY_DELAY_MULTIPLIER
+      )
+      task.controller.abort(error)
+      settleTask(task, { error })
     }, timeoutMs(task.priority))
-    task.stuckTimer.unref?.()
+    task.deadlineTimer.unref?.()
     void Promise.resolve()
       .then(() => {
         task.controller.signal.throwIfAborted()
@@ -284,15 +275,12 @@ function pumpTasks(): void {
 }
 
 /**
- * Test-only: drop every task and counter so a case that leaves a task stalled
- * (holding a permit, marking its route stuck) cannot fast-fail the next one.
- * Tasks are marked settled first, so a late resolution from the unabortable
- * syscall they are still blocked on cannot decrement counters this just zeroed.
+ * Test-only: drop every task, route quarantine, and counter.
  */
 export function resetWslTranscriptFsGateForTests(): void {
   for (const task of [...activeTasks, ...queuedTasks]) {
     task.state = 'settled'
-    clearTimeout(task.stuckTimer)
+    clearTimeout(task.deadlineTimer)
     for (const waiter of task.waiters) {
       removeWaiter(task, waiter)
     }
@@ -301,6 +289,7 @@ export function resetWslTranscriptFsGateForTests(): void {
   queuedTasks.length = 0
   inFlightTasks.clear()
   activeLaneKeys.clear()
+  blockedRoutes.clear()
   activeScanCount = 0
 }
 
@@ -334,21 +323,13 @@ export function runWslTranscriptFsTask<T>(
       : JSON.stringify([options.operation, options.path, options.priority])
   const existing = inFlightTasks.get(key) as ScheduledTask<T> | undefined
   if (existing) {
-    // A stuck target — or a queued target that stuck I/O keeps from ever
-    // running — dooms every joiner to a slow timeout, and each fresh joiner
-    // would keep the queued task alive past its own abandonment. Fail fast.
-    if (
-      existing.stuck ||
-      (existing.state === 'queued' && stuckBlocker(existing.route, existing.priority))
-    ) {
+    if (routeIsBlocked(existing.route)) {
       return Promise.reject(unavailableError())
     }
     return attachWaiter(existing, options.signal)
   }
   const route = wslTranscriptFsRouteKey(options.path)
-  // Fail fast when the permit, route, or scan slot this task needs is held by
-  // stuck I/O — queueing would only burn the caller's full deadline.
-  if (stuckBlocker(route, options.priority)) {
+  if (routeIsBlocked(route)) {
     return Promise.reject(unavailableError())
   }
   if (queuedTasks.length >= WSL_TRANSCRIPT_FS_MAX_PENDING_TASKS) {
@@ -364,8 +345,7 @@ export function runWslTranscriptFsTask<T>(
     onAbandonedResult: options.onAbandonedResult,
     controller: new AbortController(),
     waiters: new Set(),
-    state: 'queued',
-    stuck: false
+    state: 'queued'
   }
   inFlightTasks.set(key, scheduled as UnknownScheduledTask)
   const result = attachWaiter(scheduled, options.signal)

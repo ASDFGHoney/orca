@@ -1,4 +1,3 @@
-import type { FileHandle } from 'node:fs/promises'
 import type {
   AgentType,
   NativeChatMessage,
@@ -21,7 +20,8 @@ import {
   closeTranscriptHandle,
   wslGatedOpen,
   wslGatedRead,
-  wslGatedStat
+  wslGatedStat,
+  type TranscriptFileHandle
 } from './wsl-transcript-fs-access'
 import { wslTranscriptFsRefusal } from './wsl-transcript-fs-gate'
 
@@ -202,7 +202,7 @@ export async function readNativeChatTranscriptTailFile(
 }
 
 async function findLastCompleteLineEnd(
-  handle: FileHandle,
+  handle: TranscriptFileHandle,
   filePath: string,
   end: number,
   signal?: AbortSignal

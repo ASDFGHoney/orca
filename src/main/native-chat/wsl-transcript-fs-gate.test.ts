@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
+  resetWslTranscriptFsGateForTests,
   runWslTranscriptFsTask,
   WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS,
   WSL_TRANSCRIPT_FS_MAX_PENDING_TASKS,
@@ -43,6 +44,7 @@ describe('WSL transcript filesystem task scheduling', () => {
   let warnSpy: MockInstance
 
   beforeEach(() => {
+    resetWslTranscriptFsGateForTests()
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
@@ -278,7 +280,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('does not let one timed-out waiter settle a later shared waiter', async () => {
+  it('expires every waiter when shared work reaches its enforced deadline', async () => {
     vi.useFakeTimers()
     const work = deferred<string>()
     const task = vi.fn(() => work.promise)
@@ -288,11 +290,11 @@ describe('WSL transcript filesystem task scheduling', () => {
       const firstRejected = expect(first).rejects.toMatchObject({ code: 'timeout' })
       await vi.advanceTimersByTimeAsync(10_000)
       const second = run(path, 'exact', task)
+      const secondRejected = expect(second).rejects.toMatchObject({ code: 'timeout' })
 
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS - 10_000)
-      await firstRejected
+      await Promise.all([firstRejected, secondRejected])
       work.resolve('shared')
-      await expect(second).resolves.toBe('shared')
       expect(task).toHaveBeenCalledOnce()
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -380,7 +382,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('fails new work fast after both running permits stall', async () => {
+  it('restores both permits after running work exceeds its deadline', async () => {
     vi.useFakeTimers()
     const ubuntu = deferred<string>()
     const debian = deferred<string>()
@@ -393,10 +395,10 @@ describe('WSL transcript filesystem task scheduling', () => {
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
       await Promise.all([firstRejected, secondRejected])
       const laterTask = vi.fn(async () => 'later')
-      await expect(
-        run('\\\\wsl.localhost\\Fedora\\later', 'exact', laterTask)
-      ).rejects.toMatchObject({ code: 'unavailable', message: SLOW_MESSAGE })
-      expect(laterTask).not.toHaveBeenCalled()
+      await expect(run('\\\\wsl.localhost\\Fedora\\later', 'exact', laterTask)).resolves.toBe(
+        'later'
+      )
+      expect(laterTask).toHaveBeenCalledOnce()
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       ubuntu.resolve('ubuntu')
@@ -406,7 +408,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('fails only work needing a stuck lane fast, keeping the other permit usable', async () => {
+  it('quarantines an expired route while keeping healthy routes usable', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     try {
@@ -418,7 +420,7 @@ describe('WSL transcript filesystem task scheduling', () => {
       const sameLaneTask = vi.fn(async () => 'same-lane')
       await expect(
         run('\\\\wsl.localhost\\Ubuntu\\lane-stuck-sibling', 'exact', sameLaneTask)
-      ).rejects.toMatchObject({ code: 'unavailable', message: SLOW_MESSAGE })
+      ).rejects.toMatchObject({ code: 'unavailable' })
       expect(sameLaneTask).not.toHaveBeenCalled()
       await expect(
         run('\\\\wsl.localhost\\Debian\\healthy-lane', 'exact', async () => 'debian')
@@ -430,7 +432,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('fails scans and same-route probes fast while a scan is stuck', async () => {
+  it('restores the scan slot while quarantining the expired route', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     try {
@@ -442,10 +444,8 @@ describe('WSL transcript filesystem task scheduling', () => {
       const otherScanTask = vi.fn(async () => 'other-scan')
       await expect(
         run('\\\\wsl.localhost\\Debian\\other-tree', 'scan', otherScanTask)
-      ).rejects.toMatchObject({ code: 'unavailable' })
-      expect(otherScanTask).not.toHaveBeenCalled()
-      // The whole Ubuntu mount is hung — an exact probe there would only burn
-      // the remaining permit on it.
+      ).resolves.toBe('other-scan')
+      expect(otherScanTask).toHaveBeenCalledOnce()
       await expect(
         run('\\\\wsl.localhost\\Ubuntu\\live-probe', 'exact', async () => 'exact')
       ).rejects.toMatchObject({ code: 'unavailable' })
@@ -459,7 +459,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('keeps a stuck exact probe from feeding a doomed scan the second permit', async () => {
+  it('does not spend a replacement process on a quarantined route', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     try {
@@ -483,7 +483,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('admits new work again once stuck work finally settles', async () => {
+  it('ignores a late result after admitting replacement work', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     try {
@@ -508,7 +508,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('refuses to join in-flight work already past its own deadline', async () => {
+  it('starts a new generation after shared work reaches its deadline', async () => {
     vi.useFakeTimers()
     const work = deferred<string>()
     const task = vi.fn(() => work.promise)
@@ -521,12 +521,12 @@ describe('WSL transcript filesystem task scheduling', () => {
       const secondRejected = expect(second).rejects.toMatchObject({ code: 'timeout' })
 
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS - 10_000)
-      await firstRejected
+      await Promise.all([firstRejected, secondRejected])
+      work.resolve('late')
+      await vi.advanceTimersByTimeAsync(0)
       const joinTask = vi.fn(async () => 'join')
-      await expect(run(path, 'exact', joinTask)).rejects.toMatchObject({ code: 'unavailable' })
-      expect(joinTask).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(10_000)
-      await secondRejected
+      await expect(run(path, 'exact', joinTask)).resolves.toBe('join')
+      expect(joinTask).toHaveBeenCalledOnce()
     } finally {
       work.resolve('late')
       await vi.advanceTimersByTimeAsync(0)
@@ -534,7 +534,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('fails joins onto queued work fast when stuck I/O keeps it from running', async () => {
+  it('drains queued work on an expired route without starting it', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     const queuedTask = vi.fn(async () => 'queued')
@@ -549,11 +549,6 @@ describe('WSL transcript filesystem task scheduling', () => {
 
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS - 5_000)
       await stuckRejected
-      // Re-requests must not keep the doomed queued task alive with fresh
-      // deadlines — that would defeat the fail-fast for as long as I/O hangs.
-      await expect(run(queuedPath, 'exact', queuedTask)).rejects.toMatchObject({
-        code: 'unavailable'
-      })
       await vi.advanceTimersByTimeAsync(5_000)
       await queuedRejected
       expect(queuedTask).not.toHaveBeenCalled()
@@ -564,7 +559,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('does not feed a stuck route the other permit from the queue', async () => {
+  it('keeps exact work moving while an isolated scan process is stalled', async () => {
     vi.useFakeTimers()
     const scanWork = deferred<string>()
     const debianWork = deferred<string>()
@@ -587,16 +582,13 @@ describe('WSL transcript filesystem task scheduling', () => {
 
       // Queued before Ubuntu's hang is detected at the 60s scan deadline.
       const queuedU = run('\\\\wsl.localhost\\Ubuntu\\queued-route-file', 'exact', ubuntuTask)
-      const queuedURejected = expect(queuedU).rejects.toMatchObject({ code: 'timeout' })
+      await expect(queuedU).resolves.toBe('ubuntu')
       await vi.advanceTimersByTimeAsync(25_000)
       await scanRejected
 
       debianWork.resolve('debian')
       await vi.advanceTimersByTimeAsync(0)
-      expect(ubuntuTask).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(5_000)
-      await queuedURejected
-      expect(ubuntuTask).not.toHaveBeenCalled()
+      expect(ubuntuTask).toHaveBeenCalledOnce()
     } finally {
       scanWork.resolve('late')
       debianWork.resolve('debian')

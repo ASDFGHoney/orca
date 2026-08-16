@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as NodeFsModule from 'node:fs'
 import type * as NodeFsPromisesModule from 'node:fs/promises'
 import type * as GateModule from './wsl-transcript-fs-gate'
+import type * as ProcessClientModule from './wsl-transcript-fs-process-client'
 
 const UNC_PATH = '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.codex\\sessions\\a.jsonl'
 const OTHER_DISTRO_UNC_PATH = '\\\\wsl.localhost\\Debian\\home\\ada\\.codex\\sessions\\a.jsonl'
@@ -16,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   open: vi.fn(),
   createReadStream: vi.fn(),
-  runTask: vi.fn()
+  runTask: vi.fn(),
+  runProcess: vi.fn()
 }))
 
 vi.mock('node:fs', async (importOriginal) => ({
@@ -38,6 +40,11 @@ vi.mock('./wsl-transcript-fs-gate', async (importOriginal) => {
   mocks.runTask.mockImplementation(original.runWslTranscriptFsTask)
   return { ...original, runWslTranscriptFsTask: mocks.runTask }
 })
+
+vi.mock('./wsl-transcript-fs-process-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProcessClientModule>()),
+  runWslTranscriptFsProcess: mocks.runProcess
+}))
 
 import {
   closeTranscriptHandle,
@@ -69,8 +76,35 @@ beforeEach(() => {
   // runTask keeps the real gate implementation installed by the mock factory;
   // only its call log is cleared.
   mocks.runTask.mockClear()
+  mocks.runProcess.mockClear()
+  mocks.runProcess.mockImplementation(async (request) => {
+    switch (request.operation) {
+      case 'access':
+        return true
+      case 'stat':
+        return mocks.stat(request.path)
+      case 'lstat':
+        return mocks.lstat(request.path)
+      case 'readdir':
+        return mocks.readdir(request.path, { withFileTypes: true })
+      case 'readfile':
+        return mocks.readFile(request.path, request.encoding)
+      case 'open':
+        return true
+      case 'read': {
+        const handle = await mocks.open(request.path, 'r')
+        try {
+          const buffer = Buffer.allocUnsafe(request.length)
+          const result = await handle.read(buffer, 0, request.length, request.position)
+          return buffer.subarray(0, result.bytesRead)
+        } finally {
+          await handle.close()
+        }
+      }
+    }
+  })
   for (const [name, mock] of Object.entries(mocks)) {
-    if (name !== 'runTask') {
+    if (name !== 'runTask' && name !== 'runProcess') {
       mock.mockReset()
     }
   }
@@ -166,7 +200,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
     mocks.open.mockResolvedValue(handle)
 
     await expect(readTranscriptSlice(UNC_PATH, 4, 8, 'scan')).rejects.toThrow('EIO')
-    expect(handle.close).toHaveBeenCalledTimes(1)
+    expect(handle.close).toHaveBeenCalled()
   })
 
   it('yields Buffer chunks and closes the handle when the consumer destroys the stream', async () => {
@@ -193,7 +227,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
     expect(chunks).toHaveLength(1)
     expect(Buffer.isBuffer(chunks[0])).toBe(true)
     expect((chunks[0] as Buffer).toString('utf-8')).toBe('{"a":1}\n{"b":2}\n')
-    expect(handle.close).toHaveBeenCalledTimes(1)
+    expect(handle.close).toHaveBeenCalled()
   })
 
   it('swallows close failures so teardown never rejects', async () => {
@@ -289,7 +323,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
     }
   )
 
-  it('closes an abandoned open whose syscall lands after the caller gave up', async () => {
+  it('does not expose a late open result after its isolated process is aborted', async () => {
     vi.useFakeTimers()
     let release: ((handle: unknown) => void) | undefined
     mocks.open.mockReturnValue(
@@ -297,6 +331,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
         release = resolve
       })
     )
+    mocks.runProcess.mockImplementationOnce(() => mocks.open())
     try {
       const handle = fakeHandle()
       const refused = wslGatedOpen(UNC_PATH, 'exact').catch((error: unknown) => error)
@@ -306,8 +341,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
       release?.(handle)
       await vi.advanceTimersByTimeAsync(0)
 
-      // Nobody received the handle, so the gate owns closing it.
-      expect(handle.close).toHaveBeenCalledTimes(1)
+      expect(handle.close).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

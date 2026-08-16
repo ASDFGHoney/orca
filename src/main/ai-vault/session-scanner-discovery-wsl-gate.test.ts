@@ -12,6 +12,7 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
 }))
 
 import {
+  resetWslTranscriptFsGateForTests,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
   WslTranscriptFsError
 } from '../native-chat/wsl-transcript-fs-gate'
@@ -33,6 +34,7 @@ function stalls<T>(): Promise<T> {
 }
 
 beforeEach(() => {
+  resetWslTranscriptFsGateForTests()
   fsMocks.readdir.mockReset()
   fsMocks.stat.mockReset()
   fsMocks.readdir.mockResolvedValue([])
