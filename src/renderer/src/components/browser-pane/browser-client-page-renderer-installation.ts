@@ -4,10 +4,15 @@ import type {
 } from '../../../../shared/browser-client-page-renderer-protocol'
 import {
   BrowserClientPageRetainedRegistry,
-  type BrowserClientPageRendererMemoryProfile
+  type BrowserClientPageRendererMemoryProfile,
+  type BrowserClientPageVisibleAttachment
 } from './browser-client-page-retained-registry'
 
 type RendererPageRegistry = {
+  attachPage?(
+    page: Pick<BrowserClientPageRendererRequest['page'], 'browserPageId' | 'pageHostGeneration'>,
+    container: HTMLElement
+  ): BrowserClientPageVisibleAttachment
   dispose(): void
   getMemoryProfile(): BrowserClientPageRendererMemoryProfile
   mountPage(page: BrowserClientPageRendererRequest['page']): Promise<{ webContentsId: number }>
@@ -16,6 +21,15 @@ type RendererPageRegistry = {
     next: BrowserClientPageRendererRequest['page']
   ): void
   retirePage(page: BrowserClientPageRendererRequest['page']): void
+}
+
+let activeRendererPageRegistry: RendererPageRegistry | null = null
+
+export function attachBrowserClientPageToViewport(
+  page: Pick<BrowserClientPageRendererRequest['page'], 'browserPageId' | 'pageHostGeneration'>,
+  container: HTMLElement
+): BrowserClientPageVisibleAttachment | null {
+  return activeRendererPageRegistry?.attachPage?.(page, container) ?? null
 }
 
 type RendererRequestSubscriber = (
@@ -54,6 +68,7 @@ export function installBrowserClientPageRenderer(
     options.registry ??
     new BrowserClientPageRetainedRegistry({ document: options.document ?? document })
   const unsubscribe = subscribe((request) => handleRequest(registry, request))
+  activeRendererPageRegistry = registry
   let disposed = false
   return {
     dispose: () => {
@@ -62,6 +77,9 @@ export function installBrowserClientPageRenderer(
       }
       disposed = true
       unsubscribe()
+      if (activeRendererPageRegistry === registry) {
+        activeRendererPageRegistry = null
+      }
       registry.dispose()
     },
     getMemoryProfile: () => registry.getMemoryProfile()

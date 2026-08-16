@@ -52,6 +52,7 @@ import {
   type ExecutionHostId
 } from '../../../../shared/execution-host'
 import { getHostSettingOverride } from '../../../../shared/host-setting-overrides'
+import type { RuntimeBrowserPlacement } from '../../../../shared/runtime-browser-placement'
 import {
   getExecutionHostIdForWorktree,
   getRuntimeEnvironmentIdForWorktree
@@ -122,6 +123,7 @@ function sanitizeBrowserPageAnnotation(annotation: BrowserPageAnnotation): Brows
 export type RemoteBrowserPageHandle = {
   environmentId: string
   remotePageId: string
+  placement?: RuntimeBrowserPlacement
 }
 
 export type BrowserCookieImportExecutionResult = BrowserCookieImportResult & {

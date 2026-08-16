@@ -7,7 +7,9 @@ export type BrowserClientRetainedRendererPage = {
   webview: Electron.WebviewTag
   status: 'attaching' | 'attached' | 'retiring'
   webContentsId: number | null
+  metadataRevision: number
   attachmentObserved: boolean
+  visibleAttachment: { container: HTMLElement } | null
   mount: Promise<{ webContentsId: number }>
   resolveMount: (value: { webContentsId: number }) => void
   rejectMount: (error: Error) => void

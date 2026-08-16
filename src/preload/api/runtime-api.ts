@@ -8,6 +8,10 @@ import type {
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { PublicKnownRuntimeEnvironment } from '../../shared/runtime-environments'
 import type { VerifyAndAddRuntimeEnvironmentResult } from '../../shared/remote-pairing-verification'
+import type {
+  BrowserClientHostPlacementPreparationRequest,
+  BrowserPageCreationPlacement
+} from '../../shared/browser-client-host-placement'
 
 export type RuntimeEnvironmentSubscriptionHandle = {
   unsubscribe: () => void
@@ -80,6 +84,9 @@ export type RuntimeApi = {
       selector: string
       timeoutMs?: number
     }) => Promise<RuntimeRpcResponse<RuntimeStatus>>
+    prepareBrowserClientHostPlacement: (
+      args: BrowserClientHostPlacementPreparationRequest
+    ) => Promise<BrowserPageCreationPlacement>
     // Why: system resume / browser online advance pending shared-control reconnect timers only.
     retryConnectionsNow?: () => Promise<void>
     call: (args: {

@@ -104,6 +104,89 @@ describe('browser client page retained registry', () => {
     expect(webviews).toHaveLength(1)
   })
 
+  it('moves the retained host without reparenting its attached guest', async () => {
+    const { registry, webviews } = createRig()
+    const mounting = registry.mountPage(PAGE)
+    const webview = webviews[0]!
+    attach(webview)
+    await mounting
+    const retainedHost = webview.parentElement
+    const retainedRoot = retainedHost?.parentElement
+    const viewport = document.createElement('div')
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
+      bottom: 260,
+      height: 200,
+      left: 40,
+      right: 340,
+      top: 60,
+      width: 300,
+      x: 40,
+      y: 60,
+      toJSON: () => ({})
+    })
+    document.body.appendChild(viewport)
+
+    const attachment = registry.attachPage(
+      {
+        browserPageId: PAGE.browserPageId,
+        pageHostGeneration: PAGE.pageHostGeneration
+      },
+      viewport
+    )
+
+    expect(attachment.webview).toBe(webview)
+    expect(webview.parentElement).toBe(retainedHost)
+    expect(retainedHost?.parentElement).toBe(retainedRoot)
+    expect(retainedHost?.inert).toBe(false)
+    expect(retainedHost?.style.cssText).toContain('left: 40px')
+    expect(retainedHost?.style.cssText).toContain('width: 300px')
+    attachment.detach()
+    expect(webview.parentElement).toBe(retainedHost)
+    expect(retainedHost?.parentElement).toBe(retainedRoot)
+    expect(retainedHost?.inert).toBe(true)
+    expect(retainedHost?.style.cssText).toContain('left: -10000px')
+    expect(webview.isConnected).toBe(true)
+    expect(registry.getMemoryProfile().attachedPageCount).toBe(1)
+  })
+
+  it('keeps metadata revisions monotonic across visible detach and reattach', async () => {
+    const { registry, webviews } = createRig()
+    const mounting = registry.mountPage(PAGE)
+    attach(webviews[0]!)
+    await mounting
+    const first = registry.attachPage(PAGE, document.createElement('div'))
+
+    expect(first.nextMetadataRevision()).toBe(1)
+    expect(first.nextMetadataRevision()).toBe(2)
+    first.detach()
+    const second = registry.attachPage(PAGE, document.createElement('div'))
+
+    expect(second.nextMetadataRevision()).toBe(3)
+  })
+
+  it('never resurrects a visible guest retired by exact generation', async () => {
+    const { registry, webviews } = createRig()
+    const mounting = registry.mountPage(PAGE)
+    const webview = webviews[0]!
+    attach(webview)
+    await mounting
+    const viewport = document.createElement('div')
+    document.body.appendChild(viewport)
+    const attachment = registry.attachPage(
+      {
+        browserPageId: PAGE.browserPageId,
+        pageHostGeneration: PAGE.pageHostGeneration
+      },
+      viewport
+    )
+
+    registry.retirePage(PAGE)
+    attachment.detach()
+
+    expect(webview.isConnected).toBe(false)
+    expect(registry.getMemoryProfile().retiringPageCount).toBe(1)
+  })
+
   it('does not readvertise a cached guest id after the guest becomes unreadable', async () => {
     const { registry, webviews } = createRig()
     const mounting = registry.mountPage(PAGE)

@@ -3,18 +3,7 @@ import { ORCA_BROWSER_GUEST_WEB_PREFERENCES_ATTRIBUTE } from '../../../../shared
 export function createBrowserClientPageRetainedRoot(document: Document): HTMLDivElement {
   const root = document.createElement('div')
   root.dataset.browserClientPageRetainedRoot = ''
-  root.inert = true
-  root.setAttribute('aria-hidden', 'true')
-  Object.assign(root.style, {
-    position: 'fixed',
-    left: '-10000px',
-    top: '0',
-    width: '1px',
-    height: '1px',
-    overflow: 'hidden',
-    opacity: '0',
-    pointerEvents: 'none'
-  })
+  root.style.display = 'contents'
   document.body.appendChild(root)
   return root
 }
@@ -24,8 +13,9 @@ export function createBrowserClientPageRetainedHost(document: Document): HTMLDiv
   host.inert = true
   host.setAttribute('aria-hidden', 'true')
   Object.assign(host.style, {
-    position: 'absolute',
-    inset: '0',
+    position: 'fixed',
+    left: '-10000px',
+    top: '0',
     width: '1px',
     height: '1px',
     overflow: 'hidden',

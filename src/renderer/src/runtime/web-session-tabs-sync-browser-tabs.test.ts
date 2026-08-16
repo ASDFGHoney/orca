@@ -60,6 +60,12 @@ describe('applyWebSessionTabsSnapshot', () => {
             loading: false,
             canGoBack: true,
             canGoForward: false,
+            placement: {
+              kind: 'client',
+              browserHostClientId: 'host-a',
+              browserHostGeneration: 3,
+              pageHostGeneration: 9
+            },
             loadError: {
               code: -202,
               description: 'ERR_CERT_AUTHORITY_INVALID',
@@ -116,7 +122,13 @@ describe('applyWebSessionTabsSnapshot', () => {
     ])
     expect(patch.remoteBrowserPageHandlesByPageId?.['host-browser-page']).toEqual({
       environmentId: ENV,
-      remotePageId: 'host-browser-page'
+      remotePageId: 'host-browser-page',
+      placement: {
+        kind: 'client',
+        browserHostClientId: 'host-a',
+        browserHostGeneration: 3,
+        pageHostGeneration: 9
+      }
     })
     expect(patch.browserCertificateFailuresByPageId?.['host-browser-page']).toEqual({
       challengeId: 'challenge-1',

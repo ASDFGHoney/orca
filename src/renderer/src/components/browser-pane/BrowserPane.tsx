@@ -219,19 +219,11 @@ import {
   resolveBrowserReloadButtonLabelKind,
   resolveBrowserReloadIntent
 } from './browser-reload-action'
-
-type BrowserTabPageState = Partial<
-  Pick<
-    BrowserPageState,
-    'title' | 'loading' | 'faviconUrl' | 'canGoBack' | 'canGoForward' | 'loadError'
-  >
->
-
-type BrowserPageUrlSetter = (
-  tabId: string,
-  url: string,
-  options?: { preserveLoadError?: boolean }
-) => void
+import {
+  ClientHostedBrowserPagePane,
+  type BrowserPageUrlSetter,
+  type BrowserTabPageState
+} from './ClientHostedBrowserPagePane'
 
 type BrowserDownloadState = Omit<BrowserDownloadRequestedEvent, 'status' | 'savePath'> & {
   receivedBytes: number
@@ -758,6 +750,11 @@ export default function BrowserPane({
     : null
   const runtimeEnvironmentActive = Boolean(activeBrowserRuntimeEnvironmentId)
   const activeBrowserPageId = activeBrowserPage?.id ?? null
+  const activeRemotePageHandle = useAppStore((state) =>
+    activeBrowserPageId
+      ? (state.remoteBrowserPageHandlesByPageId[activeBrowserPageId] ?? null)
+      : null
+  )
   const browserPageIds = useMemo(() => browserPages.map((page) => page.id), [browserPages])
   const automationVisiblePageIds = useBrowserAutomationVisiblePageIds(browserPageIds)
   const mobileDrivenPageIds = useBrowserMobileDrivenPageIds(browserPageIds)
@@ -807,16 +804,33 @@ export default function BrowserPane({
   }, [activeBrowserPageId])
 
   if (activeBrowserRuntimeEnvironmentId) {
+    const clientPlacement =
+      activeRemotePageHandle?.environmentId === activeBrowserRuntimeEnvironmentId &&
+      activeRemotePageHandle.placement?.kind === 'client'
+        ? activeRemotePageHandle.placement
+        : null
     return activeBrowserPage ? (
-      <RemoteBrowserPagePane
-        key={`${activeBrowserRuntimeEnvironmentId ?? ''}:${activeBrowserPage.id}`}
-        browserTab={activeBrowserPage}
-        runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
-        worktreeId={browserTab.worktreeId}
-        isActive={isActive}
-        onUpdatePageState={updateBrowserPageState}
-        onSetUrl={setBrowserPageUrl}
-      />
+      clientPlacement ? (
+        <ClientHostedBrowserPagePane
+          key={`${clientPlacement.browserHostClientId}:${activeBrowserPage.id}:${clientPlacement.pageHostGeneration}`}
+          browserTab={activeBrowserPage}
+          runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
+          placement={clientPlacement}
+          isActive={isActive}
+          onUpdatePageState={updateBrowserPageState}
+          onSetUrl={setBrowserPageUrl}
+        />
+      ) : (
+        <RemoteBrowserPagePane
+          key={`${activeBrowserRuntimeEnvironmentId ?? ''}:${activeBrowserPage.id}`}
+          browserTab={activeBrowserPage}
+          runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
+          worktreeId={browserTab.worktreeId}
+          isActive={isActive}
+          onUpdatePageState={updateBrowserPageState}
+          onSetUrl={setBrowserPageUrl}
+        />
+      )
     ) : (
       <div className="flex h-full min-h-0 flex-1 bg-background" />
     )

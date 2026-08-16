@@ -21,8 +21,17 @@ import type {
 } from '../../../shared/agent-session-resume'
 import {
   AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
+  BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
+  BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
+  BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
+  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
+  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
   BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
 } from '../../../shared/protocol-version'
+import type {
+  BrowserClientHostPlacementPreference,
+  BrowserPageCreationPlacement
+} from '../../../shared/browser-client-host-placement'
 import type {
   AgentLaunchPreferences,
   AgentPromptDelivery,
@@ -81,6 +90,7 @@ import {
 } from './web-session-browser-placement'
 import { assertRuntimeManagedBrowserCreationAvailable } from '../lib/client-creation-action-policy'
 import { hasMaterializedWebRuntimeBrowserPage } from './web-runtime-browser-materialization'
+import { waitForWebRuntimeBrowserPageMaterialization } from './web-runtime-browser-materialization-wait'
 import {
   pauseAfterE2eWebRuntimeBrowserCreate,
   throwIfE2eWebRuntimeBrowserCapabilityUnavailable,
@@ -473,6 +483,7 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   stagedTitle?: string
   stagedFocusAddressBar?: boolean
   failureLogMode?: 'details' | 'operation-only'
+  placementPreference?: BrowserClientHostPlacementPreference
 }): Promise<boolean> {
   const environmentId =
     args.environmentId?.trim() ??
@@ -486,10 +497,19 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   const shouldFocusOnCreate = args.focusOnCreate !== false
   const shouldSelectWorktree = args.selectWorktree !== false
   const provisionalPageId = createBrowserUuid()
-  const hostSupportsKnownPageId = useAppStore
-    .getState()
-    .runtimeStatusByEnvironmentId?.get(environmentId)
-    ?.status?.capabilities?.includes(BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY)
+  const advertisedCapabilities =
+    useAppStore.getState().runtimeStatusByEnvironmentId?.get(environmentId)?.status?.capabilities ??
+    []
+  const hostSupportsKnownPageId = advertisedCapabilities.includes(
+    BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
+  )
+  const hostAdvertisesClientHosting = [
+    BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
+    BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
+    BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
+    BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
+    BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY
+  ].every((capability) => advertisedCapabilities.includes(capability))
   let unsubscribeFocusGuard = (): void => {}
   let guardedPageId = provisionalPageId
   let createdPageId: string | null = null
@@ -497,6 +517,26 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   try {
     throwIfE2eWebRuntimeBrowserCapabilityUnavailable()
     assertRuntimeManagedBrowserCreationAvailable(useAppStore.getState(), environmentId)
+    const placementPreference = args.placementPreference ?? 'auto'
+    let placement: BrowserPageCreationPlacement = { kind: 'server' }
+    if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
+      try {
+        placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
+          selector: environmentId,
+          expectedPairingRevision: intentOwner.pairingRevision,
+          preference: placementPreference
+        })
+      } catch (error) {
+        console.warn('[web-runtime-session] failed to prepare client browser host:', error)
+        throw new Error(
+          translate(
+            'browser.clientHosted.preparationFailed',
+            "Couldn't start the remote browser on this desktop. Check the paired connection and try again."
+          ),
+          { cause: error }
+        )
+      }
+    }
     if (args.clientTargetGroupId) {
       recordWebSessionBrowserPlacement({
         environmentId,
@@ -557,6 +597,7 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           worktree: toRuntimeWorktreeSelector(args.worktreeId),
           url: navigateAfterCreate ? undefined : args.url,
           ...(hostSupportsKnownPageId ? { page: provisionalPageId } : {}),
+          ...(placement.kind === 'client' ? { placement } : {}),
           profileId: args.profileId ?? undefined,
           activate: shouldFocusOnCreate,
           // Why: place the new browser in the clicked split group so the host snapshot is authoritative for it (no left-snap).
@@ -628,15 +669,23 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         throw error
       }
     }
-    if (
-      !hasMaterializedWebRuntimeBrowserPage(
-        useAppStore.getState(),
+    const expectedGroupId = args.clientTargetGroupId ?? args.targetGroupId
+    let materialized = hasMaterializedWebRuntimeBrowserPage(
+      useAppStore.getState(),
+      environmentId,
+      args.worktreeId,
+      created.browserPageId,
+      expectedGroupId
+    )
+    if (!materialized) {
+      materialized = await waitForWebRuntimeBrowserPageMaterialization({
         environmentId,
-        args.worktreeId,
-        created.browserPageId,
-        args.clientTargetGroupId ?? args.targetGroupId
-      )
-    ) {
+        worktreeId: args.worktreeId,
+        remotePageId: created.browserPageId,
+        ...(expectedGroupId ? { expectedGroupId } : {})
+      })
+    }
+    if (!materialized) {
       throw new Error('The created browser tab did not materialize in the client.')
     }
     const remainingFocusIntent = shouldFocusOnCreate
@@ -667,7 +716,9 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     const createFailureDefinitive = isDefinitiveBrowserCreateFailure(error)
     const cleanupPageId =
       createdPageId ??
-      (!createFailureDefinitive && hostSupportsKnownPageId ? provisionalPageId : null)
+      (createAttempted && !createFailureDefinitive && hostSupportsKnownPageId
+        ? provisionalPageId
+        : null)
     const createOutcomeUnknown = !cleanupPageId && !createFailureDefinitive
     const ownsClientGroupCleanup = args.clientTargetGroupId
       ? releaseWebSessionBrowserPlacementGroup({

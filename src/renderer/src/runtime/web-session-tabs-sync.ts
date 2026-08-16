@@ -103,6 +103,10 @@ import {
   buildWebSessionExistingTabIndex,
   type WebSessionExistingTabIndex
 } from './web-session-existing-tab-index'
+import {
+  sameRuntimeBrowserPlacement,
+  type RuntimeBrowserPlacement
+} from '../../../shared/runtime-browser-placement'
 
 const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
 export const WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS = 100
@@ -192,6 +196,7 @@ type MirroredBrowserTab = {
   page: BrowserPage
   certificateFailure: BrowserCertificateFailure | null
   remotePageId: string
+  placement?: RuntimeBrowserPlacement
   unifiedTab: Tab
   hostTabId: string
   clientGroupId?: string
@@ -1575,6 +1580,7 @@ function buildMirroredBrowserTabs(
       page,
       certificateFailure: tab.certificateFailure ?? null,
       remotePageId: tab.browserPageId,
+      ...(tab.placement ? { placement: tab.placement } : {}),
       unifiedTab: buildBrowserUnifiedTab(workspace, tab, existing?.unifiedTab ?? null, groupId),
       hostTabId: tab.id,
       ...(clientGroupId ? { clientGroupId } : {})
@@ -2099,6 +2105,15 @@ function browserPageEqual(a: BrowserPage, b: BrowserPage): boolean {
     a.browserRuntimeEnvironmentId === b.browserRuntimeEnvironmentId &&
     a.viewportPresetId === b.viewportPresetId
   )
+}
+
+function optionalRuntimeBrowserPlacementsEqual(
+  left: RuntimeBrowserPlacement | undefined,
+  right: RuntimeBrowserPlacement | undefined
+): boolean {
+  return left === undefined
+    ? right === undefined
+    : right !== undefined && sameRuntimeBrowserPlacement(left, right)
 }
 
 function browserCertificateFailureEqual(
@@ -2989,7 +3004,7 @@ function applyWebSessionTabsSnapshotWithContext(
       }
     }
   }
-  for (const { page, certificateFailure, remotePageId } of mirroredBrowserTabs) {
+  for (const { page, certificateFailure, remotePageId, placement } of mirroredBrowserTabs) {
     const current = nextBrowserPagesByWorkspace[page.workspaceId] ?? []
     if (!sameBrowserPages(current, [page])) {
       nextBrowserPagesByWorkspace =
@@ -3001,7 +3016,8 @@ function applyWebSessionTabsSnapshotWithContext(
     const currentHandle = nextRemoteBrowserPageHandlesByPageId[page.id]
     if (
       currentHandle?.environmentId !== environmentId ||
-      currentHandle.remotePageId !== remotePageId
+      currentHandle.remotePageId !== remotePageId ||
+      !optionalRuntimeBrowserPlacementsEqual(currentHandle.placement, placement)
     ) {
       nextRemoteBrowserPageHandlesByPageId =
         nextRemoteBrowserPageHandlesByPageId === state.remoteBrowserPageHandlesByPageId
@@ -3009,7 +3025,8 @@ function applyWebSessionTabsSnapshotWithContext(
           : nextRemoteBrowserPageHandlesByPageId
       nextRemoteBrowserPageHandlesByPageId[page.id] = {
         environmentId,
-        remotePageId
+        remotePageId,
+        ...(placement ? { placement } : {})
       }
     }
     if (

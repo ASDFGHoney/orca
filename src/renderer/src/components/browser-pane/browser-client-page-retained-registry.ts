@@ -12,18 +12,21 @@ import {
 import { browserClientPageRetainedKey } from './browser-client-page-retained-key'
 import { rekeyBrowserClientRetainedPage } from './browser-client-page-retained-rekey'
 import type { BrowserClientRetainedRendererPage as RetainedPage } from './browser-client-page-retained-state'
+import {
+  attachBrowserClientRetainedPage,
+  type BrowserClientPageVisibleAttachment
+} from './browser-client-page-visible-attachment'
+import {
+  snapshotBrowserClientPageRendererMemoryProfile,
+  type BrowserClientPageRendererMemoryProfile
+} from './browser-client-page-retained-memory-profile'
+
+export type { BrowserClientPageVisibleAttachment } from './browser-client-page-visible-attachment'
+export type { BrowserClientPageRendererMemoryProfile } from './browser-client-page-retained-memory-profile'
 
 const DEFAULT_MAX_PAGES = 256
 const DEFAULT_MAX_PAGES_PER_PARTITION = 64
 const DEFAULT_ATTACH_TIMEOUT_MS = 5_000
-
-export type BrowserClientPageRendererMemoryProfile = {
-  retainedPageCount: number
-  attachingPageCount: number
-  attachedPageCount: number
-  retiringPageCount: number
-  partitionCount: number
-}
 
 export class BrowserClientPageRetainedRegistry {
   private readonly maxPages: number
@@ -93,6 +96,18 @@ export class BrowserClientPageRetainedRegistry {
     return this.createPage(identity, key).mount
   }
 
+  attachPage(
+    identity: Pick<RendererPageIdentity, 'browserPageId' | 'pageHostGeneration'>,
+    container: HTMLElement
+  ): BrowserClientPageVisibleAttachment {
+    const page = [...this.pages.values()].find(
+      (candidate) =>
+        candidate.identity.browserPageId === identity.browserPageId &&
+        candidate.identity.pageHostGeneration === identity.pageHostGeneration
+    )
+    return attachBrowserClientRetainedPage(page, this.pages, container)
+  }
+
   retirePage(candidate: RendererPageIdentity): void {
     const parsed = BrowserClientPageRendererIdentity.safeParse(candidate)
     if (!parsed.success) {
@@ -108,7 +123,7 @@ export class BrowserClientPageRetainedRegistry {
     if (wasAttaching) {
       page.rejectMount(new Error('browser_client_page_renderer_page_retired'))
     }
-    page.host.remove()
+    this.disconnectPage(page)
     if (
       wasAttaching &&
       !page.attachmentObserved &&
@@ -125,25 +140,7 @@ export class BrowserClientPageRetainedRegistry {
   }
 
   getMemoryProfile(): BrowserClientPageRendererMemoryProfile {
-    let attachingPageCount = 0
-    let attachedPageCount = 0
-    let retiringPageCount = 0
-    for (const page of this.pages.values()) {
-      if (page.status === 'attaching') {
-        attachingPageCount += 1
-      } else if (page.status === 'attached') {
-        attachedPageCount += 1
-      } else {
-        retiringPageCount += 1
-      }
-    }
-    return {
-      retainedPageCount: this.pages.size,
-      attachingPageCount,
-      attachedPageCount,
-      retiringPageCount,
-      partitionCount: this.partitionCounts.size
-    }
+    return snapshotBrowserClientPageRendererMemoryProfile(this.pages, this.partitionCounts.size)
   }
 
   dispose(): void {
@@ -188,7 +185,9 @@ export class BrowserClientPageRetainedRegistry {
       webview,
       status: 'attaching',
       webContentsId: null,
+      metadataRevision: 0,
       attachmentObserved: false,
+      visibleAttachment: null,
       mount,
       resolveMount,
       rejectMount,
@@ -249,7 +248,7 @@ export class BrowserClientPageRetainedRegistry {
     page.status = 'retiring'
     clearTimeout(page.attachTimer)
     page.rejectMount(new Error(errorCode))
-    page.host.remove()
+    this.disconnectPage(page)
     if (!page.attachmentObserved && !hasBrowserClientPageAttachedGuest(page.webview)) {
       this.releasePage(page)
     }
@@ -264,7 +263,7 @@ export class BrowserClientPageRetainedRegistry {
     }
     page.status = 'retiring'
     clearTimeout(page.attachTimer)
-    page.host.remove()
+    this.disconnectPage(page)
   }
 
   private handleDestroyed(page: RetainedPage): void {
@@ -286,6 +285,8 @@ export class BrowserClientPageRetainedRegistry {
     page.webview.removeEventListener('dom-ready', page.onReady)
     page.webview.removeEventListener('destroyed', page.onDestroyed)
     page.webview.removeEventListener('render-process-gone', page.onRendererGone)
+    page.visibleAttachment = null
+    page.webview.remove()
     page.host.remove()
     this.pages.delete(page.key)
     const nextCount = (this.partitionCounts.get(page.identity.partition) ?? 1) - 1
@@ -303,5 +304,11 @@ export class BrowserClientPageRetainedRegistry {
     const root = createBrowserClientPageRetainedRoot(this.options.document)
     this.root = root
     return root
+  }
+
+  private disconnectPage(page: RetainedPage): void {
+    page.visibleAttachment = null
+    page.webview.remove()
+    page.host.remove()
   }
 }

@@ -265,6 +265,44 @@ describe('createWebRuntimeSessionBrowserTab', () => {
     expect(runtimeCall).toHaveBeenCalledTimes(2)
   })
 
+  it('waits for an acknowledged server page to reach the renderer store', async () => {
+    let currentState = { ...mocks.getState(), materialized: false }
+    let publishStoreState: ((state: typeof currentState) => void) | undefined
+    const unsubscribe = vi.fn()
+    mocks.getState.mockImplementation(() => currentState)
+    mocks.subscribe.mockImplementation((listener: (state: typeof currentState) => void) => {
+      publishStoreState = listener
+      return unsubscribe
+    })
+    mocks.hasMaterializedWebRuntimeBrowserPage.mockImplementation(
+      (state: typeof currentState) => state.materialized
+    )
+    const runtimeCall = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: 'create',
+        ok: true,
+        result: { browserPageId: 'remote-browser-page-1' }
+      })
+      .mockResolvedValueOnce({ id: 'list', ok: true, result: makeSnapshot() })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    const creation = createWebRuntimeSessionBrowserTab({
+      worktreeId: WORKTREE_ID,
+      focusOnCreate: false
+    })
+    await vi.waitFor(() => expect(publishStoreState).toBeTypeOf('function'))
+    currentState = { ...currentState, materialized: true }
+    publishStoreState?.(currentState)
+
+    await expect(creation).resolves.toBe(true)
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    expect(runtimeCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'browser.tabCreate',
+      'session.tabs.list'
+    ])
+  })
+
   it('reports ambiguous failure when exact host cleanup is not confirmed', async () => {
     mocks.hasMaterializedWebRuntimeBrowserPage.mockReturnValue(false)
     const runtimeCall = vi

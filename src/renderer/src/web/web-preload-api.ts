@@ -1587,6 +1587,7 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
     },
     getStatus: ({ selector, timeoutMs }) =>
       callEnvironmentEnvelope<RuntimeStatus>(selector, 'status.get', undefined, timeoutMs),
+    prepareBrowserClientHostPlacement: async () => ({ kind: 'server' }),
     call: ({ selector, method, params, timeoutMs }) =>
       callEnvironmentEnvelope(selector, method, params, timeoutMs),
     subscribe: async ({ selector, method, params, timeoutMs }, callbacks) => {
