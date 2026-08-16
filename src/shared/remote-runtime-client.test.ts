@@ -12,15 +12,9 @@ import {
   publicKeyToBase64
 } from './e2ee-crypto'
 import { sendRemoteRuntimeRequest, subscribeRemoteRuntimeRequest } from './remote-runtime-client'
+import { remoteRuntimeClientCapabilities } from './remote-runtime-client-capabilities'
 import { MAX_TIMER_DELAY_MS } from './timer-delay'
-import {
-  AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
-  SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
-  WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
-  WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY
-} from './protocol-version'
-import { SKILL_INSTALL_RESULT_V2_CAPABILITY } from './skill-install-capability'
+import { BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY } from './protocol-version'
 
 const servers: WebSocketServer[] = []
 
@@ -76,13 +70,7 @@ describe('subscribeRemoteRuntimeRequest', () => {
     await expect(server.nextAuth).resolves.toEqual({
       type: 'e2ee_auth',
       deviceToken: 'device-token',
-      clientCapabilities: [
-        SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
-        AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-        SKILL_INSTALL_RESULT_V2_CAPABILITY,
-        WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
-        WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY
-      ]
+      clientCapabilities: remoteRuntimeClientCapabilities()
     })
     const bytes = new Uint8Array([1, 2, 3])
     expect(subscription.sendBinary(bytes)).toBe(true)
@@ -111,13 +99,9 @@ describe('subscribeRemoteRuntimeRequest', () => {
     await expect(server.nextAuth).resolves.toEqual({
       type: 'e2ee_auth',
       deviceToken: 'device-token',
-      clientCapabilities: [
-        SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
-        AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
-        WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
-        WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY,
+      clientCapabilities: remoteRuntimeClientCapabilities([
         BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY
-      ]
+      ])
     })
     expect(subscription.sendBinary(new Uint8Array([9]))).toBe(false)
     expect(onError).toHaveBeenCalledWith(
