@@ -43,7 +43,8 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft and correctly based in
-  sequence; every required check is green.
+  sequence. Every pre-rebase required check was green; the stack is now resubmitted on
+  `origin/main@9e3e583a83` and its refreshed GitHub checks are running.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final implementation tip before this
@@ -227,6 +228,19 @@ Subsequent review and full-suite evidence found and fixed the remaining activati
 
 Current validation is green on the cumulative tree:
 
+- The landing stack was rebased onto `origin/main@9e3e583a83`, which added private skill sharing
+  and regional relay placement. `git range-diff` marks 45/49 patches identical; the four contextual
+  patches preserve upstream capability centralization, abort-signal ordering, renderer bootstrap,
+  and STA-4150's additive Electron capability advertisement. Safety tag
+  `sta-4150-safety-pre-9e3-rebase-20260816` retains the previous green tip.
+- Post-rebase activated placement, transport, WSL, and capability coverage passes 19 files / 172
+  tests. The real Docker/OpenSSH route oracle and mixed-version wire matrix pass 7/7.
+- The first full post-rebase suite found only two stale mocked call-shape expectations; their exact
+  file is green after adding upstream's abort-signal slot. Later aggregate runs passed 5,835 files
+  and 54,341 tests with 164 skips, each leaving one unrelated timing cleanup test red. The macOS
+  helper cleanup passed 21/21 in isolation, and the daemon checkpoint cleanup passed 4/4 three
+  consecutive times; both also passed in another aggregate run.
+
 - Latest-main full repository suite: 5,749 files passed, 53,861 tests passed, 126 skipped, zero
   failures.
 - Full Node/CLI/web typecheck and full lint pass, including native/type-aware audits, 89 reliability
@@ -239,20 +253,21 @@ Current validation is green on the cumulative tree:
 - Both post-rebase paired-runtime product journeys pass from rebuilt E2E Electron and CLI
   artifacts; the headed paired-Electron journey and real headless `orca serve` journey each prove
   client placement, local rendering and automation, zero host guest, no screencast, new-page-only
-  kill-switch behavior, and server fallback without duplicate execution.
+  kill-switch behavior, and server fallback without duplicate execution. One fresh-build headed
+  run timed out waiting for the fallback screencast frame; the identical artifact passed on an
+  immediate headed rerun, then both journeys passed together in 42.8 seconds.
 - Required independent Electron/CDP validation attached to the exact workspace and branch, showed
-  a normally rendered visible app with zero console errors, and produced the inspected screenshot
-  `/tmp/sta-4150-cdp-visible.png`. The Playwright session and launched dev Electron process were
-  closed afterward.
+  a normally rendered visible app with zero console errors and two non-blocking warnings, and
+  produced the inspected screenshot `/tmp/sta-4150-rebased-cdp.png`. The Playwright session and
+  launched dev Electron process were closed afterward.
 - Fresh wire/mobile/security and performance/resource reviews found no remaining proven P0/P1/P2.
   Lifecycle/cross-platform review found the headed-close, stale-snapshot, and headed graph-pruning
   defects above; all are fixed. Its final post-fix rereview found no remaining proven P0/P1/P2 and
   passed 1,188 focused tests with one intentional skip.
 
-The 41-commit cumulative tree is rebased onto latest `origin/main@9f3a912c1e`. `git range-diff`
-marks 39 patches identical; the two contextual differences preserve the newer upstream preload
-import neighborhood and upstream reliability-gate duration while retaining the STA-4150 gate.
-The pre-rebase checkpoint and explicit safety refs preserve the exact validated tree.
+The 50-commit cumulative tree is rebased onto latest `origin/main@9e3e583a83`. The implementation
+tip before this ledger-only update is `a4be155791`. The pre-rebase checkpoint and explicit safety
+refs preserve the prior exact validated tree.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, and packaged mixed-release client/server browser
 journeys. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless, mixed-version, and
@@ -339,13 +354,13 @@ ownership.
 
 ### Landing stack
 
-| Order | Draft PR                                              | Published head before final ledger                  | Validation at layer tip                                  |
+| Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                  |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3e1e607b3a`   | Typecheck, full lint, 3 focused tests; 44 checks green   |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@7e18471346` | Typecheck, full lint, 74 focused tests; 47 checks green  |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@c0ae154891`    | Typecheck, full lint, 66 focused tests; 43 checks green  |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@f36b2b48f3`     | Typecheck, full lint, 107 focused tests; 46 checks green |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@61dbe1b74b`    | Full cumulative and paired E2E proof; 46 checks green    |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@a49d24d646`   | Typecheck, full lint, 3 focused tests; CI rerunning      |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@a3625652df` | Typecheck, full lint, 74 focused tests; CI rerunning     |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@cb04a85cfa`    | Typecheck, full lint, 66 focused tests; CI rerunning     |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@6e0f6b6697`     | Typecheck, full lint, 107 focused tests; CI rerunning    |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@a4be155791`    | Full cumulative and paired E2E proof; CI rerunning       |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1237,6 +1252,11 @@ topology, versions, and explicit gaps at every later checkpoint.
 - The superseded development drafts remain open until human reviewers accept the replacement
   stack. Their mapping is durable in #14957; closing them now would remove useful review evidence.
 - No PR was merged or marked ready.
+- Rebased all five replacement branches onto `origin/main@9e3e583a83` and resubmitted stack
+  #14958. The conflict resolution kept upstream `skills.install-result.v2` on every native remote
+  transport, added Electron browser capabilities only for Electron callers, preserved upstream
+  abort semantics, and retained both renderer bootstrap installers. No PR was merged or marked
+  ready, no superseded draft was closed, and Linear remained In Progress.
 
 ## Completion rule
 
