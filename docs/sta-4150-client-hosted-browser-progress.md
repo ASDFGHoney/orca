@@ -102,11 +102,24 @@ Old clients and callers that omit placement must retain current server-hosted be
   its prior head passed every substantive job while GitHub's aggregate `verify` remained queued.
 - Published renderer-registry branch: `sta-4150-browser-client-page-renderer-registry`, draft PR
   [#14596](https://github.com/stablyai/orca/pull/14596), stacked on #14578.
-- Current stack-tip state is **not yet activated or user-visible**, because capability
-  advertisement, default client placement, live host registration, and normal caller routing are
-  not connected yet. This is only the current development-stack boundary. The next feature layer
-  must activate and prove the end-to-end desktop path; no further standalone compatibility
-  substrate should be added first.
+- The cumulative development tree is now **production-active and user-visible** when the
+  new-page setting is enabled: eligible paired Electron desktops select client placement, mount
+  one retained local guest, and route normal automation to it. Ineligible and explicitly
+  server-placed pages retain the server engine. This activated tree remains unpublished while its
+  landing-stack rebase, decomposition, and review are completed.
+- Active development branch: `sta-4150-browser-client-host-desktop-activation`. The exact validated
+  pre-rebase cumulative tree is preserved by
+  `sta-4150-safety-validated-cumulative-20260816` at `2eda86baa6`; the committed pre-activation base
+  is preserved by `sta-4150-safety-pre-landing-base-20260816` at `182c2c75f3`. A deterministic
+  baseline proved production capability advertisement and client-host/tunnel RPC registration were
+  absent: 3 tests failed and 26 passed. The candidate advertises the three existing capabilities
+  and registers the two authenticated method sets; the same 3 files now pass all 29 tests.
+- Two read-only activation reviews confirmed that advertisement, host preparation, and
+  placement-aware creation are one functional seam: do not publish support before a normal caller
+  can create a routed client page. They also confirmed that routing every browser method as a new
+  client-host command would duplicate the server engine. Use one separately negotiated, bounded
+  automation command/result envelope that invokes the hosting desktop's existing
+  `AgentBrowserBridge`; keep large binary results on a bounded secondary channel only when needed.
 - Design evidence: `remote-browser-client-hosting.md`, SHA-256
   `d5f6a16df09286388e4d335a8bd896ce0260e9f626ddcc79d8043eff7159a4e0`.
 - OSS reference: T3Code commit `184d8ef33b8f42869fb84f66a33984185b81dc47` keeps shared
@@ -130,11 +143,29 @@ page-placement boundary, not throughout the new engine:
 
 1. Completed: corrected #14769 and authority-transition draft #14876 are published on the latest
    base with the bounded lifecycle/resource review and sticky-cleanup oracle clean.
-2. Build one activation branch above authority transition. This branch must connect capability
-   advertisement, eligible default placement, live host registration, all normal browser/agent/CLI
-   call routing, renderer mount, local input and browser chrome, fail-closed execution-host
-   networking, failure UX/telemetry, and a kill switch for newly created pages.
-3. Prove the activated tip before reshaping history: deterministic placement/authority failures,
+2. Build and review the complete feature on one development branch above authority transition.
+   Do not publish a partial activation PR. The implementation order on that branch is:
+   1. Add a main-process preparation call used immediately before remote `browser.tabCreate`. It
+      checks the new-page kill switch, Electron/renderer eligibility, exact environment/runtime
+      identity, and all required capabilities; starts or reuses the exact paired browser host; and
+      returns either explicit server placement or the exact `browserHostClientId`.
+   2. Add one optional placement field to `browser.tabCreate`. Omitted placement preserves the old
+      server path. Explicit client placement allocates the stable page ID, resolves the exact
+      native/SSH/WSL execution host and grant, commits no page state before client create proof,
+      and rolls back on failure. Once client placement is selected, failure is surfaced; it never
+      falls back to a second server page.
+   3. Publish runtime-owned logical tab state containing immutable placement and page authority.
+      Client pages attach their already-authorized retained Electron guest to the visible
+      `BrowserPane`; they bypass screencast activation, remote input RPCs, and server-frame UX.
+   4. Route ordinary agent/CLI browser methods by the stored placement. Server pages keep the
+      existing `AgentBrowserBridge`; client pages send one capability-gated bounded automation
+      request to the hosting desktop, which invokes that same bridge against the registered guest.
+      Do not create parallel implementations for the roughly 70 browser methods.
+   5. Add local browser chrome/input ownership, client-placement failure UX and telemetry, exact
+      cleanup, and the new-page-only kill switch. Disabling the switch never migrates or replaces
+      an existing page.
+3. Prove the production-active cumulative tip before reshaping history: deterministic
+   placement/authority failures,
    real paired Electron, no-screencast client pages, remote DNS/localhost/subresources, tunnel-loss
    containment, reconnect/restart, old/new peers, server fallback for ineligible callers,
    headed/headless/browserless hosts, SSH/WSL/native, folder/worktree, and the platform matrix.
@@ -142,24 +173,113 @@ page-placement boundary, not throughout the new engine:
    only if ticket acceptance requires mobile/web mirroring or a separately bounded large-result
    transport.
 
+Current activation checkpoint (2026-08-16): the main-process host-preparation IPC, new-page-only
+setting, optional placement schema, renderer-side pre-create selection, runtime-side client create
+transaction, runtime-owned logical tabs, WSL/SSH/native execution routes, retained `BrowserPane`
+guest, bounded automation envelope, and exact cleanup are implemented. Explicit
+client placement reserves the exact host/page generation, retains the execution-host grant, proves
+`createPage`, commits placement, then navigates. Failure, timeout, or lost authority rolls back
+without entering the server creation path. Placement is immutable; there is no migration, dual
+execution, or automatic client-to-server fallback.
+
+Production proof is green from a fresh build in both live topologies: the headed paired-Electron
+and real headless `orca serve` journeys pass. Each creates through the product
+store action, proves one client-owned guest and zero server guest, renders without a screencast,
+executes `browser.snapshot` on the client guest, preserves that page when the kill switch is
+disabled, then creates the next page on the server without duplicate execution. The paired-runtime
+run used freshly rebuilt Electron, CLI, and paired-web artifacts; `test-results/.last-run.json`
+records `status: passed`.
+
+The cumulative matrix found and fixed two integration blockers. First, renderer publication can
+arrive after `browser.tabCreate` acknowledgement; an exact Zustand subscription now waits boundedly
+for only the acknowledged environment/worktree/page/group instead of declaring a false failure.
+Second, a replacement lease legitimately closes client-reported imported inventory before that
+lease has issued `createPage`; close-first is now admitted only for reconciliation, while ordinary
+close-first and navigate-first requests remain rejected. The unchanged lifecycle package was red
+3/116 and is green 116/116. Activation also made the production RPC registry authoritative, so the
+paired tunnel fixture stopped injecting duplicate method definitions and is green 3/3.
+
+Subsequent review and full-suite evidence found and fixed the remaining activation blockers:
+
+- Mobile-scoped pairings remain server-hosted, client placement is bound to the authenticated
+  `pairedDeviceId`, and preparation failure surfaces a translated actionable error without falling
+  back to a second browser engine.
+- Guest or renderer loss is reported once and generation-fenced, marks the page
+  `outcomeUnknown`, coalesces one bounded lease refresh, retires the old generation, and restores
+  only under a new generation.
+- Old clients see a placement-safe session-tab projection: hidden client pages cannot be activated,
+  closed, split, reordered into, or targeted; projected mutation indices and responses preserve
+  hidden raw slots.
+- Runtime-owned close intent now routes client pages through their lease, offscreen pages through
+  the offscreen backend, and headed renderer pages through `closeSessionTab`. Snapshot retirement
+  rereads current state after asynchronous close, so concurrent session mutations are not
+  overwritten.
+- Headed renderer graph updates preserve only an exact live registry-backed client page for the
+  same workspace and placement generation. Retirement makes the same accepted renderer revision
+  prune it, and a later revision cannot resurrect it.
+
+Current validation is green on the cumulative tree:
+
+- Latest-main full repository suite: 5,749 files passed, 53,861 tests passed, 126 skipped, zero
+  failures.
+- Full Node/CLI/web typecheck and full lint pass, including native/type-aware audits, 89 reliability
+  gates, max-lines ratchet, bundled skills, and localization catalog/extraction/coverage.
+- Package/Electron runtime contract: 22/22. The exact former full-suite failure set passes 1,202
+  tests with one intentional skip.
+- Fresh post-rebase `pnpm build:desktop` built relay bundles for Linux/macOS/Windows x64 and arm64, the WSL
+  browser relay, CLI, Electron, paired web client, and verified bundled skills. The existing
+  `/usr/local/bin/orca-dev` shim warning was benign; the CLI artifact passed verification.
+- Both post-rebase paired-runtime product journeys pass from rebuilt E2E Electron and CLI
+  artifacts; the headed paired-Electron journey and real headless `orca serve` journey each prove
+  client placement, local rendering and automation, zero host guest, no screencast, new-page-only
+  kill-switch behavior, and server fallback without duplicate execution.
+- Required independent Electron/CDP validation attached to the exact workspace and branch, showed
+  a normally rendered visible app with zero console errors, and produced the inspected screenshot
+  `/tmp/sta-4150-cdp-visible.png`. The Playwright session and launched dev Electron process were
+  closed afterward.
+- Fresh wire/mobile/security and performance/resource reviews found no remaining proven P0/P1/P2.
+  Lifecycle/cross-platform review found the headed-close, stale-snapshot, and headed graph-pruning
+  defects above; all are fixed. Its final post-fix rereview found no remaining proven P0/P1/P2 and
+  passed 1,188 focused tests with one intentional skip.
+
+The 41-commit cumulative tree is rebased onto latest `origin/main@9f3a912c1e`. `git range-diff`
+marks 39 patches identical; the two contextual differences preserve the newer upstream preload
+import neighborhood and upstream reliability-gate duration while retaining the STA-4150 gate.
+The pre-rebase checkpoint and explicit safety refs preserve the exact validated tree.
+Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
+ordering, physical mobile-client validation, and packaged mixed-release client/server browser
+journeys. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless, mixed-version, and
+package-contract evidence is green.
+
+The remaining work, in execution order, is:
+
+1. Repeat the required validation on the latest-main rebase.
+2. Reshape that exact final tree into at most five locally validated draft stacked PRs.
+3. Record the old-to-new PR mapping, update draft metadata and Linear/worktree checkpoints, and
+   stop without merging or marking any PR ready.
+
 ### Phase B: replace development history with the landing stack
 
 The 37 draft PRs remain development and evidence history while Phase A is changing. Do not relink,
 rebase, or individually production-harden that chain. After the activated tip is green, preserve it
 with a safety ref and replay the same implementation from latest `origin/main` into five branches:
 
-| Order | Landing PR                           | Cohesive scope                                                                   |
-| ----- | ------------------------------------ | -------------------------------------------------------------------------------- |
-| 1     | Contracts and placement              | Optional wire contracts, capabilities, placement model, compatibility policy     |
-| 2     | Paired tunnel and execution routing  | Bounded tunnel, remote DNS, SSH/WSL/native routes, admission and accounting      |
-| 3     | Electron isolation and lifecycle     | Partitions, quarantine, exact WebContents ownership, mount, navigation, cleanup  |
-| 4     | Command authority and reconciliation | Leases, dispatch/results, replacement, reconnect, inventory and reconciliation   |
-| 5     | Activated desktop product path       | Advertisement, default selection, callers, UI/input, kill switch, telemetry, E2E |
+| Order | Landing PR                           | Cohesive scope                                                                    |
+| ----- | ------------------------------------ | --------------------------------------------------------------------------------- |
+| 1     | Contracts and placement              | Optional wire schemas/capability constants, placement model, compatibility policy |
+| 2     | Paired tunnel and execution routing  | Bounded tunnel, remote DNS, SSH/WSL/native routes, admission and accounting       |
+| 3     | Electron isolation and lifecycle     | Partitions, quarantine, exact WebContents ownership, mount, navigation, cleanup   |
+| 4     | Command authority and reconciliation | Leases, bounded automation dispatch/results, replacement, reconnect, inventory    |
+| 5     | Activated desktop product path       | Advertisement/RPC registration, placement callers, UI/input, kill switch, E2E     |
 
 Each PR is a review boundary and each cumulative tip must compile and pass its owned deterministic
 tests. The lower PRs do not need to be independently deployable: do not add two-way shims, dormant
 fallback machinery, or temporary product flags just so a partial stack could ship alone. Production
 readiness is decided at PR 5, whose final tree must exactly match the already-proven Phase A tip.
+Capability advertisement and production RPC registration therefore belong in PR 5 even though
+their constants and implementations are introduced lower in the stack. Five PRs is a ceiling: if a
+boundary requires temporary behavior or duplicated code, combine adjacent scopes rather than add a
+shim.
 
 Construct and validate the replacement branches locally before registering them with `gh stack`.
 Then adopt them in dependency order, submit draft PRs non-interactively, verify the generated bases,
@@ -182,9 +302,10 @@ Stack mechanics:
 
 1. Rebase and fully revalidate the activated development tip on the latest `origin/main`, then
    preserve both its base and tip with safety refs.
-2. Build the five named branches locally from that exact base. Preserve dependency order and allow
-   multiple commits per branch; do not add temporary runtime behavior just to isolate a review
-   layer.
+2. Keep the activation branch outside `gh stack` while the feature is under construction. Build the
+   five named branches locally from the preserved base only after the cumulative tip passes the
+   activation matrix. Preserve dependency order and allow multiple commits per branch; do not add
+   temporary runtime behavior just to isolate a review layer.
 3. Require the fifth branch tree to equal the preserved activated tip, and use `git range-diff` to
    account for every rewritten commit before any GitHub mutation.
 4. Adopt the existing local branches with `gh stack init --base main <branches...>`, then use
@@ -196,6 +317,12 @@ Stack mechanics:
 
 The kill switch changes placement only for pages created after it is disabled. It must not migrate,
 replace, or silently fall back an existing client-hosted page.
+
+Development/landing invariant: the feature is implemented and validated as one production-active
+cumulative tip. The later PR split is only a review decomposition; it must not drive extra runtime
+branches, compatibility shims, dual execution, or temporary fallback behavior. If any proposed PR
+boundary requires those, collapse that boundary into an adjacent PR. The landing stack's top tree
+must be byte-for-byte equivalent to the preserved validated tip before any draft is published.
 
 ## Draft stack
 
