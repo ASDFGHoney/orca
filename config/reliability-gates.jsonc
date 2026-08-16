@@ -3945,7 +3945,7 @@
       "providers": ["remote-runtime", "ssh", "wsl"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["remote-runtime", "ssh", "wsl"],
-      "coverageNotes": "Fresh-build Playwright journeys run the same production store action against an isolated headed Electron server and a real headless orca serve host. They prove one immutable client placement owns one real retained guest on the viewing desktop, the server owns no duplicate guest, no screencast frame renders, browser.snapshot reaches the client guest, disabling the setting preserves that guest, and the next page uses the legacy server engine. Deterministic contracts cover omitted placement, missing capabilities, explicit server placement, exact renderer-store materialization after delayed publication, no fallback after client-create failure, folder workspaces, git worktrees, browserless hosts, native and WSL routes, exact connected SSH authority, reconnect command replay, lease replacement, imported-inventory cleanup, and bounded retirement. A Docker OpenSSH target proves container-only DNS and localhost through both ssh2 and system-SSH routes. Physical Windows/Linux Electron and packaged mixed-release browser journeys remain gaps.",
+      "coverageNotes": "Fresh-build Playwright journeys run the same production store action against an isolated headed Electron server and a real headless orca serve host. They prove one immutable client placement owns one real retained guest on the viewing desktop, the server owns no duplicate guest, no screencast frame renders, browser.snapshot reaches the client guest, disabling the setting preserves that guest, and the next page uses the legacy server engine. Deterministic contracts cover omitted placement, missing capabilities, explicit server placement, exact renderer-store materialization after delayed publication, no fallback after client-create failure, folder workspaces, git worktrees, browserless hosts, native and WSL routes, exact connected SSH authority, reconnect command replay, lease replacement, imported-inventory cleanup, and bounded retirement. A real published release checkout proves its old browser.tabCreate schema strips additive placement while the current schema preserves an old request with omitted placement. A Docker OpenSSH target proves container-only DNS and localhost through both ssh2 and system-SSH routes. Physical Windows/Linux Electron and packaged mixed-release browser journeys remain gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4150/refactor-remote-browser-to-client-hosted-electron-webviews"
       ],
@@ -3955,6 +3955,7 @@
         "pnpm exec playwright test tests/e2e/paired-client-hosted-browser.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/web-runtime-session-browser-client-placement.test.ts src/renderer/src/runtime/web-runtime-session-browser-create-failure.test.ts src/main/runtime/orca-runtime-browser-client-hosted.test.ts src/main/runtime/runtime-browser-client-page-creation.test.ts src/main/runtime/browser-host-page-reconciliation-orchestration.test.ts src/main/runtime/browser-host-command-ledger.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/browser-client-host-protocol.test.ts src/shared/remote-runtime-client.test.ts src/main/runtime/browser-host-capability-selection.test.ts src/main/runtime/rpc/methods/browser-tab-create-schema.test.ts src/main/ipc/runtime-environment-browser-client-host-handler.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/browser-network-tunnel-paired-runtime.integration.test.ts src/main/browser/paired-runtime-browser-network-route.test.ts src/main/browser/browser-network-execution-route.test.ts src/main/browser/wsl-browser-network-execution-route.test.ts src/main/browser/wsl-browser-network-relay-launch.test.ts src/main/runtime/runtime-browser-network-execution-host.test.ts",
         "ORCA_RUN_DOCKER_SSH_BROWSER_E2E=1 pnpm exec vitest run --config config/vitest.config.ts tests/e2e/ssh-browser-network-execution-route.docker.unit.test.ts"
       ],
@@ -3971,6 +3972,7 @@
         "src/main/runtime/browser-host-capability-selection.test.ts",
         "src/main/runtime/rpc/methods/browser-tab-create-schema.test.ts",
         "src/main/ipc/runtime-environment-browser-client-host-handler.test.ts",
+        "tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts",
         "src/main/runtime/browser-network-tunnel-paired-runtime.integration.test.ts",
         "src/main/browser/paired-runtime-browser-network-route.test.ts",
         "src/main/browser/browser-network-execution-route.test.ts",
@@ -3997,6 +3999,14 @@
           ]
         },
         {
+          "file": "tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts",
+          "assertions": [
+            "a real stable release has no client-host or browser-tunnel capability constants",
+            "the old server schema strips additive placement without changing legacy fields",
+            "the current schema accepts the old request with placement omitted"
+          ]
+        },
+        {
           "file": "src/main/runtime/browser-host-command-ledger.test.ts",
           "assertions": [
             "reconciliation may close imported inventory before a create command in the replacement ledger",
@@ -4019,6 +4029,15 @@
           "result": "passed",
           "durationSeconds": 48.8,
           "summary": "Two fresh-build production journeys passed against isolated headed Electron and real headless orca serve hosts, including client ownership, visible retained content, automation, no screencast, new-page-only kill switch, and server fallback without duplicate execution."
+        },
+        {
+          "date": "2026-08-16",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.23,
+          "summary": "Three assertions passed against published v1.4.182 and the current tree: the release lacks the negotiated capabilities, strips additive placement without changing legacy fields, and the current server preserves an old request with omitted placement."
         },
         {
           "date": "2026-08-16",

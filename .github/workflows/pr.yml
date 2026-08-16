@@ -340,8 +340,11 @@ jobs:
 
       # A path filter that matches nothing exits 1 ("No test files found"), so this
       # lane cannot report success while running zero tests.
-      - name: Old/new client and server terminal journey
-        run: pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts
+      - name: Old/new client and server compatibility journeys
+        run: >-
+          pnpm exec vitest run --config config/vitest.config.ts
+          tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts
+          tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts
 
   managed_hook_node18:
     name: managed hooks on Node 18
