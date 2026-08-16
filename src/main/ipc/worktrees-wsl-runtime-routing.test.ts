@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import {
   setPlatform,
   listWorktreesMock,
@@ -185,6 +186,7 @@ describe('registerWorktreeHandlers', () => {
     )
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
       [
+        ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
         'fetch',
         'pr-contributor-orca',
         '+refs/heads/contributor/wsl-fork:refs/remotes/pr-contributor-orca/contributor/wsl-fork'

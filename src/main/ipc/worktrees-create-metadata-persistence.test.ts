@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { REVIEW_HEAD_FETCH_TIMEOUT_MS } from '../../shared/review-head-tracking-ref'
 import {
   removeHandlerMock,
@@ -341,6 +342,7 @@ describe('registerWorktreeHandlers', () => {
     )
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
       [
+        ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
         'fetch',
         'pr-prateek-orca',
         '+refs/heads/prateek/fix-sidebar-agents-toggle:refs/remotes/pr-prateek-orca/prateek/fix-sidebar-agents-toggle'

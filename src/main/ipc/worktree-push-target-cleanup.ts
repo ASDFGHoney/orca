@@ -9,8 +9,6 @@ import type { WorktreePushTargetGit } from './worktree-push-target-git'
 
 export type WorktreePushTargetStore = Pick<Store, 'getAllWorktreeMeta'>
 
-export { sameGitHubRemoteUrl } from '../../shared/git-push-target-remote-url'
-
 function isPushTargetUsedByAnotherWorktree(
   store: WorktreePushTargetStore,
   removedWorktreeId: string,

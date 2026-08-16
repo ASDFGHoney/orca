@@ -86,11 +86,11 @@ import {
 } from './worktree-logic'
 import { findCreatedWorktree } from './created-worktree-reconciliation'
 import type { BranchPrefixSettings } from '../../shared/branch-prefix'
+import { sameGitHubRemoteUrl } from '../../shared/git-push-target-remote-url'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../shared/workspace-scope'
 import {
   cleanupUnusedWorktreePushTargetRemoteWithGit,
-  sameGitHubRemoteUrl,
   type WorktreePushTargetStore
 } from './worktree-push-target-cleanup'
 import {

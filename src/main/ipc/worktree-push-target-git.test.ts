@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { gitExecFileAsync } from '../git/runner'
 import { createLocalWorktreePushTargetGit } from './worktree-push-target-git'
 
@@ -32,6 +33,7 @@ describe('local worktree push-target git adapter', () => {
     expect(execGit).toHaveBeenNthCalledWith(
       2,
       [
+        ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
         'fetch',
         target.remoteName,
         `+refs/heads/${target.branchName}:refs/remotes/${target.remoteName}/${target.branchName}`

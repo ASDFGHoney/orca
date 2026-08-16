@@ -27,7 +27,8 @@ export function createSshWorktreePushTargetGit(provider: SshGitProvider): Worktr
         repoPath,
         target.remoteName,
         target.branchName,
-        `refs/remotes/${target.remoteName}/${target.branchName}`
+        `refs/remotes/${target.remoteName}/${target.branchName}`,
+        { skipAutoMaintenance: true }
       )
     },
     async configureUpstream(worktreePath, branchName, target) {

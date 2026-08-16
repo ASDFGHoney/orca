@@ -102,7 +102,8 @@ describe('SSH worktree push-target adapter', () => {
       repoPath,
       target.remoteName,
       target.branchName,
-      `refs/remotes/${target.remoteName}/${target.branchName}`
+      `refs/remotes/${target.remoteName}/${target.branchName}`,
+      { skipAutoMaintenance: true }
     )
     expect(prepared.remoteCreated).toBe(true)
   })
@@ -118,7 +119,8 @@ describe('SSH worktree push-target adapter', () => {
       repoPath,
       'fork',
       target.branchName,
-      `refs/remotes/fork/${target.branchName}`
+      `refs/remotes/fork/${target.branchName}`,
+      { skipAutoMaintenance: true }
     )
     expect(provider.configureWorktreePushTarget).toHaveBeenCalledWith(
       '/remote/repo-fix',

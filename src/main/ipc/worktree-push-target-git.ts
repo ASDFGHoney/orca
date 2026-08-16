@@ -1,6 +1,7 @@
 import type { GitPushTarget } from '../../shared/worktree/types'
 import { assertGitPushTargetShape } from '../../shared/git-push-target-validation'
 import { sameGitHubRemoteUrl } from '../../shared/git-push-target-remote-url'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { gitExecFileAsync } from '../git/runner'
 
 export type WorktreePushTargetGit = {
@@ -45,6 +46,7 @@ export function createLocalWorktreePushTargetGit(
     async fetchRemoteTrackingRef(repoPath, target) {
       await exec(
         [
+          ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
           'fetch',
           target.remoteName,
           `+refs/heads/${target.branchName}:refs/remotes/${target.remoteName}/${target.branchName}`

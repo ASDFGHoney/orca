@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { sameGitHubRemoteUrl } from '../../shared/git-push-target-remote-url'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { GitPushTarget } from '../../shared/worktree/types'
 import {
   cleanupUnusedWorktreePushTargetRemoteWithGit,
-  sameGitHubRemoteUrl,
   type WorktreePushTargetStore
 } from './worktree-push-target-cleanup'
 
@@ -247,6 +247,15 @@ describe('sameGitHubRemoteUrl', () => {
       sameGitHubRemoteUrl(
         'git@github.com:contributor/orca.git',
         'https://github.com/contributor/orca.git'
+      )
+    ).toBe(true)
+  })
+
+  it('matches www and ssh.github.com aliases of the same fork', () => {
+    expect(
+      sameGitHubRemoteUrl(
+        'https://www.github.com/contributor/orca.git',
+        'git@ssh.github.com:contributor/orca.git'
       )
     ).toBe(true)
   })
