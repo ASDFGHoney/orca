@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Globe, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
@@ -49,10 +49,8 @@ export function ClientHostedBrowserPagePane({
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
   const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
-  const onUpdatePageStateRef = useRef(onUpdatePageState)
-  const onSetUrlRef = useRef(onSetUrl)
-  onUpdatePageStateRef.current = onUpdatePageState
-  onSetUrlRef.current = onSetUrl
+  const updatePageStateFromGuest = useEffectEvent(onUpdatePageState)
+  const setUrlFromGuest = useEffectEvent(onSetUrl)
   const { browserHostClientId, browserHostGeneration, pageHostGeneration } = placement
 
   useLayoutEffect(() => {
@@ -92,10 +90,10 @@ export function ClientHostedBrowserPagePane({
     const syncNavigation = (event?: Event): void => {
       const eventUrl = (event as (Event & { url?: string }) | undefined)?.url
       const metadata = readClientPageMetadata(webview, eventUrl)
-      onSetUrlRef.current(browserTab.id, metadata.url, {
+      setUrlFromGuest(browserTab.id, metadata.url, {
         preserveLoadError: true
       })
-      onUpdatePageStateRef.current(browserTab.id, {
+      updatePageStateFromGuest(browserTab.id, {
         title: metadata.title,
         loading: metadata.loading,
         canGoBack: metadata.canGoBack,
@@ -106,7 +104,7 @@ export function ClientHostedBrowserPagePane({
       setAddressBarValue(toDisplayUrl(metadata.url))
     }
     const onStart = (): void => {
-      onUpdatePageStateRef.current(browserTab.id, { loading: true, loadError: null })
+      updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
       publisher.publish(readClientPageMetadata(webview, undefined, true))
     }
     webview.addEventListener('did-start-loading', onStart)
