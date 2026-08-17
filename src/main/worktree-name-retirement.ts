@@ -258,10 +258,11 @@ export async function retireGeneratedWorktreeName(
   // Why local too: the repo-id row dies with the project, and the on-disk backfill cannot recover a
   // name whose only surviving history is a Codex rollout file rather than a directory.
   //
-  // On-demand runtimes are the exception: each provision reaches a discarded filesystem under a
-  // fresh address, so the mirror could never match a later run and would mint a namespace per run —
-  // spending the cap on buckets that can never be read, and evicting the tombstones of the local and
-  // SSH projects that depend on it. The repo-id row still records the name for the live session.
+  // On-demand runtimes are the exception: the address is part of the key and changes on every
+  // provision, so a mirror written here is unreadable after the next one while still minting a
+  // namespace per run — spending the capped slots that local and SSH projects depend on. The
+  // repo-id row still records the name, so only a remove/re-add *within* one provision loses
+  // anything, and that VM's filesystem is discarded shortly after regardless.
   if (
     isFolderRepo(repo) ||
     !store.mergeRetiredWorktreeNamesForNamespace ||

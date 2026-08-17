@@ -170,6 +170,29 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
     expect(namespaces['local:posix:/w/2']).toBeDefined()
   })
 
+  it('leaves a merged destination newest, so the very next ordinary write cannot evict it', () => {
+    // Protecting the destination only inside the migration's own trim is not enough: the key keeps
+    // its original slot, so the next unrelated retirement write evicts it as "oldest" and undoes
+    // the migration along with the name the destination already held.
+    const namespaces: Record<string, RetiredNameRegistry> = {
+      'ssh:new|22|dev:posix:/srv/a': registry('seahorse')
+    }
+    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES - 2; index += 1) {
+      namespaces[`local:posix:/w/${index}`] = registry('dolphin')
+    }
+    namespaces['ssh:old|22|dev:posix:/srv/a'] = registry('nautilus')
+
+    migrateRetirementNamespaceHostIdentity(namespaces, {
+      copyFrom: ['ssh:old|22|dev'],
+      to: 'ssh:new|22|dev'
+    })
+    recordRetirementNamespaceRegistry(namespaces, 'local:posix:/fresh', registry('manta'))
+
+    const destination = namespaces['ssh:new|22|dev:posix:/srv/a']
+    expect(destination).toBeDefined()
+    expect(destination.names.toSorted()).toEqual(['nautilus', 'seahorse'])
+  })
+
   it('does not let the cap evict a destination it just merged into', () => {
     // Assigning to an existing key leaves it in its original slot, so the merged destination is the
     // OLDEST entry here and an unguarded oldest-first trim would drop the name it just absorbed.

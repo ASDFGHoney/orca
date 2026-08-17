@@ -96,29 +96,16 @@ export function recordRetirementNamespaceRegistry(
  *  during migration adds a key without removing one, so the map would otherwise drift over the cap
  *  and the next ordinary write would evict the whole excess at once.
  *
- *  `retained` names keys this operation just wrote or deliberately kept. They are exempt because
- *  insertion order does not track them: assigning to an existing key leaves it in its original slot,
- *  and a copy's source bucket keeps the position it was first written at. Without the exemption the
- *  trim evicts exactly the buckets the caller was protecting — the merged destination, and the
- *  shared source a live sibling target still reads. */
-function trimRetirementNamespaces(
-  namespaces: Record<string, RetiredNameRegistry>,
-  retained?: ReadonlySet<string>
-): void {
-  // Why the clamp: a negative count would make this evict from an under-full map instead of nothing.
-  let overflow = Math.max(0, Object.keys(namespaces).length - MAX_RETIREMENT_NAMESPACES)
-  if (overflow === 0) {
-    return
-  }
-  for (const stale of Object.keys(namespaces)) {
-    if (retained?.has(stale)) {
-      continue
-    }
+ *  Callers are responsible for re-inserting anything they touched first, so that insertion order
+ *  actually reflects use. Exempting keys here instead would protect them for this one call and no
+ *  other, leaving a just-written bucket sitting at the front of the eviction queue. */
+function trimRetirementNamespaces(namespaces: Record<string, RetiredNameRegistry>): void {
+  const keys = Object.keys(namespaces)
+  // Why the clamp: a negative `end` makes slice count back from the tail, so an under-full map
+  // would evict almost everything it holds instead of nothing.
+  const overflow = Math.max(0, keys.length - MAX_RETIREMENT_NAMESPACES)
+  for (const stale of keys.slice(0, overflow)) {
     delete namespaces[stale]
-    overflow -= 1
-    if (overflow === 0) {
-      return
-    }
   }
 }
 
@@ -144,7 +131,6 @@ export function migrateRetirementNamespaceHostIdentity(
     return false
   }
   const visited = new Set<string>()
-  const retained = new Set<string>()
   let changed = false
   for (const group of [
     { identities: migration.moveFrom ?? [], retainSource: false },
@@ -155,23 +141,14 @@ export function migrateRetirementNamespaceHostIdentity(
         continue
       }
       visited.add(oldIdentity)
-      if (
-        rekeyRetirementNamespaceHost(
-          namespaces,
-          oldIdentity,
-          migration.to,
-          group.retainSource,
-          retained
-        )
-      ) {
+      if (rekeyRetirementNamespaceHost(namespaces, oldIdentity, migration.to, group.retainSource)) {
         changed = true
       }
     }
   }
   if (changed) {
-    // A retained source bucket grows the map, so migration has to respect the cap too — but never
-    // by evicting what it just migrated.
-    trimRetirementNamespaces(namespaces, retained)
+    // A retained source bucket grows the map, so migration has to respect the cap too.
+    trimRetirementNamespaces(namespaces)
   }
   return changed
 }
@@ -188,8 +165,7 @@ function rekeyRetirementNamespaceHost(
   namespaces: Record<string, RetiredNameRegistry>,
   fromIdentity: string,
   toIdentity: string,
-  retainSource: boolean,
-  retained: Set<string>
+  retainSource: boolean
 ): boolean {
   const prefix = `${fromIdentity}:`
   let changed = false
@@ -198,26 +174,28 @@ function rekeyRetirementNamespaceHost(
       continue
     }
     const registry = namespaces[key]
-    if (retainSource) {
-      retained.add(key)
-    } else {
-      delete namespaces[key]
-      changed = true
-    }
     const nextKey = `${toIdentity}:${key.slice(prefix.length)}`
-    retained.add(nextKey)
     const existing = namespaces[nextKey]
-    if (!existing) {
-      namespaces[nextKey] = registry
-      changed = true
-      continue
-    }
     // Why compare: a copy repeats on every import, and reporting a change the destination already
     // covered would schedule a save each time. Compared by membership rather than by size, so a
     // destination that was stored uncompacted cannot trade a folded name for a new one and read
     // as unchanged.
-    const merged = mergeRetiredNameRegistries(existing, registry)
-    if (!retiredNameRegistriesEqual(merged, existing)) {
+    const merged = existing ? mergeRetiredNameRegistries(existing, registry) : registry
+    const wrote = !existing || !retiredNameRegistriesEqual(merged, existing)
+    if (!retainSource) {
+      delete namespaces[key]
+      changed = true
+    } else if (wrote) {
+      // Re-insert so this bucket counts as freshly used. A copy keeps it for a live sibling target,
+      // and leaving it at its original slot would make it the next eviction victim.
+      delete namespaces[key]
+      namespaces[key] = registry
+    }
+    if (wrote) {
+      // Re-insert rather than assign: assigning to an existing key leaves it in its original slot,
+      // so a destination that was just written would sit at the front of the eviction queue and the
+      // next ordinary write would drop it — taking the migrated name and its own with it.
+      delete namespaces[nextKey]
       namespaces[nextKey] = merged
       changed = true
     }
