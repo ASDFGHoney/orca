@@ -15,6 +15,7 @@ export class StructuredAgentSessionReadableRestorer {
       journalRoot: string
       supportsRecord: (record: AgentSessionRecord) => boolean
       reconcile: (sessionId: string) => Promise<AgentSessionWireRefusal | null>
+      resolveRecovery: (sessionId: string) => Promise<unknown>
       resume: (params: AgentSessionAttachParams) => Promise<boolean>
       serialize: <T>(sessionId: string, task: () => Promise<T>) => Promise<T>
       hasSession: (sessionId: string) => boolean

@@ -313,7 +313,8 @@ beforeEach(async () => {
           EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
           CODEX_HOME: '/shell/home'
         }),
-        openCodexConnection: codex.openConnection
+        openCodexConnection: codex.openConnection,
+        readProcessStartTime: async () => 1_700_000_000_000
       }).then(() => undefined),
     registerSubscriptionCleanup: vi.fn((id: string, dispose: () => void) =>
       cleanups.set(id, dispose)
@@ -779,7 +780,8 @@ describe('a structured codex session over agentSession.*', () => {
       claimKeyId: 'key-1',
       resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
       resolveCodexCommand: () => '/usr/local/bin/codex',
-      openCodexConnection: codex.openConnection
+      openCodexConnection: codex.openConnection,
+      readProcessStartTime: async () => 1_700_000_000_000
     })
     const adapter = (host as unknown as { deps: { adapter: CodexStructuredSessionAdapter } }).deps
       .adapter
