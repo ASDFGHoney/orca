@@ -3082,20 +3082,22 @@
       "providers": ["remote-runtime", "ssh", "wsl"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": [],
-      "coverageNotes": "Deterministic main-process tests cover versioned delimiter-safe aggregate partition derivation, path-safe opaque names, durable collision metadata, oversized or corrupt metadata refusal, missing-sidecar Chromium-data refusal, bounded binding/live-page admission, exact SOCKS5 configuration with Chromium loopback bypass disabled, inherited-connection closure, exact proxy verification before allowlisting, concurrent setup coalescing, live proxy-retarget refusal, token-safe page replacement, existing browser-profile policy installation, active Orca-profile storage scoping, blank-only initial attachment, arbitrary initial-navigation denial, and fail-closed per-guest WebRTC policy through delayed or failed cleanup. A real Electron capture proves the unprotected SOCKS-partition control sends direct STUN while the exact guest policy sends zero desktop UDP packets. Persisted-worker containment, non-WebRTC UDP/DoH denial, and provider journeys remain uncovered.",
+      "coverageNotes": "Deterministic main-process tests cover versioned delimiter-safe aggregate partition derivation, path-safe opaque names, durable collision metadata, oversized or corrupt metadata refusal, missing-sidecar Chromium-data refusal, bounded binding/live-page admission, immediate SOCKS5 setup with Chromium loopback bypass disabled, inherited-connection closure, exact proxy verification before allowlisting, concurrent setup coalescing, live proxy-retarget refusal, token-safe page replacement, existing browser-profile policy installation, active Orca-profile storage scoping, blank-only initial attachment, arbitrary initial-navigation denial, and fail-closed per-guest WebRTC policy through delayed or failed cleanup. A two-launch real Electron control proves a forced persisted-worker wake before setProxy reaches desktop localhost; invoking setProxy immediately after Session creation routes the same wake through SOCKS and keeps a later worker message fetch routed after verification. A second real Electron capture proves the unprotected SOCKS-partition control sends direct STUN while the exact guest policy sends zero desktop UDP packets. Non-WebRTC UDP/DoH denial and provider journeys remain uncovered.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4150/refactor-remote-browser-to-client-hosted-electron-webviews"
       ],
-      "invariant": "A client-hosted partition is derived only in main from stable Orca-profile, browser-profile, authority-connection, and execution-host identities. Raw identities and individually linkable component hashes never enter its path-safe partition name. Durable binding metadata must match and precede Chromium partition data before reuse. One live partition never changes execution host or proxy endpoint, and no partition enters the webview allowlist until its existing browser policy is installed, fixed SOCKS5 proxy is applied, inherited connections are closed, and resolveProxy returns exactly that one listener. Initial route-partition attachment is blank-only. Its exact WebContents is quarantined before applying non-proxied WebRTC denial and remains navigation- and popup-denied if policy application or cleanup fails. Distinct live partitions, retained logical page generations, durable bindings, and binding-file reads remain bounded.",
-      "oracle": "Derive two delimiter-adversarial identities and require distinct full-digest path-safe partitions with no raw IDs or component hashes. Persist one binding, reload it, and reject replacement, malformed or oversized state, Chromium data without matching metadata, and the 513th binding. Prepare one partition and require policy setup, setProxy with <-loopback>, closeAllConnections, and exact SOCKS5 resolveProxy in order while isAllowedPartition remains false; then require it to become live. Reject DIRECT, a different proxy endpoint, the 65th live partition, and the 65th page generation. Attach one blank route guest, require quarantine before disable_non_proxied_udp and before admission, and fail closed if Electron rejects the policy. Delay or fail guest closure and require navigation plus popups to remain denied. Under real Electron, require the unprotected control to emit STUN and the protected guest to emit zero direct UDP packets.",
+      "invariant": "A client-hosted partition is derived only in main from stable Orca-profile, browser-profile, authority-connection, and execution-host identities. Raw identities and individually linkable component hashes never enter its path-safe partition name. Durable binding metadata must match and precede Chromium partition data before reuse. One live partition never changes execution host or proxy endpoint. Fixed SOCKS5 setup starts immediately after Session creation, before policy installation can yield or a persisted worker is awakened; no partition enters the webview allowlist until browser policy is installed, inherited connections are closed, and resolveProxy returns exactly that one listener. Initial route-partition attachment is blank-only. Its exact WebContents is quarantined before applying non-proxied WebRTC denial and remains navigation- and popup-denied if policy application or cleanup fails. Distinct live partitions, retained logical page generations, durable bindings, and binding-file reads remain bounded.",
+      "oracle": "Derive two delimiter-adversarial identities and require distinct full-digest path-safe partitions with no raw IDs or component hashes. Persist one binding, reload it, and reject replacement, malformed or oversized state, Chromium data without matching metadata, and the 513th binding. Prepare one partition and require setProxy with <-loopback> to be invoked immediately after getSession and before policy setup, then closeAllConnections and exact SOCKS5 resolveProxy while isAllowedPartition remains false; only then may it become live. Across two Electron launches with one persistent partition, require the unprotected forced-worker control to reach desktop localhost without SOCKS, require getAllRunning to be empty immediately after Session creation, and require the same forced wake after immediate setProxy invocation plus a post-verification worker fetch to traverse SOCKS. Reject DIRECT, a different proxy endpoint, the 65th live partition, and the 65th page generation. Attach one blank route guest, require quarantine before disable_non_proxied_udp and before admission, and fail closed if Electron rejects the policy. Delay or fail guest closure and require navigation plus popups to remain denied. Under real Electron, require the unprotected control to emit STUN and the protected guest to emit zero direct UDP packets.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-route-identity.test.ts src/main/browser/browser-route-partition-binding-store.test.ts src/main/browser/browser-route-session-registry.test.ts src/main/browser/browser-session-registry.test.ts src/main/browser/browser-session-startup.test.ts src/main/window/createMainWindow.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-route-webcontents-registry.test.ts src/main/browser/browser-route-webrtc-egress.electron.test.ts"
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-route-webcontents-registry.test.ts src/main/browser/browser-route-webrtc-egress.electron.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-route-session-registry.test.ts src/main/browser/browser-route-persisted-worker-egress.electron.test.ts src/main/browser/browser-route-webrtc-egress.electron.test.ts"
       ],
       "testFiles": [
         "src/main/browser/browser-route-identity.test.ts",
         "src/main/browser/browser-route-partition-binding-store.test.ts",
         "src/main/browser/browser-route-session-registry.test.ts",
+        "src/main/browser/browser-route-persisted-worker-egress.electron.test.ts",
         "src/main/browser/browser-route-webrtc-egress.electron.test.ts",
         "src/main/browser/browser-route-webcontents-registry.test.ts",
         "src/main/browser/browser-session-registry.test.ts",
@@ -3134,6 +3136,15 @@
           ]
         },
         {
+          "file": "src/main/browser/browser-route-persisted-worker-egress.electron.test.ts",
+          "assertions": [
+            "a forced persisted-worker wake before proxy setup reaches the direct desktop control endpoint",
+            "getAllRunning is empty immediately after persistent Session creation in either arm",
+            "invoking setProxy before the forced wake routes it through SOCKS with no direct target request",
+            "a later worker message fetch remains routed after exact proxy verification"
+          ]
+        },
+        {
           "file": "src/main/browser/browser-route-webrtc-egress.electron.test.ts",
           "assertions": [
             "the unprotected SOCKS-partition control emits direct STUN packets",
@@ -3156,6 +3167,15 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-08-16",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-route-session-registry.test.ts src/main/browser/browser-route-persisted-worker-egress.electron.test.ts src/main/browser/browser-route-webrtc-egress.electron.test.ts",
+          "result": "passed",
+          "durationSeconds": 10,
+          "summary": "Three files passed 28 tests. The two-launch worker control reached desktop localhost before proxy setup; immediate setProxy invocation routed the same wake and a later worker fetch through SOCKS with path-attributed direct counts remaining zero. Both resolved and rejected proxy setup keep failed-policy retries joined through connection cleanup. The protected WebRTC guest emitted zero direct UDP packets."
+        },
         {
           "date": "2026-08-16",
           "runner": "local",
@@ -3185,7 +3205,7 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The real Electron SOCKS-partition control emitted four direct 20-byte STUN packets from the viewer. The obvious global Chromium switch and Blink feature denial remained red. Applying Electron's exact per-WebContents disable_non_proxied_udp policy reduced the same capture to zero packets. A later delayed-close oracle was red because policy rejection occurred before quarantine; installing quarantine first keeps navigation and popups denied while still applying policy before admission. Broader non-WebRTC traffic capture remains required before activation."
+        "evidence": "The two-launch persisted-worker control reached desktop localhost when the worker was forced awake before setProxy. Electron offline network emulation did not contain that path. Invoking setProxy immediately after Session creation routed the same forced wake through SOCKS with zero path-attributed direct requests and kept a later worker message fetch routed after verification. Separately, the real Electron SOCKS-partition control emitted four direct 20-byte STUN packets from the viewer; applying Electron's exact per-WebContents disable_non_proxied_udp policy reduced the same capture to zero packets. A later delayed-close oracle was red because policy rejection occurred before quarantine; installing quarantine first keeps navigation and popups denied while still applying policy before admission. Broader non-WebRTC traffic capture remains required before activation."
       },
       "performanceBudget": {
         "required": true,
@@ -3193,13 +3213,14 @@
       },
       "promotionCriteria": [
         "Use Playwright CDP in real Electron to prove proxy application before the first HTTP, HTTPS, WebSocket, DNS, worker, popup, redirect, and speculative request.",
-        "Hold or stop persisted workers until proxy verification and prove network-service restart cannot reset the partition to DIRECT or system proxy.",
+        "Prove spontaneous persisted-worker background events cannot issue network requests between Session creation and immediate proxy invocation on macOS, Linux, and Windows; add a worker hold only if that evidence requires it.",
+        "Prove network-service restart cannot reset the partition to DIRECT or system proxy.",
         "Activate a trusted exact-WebContents registration/grant flow before navigation, and fence reload, popup, restore, profile-switch, renderer-crash, and stale-cleanup paths.",
         "Disable or capture every remaining UDP, QUIC, DoH, and non-SOCKS desktop egress path on macOS, Linux, and Windows."
       ],
       "knownGaps": [
         "No production method calls preparePage, so the registry and allowlist remain inert.",
-        "Creating a persistent Electron Session may wake an existing service worker before setProxy; worker hold or termination proof is required.",
+        "A forced persisted worker is routed once setProxy is invoked immediately after Session creation; spontaneous background-event wake timing beyond the two-launch oracle still needs cross-platform soak evidence.",
         "The route partition permits only blank initial attachment; exact WebContents registration and grant primitives are inert because no production caller exists.",
         "Real Electron proxy syntax, loopback coverage, network-service recovery, and popup/worker behavior remain incompletely captured.",
         "QUIC, DoH, WebTransport, and non-WebRTC UDP/direct-network paths are not yet disabled or proven fail closed.",

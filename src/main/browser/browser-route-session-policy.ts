@@ -29,23 +29,31 @@ export async function prepareBrowserRouteSessionPolicy(input: {
   dependencies: BrowserRouteSessionPolicyDependencies
 }): Promise<BrowserRouteElectronSession> {
   const session = input.dependencies.getSession(input.partition)
+  let proxySetup: Promise<void> | null = null
   try {
+    proxySetup = session.setProxy({
+      mode: 'fixed_servers',
+      proxyRules: `socks5://${input.proxyEndpoint.host}:${input.proxyEndpoint.port}`,
+      proxyBypassRules: '<-loopback>'
+    })
     input.dependencies.setupPolicies({
       partition: input.partition,
       browserProfileId: input.browserProfileId,
       session
     })
-    await session.setProxy({
-      mode: 'fixed_servers',
-      proxyRules: `socks5://${input.proxyEndpoint.host}:${input.proxyEndpoint.port}`,
-      proxyBypassRules: '<-loopback>'
-    })
+    await proxySetup
     await session.closeAllConnections()
     const resolved = await session.resolveProxy(PROXY_PROBE_URL)
     if (resolved.trim() !== `SOCKS5 ${input.proxyEndpoint.host}:${input.proxyEndpoint.port}`) {
       throw new Error('browser_route_partition_proxy_verification_failed')
     }
   } catch (error) {
+    await proxySetup?.catch(() => {})
+    try {
+      await session.closeAllConnections()
+    } catch {
+      // The partition remains outside admission even when connection cleanup fails.
+    }
     try {
       input.dependencies.clearPolicies({ partition: input.partition, session })
     } catch {

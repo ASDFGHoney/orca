@@ -22,6 +22,7 @@ function createHarness(
     retirementSettled?: boolean
     retirementError?: Error
     cleanupError?: Error
+    setProxyGate?: Promise<void>
     proxyProbeStarted?: () => void
     resolveProxyGate?: Promise<void>
   } = {}
@@ -37,6 +38,7 @@ function createHarness(
     setProxy: vi.fn(async () => {
       order.push('set-proxy')
       expect(registry.isAllowedPartition(preparingPartition)).toBe(false)
+      await options.setProxyGate
     }),
     closeAllConnections: vi.fn(async () => {
       order.push('close-connections')
@@ -112,12 +114,22 @@ function prepare(registry: BrowserRouteSessionRegistry, overrides: Record<string
   })
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
+function deferred(): {
+  promise: Promise<void>
+  reject: (error: Error) => void
+  resolve: () => void
+} {
+  let rejectPromise: ((error: Error) => void) | undefined
   let resolvePromise: (() => void) | undefined
-  const promise = new Promise<void>((resolve) => {
+  const promise = new Promise<void>((resolve, reject) => {
+    rejectPromise = reject
     resolvePromise = resolve
   })
-  return { promise, resolve: () => resolvePromise?.() }
+  return {
+    promise,
+    reject: (error) => rejectPromise?.(error),
+    resolve: () => resolvePromise?.()
+  }
 }
 
 describe('BrowserRouteSessionRegistry', () => {
@@ -131,8 +143,8 @@ describe('BrowserRouteSessionRegistry', () => {
       'validate-profile',
       'persist-binding',
       'get-session',
-      'setup-policies',
       'set-proxy',
+      'setup-policies',
       'close-connections',
       'resolve-proxy'
     ])
@@ -470,10 +482,49 @@ describe('BrowserRouteSessionRegistry', () => {
     })
 
     await expect(prepare(registry)).rejects.toThrow('policy setup failed')
-    expect(session.setProxy).not.toHaveBeenCalled()
+    expect(session.setProxy).toHaveBeenCalledTimes(1)
+    expect(session.closeAllConnections).toHaveBeenCalledTimes(1)
     expect(dependencies.clearPolicies).toHaveBeenCalledTimes(1)
     expect(registry.isAllowedPartition('persist:route-a')).toBe(false)
   })
+
+  it.each([false, true])(
+    'keeps retries joined until failed policy setup settles proxy cleanup (reject: %s)',
+    async (rejectProxy) => {
+      const proxyGate = deferred()
+      const { registry, session } = createHarness({
+        setProxyGate: proxyGate.promise,
+        setupError: new Error('policy setup failed')
+      })
+
+      const first = prepare(registry)
+      const retry = prepare(registry, { browserPageId: 'page-b' })
+      await vi.waitFor(() => expect(session.setProxy).toHaveBeenCalledTimes(1))
+      let settlementCount = 0
+      for (const attempt of [first, retry]) {
+        void attempt.then(
+          () => {
+            settlementCount += 1
+          },
+          () => {
+            settlementCount += 1
+          }
+        )
+      }
+      await Promise.resolve()
+      expect(settlementCount).toBe(0)
+
+      if (rejectProxy) {
+        proxyGate.reject(new Error('proxy failed'))
+      } else {
+        proxyGate.resolve()
+      }
+      await expect(first).rejects.toThrow('policy setup failed')
+      await expect(retry).rejects.toThrow('policy setup failed')
+      expect(session.setProxy).toHaveBeenCalledTimes(1)
+      expect(session.closeAllConnections).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it('rejects a binding collision before opening an Electron session', async () => {
     const { bindings, dependencies, registry } = createHarness()
