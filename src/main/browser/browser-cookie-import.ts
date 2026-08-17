@@ -85,9 +85,8 @@ import {
   type ReplacedImportedDomainCookies
 } from './browser-cookie-import-policy'
 import {
-  acquireCookieMutationLock,
   removeTransplantableCookies,
-  withCookieMutationLock,
+  withCookieClearLock,
   type CookieClearStore,
   type CookieImportWriteStore
 } from './browser-cookie-import-clear'
@@ -584,7 +583,6 @@ type CookieImportSessionStore = CookieClearStore & CookieImportWriteStore & { di
 
 type CookieImportTarget = {
   partition: string
-  mutationOwner: object
   openWriteStore: () => CookieImportSessionStore
 }
 
@@ -596,7 +594,6 @@ function cookieImportTarget(targetPartition: string): CookieImportTarget {
   const targetSession = session.fromPartition(targetPartition)
   return {
     partition: targetPartition,
-    mutationOwner: targetSession,
     openWriteStore: () => openCookieClearStore(targetSession)
   }
 }
@@ -667,9 +664,6 @@ async function importValidatedCookies(
   const cookieClearStore = plan.writes.length > 0 ? target.openWriteStore() : null
 
   if (cookieClearStore) {
-    // Why: replace, writes, and rollback are one live-jar transaction; a stale rollback must not
-    // remove a later import that already reported success.
-    const releaseMutationLock = await acquireCookieMutationLock(target.mutationOwner)
     let replaced: ReplacedImportedDomainCookies | null = null
     try {
       if (mode === 'replace-imported-domains') {
@@ -730,11 +724,7 @@ async function importValidatedCookies(
         }
       }
     } finally {
-      try {
-        cookieClearStore.dispose()
-      } finally {
-        releaseMutationLock()
-      }
+      cookieClearStore.dispose()
     }
   }
 
@@ -2026,8 +2016,8 @@ export async function importCookiesFromBrowser(
     try {
       // Why: this lock covers only the live jar; staging and cold-start replay keep their existing
       // semantics while clear and writes can no longer interleave with another import.
-      await withCookieMutationLock(targetSession, async () => {
-        await removeTransplantableCookies(
+      await withCookieClearLock(targetSession, () =>
+        removeTransplantableCookies(
           {
             cookies: cookieClearStore,
             clearData: (options) => targetSession.clearData(options),
@@ -2040,28 +2030,28 @@ export async function importCookiesFromBrowser(
           // snapshot taken from it, so they are never submitted to any mutation.
           nativePlan.skippedFamilies
         )
-        diag(
-          `  cleared existing session cookies before loading ${decryptedCookies.length} imported cookies`
-        )
+      )
+      diag(
+        `  cleared existing session cookies before loading ${decryptedCookies.length} imported cookies`
+      )
 
-        const writable: SourceCookieToWrite[] = []
-        for (const cookie of decryptedCookies) {
-          const url = deriveUrl(cookie.domain, cookie.secure)
-          if (!url) {
-            memoryFailed++
-            continue
-          }
-          writable.push({ ...cookie, url })
+      const writable: SourceCookieToWrite[] = []
+      for (const cookie of decryptedCookies) {
+        const url = deriveUrl(cookie.domain, cookie.secure)
+        if (!url) {
+          memoryFailed++
+          continue
         }
-        // Why: a rejected cookie here falls back to the staged cold-start replay rather than
-        // unwinding the import, so one failure must not stop the rest from loading.
-        const phase = await writeImportedCookies(cookieClearStore, writable, {
-          stopOnFailure: false,
-          log: diag
-        })
-        memoryLoaded = phase.importedCount
-        memoryFailed += phase.writeRejected
+        writable.push({ ...cookie, url })
+      }
+      // Why: a rejected cookie here falls back to the staged cold-start replay rather than
+      // unwinding the import, so one failure must not stop the rest from loading.
+      const phase = await writeImportedCookies(cookieClearStore, writable, {
+        stopOnFailure: false,
+        log: diag
       })
+      memoryLoaded = phase.importedCount
+      memoryFailed += phase.writeRejected
     } finally {
       cookieClearStore.dispose()
     }
