@@ -9,6 +9,7 @@ function makeRuntime(): OrcaRuntimeService {
     getRuntimeId: () => 'test-runtime',
     dedupeWorktreeCreate: <T>(_repo: string, _id: string | undefined, run: () => Promise<T>) =>
       run(),
+    showManagedWorktree: vi.fn().mockResolvedValue({ hostId: 'ssh:builder' }),
     removeManagedWorktree: vi.fn().mockResolvedValue({})
   } as unknown as OrcaRuntimeService
 }
@@ -60,6 +61,27 @@ describe('worktree.rm PTY-stop waiver', () => {
       false,
       false,
       'local'
+    )
+  })
+
+  it('resolves the host before forwarding an unqualified removal', async () => {
+    const runtime = makeRuntime()
+    const dispatcher = new RpcDispatcher({ runtime, methods: WORKTREE_METHODS })
+
+    await dispatcher.dispatch({
+      id: 'req-1',
+      authToken: 'tok',
+      method: 'worktree.rm',
+      params: { worktree: 'id:wt-1', force: true, runHooks: false }
+    } satisfies RpcRequest)
+
+    expect(runtime.showManagedWorktree).toHaveBeenCalledWith('id:wt-1')
+    expect(runtime.removeManagedWorktree).toHaveBeenCalledWith(
+      'id:wt-1',
+      true,
+      false,
+      false,
+      'ssh:builder'
     )
   })
 })

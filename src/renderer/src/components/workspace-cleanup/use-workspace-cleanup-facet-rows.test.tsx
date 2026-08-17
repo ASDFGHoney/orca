@@ -2,6 +2,7 @@
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
+import { getWorkspaceCleanupCandidateIdentity } from '../../../../shared/workspace-cleanup-host-identity'
 import {
   createDefaultWorkspaceCleanupFilterState,
   DEFAULT_WORKSPACE_CLEANUP_SORT
@@ -294,5 +295,9 @@ describe('useWorkspaceCleanupFacetRows hot paths', () => {
     expect(view.result.current.rows.find((row) => row.displayName === 'remote')?.sizeBytes).toBe(
       4_096
     )
+    expect([...view.result.current.facetMatchedIdentities]).toEqual([
+      getWorkspaceCleanupCandidateIdentity(candidates[0]!),
+      getWorkspaceCleanupCandidateIdentity(candidates[1]!)
+    ])
   })
 })

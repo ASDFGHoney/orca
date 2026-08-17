@@ -16,8 +16,6 @@ import type {
   WorktreeRow
 } from './row-types'
 
-export { emitPinnedGroup } from './pinned-group-rows'
-
 export function buildPendingCreationRow(
   creation: PendingCreationRef,
   repoMap: Map<string, Repo>

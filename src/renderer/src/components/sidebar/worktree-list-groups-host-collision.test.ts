@@ -36,15 +36,23 @@ const localWorktree: Worktree = {
 }
 const sshWorktree: Worktree = { ...localWorktree, hostId: 'ssh:build-box' }
 
-function buildCollidingRows(): ReturnType<typeof buildRows> {
+function buildCollidingRows(
+  worktrees: Worktree[] = [localWorktree, sshWorktree]
+): ReturnType<typeof buildRows> {
   // Only one repo can be keyed per id in the repo map; the SSH row still has to
   // render, so the collision must be resolved from the worktree rows themselves.
   return buildRows(
     'repo',
-    [localWorktree, sshWorktree],
+    worktrees,
     new Map([[localRepo.id, localRepo]]),
     null,
-    new Set()
+    new Set(),
+    undefined,
+    undefined,
+    undefined,
+    {},
+    new Map(worktrees.map((candidate) => [candidate.id, candidate])),
+    true
   )
 }
 
@@ -76,6 +84,14 @@ describe('sidebar rows for a workspace id owned by two hosts', () => {
     const header = buildCollidingRows().find((row) => row.type === 'header')
 
     expect(header?.count).toBe(2)
+  })
+
+  it('keeps an unpinned host row visible when its same-id peer is pinned', () => {
+    const itemRows = buildCollidingRows([{ ...localWorktree, isPinned: true }, sshWorktree]).filter(
+      (row) => row.type === 'item'
+    )
+
+    expect(itemRows.map((row) => row.worktree.hostId)).toEqual(['local', 'ssh:build-box'])
   })
 
   // The same-host duplicate that this dedup was originally built for collapses a

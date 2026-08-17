@@ -175,6 +175,7 @@ import { resolvePaletteFocusRestoreTarget } from '@/components/cmd-j/palette-foc
 import { selectWorktreePaletteCacheInputs } from '@/components/cmd-j/worktree-palette-cache-inputs'
 import { getRepoHostIdentity } from '@/store/slices/repo-host-identity'
 import { buildPluginQuickActions } from '@/components/cmd-j/plugin-quick-actions'
+import { buildWorktreePaletteItemIds } from '@/components/cmd-j/worktree-palette-item-id'
 import { PaletteCreateWorktreeRow } from '@/components/cmd-j/PaletteCreateWorktreeRow'
 import { WorkspaceEmojiSuggestionPopover } from '@/components/workspace-emoji/WorkspaceEmojiSuggestionPopover'
 import { useWorkspaceEmojiShortcodeInput } from '@/components/workspace-emoji/useWorkspaceEmojiShortcodeInput'
@@ -1228,6 +1229,7 @@ function WorktreeJumpPaletteContent({
   }, [hasQuery, repoMap, worktreeByHostIdentity, worktreeMatches])
 
   const worktreeItems = useMemo<WorktreePaletteItem[]>(() => {
+    const itemIdsByIdentity = buildWorktreePaletteItemIds(worktreeMatches)
     const items = worktreeMatches
       .map((match) => {
         const identity = getPaletteMatchWorktreeIdentity(match)
@@ -1236,7 +1238,7 @@ function WorktreeJumpPaletteContent({
           return null
         }
         return {
-          id: `worktree:${identity}`,
+          id: itemIdsByIdentity.get(identity) ?? `worktree:${worktree.id}`,
           type: 'worktree' as const,
           match,
           worktree

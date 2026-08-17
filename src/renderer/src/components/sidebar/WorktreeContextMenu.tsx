@@ -41,8 +41,8 @@ import type {
   Worktree
 } from '../../../../shared/worktree/types'
 import {
-  deferWorktreeContextMenuDeleteIntent,
-  type WorktreeContextMenuDeleteIntent
+  createWorktreeContextMenuDeleteIntent,
+  deferWorktreeContextMenuDeleteIntent
 } from './worktree-context-menu-delete-intent'
 import { runSleepWorktrees } from './sleep-worktree-flow'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
@@ -682,27 +682,15 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
     scopeRef.current
       ?.closest('[data-worktree-sidebar]')
       ?.dispatchEvent(new Event(VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT))
-    const intent: WorktreeContextMenuDeleteIntent = isMultiContext
-      ? {
-          kind: 'batch',
-          worktrees: batchDeleteWorktrees.map(({ id, instanceId }) => ({ id, instanceId }))
-        }
-      : folderWorkspaceId
-        ? { kind: 'folder', folderWorkspaceId }
-        : {
-            kind: 'worktree',
-            worktree: { id: worktree.id, instanceId: worktree.instanceId }
-          }
+    const intent = createWorktreeContextMenuDeleteIntent({
+      worktree,
+      batchDeleteWorktrees,
+      isMultiContext,
+      ...(folderWorkspaceId ? { folderWorkspaceId } : {})
+    })
     deferWorktreeContextMenuDeleteIntent(intent, restoreSidebarPosition)
     setMenuOpenState(false)
-  }, [
-    batchDeleteWorktrees,
-    folderWorkspaceId,
-    isMultiContext,
-    setMenuOpenState,
-    worktree.id,
-    worktree.instanceId
-  ])
+  }, [batchDeleteWorktrees, folderWorkspaceId, isMultiContext, setMenuOpenState, worktree])
 
   const handleOpenParent = useCallback(() => {
     if (validParentWorktreeId) {

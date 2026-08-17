@@ -395,6 +395,16 @@ describe('WorktreeJumpPalette', () => {
     })
   })
 
+  it('keeps a lone host-qualified row on its clean command value', async () => {
+    const ssh = makeWorktree('single', 'SSH workspace', { hostId: 'ssh:box' })
+
+    await renderPalette({ worktreesByRepo: { 'repo-1': [ssh] }, showSleepingWorkspaces: true })
+
+    expect(
+      testContainer.querySelector('[data-command-item="worktree:single"]')?.textContent
+    ).toContain('SSH workspace')
+  })
+
   it('replaces a completed emoji shortcode in the search query', async () => {
     await renderPalette({ worktreesByRepo: { 'repo-1': [] } })
     const input = testContainer.querySelector<HTMLInputElement>('[data-command-input="true"]')

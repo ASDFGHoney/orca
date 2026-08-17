@@ -3194,10 +3194,14 @@ export function registerWorktreeHandlers(
       }
 
       const forget = (async (): Promise<RemoveWorktreeResult> => {
-        // Ambiguous repo lookup must not bypass a live folder root's deletion guard.
         const isFolderRootOf = (candidate: Repo): boolean =>
           isFolderRepo(candidate) && args.worktreeId === getFolderWorkspaceRootId(candidate)
-        if (repo ? isFolderRootOf(repo) : store.getRepos().some(isFolderRootOf)) {
+        const fallbackRepos = args.hostId
+          ? store
+              .getRepos()
+              .filter((candidate) => getRepoExecutionHostId(candidate) === args.hostId)
+          : store.getRepos()
+        if (repo ? isFolderRootOf(repo) : fallbackRepos.some(isFolderRootOf)) {
           throw new Error(
             'Cannot delete the project root workspace. Remove the folder project instead.'
           )

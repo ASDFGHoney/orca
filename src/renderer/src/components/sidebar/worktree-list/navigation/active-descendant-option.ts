@@ -1,7 +1,9 @@
 import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import type { RenderRow } from '../listing/render-row'
-import type { ExecutionHostId } from '../../../../../../shared/execution-host'
-import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
+import {
+  getWorktreeExecutionHostId,
+  type ExecutionHostId
+} from '../../../../../../shared/execution-host'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { isPinnedWorktreeRow } from '../listing/renderable-rows'
 import { getRenderRowWorktreeItem, renderRowContainsWorktree } from './render-row-lookup'
@@ -16,13 +18,13 @@ export function getRenderRowOptionId(
     return undefined
   }
   if (row.type === 'lineage-group') {
-    const targetIdentity = worktreeId
-      ? composeWorktreeHostIdentity(executionHostId, worktreeId)
-      : null
-    const targetRow = targetIdentity
+    // Hostless legacy state cannot disambiguate, but an aria pointer should still target a row.
+    const targetRow = worktreeId
       ? row.rows.find(
           (item) =>
-            composeWorktreeHostIdentity(item.worktree.hostId, item.worktree.id) === targetIdentity
+            item.worktree.id === worktreeId &&
+            (executionHostId === undefined ||
+              getWorktreeExecutionHostId(item.worktree, item.repo) === executionHostId)
         )
       : null
     return getWorktreeOptionId((targetRow ?? row.rows[0])?.rowKey ?? row.key)
@@ -38,6 +40,7 @@ export function getRenderRowOptionId(
 
 export function getActiveDescendantOptionId(args: {
   activeWorktreeId: string | null
+  activeWorkspaceExecutionHostId?: ExecutionHostId | null
   primaryActiveRowKey?: string
   pinnedDisplayPolicy: PinnedWorktreeDisplayPolicy
   renderRows: readonly RenderRow[]
@@ -50,7 +53,14 @@ export function getActiveDescendantOptionId(args: {
     const primaryOptionId = getWorktreeOptionId(args.primaryActiveRowKey)
     for (const item of args.virtualItems) {
       const row = args.renderRows[item.index]
-      if (row && getRenderRowOptionId(row, args.activeWorktreeId) === primaryOptionId) {
+      if (
+        row &&
+        getRenderRowOptionId(
+          row,
+          args.activeWorktreeId,
+          args.activeWorkspaceExecutionHostId ?? undefined
+        ) === primaryOptionId
+      ) {
         return primaryOptionId
       }
     }
@@ -58,12 +68,27 @@ export function getActiveDescendantOptionId(args: {
   let fallbackOptionId: string | undefined
   for (const item of args.virtualItems) {
     const row = args.renderRows[item.index]
-    if (row && renderRowContainsWorktree(row, args.activeWorktreeId)) {
-      const optionId = getRenderRowOptionId(row, args.activeWorktreeId)
+    if (
+      row &&
+      renderRowContainsWorktree(
+        row,
+        args.activeWorktreeId,
+        args.activeWorkspaceExecutionHostId ?? undefined
+      )
+    ) {
+      const optionId = getRenderRowOptionId(
+        row,
+        args.activeWorktreeId,
+        args.activeWorkspaceExecutionHostId ?? undefined
+      )
       if (!optionId) {
         continue
       }
-      const itemRow = getRenderRowWorktreeItem(row, args.activeWorktreeId)
+      const itemRow = getRenderRowWorktreeItem(
+        row,
+        args.activeWorktreeId,
+        args.activeWorkspaceExecutionHostId ?? undefined
+      )
       if (
         args.pinnedDisplayPolicy === 'duplicate-in-groups' &&
         itemRow &&
