@@ -69,6 +69,9 @@ describe('BrowserClientPageCommandExecutor integration', () => {
     await expect(executor.handle(createCommand('createPage'), signal())).resolves.toEqual({
       status: 'completed'
     })
+    expect(guest.webContents.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith(
+      'disable_non_proxied_udp'
+    )
     expect(sessionRegistry.isAllowedPartition(partition)).toBe(true)
     expect(guest.url()).toBe('about:blank')
     await expect(executor.handle(createCommand('navigate'), signal())).resolves.toEqual({
@@ -178,6 +181,7 @@ function createGuest(routeSession: Session) {
       }
       url = nextUrl
     }),
+    setWebRTCIPHandlingPolicy: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
       const eventListeners = listeners.get(event) ?? new Set()
