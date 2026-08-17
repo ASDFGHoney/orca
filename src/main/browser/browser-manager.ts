@@ -1193,16 +1193,7 @@ export class BrowserManager {
     return true
   }
 
-  unregisterGuest(browserTabId: string, expectedWebContentsId?: number): void {
-    const currentWebContentsId = this.webContentsIdByTabId.get(browserTabId)
-    if (
-      expectedWebContentsId !== undefined &&
-      currentWebContentsId !== undefined &&
-      currentWebContentsId !== expectedWebContentsId
-    ) {
-      // A stale page close must not unregister a replacement using the same id.
-      return
-    }
+  unregisterGuest(browserTabId: string): void {
     // Why: teardown mid-grab must cancel it so the renderer gets a signal, not a dangling Promise.
     this.cancelGrabOp(browserTabId, 'evicted')
 

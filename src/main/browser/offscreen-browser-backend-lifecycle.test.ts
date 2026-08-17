@@ -87,9 +87,6 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     expect(browserManager.unregisterGuest).toHaveBeenCalledTimes(50)
     expect(onWebContentsClosed).toHaveBeenCalledTimes(50)
     expect((backend as unknown as { pagesById: Map<string, unknown> }).pagesById.size).toBe(0)
-    expect(
-      (backend as unknown as { pendingCloseById: Map<string, unknown> }).pendingCloseById.size
-    ).toBe(0)
   })
 
   it('keeps browser ownership registered until session cleanup resolves', async () => {
@@ -109,47 +106,6 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     await backend.closeTab('page-1')
 
     expect(order).toEqual(['session-cleanup', 'unregister'])
-  })
-
-  it('does not let stale close cleanup unregister a replacement page', async () => {
-    let finishCleanup: (() => void) | undefined
-    const cleanupBarrier = new Promise<void>((resolve) => {
-      finishCleanup = resolve
-    })
-    const registrations = new Map<string, number>()
-    const browserManager = {
-      registerOffscreenGuest: vi.fn(
-        ({ browserPageId, webContentsId }: { browserPageId: string; webContentsId: number }) => {
-          registrations.set(browserPageId, webContentsId)
-        }
-      ),
-      unregisterGuest: vi.fn((browserPageId: string, expectedWebContentsId?: number) => {
-        if (registrations.get(browserPageId) === expectedWebContentsId) {
-          registrations.delete(browserPageId)
-        }
-      })
-    }
-    const backend = new OffscreenBrowserBackend(
-      browserManager as never,
-      vi.fn(() => cleanupBarrier)
-    )
-    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
-
-    const close = backend.closeTab('page-1')
-    const recreate = backend.createTab({
-      browserPageId: 'page-1',
-      url: 'about:blank',
-      worktreeId: 'wt-1'
-    })
-    await Promise.resolve()
-    expect(browserManager.registerOffscreenGuest).toHaveBeenCalledTimes(1)
-
-    finishCleanup?.()
-    await close
-    await recreate
-
-    expect(registrations.get('page-1')).toBe(2)
-    expect(backend.getWebContentsId('page-1')).toBe(2)
   })
 
   it('contains asynchronous cleanup failures during bulk destruction', async () => {
