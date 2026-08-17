@@ -2,6 +2,25 @@ import { describe, expect, it } from 'vitest'
 import { getRemoteBrowserFramePoint } from './remote-browser-frame-point'
 
 describe('getRemoteBrowserFramePoint', () => {
+  it('maps a centered native-width legacy frame and rejects its side gutters', () => {
+    const input = {
+      viewportRect: { left: 281, top: 87, width: 1097, height: 917 },
+      naturalWidth: 533,
+      naturalHeight: 917,
+      metadata: { imageWidth: 533, imageHeight: 917, deviceWidth: 533, deviceHeight: 917 },
+      remoteCssViewportSize: { width: 533, height: 917 },
+      remoteViewportSize: { width: 1097, height: 917 },
+      legacyViewportSize: { width: 533, height: 917 }
+    }
+    expect(
+      getRemoteBrowserFramePoint({ ...input, clientX: 281 + 282 + 106, clientY: 478 })
+    ).toEqual({
+      x: 106,
+      y: 391
+    })
+    expect(getRemoteBrowserFramePoint({ ...input, clientX: 281 + 100, clientY: 478 })).toBeNull()
+  })
+
   it('maps a contained legacy frame in its actual bitmap coordinate space', () => {
     expect(
       getRemoteBrowserFramePoint({

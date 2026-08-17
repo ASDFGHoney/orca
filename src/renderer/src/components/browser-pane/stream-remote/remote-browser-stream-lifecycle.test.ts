@@ -202,7 +202,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.streams[1].viewportWidth).toBe(1200)
   })
 
-  it('renegotiates one legacy host-sized frame to a complete aspect-matched viewport', async () => {
+  it('renegotiates one legacy host-sized frame to a complete native-width viewport', async () => {
     const harness = createHarness()
     harness.setViewportSize({ width: 1097, height: 917 })
     await openStreamAndConfirmReady(harness)
@@ -217,13 +217,13 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(recovered).toBe(true)
     expect(harness.streams).toHaveLength(2)
     expect(harness.streams[0].unsubscribeCount).toBe(1)
-    expect(harness.streams[1]).toMatchObject({ viewportWidth: 533, viewportHeight: 446 })
+    expect(harness.streams[1]).toMatchObject({ viewportWidth: 533, viewportHeight: 917 })
     harness.streams[0].emitClose()
     await settle()
     expect(harness.streams).toHaveLength(2)
     harness.streams[1].emitReady()
     await settle()
-    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 446 })
+    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 917 })
 
     const secondRecovery = harness.lifecycle.recoverLegacyFrame({
       imageWidth: 320,
@@ -273,10 +273,10 @@ describe('RemoteBrowserStreamLifecycle', () => {
     harness.streams[1].emitEnd()
     await vi.advanceTimersByTimeAsync(500)
 
-    expect(harness.streams[2]).toMatchObject({ viewportWidth: 533, viewportHeight: 446 })
+    expect(harness.streams[2]).toMatchObject({ viewportWidth: 533, viewportHeight: 917 })
     harness.streams[2].emitReady()
     await settle()
-    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 446 })
+    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 917 })
   })
 
   it('keeps observer viewport syncs on the active compatibility viewport', async () => {
@@ -295,7 +295,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
     harness.streams[1].emitReady()
     await settle()
 
-    expect(harness.lifecycle.viewportForSync()).toEqual({ width: 533, height: 446 })
+    expect(harness.lifecycle.viewportForSync()).toEqual({ width: 533, height: 917 })
   })
 
   it('releases the compatibility viewport before syncing a real pane resize', async () => {
@@ -350,7 +350,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
       })
     ).toBe(true)
     await settle()
-    expect(harness.streams[3]).toMatchObject({ viewportWidth: 533, viewportHeight: 400 })
+    expect(harness.streams[3]).toMatchObject({ viewportWidth: 533, viewportHeight: 900 })
   })
 
   // waitForViewportSize can block for a few frames while the element is unmeasurable. An attempt

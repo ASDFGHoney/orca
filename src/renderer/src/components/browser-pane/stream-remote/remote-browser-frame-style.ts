@@ -1,6 +1,8 @@
 import type { CSSProperties } from 'react'
 import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 
+type Size = { width: number; height: number }
+
 function positiveNumber(value: number | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
@@ -20,8 +22,19 @@ export function shouldContainRemoteBrowserFrame(
 }
 
 export function getRemoteBrowserFrameStyle(
-  metadata: BrowserScreencastFrameMetadata | null
+  metadata: BrowserScreencastFrameMetadata | null,
+  legacyViewport: Size | null = null
 ): CSSProperties {
+  if (legacyViewport) {
+    return {
+      width: `${legacyViewport.width}px`,
+      height: `${legacyViewport.height}px`,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      objectFit: 'fill',
+      objectPosition: 'top left'
+    }
+  }
   return {
     width: '100%',
     height: '100%',

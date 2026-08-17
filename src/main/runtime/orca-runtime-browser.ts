@@ -113,7 +113,6 @@ type ActiveBrowserScreencastSubscriber = {
   emit?: (event: BrowserScreencastResult) => void
   done: Promise<void>
   resolveDone: () => void
-  viewport: BrowserScreencastViewport
 }
 
 type ActiveBrowserScreencastPage = {
@@ -122,7 +121,7 @@ type ActiveBrowserScreencastPage = {
   started: Promise<BrowserScreencastSession>
   stopping: boolean
   subscribers: Map<string, ActiveBrowserScreencastSubscriber>
-  viewportOwnerSubscriptionId: string | null
+  viewport: BrowserScreencastViewport
 }
 
 function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserScreencastViewport {
@@ -132,6 +131,18 @@ function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserSc
     deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
     mobile: params.mobile === true
   }
+}
+
+function sameScreencastViewport(
+  left: BrowserScreencastViewport,
+  right: BrowserScreencastViewport
+): boolean {
+  return (
+    left.viewportWidth === right.viewportWidth &&
+    left.viewportHeight === right.viewportHeight &&
+    left.deviceScaleFactor === right.deviceScaleFactor &&
+    left.mobile === right.mobile
+  )
 }
 
 function clampInteger(
@@ -492,27 +503,26 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
     const viewport = normalizeScreencastViewport(params)
-    let resolveSubscriberDone!: () => void
-    const subscriberDone = new Promise<void>((resolve) => {
-      resolveSubscriberDone = resolve
-    })
-    let createdPageStream = false
     let active = this.activeScreencastsByPageId.get(browserPageId)
     while (active?.stopping) {
       await active.session?.done
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
+    if (active && !sameScreencastViewport(active.viewport, viewport)) {
+      throw new BrowserError(
+        'browser_error',
+        `Browser page ${browserPageId} is already streaming at a different viewport.`
+      )
+    }
     if (!active) {
-      createdPageStream = true
       const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
       const record = {
         format: params.format,
         session: null,
         stopping: false,
         subscribers,
-        viewportOwnerSubscriptionId: null
+        viewport
       } as ActiveBrowserScreencastPage
       record.started = startBrowserScreencast(guest, {
         format: params.format,
@@ -558,14 +568,17 @@ export class RuntimeBrowserCommands {
         })
         .catch(() => {})
     }
+    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
+    let resolveSubscriberDone!: () => void
+    const subscriberDone = new Promise<void>((resolve) => {
+      resolveSubscriberDone = resolve
+    })
     active.subscribers.set(subscriptionId, {
       sendBinary: stream.sendBinary,
       emit: stream.emit,
       done: subscriberDone,
-      resolveDone: resolveSubscriberDone,
-      viewport
+      resolveDone: resolveSubscriberDone
     })
-    active.viewportOwnerSubscriptionId = subscriptionId
     let session: BrowserScreencastSession
     try {
       session = await active.started
@@ -573,9 +586,6 @@ export class RuntimeBrowserCommands {
       active.subscribers.delete(subscriptionId)
       resolveSubscriberDone()
       throw error
-    }
-    if (!createdPageStream && active.viewportOwnerSubscriptionId === subscriptionId) {
-      await session.updateViewport(viewport)
     }
     return {
       subscriptionId,
@@ -588,13 +598,6 @@ export class RuntimeBrowserCommands {
           }
           active.subscribers.delete(subscriptionId)
           subscriber.resolveDone()
-          if (active.viewportOwnerSubscriptionId === subscriptionId) {
-            const fallback = Array.from(active.subscribers.entries()).at(-1)
-            active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
-            if (fallback) {
-              void session.updateViewport(fallback[1].viewport).catch(() => {})
-            }
-          }
           if (active.subscribers.size === 0) {
             active.stopping = true
             session.stop()
@@ -1362,7 +1365,7 @@ export class RuntimeBrowserCommands {
         params.targetGroupId,
         params.page
       )
-      if (!params.page) {
+      if (!params.page && worktreeId) {
         await this.host.waitForBrowserSessionTabPublication?.(worktreeId, created.browserPageId)
       }
       return created

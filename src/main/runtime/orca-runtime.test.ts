@@ -34866,16 +34866,18 @@ describe('OrcaRuntimeService', () => {
     expect(replacementCleanup).toHaveBeenCalledTimes(1)
   })
 
-  it('does not deliver or accept browser screencast frames before ready', async () => {
+  it('delivers the latest startup frame immediately after ready', async () => {
     const runtime = createRuntime()
     const done = deferred<void>()
     const stop = vi.fn(() => done.resolve())
     const startupFrame = new Uint8Array([1, 2, 3])
+    const latestStartupFrame = new Uint8Array([4, 5, 6])
     const sendBinary = vi.fn()
     const emit = vi.fn()
     const browserScreencast = vi.fn(
       async (_params: unknown, stream: { sendBinary: typeof sendBinary }) => {
-        expect(stream.sendBinary(startupFrame)).toBe(false)
+        expect(stream.sendBinary(startupFrame)).toBe(true)
+        expect(stream.sendBinary(latestStartupFrame)).toBe(true)
         expect(sendBinary).not.toHaveBeenCalled()
         return {
           subscriptionId: 'browser-screencast:page-1:first',
@@ -34909,7 +34911,8 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() =>
       expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }))
     )
-    expect(sendBinary).not.toHaveBeenCalled()
+    expect(sendBinary).toHaveBeenCalledOnce()
+    expect(sendBinary).toHaveBeenCalledWith(latestStartupFrame)
 
     runtime.cleanupSubscription('browser-screencast:page-1:first')
     await task

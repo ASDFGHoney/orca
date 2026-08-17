@@ -689,6 +689,27 @@ describe('RuntimeBrowserCommands headless offscreen routing', () => {
     expect(setActiveTab).toHaveBeenCalledWith(202, 'wt-1')
   })
 
+  it('does not wait for worktree publication when a headless create has no scope', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    browserSessionRegistryMock.resolveKnownPartition.mockReturnValue('persist:orca-browser')
+    const createTab = vi.fn(async () => ({ browserPageId: 'page-unscoped' }))
+    const waitForBrowserSessionTabPublication = vi.fn(async () => {
+      throw new Error('unscoped tabs cannot be published')
+    })
+    const commands = new RuntimeBrowserCommands(
+      createHost({
+        getAvailableAuthoritativeWindow: vi.fn(() => null),
+        getOffscreenBrowserBackend: vi.fn(() => ({ createTab, closeTab: vi.fn() })),
+        waitForBrowserSessionTabPublication
+      })
+    )
+
+    await expect(commands.browserTabCreate({ url: 'about:blank' })).resolves.toEqual({
+      browserPageId: 'page-unscoped'
+    })
+    expect(waitForBrowserSessionTabPublication).not.toHaveBeenCalled()
+  })
+
   it('publishes a headless session snapshot after explicit navigation', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })

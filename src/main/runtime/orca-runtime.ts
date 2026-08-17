@@ -37471,6 +37471,7 @@ export class OrcaRuntimeService {
     let ended = false
     let cancelledBeforeStart = false
     let readyEmitted = false
+    let pendingFrameBeforeReady: Uint8Array<ArrayBufferLike> | null = null
     let resolveActiveDone!: () => void
     const activeDone = new Promise<void>((resolve) => {
       resolveActiveDone = resolve
@@ -37480,6 +37481,7 @@ export class OrcaRuntimeService {
         return
       }
       ended = true
+      pendingFrameBeforeReady = null
       screencast?.session.stop()
       if (emitEnd && screencast) {
         options.emit({ type: 'end', subscriptionId: screencast.subscriptionId })
@@ -37495,8 +37497,8 @@ export class OrcaRuntimeService {
     const abortScreencast = (): void => cancel()
     const sendBinaryAfterReady = (bytes: Uint8Array<ArrayBufferLike>): boolean | void => {
       if (!readyEmitted) {
-        // Why: clients learn the owning subscription from ready, so CDP frames must stay unacked until the JSON ready event is delivered.
-        return false
+        pendingFrameBeforeReady = bytes
+        return true
       }
       return options.sendBinary?.(bytes)
     }
@@ -37538,6 +37540,11 @@ export class OrcaRuntimeService {
       registeredSubscriptionId = screencast.subscriptionId
       options.emit(screencast.ready)
       readyEmitted = true
+      const startupFrame = pendingFrameBeforeReady
+      pendingFrameBeforeReady = null
+      if (startupFrame) {
+        options.sendBinary(startupFrame)
+      }
       await screencast.session.done
       end(true)
       this.cleanupSubscription(screencast.subscriptionId)

@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { getRemoteBrowserFrameStyle } from './remote-browser-frame-style'
 
 describe('getRemoteBrowserFrameStyle', () => {
+  it('centers a recovered legacy viewport without upscaling its pixels', () => {
+    expect(
+      getRemoteBrowserFrameStyle(
+        { imageWidth: 533, imageHeight: 917, deviceWidth: 533, deviceHeight: 917 },
+        { width: 533, height: 917 }
+      )
+    ).toEqual({
+      width: '533px',
+      height: '917px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      objectFit: 'fill',
+      objectPosition: 'top left'
+    })
+  })
+
   it('contains a host-sized legacy frame without distorting it', () => {
     expect(
       getRemoteBrowserFrameStyle({

@@ -31,8 +31,8 @@ export function getLegacyRemoteBrowserViewport(
   const uniformScale = Math.max(1, imageWidth / requested.width, imageHeight / requested.height)
   const captureWidth = imageWidth / uniformScale
   const captureHeight = imageHeight / uniformScale
-  const width = Math.round(Math.min(captureWidth, captureHeight * requestedAspect))
-  const height = Math.round(width / requestedAspect)
+  const width = Math.round(captureWidth)
+  const height = Math.round(Math.min(requested.height, captureHeight))
   if (width < MIN_VIEWPORT_WIDTH || height < MIN_VIEWPORT_HEIGHT) {
     return null
   }
@@ -70,4 +70,14 @@ export class RemoteBrowserLegacyViewport {
     }
     return this.viewport ?? measured
   }
+}
+
+export function getLegacyViewportForRendering(
+  resolved: RemoteBrowserViewportSize | null,
+  measured: RemoteBrowserViewportSize | null
+): RemoteBrowserViewportSize | null {
+  if (!resolved || !measured || areRemoteViewportSizesNear(resolved, measured)) {
+    return null
+  }
+  return resolved
 }

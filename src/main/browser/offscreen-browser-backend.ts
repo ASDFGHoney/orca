@@ -125,9 +125,9 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     let report: Promise<void> | null = null
     return () => {
       if (!report) {
-        this.browserManager.unregisterGuest(browserPageId)
         report = Promise.resolve()
           .then(() => this.onWebContentsClosed?.(webContentsId))
+          .finally(() => this.browserManager.unregisterGuest(browserPageId))
           .then(() => {})
       }
       return report

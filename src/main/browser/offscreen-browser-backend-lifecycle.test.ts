@@ -89,6 +89,25 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     expect((backend as unknown as { pagesById: Map<string, unknown> }).pagesById.size).toBe(0)
   })
 
+  it('keeps browser ownership registered until session cleanup resolves', async () => {
+    const order: string[] = []
+    const browserManager = {
+      registerOffscreenGuest: vi.fn(),
+      unregisterGuest: vi.fn(() => order.push('unregister'))
+    }
+    const backend = new OffscreenBrowserBackend(
+      browserManager as never,
+      vi.fn(async () => {
+        order.push('session-cleanup')
+      })
+    )
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+
+    await backend.closeTab('page-1')
+
+    expect(order).toEqual(['session-cleanup', 'unregister'])
+  })
+
   it('contains asynchronous cleanup failures during bulk destruction', async () => {
     const cleanupError = new Error('cleanup failed')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

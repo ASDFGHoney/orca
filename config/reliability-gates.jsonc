@@ -2287,14 +2287,14 @@
       "providers": ["remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["remote-runtime"],
-      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection and acknowledgement, one-shot legacy viewport renegotiation, legacy frame containment, click mapping, multi-viewer viewport/driver handoff, and destroyed-page load cleanup. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, a complete aspect-matched frame after the old host captures only 533 of 1097 requested pixels, and absence of reconnect/toast failure.",
+      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection and acknowledgement, one-shot legacy viewport renegotiation, legacy frame containment, click mapping, matching-geometry multi-viewer fanout, incompatible-geometry rejection, pre-ready frame retention, headless publication scope, and close cleanup ordering. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, a complete aspect-matched frame after the old host captures only 533 of 1097 requested pixels, and absence of reconnect/toast failure.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4525",
         "https://github.com/stablyai/orca/issues/14883",
         "https://github.com/stablyai/orca/pull/14987"
       ],
-      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. When an old host captures only part of the requested viewport, the client renegotiates once to the largest complete aspect-matched viewport and keeps page layout, pixels, and input coordinates aligned across navigation and reconnect. A shared page follows the latest viewer viewport and restores the surviving viewer on disconnect without idling its driver or retaining page-load waiters.",
-      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to renegotiate the legacy stream once to 533x446, synchronize the authoritative page viewport, preserve that fallback across navigation/reconnect, re-arm only after a real pane resize, and avoid looping if the fallback frame remains malformed. Also require legacy frame containment, actual-pixel click mapping, gutter rejection, malformed CDP acknowledgement, prior-viewer viewport restoration after disconnect, and destroyed-page load cleanup. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require a complete aspect-matched frame plus visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
+      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. When an old host captures only part of the requested viewport, the client renegotiates once to the largest complete aspect-matched viewport and keeps page layout, pixels, and input coordinates aligned across navigation and reconnect. A shared page fans out to viewers only when their geometry matches; an incompatible viewer fails without changing the live page, startup retains the latest frame until ready, and close cleanup retains ownership until session teardown resolves.",
+      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to renegotiate the legacy stream once to 533x446, synchronize the authoritative page viewport, preserve that fallback across navigation/reconnect and observer sync, re-arm only after a real pane resize, and avoid looping if the fallback frame remains malformed. Also require legacy frame containment, actual-pixel click mapping, gutter rejection, malformed CDP acknowledgement, startup-frame delivery after ready, matching-geometry fanout, rejection without mutation for conflicting geometry, scoped-only publication waits, and ownership-preserving close cleanup. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require a complete aspect-matched frame plus visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts --reporter=dot",
@@ -2357,13 +2357,25 @@
         {
           "file": "src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
           "assertions": [
-            "the latest subscriber owns a shared page viewport and disconnect restores the previous subscriber"
+            "matching viewer geometry shares one stream",
+            "conflicting viewer geometry is rejected without disturbing the live stream"
           ]
         },
         {
           "file": "src/main/browser/offscreen-browser-backend-lifecycle.test.ts",
           "assertions": [
-            "destroying a page during load removes its listeners and timer immediately"
+            "destroying a page during load removes its listeners and timer immediately",
+            "session cleanup resolves while authoritative page ownership remains registered"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orca-runtime.test.ts",
+          "assertions": ["the latest pre-ready frame is delivered immediately after ready"]
+        },
+        {
+          "file": "src/main/runtime/orca-runtime-browser.test.ts",
+          "assertions": [
+            "unscoped headless creates do not wait for an impossible worktree publication"
           ]
         },
         {

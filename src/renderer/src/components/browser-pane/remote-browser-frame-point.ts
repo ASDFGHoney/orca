@@ -13,6 +13,7 @@ type RemoteBrowserFramePointInput = {
   metadata: BrowserScreencastFrameMetadata | null
   remoteCssViewportSize: Size | null
   remoteViewportSize: Size | null
+  legacyViewportSize?: Size | null
 }
 
 function positiveNumber(value: number | undefined): number | null {
@@ -25,6 +26,18 @@ export function getRemoteBrowserFramePoint(
   const { viewportRect: rect } = input
   if (rect.width <= 0 || rect.height <= 0 || input.naturalWidth <= 0 || input.naturalHeight <= 0) {
     return null
+  }
+
+  if (input.legacyViewportSize) {
+    const width = input.legacyViewportSize.width
+    const height = input.legacyViewportSize.height
+    const left = Math.max(0, (rect.width - width) / 2)
+    const x = input.clientX - rect.left - left
+    const y = input.clientY - rect.top
+    if (x < 0 || y < 0 || x > width || y > height) {
+      return null
+    }
+    return { x: Math.round(x), y: Math.round(y) }
   }
 
   if (shouldContainRemoteBrowserFrame(input.metadata)) {

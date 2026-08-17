@@ -95,6 +95,33 @@ describe('legacy remote browser input', () => {
     expect(onInput).toHaveBeenCalledOnce()
   })
 
+  it('deletes from selection-less value inputs without scrolling the page', () => {
+    const input = document.createElement('input')
+    input.type = 'number'
+    input.value = '123'
+    document.body.append(input)
+    input.focus()
+    const scrollBy = vi.spyOn(window, 'scrollBy')
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('Backspace')!)
+
+    expect(input.value).toBe('12')
+    expect(scrollBy).not.toHaveBeenCalled()
+  })
+
+  it('retains a synthetic caret for selection-less value inputs', () => {
+    const input = document.createElement('input')
+    input.type = 'email'
+    input.value = 'abc'
+    document.body.append(input)
+    input.focus()
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('ArrowLeft')!)
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('x')!)
+
+    expect(input.value).toBe('abxc')
+  })
+
   it('extends text selection in either direction', () => {
     const input = document.createElement('input')
     input.value = 'abcd'

@@ -78,6 +78,15 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
     const valueEditable = target instanceof HTMLInputElement && /^(date|datetime-local|email|month|number|time|week)$/i.test(target.type);
     const editable = selectionEditable || valueEditable;
     const rich = target instanceof HTMLElement && target.isContentEditable;
+    const valueSelectionKey = Symbol.for('orca.legacy.value-selection');
+    const readValueSelection = () => {
+      const saved = target[valueSelectionKey];
+      if (saved?.value === target.value) return saved;
+      return { start: target.value.length, end: target.value.length, direction: 'none', value: target.value };
+    };
+    const writeValueSelection = (start, end, direction = 'none') => {
+      target[valueSelectionKey] = { start, end, direction, value: target.value };
+    };
     const emitInput = (inputType, data = null) => target.dispatchEvent(new InputEvent('input', { inputType, data, bubbles: true }));
     const replaceSelection = (text, inputType) => {
       if (selectionEditable) {
@@ -85,11 +94,24 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
         const end = target.selectionEnd ?? start;
         target.setRangeText(text, start, end, 'end');
       } else {
-        target.value += text;
+        const selection = readValueSelection();
+        target.value = target.value.slice(0, selection.start) + text + target.value.slice(selection.end);
+        const position = selection.start + text.length;
+        writeValueSelection(position, position);
       }
       emitInput(inputType, text);
     };
     const moveCaret = (position, extend = false) => {
+      if (valueEditable) {
+        const selection = readValueSelection();
+        if (!extend) {
+          writeValueSelection(position, position);
+          return;
+        }
+        const anchor = selection.direction === 'backward' ? selection.end : selection.start;
+        writeValueSelection(Math.min(anchor, position), Math.max(anchor, position), position < anchor ? 'backward' : 'forward');
+        return;
+      }
       if (!extend) {
         target.setSelectionRange(position, position);
         return;
@@ -111,6 +133,7 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
     }
     if (shortcut && input.key.toLowerCase() === 'a' && (editable || rich)) {
       if (selectionEditable) target.select();
+      else if (valueEditable) writeValueSelection(0, target.value.length, 'forward');
       else {
         const range = document.createRange();
         range.selectNodeContents(target);
@@ -141,19 +164,37 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       else if (target instanceof HTMLElement) target.click();
       return finish('enter');
     }
-    if (selectionEditable && (input.key === 'Backspace' || input.key === 'Delete')) {
-      let start = target.selectionStart ?? 0;
-      let end = target.selectionEnd ?? start;
+    if (editable && (input.key === 'Backspace' || input.key === 'Delete')) {
+      const selection = valueEditable ? readValueSelection() : null;
+      let start = selection?.start ?? target.selectionStart ?? 0;
+      let end = selection?.end ?? target.selectionEnd ?? start;
       if (start === end && input.key === 'Backspace') start = Math.max(0, start - 1);
       if (start === end && input.key === 'Delete') end = Math.min(target.value.length, end + 1);
-      target.setRangeText('', start, end, 'end');
+      if (selectionEditable) target.setRangeText('', start, end, 'end');
+      else {
+        target.value = target.value.slice(0, start) + target.value.slice(end);
+        writeValueSelection(start, start);
+      }
       emitInput(input.key === 'Backspace' ? 'deleteContentBackward' : 'deleteContentForward');
       return finish('delete');
     }
-    if (selectionEditable && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(input.key)) {
-      const current = target.selectionDirection === 'backward' ? (target.selectionStart ?? 0) : (target.selectionEnd ?? 0);
+    if (rich && (input.key === 'Backspace' || input.key === 'Delete')) {
+      document.execCommand(input.key === 'Backspace' ? 'delete' : 'forwardDelete');
+      return finish('delete');
+    }
+    if (editable && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(input.key)) {
+      const selection = valueEditable ? readValueSelection() : null;
+      const direction = selection?.direction ?? target.selectionDirection;
+      const current = direction === 'backward' ? (selection?.start ?? target.selectionStart ?? 0) : (selection?.end ?? target.selectionEnd ?? 0);
       const position = input.key === 'Home' ? 0 : input.key === 'End' ? target.value.length : input.key === 'ArrowLeft' ? Math.max(0, current - 1) : Math.min(target.value.length, current + 1);
       moveCaret(position, input.shiftKey);
+      return finish('caret');
+    }
+    if (rich && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(input.key)) {
+      const selection = window.getSelection();
+      const direction = input.key === 'ArrowLeft' || input.key === 'Home' ? 'backward' : 'forward';
+      const granularity = input.key === 'Home' || input.key === 'End' ? 'lineboundary' : 'character';
+      selection?.modify(input.shiftKey ? 'extend' : 'move', direction, granularity);
       return finish('caret');
     }
     const viewportStep = Math.max(1, window.innerHeight * 0.8);
