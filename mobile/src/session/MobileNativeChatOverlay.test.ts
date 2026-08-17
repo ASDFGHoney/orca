@@ -24,12 +24,19 @@ type Tick = {
   streamingText?: string
   streamLive?: boolean
   identity?: string
+  /** The host's paging answer, which decides whether the oldest visible row is
+   *  a window head that may have lost its image-source run. */
+  hasMore?: boolean
 }
 
 function overlayElement(tick: Tick): ReturnType<typeof createElement> {
   const controller = {
     showNativeChat: tick.show ?? true,
-    nativeChatSession: { messages: tick.messages ?? [], status: 'ready' },
+    nativeChatSession: {
+      messages: tick.messages ?? [],
+      status: 'ready',
+      hasMore: tick.hasMore ?? false
+    },
     nativeChatAgent: 'claude',
     nativeChatAgentWorking: tick.streamLive ?? false,
     nativeChatStreamingText: tick.streamingText,
@@ -170,5 +177,56 @@ describe('MobileNativeChatOverlay streaming gate', () => {
     })
 
     expect(streaming()).toBeNull()
+  })
+})
+
+// STA-4363, mobile half. The window-head rule strips a head turn's `[Image #n]`
+// run because the read window may have trimmed the source turns that vouch for
+// it — true only while older history exists. Desktop derives the head from its
+// read list, mobile from the merged list, so pin mobile's own derivation: a
+// pure-function test of the fold cannot see this call site stop guarding it.
+describe('MobileNativeChatOverlay window-head marker rule', () => {
+  let renderer: ReactTestRenderer | null = null
+
+  afterEach(() => {
+    act(() => renderer?.unmount())
+    renderer = null
+  })
+
+  function markerTurn(id: string, text: string, timestamp: number): NativeChatMessage {
+    return { id, role: 'user', blocks: [{ type: 'text', text }], timestamp, source: 'transcript' }
+  }
+
+  async function foldedById(hasMore: boolean): Promise<Map<string, unknown>> {
+    await act(async () => {
+      renderer = create(
+        overlayElement({
+          hasMore,
+          messages: [
+            markerTurn('u-head', '[Image #1] hello', 1),
+            markerTurn('u-tail', '[Image #2] bye', 2)
+          ]
+        })
+      )
+    })
+    const folded = renderer!.root.findAll((node) => node.type === 'ChatView')[0].props
+      .folded as NativeChatMessage[]
+    return new Map(folded.map((message) => [message.id, message.blocks]))
+  }
+
+  it('keeps the head turn’s literal markers when the window holds the whole conversation', async () => {
+    expect((await foldedById(false)).get('u-head')).toEqual([
+      { type: 'text', text: '[Image #1] hello' }
+    ])
+  })
+
+  it('strips the head turn’s markers only while older history is still pageable', async () => {
+    expect((await foldedById(true)).get('u-head')).toEqual([{ type: 'text', text: 'hello' }])
+  })
+
+  it('leaves a turn below the head literal even while older history exists', async () => {
+    expect((await foldedById(true)).get('u-tail')).toEqual([
+      { type: 'text', text: '[Image #2] bye' }
+    ])
   })
 })

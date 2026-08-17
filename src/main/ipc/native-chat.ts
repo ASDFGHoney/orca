@@ -5,7 +5,6 @@ import type {
   NativeChatTurnLifecycle
 } from '../../shared/native-chat-types'
 import { clearNativeChatTranscriptCache } from '../native-chat/transcript-read-cache'
-import type { ReadTranscriptResult } from '../native-chat/transcript-reader'
 import {
   subscribeNativeChatTranscript,
   readNativeChatTranscriptTail,
@@ -32,7 +31,13 @@ export type NativeChatReadSessionArgs = {
 // either the main process or the message list. Pagination raises this limit.
 const DESKTOP_READ_WINDOW = 300
 
-async function readSession(args: NativeChatReadSessionArgs): Promise<ReadTranscriptResult> {
+// Why: the annotation was `ReadTranscriptResult`, which has no `hasMore` — the
+// field survived only because a returned call result skips excess-property
+// checking. The renderer now decides from it whether a head turn's `[Image #n]`
+// run is the user's own words, so let inference carry the reader's real shape.
+async function readSession(
+  args: NativeChatReadSessionArgs
+): Promise<Awaited<ReturnType<typeof readNativeChatTranscriptTail>>> {
   const { agent, sessionId } = args
   // Clamp to a positive window; default to the desktop window for the first page.
   const limit = args.limit && args.limit > 0 ? Math.floor(args.limit) : DESKTOP_READ_WINDOW

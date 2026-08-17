@@ -779,3 +779,86 @@ describe('useNativeChatLiveSession — notFound retry (#8401)', () => {
     ])
   })
 })
+
+// STA-4363: the window-head rule strips a head turn's `[Image #n]` run because the
+// source turns that would vouch for it may have been trimmed by the read window.
+// That only holds while older history actually exists — otherwise the head is the
+// start of the conversation and its markers are the user's own words. The host's
+// paging answer is what tells the two apart, and a pure-function test cannot see a
+// call site that stops forwarding it.
+describe('useNativeChatLiveSession — window-head marker rule', () => {
+  const AGENT = 'claude' as const
+  const SESSION = 'sess-window-head'
+  const PANE = 'pane-window-head'
+  const roots: Root[] = []
+  let latest: NativeChatLiveSession | null = null
+
+  function Probe(props: UseNativeChatLiveSessionArgs): null {
+    latest = useNativeChatLiveSession(props)
+    return null
+  }
+
+  function markerTurn(id: string, text: string, timestamp: number): NativeChatMessage {
+    return { id, role: 'user', blocks: [{ type: 'text', text }], timestamp, source: 'transcript' }
+  }
+
+  /** Renders a two-turn window whose head and tail both carry a literal marker. */
+  async function blocksById(hasMore: boolean): Promise<Map<string, unknown>> {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    roots.push(root)
+    const transport = getMockTransport('env-1')
+    await act(async () => {
+      root.render(
+        createElement(Probe, {
+          paneKey: PANE,
+          agent: AGENT,
+          sessionId: SESSION,
+          runtimeEnvironmentId: 'env-1'
+        })
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      transport.emit({
+        type: 'snapshot',
+        messages: [
+          markerTurn('u-head', '[Image #1] hello', 1),
+          markerTurn('u-tail', '[Image #2] bye', 2)
+        ],
+        hasMore
+      })
+    })
+    return new Map((latest?.messages ?? []).map((message) => [message.id, message.blocks]))
+  }
+
+  beforeEach(() => {
+    useAppStore.setState({ agentStatusByPaneKey: {} })
+  })
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      act(() => root.unmount())
+    }
+    latest = null
+    vi.clearAllMocks()
+    resetMockTransports()
+  })
+
+  it('keeps a head turn’s literal markers when the window holds the whole conversation', async () => {
+    expect((await blocksById(false)).get('u-head')).toEqual([
+      { type: 'text', text: '[Image #1] hello' }
+    ])
+  })
+
+  it('strips the head turn’s markers only while older history is still pageable', async () => {
+    expect((await blocksById(true)).get('u-head')).toEqual([{ type: 'text', text: 'hello' }])
+  })
+
+  it('leaves a turn below the head literal even while older history exists', async () => {
+    expect((await blocksById(true)).get('u-tail')).toEqual([
+      { type: 'text', text: '[Image #2] bye' }
+    ])
+  })
+})
