@@ -139,17 +139,20 @@ describe('getActiveStickyIndexesForScroll', () => {
   })
 
   it('clamps stale remount offsets when collapsed hosts fit the viewport', () => {
-    const collapsedRows: RenderRow[] = [hostRow('ssh:a'), hostRow('ssh:b')]
-    const collapsedItems = [virtualItem(0, 0), virtualItem(1, 38)]
+    const collapsedRows = Array.from({ length: 20 }, (_, index) => hostRow(`ssh:${index}`))
+    const measurements = collapsedRows.map((_, index) => virtualItem(index, index * 38))
+    // The stale end range omits row 0 even though the clamped offset is 0.
+    const mountedItems = measurements.slice(9)
 
     expect(
       getActiveStickyIndexesForScroll({
         rows: collapsedRows,
-        rangeStartIndex: 1,
+        rangeStartIndex: 19,
         scrollOffset: 500,
         maxScrollOffset: 0,
         stickyHeaderIndexes: getStickyHeaderIndexes(collapsedRows),
-        virtualItems: collapsedItems
+        virtualItems: mountedItems,
+        rangeStartIndexAtMaxScrollOffset: 0
       })
     ).toEqual({ hostIndex: 0, groupIndex: null })
   })

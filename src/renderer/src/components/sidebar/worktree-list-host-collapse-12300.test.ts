@@ -187,6 +187,28 @@ describe('host collapse multi-host style uniqueness (#12300)', () => {
     ).toBe(true)
   })
 
+  it('reuses an already-localized header for its owning host', () => {
+    const localHeader = { ...projectGroupHeader('ai', 'ai'), hostId: 'local' as const }
+    const localized = addHostSectionRows({
+      rows: [
+        localHeader,
+        item(worktree('wt-local-ai', 'local-ai'), localAi),
+        item(worktree('wt-home-ai', 'home-ai'), homeAi)
+      ],
+      hostOptions,
+      workspaceHostScope: 'all',
+      visibleWorkspaceHostIds: ['local', 'ssh:home'],
+      defaultHostId: 'local',
+      preferProjectGrouping: true
+    })
+
+    expect(
+      localized.find(
+        (row) => row.type === 'header' && row.key === 'project-group:ai' && row.hostId === 'local'
+      )
+    ).toBe(localHeader)
+  })
+
   it('sizes host headers with inner padding so sticky geometry matches paint', () => {
     const rows = section() as RenderRow[]
     const firstHost = rows.findIndex((row) => row.type === 'host-header')

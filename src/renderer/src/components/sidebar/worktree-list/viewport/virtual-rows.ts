@@ -196,6 +196,8 @@ export function getActiveStickyIndexesForScroll(args: {
   virtualItems: readonly VirtualItem[]
   /** Largest offset the scroll element can reach (total size minus viewport height). */
   maxScrollOffset?: number
+  /** Full-measurement row index at maxScrollOffset when it is outside the mounted window. */
+  rangeStartIndexAtMaxScrollOffset?: number
 }): ActiveStickyIndexes {
   // Why: remounted short content may never emit the scroll event that corrects
   // the previous view's offset, which otherwise pins the last host over the first.
@@ -203,7 +205,10 @@ export function getActiveStickyIndexesForScroll(args: {
   let rangeStartIndex = args.rangeStartIndex
   if (args.maxScrollOffset !== undefined && scrollOffset > args.maxScrollOffset) {
     scrollOffset = Math.max(0, args.maxScrollOffset)
-    rangeStartIndex = getVirtualRowIndexAtOffset(args.virtualItems, scrollOffset) ?? 0
+    rangeStartIndex =
+      args.rangeStartIndexAtMaxScrollOffset ??
+      getVirtualRowIndexAtOffset(args.virtualItems, scrollOffset) ??
+      0
   }
   const hostIndexes = getHostStickyIndexes(args.rows, args.stickyHeaderIndexes)
 
