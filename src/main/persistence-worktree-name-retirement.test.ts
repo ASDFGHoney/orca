@@ -310,6 +310,29 @@ describe('worktree name retirement registry', () => {
     ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
   })
 
+  it('carries retirements across an in-place endpoint edit, which keeps the target id', async () => {
+    // Config sync rewrites host/port/username on the existing row, so no re-adoption runs and the
+    // endpoint-derived namespace key silently moves. Without a migration here the mirror strands.
+    const store = await createStore()
+    store.addSshTarget(sshTarget('ssh-1', { configHost: 'builder', host: 'old.example.com' }))
+    const repo = { ...REMOTE_REPO, connectionId: 'ssh-1' }
+    store.addRepo(repo)
+    const { getRetiredNameRegistryForRepo, retireGeneratedWorktreeName } =
+      await import('./worktree-name-retirement')
+    await retireGeneratedWorktreeName(store, repo, store.getSettings(), 'nautilus')
+
+    // The user edits ~/.ssh/config; the next import refreshes the row in place, same id.
+    store.updateSshTarget('ssh-1', { host: 'new.example.com' })
+
+    // Drop the repo row the way a project remove/re-add does, leaving the mirror as the only source.
+    store.removeProject(REPO)
+    const readded = { ...REMOTE_REPO, id: OTHER_REPO, connectionId: 'ssh-1' }
+    store.addRepo(readded)
+    await expect(
+      getRetiredNameRegistryForRepo(store, readded, [readded], store.getSettings())
+    ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
+  })
+
   it('keeps a live sibling target its retirements when another row on the same endpoint rotates', async () => {
     const store = await createStore()
     // Two rows, one endpoint: nothing dedupes SSH targets by host|port|username, so the endpoint

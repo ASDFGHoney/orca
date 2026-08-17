@@ -113,6 +113,45 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
         to: 'ssh:new|22|dev'
       })
     ).toBe(false)
+    // Reporting "no change" must mean it left both buckets intact, not that it emptied them.
+    expect(Object.keys(namespaces).toSorted()).toEqual([
+      'ssh:new|22|dev:posix:/srv/a',
+      'ssh:old|22|dev:posix:/srv/a'
+    ])
+    expect(namespaces['ssh:old|22|dev:posix:/srv/a'].names).toEqual(['nautilus'])
+    expect(namespaces['ssh:new|22|dev:posix:/srv/a'].names).toEqual(['nautilus'])
+  })
+
+  it('still copies a name the destination folded into its watermark', () => {
+    // A destination stored uncompacted trades a folded name for the incoming one, so comparing
+    // sizes alone would read as unchanged and drop the copy.
+    const namespaces = {
+      'ssh:old|22|dev:posix:/srv/a': registry('seahorse-2'),
+      'ssh:new|22|dev:posix:/srv/a': { exhaustedTiers: 1, names: ['nautilus'] }
+    }
+
+    expect(
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        copyFrom: ['ssh:old|22|dev'],
+        to: 'ssh:new|22|dev'
+      })
+    ).toBe(true)
+    expect(namespaces['ssh:new|22|dev:posix:/srv/a'].names).toContain('seahorse-2')
+  })
+
+  it('keeps the namespace map within its cap when a copy grows it', () => {
+    const namespaces: Record<string, RetiredNameRegistry> = {}
+    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES; index += 1) {
+      namespaces[`ssh:old|22|dev:posix:/srv/${index}`] = registry('nautilus')
+    }
+
+    expect(
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        copyFrom: ['ssh:old|22|dev'],
+        to: 'ssh:new|22|dev'
+      })
+    ).toBe(true)
+    expect(Object.keys(namespaces).length).toBe(MAX_RETIREMENT_NAMESPACES)
   })
 
   it('leaves an identity that merely shares a prefix with the old one alone', () => {

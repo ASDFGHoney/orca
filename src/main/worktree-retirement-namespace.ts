@@ -89,6 +89,13 @@ export function recordRetirementNamespaceRegistry(
   // JSON round-trips it, so the object's own order is the LRU list — no timestamp to persist.
   delete namespaces[namespaceKey]
   namespaces[namespaceKey] = registry
+  trimRetirementNamespaces(namespaces)
+}
+
+/** Evicts oldest-first back to the cap. Every writer that can grow the map must end here — a copy
+ *  during migration adds a key without removing one, so the map would otherwise drift over the cap
+ *  and the next ordinary write would evict the whole excess at once. */
+function trimRetirementNamespaces(namespaces: Record<string, RetiredNameRegistry>): void {
   const keys = Object.keys(namespaces)
   // Why the clamp: a negative `end` makes slice count back from the tail, so an under-full map
   // would evict almost everything it holds instead of nothing.
@@ -135,7 +142,19 @@ export function migrateRetirementNamespaceHostIdentity(
       }
     }
   }
+  if (changed) {
+    // A retained source bucket grows the map, so migration has to respect the cap too.
+    trimRetirementNamespaces(namespaces)
+  }
   return changed
+}
+
+function retiredNameRegistriesEqual(a: RetiredNameRegistry, b: RetiredNameRegistry): boolean {
+  if (a.exhaustedTiers !== b.exhaustedTiers || a.names.length !== b.names.length) {
+    return false
+  }
+  const names = new Set(a.names)
+  return b.names.every((name) => names.has(name))
 }
 
 function rekeyRetirementNamespaceHost(
@@ -163,12 +182,11 @@ function rekeyRetirementNamespaceHost(
       continue
     }
     // Why compare: a copy repeats on every import, and reporting a change the destination already
-    // covered would schedule a save each time.
+    // covered would schedule a save each time. Compared by membership rather than by size, so a
+    // destination that was stored uncompacted cannot trade a folded name for a new one and read
+    // as unchanged.
     const merged = mergeRetiredNameRegistries(existing, registry)
-    if (
-      merged.names.length !== existing.names.length ||
-      merged.exhaustedTiers !== existing.exhaustedTiers
-    ) {
+    if (!retiredNameRegistriesEqual(merged, existing)) {
       namespaces[nextKey] = merged
       changed = true
     }
