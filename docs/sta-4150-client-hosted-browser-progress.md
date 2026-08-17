@@ -43,8 +43,9 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@96b03bab4f`; all 58 patches are
-  identical by `git range-diff`, and the three new upstream commits have no changed-file overlap.
+  sequence. The current local series is rebased onto `origin/main@21ed09e45c`; all 63 patches are
+  identical by `git range-diff`. The sole commit after the preceding reviewed base changes only
+  `mobile/app.json` and has no changed-file overlap with STA-4150.
   The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
   #14956, #14957 pass 46. The refreshed substantive PR-check runs are also green on all five
   rebased heads, as are the replacement computer-use runs. GitHub's #14954 rollup still counts an
@@ -333,12 +334,25 @@ boundary` successfully; its Windows package boundary also passed before post-job
   2-file regression gate passes 23/23, and the package workflow contract pins the real Electron
   capture into both native Linux and Windows package lanes. This changes no wire field or server,
   mobile, web, browserless, explicit-server, SSH, WSL, folder-workspace, or worktree selection.
+- Exact-tip lifecycle review then reproduced a fail-closed ordering defect: policy rejection could
+  begin guest closure before navigation and popup quarantine existed. The deterministic regression
+  was red 1/23 because `preventDefault` was never called. Quarantine now installs first; delayed or
+  throwing close remains navigation- and popup-denied, and the focused gate is green 24/24.
+- Exact-tip resource review found two cleanup-only P2s. The Electron UDP probe now attempts deletion
+  of every profile root before reporting one `AggregateError`, and packaged-skew profile seeding now
+  occurs inside the cleanup-protected scope. Three independent closure rereviews on
+  `c72f770b04e7` found no remaining proven P0/P1/P2; their focused validation passed 57/57, 68/68,
+  and 49/49 tests, plus packaged skew 2/2 and the 23/23 native-workflow contract.
+- The final headed paired-runtime run completed with `test-results/.last-run.json` recording
+  `status: passed`. A separate clean headless rerun rebuilt Electron and CLI artifacts and passed
+  both product journeys 2/2 in 47.1 seconds, including client hosting, new-page-only disablement,
+  and server fallback without duplicate execution.
 
-The cumulative local tree is rebased onto `origin/main@96b03bab4f`. Safety refs
-`sta-4150-safety-pre-packaged-linux-rebase-20260816` and
-`sta-4150-safety-pre-96b-packaged-linux-rebase-20260816` preserve the pre-split and pre-main-rebase
-tips. All 58 patches are identical by `git range-diff`, and the three upstream commits have no
-changed-file overlap with the feature.
+The cumulative local tree is rebased onto `origin/main@21ed09e45c`. Safety refs
+`sta-4150-safety-pre-886-main-rebase-20260816` and
+`sta-4150-safety-pre-21ed-main-rebase-20260816` preserve the preceding reviewed tips. All 63
+patches are identical by `git range-diff`; the intervening main commit only bumps the mobile app
+version and has no changed-file overlap with the feature.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, packaged Windows/Linux skew, and broader live network
 containment beyond the current HTTP/DNS routes. Deterministic WSL, SSH, folder-workspace,
@@ -346,9 +360,8 @@ git-worktree, browserless, mixed-version, packaged-macOS, and package-contract e
 
 The remaining ownership work, in execution order, is:
 
-1. Finish local/package validation and the final security, cross-platform, and resource rereviews,
-   then publish the WebRTC fix in #14955, native-host CI contract in #14956, and test-harness
-   cleanup in #14957 without marking any PR ready or merging.
+1. Publish the latest-main heads without marking any PR ready or merging, then monitor the native
+   Linux and Windows WebRTC/lifecycle jobs and fix only reproducible, actionable failures.
 2. Obtain human review for the five landing PRs.
 3. Before release, run or explicitly accept the remaining physical Windows/Linux/mobile,
    packaged Windows/Linux, and broader protocol-containment gaps.
@@ -430,11 +443,11 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                     |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@036d7b6475`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@f783806b10` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@11ba439ed0`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@176b9079e8`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@18a3c873a1`    | Full cumulative and paired E2E proof; latest CI pending     |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@f04de37b30`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@c764292ff3` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@54d78c83c3`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b604f5850f`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@7bd2169d9a`    | Full cumulative and paired E2E proof; latest CI pending     |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -915,8 +928,9 @@ Validation and review:
   without proof risks desktop-network leakage or targeting a replacement guest.
 - Electron partitions are session-wide. A profile/execution-host change requires a new engine and
   partition, never proxy retargeting.
-- Service workers, speculative connections, QUIC/HTTP3, DoH, WebRTC, network-service restarts,
-  downloads, and popups are activation blockers until proven routed or explicitly denied.
+- Service workers, speculative connections, QUIC/HTTP3, DoH, WebTransport, network-service
+  restarts, downloads, and other non-WebRTC direct-egress paths remain unproven. WebRTC direct UDP
+  is denied on the exact routed guest, with real Electron packet-capture evidence.
 - Renderer crash or last hosting-window close suspends/closes client page generations; no server
   fallback is allowed.
 - The open draft stack is intentionally large. Review/landing order and rebasing are delivery
