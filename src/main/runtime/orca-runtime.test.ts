@@ -166,6 +166,16 @@ function resetPlatform(): void {
   }
 }
 
+function acknowledgeAgentPromptSubmit(
+  runtime: OrcaRuntimeService,
+  ptyId: string,
+  data: string
+): void {
+  if (data === '\r') {
+    runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', Date.now())
+  }
+}
+
 const electronMocks = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
   const listeners = new Map<string, Set<Listener>>()
@@ -6455,7 +6465,8 @@ describe('OrcaRuntimeService', () => {
           worktreeId: `${TEST_REPO_ID}::/remote/feature`
         }
       ]),
-      shutdown: vi.fn().mockResolvedValue(undefined)
+      shutdown: vi.fn().mockResolvedValue(undefined),
+      deleteWorktreeHistory: vi.fn().mockResolvedValue(undefined)
     }
     const runtime = new OrcaRuntimeService(remoteStore as never, undefined, {
       getSshProvider: () => ptyProvider as never
@@ -6471,6 +6482,9 @@ describe('OrcaRuntimeService', () => {
     expect(ptyProvider.shutdown).toHaveBeenCalledWith(
       'pty-remote',
       expect.objectContaining({ immediate: true })
+    )
+    expect(ptyProvider.deleteWorktreeHistory).toHaveBeenCalledWith(
+      `${TEST_REPO_ID}::/remote/feature`
     )
     expect(ptyProvider.shutdown.mock.invocationCallOrder[0]).toBeLessThan(
       gitProvider.removeWorktree.mock.invocationCallOrder[0]
@@ -13092,110 +13106,6 @@ describe('OrcaRuntimeService', () => {
     ).toBeUndefined()
   })
 
-  it('keeps OpenCode launch authority while command-finished leaves it in foreground', async () => {
-    const spawn = vi.fn().mockResolvedValue({ id: 'pty-opencode', incarnationId: 'process-1' })
-    const retireAuthority = vi.fn()
-    const getForegroundProcess = vi.fn(async () => 'opencode')
-    const runtime = new OrcaRuntimeService(store, undefined, {
-      attestAgentHookCompatibilityAuthority: (candidate) => ({
-        paneKey: candidate.paneKey,
-        source: 'current_hook'
-      }),
-      retireAgentHookCompatibilityAuthority: retireAuthority
-    })
-    runtime.setPtyController({
-      spawn,
-      write: () => true,
-      kill: () => true,
-      getForegroundProcess
-    })
-    runtime.setNotifier({
-      worktreesChanged: vi.fn(),
-      reposChanged: vi.fn(),
-      activateWorktree: vi.fn(),
-      createTerminal: vi.fn(),
-      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-opencode' }),
-      splitTerminal: vi.fn(),
-      renameTerminal: vi.fn(),
-      focusTerminal: vi.fn(),
-      closeTerminal: vi.fn(),
-      sleepWorktree: vi.fn(),
-      terminalFitOverrideChanged: vi.fn(),
-      terminalDriverChanged: vi.fn()
-    })
-    runtime.attachWindow(1)
-    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
-
-    const terminal = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-      command: 'opencode',
-      launchConfig: { agentCommand: 'opencode', agentArgs: '', agentEnv: {} },
-      launchAgent: 'opencode'
-    })
-    const spawnEnv =
-      (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
-    const evidence = {
-      terminalHandle: terminal.handle,
-      paneKey: spawnEnv.ORCA_PANE_KEY,
-      launchToken: spawnEnv.ORCA_AGENT_LAUNCH_TOKEN
-    }
-
-    runtime.onPtyData('pty-opencode', '\x1b]133;D;0\x07', 100)
-    await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalled())
-
-    expect(retireAuthority).not.toHaveBeenCalled()
-    expect(runtime.verifyOrchestrationCompatibilityCaller(evidence)).not.toBeNull()
-  })
-
-  it('ignores a stale OpenCode foreground result after a newer title observation', async () => {
-    let resolveForegroundProcess: ((process: string | null) => void) | undefined
-    const foregroundProcess = new Promise<string | null>((resolve) => {
-      resolveForegroundProcess = resolve
-    })
-    const spawn = vi.fn().mockResolvedValue({ id: 'pty-opencode-race', incarnationId: 'process-1' })
-    const retireAuthority = vi.fn()
-    const getForegroundProcess = vi.fn(() => foregroundProcess)
-    const runtime = new OrcaRuntimeService(store, undefined, {
-      retireAgentHookCompatibilityAuthority: retireAuthority
-    })
-    runtime.setPtyController({
-      spawn,
-      write: () => true,
-      kill: () => true,
-      getForegroundProcess
-    })
-    runtime.setNotifier({
-      worktreesChanged: vi.fn(),
-      reposChanged: vi.fn(),
-      activateWorktree: vi.fn(),
-      createTerminal: vi.fn(),
-      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-opencode-race' }),
-      splitTerminal: vi.fn(),
-      renameTerminal: vi.fn(),
-      focusTerminal: vi.fn(),
-      closeTerminal: vi.fn(),
-      sleepWorktree: vi.fn(),
-      terminalFitOverrideChanged: vi.fn(),
-      terminalDriverChanged: vi.fn()
-    })
-    runtime.attachWindow(1)
-    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
-
-    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
-      command: 'opencode',
-      launchConfig: { agentCommand: 'opencode', agentArgs: '', agentEnv: {} },
-      launchAgent: 'opencode'
-    })
-
-    runtime.onPtyData('pty-opencode-race', '\x1b]133;D;0\x07', 100)
-    await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalled())
-    runtime.onPtyData('pty-opencode-race', '\x1b]0;OpenCode working\x07', 101)
-    resolveForegroundProcess?.(null)
-    await foregroundProcess
-    await Promise.resolve()
-
-    expect(retireAuthority).not.toHaveBeenCalled()
-  })
-
   it('retires only receipted restored PTY authority on command completion and exit', () => {
     const retireAuthority = vi.fn()
     const runtime = new OrcaRuntimeService(store, undefined, {
@@ -16866,6 +16776,7 @@ describe('OrcaRuntimeService', () => {
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
           writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -16932,6 +16843,7 @@ describe('OrcaRuntimeService', () => {
               } else {
                 prematureEnters += 1
               }
+              acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
             }
             return true
           },
@@ -16980,6 +16892,7 @@ describe('OrcaRuntimeService', () => {
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
           writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -17017,6 +16930,7 @@ describe('OrcaRuntimeService', () => {
               runtime.onPtyData('pty-bg', '\x1b[?25hcomposer rendered', Date.now())
             }, 1_200)
           }
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -17049,6 +16963,7 @@ describe('OrcaRuntimeService', () => {
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
           writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -17087,6 +17002,7 @@ describe('OrcaRuntimeService', () => {
               runtime.onPtyData('pty-bg', 'final slow composer frame', Date.now())
             }, 8_100)
           }
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -17128,6 +17044,7 @@ describe('OrcaRuntimeService', () => {
               )
             }
           }
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -17158,6 +17075,7 @@ describe('OrcaRuntimeService', () => {
         spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
         write: (_ptyId, data) => {
           writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
           return true
         },
         kill: () => true,
@@ -33244,7 +33162,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).not.toHaveBeenCalled()
   })
 
-  it('uses POSIX quoting for mobile agent launch commands in WSL project runtimes', async () => {
+  it('uses portable Unix quoting for mobile agent launch commands in WSL project runtimes', async () => {
     await withPlatform('win32', async () => {
       const spawn = vi.fn().mockResolvedValue({ id: 'pty-agent' })
       const runtime = new OrcaRuntimeService({
@@ -33282,7 +33200,7 @@ describe('OrcaRuntimeService', () => {
 
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
-          command: "command-code --profile mobile '--note' 'can'\\''t'",
+          command: `command-code --profile mobile '--note' 'can'"'"'t'`,
           cwd: TEST_WORKTREE_PATH,
           worktreeId: TEST_WORKTREE_ID
         })
@@ -48521,6 +48439,145 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('routes already-missing SSH runtime history cleanup through the PTY owner', async () => {
+    const repo = {
+      id: 'repo-runtime-ssh',
+      path: '/remote/repo',
+      displayName: 'ssh',
+      badgeColor: 'blue',
+      addedAt: 1,
+      connectionId: 'ssh-1'
+    }
+    const worktreeId = `${repo.id}::/remote/already-deleted`
+    const metaById: Record<string, WorktreeMeta> = {
+      [worktreeId]: makeWorktreeMeta({ hostId: 'ssh:ssh-1', orcaCreationSource: 'ssh' })
+    }
+    const removeWorktreeMeta = vi.fn((id: string) => {
+      delete metaById[id]
+    })
+    const runtimeStore = {
+      ...store,
+      getRepos: () => [repo],
+      getRepo: (id: string) => (id === repo.id ? repo : undefined),
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (id: string) => metaById[id],
+      removeWorktreeMeta
+    }
+    const gitProvider = {
+      listWorktrees: vi.fn().mockResolvedValue([
+        {
+          path: repo.path,
+          head: 'main',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+    }
+    const fsProvider = {
+      stat: vi.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    }
+    const deleteWorktreeHistory = vi.fn().mockResolvedValue(undefined)
+    const ptyProvider = { deleteWorktreeHistory } as never
+    registerSshGitProvider(repo.connectionId, gitProvider as never)
+    registerSshFilesystemProvider(repo.connectionId, fsProvider as never)
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
+      getSshProvider: () => ptyProvider
+    })
+
+    try {
+      await expect(runtime.removeManagedWorktree(`id:${worktreeId}`)).resolves.toEqual({})
+    } finally {
+      unregisterSshGitProvider(repo.connectionId)
+      unregisterSshFilesystemProvider(repo.connectionId)
+    }
+
+    expect(deleteWorktreeHistory).toHaveBeenCalledWith(worktreeId)
+    expect(deleteWorktreeHistory.mock.invocationCallOrder[0]).toBeLessThan(
+      removeWorktreeMeta.mock.invocationCallOrder[0]
+    )
+    expect(removeWorktreeMeta).toHaveBeenCalledWith(worktreeId, 'ssh:ssh-1')
+  })
+
+  it('routes SSH runtime orphan-directory history cleanup through the PTY owner', async () => {
+    const repo = {
+      id: 'repo-runtime-ssh',
+      path: '/remote/repo',
+      displayName: 'ssh',
+      badgeColor: 'blue',
+      addedAt: 1,
+      connectionId: 'ssh-1'
+    }
+    const worktreePath = '/remote/orphan'
+    const worktreeId = `${repo.id}::${worktreePath}`
+    const metaById: Record<string, WorktreeMeta> = {
+      [worktreeId]: makeWorktreeMeta({
+        hostId: 'ssh:ssh-1',
+        orcaCreatedAt: Date.now(),
+        orcaCreationSource: 'ssh'
+      })
+    }
+    const removeWorktreeMeta = vi.fn((id: string) => {
+      delete metaById[id]
+    })
+    const runtimeStore = {
+      ...store,
+      getRepos: () => [repo],
+      getRepo: (id: string) => (id === repo.id ? repo : undefined),
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (id: string) => metaById[id],
+      removeWorktreeMeta
+    }
+    const gitProvider = {
+      listWorktrees: vi.fn().mockResolvedValue([
+        {
+          path: repo.path,
+          head: 'main',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+    }
+    const fsProvider = {
+      lstat: vi.fn(async (path: string) => ({
+        type: path === `${worktreePath}/.git` ? 'file' : 'directory'
+      })),
+      readFile: vi.fn(async (path: string) => ({
+        isBinary: false,
+        content:
+          path === `${worktreePath}/.git`
+            ? `gitdir: ${repo.path}/.git/worktrees/orphan\n`
+            : `${worktreePath}/.git\n`
+      })),
+      deletePath: vi.fn().mockResolvedValue(undefined)
+    }
+    const deleteWorktreeHistory = vi.fn().mockResolvedValue(undefined)
+    const ptyProvider = {
+      listProcesses: vi.fn().mockResolvedValue([]),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+      deleteWorktreeHistory
+    }
+    registerSshGitProvider(repo.connectionId, gitProvider as never)
+    registerSshFilesystemProvider(repo.connectionId, fsProvider as never)
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
+      getSshProvider: () => ptyProvider as never
+    })
+
+    try {
+      await expect(runtime.removeManagedWorktree(`id:${worktreeId}`, true)).resolves.toEqual({})
+    } finally {
+      unregisterSshGitProvider(repo.connectionId)
+      unregisterSshFilesystemProvider(repo.connectionId)
+    }
+
+    expect(fsProvider.deletePath).toHaveBeenCalledWith(worktreePath, true)
+    expect(deleteWorktreeHistory).toHaveBeenCalledWith(worktreeId)
+    expect(deleteWorktreeHistory.mock.invocationCallOrder[0]).toBeLessThan(
+      removeWorktreeMeta.mock.invocationCallOrder[0]
+    )
+  })
+
   it('force-removes a legacy Orca-created runtime orphaned worktree directory after Git tracking is gone', async () => {
     const parentDir = await mkdtemp(join(tmpdir(), 'orca-runtime-orphan-'))
     const repoPath = join(parentDir, 'repo')
@@ -49827,6 +49884,7 @@ describe('OrcaRuntimeService', () => {
       expect(runtime.resolveLeafForHandle(handle)).toEqual({ ptyId: 'pty-b' })
       // The guarded resolver surfaces the staleness so clients can re-derive.
       expect(() => runtime.resolveLiveLeafForHandle(handle)).toThrow('terminal_handle_stale')
+      expect(runtime.getLiveTerminalPaneKey(handle)).toBeNull()
     })
 
     it('lets a handle issued before its first PTY adopt that PTY without erroring', async () => {
@@ -49846,6 +49904,23 @@ describe('OrcaRuntimeService', () => {
       record.ptyId = null
 
       expect(runtime.resolveLiveLeafForHandle(handle)).toEqual({ ptyId: 'pty-a' })
+    })
+
+    it('keeps terminal cwd resolution fail-soft when the provider is unavailable', async () => {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.attachWindow(1)
+      syncSingleTerminalGraph(runtime, 'pty-a')
+      const handle = issueLeafHandle(runtime, 'pty-a')
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null,
+        getCwd: async () => {
+          throw new Error('ssh disconnected')
+        }
+      })
+
+      await expect(runtime.resolveTerminalCwd(handle)).resolves.toBeNull()
     })
   })
 

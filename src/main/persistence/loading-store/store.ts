@@ -302,7 +302,8 @@ import {
   normalizePersistedPaneIdentityState,
   normalizeWorkspaceSessionPaneIdentities,
   remapAcknowledgedAgentPaneKeys,
-  remapSshRemotePtyLeaseLeafIds
+  remapSshRemotePtyLeaseLeafIds,
+  type WorkspaceSessionPaneIdentityRemap
 } from '../restoring-sessions/workspace-pane-normalization'
 import {
   mergeProjectHostSetupCompatibilityState,
@@ -2881,10 +2882,13 @@ export class Store {
       registerPersistedPaneKeyAlias(entry)
     }
     session = normalized.session
+    const remapsByHostId = new Map<ExecutionHostId, WorkspaceSessionPaneIdentityRemap>([
+      [LOCAL_EXECUTION_HOST_ID, normalized]
+    ])
     const remappedLeases = remapSshRemotePtyLeaseLeafIds(
       this.state.sshRemotePtyLeases ?? [],
-      normalized.leafIdByInputLeafIdByTabId,
-      normalized.leafIdByPtyIdByTabId
+      remapsByHostId,
+      new Set(this.getWorkspaceSessionHostIds())
     )
     if (remappedLeases.changed) {
       this.state.sshRemotePtyLeases = remappedLeases.leases

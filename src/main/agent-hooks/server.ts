@@ -416,7 +416,8 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
 // Why: OSC never carries model/children; omit both so an equivalent OSC ping preserves the hook-cached identity graph.
 function equivalentParsedAgentStatusPayload(
   a: ParsedAgentStatusPayload,
-  b: ParsedAgentStatusPayload
+  b: ParsedAgentStatusPayload,
+  preserveActiveTurnStamp = false
 ): boolean {
   return (
     a.state === b.state &&
@@ -425,11 +426,14 @@ function equivalentParsedAgentStatusPayload(
     a.toolName === b.toolName &&
     a.toolInput === b.toolInput &&
     a.interactivePrompt === b.interactivePrompt &&
-    a.lastAssistantMessage === b.lastAssistantMessage &&
+    (a.lastAssistantMessage === b.lastAssistantMessage ||
+      (preserveActiveTurnStamp && b.lastAssistantMessage === undefined)) &&
     a.interrupted === b.interrupted &&
     // Why: a session-boundary done must never be deduped against a cached real done —
     // the flag has to reach receivers deterministically (STA-3386).
-    a.sessionBoundary === b.sessionBoundary
+    a.sessionBoundary === b.sessionBoundary &&
+    (a.turnCompletedAt === b.turnCompletedAt ||
+      (preserveActiveTurnStamp && b.turnCompletedAt === undefined))
   )
 }
 
@@ -630,10 +634,10 @@ export class AgentHookServer {
   private assistantMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private codexSubagentPollTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private promptSentDedupeByPaneKey = new Map<string, AgentPromptSentDedupeEntry>()
+  private activeHookTurnCompletedAtByPaneKey = new Map<string, number>()
   private promptSentHashSalt = randomBytes(16).toString('hex')
   private closedAgentStatusTabIds = new Set<string>()
   private closedAgentStatusPaneKeys = new Set<string>()
-  private restartedStatusLaunchTokenHashByPaneKey = new Map<string, string>()
   private connectionTimestampWatermarkById = new Map<string, number>()
   // Why: skip disk writes when the JSON exactly matches the last write; guards against re-firing trailing timers when nothing changed.
   private lastWrittenJson: string | null = null
@@ -918,6 +922,9 @@ export class AgentHookServer {
         prompt: payload.prompt,
         agentType: payload.agentType,
         ...(restored.state === 'done' && restored.interrupted ? { interrupted: true } : {}),
+        ...(restored.turnCompletedAt !== undefined
+          ? { turnCompletedAt: restored.turnCompletedAt }
+          : {}),
         ...(payload.subagents ? { subagents: payload.subagents } : {})
       }
     })
@@ -997,13 +1004,7 @@ export class AgentHookServer {
 
   private getAgentStatusDisposition(
     paneKey: string,
-    event?: {
-      hookEventName?: string
-      isReplay?: boolean
-      source?: AgentHookSource
-      hasExplicitPrompt?: boolean
-      launchToken?: string
-    }
+    event?: { hookEventName?: string; isReplay?: boolean }
   ): 'accept' | 'restart' | 'suppress' {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
     const paneRetired =
@@ -1014,38 +1015,17 @@ export class AgentHookServer {
       return 'suppress'
     }
     if (!paneRetired) {
-      const tokenFence = this.restartedStatusLaunchTokenHashByPaneKey.get(ownerPaneKey)
-      if (event && tokenFence) {
-        const launchToken = event.launchToken?.trim()
-        if (!launchToken || createHash('sha256').update(launchToken).digest('hex') !== tokenFence) {
-          return 'suppress'
-        }
-      }
       return 'accept'
     }
-    // Why: a new session boundary or explicit prompt proves a live lifecycle, while its
-    // token fences follow-up status without restoring retired orchestration authority.
-    const freshOpenCodePrompt =
-      event?.source === 'opencode' &&
-      event.hookEventName === 'MessagePart' &&
-      event.hasExplicitPrompt === true
+    // Why: command completion retires launch authority but leaves its shell pane reusable.
+    // A live SessionStart proves a new agent process owns the retired pane just like a
+    // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
     if (
-      (event?.hookEventName === 'UserPromptSubmit' ||
-        event?.hookEventName === 'SessionStart' ||
-        freshOpenCodePrompt) &&
-      event?.isReplay !== true
+      (event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart') &&
+      event.isReplay !== true
     ) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
-      const launchToken = event.launchToken?.trim()
-      if (launchToken) {
-        this.restartedStatusLaunchTokenHashByPaneKey.set(
-          ownerPaneKey,
-          createHash('sha256').update(launchToken).digest('hex')
-        )
-      } else {
-        this.restartedStatusLaunchTokenHashByPaneKey.delete(ownerPaneKey)
-      }
       return 'restart'
     }
     return 'suppress'
@@ -1166,6 +1146,10 @@ export class AgentHookServer {
     payload: AgentHookEventPayload,
     onAccepted?: () => void
   ): EnrichedAgentHookEventPayload {
+    if (payload.hookEventName === 'UserPromptSubmit') {
+      // Why: the prompt boundary is authoritative even when text is unchanged; its next OSC working row must not inherit the prior cron/background turn stamp.
+      this.activeHookTurnCompletedAtByPaneKey.delete(payload.paneKey)
+    }
     const previous = this.state.lastStatusByPaneKey.get(payload.paneKey) as
       | EnrichedAgentHookEventPayload
       | undefined
@@ -1305,6 +1289,15 @@ export class AgentHookServer {
     }
     const cachedPayload = resolveCachedClaudeCompactOwnership(previous, effectivePayload)
     const enriched = this.attachStatusTiming(cachedPayload, now)
+    if (
+      typeof enriched.payload.turnCompletedAt === 'number' &&
+      Number.isFinite(enriched.payload.turnCompletedAt)
+    ) {
+      this.activeHookTurnCompletedAtByPaneKey.set(
+        enriched.paneKey,
+        enriched.payload.turnCompletedAt
+      )
+    }
     // Why: an identity-matched event can still leave the aggregate backed only by another restored child; keep liveness reconciliation eligible.
     if (enriched.restoredUnconfirmed) {
       this.runtimeObservedStatusPaneKeys.delete(enriched.paneKey)
@@ -1619,12 +1612,10 @@ export class AgentHookServer {
     if (this.runtimeObservedStatusPaneKeys.delete(previousOwnerPaneKey)) {
       this.runtimeObservedStatusPaneKeys.add(toPaneKey)
     }
-    const restartedTokenHash =
-      this.restartedStatusLaunchTokenHashByPaneKey.get(previousOwnerPaneKey)
-    this.restartedStatusLaunchTokenHashByPaneKey.delete(previousOwnerPaneKey)
-    this.restartedStatusLaunchTokenHashByPaneKey.delete(toPaneKey)
-    if (restartedTokenHash) {
-      this.restartedStatusLaunchTokenHashByPaneKey.set(toPaneKey, restartedTokenHash)
+    const activeTurnCompletedAt = this.activeHookTurnCompletedAtByPaneKey.get(previousOwnerPaneKey)
+    if (activeTurnCompletedAt !== undefined) {
+      this.activeHookTurnCompletedAtByPaneKey.delete(previousOwnerPaneKey)
+      this.activeHookTurnCompletedAtByPaneKey.set(toPaneKey, activeTurnCompletedAt)
     }
     const authorityObservation = this.currentAuthorityObservations.get(previousOwnerPaneKey)
     if (authorityObservation) {
@@ -1678,10 +1669,10 @@ export class AgentHookServer {
     const hadStatus = [...paneKeys].some((key) => this.state.lastStatusByPaneKey.has(key))
     for (const key of paneKeys) {
       this.markPaneClosedForAgentStatus(key)
-      this.restartedStatusLaunchTokenHashByPaneKey.delete(key)
       this.clearAssistantMessageRetry(key)
       this.clearCodexSubagentPoll(key)
       clearPaneCacheState(this.state, key)
+      this.activeHookTurnCompletedAtByPaneKey.delete(key)
       this.runtimeObservedStatusPaneKeys.delete(key)
       this.currentAuthorityObservations.delete(key)
       this.promptSentDedupeByPaneKey.delete(key)
@@ -1715,6 +1706,7 @@ export class AgentHookServer {
         }
         this.legacyPaneKeyAliases.delete(legacyPaneKey)
         clearPaneCacheState(this.state, legacyPaneKey)
+        this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
         if (shouldClearStablePaneKey && this.state.lastStatusByPaneKey.has(entry.stablePaneKey)) {
@@ -1724,6 +1716,7 @@ export class AgentHookServer {
         if (shouldClearStablePaneKey) {
           // Why: hydrated rows live under the stable key; if this PTY dies before ptyPaneKey rebuilds, alias cleanup is the only evictor.
           clearPaneCacheState(this.state, entry.stablePaneKey)
+          this.activeHookTurnCompletedAtByPaneKey.delete(entry.stablePaneKey)
           this.runtimeObservedStatusPaneKeys.delete(entry.stablePaneKey)
           this.currentAuthorityObservations.delete(entry.stablePaneKey)
           this.promptSentDedupeByPaneKey.delete(entry.stablePaneKey)
@@ -1865,12 +1858,15 @@ export class AgentHookServer {
     const previous = this.state.lastStatusByPaneKey.get(paneKey) as
       | EnrichedAgentHookEventPayload
       | undefined
+    const preserveActiveTurnStamp =
+      previous?.payload.turnCompletedAt !== undefined &&
+      previous.payload.turnCompletedAt === this.activeHookTurnCompletedAtByPaneKey.get(paneKey)
     if (
       !previous?.restoredUnconfirmed &&
       previous?.connectionId === connectionId &&
       previous.tabId === tabId &&
       previous.worktreeId === worktreeId &&
-      equivalentParsedAgentStatusPayload(previous.payload, event.payload)
+      equivalentParsedAgentStatusPayload(previous.payload, event.payload, preserveActiveTurnStamp)
     ) {
       return
     }
@@ -1989,10 +1985,7 @@ export class AgentHookServer {
         : undefined
     const statusDisposition = this.getAgentStatusDisposition(paneKey, {
       hookEventName,
-      isReplay: envelope.isReplay === true,
-      source,
-      hasExplicitPrompt: envelope.hasExplicitPrompt === true,
-      launchToken: envelope.launchToken
+      isReplay: envelope.isReplay === true
     })
     if (statusDisposition === 'suppress') {
       return
@@ -2196,10 +2189,7 @@ export class AgentHookServer {
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
               hookEventName: normalized.event.hookEventName,
-              isReplay: normalized.event.isReplay,
-              source: normalized.event.source,
-              hasExplicitPrompt: normalized.event.hasExplicitPrompt,
-              launchToken: normalized.event.launchToken
+              isReplay: normalized.event.isReplay
             })
           : 'suppress'
         if (normalized.event && statusDisposition !== 'suppress') {
@@ -2282,7 +2272,6 @@ export class AgentHookServer {
     this.promptSentDedupeByPaneKey.clear()
     this.closedAgentStatusTabIds.clear()
     this.closedAgentStatusPaneKeys.clear()
-    this.restartedStatusLaunchTokenHashByPaneKey.clear()
     this.connectionTimestampWatermarkById.clear()
     this.legacyPaneKeyAliases.clear()
     clearAllListenerCaches(this.state)
@@ -2374,6 +2363,7 @@ export class AgentHookServer {
       return null
     }
     this.state.lastStatusByPaneKey.delete(resolvedPaneKey)
+    this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     if (!options?.preserveAuthority) {
       this.hydratedLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
       this.persistedAuthorityCommitmentsByPaneKey.delete(resolvedPaneKey)
@@ -2454,10 +2444,10 @@ export class AgentHookServer {
       this.clearAssistantMessageRetry(paneKey)
       this.clearCodexSubagentPoll(paneKey)
       clearPaneCacheState(this.state, paneKey)
+      this.activeHookTurnCompletedAtByPaneKey.delete(paneKey)
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
       this.currentAuthorityObservations.delete(paneKey)
       this.promptSentDedupeByPaneKey.delete(paneKey)
-      this.restartedStatusLaunchTokenHashByPaneKey.delete(paneKey)
     }
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
@@ -2476,9 +2466,9 @@ export class AgentHookServer {
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
     clearPaneCacheState(this.state, resolvedPaneKey)
+    this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
-    this.restartedStatusLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
     let clearedAlias = false
     for (const [legacyPaneKey, stablePaneKey] of this.legacyPaneKeyAliases) {
       if (stablePaneKey.stablePaneKey === resolvedPaneKey) {
@@ -2486,9 +2476,9 @@ export class AgentHookServer {
         paneKeys.add(legacyPaneKey)
         paneKeys.add(stablePaneKey.stablePaneKey)
         clearPaneCacheState(this.state, legacyPaneKey)
+        this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
-        this.restartedStatusLaunchTokenHashByPaneKey.delete(legacyPaneKey)
         clearedAlias = true
       }
     }
