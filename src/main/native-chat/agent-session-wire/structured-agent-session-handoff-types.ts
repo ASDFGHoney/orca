@@ -55,7 +55,7 @@ export type StructuredAgentSessionHandoffDeps = {
   claimKeyId: string
   transport?: StructuredAgentSessionHandoffTransport
   session: (sessionId: string) => { journal: AgentSessionJournal; fence: number }
-  suspendNative: (sessionId: string) => Promise<void>
+  suspendNative: (sessionId: string) => Promise<void | boolean>
   acquireNative: (input: {
     sessionId: string
     fence: number

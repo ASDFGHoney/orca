@@ -10800,7 +10800,25 @@ export class OrcaRuntimeService {
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    throw new Error('The recovered owner process did not exit.')
+    // SIGTERM is only a request. Escalate once, then require an independent
+    // absence probe before allowing the lease transition to proceed.
+    try {
+      process.kill(identity.pid, 'SIGKILL')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        throw error
+      }
+      return
+    }
+    const forcedDeadline = Date.now() + 5_000
+    while (Date.now() < forcedDeadline) {
+      const current = await probeAgentSessionProcessIdentity({ identity })
+      if (current.outcome === 'pid-absent' || current.outcome === 'identity-mismatch') {
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error('The recovered owner process did not exit after forced termination.')
   }
 
   private structuredTuiStatus(owner: StructuredTuiOwner): 'idle' | 'busy' {
