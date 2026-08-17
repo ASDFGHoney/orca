@@ -291,14 +291,14 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
 
   /** Reaps one session's child. The proven handle chain is already durable, so
    *  a graceful close loses nothing. */
-  async closeSession(sessionId: string): Promise<void> {
+  async closeSession(sessionId: string): Promise<void | boolean> {
     const attempt = this.acquisitions.get(sessionId)
     if (attempt) {
       attempt.cancelled = true
       await attempt.window.connection?.close()
       await attempt.finished
     }
-    await closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent)
+    return closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent)
   }
 
   async closeAll(): Promise<void> {
@@ -309,8 +309,9 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
     }
   }
 
-  releaseAcquisition = (input: { sessionId: string }): Promise<void> =>
-    this.closeSession(input.sessionId)
+  releaseAcquisition = async (input: { sessionId: string }): Promise<void> => {
+    await this.closeSession(input.sessionId)
+  }
 
   private session(sessionId: string): CodexSession {
     const session = this.sessions.get(sessionId)
