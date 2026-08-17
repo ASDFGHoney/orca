@@ -21,6 +21,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
+    env:
+      # Why: an unfrozen bundler silently re-resolves when Gemfile.lock drifts
+      # from the Gemfile, which is how the release jobs could land on different
+      # fastlane versions in the first place. Fail here instead.
+      BUNDLE_FROZEN: 'true'
+
     defaults:
       run:
         working-directory: mobile
