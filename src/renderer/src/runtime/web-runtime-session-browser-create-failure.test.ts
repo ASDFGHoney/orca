@@ -265,6 +265,40 @@ describe('createWebRuntimeSessionBrowserTab', () => {
     expect(runtimeCall).toHaveBeenCalledTimes(2)
   })
 
+  it('waits for an old host to publish its generated browser page id', async () => {
+    let pagePublished = false
+    let listCount = 0
+    mocks.hasMaterializedWebRuntimeBrowserPage.mockImplementation(() => pagePublished)
+    const runtimeCall = vi.fn((request: { method: string }) => {
+      if (request.method === 'browser.tabCreate') {
+        return Promise.resolve({
+          id: 'create',
+          ok: true,
+          result: { browserPageId: 'old-host-generated-page' }
+        })
+      }
+      if (request.method === 'session.tabs.list') {
+        listCount += 1
+        pagePublished = listCount >= 2
+        return Promise.resolve({
+          id: `list-${listCount}`,
+          ok: true,
+          result: makeSnapshot()
+        })
+      }
+      return Promise.resolve({ id: 'close', ok: true, result: { closed: true } })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(createWebRuntimeSessionBrowserTab({ worktreeId: WORKTREE_ID })).resolves.toBe(true)
+
+    expect(runtimeCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'browser.tabCreate',
+      'session.tabs.list',
+      'session.tabs.list'
+    ])
+  })
+
   it('reports ambiguous failure when exact host cleanup is not confirmed', async () => {
     mocks.hasMaterializedWebRuntimeBrowserPage.mockReturnValue(false)
     const runtimeCall = vi
