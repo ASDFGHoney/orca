@@ -2814,6 +2814,8 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-stream-reconnect.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
       ],
       "testFiles": [
@@ -2823,6 +2825,7 @@
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
+        "src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
         "tests/e2e/paired-remote-browser-stream-reconnect.spec.ts"
       ],
       "assertionRefs": [
@@ -2862,6 +2865,12 @@
           ]
         },
         {
+          "file": "src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
+          "assertions": [
+            "cancellation before subscription admission unsubscribes the pending remote request exactly once"
+          ]
+        },
+        {
           "file": "tests/e2e/paired-remote-browser-stream-reconnect.spec.ts",
           "assertions": [
             "a real paired-runtime disconnect ends with an actionable Reconnect control",
@@ -2888,6 +2897,16 @@
           "result": "passed",
           "durationSeconds": 59.8,
           "summary": "Both isolated headless paired-runtime scenarios passed: bounded recovery after a live-stream disconnect and manual recovery when the first stream never opened."
+        },
+        {
+          "date": "2026-08-17",
+          "commit": "c6016e2963e1f5e456f25d57a43b54494582a8ea",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.39,
+          "summary": "Seven focused stream, viewport, and cancellation files passed 98 deterministic lifecycle, recovery, and abort tests."
         }
       ],
       "runtimeBudget": {
@@ -2900,7 +2919,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The original byte-identical six-test first-frame oracle is red on 04072c54e9 and with only frame-gated live state disabled because ready immediately publishes live with zero frames. Six added race/cleanup cases are red on 0282778103: stale frames publish false live, post-error frames paint, duplicate ready repeats work, and close/frame/unmount do not abort the repaint RPC. All are green on the candidate, which also asserts exactly six total subscriptions and zero timers after exhaustion. The scheduler oracle fails with rescheduling disabled and passes after restoration. The isolated paired-runtime journey passes both disconnect and cold-open recovery scenarios."
+        "evidence": "The original byte-identical six-test first-frame oracle is red on 04072c54e9 and with only frame-gated live state disabled because ready immediately publishes live with zero frames. Six added race/cleanup cases are red on 0282778103: stale frames publish false live, post-error frames paint, duplicate ready repeats work, and close/frame/unmount do not abort the repaint RPC. All are green on candidate c6016e2963, which also asserts exactly six total subscriptions and zero timers after exhaustion; the exact-head stream/viewport/cancellation run passed 98 tests on 2026-08-17. The scheduler oracle fails with rescheduling disabled and passes after restoration. The isolated paired-runtime journey passes both disconnect and cold-open recovery scenarios. The physical Windows 1.4.184 run is manual evidence only and remains excluded from coveredPlatforms until replayable automation exists."
       },
       "performanceBudget": {
         "required": true,
