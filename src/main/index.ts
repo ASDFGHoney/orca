@@ -1188,6 +1188,12 @@ async function prepareCodexSessionResumeForLaunch(args: {
           }
         )
       } catch (error) {
+        // Why: this launch path pins CODEX_HOME to the account that OWNS the
+        // rollout and deliberately refuses to repin onto whichever account is
+        // selected now (#10793), so it does not wire
+        // getSelectedHostAccountCodexHomePath and this branch cannot fire today.
+        // It stays as a contract guard: the blanket catch below must never
+        // silently swallow a typed refusal if that ever changes.
         if (error instanceof ManagedCodexHomeTemporarilyUnavailableError) {
           throw error
         }

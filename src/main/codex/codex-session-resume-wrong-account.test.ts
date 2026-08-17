@@ -198,6 +198,31 @@ describe('STA-4607 session resume under a briefly unreadable sessions tree', () 
     ).rejects.toBeInstanceOf(ManagedCodexHomeTemporarilyUnavailableError)
   })
 
+  // Why: CodeRabbit read the callback's guard as matching only the exact sessions
+  // root and reported nested failures as leaking. The guard actually keys on the
+  // root being LISTED, not the failing directory, so a lock on a dated
+  // subdirectory is covered too. Pinned so the question cannot recur.
+  it('refuses when a NESTED dated directory locks and the root stats fine', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-sta4607-'))
+    tempRoots.push(root)
+    const selectedHome = makeHomeWithRollout(root, 'account-a')
+    const otherHome = makeHomeWithRollout(root, 'account-b')
+    // Only the dated directory faults; the sessions root itself reads fine, so
+    // the preliminary stat guard cannot be what catches this.
+    listingFaults.hold(join(selectedHome, 'sessions', '2026', '07', '20'))
+
+    await expect(
+      findTrustedCodexSessionResume({
+        sessionId: SESSION_ID,
+        transcriptPath: undefined,
+        trustedCodexHomes: [selectedHome, otherHome],
+        getSelectedAccountCodexHome: (): string | null => selectedHome,
+        systemCodexHomePath: null,
+        sharedRuntimeCodexHomePath: null
+      })
+    ).rejects.toBeInstanceOf(ManagedCodexHomeTemporarilyUnavailableError)
+  })
+
   it('skips an unreadable home that is NOT the selected account', async () => {
     const root = mkdtempSync(join(tmpdir(), 'orca-sta4607-'))
     tempRoots.push(root)
