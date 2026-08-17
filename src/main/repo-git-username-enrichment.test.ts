@@ -94,6 +94,22 @@ describe('enrichRepoGitUsernames', () => {
     expect(resolveLocalGitUsernameDetailedMock).toHaveBeenCalledTimes(1)
   })
 
+  it('probes a local and a runtime repo that share a path separately', async () => {
+    const store = makeStore([
+      makeRepo(),
+      makeRepo({ id: 'r1-runtime', executionHostId: 'runtime:env-a' })
+    ])
+
+    enrichRepoGitUsernames(store)
+    await flushRepoGitUsernameEnrichmentForTests()
+
+    expect(resolveLocalGitUsernameDetailedMock).toHaveBeenCalledTimes(2)
+    expect(store.setResolvedRepoGitUsername).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r1-runtime' }),
+      'demo-user'
+    )
+  })
+
   it('keeps persisted usernames on a non-authoritative empty resolution', async () => {
     resolveLocalGitUsernameDetailedMock.mockResolvedValue(resolved('', false))
     const store = makeStore([makeRepo()])
