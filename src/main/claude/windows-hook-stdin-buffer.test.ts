@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { spawn } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   MANAGED_HOOK_TIMEOUT_SECONDS,
   buildWindowsAgentHookCurlPostCommand
@@ -15,6 +19,7 @@ import {
   WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV,
   WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS,
   WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES,
+  WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS,
   buildWindowsClaudeHookStdinBuffer
 } from './windows-hook-stdin-buffer'
 
@@ -23,16 +28,69 @@ function decodePowerShellCommand(command: string): string {
   return Buffer.from(encoded ?? '', 'base64').toString('utf16le')
 }
 
+async function runWindowsHook(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  chunks: readonly { delay: number; value: string }[]
+): Promise<{ code: number | null; stdout: string }> {
+  const child = spawn('cmd.exe', ['/d', '/c', command], {
+    env,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'ignore']
+  })
+  let stdout = ''
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', (data: string) => {
+    stdout += data
+  })
+  const code = await new Promise<number | null>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill()
+      reject(new Error('Windows hook did not exit'))
+    }, 5_000)
+    const settle = (result: () => void): void => {
+      clearTimeout(timeout)
+      result()
+    }
+    child.once('error', (error) => settle(() => reject(error)))
+    child.once('close', (exitCode) => settle(() => resolve(exitCode)))
+
+    void (async () => {
+      for (const chunk of chunks) {
+        await new Promise((delayDone) => setTimeout(delayDone, chunk.delay))
+        if (child.exitCode !== null || child.killed) {
+          return
+        }
+        await new Promise<void>((writeDone, writeFailed) => {
+          child.stdin.write(chunk.value, (error) => (error ? writeFailed(error) : writeDone()))
+        })
+      }
+    })().catch((error: unknown) => {
+      settle(() => reject(error))
+    })
+  })
+  return { code, stdout }
+}
+
 describe('Windows Claude hook stdin buffer', () => {
   it('bounds the reader before launching children and makes the payload file crash-cleanup-safe', () => {
     const command = buildWindowsClaudeHookStdinBuffer('& $scriptPath')
 
-    expect(command).toContain('$inputStream.ReadAsync')
-    expect(command).toContain(`$read.Wait(${WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS})`)
-    expect(command).toContain(`$payload.Length -lt ${WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES}`)
+    expect(command).toContain('$i.ReadAsync')
+    expect(command).toContain(
+      `$r.Wait([Math]::Min(${WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS}, $u))`
+    )
+    expect(command).toContain(
+      `$w.ElapsedMilliseconds -lt ${WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS}`
+    )
+    expect(command).toContain('$t.Cancel()')
+    expect(command).toContain(`$p.Length -lt ${WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES}`)
+    expect(command).toContain("if (-not $c -or $x) { Write-Output '{}'; exit 0 }")
+    expect(command).toContain('ConvertFrom-Json')
     expect(command).toContain('[System.IO.FileOptions]::DeleteOnClose')
-    expect(command).toContain(`$env:${WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV} = $payloadPath`)
-    expect(command.indexOf('$inputStream.ReadAsync')).toBeLessThan(command.indexOf('& $scriptPath'))
+    expect(command).toContain(`$env:${WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV} = $f`)
+    expect(command.indexOf('ORCA_PANE_KEY')).toBeLessThan(command.indexOf('$i.ReadAsync'))
+    expect(command.indexOf('$i.ReadAsync')).toBeLessThan(command.indexOf('& $scriptPath'))
   })
 
   it('generates the bounded launcher only for local Windows Claude settings', () => {
@@ -52,7 +110,8 @@ describe('Windows Claude hook stdin buffer', () => {
       'linux'
     )
 
-    expect(decodePowerShellCommand(windowsClaude.command)).toContain('$inputStream.ReadAsync')
+    expect(decodePowerShellCommand(windowsClaude.command)).toContain('$i.ReadAsync')
+    expect(windowsClaude.command.length).toBeLessThanOrEqual(8_191)
     expect(windowsClaude.timeout).toBe(MANAGED_HOOK_TIMEOUT_SECONDS)
     expect(decodePowerShellCommand(windowsOpenClaude.command)).toBe('')
     expect(windowsOpenClaude.timeout).toBe(MANAGED_HOOK_TIMEOUT_SECONDS)
@@ -82,4 +141,57 @@ describe('Windows Claude hook stdin buffer', () => {
     expect(claudeDrain).toContain(`< "%${WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV}%" >nul 2>nul`)
     expect(buildWindowsHookStdinDrainEpilogue().join('\r\n')).toContain('more.com" >nul 2>nul')
   })
+
+  it.skipIf(process.platform !== 'win32')(
+    'runs complete fragmented JSON without waiting for EOF and guards missing context before reading',
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), 'orca-claude-stdin-buffer-'))
+      const scriptDir = join(home, '.orca', 'agent-hooks')
+      const capturePath = join(home, 'captured.json')
+      mkdirSync(scriptDir, { recursive: true })
+      writeFileSync(
+        join(scriptDir, 'claude-hook.cmd'),
+        [
+          '@echo off',
+          'copy /y "%ORCA_AGENT_HOOK_PAYLOAD_FILE%" "%ORCA_TEST_CAPTURE%" >nul',
+          'echo {}',
+          'exit /b 0'
+        ].join('\r\n')
+      )
+      const hook = getManagedLifecycleHook('claude-hook.cmd', CLAUDE_HOOK_SETTINGS, 'win32')
+      const env = {
+        ...process.env,
+        USERPROFILE: home,
+        ORCA_AGENT_HOOK_PORT: '1',
+        ORCA_AGENT_HOOK_TOKEN: 'token',
+        ORCA_PANE_KEY: 'pane',
+        ORCA_TEST_CAPTURE: capturePath
+      }
+      try {
+        const payload = '{"hook_event_name":"Stop","value":"✓"}'
+        const split = payload.indexOf(',') + 1
+        const result = await runWindowsHook(hook.command, env, [
+          { delay: 0, value: payload.slice(0, split) },
+          { delay: 300, value: payload.slice(split) }
+        ])
+        expect(result.code).toBe(0)
+        expect(result.stdout.trim()).toBe('{}')
+        expect(readFileSync(capturePath, 'utf8')).toBe(payload)
+
+        rmSync(capturePath)
+        const startedAt = Date.now()
+        const missingContext = await runWindowsHook(
+          hook.command,
+          { ...process.env, USERPROFILE: home, ORCA_TEST_CAPTURE: capturePath },
+          []
+        )
+        expect(missingContext.code).toBe(0)
+        expect(missingContext.stdout.trim()).toBe('{}')
+        expect(Date.now() - startedAt).toBeLessThan(2_000)
+        expect(() => readFileSync(capturePath)).toThrow()
+      } finally {
+        rmSync(home, { recursive: true, force: true })
+      }
+    }
+  )
 })
