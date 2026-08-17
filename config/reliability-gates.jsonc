@@ -2136,7 +2136,7 @@
       "knownGaps": [
         "Live paired-server validation currently covers macOS host and client only.",
         "The transport drop is an explicit runtime disconnect; real sleep/wake and network partitions are not yet exercised by this gate.",
-        "Browser screencast subscribers share the fixed contract but have no dedicated reveal journey; the web and mobile clients run parallel transports and are unaffected."
+        "Browser screencast subscribers now have deterministic shared-stream fanout coverage; a full headed reveal journey for multiple simultaneous viewers remains uncollected, while web and mobile clients continue to use their parallel transports."
       ],
       "demotionRule": "Demote if a retired runtime transport can leave a renderer subscription without a close event, if a close is delivered more than once, if one failing teardown strands its sibling subscriptions, if payload frames from a retired transport reach the renderer, or if a revealed remote terminal can stay blank or reject input after a reconnect."
     },
@@ -3945,7 +3945,7 @@
       "providers": ["remote-runtime", "ssh", "wsl"],
       "coveredPlatforms": ["macos", "ios"],
       "coveredProviders": ["remote-runtime", "ssh", "wsl"],
-      "coverageNotes": "Fresh-build Playwright journeys run the same production store action against an isolated headed Electron server and a real headless orca serve host. They prove one immutable client placement owns one real retained guest on the viewing desktop, the server owns no duplicate guest, no screencast frame renders, browser.snapshot reaches the client guest, disabling the setting preserves that guest, and the next page uses the legacy server engine. Deterministic contracts cover omitted placement, missing capabilities, explicit server placement, exact renderer-store materialization after delayed publication, no fallback after client-create failure, folder workspaces, git worktrees, browserless hosts, native and WSL routes, exact connected SSH authority, reconnect command replay, lease replacement, imported-inventory cleanup, and bounded retirement. A published v1.4.184 package runs both skew directions: an old client omits placement against the current host, while a current client capability-downgrades against the old host; each creates one server guest, no client guest, and returns the exact snapshot marker. A current iOS Simulator client paired to that legacy packaged host visibly loads Example Domain through the preserved server-hosted surface. A Docker OpenSSH target proves container-only DNS and localhost through both ssh2 and system-SSH routes. Physical Windows/Linux Electron and physical mobile journeys remain gaps.",
+      "coverageNotes": "Fresh-build Playwright journeys run the same production store action against an isolated headed Electron server and a real headless orca serve host. They prove one immutable client placement owns one real retained guest on the viewing desktop, the server owns no duplicate guest, no screencast frame renders, browser.snapshot reaches the client guest, disabling the setting preserves that guest, and the next page uses the legacy server engine. Deterministic contracts cover omitted placement, missing capabilities, explicit server placement, exact renderer-store materialization after delayed publication, no fallback after client-create failure, folder workspaces, git worktrees, browserless hosts, native and WSL routes, exact connected SSH authority, reconnect command replay, lease replacement, imported-inventory cleanup, bounded retirement, and shared remote screencast fanout for multiple independent viewers. A published v1.4.184 package runs both skew directions: an old client omits placement against the current host, while a current client capability-downgrades against the old host; each creates one server guest, no client guest, and returns the exact snapshot marker. A current iOS Simulator client paired to that legacy packaged host visibly loads Example Domain through the preserved server-hosted surface. A Docker OpenSSH target proves container-only DNS and localhost through both ssh2 and system-SSH routes. Physical Windows/Linux Electron and physical mobile journeys remain gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4150/refactor-remote-browser-to-client-hosted-electron-webviews"
       ],
@@ -3958,6 +3958,7 @@
         "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-browser-placement.unit.test.ts",
         "SKIP_BUILD=1 ORCA_CROSS_VERSION_PACKAGED_EXECUTABLE=/Applications/Orca.app/Contents/MacOS/Orca pnpm exec playwright test tests/e2e/packaged-mixed-version-browser-placement.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/browser-network-tunnel-paired-runtime.integration.test.ts src/main/browser/paired-runtime-browser-network-route.test.ts src/main/browser/browser-network-execution-route.test.ts src/main/browser/wsl-browser-network-execution-route.test.ts src/main/browser/wsl-browser-network-relay-launch.test.ts src/main/runtime/runtime-browser-network-execution-host.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
         "ORCA_RUN_DOCKER_SSH_BROWSER_E2E=1 pnpm exec vitest run --config config/vitest.config.ts tests/e2e/ssh-browser-network-execution-route.docker.unit.test.ts",
         "Manual iOS 26.5 simulator: pair current mobile code to packaged Orca 1.4.184; create Browser; navigate to https://example.com; require one visible Example Domain tab on the server-hosted surface"
       ],
@@ -3982,6 +3983,9 @@
         "src/main/browser/wsl-browser-network-execution-route.test.ts",
         "src/main/browser/wsl-browser-network-relay-launch.test.ts",
         "src/main/runtime/runtime-browser-network-execution-host.test.ts",
+        "src/main/browser/browser-screencast-lifecycle.test.ts",
+        "src/main/browser/browser-screencast-stream.test.ts",
+        "src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
         "tests/e2e/ssh-browser-network-execution-route.docker.unit.test.ts"
       ],
       "assertionRefs": [
@@ -4028,6 +4032,13 @@
           "file": "tests/e2e/ssh-browser-network-execution-route.docker.unit.test.ts",
           "assertions": [
             "ssh2 and system OpenSSH resolve a container-only domain and localhost on the execution host"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
+          "assertions": [
+            "two independent viewers share one physical CDP screencast without evicting one another",
+            "viewer-specific backpressure and viewport ownership survive attach, detach, and replacement"
           ]
         }
       ],
@@ -4076,6 +4087,15 @@
           "result": "passed",
           "durationSeconds": 180,
           "summary": "Current mobile code paired to an isolated legacy packaged host, created one Browser tab, and visibly progressed from about:blank through loading to Example Domain at https://example.com/ on the server-hosted mobile surface."
+        },
+        {
+          "date": "2026-08-17",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
+          "result": "passed",
+          "durationSeconds": 1.2,
+          "summary": "22 screencast lifecycle, stream, and shared-fanout tests passed; the suite confirms one physical CDP stream fans out independently to multiple viewers, preserves viewport ownership, and cleans up without cross-viewer eviction."
         }
       ],
       "runtimeBudget": {
@@ -4102,7 +4122,7 @@
       "knownGaps": [
         "Live production journeys are macOS-only; WSL is deterministic and SSH uses Docker Linux rather than physical Windows/Linux Electron.",
         "The packaged skew journey uses one published old package plus the current E2E artifact on macOS; packaged Windows/Linux and a second independently released post-feature package remain unrecorded.",
-        "The live fixture proves HTTP loopback ownership; HTTPS, WebSocket, worker, speculative, WebRTC, UDP, and DoH containment remain unrecorded.",
+        "The live fixture proves routed HTTP, HTTPS, WebSocket, redirect, subresource, and download ownership plus remote DNS through the fixed SOCKS session; worker, speculative, WebRTC, UDP, and DoH containment remain unrecorded.",
         "The setting currently requires explicit enablement while product rollout policy is decided; disabling it is intentionally new-page-only."
       ],
       "demotionRule": "Demote if placement changes after creation, a client failure creates a server fallback page, one logical page owns two engines, an omitted or unnegotiated field activates client hosting, the execution route resolves on the viewing desktop, a client page uses screencast/input RPC rendering, automation reaches a different page or engine, delayed publication leaks listeners or causes cleanup of a materialized page, or the kill switch mutates an existing page."

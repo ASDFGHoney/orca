@@ -76,7 +76,7 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14956](https://github.com/stablyai/orca/pull/14956), desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957), and terminal-link lifecycle acceptance
   [#15038](https://github.com/stablyai/orca/pull/15038). All remain draft and correctly based in
-  sequence. The six-layer series is rebased onto `origin/main@7fad71e448`; the 81 preceding
+  sequence. The six-layer series is rebased onto `origin/main@7ae6aedc02`; the 81 preceding
   commits were identical by range-diff, followed by one TCP-capture commit in #14955 and one
   native-package CI commit in #14956. No PR has been merged or marked ready.
 - The initial published landing tip was `df7e7d616b`. Its tree
@@ -89,6 +89,14 @@ Old clients and callers that omit placement must retain current server-hosted be
   transition began. The candidate now requires exact reconciliation echo before activating
   retained inventory, allows legacy replacement only for empty inventory, and rechecks transition
   state before every create/reconciliation commit.
+- After the latest-main rebase, the TCP egress fixture was hardened without production behavior
+  changes: the recorder now validates SOCKS5 version/CONNECT/reserved bytes, captures routed
+  classification at request time, removes closed upstream source ports, explicitly sets baseline
+  `direct` proxy mode, proves `remote-browser.test` is locally unresolvable, and bounds cleanup
+  while preserving close errors. The focused Electron capture and global-fetch audit pass.
+- Shared remote screencast fanout is now recorded in the STA-4150 reliability gate. The lifecycle,
+  stream, and runtime fanout suite passes 22 tests, proving two independent viewers share one CDP
+  stream without eviction; a full multi-viewer headed reveal remains a stated gap.
 - Final review reproduced a reconnect-only stale-inventory defect: the client sampled inventory
   once per host generation, so later reconnect attaches could republish the initial empty or stale
   snapshot. Every attach now samples fresh executor inventory, with a deterministic regression
@@ -503,12 +511,12 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main implementation head                       | Validation at layer tip                                     |
 | ----- | ----------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@230f2df59e`     | Typecheck, full lint, 3 focused tests; refreshed CI pending |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@0fd0dc0ac7`   | Typecheck, routing and transport suites; CI pending         |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@a46c591a66`      | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b882620bbf`       | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f63ca30fb1`      | Full cumulative, paired E2E, and daemon-smoke proof         |
-| 6     | [#15038](https://github.com/stablyai/orca/pull/15038) | `sta-4150-landing-client-mirror-transport@86099c72d5` | Terminal-link close reconciliation and paired Electron E2E  |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@947795977f`     | Rebased onto latest main; refreshed CI pending              |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@db28693bb2`   | Rebased onto layer 1; refreshed CI pending                 |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@a22c7b38cf`      | TCP oracle, lifecycle, worker, and audit tests local-green  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@bc868fbf80`       | Rebased onto layer 3; refreshed CI pending                 |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@b928facea5`      | Rebased cumulative activation tip; E2E rerun pending       |
+| 6     | [#15038](https://github.com/stablyai/orca/pull/15038) | `sta-4150-landing-client-mirror-transport@2765899044` | Rebased top; readiness metadata and final E2E pending       |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
