@@ -2736,8 +2736,19 @@ export function seedClaudeLeadTurnFromPersistedStatus(
   if (options.childOnlyBoundary && status.payload.agentType === 'claude') {
     state.claudeLeadStateByPaneKey.set(paneKey, {
       state: 'done',
-      ...(status.payload.interrupted === true ? { interrupted: true } : {})
+      ...(status.payload.interrupted === true ? { interrupted: true } : {}),
+      ...(status.payload.turnCompletedAt !== undefined
+        ? { turnCompletedAt: status.payload.turnCompletedAt }
+        : {})
     })
+    if (status.payload.prompt) {
+      state.lastPromptByPaneKey.set(paneKey, status.payload.prompt)
+    }
+    if (status.payload.lastAssistantMessage) {
+      state.lastToolByPaneKey.set(paneKey, {
+        lastAssistantMessage: status.payload.lastAssistantMessage
+      })
+    }
   }
 }
 

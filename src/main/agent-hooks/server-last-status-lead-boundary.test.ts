@@ -86,11 +86,18 @@ describe('Persisted Claude lead boundaries', () => {
       firstServer,
       buildBody({ hook_event_name: 'SubagentStart', agent_id: 'arestored-child' })
     )
-    await postHookEvent(firstServer, buildBody({ hook_event_name: 'Stop' }))
+    await postHookEvent(
+      firstServer,
+      buildBody({ hook_event_name: 'Stop', last_assistant_message: 'Lead finished.' })
+    )
     expect(firstServer.getStatusSnapshot()[0]).toMatchObject({
       state: 'working',
+      prompt: 'finish after child',
+      lastAssistantMessage: 'Lead finished.',
       subagents: [expect.objectContaining({ id: 'arestored-child', state: 'working' })]
     })
+    const turnCompletedAt = firstServer.getStatusSnapshot()[0]?.turnCompletedAt
+    expect(turnCompletedAt).toEqual(expect.any(Number))
     expect(firstServer._getStateForTests().lastStatusByPaneKey.get(PANE)?.hookEventName).toBe(
       'Stop'
     )
@@ -105,7 +112,13 @@ describe('Persisted Claude lead boundaries', () => {
         buildBody({ hook_event_name: 'SubagentStop', agent_id: 'arestored-child' })
       )
 
-      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done', agentType: 'claude' })
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'done',
+        agentType: 'claude',
+        prompt: 'finish after child',
+        lastAssistantMessage: 'Lead finished.',
+        turnCompletedAt
+      })
       expect(server.getStatusSnapshot()[0]?.restoredUnconfirmed).toBeUndefined()
       expect(server.getStatusSnapshot()[0]?.subagents).toBeUndefined()
     } finally {
