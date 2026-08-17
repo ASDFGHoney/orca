@@ -274,7 +274,27 @@ describe('TabBarCreateEntry tab results', () => {
     expect(activationMocks.workspace).not.toHaveBeenCalled()
   })
 
-  it('drops tab rows built for an earlier query until the search catches up', () => {
+  it('keeps a deferred tab row that still matches the newer query', () => {
+    entryOptionsMock.options = [newFileOption]
+    tabSearchMock.resultsByQuery['add tab'] = [terminalResult()]
+    const onOpenEntry = vi.fn().mockResolvedValue(undefined)
+    renderEntry({ onOpenEntry })
+
+    setQuery('add tab')
+    expect(rowTexts()[0]).toContain('Switch to tab')
+
+    // The user backspaces; the deferred search still describes 'add tab'.
+    tabSearchMock.hold = 'add tab'
+    setQuery('add ta')
+
+    expect(rowTexts()[0]).toContain('Switch to tab')
+    submitForm()
+
+    expect(activationMocks.workspace).toHaveBeenCalledTimes(1)
+    expect(onOpenEntry).not.toHaveBeenCalled()
+  })
+
+  it('drops a deferred tab row that the newer query no longer matches', () => {
     entryOptionsMock.options = [newFileOption]
     tabSearchMock.resultsByQuery['add tab'] = [terminalResult()]
     const onOpenEntry = vi.fn().mockResolvedValue(undefined)
