@@ -198,6 +198,38 @@ function parseState(
   return { state, needsRewrite }
 }
 
+/** A record the primary retained as unreadable may still have a valid copy in the previous
+ *  committed state. Adopting it keeps the session reachable — the lease is re-adjudicated
+ *  like any other — while the unreadable bytes stay quarantined verbatim. */
+async function salvageUnreadableRecordsFromBackup(
+  state: AgentSessionStoreState,
+  backupFilePath: string,
+  hostId: string
+): Promise<void> {
+  const missing = [...state.unreadableRecords.keys()].filter(
+    (sessionId) => !state.records.has(sessionId)
+  )
+  if (missing.length === 0) {
+    return
+  }
+  let raw: string
+  try {
+    raw = await readFile(backupFilePath, 'utf-8')
+  } catch {
+    return
+  }
+  const backup = parseState(raw, hostId)
+  if (!backup) {
+    return
+  }
+  for (const sessionId of missing) {
+    const record = backup.state.records.get(sessionId)
+    if (record) {
+      state.records.set(sessionId, record)
+    }
+  }
+}
+
 export async function loadAgentSessionStore(
   filePath: string,
   hostId: string
@@ -220,6 +252,9 @@ export async function loadAgentSessionStore(
     if (!parsed) {
       unusableStoreFound = true
       continue
+    }
+    if (!recoveredFromBackup) {
+      await salvageUnreadableRecordsFromBackup(parsed.state, backupPath(filePath), hostId)
     }
     return {
       state: parsed.state,
