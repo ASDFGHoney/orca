@@ -62,6 +62,9 @@ export function useVirtualRowMeasurementSync(args: {
     rows: renderRows,
     rangeStartIndex: virtualization.stickyRangeStartIndexRef.current,
     scrollOffset: virtualizer.scrollOffset ?? scrollOffsetRef.current,
+    // Why: remounts retain the prior view's offset until a scroll event, but
+    // all-collapsed content may be too short to emit one.
+    maxScrollOffset: Math.max(0, totalSize - (virtualizer.scrollRect?.height ?? 0)),
     stickyHeaderIndexes: virtualization.stickyHeaderIndexes,
     virtualItems
   })

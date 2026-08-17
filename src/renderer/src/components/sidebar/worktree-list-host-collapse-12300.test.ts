@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Repo, Worktree } from '../../../../shared/types'
+import type { Repo } from '../../../../shared/repo-types'
+import type { Worktree } from '../../../../shared/worktree/types'
 import { addHostSectionRows, type HostSectionRow } from './host-section-rows'
-import type { Row } from './worktree-list-groups'
+import type { Row } from './worktree-list/grouping/row-types'
 import {
   estimateRenderRowSize,
-  getRenderRowKey,
-  HOST_STICKY_PINNED_HEIGHT,
-  type RenderRow
-} from './worktree-list-virtual-rows'
+  HOST_STICKY_PINNED_HEIGHT
+} from './worktree-list/viewport/virtual-rows'
+import { getRenderRowKey, type RenderRow } from './worktree-list/listing/render-row'
 
 function repo(id: string, connectionId?: string | null): Repo {
   return {

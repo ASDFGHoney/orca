@@ -138,6 +138,35 @@ describe('getActiveStickyIndexesForScroll', () => {
     expect(after).toEqual({ hostIndex: 4, groupIndex: 5 })
   })
 
+  it('clamps stale remount offsets when collapsed hosts fit the viewport', () => {
+    const collapsedRows: RenderRow[] = [hostRow('ssh:a'), hostRow('ssh:b')]
+    const collapsedItems = [virtualItem(0, 0), virtualItem(1, 38)]
+
+    expect(
+      getActiveStickyIndexesForScroll({
+        rows: collapsedRows,
+        rangeStartIndex: 1,
+        scrollOffset: 500,
+        maxScrollOffset: 0,
+        stickyHeaderIndexes: getStickyHeaderIndexes(collapsedRows),
+        virtualItems: collapsedItems
+      })
+    ).toEqual({ hostIndex: 0, groupIndex: null })
+  })
+
+  it('leaves reachable offsets unchanged when a maximum is provided', () => {
+    expect(
+      getActiveStickyIndexesForScroll({
+        rows,
+        rangeStartIndex: 2,
+        scrollOffset: 250,
+        maxScrollOffset: 600,
+        stickyHeaderIndexes,
+        virtualItems
+      })
+    ).toEqual({ hostIndex: 0, groupIndex: 1 })
+  })
+
   it('degrades to single-tier rules when no host sections exist', () => {
     const flatRows: RenderRow[] = [
       groupRow('g1'),

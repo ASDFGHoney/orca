@@ -380,6 +380,32 @@ describe('addHostSectionRows', () => {
     ).toEqual(['local', 'ssh:ssh-1'])
   })
 
+  it('reuses an already-localized pass-through header for its owning host', () => {
+    const local = repo('local')
+    const ssh = repo('ssh', 'ssh-1')
+    const localHeader = { ...header('all', 'All'), hostId: 'local' as const }
+
+    const sectioned = addHostSectionRows({
+      rows: [localHeader, item('local-wt', local), item('ssh-wt', ssh)],
+      hostOptions: [
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        { id: 'ssh:ssh-1', kind: 'ssh', label: 'Builder', detail: 'SSH', health: 'available' }
+      ],
+      workspaceHostScope: 'all',
+      defaultHostId: 'local'
+    })
+
+    expect(
+      sectioned.find((row) => row.type === 'header' && row.key === 'all' && row.hostId === 'local')
+    ).toBe(localHeader)
+  })
+
   it('keeps collapsed pinned rows attributable to their owning hosts', () => {
     const rows = [
       pinnedHeader(
