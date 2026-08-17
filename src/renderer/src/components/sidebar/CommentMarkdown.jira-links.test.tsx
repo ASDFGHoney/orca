@@ -45,7 +45,17 @@ describe('CommentMarkdown Jira ADF links', () => {
           content: [
             {
               type: 'text',
-              text: 'line\nbreak ]',
+              text: 'bracket [label] ]',
+              marks: [{ type: 'link', attrs: { href: 'https://example.com/brackets' } }]
+            }
+          ]
+        },
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'line\n\nbreak ]',
               marks: [{ type: 'link', attrs: { href: 'https://example.com/newline' } }]
             }
           ]
@@ -106,7 +116,9 @@ describe('CommentMarkdown Jira ADF links', () => {
     expect(markup).toContain('href="https://example.com/star"')
     expect(markup).toContain('><strong>a*b</strong></a>')
     expect(markup).toContain('href="https://example.com/newline"')
-    expect(markup).toContain('>line break ]</a>')
+    expect(markup).toContain('>line  break ]</a>')
+    expect(markup).toContain('href="https://example.com/brackets"')
+    expect(markup).toContain('>bracket [label] ]</a>')
     expect(markup).toContain('href="https://example.com/code"')
     expect(markup).toContain('>cost ` per unit</code></a>')
     expect(markup).toContain('href="https://example.com/list"')

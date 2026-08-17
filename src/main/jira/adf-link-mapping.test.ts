@@ -181,6 +181,11 @@ describe('Jira ADF link mark mapping', () => {
     const { getIssueComments } = await import('./issues')
     const comments = await getIssueComments('ALP-1', 'site-1')
 
+    expect(jiraRequestMock).toHaveBeenCalledTimes(1)
+    expect(jiraRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ site: expect.objectContaining({ id: 'site-1' }) }),
+      expect.stringContaining('/issue/ALP-1/comment?')
+    )
     expect(comments[0]?.body).toBe('[Follow-up](https://example.com/follow-up)')
   })
 
