@@ -52,6 +52,16 @@ Old clients and callers that omit placement must retain current server-hosted be
   unauthenticated local-SOCKS security decision, broader egress-containment adjudication, and final
   physical-platform coverage where CI/simulator evidence is not equivalent to Windows, Linux, or
   mobile hardware.
+- A fresh read-only SOCKS review found no P0 and passed 52 focused tests, but confirmed that the
+  ephemeral `127.0.0.1` listener accepts SOCKS5 `NO_AUTH`. Paired-runtime authentication protects
+  the remote tunnel, not the local caller, so another local process can scan the port and proxy to
+  the remote execution network. Release is blocked until Orca either explicitly accepts all local
+  desktop processes as trusted or isolates/authenticates the local endpoint.
+- A fresh containment/platform review found no P0 but treats release as blocked until direct
+  egress is explicitly denied or captured for QUIC/HTTP3, DoH, WebTransport and other UDP paths,
+  with real coverage for HTTPS, WebSocket, redirects/subresources, downloads, and network-service
+  restart. The complete production placement/network journey is real on macOS; Linux and Windows
+  currently have Electron boundary CI rather than the full paired journey.
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
@@ -1427,6 +1437,11 @@ topology, versions, and explicit gaps at every later checkpoint.
   journey proves one client guest, zero host guests, no screencast or PTY churn, local input, no
   reconnect/error UI, exact close convergence, and a still-live terminal. No PR was merged or
   marked ready.
+- Two post-publication read-only Codex reviews found no P0. The SOCKS review passed 52 focused
+  tests and classified unauthenticated loopback access as a P1 unless Orca explicitly accepts the
+  local-process trust boundary. The egress/platform review classified unproven alternate egress
+  and missing native Windows/Linux full-placement journeys as P1 release blockers. Neither review
+  changed files or external state.
 
 ## Completion rule
 
