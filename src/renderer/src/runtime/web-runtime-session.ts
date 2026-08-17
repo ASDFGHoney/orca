@@ -81,6 +81,7 @@ import {
 } from './web-session-browser-placement'
 import { assertRuntimeManagedBrowserCreationAvailable } from '../lib/client-creation-action-policy'
 import { hasMaterializedWebRuntimeBrowserPage } from './web-runtime-browser-materialization'
+import { waitForHostGeneratedBrowserPublication } from './web-runtime-browser-publication-wait'
 import {
   pauseAfterE2eWebRuntimeBrowserCreate,
   throwIfE2eWebRuntimeBrowserCapabilityUnavailable,
@@ -608,35 +609,36 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       }
       guardedPageId = created.browserPageId
     }
-    try {
-      await refreshWebRuntimeSessionTabsSnapshot(environmentId, args.worktreeId, {
-        expectedEnvironmentPairingRevision: intentOwner.pairingRevision,
-        acceptCurrentSnapshot: true,
-        afterCurrentInFlight: true,
-        errorMode: 'throw'
-      })
-    } catch (error) {
-      if (
-        !hasMaterializedWebRuntimeBrowserPage(
-          useAppStore.getState(),
-          environmentId,
-          args.worktreeId,
-          created.browserPageId,
-          args.clientTargetGroupId ?? args.targetGroupId
-        )
-      ) {
-        throw error
-      }
-    }
-    if (
-      !hasMaterializedWebRuntimeBrowserPage(
+    const hasCreatedPageMaterialized = (): boolean =>
+      hasMaterializedWebRuntimeBrowserPage(
         useAppStore.getState(),
         environmentId,
         args.worktreeId,
         created.browserPageId,
         args.clientTargetGroupId ?? args.targetGroupId
       )
-    ) {
+    const refreshCreatedPage = (): Promise<void> =>
+      refreshWebRuntimeSessionTabsSnapshot(environmentId, args.worktreeId, {
+        expectedEnvironmentPairingRevision: intentOwner.pairingRevision,
+        acceptCurrentSnapshot: true,
+        afterCurrentInFlight: true,
+        errorMode: 'throw'
+      })
+    try {
+      await refreshCreatedPage()
+    } catch (error) {
+      if (!hasCreatedPageMaterialized()) {
+        throw error
+      }
+    }
+    if (created.browserPageId !== provisionalPageId && !hasCreatedPageMaterialized()) {
+      await waitForHostGeneratedBrowserPublication({
+        isMaterialized: hasCreatedPageMaterialized,
+        refresh: refreshCreatedPage,
+        canRetry: () => matchesWebSessionIntentOwner(intentOwner)
+      })
+    }
+    if (!hasCreatedPageMaterialized()) {
       throw new Error('The created browser tab did not materialize in the client.')
     }
     const remainingFocusIntent = shouldFocusOnCreate

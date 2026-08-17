@@ -269,7 +269,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
     let pagePublished = false
     let listCount = 0
     mocks.hasMaterializedWebRuntimeBrowserPage.mockImplementation(() => pagePublished)
-    const runtimeCall = vi.fn((request: { method: string }) => {
+    const runtimeCall = vi.fn((request: { method: string; params: { page?: string } }) => {
       if (request.method === 'browser.tabCreate') {
         return Promise.resolve({
           id: 'create',
@@ -292,6 +292,48 @@ describe('createWebRuntimeSessionBrowserTab', () => {
 
     await expect(createWebRuntimeSessionBrowserTab({ worktreeId: WORKTREE_ID })).resolves.toBe(true)
 
+    expect(runtimeCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'browser.tabCreate',
+      'session.tabs.list',
+      'session.tabs.list'
+    ])
+  })
+
+  it('recognizes a host-generated id when the cached capability is stale', async () => {
+    mocks.getState.mockReturnValue({
+      ...mocks.getState(),
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          ENVIRONMENT_ID,
+          {
+            status: {
+              capabilities: ['browser.screencast.v1', 'browser.tab-create-known-id.v1']
+            },
+            checkedAt: 1
+          }
+        ]
+      ])
+    })
+    let pagePublished = false
+    let listCount = 0
+    mocks.hasMaterializedWebRuntimeBrowserPage.mockImplementation(() => pagePublished)
+    const runtimeCall = vi.fn((request: { method: string; params: { page?: string } }) => {
+      if (request.method === 'browser.tabCreate') {
+        return Promise.resolve({
+          id: 'create',
+          ok: true,
+          result: { browserPageId: 'replacement-host-page' }
+        })
+      }
+      listCount += 1
+      pagePublished = listCount >= 2
+      return Promise.resolve({ id: `list-${listCount}`, ok: true, result: makeSnapshot() })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(createWebRuntimeSessionBrowserTab({ worktreeId: WORKTREE_ID })).resolves.toBe(true)
+
+    expect(runtimeCall.mock.calls[0]?.[0].params.page).toMatch(/^[0-9a-f-]{36}$/)
     expect(runtimeCall.mock.calls.map(([request]) => request.method)).toEqual([
       'browser.tabCreate',
       'session.tabs.list',
