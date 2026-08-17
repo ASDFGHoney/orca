@@ -658,11 +658,13 @@ describe('OrchestrationDb', () => {
       const d = createDb()
       const task = d.createTask({ spec: 'work' })
       const ctx = d.createDispatchContext(task.id, 'term_a')
+      // Why: seed first so the expectation isn't the row's initial null — a completion that cleared the column would satisfy that too.
+      d.recordHeartbeat(ctx.id, '2026-05-03T00:00:00.000Z')
       d.completeDispatch(ctx.id)
 
       d.recordHeartbeat(ctx.id, '2026-05-04T00:00:00.000Z')
       const after = d.getDispatchContext(task.id)
-      expect(after?.last_heartbeat_at).toBeNull()
+      expect(after?.last_heartbeat_at).toBe('2026-05-03T00:00:00.000Z')
     })
 
     it('getStaleDispatches returns only dispatched rows past the grace window', () => {
