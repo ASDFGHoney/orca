@@ -1,6 +1,6 @@
 # Final readiness — PR #13568
 
-Verdict: **P1 residual risk; not release-blocked by a known deterministic failure in the reviewed paths.** The final head is `060b28a14d9b75a1aa28bfdc61f0208211cc5032`, rebased on pinned `origin/main` `be07b43a2b7377b69bed04e0f39bc4cbb70593fc`.
+Verdict: **P1 residual risk; review loop did not reach CLEAN.** The final head is `8ee8fa4e609468ede62a025063eb627503117e23`, rebased on pinned `origin/main` `be07b43a2b7377b69bed04e0f39bc4cbb70593fc`.
 
 ## Checklist
 
@@ -26,3 +26,7 @@ Verdict: **P1 residual risk; not release-blocked by a known deterministic failur
 - Focused changed suite: 9 files, 125 tests passed.
 - Mutation proof: replacing the materialization guard with unconditional candidate publication failed the diverged file/Keychain integration test; guard restored.
 - Opening readiness was run and saved as `OPENING-READINESS.md`; this is the final readiness pass.
+
+## Review loop
+
+Seven independent same-model rounds ran. Rounds 1–6 found and received fixes for launch-safe failure handling, file CAS/publication, parser consistency, managed fallback, snapshot recovery, and unsupported-filesystem behavior; round 7 still reports the unavoidable external Keychain TOCTOU window, hard-link-less fallback race, and incomplete recovery coverage.
