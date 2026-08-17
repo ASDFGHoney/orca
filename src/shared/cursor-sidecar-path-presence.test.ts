@@ -44,6 +44,15 @@ describe('Cursor sidecar path presence', () => {
     expect(lstat).toHaveBeenCalledWith('\\\\wsl.localhost\\Ubuntu\\')
   })
 
+  it('does not call an unreachable ordinary UNC share missing', async () => {
+    const lstat = vi.fn().mockRejectedValue(missing)
+
+    await expect(
+      isConfirmedCursorPathMissing('\\\\server\\cursor-data\\chats\\bucket', missing, lstat)
+    ).resolves.toBe(false)
+    expect(lstat).toHaveBeenCalledWith('\\\\server\\cursor-data\\')
+  })
+
   it('does not turn a cancelled ancestor probe into missing history', async () => {
     const cancelled = new Error('cursor_sidecar_scan_cancelled')
 

@@ -21,7 +21,6 @@ import { throwIfAiVaultScanCancelled } from './ai-vault-scan-cancellation'
 import { isMissingCursorPathOnScan } from './session-scanner-cursor-path-presence'
 import {
   buildCursorCandidateSelectionGroups,
-  canStopCursorGroupSelection,
   selectCursorScopedGroups,
   type CursorCandidateSelectionGroup
 } from './session-scanner-cursor-selection'
@@ -62,19 +61,6 @@ export async function processLocalCursorCandidates(args: {
   const processedGroups = new Set<CursorCandidateSelectionGroup<SessionFileCandidate>>()
   for (let index = 0; index < groups.length; index += CURSOR_PARSE_CONCURRENCY) {
     throwIfAiVaultScanCancelled(args.signal)
-    // Reconcile is O(parsed); sessions never outnumber candidates, so a short parsed
-    // count can't satisfy the limit and the preview would be wasted work.
-    if (parsed.length >= args.limit) {
-      const preview = reconcileCursorCandidates({
-        candidates: parsed,
-        executionHostId: args.executionHostId,
-        platform: args.platform,
-        issues: []
-      })
-      if (canStopCursorGroupSelection(preview.sessions, args.limit, groups[index]?.mtimeMs)) {
-        break
-      }
-    }
     const batch = groups.slice(index, index + CURSOR_PARSE_CONCURRENCY)
     await parseCursorGroups(batch, parsed, args, verifiedReads)
     throwIfAiVaultScanCancelled(args.signal)

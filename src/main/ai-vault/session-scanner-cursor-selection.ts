@@ -1,4 +1,4 @@
-import { sessionIdFromFileName, sessionSortTime } from './session-scanner-accumulator'
+import { sessionIdFromFileName } from './session-scanner-accumulator'
 import { compareCursorSidecarNames } from '../../shared/cursor-sidecar-scan-directory'
 import {
   cursorSessionActivityMtimeMs,
@@ -6,7 +6,6 @@ import {
   cursorSidecarSessionId
 } from './session-scanner-cursor-paths'
 import type { CursorCwdEvidence, CursorLayout, FileWithMtime } from './session-scanner-types'
-import type { AiVaultSession } from '../../shared/ai-vault-types'
 
 export type CursorCandidateSelectionGroup<T> = {
   candidates: T[]
@@ -99,21 +98,6 @@ export function selectCursorScopedGroups<T>(
         compareCursorSidecarNames(left.key, right.key)
     )
     .slice(0, limit)
-}
-
-export function canStopCursorGroupSelection(
-  sessions: readonly AiVaultSession[],
-  limit: number,
-  nextGroupMtimeMs: number | undefined
-): boolean {
-  if (sessions.length < limit || typeof nextGroupMtimeMs !== 'number') {
-    return false
-  }
-  const cutoff = [...sessions]
-    .map(sessionSortTime)
-    .sort((left, right) => right - left)
-    .at(Math.max(0, limit - 1))
-  return typeof cutoff === 'number' && nextGroupMtimeMs < cutoff
 }
 
 function cursorSelectionIdentity<T>(

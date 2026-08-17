@@ -1,7 +1,6 @@
 import type { Stats } from 'node:fs'
 import { win32 } from 'node:path'
 import { isCursorSidecarScanCancelledError } from './cursor-sidecar-scan-cancellation'
-import { parseWslUncPath } from './wsl-paths'
 
 type LstatPath = (path: string) => Promise<Stats>
 
@@ -18,15 +17,14 @@ export async function isConfirmedCursorPathMissing(
   if (!isCursorMissingPathError(error)) {
     return false
   }
-  const unc = parseWslUncPath(path)
-  if (!unc) {
+  const uncRoot = win32.parse(path).root
+  if (!uncRoot.replaceAll('/', '\\').startsWith('\\\\')) {
     return true
   }
 
   let ancestor = win32.dirname(path)
   for (;;) {
-    const parsed = parseWslUncPath(ancestor)
-    if (!parsed || parsed.distro.toLowerCase() !== unc.distro.toLowerCase()) {
+    if (win32.parse(ancestor).root.toLowerCase() !== uncRoot.toLowerCase()) {
       return false
     }
     try {

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -115,5 +115,52 @@ describe('Cursor session scanner integration', () => {
       [sessionPaths[0], sessionPaths[2]].sort()
     )
     expect(result.sessions.every((session) => session.messageCount === 1)).toBe(true)
+  })
+
+  it('does not skip an older file whose session metadata is newer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-cursor-inverted-time-'))
+    tempRoots.push(root)
+    const roots = isolatedScanRoots(root)
+    const sessions = [
+      { id: 'newer-file', fileTime: 100, updatedAtMs: 1_000 },
+      { id: 'newer-session', fileTime: 99, updatedAtMs: 2_000 }
+    ]
+    await Promise.all(
+      sessions.map(async ({ id, fileTime, updatedAtMs }) => {
+        const workspace = join(root, id)
+        const sessionDir = join(roots.cursorChatsDir, cursorBucketForCwd(workspace, 'linux'), id)
+        await Promise.all([mkdir(workspace), mkdir(sessionDir, { recursive: true })])
+        const metaPath = join(sessionDir, 'meta.json')
+        const storePath = join(sessionDir, 'store.db')
+        await Promise.all([
+          writeFile(
+            metaPath,
+            JSON.stringify({
+              createdAtMs: updatedAtMs,
+              updatedAtMs,
+              hasConversation: true,
+              title: id,
+              cwd: workspace
+            })
+          ),
+          writeFile(storePath, '')
+        ])
+        const timestamp = new Date(fileTime)
+        await Promise.all([
+          utimes(metaPath, timestamp, timestamp),
+          utimes(storePath, timestamp, timestamp)
+        ])
+      })
+    )
+
+    const result = await scanAiVaultSessions({
+      ...roots,
+      platform: 'linux',
+      executionHostId: 'local',
+      limit: 1
+    })
+
+    expect(result.sessions).toHaveLength(1)
+    expect(result.sessions[0]?.sessionId).toBe('newer-session')
   })
 })
