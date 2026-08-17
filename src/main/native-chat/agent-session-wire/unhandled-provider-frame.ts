@@ -10,6 +10,8 @@ import { classifyProviderFrame } from './provider-frame-disposition'
 export type UnhandledProviderFrameJournalItem = {
   body: AgentJournalStatusItem
   blobs: { digest: string; payload: string }[]
+  /** Why the frame surfaced. Error frames are exempt from generic-row caps. */
+  classification: 'timeline-substantive' | 'error-surface'
 }
 
 function serializeProviderPayload(payload: unknown): string {
@@ -85,6 +87,7 @@ export function unhandledProviderFrameJournalItem(
       text: display?.text ?? `${provider} · ${kind}`,
       providerFrame: { provider, kind, payload: bounded }
     },
-    blobs: bounded.truncated ? [{ digest: bounded.digest, payload: serialized }] : []
+    blobs: bounded.truncated ? [{ digest: bounded.digest, payload: serialized }] : [],
+    classification: classification === 'error-surface' ? 'error-surface' : 'timeline-substantive'
   }
 }

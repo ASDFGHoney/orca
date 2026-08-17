@@ -73,7 +73,7 @@ describe('unhandled provider frame journal fallback', () => {
     ).toBeNull()
   })
 
-  it('never creates generic rows for known or unknown delta-shaped frames', () => {
+  it('never creates generic rows for delta-shaped frames that report no failure', () => {
     expect(
       unhandledProviderFrameJournalItem('codex', 'notification:item/commandExecution/outputDelta', {
         itemId: 'exec-1',
@@ -82,9 +82,23 @@ describe('unhandled provider frame journal fallback', () => {
     ).toBeNull()
     expect(
       unhandledProviderFrameJournalItem('codex', 'notification:item/future/outputDelta', {
-        error: 'still a delta'
+        itemId: 'future-1',
+        delta: 'y'
       })
     ).toBeNull()
+  })
+
+  it('surfaces an unknown delta-shaped frame whose payload reports an error', () => {
+    const row = unhandledProviderFrameJournalItem('codex', 'notification:item/future/outputDelta', {
+      error: 'stream broke mid-item'
+    })
+
+    expect(row).not.toBeNull()
+    expect(row?.classification).toBe('error-surface')
+    expect(row?.body.providerFrame).toMatchObject({
+      provider: 'codex',
+      kind: 'notification:item/future/outputDelta'
+    })
   })
 
   it('renders codex systemError and Claude error result variants', () => {
