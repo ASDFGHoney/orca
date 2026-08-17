@@ -85,10 +85,20 @@ describe('runRetirementBackfillScan', () => {
     const store = {}
     const stalled = await stallPastDeadline(store, 'ns')
     const retry = vi.fn(async () => found(['nautilus']))
+
+    // The listing must be fully settled before this asserts anything: while it is still
+    // outstanding the no-restack rule answers first, and the backoff would go untested.
     stalled.fail()
+    await vi.advanceTimersByTimeAsync(0)
 
     await expect(runRetirementBackfillScan(store, 'ns', retry)).rejects.toThrow(/exceeded/)
     expect(retry).not.toHaveBeenCalled()
+
+    // And it is the backoff, not the listing, that is holding it back.
+    await vi.advanceTimersByTimeAsync(RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS)
+    await expect(runRetirementBackfillScan(store, 'ns', retry)).resolves.toEqual(
+      new Set(['nautilus'])
+    )
   })
 
   it('never lets one wedged namespace stop another from scanning', async () => {
