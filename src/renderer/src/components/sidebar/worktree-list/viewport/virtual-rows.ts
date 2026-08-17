@@ -181,7 +181,10 @@ function getHostStickyIndexes(rows: readonly RenderRow[], sticky: readonly numbe
   return sticky.filter((index) => rows[index]?.type === 'host-header')
 }
 
-function getVirtualRowIndexAtOffset(items: readonly VirtualItem[], offset: number): number | null {
+export function getVirtualRowIndexAtOffset(
+  items: readonly VirtualItem[],
+  offset: number
+): number | null {
   return (items.findLast((item) => item.start <= offset) ?? items[0])?.index ?? null
 }
 

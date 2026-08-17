@@ -10,6 +10,7 @@ import {
   extractWorktreeVirtualRowIndexes,
   getActiveStickyIndexesForScroll,
   getStickyHeaderIndexes,
+  getVirtualRowIndexAtOffset,
   pruneStaleVirtualRowElementCache
 } from './virtual-rows'
 import {
@@ -360,6 +361,18 @@ describe('getActiveStickyIndexesForScroll', () => {
       'hdr:ssh:builder:project-group:infra'
     )
     expect(getRenderRowKey(groupRow('project-group:infra'))).toBe('hdr:project-group:infra')
+  })
+})
+
+describe('getVirtualRowIndexAtOffset', () => {
+  it('returns the last row at or before the offset', () => {
+    expect(getVirtualRowIndexAtOffset([virtualItem(2, 20), virtualItem(3, 60)], 60)).toBe(3)
+    expect(getVirtualRowIndexAtOffset([virtualItem(2, 20), virtualItem(3, 60)], 59)).toBe(2)
+  })
+
+  it('falls back to the first row when the offset precedes the mounted window', () => {
+    expect(getVirtualRowIndexAtOffset([virtualItem(9, 342), virtualItem(10, 380)], 0)).toBe(9)
+    expect(getVirtualRowIndexAtOffset([], 0)).toBeNull()
   })
 })
 

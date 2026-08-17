@@ -9,6 +9,7 @@ import {
   buildLineageRowRekeyMap,
   getActiveStickyIndexesForScroll,
   getVirtualRowKey,
+  getVirtualRowIndexAtOffset,
   pruneStaleVirtualRowElementCache
 } from './virtual-rows'
 import { getRenderRowKey } from '../listing/render-row'
@@ -67,7 +68,7 @@ export function useVirtualRowMeasurementSync(args: {
     // all-collapsed content may be too short to emit one.
     maxScrollOffset,
     rangeStartIndexAtMaxScrollOffset:
-      virtualizer.getVirtualItemForOffset(maxScrollOffset)?.index ?? 0,
+      getVirtualRowIndexAtOffset(virtualItems, maxScrollOffset) ?? 0,
     stickyHeaderIndexes: virtualization.stickyHeaderIndexes,
     virtualItems
   })
