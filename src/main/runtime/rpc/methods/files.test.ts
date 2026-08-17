@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
 import type { OrcaRuntimeService } from '../../orca-runtime'
+import { remoteRpcContentBudget } from '../../../../shared/remote-rpc-content-budget'
 import { FILE_METHODS } from './files'
 
 function makeRequest(method: string, params?: unknown): RpcRequest {
@@ -830,6 +831,28 @@ describe('file RPC methods', () => {
       excludePaths: ['/repo/other-worktree']
     })
     expect(response).toMatchObject({ ok: true, result: ['src/index.ts'] })
+  })
+
+  it('passes the request-scoped transport budget to paired Quick Open', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      listRuntimeFiles: vi.fn().mockResolvedValue(['src/index.ts'])
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: FILE_METHODS })
+    const id = 'paired-quick-open-request'
+    const reply = vi.fn()
+
+    await dispatcher.dispatchStreaming(
+      { ...makeRequest('files.listAll', { worktree: 'id:wt-1' }), id },
+      reply,
+      { clientKind: 'runtime' }
+    )
+
+    expect(runtime.listRuntimeFiles).toHaveBeenCalledWith('id:wt-1', {
+      excludePaths: undefined,
+      maxResults: 20_001,
+      maxContentBytes: remoteRpcContentBudget(id)
+    })
   })
 
   it('lists markdown documents for a selected worktree', async () => {

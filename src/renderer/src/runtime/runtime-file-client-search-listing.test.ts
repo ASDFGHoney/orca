@@ -4,6 +4,7 @@ import {
   listRuntimeFiles,
   listRuntimeMarkdownDocuments,
   runtimePathExists,
+  searchRuntimeFilePaths,
   searchRuntimeFiles,
   statRuntimePath
 } from './runtime-file-client'
@@ -119,6 +120,81 @@ describe('runtime file client', () => {
       params: { worktree: 'id:wt-1', excludePaths: ['/remote/repo-other'] },
       timeoutMs: 15_000
     })
+  })
+
+  it('routes bounded quick-open queries through the owning runtime', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-1',
+      ok: true,
+      result: {
+        worktree: 'wt-1',
+        rootPath: '/remote/repo',
+        files: [
+          { relativePath: 'data/target.ts', basename: 'target.ts', kind: 'text' },
+          { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' }
+        ],
+        totalCount: 40,
+        truncated: true
+      },
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/remote/repo'
+        },
+        { query: 'target', limit: 32, excludePaths: ['/remote/repo/nested'] }
+      )
+    ).resolves.toEqual({
+      files: ['data/target.ts', 'src/target.ts'],
+      truncated: true
+    })
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'files.searchPaths',
+      params: {
+        worktree: 'id:wt-1',
+        query: 'target',
+        limit: 32,
+        excludePaths: ['/remote/repo/nested'],
+        mode: 'quick-open'
+      },
+      timeoutMs: 15_000
+    })
+    expect(fsListFiles).not.toHaveBeenCalled()
+  })
+
+  it('re-applies exclusions for legacy runtimes that ignore quick-open fields', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-legacy',
+      ok: true,
+      result: {
+        worktree: 'wt-1',
+        rootPath: '/remote/repo',
+        files: [
+          { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' },
+          { relativePath: 'nested/target.ts', basename: 'target.ts', kind: 'text' }
+        ],
+        totalCount: 2,
+        truncated: false
+      },
+      _meta: { runtimeId: 'legacy-runtime' }
+    })
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/remote/repo'
+        },
+        { query: 'target', limit: 32, excludePaths: ['/remote/repo/nested'] }
+      )
+    ).resolves.toEqual({ files: ['src/target.ts'], truncated: false })
   })
 
   it('passes the cancellation token through the IPC file listing path (#7721)', async () => {

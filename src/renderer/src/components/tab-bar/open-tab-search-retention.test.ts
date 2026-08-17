@@ -86,6 +86,7 @@ function makeWorkspaceTab({
       repoName: 'octo/rocket',
       typeAliases: aliases
     }),
+    typeSearchAliases: aliases,
     agentMetadata: agentSnippets.length
       ? [{ paneKey: `${id}-pane`, textParts: [], snippetCandidates: agentSnippets }]
       : [],
@@ -139,6 +140,12 @@ function makeBrowserPage({
     worktree,
     repoName: 'octo/rocket',
     worktreeSortIndex: 0,
+    document: buildSearchableBrowserPageDocument({
+      page,
+      workspace,
+      worktree,
+      repoName: 'octo/rocket'
+    }),
     isCurrentPage: false,
     isCurrentWorktree: true,
     document: buildSearchableBrowserPageDocument({

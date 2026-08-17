@@ -54,6 +54,10 @@ import { parseWslPath, toWindowsWslPath } from '../wsl'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
+import { searchQuickOpenFilePaths as searchHostQuickOpenFilePaths } from '../ipc/filesystem-search-file-paths'
+import { isQuickOpenQueryTooLarge, QuickOpenPathRanker } from '../../shared/quick-open-path-search'
+import { QUICK_OPEN_LISTING_MAX_RESULTS } from '../../shared/quick-open-listing-limits'
+import { limitQuickOpenFilesBySerializedBytes } from '../../shared/quick-open-transport-budget'
 import { searchWithGitGrep } from '../ipc/filesystem-search-git'
 import { getLocalGitOptionsForRegisteredWorktree } from '../ipc/local-worktree-runtime-options'
 import { checkRgAvailable } from '../ipc/rg-availability'
@@ -684,6 +688,46 @@ export class RuntimeFileCommands {
       })),
       totalCount: matches.totalCount,
       truncated: inventory.truncated || matches.totalCount > limit
+    }
+  }
+
+  async searchQuickOpenFilePaths(
+    worktreeSelector: string,
+    query: string,
+    limit: number,
+    excludePaths?: string[],
+    signal?: AbortSignal
+  ): Promise<RuntimeFileListResult> {
+    const target = await this.host.resolveRuntimeFileTarget(worktreeSelector)
+    const { worktree, connectionId } = target
+    const result =
+      !query.trim() || isQuickOpenQueryTooLarge(query)
+        ? { paths: [], totalCount: 0, truncated: false }
+        : connectionId
+          ? await this.searchRemoteQuickOpenFilePaths(
+              worktree.path,
+              connectionId,
+              query,
+              limit,
+              excludePaths,
+              signal
+            )
+          : await searchHostQuickOpenFilePaths(worktree.path, this.host.requireStore(), {
+              query,
+              limit,
+              excludePaths,
+              signal
+            })
+    return {
+      worktree: worktree.id,
+      rootPath: worktree.path,
+      files: result.paths.map((relativePath) => ({
+        relativePath,
+        basename: basenameFromRelativePath(relativePath),
+        kind: isMobileBinaryPath(relativePath) ? ('binary' as const) : ('text' as const)
+      })),
+      totalCount: result.totalCount,
+      truncated: result.truncated
     }
   }
 
@@ -2043,7 +2087,12 @@ export class RuntimeFileCommands {
 
   async listRuntimeFiles(
     worktreeSelector: string,
-    options: { excludePaths?: string[] } = {}
+    options: {
+      excludePaths?: string[]
+      maxContentBytes?: number
+      maxResults?: number
+      signal?: AbortSignal
+    } = {}
   ): Promise<string[]> {
     const target = await this.host.resolveRuntimeFileTarget(worktreeSelector)
     const provider = target.connectionId ? getSshFilesystemProvider(target.connectionId) : null
@@ -2051,9 +2100,23 @@ export class RuntimeFileCommands {
       if (!provider) {
         return []
       }
-      return provider.listFiles(target.worktree.path, { excludePaths: options.excludePaths })
+      const files = await provider.listFiles(target.worktree.path, {
+        excludePaths: options.excludePaths,
+        maxResults: options.maxResults,
+        signal: options.signal
+      })
+      return options.maxContentBytes === undefined
+        ? files
+        : limitQuickOpenFilesBySerializedBytes(files, options.maxContentBytes)
     }
-    return listQuickOpenFiles(target.worktree.path, this.host.requireStore(), options.excludePaths)
+    return listQuickOpenFiles(
+      target.worktree.path,
+      this.host.requireStore(),
+      options.excludePaths,
+      options.signal,
+      options.maxResults,
+      options.maxContentBytes
+    )
   }
 
   async listRuntimeMarkdownDocuments(worktreeSelector: string): Promise<MarkdownDocument[]> {
@@ -2271,6 +2334,49 @@ export class RuntimeFileCommands {
       return []
     }
     return provider.listFiles(rootPath, { maxResults })
+  }
+
+  private async searchRemoteQuickOpenFilePaths(
+    rootPath: string,
+    connectionId: string,
+    query: string,
+    limit: number,
+    excludePaths?: string[],
+    signal?: AbortSignal
+  ): Promise<{ paths: string[]; totalCount: number; truncated: boolean }> {
+    const provider = getSshFilesystemProvider(connectionId)
+    if (!provider) {
+      return { paths: [], totalCount: 0, truncated: false }
+    }
+    if (!(await provider.supportsQuickOpenSearch?.({ signal }))) {
+      // Old relays ignore searchQuery. Preserve their legacy bounded listing
+      // semantics and rank locally instead of presenting arbitrary paths as matches.
+      const legacyFiles = await provider.listFiles(rootPath, {
+        excludePaths,
+        maxResults: QUICK_OPEN_LISTING_MAX_RESULTS,
+        signal
+      })
+      const ranker = new QuickOpenPathRanker(query, limit)
+      for (const file of legacyFiles) {
+        ranker.consider(file)
+      }
+      const result = ranker.result()
+      return {
+        ...result,
+        truncated: legacyFiles.length >= QUICK_OPEN_LISTING_MAX_RESULTS || result.totalCount > limit
+      }
+    }
+    const files = await provider.listFiles(rootPath, {
+      excludePaths,
+      maxResults: limit + 1,
+      searchQuery: query,
+      signal
+    })
+    return {
+      paths: files.slice(0, limit),
+      totalCount: files.length,
+      truncated: files.length > limit
+    }
   }
 
   private async readRemoteMobileFile(filePath: string, connectionId: string): Promise<string> {

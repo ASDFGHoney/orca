@@ -12,6 +12,7 @@ import type {
   RuntimeFilePreviewResult,
   RuntimeFileReadChunkResult,
   RuntimeFileReadResult,
+  RuntimeFileListResult,
   RuntimeStatus
 } from '../../../shared/runtime-types'
 import {
@@ -31,6 +32,10 @@ import {
   createEmptyRuntimeFileSearchResult,
   getRuntimeFileSearchRejectedField
 } from './runtime-file-search-bounds'
+import {
+  buildExcludePathPrefixes,
+  shouldExcludeQuickOpenRelPath
+} from '../../../shared/quick-open-filter'
 import { assertFileMutationOwnershipCapability } from '../../../shared/file-mutation-ownership'
 import {
   captureRuntimeEnvironmentRequestRevision,
@@ -951,7 +956,12 @@ export async function searchRuntimeFiles(
 
 export async function listRuntimeFiles(
   context: RuntimeFileOperationArgs,
-  args: { rootPath: string; excludePaths?: string[]; requestToken?: string }
+  args: {
+    rootPath: string
+    excludePaths?: string[]
+    requestToken?: string
+    signal?: AbortSignal
+  }
 ): Promise<string[]> {
   const target = getActiveRuntimeTarget(context.settings)
   if (target.kind !== 'environment' || !context.worktreeId) {
@@ -969,8 +979,40 @@ export async function listRuntimeFiles(
       worktree: toRuntimeWorktreeSelector(context.worktreeId),
       excludePaths: args.excludePaths
     },
-    { timeoutMs: 15_000 }
+    { timeoutMs: 15_000, ...(args.signal === undefined ? {} : { signal: args.signal }) }
   )
+}
+
+export async function searchRuntimeFilePaths(
+  context: RuntimeFileOperationArgs,
+  args: { query: string; limit?: number; excludePaths?: string[]; signal?: AbortSignal }
+): Promise<{ files: string[]; truncated: boolean }> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind !== 'environment' || !context.worktreeId) {
+    return { files: [], truncated: false }
+  }
+  const result = await callRuntimeRpc<RuntimeFileListResult>(
+    target,
+    'files.searchPaths',
+    {
+      worktree: toRuntimeWorktreeSelector(context.worktreeId),
+      query: args.query,
+      limit: args.limit,
+      excludePaths: args.excludePaths,
+      mode: 'quick-open'
+    },
+    { timeoutMs: 15_000, ...(args.signal === undefined ? {} : { signal: args.signal }) }
+  )
+  const excludePrefixes = buildExcludePathPrefixes(
+    context.worktreePath ?? result.rootPath,
+    args.excludePaths
+  )
+  return {
+    files: result.files
+      .map((entry) => entry.relativePath)
+      .filter((relativePath) => !shouldExcludeQuickOpenRelPath(relativePath, excludePrefixes)),
+    truncated: result.truncated
+  }
 }
 
 /**
