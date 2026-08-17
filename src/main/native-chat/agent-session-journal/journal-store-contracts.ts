@@ -13,6 +13,8 @@ export type AgentSessionJournalOptions = {
   journalDir: string
   limits?: JournalPayloadLimits
   compaction?: JournalCompactionPolicy
+  /** Compact as the tail grows. Defaults on: without it the log never sheds. */
+  autoCompact?: boolean
   now?: () => number
   mintEpoch?: () => string
 }

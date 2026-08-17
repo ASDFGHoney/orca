@@ -72,6 +72,7 @@ export class AgentSessionJournal {
   private readonly journalDir: string
   private readonly budget: JournalAppendBudget
   private readonly compaction: JournalCompactionPolicy
+  private readonly autoCompact: boolean
   private readonly now: () => number
   private readonly mintEpoch: () => string
 
@@ -90,6 +91,7 @@ export class AgentSessionJournal {
       options.identity.sessionId,
       options.limits ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS
     )
+    this.autoCompact = options.autoCompact ?? true
     this.compaction = options.compaction ?? DEFAULT_JOURNAL_COMPACTION_POLICY
     this.now = options.now ?? (() => Date.now())
     this.mintEpoch = options.mintEpoch ?? randomUUID
@@ -266,6 +268,16 @@ export class AgentSessionJournal {
     return pending
   }
 
+  /** Only when the retention window would actually drop rows: inside it,
+   *  compaction rewrites an identical log, and doing that per append is a full
+   *  state serialization on the hot path. */
+  private shouldAutoCompact(now: number): boolean {
+    if (!this.autoCompact || this.tailRows.length <= this.compaction.minTailRows * 2) {
+      return false
+    }
+    return (this.tailRows[0]?.ts ?? now) < now - this.compaction.retainTailMs
+  }
+
   async compact(now = this.now()): Promise<void> {
     assertJournalWritable(this.readOnly, this.identity.sessionId)
     const result = await compactJournal({
@@ -340,6 +352,11 @@ export class AgentSessionJournal {
       applyJournalRow(this.state, row)
       this.tailRows.push(row)
       this.sizeBytes += journalRowByteLength(row)
+      // Nothing else calls compact(), so without this the log only ever grows —
+      // until the size bound refuses every append for the rest of the session.
+      if (this.shouldAutoCompact(ts)) {
+        await this.compact(ts)
+      }
       return row
     })
     this.writes = run.catch(() => undefined)
