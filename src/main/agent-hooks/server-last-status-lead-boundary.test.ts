@@ -126,6 +126,50 @@ describe('Persisted Claude lead boundaries', () => {
     }
   })
 
+  it('keeps a persisted child boundary across an OSC repaint and restart', async () => {
+    const firstServer = new AgentHookServer()
+    await firstServer.start({ env: 'production', userDataPath })
+    await postHookEvent(
+      firstServer,
+      buildBody({ hook_event_name: 'UserPromptSubmit', prompt: 'finish after child' })
+    )
+    await postHookEvent(
+      firstServer,
+      buildBody({ hook_event_name: 'SubagentStart', agent_id: 'arestored-child' })
+    )
+    await postHookEvent(firstServer, buildBody({ hook_event_name: 'Stop' }))
+    firstServer.flushStatusPersistSync()
+    firstServer.stop()
+
+    const secondServer = new AgentHookServer()
+    await secondServer.start({ env: 'production', userDataPath })
+    secondServer.ingestTerminalStatus({
+      paneKey: PANE,
+      connectionId: null,
+      payload: { state: 'working', prompt: '', agentType: 'claude' }
+    })
+    secondServer.flushStatusPersistSync()
+    secondServer.stop()
+
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'SubagentStop', agent_id: 'arestored-child' })
+      )
+
+      expect(server.getStatusSnapshot()[0]).toMatchObject({
+        state: 'done',
+        agentType: 'claude',
+        turnCompletedAt: expect.any(Number)
+      })
+      expect(server.getStatusSnapshot()[0]?.restoredUnconfirmed).toBeUndefined()
+    } finally {
+      server.stop()
+    }
+  })
+
   it('preserves a persisted lead boundary across sibling drain', async () => {
     const firstServer = new AgentHookServer()
     await firstServer.start({ env: 'production', userDataPath })
