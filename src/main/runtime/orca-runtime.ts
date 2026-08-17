@@ -34670,11 +34670,17 @@ export class OrcaRuntimeService {
     return this.leaves.get(this.getLeafKey(captured.tabId, captured.leafId)) ?? captured
   }
 
-  /** Same re-read for PTY records, and a no-op today by construction: `ptysById` has one
-   *  `set` site guarded by `if (!pty)`, so records are create-once and mutated in place, and
-   *  the only path that mints a fresh object under the same id — `dropDisconnectedPtyRecord`
-   *  — rejects the handle's waiters on its way through. Kept so the two polls cannot drift:
-   *  a second `set` site would otherwise reintroduce the leaf hang here, silently. */
+  /** Same re-read for PTY records, inert today — deliberately kept so the two polls cannot
+   *  drift apart. Two things make it inert, and this guard goes live the moment either
+   *  changes:
+   *    1. `ptysById` has one `set` site (`recordPtyWorktree`), guarded by `if (!pty)`, so
+   *       records are create-once and mutated in place rather than swapped. A second `set`
+   *       site would make PTY captures go stale exactly like leaf ones.
+   *    2. The only path that mints a fresh record under an existing id,
+   *       `dropDisconnectedPtyRecord`, calls `invalidatePtyIncarnationHandle` →
+   *       `rejectWaitersForHandle(handle, 'terminal_handle_stale')`. Every waiter on that
+   *       handle is rejected before any replacement record could be observed. Moving that
+   *       rejection off the drop path would let a waiter outlive its record. */
   private getLivePtyRecord(captured: RuntimePtyWorktreeRecord): RuntimePtyWorktreeRecord {
     return this.ptysById.get(captured.ptyId) ?? captured
   }
