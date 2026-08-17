@@ -455,6 +455,35 @@ describe('useNativeChatLiveSession — transport routing', () => {
     expect(latest?.status).toBe('ready')
   })
 
+  // The runtime RPC host clamps the read window to 2000 turns, then keeps
+  // answering `hasMore: true` while returning the same capped tail. Taking that
+  // answer as the affordance would leave a "Load earlier" button that re-reads
+  // the whole window on every scroll near the top and never grows it.
+  it('stops offering load-earlier once the host stops growing the window', async () => {
+    const transport = getMockTransport('env-1')
+    const capped = Array.from({ length: NATIVE_CHAT_INITIAL_LIMIT }, (_unused, n) =>
+      assistant(`capped-${n}`, 'old')
+    )
+    await render({
+      paneKey: PANE,
+      agent: AGENT,
+      sessionId: SESSION,
+      runtimeEnvironmentId: 'env-1'
+    })
+    await act(async () => transport.emit({ type: 'snapshot', messages: capped, hasMore: true }))
+    expect(latest?.hasMore).toBe(true)
+
+    // The host truthfully has more, but it cannot hand any of it over: the page
+    // request asked for a wider window and got back the same clamped tail.
+    transport.readSession.mockImplementationOnce(() =>
+      Promise.resolve({ messages: capped, hasMore: true })
+    )
+    await act(async () => latest?.loadEarlier())
+
+    expect(latest?.hasMore).toBe(false)
+    expect(latest?.messages).toHaveLength(NATIVE_CHAT_INITIAL_LIMIT)
+  })
+
   it('does not let an older pagination read rewind a live completion', async () => {
     useAppStore.setState({
       agentStatusByPaneKey: { [PANE]: { state: 'working', stateStartedAt: 1 } as never }

@@ -29,12 +29,21 @@ describe('hasMoreNativeChatHistory', () => {
   })
 
   // The count inference cannot tell "the window is exactly full" from "there is
-  // more behind it". That was harmless while this only drove a load-earlier
-  // affordance, but it now also decides whether a head turn's `[Image #n]`
-  // markers are read as the user's own words, so the host's exact answer wins.
-  it('prefers the host’s reported answer over the count inference', () => {
+  // more behind it", so a reported `false` ends pagination without the wasted
+  // read the count rule alone costs.
+  it('takes the host’s reported answer when it ends pagination', () => {
     expect(hasMoreNativeChatHistory(300, 300, false)).toBe(false)
-    expect(hasMoreNativeChatHistory(120, 300, true)).toBe(true)
+  })
+
+  // A reported `true` says history exists, not that the next read can reach it.
+  // The runtime RPC host clamps the window to 2000 turns and then answers `true`
+  // forever while returning the same capped tail; trusting it alone left a
+  // "Load earlier" button that re-read the whole window and never grew it.
+  it('still ends pagination when the read came back short of the window', () => {
+    expect(hasMoreNativeChatHistory(120, 300, true)).toBe(false)
+    expect(hasMoreNativeChatHistory(2000, 2100, true)).toBe(false)
+    // The window is still growing, so keep paging.
+    expect(hasMoreNativeChatHistory(300, 300, true)).toBe(true)
   })
 
   it('falls back to the count when an older host reports nothing', () => {
