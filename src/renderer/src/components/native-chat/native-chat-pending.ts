@@ -142,7 +142,9 @@ function messageIsAfterPendingTimestamp(
   // rows would make the echo unmatchable forever, stranding a rank-pinned
   // bubble at the list tail — which reads as the conversation reordering.
   if (message.timestamp === null) {
-    return true
+    // A paged-out boundary without a timestamp cannot prove post-boundary
+    // ordering; treating every row as newer can retire an older identical turn.
+    return false
   }
   const boundary = nativeChatPendingMatchingAfter(pending)
   // Why: `sentAt` is renderer-clock; `message.timestamp` is host/provider clock

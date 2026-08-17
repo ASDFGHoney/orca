@@ -35,6 +35,7 @@ export function NativeChatInteractiveCard({
   messages,
   transcriptSettled,
   clearBoundaryUnavailable = false,
+  hasClearMarker = false,
   onShowingQuestionChange,
   answerInputRef
 }: {
@@ -47,6 +48,7 @@ export function NativeChatInteractiveCard({
   transcriptSettled: boolean
   /** Prevent stale transcript asks from reappearing while /clear is unresolved. */
   clearBoundaryUnavailable?: boolean
+  hasClearMarker?: boolean
   /** Reports whether a question card is on screen so the view can replace the
    *  composer with it (the card's free-text row is the answer input). */
   onShowingQuestionChange?: (showing: boolean) => void
@@ -63,9 +65,10 @@ export function NativeChatInteractiveCard({
   const { sendAnswer, sendRaw, cancelPending, cancel } = send
 
   const card = useMemo(() => {
-    const statusCard = clearBoundaryUnavailable
-      ? null
-      : parseInteractivePrompt(interactivePrompt, interactiveToolName ?? undefined)
+    const statusCard =
+      clearBoundaryUnavailable || hasClearMarker
+        ? null
+        : parseInteractivePrompt(interactivePrompt, interactiveToolName ?? undefined)
     if (statusCard?.kind === 'approval') {
       return statusCard
     }
@@ -77,6 +80,7 @@ export function NativeChatInteractiveCard({
     return prompt ? { kind: 'question' as const, prompt } : null
   }, [
     clearBoundaryUnavailable,
+    hasClearMarker,
     interactivePrompt,
     interactiveToolName,
     messages,

@@ -172,7 +172,7 @@ export function useNativeChatLiveSession(
           transcriptLifecycleControl.replace(result?.lifecycle)
           // Establish a renderer-local baseline for every authoritative read;
           // reconnect snapshots then sequence only first-seen rows beyond it.
-          authoritativeSettle.settleFrame(messages, true)
+          authoritativeSettle.settleFrame(messages, false)
           setRead({ phase: 'ready', messages })
           setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current))
         })
@@ -209,7 +209,7 @@ export function useNativeChatLiveSession(
           transcriptLifecycleControl.replace(frame.lifecycle)
           replaceList(appendMergerRef.current, frame.messages)
           setAppended([])
-          authoritativeSettle.settleFrame(frame.messages, true)
+          authoritativeSettle.settleFrame(frame.messages, frame.type === 'replacement')
           setRead({ phase: 'ready', messages: appendMergerRef.current.list })
           setHasMore(frame.hasMore)
           return

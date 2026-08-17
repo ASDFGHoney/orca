@@ -194,6 +194,7 @@ function NativeChatResolvedView({
     paneKey,
     agent,
     sessionId,
+    sourceKey: JSON.stringify([runtimeEnvironmentId ?? null, transcriptPath ?? null]),
     messages: session.messages,
     transcriptOrder: order,
     onWorkingInterruptReset: resetWorkingInterrupted
@@ -427,6 +428,9 @@ function NativeChatResolvedView({
         messages={sessionAfterCommandBoundaries.messages}
         transcriptSettled={session.readPhase === 'ready'}
         clearBoundaryUnavailable={clearBoundaryUnavailable}
+        hasClearMarker={commandMarkers.some((marker) =>
+          marker.command.trim().toLowerCase().startsWith('/clear')
+        )}
         onShowingQuestionChange={setQuestionActive}
         answerInputRef={questionAnswerInputRef}
       />

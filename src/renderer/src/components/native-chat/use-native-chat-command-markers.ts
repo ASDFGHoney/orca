@@ -13,6 +13,7 @@ export function useNativeChatCommandMarkers(args: {
   paneKey: string
   agent: string
   sessionId: string | null
+  sourceKey?: string
   messages: readonly NativeChatMessage[]
   transcriptOrder: NativeChatTranscriptOrder
   onWorkingInterruptReset: () => void
@@ -20,10 +21,18 @@ export function useNativeChatCommandMarkers(args: {
   commandMarkers: NativeChatCommandMarker[]
   onSlashCommand: (command: string) => void
 } {
-  const { paneKey, agent, sessionId, messages, transcriptOrder, onWorkingInterruptReset } = args
+  const {
+    paneKey,
+    agent,
+    sessionId,
+    sourceKey,
+    messages,
+    transcriptOrder,
+    onWorkingInterruptReset
+  } = args
   const commandMarkerScope = useMemo(
-    (): NativeChatCommandMarkerScope => ({ paneKey, agent, sessionId }),
-    [paneKey, agent, sessionId]
+    (): NativeChatCommandMarkerScope => ({ paneKey, agent, sessionId, sourceKey }),
+    [paneKey, agent, sessionId, sourceKey]
   )
   const [commandMarkers, setCommandMarkers] = useState<NativeChatCommandMarker[]>(() =>
     readCommandMarkerCache(commandMarkerScope)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import { useAppStore } from '../../store'
 import { launchPromptAsMessage, shouldPruneLaunchPrompt } from './native-chat-launch-prompt'
@@ -17,6 +17,15 @@ export function useNativeChatLaunchPrompt(args: {
   )
   const clearLaunchPrompt = useAppStore((state) => state.clearNativeChatLaunchPrompt)
   const paneLaunchPrompt = launchPrompt?.agent === agent ? launchPrompt : null
+  const launchGenerationRef = useRef(transcriptOrder.generation)
+  useEffect(() => {
+    if (launchGenerationRef.current !== transcriptOrder.generation && paneLaunchPrompt) {
+      // A launch echo belongs to the source generation that existed at send;
+      // never let a replacement baseline retire it by identical content.
+      clearLaunchPrompt(terminalTabId)
+    }
+    launchGenerationRef.current = transcriptOrder.generation
+  }, [clearLaunchPrompt, paneLaunchPrompt, terminalTabId, transcriptOrder.generation])
 
   useEffect(() => {
     if (

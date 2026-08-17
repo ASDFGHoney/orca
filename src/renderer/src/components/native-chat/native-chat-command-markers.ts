@@ -29,6 +29,7 @@ export type NativeChatCommandMarkerScope = {
   paneKey: string
   agent: string
   sessionId: string | null
+  sourceKey?: string
 }
 
 const COMMAND_MARKER_LIMIT = 8
@@ -36,7 +37,7 @@ const commandMarkerCache = new Map<string, NativeChatCommandMarker[]>()
 let commandMarkerCounter = 0
 
 function commandMarkerScopeKey(scope: NativeChatCommandMarkerScope): string {
-  return `${scope.paneKey}\0${scope.agent}\0${scope.sessionId ?? ''}`
+  return `${scope.paneKey}\0${scope.agent}\0${scope.sessionId ?? ''}\0${scope.sourceKey ?? ''}`
 }
 
 export function readCommandMarkerCache(
@@ -161,11 +162,16 @@ export function hasUnavailableNativeChatClearBoundary(
   if (boundaryId !== null && messages.some((message) => message.id === boundaryId)) {
     return false
   }
-  return !(
+  if (
     transcriptOrder !== undefined &&
     clearMarker.clearTranscriptGeneration === transcriptOrder.generation &&
     clearMarker.clearTranscriptHighWater !== undefined
-  )
+  ) {
+    return ![...transcriptOrder.messageSequenceById.values()].some(
+      (sequence) => sequence > clearMarker.clearTranscriptHighWater!
+    )
+  }
+  return true
 }
 
 /** Render command markers as compact `system` messages. The `system` role draws

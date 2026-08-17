@@ -388,7 +388,7 @@ describe('useNativeChatLiveSession — transport routing', () => {
     expect(latest?.messages.map((message) => message.id)).toEqual(['u-live'])
   })
 
-  it('orders reconnect snapshots and live appends in one local sequence', async () => {
+  it('orders only live appends after a non-adoption snapshot baseline', async () => {
     const transport = getMockTransport('env-1')
     await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
     await act(async () =>
@@ -399,8 +399,8 @@ describe('useNativeChatLiveSession — transport routing', () => {
       })
     )
     const generation = latest?.transcriptOrder.generation
-    expect(latest?.transcriptOrder.highWater).toBe(1)
-    expect(latest?.transcriptOrder.messageSequenceById.get('old')).toBe(1)
+    expect(latest?.transcriptOrder.highWater).toBe(0)
+    expect(latest?.transcriptOrder.messageSequenceById.has('old')).toBe(false)
 
     await act(async () =>
       transport.emit({
@@ -409,9 +409,9 @@ describe('useNativeChatLiveSession — transport routing', () => {
       })
     )
 
-    expect(latest?.transcriptOrder).toMatchObject({ generation, highWater: 3 })
-    expect(latest?.transcriptOrder.messageSequenceById.get('new-user')).toBe(2)
-    expect(latest?.transcriptOrder.messageSequenceById.get('new-answer')).toBe(3)
+    expect(latest?.transcriptOrder).toMatchObject({ generation, highWater: 2 })
+    expect(latest?.transcriptOrder.messageSequenceById.get('new-user')).toBe(1)
+    expect(latest?.transcriptOrder.messageSequenceById.get('new-answer')).toBe(2)
 
     await act(async () =>
       transport.emit({
@@ -422,8 +422,8 @@ describe('useNativeChatLiveSession — transport routing', () => {
     )
     // Same-session replacement keeps generation and settles post-action rows.
     expect(latest?.transcriptOrder.generation).toBe(generation)
-    expect(latest?.transcriptOrder.messageSequenceById.get('replacement')).toBe(4)
-    expect(latest?.transcriptOrder.highWater).toBe(4)
+    expect(latest?.transcriptOrder.messageSequenceById.get('replacement')).toBe(3)
+    expect(latest?.transcriptOrder.highWater).toBe(3)
   })
 
   it('null-session send then session metadata initial snapshot retires the pending turn', async () => {
@@ -531,7 +531,7 @@ describe('useNativeChatLiveSession — transport routing', () => {
     )
     await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
     await act(async () => transport.emit({ type: 'snapshot', messages: many, hasMore: true }))
-    expect(latest?.transcriptOrder.highWater).toBe(NATIVE_CHAT_INITIAL_LIMIT)
+    expect(latest?.transcriptOrder.highWater).toBe(0)
 
     await act(async () =>
       transport.emit({
@@ -539,9 +539,7 @@ describe('useNativeChatLiveSession — transport routing', () => {
         messages: [user('live', 'go')]
       })
     )
-    expect(latest?.transcriptOrder.messageSequenceById.get('live')).toBe(
-      NATIVE_CHAT_INITIAL_LIMIT + 1
-    )
+    expect(latest?.transcriptOrder.messageSequenceById.get('live')).toBe(1)
 
     transport.readSession.mockResolvedValueOnce({
       messages: [assistant('older', 'page'), ...many, user('live', 'go')]
@@ -550,9 +548,7 @@ describe('useNativeChatLiveSession — transport routing', () => {
     await flush()
 
     // Pagination only replaces the base list; order stays append-settled.
-    expect(latest?.transcriptOrder.messageSequenceById.get('live')).toBe(
-      NATIVE_CHAT_INITIAL_LIMIT + 1
-    )
+    expect(latest?.transcriptOrder.messageSequenceById.get('live')).toBe(1)
     expect(latest?.transcriptOrder.messageSequenceById.has('older')).toBe(false)
     expect(latest?.messages.map((message) => message.id)).toContain('older')
   })
