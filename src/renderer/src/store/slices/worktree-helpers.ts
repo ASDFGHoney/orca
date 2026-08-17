@@ -10,7 +10,6 @@ import type {
   CreateWorktreeArgs,
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
-  RemoveWorktreeResult,
   SetupDecision
 } from '../../../../shared/worktree/create-types'
 import type { WorktreeStartupLaunch } from '../../../../shared/worktree/launch-types'
@@ -58,12 +57,8 @@ export type WorktreeDeleteState = {
 
 export type WorktreeDeleteStateTarget = Pick<Worktree, 'id' | 'hostId'>
 
-type RendererRemoveWorktreeResult = Omit<RemoveWorktreeResult, 'preservedBranch'> & {
-  preservedBranch?: NonNullable<RemoveWorktreeResult['preservedBranch']> & {
-    hostId?: ExecutionHostId
-    runtimeEnvironmentId?: string
-  }
-}
+
+import type { RendererRemoveWorktreeResult } from './renderer-remove-worktree-result'
 
 export type WorktreeFetchOptions = {
   requireAuthoritative?: boolean

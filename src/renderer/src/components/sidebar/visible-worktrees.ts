@@ -17,11 +17,14 @@ import {
   isDetachedHeadWorkspace,
   isSleepingSweepExemptWorkspace
 } from './visible-worktree-kinds'
+import {
+  getVisibleWorkspaceHostIdSet,
+  worktreeMatchesVisibleHost
+} from './visible-worktree-host-scope'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { buildWorktreeComparator, sortWorktreesSmart } from './smart-sort'
 import { getWorktreeIdsWithLiveAgent, isInactiveWorkspace } from '@/lib/worktree-activity-state'
 import { useAppStore } from '@/store'
-import type { AppState } from '@/store/types'
 import { getAllWorktreesFromState, getRepoMapFromState } from '@/store/selectors'
 import {
   ALL_EXECUTION_HOSTS_SCOPE,
@@ -243,35 +246,6 @@ export type VisibleWorktreeShortcutTarget = {
 }
 let _publishedVisibleShortcutTargets: VisibleWorktreeShortcutTarget[] | null = null
 
-function getVisibleWorkspaceHostIdSet(
-  state: Pick<AppState, 'workspaceHostScope' | 'visibleWorkspaceHostIds'>
-): ReadonlySet<ExecutionHostId> | null {
-  const hostIds =
-    state.visibleWorkspaceHostIds ??
-    (state.workspaceHostScope === ALL_EXECUTION_HOSTS_SCOPE ? null : [state.workspaceHostScope])
-  return hostIds ? new Set(hostIds) : null
-}
-
-function worktreeMatchesVisibleHost(
-  worktree: Worktree,
-  visibleHostIds: ReadonlySet<ExecutionHostId> | null,
-  repoMap: Map<string, Repo>,
-  defaultHostId: ExecutionHostId
-): boolean {
-  if (!visibleHostIds) {
-    return true
-  }
-  const repo = repoMap.get(worktree.repoId)
-  return repo
-    ? visibleHostIds.has(getWorktreeExecutionHostId(worktree, repo, defaultHostId))
-    : false
-}
-
-/**
- * Called by WorktreeList after computing visible worktrees so the Cmd+1–9
- * handler can read the exact same ordering the user sees on screen. Pass null
- * on unmount.
- */
 export function setVisibleWorktreeIds(ids: string[] | null): void {
   _publishedVisibleIds = ids
 }

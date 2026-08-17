@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type React from 'react'
-import type { WorkspaceStatus, Worktree } from '../../../../shared/worktree/types'
 import {
   CARD_SELECTOR,
   getCardDropTarget,
@@ -41,42 +40,12 @@ type DragState = {
   latestDropTarget: WorkspaceKanbanCardTrackedDropTarget | null
 }
 
-export function resolveWorkspaceKanbanPointerDragSelection(args: {
-  sourceWorktreeId: string
-  sourceWorktreeIdentity: string
-  selectedWorktreeIds: ReadonlySet<string>
-  selectedWorktrees: readonly Worktree[]
-}): { worktreeIds: string[]; worktreeIdentities: string[] } {
-  if (
-    args.selectedWorktreeIds.has(args.sourceWorktreeIdentity) &&
-    args.selectedWorktrees.length > 1
-  ) {
-    return {
-      worktreeIds: args.selectedWorktrees.map((worktree) => worktree.id),
-      worktreeIdentities: [...args.selectedWorktreeIds]
-    }
-  }
-  return {
-    worktreeIds: [args.sourceWorktreeId],
-    worktreeIdentities: [args.sourceWorktreeIdentity]
-  }
-}
+export { resolveWorkspaceKanbanPointerDragSelection } from './workspace-kanban-pointer-drag-selection'
+import {
+  resolveWorkspaceKanbanPointerDragSelection,
+  type UseWorkspaceKanbanCardPointerDragParams
+} from './workspace-kanban-pointer-drag-selection'
 
-type UseWorkspaceKanbanCardPointerDragParams = {
-  open: boolean
-  boardRef: React.RefObject<HTMLElement | null>
-  selectedWorktreeIds: ReadonlySet<string>
-  selectedWorktrees: readonly Worktree[]
-  onDropWorktreesInStatus: (args: {
-    worktreeIds: readonly string[]
-    status: WorkspaceStatus
-    dropIndex: number
-  }) => void
-  onShouldShowDropIndicator: (worktreeIds: readonly string[], status: WorkspaceStatus) => boolean
-  onPinWorktrees: (worktreeIds: readonly string[]) => void
-  onDragTargetChange: (status: WorkspaceStatus | null) => void
-  onPinDragTargetChange: (isOver: boolean) => void
-}
 
 export function useWorkspaceKanbanCardPointerDrag({
   open,
