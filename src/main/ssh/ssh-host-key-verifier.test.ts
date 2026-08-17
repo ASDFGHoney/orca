@@ -204,7 +204,6 @@ describe('the ssh2 host key verifier', () => {
 // We now READ ssh2's list instead of copying it, which removes the drift class entirely — but the
 // fallback copy is still load-bearing if the deep path ever moves, so it is the thing worth pinning.
 describe('the ssh2 default algorithm list', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- ssh2 exports this only here
   const ssh2Constants = require('ssh2/lib/protocol/constants.js') as {
     DEFAULT_SERVER_HOST_KEY: string[]
     SUPPORTED_SERVER_HOST_KEY: string[]

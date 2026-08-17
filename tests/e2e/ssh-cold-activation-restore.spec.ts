@@ -178,7 +178,18 @@ test.describe('SSH cold activation restore', () => {
       if (!firstTabId) {
         throw new Error('Restored SSH tabs disappeared')
       }
-      await orcaPage.getByRole('button', { name: /^Terminal 1 Close tab Terminal 1/ }).click()
+      // Six restored tabs overflow the strip on a CI-sized window, and the restore pins it to the
+      // END — so Terminal 1 sits outside the scroll viewport. Playwright's own scroll-into-view
+      // loses that race against the strip's sticky-to-end effect and times out on an element it can
+      // see but never reaches, which is what this spec failed on the first time it ever ran in CI.
+      // Scrolling to the start first is deterministic; the strip is a native overflow container.
+      const tabStrip = orcaPage.locator('.terminal-tab-strip').first()
+      await tabStrip.evaluate((el) => {
+        el.scrollTo({ left: 0, behavior: 'instant' as ScrollBehavior })
+      })
+      const firstTab = orcaPage.getByRole('button', { name: /^Terminal 1 Close tab Terminal 1/ })
+      await firstTab.scrollIntoViewIfNeeded()
+      await firstTab.click()
       await expect
         .poll(() => orcaPage.evaluate(() => window.__store?.getState().activeTabId ?? null), {
           timeout: 10_000

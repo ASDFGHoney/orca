@@ -78,7 +78,6 @@ export const DEFAULT_SERVER_HOST_KEY_ALGORITHMS = readSsh2DefaultServerHostKeyAl
  */
 function readSsh2DefaultServerHostKeyAlgorithms(): string[] | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- ssh2 exports this only here
     const constants = require('ssh2/lib/protocol/constants.js') as {
       DEFAULT_SERVER_HOST_KEY?: unknown
     }
