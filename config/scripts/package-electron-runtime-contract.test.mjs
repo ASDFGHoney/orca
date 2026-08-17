@@ -449,12 +449,14 @@ describe('Electron runtime package contract', () => {
       'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
     )
     expect(linuxStep.run).toContain('src/main/browser/browser-route-webrtc-egress.electron.test.ts')
+    expect(linuxStep.run).toContain('src/main/browser/browser-route-tcp-egress.electron.test.ts')
     expect(windowsStep.run).toContain(
       'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
     )
     expect(windowsStep.run).toContain(
       'src/main/browser/browser-route-webrtc-egress.electron.test.ts'
     )
+    expect(windowsStep.run).toContain('src/main/browser/browser-route-tcp-egress.electron.test.ts')
   })
 
   it('smokes the packaged CLI from outside the checkout in PR checks', () => {
