@@ -2602,10 +2602,11 @@ function resolveClaudePaneState(
     return lead.state
   }
   const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
+  // Why: leftover provider shells/monitors are session inventory, not lead-turn
+  // work. Gating done→working on them latches the pane forever because an idle
+  // parent never emits another background_tasks list (STA-4119).
   return claudeRosterHasWorkingSubagent(roster) ||
-    (!lead.interrupted &&
-      (state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
-        state.claudeActiveSessionCronPaneKeys.has(paneKey)))
+    (!lead.interrupted && state.claudeActiveSessionCronPaneKeys.has(paneKey))
     ? 'working'
     : 'done'
 }
@@ -2679,8 +2680,7 @@ function normalizeClaudeSubagentLifecycleEvent(
   const hasConfirmedDoneGate =
     cachedLead?.state === 'done' &&
     cachedLead.interrupted !== true &&
-    (state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
-      state.claudeActiveSessionCronPaneKeys.has(paneKey))
+    state.claudeActiveSessionCronPaneKeys.has(paneKey)
   const restoredOnlyDoneGate =
     cachedLead?.state === 'done' && !hasConfirmedDoneGate && hasUnconfirmedChild
   if (roster?.size === 0) {
@@ -3107,7 +3107,6 @@ function normalizeClaudeEvent(
     effectiveState === 'working' &&
     claudeRosterHasRestoredSnapshotSubagent(effectiveRoster) &&
     !claudeRosterHasRuntimeWorkingSubagent(effectiveRoster) &&
-    !state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) &&
     !state.claudeActiveSessionCronPaneKeys.has(paneKey)
   ) {
     // Why: a legacy or partial Stop confirms the lead boundary, not a child restored from disk; keep the child-only gate eligible for reconciliation.

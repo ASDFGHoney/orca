@@ -1,0 +1,57 @@
+{
+  "capturedAtLocal": "2026-08-17T16:37:44-07:00",
+  "localAppVersion": "1.4.185-adhoc.20260817215434",
+  "sourceWorktreeHead": "8cd338357ee35e7348cb08d3a0522fee161b2e28",
+  "reproPane": {
+    "paneKey": "b1a746f4-93d0-483a-9b56-841d3d38b3c5:45175c2f-d16d-4ff4-bc95-809fed804872",
+    "source": "claude",
+    "tabId": "b1a746f4-93d0-483a-9b56-841d3d38b3c5",
+    "worktreeId": "a2200db1-ead2-44b2-98ef-305f17644241::/Users/brennanbenson/orca/workspaces/sta-4119-bg-fixture/sta-4119-repro-macos",
+    "connectionId": null,
+    "hasExplicitPrompt": false,
+    "hookEventName": "SubagentStop",
+    "providerPromptId": "cd77def5-25b9-40b3-a721-b4a66b6c8004",
+    "toolAgentId": "ac4a0c329a0e18cd9",
+    "providerSession": {
+      "key": "session_id",
+      "id": "4598b6d9-e09d-4a1c-896a-df301d180f44",
+      "transcriptPath": "/Users/brennanbenson/.claude/projects/-Users-brennanbenson-orca-workspaces-sta-4119-bg-fixture-sta-4119-repro-macos/4598b6d9-e09d-4a1c-896a-df301d180f44.jsonl"
+    },
+    "payload": {
+      "state": "working",
+      "prompt": "Do exactly these steps, then end your turn. Do not start a subagent. Do not ask questions. 1. Start this long-lived process as a background/async Bash shell and do NOT wait for it to exit:    python3 ",
+      "agentType": "claude",
+      "toolName": "Bash",
+      "toolInput": "cat /private/tmp/claude-501/-Users-brennanbenson-orca-workspaces-sta-4119-bg-fixture-sta-4119-repro-macos/4598b6d9-e09d-4a1c-896a-df301d180f44/tasks/b0icpu59e.o",
+      "lastAssistantMessage": "STA-4119-TURN-DONE",
+      "turnCompletedAt": 1787009576866
+    },
+    "receivedAt": 1787009578408,
+    "stateStartedAt": 1787009567895,
+    "launchTokenHash": "dee6f186298eb5a60bb0a854ae0a6ced88cebfa4dc3988bd5dc48d84cce6896c"
+  },
+  "controlPane": {
+    "paneKey": "032f97d0-4e98-4833-a2c9-b360e1ecd162:92bc0766-7177-4cd6-89dd-a45130e36e70",
+    "source": "claude",
+    "tabId": "032f97d0-4e98-4833-a2c9-b360e1ecd162",
+    "worktreeId": "a2200db1-ead2-44b2-98ef-305f17644241::/Users/brennanbenson/orca/workspaces/sta-4119-bg-fixture/sta-4119-control-macos",
+    "connectionId": null,
+    "hasExplicitPrompt": false,
+    "hookEventName": "Stop",
+    "providerPromptId": "982d1b47-9d7b-47d0-bfb3-ccfb217e850d",
+    "providerSession": {
+      "key": "session_id",
+      "id": "e8ddb7ac-d5ec-424f-bead-4b76ff64ce16",
+      "transcriptPath": "/Users/brennanbenson/.claude/projects/-Users-brennanbenson-orca-workspaces-sta-4119-bg-fixture-sta-4119-control-macos/e8ddb7ac-d5ec-424f-bead-4b76ff64ce16.jsonl"
+    },
+    "payload": {
+      "state": "done",
+      "prompt": "Reply with exactly STA-4119-CONTROL-DONE and end your turn. Do not run any shell command. Do not start a background process. Do not start a subagent.",
+      "agentType": "claude",
+      "lastAssistantMessage": "STA-4119-CONTROL-DONE"
+    },
+    "receivedAt": 1787009672621,
+    "stateStartedAt": 1787009672621,
+    "launchTokenHash": "e3a4bc871a4a496087b8f220b65468476673ab9a7d297e9b7da4f5c4a7d5956f"
+  }
+}

@@ -99,7 +99,7 @@ describe('RelayAgentHookServer', () => {
 
       expect(forward.mock.calls[0][0]).toMatchObject({
         claudeRunningNonAgentTask: true,
-        payload: { state: 'working', agentType: 'claude' }
+        payload: { state: 'done', agentType: 'claude' }
       })
     } finally {
       server.stop()

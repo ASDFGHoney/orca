@@ -1,0 +1,19 @@
+{
+  "capturedAtLocal": "2026-08-17T16:38:30-07:00",
+  "windowsEnvironment": "Windows high spec",
+  "windowsAppVersion": "1.4.184",
+  "windowsRuntimeId": "70a74ef9-bd02-4f76-b08b-846e230d2dc5",
+  "lastStatusPath": "C:\\Users\\neil\\AppData\\Roaming\\orca\\agent-hooks\\last-status.json",
+  "paneKey": "0eefb1da-3af1-40cb-ab8c-309eea05e5cb:d96df5f8-1870-42e2-b11b-a50bbc6c6985",
+  "hookEventName": "SubagentStop",
+  "state": "working",
+  "turnCompletedAt": null,
+  "lastAssistantMessage": "STA-4119-TURN-DONE",
+  "toolName": "Read",
+  "toolAgentId": "a0dc6d9fd3ea4d8be",
+  "receivedAt": 1787009583714,
+  "stateStartedAt": 1787009565488,
+  "payloadKeys": ["state", "prompt", "agentType", "toolName", "toolInput", "lastAssistantMessage"],
+  "subagents": null,
+  "note": "Fields extracted on the Windows host from last-status.json. Full entry also written on that host as C:/Users/neil/orca/workspaces/orca-setup-shell-repro/sta-4119-repro-win/sta-4119-win-last-status.json"
+}

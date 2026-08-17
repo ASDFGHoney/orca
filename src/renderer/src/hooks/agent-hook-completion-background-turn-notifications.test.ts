@@ -205,14 +205,16 @@ describe('Claude background-turn completion notifications', () => {
       }
     ])
 
+    // Why: a leftover shell no longer gates Stop to working, so this turn
+    // announces on the done quiet edge instead of turnCompletedAt.
     expect(banners).toHaveLength(2)
     expect(banners[0]).toMatchObject({
-      at: 1_700_000_001_000,
+      at: 1_700_000_001_000 + HOOK_DONE_QUIET_MS,
       body: 'Dev server is up.',
       stateStartedAt: 1_700_000_001_000
     })
     expect(banners[1]).toMatchObject({
-      at: 1_700_000_011_000,
+      at: 1_700_000_011_000 + HOOK_DONE_QUIET_MS,
       body: 'Route added.',
       stateStartedAt: 1_700_000_011_000
     })
