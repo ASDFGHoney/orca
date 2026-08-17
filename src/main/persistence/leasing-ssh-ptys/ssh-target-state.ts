@@ -8,6 +8,7 @@ import {
   MAX_REMOVED_SSH_TARGET_TOMBSTONES
 } from '../restoring-sessions/pane-alias-normalization'
 import { normalizeSshTarget } from './ssh-normalization'
+import { isRuntimeOwnedSshTargetId } from '../../../shared/execution-host'
 import {
   migrateRetirementNamespaceHostIdentity,
   sshHostIdentity
@@ -55,13 +56,20 @@ export function updateSshTarget(
   }
   Object.assign(target, normalized)
   // Why: an endpoint edit keeps the row id, so no re-adoption runs and nothing else would carry the
-  // retirement mirror across. Config sync rewrites host/port/username in place on every import, and
-  // a runtime-owned target takes a fresh address from each provision. Copied, not moved: another
-  // target may still sit on the old endpoint.
-  migrateRetirementNamespaceHostIdentity(operations.state.retiredWorktreeNamesByNamespace, {
-    copyFrom: [previousHostIdentity],
-    to: sshHostIdentity(target)
-  })
+  // retirement mirror across — config sync rewrites host/port/username in place on every import.
+  // Copied, not moved: another target may still sit on the old endpoint.
+  //
+  // Runtime-owned targets are excluded: an on-demand VM is discarded between provisions, so its
+  // fresh address reaches an empty filesystem where a reissued name collides with nothing. Copying
+  // there would spend names against history that no longer exists and, since each provision mints
+  // another address, churn the namespace cap with a bucket per run — evicting the real tombstones
+  // of local and ordinary SSH repos.
+  if (!isRuntimeOwnedSshTargetId(id)) {
+    migrateRetirementNamespaceHostIdentity(operations.state.retiredWorktreeNamesByNamespace, {
+      copyFrom: [previousHostIdentity],
+      to: sshHostIdentity(target)
+    })
+  }
   operations.scheduleSave()
   return { ...target }
 }

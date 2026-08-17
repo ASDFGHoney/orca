@@ -7,6 +7,7 @@ import { MARINE_CREATURES } from '../shared/marine-creatures'
 import { createRetiredNameLookup } from '../shared/worktree/retired-name-registry'
 import type { SshTarget } from '../shared/ssh-types'
 import { MAX_RETIREMENT_NAMESPACES } from './worktree-retirement-namespace'
+import { getRuntimeOwnedSshTargetId } from './ssh/ssh-connection-store'
 
 const testState = { dir: '' }
 
@@ -331,6 +332,31 @@ describe('worktree name retirement registry', () => {
     await expect(
       getRetiredNameRegistryForRepo(store, readded, [readded], store.getSettings())
     ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
+  })
+
+  it('does not carry retirements forward when an on-demand runtime target is reprovisioned', async () => {
+    // Each provision mints a fresh address onto a discarded filesystem, so the old names collide
+    // with nothing. Copying per run would also churn the namespace cap out from under real hosts.
+    const store = await createStore()
+    const runtimeId = getRuntimeOwnedSshTargetId('vm-1')
+    store.addSshTarget({
+      ...sshTarget(runtimeId, { host: 'vm-old.example.com' }),
+      owner: { type: 'on-demand-runtime', runtimeId: 'vm-1' }
+    })
+    const repo = { ...REMOTE_REPO, connectionId: runtimeId }
+    store.addRepo(repo)
+    const { getRetiredNameRegistryForRepo, retireGeneratedWorktreeName } =
+      await import('./worktree-name-retirement')
+    await retireGeneratedWorktreeName(store, repo, store.getSettings(), 'nautilus')
+
+    store.updateSshTarget(runtimeId, { host: 'vm-new.example.com' })
+
+    store.removeProject(REPO)
+    const readded = { ...REMOTE_REPO, id: OTHER_REPO, connectionId: runtimeId }
+    store.addRepo(readded)
+    await expect(
+      getRetiredNameRegistryForRepo(store, readded, [readded], store.getSettings())
+    ).resolves.toEqual({ exhaustedTiers: 0, names: [] })
   })
 
   it('keeps a live sibling target its retirements when another row on the same endpoint rotates', async () => {
