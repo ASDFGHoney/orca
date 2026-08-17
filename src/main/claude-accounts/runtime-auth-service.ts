@@ -383,6 +383,7 @@ export class ClaudeRuntimeAuthService {
         credentialsJson,
         runtimeCredentialsCaptured
       )
+      await this.refreshUnknownSystemDefaultSnapshot(credentialsJson)
     }
 
     // Why: re-auth/add-account mark managed as authoritative; capture before skip flags are cleared so materialization can force-write that snapshot.
@@ -661,7 +662,17 @@ export class ClaudeRuntimeAuthService {
             continue
           }
         }
-        // Why: after Orca publishes a baseline, a changed same-account runtime token was observed later even if its new TTL is shorter.
+        // Why: expiry is the only monotonic signal shared by all credential stores; never let a
+        // delayed runtime writer move managed storage backwards.
+        const runtimeFreshness = this.readFreshnessFromCredentials(runtimeContents.credentialsJson)
+        const managedFreshness = this.readFreshnessFromCredentials(match.managedCredentialsJson)
+        if (
+          runtimeFreshness === null ||
+          managedFreshness === null ||
+          runtimeFreshness < managedFreshness
+        ) {
+          continue
+        }
         acceptedCandidates.push({ credentialsJson: runtimeContents.credentialsJson, match })
       }
       if (acceptedCandidates.length === 0) {
@@ -1194,11 +1205,15 @@ export class ClaudeRuntimeAuthService {
     }
     if (process.platform === 'darwin') {
       try {
-        return await readManagedClaudeKeychainCredentials(account.id)
+        const keychainCredentials = await readManagedClaudeKeychainCredentials(account.id)
+        if (keychainCredentials && this.isValidCredentialsJsonObject(keychainCredentials)) {
+          return keychainCredentials
+        }
       } catch {
         // Why: a locked managed Keychain must not prevent launch when the owned file copy is readable.
-        return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
       }
+      // Why: the owned file is the recovery copy when a Keychain item is missing or malformed.
+      return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
     }
     return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
   }
@@ -1589,6 +1604,32 @@ export class ClaudeRuntimeAuthService {
       force: false,
       credentialsJsonOverride: runtimeCredentialsJson,
       credentialsCaptured: runtimeCredentialsCaptured
+    })
+  }
+
+  private async refreshUnknownSystemDefaultSnapshot(managedCredentialsJson: string): Promise<void> {
+    const snapshotPath = this.getSystemDefaultSnapshotPath()
+    const snapshot = this.readSystemDefaultSnapshot(snapshotPath)
+    if (
+      !snapshot ||
+      (snapshot.credentialsCaptured !== false &&
+        snapshot.scopedKeychainCredentialsCaptured !== false &&
+        snapshot.legacyKeychainCredentialsCaptured !== false)
+    ) {
+      return
+    }
+    const credentialsPath = this.pathResolver.getRuntimePaths().credentialsPath
+    let credentialsJson: string | null = null
+    try {
+      credentialsJson = existsSync(credentialsPath) ? readFileSync(credentialsPath, 'utf-8') : null
+    } catch {
+      return
+    }
+    await this.captureSystemDefaultSnapshot({
+      force: true,
+      credentialsJsonOverride: credentialsJson,
+      previousSnapshot: snapshot,
+      managedCredentialsJson
     })
   }
 
@@ -2195,10 +2236,15 @@ export class ClaudeRuntimeAuthService {
           mode: 0o600
         })
       } catch {
-        console.warn(
-          '[claude-runtime-auth] Skipping shared Claude credential write because guarded publication is unavailable'
-        )
-        return false
+        // Some SSH/NFS homes do not support hard links; retain the read-before-write check there.
+        if (!this.fileContentsEqual(credentialsPath, expectedContents)) {
+          console.warn(
+            '[claude-runtime-auth] Skipping shared Claude credential write because guarded publication is unavailable'
+          )
+          return false
+        }
+        writeFileAtomically(credentialsPath, contents, { mode: 0o600 })
+        replaced = true
       }
       if (!replaced) {
         console.warn(

@@ -614,7 +614,7 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
     expect(readActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledTimes(2)
   })
 
-  it('adopts a later observed same-account refresh with a shorter TTL', async () => {
+  it('rejects a later observed same-account refresh with an older expiry', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const managedCredentials = createClaudeCredentialsJson(
       'one@example.com',
@@ -649,10 +649,10 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
     testState.legacyKeychainCredentials = shorterRefresh
     await service.prepareForClaudeLaunch()
 
-    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(shorterRefresh)
-    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(shorterRefresh)
-    expect(testState.scopedKeychainCredentials).toBe(shorterRefresh)
-    expect(testState.legacyKeychainCredentials).toBe(shorterRefresh)
+    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(managedCredentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(managedCredentials)
+    expect(testState.scopedKeychainCredentials).toBe(managedCredentials)
+    expect(testState.legacyKeychainCredentials).toBe(managedCredentials)
   })
 
   it('recovers from a far-future runtime expiry after explicit re-auth', async () => {

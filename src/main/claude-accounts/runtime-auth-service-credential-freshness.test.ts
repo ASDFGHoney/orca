@@ -42,6 +42,29 @@ describe('ClaudeRuntimeAuthService monotonic credential freshness', () => {
     cleanupRuntimeAuthTestState()
   })
 
+  it('falls back to the owned managed file when the Keychain item is malformed', async () => {
+    const managedCredentials = createClaudeCredentialsJson('one@example.com', 'managed')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      managedCredentials
+    )
+    testState.managedKeychainCredentials.set('account-1', '{malformed')
+    const settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('account-1', managedAuthPath, { email: 'one@example.com' })
+      ],
+      activeClaudeManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+
+    await expect(service.prepareForClaudeLaunch()).resolves.toMatchObject({
+      provenance: 'managed:account-1'
+    })
+  })
+
   it('does not overwrite a fresher same-identity runtime file with an older managed snapshot', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const freshRuntime = createClaudeCredentialsJson(
