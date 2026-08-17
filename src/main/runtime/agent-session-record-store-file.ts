@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   agentSessionOperationKey,
@@ -17,7 +17,12 @@ import {
 } from '../../shared/agent-session-operation-ledger'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { loadAgentSessionRecord } from '../../shared/agent-session-record-load'
-import { durableWriteTempPath, writeFileDurable } from '../durable-file-write'
+import {
+  copyFileDurable,
+  durableWriteTempPath,
+  renameDurable,
+  writeTempFileDurable
+} from '../durable-file-write'
 
 export const AGENT_SESSION_STORE_SCHEMA_VERSION = 2 as const
 
@@ -244,6 +249,12 @@ export async function loadAgentSessionStore(
       raw = await readFile(candidate, 'utf-8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // Only a missing or unparseable primary means "fall back". A transient read failure
+        // (EACCES, EIO, EMFILE) says nothing about the primary's contents, and treating it as
+        // recovery would replace newer state with a stale backup and latch the recovery path.
+        if (!recoveredFromBackup) {
+          throw new Error('agent_session_store_corrupt')
+        }
         unusableStoreFound = true
       }
       continue
@@ -291,27 +302,26 @@ function serializeState(state: AgentSessionStoreState): string {
   })
 }
 
-/** Commit the whole state. The previous file becomes the backup before the new one lands. */
+/**
+ * Commit the whole state. The live path is never absent: the new content is made durable in a temp
+ * file first, the old content is COPIED to the backup, and only then does the rename publish it.
+ *
+ * The old ordering renamed the live file aside before writing the new one, so a death in that
+ * window left the profile with a backup and no primary — which is exactly the state that wedged a
+ * real profile. Copy, don't move.
+ */
 export async function saveAgentSessionStore(
   filePath: string,
-  state: AgentSessionStoreState,
-  options: { recoveredFromBackup?: boolean } = {}
+  state: AgentSessionStoreState
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true })
   const tmpPath = durableWriteTempPath(filePath)
-  if (!options.recoveredFromBackup) {
-    try {
-      await rm(backupPath(filePath), { force: true })
-      await rename(filePath, backupPath(filePath))
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error
-      }
-      // First write, or recovery already found the primary missing.
-    }
-  }
   try {
-    await writeFileDurable(tmpPath, filePath, serializeState(state))
+    await writeTempFileDurable(tmpPath, serializeState(state))
+    // A failed rotation aborts the save. Recovery's fence floor assumes the backup is at most one
+    // committed generation behind; letting the primary advance past a stale backup breaks that.
+    await copyFileDurable(filePath, backupPath(filePath))
+    await renameDurable(tmpPath, filePath)
   } catch (error) {
     await rm(tmpPath, { force: true }).catch(() => {})
     throw error
