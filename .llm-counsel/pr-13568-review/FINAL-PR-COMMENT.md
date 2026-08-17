@@ -1,7 +1,0 @@
-Final head: `47a6c682390a9a09bc2d535e7fd5784d516f8781` (rebased on pinned base `be07b43a2b7377b69bed04e0f39bc4cbb70593fc`).
-
-Seven independent same-model review rounds ran. Rounds 1–6 found and fixed launch-path fail-open handling, freshness/parser mismatches, file publication races, managed-store fallback, snapshot recovery, and unsupported-filesystem handling; round 7 still identified residual external Keychain TOCTOU and hard-link-less filesystem race windows, plus recovery gaps.
-
-Validation executed: `pnpm run typecheck:node` passed; `npx oxlint` on touched production files passed; Claude account suite passed with 24 files / 227 tests; focused freshness/race suite passed with 6 files / 77 tests; broader runtime-auth suite passed with 10 files / 125 tests. Mutation proof replaced the materialization guard with unconditional candidate publication and the diverged file/Keychain integration test failed, then the guard was restored.
-
-Both readiness passes ran: `OPENING-READINESS.md` and `FINAL-READINESS.md`. `ref-oss` did not run because the skill invocation was unavailable; its workflow was not replicated. Electron/platform QA was not performed here and remains coordinator-owned. Residual gaps are the lack of an external Keychain compare-and-swap primitive, the unavoidable read-before-write fallback race on hard-link-less remote filesystems, and incomplete live cross-platform/SSH validation.
