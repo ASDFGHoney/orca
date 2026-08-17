@@ -243,7 +243,7 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
     setPayload(null)
     setError(null)
     setContextMenu(false)
-  }, [browserPageId])
+  }, [])
 
   // Keyboard shortcut: Esc cancels grab mode
   useEffect(() => {
