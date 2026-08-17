@@ -1,17 +1,11 @@
-import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
-import type { RuntimeStatus } from '../../../../../shared/runtime-types'
 import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 import { RemoteBrowserPageSession } from './remote-browser-page-session'
 import { RemoteBrowserLegacyViewport } from '../remote-browser-legacy-viewport'
-import { openRemoteBrowserScreencastStream } from './remote-browser-screencast-subscription'
-import { createRemoteBrowserStreamEvents } from '../remote-browser-stream-events'
+import { startRemoteBrowserStream } from '../remote-browser-stream-opening'
 import { RemoteBrowserStreamRestartScheduler } from './remote-browser-stream-restart-scheduler'
 import { RemoteBrowserStreamLiveness } from './remote-browser-stream-liveness'
 import { createRemoteBrowserStreamRestartAttempt } from './remote-browser-stream-restart-attempt'
-import {
-  releaseFailedRemoteBrowserStream,
-  retireRemoteBrowserStreamWork
-} from './remote-browser-stream-retirement'
+import { retireRemoteBrowserStreamWork } from '../remote-browser-stream-retirement'
 import {
   REMOTE_BROWSER_STREAM_OPENING,
   remoteBrowserStreamLostNotice,
@@ -23,7 +17,6 @@ import {
 import {
   isPermanentRemoteBrowserStreamFailure,
   isRemoteBrowserPageMissingError,
-  remoteBrowserStreamUnsupportedError,
   resolveRemoteBrowserStreamRestartFailure
 } from './remote-browser-stream-errors'
 import {
@@ -254,72 +247,24 @@ export class RemoteBrowserStreamLifecycle {
     this.subscription = subscription
   }
 
-  private async startStream(pageId: string): Promise<RemoteBrowserStreamSubscription | null> {
-    const { tokens, deps } = this
-    const operationToken = tokens.createOperationToken(pageId)
-    if (!operationToken || !tokens.isCurrent(operationToken)) {
-      return null
-    }
-    const target: RuntimeClientTarget = {
-      kind: 'environment',
-      environmentId: operationToken.environmentId
-    }
-    const status = await deps.callRpc<RuntimeStatus>(target, 'status.get', undefined, {
-      timeoutMs: 15_000
-    })
-    if (!status.capabilities?.includes('browser.screencast.v1')) {
-      throw remoteBrowserStreamUnsupportedError()
-    }
-    if (!tokens.isCurrent(operationToken)) {
-      return null
-    }
-    const measuredViewportSize = await deps.waitForViewportSize()
-    // Why this guard, which every other await here already had: waitForViewportSize can block for a
-    // few frames while the element is unmeasurable, and a superseded attempt resuming after that
-    // would claim the stream token out from under the live stream — and, since one deadline is kept
-    // per pane, cancel its safety net too. The pane then sits in 'opening' with nothing pending.
-    if (!tokens.isCurrent(operationToken)) {
-      return null
-    }
-    this.streamViewportSize = measuredViewportSize
-    const viewportSize = this.legacyViewport.resolve(measuredViewportSize)
-    const token = tokens.claimStreamToken(operationToken, pageId)
-    // Treated as a drop rather than announced directly, so a hung host spends the same budget and
-    // ends at the same 'stopped' with a reconnect as a host that refuses outright.
-    this.liveness.watch(() => {
-      if (this.tokens.isCurrentStreamToken(token)) {
-        this.handleStreamClosed(token, true)
+  private startStream(pageId: string): Promise<RemoteBrowserStreamSubscription | null> {
+    return startRemoteBrowserStream({
+      deps: this.deps,
+      tokens: this.tokens,
+      liveness: this.liveness,
+      pageId,
+      getSubscription: () => this.subscription,
+      setSubscription: (subscription) => {
+        this.subscription = subscription
+      },
+      onClosed: (token, restart) => this.handleStreamClosed(token, restart),
+      onSubscriptionStart: (token, handle) =>
+        this.adoptSubscription({ token, unsubscribe: handle.unsubscribe }),
+      prepareViewport: (size) => {
+        this.streamViewportSize = size
+        return this.legacyViewport.resolve(size)
       }
     })
-    try {
-      const subscription = await openRemoteBrowserScreencastStream(
-        deps.subscribeScreencast,
-        {
-          environmentId: target.environmentId,
-          worktree: deps.getWorktreeSelector(),
-          pageId,
-          viewportSize,
-          deviceScaleFactor: deps.getDeviceScaleFactor()
-        },
-        createRemoteBrowserStreamEvents(pageId, token, viewportSize, {
-          ...deps,
-          tokens,
-          liveness: this.liveness,
-          handleClosed: (restart) => this.handleStreamClosed(token, restart),
-          onSubscriptionStart: (handle) =>
-            this.adoptSubscription({ token, unsubscribe: handle.unsubscribe })
-        })
-      )
-      return { token, unsubscribe: subscription.unsubscribe }
-    } catch (error) {
-      this.subscription = releaseFailedRemoteBrowserStream(
-        this.subscription,
-        tokens,
-        this.liveness,
-        tokens.isCurrentStreamToken(token)
-      )
-      throw error
-    }
   }
 
   private handleStreamClosed(token: RemoteBrowserStreamToken, restart: boolean): void {
