@@ -606,6 +606,7 @@ import {
 } from '../../shared/worktree/visibility-sources'
 import {
   BROWSER_HEADLESS_RUNTIME_CAPABILITY,
+  BROWSER_DIRECT_RAW_INPUT_RUNTIME_CAPABILITY,
   BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY,
   MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION,
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
@@ -6042,6 +6043,9 @@ export class OrcaRuntimeService {
     // can host a page so remote clients can surface Proceed Anyway (Unsafe).
     if (canBrowse) {
       capabilities.push(BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY)
+      if (process.env.ORCA_E2E_DISABLE_BROWSER_DIRECT_RAW_INPUT !== '1') {
+        capabilities.push(BROWSER_DIRECT_RAW_INPUT_RUNTIME_CAPABILITY)
+      }
     }
     return {
       runtimeId: this.runtimeId,

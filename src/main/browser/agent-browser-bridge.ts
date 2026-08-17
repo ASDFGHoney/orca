@@ -50,6 +50,7 @@ import type {
 import { assertClipboardTextWriteWithinLimitWithYield } from '../../shared/clipboard-text'
 import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
 import { iterateBrowserTextInsertionChunks } from './browser-text-insertion'
+import { AgentBrowserDirectInput } from './agent-browser-direct-input'
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
@@ -585,6 +586,7 @@ export class AgentBrowserBridge {
   // Why: `agent-browser close` is async, keyed by session name — recreating before it finishes lets the old teardown close the new session.
   private readonly pendingSessionDestruction = new Map<string, Promise<void>>()
   private readonly cancelledProcesses = new WeakSet<ChildProcess>()
+  private readonly directInput = new AgentBrowserDirectInput()
 
   constructor(
     private readonly browserManager: BrowserManager,
@@ -671,6 +673,7 @@ export class AgentBrowserBridge {
       this.activeWebContentsId = nextWorktreeActiveWebContentsId
     }
     if (browserPageId) {
+      this.directInput.forget(browserPageId)
       const sessionName = `orca-tab-${browserPageId}`
       await this.destroySession(sessionName)
       this.pendingInterceptRestore.delete(sessionName)
@@ -685,6 +688,7 @@ export class AgentBrowserBridge {
   ): Promise<void> {
     // Why: an Electron process swap keeps browserPageId but gives a new webContentsId — destroy the session so the next command recreates it.
     const sessionName = `orca-tab-${browserPageId}`
+    this.directInput.forget(browserPageId)
     const session = this.sessions.get(sessionName)
     const oldWebContentsId = previousWebContentsId ?? session?.webContentsId
     const owningWorktreeId = this.browserManager.getWorktreeIdForTab(browserPageId)
@@ -1085,19 +1089,32 @@ export class AgentBrowserBridge {
     worktreeId?: string,
     browserPageId?: string
   ): Promise<unknown> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      return await this.execAgentBrowser(sessionName, ['mouse', 'move', String(x), String(y)])
-    })
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) =>
+        await this.directInput.move(
+          target.browserPageId,
+          this.requireTargetWebContents(target),
+          x,
+          y
+        ),
+      { ensureSession: false }
+    )
   }
 
   async mouseDown(button?: string, worktreeId?: string, browserPageId?: string): Promise<unknown> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      const args = ['mouse', 'down']
-      if (button) {
-        args.push(button)
-      }
-      return await this.execAgentBrowser(sessionName, args)
-    })
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) =>
+        await this.directInput.down(
+          target.browserPageId,
+          this.requireTargetWebContents(target),
+          button
+        ),
+      { ensureSession: false }
+    )
   }
 
   async mouseClick(
@@ -1120,6 +1137,7 @@ export class AgentBrowserBridge {
             `Browser page ${target.browserPageId} is no longer available`
           )
         }
+        const inputToken = this.directInput.capturePageToken(target.browserPageId)
         const cdpButton = normalizeCdpMouseButton(button)
         const buttons = cdpMouseButtonMask(cdpButton)
         const cdpModifiers = cdpMouseModifierMask(modifiers)
@@ -1134,6 +1152,13 @@ export class AgentBrowserBridge {
           // Why: land the tap as one atomic op — separate move/down/up CLI calls visibly hover and can miss small controls.
           // Why: mobile-emulated BrowserViews can ignore CDP mouse clicks, so the runtime may already have activated DOM controls.
           if (!point.handled) {
+            await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
+              type: 'mouseMoved',
+              x: point.x,
+              y: point.y,
+              buttons: 0,
+              modifiers: cdpModifiers
+            })
             await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
               type: 'mousePressed',
               x: point.x,
@@ -1153,6 +1178,7 @@ export class AgentBrowserBridge {
               clickCount: 1
             })
           }
+          this.directInput.recordPointer(target.browserPageId, point.x, point.y, inputToken)
           return {
             clicked: {
               x: point.x,
@@ -1171,13 +1197,17 @@ export class AgentBrowserBridge {
   }
 
   async mouseUp(button?: string, worktreeId?: string, browserPageId?: string): Promise<unknown> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      const args = ['mouse', 'up']
-      if (button) {
-        args.push(button)
-      }
-      return await this.execAgentBrowser(sessionName, args)
-    })
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) =>
+        await this.directInput.up(
+          target.browserPageId,
+          this.requireTargetWebContents(target),
+          button
+        ),
+      { ensureSession: false }
+    )
   }
 
   async mouseWheel(
@@ -1186,13 +1216,18 @@ export class AgentBrowserBridge {
     worktreeId?: string,
     browserPageId?: string
   ): Promise<unknown> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      const args = ['mouse', 'wheel', String(dy)]
-      if (dx != null) {
-        args.push(String(dx))
-      }
-      return await this.execAgentBrowser(sessionName, args)
-    })
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) =>
+        await this.directInput.wheel(
+          target.browserPageId,
+          this.requireTargetWebContents(target),
+          dy,
+          dx
+        ),
+      { ensureSession: false }
+    )
   }
 
   // ── Find (semantic locators) ──
@@ -1768,9 +1803,16 @@ export class AgentBrowserBridge {
     worktreeId?: string,
     browserPageId?: string
   ): Promise<BrowserKeypressResult> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      return (await this.execAgentBrowser(sessionName, ['press', key])) as BrowserKeypressResult
-    })
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) =>
+        (await this.directInput.keypress(
+          this.requireTargetWebContents(target),
+          key
+        )) as BrowserKeypressResult,
+      { ensureSession: false }
+    )
   }
 
   async pdf(worktreeId?: string, browserPageId?: string): Promise<BrowserPdfResult> {
@@ -2156,21 +2198,29 @@ export class AgentBrowserBridge {
     }
     this.processingQueues.add(sessionName)
 
-    const queue = this.commandQueues.get(sessionName)
-    while (queue && queue.length > 0) {
-      const cmd = queue.shift()!
-      try {
-        const result = await cmd.execute()
-        cmd.resolve(result)
-      } catch (error) {
-        cmd.reject(error)
+    try {
+      for (;;) {
+        const queue = this.commandQueues.get(sessionName)
+        const cmd = queue?.shift()
+        if (!cmd) {
+          if (queue && this.commandQueues.get(sessionName) === queue) {
+            this.commandQueues.delete(sessionName)
+          }
+          return
+        }
+        try {
+          const result = await cmd.execute()
+          cmd.resolve(result)
+        } catch (error) {
+          cmd.reject(error)
+        }
+      }
+    } finally {
+      this.processingQueues.delete(sessionName)
+      if ((this.commandQueues.get(sessionName)?.length ?? 0) > 0) {
+        void this.processQueue(sessionName)
       }
     }
-
-    if (queue && queue.length === 0 && this.commandQueues.get(sessionName) === queue) {
-      this.commandQueues.delete(sessionName)
-    }
-    this.processingQueues.delete(sessionName)
   }
 
   getActivePageId(worktreeId?: string, browserPageId?: string): string | null {
@@ -2454,7 +2504,6 @@ export class AgentBrowserBridge {
   private rejectQueuedCommandsForClosedSession(sessionName: string): void {
     const queue = this.commandQueues.get(sessionName)
     this.commandQueues.delete(sessionName)
-    this.processingQueues.delete(sessionName)
     if (queue) {
       const err = new BrowserError(
         'browser_tab_closed',

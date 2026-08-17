@@ -18,12 +18,14 @@ function renderActivation(isActive = true) {
   const closeStream = vi.fn()
   const open = vi.fn(() => closeStream)
   const lifecycle = { open }
+  const clearPendingRemoteInput = vi.fn()
   const clearPendingRemoteWheel = vi.fn()
   const hook = renderHook(
     ({ active }) =>
       useRemoteBrowserStreamActivation({
         activeRuntimeEnvironmentId: 'env-1',
         browserPageId: 'page-1',
+        clearPendingRemoteInput,
         clearPendingRemoteWheel,
         isActive: active,
         lifecycle,
@@ -32,7 +34,7 @@ function renderActivation(isActive = true) {
       }),
     { initialProps: { active: isActive } }
   )
-  return { ...hook, clearPendingRemoteWheel, closeStream, open }
+  return { ...hook, clearPendingRemoteInput, clearPendingRemoteWheel, closeStream, open }
 }
 
 describe('useRemoteBrowserStreamActivation', () => {
@@ -60,6 +62,7 @@ describe('useRemoteBrowserStreamActivation', () => {
 
     await act(async () => vi.advanceTimersByTime(1))
     expect(harness.closeStream).toHaveBeenCalledTimes(1)
+    expect(harness.clearPendingRemoteInput).toHaveBeenCalledTimes(1)
     expect(harness.clearPendingRemoteWheel).toHaveBeenCalledTimes(1)
 
     await act(async () => {
@@ -95,6 +98,7 @@ describe('useRemoteBrowserStreamActivation', () => {
 
     await act(async () => harness.rerender({ active: false }))
     expect(harness.closeStream).toHaveBeenCalledTimes(1)
+    expect(harness.clearPendingRemoteInput).toHaveBeenCalledTimes(1)
     expect(harness.clearPendingRemoteWheel).toHaveBeenCalledTimes(1)
 
     await act(async () => harness.rerender({ active: true }))

@@ -116,9 +116,10 @@ describe('AgentBrowserBridge', () => {
     const mouseCalls = wc.debugger.sendCommand.mock.calls.filter(
       (call) => call[0] === 'Input.dispatchMouseEvent'
     )
-    expect(mouseCalls).toHaveLength(2)
-    expect(mouseCalls[0]?.[1]).toMatchObject({ type: 'mousePressed', x: 10, y: 20 })
-    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mouseReleased', x: 10, y: 20 })
+    expect(mouseCalls).toHaveLength(3)
+    expect(mouseCalls[0]?.[1]).toMatchObject({ type: 'mouseMoved', x: 10, y: 20 })
+    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mousePressed', x: 10, y: 20 })
+    expect(mouseCalls[2]?.[1]).toMatchObject({ type: 'mouseReleased', x: 10, y: 20 })
   })
 
   it('passes mobile click modifiers through to CDP mouse events', async () => {
@@ -136,8 +137,8 @@ describe('AgentBrowserBridge', () => {
     const mouseCalls = wc.debugger.sendCommand.mock.calls.filter(
       (call) => call[0] === 'Input.dispatchMouseEvent'
     )
-    expect(mouseCalls[0]?.[1]).toMatchObject({ type: 'mousePressed', modifiers: 12 })
-    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mouseReleased', modifiers: 12 })
+    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mousePressed', modifiers: 12 })
+    expect(mouseCalls[2]?.[1]).toMatchObject({ type: 'mouseReleased', modifiers: 12 })
   })
 
   it('keeps adjusted mobile tap coordinates but uses CDP for modifier clicks', async () => {
@@ -165,9 +166,9 @@ describe('AgentBrowserBridge', () => {
     const mouseCalls = wc.debugger.sendCommand.mock.calls.filter(
       (call) => call[0] === 'Input.dispatchMouseEvent'
     )
-    expect(mouseCalls).toHaveLength(2)
-    expect(mouseCalls[0]?.[1]).toMatchObject({ type: 'mousePressed', x: 12, y: 34, modifiers: 4 })
-    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mouseReleased', x: 12, y: 34, modifiers: 4 })
+    expect(mouseCalls).toHaveLength(3)
+    expect(mouseCalls[1]?.[1]).toMatchObject({ type: 'mousePressed', x: 12, y: 34, modifiers: 4 })
+    expect(mouseCalls[2]?.[1]).toMatchObject({ type: 'mouseReleased', x: 12, y: 34, modifiers: 4 })
   })
 
   it('drops empty command queues after direct CDP commands finish', async () => {
@@ -181,5 +182,42 @@ describe('AgentBrowserBridge', () => {
       (bridge as unknown as { commandQueues: Map<string, unknown[]> }).commandQueues.size
     ).toBe(0)
     expect((bridge as unknown as { processingQueues: Set<string> }).processingQueues.size).toBe(0)
+  })
+
+  it('keeps replacement-page input queued behind teardown of an in-flight command', async () => {
+    const tabs = new Map([['tab-1', 100]])
+    const b = new AgentBrowserBridge(mockBrowserManager(tabs))
+    b.setActiveTab(100)
+    const oldWc = mockWebContents(100)
+    const newWc = mockWebContents(200)
+    let releaseOldMove: (() => void) | null = null
+    oldWc.debugger.sendCommand.mockImplementationOnce(
+      async () =>
+        await new Promise((resolve) => {
+          releaseOldMove = () => resolve({})
+        })
+    )
+    webContentsFromIdMock.mockImplementation((id: number) => (id === 100 ? oldWc : newWc))
+
+    const oldMove = b.mouseMove(10, 20, undefined, 'tab-1')
+    await vi.waitFor(() => expect(releaseOldMove).not.toBeNull())
+    const close = b.onTabClosed(100)
+    tabs.set('tab-1', 200)
+    const replacementMove = b.mouseMove(30, 40, undefined, 'tab-1')
+    await Promise.resolve()
+
+    expect(newWc.debugger.sendCommand).not.toHaveBeenCalled()
+    releaseOldMove!()
+    await oldMove
+    await close
+    await replacementMove
+
+    expect(newWc.debugger.sendCommand).toHaveBeenCalledWith('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 30,
+      y: 40,
+      buttons: 0
+    })
+    expect((b as unknown as { processingQueues: Set<string> }).processingQueues.size).toBe(0)
   })
 })
