@@ -86,6 +86,9 @@ export function buildMobileNativeChatTransientData({
       previewIndex += 1
       return url ? { ...block, url } : block
     })
+    // Previews left over once every image block the turn already had has taken
+    // one. Only these add an image the turn was not already showing.
+    const appendedPreviews = Math.max(0, previews.length - previewIndex)
     while (previewIndex < previews.length) {
       blocks.push({ type: 'image-ref', url: previews[previewIndex] })
       previewIndex += 1
@@ -96,12 +99,12 @@ export function buildMobileNativeChatTransientData({
     // them. Without this a marker-only host echo captions the user's own photo
     // with a literal `[Image #1]`.
     //
-    // Budget counts ONLY path-less blocks — the previews appended just above. A
-    // block with a path came from a real `[Image: source: …]` turn, so the fold
-    // already spent that marker; charging for it again would re-strip a surplus
-    // marker the fold deliberately preserved as the user's own words.
-    const unvouchedImages = blocks.filter((block) => isImageRefBlock(block) && !block.path).length
-    return { ...message, blocks: stripImagePromptMarkersFromTextBlocks(blocks, unvouchedImages) }
+    // Budget is what was APPENDED, not what looks path-less. A block the turn
+    // already carried has already had its marker spent — by the fold for a
+    // `[Image: source: …]` run, or by the host for an inline image, which some
+    // agents emit as a url with no path. Charging for those would re-strip a
+    // marker the user actually typed.
+    return { ...message, blocks: stripImagePromptMarkersFromTextBlocks(blocks, appendedPreviews) }
   })
   const data: NativeChatMessage[] = [
     ...renderedFolded,

@@ -222,6 +222,34 @@ describe('buildMobileNativeChatTransientData', () => {
     ])
   })
 
+  // Why: some agents emit an inline image as a url with NO path, so "path-less"
+  // does not mean "a preview we just appended". Charging the budget for a block
+  // the turn already carried destroys a marker the user actually typed.
+  it('does not charge the budget for a path-less image the turn already carried', () => {
+    const result = buildMobileNativeChatTransientData({
+      folded: [
+        {
+          id: 'prompt',
+          role: 'user',
+          blocks: [
+            { type: 'image-ref', url: 'https://host/a.png' },
+            { type: 'text', text: 'look [Image #2] typed' }
+          ],
+          timestamp: 1,
+          source: 'transcript'
+        }
+      ],
+      streaming: null,
+      pending: [],
+      imagePreviewsByMessageId: { prompt: ['file:///local/b.jpg'] }
+    })
+
+    expect(result.data[0]?.blocks).toEqual([
+      { type: 'image-ref', url: 'file:///local/b.jpg' },
+      { type: 'text', text: 'look [Image #2] typed' }
+    ])
+  })
+
   // Why: no preview binding means no evidence, so the ticket's rule still holds.
   it('leaves marker text alone when no preview is bound', () => {
     const result = buildMobileNativeChatTransientData({
