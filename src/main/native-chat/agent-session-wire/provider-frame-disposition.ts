@@ -225,11 +225,14 @@ export function classifyProviderFrame(
   kind: string,
   payload: unknown
 ): ProviderFrameClassification {
-  if (isDeltaShapedProviderFrameKind(kind)) {
-    return 'stream-into-item'
-  }
+  // Payload failure inspection outranks the name-shape heuristic below: an
+  // unknown frame that reports an error must reach the user even when its
+  // method name happens to look like a stream delta.
   if (hasProviderError(payload)) {
     return 'error-surface'
+  }
+  if (isDeltaShapedProviderFrameKind(kind)) {
+    return 'stream-into-item'
   }
   if (provider === 'claude' && kind === 'message:result') {
     const subtype =

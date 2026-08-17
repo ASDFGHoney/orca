@@ -66,6 +66,7 @@ export function createCodexJournalTranslator(
   const details = new Map<string, string>()
   const currentTurnIds = new Map<string, string>()
   const genericRowsByTurn = new Map<string, number>()
+  const suppressedRowsByTurn = new Map<string, number>()
   let fallbackSequence = 0
 
   const appendUnhandled = (kind: string, payload: unknown, threadId = 'session'): void => {
@@ -76,7 +77,21 @@ export function createCodexJournalTranslator(
     const turnId = readCodexTurnId(payload) ?? currentTurnIds.get(threadId) ?? 'outside-turn'
     const bucket = `${encodeURIComponent(threadId)}:${encodeURIComponent(turnId)}`
     const rowCount = genericRowsByTurn.get(bucket) ?? 0
-    if (rowCount >= MAX_CODEX_GENERIC_ROWS_PER_TURN) {
+    // The cap bounds noise, never evidence: an error frame is always journaled,
+    // and capped frames stay countable through one summary row per turn.
+    const capped =
+      rowCount >= MAX_CODEX_GENERIC_ROWS_PER_TURN && translated.classification !== 'error-surface'
+    if (capped) {
+      const suppressed = (suppressedRowsByTurn.get(bucket) ?? 0) + 1
+      suppressedRowsByTurn.set(bucket, suppressed)
+      deps.sink.appendItem(
+        { provider: 'orca', clientMessageId: `provider-frame-suppressed:codex:${bucket}` },
+        {
+          kind: 'status',
+          text: `${suppressed} more provider notification${suppressed === 1 ? '' : 's'} not shown for this turn`
+        }
+      )
+      deps.sink.publish()
       return
     }
     genericRowsByTurn.set(bucket, rowCount + 1)
@@ -276,6 +291,7 @@ export function createCodexJournalTranslator(
       details.clear()
       currentTurnIds.clear()
       genericRowsByTurn.clear()
+      suppressedRowsByTurn.clear()
     }
   }
 }
