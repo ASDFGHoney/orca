@@ -207,7 +207,7 @@ export function formatComputerAction(
   const path = result.action?.path ? ` via ${result.action.path}` : ''
   const verification = formatActionVerification(result.action)
   const followUpCommand = formatComputerFollowUpCommand(result, target)
-  const unverified = isUnverifiedComputerAction(result.action)
+  const unverified = result.action?.verification?.state !== 'verified'
   const outcome = unverified ? 'attempted' : 'completed'
   const screenshotFailure = formatComputerActionScreenshotFailure(result)
   const inspectTail = unverified
@@ -261,21 +261,17 @@ const UNVERIFIED_ACTION_REASONS: Record<ComputerActionMetadata['path'], string> 
 }
 
 function formatActionVerification(action: ComputerActionMetadata | undefined): string {
-  const verification = action?.verification
+  if (!action) {
+    return ', unverified (verification metadata unavailable)'
+  }
+  const verification = action.verification
   if (!verification) {
-    return action ? `, unverified (${UNVERIFIED_ACTION_REASONS[action.path]})` : ''
+    return `, unverified (${UNVERIFIED_ACTION_REASONS[action.path]})`
   }
   if (verification.state === 'verified') {
     return `, verified ${verification.property}`
   }
   return `, unverified (${verification.reason.replaceAll('_', ' ')})`
-}
-
-function isUnverifiedComputerAction(action: ComputerActionMetadata | undefined): boolean {
-  if (action?.verification) {
-    return action.verification.state === 'unverified'
-  }
-  return action !== undefined
 }
 
 function formatComputerActionScreenshotFailure(result: ComputerActionResult): string {
