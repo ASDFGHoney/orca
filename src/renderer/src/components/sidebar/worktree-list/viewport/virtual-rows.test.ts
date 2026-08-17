@@ -12,6 +12,10 @@ import {
   getStickyHeaderIndexes,
   pruneStaleVirtualRowElementCache
 } from './virtual-rows'
+import {
+  clampInitialVirtualScrollOffset,
+  estimateRenderRowsTotalSize
+} from './initial-scroll-offset'
 import { getRenderRowKey } from '../listing/render-row'
 import type { RenderRow } from '../listing/render-row'
 
@@ -155,6 +159,28 @@ describe('getActiveStickyIndexesForScroll', () => {
         rangeStartIndexAtMaxScrollOffset: 0
       })
     ).toEqual({ hostIndex: 0, groupIndex: null })
+  })
+
+  it('clamps the initial offset before TanStack selects a stale remount range', () => {
+    const collapsedRows = Array.from({ length: 20 }, (_, index) => hostRow(`ssh:${index}`))
+
+    expect(
+      clampInitialVirtualScrollOffset({
+        requestedOffset: 500,
+        estimatedTotalSize: estimateRenderRowsTotalSize(collapsedRows, 0),
+        viewportHeight: 1_000
+      })
+    ).toBe(0)
+  })
+
+  it('preserves a reachable initial remount offset', () => {
+    expect(
+      clampInitialVirtualScrollOffset({
+        requestedOffset: 250,
+        estimatedTotalSize: 1_000,
+        viewportHeight: 500
+      })
+    ).toBe(250)
   })
 
   it('leaves reachable offsets unchanged when a maximum is provided', () => {
