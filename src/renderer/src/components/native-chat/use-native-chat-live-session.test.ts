@@ -743,4 +743,39 @@ describe('useNativeChatLiveSession — notFound retry (#8401)', () => {
       { type: 'text', text: 'what do you see' }
     ])
   })
+  // Why: a remote adapter's FIRST snapshot folds a count inference into
+  // `hasMore`, so the frame path needs the same guard as the read path — a
+  // guessed value must not strip a marker the user typed.
+  it('keeps a head marker when a snapshot frame only inferred older history', async () => {
+    const transport = getMockTransport('env-1', { autoSnapshot: false })
+    await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
+
+    await act(async () => {
+      // hasMore true, but no reported field: nobody answered.
+      transport.emit({ type: 'snapshot', messages: headWindow(), hasMore: true })
+    })
+
+    expect(latest?.hasMore).toBe(true)
+    expect(latest?.messages.find((m) => m.id === 'u-head')?.blocks).toEqual([
+      { type: 'text', text: '[Image #1] what do you see' }
+    ])
+  })
+
+  it('strips a head marker when the snapshot frame carries the host answer', async () => {
+    const transport = getMockTransport('env-1', { autoSnapshot: false })
+    await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
+
+    await act(async () => {
+      transport.emit({
+        type: 'snapshot',
+        messages: headWindow(),
+        hasMore: true,
+        hasMoreReported: true
+      })
+    })
+
+    expect(latest?.messages.find((m) => m.id === 'u-head')?.blocks).toEqual([
+      { type: 'text', text: 'what do you see' }
+    ])
+  })
 })

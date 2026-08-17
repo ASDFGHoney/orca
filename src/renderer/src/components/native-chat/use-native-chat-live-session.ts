@@ -245,7 +245,10 @@ export function useNativeChatLiveSession(
           setAppended([])
           setRead({ phase: 'ready', messages: appendMergerRef.current.list })
           setHasMore(frame.hasMore)
-          setEarlierHistoryConfirmed(frame.hasMore === true)
+          // Why: `frame.hasMore` on a remote adapter's FIRST snapshot folds in a
+          // count inference, so it cannot say whether the host answered. Absence
+          // of the reported field means unanswered on every path.
+          setEarlierHistoryConfirmed(frame.hasMoreReported === true)
           return
         }
         transcriptLifecycleControl.append(frame.lifecycle)

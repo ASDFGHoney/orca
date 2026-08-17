@@ -62,6 +62,10 @@ export type NativeChatAppendedPayload = {
         type: 'snapshot'
         messages: NativeChatMessage[]
         hasMore: boolean
+        /** This host computed the answer, so it is always reported here. Remote
+         *  adapters fold a count inference into `hasMore` instead, and callers
+         *  that change what a message says have to tell the two apart. */
+        hasMoreReported?: boolean
         error?: string
         lifecycle?: NativeChatTurnLifecycle
       }
@@ -69,6 +73,8 @@ export type NativeChatAppendedPayload = {
         type: 'replacement'
         messages: NativeChatMessage[]
         hasMore: boolean
+        /** See the snapshot variant. */
+        hasMoreReported?: boolean
         lifecycle?: NativeChatTurnLifecycle
       }
     | {
@@ -193,6 +199,11 @@ async function handleSubscribe(event: IpcMainEvent, args: NativeChatSubscribeArg
           type: 'snapshot',
           messages,
           hasMore,
+          // Why: this host computed the answer (it reads one turn past the limit),
+          // so mark it as reported. Remote adapters fold a count inference into
+          // `hasMore`, and callers that change what a message says need to tell
+          // the two apart.
+          hasMoreReported: hasMore,
           ...(error ? { error } : {}),
           ...(lifecycle ? { lifecycle } : {})
         }
@@ -209,6 +220,7 @@ async function handleSubscribe(event: IpcMainEvent, args: NativeChatSubscribeArg
           type: 'replacement',
           messages,
           hasMore,
+          hasMoreReported: hasMore,
           ...(lifecycle ? { lifecycle } : {})
         }
       } satisfies NativeChatAppendedPayload)
