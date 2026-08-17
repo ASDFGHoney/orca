@@ -1,4 +1,5 @@
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
+import type { WorktreeDeleteState } from '@/store/slices/worktree-helpers'
 import {
   getWorkspaceCleanupCandidateIdentity,
   getWorkspaceCleanupIdentityWorktreeId,
@@ -28,6 +29,32 @@ export function getWorkspaceCleanupDeletionPhaseByIdentity(
     if (phase) {
       phases[getWorkspaceCleanupCandidateIdentity(candidate)] = phase
     }
+  }
+  return phases
+}
+
+/**
+ * In-flight delete phases keyed by host-qualified identity.
+ *
+ * `deleteStateByWorktreeId` is keyed by bare id, so a row whose delete-state
+ * names a host is re-keyed onto that host — otherwise two hosts sharing an id
+ * would show each other's progress (STA-4343).
+ */
+export function selectWorkspaceCleanupDeletionPhases(s: {
+  deleteStateByWorktreeId: Record<string, WorktreeDeleteState>
+}): Record<string, WorkspaceCleanupDeletionPhase> {
+  const phases: Record<string, WorkspaceCleanupDeletionPhase> = {}
+  for (const [worktreeId, state] of Object.entries(s.deleteStateByWorktreeId)) {
+    if (!state.isDeleting) {
+      continue
+    }
+    const executionHostId = state.executionHostId ?? undefined
+    const hostPrefix = executionHostId ? composeWorktreeHostIdentity(executionHostId, '') : null
+    const key =
+      hostPrefix && !worktreeId.startsWith(hostPrefix)
+        ? composeWorktreeHostIdentity(executionHostId, worktreeId)
+        : worktreeId
+    phases[key] = state.phase ?? 'deleting'
   }
   return phases
 }

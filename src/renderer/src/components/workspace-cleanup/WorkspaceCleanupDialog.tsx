@@ -15,12 +15,13 @@ import {
   getWorkspaceCleanupCandidateIdentity,
   resolveWorkspaceCleanupRemovalHostId
 } from '../../../../shared/workspace-cleanup-host-identity'
-import { composeWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
-import type { WorkspaceCleanupDeletionPhase } from './workspace-cleanup-candidate-row'
 import { WorkspaceCleanupBrowseToolbar } from './workspace-cleanup-browse-toolbar'
 import { WorkspaceCleanupConfirmRemove } from './workspace-cleanup-confirm-remove'
 import { WorkspaceCleanupDialogHeader } from './workspace-cleanup-dialog-header'
-import { getWorkspaceCleanupDeletionPhaseByIdentity } from './workspace-cleanup-deletion-phases'
+import {
+  getWorkspaceCleanupDeletionPhaseByIdentity,
+  selectWorkspaceCleanupDeletionPhases
+} from './workspace-cleanup-deletion-phases'
 import {
   WorkspaceCleanupInitialScanBanner,
   WorkspaceCleanupNotice,
@@ -75,23 +76,7 @@ function WorkspaceCleanupDialogContent({
   const workspaceSpaceScanning = useAppStore((s) => s.workspaceSpaceScanning)
   const workspaceSpaceProgress = useAppStore((s) => s.workspaceSpaceScanProgress)
   const genericDeletionPhaseByWorktreeId = useAppStore(
-    useShallow((s) => {
-      const phases: Record<string, WorkspaceCleanupDeletionPhase> = {}
-      for (const [worktreeId, state] of Object.entries(s.deleteStateByWorktreeId)) {
-        if (state.isDeleting) {
-          const executionHostId = state.executionHostId ?? undefined
-          const hostPrefix = executionHostId
-            ? composeWorktreeHostIdentity(executionHostId, '')
-            : null
-          const key =
-            hostPrefix && !worktreeId.startsWith(hostPrefix)
-              ? composeWorktreeHostIdentity(executionHostId, worktreeId)
-              : worktreeId
-          phases[key] = state.phase ?? 'deleting'
-        }
-      }
-      return phases
-    })
+    useShallow(selectWorkspaceCleanupDeletionPhases)
   )
   const browse = useWorkspaceCleanupBrowseState()
   // Why: facet counts/options are only rendered inside the filter popover;

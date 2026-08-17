@@ -8,9 +8,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAppStore } from '@/store'
 import { useAllWorktrees } from '@/store/selectors'
-import { toast } from 'sonner'
 import { runWorktreeDeletesInParallel } from './delete-worktree-flow'
-import { prepareActiveWorktreeFocusAfterDelete } from './active-worktree-focus-after-delete'
 import {
   composeWorktreeHostIdentity,
   getWorktreeHostIdentity
@@ -31,13 +29,11 @@ import {
   isFolderWorkspaceDelete as getIsFolderWorkspaceDelete
 } from './delete-worktree-dialog-copy'
 import { translate } from '@/i18n/i18n'
-import {
-  toWorktreeRemovalTarget,
-  type WorktreeRemovalTarget
-} from '../../../../shared/worktree/removal'
-import { showWorkspaceListChangedToast } from './stale-workspace-list-toast'
+import type { WorktreeRemovalTarget } from '../../../../shared/worktree/removal'
 import { useDeleteWorktreeStatusHydration } from './use-delete-worktree-status-hydration'
 import { useConfirmedWorktreeDeleteTargets } from './use-confirmed-worktree-delete-targets'
+import { runLineageDeleteAll } from './delete-worktree-lineage-delete-all'
+import { runDialogForceDelete } from './delete-worktree-dialog-force-delete'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
 const DeleteWorktreeDialog = React.memo(function DeleteWorktreeDialog() {
@@ -270,56 +266,13 @@ const DeleteWorktreeDialog = React.memo(function DeleteWorktreeDialog() {
         persistDontAskAgainPreference()
       }
       if (force) {
-        // Why: this branch preserves the legacy "Force Delete" button behavior
-        // inside the dialog — it runs the destructive retry directly without
-        // the shared toast wrapper. Close immediately because workspace cards
-        // already show the deleting state while the retry runs.
-        // Why the lookup (STA-4343): the confirmed row carries the host the
-        // removal must land on; a bare id would let force delete another host's
-        // checkout at the same path.
-        const forceTarget = currentWorktrees.find((entry) => entry.id === worktreeId)
-        if (!forceTarget) {
-          // Same recovery as a stale confirmed batch: say so and close, rather
-          // than leaving a destructive button that silently does nothing.
-          showWorkspaceListChangedToast()
-          closeModal()
-          return
-        }
-        const commitFocus = prepareActiveWorktreeFocusAfterDelete(worktreeId)
-        // Why (#11960): this IS the explicit Force Delete, so it may also waive
-        // the PTY-stop proof — unlike the confirmed delete in the branch below.
-        const deletePromise = removeWorktree(toWorktreeRemovalTarget(forceTarget), true, {
-          allowUnverifiedPtyStop: true
+        runDialogForceDelete({
+          worktreeId,
+          currentWorktrees,
+          removeWorktree,
+          closeModal,
+          onDeleted
         })
-        closeModal()
-        deletePromise
-          .then((result) => {
-            if (!result.ok) {
-              toast.error(
-                translate(
-                  'auto.components.sidebar.DeleteWorktreeDialog.42e610d6cf',
-                  'Force delete failed'
-                ),
-                {
-                  description: result.error
-                }
-              )
-              return
-            }
-            commitFocus()
-            onDeleted?.([toWorktreeRemovalTarget(forceTarget)])
-          })
-          .catch((err: unknown) => {
-            toast.error(
-              translate(
-                'auto.components.sidebar.DeleteWorktreeDialog.4f6750ca7b',
-                'Failed to delete workspace'
-              ),
-              {
-                description: err instanceof Error ? err.message : String(err)
-              }
-            )
-          })
       } else {
         // Why: this modal is the destructive confirmation for the workspace
         // folder. Running a non-force remove here just turns dirty files into
@@ -355,29 +308,14 @@ const DeleteWorktreeDialog = React.memo(function DeleteWorktreeDialog() {
   )
 
   const handleDeleteAll = useCallback(() => {
-    if (lineageDelete.deleteAllTargets.length <= 1) {
-      return
-    }
-    const currentTargets = resolveConfirmedTargets(
+    runLineageDeleteAll({
+      deleteAllTargetCount: lineageDelete.deleteAllTargets.length,
       lineageDeleteIdentities,
-      lineageDelete.deleteAllTargets.length
-    )
-    if (!currentTargets) {
-      return
-    }
-    // Why: the lineage modal confirms every affected workspace up front, so
-    // dirty child workspaces should not create per-workspace force prompts.
-    const deletePromise = runWorktreeDeletesInParallel(currentTargets, {
-      force: forceOnConfirm,
-      onForceDeleted: handleForceDeletedFromToast
-    })
-    // Why: deletion progress is shown on the workspace cards; the modal should
-    // not sit on top of that in-progress UI.
-    closeModal()
-    void deletePromise.then((deletedTargets) => {
-      if (deletedTargets.length > 0) {
-        onDeleted?.(deletedTargets)
-      }
+      resolveConfirmedTargets,
+      forceOnConfirm,
+      onForceDeleted: handleForceDeletedFromToast,
+      closeModal,
+      onDeleted
     })
   }, [
     closeModal,
