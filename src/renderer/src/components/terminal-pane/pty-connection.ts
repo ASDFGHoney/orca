@@ -78,6 +78,7 @@ import {
 } from '@/lib/pane-manager/mobile-fit-overrides'
 import { isPtyLocked } from '@/lib/pane-manager/mobile-driver-state'
 import { reconcilePtySizeAcrossFrames, type PtySizeReconcileHandle } from './pty-size-reconcile'
+import { getDeleteStateForWorktreeHost } from '../sidebar/worktree-delete-state-host-match'
 import { shouldClaimRemoteDesktopViewport } from './remote-desktop-viewport-claim'
 import { getAppliedSizeReadE2eDelayMs } from './pty-applied-size-read-e2e-delay'
 import { createPtySizeReassertion } from './pty-size-reassertion'
@@ -3011,6 +3012,10 @@ export function connectPanePty(
     registerSideEffectFactConsumerForPty(ptyId)
     syncHiddenRendererPtyDelivery()
     deps.syncPanePtyLayoutBinding(pane.id, ptyId)
+    // Why: binding a live PTY here is the proof that this pane is current again, so
+    // lift any retirement fence left by a detach/reattach cycle before hooks arrive.
+    // Waiting for a new turn would strand a pane re-attached mid-turn or idle (STA-4114).
+    useAppStore.getState().restoreAgentPaneAuthority?.(cacheKey)
     notifyCodexPaneBoundForStaleSweep(ptyId)
     const tabPtyIds = useAppStore.getState().ptyIdsByTabId?.[deps.tabId] ?? []
     const directSshRetryAttemptId =
@@ -5227,7 +5232,13 @@ export function connectPanePty(
       if (isLegacyWorkerAutomaticResumeBlocked()) {
         return Promise.resolve(null)
       }
-      if (useAppStore.getState().deleteStateByWorktreeId?.[deps.worktreeId]?.isDeleting) {
+      const currentState = useAppStore.getState()
+      if (
+        getDeleteStateForWorktreeHost(
+          { id: deps.worktreeId, hostId: executionHostId },
+          currentState.deleteStateByWorktreeId
+        )?.isDeleting
+      ) {
         // Why: the worktree is being deleted; its PTYs were just killed for the
         // filesystem teardown. A fresh shell must not spawn into a directory the
         // removal is about to delete (main fences it anyway), and the pane is
@@ -8189,6 +8200,9 @@ export function connectPanePty(
       registerSideEffectFactConsumerForPty(ptyId)
       syncHiddenRendererPtyDelivery()
       deps.syncPanePtyLayoutBinding(pane.id, ptyId)
+      // Why: this is the daemon-backed reattach path — the live PTY outlived the
+      // renderer, so the pane is current the moment it binds (STA-4114).
+      useAppStore.getState().restoreAgentPaneAuthority?.(cacheKey)
       notifyCodexPaneBoundForStaleSweep(ptyId)
       if (capturedDirectSshRetryPtyAccepted && directSshRetryAttempt) {
         deps.updateTabPtyId(deps.tabId, ptyId, undefined, directSshRetryAttempt.attemptId)
