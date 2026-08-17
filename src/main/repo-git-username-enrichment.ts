@@ -3,7 +3,11 @@ import { resolveLocalGitUsernameDetailed } from './git/git-username'
 
 type RepoUsernameStore = {
   getRepos(): Repo[]
-  setResolvedRepoGitUsername(id: string, username: string): boolean
+  // Why the repo and not its id: duplicate repo ids across execution hosts make an id-only write ambiguous.
+  setResolvedRepoGitUsername(
+    target: Pick<Repo, 'id' | 'connectionId' | 'executionHostId'>,
+    username: string
+  ): boolean
 }
 
 type EnrichmentOptions = {
@@ -44,7 +48,7 @@ async function enrichRepoGitUsernamesInBackground(
     if (!authoritative && !username) {
       continue
     }
-    if (store.setResolvedRepoGitUsername(repo.id, username)) {
+    if (store.setResolvedRepoGitUsername(repo, username)) {
       changed = true
     }
   }
