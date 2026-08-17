@@ -7,12 +7,16 @@ const electronMocks = vi.hoisted(() => ({
 }))
 
 class MockWebContents extends EventEmitter {
+  static hangLoads = false
+
   constructor(readonly id: number) {
     super()
   }
 
   loadURL(): Promise<void> {
-    queueMicrotask(() => this.emit('did-finish-load'))
+    if (!MockWebContents.hangLoads) {
+      queueMicrotask(() => this.emit('did-finish-load'))
+    }
     return Promise.resolve()
   }
 }
@@ -20,6 +24,7 @@ class MockWebContents extends EventEmitter {
 class MockBrowserWindow {
   readonly webContents: MockWebContents
   private destroyed = false
+  emitDestroyedOnDestroy = true
 
   constructor() {
     this.webContents = new MockWebContents(electronMocks.windows.length + 1)
@@ -35,7 +40,9 @@ class MockBrowserWindow {
       return
     }
     this.destroyed = true
-    this.webContents.emit('destroyed')
+    if (this.emitDestroyedOnDestroy) {
+      this.webContents.emit('destroyed')
+    }
   }
 }
 
@@ -57,6 +64,7 @@ import { OffscreenBrowserBackend } from './offscreen-browser-backend'
 describe('OffscreenBrowserBackend lifecycle', () => {
   beforeEach(() => {
     electronMocks.windows.length = 0
+    MockWebContents.hangLoads = false
     electronMocks.BrowserWindow.mockImplementation(function BrowserWindowMock() {
       return new MockBrowserWindow()
     })
@@ -134,5 +142,46 @@ describe('OffscreenBrowserBackend lifecycle', () => {
       expect(warn).toHaveBeenCalledWith('[offscreen-browser] tab cleanup failed:', 'cleanup failed')
     )
     warn.mockRestore()
+  })
+
+  it('ignores a delayed destroyed event from a replaced page', async () => {
+    const browserManager = {
+      registerOffscreenGuest: vi.fn(),
+      unregisterGuest: vi.fn()
+    }
+    const backend = new OffscreenBrowserBackend(browserManager as never)
+
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+    const staleWindow = electronMocks.windows[0]
+    staleWindow.emitDestroyedOnDestroy = false
+    await backend.closeTab('page-1')
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+
+    staleWindow.webContents.emit('destroyed')
+
+    expect(backend.getWebContentsId('page-1')).toBe(2)
+  })
+
+  it('removes load listeners when a page closes before navigation finishes', async () => {
+    MockWebContents.hangLoads = true
+    const backend = new OffscreenBrowserBackend({
+      registerOffscreenGuest: vi.fn(),
+      unregisterGuest: vi.fn()
+    } as never)
+
+    await backend.createTab({
+      browserPageId: 'page-1',
+      url: 'https://example.com',
+      worktreeId: 'wt-1'
+    })
+    const webContents = electronMocks.windows[0].webContents
+    expect(webContents.listenerCount('did-finish-load')).toBe(1)
+    expect(webContents.listenerCount('destroyed')).toBe(2)
+
+    await backend.closeTab('page-1')
+
+    expect(webContents.listenerCount('did-finish-load')).toBe(0)
+    expect(webContents.listenerCount('did-fail-load')).toBe(0)
+    expect(webContents.listenerCount('destroyed')).toBe(0)
   })
 })

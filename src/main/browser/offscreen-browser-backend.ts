@@ -63,6 +63,10 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     // teardown), drop the registry entry so commands fail cleanly instead of
     // resolving a dead WebContents.
     win.webContents.once('destroyed', () => {
+      // A delayed event from an old window must not remove a replacement page.
+      if (this.windowsByPageId.get(browserPageId) !== win) {
+        return
+      }
       this.windowsByPageId.delete(browserPageId)
       if (!this.pendingCloseById.has(browserPageId)) {
         this.trackPendingClose(browserPageId, this.reportClosed(browserPageId, webContentsId))
@@ -149,6 +153,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
         if (this.pendingCloseById.get(browserPageId) === cleanup) {
           this.pendingCloseById.delete(browserPageId)
         }
+        this.reportedClosedPageIds.delete(browserPageId)
       })
       .catch(() => {})
   }
@@ -202,14 +207,24 @@ export class OffscreenBrowserBackend implements BrowserBackend {
         }
         reject(new Error(`${errorDescription} (${errorCode})`))
       }
+      const onDestroyed = (): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        resolve()
+      }
       const cleanup = (): void => {
         clearTimeout(timer)
         wc.removeListener('did-finish-load', onFinish)
         wc.removeListener('did-fail-load', onFail)
+        wc.removeListener('destroyed', onDestroyed)
       }
 
       wc.on('did-finish-load', onFinish)
       wc.on('did-fail-load', onFail)
+      wc.on('destroyed', onDestroyed)
       void wc.loadURL(url).catch(() => {
         // loadURL rejects on aborted navigations; did-fail-load handles the rest.
       })
