@@ -109,6 +109,23 @@ describe('retirement discovery on WSL', () => {
     }
   })
 
+  it('does not trust a UNC ENOENT, which is what a shut-down distro looks like', async () => {
+    // Windows maps an unreachable 9P route to ENOENT, so `wsl --shutdown` is indistinguishable
+    // from a distro that never held buckets. The home stays cached and still resolves, so nothing
+    // else marks the scan incomplete — believing ENOENT here memoizes the STA-4472 hole for good.
+    const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    runWslTranscriptFsTaskMock.mockRejectedValue(enoent)
+
+    const retired = await discoverRetiredWorktreeNames({
+      workspaceRoots: [DISTRO_ROOT],
+      home: '/nonexistent-home',
+      env: {},
+      resolveWslHome: async () => '\\\\wsl.localhost\\Ubuntu\\home\\ada'
+    })
+
+    expect(retired.complete).toBe(false)
+  })
+
   it('stays retryable when the distro home cannot be resolved, rather than memoizing the hole', async () => {
     // `getWslHomeAsync` shells out to `wsl.exe` and returns null for a stopped or slow distro.
     // Memoizing that as a complete "nothing is retired" is the STA-4472 defect itself, since the

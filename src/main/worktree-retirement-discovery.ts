@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { parseWslUncPath } from '../shared/wsl-paths'
+import { isWslUncPath, parseWslUncPath } from '../shared/wsl-paths'
 import {
   encodeClaudeProjectPaths,
   isClaudeProjectDirInScope
@@ -68,8 +68,14 @@ async function readDirectoryNames(path: string): Promise<{ names: string[]; refu
     // A missing root is itself a complete answer: the agent may never have run on this machine.
     // Anything else — a gate refusal, an EIO on a redirected or network home — leaves names
     // unread, and memoizing that as "nothing is retired" is the under-retiring direction.
+    //
+    // Never on UNC though: Windows reports an unreachable 9P route as ENOENT, so a distro that is
+    // merely shut down is indistinguishable from one that never held buckets. `wsl.ts` already
+    // refuses to trust a UNC ENOENT for the same reason. Believing it here would memoize the
+    // STA-4472 hole for the process lifetime, since the cached distro home still resolves.
     const code = (error as NodeJS.ErrnoException | null)?.code
-    return { names: [], refused: code !== 'ENOENT' && code !== 'ENOTDIR' }
+    const absent = code === 'ENOENT' || code === 'ENOTDIR'
+    return { names: [], refused: !absent || isWslUncPath(path) }
   }
 }
 
