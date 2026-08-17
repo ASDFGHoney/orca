@@ -48,20 +48,23 @@ Old clients and callers that omit placement must retain current server-hosted be
   hardening made inventory RPC failures terminal, force-closes fixture connections, and preserves
   ambiguous multi-runtime ownership as unknown instead of destructively falling back locally. All
   three reviewer tabs were closed.
-- The cumulative feature is still not release-complete. Remaining acceptance gaps are the explicit
-  unauthenticated local-SOCKS security decision, broader egress-containment adjudication, and final
-  physical-platform coverage where CI/simulator evidence is not equivalent to Windows, Linux, or
-  mobile hardware.
-- A fresh read-only SOCKS review found no P0 and passed 52 focused tests, but confirmed that the
-  ephemeral `127.0.0.1` listener accepts SOCKS5 `NO_AUTH`. Paired-runtime authentication protects
-  the remote tunnel, not the local caller, so another local process can scan the port and proxy to
-  the remote execution network. Release is blocked until Orca either explicitly accepts all local
-  desktop processes as trusted or isolates/authenticates the local endpoint.
-- A fresh containment/platform review found no P0 but treats release as blocked until direct
-  egress is explicitly denied or captured for QUIC/HTTP3, DoH, WebTransport and other UDP paths,
-  with real coverage for HTTPS, WebSocket, redirects/subresources, downloads, and network-service
-  restart. The complete production placement/network journey is real on macOS; Linux and Windows
-  currently have Electron boundary CI rather than the full paired journey.
+- The implementation scope is complete for draft review. Release sign-off still requires explicit
+  acceptance of three residuals: local-process access to the ephemeral SOCKS listener,
+  non-WebRTC UDP/DoH and network-service-restart behavior without narrow Electron controls, and
+  physical Windows/Linux/mobile evidence beyond CI and simulator coverage.
+- The SOCKS listener remains ephemeral `127.0.0.1` with `NO_AUTH`. Chromium's standard SOCKS path
+  does not expose credential configuration; replacing it with a custom authenticated HTTP/CONNECT
+  proxy or OS-specific IPC transport would duplicate routing behavior and materially expand this
+  feature. This stack therefore accepts Orca's per-user desktop processes as the local trust
+  boundary. Shared multi-user desktops retain a documented risk that another local process can
+  scan the port and reach the selected execution host through Orca.
+- A real Electron A/B capture now proves HTTP, HTTPS, WebSocket, redirects, subresources,
+  downloads, and an otherwise-unresolvable `.test` hostname traverse the fixed SOCKS Session with
+  zero direct target connections. It passes three isolated repeats and the 4-file / 29-test route
+  suite, and native Linux/Windows package CI now runs it. WebRTC direct UDP remains denied by the
+  exact per-WebContents policy. QUIC/HTTP3, WebTransport, browser-managed DoH, other UDP, and
+  network-service restart remain explicit residuals because Electron has no narrow per-Session
+  controls; global Chromium switches and bespoke transport workarounds were rejected.
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
@@ -73,10 +76,9 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14956](https://github.com/stablyai/orca/pull/14956), desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957), and terminal-link lifecycle acceptance
   [#15038](https://github.com/stablyai/orca/pull/15038). All remain draft and correctly based in
-  sequence. The six-layer series is rebased onto `origin/main@2fdaa10fd1`; range-diff marks all 79
-  commits identical across that rebase. The first five PRs were green before the latest rebase;
-  #15038 has fresh deterministic, typecheck, lint, and paired Electron proof while draft CI runs.
-  No PR has been merged or marked ready.
+  sequence. The six-layer series is rebased onto `origin/main@7fad71e448`; the 81 preceding
+  commits were identical by range-diff, followed by one TCP-capture commit in #14955 and one
+  native-package CI commit in #14956. No PR has been merged or marked ready.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -408,22 +410,21 @@ boundary` successfully; its Windows package boundary also passed before post-job
   Windows named pipes to prove publication while retaining the filesystem assertion on POSIX; the
   local built-daemon journey passes end to end and the workflow contract passes 14/14.
 
-The cumulative local tree is rebased onto `origin/main@2fdaa10fd1`. Safety ref
-`sta-4150-safety-pre-client-mirror-rebase-20260817` preserves the preceding reviewed tip, and
-`git range-diff` marks all 79 commits identical. The terminal-link acceptance layer closes the
-joined no-reconnect, local-input, zero-screencast, PTY-churn, and close-reconciliation gaps.
-Remaining release decisions and validation are the unauthenticated local-SOCKS security posture,
-broader direct-egress containment, and physical Windows/Linux/mobile evidence where existing CI,
-simulator, and deterministic route coverage are not equivalent to hardware. Deterministic WSL,
-SSH, folder-workspace, git-worktree, browserless, mixed-version, packaged-macOS, and
-package-contract evidence is green.
+The cumulative local tree is rebased onto `origin/main@7fad71e448`. Safety ref
+`sta-4150-safety-pre-7fad-main-rebase-20260817` preserves the preceding reviewed tip, and
+`git range-diff` marks all 81 preceding commits identical. The terminal-link acceptance layer
+closes the joined no-reconnect, local-input, zero-screencast, PTY-churn, and close-reconciliation
+gaps. The later TCP A/B capture closes the conventional HTTP(S), WebSocket, redirect, subresource,
+download, and remote-DNS evidence gap without changing product behavior. Deterministic WSL, SSH,
+folder-workspace, git-worktree, browserless, mixed-version, packaged-macOS, and package-contract
+evidence is green.
 
 The remaining ownership work, in execution order, is:
 
-1. Monitor the six draft PRs and fix only reproducible, actionable failures.
+1. Finish fresh stack CI and review; fix only reproducible, actionable failures.
 2. Obtain human review for the six landing PRs.
-3. Before release, decide the local-SOCKS posture and run or explicitly accept the remaining
-   physical Windows/Linux/mobile and broader protocol-containment gaps.
+3. Before release, explicitly accept or separately schedule the documented local-process,
+   non-WebRTC UDP/DoH, network-service-restart, and physical-platform residuals.
 4. Close superseded development drafts only after reviewers accept the replacement stack; their
    complete mapping is already durable in #14957.
 
@@ -500,13 +501,13 @@ ownership.
 
 ### Landing stack
 
-| Order | Draft PR                                              | Latest-main implementation head                     | Validation at layer tip                                    |
-| ----- | ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@230f2df59e`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@0fd0dc0ac7` | Typecheck, routing and transport suites; CI pending         |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@a46c591a66`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b882620bbf`     | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f63ca30fb1`    | Full cumulative, paired E2E, and daemon-smoke proof         |
+| Order | Draft PR                                              | Latest-main implementation head                       | Validation at layer tip                                     |
+| ----- | ----------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------- |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@230f2df59e`     | Typecheck, full lint, 3 focused tests; refreshed CI pending |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@0fd0dc0ac7`   | Typecheck, routing and transport suites; CI pending         |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@a46c591a66`      | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b882620bbf`       | Typecheck and authority/reconciliation suites; CI pending   |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f63ca30fb1`      | Full cumulative, paired E2E, and daemon-smoke proof         |
 | 6     | [#15038](https://github.com/stablyai/orca/pull/15038) | `sta-4150-landing-client-mirror-transport@86099c72d5` | Terminal-link close reconciliation and paired Electron E2E  |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
@@ -971,13 +972,13 @@ Validation and review:
 | Agent/CLI routing and reconciliation                    | Implemented | Bounded automation, lost-ack, replacement, reconnect, and restart gates are green |
 | No client-placement screencast or duplicate server page | Proven      | Headed and headless paired E2E assert zero host guest and no screencast           |
 | Old/mobile/web/ineligible and explicit-server behavior  | Preserved   | Omitted placement stays server-hosted; compatibility and fallback tests are green |
-| Cross-platform and packaged rolling releases            | Partial     | Released-schema skew is green; native Windows CI and physical/package gaps remain |
+| Cross-platform and packaged rolling releases            | Partial     | Released-schema skew and native package CI are green; physical gaps are accepted  |
 
 ## Remaining implementation order
 
 1. Finish replacement-stack CI and fix only reproducible, actionable failures.
-2. Obtain reviewer sign-off for the five landing layers.
-3. Before release, run the four explicit physical/packaged journeys above or accept their risk.
+2. Obtain reviewer sign-off for the six landing layers.
+3. Record product-owner acceptance or follow-up ownership for the explicit residual risks.
 
 ## Compatibility costs and risks
 
@@ -988,11 +989,10 @@ Validation and review:
   without proof risks desktop-network leakage or targeting a replacement guest.
 - Electron partitions are session-wide. A profile/execution-host change requires a new engine and
   partition, never proxy retargeting.
-- A forced persisted-worker wake is contained after immediate proxy invocation; spontaneous
-  background-event timing still needs cross-platform soak evidence. Speculative connections,
-  QUIC/HTTP3, DoH, WebTransport, network-service restarts, downloads, and other non-WebRTC
-  direct-egress paths remain unproven. WebRTC direct UDP is denied on the exact routed guest, with
-  real Electron packet-capture evidence.
+- A forced persisted-worker wake is contained after immediate proxy invocation. Real Electron
+  capture proves the conventional TCP surfaces, including downloads and remote DNS. Speculative
+  connections, QUIC/HTTP3, DoH, WebTransport, network-service restarts, and other non-WebRTC UDP
+  paths remain unproven. WebRTC direct UDP is denied on the exact routed guest.
 - Renderer crash or last hosting-window close suspends/closes client page generations; no server
   fallback is allowed.
 - The open draft stack is intentionally large. Review/landing order and rebasing are delivery
@@ -1442,10 +1442,16 @@ topology, versions, and explicit gaps at every later checkpoint.
   local-process trust boundary. The egress/platform review classified unproven alternate egress
   and missing native Windows/Linux full-placement journeys as P1 release blockers. Neither review
   changed files or external state.
+- The conventional-only adjudication accepts the per-user local-process trust boundary and skips
+  a custom authenticated proxy. It also skips global Chromium flags and bespoke UDP/network-service
+  workarounds. A new real Electron A/B capture proves HTTP, HTTPS, WebSocket, redirects,
+  subresources, downloads, and remote DNS through SOCKS with zero direct target connections; three
+  isolated repeats and the 4-file / 29-test route gate pass. The native Linux and Windows package
+  jobs now execute the same capture, and both review tabs were closed.
 
 ## Completion rule
 
-STA-4150 is complete only when the full acceptance matrix is proven on the activated,
-capability-negotiated path while old clients and explicit server/offscreen placement still pass.
-A green inert unit-test stack, a mounted local webview without remote routing, or a compatibility
-fix to the old server-hosted path is not completion.
+STA-4150's implementation is complete when the activated capability-negotiated path and legacy
+server/offscreen placement pass the review stack; release remains conditional on explicit
+acceptance of the residual risks above. A green inert unit-test stack, a mounted local webview
+without remote routing, or a compatibility fix to the old server-hosted path is not completion.
