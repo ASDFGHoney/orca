@@ -25,7 +25,18 @@ function serializeProviderPayload(payload: unknown): string {
 
 /** Fields providers use for the human-facing sentence on a frame, most specific
  *  first. Nested one level because warnings arrive wrapped as often as not. */
-const MESSAGE_KEYS = ['message', 'text', 'warning', 'detail', 'description', 'reason'] as const
+const MESSAGE_KEYS = [
+  'message',
+  'text',
+  'warning',
+  'detail',
+  'description',
+  'reason',
+  // `error` is how a failed dependency reports itself — an MCP server that could not start says
+  // so here and nowhere else. Without it the row falls back to the bare method name, which is how
+  // "MCP server X failed to start: auth expired" reached users as `notification:mcpServer/...`.
+  'error'
+] as const
 
 function directReadableMessage(payload: unknown): string | null {
   if (typeof payload === 'string') {

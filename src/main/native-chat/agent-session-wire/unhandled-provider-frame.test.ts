@@ -222,3 +222,32 @@ describe('unhandled provider frame journal fallback', () => {
     ).toBe('codex \u00b7 notification:future/event')
   })
 })
+
+describe('a failed provider dependency', () => {
+  it('leads with the failure the provider reported, not the method name', () => {
+    const item = unhandledProviderFrameJournalItem(
+      'codex',
+      'notification:mcpServer/startupStatus/updated',
+      {
+        threadId: 'thread-1',
+        name: 'codex_apps',
+        status: 'failed',
+        error: 'MCP client for `codex_apps` failed to start: authentication token invalidated',
+        failureReason: 'reauthenticationRequired'
+      }
+    )
+    expect(item?.classification).toBe('error-surface')
+    expect(item?.body.text).toContain('failed to start')
+    expect(item?.body.text).not.toContain('notification:mcpServer')
+  })
+
+  it('stays out of the timeline while the dependency is merely starting', () => {
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'notification:mcpServer/startupStatus/updated', {
+        threadId: 'thread-1',
+        name: 'codex_apps',
+        status: 'starting'
+      })
+    ).toBeNull()
+  })
+})
