@@ -279,6 +279,46 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 446 })
   })
 
+  it('keeps observer viewport syncs on the active compatibility viewport', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 533,
+        imageHeight: 917,
+        deviceWidth: 1097,
+        deviceHeight: 917
+      })
+    ).toBe(true)
+    await settle()
+    harness.streams[1].emitReady()
+    await settle()
+
+    expect(harness.lifecycle.viewportForSync()).toEqual({ width: 533, height: 446 })
+  })
+
+  it('releases the compatibility viewport before syncing a real pane resize', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 533,
+        imageHeight: 917,
+        deviceWidth: 1097,
+        deviceHeight: 917
+      })
+    ).toBe(true)
+    await settle()
+    harness.streams[1].emitReady()
+    await settle()
+
+    harness.setViewportSize({ width: 1200, height: 900 })
+
+    expect(harness.lifecycle.viewportForSync()).toEqual({ width: 1200, height: 900 })
+  })
+
   it('allows one fresh compatibility negotiation after a real pane resize', async () => {
     const harness = createHarness()
     harness.setViewportSize({ width: 1097, height: 917 })

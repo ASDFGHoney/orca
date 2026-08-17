@@ -60,6 +60,10 @@ export class RemoteBrowserStreamLifecycle {
     this.legacyViewport.clear()
   }
 
+  viewportForSync(): RemoteBrowserViewportSize | null {
+    return this.legacyViewport.resolve(this.deps.readViewportSize())
+  }
+
   // Opens the stream for the active pane and returns the teardown for that attempt.
   open(): () => void {
     let cancelled = false
