@@ -34,10 +34,13 @@
  * rebind that argument to the patched api.setState — see store/index.ts.
  *
  * Cost on the normal path (every store write, ~2.4k live subscriptions): one
- * integer increment, two branch checks, and — once per burst — queueing a
- * pre-bound microtask. No allocation, no stack capture. `new Error().stack`
- * is only constructed after the threshold is crossed, at most once per burst
- * and once per STORE_WRITE_CHAIN_CAPTURE_INTERVAL_MS.
+ * integer increment, three integer branch checks, and — once per burst —
+ * queueing a pre-bound microtask. No allocation, no stack capture.
+ * `new Error().stack` is only constructed past the threshold, at most once per
+ * burst, and inside a capture-floor window only when a burst runs strictly
+ * deeper than everything already recorded there — so a repeating storm still
+ * costs one stack per window, while a deeper burst supersedes rather than
+ * being masked (see the capture-floor doc below).
  *
  * Diagnostic only: observes and records, never throttles or suppresses a
  * write. Store-driven rings are the surviving field hypothesis; a ring cycling
@@ -58,18 +61,26 @@ const REACT_NESTED_UPDATE_LIMIT = 50
  *  ring alternating one store write with one component-state hop is still
  *  captured, where T=40 required k=0 (2·39 = 78 overshoots — only ~11
  *  non-store commits TOTAL fit in its margin). Rings with k≥2 still throw
- *  uncaptured. Cost of the wider net: benign 25–39-write bursts capture too,
- *  bounded to one name-only crumb per capture interval (and one ring slot per
- *  30s by main-process coalescing); their depth/burst fields keep them
- *  tellable from true rings. */
+ *  uncaptured. Cost of the wider net: benign bulk work crosses 25 too — a
+ *  close-other-tabs over ~8-12 tabs is ≥2 writes per close in one flush, and
+ *  N same-tick promise continuations writing once each sum to depth N. Two
+ *  things keep those from polluting the evidence: the burst-end depth stamped
+ *  on each record separates them (a benign batch ends near the threshold; a
+ *  #185-bound ring runs toward React's limit of 50), and a deeper burst
+ *  supersedes a shallower record inside the capture floor, so a routine
+ *  bulk close can never mask the ring that crashes seconds later. */
 export const STORE_WRITE_CHAIN_STACK_THRESHOLD = REACT_NESTED_UPDATE_LIMIT / 2
 /** Frame budget for the capture: enough to reach through wrapper and notify
  *  frames into the ring; V8's default 10 would show mostly plumbing. */
 const CAPTURE_STACK_FRAMES = 40
-/** Renderer-side floor between captures. A sustained sub-limit oscillation
- *  re-crosses the threshold every frame; this bounds stack + IPC cost while
- *  main-process coalescing separately bounds ring slots. Skipped bursts stay
- *  countable via burstsSinceInstall deltas between captured crumbs. */
+/** Renderer-side capture floor. A sustained sub-limit oscillation re-crosses
+ *  the threshold every frame; inside one floor window only a burst that runs
+ *  strictly DEEPER than everything already recorded earns a capture, so a
+ *  repeating storm costs one stack per window while a genuine ring is never
+ *  masked by a benign burst that crossed first (supersede, not first-wins).
+ *  Main-process coalescing separately bounds ring slots to one per 30s, and
+ *  keeps the newest payload — i.e. the deepest burst's stack. Skipped bursts
+ *  stay countable via burstsSinceInstall deltas between captured crumbs. */
 export const STORE_WRITE_CHAIN_CAPTURE_INTERVAL_MS = 10_000
 
 type StoreWriteChainTelemetryOptions = {
@@ -115,10 +126,49 @@ export function createStoreWriteChainTelemetry(
   let resetQueued = false
   let burstsSinceInstall = 0
   let lastCaptureAtMs = Number.NEGATIVE_INFINITY
+  /** Deepest depth already recorded in the current floor window: the bar a
+   *  later burst must beat to earn its own capture (supersede, not first-wins). */
+  let windowMaxRecordedDepth = 0
+  /** Per-burst capture trigger: capture fires at ceiling+1, so a burst that
+   *  never beats the window's recorded max stays capture-free. MAX_SAFE_INTEGER
+   *  outside a threshold-crossing burst keeps the trigger unreachable. */
+  let burstCaptureCeiling = Number.MAX_SAFE_INTEGER
+  /** Depth at this burst's capture; 0 when the burst has no capture pending. */
+  let pendingDepthAtCapture = 0
+  let pendingStack: string | undefined
 
   const resetDepth = (): void => {
+    const finalDepth = depth
     depth = 0
     resetQueued = false
+    burstCaptureCeiling = Number.MAX_SAFE_INTEGER
+    if (pendingDepthAtCapture === 0) {
+      return
+    }
+    const depthAtCapture = pendingDepthAtCapture
+    const stack = pendingStack
+    pendingDepthAtCapture = 0
+    pendingStack = undefined
+    // The burst ran past its capture point: upgrade the record with the final
+    // depth — the field that tells a benign batch (ends near the threshold)
+    // from a true ring (runs toward React's limit). Re-sends the stack already
+    // captured mid-burst; no new Error here, and main-side name coalescing
+    // folds this into the same ring slot with the newest payload winning.
+    if (finalDepth > depthAtCapture) {
+      try {
+        if (finalDepth > windowMaxRecordedDepth) {
+          windowMaxRecordedDepth = finalDepth
+        }
+        record(STORE_WRITE_CHAIN_BREADCRUMB, {
+          depth: finalDepth,
+          depthAtCapture,
+          burstsSinceInstall,
+          ...(stack ? { stack } : {})
+        })
+      } catch {
+        // Diagnostic only; an upgrade failure must never surface.
+      }
+    }
   }
 
   return {
@@ -138,22 +188,37 @@ export function createStoreWriteChainTelemetry(
             resetQueued = true
             queueMicrotask(resetDepth)
           }
-          // Strict equality latches capture to the crossing write: a chain
-          // running deeper than the threshold still costs one capture per
-          // burst, no matter which stores its writes land on.
+          // Once per threshold-crossing burst: pick this burst's capture bar.
+          // Fresh window → the threshold itself; inside a window → the deepest
+          // depth already recorded, so only a strictly deeper burst captures.
           if (depth === threshold) {
             try {
               burstsSinceInstall += 1
-              const nowMs = now()
-              if (nowMs - lastCaptureAtMs >= captureIntervalMs) {
-                lastCaptureAtMs = nowMs
-                const stack = captureStack()
-                record(STORE_WRITE_CHAIN_BREADCRUMB, {
-                  depth,
-                  burstsSinceInstall,
-                  ...(stack ? { stack } : {})
-                })
+              if (now() - lastCaptureAtMs >= captureIntervalMs) {
+                windowMaxRecordedDepth = 0
               }
+              burstCaptureCeiling = Math.max(threshold - 1, windowMaxRecordedDepth)
+            } catch {
+              // Diagnostic only; a clock failure must never block the write.
+            }
+          }
+          // Strict equality latches capture to the write that beats the bar:
+          // at most one stack per burst, no matter which stores the writes
+          // land on or how far past the threshold the chain runs.
+          if (depth === burstCaptureCeiling + 1) {
+            try {
+              lastCaptureAtMs = now()
+              const stack = captureStack()
+              pendingDepthAtCapture = depth
+              pendingStack = stack
+              windowMaxRecordedDepth = depth
+              // Recorded immediately — evidence must land BEFORE a #185 throw;
+              // the burst-end reset upgrades it with the final depth.
+              record(STORE_WRITE_CHAIN_BREADCRUMB, {
+                depth,
+                burstsSinceInstall,
+                ...(stack ? { stack } : {})
+              })
             } catch {
               // Diagnostic only; a capture failure must never block the write.
             }

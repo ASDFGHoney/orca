@@ -41,6 +41,17 @@ function innocentBystanderDispatch(api: { setState: (p: RingState) => void }): v
   api.setState({ n: 1 })
 }
 
+/** Benign bulk work (e.g. close-other-tabs) that legitimately crosses the
+ *  threshold in one flush; named so its stack can be told from the ring's. */
+function benignBulkTabCloseDispatch(
+  api: { setState: (p: RingState) => void },
+  writes: number
+): void {
+  for (let i = 0; i < writes; i += 1) {
+    api.setState({ n: i })
+  }
+}
+
 async function yieldMicrotasks(): Promise<void> {
   // Why: the depth reset is a queueMicrotask scheduled by the burst's first
   // write, so one drained microtask tick is a genuine yield.
@@ -206,6 +217,68 @@ describe('store write chain telemetry', () => {
     // the capture ahead of the throw for mixed rings up to k=1 (2·24 = 48).
     // Raising T silently gives that coverage back — see the constant's doc.
     expect(STORE_WRITE_CHAIN_STACK_THRESHOLD).toBe(25)
+  })
+
+  it('a deeper ring inside the capture floor supersedes an earlier benign burst', async () => {
+    const record = vi.fn()
+    let nowMs = 0
+    const api = createInstrumentedStore({ record, now: () => nowMs })
+
+    // Routine bulk close: 26 writes, one flush — crosses the threshold at t=0.
+    benignBulkTabCloseDispatch(api, STORE_WRITE_CHAIN_STACK_THRESHOLD + 1)
+    await yieldMicrotasks()
+
+    // A REAL ring 8s later, still inside the 10s floor window.
+    nowMs += 8_000
+    api.subscribe(() => driverEffectLoopWrite(api, 50))
+    innocentBystanderDispatch(api)
+    await yieldMicrotasks()
+
+    // The surviving record must name the ring driver, not the bulk close that
+    // merely got there first — otherwise the crash blames a bystander.
+    const [, data] = record.mock.calls.at(-1) as [string, Record<string, unknown>]
+    const stack = String(data.stack)
+    expect(stack).toContain('driverEffectLoopWrite')
+    expect(stack).not.toContain('benignBulkTabCloseDispatch')
+    expect(data.depth).toBe(50)
+  })
+
+  it('stamps the burst-end depth so benign bursts stay tellable from true rings', async () => {
+    const record = vi.fn()
+    const api = createInstrumentedStore({ record })
+
+    benignBulkTabCloseDispatch(api, STORE_WRITE_CHAIN_STACK_THRESHOLD + 7)
+    await yieldMicrotasks()
+
+    // Threshold-crossing depth alone reads 25 for every burst; the burst-end
+    // depth is the discriminator (a benign batch ends near the threshold, a
+    // #185-bound ring runs toward React's limit of 50).
+    const [, data] = record.mock.calls.at(-1) as [string, Record<string, unknown>]
+    expect(data.depth).toBe(STORE_WRITE_CHAIN_STACK_THRESHOLD + 7)
+    expect(data.depthAtCapture).toBe(STORE_WRITE_CHAIN_STACK_THRESHOLD)
+  })
+
+  it('shallower bursts inside the window neither capture nor overwrite a deeper record', async () => {
+    const record = vi.fn()
+    const captureStack = vi.fn(() => 'ring stack')
+    let nowMs = 0
+    const api = createInstrumentedStore({ record, captureStack, now: () => nowMs })
+
+    // Deep burst first: the window's record to beat.
+    benignBulkTabCloseDispatch(api, 50)
+    await yieldMicrotasks()
+    const recordsAfterDeepBurst = record.mock.calls.length
+
+    // A storm of shallower threshold-crossing bursts inside the same window
+    // must stay free: no stack capture, no record churn (reverse masking).
+    for (let burst = 0; burst < 3; burst += 1) {
+      nowMs += 1_000
+      benignBulkTabCloseDispatch(api, STORE_WRITE_CHAIN_STACK_THRESHOLD + 1)
+      await yieldMicrotasks()
+    }
+
+    expect(captureStack).toHaveBeenCalledTimes(1)
+    expect(record.mock.calls.length).toBe(recordsAfterDeepBurst)
   })
 
   it('never blocks or alters writes, even when recording fails', () => {
