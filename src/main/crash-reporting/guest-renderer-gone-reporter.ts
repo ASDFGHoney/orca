@@ -1,4 +1,5 @@
 import type { BrowserGuestRendererGoneReporter } from '../browser/browser-manager'
+import type { ProcessGoneCrashDetails } from './process-gone-recorder'
 import type { ProcessGoneRendererIdentity } from './process-gone-renderer-identity'
 
 /** Mirrors the host's recordProcessGoneCrash so the wiring stays a one-line call. */
@@ -7,7 +8,7 @@ export type ProcessGoneCrashRecorder = (
   processType: string,
   reason: string,
   exitCode: number | null,
-  details: Record<string, unknown>,
+  details: ProcessGoneCrashDetails,
   rendererIdentity?: ProcessGoneRendererIdentity
 ) => void
 

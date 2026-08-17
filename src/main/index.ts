@@ -320,7 +320,10 @@ import {
   shouldRecoverRendererAfterProcessGone,
   type ExpectedTeardownScope
 } from './crash-reporting/process-gone-classification'
-import { recordProcessGoneCrash as recordProcessGoneCrashEvent } from './crash-reporting/process-gone-recorder'
+import {
+  recordProcessGoneCrash as recordProcessGoneCrashEvent,
+  type ProcessGoneCrashDetails
+} from './crash-reporting/process-gone-recorder'
 import { buildGuestRendererGoneReporter } from './crash-reporting/guest-renderer-gone-reporter'
 import type { ProcessGoneRendererIdentity } from './crash-reporting/process-gone-renderer-identity'
 import { startCrashpadCapture } from './crash-reporting/crashpad-capture'
@@ -1796,7 +1799,7 @@ function recordProcessGoneCrash(
   processType: string,
   reason: string,
   exitCode: number | null,
-  details: Record<string, unknown>,
+  details: ProcessGoneCrashDetails,
   // Why: two positional optional numbers let a caller transpose the ids silently (#15063).
   rendererIdentity?: ProcessGoneRendererIdentity
 ): void {

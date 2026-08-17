@@ -4,7 +4,8 @@ import {
   isCrashReportReason,
   sanitizeCrashReportDetails,
   sanitizeCrashReportString,
-  type CrashReportBreadcrumbData
+  type CrashReportBreadcrumbData,
+  type CrashReportRendererKind
 } from '../../shared/crash-reporting'
 import { decodePosixWaitStatus, describePosixWaitStatus } from '../../shared/posix-wait-status'
 import type { CrashReportStore } from './crash-report-store'
@@ -34,13 +35,18 @@ import {
 import { minidumpSignatureDetails } from './minidump-crash-signature'
 import { flushActiveSink, startSpan } from '../observability/tracer'
 
+/** rendererKind is typed here so it can be promoted onto the report record for prompt-eligibility policy, never string-matched out of details. */
+export type ProcessGoneCrashDetails = Record<string, unknown> & {
+  rendererKind?: CrashReportRendererKind
+}
+
 export type ProcessGoneCrashEvent = {
   source: ProcessGoneSource
   processType: string
   reason: string
   exitCode: number | null
   expectedTeardown: ExpectedTeardownScope
-  details: Record<string, unknown>
+  details: ProcessGoneCrashDetails
   /** Which webContents observed the death — evidence for attribution, never dedupe identity (#15063). */
   webContentsId?: number
   /** Render-process-host id of the process that died, so concurrent deaths dedupe apart (#15052) while shared-process observers coalesce (#15063). */
@@ -277,6 +283,11 @@ export function recordProcessGoneCrash(
       arch: process.arch,
       electronVersion: process.versions.electron ?? 'unknown',
       chromeVersion: process.versions.chrome ?? 'unknown',
+      // Why: prompt eligibility must not depend on parsing details; the kind
+      // rides the record as a typed field while details keep the display copy.
+      ...(event.details.rendererKind !== undefined
+        ? { rendererKind: event.details.rendererKind }
+        : {}),
       details: crashDetails,
       breadcrumbs
     })
