@@ -123,6 +123,43 @@ describe('prunePendingSends', () => {
     expect(next).toEqual([])
   })
 
+  // Why: a row like `[Image #1] fix` reads two ways — the user's own text, or a
+  // host echoing a 1-image send captioned "fix". Crediting BOTH readings let one
+  // turn retire two sends, so the photo send was pruned against a row rendering
+  // no photo and the preview was deleted for good.
+  it('does not let one row retire both a literal-marker send and a photo send', () => {
+    const boundary = assistantMessage('m0', 'ok', 1)
+    const pending = [
+      { ...pendingOf('p-literal', '[Image #1] fix'), afterMessageId: 'm0' },
+      { ...pendingOf('p-photo', 'fix'), afterMessageId: 'm0', imagePaths: ['/tmp/shot.png'] }
+    ]
+    const transcript = [
+      boundary,
+      userMessage('m1', '[Image #1] fix', 2),
+      assistantMessage('m2', 'done', 3)
+    ]
+
+    // The literal send is claimed by its own turn; the photo send has not landed.
+    expect(prunePendingSends(pending, transcript).map((entry) => entry.id)).toEqual(['p-photo'])
+  })
+
+  // Why: the marker reading is what retires a send on hosts that echo an image
+  // send as bare marker text with no source turn. It must survive, and it does
+  // whenever no other send is waiting on the row's literal reading.
+  it('still retires a photo send against a marker-only echo row', () => {
+    const boundary = assistantMessage('m0', 'ok', 1)
+    const pending = [
+      { ...pendingOf('p-photo', 'fix'), afterMessageId: 'm0', imagePaths: ['/tmp/shot.png'] }
+    ]
+    const transcript = [
+      boundary,
+      userMessage('m1', '[Image #1] fix', 2),
+      assistantMessage('m2', 'done', 3)
+    ]
+
+    expect(prunePendingSends(pending, transcript)).toEqual([])
+  })
+
   it('drops an attachment-only pending send once its image turn advances', () => {
     const pending = [{ ...pendingOf('p1', ''), imagePaths: ['/tmp/first.png', '/tmp/second.png'] }]
     const transcript = [

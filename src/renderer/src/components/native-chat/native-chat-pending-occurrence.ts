@@ -46,7 +46,31 @@ export function nativeChatPendingContentKey(
   return imagePaths.length > 0 ? `images:${JSON.stringify(imagePaths)}` : 'empty'
 }
 
-function nativeChatUserMessageContentKeys(message: NativeChatMessage): readonly string[] {
+/**
+ * The literal content keys some pending send is waiting on. A send that carried
+ * no image owns its `[Image #n]` run as text, so its key is the literal reading
+ * of a row — the only thing that can tell that reading apart from the
+ * marker-as-placeholder one, which is byte-identical in the row itself.
+ *
+ * Computed once from the whole pending list: it says which readings are spoken
+ * for, which never varies with the per-send boundary each count is sliced at.
+ */
+export function literalContentKeysClaimedByPendings(
+  pending: readonly Pick<NativeChatPendingOccurrence, 'text' | 'imagePaths'>[]
+): ReadonlySet<string> {
+  const claimed = new Set<string>()
+  for (const entry of pending) {
+    if (!entry.imagePaths?.some(Boolean)) {
+      claimed.add(nativeChatPendingContentKey(entry))
+    }
+  }
+  return claimed
+}
+
+function nativeChatUserMessageContentKeys(
+  message: NativeChatMessage,
+  claimedLiteralKeys?: ReadonlySet<string>
+): readonly string[] {
   if (message.role !== 'user') {
     return []
   }
@@ -54,7 +78,18 @@ function nativeChatUserMessageContentKeys(message: NativeChatMessage): readonly 
   const matchText = nativeChatUserMessageMatchText(message) ?? ''
   const hasImageRefs = message.blocks.some(isImageRefBlock)
   if (matchText && !hasImageRefs) {
-    keys.add(nativeChatTextContentKey(matchText, 0))
+    const literalKey = nativeChatTextContentKey(matchText, 0)
+    keys.add(literalKey)
+    // Why: one turn is ONE send, but this row can be read two ways — the user's
+    // own `[Image #n]` text, or a host echoing an image send as that marker.
+    // Minting both let a single row retire two pendings, so a row showing no
+    // photo could retire a send that carried one and delete the user's preview
+    // for good. When a send is actually waiting on the literal reading, that
+    // reading wins and the row stops there; otherwise the marker reading stands,
+    // which is what keeps a marker-only host echo matching.
+    if (claimedLiteralKeys?.has(literalKey)) {
+      return [...keys]
+    }
   }
   const imageCount = nativeChatUserMessageImageEvidenceCount(message)
   const imageText = normalizedNativeChatUserMessageText(message)
@@ -73,11 +108,13 @@ function nativeChatUserMessageContentKeys(message: NativeChatMessage): readonly 
 }
 
 export function matchingNativeChatUserContentCounts(
-  messages: readonly NativeChatMessage[]
+  messages: readonly NativeChatMessage[],
+  pending?: readonly Pick<NativeChatPendingOccurrence, 'text' | 'imagePaths'>[]
 ): Map<string, number> {
+  const claimedLiteralKeys = pending && literalContentKeysClaimedByPendings(pending)
   const counts = new Map<string, number>()
   for (const message of messages) {
-    for (const key of nativeChatUserMessageContentKeys(message)) {
+    for (const key of nativeChatUserMessageContentKeys(message, claimedLiteralKeys)) {
       counts.set(key, (counts.get(key) ?? 0) + 1)
     }
   }
@@ -85,13 +122,15 @@ export function matchingNativeChatUserContentCounts(
 }
 
 export function advancedNativeChatUserContentCounts(
-  messages: readonly NativeChatMessage[]
+  messages: readonly NativeChatMessage[],
+  pending?: readonly Pick<NativeChatPendingOccurrence, 'text' | 'imagePaths'>[]
 ): Map<string, number> {
+  const claimedLiteralKeys = pending && literalContentKeysClaimedByPendings(pending)
   const advanced = new Map<string, number>()
   const waiting = new Map<string, number>()
   for (const message of messages) {
     if (message.role === 'user') {
-      for (const key of nativeChatUserMessageContentKeys(message)) {
+      for (const key of nativeChatUserMessageContentKeys(message, claimedLiteralKeys)) {
         waiting.set(key, (waiting.get(key) ?? 0) + 1)
       }
       continue
