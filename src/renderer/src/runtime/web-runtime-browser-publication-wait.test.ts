@@ -11,7 +11,8 @@ describe('host-generated browser publication wait', () => {
     const waiting = waitForHostGeneratedBrowserPublication({
       isMaterialized: () => materialized,
       refresh,
-      canRetry: () => true
+      canRetry: () => true,
+      shouldRetryError: () => false
     })
 
     materialized = true
@@ -27,7 +28,8 @@ describe('host-generated browser publication wait', () => {
     const waiting = waitForHostGeneratedBrowserPublication({
       isMaterialized: () => false,
       refresh,
-      canRetry: () => false
+      canRetry: () => false,
+      shouldRetryError: () => false
     })
 
     await vi.advanceTimersByTimeAsync(40)
@@ -42,12 +44,36 @@ describe('host-generated browser publication wait', () => {
     const waiting = waitForHostGeneratedBrowserPublication({
       isMaterialized: () => false,
       refresh,
-      canRetry: () => true
+      canRetry: () => true,
+      shouldRetryError: () => false
     })
 
     await vi.advanceTimersByTimeAsync(1_600)
 
     await expect(waiting).resolves.toBe(false)
     expect(refresh).toHaveBeenCalledTimes(4)
+  })
+
+  it('continues after a transient inventory failure', async () => {
+    vi.useFakeTimers()
+    let materialized = false
+    const refresh = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disconnected'))
+      .mockImplementationOnce(() => {
+        materialized = true
+        return Promise.resolve()
+      })
+    const waiting = waitForHostGeneratedBrowserPublication({
+      isMaterialized: () => materialized,
+      refresh,
+      canRetry: () => true,
+      shouldRetryError: () => true
+    })
+
+    await vi.advanceTimersByTimeAsync(160)
+
+    await expect(waiting).resolves.toBe(true)
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })

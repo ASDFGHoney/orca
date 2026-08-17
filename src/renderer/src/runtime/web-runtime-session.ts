@@ -31,6 +31,10 @@ import type {
 } from '../../../shared/agent-session-host-authority'
 import type { TerminalPaneLayoutNode } from '../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
+import {
+  isRecoverableRemoteRuntimeConnectionError,
+  toRemoteRuntimeClientErrorLike
+} from '../../../shared/remote-runtime-client-error-classification'
 import { createBrowserUuid } from '../lib/browser-uuid'
 import { getRuntimeEnvironmentIdForWorktree } from '../lib/worktree-runtime-owner'
 import { useAppStore } from '../store'
@@ -121,6 +125,13 @@ const DEFINITIVE_BROWSER_CREATE_FAILURE_CODES = [
 
 function isDefinitiveBrowserCreateFailure(error: unknown): boolean {
   return DEFINITIVE_BROWSER_CREATE_FAILURE_CODES.some((code) => hasRuntimeRpcErrorCode(error, code))
+}
+
+function isRetryableBrowserPublicationError(error: unknown): boolean {
+  return (
+    hasRuntimeRpcErrorCode(error, 'remote_runtime_timeout') ||
+    isRecoverableRemoteRuntimeConnectionError(toRemoteRuntimeClientErrorLike(error))
+  )
 }
 
 const pendingWebRuntimeSplitMirrorTelemetry = new Map<string, Set<string>>()
@@ -587,7 +598,7 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           )
         })
     }
-    await pauseAfterE2eWebRuntimeBrowserCreate(created.browserPageId)
+    await pauseAfterE2eWebRuntimeBrowserCreate(created.browserPageId, provisionalPageId)
     if (created.browserPageId !== provisionalPageId) {
       moveWebSessionBrowserPlacement({
         environmentId,
@@ -627,7 +638,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     try {
       await refreshCreatedPage()
     } catch (error) {
-      if (!hasCreatedPageMaterialized()) {
+      if (
+        !hasCreatedPageMaterialized() &&
+        (created.browserPageId === provisionalPageId || !isRetryableBrowserPublicationError(error))
+      ) {
         throw error
       }
     }
@@ -635,8 +649,12 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       await waitForHostGeneratedBrowserPublication({
         isMaterialized: hasCreatedPageMaterialized,
         refresh: refreshCreatedPage,
-        canRetry: () => matchesWebSessionIntentOwner(intentOwner)
+        canRetry: () => matchesWebSessionIntentOwner(intentOwner),
+        shouldRetryError: isRetryableBrowserPublicationError
       })
+    }
+    if (!matchesWebSessionIntentOwner(intentOwner)) {
+      throw new Error('The paired runtime changed while creating the browser tab.')
     }
     if (!hasCreatedPageMaterialized()) {
       throw new Error('The created browser tab did not materialize in the client.')

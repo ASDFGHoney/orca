@@ -13,6 +13,8 @@ import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } fro
 type FaultSnapshot = {
   armed: boolean
   createdPageId: string | null
+  provisionalPageId: string | null
+  releasedPageSnapshotSuppressed: boolean
   suppressedPageIds: string[]
 }
 
@@ -162,6 +164,7 @@ test('materializes a host-generated browser id after stale publication @headful'
     if (!createdPageId) {
       throw new Error('Host-generated browser page id was not captured')
     }
+    expect(createdPageId).not.toBe(held?.provisionalPageId)
     expect(held.suppressedPageIds).toContain(createdPageId)
     expect(await readClientRemotePageIds(client.page, worktreeId)).not.toContain(createdPageId)
     expect(await readHostBrowserPageIds(hostClient, worktreeId)).toContain(createdPageId)
@@ -179,6 +182,13 @@ test('materializes a host-generated browser id after stale publication @headful'
         message: 'client did not materialize the host-generated page after retry'
       })
       .toContain(createdPageId)
+    expect(
+      await client.page.evaluate(
+        () =>
+          (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot()
+            .releasedPageSnapshotSuppressed ?? false
+      )
+    ).toBe(true)
     expect(await readHostBrowserPageIds(hostClient, worktreeId)).toEqual([
       ...baselineHostPageIds,
       createdPageId

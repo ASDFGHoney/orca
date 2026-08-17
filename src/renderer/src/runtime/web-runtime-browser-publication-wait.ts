@@ -4,7 +4,11 @@ export async function waitForHostGeneratedBrowserPublication(args: {
   isMaterialized: () => boolean
   refresh: () => Promise<void>
   canRetry: () => boolean
+  shouldRetryError: (error: unknown) => boolean
 }): Promise<boolean> {
+  if (!args.canRetry()) {
+    return false
+  }
   if (args.isMaterialized()) {
     return true
   }
@@ -16,7 +20,14 @@ export async function waitForHostGeneratedBrowserPublication(args: {
     if (args.isMaterialized()) {
       return true
     }
-    await args.refresh()
+    try {
+      await args.refresh()
+    } catch (error) {
+      if (args.shouldRetryError(error)) {
+        continue
+      }
+      throw error
+    }
     if (args.isMaterialized()) {
       return true
     }

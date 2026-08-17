@@ -5,6 +5,8 @@ type BrowserCreationFaultSnapshot = {
   armed: boolean
   capabilityRejectionArmed: boolean
   createdPageId: string | null
+  provisionalPageId: string | null
+  releasedPageSnapshotSuppressed: boolean
   suppressedPageIds: string[]
 }
 
@@ -24,8 +26,10 @@ type BrowserCreationFaultWindow = Window & {
 let armed = false
 let capabilityRejectionArmed = false
 let createdPageId: string | null = null
+let provisionalPageId: string | null = null
 let failNextReconciliation = false
 let suppressNextReleasedPageSnapshot = false
+let releasedPageSnapshotSuppressed = false
 let releaseCreatedPage: (() => void) | null = null
 let createdPageBarrier: Promise<void> | null = null
 const suppressedPageIds = new Set<string>()
@@ -36,8 +40,10 @@ function resetFault(): void {
   armed = false
   capabilityRejectionArmed = false
   createdPageId = null
+  provisionalPageId = null
   failNextReconciliation = false
   suppressNextReleasedPageSnapshot = false
+  releasedPageSnapshotSuppressed = false
   releaseCreatedPage = null
   createdPageBarrier = null
   suppressedPageIds.clear()
@@ -85,6 +91,8 @@ function exposeFaultApi(): void {
       armed,
       capabilityRejectionArmed,
       createdPageId,
+      provisionalPageId,
+      releasedPageSnapshotSuppressed,
       suppressedPageIds: [...suppressedPageIds]
     })
   }
@@ -100,11 +108,15 @@ export function throwIfE2eWebRuntimeBrowserCapabilityUnavailable(): void {
   throw new Error('E2E forced browser capability rejection')
 }
 
-export async function pauseAfterE2eWebRuntimeBrowserCreate(remotePageId: string): Promise<void> {
+export async function pauseAfterE2eWebRuntimeBrowserCreate(
+  remotePageId: string,
+  clientProvisionalPageId: string
+): Promise<void> {
   if (!e2eConfig.exposeStore || !armed || !createdPageBarrier) {
     return
   }
   createdPageId = remotePageId
+  provisionalPageId = clientProvisionalPageId
   await createdPageBarrier
 }
 
@@ -133,6 +145,7 @@ export function suppressE2eWebRuntimeBrowserSnapshot(
   }
   if (pageIds.length > 0 && suppressNextReleasedPageSnapshot) {
     suppressNextReleasedPageSnapshot = false
+    releasedPageSnapshotSuppressed = true
     armed = false
     return true
   }
