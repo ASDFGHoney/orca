@@ -136,22 +136,9 @@ export function TerminalQuickCommandContentSection({
       {/* Why: the textarea drops its own ring, so the frame carries the focus state. */}
       <div className="overflow-hidden rounded-md border border-border bg-[var(--editor-surface)] transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/70 px-3 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-              {commandFieldLabel}
-            </span>
-            <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">
-              {isAgentAction
-                ? translate(
-                    'auto.components.terminal.quick.commands.TerminalQuickCommandDialog.sent_to_agent',
-                    'sent to agent'
-                  )
-                : translate(
-                    'auto.components.terminal.quick.commands.TerminalQuickCommandDialog.runs_in_terminal',
-                    'runs in terminal'
-                  )}
-            </span>
-          </div>
+          <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+            {commandFieldLabel}
+          </span>
           {isAgentAction ? (
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {translate(

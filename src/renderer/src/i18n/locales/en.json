@@ -2828,8 +2828,6 @@
               "f9b184fc16": "Edit Quick Command",
               "6751598542": "edit",
               "command_label": "Command",
-              "sent_to_agent": "sent to agent",
-              "runs_in_terminal": "runs in terminal",
               "agent_toolbar_hint": "Supports /goal, skills, paths",
               "agent_footer_hint": "Multi-line prompts are fine — keep them focused.",
               "resize_hint": "Drag corner to resize"
