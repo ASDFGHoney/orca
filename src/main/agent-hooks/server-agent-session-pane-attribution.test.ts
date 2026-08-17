@@ -175,7 +175,11 @@ describe('shared-daemon pane attribution (relay path)', () => {
   it('routes a remote daemon-hosted turn to the spawn-pinned pane', () => {
     _internals.resetCachesForTests()
     const server = new AgentHookServer()
-    server.bindAgentSessionPane('claude', SESSION_A, { paneKey: SPLIT_PANE_A, ptyId: 'pty-remote' })
+    server.bindAgentSessionPane('claude', SESSION_A, {
+      paneKey: SPLIT_PANE_A,
+      ptyId: 'pty-remote',
+      worktreeId: 'wt-real'
+    })
 
     const event = normalizeHookPayload(
       createHookListenerState(),
@@ -190,6 +194,30 @@ describe('shared-daemon pane attribution (relay path)', () => {
     server.ingestRemote({ ...event, source: 'claude' }, 'conn-1')
 
     expect(panesInSnapshot(server)).toEqual([{ paneKey: SPLIT_PANE_A, prompt: 'remote turn' }])
+    // Why asserted here too: the relay seam has its own worktree override, and
+    // 'wt-daemon' is the workspace the stale env named.
+    expect(server.getStatusSnapshot()[0]?.worktreeId).toBe('wt-real')
+  })
+})
+
+describe('an already-correct pane key', () => {
+  it('is left alone rather than overwritten from the binding', async () => {
+    // Why this matters beyond an early-out: the binding also carries a
+    // worktreeId. A session that posts its own (correct) pane must not have its
+    // workspace restamped from a binding recorded at spawn time.
+    await withServer(async (server, post) => {
+      server.bindAgentSessionPane('claude', SESSION_A, {
+        paneKey: DAEMON_PANE,
+        ptyId: 'pty-a',
+        worktreeId: 'wt-at-spawn'
+      })
+
+      expect(await post(buildDaemonHostedBody(SESSION_A, 'posted its own pane'))).toBe(204)
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({ paneKey: DAEMON_PANE, worktreeId: 'wt-daemon' })
+      ])
+    })
   })
 })
 

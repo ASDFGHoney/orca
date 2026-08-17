@@ -13,7 +13,7 @@ describe('pinClaudeLaunchSessionId', () => {
 
   it('pins path-qualified and Windows executables', () => {
     expect(pinClaudeLaunchSessionId('/usr/local/bin/claude --model opus', SESSION, 'posix')).toBe(
-      `/usr/local/bin/claude --model opus --session-id ${SESSION}`
+      `/usr/local/bin/claude --session-id ${SESSION} --model opus`
     )
     expect(pinClaudeLaunchSessionId('claude.cmd', SESSION, 'cmd')).toBe(
       `claude.cmd --session-id ${SESSION}`
@@ -35,20 +35,48 @@ describe('pinClaudeLaunchSessionId', () => {
     )
   })
 
+  // Why: `--session-id` is a ROOT option. `claude mcp list --session-id <uuid>`
+  // exits with "error: unknown option '--session-id'", so a trailing pin would
+  // break a launch that works today — the pin must precede the subcommand.
+  it.each([
+    ['mcp list', 'claude mcp list'],
+    ['doctor', 'claude doctor'],
+    ['update', 'claude update'],
+    ['setup-token', 'claude setup-token'],
+    ['install stable', 'claude install stable']
+  ])('pins ahead of the %s subcommand, never after it', (_label, command) => {
+    const rest = command.slice('claude'.length)
+    expect(pinClaudeLaunchSessionId(command, SESSION, 'posix')).toBe(
+      `claude --session-id ${SESSION}${rest}`
+    )
+  })
+
   it('preserves the base bytes verbatim, including quoting', () => {
     expect(pinClaudeLaunchSessionId('claude "fix   the   bug"', SESSION, 'posix')).toBe(
-      `claude "fix   the   bug" --session-id ${SESSION}`
+      `claude --session-id ${SESSION} "fix   the   bug"`
+    )
+  })
+
+  it('leaves a selector that follows claude’s own -- terminator alone', () => {
+    // Why: past `--` the tokens are the child's argv, not claude flags, so they
+    // are not a competing selector and must not suppress the pin.
+    expect(pinClaudeLaunchSessionId('claude -- --resume abc', SESSION, 'posix')).toBe(
+      `claude --session-id ${SESSION} -- --resume abc`
     )
   })
 
   it.each([
     ['--session-id', `claude --session-id ${SESSION}`],
+    ['--session-id=', `claude --session-id=${SESSION}`],
     ['--resume', 'claude --resume abc'],
     ['--resume=', 'claude --resume=abc'],
     ['--continue', 'claude --continue'],
-    ['--fork-session', 'claude --resume abc --fork-session'],
+    ['--continue=', 'claude --continue=abc'],
+    ['--fork-session', 'claude --fork-session'],
     ['-r', 'claude -r abc'],
-    ['-c', 'claude -c']
+    ['-r=', 'claude -r=abc'],
+    ['-c', 'claude -c'],
+    ['-c=', 'claude -c=abc']
   ])('refuses to compete with an existing %s selector', (_label, command) => {
     expect(pinClaudeLaunchSessionId(command, SESSION, 'posix')).toBeNull()
   })

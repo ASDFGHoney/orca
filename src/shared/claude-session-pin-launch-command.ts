@@ -65,18 +65,22 @@ export function pinClaudeLaunchSessionId(
   if (!isFullyModelableStartupCommand(baseCommand, tokens, spans, shell)) {
     return null
   }
-  const pin = `--session-id ${sessionId}`
   for (let i = claudeIndex + 1; i < tokens.length; i += 1) {
     const token = tokens[i]
+    // Why: `--` is claude's own terminator, so anything after it is the child's
+    // argv, not a claude flag — a selector there is not ours to compete with.
     if (token === '--') {
-      // Why: claude is the executable here, so `--` is claude's own terminator;
-      // the pin must stay in option position before it.
-      const terminatorStart = spans[i].start
-      return `${baseCommand.slice(0, terminatorStart)}${pin} ${baseCommand.slice(terminatorStart)}`
+      break
     }
     if (isClaudeSessionSelector(token)) {
       return null
     }
   }
-  return `${baseCommand} ${pin}`
+  // Why immediately after the executable rather than appended: `--session-id` is
+  // a ROOT option, and `claude <subcommand>` (`mcp list`, `doctor`, `update`)
+  // rejects unknown options, so a trailing pin makes those launches fail
+  // outright. Root position is also before claude's own `--` terminator, which
+  // a trailing pin would fall past.
+  const insertAt = spans[claudeIndex].end
+  return `${baseCommand.slice(0, insertAt)} --session-id ${sessionId}${baseCommand.slice(insertAt)}`
 }
