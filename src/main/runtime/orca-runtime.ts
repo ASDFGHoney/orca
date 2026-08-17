@@ -9343,7 +9343,7 @@ export class OrcaRuntimeService {
     if (hasTargetGroup && nextSnapshot.tabGroupLayout) {
       this.persistHeadlessTabGroups(worktreeId, nextGroups, nextSnapshot.tabGroupLayout)
     }
-    this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    this.notifyMobileSessionTabsChanged(worktreeId)
   }
 
   private closeHeadlessMobileTerminalTab(

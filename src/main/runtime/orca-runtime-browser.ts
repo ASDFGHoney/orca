@@ -1762,6 +1762,8 @@ export class RuntimeBrowserCommands {
     // Why: only user-initiated creates (activate:true) mark the tab active; agent/background creates must not yank a connected client to it.
     if (activate === true) {
       this.host.markHeadlessBrowserSessionTabActive?.(worktreeId, browserPageId, targetGroupId)
+    } else if (worktreeId) {
+      this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktreeId)
     }
     return { browserPageId }
   }

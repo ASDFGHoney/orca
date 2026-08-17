@@ -716,8 +716,14 @@ describe('RuntimeBrowserCommands headless offscreen routing', () => {
 
   it('routes tab creation to the offscreen backend when no renderer window exists', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    browserSessionRegistryMock.resolveKnownPartition.mockReturnValue('persist:orca-browser')
     const createTab = vi.fn(async () => ({ browserPageId: 'page-offscreen' }))
     const setActiveTab = vi.fn()
+    const order: string[] = []
+    const notifyHeadlessBrowserSessionTabsChanged = vi.fn(() => order.push('publish'))
+    const waitForBrowserSessionTabPublication = vi.fn(async () => {
+      expect(order.push('wait')).not.toBe(1)
+    })
     const bridge = {
       getRegisteredTabs: vi.fn(() => new Map([['page-offscreen', 202]])),
       setActiveTab
@@ -726,7 +732,9 @@ describe('RuntimeBrowserCommands headless offscreen routing', () => {
       createHost({
         getAgentBrowserBridge: () => bridge,
         getAvailableAuthoritativeWindow: vi.fn(() => null),
-        getOffscreenBrowserBackend: vi.fn(() => ({ createTab, closeTab: vi.fn() }))
+        getOffscreenBrowserBackend: vi.fn(() => ({ createTab, closeTab: vi.fn() })),
+        notifyHeadlessBrowserSessionTabsChanged,
+        waitForBrowserSessionTabPublication
       })
     )
 
@@ -739,6 +747,7 @@ describe('RuntimeBrowserCommands headless offscreen routing', () => {
       worktreeId: 'wt-1',
       profileId: undefined
     })
+    expect(order).toEqual(['publish', 'wait'])
     // No renderer round-trip in headless mode.
     expect(waitForTabRegistrationMock).not.toHaveBeenCalled()
     expect(setActiveTab).toHaveBeenCalledWith(202, 'wt-1')
