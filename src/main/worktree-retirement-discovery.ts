@@ -5,7 +5,7 @@ import {
   encodeClaudeProjectPaths,
   isClaudeProjectDirInScope
 } from './ai-vault/claude-project-dir-encoding'
-import { wslGatedReaddir } from './native-chat/wsl-transcript-fs-access'
+import { wslGatedReaddir, wslGatedStat } from './native-chat/wsl-transcript-fs-access'
 import type { RetirementScanResult } from './worktree-retirement-backfill-scan'
 import { normalizeRetirableGeneratedName } from './worktree-name-retirement'
 import { getWslHomeAsync } from './wsl'
@@ -52,11 +52,12 @@ export function extractBucketLeafCandidates(
 /** WSL UNC listings go through the shared 9P gate, which bounds concurrency and deadlines each
  *  call; off UNC it is a plain `readdir`.
  *
- *  Accepted cost of gating: the gate admits one `scan` task process-wide, and its stuck-task
- *  check matches scan-against-scan regardless of route. So retirement discovery now queues with —
- *  and, on a wedged distro, can fast-fail — native-chat transcript discovery, which an ungated
- *  `readdir` never could. It is still the right trade: the gate has the only deadline and permit
- *  accounting these UNC reads get, and without it a hung 9P route holds a libuv thread outright.
+ *  Accepted cost of gating: the gate admits one `scan` task process-wide and its stuck-task check
+ *  matches scan-against-scan regardless of route, so the coupling runs both ways. Retirement
+ *  discovery can be fast-failed by a wedged transcript scan, and — new here — a retirement listing
+ *  wedged on one distro can fast-fail transcript discovery on a healthy one, which an ungated
+ *  `readdir` never could. It is still the right trade: the gate holds the only deadline and permit
+ *  accounting these UNC reads get, and without it a hung 9P route keeps a libuv thread outright.
  *  A dedicated lane would need a third priority, which is a change to the gate, not to this file.
  *
  *  A gate refusal is reported rather than thrown. Throwing abandoned the whole scan at whichever
@@ -94,15 +95,17 @@ async function readDirectoryNames(path: string): Promise<{ names: string[]; refu
  *  cases unreachable, which is the 60s rescan loop this exists to avoid. */
 async function uncRouteIsReachable(path: string): Promise<boolean> {
   let current = path
-  // Bounded so a pathological path cannot spend the gate's scan slot indefinitely; the distro root
-  // is only a few levels above anything discovery lists.
+  // `stat`, not a listing: this only asks whether an ancestor is there, and enumerating a WSL home
+  // over 9P to answer that would spend the single scan permit on the composer-open path.
+  // Bounded so a pathological path cannot hold that permit; the distro root is only a few levels
+  // above anything discovery lists.
   for (let depth = 0; depth < 8; depth += 1) {
     const parent = current.replace(/[/\\]+[^/\\]+[/\\]*$/, '')
     if (!parent || parent === current || !isWslUncPath(parent)) {
       return false
     }
     try {
-      await wslGatedReaddir(parent, 'scan')
+      await wslGatedStat(parent, 'scan')
       return true
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | null)?.code
