@@ -17,15 +17,7 @@ import {
   shouldClearNativeChatWorkingSuppression,
   shouldShowNativeChatWorking
 } from './native-chat-working-suppression'
-import {
-  appendPendingSendCache,
-  pendingSendsAsMessages,
-  nextNativeChatPendingSendId,
-  prunePendingSends,
-  readPendingSendCache,
-  writePendingSendCache,
-  type NativeChatPendingSend
-} from './native-chat-pending'
+import { pendingSendsAsMessages } from './native-chat-pending'
 import {
   applyCommandMarkerBoundaries,
   commandMarkersAsMessages,
@@ -50,6 +42,7 @@ import { selectNativeChatRuntimeEnvironmentId } from './native-chat-runtime-owne
 import { useNativeChatPasteBridge } from './use-native-chat-paste-bridge'
 import { useNativeChatFileLinkClick } from './use-native-chat-file-link-click'
 import { useNativeChatLaunchPrompt } from './use-native-chat-launch-prompt'
+import { useNativeChatPendingSends } from './use-native-chat-pending-sends'
 import type { NativeChatResolvedViewProps, NativeChatViewProps } from './native-chat-view-types'
 
 export type { NativeChatViewProps } from './native-chat-view-types'
@@ -185,11 +178,14 @@ function NativeChatResolvedView({
   // the message never vanishes between send and transcript catch-up.
   const pendingScope = useMemo(() => ({ paneKey, agent }), [paneKey, agent])
   const order = session.transcriptOrder
-  const [pending, setPending] = useState<NativeChatPendingSend[]>(() =>
-    readPendingSendCache(pendingScope)
-  )
-  const pendingGenerationRef = useRef(order.generation)
   const resetWorkingInterrupted = useCallback(() => setWorkingInterrupted(false), [])
+  const { pending, clearPending, onOptimisticSend, onOptimisticSendCanceled } =
+    useNativeChatPendingSends({
+      scope: pendingScope,
+      messages: session.messages,
+      order,
+      onSendStarted: resetWorkingInterrupted
+    })
   const { commandMarkers, onSlashCommand } = useNativeChatCommandMarkers({
     paneKey,
     agent,
@@ -202,62 +198,11 @@ function NativeChatResolvedView({
   const handleSlashCommand = useCallback(
     (command: string) => {
       if (command.trim().toLowerCase().startsWith('/clear')) {
-        setPending(writePendingSendCache(pendingScope, []))
+        clearPending()
       }
       onSlashCommand(command)
     },
-    [onSlashCommand, pendingScope]
-  )
-  // Reset the optimistic queue only when the pane/agent changes. A fresh launch
-  // often learns its provider session id after the first send; clearing pending
-  // on that transition briefly flashes the empty state before the transcript
-  // user turn lands.
-  useEffect(() => {
-    setPending(readPendingSendCache(pendingScope))
-    setWorkingInterrupted(false)
-  }, [pendingScope])
-  useEffect(() => {
-    if (pendingGenerationRef.current !== order.generation) {
-      // A source rebind invalidates pane-local optimistic sends. Keeping them
-      // would let an identical prompt from the replacement session retire one.
-      setPending(writePendingSendCache(pendingScope, []))
-    }
-    pendingGenerationRef.current = order.generation
-  }, [order.generation, pendingScope])
-  // Prune echoes whose real user turn is now in the transcript.
-  useEffect(() => {
-    setPending((prev) =>
-      writePendingSendCache(pendingScope, prunePendingSends(prev, session.messages, order))
-    )
-  }, [session.messages, order, pendingScope])
-  const onOptimisticSend = useCallback(
-    (text: string, imagePaths?: string[]) => {
-      setWorkingInterrupted(false)
-      const sentAt = Date.now()
-      const boundary = session.messages.at(-1)
-      const entry: NativeChatPendingSend = {
-        id: nextNativeChatPendingSendId(sentAt),
-        text,
-        sentAt,
-        afterMessageId: boundary?.id ?? null,
-        afterMessageTimestamp: boundary?.timestamp ?? null,
-        afterTranscriptGeneration: order.generation,
-        afterTranscriptHighWater: order.highWater,
-        ...(imagePaths ? { imagePaths } : {})
-      }
-      setPending(appendPendingSendCache(pendingScope, entry))
-      return entry.id
-    },
-    [pendingScope, session.messages, order]
-  )
-  const onOptimisticSendCanceled = useCallback(
-    (pendingId: string) => {
-      // Why: detach/interrupt cancels the delayed Enter, so its optimistic echo
-      // must not come back from the pane cache as a prompt that was delivered.
-      const next = readPendingSendCache(pendingScope).filter((entry) => entry.id !== pendingId)
-      setPending(writePendingSendCache(pendingScope, next))
-    },
-    [pendingScope]
+    [clearPending, onSlashCommand]
   )
 
   const { message: launchPromptMessage, failed: launchPromptFailed } = useNativeChatLaunchPrompt({
@@ -362,9 +307,9 @@ function NativeChatResolvedView({
     // Why: Stop after a submitted turn drops the delayed-write handle once it
     // settles, so cancelPendingSends no longer sees the optimistic id. Clear
     // the echo cache here so a cancelled prompt cannot stick as a ghost bubble.
-    setPending(writePendingSendCache(pendingScope, []))
+    clearPending()
     interactiveSend.cancel()
-  }, [interactiveSend, pendingScope])
+  }, [clearPending, interactiveSend])
   const nativeChatFileLinkClick = useNativeChatFileLinkClick(fileLinkContext)
 
   // Chat-only font zoom via Cmd/Ctrl +/-/0, gated to the live conversation so
