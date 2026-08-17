@@ -99,15 +99,24 @@ describe('ClaudeRuntimeAuthService', () => {
     vi.mocked(refreshClaudeOauthCredentials).mockResolvedValue(null)
   })
 
-  it('proactively refreshes and persists an expiring account on switch-in', async () => {
+  it('proactively refreshes and persists an unknown-expiry account on switch-in', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
-    const account1Stale = createClaudeCredentialsJson('one@example.com', 'one-stale', null, 1_000)
+    const account1Stale = `${JSON.stringify({
+      claudeAiOauth: {
+        email: 'one@example.com',
+        accessToken: 'one-stale',
+        refreshToken: 'one-stale-refresh'
+      }
+    })}\n`
     const account1Refreshed = createClaudeCredentialsJson(
       'one@example.com',
       'one-refreshed',
       null,
       9_999_999_999_999
     )
+    writeFileSync(runtimeCredentialsPath, account1Stale, 'utf-8')
+    testState.scopedKeychainCredentials = account1Stale
+    testState.legacyKeychainCredentials = account1Stale
     const managedAuthPath1 = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
@@ -126,7 +135,7 @@ describe('ClaudeRuntimeAuthService', () => {
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    // Now switch into account-1: token is expiring, so the service must refresh
+    // Now switch into account-1: token expiry is unknown, so the service must refresh
     // and persist the rotation before materializing.
     vi.mocked(isOauthTokenExpiring).mockReturnValueOnce(true)
     vi.mocked(refreshClaudeOauthCredentials).mockResolvedValueOnce(account1Refreshed)
