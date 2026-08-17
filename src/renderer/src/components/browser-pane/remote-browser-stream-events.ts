@@ -37,7 +37,11 @@ export function createRemoteBrowserStreamEvents(
   return {
     isCurrent: () => deps.tokens.isCurrentStreamToken(token),
     onReady: (event) => {
-      if (deps.liveness.markReady(() => recoverRemoteBrowserFirstFrame(token, deps))) {
+      const transition = deps.liveness.markReady(() => recoverRemoteBrowserFirstFrame(token, deps))
+      if (transition === 'ignored') {
+        return
+      }
+      if (transition === 'live') {
         deps.setStatus(REMOTE_BROWSER_STREAM_LIVE)
       }
       deps.applyTabInfo(event.tab)
@@ -55,7 +59,14 @@ export function createRemoteBrowserStreamEvents(
     },
     onPageMissing: () => deps.closeMissingRemotePage(pageId),
     onFrame: (bytes) => {
-      if (deps.liveness.markFrame()) {
+      if (!deps.tokens.isCurrentStreamToken(token)) {
+        return
+      }
+      const transition = deps.liveness.markFrame()
+      if (transition === 'ignored') {
+        return
+      }
+      if (transition === 'live') {
         deps.setStatus(REMOTE_BROWSER_STREAM_LIVE)
       }
       deps.handleFrameBytes(token, bytes)

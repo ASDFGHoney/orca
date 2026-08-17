@@ -9,40 +9,12 @@ import {
   remoteBrowserStreamNotice,
   type RemoteBrowserStreamStatus
 } from './remote-browser-stream-status'
-
-export type Gate = {
-  wait: Promise<void>
-  release: () => void
-  fail: (error: unknown) => void
-}
-
-export function createGate(): Gate {
-  let release!: () => void
-  let fail!: (error: unknown) => void
-  const wait = new Promise<void>((resolve, reject) => {
-    release = () => resolve()
-    fail = (error: unknown) => reject(error)
-  })
-  // Why: the gate is released by the test, not by this tick; an unhandled rejection would fail the run.
-  wait.catch(() => {})
-  return { wait, release, fail }
-}
-
-export type FakeScreencastStream = {
-  pageId: string
-  params: unknown
-  viewportWidth: number | undefined
-  viewportHeight: number | undefined
-  unsubscribeCount: number
-  emitReady: () => void
-  emitFrame: () => void
-  emitEnd: () => void
-  emitStreamError: (message: string) => void
-  emitMalformedSuccess: () => void
-  emitResponseFailure: (code: string, message: string) => void
-  emitTransportError: (code: string, message: string) => void
-  emitClose: () => void
-}
+import {
+  createGate,
+  RemoteBrowserRecoveryEvalGate,
+  type Gate
+} from './remote-browser-stream-test-gate'
+import type { FakeScreencastStream } from './remote-browser-fake-screencast-stream'
 
 export function rpcError(code: string, message: string): Error {
   return Object.assign(new Error(message), { code })
@@ -72,6 +44,7 @@ export function createHarness() {
   let tabShowGate: Gate | null = null
   let tabCreateGate: Gate | null = null
   let subscribeGate: Gate | null = null
+  const recoveryEval = new RemoteBrowserRecoveryEvalGate()
   let persistentSubscribeError: unknown = null
   const subscribeErrorQueue: unknown[] = []
   let subscribeAttempts = 0
@@ -79,7 +52,12 @@ export function createHarness() {
   let handledFrames = 0
   let closeBeforeNextSubscribeRejects = false
 
-  const callRpc = (async (_target: unknown, method: string, params?: unknown) => {
+  const callRpc = (async (
+    _target: unknown,
+    method: string,
+    params?: unknown,
+    options?: { signal?: AbortSignal }
+  ) => {
     rpcLog.push(method)
     if (method === 'status.get') {
       if (statusGate) {
@@ -108,6 +86,9 @@ export function createHarness() {
     }
     if (method === 'browser.tabClose') {
       closedCreatedPages.push((params as { page: string }).page)
+    }
+    if (method === 'browser.eval') {
+      await recoveryEval.wait(options?.signal)
     }
     return {}
   }) as unknown as RemoteBrowserRpcCall
@@ -177,7 +158,8 @@ export function createHarness() {
     }
   }
 
-  const lifecycle = new RemoteBrowserStreamLifecycle({
+  let lifecycle!: RemoteBrowserStreamLifecycle
+  lifecycle = new RemoteBrowserStreamLifecycle({
     identity: {
       isMounted: () => identity.mounted,
       isActive: () => identity.active,
@@ -237,6 +219,12 @@ export function createHarness() {
     get handledFrames(): number {
       return handledFrames
     },
+    get recoveryEvalAbortCount(): number {
+      return recoveryEval.abortCount
+    },
+    get recoveryEvalSignal(): AbortSignal | null {
+      return recoveryEval.signal
+    },
     // Kept as accessors so the assertions written against the old three-variable shape still read
     // naturally — they now derive from the one status, which is the point of the change.
     get errorLog(): (string | null)[] {
@@ -295,6 +283,9 @@ export function createHarness() {
       const gate = createGate()
       subscribeGate = gate
       return gate
+    },
+    holdNextRecoveryEval: (): Gate => {
+      return recoveryEval.hold()
     }
   }
 }

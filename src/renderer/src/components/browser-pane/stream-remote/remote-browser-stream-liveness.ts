@@ -13,6 +13,8 @@ export const REMOTE_BROWSER_STREAM_HEALTHY_MS = 10_000
 export const REMOTE_BROWSER_STREAM_FIRST_FRAME_DEADLINE_MS = 1_500
 export const REMOTE_BROWSER_STREAM_RECOVERED_FRAME_DEADLINE_MS = 2_500
 
+export type RemoteBrowserStreamLivenessEvent = 'ignored' | 'accepted' | 'live'
+
 // Tracks whether one screencast subscription ever came alive, and for how long. Kept apart from the
 // lifecycle because "is this stream actually alive?" is a different question from "what should the
 // pane do about it?", and only the second needs tokens, status, or the retry budget.
@@ -22,6 +24,7 @@ export class RemoteBrowserStreamLiveness {
   private canBecomeLive = false
   private deadlineTimer: ReturnType<typeof setTimeout> | null = null
   private firstFrameTimer: ReturnType<typeof setTimeout> | null = null
+  private recoveryController: AbortController | null = null
 
   /**
    * Starts watching a newly subscribed stream. `onNeverReady` fires once if it stays silent, and the
@@ -36,21 +39,44 @@ export class RemoteBrowserStreamLiveness {
     }, REMOTE_BROWSER_STREAM_READY_DEADLINE_MS)
   }
 
-  markReady(onFirstFrameMissing: () => void): boolean {
+  markReady(onFirstFrameMissing: () => void): RemoteBrowserStreamLivenessEvent {
+    if (!this.canBecomeLive || this.readyAt !== null) {
+      return 'ignored'
+    }
     this.clearDeadline()
     this.readyAt = Date.now()
     if (this.frameSeen) {
-      return true
+      return 'live'
     }
     this.armFirstFrameDeadline(REMOTE_BROWSER_STREAM_FIRST_FRAME_DEADLINE_MS, onFirstFrameMissing)
-    return false
+    return 'accepted'
   }
 
-  markFrame(): boolean {
+  markFrame(): RemoteBrowserStreamLivenessEvent {
+    if (!this.canBecomeLive) {
+      return 'ignored'
+    }
     const firstFrame = !this.frameSeen
     this.frameSeen = true
     this.clearFirstFrameDeadline()
-    return firstFrame && this.readyAt !== null && this.canBecomeLive
+    this.cancelRecovery()
+    return firstFrame && this.readyAt !== null ? 'live' : 'accepted'
+  }
+
+  startFirstFrameRecovery(): AbortSignal | null {
+    if (!this.canBecomeLive || this.frameSeen || this.readyAt === null || this.recoveryController) {
+      return null
+    }
+    this.recoveryController = new AbortController()
+    return this.recoveryController.signal
+  }
+
+  finishFirstFrameRecovery(signal: AbortSignal): boolean {
+    if (this.recoveryController?.signal !== signal || signal.aborted) {
+      return false
+    }
+    this.recoveryController = null
+    return this.canBecomeLive && !this.frameSeen && this.readyAt !== null
   }
 
   waitForRecoveredFrame(onStillMissing: () => void): void {
@@ -68,6 +94,7 @@ export class RemoteBrowserStreamLiveness {
   stopWaitingForReady(): void {
     this.clearDeadline()
     this.clearFirstFrameDeadline()
+    this.cancelRecovery()
     this.canBecomeLive = false
   }
 
@@ -75,6 +102,7 @@ export class RemoteBrowserStreamLiveness {
   settle(): boolean {
     this.clearDeadline()
     this.clearFirstFrameDeadline()
+    this.cancelRecovery()
     const readyAt = this.readyAt
     const frameSeen = this.frameSeen
     this.readyAt = null
@@ -86,6 +114,7 @@ export class RemoteBrowserStreamLiveness {
   clear(): void {
     this.clearDeadline()
     this.clearFirstFrameDeadline()
+    this.cancelRecovery()
     this.readyAt = null
     this.frameSeen = false
     this.canBecomeLive = false
@@ -111,5 +140,10 @@ export class RemoteBrowserStreamLiveness {
       clearTimeout(this.firstFrameTimer)
       this.firstFrameTimer = null
     }
+  }
+
+  private cancelRecovery(): void {
+    this.recoveryController?.abort()
+    this.recoveryController = null
   }
 }

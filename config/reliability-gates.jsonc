@@ -2801,15 +2801,15 @@
       ],
       "platforms": ["macos", "linux", "windows"],
       "providers": ["remote-runtime"],
-      "coveredPlatforms": ["macos", "linux", "windows"],
+      "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": ["remote-runtime"],
-      "coverageNotes": "Deterministic fake-clock tests cover counted backoff, first-frame proof and repaint recovery, in-flight ownership and handoff, cancellation, supersession, transient and permanent failures, late stale rejection, silent hosts, flapping streams, viewport restarts, stale events, budget exhaustion, and manual recovery. A headless paired-runtime journey covers disconnect/reconnect. A physical headed Mac client against an unchanged Windows 1.4.184 desktop host covers ready-without-frame recovery for an already-painted static page. Sleep/wake and real network-partition evidence remain uncollected.",
+      "coverageNotes": "Deterministic fake-clock tests cover counted backoff, first-frame proof and repaint recovery, stale-frame rejection, duplicate-ready idempotence, in-flight RPC cancellation, ownership and handoff, supersession, transient and permanent failures, silent hosts, flapping streams, viewport restarts, budget exhaustion, and manual recovery. A headless paired-runtime journey covers disconnect/reconnect. PR evidence includes a manual headed Mac client against an unchanged Windows 1.4.184 desktop host, but Windows is not counted as covered until that run has a durable replayable gate. Sleep/wake and real network-partition evidence remain uncollected.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/12787",
         "https://linear.app/stably/issue/STA-3483"
       ],
-      "invariant": "A current remote browser stream is live only after its first frame, not merely its ready acknowledgement. A frame-less ready stream requests at most one safe compositor repaint per attempt, then joins one counted, capped backoff chain. Cancellation, pane or runtime supersession, missing pages, and permanent failures stop that chain without stale state mutation. Exhaustion and every non-retrying failure leave an actionable Reconnect control, and manual reconnect creates a fresh stream without resurrecting stale subscriptions.",
-      "oracle": "With one fake clock and exact pane, operation, stream, page, and runtime identities, inject ready with zero frames and require opening state, one old-host-safe repaint RPC, live only after a frame, no repeated status writes, cancellation cleanup, and bounded retry to Reconnect if every repaint remains frame-less. Drop a confirmed stream and require the counted delay sequence, one active chain, stale-token rejection, exact cancellation, and full cleanup. Also inject transport error without close, close racing rejection, never-ready subscriptions, ready-then-end flapping, viewport supersession, missing pages, and permanent failures. In paired headless and physical headed Windows-host journeys, require authoritative host page state plus a newly painted client frame.",
+      "invariant": "A current remote browser stream is live only after its own first frame, not merely its ready acknowledgement or a stale frame from a superseded stream. A frame-less ready stream requests at most one safe compositor repaint per attempt, then joins one counted, capped backoff chain. Cancellation, pane or runtime supersession, transport failure, missing pages, and permanent failures stop that chain and abort in-flight recovery without stale state mutation. Exhaustion and every non-retrying failure leave an actionable Reconnect control, and manual reconnect creates a fresh stream without resurrecting stale subscriptions.",
+      "oracle": "With one fake clock and exact pane, operation, stream, page, and runtime identities, inject ready with zero frames and require opening state, one old-host-safe repaint RPC, live only after the current stream's frame, no repeated status writes, duplicate-ready idempotence, exact in-flight RPC cancellation, and bounded retry to Reconnect if every repaint remains frame-less. Replace a stream and deliver its stale frame before the replacement ready; then deliver late ready/frame after transport failure and require no liveness, frame, viewport, or tab-state mutation. Drop a confirmed stream and require the counted delay sequence, one active chain, stale-token rejection, exact cancellation, and full cleanup. Also inject close racing rejection, never-ready subscriptions, ready-then-end flapping, viewport supersession, missing pages, and permanent failures. In paired headless journeys, require authoritative host page state plus a newly painted client frame.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
@@ -2855,8 +2855,10 @@
           "file": "src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
           "assertions": [
             "ready without a frame stays opening, requests one repaint, and either paints or retries",
-            "first-frame deadlines and recovery stop on frame, close, replacement, and unmount",
-            "later frames do not publish repeated live status writes"
+            "first-frame deadlines and the in-flight repaint RPC stop on frame, close, replacement, and unmount",
+            "stale frames and post-transport events cannot prove or repaint a replacement stream",
+            "duplicate ready and later frame events are idempotent",
+            "budget exhaustion stops at six total subscriptions with no retained timers"
           ]
         },
         {
@@ -2898,21 +2900,20 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical six-test first-frame oracle is red on 04072c54e9 and with only frame-gated live state disabled because ready immediately publishes live with zero frames; it is green on the candidate, including one repaint, frame-only live state, cleanup, and bounded exhaustion. The byte-identical scheduler oracle fails with rescheduling disabled and passes after restoration. The focused suite passes 58 first-frame and lifecycle tests, and the isolated paired-runtime journey passes both disconnect and cold-open recovery scenarios."
+        "evidence": "The original byte-identical six-test first-frame oracle is red on 04072c54e9 and with only frame-gated live state disabled because ready immediately publishes live with zero frames. Six added race/cleanup cases are red on 0282778103: stale frames publish false live, post-error frames paint, duplicate ready repeats work, and close/frame/unmount do not abort the repaint RPC. All are green on the candidate, which also asserts exactly six total subscriptions and zero timers after exhaustion. The scheduler oracle fails with rescheduling disabled and passes after restoration. The isolated paired-runtime journey passes both disconnect and cold-open recovery scenarios."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Each pane retains at most one retry timer, one in-flight attempt, one ready deadline, and one first-frame deadline. A frame-less attempt makes one existing browser.eval RPC and no polling, global scan, subprocess, per-frame status write, or cross-pane fanout. Automatic recovery remains capped at five counted attempts; exhaustion stops background work until explicit user reconnect."
+        "evidence": "Each pane retains at most one retry timer, one in-flight attempt, one ready deadline, one first-frame deadline, and one abortable repaint RPC. A frame-less attempt makes one existing browser.eval RPC and no polling, global scan, subprocess, per-frame status write, or cross-pane fanout. Frame, close, replacement, transport failure, and unmount abort that RPC. Automatic recovery remains capped at five counted retries after the initial subscription; exhaustion leaves zero timers and stops background work until explicit user reconnect."
       },
       "promotionCriteria": [
         "Collect sleep/wake or network-partition recovery evidence.",
-        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
-        "Replace the E2E's post-exhaustion elapsed-time check with an exact subscribe-attempt oracle."
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake."
       ],
       "knownGaps": [
         "The live fault is an explicit disconnect rather than sleep/wake or a real network partition.",
         "The E2E observes UI convergence and new frame identity but does not count screencast subscribe attempts directly.",
-        "Live Linux evidence is uncollected."
+        "Live Linux evidence and a durable replayable physical Windows gate are uncollected."
       ],
       "demotionRule": "Keep experimental or demote if retries can stop before recovery or exhaustion, continue after exhaustion, run in parallel, mutate a superseded pane, hide the Reconnect control, leak a subscription or timer, or fail to paint a new frame after manual reconnect."
     },

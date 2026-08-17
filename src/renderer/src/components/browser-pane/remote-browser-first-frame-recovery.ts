@@ -25,9 +25,26 @@ export function recoverRemoteBrowserFirstFrame(
   if (!deps.tokens.isCurrentStreamToken(token)) {
     return
   }
+  const signal = deps.liveness.startFirstFrameRecovery()
+  if (!signal) {
+    return
+  }
   const target: RuntimeClientTarget = {
     kind: 'environment',
     environmentId: token.environmentId
+  }
+  const waitForFrame = (): void => {
+    if (
+      !deps.tokens.isCurrentStreamToken(token) ||
+      !deps.liveness.finishFirstFrameRecovery(signal)
+    ) {
+      return
+    }
+    deps.liveness.waitForRecoveredFrame(() => {
+      if (deps.tokens.isCurrentStreamToken(token)) {
+        deps.handleClosed(true)
+      }
+    })
   }
   void deps
     .callRpc(
@@ -38,17 +55,7 @@ export function recoverRemoteBrowserFirstFrame(
         page: token.remotePageId,
         expression: FIRST_FRAME_REPAINT_EXPRESSION
       },
-      { timeoutMs: 5_000, suppressFeatureInteraction: true }
+      { timeoutMs: 5_000, suppressFeatureInteraction: true, signal }
     )
-    .catch(() => {})
-    .then(() => {
-      if (!deps.tokens.isCurrentStreamToken(token)) {
-        return
-      }
-      deps.liveness.waitForRecoveredFrame(() => {
-        if (deps.tokens.isCurrentStreamToken(token)) {
-          deps.handleClosed(true)
-        }
-      })
-    })
+    .then(waitForFrame, waitForFrame)
 }
