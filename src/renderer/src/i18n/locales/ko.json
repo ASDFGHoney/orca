@@ -1442,7 +1442,6 @@
         "c57873d721": "PR이 병합되었습니다",
         "a63b3c159c": "그러면 GitHub의 PR이 업데이트됩니다.",
         "eec3706a6a": "{{value0}} PR #{{value1}}?",
-        "b8c6cbb8c4": "PR {{value0}}에 실패했습니다.",
         "710e47aa06": "PR이 다시 열렸습니다",
         "7aa3b5f706": "PR이 종료되었습니다.",
         "3d77438c92": "그러면 GitHub에서 PR이 다시 열립니다.",
@@ -1541,7 +1540,13 @@
         "dd5d9a4f17": "{{value0}}에 업데이트됨",
         "71a3c0f9d2": "워크스페이스 시작",
         "filesUnavailable": "변경된 파일을 불러오지 못했습니다.",
-        "filesRetry": "Retry"
+        "filesRetry": "Retry",
+        "77482513f8": "닫기",
+        "2f5195c6a0": "다시 열기",
+        "4b8ae7303f": "차이를 불러오지 못했습니다.",
+        "closePullRequestFailed": "PR을 닫지 못했습니다.",
+        "reopenPullRequestFailed": "PR을 다시 열지 못했습니다.",
+        "diffLoadTimedOut": "이 diff를 불러오는 데 시간이 초과되었습니다."
       },
       "QuickOpen": {
         "1dbd3f59ff": "이동",
@@ -2643,7 +2648,7 @@
               "346d409ab2": "agent 선택",
               "0adba8fa0c": "에이전트",
               "ec8f081919": "작업",
-              "ed04233b3e": "빠른 액세스를 위해 terminal 명령이나 agent 프롬프트를 저장하세요.",
+              "ed04233b3e": "저장한 항목은 탭 바 메뉴에 표시되어 한 번의 클릭으로 실행할 수 있습니다.",
               "ca414324ee": "명령 텍스트",
               "dc921c17ee": "프롬프트",
               "5b3f634a55": "빠른 명령 추가",
@@ -3273,7 +3278,9 @@
             "antigravityUsageDetails": "Antigravity 사용량 세부 정보 열기",
             "grokUsageAria": "Grok 사용량 세부 정보 열기",
             "grokUsageMenu": "Grok 사용량",
-            "floatingTerminalNewActivity": "{{label}}, 새 활동"
+            "floatingTerminalNewActivity": "{{label}}, 새 활동",
+            "codexSignInSuccess": "Codex에 로그인했습니다",
+            "codexSignInError": "Codex 로그인에 실패했습니다. 다시 시도해 주세요."
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "계정 연결",
@@ -5320,6 +5327,7 @@
           "codexSystemDefaultNeedsSignIn": "{{value0}}에 대한 Codex 로그인을 찾을 수 없습니다.",
           "codexConfigSyncMissingSource": "Codex is still using the settings it last synced because {{value0}} is missing. Restore that file to resume syncing.",
           "codexConfigSyncBlankSource": "Codex is still using the settings it last synced because {{value0}} is empty. That is expected while a synced folder finishes downloading.",
+          "codexConfigSyncManagedHomeUnavailable": "현재 Orca가 이 계정의 Codex 파일을 읽을 수 없어 설정이 동기화되지 않을 수 있습니다. 바이러스 백신이나 백업 도구가 파일을 잠시 잠근 경우가 많으며, 일반적으로 자동으로 해결됩니다.",
           "codexConfigSyncUnreadableSource": "Codex is still using the settings it last synced because {{value0}} could not be read. Check that file's permissions."
         },
         "AdvancedPane": {
