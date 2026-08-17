@@ -407,7 +407,8 @@ describe('launchWorkItemDirect', () => {
       agentEnv: {},
       sessionOptions: undefined,
       platform: 'win32',
-      isRemote: false
+      isRemote: false,
+      agentStatusHooksEnabled: true
     })
     expect(buildAgentStartupPlan).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -598,7 +599,8 @@ describe('launchWorkItemDirect', () => {
       agentEnv: {},
       sessionOptions: undefined,
       platform: 'linux',
-      isRemote: true
+      isRemote: true,
+      agentStatusHooksEnabled: true
     })
     expect(buildAgentStartupPlan).toHaveBeenCalledWith({
       agent: 'cursor',
@@ -609,6 +611,7 @@ describe('launchWorkItemDirect', () => {
       sessionOptions: undefined,
       platform: 'linux',
       isRemote: true,
+      agentStatusHooksEnabled: true,
       allowEmptyPromptLaunch: true
     })
     expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith(
