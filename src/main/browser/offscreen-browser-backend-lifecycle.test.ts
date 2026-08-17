@@ -108,6 +108,39 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     expect(order).toEqual(['session-cleanup', 'unregister'])
   })
 
+  it('does not let stale close cleanup unregister a replacement page', async () => {
+    let finishCleanup: (() => void) | undefined
+    const cleanupBarrier = new Promise<void>((resolve) => {
+      finishCleanup = resolve
+    })
+    const registrations = new Map<string, number>()
+    const browserManager = {
+      registerOffscreenGuest: vi.fn(
+        ({ browserPageId, webContentsId }: { browserPageId: string; webContentsId: number }) => {
+          registrations.set(browserPageId, webContentsId)
+        }
+      ),
+      unregisterGuest: vi.fn((browserPageId: string, expectedWebContentsId?: number) => {
+        if (registrations.get(browserPageId) === expectedWebContentsId) {
+          registrations.delete(browserPageId)
+        }
+      })
+    }
+    const backend = new OffscreenBrowserBackend(
+      browserManager as never,
+      vi.fn(() => cleanupBarrier)
+    )
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+
+    const close = backend.closeTab('page-1')
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+    finishCleanup?.()
+    await close
+
+    expect(registrations.get('page-1')).toBe(2)
+    expect(backend.getWebContentsId('page-1')).toBe(2)
+  })
+
   it('contains asynchronous cleanup failures during bulk destruction', async () => {
     const cleanupError = new Error('cleanup failed')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
