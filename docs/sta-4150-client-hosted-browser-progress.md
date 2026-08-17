@@ -43,13 +43,13 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence, and locally rebased onto `origin/main@17ef6ccce6`; the preceding implementation-base
+  sequence, and locally rebased onto `origin/main@85565a9302`; the preceding implementation-base
   CI is green and refreshed latest-main CI is pending.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
-  `sta-4150-safety-rebased-validated-cumulative-20260816`. The final implementation tip before this
-  ledger-only update is `d769eaf308`; its only product delta from that safety tree is the
-  CI-proven React render-purity correction described below.
+  `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
+  update is `18a3c873a1`; after the preceding green head it adds only native Windows lifecycle CI
+  coverage and a release-extracted browser-placement compatibility oracle, with no product change.
 - A fresh review reproduced two blockers before publication: an unnegotiated replacement could
   retain old-runtime inventory indefinitely, and an in-flight create could commit after authority
   transition began. The candidate now requires exact reconciliation echo before activating
@@ -256,6 +256,18 @@ Current validation is green on the cumulative tree:
   around upstream crash-breadcrumb imports, without changing STA-4150 behavior. The seven-file
   overlap package passes 99 tests, full Node/CLI/web typecheck and lint pass, and safety tag
   `sta-4150-safety-pre-17e-rebase-20260816` retains the prior tip.
+- The next rebase onto `origin/main@85565a9302` was conflict-free and `git range-diff` marked all 54
+  patches identical, including the new Windows lifecycle CI commit. The six-file upstream overlap
+  package passes 1,190 tests with one intentional skip; full Node/CLI/web typecheck, lint, audits,
+  89 reliability gates, max-lines, bundled skills, and localization pass. Safety tags
+  `sta-4150-safety-pre-windows-electron-ci-20260816` and
+  `sta-4150-safety-pre-9c4-windows-ci-rebase-20260816` retain the preceding tips.
+- The Windows package lane previously omitted the real Electron guest mount/retirement fixture; a
+  workflow contract was red 1/23 before adding it to the native Windows boundary. The contract and
+  fixture pass 24/24 locally, and refreshed Windows CI is pending. A new release-extracted oracle
+  passes 3/3 against published `v1.4.182`: the old schema strips additive placement without changing
+  legacy fields, the release lacks both negotiated capabilities, and the current schema preserves
+  an old request with placement omitted. The combined browser/terminal skew package passes 8/8.
 
 - Latest-main full repository suite: 5,749 files passed, 53,861 tests passed, 126 skipped, zero
   failures.
@@ -281,8 +293,8 @@ Current validation is green on the cumulative tree:
   defects above; all are fixed. Its final post-fix rereview found no remaining proven P0/P1/P2 and
   passed 1,188 focused tests with one intentional skip.
 
-The cumulative tree is rebased onto latest `origin/main@17ef6ccce6`. The implementation tip before
-this ledger-only update is `d769eaf308`. The pre-rebase checkpoint and explicit safety refs
+The cumulative tree is rebased onto latest `origin/main@85565a9302`. The non-ledger tip before this
+update is `18a3c873a1`. The pre-rebase checkpoint and explicit safety refs
 preserve the prior exact validated tree.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, and packaged mixed-release client/server browser
@@ -372,11 +384,11 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                     |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@3ec226167e`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@767b9aca96` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@d402d88897`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@323d347a77`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@bb831583eb`    | Full cumulative and paired E2E proof; latest CI pending     |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@036d7b6475`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@f783806b10` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@11ba439ed0`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@176b9079e8`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@18a3c873a1`    | Full cumulative and paired E2E proof; latest CI pending     |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -840,7 +852,7 @@ Validation and review:
 | Agent/CLI routing and reconciliation                    | Implemented | Bounded automation, lost-ack, replacement, reconnect, and restart gates are green |
 | No client-placement screencast or duplicate server page | Proven      | Headed and headless paired E2E assert zero host guest and no screencast           |
 | Old/mobile/web/ineligible and explicit-server behavior  | Preserved   | Omitted placement stays server-hosted; compatibility and fallback tests are green |
-| Cross-platform and packaged rolling releases            | Partial     | Physical Windows/Linux/mobile and packaged mixed-release journeys remain gaps     |
+| Cross-platform and packaged rolling releases            | Partial     | Released-schema skew is green; native Windows CI and physical/package gaps remain |
 
 ## Remaining implementation order
 
