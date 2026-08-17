@@ -2686,7 +2686,12 @@ describe('OrcaRuntimeService', () => {
       })
       expect((await runtime.listTerminals()).terminals).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ ptyId: 'persisted-pty', connected: true, writable: true })
+          expect.objectContaining({
+            ptyId: 'persisted-pty',
+            connected: true,
+            writable: true,
+            hostPlatform: process.platform
+          })
         ])
       )
     } finally {

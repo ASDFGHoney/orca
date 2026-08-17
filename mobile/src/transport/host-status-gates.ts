@@ -3,11 +3,9 @@ import type { RpcClient } from './rpc-client'
 import type { ConnectionState, RpcSuccess } from './types'
 import { evaluateCompat, type CompatVerdict } from './protocol-compat'
 import type { DesktopStatus } from '../worktree/host-worktree-rpc-types'
-import { readMobileRuntimeHostPlatform } from './mobile-runtime-host-platform'
 
 export type HostStatusGates = {
   hostCapabilities: string[]
-  hostPlatform: NodeJS.Platform | null
   floatingWorkspaceEnabled: boolean
   compatVerdict: CompatVerdict
   statusPending: boolean
@@ -54,7 +52,6 @@ export function useHostStatusGates(args: {
         if (!response.ok) {
           settle({
             hostCapabilities: [],
-            hostPlatform: null,
             floatingWorkspaceEnabled: false,
             compatVerdict: { kind: 'ok' }
           })
@@ -69,7 +66,6 @@ export function useHostStatusGates(args: {
         })
         settle({
           hostCapabilities: status.capabilities ?? [],
-          hostPlatform: readMobileRuntimeHostPlatform(status),
           floatingWorkspaceEnabled: status.floatingWorkspaceEnabled === true,
           compatVerdict: verdict
         })
@@ -87,7 +83,6 @@ export function useHostStatusGates(args: {
         if (!cancelled) {
           settle({
             hostCapabilities: [],
-            hostPlatform: null,
             floatingWorkspaceEnabled: false,
             compatVerdict: { kind: 'ok' }
           })
@@ -104,7 +99,6 @@ export function useHostStatusGates(args: {
   if (!proven) {
     return {
       hostCapabilities: EMPTY_HOST_CAPABILITIES,
-      hostPlatform: null,
       floatingWorkspaceEnabled: false,
       compatVerdict: { kind: 'ok' },
       statusPending: connState === 'connected' && client !== null
@@ -112,7 +106,6 @@ export function useHostStatusGates(args: {
   }
   return {
     hostCapabilities: proven.hostCapabilities,
-    hostPlatform: proven.hostPlatform,
     floatingWorkspaceEnabled: proven.floatingWorkspaceEnabled,
     compatVerdict: proven.compatVerdict,
     // Why (F10): unchanged pending timing — the reconnect refetch is still "unknown", it just no

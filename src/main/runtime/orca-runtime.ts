@@ -32320,7 +32320,8 @@ export class OrcaRuntimeService {
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
-      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
+      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
+      ...this.terminalHostPlatformField(leaf.ptyId)
     }
   }
 
@@ -32337,6 +32338,11 @@ export class OrcaRuntimeService {
     }
     const hostId = fromPtyId ?? this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId)
     return hostId ? { executionHostId: hostId } : {}
+  }
+
+  private terminalHostPlatformField(ptyId: string | null): { hostPlatform?: NodeJS.Platform } {
+    const hostPlatform = this.getPtyExecutionHostMetadata(ptyId).hostPlatform
+    return hostPlatform ? { hostPlatform } : {}
   }
 
   // Returns the worktrees whose stored snapshot object changed during this
@@ -34278,7 +34284,8 @@ export class OrcaRuntimeService {
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
-      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
+      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
+      ...this.terminalHostPlatformField(pty.ptyId)
     }
   }
 

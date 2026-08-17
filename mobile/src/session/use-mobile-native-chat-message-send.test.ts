@@ -50,7 +50,7 @@ describe('useMobileNativeChatMessageSend', () => {
   const mount = (
     readSeededLaunchDraftSeed: () => { text: string; createdAt: number | null } | null,
     agent: string | null = 'claude',
-    hostPlatform: NodeJS.Platform | null = 'darwin'
+    terminalHostPlatform: NodeJS.Platform | null = 'darwin'
   ): void => {
     agentRef.current = agent
     function Probe(): null {
@@ -60,7 +60,7 @@ describe('useMobileNativeChatMessageSend', () => {
         handleRef: { current: 'term' },
         deviceTokenRef: { current: 'device' },
         agentRef,
-        hostPlatform,
+        terminalHostPlatform,
         commandSendRef,
         captureSendOrigin,
         readSeededLaunchDraftSeed,
@@ -80,7 +80,7 @@ describe('useMobileNativeChatMessageSend', () => {
   const sentArgs = (): {
     text?: string
     clearInputFirst?: boolean
-    windowsInputRecordNewline?: string
+    bodyEncoding?: string
     resolvedLaunchDraft?: { text: string; createdAt: number }
   } =>
     sendWithOutcome.mock.calls[0]![0] as {
@@ -142,7 +142,15 @@ describe('useMobileNativeChatMessageSend', () => {
     await act(async () => {
       await api!.send('line one\nline two')
     })
-    expect(sentArgs()).toMatchObject({ windowsInputRecordNewline: 'alt-enter' })
+    expect(sentArgs()).toMatchObject({ bodyEncoding: 'alt-enter' })
+  })
+
+  it('falls back to raw multiline input when the terminal platform is unknown', async () => {
+    mount(() => null, 'codex', null)
+    await act(async () => {
+      await api!.send('line one\nline two')
+    })
+    expect(sentArgs()).toMatchObject({ bodyEncoding: 'raw' })
   })
 
   it('aborts without sending the body when the clear is rejected', async () => {

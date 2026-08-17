@@ -17,6 +17,11 @@ type MobileTerminalClient = {
   type: 'mobile'
 }
 
+export type MobileNativeChatBodyEncoding =
+  | WindowsInputRecordPasteNewline
+  | 'bracketed-paste'
+  | 'raw'
+
 // Why: Ctrl+U kills the TUI's current input line (desktop native chat sends the
 // same byte before its body), so a launch-context prefill parked there cannot
 // concatenate with a mobile chat message. The host writes text bytes verbatim.
@@ -30,10 +35,13 @@ const CLEAR_UNSUBMITTED_INPUT = '\x15'
 /** Match desktop native-chat framing; native chat has no mode/readiness signal (#14888). */
 export function buildMobileNativeChatBodyText(
   text: string,
-  windowsInputRecordNewline?: WindowsInputRecordPasteNewline
+  encoding: MobileNativeChatBodyEncoding = 'bracketed-paste'
 ): string {
-  if (windowsInputRecordNewline) {
-    return encodeWindowsInputRecordPasteText(text, windowsInputRecordNewline)
+  if (encoding === 'alt-enter' || encoding === 'csi-u') {
+    return encodeWindowsInputRecordPasteText(text, encoding)
+  }
+  if (encoding === 'raw') {
+    return sanitizeBracketedPasteText(text)
   }
   if (/[\r\n]/.test(text)) {
     return wrapTerminalBracketedPasteText(text)
@@ -47,7 +55,7 @@ type MobileNativeChatSendArgs = {
   text: string
   enter?: boolean
   rawTerminalInput?: boolean
-  windowsInputRecordNewline?: WindowsInputRecordPasteNewline
+  bodyEncoding?: MobileNativeChatBodyEncoding
   clearInputFirst?: boolean
   /** Exact host launch draft this submitting write resolves when accepted. */
   resolvedLaunchDraft?: { text: string; createdAt: number }
@@ -87,7 +95,7 @@ export async function sendMobileNativeChatMessageWithOutcome(
   try {
     const body = args.rawTerminalInput
       ? args.text
-      : buildMobileNativeChatBodyText(args.text, args.windowsInputRecordNewline)
+      : buildMobileNativeChatBodyText(args.text, args.bodyEncoding)
     const response = await args.client.sendRequest(
       'terminal.send',
       {

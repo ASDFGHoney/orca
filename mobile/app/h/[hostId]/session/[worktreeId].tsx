@@ -151,7 +151,6 @@ import {
 import { MobileBrowserPane } from '../../../../src/browser/MobileBrowserPane'
 import { normalizeBrowserUrl } from '../../../../src/browser/browser-url'
 import { StatusDot } from '../../../../src/components/StatusDot'
-import { useHostProtocolGates } from '../../../../src/components/HostProtocolGate'
 import { ActionSheetModal } from '../../../../src/components/ActionSheetModal'
 import { MobileAgentIcon } from '../../../../src/components/MobileAgentIcon'
 import { TextInputModal } from '../../../../src/components/TextInputModal'
@@ -716,7 +715,6 @@ function FileReader({
 }
 
 export default function SessionScreen() {
-  const { hostPlatform } = useHostProtocolGates()
   const {
     hostId,
     worktreeId,
@@ -960,6 +958,8 @@ export default function SessionScreen() {
   // Why: sidebar resizes change the terminal frame width without a window-dim change; track it so the refit hook re-fits (see terminal-viewport-refit.ts).
   const [terminalFrameWidth, setTerminalFrameWidth] = useState(0)
   const activeSessionTab = sessionTabs.find((tab) => tab.id === activeSessionTabId) ?? null
+  const activeTerminalHostPlatform =
+    terminals.find((terminal) => terminal.handle === activeHandle)?.hostPlatform ?? null
   const {
     clearPendingLiveInputCommit,
     flushPendingLiveInputBeforeExternalSend,
@@ -1105,7 +1105,7 @@ export default function SessionScreen() {
     activeSessionTabId,
     activeHandleRef,
     deviceTokenRef,
-    hostPlatform,
+    terminalHostPlatform: activeTerminalHostPlatform,
     nativeChatTranscriptIsLocalReadable,
     nativeChatInputLeaseReady,
     connState,

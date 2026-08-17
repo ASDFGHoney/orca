@@ -51,6 +51,12 @@ describe('buildMobileNativeChatBodyText', () => {
       'line one\x1b\rline two␛[201~'
     )
   })
+
+  it('keeps raw newlines when the terminal platform is unknown', () => {
+    expect(buildMobileNativeChatBodyText('line one\nline two\x1b[201~', 'raw')).toBe(
+      'line one\nline two␛[201~'
+    )
+  })
 })
 
 describe('sendMobileNativeChatMessage', () => {
