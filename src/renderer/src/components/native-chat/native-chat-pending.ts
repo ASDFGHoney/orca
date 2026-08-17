@@ -106,13 +106,15 @@ function messagesAfterPendingBoundary(
       pending.afterTranscriptHighWater === undefined ||
       transcriptOrder.generation !== pending.afterTranscriptGeneration
     ) {
-      return []
+      // A reconnect can replace local order before the host turn arrives. Fall
+      // back to identity/occurrence matching so the echo cannot strand forever.
+      return messages
     }
-    return messages.filter(
-      (message) =>
-        (transcriptOrder.messageSequenceById.get(message.id) ?? 0) >
-        pending.afterTranscriptHighWater!
-    )
+    const highWater = pending.afterTranscriptHighWater
+    return messages.filter((message) => {
+      const sequence = transcriptOrder.messageSequenceById.get(message.id)
+      return sequence !== undefined && sequence > highWater
+    })
   }
   const boundaryIndex = messages.findIndex((message) => message.id === pending.afterMessageId)
   if (boundaryIndex !== -1) {

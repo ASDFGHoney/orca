@@ -583,7 +583,7 @@ describe('pendingSendsAsMessages', () => {
     ).toEqual([])
   })
 
-  it('keeps an empty-at-send echo when local ordering is absent or replaced', () => {
+  it('retires an empty-at-send echo after reconnect replaces local ordering', () => {
     const pending = [
       {
         ...pendingOf('p1', 'rename it'),
@@ -592,12 +592,13 @@ describe('pendingSendsAsMessages', () => {
         afterTranscriptHighWater: 0
       }
     ]
-    const transcript = [userMessage('u1', 'rename it')]
+    const transcript = [userMessage('u1', 'rename it'), assistantMessage('a1', 'done')]
 
-    expect(pendingSendsAsMessages(pending, transcript)).toHaveLength(1)
-    expect(
-      pendingSendsAsMessages(pending, transcript, transcriptOrder(8, 1, { u1: 1 }))
-    ).toHaveLength(1)
+    expect(pendingSendsAsMessages(pending, transcript)).toEqual([])
+    expect(prunePendingSends(pending, transcript)).toEqual([])
+    const replacedOrder = transcriptOrder(8, 2, { u1: 1, a1: 2 })
+    expect(pendingSendsAsMessages(pending, transcript, replacedOrder)).toEqual([])
+    expect(prunePendingSends(pending, transcript, replacedOrder)).toEqual([])
   })
 
   it('hides only one of two identical pending sends for one real user turn', () => {
@@ -824,14 +825,25 @@ describe('applyCommandMarkerBoundaries', () => {
     ).toEqual(messages)
   })
 
-  it('hides conservatively when a paged boundary is missing', () => {
+  it('shows rows when a clear boundary is unavailable or its generation was replaced', () => {
     const messages = [userMessage('older', 'older'), userMessage('newer', 'newer')]
+    const marker = {
+      id: 'c1',
+      command: '/clear',
+      sentAt: 10,
+      clearAfterMessageId: 'missing',
+      clearTranscriptGeneration: 3,
+      clearTranscriptHighWater: 0
+    }
 
+    expect(applyCommandMarkerBoundaries(messages, [marker])).toEqual(messages)
     expect(
-      applyCommandMarkerBoundaries(messages, [
-        { id: 'c1', command: '/clear', sentAt: 10, clearAfterMessageId: 'missing' }
-      ])
-    ).toEqual([])
+      applyCommandMarkerBoundaries(
+        messages,
+        [marker],
+        transcriptOrder(4, 2, { older: 1, newer: 2 })
+      )
+    ).toEqual(messages)
   })
 
   it('shows post-boundary messages when the host clock is behind clear sentAt', () => {
@@ -871,7 +883,7 @@ describe('applyCommandMarkerBoundaries', () => {
     ).toEqual(['post-clear'])
   })
 
-  it('conservatively hides rows for a legacy clear marker without a boundary', () => {
+  it('shows rows for a legacy clear marker without a recoverable boundary', () => {
     const messages = [
       { ...userMessage('before', 'old'), timestamp: 5 },
       { ...userMessage('after', 'new'), timestamp: 20 }
@@ -880,7 +892,7 @@ describe('applyCommandMarkerBoundaries', () => {
       applyCommandMarkerBoundaries(messages, [{ id: 'c1', command: '/clear', sentAt: 10 }]).map(
         (message) => message.id
       )
-    ).toEqual([])
+    ).toEqual(['before', 'after'])
   })
 })
 

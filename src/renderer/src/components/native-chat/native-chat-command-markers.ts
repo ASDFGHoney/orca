@@ -133,14 +133,15 @@ export function applyCommandMarkerBoundaries(
     clearMarker.clearTranscriptGeneration === transcriptOrder.generation &&
     clearMarker.clearTranscriptHighWater !== undefined
   ) {
-    return messages.filter(
-      (message) =>
-        (transcriptOrder.messageSequenceById.get(message.id) ?? 0) >
-        clearMarker.clearTranscriptHighWater!
-    )
+    const highWater = clearMarker.clearTranscriptHighWater
+    return messages.filter((message) => {
+      const sequence = transcriptOrder.messageSequenceById.get(message.id)
+      return sequence !== undefined && sequence > highWater
+    })
   }
   // A missing boundary can mean an empty read, pagination, or replacement.
-  return []
+  // Showing rows keeps the user recoverable; blanking here can persist forever.
+  return messages as NativeChatMessage[]
 }
 
 /** Render command markers as compact `system` messages. The `system` role draws
