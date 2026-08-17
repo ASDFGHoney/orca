@@ -490,7 +490,12 @@ export class ClaudeRuntimeAuthService {
         credentialsJson = guardedMaterialization.credentialsJson
       }
     }
-    if (!preferManagedSnapshot && process.platform === 'darwin' && writeRuntimeKeychain) {
+    if (
+      !preferManagedSnapshot &&
+      process.platform === 'darwin' &&
+      writeRuntimeKeychain &&
+      candidateProvenance !== 'unverified'
+    ) {
       const finalSharedMaterialization = await this.prepareMonotonicRuntimeMaterialization(
         activeAccount,
         credentialsJson,
@@ -530,6 +535,11 @@ export class ClaudeRuntimeAuthService {
         credentialsJson,
         expectedRuntimeFileCredentials
       )
+    }
+    if (!runtimeFileUnchanged) {
+      this.lastSyncedAccountId = activeAccount.id
+      this.hasMaterializedRuntimeAuth = false
+      return
     }
     if (process.platform === 'darwin' && writeRuntimeKeychain && runtimeFileUnchanged) {
       // Why: Claude Code 2.1+ reads the scoped service, older builds the legacy unsuffixed one; runtime switching must satisfy both.
@@ -1183,7 +1193,12 @@ export class ClaudeRuntimeAuthService {
       return null
     }
     if (process.platform === 'darwin') {
-      return readManagedClaudeKeychainCredentials(account.id)
+      try {
+        return await readManagedClaudeKeychainCredentials(account.id)
+      } catch {
+        // Why: a locked managed Keychain must not prevent launch when the owned file copy is readable.
+        return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+      }
     }
     return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
   }
@@ -2174,9 +2189,17 @@ export class ClaudeRuntimeAuthService {
       return true
     }
     if (expectedContents !== undefined) {
-      const replaced = writeFileAtomicallyIfUnchanged(credentialsPath, expectedContents, contents, {
-        mode: 0o600
-      })
+      let replaced: boolean
+      try {
+        replaced = writeFileAtomicallyIfUnchanged(credentialsPath, expectedContents, contents, {
+          mode: 0o600
+        })
+      } catch {
+        console.warn(
+          '[claude-runtime-auth] Skipping shared Claude credential write because guarded publication is unavailable'
+        )
+        return false
+      }
       if (!replaced) {
         console.warn(
           '[claude-runtime-auth] Skipping shared Claude credential write because it changed during publication'

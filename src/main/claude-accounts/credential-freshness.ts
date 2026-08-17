@@ -2,6 +2,8 @@
 
 export type CredentialWriteDecision = 'write' | 'keep-existing'
 
+const MAX_TRUSTED_EXPIRY_MS = 100_000_000_000_000
+
 export function readCredentialExpiresAt(credentialsJson: string): number | null {
   const oauth = readOauthRecord(credentialsJson)
   if (!oauth) {
@@ -16,7 +18,8 @@ export function readCredentialExpiresAt(credentialsJson: string): number | null 
     return null
   }
   // Why: older producers used epoch seconds while current Claude uses epoch milliseconds.
-  return value > 0 && value < 100_000_000_000 ? value * 1000 : value
+  const normalized = value > 0 && value < 100_000_000_000 ? value * 1000 : value
+  return normalized <= MAX_TRUSTED_EXPIRY_MS ? normalized : null
 }
 
 /**

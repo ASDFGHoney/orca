@@ -225,4 +225,8 @@ describe('credential-freshness', () => {
     expect(pickFreshestCredentialsJson([numericString, finite])).toBe(numericString)
     expect(pickFreshestCredentialsJson([finite, numericString])).toBe(numericString)
   })
+
+  it('does not trust absurd far-future expiry values', () => {
+    expect(readCredentialExpiresAt(credentials({ expiresAt: 9_000_000_000_000_000 }))).toBeNull()
+  })
 })

@@ -611,7 +611,7 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
 
     await service.prepareForClaudeLaunch()
 
-    expect(readActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledTimes(4)
+    expect(readActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledTimes(2)
   })
 
   it('adopts a later observed same-account refresh with a shorter TTL', async () => {
