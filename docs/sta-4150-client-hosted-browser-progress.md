@@ -43,14 +43,10 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@e16a22ef58`. Range-diff preserves
-  the 68 preceding patches except the expected deferred-test signature context and the additive
-  activation-manifest composition; the new lifecycle fix is the only new functional patch.
-  The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
-  #14956, #14957 pass 46. The refreshed substantive PR-check runs are also green on all five
-  rebased heads, as are the replacement computer-use runs. GitHub's #14954 rollup still counts an
-  immediately cancelled duplicate run and its failed aggregate `verify`; `gh pr checks` reports
-  the superseding 46 checks passed and five intentional skips.
+  sequence. The current local series is rebased onto `origin/main@88b1a69824`; range-diff marks all
+  71 cumulative patches identical. The preceding published heads are green: #14953 and #14955
+  pass 43 required checks, while #14954, #14956, and #14957 pass 46. The rewritten heads require
+  fresh CI after publication; no PR has been merged or marked ready.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -368,18 +364,25 @@ boundary` successfully; its Windows package boundary also passed before post-job
   passes both production journeys: headed paired Electron and real headless `orca serve`, with
   client ownership, no server duplicate or screencast, local snapshot automation, new-page-only
   disablement, and server fallback. `test-results/.last-run.json` records `status: passed`.
+- The later rebase onto `origin/main@88b1a69824` is conflict-free and preserves all 71 patches
+  exactly by range-diff. The upstream overlap is limited to runtime/session-tab files for agent
+  completion state; the combined latest-main lifecycle, placement, and wire gate passes 8 files /
+  72 tests.
 
-The cumulative local tree is rebased onto `origin/main@e16a22ef58`. Safety refs
+The cumulative local tree is rebased onto `origin/main@88b1a69824`. Safety refs
 `sta-4150-safety-pre-21ed-main-rebase-20260816` and
 `sta-4150-safety-pre-b6d-main-rebase-20260816` preserve the preceding reviewed tips. All 68
 preceding patches retain their behavior by `git range-diff`; the two contextual diffs are the
 deferred-test helper signature and the activation manifest composing the new lifecycle evidence.
 The new immediate-proxy lifecycle commit sits between #14955 and the unchanged command/activation
 behavior above it.
-Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
-ordering, physical mobile-client validation, packaged Windows/Linux skew, and broader live network
-containment beyond the current HTTP/DNS routes. Deterministic WSL, SSH, folder-workspace,
-git-worktree, browserless, mixed-version, packaged-macOS, and package-contract evidence is green.
+The latest rebase preserves that complete 71-patch result exactly. Remaining explicit validation
+gaps are physical Windows and Linux Electron ordering, physical mobile-client validation, packaged
+Windows/Linux skew, spontaneous worker timing across platforms, broader direct-egress containment,
+the joined terminal-link/no-reconnect assertion, local-input and zero-screencast counters, large
+binary-result secondary transport, and mobile mirroring transport. Deterministic WSL, SSH,
+folder-workspace, git-worktree, browserless, mixed-version, packaged-macOS, and package-contract
+evidence is green.
 
 The remaining ownership work, in execution order, is:
 
@@ -464,13 +467,13 @@ ownership.
 
 ### Landing stack
 
-| Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                     |
-| ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@73b93bd627`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@2915411cfb` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@2024a2d5d4`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@1d9a7b1a2f`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@ee82963935`    | Full cumulative and paired E2E proof; latest CI pending     |
+| Order | Draft PR                                              | Latest-main implementation head                     | Validation at layer tip                                    |
+| ----- | ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@982dae1e52`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@f41cf97605` | Typecheck, routing and transport suites; CI pending         |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@d2ece7c976`    | 28 exact and 123 cumulative lifecycle tests; CI pending     |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@ab29c016a2`     | Typecheck and authority/reconciliation suites; CI pending   |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@10b791cf52`    | Full cumulative and paired E2E proof; CI pending            |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1370,6 +1373,13 @@ topology, versions, and explicit gaps at every later checkpoint.
   transport, added Electron browser capabilities only for Electron callers, preserved upstream
   abort semantics, and retained both renderer bootstrap installers. No PR was merged or marked
   ready, no superseded draft was closed, and Linear remained In Progress.
+- Updated #14955 and #14957 descriptions with the immediate-proxy lifecycle ordering, the real
+  two-launch persisted-worker oracle, current validation totals, and explicit residual release
+  gaps. Rebased all five draft layers onto `origin/main@88b1a69824`; range-diff marks all 71 patches
+  identical, and the latest-main overlap/lifecycle/wire gate passes 8 files / 72 tests. Resubmitted
+  stack #14958, updated the Orca worktree checkpoint, and posted one STA-4150 checkpoint
+  (`b0051172-e1a4-445a-bbe8-db5f6de27498`) while leaving every PR draft and the ticket In Progress.
+  No PR was merged or marked ready.
 
 ## Completion rule
 
