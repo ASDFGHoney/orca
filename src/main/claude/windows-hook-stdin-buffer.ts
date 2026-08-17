@@ -1,6 +1,10 @@
+import { MANAGED_HOOK_TIMEOUT_MILLISECONDS } from '../agent-hooks/installer-utils'
+
 export const WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV = 'ORCA_AGENT_HOOK_PAYLOAD_FILE'
-export const WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS = 1_000
-export const WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS = 1_500
+export const WINDOWS_CLAUDE_HOOK_DESCENDANT_BUDGET_MILLISECONDS = 3_000
+export const WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS =
+  MANAGED_HOOK_TIMEOUT_MILLISECONDS - WINDOWS_CLAUDE_HOOK_DESCENDANT_BUDGET_MILLISECONDS
+// Why: the listener rejects request bodies above the same 1 MB ceiling.
 export const WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES = 1_000_000
 
 // Why (#13285): providers can leave hook stdin open after writing JSON, so EOF is not a safe boundary.
@@ -27,7 +31,7 @@ export function buildWindowsClaudeHookStdinBuffer(scriptInvocation: string): str
     '    $t = New-Object System.Threading.CancellationTokenSource',
     '    try {',
     '      $r = $i.ReadAsync($b, 0, [Math]::Min($b.Length, $m), $t.Token)',
-    `      if (-not $r.Wait([Math]::Min(${WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS}, $u))) { $t.Cancel(); break }`,
+    '      if (-not $r.Wait($u)) { $t.Cancel(); break }',
     '      $n = $r.Result',
     '    } finally {',
     '      $t.Dispose()',

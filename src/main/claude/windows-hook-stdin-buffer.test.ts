@@ -8,6 +8,7 @@ import {
   buildWindowsAgentHookCurlPostCommand
 } from '../agent-hooks/installer-utils'
 import { buildWindowsHookStdinDrainEpilogue } from '../agent-hooks/hook-stdin-contract'
+import { HOOK_REQUEST_MAX_BYTES } from '../../shared/agent-hook-listener'
 import {
   CLAUDE_EVENTS,
   CLAUDE_HOOK_SETTINGS,
@@ -17,7 +18,7 @@ import {
 } from './hook-settings'
 import {
   WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV,
-  WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS,
+  WINDOWS_CLAUDE_HOOK_DESCENDANT_BUDGET_MILLISECONDS,
   WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES,
   WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS,
   buildWindowsClaudeHookStdinBuffer
@@ -77,14 +78,17 @@ describe('Windows Claude hook stdin buffer', () => {
     const command = buildWindowsClaudeHookStdinBuffer('& $scriptPath')
 
     expect(command).toContain('$i.ReadAsync')
-    expect(command).toContain(
-      `$r.Wait([Math]::Min(${WINDOWS_CLAUDE_HOOK_STDIN_IDLE_TIMEOUT_MILLISECONDS}, $u))`
-    )
+    expect(command).toContain('$r.Wait($u)')
     expect(command).toContain(
       `$w.ElapsedMilliseconds -lt ${WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS}`
     )
     expect(command).toContain('$t.Cancel()')
     expect(command).toContain(`$p.Length -lt ${WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES}`)
+    expect(WINDOWS_CLAUDE_HOOK_STDIN_MAX_BYTES).toBe(HOOK_REQUEST_MAX_BYTES)
+    expect(
+      WINDOWS_CLAUDE_HOOK_STDIN_TOTAL_TIMEOUT_MILLISECONDS +
+        WINDOWS_CLAUDE_HOOK_DESCENDANT_BUDGET_MILLISECONDS
+    ).toBe(MANAGED_HOOK_TIMEOUT_SECONDS * 1_000)
     expect(command).toContain("if (-not $c -or $x) { Write-Output '{}'; exit 0 }")
     expect(command).toContain('ConvertFrom-Json')
     expect(command).toContain('[System.IO.FileOptions]::DeleteOnClose')
@@ -172,7 +176,7 @@ describe('Windows Claude hook stdin buffer', () => {
         const split = payload.indexOf(',') + 1
         const result = await runWindowsHook(hook.command, env, [
           { delay: 0, value: payload.slice(0, split) },
-          { delay: 300, value: payload.slice(split) }
+          { delay: 1_200, value: payload.slice(split) }
         ])
         expect(result.code).toBe(0)
         expect(result.stdout.trim()).toBe('{}')
