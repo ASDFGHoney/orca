@@ -16512,6 +16512,49 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  // Why: the leaf poll carries its own copy of the quiet-foreground guard, and only the PTY
+  // copy was pinned — deleting the leaf one left all 1176 tests green. A visible tab is the
+  // shape `orca terminal create` produces, so this is the branch real dispatches take.
+  it('does not report tui-idle from quiet foreground on a leaf while the stream reports working', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => 'claude'
+      })
+      // No OSC 0 title, so leaf.lastAgentStatus stays null and the foreground branch is live.
+      syncSinglePty(runtime, 'pty-1', { tabTitle: 'Codex', paneTitle: null })
+      runtime.onPtyData(
+        'pty-1',
+        '\x1b]9999;{"state":"working","agentType":"claude"}\x07starting up\n',
+        Date.now()
+      )
+      const [terminal] = (await runtime.listTerminals()).terminals
+
+      const waitPromise = runtime.waitForTerminal(terminal.handle, {
+        condition: 'tui-idle',
+        timeoutMs: 20_000
+      })
+      let settled = false
+      void waitPromise.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        }
+      )
+      // Well past TUI_IDLE_QUIESCENCE_MS: a quiet non-shell foreground would resolve here.
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      expect(settled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // Why: this is the orchestration worker-readiness shape. `startWorker` waits tui-idle on a
   // freshly launched agent, so the pre-registration fast path can never satisfy it — it always
   // registers. Codex announces readiness in its BODY banner, not an OSC title, so no title
