@@ -11,8 +11,11 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
 }))
 
 const { ensureRetiredWorktreeNamesBackfilled } = await import('./worktree-name-retirement')
-const { RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS, RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS } =
-  await import('./worktree-retirement-backfill-scan')
+const {
+  RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS,
+  RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS,
+  resetRetirementBackfillScanStateForTests
+} = await import('./worktree-retirement-backfill-scan')
 
 const repo = {
   id: 'repo-a',
@@ -38,6 +41,8 @@ describe('retirement backfill against a stalled listing', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     readdirMock.mockReset()
+    // The stalled `readdir` of the previous test never settles, so its slot would leak forward.
+    resetRetirementBackfillScanStateForTests()
   })
 
   afterEach(() => {

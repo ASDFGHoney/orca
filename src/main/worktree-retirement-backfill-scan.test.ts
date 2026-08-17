@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS,
   RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS,
   RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS,
+  getOutstandingRetirementBackfillScanCount,
+  resetRetirementBackfillScanStateForTests,
   runRetirementBackfillScan
 } from './worktree-retirement-backfill-scan'
 
@@ -17,6 +20,8 @@ function stallingScan(): { run: () => Promise<Set<string>>; finish: (names: stri
 describe('runRetirementBackfillScan', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    // A stalled scan is never settled by the test that started it, so its slot would leak forward.
+    resetRetirementBackfillScanStateForTests()
   })
 
   afterEach(() => {
@@ -79,6 +84,47 @@ describe('runRetirementBackfillScan', () => {
     await settled
 
     await expect(runRetirementBackfillScan(store, 'healthy-ns', healthy)).resolves.toEqual(
+      new Set(['nautilus'])
+    )
+  })
+
+  it('stops stacking listings once the abandoned ones reach the cap', async () => {
+    // The deadline abandons a listing, it cannot cancel one. Without a cap every lapsed backoff
+    // stacks another stuck `readdir` on the same wedged mount until the libuv pool is starved.
+    const stalls = Array.from({ length: RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS }, stallingScan)
+    for (const [index, stall] of stalls.entries()) {
+      const pending = runRetirementBackfillScan({}, `ns-${index}`, stall.run)
+      const settled = expect(pending).rejects.toThrow(/exceeded/)
+      await vi.advanceTimersByTimeAsync(RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS)
+      await settled
+    }
+    expect(getOutstandingRetirementBackfillScanCount()).toBe(
+      RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS
+    )
+
+    const overflow = vi.fn(async () => new Set(['nautilus']))
+    await expect(runRetirementBackfillScan({}, 'ns-overflow', overflow)).rejects.toThrow(/deferred/)
+    expect(overflow).not.toHaveBeenCalled()
+    expect(getOutstandingRetirementBackfillScanCount()).toBe(
+      RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS
+    )
+  })
+
+  it('frees the slot when an abandoned listing finally settles, so scanning resumes', async () => {
+    const stalls = Array.from({ length: RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS }, stallingScan)
+    for (const [index, stall] of stalls.entries()) {
+      const pending = runRetirementBackfillScan({}, `ns-${index}`, stall.run)
+      const settled = expect(pending).rejects.toThrow(/exceeded/)
+      await vi.advanceTimersByTimeAsync(RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS)
+      await settled
+    }
+
+    // The mount comes back and the kernel releases the abandoned call.
+    stalls[0].finish([])
+    await vi.advanceTimersByTimeAsync(0)
+
+    const recovered = vi.fn(async () => new Set(['nautilus']))
+    await expect(runRetirementBackfillScan({}, 'ns-recovered', recovered)).resolves.toEqual(
       new Set(['nautilus'])
     )
   })
