@@ -59,6 +59,11 @@ export function reportedHasMore(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
 }
 const PAGE = 60
+// Must not exceed the host's own clamp (`MOBILE_NATIVE_CHAT_MAX_WINDOW`,
+// src/main/runtime/rpc/methods/native-chat.ts). Past that the host keeps
+// answering `hasMore: true` while returning the same capped tail, so raising
+// this alone leaves a "Load earlier" button that re-reads the whole window on
+// every press and never loads anything.
 const MAX_MESSAGES = 2000
 
 type ReadSessionResult =
