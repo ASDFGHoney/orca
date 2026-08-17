@@ -481,6 +481,7 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
       browserPageId,
       placement
     }))
+    const requireClientPage = vi.fn(() => registry.getPage('page-client')!.placement)
     const completePageRetirement = vi.fn(() => true)
     const retireRuntimeOwnedBrowserSessionTab = vi.fn()
     const notifyHeadlessBrowserSessionTabsChanged = vi.fn()
@@ -493,6 +494,7 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
             authorityRuntimeId: 'runtime-a',
             authorityEpoch: 'epoch-a',
             issueClientPageCommand,
+            requireClientPage,
             beginPageRetirement,
             completePageRetirement
           }) as never,

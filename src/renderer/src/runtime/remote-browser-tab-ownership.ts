@@ -5,6 +5,41 @@ type RemoteBrowserTabOwnershipState = Pick<
   'browserPagesByWorkspace' | 'remoteBrowserPageHandlesByPageId'
 >
 
+export type BrowserWorkspaceRemoteOwnership =
+  | { kind: 'none' }
+  | { kind: 'exact'; environmentId: string }
+  | { kind: 'ambiguous' }
+
+export function getBrowserWorkspaceRemoteOwnership(
+  state: RemoteBrowserTabOwnershipState,
+  workspaceId: string
+): BrowserWorkspaceRemoteOwnership {
+  const environmentIds = new Set<string>()
+  for (const page of state.browserPagesByWorkspace[workspaceId] ?? []) {
+    const environmentId =
+      state.remoteBrowserPageHandlesByPageId[page.id]?.environmentId?.trim() ||
+      page.browserRuntimeEnvironmentId?.trim()
+    if (environmentId) {
+      environmentIds.add(environmentId)
+    }
+  }
+  if (environmentIds.size === 0) {
+    return { kind: 'none' }
+  }
+  if (environmentIds.size > 1) {
+    return { kind: 'ambiguous' }
+  }
+  return { kind: 'exact', environmentId: [...environmentIds][0]! }
+}
+
+export function getBrowserWorkspaceRemoteOwnerEnvironmentId(
+  state: RemoteBrowserTabOwnershipState,
+  workspaceId: string
+): string | null {
+  const ownership = getBrowserWorkspaceRemoteOwnership(state, workspaceId)
+  return ownership.kind === 'exact' ? ownership.environmentId : null
+}
+
 export function browserWorkspaceHasRemoteOwner(
   state: RemoteBrowserTabOwnershipState,
   workspaceId: string,

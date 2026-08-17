@@ -92,12 +92,12 @@ function harness() {
     authorityRuntimeId: 'runtime-a',
     authorityEpoch: 'epoch-a',
     getPlacement: vi.fn(() => placement),
-    beginPageRetirement: vi.fn(
-      (browserPageId: string, expected: RuntimeBrowserClientPlacement) => ({
-        browserPageId,
-        placement: expected
-      })
-    ),
+    beginPageRetirement: vi.fn((browserPageId: string, expected: RuntimeBrowserClientPlacement) => {
+      if (expected !== placement) {
+        throw new Error('browser_page_placement_stale')
+      }
+      return { browserPageId, placement: expected }
+    }),
     completePageRetirement: vi.fn(() => {
       placement = undefined
       return true

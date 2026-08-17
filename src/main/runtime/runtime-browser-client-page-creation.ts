@@ -66,7 +66,10 @@ export async function navigateRuntimeBrowserClientPage(
 
 export async function closeRuntimeBrowserClientPage(
   authority: RuntimeBrowserClientPageAuthority &
-    Pick<BrowserHostLeaseRegistry, 'beginPageRetirement' | 'completePageRetirement'>,
+    Pick<
+      BrowserHostLeaseRegistry,
+      'beginPageRetirement' | 'completePageRetirement' | 'requireClientPage'
+    >,
   input: RuntimeBrowserClientPageRetirement
 ): Promise<void> {
   const issued = authority.issueClientPageCommand(
@@ -93,7 +96,15 @@ export async function closeRuntimeBrowserClientPage(
   if (result.status === 'failed') {
     throw new Error(result.errorCode)
   }
-  const retirement = authority.beginPageRetirement(input.browserPageId, input.placement)
+  const canonicalPlacement = authority.requireClientPage({
+    authorityRuntimeId: authority.authorityRuntimeId,
+    authorityEpoch: authority.authorityEpoch,
+    browserPageId: input.browserPageId,
+    browserHostClientId: input.placement.browserHostClientId,
+    browserHostGeneration: input.placement.browserHostGeneration,
+    pageHostGeneration: input.placement.pageHostGeneration
+  })
+  const retirement = authority.beginPageRetirement(input.browserPageId, canonicalPlacement)
   if (!authority.completePageRetirement(retirement)) {
     throw new Error('browser_page_placement_stale')
   }

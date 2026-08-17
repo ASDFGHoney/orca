@@ -90,7 +90,7 @@ async function recoverPage(
       assertInventoryAuthority(page, inventory, options.lease)
       await closeUnavailablePage(options.authority, page)
     } else {
-      const retirement = options.authority.beginPageRetirement(page.browserPageId, page.placement)
+      const retirement = options.authority.beginPageRetirement(page.browserPageId, currentPlacement)
       if (!options.authority.completePageRetirement(retirement)) {
         throw new Error('browser_page_placement_stale')
       }
@@ -140,7 +140,11 @@ async function closeUnavailablePage(
   if (result.status === 'failed') {
     throw new Error(result.errorCode)
   }
-  const retirement = authority.beginPageRetirement(page.browserPageId, page.placement)
+  const currentPlacement = authority.getPlacement(page.browserPageId)
+  if (!currentPlacement || !sameRuntimeBrowserPlacement(currentPlacement, page.placement)) {
+    throw new Error('browser_page_placement_stale')
+  }
+  const retirement = authority.beginPageRetirement(page.browserPageId, currentPlacement)
   if (!authority.completePageRetirement(retirement)) {
     throw new Error('browser_page_placement_stale')
   }

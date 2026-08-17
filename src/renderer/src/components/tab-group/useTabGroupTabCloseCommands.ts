@@ -9,7 +9,7 @@ import {
 } from '../../runtime/web-runtime-session'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-ownership'
+import { getBrowserWorkspaceRemoteOwnership } from '@/runtime/remote-browser-tab-ownership'
 
 export function useTabGroupTabCloseCommands({
   worktreeId,
@@ -86,18 +86,28 @@ export function useTabGroupTabCloseCommands({
       if (item.contentType === 'browser') {
         const browserState = useAppStore.getState()
         const hasLocalPages = (browserState.browserPagesByWorkspace[item.entityId] ?? []).length > 0
+        const remoteOwnership = getBrowserWorkspaceRemoteOwnership(browserState, item.entityId)
+        if (remoteOwnership.kind === 'ambiguous') {
+          return
+        }
+        const remoteOwnerEnvironmentId =
+          remoteOwnership.kind === 'exact' ? remoteOwnership.environmentId : null
+        const browserRuntimeEnvironmentId = remoteOwnerEnvironmentId ?? runtimeEnvironmentId
         // Why: host-close a remote-owned browser or a pageless host-mirror (else un-closable); local fallbacks have pages so stay local.
         const shouldCloseOnHost =
-          isWebRuntimeSessionActive(runtimeEnvironmentId) &&
-          (browserWorkspaceHasRemoteOwner(browserState, item.entityId, runtimeEnvironmentId) ||
-            !hasLocalPages)
+          isWebRuntimeSessionActive(browserRuntimeEnvironmentId) &&
+          (remoteOwnerEnvironmentId !== null || !hasLocalPages)
         if (shouldCloseOnHost) {
           void closeWebRuntimeSessionTab({
             worktreeId,
             tabId: item.id,
-            environmentId: runtimeEnvironmentId,
+            environmentId: browserRuntimeEnvironmentId,
             reason: 'user'
           })
+          if (!hasLocalPages) {
+            closeUnifiedTab(item.id)
+          }
+          return
         }
         destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
         closeBrowserTab(item.entityId)
@@ -147,17 +157,27 @@ export function useTabGroupTabCloseCommands({
           const browserState = useAppStore.getState()
           const hasLocalPages =
             (browserState.browserPagesByWorkspace[item.entityId] ?? []).length > 0
+          const remoteOwnership = getBrowserWorkspaceRemoteOwnership(browserState, item.entityId)
+          if (remoteOwnership.kind === 'ambiguous') {
+            continue
+          }
+          const remoteOwnerEnvironmentId =
+            remoteOwnership.kind === 'exact' ? remoteOwnership.environmentId : null
+          const browserRuntimeEnvironmentId = remoteOwnerEnvironmentId ?? runtimeEnvironmentId
           const shouldCloseOnHost =
-            isWebRuntimeSessionActive(runtimeEnvironmentId) &&
-            (browserWorkspaceHasRemoteOwner(browserState, item.entityId, runtimeEnvironmentId) ||
-              !hasLocalPages)
+            isWebRuntimeSessionActive(browserRuntimeEnvironmentId) &&
+            (remoteOwnerEnvironmentId !== null || !hasLocalPages)
           if (shouldCloseOnHost) {
             void closeWebRuntimeSessionTab({
               worktreeId,
               tabId: item.id,
-              environmentId: runtimeEnvironmentId,
+              environmentId: browserRuntimeEnvironmentId,
               reason: 'user'
             })
+            if (!hasLocalPages) {
+              closeUnifiedTab(item.id)
+            }
+            continue
           }
           destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
           closeBrowserTab(item.entityId)

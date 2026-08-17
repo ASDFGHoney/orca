@@ -184,7 +184,10 @@ import { closeTerminalTab } from './terminal/terminal-tab-actions'
 import { translate } from '@/i18n/i18n'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
-import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-ownership'
+import {
+  browserWorkspaceHasRemoteOwner,
+  getBrowserWorkspaceRemoteOwnership
+} from '@/runtime/remote-browser-tab-ownership'
 import {
   combineTerminalWorktreeParkIds,
   useManualTerminalWorktreeParking
@@ -1753,7 +1756,14 @@ function Terminal(): React.JSX.Element | null {
       if (isPinnedVisibleTab(state, owningWorktreeId, tabId)) {
         return
       }
-      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(owningWorktreeId)
+      const remoteOwnership = getBrowserWorkspaceRemoteOwnership(state, tabId)
+      if (remoteOwnership.kind === 'ambiguous') {
+        return
+      }
+      const runtimeEnvironmentId =
+        remoteOwnership.kind === 'exact'
+          ? remoteOwnership.environmentId
+          : getActiveWorktreeRuntimeEnvironmentId(owningWorktreeId)
       if (
         isWebRuntimeSessionActive(runtimeEnvironmentId) &&
         browserWorkspaceHasRemoteOwner(state, tabId, runtimeEnvironmentId)
@@ -1838,7 +1848,17 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
-        const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+        const remoteOwnership =
+          unifiedTab?.contentType === 'browser'
+            ? getBrowserWorkspaceRemoteOwnership(state, unifiedTab.entityId)
+            : null
+        if (remoteOwnership?.kind === 'ambiguous') {
+          continue
+        }
+        const runtimeEnvironmentId =
+          remoteOwnership?.kind === 'exact'
+            ? remoteOwnership.environmentId
+            : getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
         if (
           isWebRuntimeSessionActive(runtimeEnvironmentId) &&
           (unifiedTab?.contentType === 'terminal' ||
