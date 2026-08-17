@@ -66,7 +66,7 @@ describe('SSH worktree push-target adapter', () => {
     expect(provider.exec).not.toHaveBeenCalled()
   })
 
-  it('rejects an old relay before touching a same-repo target', async () => {
+  it('allows a same-repo target on an old relay without probing mutation support', async () => {
     const provider = createProvider({ origin: 'git@github.com:stablyai/orca.git' })
     provider.ensureWorktreePushTargetMutationSupport.mockRejectedValueOnce(
       new SshWorktreePushTargetRelayUnavailableError('reconnect')
@@ -79,8 +79,37 @@ describe('SSH worktree push-target adapter', () => {
         { remoteName: 'origin', branchName: 'feature' },
         () => false
       )
+    ).resolves.toEqual({ remoteName: 'origin', branchName: 'feature' })
+    expect(provider.ensureWorktreePushTargetMutationSupport).not.toHaveBeenCalled()
+    expect(provider.exec).toHaveBeenCalledWith(
+      ['check-ref-format', '--branch', 'feature'],
+      repoPath
+    )
+    expect(provider.addWorktreePushTargetRemote).not.toHaveBeenCalled()
+    expect(provider.fetchRemoteTrackingRef).toHaveBeenCalledWith(
+      repoPath,
+      'origin',
+      'feature',
+      'refs/remotes/origin/feature',
+      { skipAutoMaintenance: true }
+    )
+  })
+
+  it('rejects an old relay before adding a missing remote', async () => {
+    const provider = createProvider({ origin: 'git@github.com:stablyai/orca.git' })
+    provider.ensureWorktreePushTargetMutationSupport.mockRejectedValueOnce(
+      new SshWorktreePushTargetRelayUnavailableError('reconnect')
+    )
+
+    await expect(
+      prepareWorktreePushTargetWithGit(
+        createSshWorktreePushTargetGit(provider as unknown as SshGitProvider),
+        repoPath,
+        target,
+        () => false
+      )
     ).rejects.toThrow('reconnect')
-    expect(provider.exec).not.toHaveBeenCalled()
+    expect(provider.ensureWorktreePushTargetMutationSupport).toHaveBeenCalledOnce()
     expect(provider.addWorktreePushTargetRemote).not.toHaveBeenCalled()
     expect(provider.fetchRemoteTrackingRef).not.toHaveBeenCalled()
   })
@@ -93,6 +122,7 @@ describe('SSH worktree push-target adapter', () => {
       target,
       () => false
     )
+    expect(provider.ensureWorktreePushTargetMutationSupport).toHaveBeenCalledOnce()
     expect(provider.addWorktreePushTargetRemote).toHaveBeenCalledWith(repoPath, target)
     expect(provider.exec).not.toHaveBeenCalledWith(
       ['remote', 'add', target.remoteName, target.remoteUrl],
@@ -113,6 +143,7 @@ describe('SSH worktree push-target adapter', () => {
     const git = createSshWorktreePushTargetGit(provider as unknown as SshGitProvider)
     const prepared = await prepareWorktreePushTargetWithGit(git, repoPath, target, () => false)
     await configureCreatedWorktreePushTargetWithGit(git, '/remote/repo-fix', 'local-fix', prepared)
+    expect(provider.ensureWorktreePushTargetMutationSupport).not.toHaveBeenCalled()
     expect(provider.addWorktreePushTargetRemote).not.toHaveBeenCalled()
     expect(prepared.remoteName).toBe('fork')
     expect(provider.fetchRemoteTrackingRef).toHaveBeenCalledWith(

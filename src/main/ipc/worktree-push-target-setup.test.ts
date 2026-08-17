@@ -44,10 +44,18 @@ function forkTarget(overrides: Partial<GitPushTarget> = {}): GitPushTarget {
 describe('prepareWorktreePushTargetWithGit', () => {
   it('adds a new fork remote and fetches its head when none matches', async () => {
     const git = makeRepoGit({ origin: 'git@github.com:stablyai/orca.git' })
+    const onRemoteAdded = vi.fn()
 
-    const result = await prepareWorktreePushTargetWithGit(git, REPO, forkTarget(), () => false)
+    const result = await prepareWorktreePushTargetWithGit(
+      git,
+      REPO,
+      forkTarget(),
+      () => false,
+      onRemoteAdded
+    )
 
     expect(git.addRemote).toHaveBeenCalledWith(REPO, forkTarget())
+    expect(onRemoteAdded).toHaveBeenCalledWith(forkTarget())
     expect(git.fetchRemoteTrackingRef).toHaveBeenCalledWith(REPO, forkTarget())
     expect(result).toEqual({
       remoteName: 'pr-contributor-orca',
@@ -95,6 +103,26 @@ describe('prepareWorktreePushTargetWithGit', () => {
     })
     expect(result.remoteName).toBe('pr-contributor-orca-2')
     expect(result.remoteCreated).toBe(true)
+  })
+
+  it('removes a newly added remote when fetching its tracking ref fails', async () => {
+    const git = makeRepoGit({ origin: 'git@github.com:stablyai/orca.git' })
+    git.fetchRemoteTrackingRef.mockRejectedValueOnce(new Error('fetch failed'))
+
+    await expect(
+      prepareWorktreePushTargetWithGit(git, REPO, forkTarget(), () => false)
+    ).rejects.toThrow('fetch failed')
+    expect(git.removeRemoteIfMatches).toHaveBeenCalledWith(REPO, forkTarget())
+  })
+
+  it('keeps a reused Orca-owned remote when fetching its tracking ref fails', async () => {
+    const git = makeRepoGit({ 'pr-contributor-orca': FORK_HTTPS })
+    git.fetchRemoteTrackingRef.mockRejectedValueOnce(new Error('fetch failed'))
+
+    await expect(
+      prepareWorktreePushTargetWithGit(git, REPO, forkTarget(), () => true)
+    ).rejects.toThrow('fetch failed')
+    expect(git.removeRemoteIfMatches).not.toHaveBeenCalled()
   })
 
   it('strips an incoming remoteCreated flag and fetches the given remote when there is no remoteUrl', async () => {

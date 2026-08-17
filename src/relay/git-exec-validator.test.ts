@@ -137,6 +137,10 @@ describe('validateGitExecArgs', () => {
       expectAllowed(['branch', '-r'])
     })
 
+    it('allows the exact legacy upstream command used by older clients', () => {
+      expectAllowed(['branch', '--set-upstream-to', 'origin/feature/ssh', 'local-feature'])
+    })
+
     it.each([
       '-d',
       '-D',
@@ -162,7 +166,9 @@ describe('validateGitExecArgs', () => {
       ['-uorigin/main', 'feature'],
       ['--set-upstream-t=origin/main', 'feature'],
       ['--unset-upstrea', 'feature'],
-      ['-Dfeature']
+      ['-Dfeature'],
+      ['--set-upstream-to', 'origin/feature', '--local-feature'],
+      ['--set-upstream-to', 'origin/feature', 'local feature']
     ])('rejects attached or abbreviated branch option %s', (...args) => {
       expectBlocked(['branch', ...args], 'Destructive git branch flags')
     })

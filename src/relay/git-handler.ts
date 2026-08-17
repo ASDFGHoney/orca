@@ -235,16 +235,33 @@ export class GitHandler {
     this.dispatcher.onRequest('git.upstreamStatus', (p) => this.upstreamStatus(p))
     this.dispatcher.onRequest('git.fetch', (p) => this.fetch(p))
     this.dispatcher.onRequest('git.forkSync', (p, context) => this.forkSync(p, context))
-    this.dispatcher.onRequest('git.fetchRemoteTrackingRef', (p) => this.fetchRemoteTrackingRef(p))
+    this.dispatcher.onRequest('git.fetchRemoteTrackingRef', (p, context) =>
+      this.fetchRemoteTrackingRef(p, context)
+    )
     this.dispatcher.onRequest('git.worktreePushTargetCapabilities', async () => ({ version: 1 }))
-    this.dispatcher.onRequest('git.addWorktreePushTargetRemote', (p) =>
-      this.runWithGitReadCacheClear(() => addWorktreePushTargetRemoteOp(this.git.bind(this), p))
+    this.dispatcher.onRequest('git.addWorktreePushTargetRemote', (p, context) =>
+      this.runWithGitReadCacheClear(() =>
+        addWorktreePushTargetRemoteOp(
+          (args, cwd) => this.git(args, cwd, { signal: context.signal }),
+          p
+        )
+      )
     )
-    this.dispatcher.onRequest('git.configureWorktreePushTarget', (p) =>
-      this.runWithGitReadCacheClear(() => configureWorktreePushTargetOp(this.git.bind(this), p))
+    this.dispatcher.onRequest('git.configureWorktreePushTarget', (p, context) =>
+      this.runWithGitReadCacheClear(() =>
+        configureWorktreePushTargetOp(
+          (args, cwd) => this.git(args, cwd, { signal: context.signal }),
+          p
+        )
+      )
     )
-    this.dispatcher.onRequest('git.removeWorktreePushTargetRemote', (p) =>
-      this.runWithGitReadCacheClear(() => removeWorktreePushTargetRemoteOp(this.git.bind(this), p))
+    this.dispatcher.onRequest('git.removeWorktreePushTargetRemote', (p, context) =>
+      this.runWithGitReadCacheClear(() =>
+        removeWorktreePushTargetRemoteOp(
+          (args, cwd) => this.git(args, cwd, { signal: context.signal }),
+          p
+        )
+      )
     )
     this.dispatcher.onRequest('git.fetchGitHubPullRequestHead', (p) =>
       this.fetchGitHubPullRequestHead(p)
@@ -922,7 +939,7 @@ export class GitHandler {
     })
   }
 
-  private async fetchRemoteTrackingRef(params: Record<string, unknown>) {
+  private async fetchRemoteTrackingRef(params: Record<string, unknown>, context?: RequestContext) {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     const remote = params.remote
@@ -944,7 +961,8 @@ export class GitHandler {
       }
 
       try {
-        const { stdout } = await this.git(['remote'], worktreePath)
+        const git = (args: string[]) => this.git(args, worktreePath, { signal: context?.signal })
+        const { stdout } = await git(['remote'])
         const remotes = stdout
           .split(/\r?\n/)
           .map((line) => line.trim())
@@ -952,18 +970,15 @@ export class GitHandler {
         if (!remotes.includes(remote)) {
           throw new Error(`Remote "${remote}" is not configured.`)
         }
-        await this.git(['check-ref-format', `refs/heads/${branch}`], worktreePath)
-        await this.git(['check-ref-format', ref], worktreePath)
-        await this.git(
-          [
-            ...(skipAutoMaintenance ? GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS : []),
-            'fetch',
-            '--no-tags',
-            remote,
-            `+refs/heads/${branch}:${ref}`
-          ],
-          worktreePath
-        )
+        await git(['check-ref-format', `refs/heads/${branch}`])
+        await git(['check-ref-format', ref])
+        await git([
+          ...(skipAutoMaintenance ? GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS : []),
+          'fetch',
+          '--no-tags',
+          remote,
+          `+refs/heads/${branch}:${ref}`
+        ])
       } catch (error) {
         // Why: create-worktree needs a write-capable fetch that generic git.exec rejects; narrow RPC keeps the allowlist tight.
         throw new Error(normalizeGitErrorMessage(error, 'fetch'))

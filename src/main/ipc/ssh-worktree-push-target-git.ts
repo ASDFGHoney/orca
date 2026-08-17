@@ -6,7 +6,6 @@ export function createSshWorktreePushTargetGit(provider: SshGitProvider): Worktr
   return {
     async validateTarget(repoPath, target) {
       assertGitPushTargetShape(target)
-      await provider.ensureWorktreePushTargetMutationSupport()
       await provider.exec(['check-ref-format', '--branch', target.branchName], repoPath)
     },
     async listRemotes(repoPath) {
@@ -20,6 +19,7 @@ export function createSshWorktreePushTargetGit(provider: SshGitProvider): Worktr
       return (await provider.exec(['remote', 'get-url', remoteName], repoPath)).stdout.trim()
     },
     async addRemote(repoPath, target) {
+      await provider.ensureWorktreePushTargetMutationSupport()
       await provider.addWorktreePushTargetRemote(repoPath, target)
     },
     async fetchRemoteTrackingRef(repoPath, target) {

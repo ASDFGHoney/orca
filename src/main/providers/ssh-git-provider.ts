@@ -666,11 +666,22 @@ export class SshGitProvider implements IGitProvider {
     branchName: string,
     target: GitPushTarget
   ): Promise<void> {
-    await this.requestWorktreePushTargetMutation('git.configureWorktreePushTarget', {
-      worktreePath,
-      branchName,
-      target
-    })
+    try {
+      await this.requestWorktreePushTargetMutation('git.configureWorktreePushTarget', {
+        worktreePath,
+        branchName,
+        target
+      })
+    } catch (error) {
+      if (!(error instanceof SshWorktreePushTargetRelayUnavailableError)) {
+        throw error
+      }
+      // Older relays still allow this validated upstream-only branch mutation.
+      await this.exec(
+        ['branch', '--set-upstream-to', `${target.remoteName}/${target.branchName}`, branchName],
+        worktreePath
+      )
+    }
   }
 
   async removeWorktreePushTargetRemote(

@@ -73,6 +73,38 @@ describe('SshGitProvider', () => {
     )
   })
 
+  it('uses the old relay branch command when its configure RPC is unavailable', async () => {
+    mux.request.mockRejectedValueOnce(
+      Object.assign(new Error('Method not found: git.configureWorktreePushTarget'), {
+        code: -32601
+      })
+    )
+
+    await provider.configureWorktreePushTarget('/home/user/repo-fix', 'local-fix', {
+      remoteName: 'origin',
+      branchName: 'feature'
+    })
+
+    expect(mux.request.mock.calls).toEqual([
+      [
+        'git.configureWorktreePushTarget',
+        {
+          worktreePath: '/home/user/repo-fix',
+          branchName: 'local-fix',
+          target: { remoteName: 'origin', branchName: 'feature' }
+        }
+      ],
+      [
+        'git.exec',
+        {
+          __streamResponse: true,
+          args: ['branch', '--set-upstream-to', 'origin/feature', 'local-fix'],
+          cwd: '/home/user/repo-fix'
+        }
+      ]
+    ])
+  })
+
   it('listWorktrees sends git.listWorktrees request', async () => {
     const worktrees = [
       {

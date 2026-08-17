@@ -50,12 +50,14 @@ export async function prepareWorktreePushTargetWithGit(
   git: WorktreePushTargetGit,
   repoPath: string,
   target: GitPushTarget,
-  isRemoteCreatedByKnownWorktree: (existingRemote: string) => boolean
+  isRemoteCreatedByKnownWorktree: (existingRemote: string) => boolean,
+  onRemoteAdded?: (addedRemote: GitPushTarget & { remoteUrl: string }) => void
 ): Promise<GitPushTarget> {
   await git.validateTarget(repoPath, target)
   const { remoteCreated: _ignoredRemoteCreated, ...sanitizedTarget } = target
   let remoteName = target.remoteName
   let remoteCreated = false
+  let addedRemote: (GitPushTarget & { remoteUrl: string }) | undefined
   if (target.remoteUrl) {
     const existingRemote = await findRemoteForUrl(git, repoPath, target.remoteUrl)
     if (existingRemote) {
@@ -67,13 +69,26 @@ export async function prepareWorktreePushTargetWithGit(
       remoteName = await ensureUniqueRemoteName(git, repoPath, target.remoteName)
       await git.addRemote(repoPath, { ...sanitizedTarget, remoteName, remoteUrl: target.remoteUrl })
       remoteCreated = true
+      addedRemote = { ...sanitizedTarget, remoteName, remoteUrl: target.remoteUrl }
+      onRemoteAdded?.(addedRemote)
     }
   }
 
-  await git.fetchRemoteTrackingRef(repoPath, { ...sanitizedTarget, remoteName })
+  const preparedTarget = { ...sanitizedTarget, remoteName }
+  try {
+    await git.fetchRemoteTrackingRef(repoPath, preparedTarget)
+  } catch (error) {
+    if (addedRemote) {
+      try {
+        await git.removeRemoteIfMatches(repoPath, addedRemote)
+      } catch {
+        // Preserve the fetch error when best-effort cleanup fails.
+      }
+    }
+    throw error
+  }
   return {
-    ...sanitizedTarget,
-    remoteName,
+    ...preparedTarget,
     ...(remoteCreated ? { remoteCreated: true } : {})
   }
 }

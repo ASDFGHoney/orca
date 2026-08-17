@@ -1,3 +1,5 @@
+import { isSafeGitRefName } from '../shared/git-status-upstream-ref'
+
 /**
  * Git exec argument validation for the relay's git.exec handler.
  *
@@ -142,6 +144,21 @@ function matchesDeniedFlag(arg: string, denySet: Set<string>): boolean {
   return false
 }
 
+function isLegacySetUpstreamCommand(args: string[]): boolean {
+  if (args.length !== 4 || args[1] !== '--set-upstream-to') {
+    return false
+  }
+  const [upstream, branchName] = args.slice(2)
+  return Boolean(
+    upstream &&
+    branchName &&
+    !upstream.startsWith('-') &&
+    !branchName.startsWith('-') &&
+    isSafeGitRefName(`refs/remotes/${upstream}`) &&
+    isSafeGitRefName(`refs/heads/${branchName}`)
+  )
+}
+
 export function validateGitExecArgs(args: string[]): void {
   // Why: git accepts `-c key=value` before the subcommand, which can override
   // config and execute arbitrary commands (e.g. core.sshCommand). Reject any
@@ -179,6 +196,9 @@ export function validateGitExecArgs(args: string[]): void {
     validateCommitArgs(args)
   }
   if (subcommand === 'branch') {
+    if (isLegacySetUpstreamCommand(args)) {
+      return
+    }
     if (restArgs.some((a) => matchesDeniedFlag(a, BRANCH_DESTRUCTIVE_FLAGS))) {
       throw new Error('Destructive git branch flags are not allowed via exec')
     }

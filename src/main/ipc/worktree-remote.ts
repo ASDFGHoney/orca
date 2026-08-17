@@ -22,6 +22,7 @@ import type {
   AutomationWorkspaceProvenance,
   CliWorkspaceProvenance,
   GitPushTarget,
+  GitWorktreeInfo,
   Worktree,
   WorktreeHeadIdentity
 } from '../../shared/worktree/types'
@@ -1088,6 +1089,21 @@ export async function cleanupUnusedRemoteWorktreePushTarget(
   }
 }
 
+async function cleanupNewRemoteWorktreePushTarget(
+  provider: SshGitProvider,
+  repoPath: string,
+  addedRemote: (GitPushTarget & { remoteUrl: string }) | undefined
+): Promise<void> {
+  if (!addedRemote) {
+    return
+  }
+  try {
+    await createSshWorktreePushTargetGit(provider).removeRemoteIfMatches(repoPath, addedRemote)
+  } catch (error) {
+    console.warn('[worktrees] Failed to clean up a newly added remote fork', error)
+  }
+}
+
 async function readRemoteEffectiveHooks(
   repo: Repo,
   fsProvider: IFilesystemProvider,
@@ -1673,6 +1689,7 @@ export async function createRemoteWorktree(
   }
 
   let preparedPushTarget: GitPushTarget | undefined
+  let addedPushTargetRemote: (GitPushTarget & { remoteUrl: string }) | undefined
   if (args.pushTarget) {
     const pushTarget = args.pushTarget
     // Why: fork-PR SSH worktrees need contributor-remote setup before create, else Push/Sync target origin.
@@ -1685,7 +1702,10 @@ export async function createRemoteWorktree(
           store,
           { ...pushTarget, remoteName: existingRemote },
           repo.id
-        )
+        ),
+      (addedRemote) => {
+        addedPushTargetRemote = addedRemote
+      }
     )
   }
 
@@ -1701,6 +1721,7 @@ export async function createRemoteWorktree(
       )
     )
   } catch (err) {
+    await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
     if (
       err instanceof Error &&
       (err.message.includes('No workspace roots registered yet') ||
@@ -1742,7 +1763,13 @@ export async function createRemoteWorktree(
         console.warn('[worktree-create] Failed to roll back remote sparse worktree:', rollbackError)
       }
       if (!rollbackSucceeded && shouldRetireGeneratedName) {
-        await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
+        try {
+          await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
+        } finally {
+          await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
+        }
+      } else {
+        await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
       }
       throw err
     }
@@ -1750,17 +1777,29 @@ export async function createRemoteWorktree(
 
   // Why: fallible metadata work after creation must not leave a real workspace name reusable.
   if (shouldRetireGeneratedName) {
-    await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
+    try {
+      await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
+    } catch (error) {
+      await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
+      throw error
+    }
   }
 
   // Re-list to get the created worktree info
-  const gitWorktrees = await timing.time('list_created_worktree', async () =>
-    provider.listWorktrees(repo.path)
-  )
+  let gitWorktrees: GitWorktreeInfo[]
+  try {
+    gitWorktrees = await timing.time('list_created_worktree', async () =>
+      provider.listWorktrees(repo.path)
+    )
+  } catch (error) {
+    await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
+    throw error
+  }
   const created = gitWorktrees.find(
     (gw) => gw.branch?.endsWith(branchName) || gw.path.endsWith(effectiveSanitizedName)
   )
   if (!created) {
+    await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
     throw new Error('Worktree created but not found in listing')
   }
 
@@ -1770,12 +1809,17 @@ export async function createRemoteWorktree(
   const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
   let configuredPushTarget: GitPushTarget | undefined
   if (preparedPushTarget) {
-    configuredPushTarget = await configureCreatedWorktreePushTargetWithGit(
-      createSshWorktreePushTargetGit(provider),
-      created.path,
-      branchName,
-      preparedPushTarget
-    )
+    try {
+      configuredPushTarget = await configureCreatedWorktreePushTargetWithGit(
+        createSshWorktreePushTargetGit(provider),
+        created.path,
+        branchName,
+        preparedPushTarget
+      )
+    } catch (error) {
+      await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
+      throw error
+    }
   }
   const metaUpdates: Partial<WorktreeMeta> = {
     // Why: path-derived IDs get reused after external deletion; rotate instance identity so stale lineage can't attach to the new occupant.
