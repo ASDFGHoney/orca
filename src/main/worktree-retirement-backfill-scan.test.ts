@@ -88,6 +88,24 @@ describe('runRetirementBackfillScan', () => {
     )
   })
 
+  it('never defers a healthy machine, however many namespaces seed at once', async () => {
+    // Nested workspaces give every repo its own scan key, so several first-time backfills are
+    // routinely in flight together. Counting merely-in-flight listings would reject the third and
+    // let its create pick a name against an unseeded registry.
+    const scans = Array.from({ length: RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS + 2 }, () =>
+      stallingScan()
+    )
+    const pending = scans.map((scan, index) =>
+      runRetirementBackfillScan({}, `ns-${index}`, scan.run)
+    )
+    expect(getOutstandingRetirementBackfillScanCount()).toBe(0)
+
+    scans.forEach((scan, index) => scan.finish([`name-${index}`]))
+    await expect(Promise.all(pending)).resolves.toEqual(
+      scans.map((_, index) => new Set([`name-${index}`]))
+    )
+  })
+
   it('keeps a listing that lands after the deadline instead of discarding the answer', async () => {
     // The WSL gate admits one scan at a time and allows it 60s — four times this deadline — so a
     // late-but-correct listing is the normal case there, not an edge case.
