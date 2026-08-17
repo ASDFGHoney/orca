@@ -2296,8 +2296,8 @@
       "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. When an old host captures only part of the requested viewport, the client renegotiates once to the largest complete aspect-matched viewport and keeps page layout, pixels, and input coordinates aligned across navigation and reconnect.",
       "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to renegotiate the legacy stream once to 533x446, synchronize the authoritative page viewport, preserve that fallback across navigation/reconnect and observer sync, re-arm only after a real pane resize, and avoid looping if the fallback frame remains malformed. Also require legacy frame containment, actual-pixel click mapping, gutter rejection, malformed CDP acknowledgement, and scoped-only publication waits. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require a complete aspect-matched frame plus visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts --reporter=dot",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
         "pnpm exec playwright test tests/e2e/paired-browser-host-generated-publication.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --reporter=line"
       ],
@@ -2308,10 +2308,10 @@
         "src/main/browser/browser-screencast-stream.test.ts",
         "src/main/runtime/orca-runtime-browser.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
-        "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
-        "src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts",
+        "src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-point.test.ts",
+        "src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-style.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts",
-        "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+        "src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts",
         "tests/e2e/paired-remote-browser-legacy-input.spec.ts",
         "tests/e2e/paired-browser-host-generated-publication.spec.ts"
       ],
@@ -2324,14 +2324,14 @@
           ]
         },
         {
-          "file": "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+          "file": "src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts",
           "assertions": [
             "a partial 533x917 legacy capture selects a complete 533x446 compatibility viewport",
             "uniformly scaled corrected frames and undersized captures do not trigger fallback"
           ]
         },
         {
-          "file": "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
+          "file": "src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-point.test.ts",
           "assertions": [
             "legacy host pixels map one-to-one to authoritative pointer coordinates",
             "blank containment gutters reject pointer input"
@@ -2370,7 +2370,7 @@
           "date": "2026-08-17",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
           "result": "passed",
           "durationSeconds": 12,
           "summary": "Focused contract files passed with direct and legacy history, raw-input compatibility, exact 533x917 host-surface rejection/containment, viewport-correct host fallback, pointer mapping, malformed-frame acknowledgement, and scoped publication waits."
@@ -2812,25 +2812,25 @@
       "oracle": "With one fake clock and exact pane, operation, stream, page, and runtime identities, inject ready with zero frames and require opening state, one old-host-safe repaint RPC, live only after the current stream's frame, no repeated status writes, duplicate-ready idempotence, exact in-flight RPC cancellation, and bounded retry to Reconnect if every repaint remains frame-less. Replace a stream and deliver its stale frame before the replacement ready; then deliver late ready/frame after transport failure and require no liveness, frame, viewport, or tab-state mutation. Drop a confirmed stream and require the counted delay sequence, one active chain, stale-token rejection, exact cancellation, and full cleanup. Also inject close racing rejection, never-ready subscriptions, ready-then-end flapping, viewport supersession, missing pages, and permanent failures. In paired headless journeys, require authoritative host page state plus a newly painted client frame.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-first-frame.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-stream-reconnect.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
       ],
       "testFiles": [
-        "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+        "src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
-        "src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
+        "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-first-frame.test.ts",
         "src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
         "tests/e2e/paired-remote-browser-stream-reconnect.spec.ts"
       ],
       "assertionRefs": [
         {
-          "file": "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+          "file": "src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts",
           "assertions": [
             "legacy partial frames choose a bounded aspect-preserving viewport",
             "corrected or unusably small frames do not trigger compatibility recovery"
@@ -2855,7 +2855,7 @@
           ]
         },
         {
-          "file": "src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts",
+          "file": "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-first-frame.test.ts",
           "assertions": [
             "ready without a frame stays opening, requests one repaint, and either paints or retries",
             "first-frame deadlines and the in-flight repaint RPC stop on frame, close, replacement, and unmount",
@@ -2903,7 +2903,7 @@
           "commit": "c6016e2963e1f5e456f25d57a43b54494582a8ea",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-first-frame.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-legacy-viewport.test.ts src/renderer/src/runtime/runtime-rpc-client-cancellation.test.ts",
           "result": "passed",
           "durationSeconds": 0.39,
           "summary": "Seven focused stream, viewport, and cancellation files passed 98 deterministic lifecycle, recovery, and abort tests."
