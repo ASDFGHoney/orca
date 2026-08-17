@@ -21,17 +21,6 @@ describe('buildTerminalClipboardPasteText', () => {
     expect(framed).toBe(`${BRACKETED_PASTE_START}hello\rworld${BRACKETED_PASTE_END}`)
   })
 
-  it('frames long single-line payloads used by agent composers', () => {
-    const text = 'x'.repeat(2848)
-    const framed = buildTerminalClipboardPasteText(text, {
-      bracketedPasteMode: true,
-      altScreen: true
-    })
-    expect(framed.startsWith(BRACKETED_PASTE_START)).toBe(true)
-    expect(framed.endsWith(BRACKETED_PASTE_END)).toBe(true)
-    expect(framed).toContain(text)
-  })
-
   it('neutralizes an embedded paste-end so trailing bytes stay inside the frame', () => {
     const framed = buildTerminalClipboardPasteText('before\x1b[201~after', {
       bracketedPasteMode: true

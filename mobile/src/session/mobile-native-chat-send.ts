@@ -23,7 +23,7 @@ type MobileTerminalClient = {
 // src/shared/agent-tui-input-clear.ts for the measured 2N-1 law.
 const CLEAR_UNSUBMITTED_INPUT = '\x15'
 
-/** Match desktop native-chat framing for multi-line composer bodies. */
+/** Match desktop native-chat framing; native chat has no mode/readiness signal (#14888). */
 export function buildMobileNativeChatBodyText(text: string): string {
   if (/[\r\n]/.test(text)) {
     return wrapTerminalBracketedPasteText(text)
@@ -128,6 +128,7 @@ export async function typeMobileNativeChatCommandWithOutcome(args: {
         terminal: args.terminal,
         text: key,
         enter: false,
+        rawTerminalInput: true,
         ...(isSubmit && args.resolvedLaunchDraft
           ? { resolvedLaunchDraft: args.resolvedLaunchDraft }
           : {}),
