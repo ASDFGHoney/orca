@@ -706,4 +706,41 @@ describe('useNativeChatLiveSession — notFound retry (#8401)', () => {
     expect(latest?.error).toBeUndefined()
     expect(latest?.messages.map((m) => m.id)).toContain('a-late')
   })
+  // The marker fold changes what a MESSAGE SAYS, so it rides the host's reported
+  // paging flag rather than `hasMore`, which falls back to a count inference that
+  // reports true for a window filled to exactly the limit. A false positive there
+  // erases an `[Image #n]` the user typed — a regression against a pre-fold base.
+  function headWindow(): NativeChatMessage[] {
+    return [
+      user('u-head', '[Image #1] what do you see'),
+      ...Array.from({ length: NATIVE_CHAT_INITIAL_LIMIT - 1 }, (_unused, n) =>
+        assistant(`m-${n}`, 't')
+      )
+    ]
+  }
+
+  it('keeps a head marker when the host never reported older history', async () => {
+    const transport = getMockTransport('env-1', { autoSnapshot: false })
+    // A host predating the field: the window is exactly full, so the count
+    // inference says there is more, but nothing confirmed it.
+    transport.readSession.mockResolvedValueOnce({ messages: headWindow() })
+
+    await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
+
+    expect(latest?.hasMore).toBe(true)
+    expect(latest?.messages.find((m) => m.id === 'u-head')?.blocks).toEqual([
+      { type: 'text', text: '[Image #1] what do you see' }
+    ])
+  })
+
+  it('strips a head marker once the host confirms older history', async () => {
+    const transport = getMockTransport('env-1', { autoSnapshot: false })
+    transport.readSession.mockResolvedValueOnce({ messages: headWindow(), hasMore: true })
+
+    await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION, runtimeEnvironmentId: 'env-1' })
+
+    expect(latest?.messages.find((m) => m.id === 'u-head')?.blocks).toEqual([
+      { type: 'text', text: 'what do you see' }
+    ])
+  })
 })

@@ -26,6 +26,13 @@ export type MobileNativeChatSession = {
   error?: string
   /** True when an older page may exist (the last read filled the window). */
   hasMore: boolean
+  /** True only when the HOST said older history exists. `hasMore` falls back to
+   *  a count inference that reports true for a window filled to exactly the
+   *  limit; that is fine for the "load earlier" affordance but not for the
+   *  marker fold, which changes what a message says — a false positive there
+   *  erases an `[Image #n]` the user typed. The window limit here is 40, so the
+   *  exact-fill case is far more reachable than on desktop. */
+  earlierHistoryConfirmed: boolean
   /** Whether an older-history page is currently loading. */
   loadingEarlier: boolean
   /** Grow the window to page in older history. */
@@ -88,6 +95,7 @@ export function useMobileNativeChatSession(args: {
   const status = settled ? settled.status : initialStatus
   const [error, setError] = useState<string | undefined>(undefined)
   const [hasMore, setHasMore] = useState(false)
+  const [earlierHistoryConfirmed, setEarlierHistoryConfirmed] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const loadingEarlierRef = useRef(false)
   const beforeOffsetRef = useRef<number | null>(null)
@@ -130,6 +138,7 @@ export function useMobileNativeChatSession(args: {
     setList([])
     setError(undefined)
     setHasMore(false)
+    setEarlierHistoryConfirmed(false)
     beforeOffsetRef.current = null
     if (!client || !agent) {
       return
@@ -182,10 +191,12 @@ export function useMobileNativeChatSession(args: {
           limitRef.current = INITIAL_LIMIT
           beforeOffsetRef.current = applied.beforeOffset ?? null
           setHasMore(applied.hasMore ?? applied.messages.length >= INITIAL_LIMIT)
+          setEarlierHistoryConfirmed(applied.hasMore === true)
         }
         setMessages(applied.messages)
         if (!applied.windowReplaced && applied.hasMore != null) {
           setHasMore(applied.hasMore)
+          setEarlierHistoryConfirmed(applied.hasMore === true)
         }
         if (!applied.windowReplaced && applied.beforeOffset != null) {
           beforeOffsetRef.current = applied.beforeOffset
@@ -220,6 +231,7 @@ export function useMobileNativeChatSession(args: {
     const pageLimit = nextLimit - limitRef.current
     if (pageLimit <= 0) {
       setHasMore(false)
+      setEarlierHistoryConfirmed(false)
       return
     }
     const beforeOffset = beforeOffsetRef.current
@@ -255,10 +267,12 @@ export function useMobileNativeChatSession(args: {
           setHasMore(
             nextLimit < MAX_MESSAGES && (result.hasMore ?? result.messages.length >= pageLimit)
           )
+          setEarlierHistoryConfirmed(result.hasMore === true)
         } else {
           // Older runtimes ignore the cursor and return the growing tail.
           setList(result.messages)
           setHasMore(result.messages.length >= nextLimit)
+          setEarlierHistoryConfirmed(false)
         }
       } finally {
         // A late page from a prior tab must not unlock the current tab's request.
@@ -289,6 +303,7 @@ export function useMobileNativeChatSession(args: {
     transcriptLoading: status === 'loading',
     error,
     hasMore,
+    earlierHistoryConfirmed,
     loadingEarlier,
     loadEarlier
   }

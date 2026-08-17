@@ -94,6 +94,15 @@ export function useNativeChatLiveSession(
   )
   const [read, setRead] = useState<ReadState>({ phase: 'loading' })
   const [hasMore, setHasMore] = useState(false)
+  // Why: `hasMore` merges the host's answer with a count inference, and the
+  // inference is not exact — a window filled to exactly the limit reports true
+  // with nothing behind it. That is fine for the "load earlier" affordance (one
+  // wasted read) but not for the marker fold, which changes what a message SAYS:
+  // a false positive there erases an `[Image #n]` the user typed. So the fold
+  // rides the host's reported value alone. Every transport carries it on the
+  // initial read; only a host predating the field omits it, and there the fold
+  // simply stays off, which is what this branch's base did.
+  const [earlierHistoryConfirmed, setEarlierHistoryConfirmed] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [transcriptLifecycle, transcriptLifecycleControl] = useNativeChatTranscriptLifecycle()
   // The active read window; raised by loadEarlier to page in older history.
@@ -140,6 +149,7 @@ export function useNativeChatLiveSession(
         replaceList(appendMergerRef.current, [])
         setAppended([])
         setHasMore(false)
+        setEarlierHistoryConfirmed(false)
       }
       return () => undefined
     }
@@ -150,6 +160,7 @@ export function useNativeChatLiveSession(
       replaceList(appendMergerRef.current, [])
       setAppended([])
       setHasMore(false)
+      setEarlierHistoryConfirmed(false)
       return () => undefined
     }
 
@@ -168,6 +179,7 @@ export function useNativeChatLiveSession(
     replaceList(appendMergerRef.current, [])
     setAppended([])
     setHasMore(false)
+    setEarlierHistoryConfirmed(false)
 
     // Independent initial seed in case subscribe never delivers a snapshot; applied only until an authoritative frame lands so a live snapshot wins.
     function loadSession(attempt: number): void {
@@ -193,6 +205,7 @@ export function useNativeChatLiveSession(
           transcriptLifecycleControl.replace(result?.lifecycle)
           setRead({ phase: 'ready', messages })
           setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current, result?.hasMore))
+          setEarlierHistoryConfirmed(result?.hasMore === true)
         })
         .catch((err: unknown) => {
           if (!cancelled && latestEnabled.current && !frameArrived) {
@@ -232,6 +245,7 @@ export function useNativeChatLiveSession(
           setAppended([])
           setRead({ phase: 'ready', messages: appendMergerRef.current.list })
           setHasMore(frame.hasMore)
+          setEarlierHistoryConfirmed(frame.hasMore === true)
           return
         }
         transcriptLifecycleControl.append(frame.lifecycle)
@@ -282,6 +296,7 @@ export function useNativeChatLiveSession(
         setRead({ phase: 'ready', messages: result.messages })
         transcriptLifecycleControl.replaceFromPagination(result.lifecycle, lifecycleRevision)
         setHasMore(hasMoreNativeChatHistory(result.messages.length, nextLimit, result.hasMore))
+        setEarlierHistoryConfirmed(result.hasMore === true)
       })
       .catch(() => {
         // Swallow a rejected "load more" read: keep the already-loaded transcript intact rather than surface the rejection.
@@ -312,7 +327,7 @@ export function useNativeChatLiveSession(
     appended,
     // Why: the oldest row of the paginated read, not a position in the merged
     // list — see NormalizeImageTranscriptOptions.
-    windowHeadMessageId: hasMore ? baseMessages[0]?.id : undefined
+    windowHeadMessageId: earlierHistoryConfirmed ? baseMessages[0]?.id : undefined
   })
 
   return useMemo<NativeChatLiveSession>(() => {

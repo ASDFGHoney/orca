@@ -50,9 +50,9 @@ export function MobileNativeChatOverlay({
     () =>
       foldMobileNativeChatMessages(
         session.messages,
-        session.hasMore ? session.messages[0]?.id : undefined
+        session.earlierHistoryConfirmed ? session.messages[0]?.id : undefined
       ),
-    [session.messages, session.hasMore]
+    [session.messages, session.earlierHistoryConfirmed]
   )
   const streaming = useMobileNativeChatStreamingBubble(
     folded,
