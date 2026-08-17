@@ -395,9 +395,6 @@ export class ClaudeRuntimeAuthService {
       )
     }
 
-    // Retry any surface that was unreadable during an earlier entry sync before publishing.
-    await this.refreshUnknownSystemDefaultSnapshot(credentialsJson)
-
     // Why: re-auth/add-account mark managed as authoritative; capture before skip flags are cleared so materialization can force-write that snapshot.
     const preferManagedSnapshot = this.skipNextReadBackForAccountId === activeAccount.id
 
@@ -1227,7 +1224,12 @@ export class ClaudeRuntimeAuthService {
         // Why: a locked managed Keychain must not prevent launch when the owned file copy is readable.
       }
       // Why: the owned file is the recovery copy when a Keychain item is missing or malformed.
-      return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+      try {
+        return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
+      } catch {
+        this.managedCredentialsReadFailed = true
+        return null
+      }
     }
     return readClaudeManagedAuthFile(managedAuthPath, '.credentials.json')
   }
