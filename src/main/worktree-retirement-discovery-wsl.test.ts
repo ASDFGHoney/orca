@@ -74,21 +74,39 @@ describe('retirement discovery on WSL', () => {
     expect(runWslTranscriptFsTaskMock).not.toHaveBeenCalled()
   })
 
-  it('fails the scan when the gate refuses, rather than memoizing a half-read answer', async () => {
-    // A swallowed refusal would cache "nothing is retired" for the process lifetime — the one
-    // direction that reissues a cwd whose conversation history is still on the distro.
+  it('reports a gate refusal as incomplete but still returns what the host side could read', async () => {
+    // Marking it incomplete is what stops "nothing is retired" being cached for the process
+    // lifetime — the one direction that reissues a cwd whose history is still on the distro.
+    // Throwing instead would be worse than the pre-split behaviour: for a WSL repo the UNC
+    // workspace root is listed first, so a stuck 9P route would also discard the plain, readable
+    // Windows-side bucket scan that needs no distro access at all.
     runWslTranscriptFsTaskMock.mockRejectedValue(
       new WslTranscriptFsError('timeout', 'filesystem access is taking too long')
     )
+    const hostHome = await mkdtemp(join(tmpdir(), 'orca-wsl-host-home-'))
+    try {
+      await mkdir(
+        join(
+          hostHome,
+          '.claude',
+          'projects',
+          `--wsl-localhost-ubuntu-home-ada-orca-workspaces-${FIRST}`
+        ),
+        { recursive: true }
+      )
 
-    await expect(
-      discoverRetiredWorktreeNames({
+      const retired = await discoverRetiredWorktreeNames({
         workspaceRoots: [DISTRO_ROOT],
-        home: '/nonexistent-home',
+        home: hostHome,
         env: {},
         resolveWslHome: async () => '\\\\wsl.localhost\\Ubuntu\\home\\ada'
       })
-    ).rejects.toBeInstanceOf(WslTranscriptFsError)
+
+      expect(retired.complete).toBe(false)
+      expect(retired.names).toEqual(new Set([FIRST]))
+    } finally {
+      await rm(hostHome, { force: true, recursive: true })
+    }
   })
 
   it('keeps a deleted WSL workspace name spent, so the next create cannot reuse its cwd', async () => {
@@ -109,8 +127,10 @@ describe('retirement discovery on WSL', () => {
         resolveWslHome: async () => distroHome
       })
 
-      expect(retired).toEqual(new Set([FIRST]))
-      expect(createRetiredNameLookup({ exhaustedTiers: 0, names: [...retired] })(FIRST)).toBe(true)
+      expect(retired.names).toEqual(new Set([FIRST]))
+      expect(createRetiredNameLookup({ exhaustedTiers: 0, names: [...retired.names] })(FIRST)).toBe(
+        true
+      )
     } finally {
       await rm(distroHome, { force: true, recursive: true })
       await rm(workspaceRoot, { force: true, recursive: true })

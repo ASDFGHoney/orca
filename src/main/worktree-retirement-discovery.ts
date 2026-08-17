@@ -6,7 +6,7 @@ import {
   isClaudeProjectDirInScope
 } from './ai-vault/claude-project-dir-encoding'
 import { wslGatedReaddir } from './native-chat/wsl-transcript-fs-access'
-import { WslTranscriptFsError } from './native-chat/wsl-transcript-fs-gate'
+import type { RetirementScanResult } from './worktree-retirement-backfill-scan'
 import { normalizeRetirableGeneratedName } from './worktree-name-retirement'
 import { getWslHomeAsync } from './wsl'
 
@@ -50,18 +50,26 @@ export function extractBucketLeafCandidates(
 }
 
 /** WSL UNC listings go through the shared 9P gate, which bounds concurrency and deadlines each
- *  call; off UNC it is a plain `readdir`. A gate refusal propagates on purpose — swallowing it
- *  would memoize a partial answer forever, which under-retires, the one direction that leaks. */
-async function readDirectoryNames(path: string): Promise<string[]> {
+ *  call; off UNC it is a plain `readdir`.
+ *
+ *  A gate refusal is reported rather than thrown. Throwing abandoned the whole scan at whichever
+ *  source failed first — and for a WSL repo the very first listing is the UNC workspace root, so a
+ *  stuck 9P route also lost the plain, readable Windows-side `~/.claude/projects` read that the
+ *  caller could always perform. The names that were found are still worth returning; what must not
+ *  happen is memoizing the hole, since under-retiring is the direction that leaks. */
+async function readDirectoryNames(path: string): Promise<{ names: string[]; refused: boolean }> {
   try {
     const entries = await wslGatedReaddir(path, 'scan')
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
-  } catch (error) {
-    if (error instanceof WslTranscriptFsError) {
-      throw error
+    return {
+      names: entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+      refused: false
     }
-    // Missing or unreadable roots are normal: the agent may never have run on this machine.
-    return []
+  } catch (error) {
+    // A missing root is itself a complete answer: the agent may never have run on this machine.
+    // Anything else — a gate refusal, an EIO on a redirected or network home — leaves names
+    // unread, and memoizing that as "nothing is retired" is the under-retiring direction.
+    const code = (error as NodeJS.ErrnoException | null)?.code
+    return { names: [], refused: code !== 'ENOENT' && code !== 'ENOTDIR' }
   }
 }
 
@@ -149,17 +157,22 @@ export async function discoverRetiredWorktreeNames(args: {
   env?: NodeJS.ProcessEnv
   /** Injected in tests; production resolves the distro's `$HOME` as a UNC path. */
   resolveWslHome?: (distro: string) => Promise<string | null>
-}): Promise<Set<string>> {
+}): Promise<RetirementScanResult> {
   const leafNames: string[] = []
+  let refused = false
   for (const root of args.workspaceRoots) {
-    leafNames.push(...(await readDirectoryNames(root)))
+    const listing = await readDirectoryNames(root)
+    refused ||= listing.refused
+    leafNames.push(...listing.names)
   }
 
   for (const source of await claudeProjectsSources(args)) {
-    for (const bucket of await readDirectoryNames(source.projectsDir)) {
+    const listing = await readDirectoryNames(source.projectsDir)
+    refused ||= listing.refused
+    for (const bucket of listing.names) {
       leafNames.push(...extractBucketLeafCandidates(bucket, source.encodedParents))
     }
   }
 
-  return collectRetiredNamesFromLeafNames(leafNames)
+  return { names: collectRetiredNamesFromLeafNames(leafNames), complete: !refused }
 }

@@ -79,7 +79,7 @@ describe('discoverRetiredWorktreeNames', () => {
         home,
         env: {}
       })
-      expect(retired).toEqual(new Set([FIRST]))
+      expect(retired.names).toEqual(new Set([FIRST]))
     })
   })
 
@@ -91,7 +91,7 @@ describe('discoverRetiredWorktreeNames', () => {
         home,
         env: {}
       })
-      expect(retired).toEqual(new Set([FIRST]))
+      expect(retired.names).toEqual(new Set([FIRST]))
     })
   })
 
@@ -102,7 +102,7 @@ describe('discoverRetiredWorktreeNames', () => {
         home,
         env: {}
       })
-      expect(retired).toEqual(new Set([FIRST]))
+      expect(retired.names).toEqual(new Set([FIRST]))
     })
   })
 
@@ -115,7 +115,7 @@ describe('discoverRetiredWorktreeNames', () => {
         home,
         env: {}
       })
-      expect(retired).toEqual(new Set([FIRST]))
+      expect(retired.names).toEqual(new Set([FIRST]))
     })
   })
 
@@ -129,7 +129,7 @@ describe('discoverRetiredWorktreeNames', () => {
         // to `wsl.exe`, so on a Windows runner this unit test would boot the developer's distro.
         resolveWslHome: async () => null
       })
-      expect(retired).toEqual(new Set([FIRST]))
+      expect(retired.names).toEqual(new Set([FIRST]))
     })
   })
 
@@ -142,7 +142,7 @@ describe('discoverRetiredWorktreeNames', () => {
           home,
           env: {}
         })
-        expect(retired).toEqual(new Set([SECOND]))
+        expect(retired.names).toEqual(new Set([SECOND]))
       }
     )
   })
@@ -158,7 +158,7 @@ describe('discoverRetiredWorktreeNames', () => {
           env: { CLAUDE_CONFIG_DIR: configDir }
         })
         // The override relocates the whole state root, so the default home is not also scanned.
-        expect(retired).toEqual(new Set([FIRST]))
+        expect(retired.names).toEqual(new Set([FIRST]))
       } finally {
         await rm(configDir, { force: true, recursive: true })
       }
@@ -181,7 +181,7 @@ describe('discoverRetiredWorktreeNames', () => {
           env: {},
           resolveWslHome: async (distro) => (distro === 'Ubuntu' ? distroHome : null)
         })
-        expect(retired).toEqual(new Set([FIRST]))
+        expect(retired.names).toEqual(new Set([FIRST]))
       } finally {
         await rm(distroHome, { force: true, recursive: true })
       }
@@ -199,7 +199,7 @@ describe('discoverRetiredWorktreeNames', () => {
           env: {},
           resolveWslHome: async () => null
         })
-        expect(retired).toEqual(new Set([FIRST]))
+        expect(retired.names).toEqual(new Set([FIRST]))
       }
     )
   })
@@ -214,7 +214,7 @@ describe('discoverRetiredWorktreeNames', () => {
           home,
           env: {}
         })
-        expect(retired).toEqual(new Set([SECOND]))
+        expect(retired.names).toEqual(new Set([SECOND]))
       } finally {
         await rm(root, { force: true, recursive: true })
       }
