@@ -185,9 +185,11 @@ function rekeyRetirementNamespaceHost(
     if (!retainSource) {
       delete namespaces[key]
       changed = true
-    } else if (wrote) {
-      // Re-insert so this bucket counts as freshly used. A copy keeps it for a live sibling target,
-      // and leaving it at its original slot would make it the next eviction victim.
+    } else {
+      // Unconditional, even when the merge added nothing: a retained source is the bucket a live
+      // sibling target still reads, so it counts as used. Gating this on a write would let the trim
+      // take it ahead of buckets nothing has touched in months. Order only — never `changed`, or an
+      // import that moved nothing would schedule a save.
       delete namespaces[key]
       namespaces[key] = registry
     }
@@ -198,6 +200,11 @@ function rekeyRetirementNamespaceHost(
       delete namespaces[nextKey]
       namespaces[nextKey] = merged
       changed = true
+    } else if (existing) {
+      // A move just made this destination the only copy, and a no-op copy is still a use. Same
+      // reasoning as above, and likewise order only.
+      delete namespaces[nextKey]
+      namespaces[nextKey] = existing
     }
   }
   return changed

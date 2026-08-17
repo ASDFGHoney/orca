@@ -170,6 +170,44 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
     expect(namespaces['local:posix:/w/2']).toBeDefined()
   })
 
+  it('refreshes a retained source even when its own merge added nothing', () => {
+    // Mixed migration: /srv/a is a no-op because the destination already covers it, /srv/b writes and
+    // grows the map. The no-op source is still the bucket a live sibling on the old endpoint reads,
+    // so the trim must take a stale bystander instead of it.
+    const namespaces: Record<string, RetiredNameRegistry> = {
+      'ssh:old|22|dev:posix:/srv/a': registry('seahorse'),
+      'ssh:new|22|dev:posix:/srv/a': registry('seahorse'),
+      'ssh:old|22|dev:posix:/srv/b': registry('nautilus')
+    }
+    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES - 3; index += 1) {
+      namespaces[`local:posix:/w/${index}`] = registry('dolphin')
+    }
+
+    migrateRetirementNamespaceHostIdentity(namespaces, {
+      copyFrom: ['ssh:old|22|dev'],
+      to: 'ssh:new|22|dev'
+    })
+    expect(Object.keys(namespaces).length).toBe(MAX_RETIREMENT_NAMESPACES)
+    expect(namespaces['ssh:old|22|dev:posix:/srv/a']).toBeDefined()
+    expect(namespaces['local:posix:/w/0']).toBeUndefined()
+  })
+
+  it('refreshes a move destination that the move just made the only copy', () => {
+    // The merge is a no-op, but deleting the source leaves this destination holding the sole copy —
+    // so it has been used and must not stay at the front of the eviction queue.
+    const namespaces: Record<string, RetiredNameRegistry> = {
+      'ssh:new|22|dev:posix:/srv/a': registry('seahorse'),
+      'local:posix:/w/0': registry('dolphin'),
+      'ssh:old-id:posix:/srv/a': registry('seahorse')
+    }
+
+    migrateRetirementNamespaceHostIdentity(namespaces, {
+      moveFrom: ['ssh:old-id'],
+      to: 'ssh:new|22|dev'
+    })
+    expect(Object.keys(namespaces).at(-1)).toBe('ssh:new|22|dev:posix:/srv/a')
+  })
+
   it('leaves a merged destination newest, so the very next ordinary write cannot evict it', () => {
     // Protecting the destination only inside the migration's own trim is not enough: the key keeps
     // its original slot, so the next unrelated retirement write evicts it as "oldest" and undoes
