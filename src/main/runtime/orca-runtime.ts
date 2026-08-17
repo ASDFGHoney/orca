@@ -1987,7 +1987,6 @@ const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
 const WORKTREE_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
-const REMOTE_BROWSER_STARTUP_FRAME_RETRY_MS = 50
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
@@ -3225,7 +3224,7 @@ export class OrcaRuntimeService {
   >()
   private activeBrowserScreencastsByPage = new Map<
     string,
-    Set<{ cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }>
+    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
   >()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
@@ -9344,7 +9343,7 @@ export class OrcaRuntimeService {
     if (hasTargetGroup && nextSnapshot.tabGroupLayout) {
       this.persistHeadlessTabGroups(worktreeId, nextGroups, nextSnapshot.tabGroupLayout)
     }
-    this.notifyMobileSessionTabsChanged(worktreeId)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
   private closeHeadlessMobileTerminalTab(
@@ -10436,7 +10435,6 @@ export class OrcaRuntimeService {
       this.mobileSessionTabListeners.delete(subscription)
       if (this.mobileSessionTabListeners.size === 0) {
         this.mobileSessionTabsAgentStatusHeartbeat.cancelPending()
-        // No remaining client can observe the publication barrier.
         for (const waiter of this.browserTabPublicationWaiters) {
           clearTimeout(waiter.timer)
           waiter.resolve()
@@ -14775,9 +14773,7 @@ export class OrcaRuntimeService {
 
   reclaimBrowserForDesktop(browserPageId: string): boolean {
     this.setBrowserDriver(browserPageId, { kind: 'desktop' })
-    for (const stream of this.activeBrowserScreencastsByPage.get(browserPageId) ?? []) {
-      stream.cancel(true)
-    }
+    this.activeBrowserScreencastsByPage.get(browserPageId)?.cancel(true)
     return true
   }
 
@@ -37454,9 +37450,20 @@ export class OrcaRuntimeService {
         'Browser screencast requires a binary streaming transport.'
       )
     }
-    const sendBinary = options.sendBinary
 
     const connectionKey = options.connectionId ?? 'local'
+    const requestedPageId = typeof params.page === 'string' ? params.page : null
+    let existingPageStream = requestedPageId
+      ? this.activeBrowserScreencastsByPage.get(requestedPageId)
+      : undefined
+    while (existingPageStream) {
+      // Why: CDP allows only one screencast per page; cancel a stale stream so the next tab activation isn't stuck on an already-active error or old viewport.
+      existingPageStream.cancel(existingPageStream.connectionKey !== connectionKey)
+      await existingPageStream.done
+      existingPageStream = requestedPageId
+        ? this.activeBrowserScreencastsByPage.get(requestedPageId)
+        : undefined
+    }
     let existingStream = this.activeBrowserScreencastsByConnection.get(connectionKey)
     while (existingStream) {
       existingStream.cancel()
@@ -37473,8 +37480,6 @@ export class OrcaRuntimeService {
     let ended = false
     let cancelledBeforeStart = false
     let readyEmitted = false
-    let pendingBinaryFrame: Uint8Array<ArrayBufferLike> | null = null
-    let pendingFrameRetryTimer: ReturnType<typeof setTimeout> | null = null
     let resolveActiveDone!: () => void
     const activeDone = new Promise<void>((resolve) => {
       resolveActiveDone = resolve
@@ -37484,11 +37489,6 @@ export class OrcaRuntimeService {
         return
       }
       ended = true
-      pendingBinaryFrame = null
-      if (pendingFrameRetryTimer) {
-        clearTimeout(pendingFrameRetryTimer)
-        pendingFrameRetryTimer = null
-      }
       screencast?.session.stop()
       if (emitEnd && screencast) {
         options.emit({ type: 'end', subscriptionId: screencast.subscriptionId })
@@ -37502,45 +37502,12 @@ export class OrcaRuntimeService {
       end(emitEnd)
     }
     const abortScreencast = (): void => cancel()
-    const flushPendingFrame = (): void => {
-      if (ended || !readyEmitted || !pendingBinaryFrame) {
-        return
-      }
-      const frame = pendingBinaryFrame
-      if (sendBinary(frame) === false) {
-        if (!pendingFrameRetryTimer) {
-          pendingFrameRetryTimer = setTimeout(() => {
-            pendingFrameRetryTimer = null
-            flushPendingFrame()
-          }, REMOTE_BROWSER_STARTUP_FRAME_RETRY_MS)
-          pendingFrameRetryTimer.unref?.()
-        }
-        return
-      }
-      if (pendingBinaryFrame === frame) {
-        pendingBinaryFrame = null
-        if (pendingFrameRetryTimer) {
-          clearTimeout(pendingFrameRetryTimer)
-          pendingFrameRetryTimer = null
-        }
-      }
-    }
     const sendBinaryAfterReady = (bytes: Uint8Array<ArrayBufferLike>): boolean | void => {
       if (!readyEmitted) {
-        pendingBinaryFrame = bytes
-        return true
+        // Why: clients learn the owning subscription from ready, so CDP frames must stay unacked until the JSON ready event is delivered.
+        return false
       }
-      if (pendingBinaryFrame) {
-        pendingBinaryFrame = bytes
-        flushPendingFrame()
-        return true
-      }
-      if (sendBinary(bytes) === false) {
-        pendingBinaryFrame = bytes
-        flushPendingFrame()
-        return true
-      }
-      return true
+      return options.sendBinary?.(bytes)
     }
 
     // Why: a phone can rotate before the first stream reaches ready (no subscriptionId yet), so a same-socket replacement cancels and waits here instead of racing.
@@ -37561,14 +37528,11 @@ export class OrcaRuntimeService {
         return
       }
       activeBrowserPageId = screencast.ready.browserPageId
-      const pageStream = {
+      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, {
         cancel,
         done: activeDone,
         connectionKey
-      }
-      const pageStreams = this.activeBrowserScreencastsByPage.get(activeBrowserPageId) ?? new Set()
-      pageStreams.add(pageStream)
-      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
+      })
       this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
 
       // Why: screencast frames are connection-scoped; tie Page.stopScreencast to the exact socket so dropped connections don't leave Chromium streaming.
@@ -37580,7 +37544,6 @@ export class OrcaRuntimeService {
       registeredSubscriptionId = screencast.subscriptionId
       options.emit(screencast.ready)
       readyEmitted = true
-      flushPendingFrame()
       await screencast.session.done
       end(true)
       this.cleanupSubscription(screencast.subscriptionId)
@@ -37597,22 +37560,13 @@ export class OrcaRuntimeService {
         this.activeBrowserScreencastsByConnection.delete(connectionKey)
       }
       if (activeBrowserPageId) {
-        const pageStreams = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
-        for (const stream of pageStreams ?? []) {
-          if (stream.done === activeDone) {
-            pageStreams?.delete(stream)
-          }
-        }
-        if (pageStreams?.size === 0) {
+        const activePageStream = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
+        if (activePageStream?.done === activeDone) {
           this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
         }
         const driver = this.getBrowserDriver(activeBrowserPageId)
         if (driver.kind === 'mobile' && driver.clientId === connectionKey) {
-          const fallback = Array.from(pageStreams ?? []).at(-1)
-          this.setBrowserDriver(
-            activeBrowserPageId,
-            fallback ? { kind: 'mobile', clientId: fallback.connectionKey } : { kind: 'idle' }
-          )
+          this.setBrowserDriver(activeBrowserPageId, { kind: 'idle' })
         }
       }
       resolveActiveDone()

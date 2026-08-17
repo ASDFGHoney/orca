@@ -34716,7 +34716,7 @@ describe('OrcaRuntimeService', () => {
     expect(thirdStop).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps same-page screencasts alive for independent connections', async () => {
+  it('cancels an active same-page browser screencast before another connection starts', async () => {
     const runtime = createRuntime()
     const firstDone = deferred<void>()
     const secondDone = deferred<void>()
@@ -34780,26 +34780,18 @@ describe('OrcaRuntimeService', () => {
       { connectionId: 'conn-2', sendBinary: vi.fn(), emit: secondEmit }
     )
 
+    await vi.waitFor(() => expect(firstStop).toHaveBeenCalledTimes(1))
+    await first
     await vi.waitFor(() =>
       expect(secondEmit).toHaveBeenCalledWith(
         expect.objectContaining({ subscriptionId: 'browser-screencast:page-1:second' })
       )
     )
     expect(browserScreencast).toHaveBeenCalledTimes(2)
-    expect(firstStop).not.toHaveBeenCalled()
 
     runtime.cleanupSubscription('browser-screencast:page-1:second')
     await second
-    expect(runtime.getAllBrowserDrivers().get('page-1')).toEqual({
-      kind: 'mobile',
-      clientId: 'conn-1'
-    })
-    expect(firstStop).not.toHaveBeenCalled()
     expect(secondStop).toHaveBeenCalledTimes(1)
-    runtime.cleanupSubscription('browser-screencast:page-1:first')
-    await first
-    expect(firstStop).toHaveBeenCalledTimes(1)
-    expect(runtime.getAllBrowserDrivers().has('page-1')).toBe(false)
   })
 
   it('dedupes async subscription cleanup and retains a failed cleanup for retry', async () => {
@@ -34866,18 +34858,16 @@ describe('OrcaRuntimeService', () => {
     expect(replacementCleanup).toHaveBeenCalledTimes(1)
   })
 
-  it('delivers the latest startup frame immediately after ready', async () => {
+  it('does not deliver or accept browser screencast frames before ready', async () => {
     const runtime = createRuntime()
     const done = deferred<void>()
     const stop = vi.fn(() => done.resolve())
     const startupFrame = new Uint8Array([1, 2, 3])
-    const latestStartupFrame = new Uint8Array([4, 5, 6])
     const sendBinary = vi.fn()
     const emit = vi.fn()
     const browserScreencast = vi.fn(
       async (_params: unknown, stream: { sendBinary: typeof sendBinary }) => {
-        expect(stream.sendBinary(startupFrame)).toBe(true)
-        expect(stream.sendBinary(latestStartupFrame)).toBe(true)
+        expect(stream.sendBinary(startupFrame)).toBe(false)
         expect(sendBinary).not.toHaveBeenCalled()
         return {
           subscriptionId: 'browser-screencast:page-1:first',
@@ -34911,66 +34901,10 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() =>
       expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }))
     )
-    expect(sendBinary).toHaveBeenCalledOnce()
-    expect(sendBinary).toHaveBeenCalledWith(latestStartupFrame)
+    expect(sendBinary).not.toHaveBeenCalled()
 
     runtime.cleanupSubscription('browser-screencast:page-1:first')
     await task
-  })
-
-  it('retries a retained startup frame after transport backpressure clears', async () => {
-    vi.useFakeTimers()
-    try {
-      const runtime = createRuntime()
-      const done = deferred<void>()
-      const stop = vi.fn(() => done.resolve())
-      const startupFrame = new Uint8Array([1, 2, 3])
-      const sendBinary = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
-      const emit = vi.fn()
-      const browserScreencast = vi.fn(
-        async (_params: unknown, stream: { sendBinary: typeof sendBinary }) => {
-          expect(stream.sendBinary(startupFrame)).toBe(true)
-          return {
-            subscriptionId: 'browser-screencast:page-1:first',
-            ready: {
-              type: 'ready',
-              subscriptionId: 'browser-screencast:page-1:first',
-              browserPageId: 'page-1',
-              format: 'jpeg',
-              tab: {
-                browserPageId: 'page-1',
-                index: 0,
-                url: 'about:blank',
-                title: 'Browser',
-                active: true
-              }
-            },
-            session: { stop, done: done.promise }
-          }
-        }
-      )
-      ;(
-        runtime as unknown as { browserCommands: { browserScreencast: typeof browserScreencast } }
-      ).browserCommands = { browserScreencast }
-
-      const task = runtime.browserScreencast(
-        { worktree: `id:${TEST_WORKTREE_ID}`, page: 'page-1', format: 'jpeg' },
-        { connectionId: 'conn-1', sendBinary, emit }
-      )
-      await Promise.resolve()
-      await Promise.resolve()
-      expect(sendBinary).toHaveBeenCalledOnce()
-
-      await vi.advanceTimersByTimeAsync(50)
-
-      expect(sendBinary).toHaveBeenCalledTimes(2)
-      expect(sendBinary).toHaveBeenNthCalledWith(1, startupFrame)
-      expect(sendBinary).toHaveBeenNthCalledWith(2, startupFrame)
-      runtime.cleanupSubscription('browser-screencast:page-1:first')
-      await task
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   it('delivers pending mail via notifyMessageArrived when the recipient is already idle', async () => {

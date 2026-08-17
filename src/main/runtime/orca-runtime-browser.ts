@@ -58,10 +58,7 @@ import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
 import { BrowserError } from '../browser/cdp-bridge'
 import { startBrowserScreencast } from '../browser/browser-screencast-stream'
-import type {
-  BrowserScreencastSession,
-  BrowserScreencastViewport
-} from '../browser/browser-screencast-stream-types'
+import type { BrowserScreencastSession } from '../browser/browser-screencast-stream-types'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import {
   detectInstalledBrowsers,
@@ -108,64 +105,9 @@ type BrowserScreencastStartResult = {
   session: BrowserScreencastSession
 }
 
-type ActiveBrowserScreencastSubscriber = {
-  sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
-  emit?: (event: BrowserScreencastResult) => void
-  done: Promise<void>
-  resolveDone: () => void
-}
-
 type ActiveBrowserScreencastPage = {
-  latestFrame: Uint8Array<ArrayBufferLike> | null
-  session: BrowserScreencastSession | null
-  settings: NormalizedBrowserScreencastSettings
-  started: Promise<BrowserScreencastSession>
-  stopping: boolean
-  subscribers: Map<string, ActiveBrowserScreencastSubscriber>
-}
-
-type NormalizedBrowserScreencastSettings = BrowserScreencastViewport & {
-  format: 'jpeg' | 'png'
-  quality: number
-  maxWidth: number
-  maxHeight: number
-  everyNthFrame: number
-  minFrameIntervalMs: number
-}
-
-function normalizeScreencastSettings(
-  params: BrowserScreencastParams
-): NormalizedBrowserScreencastSettings {
-  return {
-    format: params.format,
-    quality: clampInteger(params.quality, 10, 100, 70),
-    maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
-    maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
-    viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
-    viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
-    deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
-    mobile: params.mobile === true,
-    everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
-    minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0)
-  }
-}
-
-function sameScreencastSettings(
-  left: NormalizedBrowserScreencastSettings,
-  right: NormalizedBrowserScreencastSettings
-): boolean {
-  return (
-    left.format === right.format &&
-    left.quality === right.quality &&
-    left.maxWidth === right.maxWidth &&
-    left.maxHeight === right.maxHeight &&
-    left.viewportWidth === right.viewportWidth &&
-    left.viewportHeight === right.viewportHeight &&
-    left.deviceScaleFactor === right.deviceScaleFactor &&
-    left.mobile === right.mobile &&
-    left.everyNthFrame === right.everyNthFrame &&
-    left.minFrameIntervalMs === right.minFrameIntervalMs
-  )
+  stop: () => void
+  done: Promise<void>
 }
 
 function clampInteger(
@@ -223,7 +165,9 @@ export type RuntimeBrowserCommandHost = {
 }
 
 export class RuntimeBrowserCommands {
+  private readonly activeScreencastPageIds = new Set<string>()
   private readonly activeScreencastsByPageId = new Map<string, ActiveBrowserScreencastPage>()
+  private readonly stoppingScreencastPageIds = new Map<string, Promise<void>>()
 
   constructor(private readonly host: RuntimeBrowserCommandHost) {}
 
@@ -526,114 +470,118 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    const settings = normalizeScreencastSettings(params)
+    let stopping = this.stoppingScreencastPageIds.get(browserPageId)
+    if (stopping) {
+      await stopping
+    }
     let active = this.activeScreencastsByPageId.get(browserPageId)
-    while (active?.stopping) {
-      await active.session?.done
+    while (active) {
+      // Why: CDP allows one Page.startScreencast per page, so a new subscriber takes over a stale/hidden client instead of erroring.
+      active.stop()
+      await active.done
+      stopping = this.stoppingScreencastPageIds.get(browserPageId)
+      if (stopping) {
+        await stopping
+      }
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
-    if (active && !sameScreencastSettings(active.settings, settings)) {
-      throw new BrowserError(
-        'browser_error',
-        `Browser page ${browserPageId} is already streaming with incompatible options.`
-      )
-    }
-    if (!active) {
-      const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
-      const record = {
-        latestFrame: null,
-        session: null,
-        settings,
-        stopping: false,
-        subscribers
-      } as ActiveBrowserScreencastPage
-      record.started = startBrowserScreencast(guest, {
-        ...settings,
-        onFrame: (bytes) => {
-          record.latestFrame = bytes
-          for (const subscriber of record.subscribers.values()) {
-            // A slow viewer drops this frame without stalling every other viewer.
-            sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
-          }
-          return true
-        },
-        onEvent: (event) => {
-          for (const subscriber of record.subscribers.values()) {
-            subscriber.emit?.(event)
-          }
-        },
-        onError: (message) => {
-          for (const subscriber of record.subscribers.values()) {
-            subscriber.emit?.({ type: 'error', message })
-          }
-        }
-      })
-      active = record
-      this.activeScreencastsByPageId.set(browserPageId, record)
-      void record.started
-        .then((session) => {
-          record.session = session
-          return session.done
-        })
-        .finally(() => {
-          if (this.activeScreencastsByPageId.get(browserPageId) === record) {
-            this.activeScreencastsByPageId.delete(browserPageId)
-          }
-          for (const subscriber of record.subscribers.values()) {
-            subscriber.resolveDone()
-          }
-          record.subscribers.clear()
-        })
-        .catch(() => {})
-    }
+    this.activeScreencastPageIds.add(browserPageId)
+    const format = params.format
     const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
-    let resolveSubscriberDone!: () => void
-    const subscriberDone = new Promise<void>((resolve) => {
-      resolveSubscriberDone = resolve
+    let session: BrowserScreencastSession | null = null
+    let resolveActiveDone!: () => void
+    const activeDone = new Promise<void>((resolve) => {
+      resolveActiveDone = resolve
     })
-    const subscriber = {
-      sendBinary: stream.sendBinary,
-      emit: stream.emit,
-      done: subscriberDone,
-      resolveDone: resolveSubscriberDone
+    let cancelledBeforeStart = false
+    const activeRecord: ActiveBrowserScreencastPage = {
+      stop: () => {
+        if (session) {
+          session.stop()
+          return
+        }
+        cancelledBeforeStart = true
+      },
+      done: activeDone
     }
-    active.subscribers.set(subscriptionId, subscriber)
-    if (active.latestFrame) {
-      sendRemoteBrowserScreencastFrame(subscriber.sendBinary, active.latestFrame)
-    }
-    let session: BrowserScreencastSession
+    this.activeScreencastsByPageId.set(browserPageId, activeRecord)
     try {
-      session = await active.started
+      session = await startBrowserScreencast(guest, {
+        format,
+        quality: clampInteger(params.quality, 10, 100, 70),
+        maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
+        maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
+        viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
+        viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
+        deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
+        mobile: params.mobile === true,
+        everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
+        minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
+        onFrame: (bytes) => sendRemoteBrowserScreencastFrame(stream.sendBinary, bytes),
+        onEvent: stream.emit,
+        onError: (message) => stream.emit?.({ type: 'error', message })
+      })
+      if (cancelledBeforeStart) {
+        session.stop()
+        await session.done
+        throw new BrowserError('browser_error', 'Browser screencast was cancelled.')
+      }
     } catch (error) {
-      active.subscribers.delete(subscriptionId)
-      resolveSubscriberDone()
+      this.activeScreencastPageIds.delete(browserPageId)
+      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
+        this.activeScreencastsByPageId.delete(browserPageId)
+      }
+      resolveActiveDone()
       throw error
     }
-    return {
-      subscriptionId,
-      session: {
-        done: subscriberDone,
-        stop: () => {
-          const subscriber = active.subscribers.get(subscriptionId)
-          if (!subscriber) {
-            return
-          }
-          active.subscribers.delete(subscriptionId)
-          subscriber.resolveDone()
-          if (active.subscribers.size === 0) {
-            active.stopping = true
-            session.stop()
+    let stoppingPromise: Promise<void> | null = null
+    const clearPageGate = (): void => {
+      this.activeScreencastPageIds.delete(browserPageId)
+      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
+        this.activeScreencastsByPageId.delete(browserPageId)
+      }
+      if (
+        stoppingPromise &&
+        this.stoppingScreencastPageIds.get(browserPageId) === stoppingPromise
+      ) {
+        this.stoppingScreencastPageIds.delete(browserPageId)
+      }
+      resolveActiveDone()
+    }
+    const markStopping = (): void => {
+      if (stoppingPromise || !session) {
+        return
+      }
+      // Why: mobile can unsubscribe and instantly resubscribe on rotation; new streams wait for CDP teardown instead of failing already-active.
+      stoppingPromise = session.done.finally(clearPageGate)
+      this.stoppingScreencastPageIds.set(browserPageId, stoppingPromise)
+    }
+    void session.done.finally(() => {
+      clearPageGate()
+    })
+
+    try {
+      return {
+        subscriptionId,
+        session: {
+          done: session.done,
+          stop: () => {
+            markStopping()
+            session?.stop()
           }
         },
-        updateViewport: session.updateViewport
-      },
-      ready: {
-        type: 'ready',
-        subscriptionId,
-        browserPageId,
-        format: active.settings.format,
-        tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+        ready: {
+          type: 'ready',
+          subscriptionId,
+          browserPageId,
+          format,
+          tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+        }
       }
+    } catch (error) {
+      markStopping()
+      session.stop()
+      throw error
     }
   }
 
@@ -1378,7 +1326,7 @@ export class RuntimeBrowserCommands {
       if (!offscreen) {
         throw new BrowserError('browser_error', 'This host does not support browser panes.')
       }
-      const created = await this.createBrowserTabOffscreen(
+      return this.createBrowserTabOffscreen(
         offscreen,
         url,
         worktreeId,
@@ -1387,10 +1335,6 @@ export class RuntimeBrowserCommands {
         params.targetGroupId,
         params.page
       )
-      if (!params.page && worktreeId) {
-        await this.host.waitForBrowserSessionTabPublication?.(worktreeId, created.browserPageId)
-      }
-      return created
     }
     const { browserPageId } = await this.createBrowserTabInRenderer(
       url,
@@ -1817,6 +1761,9 @@ export class RuntimeBrowserCommands {
       this.host.markHeadlessBrowserSessionTabActive?.(worktreeId, browserPageId, targetGroupId)
     } else if (worktreeId) {
       this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktreeId)
+    }
+    if (!requestedPageId && worktreeId) {
+      await this.host.waitForBrowserSessionTabPublication?.(worktreeId, browserPageId)
     }
     return { browserPageId }
   }

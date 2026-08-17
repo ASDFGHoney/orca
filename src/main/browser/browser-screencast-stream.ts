@@ -8,8 +8,7 @@ import { createBrowserScreencastFramePacer } from './browser-screencast-frame-pa
 import { createBrowserScreencastSnapshotCapture } from './browser-screencast-snapshot-capture'
 import type {
   BrowserScreencastOptions,
-  BrowserScreencastSession,
-  BrowserScreencastViewport
+  BrowserScreencastSession
 } from './browser-screencast-stream-types'
 
 export async function startBrowserScreencast(
@@ -34,7 +33,6 @@ export async function startBrowserScreencast(
   let closed = false
   let stopping = false
   let resolveDone!: () => void
-  let viewportUpdate = Promise.resolve()
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve
   })
@@ -97,7 +95,7 @@ export async function startBrowserScreencast(
       maxHeight: options.maxHeight,
       everyNthFrame: options.everyNthFrame
     })
-    viewportUpdate = snapshotCapture.emitSnapshotFrame(true)
+    void snapshotCapture.emitSnapshotFrame(true)
   } catch (error) {
     if (deviceMetrics.isOverridden()) {
       await deviceMetrics.clear().catch(() => {})
@@ -110,21 +108,6 @@ export async function startBrowserScreencast(
   }
 
   return {
-    updateViewport: (viewport: BrowserScreencastViewport) => {
-      viewportUpdate = viewportUpdate
-        .catch(() => {})
-        .then(async () => {
-          if (closed || stopping) {
-            return
-          }
-          Object.assign(options, viewport)
-          snapshotCapture.bumpGeneration()
-          snapshotCapture.clearNavigationCaptureTimer()
-          framePacer.clearPending(true)
-          await snapshotCapture.emitSnapshotFrame(true)
-        })
-      return viewportUpdate
-    },
     stop: () => {
       if (closed) {
         return
@@ -135,7 +118,6 @@ export async function startBrowserScreencast(
       framePacer.clearPending(true)
       try {
         void (async () => {
-          await viewportUpdate.catch(() => {})
           await sendDebuggerCommand(dbg, 'Page.stopScreencast').catch(() => {})
           if (deviceMetrics.isOverridden()) {
             await deviceMetrics.clear().catch(() => {})
