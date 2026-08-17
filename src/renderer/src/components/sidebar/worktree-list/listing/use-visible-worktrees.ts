@@ -84,6 +84,10 @@ export function useVisibleSidebarWorktrees(args: {
 
   const recomputedVisibleWorktrees = useMemo(() => {
     void agentStatusEpoch
+    // Either, both or neither may be set; stay undefined when neither is.
+    const forcedVisibleWorktreeIds = [args.agentSendTargetWorktreeId, activeWorktreeId].filter(
+      (id): id is string => id != null
+    )
     return computeVisibleWorktrees(worktreesByRepo, sortedIds, {
       filterRepoIds,
       filterWorkspaceStatuses,
@@ -112,9 +116,8 @@ export function useVisibleSidebarWorktrees(args: {
       visibleWorkspaceHostIds,
       defaultHostId: getSettingsFocusedExecutionHostId(settings),
       worktreeLineageById,
-      forcedVisibleWorktreeIds: [args.agentSendTargetWorktreeId, activeWorktreeId].filter(
-        (id): id is string => id != null
-      )
+      forcedVisibleWorktreeIds:
+        forcedVisibleWorktreeIds.length > 0 ? forcedVisibleWorktreeIds : undefined
     })
   }, [
     args.agentSendTargetWorktreeId,

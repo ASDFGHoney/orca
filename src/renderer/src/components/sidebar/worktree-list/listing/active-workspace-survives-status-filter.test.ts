@@ -83,7 +83,6 @@ function renderVisibleIds(
       sortBy: 'manual',
       sortedIds: worktrees.map((w) => w.id),
       repoMap: new Map([[REPO.id, REPO]]),
-      worktreeMap: new Map(worktrees.map((w) => [w.id, w])),
       worktreeLineageById: {},
       settings: state.settings,
       agentSendTargetWorktreeId: null
