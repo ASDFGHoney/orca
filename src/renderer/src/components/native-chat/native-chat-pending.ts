@@ -115,7 +115,7 @@ function messagesAfterPendingBoundary(
     )
   }
   const boundaryIndex = messages.findIndex((message) => message.id === pending.afterMessageId)
-  if (boundaryIndex >= 0) {
+  if (boundaryIndex !== -1) {
     return messages.slice(boundaryIndex + 1)
   }
   // A bounded authoritative read can page the boundary out. Use the pending
@@ -175,11 +175,10 @@ export function prunePendingSends(
     consumed.set(key, Math.max(used, occurrence))
     return occurrence > available
   })
-  // Why: when rapid body writes glued two optimistic sends into one transcript
-  // user row ("joke"+"continue"→"jokecontinue"), exact keys never match. Drop
-  // those echoes once an assistant turn advances past the glued user text.
-  // Boundary-filter per send so a pre-watermark "tellagain" cannot prune a
-  // fresh tell+again pair after the new high-water.
+  // Why: when a lost Enter glued two optimistic sends onto one input line, the
+  // transcript carries one row ("joke"+"continue"→"jokecontinue") that no exact
+  // key matches. Boundary-filter per send so an older row cannot retire a
+  // fresh queued pair after its transcript high-water.
   const stillOpen = pending.filter((_, index) => exactKeep[index])
   const gluedRepresented = gluedPendingIndicesAfterBoundaries(
     stillOpen,
@@ -192,7 +191,7 @@ export function prunePendingSends(
       return false
     }
     const openIndex = stillOpen.indexOf(entry)
-    return openIndex < 0 || !gluedRepresented.has(openIndex)
+    return openIndex === -1 || !gluedRepresented.has(openIndex)
   })
   return next.length === pending.length ? pending : next
 }
@@ -239,7 +238,7 @@ export function pendingSendsAsMessages(
         return false
       }
       const openIndex = stillVisible.indexOf(entry)
-      return openIndex < 0 || !gluedRepresented.has(openIndex)
+      return openIndex === -1 || !gluedRepresented.has(openIndex)
     })
     .map((entry) => ({
       id: `pending:${entry.id}`,
@@ -260,6 +259,19 @@ function pendingBoundaryKey(pending: NativeChatPendingSend): string {
     String(pending.afterTranscriptHighWater),
     String(nativeChatPendingMatchingAfter(pending))
   ].join('\0')
+}
+
+function messagesAfterGlueBoundary(
+  messages: readonly NativeChatMessage[],
+  pending: NativeChatPendingSend,
+  transcriptOrder: NativeChatTranscriptOrder | undefined
+): readonly NativeChatMessage[] {
+  if (pending.afterMessageId === undefined && transcriptOrder === undefined) {
+    return messages.filter(
+      (message) => message.timestamp === null || message.timestamp >= pending.sentAt
+    )
+  }
+  return messagesAfterPendingBoundary(messages, pending, transcriptOrder)
 }
 
 /** Glue-match only inside each send's post-boundary window (never full history). */
@@ -302,7 +314,7 @@ function gluedPendingIndicesAfterBoundaries(
     })
     const local = selectPendingIndicesRepresentedByUserTexts(
       groupPending,
-      userTextsOf(messagesAfterPendingBoundary(messages, head, transcriptOrder))
+      userTextsOf(messagesAfterGlueBoundary(messages, head, transcriptOrder))
     )
     for (const localIndex of local) {
       const openIndex = indices[localIndex]

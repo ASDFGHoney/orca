@@ -36,6 +36,7 @@ export function useNativeChatLoadEarlier(args: {
   transcriptLifecycleControl: TranscriptLifecycleControl
   limitRef: MutableRefObject<number>
   transcriptEpochRef: MutableRefObject<number>
+  latestEnabled: MutableRefObject<boolean>
   latestSessionId: MutableRefObject<string | null>
   latestTransport: MutableRefObject<SessionTransport>
   setLoadingEarlier: (value: boolean) => void
@@ -53,6 +54,7 @@ export function useNativeChatLoadEarlier(args: {
     transcriptLifecycleControl,
     limitRef,
     transcriptEpochRef,
+    latestEnabled,
     latestSessionId,
     latestTransport,
     setLoadingEarlier,
@@ -61,7 +63,13 @@ export function useNativeChatLoadEarlier(args: {
   } = args
 
   return useCallback(() => {
-    if (!sessionId || loadingEarlier || !hasMore || readPhase !== 'ready') {
+    if (
+      !latestEnabled.current ||
+      !sessionId ||
+      loadingEarlier ||
+      !hasMore ||
+      readPhase !== 'ready'
+    ) {
       return
     }
     const nextLimit = nextNativeChatLimit(limitRef.current)
@@ -73,6 +81,7 @@ export function useNativeChatLoadEarlier(args: {
       .then((result) => {
         // Ignore a stale resolve from a swapped session or flipped owner.
         if (
+          !latestEnabled.current ||
           latestSessionId.current !== sessionId ||
           latestTransport.current !== transport ||
           transcriptEpochRef.current !== requestEpoch
@@ -91,7 +100,7 @@ export function useNativeChatLoadEarlier(args: {
         // Keep the already-loaded transcript intact rather than surface rejection.
       })
       .finally(() => {
-        if (transcriptEpochRef.current === requestEpoch) {
+        if (latestEnabled.current && transcriptEpochRef.current === requestEpoch) {
           setLoadingEarlier(false)
         }
       })
@@ -106,6 +115,7 @@ export function useNativeChatLoadEarlier(args: {
     transcriptLifecycleControl,
     limitRef,
     transcriptEpochRef,
+    latestEnabled,
     latestSessionId,
     latestTransport,
     setLoadingEarlier,

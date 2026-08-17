@@ -15,6 +15,8 @@ export type UseNativeChatLiveSessionArgs = {
   transcriptPath?: string | null
   /** Non-null routes reads and subscriptions to the runtime owner. */
   runtimeEnvironmentId?: string | null
+  /** False suspends transcript IO while retaining the last committed session. */
+  enabled?: boolean
 }
 
 export type ReadState =
