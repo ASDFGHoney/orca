@@ -25,6 +25,19 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.busyLog.at(-1)).toBe(false)
   })
 
+  it('keeps a same-page release target valid across a stream restart', async () => {
+    const harness = createHarness()
+    await openStreamAndConfirmReady(harness)
+    const token = harness.lifecycle.tokens.createOperationToken('page-1')
+    expect(token).not.toBeNull()
+
+    harness.lifecycle.tokens.supersedeOperations()
+
+    expect(harness.lifecycle.tokens.isCurrentPageTarget(token!)).toBe(true)
+    harness.lifecycle.tokens.setRemotePage('page-2')
+    expect(harness.lifecycle.tokens.isCurrentPageTarget(token!)).toBe(false)
+  })
+
   it('tags the screencast request as browser-pane UI traffic', async () => {
     const harness = createHarness()
     await openStreamAndConfirmReady(harness)
