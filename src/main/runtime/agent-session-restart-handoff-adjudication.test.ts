@@ -65,6 +65,29 @@ describe('restarted handoff adjudication', () => {
     })
   })
 
+  it('fully releases an abandoned native reservation instead of resuming it as a handoff', () => {
+    // A native attach reservation also parks at new-owner-proving; rolling it into the
+    // handoff-retry machinery would strand journal-less sessions behind a stale operation.
+    const abandoned = record('new-owner-proving')
+    abandoned.lease.runtimeKind = 'native'
+    abandoned.lease.ownerProcess = null
+    expect(
+      adjudicateRestartedAgentSessionHandoff(
+        abandoned,
+        { outcome: 'indeterminate', reason: 'no spawn-token scan' },
+        NOW + 1_000
+      ).lease
+    ).toMatchObject({
+      runtimeKind: 'native',
+      runtimeFence: 5,
+      handoffStage: null,
+      handoffOperationId: null,
+      claimStatus: 'released',
+      ownerProcess: null,
+      reservedSpawnToken: null
+    })
+  })
+
   it('rolls a dead proving target back to the source kind before retry', () => {
     expect(
       adjudicateRestartedAgentSessionHandoff(

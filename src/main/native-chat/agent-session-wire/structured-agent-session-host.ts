@@ -98,6 +98,7 @@ export class StructuredAgentSessionHost {
       journalRoot: deps.journalRoot,
       supportsRecord: (record) => providerSupport.adapterSupportsRecord(deps.adapter, record),
       reconcile: this.reconcileLeases,
+      resolveRecovery: (sessionId) => this.runtimeState.resolveRecovery(sessionId),
       resume: (params) =>
         this.attach({ callerKey: 'trusted-local:host-restart' }, params).then(
           (result) => result.ok
@@ -149,6 +150,7 @@ export class StructuredAgentSessionHost {
       if (unreconciled) {
         return refuseAgentSessionMutation(unreconciled)
       }
+      await this.runtimeState.resolveRecovery(sessionId)
       const eventSink = this.runtimeState.eventSinkFor(sessionId)
       const attached = await performAttach({
         store: this.deps.store,

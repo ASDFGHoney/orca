@@ -19,6 +19,7 @@ describe('legacy structured session restart', () => {
       journalRoot: '/isolated/no-journal',
       records: [loaded.record],
       reconcile: async () => null,
+      resolveRecovery: async () => 'not-applicable',
       operationId: () => 'legacy-upgrade-operation',
       resume,
       serialize: async () => undefined as never,

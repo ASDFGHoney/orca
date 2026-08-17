@@ -20,6 +20,7 @@ import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agen
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import { probeAgentSessionProcessIdentity } from './agent-session-process-identity-probe'
+import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-readback'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 
@@ -40,6 +41,8 @@ export type StructuredAgentSessionRuntimeDeps = {
   /** Transport for the Codex child. Overridden only to drive the whole runtime
    *  against a scripted app-server; production spawns the real one. */
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
+  /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
+  readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   onError?: (input: { scope: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
@@ -97,7 +100,8 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
         resolveWorkspacePath: deps.resolveWorkspacePath,
         ...(deps.resolveCodexCommand ? { resolveCommand: deps.resolveCodexCommand } : {})
       }),
-      ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {})
+      ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {}),
+      ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {})
     })
     const host = new StructuredAgentSessionHost({
       store,
@@ -149,6 +153,11 @@ export function createStructuredAgentSessionOwnerProbe(
         reason: `owner runs on ${owner.hostId}, which this host cannot probe`
       }
     }
-    return probe({ identity: owner })
+    // The env read-back answers on hosts that expose it and null elsewhere, giving the
+    // probe a PID-reuse-safe element even when no start time was recorded.
+    return probe({
+      identity: owner,
+      deps: { readEchoedSpawnToken: readEchoedAgentSessionSpawnToken }
+    })
   }
 }
