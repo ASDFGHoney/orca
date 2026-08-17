@@ -65,6 +65,12 @@ Old clients and callers that omit placement must retain current server-hosted be
   exact per-WebContents policy. QUIC/HTTP3, WebTransport, browser-managed DoH, other UDP, and
   network-service restart remain explicit residuals because Electron has no narrow per-Session
   controls; global Chromium switches and bespoke transport workarounds were rejected.
+- Security decision: STA-4150 adopts the same trusted-desktop policy as default SSH dynamic
+  forwarding. The client-hosted SOCKS endpoint is loopback-only, ephemeral, bounded, and
+  page/lease-scoped, but intentionally has no local-process authentication. This is an accepted
+  residual for a trusted single-user desktop; it is not claimed to defend against local malware or
+  untrusted same-host processes. Stronger authenticated local transport is a separate follow-up,
+  not a prerequisite for this stack.
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
@@ -1456,6 +1462,18 @@ topology, versions, and explicit gaps at every later checkpoint.
   subresources, downloads, and remote DNS through SOCKS with zero direct target connections; three
   isolated repeats and the 4-file / 29-test route gate pass. The native Linux and Windows package
   jobs now execute the same capture, and both review tabs were closed.
+- Current local CI reproduction fixed two review-stack failures without product behavior changes:
+  headless runtime browser cases moved into a focused test module to satisfy the max-lines ratchet,
+  and the TCP egress assertion now requires the causal `remote-browser.test` observation while
+  allowing unrelated Chromium background hosts through the same proxy. The split browser tests,
+  5-file route/lifecycle gate, focused oxlint, and formatting checks pass locally. Fresh stack CI is
+  still required before any PR can be called ready.
+- Fresh rebuilt paired Electron validation is now green: the full 3-test suite (headed paired
+  client-hosted/fallback, headless paired fallback, and terminal-link lifecycle) passed, and the
+  headed-host journey passed three additional isolated repeats. One earlier full-suite timeout was
+  traced with independent ownership signals to a late remote-frame paint under contention: the host
+  owned `/server`, the client owned zero `/server` WebContents, and the remaining client `<webview>`
+  was the intentionally retained inactive client page. No production workaround was added.
 
 ## Completion rule
 
