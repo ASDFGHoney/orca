@@ -27,4 +27,18 @@ describe('hasMoreNativeChatHistory', () => {
     expect(hasMoreNativeChatHistory(120, 300)).toBe(false)
     expect(hasMoreNativeChatHistory(0, 300)).toBe(false)
   })
+
+  // The count inference cannot tell "the window is exactly full" from "there is
+  // more behind it". That was harmless while this only drove a load-earlier
+  // affordance, but it now also decides whether a head turn's `[Image #n]`
+  // markers are read as the user's own words, so the host's exact answer wins.
+  it('prefers the host’s reported answer over the count inference', () => {
+    expect(hasMoreNativeChatHistory(300, 300, false)).toBe(false)
+    expect(hasMoreNativeChatHistory(120, 300, true)).toBe(true)
+  })
+
+  it('falls back to the count when an older host reports nothing', () => {
+    expect(hasMoreNativeChatHistory(300, 300, undefined)).toBe(true)
+    expect(hasMoreNativeChatHistory(120, 300, undefined)).toBe(false)
+  })
 })

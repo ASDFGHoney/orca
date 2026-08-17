@@ -13,9 +13,23 @@ export function nextNativeChatLimit(currentLimit: number): number {
   return currentLimit + NATIVE_CHAT_PAGE
 }
 
-/** Whether an older page may still exist: the last read filled the window, so
- *  there could be more behind it. If the read returned fewer than requested we
- *  reached the head of the transcript and there is nothing older to load. */
-export function hasMoreNativeChatHistory(returnedCount: number, requestedLimit: number): boolean {
-  return returnedCount >= requestedLimit
+/**
+ * Whether an older page may still exist.
+ *
+ * `reported` is the host's own answer, which is exact — it reads one turn past
+ * the limit to decide. Prefer it whenever it is present; an older remote host
+ * omits it, and only then do we infer from the count.
+ *
+ * The inference is deliberately conservative and NOT exact: a transcript whose
+ * length is exactly the requested limit fills the window without anything
+ * behind it, and still reports true. That is safe for the "load earlier"
+ * affordance (one wasted read) but not for anything that changes what a message
+ * says, so callers doing the latter should rely on the reported value.
+ */
+export function hasMoreNativeChatHistory(
+  returnedCount: number,
+  requestedLimit: number,
+  reported?: boolean
+): boolean {
+  return reported ?? returnedCount >= requestedLimit
 }

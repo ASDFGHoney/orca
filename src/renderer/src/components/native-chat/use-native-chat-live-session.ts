@@ -192,7 +192,7 @@ export function useNativeChatLiveSession(
           const messages = result?.messages ?? []
           transcriptLifecycleControl.replace(result?.lifecycle)
           setRead({ phase: 'ready', messages })
-          setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current))
+          setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current, result?.hasMore))
         })
         .catch((err: unknown) => {
           if (!cancelled && latestEnabled.current && !frameArrived) {
@@ -281,7 +281,7 @@ export function useNativeChatLiveSession(
         // Read results are an ordered tail: replace the base list so the older page prepends in order; live appends stay separate.
         setRead({ phase: 'ready', messages: result.messages })
         transcriptLifecycleControl.replaceFromPagination(result.lifecycle, lifecycleRevision)
-        setHasMore(hasMoreNativeChatHistory(result.messages.length, nextLimit))
+        setHasMore(hasMoreNativeChatHistory(result.messages.length, nextLimit, result.hasMore))
       })
       .catch(() => {
         // Swallow a rejected "load more" read: keep the already-loaded transcript intact rather than surface the rejection.

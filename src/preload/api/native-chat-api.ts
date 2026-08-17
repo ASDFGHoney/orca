@@ -9,6 +9,10 @@ export type NativeChatReadSessionResult =
   | {
       messages: NativeChatMessage[]
       lifecycle?: NativeChatTurnLifecycle
+      /** Whether the transcript really holds turns older than this window. The
+       *  host knows exactly (it reads one past the limit); absent from an older
+       *  remote host, which leaves the caller to infer it from the count. */
+      hasMore?: boolean
     }
   | { error: string; notFound?: true }
 
