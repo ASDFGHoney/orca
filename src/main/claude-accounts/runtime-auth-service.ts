@@ -265,6 +265,9 @@ export class ClaudeRuntimeAuthService {
         return
       }
       if (this.lastSyncedAccountId !== null) {
+        if (previousManagedCredentialsJson) {
+          await this.refreshUnknownSystemDefaultSnapshot(previousManagedCredentialsJson)
+        }
         await (previousAccount
           ? this.restoreSystemDefaultSnapshot(
               previousManagedCredentialsJson,
@@ -383,8 +386,10 @@ export class ClaudeRuntimeAuthService {
         credentialsJson,
         runtimeCredentialsCaptured
       )
-      await this.refreshUnknownSystemDefaultSnapshot(credentialsJson)
     }
+
+    // Retry any surface that was unreadable during an earlier entry sync before publishing.
+    await this.refreshUnknownSystemDefaultSnapshot(credentialsJson)
 
     // Why: re-auth/add-account mark managed as authoritative; capture before skip flags are cleared so materialization can force-write that snapshot.
     const preferManagedSnapshot = this.skipNextReadBackForAccountId === activeAccount.id
@@ -1625,9 +1630,12 @@ export class ClaudeRuntimeAuthService {
     } catch {
       return
     }
+    const snapshotCredentialsJson =
+      snapshot.credentialsCaptured === false ? credentialsJson : snapshot.credentialsJson
     await this.captureSystemDefaultSnapshot({
       force: true,
-      credentialsJsonOverride: credentialsJson,
+      credentialsJsonOverride: snapshotCredentialsJson,
+      credentialsCaptured: snapshot.credentialsCaptured !== false,
       previousSnapshot: snapshot,
       managedCredentialsJson
     })
