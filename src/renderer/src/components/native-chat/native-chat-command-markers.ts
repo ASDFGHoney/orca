@@ -135,7 +135,10 @@ export function applyCommandMarkerBoundaries(
     clearMarker.clearTranscriptHighWater !== undefined
   ) {
     const highWater = clearMarker.clearTranscriptHighWater
-    if (transcriptOrder.messageSequenceById.size === 0) {
+    const hasPostClearSequence = [...transcriptOrder.messageSequenceById.values()].some(
+      (sequence) => sequence > highWater
+    )
+    if (!hasPostClearSequence) {
       return messages as NativeChatMessage[]
     }
     return messages.filter((message) => {

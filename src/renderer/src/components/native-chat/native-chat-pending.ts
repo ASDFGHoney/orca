@@ -152,7 +152,7 @@ function messageIsAfterPendingTimestamp(
   // the echo forever, and a host ahead matches an older identical prompt.
   // Without a host-domain bound, identity/occurrence matching sees the full list.
   if (boundary == null) {
-    return true
+    return false
   }
   // A transcript-clock boundary describes an existing message, so exclude ties.
   // Inclusive only when the bound was not taken from a concrete boundary row.
