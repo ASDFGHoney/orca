@@ -35,6 +35,7 @@ export type FakeScreencastStream = {
   viewportHeight: number | undefined
   unsubscribeCount: number
   emitReady: () => void
+  emitFrame: () => void
   emitEnd: () => void
   emitStreamError: (message: string) => void
   emitMalformedSuccess: () => void
@@ -75,6 +76,7 @@ export function createHarness() {
   const subscribeErrorQueue: unknown[] = []
   let subscribeAttempts = 0
   let tabCreateAttempts = 0
+  let handledFrames = 0
   let closeBeforeNextSubscribeRejects = false
 
   const callRpc = (async (_target: unknown, method: string, params?: unknown) => {
@@ -153,6 +155,7 @@ export function createHarness() {
           format: 'jpeg',
           tab: { url: 'https://example.test/', title: 'Example' }
         }),
+      emitFrame: () => callbacks.onBinary?.(new Uint8Array([1, 2, 3])),
       emitEnd: () => respond({ type: 'end', subscriptionId: 'sub-1' }),
       emitStreamError: (message) => respond({ type: 'error', message }),
       emitMalformedSuccess: () => respond(null),
@@ -210,7 +213,9 @@ export function createHarness() {
     getDeviceScaleFactor: () => 1,
     setStatus: (status) => statusLog.push(status),
     clearFrame: () => {},
-    handleFrameBytes: () => {}
+    handleFrameBytes: () => {
+      handledFrames += 1
+    }
   })
 
   return {
@@ -228,6 +233,9 @@ export function createHarness() {
     },
     get tabCreateAttempts(): number {
       return tabCreateAttempts
+    },
+    get handledFrames(): number {
+      return handledFrames
     },
     // Kept as accessors so the assertions written against the old three-variable shape still read
     // naturally — they now derive from the one status, which is the point of the change.
@@ -301,6 +309,7 @@ export async function openStreamAndConfirmReady(harness: Harness): Promise<() =>
   const close = harness.lifecycle.open()
   await settle()
   harness.streams[0].emitReady()
+  harness.streams[0].emitFrame()
   await settle()
   return close
 }

@@ -10,13 +10,18 @@ export const REMOTE_BROWSER_STREAM_READY_DEADLINE_MS = 30_000
 // subscriber on the same remote page evicts the first on every attempt. Treating every 'ready' as
 // healthy refills the retry budget forever, which is the unbounded retry the budget exists to stop.
 export const REMOTE_BROWSER_STREAM_HEALTHY_MS = 10_000
+export const REMOTE_BROWSER_STREAM_FIRST_FRAME_DEADLINE_MS = 1_500
+export const REMOTE_BROWSER_STREAM_RECOVERED_FRAME_DEADLINE_MS = 2_500
 
 // Tracks whether one screencast subscription ever came alive, and for how long. Kept apart from the
 // lifecycle because "is this stream actually alive?" is a different question from "what should the
 // pane do about it?", and only the second needs tokens, status, or the retry budget.
 export class RemoteBrowserStreamLiveness {
   private readyAt: number | null = null
+  private frameSeen = false
+  private canBecomeLive = false
   private deadlineTimer: ReturnType<typeof setTimeout> | null = null
+  private firstFrameTimer: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Starts watching a newly subscribed stream. `onNeverReady` fires once if it stays silent, and the
@@ -24,15 +29,34 @@ export class RemoteBrowserStreamLiveness {
    */
   watch(onNeverReady: () => void): void {
     this.clear()
+    this.canBecomeLive = true
     this.deadlineTimer = setTimeout(() => {
       this.deadlineTimer = null
       onNeverReady()
     }, REMOTE_BROWSER_STREAM_READY_DEADLINE_MS)
   }
 
-  markReady(): void {
+  markReady(onFirstFrameMissing: () => void): boolean {
     this.clearDeadline()
     this.readyAt = Date.now()
+    if (this.frameSeen) {
+      return true
+    }
+    this.armFirstFrameDeadline(REMOTE_BROWSER_STREAM_FIRST_FRAME_DEADLINE_MS, onFirstFrameMissing)
+    return false
+  }
+
+  markFrame(): boolean {
+    const firstFrame = !this.frameSeen
+    this.frameSeen = true
+    this.clearFirstFrameDeadline()
+    return firstFrame && this.readyAt !== null && this.canBecomeLive
+  }
+
+  waitForRecoveredFrame(onStillMissing: () => void): void {
+    if (this.canBecomeLive && !this.frameSeen && this.readyAt !== null) {
+      this.armFirstFrameDeadline(REMOTE_BROWSER_STREAM_RECOVERED_FRAME_DEADLINE_MS, onStillMissing)
+    }
   }
 
   /**
@@ -43,25 +67,49 @@ export class RemoteBrowserStreamLiveness {
    */
   stopWaitingForReady(): void {
     this.clearDeadline()
+    this.clearFirstFrameDeadline()
+    this.canBecomeLive = false
   }
 
   /** Ends the current watch and reports whether the stream stayed up long enough to be trusted. */
   settle(): boolean {
     this.clearDeadline()
+    this.clearFirstFrameDeadline()
     const readyAt = this.readyAt
+    const frameSeen = this.frameSeen
     this.readyAt = null
-    return readyAt !== null && Date.now() - readyAt >= REMOTE_BROWSER_STREAM_HEALTHY_MS
+    this.frameSeen = false
+    this.canBecomeLive = false
+    return frameSeen && readyAt !== null && Date.now() - readyAt >= REMOTE_BROWSER_STREAM_HEALTHY_MS
   }
 
   clear(): void {
     this.clearDeadline()
+    this.clearFirstFrameDeadline()
     this.readyAt = null
+    this.frameSeen = false
+    this.canBecomeLive = false
+  }
+
+  private armFirstFrameDeadline(delayMs: number, callback: () => void): void {
+    this.clearFirstFrameDeadline()
+    this.firstFrameTimer = setTimeout(() => {
+      this.firstFrameTimer = null
+      callback()
+    }, delayMs)
   }
 
   private clearDeadline(): void {
     if (this.deadlineTimer !== null) {
       clearTimeout(this.deadlineTimer)
       this.deadlineTimer = null
+    }
+  }
+
+  private clearFirstFrameDeadline(): void {
+    if (this.firstFrameTimer !== null) {
+      clearTimeout(this.firstFrameTimer)
+      this.firstFrameTimer = null
     }
   }
 }

@@ -11,10 +11,17 @@ import type {
   RemoteBrowserStreamToken,
   RemoteBrowserViewportSize
 } from './remote-browser-stream-tokens'
+import { recoverRemoteBrowserFirstFrame } from './remote-browser-first-frame-recovery'
 
 type RemoteBrowserStreamEventDeps = Pick<
   RemoteBrowserStreamLifecycleDeps,
-  'applyTabInfo' | 'closeMissingRemotePage' | 'handleFrameBytes' | 'setStatus' | 'syncViewport'
+  | 'applyTabInfo'
+  | 'callRpc'
+  | 'closeMissingRemotePage'
+  | 'getWorktreeSelector'
+  | 'handleFrameBytes'
+  | 'setStatus'
+  | 'syncViewport'
 > & {
   tokens: RemoteBrowserOperationTokens
   liveness: RemoteBrowserStreamLiveness
@@ -30,8 +37,9 @@ export function createRemoteBrowserStreamEvents(
   return {
     isCurrent: () => deps.tokens.isCurrentStreamToken(token),
     onReady: (event) => {
-      deps.liveness.markReady()
-      deps.setStatus(REMOTE_BROWSER_STREAM_LIVE)
+      if (deps.liveness.markReady(() => recoverRemoteBrowserFirstFrame(token, deps))) {
+        deps.setStatus(REMOTE_BROWSER_STREAM_LIVE)
+      }
       deps.applyTabInfo(event.tab)
       void deps.syncViewport(event.browserPageId, viewportSize).catch(() => {})
     },
@@ -46,7 +54,12 @@ export function createRemoteBrowserStreamEvents(
       deps.setStatus(remoteBrowserStreamStopped(remoteBrowserStreamLostNotice()))
     },
     onPageMissing: () => deps.closeMissingRemotePage(pageId),
-    onFrame: (bytes) => deps.handleFrameBytes(token, bytes),
+    onFrame: (bytes) => {
+      if (deps.liveness.markFrame()) {
+        deps.setStatus(REMOTE_BROWSER_STREAM_LIVE)
+      }
+      deps.handleFrameBytes(token, bytes)
+    },
     onClosed: () => deps.handleClosed(true)
   }
 }

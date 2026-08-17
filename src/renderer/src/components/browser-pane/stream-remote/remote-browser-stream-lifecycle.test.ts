@@ -63,6 +63,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
     harness.lifecycle.open()
     await settle()
     harness.streams[1].emitReady()
+    harness.streams[1].emitFrame()
     await settle()
 
     expect(harness.streams.map((stream) => stream.pageId)).toEqual(['page-1', 'page-1'])
@@ -214,6 +215,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
 
     await vi.advanceTimersByTimeAsync(1000)
     harness.streams[1].emitReady()
+    harness.streams[1].emitFrame()
     await settle()
 
     expect(harness.currentError).toBeNull()
@@ -229,7 +231,8 @@ describe('RemoteBrowserStreamLifecycle', () => {
     await vi.advanceTimersByTimeAsync(500)
     await vi.advanceTimersByTimeAsync(1000)
     harness.streams[1].emitReady()
-    // Why the wait: 'ready' alone no longer refills the budget — only a stream that stayed up does.
+    harness.streams[1].emitFrame()
+    // Why the wait: a first frame alone does not refill the budget — only a sustained stream does.
     await vi.advanceTimersByTimeAsync(15_000)
 
     harness.streams[1].emitEnd()
@@ -429,6 +432,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
 
     // The reopen's own stream must still own the pane: its 'ready' has to land.
     supersedingStream.emitReady()
+    supersedingStream.emitFrame()
     await settle()
     expect(harness.currentStatusKind).toBe('live')
   })
@@ -550,6 +554,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
 
     expect(() => harness.streams[0].emitMalformedSuccess()).not.toThrow()
     harness.streams[0].emitReady()
+    harness.streams[0].emitFrame()
     await settle()
 
     expect(harness.currentStatusKind).toBe('live')
@@ -624,6 +629,7 @@ describe('RemoteBrowserStreamLifecycle', () => {
 
     expect(harness.streams).toHaveLength(2)
     harness.streams[1].emitReady()
+    harness.streams[1].emitFrame()
     await settle()
     expect(harness.currentStatusKind).toBe('live')
   })
@@ -796,6 +802,7 @@ describe('RemoteBrowserStreamLifecycle transport error', () => {
     harness.streams[0].emitEnd()
     await vi.advanceTimersByTimeAsync(500)
     harness.streams[1].emitReady()
+    harness.streams[1].emitFrame()
     await settle()
 
     // Let the replacement prove itself — longer than the window that earns a refill.
