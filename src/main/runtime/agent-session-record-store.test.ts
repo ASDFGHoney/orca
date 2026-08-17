@@ -809,9 +809,12 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     expect(reopened.recoveredFromBackup).toBe(true)
     expect(reopened.getRecord('session-alpha')?.lease.runtimeFence).toBe(1)
 
-    await expect(reopened.retireClaimKey('key-2', NOW)).rejects.toThrow()
-    const backup = JSON.parse(await readFile(`${agentSessionStorePath(directory)}.bak`, 'utf-8'))
-    expect(backup.records['session-alpha'].lease.runtimeFence).toBe(1)
+    // The next transaction completes. It used to reject forever: the latch that guarded against
+    // the lost commit's fence had no exit, so a profile in this state could never write again.
+    await expect(reopened.retireClaimKey('key-2', NOW)).resolves.not.toThrow()
+    // Safety is kept by dominating the fence the lost commit could have granted (1 + 1), not by
+    // refusing: a writer holding the pre-crash fence no longer matches.
+    expect(reopened.getRecord('session-alpha')?.lease.runtimeFence).toBe(3)
   })
 
   it.each([

@@ -1,5 +1,6 @@
 import type { AgentSessionOperationRow } from '../../shared/agent-session-operation-ledger'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { raiseAgentSessionFencesAfterBackupRecovery } from './agent-session-backup-recovery-fence'
 import {
   AGENT_SESSION_STORE_SCHEMA_VERSION,
   agentSessionStoreRevision,
@@ -89,17 +90,21 @@ export class AgentSessionStoreTransactionQueue {
           throw new Error('agent_session_legacy_required')
         }
         await this.refreshExternallyChangedState()
-        if (this.diskRecoveredFromBackup) {
-          // Why: the missing commit may hold a newer fence, so rollback cannot mint another writer.
-          throw new Error('execution_owner_reconciling')
-        }
         const records = new Map(this.state.records)
         const operations = new Map(this.state.operations)
         const retiredClaimKeys = [...this.state.retiredClaimKeys]
         const unreadableRecords = new Map(this.state.unreadableRecords)
         try {
+          // The lost commit may have granted a higher fence than the backup records show. Rather
+          // than refuse forever, raise every recovered fence clear of anything that commit could
+          // have minted, then continue in the same transaction.
+          const recovering = this.diskRecoveredFromBackup
+          if (recovering) {
+            raiseAgentSessionFencesAfterBackupRecovery(this.state)
+          }
           const result = apply()
           if (
+            !recovering &&
             !this.needsRewrite &&
             !agentSessionStoreStateChanged(
               this.state,
@@ -111,9 +116,7 @@ export class AgentSessionStoreTransactionQueue {
           ) {
             return result
           }
-          await saveAgentSessionStore(this.filePath, this.state, {
-            recoveredFromBackup: this.diskRecoveredFromBackup
-          })
+          await saveAgentSessionStore(this.filePath, this.state)
           this.state.schemaVersion = AGENT_SESSION_STORE_SCHEMA_VERSION
           this.diskRevision = agentSessionStoreRevision(this.state)
           this.diskRecoveredFromBackup = false
