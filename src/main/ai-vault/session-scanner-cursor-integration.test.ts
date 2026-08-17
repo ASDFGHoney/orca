@@ -122,8 +122,12 @@ describe('Cursor session scanner integration', () => {
     tempRoots.push(root)
     const roots = isolatedScanRoots(root)
     const sessions = [
-      { id: 'newer-file', fileTime: 100, updatedAtMs: 1_000 },
-      { id: 'newer-session', fileTime: 99, updatedAtMs: 2_000 }
+      ...Array.from({ length: 8 }, (_, index) => ({
+        id: `newer-file-${index}`,
+        fileTime: 100 - index,
+        updatedAtMs: 1_000
+      })),
+      { id: 'newer-session', fileTime: 92, updatedAtMs: 2_000 }
     ]
     await Promise.all(
       sessions.map(async ({ id, fileTime, updatedAtMs }) => {
@@ -157,10 +161,10 @@ describe('Cursor session scanner integration', () => {
       ...roots,
       platform: 'linux',
       executionHostId: 'local',
-      limit: 1
+      limit: 8
     })
 
-    expect(result.sessions).toHaveLength(1)
+    expect(result.sessions).toHaveLength(8)
     expect(result.sessions[0]?.sessionId).toBe('newer-session')
   })
 })
