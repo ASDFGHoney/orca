@@ -374,6 +374,11 @@ boundary` successfully; its Windows package boundary also passed before post-job
 - The next rebase onto `origin/main@71bbab72e1` has no overlapping paths and preserves all 74
   current patches exactly by range-diff. Its two upstream commits affect crash reporting and
   Windows commit-message path handling, not browser placement or routing.
+- Current #14957 Windows native smoke twice signaled daemon readiness and matching PID ownership,
+  then rejected the named-pipe endpoint with `existsSync`. Sibling current-head Windows runs pass,
+  proving a smoke-oracle flake rather than an STA-4150 regression. The top layer now connects to
+  Windows named pipes to prove publication while retaining the filesystem assertion on POSIX; the
+  local built-daemon journey passes end to end and the workflow contract passes 14/14.
 
 The cumulative local tree is rebased onto `origin/main@71bbab72e1`. Safety refs
 `sta-4150-safety-pre-21ed-main-rebase-20260816` and
@@ -479,7 +484,7 @@ ownership.
 | 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@14079a02c0` | Typecheck, routing and transport suites; CI pending         |
 | 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@4490d989f9`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
 | 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@ea1b2bd64d`     | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f4cd797444`    | Full cumulative and paired E2E proof; CI pending            |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@2691fc7449`    | Full cumulative, paired E2E, and daemon-smoke proof         |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1396,6 +1401,11 @@ topology, versions, and explicit gaps at every later checkpoint.
   landed. There are no overlapping paths, and range-diff preserves all 74 current patches exactly.
   Refreshed #14955/#14957 descriptions and resubmitted stack #14958 as drafts for fresh CI; no
   Linear, readiness, superseded-PR, or merge state changed.
+- Reran #14957's failed Windows native smoke once without code changes after two sibling current
+  heads passed; the same invalid named-pipe `existsSync` assertion failed again. Replaced only that
+  Windows publication assertion with a real connection probe in the top layer, kept POSIX behavior
+  unchanged, and validated the local built-daemon journey plus 14/14 workflow-contract tests.
+  Refreshed #14957 and resubmitted it as draft for Windows and full PR CI.
 
 ## Completion rule
 
