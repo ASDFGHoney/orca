@@ -105,9 +105,19 @@ type BrowserScreencastStartResult = {
   session: BrowserScreencastSession
 }
 
-type ActiveBrowserScreencastPage = {
-  stop: () => void
+type ActiveBrowserScreencastSubscriber = {
+  sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
+  emit?: (event: BrowserScreencastResult) => void
   done: Promise<void>
+  resolveDone: () => void
+}
+
+type ActiveBrowserScreencastPage = {
+  format: 'jpeg' | 'png'
+  session: BrowserScreencastSession | null
+  started: Promise<BrowserScreencastSession>
+  stopping: boolean
+  subscribers: Map<string, ActiveBrowserScreencastSubscriber>
 }
 
 function clampInteger(
@@ -158,12 +168,14 @@ export type RuntimeBrowserCommandHost = {
     targetGroupId?: string
   ): void
   notifyHeadlessBrowserSessionTabsChanged?(worktreeId: string): void
+  waitForBrowserSessionTabPublication?(
+    worktreeId: string | undefined,
+    browserPageId: string
+  ): Promise<void>
 }
 
 export class RuntimeBrowserCommands {
-  private readonly activeScreencastPageIds = new Set<string>()
   private readonly activeScreencastsByPageId = new Map<string, ActiveBrowserScreencastPage>()
-  private readonly stoppingScreencastPageIds = new Map<string, Promise<void>>()
 
   constructor(private readonly host: RuntimeBrowserCommandHost) {}
 
@@ -466,44 +478,26 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    let stopping = this.stoppingScreencastPageIds.get(browserPageId)
-    if (stopping) {
-      await stopping
-    }
+    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
+    let resolveSubscriberDone!: () => void
+    const subscriberDone = new Promise<void>((resolve) => {
+      resolveSubscriberDone = resolve
+    })
     let active = this.activeScreencastsByPageId.get(browserPageId)
-    while (active) {
-      // Why: CDP allows one Page.startScreencast per page, so a new subscriber takes over a stale/hidden client instead of erroring.
-      active.stop()
-      await active.done
-      stopping = this.stoppingScreencastPageIds.get(browserPageId)
-      if (stopping) {
-        await stopping
-      }
+    while (active?.stopping) {
+      await active.session?.done
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
-    this.activeScreencastPageIds.add(browserPageId)
-    const format = params.format
-    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
-    let session: BrowserScreencastSession | null = null
-    let resolveActiveDone!: () => void
-    const activeDone = new Promise<void>((resolve) => {
-      resolveActiveDone = resolve
-    })
-    let cancelledBeforeStart = false
-    const activeRecord: ActiveBrowserScreencastPage = {
-      stop: () => {
-        if (session) {
-          session.stop()
-          return
-        }
-        cancelledBeforeStart = true
-      },
-      done: activeDone
-    }
-    this.activeScreencastsByPageId.set(browserPageId, activeRecord)
-    try {
-      session = await startBrowserScreencast(guest, {
-        format,
+    if (!active) {
+      const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
+      const record = {
+        format: params.format,
+        session: null,
+        stopping: false,
+        subscribers
+      } as ActiveBrowserScreencastPage
+      record.started = startBrowserScreencast(guest, {
+        format: params.format,
         quality: clampInteger(params.quality, 10, 100, 70),
         maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
         maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
@@ -513,71 +507,80 @@ export class RuntimeBrowserCommands {
         mobile: params.mobile === true,
         everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
         minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
-        onFrame: (bytes) => sendRemoteBrowserScreencastFrame(stream.sendBinary, bytes),
-        onEvent: stream.emit,
-        onError: (message) => stream.emit?.({ type: 'error', message })
-      })
-      if (cancelledBeforeStart) {
-        session.stop()
-        await session.done
-        throw new BrowserError('browser_error', 'Browser screencast was cancelled.')
-      }
-    } catch (error) {
-      this.activeScreencastPageIds.delete(browserPageId)
-      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
-        this.activeScreencastsByPageId.delete(browserPageId)
-      }
-      resolveActiveDone()
-      throw error
-    }
-    let stoppingPromise: Promise<void> | null = null
-    const clearPageGate = (): void => {
-      this.activeScreencastPageIds.delete(browserPageId)
-      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
-        this.activeScreencastsByPageId.delete(browserPageId)
-      }
-      if (
-        stoppingPromise &&
-        this.stoppingScreencastPageIds.get(browserPageId) === stoppingPromise
-      ) {
-        this.stoppingScreencastPageIds.delete(browserPageId)
-      }
-      resolveActiveDone()
-    }
-    const markStopping = (): void => {
-      if (stoppingPromise || !session) {
-        return
-      }
-      // Why: mobile can unsubscribe and instantly resubscribe on rotation; new streams wait for CDP teardown instead of failing already-active.
-      stoppingPromise = session.done.finally(clearPageGate)
-      this.stoppingScreencastPageIds.set(browserPageId, stoppingPromise)
-    }
-    void session.done.finally(() => {
-      clearPageGate()
-    })
-
-    try {
-      return {
-        subscriptionId,
-        session: {
-          done: session.done,
-          stop: () => {
-            markStopping()
-            session?.stop()
+        onFrame: (bytes) => {
+          for (const subscriber of record.subscribers.values()) {
+            // A slow viewer drops this frame without stalling every other viewer.
+            sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+          }
+          return true
+        },
+        onEvent: (event) => {
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.emit?.(event)
           }
         },
-        ready: {
-          type: 'ready',
-          subscriptionId,
-          browserPageId,
-          format,
-          tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+        onError: (message) => {
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.emit?.({ type: 'error', message })
+          }
         }
-      }
+      })
+      active = record
+      this.activeScreencastsByPageId.set(browserPageId, record)
+      void record.started
+        .then((session) => {
+          record.session = session
+          return session.done
+        })
+        .finally(() => {
+          if (this.activeScreencastsByPageId.get(browserPageId) === record) {
+            this.activeScreencastsByPageId.delete(browserPageId)
+          }
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.resolveDone()
+          }
+          record.subscribers.clear()
+        })
+        .catch(() => {})
+    }
+    active.subscribers.set(subscriptionId, {
+      sendBinary: stream.sendBinary,
+      emit: stream.emit,
+      done: subscriberDone,
+      resolveDone: resolveSubscriberDone
+    })
+    let session: BrowserScreencastSession
+    try {
+      session = await active.started
     } catch (error) {
-      markStopping()
-      session.stop()
+      active.subscribers.delete(subscriptionId)
+      resolveSubscriberDone()
       throw error
+    }
+    return {
+      subscriptionId,
+      session: {
+        done: subscriberDone,
+        stop: () => {
+          const subscriber = active.subscribers.get(subscriptionId)
+          if (!subscriber) {
+            return
+          }
+          active.subscribers.delete(subscriptionId)
+          subscriber.resolveDone()
+          if (active.subscribers.size === 0) {
+            active.stopping = true
+            session.stop()
+          }
+        }
+      },
+      ready: {
+        type: 'ready',
+        subscriptionId,
+        browserPageId,
+        format: active.format,
+        tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+      }
     }
   }
 
@@ -1322,7 +1325,7 @@ export class RuntimeBrowserCommands {
       if (!offscreen) {
         throw new BrowserError('browser_error', 'This host does not support browser panes.')
       }
-      return this.createBrowserTabOffscreen(
+      const created = await this.createBrowserTabOffscreen(
         offscreen,
         url,
         worktreeId,
@@ -1331,6 +1334,10 @@ export class RuntimeBrowserCommands {
         params.targetGroupId,
         params.page
       )
+      if (!params.page) {
+        await this.host.waitForBrowserSessionTabPublication?.(worktreeId, created.browserPageId)
+      }
+      return created
     }
     const { browserPageId } = await this.createBrowserTabInRenderer(
       url,
@@ -1355,6 +1362,9 @@ export class RuntimeBrowserCommands {
     const wcId = bridge.getRegisteredTabs(worktreeId).get(browserPageId)
     if (wcId != null) {
       bridge.setActiveTab(wcId, worktreeId)
+    }
+    if (!params.page) {
+      await this.host.waitForBrowserSessionTabPublication?.(worktreeId, browserPageId)
     }
 
     // Why: the webview loads about:blank first; route navigation through the bridge so its registered owner remains authoritative.

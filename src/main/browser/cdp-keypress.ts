@@ -77,9 +77,11 @@ function baseKeyDefinition(key: string): CdpKeypressDefinition {
 export function resolveCdpKeypressDefinition(serializedKey: string): CdpKeypressDefinition {
   const { key, modifiers } = parseSerializedKey(serializedKey)
   const definition = baseKeyDefinition(key)
+  const hasCommandModifier = (modifiers & 0b0111) !== 0
+  const shiftedNonPrintable = modifiers === 0b1000 && definition.key.length !== 1
   return {
     ...definition,
     ...(modifiers ? { modifiers } : {}),
-    ...(modifiers ? { text: undefined } : {})
+    ...(hasCommandModifier || shiftedNonPrintable ? { text: undefined } : {})
   }
 }

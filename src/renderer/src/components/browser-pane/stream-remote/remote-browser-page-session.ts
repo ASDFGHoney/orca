@@ -36,6 +36,7 @@ export type RemoteBrowserPageSessionDeps = {
 // testable on its own.
 export class RemoteBrowserPageSession {
   private tabRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  private tabRefreshGeneration = 0
 
   constructor(private readonly deps: RemoteBrowserPageSessionDeps) {}
 
@@ -83,32 +84,46 @@ export class RemoteBrowserPageSession {
     }
   }
 
-  scheduleTabInfoRefresh(token: RemoteBrowserOperationToken, delayMs = 250): void {
+  scheduleTabInfoRefresh(token: RemoteBrowserOperationToken, delayMs = 250, attempts = 1): void {
     const { tokens } = this.deps
     if (!tokens.isCurrent(token)) {
       return
     }
     this.cancelTabInfoRefresh()
-    this.tabRefreshTimer = setTimeout(() => {
-      this.tabRefreshTimer = null
-      if (!tokens.isCurrent(token)) {
-        return
-      }
-      void this.fetchTabInfo(token)
-        .then((tab) => {
-          if (tab && tokens.isCurrent(token)) {
-            this.deps.applyTabInfo(tab)
-          }
-        })
-        .catch((error: unknown) => {
-          if (tokens.isCurrent(token) && isRemoteBrowserPageMissingError(error)) {
-            this.deps.closeMissingRemotePage(token.remotePageId)
-          }
-        })
-    }, delayMs)
+    const generation = this.tabRefreshGeneration
+    const schedule = (nextDelayMs: number, remainingAttempts: number): void => {
+      this.tabRefreshTimer = setTimeout(() => {
+        this.tabRefreshTimer = null
+        if (!tokens.isCurrent(token) || generation !== this.tabRefreshGeneration) {
+          return
+        }
+        void this.fetchTabInfo(token)
+          .then((tab) => {
+            if (tab && tokens.isCurrent(token) && generation === this.tabRefreshGeneration) {
+              this.deps.applyTabInfo(tab)
+            }
+          })
+          .catch((error: unknown) => {
+            if (tokens.isCurrent(token) && isRemoteBrowserPageMissingError(error)) {
+              this.deps.closeMissingRemotePage(token.remotePageId)
+            }
+          })
+          .finally(() => {
+            if (
+              remainingAttempts > 1 &&
+              tokens.isCurrent(token) &&
+              generation === this.tabRefreshGeneration
+            ) {
+              schedule(nextDelayMs * 2, remainingAttempts - 1)
+            }
+          })
+      }, nextDelayMs)
+    }
+    schedule(delayMs, Math.max(1, attempts))
   }
 
   cancelTabInfoRefresh(): void {
+    this.tabRefreshGeneration += 1
     if (this.tabRefreshTimer !== null) {
       clearTimeout(this.tabRefreshTimer)
       this.tabRefreshTimer = null

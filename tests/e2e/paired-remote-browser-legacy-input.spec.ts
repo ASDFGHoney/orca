@@ -1,4 +1,8 @@
 import type { Page } from '@stablyai/playwright-test'
+import {
+  BROWSER_DIRECT_HISTORY_NAVIGATION_RUNTIME_CAPABILITY,
+  BROWSER_DIRECT_RAW_INPUT_RUNTIME_CAPABILITY
+} from '../../src/shared/protocol-version'
 import { expect, test } from './helpers/orca-app'
 import {
   launchHeadlessPairedRuntimeHost,
@@ -89,8 +93,8 @@ test('keeps click, wheel, and keyboard usable when the host lacks direct raw inp
       'status.get',
       {}
     )
-    expect(status.capabilities).not.toContain('browser.direct-raw-input.v1')
-    expect(status.capabilities).not.toContain('browser.direct-history-navigation.v1')
+    expect(status.capabilities).not.toContain(BROWSER_DIRECT_RAW_INPUT_RUNTIME_CAPABILITY)
+    expect(status.capabilities).not.toContain(BROWSER_DIRECT_HISTORY_NAVIGATION_RUNTIME_CAPABILITY)
 
     const created = await callEnvironment<{ browserPageId: string }>(
       page,

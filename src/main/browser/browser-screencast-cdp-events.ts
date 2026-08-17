@@ -81,7 +81,7 @@ export function createBrowserScreencastMessageHandler(
       // Why: image dimension parsing happens for every live frame; share the
       // result between stale-frame rejection and metadata enrichment.
       const imageSize = readBrowserScreencastImageSize(image, options.format)
-      if (!isLiveFrameCompatibleWithViewport(imageSize, options)) {
+      if (!imageSize || !isLiveFrameCompatibleWithViewport(imageSize, options)) {
         // Why: after tab switches/navigation Chromium can briefly stream the
         // host surface instead of the requested client viewport. Dropping that
         // frame keeps the client from rendering server-sized blank gutters.

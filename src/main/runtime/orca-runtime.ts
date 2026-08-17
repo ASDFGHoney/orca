@@ -2979,6 +2979,14 @@ export class OrcaRuntimeService {
   private readonly rendererPublicationThrottle = new RendererPublicationThrottle()
   private tabs = new Map<string, RuntimeSyncedTab>()
   private mobileSessionTabsByWorktree = new Map<string, RuntimeMobileSessionTabsSnapshot>()
+  private publishedBrowserPageIdsByWorktree = new Map<string, Set<string>>()
+  private browserTabPublicationWaiters = new Set<{
+    worktreeId?: string
+    browserPageId: string
+    resolve: () => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
   // Why: renderer publication ordering must be judged against the renderer's
   // own last-accepted (epoch, version) — never against the stored snapshot's
   // version, which main-local touches bump independently and can push
@@ -3216,7 +3224,7 @@ export class OrcaRuntimeService {
   >()
   private activeBrowserScreencastsByPage = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    Set<{ cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }>
   >()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
@@ -10427,6 +10435,12 @@ export class OrcaRuntimeService {
       this.mobileSessionTabListeners.delete(subscription)
       if (this.mobileSessionTabListeners.size === 0) {
         this.mobileSessionTabsAgentStatusHeartbeat.cancelPending()
+        // No remaining client can observe the publication barrier.
+        for (const waiter of this.browserTabPublicationWaiters) {
+          clearTimeout(waiter.timer)
+          waiter.resolve()
+        }
+        this.browserTabPublicationWaiters.clear()
       }
     }
   }
@@ -14760,7 +14774,9 @@ export class OrcaRuntimeService {
 
   reclaimBrowserForDesktop(browserPageId: string): boolean {
     this.setBrowserDriver(browserPageId, { kind: 'desktop' })
-    this.activeBrowserScreencastsByPage.get(browserPageId)?.cancel(true)
+    for (const stream of this.activeBrowserScreencastsByPage.get(browserPageId) ?? []) {
+      stream.cancel(true)
+    }
     return true
   }
 
@@ -32716,6 +32732,7 @@ export class OrcaRuntimeService {
       )
     }
     this.clientSessionTabSelections.forgetWorktree(worktreeId)
+    this.publishedBrowserPageIdsByWorktree.delete(worktreeId)
   }
 
   notifyMobileSessionTabsChanged(worktreeId?: string): void {
@@ -32753,6 +32770,7 @@ export class OrcaRuntimeService {
         this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
       )
     }
+    this.recordPublishedBrowserSessionTabs(worktreeId, result)
   }
 
   private notifyMobileSessionTabSnapshots(): void {
@@ -32766,7 +32784,60 @@ export class OrcaRuntimeService {
           this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
         )
       }
+      this.recordPublishedBrowserSessionTabs(snapshot.worktree, result)
     }
+  }
+
+  private recordPublishedBrowserSessionTabs(
+    worktreeId: string,
+    snapshot: RuntimeMobileSessionTabsResult
+  ): void {
+    const pageIds = new Set(
+      snapshot.tabs.flatMap((tab) =>
+        tab.type === 'browser' && tab.browserPageId ? [tab.browserPageId] : []
+      )
+    )
+    this.publishedBrowserPageIdsByWorktree.set(worktreeId, pageIds)
+    for (const waiter of [...this.browserTabPublicationWaiters]) {
+      if (
+        (waiter.worktreeId && waiter.worktreeId !== worktreeId) ||
+        !pageIds.has(waiter.browserPageId)
+      ) {
+        continue
+      }
+      clearTimeout(waiter.timer)
+      this.browserTabPublicationWaiters.delete(waiter)
+      waiter.resolve()
+    }
+  }
+
+  private waitForBrowserSessionTabPublication(
+    worktreeId: string | undefined,
+    browserPageId: string,
+    timeoutMs = 8_000
+  ): Promise<void> {
+    if (this.mobileSessionTabListeners.size === 0) {
+      return Promise.resolve()
+    }
+    const alreadyPublished = worktreeId
+      ? this.publishedBrowserPageIdsByWorktree.get(worktreeId)?.has(browserPageId)
+      : [...this.publishedBrowserPageIdsByWorktree.values()].some((ids) => ids.has(browserPageId))
+    if (alreadyPublished) {
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
+        worktreeId,
+        browserPageId,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.browserTabPublicationWaiters.delete(waiter)
+          reject(new Error(`Browser page ${browserPageId} was not published to session tabs`))
+        }, timeoutMs)
+      }
+      this.browserTabPublicationWaiters.add(waiter)
+    })
   }
 
   private getMobileSessionTabsForWorktree(
@@ -37315,7 +37386,9 @@ export class OrcaRuntimeService {
     // Why: bind directly, not a wrapper arrow — a hand-listed wrapper dropped targetGroupId, so a right-split browser landed in the left.
     markHeadlessBrowserSessionTabActive: this.markHeadlessBrowserSessionTabActive.bind(this),
     notifyHeadlessBrowserSessionTabsChanged: (worktreeId) =>
-      this.notifyMobileSessionTabsChanged(worktreeId)
+      this.notifyMobileSessionTabsChanged(worktreeId),
+    waitForBrowserSessionTabPublication: (worktreeId, browserPageId) =>
+      this.waitForBrowserSessionTabPublication(worktreeId, browserPageId)
   })
 
   private readonly emulatorCommands = new RuntimeEmulatorCommands({
@@ -37382,18 +37455,6 @@ export class OrcaRuntimeService {
     }
 
     const connectionKey = options.connectionId ?? 'local'
-    const requestedPageId = typeof params.page === 'string' ? params.page : null
-    let existingPageStream = requestedPageId
-      ? this.activeBrowserScreencastsByPage.get(requestedPageId)
-      : undefined
-    while (existingPageStream) {
-      // Why: CDP allows only one screencast per page; cancel a stale stream so the next tab activation isn't stuck on an already-active error or old viewport.
-      existingPageStream.cancel(existingPageStream.connectionKey !== connectionKey)
-      await existingPageStream.done
-      existingPageStream = requestedPageId
-        ? this.activeBrowserScreencastsByPage.get(requestedPageId)
-        : undefined
-    }
     let existingStream = this.activeBrowserScreencastsByConnection.get(connectionKey)
     while (existingStream) {
       existingStream.cancel()
@@ -37458,11 +37519,14 @@ export class OrcaRuntimeService {
         return
       }
       activeBrowserPageId = screencast.ready.browserPageId
-      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, {
+      const pageStream = {
         cancel,
         done: activeDone,
         connectionKey
-      })
+      }
+      const pageStreams = this.activeBrowserScreencastsByPage.get(activeBrowserPageId) ?? new Set()
+      pageStreams.add(pageStream)
+      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
       this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
 
       // Why: screencast frames are connection-scoped; tie Page.stopScreencast to the exact socket so dropped connections don't leave Chromium streaming.
@@ -37490,8 +37554,13 @@ export class OrcaRuntimeService {
         this.activeBrowserScreencastsByConnection.delete(connectionKey)
       }
       if (activeBrowserPageId) {
-        const activePageStream = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
-        if (activePageStream?.done === activeDone) {
+        const pageStreams = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
+        for (const stream of pageStreams ?? []) {
+          if (stream.done === activeDone) {
+            pageStreams?.delete(stream)
+          }
+        }
+        if (pageStreams?.size === 0) {
           this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
         }
         const driver = this.getBrowserDriver(activeBrowserPageId)

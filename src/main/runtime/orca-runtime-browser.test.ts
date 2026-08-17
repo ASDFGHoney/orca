@@ -223,7 +223,7 @@ describe('RuntimeBrowserCommands browser screencast', () => {
     expect(bridge.tabList).toHaveBeenCalledWith(undefined)
   })
 
-  it('creates the first explicit-worktree browser tab without waiting for an existing registration', async () => {
+  it('publishes a first explicit-worktree browser tab before its host-generated reply', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     const webContents = { send: vi.fn() }
     const send = vi.fn((channel: string, data: { requestId: string }) => {
@@ -252,17 +252,28 @@ describe('RuntimeBrowserCommands browser screencast', () => {
       setActiveTab: vi.fn(),
       tabList: vi.fn(() => ({ tabs: [] }))
     } as unknown as AgentBrowserBridge
+    const publication = deferred<void>()
+    const waitForBrowserSessionTabPublication = vi.fn(() => publication.promise)
     const commands = new RuntimeBrowserCommands(
       createHost({
         getAgentBrowserBridge: () => bridge,
         getAvailableAuthoritativeWindow: vi.fn(() => ({}) as never),
-        getAuthoritativeWindow: vi.fn(() => ({ webContents }) as never)
+        getAuthoritativeWindow: vi.fn(() => ({ webContents }) as never),
+        waitForBrowserSessionTabPublication
       })
     )
 
-    await expect(
-      commands.browserTabCreate({ worktree: 'id:wt-1', url: 'about:blank' })
-    ).resolves.toEqual({ browserPageId: 'page-new' })
+    let settled = false
+    const creation = commands
+      .browserTabCreate({ worktree: 'id:wt-1', url: 'about:blank' })
+      .then((result) => {
+        settled = true
+        return result
+      })
+    await vi.waitFor(() => expect(waitForBrowserSessionTabPublication).toHaveBeenCalled())
+    expect(settled).toBe(false)
+    publication.resolve()
+    await expect(creation).resolves.toEqual({ browserPageId: 'page-new' })
 
     expect(waitForWorktreeTabRegistrationMock).not.toHaveBeenCalled()
     // Why: with no explicit profile, main must leave sessionProfileId/
@@ -632,36 +643,38 @@ describe('RuntimeBrowserCommands browser screencast', () => {
     )
   })
 
-  it('lets a new same-page stream take over an active stale stream', async () => {
+  it('fans one page screencast out to multiple subscribers', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })
     const firstDone = deferred<void>()
-    const secondDone = deferred<void>()
     const firstStop = vi.fn(() => firstDone.resolve())
-    const secondStop = vi.fn(() => secondDone.resolve())
-    startBrowserScreencastMock
-      .mockResolvedValueOnce({ stop: firstStop, done: firstDone.promise })
-      .mockResolvedValueOnce({ stop: secondStop, done: secondDone.promise })
+    startBrowserScreencastMock.mockResolvedValueOnce({ stop: firstStop, done: firstDone.promise })
 
     const commands = new RuntimeBrowserCommands(createHost())
+    const firstSend = vi.fn(() => false)
+    const secondSend = vi.fn(() => true)
     const first = await commands.browserScreencast(
       { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: vi.fn() }
+      { sendBinary: firstSend }
     )
 
-    const secondPromise = commands.browserScreencast(
+    const second = await commands.browserScreencast(
       { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: vi.fn() }
+      { sendBinary: secondSend }
     )
 
-    await vi.waitFor(() => expect(firstStop).toHaveBeenCalledTimes(1))
-    const second = await secondPromise
-
-    expect(startBrowserScreencastMock).toHaveBeenCalledTimes(2)
+    expect(startBrowserScreencastMock).toHaveBeenCalledTimes(1)
     expect(first.subscriptionId).not.toBe(second.subscriptionId)
+    const frame = new Uint8Array([1, 2, 3])
+    expect(startBrowserScreencastMock.mock.calls[0][1].onFrame(frame)).toBe(true)
+    expect(firstSend).toHaveBeenCalledWith(frame)
+    expect(secondSend).toHaveBeenCalledWith(frame)
+    first.session.stop()
+    await first.session.done
+    expect(firstStop).not.toHaveBeenCalled()
     second.session.stop()
     await second.session.done
-    expect(secondStop).toHaveBeenCalledTimes(1)
+    expect(firstStop).toHaveBeenCalledTimes(1)
   }, 10_000)
 
   it('admits screencast frames through the paired-runtime size guard', async () => {

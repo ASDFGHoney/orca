@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { execFileMock, webContentsFromIdMock, existsSyncMock, readFileSyncMock, stdinWrites } =
-  vi.hoisted(() => ({
-    execFileMock: vi.fn(),
-    webContentsFromIdMock: vi.fn(),
-    existsSyncMock: vi.fn(() => false),
-    readFileSyncMock: vi.fn(() => Buffer.from('')),
-    stdinWrites: [] as string[]
-  }))
+const {
+  execFileMock,
+  webContentsFromIdMock,
+  existsSyncMock,
+  readFileSyncMock,
+  stdinWrites,
+  waitForTabRegistrationMock
+} = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  webContentsFromIdMock: vi.fn(),
+  existsSyncMock: vi.fn(() => false),
+  readFileSyncMock: vi.fn(() => Buffer.from('')),
+  stdinWrites: [] as string[],
+  waitForTabRegistrationMock: vi.fn()
+}))
 
 vi.mock('child_process', () => ({ execFile: execFileMock }))
 vi.mock('fs', () => ({
@@ -24,6 +31,9 @@ vi.mock('electron', () => {
     webContents: { fromId: webContentsFromIdMock }
   }
 })
+vi.mock('../ipc/browser-tab-registration-wait', () => ({
+  waitForTabRegistration: waitForTabRegistrationMock
+}))
 const { CdpWsProxyMock } = vi.hoisted(() => {
   const instances: unknown[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,6 +82,8 @@ describe('AgentBrowserBridge', () => {
       stdinWrites,
       cdpWsProxyInstances: CdpWsProxyMock.instances
     })
+    waitForTabRegistrationMock.mockReset()
+    waitForTabRegistrationMock.mockResolvedValue(undefined)
     bridge = new AgentBrowserBridge(mockBrowserManager())
     bridge.setActiveTab(100)
   })
@@ -218,6 +230,50 @@ describe('AgentBrowserBridge', () => {
 
     expect(execFileMock).not.toHaveBeenCalled()
     expect(listeners.size).toBe(0)
+  })
+
+  it('waits for replacement guest registration after history destroys the old guest', async () => {
+    const tabs = new Map([['tab-1', 100]])
+    const replacementBridge = new AgentBrowserBridge(mockBrowserManager(tabs))
+    replacementBridge.setActiveTab(100)
+    const oldWebContents = mockWebContents(100)
+    const replacementWebContents = mockWebContents(200)
+    replacementWebContents.getURL = () => 'https://example.com/replaced'
+    replacementWebContents.getTitle = () => 'Replaced'
+    const listeners = new Map<string, (...args: never[]) => void>()
+    oldWebContents.on.mockImplementation((event: string, listener: (...args: never[]) => void) => {
+      listeners.set(event, listener)
+      return oldWebContents.on
+    })
+    oldWebContents.removeListener.mockImplementation((event: string) => {
+      listeners.delete(event)
+      return oldWebContents.removeListener
+    })
+    Object.assign(oldWebContents, {
+      navigationHistory: {
+        canGoBack: vi.fn(() => true),
+        canGoForward: vi.fn(() => false),
+        goBack: vi.fn(() => queueMicrotask(() => listeners.get('destroyed')?.())),
+        goForward: vi.fn()
+      }
+    })
+    webContentsFromIdMock.mockImplementation((id: number) =>
+      id === 100 ? oldWebContents : id === 200 ? replacementWebContents : null
+    )
+    let releaseRegistration!: () => void
+    waitForTabRegistrationMock.mockImplementation(
+      () => new Promise<void>((resolve) => (releaseRegistration = resolve))
+    )
+
+    const pending = replacementBridge.back(undefined, 'tab-1')
+    await vi.waitFor(() => expect(waitForTabRegistrationMock).toHaveBeenCalledWith('tab-1'))
+    tabs.set('tab-1', 200)
+    releaseRegistration()
+
+    await expect(pending).resolves.toEqual({
+      url: 'https://example.com/replaced',
+      title: 'Replaced'
+    })
   })
 
   it('models the legacy helper losing its reply after history navigation', async () => {

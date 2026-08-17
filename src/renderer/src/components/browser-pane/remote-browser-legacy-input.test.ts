@@ -80,6 +80,39 @@ describe('legacy remote browser input', () => {
     expect(onInput).toHaveBeenCalledOnce()
   })
 
+  it('types into selection-less value inputs without setRangeText', () => {
+    const input = document.createElement('input')
+    input.type = 'number'
+    input.value = '1'
+    document.body.append(input)
+    input.focus()
+    const onInput = vi.fn()
+    input.addEventListener('input', onInput)
+
+    expect(() => window.eval(buildLegacyRemoteBrowserKeypressExpression('2')!)).not.toThrow()
+
+    expect(input.value).toBe('12')
+    expect(onInput).toHaveBeenCalledOnce()
+  })
+
+  it('extends text selection in either direction', () => {
+    const input = document.createElement('input')
+    input.value = 'abcd'
+    document.body.append(input)
+    input.focus()
+    input.setSelectionRange(2, 2)
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('Shift+ArrowLeft')!)
+    expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+      1,
+      2,
+      'backward'
+    ])
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('Shift+ArrowRight')!)
+    expect([input.selectionStart, input.selectionEnd]).toEqual([2, 2])
+  })
+
   it('emits printable keypress and honors cancellation before editing', () => {
     const input = document.createElement('input')
     document.body.append(input)

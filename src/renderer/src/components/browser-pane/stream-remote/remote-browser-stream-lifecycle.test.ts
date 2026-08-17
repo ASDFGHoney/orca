@@ -305,6 +305,30 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.appliedTitles).toEqual(titlesBeforeRestart)
   })
 
+  it('bounds legacy navigation refresh retries and cancels them on supersession', async () => {
+    const harness = createHarness()
+    await openStreamAndConfirmReady(harness)
+    const refreshToken = harness.lifecycle.tokens.createOperationToken('page-1')!
+    const initialTabShows = harness.rpcLog.filter((method) => method === 'browser.tabShow').length
+
+    harness.lifecycle.session.scheduleTabInfoRefresh(refreshToken, 250, 4)
+    await vi.advanceTimersByTimeAsync(3_750)
+
+    expect(harness.rpcLog.filter((method) => method === 'browser.tabShow')).toHaveLength(
+      initialTabShows + 4
+    )
+
+    harness.lifecycle.session.scheduleTabInfoRefresh(refreshToken, 250, 4)
+    harness.lifecycle.open()
+    await settle()
+    const tabShowsAfterOpen = harness.rpcLog.filter((method) => method === 'browser.tabShow').length
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    expect(harness.rpcLog.filter((method) => method === 'browser.tabShow')).toHaveLength(
+      tabShowsAfterOpen
+    )
+  })
+
   it('closes a page the runtime reports as missing instead of retrying it', async () => {
     const harness = createHarness()
     await openStreamAndConfirmReady(harness)

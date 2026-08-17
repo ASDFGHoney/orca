@@ -1,42 +1,62 @@
 const HISTORY_NAVIGATION_SETTLE_TIMEOUT_MS = 10_000
 
 type BrowserHistoryDirection = 'back' | 'forward'
+export type BrowserHistoryNavigationResult = 'navigated' | 'replaced'
 
 export async function waitForBrowserHistoryNavigation(
   webContents: Electron.WebContents,
   direction: BrowserHistoryDirection
-): Promise<void> {
+): Promise<BrowserHistoryNavigationResult> {
   const history = webContents.navigationHistory
   const canNavigate = direction === 'back' ? history.canGoBack() : history.canGoForward()
   if (!canNavigate) {
-    return
+    return 'navigated'
   }
 
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<BrowserHistoryNavigationResult>((resolve, reject) => {
     let settled = false
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null
     const cleanup = (): void => {
-      webContents.removeListener('did-navigate', finish)
-      webContents.removeListener('did-navigate-in-page', finish)
-      webContents.removeListener('did-fail-load', finish)
-      webContents.removeListener('destroyed', finish)
+      webContents.removeListener('did-navigate', onNavigate)
+      webContents.removeListener('did-navigate-in-page', onNavigateInPage)
+      webContents.removeListener('did-fail-load', onFailLoad)
+      webContents.removeListener('destroyed', onDestroyed)
       if (fallbackTimer) {
         clearTimeout(fallbackTimer)
       }
     }
-    const finish = (): void => {
+    const finish = (result: BrowserHistoryNavigationResult = 'navigated'): void => {
       if (settled) {
         return
       }
       settled = true
       cleanup()
-      resolve()
+      resolve(result)
     }
 
-    webContents.on('did-navigate', finish)
-    webContents.on('did-navigate-in-page', finish)
-    webContents.on('did-fail-load', finish)
-    webContents.on('destroyed', finish)
+    const onNavigateInPage = (_event: Electron.Event, _url: string, isMainFrame: boolean): void => {
+      if (isMainFrame) {
+        finish()
+      }
+    }
+    const onNavigate = (): void => finish()
+    const onFailLoad = (
+      _event: Electron.Event,
+      _errorCode: number,
+      _errorDescription: string,
+      _validatedUrl: string,
+      isMainFrame: boolean
+    ): void => {
+      if (isMainFrame) {
+        finish()
+      }
+    }
+    const onDestroyed = (): void => finish('replaced')
+
+    webContents.on('did-navigate', onNavigate)
+    webContents.on('did-navigate-in-page', onNavigateInPage)
+    webContents.on('did-fail-load', onFailLoad)
+    webContents.on('destroyed', onDestroyed)
     fallbackTimer = setTimeout(finish, HISTORY_NAVIGATION_SETTLE_TIMEOUT_MS)
     fallbackTimer.unref?.()
     try {

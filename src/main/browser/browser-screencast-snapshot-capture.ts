@@ -137,7 +137,7 @@ export function createBrowserScreencastSnapshotCapture(
         return
       }
       const imageSize = readBrowserScreencastImageSize(image, options.format)
-      if (!isLiveFrameCompatibleWithViewport(imageSize, options)) {
+      if (!imageSize || !isLiveFrameCompatibleWithViewport(imageSize, options)) {
         return
       }
       const baseMetadata =

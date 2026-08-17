@@ -5,7 +5,7 @@ import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifec
 type RemoteBrowserStreamActivationOptions = {
   activeRuntimeEnvironmentId: string
   browserPageId: string
-  clearPendingRemoteInput?: () => void
+  clearPendingRemoteInput: () => void
   clearPendingRemoteWheel: () => void
   isActive: boolean
   lifecycle: Pick<RemoteBrowserStreamLifecycle, 'open'>
@@ -32,7 +32,7 @@ export function useRemoteBrowserStreamActivation({
     const closeStream = lifecycle.open()
     return () => {
       closeStream()
-      clearPendingRemoteInput?.()
+      clearPendingRemoteInput()
       clearPendingRemoteWheel()
     }
   }, [

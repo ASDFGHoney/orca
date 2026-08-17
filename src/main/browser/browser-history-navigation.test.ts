@@ -41,7 +41,7 @@ describe('browser history navigation', () => {
       queueMicrotask(() => emitter.emit(event))
     })
 
-    await expect(waitForBrowserHistoryNavigation(webContents, direction)).resolves.toBeUndefined()
+    await expect(waitForBrowserHistoryNavigation(webContents, direction)).resolves.toBe('navigated')
 
     expect(history[direction === 'back' ? 'goBack' : 'goForward']).toHaveBeenCalledOnce()
     expect(emitter.eventNames()).toEqual([])
@@ -50,7 +50,7 @@ describe('browser history navigation', () => {
   it('returns without attaching listeners when no back entry exists', async () => {
     const { emitter, history, webContents } = historyWebContents({ canGoBack: false })
 
-    await expect(waitForBrowserHistoryNavigation(webContents, 'back')).resolves.toBeUndefined()
+    await expect(waitForBrowserHistoryNavigation(webContents, 'back')).resolves.toBe('navigated')
 
     expect(history.goBack).not.toHaveBeenCalled()
     expect(emitter.eventNames()).toEqual([])
@@ -76,11 +76,44 @@ describe('browser history navigation', () => {
 
       await vi.advanceTimersByTimeAsync(10_000)
 
-      await expect(pending).resolves.toBeUndefined()
+      await expect(pending).resolves.toBe('navigated')
       expect(history.goBack).toHaveBeenCalledOnce()
       expect(emitter.eventNames()).toEqual([])
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('ignores subframe events until the main frame finishes', async () => {
+    const { emitter, history, webContents } = historyWebContents({ canGoBack: true })
+    history.goBack.mockImplementation(() => {
+      queueMicrotask(() => {
+        emitter.emit('did-navigate-in-page', {}, 'https://frame.example', false)
+        emitter.emit('did-fail-load', {}, -3, 'aborted', 'https://frame.example', false)
+      })
+    })
+    const pending = waitForBrowserHistoryNavigation(webContents, 'back')
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    emitter.emit('did-navigate-in-page', {}, 'https://example.com', true)
+    await expect(pending).resolves.toBe('navigated')
+    expect(emitter.eventNames()).toEqual([])
+  })
+
+  it('reports a destroyed guest as a replacement boundary', async () => {
+    const { emitter, history, webContents } = historyWebContents({ canGoForward: true })
+    history.goForward.mockImplementation(() => {
+      queueMicrotask(() => emitter.emit('destroyed'))
+    })
+
+    await expect(waitForBrowserHistoryNavigation(webContents, 'forward')).resolves.toBe('replaced')
+    expect(emitter.eventNames()).toEqual([])
   })
 })

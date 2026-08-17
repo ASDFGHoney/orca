@@ -28,4 +28,24 @@ describe('resolveCdpKeypressDefinition', () => {
       modifiers: 2
     })
   })
+
+  it('preserves text for Shift-only printable keys', () => {
+    expect(resolveCdpKeypressDefinition('Shift+A')).toEqual({
+      key: 'A',
+      code: 'KeyA',
+      windowsVirtualKeyCode: 65,
+      text: 'A',
+      modifiers: 8
+    })
+  })
+
+  it('omits text for Shift-only non-printable keys', () => {
+    expect(resolveCdpKeypressDefinition('Shift+Tab')).toEqual({
+      key: 'Tab',
+      code: 'Tab',
+      windowsVirtualKeyCode: 9,
+      text: undefined,
+      modifiers: 8
+    })
+  })
 })

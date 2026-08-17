@@ -31,6 +31,36 @@ export type RemoteBrowserPointerCommand =
 
 const REMOTE_BROWSER_DRAG_THRESHOLD_PX = 6
 
+export async function executeRemoteBrowserPointerCommands(
+  commands: readonly RemoteBrowserPointerCommand[],
+  deps: {
+    isCurrent: () => boolean
+    send: (command: RemoteBrowserPointerCommand) => Promise<void>
+    release: (button: RemoteBrowserPointerButton) => void
+  }
+): Promise<boolean> {
+  let pressedButton: RemoteBrowserPointerButton | null = null
+  try {
+    for (const command of commands) {
+      if (!deps.isCurrent()) {
+        return false
+      }
+      if (command.method === 'browser.mouseDown') {
+        pressedButton = command.params.button
+      }
+      await deps.send(command)
+      if (command.method === 'browser.mouseUp') {
+        pressedButton = null
+      }
+    }
+    return true
+  } finally {
+    if (pressedButton) {
+      deps.release(pressedButton)
+    }
+  }
+}
+
 export function isRemoteBrowserPointerDrag(
   start: RemoteBrowserPointerSample,
   end: Pick<RemoteBrowserPointerSample, 'pointerId' | 'x' | 'y'>

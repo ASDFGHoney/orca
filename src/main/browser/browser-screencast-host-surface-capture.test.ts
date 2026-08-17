@@ -138,4 +138,26 @@ describe('browser screencast host-surface fallback', () => {
     session.stop()
     await session.done
   })
+
+  it('does not publish non-image snapshot bytes with viewport-compatible metadata', async () => {
+    const webContents = createMockWebContents()
+    const invalidImage = Buffer.from('not-an-image')
+    const capturePage = vi.fn(async () => ({
+      getSize: () => ({ width: 1097, height: 917 }),
+      resize: vi.fn(),
+      toPNG: () => invalidImage,
+      toJPEG: () => invalidImage
+    }))
+    Object.assign(webContents, {
+      capturePage
+    })
+    const onFrame = vi.fn<(bytes: Uint8Array<ArrayBufferLike>) => void>()
+
+    const session = await startPhysicalViewportScreencast(webContents, onFrame)
+    await vi.waitFor(() => expect(capturePage).toHaveBeenCalled())
+
+    expect(onFrame).not.toHaveBeenCalled()
+    session.stop()
+    await session.done
+  })
 })

@@ -74,19 +74,28 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       target.dispatchEvent(new KeyboardEvent('keyup', init));
       return { handled: 'page' };
     }
-    const editable = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(target.type));
+    const selectionEditable = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && /^(text|search|tel|url|password)$/i.test(target.type));
+    const valueEditable = target instanceof HTMLInputElement && /^(date|datetime-local|email|month|number|time|week)$/i.test(target.type);
+    const editable = selectionEditable || valueEditable;
     const rich = target instanceof HTMLElement && target.isContentEditable;
     const emitInput = (inputType, data = null) => target.dispatchEvent(new InputEvent('input', { inputType, data, bubbles: true }));
     const replaceSelection = (text, inputType) => {
-      const start = target.selectionStart ?? target.value.length;
-      const end = target.selectionEnd ?? start;
-      target.setRangeText(text, start, end, 'end');
+      if (selectionEditable) {
+        const start = target.selectionStart ?? target.value.length;
+        const end = target.selectionEnd ?? start;
+        target.setRangeText(text, start, end, 'end');
+      } else {
+        target.value += text;
+      }
       emitInput(inputType, text);
     };
     const moveCaret = (position, extend = false) => {
-      const anchor = target.selectionStart ?? 0;
-      const focus = target.selectionEnd ?? anchor;
-      target.setSelectionRange(extend ? anchor : position, position);
+      if (!extend) {
+        target.setSelectionRange(position, position);
+        return;
+      }
+      const anchor = target.selectionDirection === 'backward' ? (target.selectionEnd ?? 0) : (target.selectionStart ?? 0);
+      target.setSelectionRange(Math.min(anchor, position), Math.max(anchor, position), position < anchor ? 'backward' : 'forward');
     };
     const finish = (handled) => {
       if (target) target.dispatchEvent(new KeyboardEvent('keyup', init));
@@ -101,7 +110,7 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       return finish('reload');
     }
     if (shortcut && input.key.toLowerCase() === 'a' && (editable || rich)) {
-      if (editable) target.select();
+      if (selectionEditable) target.select();
       else {
         const range = document.createRange();
         range.selectNodeContents(target);
@@ -132,7 +141,7 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       else if (target instanceof HTMLElement) target.click();
       return finish('enter');
     }
-    if (editable && (input.key === 'Backspace' || input.key === 'Delete')) {
+    if (selectionEditable && (input.key === 'Backspace' || input.key === 'Delete')) {
       let start = target.selectionStart ?? 0;
       let end = target.selectionEnd ?? start;
       if (start === end && input.key === 'Backspace') start = Math.max(0, start - 1);
@@ -141,8 +150,8 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       emitInput(input.key === 'Backspace' ? 'deleteContentBackward' : 'deleteContentForward');
       return finish('delete');
     }
-    if (editable && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(input.key)) {
-      const current = target.selectionEnd ?? 0;
+    if (selectionEditable && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(input.key)) {
+      const current = target.selectionDirection === 'backward' ? (target.selectionStart ?? 0) : (target.selectionEnd ?? 0);
       const position = input.key === 'Home' ? 0 : input.key === 'End' ? target.value.length : input.key === 'ArrowLeft' ? Math.max(0, current - 1) : Math.min(target.value.length, current + 1);
       moveCaret(position, input.shiftKey);
       return finish('caret');

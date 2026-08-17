@@ -2297,7 +2297,8 @@
       "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to contain a malformed legacy frame, map only its actual pixels, and reject gutter clicks. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
-        "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line"
+        "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
+        "pnpm exec playwright test tests/e2e/paired-browser-host-generated-publication.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --reporter=line"
       ],
       "testFiles": [
         "src/main/browser/agent-browser-bridge-mouse-input.test.ts",
@@ -2308,7 +2309,8 @@
         "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts",
-        "tests/e2e/paired-remote-browser-legacy-input.spec.ts"
+        "tests/e2e/paired-remote-browser-legacy-input.spec.ts",
+        "tests/e2e/paired-browser-host-generated-publication.spec.ts"
       ],
       "assertionRefs": [
         {
@@ -2337,6 +2339,13 @@
           "assertions": [
             "a paired host with both direct capabilities disabled accepts visible click, Back, wheel, and keyboard input",
             "the client browser stream stays live without a remote-browser error"
+          ]
+        },
+        {
+          "file": "tests/e2e/paired-browser-host-generated-publication.spec.ts",
+          "assertions": [
+            "host-generated browser creation reaches the client session snapshot before the RPC settles",
+            "the client renders the authoritative host page without creating a local fallback"
           ]
         }
       ],

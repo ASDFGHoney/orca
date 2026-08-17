@@ -52,6 +52,7 @@ import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
 import { iterateBrowserTextInsertionChunks } from './browser-text-insertion'
 import { AgentBrowserDirectInput } from './agent-browser-direct-input'
 import { waitForBrowserHistoryNavigation } from './browser-history-navigation'
+import { waitForTabRegistration } from '../ipc/browser-tab-registration-wait'
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
@@ -1450,7 +1451,13 @@ export class AgentBrowserBridge {
       worktreeId,
       browserPageId,
       async (_sessionName, target) => {
-        await waitForBrowserHistoryNavigation(this.requireTargetWebContents(target), direction)
+        const result = await waitForBrowserHistoryNavigation(
+          this.requireTargetWebContents(target),
+          direction
+        )
+        if (result === 'replaced') {
+          await waitForTabRegistration(target.browserPageId)
+        }
         const navigatedTarget = this.resolveCommandTarget(worktreeId, target.browserPageId)
         const navigatedWebContents = this.requireTargetWebContents(navigatedTarget)
         return { url: navigatedWebContents.getURL(), title: navigatedWebContents.getTitle() }
