@@ -44,9 +44,11 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
   sequence. The current local series is rebased onto `origin/main@88b1a69824`; range-diff marks all
-  71 cumulative patches identical. The preceding published heads are green: #14953 and #14955
-  pass 43 required checks, while #14954, #14956, and #14957 pass 46. The rewritten heads require
-  fresh CI after publication; no PR has been merged or marked ready.
+  72 previously published patches identical, and one additive audit-only test patch records the injected
+  worker source. The preceding published heads are green: #14953 and #14955 pass 43 required
+  checks, while #14954, #14956, and #14957 pass 46. The rewritten #14955 CI deterministically
+  exposed the missing global-fetch audit entry; its correction passes the exact audit and worker
+  oracle 2/2 and requires fresh upstack CI. No PR has been merged or marked ready.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -364,10 +366,11 @@ boundary` successfully; its Windows package boundary also passed before post-job
   passes both production journeys: headed paired Electron and real headless `orca serve`, with
   client ownership, no server duplicate or screencast, local snapshot automation, new-page-only
   disablement, and server fallback. `test-results/.last-run.json` records `status: passed`.
-- The later rebase onto `origin/main@88b1a69824` is conflict-free and preserves all 71 patches
-  exactly by range-diff. The upstream overlap is limited to runtime/session-tab files for agent
-  completion state; the combined latest-main lifecycle, placement, and wire gate passes 8 files /
-  72 tests.
+- The later rebase onto `origin/main@88b1a69824` is conflict-free and preserves all 71 preceding
+  patches exactly by range-diff. The upstream overlap is limited to runtime/session-tab files for
+  agent completion state; the combined latest-main lifecycle, placement, and wire gate passes 8
+  files / 72 tests. The additive global-fetch audit correction changes no fixture or product
+  behavior and passes the exact audit plus worker oracle 2/2.
 
 The cumulative local tree is rebased onto `origin/main@88b1a69824`. Safety refs
 `sta-4150-safety-pre-21ed-main-rebase-20260816` and
@@ -376,13 +379,13 @@ preceding patches retain their behavior by `git range-diff`; the two contextual 
 deferred-test helper signature and the activation manifest composing the new lifecycle evidence.
 The new immediate-proxy lifecycle commit sits between #14955 and the unchanged command/activation
 behavior above it.
-The latest rebase preserves that complete 71-patch result exactly. Remaining explicit validation
-gaps are physical Windows and Linux Electron ordering, physical mobile-client validation, packaged
-Windows/Linux skew, spontaneous worker timing across platforms, broader direct-egress containment,
-the joined terminal-link/no-reconnect assertion, local-input and zero-screencast counters, large
-binary-result secondary transport, and mobile mirroring transport. Deterministic WSL, SSH,
-folder-workspace, git-worktree, browserless, mixed-version, packaged-macOS, and package-contract
-evidence is green.
+The feature series preserves the complete preceding result and adds only the audit correction;
+later tracker commits record that state. Remaining explicit validation gaps are physical Windows and Linux Electron ordering,
+physical mobile-client validation, packaged Windows/Linux skew, spontaneous worker timing across
+platforms, broader direct-egress containment, the joined terminal-link/no-reconnect assertion,
+local-input and zero-screencast counters, large binary-result secondary transport, and mobile
+mirroring transport. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless,
+mixed-version, packaged-macOS, and package-contract evidence is green.
 
 The remaining ownership work, in execution order, is:
 
@@ -471,9 +474,9 @@ ownership.
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- |
 | 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@982dae1e52`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
 | 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@f41cf97605` | Typecheck, routing and transport suites; CI pending         |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@d2ece7c976`    | 28 exact and 123 cumulative lifecycle tests; CI pending     |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@ab29c016a2`     | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@10b791cf52`    | Full cumulative and paired E2E proof; CI pending            |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@2324309e60`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@523b6de656`     | Typecheck and authority/reconciliation suites; CI pending   |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@43b04904e0`    | Full cumulative and paired E2E proof; CI pending            |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1380,6 +1383,12 @@ topology, versions, and explicit gaps at every later checkpoint.
   stack #14958, updated the Orca worktree checkpoint, and posted one STA-4150 checkpoint
   (`b0051172-e1a4-445a-bbe8-db5f6de27498`) while leaving every PR draft and the ticket In Progress.
   No PR was merged or marked ready.
+- Current-head #14955 CI reproduced the repository global-fetch audit against the three `fetch`
+  calls embedded in the persisted service-worker source. Added the fixture to the audit's existing
+  injected-browser-script category in #14955; the exact audit and real worker oracle pass 2/2.
+  Cascade-rebased #14956 and #14957, refreshed both affected PR descriptions, and resubmitted the
+  draft stack for fresh CI without changing readiness or Linear state. Range-diff preserves all 72
+  previously published patches; the audit correction is the only additive code/test patch.
 
 ## Completion rule
 
