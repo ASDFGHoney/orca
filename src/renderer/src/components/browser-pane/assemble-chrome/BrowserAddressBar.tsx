@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: dropdown visibility depends on DOM focus plus browser-history suggestions, so the close path is an imperative popover sync. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -29,10 +28,10 @@ export default function BrowserAddressBar({
 }: BrowserAddressBarProps): React.ReactElement {
   const [open, setOpen] = useState(false)
   const [selectedValueOverride, setSelectedValueOverride] = useState<string | null>(null)
+  const prePreviewValueRef = useRef<string | null>(null)
   // Why: while previewing a highlighted suggestion the input shows the full URL,
   // but suggestions must keep matching the original typed query.
-  const [autocompleteQuery, setAutocompleteQuery] = useState(value)
-  const prePreviewValueRef = useRef<string | null>(null)
+  const autocompleteQuery = prePreviewValueRef.current ?? value
   const browserUrlHistory = useAppStore((s) => s.browserUrlHistory)
   const browserDefaultSearchEngine = useAppStore((s) => s.browserDefaultSearchEngine)
   const browserKagiSessionLink = useAppStore((s) => s.browserKagiSessionLink)
@@ -93,20 +92,6 @@ export default function BrowserAddressBar({
     [browserUrlHistory, autocompleteQuery, searchEngine, browserKagiSessionLink]
   )
 
-  useEffect(() => {
-    if (prePreviewValueRef.current === null) {
-      setAutocompleteQuery(value)
-    }
-  }, [value])
-
-  useEffect(() => {
-    if (open) {
-      return
-    }
-    prePreviewValueRef.current = null
-    setSelectedValueOverride(null)
-  }, [open])
-
   const clearSuggestionPreview = useCallback((): void => {
     prePreviewValueRef.current = null
     setSelectedValueOverride(null)
@@ -149,7 +134,6 @@ export default function BrowserAddressBar({
     }
     prePreviewValueRef.current = null
     setSelectedValueOverride(null)
-    setAutocompleteQuery(typed)
     onChange(typed)
   }, [onChange])
 
@@ -240,7 +224,6 @@ export default function BrowserAddressBar({
         event.preventDefault()
         setOpen(false)
         clearSuggestionPreview()
-        setAutocompleteQuery(value)
         onSubmit()
         return
       }
@@ -287,24 +270,9 @@ export default function BrowserAddressBar({
       restoreTypedQuery,
       cancelSuggestionPreview,
       clearSuggestionPreview,
-      onSubmit,
-      value
+      onSubmit
     ]
   )
-
-  // Why: close the dropdown only when the input has lost focus AND there are
-  // no suggestions. Previously this closed unconditionally on empty suggestions,
-  // which caused the dropdown to vanish mid-typing when backspacing produced a
-  // query that didn't match any history entries. Keeping the popover open while
-  // focused lets the user continue editing and see results reappear.
-  useEffect(() => {
-    if (open && suggestions.length === 0) {
-      if (inputRef.current && document.activeElement === inputRef.current) {
-        return
-      }
-      dismissSuggestions()
-    }
-  }, [dismissSuggestions, open, suggestions.length, inputRef])
 
   // Why: Electron <webview> guests run in a separate process, so clicking the
   // page never dispatches pointerdown on the renderer document and Radix cannot
@@ -399,7 +367,6 @@ export default function BrowserAddressBar({
               event.preventDefault()
               setOpen(false)
               clearSuggestionPreview()
-              setAutocompleteQuery(value)
               onSubmit()
             }}
           >
@@ -423,7 +390,6 @@ export default function BrowserAddressBar({
                 // from repopulating the input after Cmd+A → Delete.
                 prePreviewValueRef.current = null
                 setSelectedValueOverride(null)
-                setAutocompleteQuery(nextValue)
                 onChange(nextValue)
               }}
               role="combobox"

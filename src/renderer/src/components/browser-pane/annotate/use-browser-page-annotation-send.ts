@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: BrowserPane synchronizes Electron webviews, remote browser drivers, streams, downloads, and annotation overlays; those external lifecycles cannot be derived during render. */
 import {
   useCallback,
   useEffect,
@@ -54,8 +53,8 @@ export function useBrowserPageAnnotationSend({
   const activeAgentSendTargetModeId = useAppStore((s) => s.agentSendPopoverTargetMode?.id ?? null)
   const annotationBannerSendModeId = `browser-annotations:${browserTabId}:banner`
   const annotationTraySendModeId = `browser-annotations:${browserTabId}:tray`
-  const [annotationBannerSendOpen, setAnnotationBannerSendOpen] = useState(false)
-  const [annotationTraySendOpen, setAnnotationTraySendOpen] = useState(false)
+  const annotationBannerSendOpen = activeAgentSendTargetModeId === annotationBannerSendModeId
+  const annotationTraySendOpen = activeAgentSendTargetModeId === annotationTraySendModeId
   const deleteBrowserPageAnnotation = useAppStore((s) => s.deleteBrowserPageAnnotation)
   const clearBrowserPageAnnotations = useAppStore((s) => s.clearBrowserPageAnnotations)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
@@ -66,23 +65,8 @@ export function useBrowserPageAnnotationSend({
     }
   }, [])
 
-  useEffect(() => {
-    setBrowserAnnotationTrayOpen(true)
-    setBrowserAnnotationsCopied(false)
-    clearTimeout(annotationCopyTimerRef.current)
-  }, [browserTabId])
-
-  useEffect(() => {
-    if (browserAnnotations.length === 0) {
-      setBrowserAnnotationTrayOpen(true)
-      setBrowserAnnotationsCopied(false)
-      clearTimeout(annotationCopyTimerRef.current)
-    }
-  }, [browserAnnotations.length])
-
   const handleAnnotationBannerSendOpenChange = useCallback(
     (open: boolean): void => {
-      setAnnotationBannerSendOpen(open)
       if (open) {
         openAgentSendPopoverTargetMode({
           id: annotationBannerSendModeId,
@@ -110,7 +94,6 @@ export function useBrowserPageAnnotationSend({
 
   const handleAnnotationTraySendOpenChange = useCallback(
     (open: boolean): void => {
-      setAnnotationTraySendOpen(open)
       if (open) {
         openAgentSendPopoverTargetMode({
           id: annotationTraySendModeId,
@@ -135,21 +118,6 @@ export function useBrowserPageAnnotationSend({
       worktreeId
     ]
   )
-
-  useEffect(() => {
-    if (annotationBannerSendOpen && activeAgentSendTargetModeId !== annotationBannerSendModeId) {
-      setAnnotationBannerSendOpen(false)
-    }
-    if (annotationTraySendOpen && activeAgentSendTargetModeId !== annotationTraySendModeId) {
-      setAnnotationTraySendOpen(false)
-    }
-  }, [
-    activeAgentSendTargetModeId,
-    annotationBannerSendModeId,
-    annotationBannerSendOpen,
-    annotationTraySendModeId,
-    annotationTraySendOpen
-  ])
 
   useEffect(
     () => () => {
@@ -186,10 +154,20 @@ export function useBrowserPageAnnotationSend({
 
   const handleDeleteBrowserAnnotation = useCallback(
     (annotationId: string): void => {
+      if (browserAnnotationsRef.current.length === 1) {
+        clearTimeout(annotationCopyTimerRef.current)
+        setBrowserAnnotationsCopied(false)
+        setBrowserAnnotationTrayOpen(true)
+      }
       deleteBrowserPageAnnotation(browserTabId, annotationId)
       recordFeatureInteraction('browser-annotations')
     },
-    [browserTabId, deleteBrowserPageAnnotation, recordFeatureInteraction]
+    [
+      browserTabId,
+      deleteBrowserPageAnnotation,
+      recordFeatureInteraction,
+      setBrowserAnnotationTrayOpen
+    ]
   )
 
   return {

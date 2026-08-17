@@ -1,9 +1,21 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import { normalizeExternalBrowserUrl } from '../../../../../shared/browser-url'
 import type { BrowserPageContextMenuState } from '../describe-page/browser-page-types'
+
+// `focus:` rather than `focus-visible:` — items are only ever focused programmatically
+// while the menu is open, so every focus here is keyboard navigation.
+const MENU_ITEM_CLASS =
+  'relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 focus:bg-black/8 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-white/14 dark:focus:bg-white/14'
 
 export function BrowserPageContextMenu({
   browserPageId,
@@ -33,16 +45,6 @@ export function BrowserPageContextMenu({
       const zoomFactor = 1.2 ** window.api.ui.getZoomLevel()
       const x = Math.round((event.screenX - window.screenX) / zoomFactor)
       const y = Math.round((event.screenY - window.screenY) / zoomFactor)
-      console.debug(
-        '[context-menu] screen=(%d,%d) window=(%d,%d) zoom=%.2f → viewport=(%d,%d)',
-        event.screenX,
-        event.screenY,
-        window.screenX,
-        window.screenY,
-        zoomFactor,
-        x,
-        y
-      )
       setContextMenu({
         x,
         y,
@@ -62,6 +64,25 @@ export function BrowserPageContextMenu({
     })
   }, [browserPageId])
 
+  // Why: the guest owns focus while the menu is open, so hand it back on close —
+  // otherwise dismissing leaves the page unable to receive keystrokes.
+  const closeMenu = useCallback((): void => {
+    setContextMenu(null)
+    try {
+      webviewRef.current?.focus()
+    } catch {
+      // The guest can be destroyed while its renderer-owned menu is open.
+    }
+  }, [webviewRef])
+
+  const menuItems = useCallback((): HTMLButtonElement[] => {
+    const el = contextMenuRef.current
+    if (!el) {
+      return []
+    }
+    return [...el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+  }, [])
+
   useEffect(() => {
     if (!contextMenu) {
       return
@@ -69,12 +90,46 @@ export function BrowserPageContextMenu({
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        setContextMenu(null)
+        closeMenu()
       }
     }
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [contextMenu])
+  }, [closeMenu, contextMenu])
+
+  // Why: role="menu" is unreachable by keyboard unless focus moves in on open.
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+    menuItems()[0]?.focus()
+  }, [contextMenu, menuItems])
+
+  const handleMenuKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>): void => {
+      const items = menuItems()
+      if (items.length === 0) {
+        return
+      }
+      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement)
+      let nextIndex: number
+      if (e.key === 'ArrowDown') {
+        nextIndex = (currentIndex + 1) % items.length
+      } else if (e.key === 'ArrowUp') {
+        nextIndex = (currentIndex <= 0 ? items.length : currentIndex) - 1
+      } else if (e.key === 'Home') {
+        nextIndex = 0
+      } else if (e.key === 'End') {
+        nextIndex = items.length - 1
+      } else {
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      items[nextIndex]?.focus()
+    },
+    [menuItems]
+  )
 
   // Why: ancestor CSS (transform/backdrop-filter) can shift position:fixed even via a body Portal, so measure/correct before paint; also flip on viewport overflow.
   useLayoutEffect(() => {
@@ -114,10 +169,13 @@ export function BrowserPageContextMenu({
 
   return createPortal(
     <>
-      <div className="fixed inset-0 z-50" onPointerDown={() => setContextMenu(null)} />
+      <div className="fixed inset-0 z-50" onPointerDown={closeMenu} />
       <div
         ref={contextMenuRef}
         role="menu"
+        aria-orientation="vertical"
+        tabIndex={-1}
+        onKeyDown={handleMenuKeyDown}
         data-testid="browser-context-menu"
         style={{ left: contextMenu.x, top: contextMenu.y }}
         className="fixed z-50 min-w-[13rem] overflow-hidden rounded-[11px] border border-black/14 bg-[rgba(255,255,255,0.82)] p-1 text-black shadow-[0_16px_36px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.14)] backdrop-blur-2xl dark:border-white/14 dark:bg-[rgba(0,0,0,0.72)] dark:text-white dark:shadow-[0_20px_44px_rgba(0,0,0,0.42),inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -126,12 +184,12 @@ export function BrowserPageContextMenu({
           <>
             <button
               role="menuitem"
-              className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 createBrowserTab(worktreeId, contextMenu.linkUrl!, {
                   title: contextMenu.linkUrl!
                 })
-                setContextMenu(null)
+                closeMenu()
               }}
             >
               {translate(
@@ -141,13 +199,13 @@ export function BrowserPageContextMenu({
             </button>
             <button
               role="menuitem"
-              className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 const targetUrl = normalizeExternalBrowserUrl(contextMenu.linkUrl!)
                 if (targetUrl) {
                   void window.api.shell.openUrl(targetUrl)
                 }
-                setContextMenu(null)
+                closeMenu()
               }}
             >
               {translate(
@@ -157,10 +215,10 @@ export function BrowserPageContextMenu({
             </button>
             <button
               role="menuitem"
-              className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 void window.api.ui.writeClipboardText(contextMenu.linkUrl ?? '')
-                setContextMenu(null)
+                closeMenu()
               }}
             >
               {translate(
@@ -175,10 +233,10 @@ export function BrowserPageContextMenu({
           <>
             <button
               role="menuitem"
-              className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 void window.api.ui.writeClipboardText(contextMenu.selectionText)
-                setContextMenu(null)
+                closeMenu()
               }}
             >
               {translate('auto.components.browser.pane.BrowserPane.2a4c4b8e1f', 'Copy')}
@@ -189,10 +247,10 @@ export function BrowserPageContextMenu({
         <button
           role="menuitem"
           disabled={!canGoBack}
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             webviewRef.current?.goBack()
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate('auto.components.browser.pane.BrowserPane.40edfa75cb', 'Back')}
@@ -200,20 +258,20 @@ export function BrowserPageContextMenu({
         <button
           role="menuitem"
           disabled={!canGoForward}
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             webviewRef.current?.goForward()
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate('auto.components.browser.pane.BrowserPane.250a9b3e42', 'Forward')}
         </button>
         <button
           role="menuitem"
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             onReload()
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate('auto.components.browser.pane.BrowserPane.0e080d820e', 'Reload')}
@@ -221,13 +279,13 @@ export function BrowserPageContextMenu({
         <div className="my-1 h-px bg-border/70" />
         <button
           role="menuitem"
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             const targetUrl = normalizeExternalBrowserUrl(contextMenu.pageUrl)
             if (targetUrl) {
               void window.api.shell.openUrl(targetUrl)
             }
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate(
@@ -237,10 +295,10 @@ export function BrowserPageContextMenu({
         </button>
         <button
           role="menuitem"
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             void window.api.ui.writeClipboardText(contextMenu.pageUrl)
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate('auto.components.browser.pane.BrowserPane.1b179ab561', 'Copy Page URL')}
@@ -248,10 +306,10 @@ export function BrowserPageContextMenu({
         <div className="my-1 h-px bg-border/70" />
         <button
           role="menuitem"
-          className="relative flex w-full cursor-default items-center gap-2 rounded-[7px] px-2 py-0.5 text-[12px] leading-5 font-medium outline-none select-none hover:bg-black/8 dark:hover:bg-white/14"
+          className={MENU_ITEM_CLASS}
           onClick={() => {
             void window.api.browser.openDevTools({ browserPageId })
-            setContextMenu(null)
+            closeMenu()
           }}
         >
           {translate('auto.components.browser.pane.BrowserPane.a8f37f70c3', 'Inspect Page')}

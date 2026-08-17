@@ -6,6 +6,13 @@ import {
   webviewRegistry
 } from './webview-registry'
 
+export function setBrowserPageWebviewInputLock(
+  webview: Electron.WebviewTag,
+  inputLocked: boolean
+): void {
+  webview.style.pointerEvents = inputLocked ? 'none' : 'auto'
+}
+
 export function ensureBrowserPageWebview({
   browserTabId,
   container,
@@ -43,7 +50,7 @@ export function ensureBrowserPageWebview({
     activeContainer = refreshedContainer
   }
   if (webview) {
-    webview.style.pointerEvents = inputLocked ? 'none' : 'auto'
+    setBrowserPageWebviewInputLock(webview, inputLocked)
     return { container: activeContainer, created, webview }
   }
 
@@ -58,7 +65,7 @@ export function ensureBrowserPageWebview({
   webview.style.width = '100%'
   webview.style.height = '100%'
   webview.style.border = 'none'
-  webview.style.pointerEvents = inputLocked ? 'none' : 'auto'
+  setBrowserPageWebviewInputLock(webview, inputLocked)
   // Why: some pages never paint a background, and a white viewport matches
   // normal browser behavior instead of leaking Orca chrome through the guest.
   webview.style.background = '#ffffff'

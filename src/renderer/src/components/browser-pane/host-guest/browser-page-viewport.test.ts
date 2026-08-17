@@ -8,6 +8,7 @@ import {
   parkBrowserPageViewport,
   registerBrowserOverlaySlotViewport,
   removeBrowserPageViewport,
+  subscribeBrowserOverlaySlotViewport,
   syncBrowserPageChromeInset
 } from './browser-page-viewport'
 
@@ -141,6 +142,40 @@ describe('syncBrowserPageChromeInset', () => {
     const viewport = ensureBrowserPageViewport('page-2', 'workspace-1')!
 
     expect(viewport.chromeInset.style.height).toBe('40px')
+  })
+})
+
+describe('subscribeBrowserOverlaySlotViewport', () => {
+  it('keeps notifying a mounted subscriber across an unregister/re-register cycle', () => {
+    const seen: (HTMLDivElement | null)[] = []
+    const unsubscribe = subscribeBrowserOverlaySlotViewport('workspace-1', () => {
+      seen.push(getBrowserOverlaySlotViewport('workspace-1'))
+    })
+
+    const first = mountSlotViewport('workspace-1')
+    first.remove()
+    registerBrowserOverlaySlotViewport('workspace-1', null)
+    const second = mountSlotViewport('workspace-1')
+
+    expect(seen).toEqual([first, null, second])
+    unsubscribe()
+  })
+
+  it('does not let a repeated stale unsubscribe drop a newer subscriber set', () => {
+    const stale = subscribeBrowserOverlaySlotViewport('workspace-1', () => {})
+    stale()
+
+    let notified = 0
+    const active = subscribeBrowserOverlaySlotViewport('workspace-1', () => {
+      notified += 1
+    })
+    // StrictMode/double-cleanup: the emptied first Set must not evict the replacement.
+    stale()
+
+    mountSlotViewport('workspace-1')
+
+    expect(notified).toBe(1)
+    active()
   })
 })
 

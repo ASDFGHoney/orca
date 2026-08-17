@@ -23,6 +23,7 @@ import {
   type BrowserOverlayViewport
 } from '../describe-page/browser-annotation-geometry'
 import { attachBrowserPageWebview } from './attach-browser-page-webview'
+import { setBrowserPageWebviewInputLock } from './browser-page-webview'
 import type {
   BrowserPageRecoveryNavigationValidation,
   BrowserPageUrlSetter,
@@ -39,7 +40,7 @@ export function useBrowserPageWebviewLifecycle({
   webviewPartition,
   isActive,
   isPaintable,
-  slotViewportReady,
+  slotViewport,
   viewportPresetId,
   addressBarInputRef,
   addressBarValueRef,
@@ -80,7 +81,7 @@ export function useBrowserPageWebviewLifecycle({
   webviewPartition: string
   isActive: boolean
   isPaintable: boolean
-  slotViewportReady: boolean
+  slotViewport: HTMLDivElement | null
   viewportPresetId: BrowserViewportPresetId | null
   addressBarInputRef: RefObject<HTMLInputElement | null>
   addressBarValueRef: MutableRefObject<string>
@@ -147,6 +148,13 @@ export function useBrowserPageWebviewLifecycle({
     isPaintableRef.current = isPaintable
   }, [isPaintable])
 
+  useLayoutEffect(() => {
+    const webview = webviewRef.current
+    if (webview) {
+      setBrowserPageWebviewInputLock(webview, inputLocked)
+    }
+  }, [inputLocked, webviewRef])
+
   useEffect(() => {
     initialBrowserUrlRef.current = browserTabUrl
   }, [browserTabId, browserTabUrl])
@@ -209,7 +217,6 @@ export function useBrowserPageWebviewLifecycle({
   }, [browserTabId])
 
   // Why: browserTab.url excluded from deps (changes every navigation → would destroy/recreate the webview); URL logic reads browserTabUrlRef.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
   useEffect(() => {
     return attachBrowserPageWebview({
       browserTabId,
@@ -263,7 +270,7 @@ export function useBrowserPageWebviewLifecycle({
     browserTabId,
     guestRecoveryGeneration,
     workspaceId,
-    slotViewportReady,
+    slotViewport,
     webviewPartition,
     worktreeId,
     createBrowserTab,

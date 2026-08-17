@@ -103,6 +103,15 @@ function EscapedText({ text, className }: { text: string; className?: string }):
   return <span className={className}>{text}</span>
 }
 
+function getNearbyTextRows(nearbyText: readonly string[]): { key: string; text: string }[] {
+  const counts = new Map<string, number>()
+  return nearbyText.map((text) => {
+    const count = counts.get(text) ?? 0
+    counts.set(text, count + 1)
+    return { key: `${text}:${count}`, text }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Confirmation Sheet Component
 // ---------------------------------------------------------------------------
@@ -121,6 +130,7 @@ export default function GrabConfirmationSheet({
   onCancel: () => void
 }): React.JSX.Element {
   const { target, page, nearbyText } = payload
+  const nearbyTextRows = getNearbyTextRows(nearbyText)
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background/98 backdrop-blur-sm">
@@ -246,9 +256,9 @@ export default function GrabConfirmationSheet({
               </h3>
               <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
                 <ul className="list-inside list-disc space-y-0.5 text-sm text-muted-foreground">
-                  {nearbyText.map((text, i) => (
-                    <li key={i}>
-                      <EscapedText text={text} />
+                  {nearbyTextRows.map((row) => (
+                    <li key={row.key}>
+                      <EscapedText text={row.text} />
                     </li>
                   ))}
                 </ul>

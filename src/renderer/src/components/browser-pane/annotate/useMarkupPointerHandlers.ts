@@ -16,6 +16,7 @@ export type MarkupPointerParams = {
   color: string
   width: number
   pendingText: PendingText | null
+  inProgress: MarkupShape | null
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   setInProgress: React.Dispatch<React.SetStateAction<MarkupShape | null>>
   setPendingText: (value: PendingText | null) => void
@@ -31,6 +32,7 @@ export function useMarkupPointerHandlers(params: MarkupPointerParams) {
     color,
     width,
     pendingText,
+    inProgress,
     canvasRef,
     setInProgress,
     setPendingText,
@@ -96,14 +98,14 @@ export function useMarkupPointerHandlers(params: MarkupPointerParams) {
     [pointFromEvent, setInProgress]
   )
 
+  // Why: committing inside the setInProgress updater made it impure, so StrictMode's
+  // double-invoke appended the shape twice (commitShape does not dedupe by id).
   const onPointerUp = useCallback(() => {
-    setInProgress((current) => {
-      if (current) {
-        setDoc((document) => commitShape(document, current))
-      }
-      return null
-    })
-  }, [setDoc, setInProgress])
+    if (inProgress) {
+      setDoc((document) => commitShape(document, inProgress))
+    }
+    setInProgress(null)
+  }, [inProgress, setDoc, setInProgress])
 
   return { onPointerDown, onPointerMove, onPointerUp }
 }

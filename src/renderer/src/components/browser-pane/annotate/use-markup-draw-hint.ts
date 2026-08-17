@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { useAppStore } from '@/store'
 
 // One-time discovery highlight for the screenshot-markup Draw button. Shows once
@@ -30,22 +30,32 @@ export type MarkupDrawHint = { hintOpen: boolean; dismissHint: () => void }
 
 export function useMarkupDrawHint(eligible: boolean): MarkupDrawHint {
   const persistedUIReady = useAppStore((state) => state.persistedUIReady)
-  const [hintOpen, setHintOpen] = useState(false)
-
-  useEffect(() => {
-    // Why: only nudge once the app is ready and the button is usable on a
-    // visible surface. If eligibility drops mid-hint (tab switch, grab
-    // started, markup open, blank tab), close it so a forced-open floating
-    // layer can't stick over a hidden or disabled control at (0,0).
-    if (!persistedUIReady || !eligible) {
-      setHintOpen(false)
-      return
-    }
-    if (claimFirstView()) {
-      setHintOpen(true)
-    }
-  }, [eligible, persistedUIReady])
-
-  const dismissHint = useCallback(() => setHintOpen(false), [])
+  const hintOpenRef = useRef(false)
+  const notifyRef = useRef<() => void>(() => {})
+  const subscribe = useCallback(
+    (notify: () => void): (() => void) => {
+      notifyRef.current = notify
+      const nextOpen = persistedUIReady && eligible && (hintOpenRef.current || claimFirstView())
+      if (hintOpenRef.current !== nextOpen) {
+        hintOpenRef.current = nextOpen
+        notify()
+      }
+      return () => {
+        if (notifyRef.current === notify) {
+          notifyRef.current = () => {}
+        }
+      }
+    },
+    [eligible, persistedUIReady]
+  )
+  const getSnapshot = useCallback(
+    () => hintOpenRef.current && persistedUIReady && eligible,
+    [eligible, persistedUIReady]
+  )
+  const hintOpen = useSyncExternalStore(subscribe, getSnapshot, () => false)
+  const dismissHint = useCallback(() => {
+    hintOpenRef.current = false
+    notifyRef.current()
+  }, [])
   return { hintOpen, dismissHint }
 }

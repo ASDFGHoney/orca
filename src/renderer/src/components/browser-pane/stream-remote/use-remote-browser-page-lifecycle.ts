@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: BrowserPane synchronizes Electron webviews, remote browser drivers, streams, downloads, and annotation overlays; those external lifecycles cannot be derived during render. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
@@ -44,6 +43,8 @@ export function useRemoteBrowserPageLifecycle({
 }) {
   const [frameUrl, setFrameUrl] = useState<string | null>(null)
   const [frameMetadata, setFrameMetadata] = useState<BrowserScreencastFrameMetadata | null>(null)
+  const setFrameUrlRef = useRef(setFrameUrl)
+  const setFrameMetadataRef = useRef(setFrameMetadata)
   // The single source for what the stream is doing. busy, the notice, and whether the reconnect
   // control renders are all derived below, so they cannot disagree — see
   // remote-browser-stream-status.ts for the four ways they used to.
@@ -139,8 +140,8 @@ export function useRemoteBrowserPageLifecycle({
     streamFrameUrlRef.current = null
     remoteCssViewportSizeRef.current = null
     lifecycle.forgetStreamViewportSize()
-    setFrameMetadata(null)
-    setFrameUrl(null)
+    setFrameMetadataRef.current(null)
+    setFrameUrlRef.current(null)
     if (prevUrl) {
       URL.revokeObjectURL(prevUrl)
     }

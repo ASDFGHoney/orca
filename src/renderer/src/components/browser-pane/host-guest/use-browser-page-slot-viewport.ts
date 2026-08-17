@@ -1,21 +1,15 @@
-import { useLayoutEffect, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import {
   getBrowserOverlaySlotViewport,
   subscribeBrowserOverlaySlotViewport
 } from './browser-page-viewport'
 
-export function useBrowserPageSlotViewport(workspaceId: string): boolean {
-  const [slotViewportReady, setSlotViewportReady] = useState(
-    () => getBrowserOverlaySlotViewport(workspaceId) !== null
+export function useBrowserPageSlotViewport(workspaceId: string): HTMLDivElement | null {
+  const subscribe = useCallback(
+    (listener: () => void): (() => void) =>
+      subscribeBrowserOverlaySlotViewport(workspaceId, listener),
+    [workspaceId]
   )
-  useLayoutEffect(() => {
-    if (getBrowserOverlaySlotViewport(workspaceId)) {
-      setSlotViewportReady(true)
-      return
-    }
-    return subscribeBrowserOverlaySlotViewport(workspaceId, () => {
-      setSlotViewportReady(true)
-    })
-  }, [workspaceId])
-  return slotViewportReady
+  const getSnapshot = useCallback(() => getBrowserOverlaySlotViewport(workspaceId), [workspaceId])
+  return useSyncExternalStore(subscribe, getSnapshot, () => null)
 }

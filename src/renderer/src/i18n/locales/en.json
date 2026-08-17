@@ -14771,7 +14771,8 @@
             "a6914ee43f": "Take back",
             "f4ecd61552": "This tab is being controlled from your phone. Take back to use it on desktop.",
             "d9768ec642": "Browser input is paused",
-            "20539eca03": "Mobile is driving this browser"
+            "20539eca03": "Mobile is driving this browser",
+            "7c31b0da94": "Couldn't take back this tab. Check the phone session, then try again."
           },
           "BrowserPane": {
             "1ded0d3168": "Copy Screenshot",

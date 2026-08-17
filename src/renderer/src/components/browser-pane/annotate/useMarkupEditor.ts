@@ -124,6 +124,7 @@ export function useMarkupEditor(busy: boolean, onCancel: () => void) {
     color,
     width,
     pendingText,
+    inProgress,
     canvasRef,
     setInProgress,
     setPendingText,

@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: BrowserPane synchronizes Electron webviews, remote browser drivers, streams, downloads, and annotation overlays; those external lifecycles cannot be derived during render. */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
@@ -111,7 +110,7 @@ export function BrowserPagePane({
     sessionPartition
   })
   const grabElementShortcut = useShortcutLabel('browser.grabElement')
-  const slotViewportReady = useBrowserPageSlotViewport(workspaceId)
+  const slotViewport = useBrowserPageSlotViewport(workspaceId)
 
   const zoom = useBrowserPageZoomFeedback(browserTab.id)
   const { resourceNotice, setResourceNotice } = useBrowserPageResourceNotices(browserTab.id)
@@ -165,7 +164,7 @@ export function BrowserPagePane({
     webviewPartition,
     isActive,
     isPaintable,
-    slotViewportReady,
+    slotViewport,
     viewportPresetId: browserTab.viewportPresetId ?? null,
     addressBarInputRef,
     addressBarValueRef,
@@ -203,7 +202,7 @@ export function BrowserPagePane({
     browserTabLoading: browserTab.loading,
     isActive,
     isPaintable,
-    slotViewportReady,
+    slotViewport,
     webviewRef,
     chromeHeaderRef,
     lastKnownWebviewUrlRef,

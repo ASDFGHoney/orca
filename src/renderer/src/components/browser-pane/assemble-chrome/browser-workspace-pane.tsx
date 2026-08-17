@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useAppStore } from '@/store'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import type { BrowserWorkspace as BrowserWorkspaceState } from '../../../../../shared/browser-workspace-types'
@@ -7,10 +7,9 @@ import { useBrowserAutomationVisiblePageIds } from '../host-guest/browser-automa
 import { getBrowserPagesForWorkspace } from './browser-pane-page-selection'
 import { BrowserMobileDriverOverlay } from './BrowserMobileDriverOverlay'
 import {
-  getDriverForBrowserPage,
-  onBrowserDriverChange,
-  useBrowserMobileDrivenPageIds,
-  type BrowserDriverState
+  IDLE_BROWSER_DRIVER,
+  useBrowserDriverForPage,
+  useBrowserMobileDrivenPageIds
 } from '@/lib/pane-manager/browser-mobile-driver-state'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
 import { getBrowserPageRuntimeEnvironmentId } from '../describe-page/browser-page-url-display'
@@ -50,9 +49,9 @@ export default function BrowserPane({
   const renderedBrowserPages = browserPages.filter(
     (page) => !getBrowserPageRuntimeEnvironmentId(page, activeRuntimeEnvironmentId)
   )
-  const [activeBrowserDriver, setActiveBrowserDriver] = useState<BrowserDriverState>({
-    kind: 'idle'
-  })
+  const pageDriver = useBrowserDriverForPage(activeBrowserPageId)
+  // Why: a runtime-backed page is streamed, never locally driven, so its driver must read idle.
+  const activeBrowserDriver = runtimeEnvironmentActive ? IDLE_BROWSER_DRIVER : pageDriver
 
   useEffect(() => {
     if (!runtimeEnvironmentActive) {
@@ -65,19 +64,6 @@ export default function BrowserPane({
     }
   }, [activeRuntimeEnvironmentId, browserPages, runtimeEnvironmentActive])
 
-  useEffect(() => {
-    if (runtimeEnvironmentActive || !activeBrowserPageId) {
-      setActiveBrowserDriver({ kind: 'idle' })
-      return
-    }
-    setActiveBrowserDriver(getDriverForBrowserPage(activeBrowserPageId))
-    return onBrowserDriverChange((event) => {
-      if (event.browserPageId === activeBrowserPageId) {
-        setActiveBrowserDriver(event.driver)
-      }
-    })
-  }, [activeBrowserPageId, runtimeEnvironmentActive])
-
   useContextualTour(
     'browser',
     isActive && activeBrowserPage !== null && !runtimeEnvironmentActive,
@@ -88,7 +74,10 @@ export default function BrowserPane({
     if (!activeBrowserPageId) {
       return
     }
-    await window.api.runtime.reclaimBrowserForDesktop(activeBrowserPageId)
+    const { reclaimed } = await window.api.runtime.reclaimBrowserForDesktop(activeBrowserPageId)
+    if (!reclaimed) {
+      throw new Error('Could not reclaim browser control')
+    }
   }, [activeBrowserPageId])
 
   if (activeBrowserRuntimeEnvironmentId) {

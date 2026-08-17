@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: BrowserPane synchronizes Electron webviews, remote browser drivers, streams, downloads, and annotation overlays; those external lifecycles cannot be derived during render. */
 import {
   useCallback,
   useEffect,
@@ -85,14 +84,6 @@ export function useBrowserPageGrabAnnotations({
     }
   }, [])
 
-  useEffect(() => {
-    setPendingAnnotationPayload(null)
-    setBrowserOverlayViewport({ scrollX: 0, scrollY: 0, version: 0 })
-    if (grabRef.current.state !== 'idle' && grabRef.current.state !== 'error') {
-      grabRef.current.cancel()
-    }
-  }, [browserTabId, setBrowserOverlayViewport])
-
   const dismissGrabToast = useCallback(() => {
     clearTimeout(grabToastTimerRef.current)
     setGrabToast(null)
@@ -158,12 +149,6 @@ export function useBrowserPageGrabAnnotations({
     recordFeatureInteraction,
     showGrabToast
   ])
-
-  useEffect(() => {
-    if (grab.state === 'idle' || grab.state === 'error') {
-      setPendingAnnotationPayload(null)
-    }
-  }, [grab.state])
 
   useEffect(() => {
     if (!isActive || (!pendingAnnotationPayload && browserAnnotationsLength === 0)) {

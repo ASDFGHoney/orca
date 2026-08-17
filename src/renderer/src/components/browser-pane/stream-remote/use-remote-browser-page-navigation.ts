@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: the address bar mirrors the live remote tab URL except while the user is editing it. */
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
 import {

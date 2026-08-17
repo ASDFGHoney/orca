@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type {
   BrowserDownloadFinishedEvent,
   BrowserDownloadProgressEvent
@@ -16,16 +16,6 @@ export function useBrowserPageDownloadEvents({
   setDownloadStates: Dispatch<SetStateAction<BrowserDownloadState[]>>
 } {
   const [downloadStates, setDownloadStates] = useState<BrowserDownloadState[]>([])
-  const downloadStatesRef = useRef<BrowserDownloadState[]>([])
-
-  useEffect(() => {
-    downloadStatesRef.current = downloadStates
-  }, [downloadStates])
-
-  useEffect(() => {
-    setResourceNotice(null)
-    setDownloadStates([])
-  }, [browserTabId, setResourceNotice])
 
   useEffect(() => {
     return window.api.browser.onDownloadRequested((event) => {
@@ -81,10 +71,6 @@ export function useBrowserPageDownloadEvents({
   useEffect(() => {
     return window.api.browser.onDownloadFinished((event: BrowserDownloadFinishedEvent) => {
       if (event.browserPageId && event.browserPageId !== browserTabId) {
-        return
-      }
-      const current = downloadStatesRef.current
-      if (!current.some((download) => download.downloadId === event.downloadId)) {
         return
       }
       setDownloadStates((current) =>

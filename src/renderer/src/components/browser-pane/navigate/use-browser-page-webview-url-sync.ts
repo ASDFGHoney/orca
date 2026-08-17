@@ -19,7 +19,7 @@ export function useBrowserPageWebviewUrlSync({
   browserTabLoading,
   isActive,
   isPaintable,
-  slotViewportReady,
+  slotViewport,
   webviewRef,
   chromeHeaderRef,
   lastKnownWebviewUrlRef,
@@ -36,7 +36,7 @@ export function useBrowserPageWebviewUrlSync({
   browserTabLoading: boolean
   isActive: boolean
   isPaintable: boolean
-  slotViewportReady: boolean
+  slotViewport: HTMLDivElement | null
   webviewRef: MutableRefObject<Electron.WebviewTag | null>
   chromeHeaderRef: RefObject<HTMLDivElement | null>
   lastKnownWebviewUrlRef: MutableRefObject<string | null>
@@ -67,8 +67,8 @@ export function useBrowserPageWebviewUrlSync({
     return () => {
       resizeObserver?.disconnect()
     }
-    // Why: re-run once slotViewportReady flips so visibility and chrome-inset land on a real viewport (first render no-ops).
-  }, [browserTabId, chromeHeaderRef, isActive, isPaintable, slotViewportReady])
+    // Why: a replacement slot root needs visibility and chrome inset re-applied.
+  }, [browserTabId, chromeHeaderRef, isActive, isPaintable, slotViewport])
 
   useEffect(() => {
     const webview = webviewRef.current

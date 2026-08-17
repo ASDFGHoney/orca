@@ -78,6 +78,8 @@ export function useBrowserPageChromeFocus({
     return () => {
       cancelled = true
       window.cancelAnimationFrame(frameId)
+      // Why: aborting mid-retry would otherwise latch the flag on and suppress guest focus forever.
+      keepAddressBarFocusRef.current = false
     }
   }, [
     browserTabId,

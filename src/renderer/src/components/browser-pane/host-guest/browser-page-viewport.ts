@@ -37,7 +37,9 @@ export function registerBrowserOverlaySlotViewport(
     return
   }
   slotViewportRoots.delete(workspaceTabId)
-  slotRootListeners.delete(workspaceTabId)
+  // Why: subscribers outlive the root they watch — dropping them here would leave a
+  // remounted slot with live components that never hear about the new root.
+  notifySlotRootListeners(workspaceTabId)
 }
 
 export function getBrowserOverlaySlotViewport(workspaceTabId: string): HTMLDivElement | null {
@@ -53,10 +55,13 @@ export function subscribeBrowserOverlaySlotViewport(
     listeners = new Set()
     slotRootListeners.set(workspaceTabId, listeners)
   }
-  listeners.add(listener)
+  const ownedListeners = listeners
+  ownedListeners.add(listener)
   return () => {
-    listeners?.delete(listener)
-    if (listeners?.size === 0) {
+    ownedListeners.delete(listener)
+    // Why: only drop the map entry this unsubscribe still owns; a replacement Set
+    // may already be registered for the same tab.
+    if (ownedListeners.size === 0 && slotRootListeners.get(workspaceTabId) === ownedListeners) {
       slotRootListeners.delete(workspaceTabId)
     }
   }

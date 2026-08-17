@@ -17,6 +17,7 @@ export default function BrowserFind({
 }: BrowserFindProps): React.JSX.Element | null {
   const inputRef = useRef<HTMLInputElement>(null)
   const wasOpenRef = useRef(isOpen)
+  const activeFindQueryRef = useRef<string | null>(null)
   const [query, setQuery] = useState('')
   const [activeMatch, setActiveMatch] = useState(0)
   const [totalMatches, setTotalMatches] = useState(0)
@@ -50,15 +51,21 @@ export default function BrowserFind({
     }
   }, [webviewRef])
 
+  // Why: Electron's findNext means "start a NEW session" — follow-up requests that
+  // advance the selection must pass false, or every Enter restarts at the first match.
   const findNext = useCallback(() => {
     if (requestQuery) {
-      safeFindInPage(requestQuery, { forward: true, findNext: true })
+      const findNext = activeFindQueryRef.current !== requestQuery
+      safeFindInPage(requestQuery, { forward: true, findNext })
+      activeFindQueryRef.current = requestQuery
     }
   }, [requestQuery, safeFindInPage])
 
   const findPrevious = useCallback(() => {
     if (requestQuery) {
-      safeFindInPage(requestQuery, { forward: false, findNext: true })
+      const findNext = activeFindQueryRef.current !== requestQuery
+      safeFindInPage(requestQuery, { forward: false, findNext })
+      activeFindQueryRef.current = requestQuery
     }
   }, [requestQuery, safeFindInPage])
 
@@ -75,14 +82,23 @@ export default function BrowserFind({
     const wasOpen = wasOpenRef.current
     wasOpenRef.current = isOpen
     if (!isOpen) {
+      activeFindQueryRef.current = null
       return
     }
     if (!requestQuery) {
+      activeFindQueryRef.current = null
       safeStopFindInPage()
       return
     }
 
-    const runFind = (): void => safeFindInPage(requestQuery)
+    // A reopen or a changed query starts a fresh session, so findNext must be true here.
+    const runFind = (): void => {
+      if (activeFindQueryRef.current === requestQuery) {
+        return
+      }
+      safeFindInPage(requestQuery, { findNext: true })
+      activeFindQueryRef.current = requestQuery
+    }
     if (!wasOpen) {
       runFind()
       return
