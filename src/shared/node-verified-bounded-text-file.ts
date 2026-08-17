@@ -129,6 +129,10 @@ export async function readBoundedFileHandle(
   return buffer.subarray(0, totalBytesRead)
 }
 
+export function isVerifiedBoundedTextFileTooLargeError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'file_too_large'
+}
+
 export async function openNoFollow(
   filePath: string,
   io: VerifiedBoundedTextFileIo = defaultVerifiedBoundedTextFileIo
@@ -165,13 +169,19 @@ function samePath(left: string, right: string): boolean {
 }
 
 function sameFileIdentity(beforeOpen: Stats, opened: Stats): boolean {
-  if (
-    Number.isFinite(beforeOpen.dev) &&
-    Number.isFinite(beforeOpen.ino) &&
-    Number.isFinite(opened.dev) &&
-    Number.isFinite(opened.ino)
-  ) {
+  const beforeHasIdentity = hasStableFileIdentity(beforeOpen)
+  const openedHasIdentity = hasStableFileIdentity(opened)
+  if (beforeHasIdentity || openedHasIdentity) {
+    if (!beforeHasIdentity || !openedHasIdentity) {
+      return false
+    }
     return beforeOpen.dev === opened.dev && beforeOpen.ino === opened.ino
   }
   return beforeOpen.size === opened.size && beforeOpen.mtimeMs === opened.mtimeMs
+}
+
+function hasStableFileIdentity(stats: Stats): boolean {
+  return (
+    stats.dev !== 0 && stats.ino !== 0 && Number.isFinite(stats.dev) && Number.isFinite(stats.ino)
+  )
 }

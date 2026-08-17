@@ -1,6 +1,9 @@
 import type { Dir, Dirent } from 'node:fs'
 import { opendir, realpath } from 'node:fs/promises'
 import { posix, win32 } from 'node:path'
+import { isCursorSidecarScanCancelledError } from './cursor-sidecar-scan-cancellation'
+
+export type CursorDirectoryStream = Pick<Dir, 'close' | 'read'> & AsyncIterable<Dirent>
 
 /** Per-directory dirent examination budget; keeps cold scans hard-bounded. */
 export const CURSOR_DIR_MAX_ENTRIES_EXAMINED = 8_192
@@ -43,11 +46,11 @@ export type StreamDirectoryNamesOptions = {
   onDirent?: () => void
   /** Hard stop after this many dirents; default CURSOR_DIR_MAX_ENTRIES_EXAMINED. */
   maxEntriesExamined?: number
-  opendir?: (path: string) => Promise<Dir>
+  opendir?: (path: string) => Promise<CursorDirectoryStream>
 }
 
 type StreamDirectoryIo = {
-  opendir: (path: string) => ReturnType<typeof opendir>
+  opendir: (path: string) => Promise<CursorDirectoryStream>
 }
 
 const defaultStreamDirectoryIo: StreamDirectoryIo = {
@@ -109,7 +112,7 @@ export async function listLexicographicDirectoryNames(args: {
   accept: (name: string, entry: Dirent) => boolean
   maxEntriesExamined?: number
   onDirent?: () => void
-  opendir?: (path: string) => Promise<Dir>
+  opendir?: (path: string) => Promise<CursorDirectoryStream>
 }): Promise<{ names: string[]; truncated: boolean; entriesExamined: number }> {
   if (args.limit <= 0) {
     return { names: [], truncated: true, entriesExamined: 0 }
@@ -166,15 +169,18 @@ export async function resolveTargetScopePathVariants(args: {
   value: string
   pathPlatform: NodeJS.Platform
   resolveScopePaths?: (scopePath: string) => Promise<readonly string[]>
+  realpathPath?: (path: string) => Promise<string>
 }): Promise<readonly string[]> {
   if (args.resolveScopePaths) {
     return args.resolveScopePaths(args.value)
   }
   const variants = targetPathVariants(args.value, args.pathPlatform)
   try {
-    variants.push(...targetPathVariants(await realpath(args.value), args.pathPlatform))
+    variants.push(
+      ...targetPathVariants(await (args.realpathPath ?? realpath)(args.value), args.pathPlatform)
+    )
   } catch (error) {
-    if ((error as Error).message === 'cursor_sidecar_scan_cancelled') {
+    if (isCursorSidecarScanCancelledError(error)) {
       throw error
     }
     // A scope path need not exist on the owning host.
@@ -187,7 +193,7 @@ export function safeBasename(value: string): boolean {
 }
 
 async function examineDirectoryStream(
-  directory: Dir,
+  directory: CursorDirectoryStream,
   visit: (name: string, entry: Dirent) => void,
   options: StreamDirectoryNamesOptions,
   maxEntries: number

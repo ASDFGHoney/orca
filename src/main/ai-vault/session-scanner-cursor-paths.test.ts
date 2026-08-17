@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   cursorBucketForCwd,
@@ -18,12 +19,12 @@ describe('Cursor session paths', () => {
         XDG_CONFIG_HOME: '/xdg'
       })
     ).toEqual({
-      chatsDir: '/config/cursor/chats',
-      projectsDir: '/data/cursor/projects'
+      chatsDir: join('/config/cursor', 'chats'),
+      projectsDir: join('/data/cursor', 'projects')
     })
     expect(resolveCursorLocalRoots('/home/ada', { XDG_CONFIG_HOME: '/xdg' })).toEqual({
-      chatsDir: '/xdg/cursor/chats',
-      projectsDir: '/home/ada/.cursor/projects'
+      chatsDir: join('/xdg', 'cursor', 'chats'),
+      projectsDir: join('/home/ada', '.cursor', 'projects')
     })
   })
 

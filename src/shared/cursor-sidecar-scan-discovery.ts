@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { Dir, Stats } from 'node:fs'
+import type { Stats } from 'node:fs'
 import { lstat, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CursorSidecarScanState } from './cursor-sidecar-scan'
@@ -9,6 +9,7 @@ import {
 } from './cursor-sidecar-scan-cancellation'
 import {
   compareCursorSidecarNames,
+  type CursorDirectoryStream,
   CURSOR_DIR_MAX_ENTRIES_EXAMINED,
   listLexicographicDirectoryNames,
   resolveTargetScopePathVariants
@@ -49,7 +50,7 @@ type ScanArgs = {
 export type CursorSidecarScanIo = {
   realpath: (path: string) => Promise<string>
   lstat: (path: string) => Promise<Stats>
-  opendir?: (path: string) => Promise<Dir>
+  opendir?: (path: string) => Promise<CursorDirectoryStream>
 }
 
 const defaultCursorSidecarScanIo: CursorSidecarScanIo = { realpath, lstat }
@@ -119,7 +120,8 @@ async function scopeBuckets(
       const variants = await resolveTargetScopePathVariants({
         value: scopePath,
         pathPlatform,
-        resolveScopePaths: args.resolveScopePaths
+        resolveScopePaths: args.resolveScopePaths,
+        realpathPath: args.io.realpath
       })
       variants.forEach((cwd) => cwds.add(cwd))
     } catch (error) {

@@ -11,6 +11,7 @@ import {
 import { startSpan } from '../observability/tracer'
 import { processLocalCursorCandidates } from './session-scanner-cursor-local-pipeline'
 import * as cursorSidecarParser from './session-scanner-cursor-sidecar'
+import * as sessionParseCache from './session-scanner-parse-cache'
 import { createSessionParseStats } from './session-scanner-parse-cache'
 import type {
   FileWithMtime,
@@ -141,7 +142,7 @@ describe('Cursor verified-read budgets by storage context', () => {
     const signal = {
       get aborted() {
         cancellationChecks += 1
-        return cancellationChecks > 1
+        return cancellationChecks > 4
       }
     } as AbortSignal
     const span = startSpan('cursor-parse-cancel-test')
@@ -304,7 +305,8 @@ describe('Cursor verified-read budgets by storage context', () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-cursor-storage-failed-reads-'))
     roots.push(root)
     const chatsRoot = join(root, '.cursor', 'chats')
-    const attemptLimit = CURSOR_SIDECAR_MAX_AGGREGATE_BYTES / CURSOR_SIDECAR_MAX_BYTES
+    const attemptLimit = Math.floor(CURSOR_SIDECAR_MAX_AGGREGATE_BYTES / CURSOR_SIDECAR_MAX_BYTES)
+    expect(CURSOR_SIDECAR_MAX_AGGREGATE_BYTES % CURSOR_SIDECAR_MAX_BYTES).toBe(0)
     const files = await Promise.all(
       Array.from({ length: attemptLimit + 2 }, (_, index) =>
         addSession(chatsRoot, `failed-${index}`, sidecarPayload(1_000), 1_000)
@@ -339,6 +341,106 @@ describe('Cursor verified-read budgets by storage context', () => {
       expect(discovery.cursorDiscoveryTruncated?.sidecarBytes).toBe(true)
       expect(issues).toHaveLength(attemptLimit)
       expect(issues[0]?.message).toContain('verified_file_not_regular')
+    } finally {
+      span.end()
+    }
+  })
+
+  it('does not charge vanished sidecars against the aggregate read budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-cursor-storage-vanished-'))
+    roots.push(root)
+    const chatsRoot = join(root, '.cursor', 'chats')
+    const stable = await addSession(chatsRoot, 'stable', sidecarPayload(1_000), 1_000)
+    const attemptLimit = Math.floor(CURSOR_SIDECAR_MAX_AGGREGATE_BYTES / CURSOR_SIDECAR_MAX_BYTES)
+    const vanished = Array.from(
+      { length: attemptLimit },
+      (_, index): FileWithMtime => ({
+        cursorStoreMtimeMs: 2_000 + index,
+        dev: 1,
+        ino: index + 1,
+        modifiedAt: new Date(2_000 + index).toISOString(),
+        mtimeMs: 2_000 + index,
+        nlink: 1,
+        path: join(
+          chatsRoot,
+          createHash('md5').update(String(index)).digest('hex'),
+          `gone-${index}`,
+          'meta.json'
+        ),
+        sizeBytes: CURSOR_SIDECAR_MAX_BYTES
+      })
+    )
+    const discovery = sidecarDiscovery('native', chatsRoot, await realpath(chatsRoot), [
+      ...vanished,
+      stable
+    ])
+    const originalParse = cursorSidecarParser.parseCursorSidecarFileCached
+    vi.spyOn(cursorSidecarParser, 'parseCursorSidecarFileCached').mockImplementation((args) =>
+      args.file.path.includes('gone-')
+        ? Promise.reject(Object.assign(new Error('gone'), { code: 'ENOENT' }))
+        : originalParse(args)
+    )
+    const span = startSpan('cursor-storage-vanished-test')
+    const issues: AiVaultScanIssue[] = []
+
+    try {
+      const result = await processLocalCursorCandidates({
+        candidates: discoveryCandidates(discovery),
+        discoveries: [discovery],
+        executionHostId: 'local',
+        issues,
+        limit: 100,
+        parseStats: createSessionParseStats(),
+        platform: 'linux',
+        scopeLimit: 100,
+        span
+      })
+
+      expect(result.sessions.map((session) => session.sessionId)).toEqual(['stable'])
+      expect(discovery.cursorDiscoveryCounters?.boundedReads).toBe(attemptLimit + 1)
+      expect(discovery.cursorDiscoveryCounters?.returnedBytes).toBe(1_000)
+      expect(discovery.cursorDiscoveryTruncated?.sidecarBytes).toBe(false)
+      expect(issues).toEqual([])
+    } finally {
+      span.end()
+    }
+  })
+
+  it('propagates cancellation that lands while a legacy candidate parses', async () => {
+    const controller = new AbortController()
+    vi.spyOn(sessionParseCache, 'parseAgentSessionFileCached').mockImplementation(async () => {
+      controller.abort()
+      return null
+    })
+    const span = startSpan('cursor-legacy-cancel-test')
+
+    try {
+      await expect(
+        processLocalCursorCandidates({
+          candidates: [
+            {
+              agent: 'cursor',
+              codexHome: null,
+              cursorLayout: 'legacy',
+              cursorStorageContextKey: 'native',
+              file: {
+                modifiedAt: new Date(1_000).toISOString(),
+                mtimeMs: 1_000,
+                path: join('/cursor', 'legacy-session.jsonl')
+              }
+            }
+          ],
+          executionHostId: 'local',
+          issues: [],
+          limit: 20,
+          parseStats: createSessionParseStats(),
+          platform: 'linux',
+          scopeLimit: 20,
+          signal: controller.signal,
+          span
+        })
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(sessionParseCache.parseAgentSessionFileCached).toHaveBeenCalledOnce()
     } finally {
       span.end()
     }

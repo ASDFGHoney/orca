@@ -5,6 +5,7 @@ import {
   CURSOR_SIDECAR_MAX_BYTES
 } from '../../shared/cursor-sidecar-scan'
 import { isCursorSidecarScanCancelledError } from '../../shared/cursor-sidecar-scan-discovery'
+import { isVerifiedBoundedTextFileTooLargeError } from '../../shared/node-verified-bounded-text-file'
 import type { ActiveSpan } from '../observability/tracer'
 import { parseAgentSessionFileCached } from './session-scanner-parse-cache'
 import type { SessionParseStats } from './session-scanner-parse-cache'
@@ -44,6 +45,7 @@ export async function processLocalCursorCandidates(args: {
   discoveries?: readonly SessionFileDiscovery[]
   signal?: AbortSignal
 }): Promise<ReturnType<typeof reconcileCursorCandidates>> {
+  throwIfAiVaultScanCancelled(args.signal)
   const groups = buildCursorCandidateSelectionGroups({
     candidates: args.candidates,
     platform: args.platform,
@@ -58,6 +60,7 @@ export async function processLocalCursorCandidates(args: {
   const parsed: ParsedCursorCandidate[] = []
   const processedGroups = new Set<CursorCandidateSelectionGroup<SessionFileCandidate>>()
   for (let index = 0; index < groups.length; index += CURSOR_PARSE_CONCURRENCY) {
+    throwIfAiVaultScanCancelled(args.signal)
     // Reconcile is O(parsed); sessions never outnumber candidates, so a short parsed
     // count can't satisfy the limit and the preview would be wasted work.
     if (parsed.length >= args.limit) {
@@ -73,13 +76,17 @@ export async function processLocalCursorCandidates(args: {
     }
     const batch = groups.slice(index, index + CURSOR_PARSE_CONCURRENCY)
     await parseCursorGroups(batch, parsed, args, verifiedReads)
+    throwIfAiVaultScanCancelled(args.signal)
     batch.forEach((group) => processedGroups.add(group))
   }
   const scopedGroups = selectCursorScopedGroups(groups, processedGroups, args.scopeLimit)
   for (let index = 0; index < scopedGroups.length; index += CURSOR_PARSE_CONCURRENCY) {
+    throwIfAiVaultScanCancelled(args.signal)
     const batch = scopedGroups.slice(index, index + CURSOR_PARSE_CONCURRENCY)
     await parseCursorGroups(batch, parsed, args, verifiedReads)
+    throwIfAiVaultScanCancelled(args.signal)
   }
+  throwIfAiVaultScanCancelled(args.signal)
   const reconciled = reconcileCursorCandidates({
     candidates: parsed,
     executionHostId: args.executionHostId,
@@ -189,12 +196,14 @@ async function parseCursorCandidate(
   },
   verifiedReads: VerifiedReadTracker
 ): Promise<ParsedCursorCandidate | null> {
+  throwIfAiVaultScanCancelled(args.signal)
   const layout = candidate.cursorLayout ?? 'legacy'
   try {
     if (layout === 'sidecar') {
       return await parseSidecarWithAggregateCap(candidate, args, verifiedReads)
     }
     const legacy = await parseAgentSessionFileCached(candidate, args.platform, args.parseStats)
+    throwIfAiVaultScanCancelled(args.signal)
     return legacy
       ? {
           layout,
@@ -256,20 +265,27 @@ async function parseSidecarWithAggregateCap(
       signal: args.signal
     })
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code
+    const missing = code === 'ENOENT' || code === 'ENOTDIR'
     settleCursorVerifiedReadReservation(
       budget,
       reservedBytes,
-      isVerifiedReadTooLargeError(error)
-        ? CURSOR_SIDECAR_MAX_AGGREGATE_BYTES
-        : CURSOR_SIDECAR_MAX_BYTES
+      missing
+        ? 0
+        : isVerifiedBoundedTextFileTooLargeError(error)
+          ? CURSOR_SIDECAR_MAX_AGGREGATE_BYTES
+          : CURSOR_SIDECAR_MAX_BYTES
     )
     if (storage) {
       storage.counters.boundedReads += 1
-      if (isVerifiedReadTooLargeError(error)) {
+      if (isVerifiedBoundedTextFileTooLargeError(error)) {
         storage.truncated.sidecarBytes = true
       }
     }
     throwIfAiVaultScanCancelled(args.signal)
+    if (missing) {
+      return null
+    }
     throw error
   }
 
@@ -293,8 +309,4 @@ async function parseSidecarWithAggregateCap(
         sidecar: result.evidence
       }
     : null
-}
-
-function isVerifiedReadTooLargeError(error: unknown): boolean {
-  return error instanceof Error && error.message === 'file_too_large'
 }

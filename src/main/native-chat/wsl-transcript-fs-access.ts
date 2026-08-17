@@ -1,4 +1,4 @@
-import { constants, createReadStream, type Dir, type Dirent, type Stats } from 'node:fs'
+import { constants, createReadStream, type Dirent, type Stats } from 'node:fs'
 import {
   lstat,
   open,
@@ -12,6 +12,7 @@ import {
 import { Readable } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
 import { isWslUncPath } from '../../shared/wsl-paths'
+import type { CursorDirectoryStream } from '../../shared/cursor-sidecar-scan-directory'
 import { runWslTranscriptFsTask, type WslTranscriptFsTaskPriority } from './wsl-transcript-fs-gate'
 import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 
@@ -20,6 +21,7 @@ import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 // Why: one deadline per chunk instead of one for the whole file, so a large
 // healthy-but-slow transcript is not false-failed by a whole-file timeout.
 export const WSL_TRANSCRIPT_READ_CHUNK_BYTES = 1024 * 1024
+// Windows has no O_NOFOLLOW; verified reads rely on lstat plus handle identity there.
 const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
 type Operation = Parameters<typeof runWslTranscriptFsTask>[0]['operation']
 
@@ -77,7 +79,7 @@ export async function wslGatedOpendir(
   path: string,
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
-): Promise<Dir> {
+): Promise<CursorDirectoryStream> {
   const directory = await runPathOperation('opendir', path, priority, signal, () => opendir(path), {
     dedupe: false,
     onAbandonedResult: (lateDirectory) => void closeTranscriptHandle(lateDirectory, path)
@@ -108,7 +110,7 @@ export async function wslGatedOpendir(
         await close()
       }
     }
-  } as Dir
+  }
 }
 
 export function wslGatedReadFile(

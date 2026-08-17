@@ -93,6 +93,7 @@ async function discoverCursorSidecars(args: {
         })
     })
   } catch (error) {
+    throwIfAiVaultScanCancelled(args.options.signal)
     if ((error as Error).message === 'cursor_sidecar_scan_cancelled') {
       throw createAiVaultScanCancelledError()
     }
@@ -162,7 +163,8 @@ async function discoverCursorLegacy(args: {
     agent: 'cursor',
     issues: args.issues,
     extensions: ['.jsonl'],
-    filePredicate: (filePath) => filePath.split(/[\\/]/).includes('agent-transcripts')
+    filePredicate: (filePath) => filePath.split(/[\\/]/).includes('agent-transcripts'),
+    signal: args.options.signal
   })
   const evidenceByPath = new Map<string, CursorCwdEvidence>()
   const scopedFiles: FileWithMtime[] = []
@@ -176,7 +178,8 @@ async function discoverCursorLegacy(args: {
       limit: Math.max(args.limit, 2000),
       agent: 'cursor',
       issues: args.issues,
-      extensions: ['.jsonl']
+      extensions: ['.jsonl'],
+      signal: args.options.signal
     })
     for (const file of scopeDiscovery.files) {
       evidenceByPath.set(file.path, {

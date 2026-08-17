@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Stats } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
-import { readBoundedFileHandle } from './node-verified-bounded-text-file'
+import { dirname, join, resolve } from 'node:path'
+import {
+  readBoundedFileHandle,
+  readVerifiedBoundedTextFile
+} from './node-verified-bounded-text-file'
 
 describe('readBoundedFileHandle', () => {
   it('continues after short reads until EOF', async () => {
@@ -33,4 +38,74 @@ describe('readBoundedFileHandle', () => {
       readBoundedFileHandle({ read } as unknown as FileHandle, source.length - 1)
     ).rejects.toThrow('file_too_large')
   })
+
+  it('falls back to size and mtime when a provider reports zero file identity', async () => {
+    const root = resolve('cursor-identity-root')
+    const filePath = join(root, 'session', 'meta.json')
+    const beforeOpen = fakeStats('file', 6, 10)
+    const opened = fakeStats('file', 7, 20)
+    const handle = {
+      close: vi.fn(async () => undefined),
+      read: vi.fn(),
+      stat: vi.fn(async () => opened)
+    }
+
+    await expect(
+      readVerifiedBoundedTextFile(filePath, {
+        expectedRootRealPath: root,
+        maxBytes: 100,
+        io: {
+          realpath: async (path) => path,
+          lstat: async (path) =>
+            path === dirname(filePath) ? fakeStats('directory', 0, 0) : beforeOpen,
+          open: async () => handle as unknown as FileHandle
+        }
+      })
+    ).rejects.toThrow('verified_file_changed')
+    expect(handle.read).not.toHaveBeenCalled()
+    expect(handle.close).toHaveBeenCalledOnce()
+  })
+
+  it('rejects when file identity becomes available only after open', async () => {
+    const root = resolve('cursor-identity-root')
+    const filePath = join(root, 'session', 'meta.json')
+    const handle = {
+      close: vi.fn(async () => undefined),
+      read: vi.fn(),
+      stat: vi.fn(async () => fakeStats('file', 6, 10, 2, 3))
+    }
+
+    await expect(
+      readVerifiedBoundedTextFile(filePath, {
+        expectedRootRealPath: root,
+        maxBytes: 100,
+        io: {
+          realpath: async (path) => path,
+          lstat: async (path) =>
+            path === dirname(filePath) ? fakeStats('directory', 0, 0) : fakeStats('file', 6, 10),
+          open: async () => handle as unknown as FileHandle
+        }
+      })
+    ).rejects.toThrow('verified_file_changed')
+    expect(handle.read).not.toHaveBeenCalled()
+    expect(handle.close).toHaveBeenCalledOnce()
+  })
 })
+
+function fakeStats(
+  kind: 'directory' | 'file',
+  size: number,
+  mtimeMs: number,
+  dev = 0,
+  ino = 0
+): Stats {
+  return {
+    dev,
+    ino,
+    mtimeMs,
+    size,
+    isDirectory: () => kind === 'directory',
+    isFile: () => kind === 'file',
+    isSymbolicLink: () => false
+  } as unknown as Stats
+}

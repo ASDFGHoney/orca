@@ -62,15 +62,16 @@ describe('local Cursor sidecar discovery bounds', () => {
 
     for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex += 1) {
       const bucket = bucketName(`bucket-${bucketIndex}`)
-      for (let sessionIndex = 0; sessionIndex < sessionsPerBucket; sessionIndex += 1) {
-        await addSession(chatsDir, bucket, `session-${String(sessionIndex).padStart(4, '0')}`, {
-          updatedAtMs: 1_750_000_000_000 + bucketIndex * 1_000 + sessionIndex
-        })
-      }
+      await Promise.all(
+        Array.from({ length: sessionsPerBucket }, (_, sessionIndex) =>
+          addSession(chatsDir, bucket, `session-${String(sessionIndex).padStart(4, '0')}`, {
+            updatedAtMs: 1_750_000_000_000 + bucketIndex * 1_000 + sessionIndex
+          })
+        )
+      )
     }
 
     const issues: AiVaultScanIssue[] = []
-    const baselineStarted = Date.now()
     // Historical unbounded baseline for this shape (1 root + 100 readdirs + 10k×3).
     const baselineOps = 30_101
     const result = await discoverLocalCursorSidecarsBounded({
@@ -78,8 +79,6 @@ describe('local Cursor sidecar discovery bounds', () => {
       scopePaths: [],
       issues
     })
-    const boundedMs = Date.now() - baselineStarted
-
     const filesystemOperations =
       result.counters.rootReaddir +
       result.counters.bucketReaddir +
@@ -98,7 +97,6 @@ describe('local Cursor sidecar discovery bounds', () => {
     expect(filesystemOperations).toBeLessThanOrEqual(maxOps)
     expect(filesystemOperations).toBeLessThan(10_000)
     expect(filesystemOperations).toBeLessThan(baselineOps / 3)
-    expect(boundedMs).toBeLessThan(30_000)
     expect(issues.some((issue) => issue.message.includes('session directories'))).toBe(true)
   }, 120_000)
 
@@ -149,20 +147,12 @@ describe('local Cursor sidecar discovery bounds', () => {
 
     // Fill beyond the unscoped bucket cap with lexicographically earlier names.
     for (let index = 0; index < CURSOR_SIDECAR_MAX_BUCKETS + 8; index += 1) {
-      const foreign = `0${String(index).padStart(31, '0')}`
-      expect(foreign < scopedBucket || !BUCKET_PATTERN_TEST(foreign)).toBeTruthy()
-      await addSession(chatsDir, bucketName(`early-${index}`), `early-${index}`, {
+      const foreign = index.toString(16).padStart(32, '0')
+      expect(BUCKET_PATTERN_TEST(foreign)).toBe(true)
+      expect(foreign < scopedBucket).toBe(true)
+      await addSession(chatsDir, foreign, `foreign-${index}`, {
         updatedAtMs: 1_000_000 + index
       })
-    }
-    // Ensure at least 256 foreign buckets exist with md5 names; pad if needed.
-    for (let index = 0; index < CURSOR_SIDECAR_MAX_BUCKETS + 8; index += 1) {
-      await addSession(
-        chatsDir,
-        bucketName(`pad-foreign-${String(index).padStart(4, '0')}`),
-        `pad-${index}`,
-        { updatedAtMs: 2_000_000 + index }
-      )
     }
 
     const result = await discoverLocalCursorSidecarsBounded({

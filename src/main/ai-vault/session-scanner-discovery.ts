@@ -15,13 +15,15 @@ export async function discoverFiles(args: {
   extensions: string[]
   filePredicate?: (path: string) => boolean
   directoryPredicate?: (name: string, depth: number) => boolean
+  signal?: AbortSignal
 }): Promise<SessionFileDiscovery> {
   let paths: string[]
   try {
     paths = await walkSessionFiles(args.rootDir, args.agent, args.issues, {
       extensions: new Set(args.extensions),
       filePredicate: args.filePredicate,
-      directoryPredicate: args.directoryPredicate
+      directoryPredicate: args.directoryPredicate,
+      signal: args.signal
     })
   } catch (err) {
     // Why: discoverAiVaultSessionSources fans out with Promise.all, so one
@@ -40,7 +42,7 @@ export async function discoverFiles(args: {
   const files: FileWithMtime[] = []
   for (const path of paths) {
     try {
-      const fileStat = await wslGatedStat(path, 'scan')
+      const fileStat = await wslGatedStat(path, 'scan', args.signal)
       files.push({
         path,
         mtimeMs: fileStat.mtimeMs,
@@ -51,6 +53,7 @@ export async function discoverFiles(args: {
         nlink: fileStat.nlink
       })
     } catch (err) {
+      args.signal?.throwIfAborted()
       recordSessionScanIssue(args.issues, {
         agent: args.agent,
         path,

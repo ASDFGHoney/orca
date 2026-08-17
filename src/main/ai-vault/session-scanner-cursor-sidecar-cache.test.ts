@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cursorBucketForCwd } from './session-scanner-cursor-paths'
+import { cursorBucketForCwd, resolveCursorTargetPath } from './session-scanner-cursor-paths'
 import {
   parseCursorSidecarFileCached,
   resetCursorSidecarParseCacheForTests
@@ -60,7 +60,7 @@ describe('Cursor sidecar parse cache isolation', () => {
     expect(mismatched.issue?.message).toContain('does not match')
     expect(matching.issue).toBeNull()
     expect(matching.evidence?.cwdEvidence?.cwd).toBe(
-      process.platform === 'win32' ? '\\correct' : '/correct'
+      resolveCursorTargetPath('/correct', process.platform)
     )
   })
 })
