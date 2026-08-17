@@ -32834,6 +32834,7 @@ export class OrcaRuntimeService {
           reject(new Error(`Browser page ${browserPageId} was not published to session tabs`))
         }, timeoutMs)
       }
+      waiter.timer.unref?.()
       this.browserTabPublicationWaiters.add(waiter)
     })
   }

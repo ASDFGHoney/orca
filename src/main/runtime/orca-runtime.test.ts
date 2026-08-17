@@ -50204,4 +50204,33 @@ describe('resolveWorktreeScanCacheTtlMs', () => {
       internals.waitForBrowserSessionTabPublication(TEST_WORKTREE_ID, 'page-1', 50)
     ).resolves.toBeUndefined()
   })
+
+  it('does not keep the process alive for a pending browser publication', async () => {
+    const runtime = createRuntime()
+    const internals = runtime as unknown as {
+      mobileSessionTabListeners: Set<unknown>
+      browserTabPublicationWaiters: Set<{
+        resolve: () => void
+        timer: ReturnType<typeof setTimeout>
+      }>
+      waitForBrowserSessionTabPublication: (
+        worktreeId: string,
+        browserPageId: string,
+        timeoutMs?: number
+      ) => Promise<void>
+    }
+    internals.mobileSessionTabListeners.add({ listener: vi.fn(), clientNavigationId: undefined })
+
+    const pending = internals.waitForBrowserSessionTabPublication(
+      TEST_WORKTREE_ID,
+      'page-pending',
+      8_000
+    )
+    const waiter = [...internals.browserTabPublicationWaiters][0]
+
+    expect(waiter.timer.hasRef()).toBe(false)
+    clearTimeout(waiter.timer)
+    waiter.resolve()
+    await expect(pending).resolves.toBeUndefined()
+  })
 })
