@@ -67,8 +67,10 @@ export function AutomationEditorPromptEditor({
   const lastSyncedContentRef = useRef(value)
   const isApplyingProgrammaticContentRef = useRef(false)
   const onDismissRef = useRef(onDismiss)
-  contentRef.current = value
-  onDismissRef.current = onDismiss
+
+  useLayoutEffect(() => {
+    onDismissRef.current = onDismiss
+  }, [onDismiss])
 
   const fontSize = computeEditorFontSize(settings?.terminalFontSize ?? 13, editorFontZoomLevel)
   const fontFamily = resolveEditorFontFamily(settings)
@@ -121,6 +123,7 @@ export function AutomationEditorPromptEditor({
   // Why: templates rewrite the draft while this editor stays mounted; push an
   // undoable model edit instead of setValue so Cmd+Z can revert the apply.
   useLayoutEffect(() => {
+    contentRef.current = value
     const mountedEditor = editorRef.current
     if (!mountedEditor || lastSyncedContentRef.current === value) {
       return
