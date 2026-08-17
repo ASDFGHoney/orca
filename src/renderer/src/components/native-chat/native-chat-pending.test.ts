@@ -95,6 +95,29 @@ describe('prunePendingSends', () => {
     expect(next).toEqual([])
   })
 
+  // The strip is bounded to the run it anchors to, so a folded image row keeps
+  // surplus markers the user typed. Reading those as photos let this row vouch
+  // for two sends and retire the two-photo one, which `prunePendingSends` then
+  // dropped from the bounded cache — the user's photos gone with no trace.
+  it('does not let one rendered photo retire a send that carried two', () => {
+    const folded: NativeChatMessage = {
+      id: 'm1',
+      role: 'user',
+      blocks: [
+        { type: 'image-ref', path: '/tmp/x.png' },
+        { type: 'text', text: 'look [Image #2] [Image #3]' }
+      ],
+      timestamp: 1,
+      source: 'transcript'
+    }
+    const pending = [
+      { ...pendingOf('p-one', 'look'), imagePaths: ['/tmp/a.png'] },
+      { ...pendingOf('p-two', 'look'), imagePaths: ['/tmp/b.png', '/tmp/c.png'] }
+    ]
+    const next = prunePendingSends(pending, [folded, assistantMessage('m2', 'ok')])
+    expect(next.map((entry) => entry.id)).toEqual(['p-two'])
+  })
+
   it('drops an attachment pending send once a trailing-marker prompt advances', () => {
     const pending = [
       { ...pendingOf('p1', 'what do you see'), imagePaths: ['/Users/me/Downloads/3d.png'] }

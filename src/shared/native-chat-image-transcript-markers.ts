@@ -155,12 +155,27 @@ export function countImagePromptMarkers(message: NativeChatMessage): number {
   )
 }
 
+/**
+ * How many image-carrying sends a row can vouch for.
+ *
+ * Structure wins wherever it exists; markers are the fallback for a host that
+ * echoes an image send as bare `[Image #n]` with no `[Image: source: …]` turn,
+ * never a top-up on a row already showing its photos. Taking the larger of the
+ * two used to be equivalent, because every marker was stripped from every turn —
+ * but the strip is now bounded to the size of the run it anchors to, so a row can
+ * legitimately keep markers the user typed. Counting those as photos let a row
+ * rendering one image retire a send that carried two, and `prunePendingSends`
+ * then dropped that send from the bounded cache with the user's photos in it.
+ *
+ * Under-counting only costs a duplicate bubble; over-counting loses the photo.
+ * That is the same trade `nativeChatUserTextRow` already makes on the glue arm.
+ */
 export function nativeChatUserMessageImageEvidenceCount(message: NativeChatMessage): number {
   if (message.role !== 'user') {
     return 0
   }
   const imageRefCount = message.blocks.filter(isImageRefBlock).length
-  return Math.max(imageRefCount, countImagePromptMarkers(message))
+  return imageRefCount > 0 ? imageRefCount : countImagePromptMarkers(message)
 }
 
 export type NormalizeImageTranscriptOptions = {

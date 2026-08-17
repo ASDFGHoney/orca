@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NativeChatMessage } from './native-chat-types'
 import {
   isImageSourceUserTurn,
+  nativeChatUserMessageImageEvidenceCount,
   nativeChatUserMessageMatchText,
   nativeChatUserTextMatchText,
   normalizeImageTranscriptMessages,
@@ -440,5 +441,34 @@ describe('normalizeImageTranscriptMessages with earlier history above the window
       windowHeadMessageId: 'some-other-row'
     })
     expect(out[0]!.blocks).toEqual([{ type: 'text', text: '[Image #1] what do you see' }])
+  })
+})
+
+// The strip is bounded to the size of the run it anchors to, so a folded image
+// row can now KEEP markers the user typed. Counting those as photos would let a
+// row rendering one image vouch for two sends and retire the wrong one.
+describe('nativeChatUserMessageImageEvidenceCount', () => {
+  it('counts the photos a row shows, not the markers it kept', () => {
+    const [row] = normalizeImageTranscriptMessages([
+      userText('a', '[Image: source: /tmp/x.png]'),
+      userText('b', '[Image #1] look [Image #2] [Image #3]')
+    ])
+    // The fold spent its one-image budget and left the two surplus markers.
+    expect(row!.blocks).toEqual([
+      { type: 'image-ref', path: '/tmp/x.png' },
+      { type: 'text', text: 'look [Image #2] [Image #3]' }
+    ])
+    expect(nativeChatUserMessageImageEvidenceCount(row!)).toBe(1)
+  })
+
+  it('still reads markers as evidence when the turn shows no image at all', () => {
+    // A host that echoes an image send as bare `[Image #n]` with no source turn
+    // leaves the markers as the only proof the photos landed.
+    expect(nativeChatUserMessageImageEvidenceCount(userText('c', '[Image #1] [Image #2]'))).toBe(2)
+  })
+
+  it('ignores an assistant turn', () => {
+    const assistantTurn = { ...userText('d', '[Image #1]'), role: 'assistant' as const }
+    expect(nativeChatUserMessageImageEvidenceCount(assistantTurn)).toBe(0)
   })
 })
