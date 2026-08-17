@@ -143,20 +143,20 @@ async function launchPackagedPairedClient(args: {
   testInfo: TestInfo
 }): Promise<PackagedPairedClient> {
   const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-packaged-client-'))
-  writeFileSync(
-    path.join(userDataDir, 'orca-data.json'),
-    `${JSON.stringify(getE2ECompletedOnboardingProfile(), null, 2)}\n`
-  )
-  const { ELECTRON_RUN_AS_NODE: _unused, ...cleanEnv } = process.env
-  void _unused
-  const homeIsolation = createElectronHomeIsolation({
-    inheritedEnv: cleanEnv,
-    launchEnv: {},
-    extraEnv: {},
-    userDataDir
-  })
   let app: ElectronApplication | undefined
   try {
+    writeFileSync(
+      path.join(userDataDir, 'orca-data.json'),
+      `${JSON.stringify(getE2ECompletedOnboardingProfile(), null, 2)}\n`
+    )
+    const { ELECTRON_RUN_AS_NODE: _unused, ...cleanEnv } = process.env
+    void _unused
+    const homeIsolation = createElectronHomeIsolation({
+      inheritedEnv: cleanEnv,
+      launchEnv: {},
+      extraEnv: {},
+      userDataDir
+    })
     app = await electron.launch({
       executablePath: args.executablePath,
       args: [],
