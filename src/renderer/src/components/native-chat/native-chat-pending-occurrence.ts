@@ -232,20 +232,24 @@ export function selectPendingIndicesRepresentedByUserTexts(
   }))
   for (const row of userRows) {
     // Why: a row can only be the glue of a CONTIGUOUS run of sends, so the scan
-    // walks them in send order and stops at the first one the row cannot contain.
-    // Filtering instead of stopping would match a non-contiguous subsequence and
-    // retire echoes whose sends are still in flight — with "fix", "the"+photo,
-    // "bug" a row reading "fix bug" would retire "fix" and "bug" around the
-    // photo. A send with no match text (an uncaptioned photo, or one whose whole
-    // text was an `[Image #n]` placeholder) can never appear in a glued row, but
-    // it still SEPARATES the sends either side of it, so it is a barrier too.
+    // walks `remaining` in send order (retired sends are spliced out below, so it
+    // is already the open list) and stops where the run breaks.
+    //
+    // A send with no match text — an uncaptioned photo, or one whose whole text
+    // was an `[Image #n]` placeholder — can never appear in a glued row. Ahead of
+    // the run it separates nothing, so skip it: treating it as a barrier there
+    // emptied `open` and killed glue for every row, and since such a send can sit
+    // unretired indefinitely that stranded every later pair for the pane's life.
+    // Once a run has started it does separate what follows, so it ends the scan —
+    // otherwise "fix", photo, "bug" would let a row reading "fix bug" retire
+    // "fix" and "bug" around a send that is still in flight.
     const open: typeof remaining = []
     for (const entry of remaining) {
-      if (represented.has(entry.index)) {
-        continue
-      }
       if (entry.text.length === 0) {
-        break
+        if (open.length > 0) {
+          break
+        }
+        continue
       }
       open.push(entry)
     }

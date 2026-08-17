@@ -320,6 +320,36 @@ describe('glued rapid sends', () => {
     expect(prunePendingSends(pending, advancedGlueTranscript('a b [Image #1]'))).toEqual(pending)
   })
 
+  // Why: a textless send AHEAD of the glued pair separates nothing, so it must not
+  // block them. Treating it as a barrier there emptied the candidate list and
+  // killed glue for every row — and because such a send can sit unretired
+  // indefinitely, it stranded every later pair for the life of the pane.
+  it('retires a glued pair queued behind a leading uncaptioned image send', () => {
+    const pending = [
+      { ...gluePending('p0', ''), imagePaths: ['/tmp/p.png'] },
+      gluePending('p1', 'a'),
+      gluePending('p2', 'b')
+    ]
+
+    expect(prunePendingSends(pending, advancedGlueTranscript('a b'))).toEqual([pending[0]])
+  })
+
+  it('retires a glued pair queued behind a leading marker-only image send', () => {
+    const pending = [
+      { ...gluePending('p0', '[Image #1]'), imagePaths: ['/tmp/p.png'] },
+      gluePending('p1', 'a'),
+      gluePending('p2', 'b')
+    ]
+
+    expect(prunePendingSends(pending, advancedGlueTranscript('a b'))).toEqual([pending[0]])
+  })
+
+  it('retires a glued pair queued behind a leading whitespace-only send', () => {
+    const pending = [gluePending('p0', '   '), gluePending('p1', 'a'), gluePending('p2', 'b')]
+
+    expect(prunePendingSends(pending, advancedGlueTranscript('a b'))).toEqual([pending[0]])
+  })
+
   // Why: an uncaptioned photo send has no match text, so it can never appear in a
   // glued row — but it still separates the sends either side of it. Skipping it
   // would retire those two echoes while their sends are still in flight.
