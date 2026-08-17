@@ -184,6 +184,28 @@ describe('BrowserRouteWebContentsRegistry', () => {
     expect(registry.registerGuest(page)).toBe(false)
   })
 
+  it('keeps policy-rejected guests quarantined through delayed or failed close', () => {
+    const { registry, routeSession } = createHarness()
+    for (const rejected of [
+      createGuest({
+        session: routeSession,
+        closeDestroys: false,
+        webRtcPolicyError: new Error('policy unavailable')
+      }),
+      createGuest({
+        session: routeSession,
+        closeError: new Error('close failed'),
+        webRtcPolicyError: new Error('policy unavailable')
+      })
+    ]) {
+      expect(registry.attachGuest(rejected.guest)).toBe(false)
+      const navigation = navigationEvent()
+      rejected.emit('will-navigate', navigation, 'https://example.com/')
+      expect(navigation.preventDefault).toHaveBeenCalledOnce()
+      expect(rejected.openWindow()).toEqual({ action: 'deny' })
+    }
+  })
+
   it('allows blank navigation while quarantined but blocks invalid schemes after a grant', () => {
     const { registry, routeSession } = createHarness()
     const guest = createGuest({ session: routeSession })

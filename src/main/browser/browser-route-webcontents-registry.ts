@@ -52,9 +52,6 @@ export class BrowserRouteWebContentsRegistry {
     if (existing?.guest === guest) {
       return true
     }
-    if (!enforceBrowserRouteWebRtcPolicy(guest)) {
-      return false
-    }
     const state = this.createGuestState(guest, partition)
     try {
       this.installGuestQuarantine(state)
@@ -62,12 +59,13 @@ export class BrowserRouteWebContentsRegistry {
       closeRouteGuest(guest)
       return false
     }
+    if (!enforceBrowserRouteWebRtcPolicy(guest, () => this.releaseGuest(state))) {
+      return false
+    }
     let isValid = false
     try {
       isValid = isValidBlankRouteGuest(guest)
-    } catch {
-      // Electron may destroy a guest between did-attach and main inspection.
-    }
+    } catch {}
     if (existing || this.guests.size >= this.maxGuests || !isValid) {
       closeRouteGuest(guest)
       if (isRouteGuestDestroyed(guest)) {

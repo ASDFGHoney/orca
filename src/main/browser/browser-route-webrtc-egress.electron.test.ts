@@ -15,8 +15,16 @@ type ProbeResult = {
 }
 
 afterAll(() => {
+  const failures: unknown[] = []
   for (const root of fixtureRoots) {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Failed to clean up WebRTC egress fixtures')
   }
 })
 
