@@ -9,9 +9,9 @@ export const RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS = 60_000
  *
  *  The deadline above abandons a scan, it cannot cancel one: an unabortable `readdir` keeps its
  *  libuv threadpool thread until the OS releases it, and that pool defaults to four. So the
- *  backoff alone only paces the leak — each lapse still stacks another stuck thread, and a mount
- *  that stays wedged eventually starves every other filesystem user in the process. Capping the
- *  outstanding count is what actually bounds it; the backoff stays as the rate limit. */
+ *  backoff alone only paces the leak — each lapse still stacks another stuck thread. This bounds
+ *  what retirement discovery can hold; it is not a guarantee the pool stays healthy, since the WSL
+ *  gate and its close lane hold threads of their own. Two leaves headroom for both. */
 export const RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS = 2
 
 type BackfillScan = {
@@ -70,26 +70,35 @@ export function runRetirementBackfillScan(
   if (cached && (cached.retryAfter === 0 || Date.now() < cached.retryAfter)) {
     return cached.names
   }
-  const entry: BackfillScan = { names: Promise.resolve(new Set()), retryAfter: 0 }
   if (outstandingScans >= RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS) {
-    // Serve the failure rather than stacking another listing, and re-arm the backoff so the next
-    // create does not re-check immediately. Recovery still happens: an abandoned listing that
-    // finally settles frees its slot.
-    entry.retryAfter = Date.now() + RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS
-    entry.names = Promise.reject(
+    // Deliberately not memoized: this namespace never got to start a listing, so arming its
+    // backoff would spread one wedged mount's outage to repos on healthy disks. Rejecting costs
+    // nothing, so the next create can just try again once a slot frees.
+    return Promise.reject(
       new Error(
         `retirement backfill scan deferred: ${outstandingScans} listings already outstanding`
       )
     )
-    storeScans.set(scanKey, entry)
-    return entry.names
   }
+  const entry: BackfillScan = { names: Promise.resolve(new Set()), retryAfter: 0 }
   const started = scan()
   outstandingScans += 1
-  const releaseSlot = (): void => {
-    outstandingScans -= 1
-  }
-  void started.then(releaseSlot, releaseSlot)
+  void started.then(
+    (names) => {
+      outstandingScans -= 1
+      // A listing that lands after the deadline still holds the right answer, and under WSL gate
+      // contention that is the common case rather than the edge one — the gate admits a single
+      // scan at a time and gives it 60s, four times this deadline. Dropping it would leave the
+      // namespace unseeded on exactly the mounts this feature exists to cover.
+      if (entry.retryAfter !== 0) {
+        entry.names = Promise.resolve(names)
+        entry.retryAfter = 0
+      }
+    },
+    () => {
+      outstandingScans -= 1
+    }
+  )
   entry.names = withScanDeadline(started).catch((error: unknown) => {
     entry.retryAfter = Date.now() + RETIREMENT_BACKFILL_RETRY_AFTER_FAILURE_MS
     throw error

@@ -124,7 +124,10 @@ describe('discoverRetiredWorktreeNames', () => {
       const retired = await discoverRetiredWorktreeNames({
         workspaceRoots: ['\\\\wsl$\\Ubuntu\\home\\ada\\orca\\workspaces'],
         home,
-        env: {}
+        env: {},
+        // Stubbed even though this case asserts the host-side bucket: the real resolver shells out
+        // to `wsl.exe`, so on a Windows runner this unit test would boot the developer's distro.
+        resolveWslHome: async () => null
       })
       expect(retired).toEqual(new Set([FIRST]))
     })

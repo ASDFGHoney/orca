@@ -88,6 +88,52 @@ describe('runRetirementBackfillScan', () => {
     )
   })
 
+  it('keeps a listing that lands after the deadline instead of discarding the answer', async () => {
+    // The WSL gate admits one scan at a time and allows it 60s — four times this deadline — so a
+    // late-but-correct listing is the normal case there, not an edge case.
+    const store = {}
+    const slow = stallingScan()
+    const rescan = vi.fn(async () => new Set(['orca']))
+
+    const pending = runRetirementBackfillScan(store, 'ns', slow.run)
+    const settled = expect(pending).rejects.toThrow(/exceeded/)
+    await vi.advanceTimersByTimeAsync(RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS)
+    await settled
+
+    slow.finish(['nautilus'])
+    await vi.advanceTimersByTimeAsync(0)
+
+    await expect(runRetirementBackfillScan(store, 'ns', rescan)).resolves.toEqual(
+      new Set(['nautilus'])
+    )
+    expect(rescan).not.toHaveBeenCalled()
+  })
+
+  it('does not arm a backoff on a namespace it never got to scan', async () => {
+    // A deferred namespace never touched the wedged mount; penalising it would spread one bad
+    // mount's outage to repos on healthy disks.
+    const stalls = Array.from({ length: RETIREMENT_BACKFILL_MAX_OUTSTANDING_SCANS }, stallingScan)
+    for (const [index, stall] of stalls.entries()) {
+      const pending = runRetirementBackfillScan({}, `ns-${index}`, stall.run)
+      const settled = expect(pending).rejects.toThrow(/exceeded/)
+      await vi.advanceTimersByTimeAsync(RETIREMENT_BACKFILL_SCAN_TIMEOUT_MS)
+      await settled
+    }
+
+    const store = {}
+    const healthy = vi.fn(async () => new Set(['nautilus']))
+    await expect(runRetirementBackfillScan(store, 'ns-healthy', healthy)).rejects.toThrow(
+      /deferred/
+    )
+
+    // A slot frees, and the very next create succeeds — no backoff to wait out.
+    stalls[0].finish([])
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(runRetirementBackfillScan(store, 'ns-healthy', healthy)).resolves.toEqual(
+      new Set(['nautilus'])
+    )
+  })
+
   it('stops stacking listings once the abandoned ones reach the cap', async () => {
     // The deadline abandons a listing, it cannot cancel one. Without a cap every lapsed backoff
     // stacks another stuck `readdir` on the same wedged mount until the libuv pool is starved.
