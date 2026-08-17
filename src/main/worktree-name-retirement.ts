@@ -267,7 +267,12 @@ export async function ensureRetiredWorktreeNamesBackfilled(
   )
   const scanKey = `${getRepoExecutionHostId(repo)}:${worktreePathComparisonKey(probePath)}`
   const names = await runRetirementBackfillScan(store, scanKey, () =>
-    discoverRetiredWorktreeNames({ workspaceRoots: [parentPath(probePath)] })
+    discoverRetiredWorktreeNames({
+      workspaceRoots: [parentPath(probePath)],
+      // The repo, not the workspace root, is what says which distro the agent runs in: a WSL repo
+      // whose workspaces fell back to the Windows side still buckets under the drvfs mirror there.
+      wslDistro: parseWslPath(repo.path)?.distro
+    })
   )
   // Why the merge sits outside the cached scan: the scan is per cwd namespace but the registry is
   // per repo, so every repo that asks must receive it — not only the one that triggered it.

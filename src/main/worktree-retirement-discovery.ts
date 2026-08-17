@@ -93,6 +93,12 @@ type ClaudeProjectsSource = {
   encodedParents: string[]
 }
 
+/** How a distro sees a Windows drive path through the drvfs automount, which is lowercase `/mnt`. */
+function drvfsPath(windowsPath: string): string | null {
+  const drive = windowsPath.match(/^([A-Za-z]):[/\\](.*)$/)
+  return drive ? `/mnt/${drive[1].toLowerCase()}/${drive[2].replace(/\\/g, '/')}` : null
+}
+
 // Lowercased on both sides: the recorded cwd can differ in case from ours on case-insensitive
 // filesystems, and a missed bucket reissues a live path while a spurious one costs one name.
 function encodeParents(paths: readonly string[]): string[] {
@@ -116,6 +122,7 @@ async function claudeProjectsSources(args: {
   home?: string
   env?: NodeJS.ProcessEnv
   resolveWslHome?: (distro: string) => Promise<string | null>
+  wslDistro?: string
 }): Promise<{ sources: ClaudeProjectsSource[]; complete: boolean }> {
   const sources: ClaudeProjectsSource[] = []
   let complete = true
@@ -127,13 +134,22 @@ async function claudeProjectsSources(args: {
     })
   }
   const linuxRootsByDistro = new Map<string, string[]>()
+  const addLinuxRoot = (distro: string, linuxPath: string): void => {
+    linuxRootsByDistro.set(distro, [...(linuxRootsByDistro.get(distro) ?? []), linuxPath])
+  }
   for (const root of args.workspaceRoots) {
     const wsl = parseWslUncPath(root)
     if (wsl) {
-      linuxRootsByDistro.set(wsl.distro, [
-        ...(linuxRootsByDistro.get(wsl.distro) ?? []),
-        wsl.linuxPath
-      ])
+      addLinuxRoot(wsl.distro, wsl.linuxPath)
+      continue
+    }
+    // A WSL repo can still have its workspaces on the Windows side: `computeWorkspaceRootAsync`
+    // falls back to the drive path whenever the distro home will not resolve at create time. The
+    // agent is still spawned through `wsl.exe`, so its cwd is the drvfs mirror of that drive path
+    // and its bucket lands in the distro home under `-mnt-c-…`, out of reach of the host scan.
+    const mirrored = args.wslDistro ? drvfsPath(root) : null
+    if (mirrored && args.wslDistro) {
+      addLinuxRoot(args.wslDistro, mirrored)
     }
   }
   const resolveWslHome = args.resolveWslHome ?? getWslHomeAsync
@@ -163,6 +179,8 @@ export async function discoverRetiredWorktreeNames(args: {
   env?: NodeJS.ProcessEnv
   /** Injected in tests; production resolves the distro's `$HOME` as a UNC path. */
   resolveWslHome?: (distro: string) => Promise<string | null>
+  /** The repo's distro, so workspaces that live on the Windows side are still traced into it. */
+  wslDistro?: string
 }): Promise<RetirementScanResult> {
   const leafNames: string[] = []
   let refused = false
