@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 import {
   BRACKETED_PASTE_END,
   BRACKETED_PASTE_START
@@ -41,6 +42,8 @@ describe('useMobileTerminalPaste', () => {
   let onSuccess = vi.fn()
   let showToast = vi.fn()
   let modes = new Map<string, TerminalModes>()
+  let terminalAgent: TuiAgent | null = null
+  let terminalHostPlatform: NodeJS.Platform | null = null
 
   beforeEach(() => {
     sendRequest = vi.fn().mockResolvedValue({
@@ -52,6 +55,8 @@ describe('useMobileTerminalPaste', () => {
     onSuccess = vi.fn()
     showToast = vi.fn()
     modes = new Map([['terminal', MODES]])
+    terminalAgent = null
+    terminalHostPlatform = null
     clipboardMocks.getStringAsync.mockReset()
     clipboardMocks.getImageAsync.mockReset()
   })
@@ -80,7 +85,9 @@ describe('useMobileTerminalPaste', () => {
       onSuccess,
       ptyModesRef: { current: modes },
       refreshCanPaste: vi.fn(),
-      showToast
+      showToast,
+      terminalAgent,
+      terminalHostPlatform
     })
     return null
   }
@@ -106,6 +113,15 @@ describe('useMobileTerminalPaste', () => {
       client: { id: 'device', type: 'mobile' }
     })
     expect(onSuccess).toHaveBeenCalledOnce()
+  })
+
+  it('uses Windows input-record newlines for Codex instead of bracket markers', async () => {
+    terminalAgent = 'codex'
+    terminalHostPlatform = 'win32'
+    await mountAndPaste('alpha\nbeta')
+    const params = sendRequest.mock.calls[0]?.[1] as { text?: string } | undefined
+    expect(params?.text).toBe('alpha\x1b\rbeta')
+    expect(params?.text).not.toContain(BRACKETED_PASTE_START)
   })
 
   it('delivers a non-aligned payload above 1,024 bytes without dropping a prefix', async () => {

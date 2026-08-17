@@ -2667,6 +2667,59 @@ describe('OrcaRuntimeService', () => {
     expect(terminal?.hostPlatform).toBe('win32')
   })
 
+  it('resets platform metadata across a real reused-PTY incarnation', async () => {
+    setPlatform('win32')
+    const runtime = createRuntime()
+    runtime.preparePtyExecutionContext('pty-real-reuse', 'Ubuntu', { resetIncarnation: true })
+    runtime.registerPty(
+      'pty-real-reuse',
+      TEST_WORKTREE_ID,
+      null,
+      {
+        tabId: 'tab-1',
+        leafId: 'pane:1',
+        incarnationId: 'inc-wsl'
+      },
+      true
+    )
+    runtime.onPtyExit('pty-real-reuse', 0, 'inc-wsl')
+    runtime.onPtySpawned('pty-real-reuse', 'inc-native', { awaitsRegistration: false })
+    runtime.registerPty(
+      'pty-real-reuse',
+      TEST_WORKTREE_ID,
+      null,
+      {
+        tabId: 'tab-1',
+        leafId: 'pane:1',
+        incarnationId: 'inc-native'
+      },
+      false
+    )
+
+    const terminal = (await runtime.listTerminals()).terminals.find(
+      (candidate) => candidate.ptyId === 'pty-real-reuse'
+    )
+    expect(terminal?.hostPlatform).toBe('win32')
+  })
+
+  it('backfills an unknown restored SSH platform after relay readiness', async () => {
+    const runtime = createRuntime()
+    const internals = runtime as unknown as {
+      recordPtyWorktree: (ptyId: string, worktreeId: string, state: Record<string, unknown>) => void
+    }
+    internals.recordPtyWorktree('ssh:ssh-restored@@platform', TEST_WORKTREE_ID, {
+      connected: true,
+      connectionId: 'ssh-restored',
+      hostPlatform: null
+    })
+    getRegisteredSshStateMock.mockReturnValue({ remotePlatform: 'win32' })
+
+    const terminal = (await runtime.listTerminals()).terminals.find(
+      (candidate) => candidate.ptyId === 'ssh:ssh-restored@@platform'
+    )
+    expect(terminal).toMatchObject({ hostPlatform: 'win32' })
+  })
+
   it('keeps an earlier committed reload fenced when a later reload is cancelled', async () => {
     vi.useFakeTimers()
     try {

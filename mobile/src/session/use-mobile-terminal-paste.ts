@@ -13,6 +13,11 @@ import {
   type MobileClipboardImageResizer
 } from './mobile-clipboard-image'
 import { buildTerminalClipboardPasteText } from '../../../src/shared/terminal-bracketed-paste-text'
+import {
+  encodeWindowsInputRecordPasteText,
+  resolveWindowsInputRecordPasteNewline
+} from '../../../src/shared/terminal-input-record-paste'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 
 const CLIPBOARD_IMAGE_DATA_URL_PREFIX_RE = /^data:image\/[a-z0-9.+-]+;base64,/i
 
@@ -76,6 +81,8 @@ type UseMobileTerminalPasteOptions = {
   readonly ptyModesRef: RefObject<Map<string, TerminalModes>>
   readonly refreshCanPaste: () => void
   readonly showToast: (message: string, durationMs?: number) => void
+  readonly terminalAgent: TuiAgent | null
+  readonly terminalHostPlatform: NodeJS.Platform | null
 }
 
 export function useMobileTerminalPaste({
@@ -94,7 +101,9 @@ export function useMobileTerminalPaste({
   onSuccess,
   ptyModesRef,
   refreshCanPaste,
-  showToast
+  showToast,
+  terminalAgent,
+  terminalHostPlatform
 }: UseMobileTerminalPasteOptions): () => Promise<void> {
   return useCallback(async () => {
     if (!client || !activeHandle || !canSend) {
@@ -105,7 +114,13 @@ export function useMobileTerminalPaste({
       const text = await Clipboard.getStringAsync()
       let payload: string | null = null
       if (text.length > 0) {
-        payload = buildTerminalClipboardPasteText(text, ptyModesRef.current.get(targetHandle))
+        const windowsInputRecordPasteNewline = resolveWindowsInputRecordPasteNewline(
+          terminalHostPlatform,
+          terminalAgent
+        )
+        payload = windowsInputRecordPasteNewline
+          ? encodeWindowsInputRecordPasteText(text, windowsInputRecordPasteNewline)
+          : buildTerminalClipboardPasteText(text, ptyModesRef.current.get(targetHandle))
       } else {
         const image = await Clipboard.getImageAsync({ format: 'png' })
         if (!image) {
@@ -185,6 +200,8 @@ export function useMobileTerminalPaste({
     onSuccess,
     ptyModesRef,
     refreshCanPaste,
-    showToast
+    showToast,
+    terminalAgent,
+    terminalHostPlatform
   ])
 }
