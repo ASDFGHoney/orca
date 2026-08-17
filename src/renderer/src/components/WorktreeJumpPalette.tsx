@@ -463,14 +463,14 @@ function HighlightedText({
   }
   const parts: React.ReactNode[] = []
   let cursor = 0
-  for (const [index, range] of ranges.entries()) {
+  for (const range of ranges) {
     const start = Math.max(cursor, range.start)
     if (start >= range.end) {
       continue
     }
     parts.push(text.slice(cursor, start))
     parts.push(
-      <span key={`${range.start}-${range.end}-${index}`} className="font-semibold text-foreground">
+      <span key={`${range.start}-${range.end}`} className="font-semibold text-foreground">
         {text.slice(start, range.end)}
       </span>
     )
@@ -2302,12 +2302,19 @@ function WorktreeJumpPaletteContent({
     setSelectedItemId(nextItemId)
   }, [])
 
-  // Why: while query is mid-deferral, cmdk (and mid-lag arrows) can latch a selection
-  // against the previous ranking. When the deferred list commits, snap Enter back to the
-  // new head — matching handleQueryChange's clear, but covering selection that landed
-  // after the keystroke and before this commit.
+  // A late cmdk callback can restore the old cursor after handleQueryChange clears it.
+  // Commit the new list head explicitly so a surviving stale row cannot stay highlighted.
   useLayoutEffect(() => {
-    setSelectedItemId('')
+    setSelectedItemId(
+      getNextWorktreePaletteSelection({
+        currentSelectedItemId: '',
+        queryChanged: true,
+        selectableItemIds: selectionItemIds,
+        showCreateAction,
+        autoSelectCreateAction: taskSourceUrl !== null
+      })
+    )
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- selection resets only when the deferred query commits, not on unrelated list churn.
   }, [deferredQuery])
 
   useEffect(() => {
