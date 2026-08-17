@@ -14912,6 +14912,35 @@
                 }
               }
             }
+          },
+          "annotate": {
+            "use": {
+              "browser": {
+                "page": {
+                  "grab": {
+                    "annotations": {
+                      "0c7b9b2b7a": "Copied",
+                      "c937229f19": "Screenshotted",
+                      "1f5cb19034": "Annotation added"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "navigate": {
+            "use": {
+              "browser": {
+                "page": {
+                  "navigation": {
+                    "downloads": {
+                      "8683b84b9e": "Browser page is not ready for file drops.",
+                      "22272f2784": "Drop files over the browser page, not the toolbar."
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "profile": {

@@ -7,6 +7,7 @@ import {
   type MutableRefObject,
   type SetStateAction
 } from 'react'
+import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import type {
   BrowserAnnotationIntent,
@@ -22,6 +23,22 @@ import {
 } from '../describe-page/browser-annotation-geometry'
 import { runBrowserGrabActionShortcut } from './browser-page-grab-action'
 import type { BrowserPageGrabToastState, GrabIntent } from '../describe-page/browser-page-types'
+
+const copiedGrabToastMessage = (): string =>
+  translate(
+    'auto.components.browser.pane.annotate.use.browser.page.grab.annotations.0c7b9b2b7a',
+    'Copied'
+  )
+const screenshottedGrabToastMessage = (): string =>
+  translate(
+    'auto.components.browser.pane.annotate.use.browser.page.grab.annotations.c937229f19',
+    'Screenshotted'
+  )
+const annotationAddedGrabToastMessage = (): string =>
+  translate(
+    'auto.components.browser.pane.annotate.use.browser.page.grab.annotations.1f5cb19034',
+    'Annotation added'
+  )
 
 export function useBrowserPageGrabAnnotations({
   browserTabId,
@@ -139,7 +156,7 @@ export function useBrowserPageGrabAnnotations({
       const text = formatGrabPayloadAsText(grab.payload)
       void window.api.ui.writeClipboardText(text)
       recordFeatureInteraction('browser-grab')
-      showGrabToast('Copied', 'success', grab.payload)
+      showGrabToast(copiedGrabToastMessage(), 'success', grab.payload)
     }
   }, [
     grab.state,
@@ -184,7 +201,6 @@ export function useBrowserPageGrabAnnotations({
         recordFeatureInteraction('browser-annotations')
       }
       setGrabIntent(nextIntent)
-      recordFeatureInteraction(nextIntent === 'annotate' ? 'browser-annotations' : 'browser-grab')
       if (nextIntent === 'copy') {
         setPendingAnnotationPayload(null)
       } else {
@@ -222,7 +238,7 @@ export function useBrowserPageGrabAnnotations({
     const text = formatGrabPayloadAsText(payload)
     void window.api.ui.writeClipboardText(text)
     recordFeatureInteraction('browser-grab')
-    showGrabToast('Copied', 'success', payload)
+    showGrabToast(copiedGrabToastMessage(), 'success', payload)
     grab.rearm()
   }, [grab, recordFeatureInteraction, showGrabToast])
 
@@ -238,7 +254,7 @@ export function useBrowserPageGrabAnnotations({
     }
     void window.api.ui.writeClipboardImage(dataUrl)
     recordFeatureInteraction('browser-grab')
-    showGrabToast('Screenshotted', 'success', payload)
+    showGrabToast(screenshottedGrabToastMessage(), 'success', payload)
     grab.rearm()
   }, [grab, recordFeatureInteraction, showGrabToast])
 
@@ -260,8 +276,7 @@ export function useBrowserPageGrabAnnotations({
       recordFeatureInteraction('browser-annotations')
       setPendingAnnotationPayload(null)
       setBrowserAnnotationTrayOpen(true)
-      recordFeatureInteraction('browser-annotations')
-      showGrabToast('Annotation added', 'success', payload)
+      showGrabToast(annotationAddedGrabToastMessage(), 'success', payload)
       grab.rearm()
     },
     [

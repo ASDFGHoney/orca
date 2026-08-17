@@ -75,7 +75,7 @@ export function useBrowserPageNavigationDownloads({
   handleInternalFileDragOverRef: MutableRefObject<(event: DragEvent<HTMLDivElement>) => void>
   handleInternalFileDropRef: MutableRefObject<(event: DragEvent<HTMLDivElement>) => void>
 } {
-  const [addressBarValue, setAddressBarValue] = useState(browserTabUrl)
+  const [addressBarValue, setAddressBarValue] = useState(() => toDisplayUrl(browserTabUrl))
   const { downloadStates, setDownloadStates } = useBrowserPageDownloadEvents({
     browserTabId,
     setResourceNotice
@@ -190,13 +190,23 @@ export function useBrowserPageNavigationDownloads({
       const webview = webviewRef.current
       const rect = webview?.getBoundingClientRect()
       if (!webview || !rect) {
-        setResourceNotice('Browser page is not ready for file drops.')
+        setResourceNotice(
+          translate(
+            'auto.components.browser.pane.navigate.use.browser.page.navigation.downloads.8683b84b9e',
+            'Browser page is not ready for file drops.'
+          )
+        )
         return
       }
       const pageX = event.clientX - rect.left
       const pageY = event.clientY - rect.top
       if (pageX < 0 || pageY < 0 || pageX > rect.width || pageY > rect.height) {
-        setResourceNotice('Drop files over the browser page, not the toolbar.')
+        setResourceNotice(
+          translate(
+            'auto.components.browser.pane.navigate.use.browser.page.navigation.downloads.22272f2784',
+            'Drop files over the browser page, not the toolbar.'
+          )
+        )
         return
       }
 
