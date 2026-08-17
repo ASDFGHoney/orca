@@ -1,5 +1,4 @@
-// Static test-only identity with SANs for localhost and 127.0.0.1. Keeping the
-// fixture in-repo avoids an OpenSSL dependency on Windows E2E runners.
+// Static test-only identity with SANs for localhost and 127.0.0.1 avoids an OpenSSL dependency.
 export const LOCAL_HTTPS_TEST_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCjkYboq/BDMxGh
 0jYeeAEnhH466vJO2NTIsDAaqhVDxXSWqgcqPHhAXS3I4CCzBuTBKMCfZnFLjOf6
