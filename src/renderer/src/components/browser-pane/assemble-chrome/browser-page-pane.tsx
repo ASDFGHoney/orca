@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { getConnectionIdFromState } from '@/lib/connection-context'
@@ -71,8 +71,11 @@ export function BrowserPagePane({
     isMobileDriven
   })
   const pageViewport = ensureBrowserPageViewport(browserTab.id, workspaceId)
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  containerRef.current = pageViewport?.container ?? null
+  const pageViewportContainer = pageViewport?.container ?? null
+  const containerRef = useRef<HTMLDivElement | null>(pageViewportContainer)
+  useLayoutEffect(() => {
+    containerRef.current = pageViewportContainer
+  }, [pageViewportContainer])
   const chromeHeaderRef = useRef<HTMLDivElement | null>(null)
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
@@ -93,7 +96,9 @@ export function BrowserPagePane({
   const onUpdatePageStateRef = useRef(onUpdatePageState)
   const onSetUrlRef = useRef(onSetUrl)
   const isActiveRef = useRef(isActive)
-  isActiveRef.current = isActive
+  useLayoutEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
   const [findOpen, setFindOpen] = useState(false)
   const [browserOverlayViewport, setBrowserOverlayViewport] = useState<BrowserOverlayViewport>({
     scrollX: 0,

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -75,21 +76,24 @@ export function useBrowserPageGrabAnnotations({
   handleGrabActionShortcut: (key: 'c' | 's') => void
 } {
   const browserTabIdRef = useRef(browserTabId)
-  browserTabIdRef.current = browserTabId
   const grabToastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [grabIntent, setGrabIntent] = useState<GrabIntent>('copy')
   const grabIntentRef = useRef(grabIntent)
-  grabIntentRef.current = grabIntent
   const [pendingAnnotationPayload, setPendingAnnotationPayload] =
     useState<BrowserGrabPayload | null>(null)
   const pendingAnnotationPayloadRef = useRef<BrowserGrabPayload | null>(null)
-  pendingAnnotationPayloadRef.current = pendingAnnotationPayload
   // Inline toast near the grabbed element (below, or above near the viewport bottom) so it doesn't occlude the selection.
   const [grabToast, setGrabToast] = useState<BrowserPageGrabToastState | null>(null)
   const grabRef = useRef(grab)
-  grabRef.current = grab
   const grabPayloadRef = useRef(grab.payload)
-  grabPayloadRef.current = grab.payload
+
+  useLayoutEffect(() => {
+    browserTabIdRef.current = browserTabId
+    grabIntentRef.current = grabIntent
+    pendingAnnotationPayloadRef.current = pendingAnnotationPayload
+    grabRef.current = grab
+    grabPayloadRef.current = grab.payload
+  }, [browserTabId, grab, grabIntent, pendingAnnotationPayload])
   // Why: Radix fires onOpenChange(false) before onSelect, so this flag lets onOpenChange skip the rearm that would clear the payload first.
   const grabMenuActionTakenRef = useRef(false)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)

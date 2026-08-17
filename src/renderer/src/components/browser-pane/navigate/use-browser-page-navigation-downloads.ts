@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -160,7 +161,6 @@ export function useBrowserPageNavigationDownloads({
     event.stopPropagation()
     event.dataTransfer.dropEffect = 'copy'
   }, [])
-  handleInternalFileDragOverRef.current = handleInternalFileDragOver
 
   const handleInternalFileDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
@@ -214,7 +214,11 @@ export function useBrowserPageNavigationDownloads({
     },
     [navigateToUrl, setResourceNotice, webviewRef, worktreeId]
   )
-  handleInternalFileDropRef.current = handleInternalFileDrop
+
+  useLayoutEffect(() => {
+    handleInternalFileDragOverRef.current = handleInternalFileDragOver
+    handleInternalFileDropRef.current = handleInternalFileDrop
+  }, [handleInternalFileDragOver, handleInternalFileDrop])
 
   const dismissBrowserDownload = useCallback(
     (downloadId: string) => {

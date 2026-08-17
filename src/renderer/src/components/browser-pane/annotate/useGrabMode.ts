@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   BrowserGrabPayload,
   BrowserGrabRejectReason,
@@ -74,15 +74,15 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
   const grabTabIdRef = useRef<string | null>(null)
   const armGenerationRef = useRef(0)
   const browserTabIdRef = useRef(browserPageId)
-  // Why: toolbar/key handlers from the latest render can fire before passive
-  // effects run after a page switch, so keep the target page current in render.
-  browserTabIdRef.current = browserPageId
   const mountedRef = useMountedRef()
+
+  useLayoutEffect(() => {
+    browserTabIdRef.current = browserPageId
+  }, [browserPageId])
 
   // Why: when the browser page changes while grab is active, cancel the
   // current grab operation so stale overlays don't survive tab switches.
   useEffect(() => {
-    browserTabIdRef.current = browserPageId
     return () => {
       const grabTabId = grabTabIdRef.current
       if (grabTabId) {
@@ -96,7 +96,7 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
   }, [browserPageId])
 
   const armAndAwait = useCallback(async () => {
-    const tabId = browserTabIdRef.current
+    const tabId = browserPageId
     const armGeneration = (armGenerationRef.current += 1)
     grabTabIdRef.current = tabId
     setState('armed')
@@ -181,10 +181,10 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
       setState('error')
       setError(result.reason)
     }
-  }, [mountedRef])
+  }, [browserPageId, mountedRef])
 
   const cancel = useCallback(() => {
-    const targetTabId = grabTabIdRef.current ?? browserTabIdRef.current
+    const targetTabId = grabTabIdRef.current ?? browserPageId
     armGenerationRef.current += 1
     void window.api.browser.setGrabMode({
       browserPageId: targetTabId,
@@ -201,7 +201,7 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
     setPayload(null)
     setError(null)
     setContextMenu(false)
-  }, [])
+  }, [browserPageId])
 
   const toggle = useCallback(() => {
     if ((state === 'idle' || state === 'error') && grabTabIdRef.current === null) {
@@ -243,7 +243,7 @@ export function useGrabMode(browserPageId: string): GrabModeHook {
     setPayload(null)
     setError(null)
     setContextMenu(false)
-  }, [])
+  }, [browserPageId])
 
   // Keyboard shortcut: Esc cancels grab mode
   useEffect(() => {

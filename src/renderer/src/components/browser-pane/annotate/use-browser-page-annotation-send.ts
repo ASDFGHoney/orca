@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,7 +41,6 @@ export function useBrowserPageAnnotationSend({
   )
   const activeGroupId = useAppStore((s) => s.activeGroupIdByWorktree[worktreeId])
   const browserAnnotationsRef = useRef(browserAnnotations)
-  browserAnnotationsRef.current = browserAnnotations
   const [browserAnnotationTrayOpen, setBrowserAnnotationTrayOpen] = useState(true)
   const [browserAnnotationsCopied, setBrowserAnnotationsCopied] = useState(false)
   const annotationCopyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -58,6 +58,10 @@ export function useBrowserPageAnnotationSend({
   const deleteBrowserPageAnnotation = useAppStore((s) => s.deleteBrowserPageAnnotation)
   const clearBrowserPageAnnotations = useAppStore((s) => s.clearBrowserPageAnnotations)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
+
+  useLayoutEffect(() => {
+    browserAnnotationsRef.current = browserAnnotations
+  }, [browserAnnotations])
 
   useEffect(() => {
     return () => {

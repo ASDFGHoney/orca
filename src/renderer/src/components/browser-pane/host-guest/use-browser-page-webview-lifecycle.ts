@@ -120,33 +120,41 @@ export function useBrowserPageWebviewLifecycle({
   const validateVisibleGuestRegistrationRef = useRef<() => void>(() => {})
   const wasPaintableForGuestValidationRef = useRef(isPaintable)
   const inputLockedRef = useRef(inputLocked)
-  inputLockedRef.current = inputLocked
   const faviconUrlRef = useRef<string | null>(faviconUrl)
   const initialBrowserUrlRef = useRef(browserTabUrl)
   // Why: CDP viewport emulation doesn't survive renderer process swaps, so reapply the preset from this ref on every dom-ready.
   const viewportPresetIdRef = useRef(viewportPresetId)
-  viewportPresetIdRef.current = viewportPresetId
   const addBrowserHistoryEntry = useAppStore((s) => s.addBrowserHistoryEntry)
   const addBrowserHistoryEntryRef = useRef(addBrowserHistoryEntry)
   const createBrowserTab = useAppStore((s) => s.createBrowserTab)
   const isPaintableRef = useRef(isPaintable)
   const annotationViewportBridgeTokenRef = useRef(createBrowserUuid().replaceAll('-', ''))
   const isActiveRef = useRef(isActive)
-  isActiveRef.current = isActive
   const pendingAnnotationPayloadRef = useRef(pendingAnnotationPayload)
-  pendingAnnotationPayloadRef.current = pendingAnnotationPayload
   const browserAnnotations = useAppStore(
     (s) => s.browserAnnotationsByPageId[browserTabId] ?? EMPTY_BROWSER_ANNOTATIONS
   )
   const browserAnnotationsRef = useRef(browserAnnotations)
-  browserAnnotationsRef.current = browserAnnotations
   const clearBrowserPageAnnotations = useAppStore((s) => s.clearBrowserPageAnnotations)
   const clearBrowserPageAnnotationsRef = useRef(clearBrowserPageAnnotations)
-  clearBrowserPageAnnotationsRef.current = clearBrowserPageAnnotations
 
   useLayoutEffect(() => {
+    inputLockedRef.current = inputLocked
+    viewportPresetIdRef.current = viewportPresetId
+    isActiveRef.current = isActive
+    pendingAnnotationPayloadRef.current = pendingAnnotationPayload
+    browserAnnotationsRef.current = browserAnnotations
+    clearBrowserPageAnnotationsRef.current = clearBrowserPageAnnotations
     isPaintableRef.current = isPaintable
-  }, [isPaintable])
+  }, [
+    browserAnnotations,
+    clearBrowserPageAnnotations,
+    inputLocked,
+    isActive,
+    isPaintable,
+    pendingAnnotationPayload,
+    viewportPresetId
+  ])
 
   useLayoutEffect(() => {
     const webview = webviewRef.current
