@@ -20,7 +20,9 @@ function relevantLaunchPromptMessages(
   if (options.crossClock) {
     // Remote host timestamps are incomparable; sequence marks only post-launch rows.
     const sequenceById = options.transcriptOrder?.messageSequenceById
-    return sequenceById ? messages.filter((message) => sequenceById.has(message.id)) : []
+    // If ordering is not available yet, retain identity/occurrence matching;
+    // comparing createdAt to provider timestamps would mix clock domains.
+    return sequenceById ? messages.filter((message) => sequenceById.has(message.id)) : messages
   }
   return messages.filter(
     (message) => message.timestamp === null || message.timestamp >= entry.createdAt

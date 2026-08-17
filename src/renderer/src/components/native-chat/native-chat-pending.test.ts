@@ -583,7 +583,7 @@ describe('pendingSendsAsMessages', () => {
     ).toEqual([])
   })
 
-  it('retires an empty-at-send echo after reconnect replaces local ordering', () => {
+  it('keeps an empty-at-send echo isolated after reconnect replaces local ordering', () => {
     const pending = [
       {
         ...pendingOf('p1', 'rename it'),
@@ -597,8 +597,8 @@ describe('pendingSendsAsMessages', () => {
     expect(pendingSendsAsMessages(pending, transcript)).toEqual([])
     expect(prunePendingSends(pending, transcript)).toEqual([])
     const replacedOrder = transcriptOrder(8, 2, { u1: 1, a1: 2 })
-    expect(pendingSendsAsMessages(pending, transcript, replacedOrder)).toEqual([])
-    expect(prunePendingSends(pending, transcript, replacedOrder)).toEqual([])
+    expect(pendingSendsAsMessages(pending, transcript, replacedOrder)).toHaveLength(1)
+    expect(prunePendingSends(pending, transcript, replacedOrder)).toEqual(pending)
   })
 
   it('hides only one of two identical pending sends for one real user turn', () => {

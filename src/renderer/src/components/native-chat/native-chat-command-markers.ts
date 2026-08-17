@@ -144,6 +144,30 @@ export function applyCommandMarkerBoundaries(
   return messages as NativeChatMessage[]
 }
 
+/** True when the latest clear marker cannot prove which rows are post-clear. */
+export function hasUnavailableNativeChatClearBoundary(
+  messages: readonly NativeChatMessage[],
+  markers: readonly NativeChatCommandMarker[],
+  transcriptOrder?: NativeChatTranscriptOrder
+): boolean {
+  const clearMarker = latestClearMarker(markers)
+  if (clearMarker === null) {
+    return false
+  }
+  const boundaryId =
+    clearMarker.clearAfterMessageId !== undefined
+      ? clearMarker.clearAfterMessageId
+      : (clearMarker.clearedMessageIds?.at(-1) ?? null)
+  if (boundaryId !== null && messages.some((message) => message.id === boundaryId)) {
+    return false
+  }
+  return !(
+    transcriptOrder !== undefined &&
+    clearMarker.clearTranscriptGeneration === transcriptOrder.generation &&
+    clearMarker.clearTranscriptHighWater !== undefined
+  )
+}
+
 /** Render command markers as compact `system` messages. The `system` role draws
  *  as a muted aside (not a user bubble); the text avoids the harness noise
  *  prefixes so stripNoiseMessages keeps it. */

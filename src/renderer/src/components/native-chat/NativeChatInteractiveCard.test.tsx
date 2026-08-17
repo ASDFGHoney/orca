@@ -49,7 +49,8 @@ function cardElement(
   canSend = true,
   messages?: readonly NativeChatMessage[],
   onShowingQuestionChange?: (showing: boolean) => void,
-  transcriptSettled = true
+  transcriptSettled = true,
+  clearBoundaryUnavailable = false
 ): React.JSX.Element {
   return (
     <NativeChatInteractiveCard
@@ -57,6 +58,7 @@ function cardElement(
       canSend={canSend}
       messages={messages}
       transcriptSettled={transcriptSettled}
+      clearBoundaryUnavailable={clearBoundaryUnavailable}
       onShowingQuestionChange={onShowingQuestionChange}
       send={{
         sendAnswer: mocks.sendAnswer,
@@ -291,7 +293,9 @@ describe('NativeChatInteractiveCard transcript fallback', () => {
       [abandoned as unknown as NativeChatMessage],
       [{ id: 'clear-1', command: '/clear', sentAt: 200 }]
     )
-    render(cardElement(true, trimmed))
+    // An unavailable clear boundary leaves transcript rows visible for
+    // recovery, but the card path must remain conservative until it settles.
+    render(cardElement(true, trimmed, undefined, true, true))
 
     expect(screen.queryByText('Tabs or spaces?')).not.toBeInTheDocument()
   })

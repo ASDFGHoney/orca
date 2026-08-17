@@ -28,7 +28,8 @@ import {
 } from './native-chat-pending'
 import {
   applyCommandMarkerBoundaries,
-  commandMarkersAsMessages
+  commandMarkersAsMessages,
+  hasUnavailableNativeChatClearBoundary
 } from './native-chat-command-markers'
 import { useNativeChatCommandMarkers } from './use-native-chat-command-markers'
 import {
@@ -187,6 +188,7 @@ function NativeChatResolvedView({
   const [pending, setPending] = useState<NativeChatPendingSend[]>(() =>
     readPendingSendCache(pendingScope)
   )
+  const pendingGenerationRef = useRef(order.generation)
   const resetWorkingInterrupted = useCallback(() => setWorkingInterrupted(false), [])
   const { commandMarkers, onSlashCommand } = useNativeChatCommandMarkers({
     paneKey,
@@ -204,6 +206,14 @@ function NativeChatResolvedView({
     setPending(readPendingSendCache(pendingScope))
     setWorkingInterrupted(false)
   }, [pendingScope])
+  useEffect(() => {
+    if (pendingGenerationRef.current !== order.generation) {
+      // A source rebind invalidates pane-local optimistic sends. Keeping them
+      // would let an identical prompt from the replacement session retire one.
+      setPending(writePendingSendCache(pendingScope, []))
+    }
+    pendingGenerationRef.current = order.generation
+  }, [order.generation, pendingScope])
   // Prune echoes whose real user turn is now in the transcript.
   useEffect(() => {
     setPending((prev) =>
@@ -245,7 +255,7 @@ function NativeChatResolvedView({
     agent,
     messages: session.messages,
     transcriptOrder: order,
-    crossClock: runtimeEnvironmentId != null
+    crossClock: true
   })
   const sessionWithLaunchPrompt = useMemo<typeof session>(() => {
     if (!launchPromptMessage) {
@@ -264,6 +274,11 @@ function NativeChatResolvedView({
       ? sessionWithLaunchPrompt
       : { ...sessionWithLaunchPrompt, messages }
   }, [sessionWithLaunchPrompt, commandMarkers, order])
+  const clearBoundaryUnavailable = hasUnavailableNativeChatClearBoundary(
+    sessionWithLaunchPrompt.messages,
+    commandMarkers,
+    order
+  )
   const failedLaunchPromptMessageIds = useMemo(() => {
     const id = launchPromptFailed ? launchPromptMessage?.id : null
     if (!id || !sessionAfterCommandBoundaries.messages.some((message) => message.id === id)) {
@@ -411,6 +426,7 @@ function NativeChatResolvedView({
         canSend={canSend}
         messages={sessionAfterCommandBoundaries.messages}
         transcriptSettled={session.readPhase === 'ready'}
+        clearBoundaryUnavailable={clearBoundaryUnavailable}
         onShowingQuestionChange={setQuestionActive}
         answerInputRef={questionAnswerInputRef}
       />

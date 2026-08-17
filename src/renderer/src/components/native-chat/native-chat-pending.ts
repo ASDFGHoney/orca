@@ -96,19 +96,28 @@ function messagesAfterPendingBoundary(
   pending: NativeChatPendingSend,
   transcriptOrder?: NativeChatTranscriptOrder
 ): readonly NativeChatMessage[] {
+  if (
+    transcriptOrder !== undefined &&
+    pending.afterTranscriptGeneration !== undefined &&
+    transcriptOrder.generation !== pending.afterTranscriptGeneration
+  ) {
+    // Pending sends are pane-local. A source rebind clears their cache; until
+    // that effect runs, never match an old send against the replacement list.
+    return []
+  }
   if (pending.afterMessageId === undefined) {
     return messages
   }
   if (pending.afterMessageId === null) {
+    if (transcriptOrder === undefined) {
+      return messages
+    }
     if (
-      transcriptOrder === undefined ||
       pending.afterTranscriptGeneration === undefined ||
       pending.afterTranscriptHighWater === undefined ||
       transcriptOrder.generation !== pending.afterTranscriptGeneration
     ) {
-      // A reconnect can replace local order before the host turn arrives. Fall
-      // back to identity/occurrence matching so the echo cannot strand forever.
-      return messages
+      return []
     }
     const highWater = pending.afterTranscriptHighWater
     return messages.filter((message) => {
@@ -269,9 +278,10 @@ function messagesAfterGlueBoundary(
   transcriptOrder: NativeChatTranscriptOrder | undefined
 ): readonly NativeChatMessage[] {
   if (pending.afterMessageId === undefined && transcriptOrder === undefined) {
-    return messages.filter(
-      (message) => message.timestamp === null || message.timestamp >= pending.sentAt
-    )
+    // No comparable transcript boundary exists in this legacy shape. Identity
+    // and occurrence matching may inspect the list, but renderer sentAt must
+    // never be compared with a provider timestamp.
+    return []
   }
   return messagesAfterPendingBoundary(messages, pending, transcriptOrder)
 }
