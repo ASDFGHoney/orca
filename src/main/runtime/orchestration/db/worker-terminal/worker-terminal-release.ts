@@ -20,9 +20,20 @@ export function requestWorkerTerminalRelease(
     } {
   this.db.exec('BEGIN IMMEDIATE')
   try {
+    const dispatch = this.getDispatchContextById(dispatchId)
     const worker = this.getWorkerDispatch(dispatchId)
-    if (!worker) {
+    if (!dispatch) {
       throw new OrchestrationError('dispatch_not_found', `Dispatch ${dispatchId} was not found.`)
+    }
+    if (!worker) {
+      if (!['completed', 'failed', 'circuit_broken'].includes(dispatch.status)) {
+        throw new OrchestrationError(
+          'dispatch_inactive',
+          `Dispatch ${dispatchId} is ${dispatch.status}; only a settled dispatch can release.`
+        )
+      }
+      this.db.exec('COMMIT')
+      return { disposition: 'retained', resource: null, reason: 'no_owned_resource' }
     }
     if (!WORKER_SETTLED_STATES.includes(worker.state)) {
       // Why: release is post-completion cleanup only; recording intent for an unsettled or
@@ -64,10 +75,7 @@ export function requestWorkerTerminalRelease(
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource, reason: 'ownership_transferred' }
     }
-    if (
-      resource.release_state === 'unknown' ||
-      (resource.release_state === 'retained' && resource.retained_reason === 'user_requested')
-    ) {
+    if (resource.release_state === 'retained' && resource.retained_reason === 'user_requested') {
       this.db.prepare('DELETE FROM worker_terminal_archives WHERE dispatch_id = ?').run(dispatchId)
     }
     this.db

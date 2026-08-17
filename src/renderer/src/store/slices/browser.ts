@@ -2203,7 +2203,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         const result = await callRuntimeRpc<BrowserProfileImportFromBrowserResult>(
           { kind: 'environment', environmentId: runtimeEnvironmentId },
           'browser.profileImportFromBrowser',
-          { profileId, browserFamily, browserProfile },
+          { profileId, browserFamily, browserProfile, supportsPartitionSkippedCookies: true },
           { timeoutMs: 30_000 }
         )
         if (result.ok) {

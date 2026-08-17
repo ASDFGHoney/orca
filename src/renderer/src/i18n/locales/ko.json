@@ -2648,7 +2648,7 @@
               "346d409ab2": "agent 선택",
               "0adba8fa0c": "에이전트",
               "ec8f081919": "작업",
-              "ed04233b3e": "빠른 액세스를 위해 terminal 명령이나 agent 프롬프트를 저장하세요.",
+              "ed04233b3e": "저장한 항목은 탭 바 메뉴에 표시되어 한 번의 클릭으로 실행할 수 있습니다.",
               "ca414324ee": "명령 텍스트",
               "dc921c17ee": "프롬프트",
               "5b3f634a55": "빠른 명령 추가",
@@ -3278,7 +3278,9 @@
             "antigravityUsageDetails": "Antigravity 사용량 세부 정보 열기",
             "grokUsageAria": "Grok 사용량 세부 정보 열기",
             "grokUsageMenu": "Grok 사용량",
-            "floatingTerminalNewActivity": "{{label}}, 새 활동"
+            "floatingTerminalNewActivity": "{{label}}, 새 활동",
+            "codexSignInSuccess": "Codex에 로그인했습니다",
+            "codexSignInError": "Codex 로그인에 실패했습니다. 다시 시도해 주세요."
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "계정 연결",
@@ -5325,6 +5327,7 @@
           "codexSystemDefaultNeedsSignIn": "{{value0}}에 대한 Codex 로그인을 찾을 수 없습니다.",
           "codexConfigSyncMissingSource": "Codex is still using the settings it last synced because {{value0}} is missing. Restore that file to resume syncing.",
           "codexConfigSyncBlankSource": "Codex is still using the settings it last synced because {{value0}} is empty. That is expected while a synced folder finishes downloading.",
+          "codexConfigSyncManagedHomeUnavailable": "현재 Orca가 이 계정의 Codex 파일을 읽을 수 없어 설정이 동기화되지 않을 수 있습니다. 바이러스 백신이나 백업 도구가 파일을 잠시 잠근 경우가 많으며, 일반적으로 자동으로 해결됩니다.",
           "codexConfigSyncUnreadableSource": "Codex is still using the settings it last synced because {{value0}} could not be read. Check that file's permissions."
         },
         "AdvancedPane": {

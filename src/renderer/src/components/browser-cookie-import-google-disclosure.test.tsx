@@ -39,8 +39,8 @@ vi.mock('../../store', () => ({ useAppStore: appStoreStub() }))
 vi.mock('sonner', () => ({ toast: { success: successToastMock, error: errorToastMock } }))
 
 import { BrowserCookieImportDisclosure } from './BrowserCookieImportDisclosure'
-import { BrowserImportHintButton } from './browser-pane/BrowserImportHintButton'
-import { BrowserToolbarMenuDropdown } from './browser-pane/browser-toolbar-menu-dropdown'
+import { BrowserImportHintButton } from './browser-pane/assemble-chrome/BrowserImportHintButton'
+import { BrowserToolbarMenuDropdown } from './browser-pane/assemble-chrome/browser-toolbar-menu-dropdown'
 import { BrowserProfileRow } from './settings/BrowserProfileRow'
 import { BrowserUseCookieImportStep } from './settings/BrowserUseCookieImportStep'
 

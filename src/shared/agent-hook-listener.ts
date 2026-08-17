@@ -76,6 +76,7 @@ import {
   resolveGrokSessionsDir
 } from './grok-session-paths'
 import { sweepStaleAgentHookEndpointTemps } from './agent-hook-endpoint-temp-cleanup'
+import { classifyTruncatedHookRequest } from './agent-hook-transport-interference'
 import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit'
 
 /** Maximum request body size accepted by the listener (1 MB). */
@@ -352,6 +353,8 @@ export type AgentHookEventPayload = {
   toolUseId?: string
   /** Claude agent/subagent identifier when the hook source exposes one. */
   toolAgentId?: string
+  /** Claude teammate name carried by TeammateIdle. */
+  teammateName?: string
   /** Agent/subagent type from the source hook payload, when present. */
   toolAgentType?: string
   /** Provider-owned conversation/session id needed to resume a sleeping agent. */
@@ -532,12 +535,20 @@ export function readRequestBody(req: IncomingMessage): Promise<unknown> {
         settleReject(error)
       }
     }
+    // Why (#11217): a body cut short of its own Content-Length is the fingerprint of an IDS
+    // resetting the connection mid-inspection. Classify on every path that ends the request without
+    // 'end' — a peer RST surfaces as 'error' (ECONNRESET) and only a local destroy reaches 'close' first.
+    const settleUnfinished = (fallback: Error): void => {
+      settleReject(
+        classifyTruncatedHookRequest(req.headers['content-length'], byteLength) ?? fallback
+      )
+    }
     const onError = (err: Error): void => {
-      settleReject(err)
+      settleUnfinished(err)
     }
     // Why: req.destroy() (slowloris timer) emits 'close' but not 'end'/'error'; without this the promise never settles and buffers leak.
     const onClose = (): void => {
-      settleReject(new Error('aborted'))
+      settleUnfinished(new Error('aborted'))
     }
     req.on('data', onData)
     req.on('end', onEnd)
@@ -2665,14 +2676,20 @@ function normalizeClaudeSubagentLifecycleEvent(
   }
   const workingChildEvidence = claudeRosterHasRuntimeWorkingSubagent(roster)
   const hasUnconfirmedChild = claudeRosterHasRestoredSnapshotSubagent(roster)
+  const hasConfirmedDoneGate =
+    cachedLead?.state === 'done' &&
+    cachedLead.interrupted !== true &&
+    (state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+      state.claudeActiveSessionCronPaneKeys.has(paneKey))
+  const restoredOnlyDoneGate =
+    cachedLead?.state === 'done' && !hasConfirmedDoneGate && hasUnconfirmedChild
   if (roster?.size === 0) {
     state.claudeSubagentRosterByPaneKey.delete(paneKey)
   }
   if (
-    !hasCachedLeadEvidence &&
-    endedChildWork &&
     !workingChildEvidence &&
-    (hasUnconfirmedChild || !endedRuntimeChildWork)
+    (restoredOnlyDoneGate ||
+      (endedChildWork && !hasCachedLeadEvidence && (hasUnconfirmedChild || !endedRuntimeChildWork)))
   ) {
     // Why: a restored-only ending proves no lead boundary, and an unmatched restored sibling proves no current liveness; persist the roster transition without publishing fresh work or completion.
     state.claudeUnconfirmedRestoredStatusPaneKeys.add(paneKey)
@@ -2719,6 +2736,31 @@ export function seedClaudeSubagentRosterFromSnapshots(
   }
 }
 
+export function seedClaudeLeadTurnFromPersistedStatus(
+  state: HookListenerState,
+  paneKey: string,
+  status: Pick<AgentHookEventPayload, 'payload'>,
+  options: { childOnlyBoundary: boolean }
+): void {
+  if (options.childOnlyBoundary && status.payload.agentType === 'claude') {
+    state.claudeLeadStateByPaneKey.set(paneKey, {
+      state: 'done',
+      ...(status.payload.interrupted === true ? { interrupted: true } : {}),
+      ...(status.payload.turnCompletedAt !== undefined
+        ? { turnCompletedAt: status.payload.turnCompletedAt }
+        : {})
+    })
+    if (status.payload.prompt) {
+      state.lastPromptByPaneKey.set(paneKey, status.payload.prompt)
+    }
+    if (status.payload.lastAssistantMessage) {
+      state.lastToolByPaneKey.set(paneKey, {
+        lastAssistantMessage: status.payload.lastAssistantMessage
+      })
+    }
+  }
+}
+
 /** Reap this pane's unconfirmed restored seeds because no live agent process backs
  *  the pane any more (its PTY died while Orca was down, so no finish hook could
  *  arrive). Callers must have proven the pane is LOCAL-launched — a remote/SSH
@@ -2749,6 +2791,13 @@ function clearClaudePendingWaitForAgent(
     return
   }
   state.claudeLeadStateByPaneKey.set(paneKey, lead.stateBeforeWait ?? { state: 'working' })
+  const previousTool = state.lastToolByPaneKey.get(paneKey)
+  state.lastToolByPaneKey.set(
+    paneKey,
+    previousTool?.lastAssistantMessage
+      ? { lastAssistantMessage: previousTool.lastAssistantMessage }
+      : {}
+  )
 }
 
 /** Clear an AskUserQuestion wait after the answer is typed (answering emits no hook event; the caller infers it from the submit keystroke). Restores the stashed pre-wait lead state or 'working', drops the cached card, and returns the pane state to emit (gated up to 'working' while children run). */
@@ -4530,6 +4579,10 @@ export function normalizeHookPayload(
         compactTrigger,
         toolUseId: readFirstString(hookPayloadRecord, ['tool_use_id', 'toolUseId']),
         toolAgentId: readFirstString(hookPayloadRecord, ['agent_id', 'agentId']),
+        teammateName:
+          source === 'claude' && eventName === 'TeammateIdle'
+            ? readString(hookPayloadRecord, 'teammate_name')
+            : undefined,
         toolAgentType: readString(hookPayloadRecord, 'agent_type'),
         ...(source === 'claude'
           ? {
