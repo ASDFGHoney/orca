@@ -192,6 +192,12 @@ export function normalizeImageTranscriptMessages(
   options?: NormalizeImageTranscriptOptions
 ): NativeChatMessage[] {
   const windowHeadMessageId = options?.windowHeadMessageId
+  // Why: absent option means there is no window head at all, so the rule must not
+  // fire. Comparing ids alone would let a row whose own id is missing — the remote
+  // read casts host frames without validating per-message fields — satisfy
+  // `message.id === undefined` and strip a marker the user typed.
+  const isWindowHead = (candidate: NativeChatMessage): boolean =>
+    windowHeadMessageId !== undefined && candidate.id === windowHeadMessageId
   let normalized: NativeChatMessage[] | null = null
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]!
@@ -221,8 +227,7 @@ export function normalizeImageTranscriptMessages(
       ) {
         // Why: a run touching the window head may have lost earlier source turns,
         // so the visible image count is a floor, not the run's real size.
-        const limit =
-          message.id === windowHeadMessageId ? Number.POSITIVE_INFINITY : imagePaths.length
+        const limit = isWindowHead(message) ? Number.POSITIVE_INFINITY : imagePaths.length
         normalized.push({
           ...prompt,
           blocks: [
@@ -242,7 +247,7 @@ export function normalizeImageTranscriptMessages(
     // Why: the whole source run above the head can be trimmed away, leaving the
     // prompt alone at index 0 with markers no anchor can vouch for.
     const blocks =
-      message.id === windowHeadMessageId && hasImagePromptMarker(message)
+      isWindowHead(message) && hasImagePromptMarker(message)
         ? stripImagePromptMarkersFromTextBlocks(message.blocks, Number.POSITIVE_INFINITY)
         : removeEmptyFirstTextBlock(message.blocks)
     if (blocks === message.blocks) {

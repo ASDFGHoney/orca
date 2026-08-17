@@ -421,6 +421,20 @@ describe('normalizeImageTranscriptMessages with earlier history above the window
     expect(out[1]!.blocks).toEqual([{ type: 'text', text: 'what do you see' }])
   })
 
+  // Why: the remote read casts host frames without validating per-message fields,
+  // so a row can reach the fold with no id. Comparing ids alone let that row match
+  // an absent option and strip a marker the user typed, with no window head at all.
+  it('never treats an id-less row as the head when no head is named', () => {
+    // Cast because the type says `id: string`; only the unvalidated remote read
+    // can produce this, which is exactly why the guard has to exist at runtime.
+    const idLess = {
+      ...userText('x', 'what does [Image #1] mean?'),
+      id: undefined
+    } as unknown as NativeChatMessage
+    const out = normalizeImageTranscriptMessages([idLess], {})
+    expect(out[0]!.blocks).toEqual([{ type: 'text', text: 'what does [Image #1] mean?' }])
+  })
+
   it('does nothing when the named head is not in the list', () => {
     const out = normalizeImageTranscriptMessages([userText('b', '[Image #1] what do you see')], {
       windowHeadMessageId: 'some-other-row'
