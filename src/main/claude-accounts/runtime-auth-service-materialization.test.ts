@@ -448,9 +448,9 @@ describe('ClaudeRuntimeAuthService', () => {
     writeFileSync(join(managedAuthPath, '.credentials.json'), rotatedCredentials, 'utf-8')
     chmodSync(runtimeCredentialsPath, 0o000)
     try {
-      await expect(service.syncForCurrentSelection()).rejects.toThrow(
-        'Cannot verify shared Claude file credential freshness'
-      )
+      await expect(service.prepareForClaudeLaunch()).resolves.toMatchObject({
+        provenance: 'managed:account-1'
+      })
     } finally {
       if (existsSync(runtimeCredentialsPath)) {
         chmodSync(runtimeCredentialsPath, 0o600)

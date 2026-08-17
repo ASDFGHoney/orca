@@ -11,6 +11,7 @@ import {
   createStore,
   readManagedCredentialsForTest,
   resetRuntimeAuthTestState,
+  setPlatform,
   testState
 } from './runtime-auth-service-test-harness'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -84,7 +85,48 @@ describe('ClaudeRuntimeAuthService monotonic credential freshness', () => {
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(freshRuntime)
   })
 
-  it('writes a newer managed snapshot over an older same-identity runtime', async () => {
+  it('preserves a newer same-identity runtime file on Linux', async () => {
+    setPlatform('linux')
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const freshRuntime = createClaudeCredentialsJson(
+      'one@example.com',
+      'fresh-runtime',
+      null,
+      9_000
+    )
+    const staleManaged = createClaudeCredentialsJson(
+      'one@example.com',
+      'stale-managed',
+      null,
+      1_000
+    )
+    writeFileSync(runtimeCredentialsPath, freshRuntime, 'utf-8')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      staleManaged
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('account-1', managedAuthPath, { email: 'one@example.com' })
+      ],
+      activeClaudeManagedAccountId: null
+    })
+    const store = createStore(settings)
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
+    await service.syncForCurrentSelection()
+
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(freshRuntime)
+    expect(testState.scopedKeychainCredentials).toBeNull()
+    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(freshRuntime)
+  })
+
+  it('continues launch and updates the file when a Keychain freshness read fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const staleRuntime = createClaudeCredentialsJson(
       'one@example.com',
@@ -110,19 +152,29 @@ describe('ClaudeRuntimeAuthService monotonic credential freshness', () => {
       claudeManagedAccounts: [
         createClaudeAccount('account-1', managedAuthPath, { email: 'one@example.com' })
       ],
-      activeClaudeManagedAccountId: null
+      activeClaudeManagedAccountId: 'account-1'
     })
     const store = createStore(settings)
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
     await service.syncForCurrentSelection()
 
-    store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
-    await service.syncForCurrentSelection()
+    writeFileSync(runtimeCredentialsPath, staleRuntime, 'utf-8')
+    testState.scopedKeychainCredentials = staleRuntime
+    testState.legacyKeychainCredentials = staleRuntime
+    testState.throwScopedKeychainRead = true
+    try {
+      await expect(service.prepareForClaudeLaunch()).resolves.toMatchObject({
+        provenance: 'managed:account-1'
+      })
+    } finally {
+      testState.throwScopedKeychainRead = false
+      warn.mockRestore()
+    }
 
     expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(freshManaged)
-    expect(testState.scopedKeychainCredentials).toBe(freshManaged)
-    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(freshManaged)
+    expect(testState.scopedKeychainCredentials).toBe(staleRuntime)
+    expect(testState.legacyKeychainCredentials).toBe(staleRuntime)
   })
 
   it('materializes the selected account when same-identity expiries are equal', async () => {
@@ -217,7 +269,7 @@ describe('ClaudeRuntimeAuthService monotonic credential freshness', () => {
         email: 'one@example.com',
         accessToken: 'unknown-new-login',
         refreshToken: 'unknown-new-login-refresh',
-        expiresAt: '9999999999999'
+        expiresAt: 'not-a-number'
       }
     })}\n`
     const staleFiniteCredentials = createClaudeCredentialsJson(
@@ -245,34 +297,34 @@ describe('ClaudeRuntimeAuthService monotonic credential freshness', () => {
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never) as unknown as {
       syncForCurrentSelection(): Promise<void>
-      applyMonotonicRuntimeMaterializationGuard(
+      prepareMonotonicRuntimeMaterialization(
         selectedAccount: ClaudeManagedAccount,
         candidateCredentialsJson: string,
         observation: undefined,
         preferCandidateOnEqual: boolean,
         candidateProvenance: 'unverified' | 'verified-refresh' | 'verified-adoption'
-      ): Promise<string>
+      ): Promise<{ credentialsJson: string }>
     }
     await service.syncForCurrentSelection()
 
     await expect(
-      service.applyMonotonicRuntimeMaterializationGuard(
+      service.prepareMonotonicRuntimeMaterialization(
         account,
         staleFiniteCredentials,
         undefined,
         true,
         'unverified'
       )
-    ).resolves.toBe(unknownExpiryRuntime)
+    ).resolves.toMatchObject({ credentialsJson: unknownExpiryRuntime })
     await expect(
-      service.applyMonotonicRuntimeMaterializationGuard(
+      service.prepareMonotonicRuntimeMaterialization(
         account,
         staleFiniteCredentials,
         undefined,
         true,
         'verified-adoption'
       )
-    ).resolves.toBe(staleFiniteCredentials)
+    ).resolves.toMatchObject({ credentialsJson: staleFiniteCredentials })
 
     store.updateSettings({ activeClaudeManagedAccountId: 'account-1' })
     await service.syncForCurrentSelection()

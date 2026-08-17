@@ -147,15 +147,24 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account1Refreshed)
   })
 
-  it('refreshes the active account with an expired token when no Claude PTY is live', async () => {
+  it('persists a verified shorter-TTL refresh over a longer-lived runtime snapshot', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const expired = createClaudeCredentialsJson('one@example.com', 'one-expired', null, 1_000)
+    const olderLongerLived = createClaudeCredentialsJson(
+      'one@example.com',
+      'one-older-longer-lived',
+      null,
+      9_000_000_000_000
+    )
     const refreshedCreds = createClaudeCredentialsJson(
       'one@example.com',
       'one-refreshed',
       null,
-      9_999_999_999_999
+      8_000_000_000_000
     )
+    writeFileSync(runtimeCredentialsPath, olderLongerLived, 'utf-8')
+    testState.scopedKeychainCredentials = olderLongerLived
+    testState.legacyKeychainCredentials = olderLongerLived
     const managedAuthPath1 = createManagedClaudeAuth(testState.userDataDir, 'account-1', expired)
     // account-1 is ALREADY the active account (seeded), so this is a re-sync of
     // the active account, not a switch-in — the path that was previously missed.

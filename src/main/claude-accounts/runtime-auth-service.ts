@@ -95,6 +95,15 @@ type ClaudeRuntimeCredentialCandidate = {
 type ClaudeRuntimeCredentialObservation = {
   candidates: ClaudeRuntimeCredentialCandidate[]
   keychainReadFailed: boolean
+  fileReadFailed: boolean
+}
+type ClaudeRuntimeMaterialization = {
+  credentialsJson: string
+  writeRuntimeFile: boolean
+  writeRuntimeKeychain: boolean
+}
+type ClaudeSharedRuntimeCredentials = Omit<ClaudeRuntimeMaterialization, 'credentialsJson'> & {
+  credentialsJson: string | null
 }
 
 const RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR = Symbol('runtime-oauth-account-parse-error')
@@ -447,36 +456,47 @@ export class ClaudeRuntimeAuthService {
     const paths = this.pathResolver.getRuntimePaths()
     // Why: shared ~/.claude + keychain are multi-writer; refuse same-identity regressions so a stale managed snapshot cannot clobber a fresher CLI/login token.
     let runtimeCredentialsToAdopt: string | null = null
+    let writeRuntimeFile = true
+    let writeRuntimeKeychain = true
     const managedCredentialsJson = credentialsJson
     const preferCandidateOnEqual = this.lastSyncedAccountId !== activeAccount.id
     if (!preferManagedSnapshot) {
-      const guardedCredentialsJson = await this.applyMonotonicRuntimeMaterializationGuard(
+      const guardedMaterialization = await this.prepareMonotonicRuntimeMaterialization(
         activeAccount,
         credentialsJson,
         runtimeCredentialObservation,
         preferCandidateOnEqual,
         candidateProvenance
       )
-      if (guardedCredentialsJson !== credentialsJson) {
-        runtimeCredentialsToAdopt = guardedCredentialsJson
-        credentialsJson = guardedCredentialsJson
+      writeRuntimeFile = guardedMaterialization.writeRuntimeFile
+      writeRuntimeKeychain = guardedMaterialization.writeRuntimeKeychain
+      if (guardedMaterialization.credentialsJson !== credentialsJson) {
+        if (writeRuntimeFile && (process.platform !== 'darwin' || writeRuntimeKeychain)) {
+          runtimeCredentialsToAdopt = guardedMaterialization.credentialsJson
+        }
+        credentialsJson = guardedMaterialization.credentialsJson
       }
     }
-    if (!preferManagedSnapshot) {
-      const protectedCredentialsJson = this.protectRuntimeFileCredentialWrite(
+    if (!preferManagedSnapshot && writeRuntimeFile) {
+      const protectedMaterialization = this.protectRuntimeFileCredentialWrite(
         activeAccount,
         credentialsJson,
         managedCredentialsJson,
         preferCandidateOnEqual,
         candidateProvenance
       )
-      if (protectedCredentialsJson !== credentialsJson) {
-        runtimeCredentialsToAdopt = protectedCredentialsJson
-        credentialsJson = protectedCredentialsJson
+      writeRuntimeFile = protectedMaterialization.writeRuntimeFile
+      if (protectedMaterialization.credentialsJson !== credentialsJson) {
+        if (writeRuntimeFile && (process.platform !== 'darwin' || writeRuntimeKeychain)) {
+          runtimeCredentialsToAdopt = protectedMaterialization.credentialsJson
+        }
+        credentialsJson = protectedMaterialization.credentialsJson
       }
     }
-    this.writeRuntimeCredentials(credentialsJson)
-    if (process.platform === 'darwin') {
+    if (writeRuntimeFile) {
+      this.writeRuntimeCredentials(credentialsJson)
+    }
+    if (process.platform === 'darwin' && writeRuntimeKeychain) {
       // Why: Claude Code 2.1+ reads the scoped service, older builds the legacy unsuffixed one; runtime switching must satisfy both.
       try {
         await writeActiveClaudeKeychainCredentialsForRuntime(credentialsJson, paths.configDir)
@@ -530,7 +550,7 @@ export class ClaudeRuntimeAuthService {
         observation ??
         (await this.readRuntimeCredentialCandidatesForReadBack(baselineCredentialsJson))
       const { candidates } = observed
-      if (observed.keychainReadFailed) {
+      if (observed.keychainReadFailed || observed.fileReadFailed) {
         return {
           status: 'rejected',
           runtimeCredentialsChanged:
@@ -626,14 +646,17 @@ export class ClaudeRuntimeAuthService {
         // Why: managed persistence awaits Keychain, so re-read the file before publishing the observed snapshot.
         const runtimeCredentialsChangedWhilePersisting =
           this.readRuntimeCredentialsFile() !== runtimeCredentialsBeforeManagedWrite
-        const credentialsToPublish = this.protectRuntimeFileCredentialWrite(
+        const protectedMaterialization = this.protectRuntimeFileCredentialWrite(
           match.account,
           runtimeContents,
           match.managedCredentialsJson,
           !runtimeCredentialsChangedWhilePersisting,
           'verified-adoption'
         )
-        this.writeRuntimeCredentials(credentialsToPublish)
+        const credentialsToPublish = protectedMaterialization.credentialsJson
+        if (protectedMaterialization.writeRuntimeFile) {
+          this.writeRuntimeCredentials(credentialsToPublish)
+        }
         this.lastWrittenCredentialsJson = credentialsToPublish
         if (process.platform === 'darwin') {
           const paths = this.pathResolver.getRuntimePaths()
@@ -664,6 +687,7 @@ export class ClaudeRuntimeAuthService {
     const runtimeOauthAccount = this.readRuntimeOauthAccount()
     const candidates: ClaudeRuntimeCredentialCandidate[] = []
     let keychainReadFailed = false
+    let fileReadFailed = false
     const pushCandidate = (credentialsJson: string | null): void => {
       if (
         credentialsJson &&
@@ -682,9 +706,14 @@ export class ClaudeRuntimeAuthService {
         scopedKeychain.status === 'captured' ? scopedKeychain.credentialsJson : null
       const legacyKeychainCredentials =
         legacyKeychain.status === 'captured' ? legacyKeychain.credentialsJson : null
-      const fileCredentials = existsSync(paths.credentialsPath)
-        ? readFileSync(paths.credentialsPath, 'utf-8')
-        : null
+      let fileCredentials: string | null = null
+      try {
+        fileCredentials = existsSync(paths.credentialsPath)
+          ? readFileSync(paths.credentialsPath, 'utf-8')
+          : null
+      } catch {
+        fileReadFailed = true
+      }
       if (this.lastWrittenCredentialsJson === null) {
         pushCandidate(scopedKeychainCredentials)
         pushCandidate(legacyKeychainCredentials)
@@ -693,19 +722,25 @@ export class ClaudeRuntimeAuthService {
           candidates: candidates.filter(
             (candidate) => candidate.credentialsJson !== baselineCredentialsJson
           ),
-          keychainReadFailed
+          keychainReadFailed,
+          fileReadFailed
         }
       }
       pushCandidate(scopedKeychainCredentials)
       pushCandidate(legacyKeychainCredentials)
       pushCandidate(fileCredentials)
-      return { candidates, keychainReadFailed }
+      return { candidates, keychainReadFailed, fileReadFailed }
     }
-    const fileCredentials = existsSync(paths.credentialsPath)
-      ? readFileSync(paths.credentialsPath, 'utf-8')
-      : null
+    let fileCredentials: string | null = null
+    try {
+      fileCredentials = existsSync(paths.credentialsPath)
+        ? readFileSync(paths.credentialsPath, 'utf-8')
+        : null
+    } catch {
+      fileReadFailed = true
+    }
     pushCandidate(fileCredentials)
-    return { candidates, keychainReadFailed }
+    return { candidates, keychainReadFailed, fileReadFailed }
   }
 
   private getPreparation(target?: ClaudeAccountSelectionTarget): ClaudeRuntimeAuthPreparation {
@@ -1113,17 +1148,6 @@ export class ClaudeRuntimeAuthService {
     if (!managedAuthPath) {
       throw new Error('Managed Claude auth storage is not owned by Orca.')
     }
-    const existingManagedCredentialsJson = await this.readManagedCredentials(account)
-    if (
-      decideMonotonicCredentialWrite({
-        candidateJson: credentialsJson,
-        existingJson: existingManagedCredentialsJson,
-        equalExpiry: 'write',
-        unknownExistingExpiry: 'write'
-      }) === 'keep-existing'
-    ) {
-      return
-    }
     if (process.platform === 'darwin') {
       await writeManagedClaudeKeychainCredentials(account.id, credentialsJson)
       return
@@ -1136,19 +1160,38 @@ export class ClaudeRuntimeAuthService {
    * keychain and refuse a same-identity expiresAt regression. When runtime is fresher,
    * adopt it into managed storage so the next sync cannot reintroduce the stale snapshot.
    */
-  private async applyMonotonicRuntimeMaterializationGuard(
+  private async prepareMonotonicRuntimeMaterialization(
     account: ClaudeManagedAccount,
     candidateCredentialsJson: string,
     observation: ClaudeRuntimeCredentialObservation | undefined,
     preferCandidateOnEqual: boolean,
     candidateProvenance: ClaudeCredentialCandidateProvenance
-  ): Promise<string> {
-    const existingRuntimeCredentialsJson = await this.readFreshestSharedRuntimeCredentials(
+  ): Promise<ClaudeRuntimeMaterialization> {
+    const sharedRuntime = await this.readFreshestSharedRuntimeCredentials(
       account,
       candidateCredentialsJson,
       observation
     )
+    const existingRuntimeCredentialsJson = sharedRuntime.credentialsJson
+    return {
+      ...sharedRuntime,
+      credentialsJson: this.applyMonotonicRuntimeMaterializationGuard(
+        candidateCredentialsJson,
+        existingRuntimeCredentialsJson,
+        preferCandidateOnEqual,
+        candidateProvenance
+      )
+    }
+  }
+
+  private applyMonotonicRuntimeMaterializationGuard(
+    candidateCredentialsJson: string,
+    existingRuntimeCredentialsJson: string | null,
+    preferCandidateOnEqual: boolean,
+    candidateProvenance: ClaudeCredentialCandidateProvenance
+  ): string {
     if (
+      candidateProvenance === 'verified-refresh' ||
       decideMonotonicCredentialWrite({
         candidateJson: candidateCredentialsJson,
         existingJson: existingRuntimeCredentialsJson,
@@ -1172,14 +1215,23 @@ export class ClaudeRuntimeAuthService {
     managedCredentialsJson: string,
     preferCandidateOnEqual: boolean,
     candidateProvenance: ClaudeCredentialCandidateProvenance
-  ): string {
+  ): Pick<ClaudeRuntimeMaterialization, 'credentialsJson' | 'writeRuntimeFile'> {
     const paths = this.pathResolver.getRuntimePaths()
-    const currentCredentialsJson = existsSync(paths.credentialsPath)
-      ? readFileSync(paths.credentialsPath, 'utf-8')
-      : null
+    let currentCredentialsJson: string | null
+    try {
+      currentCredentialsJson = existsSync(paths.credentialsPath)
+        ? readFileSync(paths.credentialsPath, 'utf-8')
+        : null
+    } catch {
+      console.warn(
+        '[claude-runtime-auth] Skipping shared Claude credential write because freshness could not be verified'
+      )
+      return { credentialsJson: candidateCredentialsJson, writeRuntimeFile: false }
+    }
     if (
       !currentCredentialsJson ||
       currentCredentialsJson === candidateCredentialsJson ||
+      !this.isValidCredentialsJsonObject(currentCredentialsJson) ||
       !this.runtimeCredentialsUniquelyMatchAccount(
         currentCredentialsJson,
         this.readRuntimeOauthAccount(),
@@ -1188,60 +1240,61 @@ export class ClaudeRuntimeAuthService {
         this.readManagedOauthAccount(account)
       )
     ) {
-      return candidateCredentialsJson
+      return { credentialsJson: candidateCredentialsJson, writeRuntimeFile: true }
     }
-    return decideMonotonicCredentialWrite({
-      candidateJson: candidateCredentialsJson,
-      existingJson: currentCredentialsJson,
-      equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing',
-      unknownExistingExpiry: candidateProvenance === 'unverified' ? 'keep-existing' : 'write'
-    }) === 'keep-existing'
-      ? currentCredentialsJson
-      : candidateCredentialsJson
+    const credentialsJson =
+      decideMonotonicCredentialWrite({
+        candidateJson: candidateCredentialsJson,
+        existingJson: currentCredentialsJson,
+        equalExpiry: preferCandidateOnEqual ? 'write' : 'keep-existing',
+        unknownExistingExpiry: candidateProvenance === 'unverified' ? 'keep-existing' : 'write'
+      }) === 'keep-existing' && candidateProvenance !== 'verified-refresh'
+        ? currentCredentialsJson
+        : candidateCredentialsJson
+    return { credentialsJson, writeRuntimeFile: true }
   }
 
   private async readFreshestSharedRuntimeCredentials(
     account: ClaudeManagedAccount,
     managedCredentialsJson: string,
     observation?: ClaudeRuntimeCredentialObservation
-  ): Promise<string | null> {
+  ): Promise<ClaudeSharedRuntimeCredentials> {
     const paths = this.pathResolver.getRuntimePaths()
     const runtimeOauthAccount = this.readRuntimeOauthAccount()
     const managedOauthAccount = this.readManagedOauthAccount(account)
     const candidates = observation ? [...observation.candidates] : []
-    if (observation?.keychainReadFailed) {
-      throw new Error('Cannot verify shared Claude Keychain credential freshness')
-    }
+    let keychainReadFailed = observation?.keychainReadFailed ?? false
     if (process.platform === 'darwin' && !observation) {
       const scopedKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot(
         paths.configDir
       )
       const legacyKeychain = await this.readActiveClaudeKeychainCredentialsForSnapshot()
-      if (scopedKeychain.status === 'failed' || legacyKeychain.status === 'failed') {
-        throw new Error('Cannot verify shared Claude Keychain credential freshness')
-      }
+      keychainReadFailed = scopedKeychain.status === 'failed' || legacyKeychain.status === 'failed'
       candidates.push(
         {
-          credentialsJson: scopedKeychain.credentialsJson ?? '',
+          credentialsJson:
+            scopedKeychain.status === 'captured' ? (scopedKeychain.credentialsJson ?? '') : '',
           runtimeOauthAccount
         },
         {
-          credentialsJson: legacyKeychain.credentialsJson ?? '',
+          credentialsJson:
+            legacyKeychain.status === 'captured' ? (legacyKeychain.credentialsJson ?? '') : '',
           runtimeOauthAccount
         }
       )
     }
     let fileCredentials: string | null = null
+    let fileReadFailed = observation?.fileReadFailed ?? false
     try {
       if (existsSync(paths.credentialsPath)) {
         fileCredentials = readFileSync(paths.credentialsPath, 'utf-8')
       }
-    } catch (error) {
+      fileReadFailed = false
+    } catch {
       console.warn(
-        '[claude-runtime-auth] Failed to read shared Claude credentials for freshness guard:',
-        error
+        '[claude-runtime-auth] Skipping shared Claude credential write because freshness could not be verified'
       )
-      throw new Error('Cannot verify shared Claude file credential freshness')
+      fileReadFailed = true
     }
     if (fileCredentials) {
       candidates.unshift({ credentialsJson: fileCredentials, runtimeOauthAccount })
@@ -1250,6 +1303,7 @@ export class ClaudeRuntimeAuthService {
       .filter(
         (candidate) =>
           candidate.credentialsJson !== '' &&
+          this.isValidCredentialsJsonObject(candidate.credentialsJson) &&
           this.runtimeCredentialsUniquelyMatchAccount(
             candidate.credentialsJson,
             candidate.runtimeOauthAccount,
@@ -1259,7 +1313,11 @@ export class ClaudeRuntimeAuthService {
           )
       )
       .map((candidate) => candidate.credentialsJson)
-    return pickFreshestCredentialsJson(sameAccountCandidates)
+    return {
+      credentialsJson: pickFreshestCredentialsJson(sameAccountCandidates),
+      writeRuntimeFile: !fileReadFailed,
+      writeRuntimeKeychain: !keychainReadFailed
+    }
   }
 
   private runtimeCredentialsUniquelyMatchAccount(

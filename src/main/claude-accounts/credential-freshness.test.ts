@@ -33,16 +33,25 @@ function credentials(input: {
 }
 
 describe('credential-freshness', () => {
-  it('normalizes seconds and milliseconds while rejecting non-numeric expiry', () => {
+  it('normalizes numeric and numeric-string seconds while rejecting non-numeric expiry', () => {
     expect(readCredentialExpiresAt(credentials({ expiresAt: 5_000 }))).toBe(5_000_000)
     expect(
       readCredentialExpiresAt(
         JSON.stringify({ claudeAiOauth: { accessToken: 't', expires_at: 7_000 } })
       )
     ).toBe(7_000_000)
-    expect(readCredentialExpiresAt(credentials({ expiresAt: '7000' }))).toBeNull()
+    expect(readCredentialExpiresAt(credentials({ expiresAt: '7000' }))).toBe(7_000_000)
     expect(readCredentialExpiresAt('not-json')).toBeNull()
     expect(readCredentialExpiresAt(credentials({ expiresAt: 'bad' }))).toBeNull()
+  })
+
+  it('orders mixed epoch seconds and milliseconds after normalization', () => {
+    const seconds = credentials({ accessToken: 'seconds', expiresAt: '9000000000' })
+    const milliseconds = credentials({ accessToken: 'milliseconds', expiresAt: 8_000_000_000_000 })
+
+    expect(
+      decideMonotonicCredentialWrite({ candidateJson: seconds, existingJson: milliseconds })
+    ).toBe('write')
   })
 
   it('writes when there is no existing credential', () => {
@@ -183,7 +192,7 @@ describe('credential-freshness', () => {
     ).toBe('write')
   })
 
-  it('keeps existing when candidate lacks an access token', () => {
+  it('does not reject a credential object solely because OAuth accessToken is absent', () => {
     expect(
       decideMonotonicCredentialWrite({
         candidateJson: JSON.stringify({
@@ -191,7 +200,14 @@ describe('credential-freshness', () => {
         }),
         existingJson: credentials({ email: 'a@example.com', accessToken: 'ok', expiresAt: 1_000 })
       })
-    ).toBe('keep-existing')
+    ).toBe('write')
+    expect(
+      decideMonotonicCredentialWrite({
+        candidateJson: JSON.stringify({ apiKey: 'synthetic-new' }),
+        existingJson: JSON.stringify({ apiKey: 'synthetic-old' }),
+        unknownExistingExpiry: 'write'
+      })
+    ).toBe('write')
   })
 
   it('picks the freshest credential among diverged stores', () => {
@@ -202,11 +218,11 @@ describe('credential-freshness', () => {
     expect(pickFreshestCredentialsJson([null, undefined, ''])).toBeNull()
   })
 
-  it('preserves store precedence when finite and unknown expiries are incomparable', () => {
-    const unknown = credentials({ accessToken: 'unknown', expiresAt: '9999999999999' })
+  it('uses numeric-string expiry when choosing among stores', () => {
+    const numericString = credentials({ accessToken: 'numeric-string', expiresAt: '9999999999999' })
     const finite = credentials({ accessToken: 'finite', expiresAt: 1_000 })
 
-    expect(pickFreshestCredentialsJson([unknown, finite])).toBe(unknown)
-    expect(pickFreshestCredentialsJson([finite, unknown])).toBe(finite)
+    expect(pickFreshestCredentialsJson([numericString, finite])).toBe(numericString)
+    expect(pickFreshestCredentialsJson([finite, numericString])).toBe(numericString)
   })
 })

@@ -33,17 +33,17 @@ export function decideMonotonicCredentialWrite(input: {
   if (existingJson === null || existingJson === '') {
     return 'write'
   }
-  if (!hasAccessToken(existingJson)) {
+  if (!isCredentialsObject(existingJson)) {
     return 'write'
   }
-  if (!hasAccessToken(candidateJson)) {
+  if (!isCredentialsObject(candidateJson)) {
     return 'keep-existing'
   }
   const candidateExpiresAt = readCredentialExpiresAt(candidateJson)
   const existingExpiresAt = readCredentialExpiresAt(existingJson)
 
   if (existingExpiresAt === null && candidateExpiresAt === null) {
-    return 'keep-existing'
+    return input.unknownExistingExpiry ?? 'keep-existing'
   }
   if (candidateExpiresAt === null) {
     return 'keep-existing'
@@ -66,7 +66,7 @@ export function pickFreshestCredentialsJson(
   let freshest: string | null = null
   let freshestExpiresAt: number | null = null
   for (const candidate of candidates) {
-    if (!candidate || !hasAccessToken(candidate)) {
+    if (!candidate || !isCredentialsObject(candidate)) {
       continue
     }
     const expiresAt = readCredentialExpiresAt(candidate)
@@ -84,13 +84,13 @@ export function pickFreshestCredentialsJson(
   return freshest
 }
 
-function hasAccessToken(credentialsJson: string): boolean {
-  const oauth = readOauthRecord(credentialsJson)
-  if (!oauth) {
+function isCredentialsObject(credentialsJson: string): boolean {
+  try {
+    const parsed = JSON.parse(credentialsJson) as unknown
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+  } catch {
     return false
   }
-  const accessToken = oauth.accessToken
-  return typeof accessToken === 'string' && accessToken.trim() !== ''
 }
 
 function readOauthRecord(credentialsJson: string): Record<string, unknown> | null {
@@ -112,6 +112,10 @@ function readOauthRecord(credentialsJson: string): Record<string, unknown> | nul
 function readFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
   }
   return null
 }

@@ -498,7 +498,7 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
         managedCredentialsJson: string,
         preferCandidateOnEqual: boolean,
         candidateProvenance: 'unverified' | 'verified-refresh' | 'verified-adoption'
-      ) => string
+      ) => { credentialsJson: string }
     }
     writeFileSync(runtimeCredentialsPath, observedRuntime, 'utf-8')
     expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(observedRuntime)
@@ -512,7 +512,7 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
         false,
         'unverified'
       )
-    ).toBe(concurrentRefresh)
+    ).toMatchObject({ credentialsJson: concurrentRefresh })
   })
 
   it('reuses the read-back keychain snapshot for the steady-state freshness guard', async () => {
@@ -544,13 +544,13 @@ describe('ClaudeRuntimeAuthService credential freshness races', () => {
     expect(readActiveClaudeKeychainCredentialsStrict).toHaveBeenCalledTimes(2)
   })
 
-  it('force-materializes after re-auth skip even when runtime expires later', async () => {
+  it('recovers from a far-future runtime expiry after explicit re-auth', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const previousRuntime = createClaudeCredentialsJson(
       'one@example.com',
       'previous-runtime',
       null,
-      9_000
+      9_000_000_000_000_000
     )
     const reauthedManaged = createClaudeCredentialsJson(
       'one@example.com',
