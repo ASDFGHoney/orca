@@ -165,6 +165,43 @@ describe('replay', () => {
   })
 })
 
+describe('automatic compaction', () => {
+  // Production passes no policy and never called compact(), so the log only
+  // ever grew — until the size bound refused every append for good.
+  it('compacts on append once the retention window has rows to shed', async () => {
+    const policy = { minTailRows: 2, retainTailMs: 0 }
+    const journal = await open({ compaction: policy })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBeGreaterThan(0)
+    // The log sheds instead of growing with every append (7 = epoch row + 6).
+    const log = await readFile(join(root, JOURNAL_LOG_FILE), 'utf-8')
+    expect(log.trim().split('\n').length).toBeLessThan(7)
+    // Nothing is lost: the folded prefix is served from the snapshot.
+    expect(journal.snapshot().items).toHaveLength(6)
+  })
+
+  it('does not rewrite the log while every row is inside the retention window', async () => {
+    const journal = await open({ compaction: { minTailRows: 2, retainTailMs: 60_000 } })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBe(0)
+  })
+
+  it('can be turned off explicitly', async () => {
+    const journal = await open({
+      autoCompact: false,
+      compaction: { minTailRows: 2, retainTailMs: 0 }
+    })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBe(0)
+  })
+})
+
 describe('compaction and retention', () => {
   it('preserves the highest fence across compaction and reopen', async () => {
     const journal = await open({ compaction: { minTailRows: 1, retainTailMs: 0 } })
