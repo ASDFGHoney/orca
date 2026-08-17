@@ -394,6 +394,7 @@ jobs:
         run: >-
           xvfb-run --auto-servernum pnpm exec vitest run --config config/vitest.config.ts
           src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts
+          src/main/browser/browser-route-webrtc-egress.electron.test.ts
 
       - name: Build package inputs
         run: |
@@ -471,6 +472,7 @@ jobs:
         run: >-
           pnpm exec vitest run --config config/vitest.config.ts
           src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts
+          src/main/browser/browser-route-webrtc-egress.electron.test.ts
           src/main/cli/wsl-cli-powershell-boundary.test.ts
           src/main/orca-profiles/profile-index-store.test.ts
           src/main/runtime/repo-worktree-admin-fingerprint.test.ts

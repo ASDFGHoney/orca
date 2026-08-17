@@ -448,8 +448,12 @@ describe('Electron runtime package contract', () => {
     expect(linuxStep.run).toContain(
       'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
     )
+    expect(linuxStep.run).toContain('src/main/browser/browser-route-webrtc-egress.electron.test.ts')
     expect(windowsStep.run).toContain(
       'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
+    )
+    expect(windowsStep.run).toContain(
+      'src/main/browser/browser-route-webrtc-egress.electron.test.ts'
     )
   })
 
