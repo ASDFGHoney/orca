@@ -1,11 +1,11 @@
 import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 import { RemoteBrowserPageSession } from './remote-browser-page-session'
-import { RemoteBrowserLegacyViewport } from '../remote-browser-legacy-viewport'
-import { startRemoteBrowserStream } from '../remote-browser-stream-opening'
+import { RemoteBrowserLegacyViewport } from './remote-browser-legacy-viewport'
+import { startRemoteBrowserStream } from './remote-browser-stream-opening'
 import { RemoteBrowserStreamRestartScheduler } from './remote-browser-stream-restart-scheduler'
 import { RemoteBrowserStreamLiveness } from './remote-browser-stream-liveness'
 import { createRemoteBrowserStreamRestartAttempt } from './remote-browser-stream-restart-attempt'
-import { retireRemoteBrowserStreamWork } from '../remote-browser-stream-retirement'
+import { retireRemoteBrowserStreamWork } from './remote-browser-stream-retirement'
 import {
   REMOTE_BROWSER_STREAM_OPENING,
   remoteBrowserStreamLostNotice,

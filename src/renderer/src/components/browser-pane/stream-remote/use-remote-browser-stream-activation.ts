@@ -5,7 +5,6 @@ import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifec
 type RemoteBrowserStreamActivationOptions = {
   activeRuntimeEnvironmentId: string
   browserPageId: string
-  clearPendingRemoteInput: () => void
   clearPendingRemoteWheel: () => void
   isActive: boolean
   lifecycle: Pick<RemoteBrowserStreamLifecycle, 'open'>
@@ -16,7 +15,6 @@ type RemoteBrowserStreamActivationOptions = {
 export function useRemoteBrowserStreamActivation({
   activeRuntimeEnvironmentId,
   browserPageId,
-  clearPendingRemoteInput,
   clearPendingRemoteWheel,
   isActive,
   lifecycle,
@@ -32,14 +30,12 @@ export function useRemoteBrowserStreamActivation({
     const closeStream = lifecycle.open()
     return () => {
       closeStream()
-      clearPendingRemoteInput()
       clearPendingRemoteWheel()
     }
   }, [
     // The stable lifecycle reads identity through refs; these values trigger the required reopen.
     activeRuntimeEnvironmentId,
     browserPageId,
-    clearPendingRemoteInput,
     clearPendingRemoteWheel,
     isActive,
     lifecycle,

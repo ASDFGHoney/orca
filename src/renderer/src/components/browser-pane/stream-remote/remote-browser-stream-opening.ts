@@ -1,5 +1,5 @@
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
-import type { RuntimeStatus } from '../../../../shared/runtime-types'
+import type { RuntimeStatus } from '../../../../../shared/runtime-types'
 import { openRemoteBrowserScreencastStream } from './remote-browser-screencast-subscription'
 import { createRemoteBrowserStreamEvents } from './remote-browser-stream-events'
 import type { RemoteBrowserStreamLifecycleDeps } from './remote-browser-stream-lifecycle-deps'

@@ -1,4 +1,4 @@
-import type { BrowserScreencastFrameMetadata } from '../../../../shared/browser-screencast-protocol'
+import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 import {
   areRemoteViewportSizesNear,
   type RemoteBrowserViewportSize

@@ -1,4 +1,4 @@
-import type { BrowserScreencastFrameMetadata } from '../../../../shared/browser-screencast-protocol'
+import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 import { shouldContainRemoteBrowserFrame } from './remote-browser-frame-style'
 
 type Size = { width: number; height: number }
