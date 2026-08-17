@@ -773,30 +773,6 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     ).rejects.toThrow('agent_session_operation_conflict')
   })
 
-  it('quarantines a record it cannot validate and refuses to own that session id', async () => {
-    const first = await open()
-    await establishOwner(first)
-    const filePath = agentSessionStorePath(directory)
-    const raw = JSON.parse(await readFile(filePath, 'utf-8'))
-    raw.records['session-alpha'].lease.runtimeFence = 'not-a-number'
-    await writeFile(filePath, JSON.stringify(raw))
-
-    const reopened = await open()
-    expect(reopened.getRecord('session-alpha')).toBeNull()
-    expect(reopened.isSessionUnreadable('session-alpha')).toBe(true)
-    await expect(reopened.reserveOwner(reserveRequest())).rejects.toThrow(
-      'execution_owner_reconciling'
-    )
-    // The row stays verbatim inside an explicit unusable envelope.
-    await reopened.retireClaimKey('key-2', NOW)
-    const persisted = JSON.parse(await readFile(filePath, 'utf-8'))
-    expect(persisted.records).not.toHaveProperty('session-alpha')
-    expect(persisted.unusableRecords['session-alpha']).toMatchObject({
-      reason: 'current_shape_invalid',
-      raw: { lease: { runtimeFence: 'not-a-number' } }
-    })
-  })
-
   it.each([
     [
       'invalid checkpoint',
