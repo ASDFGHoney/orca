@@ -310,6 +310,43 @@ describe('worktree name retirement registry', () => {
     ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
   })
 
+  it('keeps a live sibling target its retirements when another row on the same endpoint rotates', async () => {
+    const store = await createStore()
+    // Two rows, one endpoint: nothing dedupes SSH targets by host|port|username, so the endpoint
+    // bucket is shared and is not owned by whichever row happens to rotate.
+    store.addSshTarget(sshTarget('ssh-x', { configHost: 'builder', host: 'old.example.com' }))
+    store.addSshTarget(sshTarget('ssh-y', { host: 'old.example.com' }))
+    const sibling = { ...REMOTE_REPO, connectionId: 'ssh-y' }
+    store.addRepo(sibling)
+    const { getRetiredNameRegistryForRepo, retireGeneratedWorktreeName } =
+      await import('./worktree-name-retirement')
+    await retireGeneratedWorktreeName(store, sibling, store.getSettings(), 'nautilus')
+
+    // `ssh-x` is removed and re-imported with a moved HostName; its alias still matches, so
+    // re-adoption rotates it onto a new endpoint.
+    store.removeSshTarget('ssh-x')
+    store.addRemovedSshTargetTombstone({
+      oldTargetId: 'ssh-x',
+      configHost: 'builder',
+      host: 'old.example.com',
+      port: 22,
+      username: 'dev',
+      label: 'builder',
+      removedAt: 0
+    })
+    store.addSshTarget(sshTarget('ssh-x-new', { configHost: 'builder', host: 'new.example.com' }))
+    store.reassignSshTargetId('ssh-x', 'ssh-x-new')
+
+    // `ssh-y` never moved. Drop its repo row the way a project remove/re-add does, so the namespace
+    // copy is the only thing left holding the tombstone.
+    store.removeProject(REPO)
+    const readded = { ...REMOTE_REPO, id: OTHER_REPO, connectionId: 'ssh-y' }
+    store.addRepo(readded)
+    await expect(
+      getRetiredNameRegistryForRepo(store, readded, [readded], store.getSettings())
+    ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
+  })
+
   it('shares one retirement bucket across SSH repos whose target row is gone', async () => {
     // No target row means no endpoint to compare. Retirement prefers spending one name out of the
     // pool over reissuing a cwd whose agent history is still on disk, so these share a bucket.

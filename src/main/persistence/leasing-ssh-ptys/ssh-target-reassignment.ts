@@ -34,11 +34,14 @@ function migrateRetirementNamespaces(
   const tombstone = state.removedSshTargetTombstones?.find(
     (entry) => entry.oldTargetId === oldTargetId
   )
-  return migrateRetirementNamespaceHostIdentity(
-    state.retiredWorktreeNamesByNamespace,
-    [toSshExecutionHostId(oldTargetId), ...(tombstone ? [sshHostIdentity(tombstone)] : [])],
-    sshHostIdentity(newTarget)
-  )
+  return migrateRetirementNamespaceHostIdentity(state.retiredWorktreeNamesByNamespace, {
+    // The row id died with the target, so nothing else can still resolve to it.
+    moveFrom: [toSshExecutionHostId(oldTargetId)],
+    // Endpoints are shared, not owned: a second target can still reach this host, so leave its
+    // bucket in place rather than stripping the tombstones out from under it.
+    copyFrom: tombstone ? [sshHostIdentity(tombstone)] : [],
+    to: sshHostIdentity(newTarget)
+  })
 }
 
 /**

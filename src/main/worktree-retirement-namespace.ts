@@ -98,31 +98,78 @@ export function recordRetirementNamespaceRegistry(
   }
 }
 
-/** Re-keys every namespace an SSH target used to own onto its current identity, so a rotated
+export type RetirementNamespaceHostMigration = {
+  /** Identities a single target row owned outright — its `ssh:<targetId>` host id. Reassignment
+   *  leaves nothing pointing at them, so their namespaces move. */
+  moveFrom?: readonly string[]
+  /** Endpoint identities. These are deliberately *not* owned by the row that rotated: nothing stops
+   *  a second target resolving to the same host|port|username, so the source bucket is kept.
+   *  Copying costs one duplicated entry; moving would strip a live target's tombstones and reissue
+   *  a path whose agent history is still on disk. */
+  copyFrom?: readonly string[]
+  to: string
+}
+
+/** Re-keys every namespace an SSH target used to reach onto its current identity, so a rotated
  *  target id does not strand the names it already spent. */
 export function migrateRetirementNamespaceHostIdentity(
   namespaces: Record<string, RetiredNameRegistry> | undefined,
-  oldHostIdentities: readonly string[],
-  newHostIdentity: string
+  migration: RetirementNamespaceHostMigration
 ): boolean {
   if (!namespaces) {
     return false
   }
+  const visited = new Set<string>()
   let changed = false
-  for (const oldIdentity of new Set(oldHostIdentities)) {
-    if (!oldIdentity || oldIdentity === newHostIdentity) {
-      continue
-    }
-    const prefix = `${oldIdentity}:`
-    for (const key of Object.keys(namespaces)) {
-      if (!key.startsWith(prefix)) {
+  for (const group of [
+    { identities: migration.moveFrom ?? [], retainSource: false },
+    { identities: migration.copyFrom ?? [], retainSource: true }
+  ]) {
+    for (const oldIdentity of group.identities) {
+      if (!oldIdentity || oldIdentity === migration.to || visited.has(oldIdentity)) {
         continue
       }
-      const registry = namespaces[key]
+      visited.add(oldIdentity)
+      if (rekeyRetirementNamespaceHost(namespaces, oldIdentity, migration.to, group.retainSource)) {
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
+function rekeyRetirementNamespaceHost(
+  namespaces: Record<string, RetiredNameRegistry>,
+  fromIdentity: string,
+  toIdentity: string,
+  retainSource: boolean
+): boolean {
+  const prefix = `${fromIdentity}:`
+  let changed = false
+  for (const key of Object.keys(namespaces)) {
+    if (!key.startsWith(prefix)) {
+      continue
+    }
+    const registry = namespaces[key]
+    if (!retainSource) {
       delete namespaces[key]
-      const nextKey = `${newHostIdentity}:${key.slice(prefix.length)}`
-      const existing = namespaces[nextKey]
-      namespaces[nextKey] = existing ? mergeRetiredNameRegistries(existing, registry) : registry
+      changed = true
+    }
+    const nextKey = `${toIdentity}:${key.slice(prefix.length)}`
+    const existing = namespaces[nextKey]
+    if (!existing) {
+      namespaces[nextKey] = registry
+      changed = true
+      continue
+    }
+    // Why compare: a copy repeats on every import, and reporting a change the destination already
+    // covered would schedule a save each time.
+    const merged = mergeRetiredNameRegistries(existing, registry)
+    if (
+      merged.names.length !== existing.names.length ||
+      merged.exhaustedTiers !== existing.exhaustedTiers
+    ) {
+      namespaces[nextKey] = merged
       changed = true
     }
   }

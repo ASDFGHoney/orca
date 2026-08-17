@@ -62,18 +62,57 @@ describe('recordRetirementNamespaceRegistry', () => {
 describe('migrateRetirementNamespaceHostIdentity', () => {
   it('folds a migrated namespace into one the new identity already owns', () => {
     const namespaces = {
-      'ssh:old|22|dev:posix:/srv/a': registry('nautilus'),
+      'ssh:old-id:posix:/srv/a': registry('nautilus'),
       'ssh:new|22|dev:posix:/srv/a': registry('seahorse')
     }
 
     expect(
-      migrateRetirementNamespaceHostIdentity(namespaces, ['ssh:old|22|dev'], 'ssh:new|22|dev')
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        moveFrom: ['ssh:old-id'],
+        to: 'ssh:new|22|dev'
+      })
     ).toBe(true)
     expect(Object.keys(namespaces)).toEqual(['ssh:new|22|dev:posix:/srv/a'])
     expect(namespaces['ssh:new|22|dev:posix:/srv/a'].names.toSorted()).toEqual([
       'nautilus',
       'seahorse'
     ])
+  })
+
+  it('keeps the source bucket when an endpoint identity moves, since a live target may share it', () => {
+    // A second target can still resolve to `old|22|dev`. Stripping its tombstones would reissue a
+    // path whose agent history is still on disk — the one outcome retirement exists to prevent.
+    const namespaces = {
+      'ssh:old|22|dev:posix:/srv/a': registry('nautilus')
+    }
+
+    expect(
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        copyFrom: ['ssh:old|22|dev'],
+        to: 'ssh:new|22|dev'
+      })
+    ).toBe(true)
+    expect(Object.keys(namespaces).toSorted()).toEqual([
+      'ssh:new|22|dev:posix:/srv/a',
+      'ssh:old|22|dev:posix:/srv/a'
+    ])
+    expect(namespaces['ssh:old|22|dev:posix:/srv/a'].names).toEqual(['nautilus'])
+    expect(namespaces['ssh:new|22|dev:posix:/srv/a'].names).toEqual(['nautilus'])
+  })
+
+  it('reports no change when a repeated copy adds nothing the destination lacks', () => {
+    // Re-import runs this on every add; a no-op copy must not schedule a save.
+    const namespaces = {
+      'ssh:old|22|dev:posix:/srv/a': registry('nautilus'),
+      'ssh:new|22|dev:posix:/srv/a': registry('nautilus')
+    }
+
+    expect(
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        copyFrom: ['ssh:old|22|dev'],
+        to: 'ssh:new|22|dev'
+      })
+    ).toBe(false)
   })
 
   it('leaves an identity that merely shares a prefix with the old one alone', () => {
@@ -83,25 +122,28 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
     }
 
     expect(
-      migrateRetirementNamespaceHostIdentity(namespaces, ['ssh:h|22|dev'], 'ssh:h|22|other')
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        moveFrom: ['ssh:h|22|dev'],
+        to: 'ssh:h|22|other'
+      })
     ).toBe(false)
     expect(Object.keys(namespaces)).toEqual(['ssh:h|22|dev2:posix:/srv/a'])
   })
 
   it('reports no change when there is nothing to move or the identity is unchanged', () => {
-    expect(migrateRetirementNamespaceHostIdentity(undefined, ['ssh:a'], 'ssh:b')).toBe(false)
+    expect(
+      migrateRetirementNamespaceHostIdentity(undefined, { moveFrom: ['ssh:a'], to: 'ssh:b' })
+    ).toBe(false)
     expect(
       migrateRetirementNamespaceHostIdentity(
         { 'ssh:a:posix:/srv': registry('nautilus') },
-        [],
-        'ssh:a'
+        { to: 'ssh:a' }
       )
     ).toBe(false)
     expect(
       migrateRetirementNamespaceHostIdentity(
         { 'ssh:a:posix:/srv': registry('nautilus') },
-        ['ssh:a'],
-        'ssh:a'
+        { moveFrom: ['ssh:a'], to: 'ssh:a' }
       )
     ).toBe(false)
   })
