@@ -125,6 +125,7 @@ export class ClaudeRuntimeAuthService {
   private lastWrittenOauthAccount: unknown = null
   private skipNextReadBackForAccountId: string | null = null
   private managedRefreshDeferredByLivePtyAccountId: string | null = null
+  private managedCredentialsReadFailed = false
 
   constructor(private readonly store: Store) {
     this.initializeLastSyncedState()
@@ -344,6 +345,12 @@ export class ClaudeRuntimeAuthService {
 
     let credentialsJson = await this.readManagedCredentials(activeAccount)
     if (!credentialsJson || !this.isValidCredentialsJsonObject(credentialsJson)) {
+      if (this.managedCredentialsReadFailed) {
+        console.warn(
+          '[claude-runtime-auth] Managed Claude credentials could not be read; preserving account selection'
+        )
+        return
+      }
       console.warn(
         '[claude-runtime-auth] Active managed account is missing or has invalid credentials, restoring system default'
       )
@@ -1204,6 +1211,7 @@ export class ClaudeRuntimeAuthService {
   }
 
   private async readManagedCredentials(account: ClaudeManagedAccount): Promise<string | null> {
+    this.managedCredentialsReadFailed = false
     const managedAuthPath = this.getOwnedManagedAuthPath(account)
     if (!managedAuthPath) {
       return null
@@ -1215,6 +1223,7 @@ export class ClaudeRuntimeAuthService {
           return keychainCredentials
         }
       } catch {
+        this.managedCredentialsReadFailed = true
         // Why: a locked managed Keychain must not prevent launch when the owned file copy is readable.
       }
       // Why: the owned file is the recovery copy when a Keychain item is missing or malformed.
@@ -1635,7 +1644,7 @@ export class ClaudeRuntimeAuthService {
     await this.captureSystemDefaultSnapshot({
       force: true,
       credentialsJsonOverride: snapshotCredentialsJson,
-      credentialsCaptured: snapshot.credentialsCaptured !== false,
+      credentialsCaptured: true,
       previousSnapshot: snapshot,
       managedCredentialsJson
     })
@@ -1966,7 +1975,7 @@ export class ClaudeRuntimeAuthService {
   private restoreRuntimeCredentials(credentialsJson: string | null): void {
     const paths = this.pathResolver.getRuntimePaths()
     if (credentialsJson !== null) {
-      this.writeRuntimeCredentials(credentialsJson)
+      this.writeRuntimeCredentials(credentialsJson, this.lastWrittenCredentialsJson)
     } else {
       rmSync(paths.credentialsPath, { force: true })
     }
