@@ -10,7 +10,7 @@ import type { RemoteHostPlatform } from '../ssh/ssh-remote-platform'
 import { sessionSortTime } from './session-scanner-accumulator'
 import { processLocalCursorCandidates } from './session-scanner-cursor-local-pipeline'
 import { recordLocalCursorDiscoverySpan } from './session-scanner-cursor-observability'
-import { resolveCursorLocalRoots } from './session-scanner-cursor-paths'
+import { resolveCursorOwningHostRoots } from './session-scanner-cursor-paths'
 import { cursorDiscoveries } from './session-scanner-cursor-sources'
 import { createSessionParseStats } from './session-scanner-parse-cache'
 import type {
@@ -34,7 +34,9 @@ export async function scanCursorSessionsOnOwningHost(args: {
     const issues: AiVaultScanIssue[] = []
     const options = cursorHostScanOptions(args)
     const discoveryLimit = args.unlimited ? Number.POSITIVE_INFINITY : limit * 2
-    const discoveries = await Promise.all(cursorDiscoveries(options, [], discoveryLimit, issues))
+    const discoveries = await Promise.all(
+      cursorDiscoveries(options, [], discoveryLimit, issues, { reportMissingSidecarRoot: true })
+    )
     throwIfAiVaultScanCancelled(args.signal)
     const candidates = cursorCandidates(discoveries)
     const reconciled = await processLocalCursorCandidates({
@@ -66,7 +68,7 @@ export async function scanCursorSessionsOnOwningHost(args: {
 function cursorHostScanOptions(
   args: Parameters<typeof scanCursorSessionsOnOwningHost>[0]
 ): AiVaultScanOptions {
-  const roots = resolveCursorLocalRoots(args.remoteHome)
+  const roots = resolveCursorOwningHostRoots(args.remoteHome)
   return {
     cursorChatsDir: roots.chatsDir,
     cursorProjectsDir: roots.projectsDir,
@@ -102,11 +104,17 @@ function retainCappedAndScopedSessions(
   limit: number
 ): AiVaultSession[] {
   const ranked = [...sessions].sort((left, right) => sessionSortTime(right) - sessionSortTime(left))
-  const retained = new Map(ranked.slice(0, limit).map((session) => [session.id, session]))
+  const retained = new Map<string, AiVaultSession>()
   for (const session of ranked) {
-    if (scopedSessionIds.has(session.id)) {
+    if (scopedSessionIds.has(session.id) && retained.size < limit) {
       retained.set(session.id, session)
     }
+  }
+  for (const session of ranked) {
+    if (retained.size >= limit) {
+      break
+    }
+    retained.set(session.id, session)
   }
   return [...retained.values()].sort(
     (left, right) => sessionSortTime(right) - sessionSortTime(left)

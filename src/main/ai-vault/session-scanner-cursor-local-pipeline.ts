@@ -18,6 +18,7 @@ import { parseCursorSidecarFileCached } from './session-scanner-cursor-sidecar'
 import type { SessionFileCandidate, SessionFileDiscovery } from './session-scanner-types'
 import { errorMessage } from './session-scanner-values'
 import { throwIfAiVaultScanCancelled } from './ai-vault-scan-cancellation'
+import { isMissingCursorPathOnScan } from './session-scanner-cursor-path-presence'
 import {
   buildCursorCandidateSelectionGroups,
   canStopCursorGroupSelection,
@@ -265,8 +266,7 @@ async function parseSidecarWithAggregateCap(
       signal: args.signal
     })
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException | null)?.code
-    const missing = code === 'ENOENT' || code === 'ENOTDIR'
+    const missing = await isMissingCursorPathOnScan(candidate.file.path, error, args.signal)
     settleCursorVerifiedReadReservation(
       budget,
       reservedBytes,

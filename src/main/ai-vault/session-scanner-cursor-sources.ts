@@ -54,10 +54,17 @@ export function cursorDiscoveries(
   options: AiVaultScanOptions,
   wslHomeDirs: readonly string[],
   limit: number,
-  issues: AiVaultScanIssue[]
+  issues: AiVaultScanIssue[],
+  behavior: { reportMissingSidecarRoot?: boolean } = {}
 ): Promise<SessionFileDiscovery>[] {
   return cursorRootPairs(options, wslHomeDirs).flatMap((roots) => [
-    discoverCursorSidecars({ roots, options, limit, issues }),
+    discoverCursorSidecars({
+      roots,
+      options,
+      limit,
+      issues,
+      reportMissingRoot: behavior.reportMissingSidecarRoot === true
+    }),
     discoverCursorLegacy({ roots, options, limit, issues })
   ])
 }
@@ -67,6 +74,7 @@ async function discoverCursorSidecars(args: {
   options: AiVaultScanOptions
   limit: number
   issues: AiVaultScanIssue[]
+  reportMissingRoot: boolean
 }): Promise<SessionFileDiscovery> {
   const startedAt = Date.now()
   const scopePaths = localSidecarScopePaths(args)
@@ -111,6 +119,13 @@ async function discoverCursorSidecars(args: {
     elapsedMs: Math.max(0, Date.now() - startedAt)
   }
   if (!discovery.rootRealPath) {
+    if (args.reportMissingRoot) {
+      args.issues.push({
+        agent: 'cursor',
+        path: args.roots.chatsDir,
+        message: 'Cursor sidecar root could not be resolved.'
+      })
+    }
     return {
       agent: 'cursor',
       rootDir: args.roots.chatsDir,

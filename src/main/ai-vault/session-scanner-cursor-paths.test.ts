@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   cursorBucketForCwd,
+  isCursorSidecarPath,
   cursorLegacySlug,
   cursorScopeCwdCandidates,
   cursorWindowsPathVariants,
@@ -80,5 +81,14 @@ describe('Cursor session paths', () => {
         .replace(/^-+|-+$/g, '')
     )
     expect(slug.length).toBeGreaterThan(92)
+  })
+
+  it('validates Windows sidecar paths with the path storage flavor', () => {
+    expect(
+      isCursorSidecarPath(
+        'C:\\Users\\ada\\.cursor\\chats',
+        'C:\\Users\\ada\\.cursor\\chats\\11111111111111111111111111111111\\session\\meta.json'
+      )
+    ).toBe(true)
   })
 })

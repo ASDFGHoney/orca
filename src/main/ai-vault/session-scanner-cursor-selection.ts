@@ -112,7 +112,7 @@ export function canStopCursorGroupSelection(
   const cutoff = [...sessions]
     .map(sessionSortTime)
     .sort((left, right) => right - left)
-    .at(limit - 1)
+    .at(Math.max(0, limit - 1))
   return typeof cutoff === 'number' && nextGroupMtimeMs < cutoff
 }
 

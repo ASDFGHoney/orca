@@ -3,6 +3,7 @@ import {
   type CursorSidecarScanState
 } from './cursor-sidecar-scan'
 import type { CursorSidecarScanIo } from './cursor-sidecar-scan-discovery'
+import { isConfirmedCursorPathMissing } from './cursor-sidecar-path-presence'
 import {
   isCursorSidecarScanCancelledError,
   type CursorSidecarScanCancellation
@@ -187,7 +188,7 @@ async function listBucketSessions(
     if (isCursorSidecarScanCancelledError(error)) {
       throw error
     }
-    if (!isMissing(error)) {
+    if (!(await confirmedMissing(bucket.path, error, args))) {
       addIssue(args.response, bucket.path, error)
     }
     return { bucket, names: [], truncated: false, entriesExamined: 0 }
@@ -211,7 +212,9 @@ function addIssue(response: CursorSidecarScanState, path: string, error: unknown
   })
 }
 
-function isMissing(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code
-  return code === 'ENOENT' || code === 'ENOTDIR'
+function confirmedMissing(path: string, error: unknown, args: RetentionArgs): Promise<boolean> {
+  return isConfirmedCursorPathMissing(path, error, async (ancestor) => {
+    args.response.counters.fileLstat++
+    return args.io.lstat(ancestor)
+  })
 }

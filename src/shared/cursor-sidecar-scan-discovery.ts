@@ -3,6 +3,7 @@ import type { Stats } from 'node:fs'
 import { lstat, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CursorSidecarScanState } from './cursor-sidecar-scan'
+import { isConfirmedCursorPathMissing } from './cursor-sidecar-path-presence'
 import {
   isCursorSidecarScanCancelledError,
   type CursorSidecarScanCancellation
@@ -84,7 +85,7 @@ export async function discoverCursorSidecarCandidates(args: {
   } catch (error) {
     rethrowCancel(error, args.cancellation)
     args.cancellation.throwIfCancelled()
-    if (!isMissing(error)) {
+    if (!(await confirmedMissing(chatsRoot, error, scanArgs))) {
       addIssue(args.response, chatsRoot, error)
     }
     return null
@@ -165,7 +166,7 @@ async function enumeratedBuckets(
     return names.map((name) => ({ name, path: join(chatsRoot, name), scopeCwd: null }))
   } catch (error) {
     rethrowCancel(error, args.cancellation)
-    if (!isMissing(error)) {
+    if (!(await confirmedMissing(chatsRoot, error, args))) {
       addIssue(args.response, chatsRoot, error)
     }
     return []
@@ -232,7 +233,7 @@ async function inspectSession(
     return { ...session, metaPath, meta, store }
   } catch (error) {
     rethrowCancel(error, args.cancellation)
-    if (!isMissing(error)) {
+    if (!(await confirmedMissing(metaPath, error, args))) {
       addIssue(args.response, metaPath, error)
     }
     return null
@@ -306,9 +307,11 @@ function addIssue(response: CursorSidecarScanState, path: string, error: unknown
   })
 }
 
-function isMissing(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code
-  return code === 'ENOENT' || code === 'ENOTDIR'
+function confirmedMissing(path: string, error: unknown, args: ScanArgs): Promise<boolean> {
+  return isConfirmedCursorPathMissing(path, error, async (ancestor) => {
+    args.response.counters.fileLstat++
+    return args.io.lstat(ancestor)
+  })
 }
 
 function isFiniteNonnegative(value: number): boolean {

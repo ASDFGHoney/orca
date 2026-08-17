@@ -90,6 +90,19 @@ describe('Cursor candidate selection', () => {
     expect(canStopCursorGroupSelection([visible], 2, Date.parse('2026-06-01'))).toBe(false)
   })
 
+  it('does not use a negative cutoff index when the limit is zero', () => {
+    const newest = {
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      modifiedAt: '2026-07-01T00:00:00.000Z'
+    } as AiVaultSession
+    const oldest = {
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      modifiedAt: '2026-01-01T00:00:00.000Z'
+    } as AiVaultSession
+
+    expect(canStopCursorGroupSelection([newest, oldest], 0, Date.parse('2026-06-01'))).toBe(true)
+  })
+
   it('prioritizes scope buckets over weak legacy matches before truncation', () => {
     const strong = candidate(
       '/chats/11111111111111111111111111111111/strong/meta.json',

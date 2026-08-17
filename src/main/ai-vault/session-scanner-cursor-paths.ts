@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join, posix, relative, sep, win32 } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import type { FileWithMtime } from './session-scanner-types'
 
@@ -20,6 +20,13 @@ export function resolveCursorLocalRoots(
     chatsDir: join(configRoot, 'chats'),
     projectsDir: join(dataRoot, 'projects')
   }
+}
+
+export function resolveCursorOwningHostRoots(homeDir: string): {
+  chatsDir: string
+  projectsDir: string
+} {
+  return resolveCursorLocalRoots(homeDir, {})
 }
 
 export function cursorBucketForCwd(cwd: string, platform: NodeJS.Platform): string {
@@ -101,7 +108,8 @@ export function isCursorSidecarDirectory(name: string, depth: number): boolean {
 }
 
 export function isCursorSidecarPath(chatsRoot: string, filePath: string): boolean {
-  const segments = relative(chatsRoot, filePath).split(sep)
+  const pathOps = parseWslUncPath(chatsRoot) || win32.isAbsolute(chatsRoot) ? win32 : posix
+  const segments = pathOps.relative(chatsRoot, filePath).split(pathOps.sep)
   return (
     segments.length === 3 &&
     CURSOR_BUCKET_PATTERN.test(segments[0]) &&

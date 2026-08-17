@@ -1,0 +1,45 @@
+import type { Stats } from 'node:fs'
+import { win32 } from 'node:path'
+import { parseWslUncPath } from './wsl-paths'
+
+type LstatPath = (path: string) => Promise<Stats>
+
+export function isCursorMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+export async function isConfirmedCursorPathMissing(
+  path: string,
+  error: unknown,
+  lstatPath: LstatPath
+): Promise<boolean> {
+  if (!isCursorMissingPathError(error)) {
+    return false
+  }
+  const unc = parseWslUncPath(path)
+  if (!unc) {
+    return true
+  }
+
+  let ancestor = win32.dirname(path)
+  for (;;) {
+    const parsed = parseWslUncPath(ancestor)
+    if (!parsed || parsed.distro.toLowerCase() !== unc.distro.toLowerCase()) {
+      return false
+    }
+    try {
+      await lstatPath(ancestor)
+      return true
+    } catch (ancestorError) {
+      if (!isCursorMissingPathError(ancestorError)) {
+        return false
+      }
+    }
+    const parent = win32.dirname(ancestor)
+    if (parent === ancestor) {
+      return false
+    }
+    ancestor = parent
+  }
+}

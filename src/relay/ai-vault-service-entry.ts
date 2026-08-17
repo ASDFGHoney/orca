@@ -5,6 +5,7 @@ import {
   RELAY_AI_VAULT_SERVICE_PROTOCOL,
   isRelayAiVaultServiceRequest,
   relayAiVaultServiceLane,
+  relayAiVaultServiceErrorMessage,
   type RelayAiVaultServiceChildMessage,
   type RelayAiVaultServiceInit,
   type RelayAiVaultServiceParentMessage,
@@ -59,7 +60,7 @@ async function execute(request: RelayAiVaultServiceRequest): Promise<void> {
     send({
       type: 'error',
       id: request.id,
-      message: error instanceof Error ? error.message : String(error)
+      message: relayAiVaultServiceErrorMessage(error)
     })
   } finally {
     controllers.delete(request.id)
