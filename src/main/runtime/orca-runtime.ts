@@ -8588,6 +8588,7 @@ export class OrcaRuntimeService {
         this.clientSessionTabSelections.project(result, subscription.clientNavigationId)
       )
     }
+    this.recordPublishedBrowserSessionTabs(snapshot.worktree, result)
   }
 
   private async refreshMobileSessionPtyRecords(

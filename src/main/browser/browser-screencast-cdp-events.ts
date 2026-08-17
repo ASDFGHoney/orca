@@ -68,7 +68,11 @@ export function createBrowserScreencastMessageHandler(
     const payload = params && typeof params === 'object' ? (params as Record<string, unknown>) : {}
     const data = typeof payload.data === 'string' ? payload.data : null
     const sessionId = typeof payload.sessionId === 'number' ? payload.sessionId : null
-    if (!data || sessionId === null) {
+    if (sessionId === null) {
+      return
+    }
+    if (!data) {
+      ackScreencastFrame(sessionId)
       return
     }
     if (isStopping()) {

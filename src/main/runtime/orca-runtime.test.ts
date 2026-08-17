@@ -50160,4 +50160,48 @@ describe('resolveWorktreeScanCacheTtlMs', () => {
       vi.useRealTimers()
     }
   })
+
+  it('records browser pages emitted by active headless snapshots', async () => {
+    const runtime = createRuntime()
+    runtime.setAgentBrowserBridge({
+      tabList: vi.fn(() => ({
+        tabs: [{ browserPageId: 'page-1', title: 'Browser', url: 'about:blank' }]
+      }))
+    } as never)
+    const listener = vi.fn()
+    const internals = runtime as unknown as {
+      mobileSessionTabListeners: Set<unknown>
+      emitMobileSessionTabsSnapshot: (snapshot: unknown) => void
+      waitForBrowserSessionTabPublication: (
+        worktreeId: string,
+        browserPageId: string,
+        timeoutMs?: number
+      ) => Promise<void>
+    }
+    internals.mobileSessionTabListeners.add({ listener, clientNavigationId: undefined })
+    internals.emitMobileSessionTabsSnapshot({
+      worktree: TEST_WORKTREE_ID,
+      publicationEpoch: 'headless:test',
+      snapshotVersion: 1,
+      activeGroupId: null,
+      activeTabId: 'browser-tab',
+      activeTabType: 'browser',
+      tabs: [
+        {
+          id: 'browser-tab',
+          type: 'browser',
+          browserWorkspaceId: 'browser-tab',
+          browserPageId: 'page-1',
+          title: 'Browser',
+          url: 'about:blank',
+          isActive: true
+        }
+      ],
+      tabGroups: []
+    })
+
+    await expect(
+      internals.waitForBrowserSessionTabPublication(TEST_WORKTREE_ID, 'page-1', 50)
+    ).resolves.toBeUndefined()
+  })
 })

@@ -19,6 +19,7 @@ const LOAD_TIMEOUT_MS = 30_000
 
 export class OffscreenBrowserBackend implements BrowserBackend {
   private readonly windowsByPageId = new Map<string, BrowserWindow>()
+  private readonly pendingCloseById = new Map<string, Promise<void>>()
   private readonly reportedClosedPageIds = new Set<string>()
 
   constructor(
@@ -28,6 +29,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   async createTab(params: BrowserBackendCreateTab): Promise<{ browserPageId: string }> {
     const browserPageId = params.browserPageId ?? randomUUID()
+    await this.pendingCloseById.get(browserPageId)?.catch(() => {})
     if (this.windowsByPageId.has(browserPageId)) {
       throw new Error(`Browser page ${browserPageId} already exists`)
     }
@@ -62,7 +64,9 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     // resolving a dead WebContents.
     win.webContents.once('destroyed', () => {
       this.windowsByPageId.delete(browserPageId)
-      void this.reportClosed(browserPageId, webContentsId)
+      if (!this.pendingCloseById.has(browserPageId)) {
+        this.trackPendingClose(browserPageId, this.reportClosed(browserPageId, webContentsId))
+      }
     })
 
     // Why: register the guest and return immediately so the new tab appears
@@ -92,8 +96,13 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   async closeTab(browserPageId: string): Promise<void> {
     const win = this.windowsByPageId.get(browserPageId)
+    if (!win) {
+      await this.pendingCloseById.get(browserPageId)
+      return
+    }
     this.windowsByPageId.delete(browserPageId)
-    const cleanup = win ? this.reportClosed(browserPageId, win.webContents.id) : Promise.resolve()
+    const cleanup = this.reportClosed(browserPageId, win.webContents.id)
+    this.trackPendingClose(browserPageId, cleanup)
     if (win && !win.isDestroyed()) {
       win.destroy()
     }
@@ -107,7 +116,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   destroyAll(): void {
     for (const [pageId, win] of this.windowsByPageId) {
-      void this.reportClosed(pageId, win.webContents.id)
+      this.trackPendingClose(pageId, this.reportClosed(pageId, win.webContents.id))
       if (!win.isDestroyed()) {
         win.destroy()
       }
@@ -120,9 +129,28 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       return
     }
     this.reportedClosedPageIds.add(browserPageId)
-    const cleanup = this.onWebContentsClosed?.(webContentsId)
-    this.browserManager.unregisterGuest(browserPageId)
-    await cleanup
+    try {
+      await this.onWebContentsClosed?.(webContentsId)
+    } catch (error) {
+      console.warn(
+        '[offscreen-browser] tab cleanup failed:',
+        error instanceof Error ? error.message : String(error)
+      )
+    } finally {
+      // Keep the BrowserManager identity until the bridge has released its page/session state.
+      this.browserManager.unregisterGuest(browserPageId)
+    }
+  }
+
+  private trackPendingClose(browserPageId: string, cleanup: Promise<void>): void {
+    this.pendingCloseById.set(browserPageId, cleanup)
+    void cleanup
+      .finally(() => {
+        if (this.pendingCloseById.get(browserPageId) === cleanup) {
+          this.pendingCloseById.delete(browserPageId)
+        }
+      })
+      .catch(() => {})
   }
 
   private async loadUrl(win: BrowserWindow, url: string): Promise<void> {

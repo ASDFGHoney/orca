@@ -174,6 +174,34 @@ describe('startBrowserScreencast', () => {
     await session.done
   })
 
+  it('acknowledges empty live screencast frames so CDP keeps streaming', async () => {
+    const webContents = createMockWebContents()
+    const session = await startBrowserScreencast(webContents as never, {
+      format: 'jpeg',
+      quality: 70,
+      maxWidth: 1440,
+      maxHeight: 1200,
+      everyNthFrame: 1,
+      minFrameIntervalMs: 0,
+      onFrame: vi.fn()
+    })
+
+    try {
+      webContents.debugger.emit('message', {}, 'Page.screencastFrame', {
+        data: '',
+        sessionId: 42
+      })
+      await vi.waitFor(() =>
+        expect(webContents.debugger.sendCommand).toHaveBeenCalledWith('Page.screencastFrameAck', {
+          sessionId: 42
+        })
+      )
+    } finally {
+      session.stop()
+      await session.done
+    }
+  })
+
   it('does not emit a stale navigation fallback capture after newer live frames', async () => {
     vi.useFakeTimers()
     const webContents = createMockWebContents()
