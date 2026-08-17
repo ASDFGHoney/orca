@@ -124,7 +124,7 @@ export function applyCommandMarkerBoundaries(
       : (clearMarker.clearedMessageIds?.at(-1) ?? null)
   if (boundaryId !== null) {
     const boundaryIndex = messages.findIndex((message) => message.id === boundaryId)
-    if (boundaryIndex >= 0) {
+    if (boundaryIndex !== -1) {
       return messages.slice(boundaryIndex + 1)
     }
   }
