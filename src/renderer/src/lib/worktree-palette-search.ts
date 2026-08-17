@@ -33,6 +33,7 @@ export type PaletteSupportingText = {
 
 export type PaletteSearchResult = {
   worktreeId: string
+  worktreeHostId?: Worktree['hostId']
   matchedField: PaletteMatchedField | null
   displayNameRange: MatchRange | null
   branchRange: MatchRange | null
@@ -58,12 +59,13 @@ type PRCacheEntry = { data?: { number: number; title: string } | null } | undefi
 type IssueCacheEntry = { data?: { number: number; title: string } | null } | undefined
 
 function makeResult(
-  worktreeId: string,
+  worktree: Pick<Worktree, 'id' | 'hostId'>,
   matchedField: PaletteMatchedField | null,
   overrides: Partial<Omit<PaletteSearchResult, 'worktreeId' | 'matchedField'>> = {}
 ): PaletteSearchResult {
   return {
-    worktreeId,
+    worktreeId: worktree.id,
+    ...(worktree.hostId ? { worktreeHostId: worktree.hostId } : {}),
     matchedField,
     displayNameRange: null,
     branchRange: null,
@@ -87,7 +89,7 @@ export function searchWorktrees(
   }
   const trimmedQuery = query.trim()
   if (!trimmedQuery) {
-    return worktrees.map((worktree) => makeResult(worktree.id, null))
+    return worktrees.map((worktree) => makeResult(worktree, null))
   }
 
   const q = trimmedQuery.toLowerCase()
@@ -129,7 +131,7 @@ export function searchWorktrees(
       const branchIdx = branch.toLowerCase().indexOf(composite.branchPart)
       if (repoIdx !== -1 && branchIdx !== -1) {
         results.push(
-          makeResult(worktree.id, 'branch', {
+          makeResult(worktree, 'branch', {
             repoRange: { start: repoIdx, end: repoIdx + composite.repoPart.length },
             branchRange: { start: branchIdx, end: branchIdx + composite.branchPart.length }
           })
@@ -143,7 +145,7 @@ export function searchWorktrees(
     const nameIndex = resolveWorktreeDisplayName(worktree).toLowerCase().indexOf(q)
     if (nameIndex !== -1) {
       results.push(
-        makeResult(worktree.id, 'displayName', {
+        makeResult(worktree, 'displayName', {
           displayNameRange: { start: nameIndex, end: nameIndex + q.length }
         })
       )
@@ -154,7 +156,7 @@ export function searchWorktrees(
     const branchIndex = branch.toLowerCase().indexOf(q)
     if (branchIndex !== -1) {
       results.push(
-        makeResult(worktree.id, 'branch', {
+        makeResult(worktree, 'branch', {
           branchRange: { start: branchIndex, end: branchIndex + q.length }
         })
       )
@@ -165,7 +167,7 @@ export function searchWorktrees(
     const repoIndex = repoName.toLowerCase().indexOf(q)
     if (repoIndex !== -1) {
       results.push(
-        makeResult(worktree.id, 'repo', {
+        makeResult(worktree, 'repo', {
           repoRange: { start: repoIndex, end: repoIndex + q.length }
         })
       )
@@ -181,7 +183,7 @@ export function searchWorktrees(
           commentIndex + q.length
         )
         results.push(
-          makeResult(worktree.id, 'comment', {
+          makeResult(worktree, 'comment', {
             supportingText: {
               labelKind: 'comment',
               text: snippet.text,
@@ -205,7 +207,7 @@ export function searchWorktrees(
       if (portIndex !== -1) {
         const label = port.processName ? `${portText} · ${port.processName}` : portText
         results.push(
-          makeResult(worktree.id, 'port', {
+          makeResult(worktree, 'port', {
             supportingText: {
               labelKind: 'port',
               text: label,
@@ -230,7 +232,7 @@ export function searchWorktrees(
     if (checksReview) {
       const supportingText = matchWorktreePaletteReview(checksReview, q, numericQuery)
       if (supportingText) {
-        results.push(makeResult(worktree.id, 'pr', { supportingText }))
+        results.push(makeResult(worktree, 'pr', { supportingText }))
         continue
       }
     }
@@ -245,7 +247,7 @@ export function searchWorktrees(
         numericQuery
       )
       if (supportingText) {
-        results.push(makeResult(worktree.id, 'pr', { supportingText }))
+        results.push(makeResult(worktree, 'pr', { supportingText }))
         continue
       }
     } else if (!hasChecksReviewEntry && worktree.linkedPR != null) {
@@ -253,7 +255,7 @@ export function searchWorktrees(
       const prNumberIndex = String(worktree.linkedPR).indexOf(numericQuery)
       if (prNumberIndex !== -1) {
         results.push(
-          makeResult(worktree.id, 'pr', {
+          makeResult(worktree, 'pr', {
             supportingText: {
               labelKind: 'pr',
               text: prText,
@@ -276,7 +278,7 @@ export function searchWorktrees(
     const issueNumberIndex = String(worktree.linkedIssue).indexOf(numericQuery)
     if (issueNumberIndex !== -1) {
       results.push(
-        makeResult(worktree.id, 'issue', {
+        makeResult(worktree, 'issue', {
           supportingText: {
             labelKind: 'issue',
             text: issueText,
@@ -308,7 +310,7 @@ export function searchWorktrees(
     const issueTitleIndex = issue.title.toLowerCase().indexOf(q)
     if (issueTitleIndex !== -1) {
       results.push(
-        makeResult(worktree.id, 'issue', {
+        makeResult(worktree, 'issue', {
           supportingText: {
             labelKind: 'issue',
             text: issue.title,

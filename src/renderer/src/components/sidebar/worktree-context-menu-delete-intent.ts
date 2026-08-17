@@ -14,7 +14,10 @@ export function runWorktreeContextMenuDeleteIntent(intent: WorktreeContextMenuDe
     return
   }
   if (intent.kind === 'worktree') {
-    runWorktreeDelete(intent.worktree.id, { expectedInstanceId: intent.worktree.instanceId })
+    runWorktreeDelete(intent.worktree.id, {
+      expectedInstanceId: intent.worktree.instanceId,
+      ...(intent.worktree.hostId ? { expectedHostId: intent.worktree.hostId } : {})
+    })
     return
   }
   const state = useAppStore.getState()

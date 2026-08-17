@@ -1,5 +1,7 @@
 import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import type { RenderRow } from '../listing/render-row'
+import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { isPinnedWorktreeRow } from '../listing/renderable-rows'
 import { getRenderRowWorktreeItem, renderRowContainsWorktree } from './render-row-lookup'
@@ -7,13 +9,22 @@ import { getWorktreeOptionId } from '../rows/option-dom'
 
 export function getRenderRowOptionId(
   row: RenderRow | undefined,
-  worktreeId?: string | null
+  worktreeId?: string | null,
+  executionHostId?: ExecutionHostId
 ): string | undefined {
   if (!row) {
     return undefined
   }
   if (row.type === 'lineage-group') {
-    const targetRow = worktreeId ? row.rows.find((item) => item.worktree.id === worktreeId) : null
+    const targetIdentity = worktreeId
+      ? composeWorktreeHostIdentity(executionHostId, worktreeId)
+      : null
+    const targetRow = targetIdentity
+      ? row.rows.find(
+          (item) =>
+            composeWorktreeHostIdentity(item.worktree.hostId, item.worktree.id) === targetIdentity
+        )
+      : null
     return getWorktreeOptionId((targetRow ?? row.rows[0])?.rowKey ?? row.key)
   }
   if (row.type === 'item') {

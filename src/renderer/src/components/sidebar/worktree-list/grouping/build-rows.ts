@@ -140,7 +140,7 @@ export function buildRows(
           collapsedGroups,
           groupDepth: 0,
           sectionKey: ALL_GROUP_KEY,
-          hostContextLabelByWorktreeId: mixedWorktreeHostContextLabels,
+          hostContextLabelByWorktreeIdentity: mixedWorktreeHostContextLabels,
           cyclicLineageIds
         })
       }

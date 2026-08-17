@@ -67,6 +67,7 @@ import { isEventTargetInsideCurrentTarget } from './worktree-card-dom-events'
 import { translate } from '@/i18n/i18n'
 import { unnestWorktrees } from './worktree-unnest'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
+import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
 type Props = {
   worktree: Worktree
@@ -333,7 +334,9 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   const createProjectGroup = useAppStore((s) => s.createProjectGroup)
   const moveProjectToGroup = useAppStore((s) => s.moveProjectToGroup)
   const repo = useRepoById(worktree.repoId)
-  const deleteState = useAppStore((s) => s.deleteStateByWorktreeId[worktree.id])
+  const deleteState = useAppStore((s) =>
+    getDeleteStateForWorktreeHost(worktree, s.deleteStateByWorktreeId)
+  )
   const [menuOpen, setMenuOpen] = useState(false)
   // Why: the Developer submenu is a power-user affordance, so it is revealed by
   // holding Option/Alt at right-click — captured at open time (like the Help
@@ -419,11 +422,14 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   const lineageDescendantCount = lineageMenuActions.descendants.length
   const subtreeSleepableWorktrees = lineageMenuActions.sleepableTargets
   const deletingContext = useMemo(
-    () => activeContextWorktrees.some((item) => deleteStateByWorktreeId[item.id]?.isDeleting),
+    () =>
+      activeContextWorktrees.some(
+        (item) => getDeleteStateForWorktreeHost(item, deleteStateByWorktreeId)?.isDeleting
+      ),
     [activeContextWorktrees, deleteStateByWorktreeId]
   )
   const deletingSubtree = lineageMenuActions.targets.some(
-    (item) => deleteStateByWorktreeId[item.id]?.isDeleting
+    (item) => getDeleteStateForWorktreeHost(item, deleteStateByWorktreeId)?.isDeleting
   )
   const contextDeletePending = isMultiContext ? deletingContext : deletingSubtree
   const contextWorkspaceStatus = useMemo(() => {

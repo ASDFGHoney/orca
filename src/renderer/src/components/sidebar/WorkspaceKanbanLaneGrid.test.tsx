@@ -101,7 +101,7 @@ function makeGrid(): React.JSX.Element {
       laneFullWorktreeIds={new Map()}
       hasQuery={false}
       repoMap={REPO_MAP}
-      activeWorktreeId={null}
+      activeWorktreeIdentity={null}
       columnWidth={308}
       isResizingColumn={false}
       dragOverStatus={null}

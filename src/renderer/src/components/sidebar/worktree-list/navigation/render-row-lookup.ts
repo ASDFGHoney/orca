@@ -1,4 +1,6 @@
 import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
+import type { Worktree } from '../../../../../../shared/worktree/types'
+import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
 import type { RenderRow } from '../listing/render-row'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { isPinnedWorktreeRow, type WorktreeItemRow } from '../listing/renderable-rows'
@@ -72,6 +74,32 @@ export function findPreferredRenderRowIndexForWorktree(
     }
     const itemRow = getRenderRowWorktreeItem(row, worktreeId)
     if (pinnedDisplayPolicy === 'duplicate-in-groups' && itemRow && !isPinnedWorktreeRow(itemRow)) {
+      return index
+    }
+  }
+  return fallbackIndex
+}
+
+export function findPreferredRenderRowIndexForWorktreeIdentity(
+  renderRows: readonly RenderRow[],
+  worktree: Pick<Worktree, 'id' | 'hostId'>,
+  pinnedDisplayPolicy: PinnedWorktreeDisplayPolicy
+): number {
+  const identity = getWorktreeHostIdentity(worktree)
+  let fallbackIndex = -1
+  for (let index = 0; index < renderRows.length; index++) {
+    const row = renderRows[index]
+    const itemRows = row.type === 'lineage-group' ? row.rows : row.type === 'item' ? [row] : []
+    const itemRow = itemRows.find(
+      (candidate) => getWorktreeHostIdentity(candidate.worktree) === identity
+    )
+    if (!itemRow) {
+      continue
+    }
+    if (fallbackIndex === -1) {
+      fallbackIndex = index
+    }
+    if (pinnedDisplayPolicy === 'duplicate-in-groups' && !isPinnedWorktreeRow(itemRow)) {
       return index
     }
   }

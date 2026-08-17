@@ -25,10 +25,22 @@ describe('worktree.rm PTY-stop waiver', () => {
       id: 'req-1',
       authToken: 'tok',
       method: 'worktree.rm',
-      params: { worktree: 'id:wt-1', force: true, allowUnverifiedPtyStop: true, runHooks: false }
+      params: {
+        worktree: 'id:wt-1',
+        hostId: 'local',
+        force: true,
+        allowUnverifiedPtyStop: true,
+        runHooks: false
+      }
     } satisfies RpcRequest)
 
-    expect(runtime.removeManagedWorktree).toHaveBeenCalledWith('id:wt-1', true, false, true)
+    expect(runtime.removeManagedWorktree).toHaveBeenCalledWith(
+      'id:wt-1',
+      true,
+      false,
+      true,
+      'local'
+    )
   })
 
   it('does not infer a waiver from force alone', async () => {
@@ -39,9 +51,15 @@ describe('worktree.rm PTY-stop waiver', () => {
       id: 'req-1',
       authToken: 'tok',
       method: 'worktree.rm',
-      params: { worktree: 'id:wt-1', force: true, runHooks: false }
+      params: { worktree: 'id:wt-1', hostId: 'local', force: true, runHooks: false }
     } satisfies RpcRequest)
 
-    expect(runtime.removeManagedWorktree).toHaveBeenCalledWith('id:wt-1', true, false, false)
+    expect(runtime.removeManagedWorktree).toHaveBeenCalledWith(
+      'id:wt-1',
+      true,
+      false,
+      false,
+      'local'
+    )
   })
 })

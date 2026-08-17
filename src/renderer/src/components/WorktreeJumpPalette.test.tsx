@@ -10,6 +10,12 @@ import type { AppState } from '@/store/types'
 import WorktreeJumpPalette from './WorktreeJumpPalette'
 import { makeRepo, makeWorktree } from './worktree-jump-palette-test-fixtures'
 
+const { activateAndRevealWorktree } = vi.hoisted(() => ({
+  activateAndRevealWorktree: vi.fn(() => false)
+}))
+
+vi.mock('@/lib/worktree-activation', () => ({ activateAndRevealWorktree }))
+
 vi.mock('react-i18next', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactI18Next>()
   return {
@@ -184,6 +190,7 @@ describe('WorktreeJumpPalette', () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     setCommandQuery = null
+    activateAndRevealWorktree.mockClear()
     useAppStore.setState(initialAppState, true)
     testContainer = document.createElement('div')
     document.body.appendChild(testContainer)
@@ -352,6 +359,40 @@ describe('WorktreeJumpPalette', () => {
     await flushEffects()
 
     expect(testContainer.textContent).toContain('Feature workspace')
+  })
+
+  it('keeps and activates both host rows when workspace ids collide', async () => {
+    const local = makeWorktree('shared', 'Local workspace', { hostId: 'local' })
+    const ssh = makeWorktree('shared', 'SSH workspace', { hostId: 'ssh:box' })
+    const state = {
+      worktreesByRepo: { 'repo-1': [local, ssh] },
+      showSleepingWorkspaces: true
+    }
+
+    await renderPalette(state)
+
+    const localRow = testContainer.querySelector<HTMLButtonElement>(
+      '[data-command-item="worktree:local|shared"]'
+    )
+    const sshRow = testContainer.querySelector<HTMLButtonElement>(
+      '[data-command-item="worktree:ssh:box|shared"]'
+    )
+    expect(localRow?.textContent).toContain('Local workspace')
+    expect(sshRow?.textContent).toContain('SSH workspace')
+
+    await act(async () => fireEvent.click(localRow!))
+    expect(activateAndRevealWorktree).toHaveBeenLastCalledWith('shared', {
+      executionHostId: 'local'
+    })
+
+    await renderPalette(state)
+    const rerenderedSshRow = testContainer.querySelector<HTMLButtonElement>(
+      '[data-command-item="worktree:ssh:box|shared"]'
+    )
+    await act(async () => fireEvent.click(rerenderedSshRow!))
+    expect(activateAndRevealWorktree).toHaveBeenLastCalledWith('shared', {
+      executionHostId: 'ssh:box'
+    })
   })
 
   it('replaces a completed emoji shortcode in the search query', async () => {

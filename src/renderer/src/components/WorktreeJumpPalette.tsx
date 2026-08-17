@@ -204,6 +204,10 @@ import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
 import type { LinearIssue } from '../../../shared/linear/issue-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import type { Worktree } from '../../../shared/worktree/types'
+import {
+  composeWorktreeHostIdentity,
+  getWorktreeHostIdentity
+} from '../../../shared/worktree/host-qualified-identity'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import {
   buildTaskSourceContextFromRepo,
@@ -218,6 +222,10 @@ type WorktreePaletteItem = {
   type: 'worktree'
   match: PaletteSearchResult
   worktree: Worktree
+}
+
+function getPaletteMatchWorktreeIdentity(match: PaletteSearchResult): string {
+  return composeWorktreeHostIdentity(match.worktreeHostId, match.worktreeId)
 }
 
 type BrowserPaletteItem = {
@@ -1035,6 +1043,14 @@ function WorktreeJumpPaletteContent({
     return map
   }, [browserSortedWorktrees])
 
+  const worktreeByHostIdentity = useMemo(
+    () =>
+      new Map(
+        browserSortedWorktrees.map((worktree) => [getWorktreeHostIdentity(worktree), worktree])
+      ),
+    [browserSortedWorktrees]
+  )
+
   const worktreeOrder = useMemo(
     () => new Map(browserSortedWorktrees.map((worktree, index) => [worktree.id, index])),
     [browserSortedWorktrees]
@@ -1189,16 +1205,17 @@ function WorktreeJumpPaletteContent({
     [workspaceTabEntries, deferredQuery]
   )
 
-  const worktreeRelevanceById = useMemo(() => {
-    const relevanceById = new Map<string, number>()
+  const worktreeRelevanceByIdentity = useMemo(() => {
+    const relevanceByIdentity = new Map<string, number>()
     if (!hasQuery) {
-      return relevanceById
+      return relevanceByIdentity
     }
     for (const match of worktreeMatches) {
-      const worktree = worktreeMap.get(match.worktreeId)
+      const identity = getPaletteMatchWorktreeIdentity(match)
+      const worktree = worktreeByHostIdentity.get(identity)
       if (worktree) {
-        relevanceById.set(
-          match.worktreeId,
+        relevanceByIdentity.set(
+          identity,
           getWorktreeMatchRelevance(
             match,
             worktree,
@@ -1207,18 +1224,19 @@ function WorktreeJumpPaletteContent({
         )
       }
     }
-    return relevanceById
-  }, [hasQuery, repoMap, worktreeMap, worktreeMatches])
+    return relevanceByIdentity
+  }, [hasQuery, repoMap, worktreeByHostIdentity, worktreeMatches])
 
   const worktreeItems = useMemo<WorktreePaletteItem[]>(() => {
     const items = worktreeMatches
       .map((match) => {
-        const worktree = worktreeMap.get(match.worktreeId)
+        const identity = getPaletteMatchWorktreeIdentity(match)
+        const worktree = worktreeByHostIdentity.get(identity)
         if (!worktree) {
           return null
         }
         return {
-          id: `worktree:${worktree.id}`,
+          id: `worktree:${identity}`,
           type: 'worktree' as const,
           match,
           worktree
@@ -1232,10 +1250,11 @@ function WorktreeJumpPaletteContent({
     // hit. Sort is stable, so equal relevance still falls back to smart order.
     return items.sort(
       (a, b) =>
-        (worktreeRelevanceById.get(a.worktree.id) ?? NO_MATCH_RELEVANCE) -
-        (worktreeRelevanceById.get(b.worktree.id) ?? NO_MATCH_RELEVANCE)
+        (worktreeRelevanceByIdentity.get(getWorktreeHostIdentity(a.worktree)) ??
+          NO_MATCH_RELEVANCE) -
+        (worktreeRelevanceByIdentity.get(getWorktreeHostIdentity(b.worktree)) ?? NO_MATCH_RELEVANCE)
     )
-  }, [hasQuery, worktreeMap, worktreeMatches, worktreeRelevanceById])
+  }, [hasQuery, worktreeByHostIdentity, worktreeMatches, worktreeRelevanceByIdentity])
 
   const browserItems = useMemo<BrowserPaletteItem[]>(
     () =>
@@ -1588,12 +1607,17 @@ function WorktreeJumpPaletteContent({
   }, [openModal, prefetchCreateWorkspaceBaseForComposer])
 
   const deleteActiveWorkspaceAction = useCallback(() => {
-    const { activeView, activeWorktreeId } = useAppStore.getState()
+    const { activeView, activeWorktreeId, activeWorkspaceExecutionHostId } = useAppStore.getState()
     if (activeView !== 'terminal' || !activeWorktreeId) {
       return
     }
     // Why: let the palette close before mounting the delete-confirm modal so Radix focus teardown can't fight it.
-    queueMicrotask(() => runWorktreeDelete(activeWorktreeId))
+    queueMicrotask(() =>
+      runWorktreeDelete(
+        activeWorktreeId,
+        activeWorkspaceExecutionHostId ? { expectedHostId: activeWorkspaceExecutionHostId } : {}
+      )
+    )
   }, [])
 
   const openAddQuickCommandAction = useCallback(() => {
@@ -1681,14 +1705,15 @@ function WorktreeJumpPaletteContent({
     }
     const bestWorktree = worktreeItems[0]
     const bestWorktreeRelevance = bestWorktree
-      ? (worktreeRelevanceById.get(bestWorktree.worktree.id) ?? NO_MATCH_RELEVANCE)
+      ? (worktreeRelevanceByIdentity.get(getWorktreeHostIdentity(bestWorktree.worktree)) ??
+        NO_MATCH_RELEVANCE)
       : NO_MATCH_RELEVANCE
     const bestOpenTab = openTabItems[0]
     const bestOpenTabRelevance = bestOpenTab
       ? getOpenTabMatchRelevance(bestOpenTab.result)
       : NO_MATCH_RELEVANCE
     return bestOpenTabRelevance <= bestWorktreeRelevance
-  }, [hasQuery, openTabItems, worktreeItems, worktreeRelevanceById])
+  }, [hasQuery, openTabItems, worktreeItems, worktreeRelevanceByIdentity])
 
   const paletteSections = useMemo(() => {
     const openTabs = hasQuery

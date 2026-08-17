@@ -2,6 +2,10 @@ import { isWorktreePaletteQueryTooLarge } from '@/lib/worktree-palette-query-bou
 import { searchWorktrees, type PaletteMatchedField } from '@/lib/worktree-palette-search'
 import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceStatus, Worktree } from '../../../../shared/worktree/types'
+import {
+  composeWorktreeHostIdentity,
+  getWorktreeHostIdentity
+} from '../../../../shared/worktree/host-qualified-identity'
 
 export type WorkspaceKanbanLaneView = {
   items: readonly Worktree[]
@@ -38,7 +42,7 @@ export function matchWorkspaceBoardWorktrees(args: {
   const matched = new Set<string>()
   for (const result of searchWorktrees(args.worktrees, args.query, args.repoMap, null, null)) {
     if (result.matchedField && BOARD_MATCHED_FIELDS.has(result.matchedField)) {
-      matched.add(result.worktreeId)
+      matched.add(composeWorktreeHostIdentity(result.worktreeHostId, result.worktreeId))
     }
   }
   return matched
@@ -54,7 +58,7 @@ export function buildWorkspaceKanbanLaneViews(args: {
     views.set(status, {
       // Why: the no-query path must not reallocate a lane array per keystroke.
       items: matchingWorktreeIds
-        ? items.filter((worktree) => matchingWorktreeIds.has(worktree.id))
+        ? items.filter((worktree) => matchingWorktreeIds.has(getWorktreeHostIdentity(worktree)))
         : items,
       totalCount: items.length
     })

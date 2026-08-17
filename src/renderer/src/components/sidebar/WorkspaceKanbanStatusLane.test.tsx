@@ -51,7 +51,7 @@ function renderLane(props: {
         hasQuery={props.hasQuery}
         fullWorktreeIds={props.fullWorktreeIds}
         repoMap={repoMap}
-        activeWorktreeId={null}
+        activeWorktreeIdentity={null}
         columnWidth={308}
         isResizingColumn={false}
         isDragTarget={false}

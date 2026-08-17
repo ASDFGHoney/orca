@@ -202,12 +202,13 @@ function supportingText(
 }
 
 function result(
-  worktreeId: string,
+  worktree: Pick<Worktree, 'id' | 'hostId'>,
   matchedField: PaletteSearchResult['matchedField'],
   text: PaletteSupportingText
 ): PaletteSearchResult {
   return {
-    worktreeId,
+    worktreeId: worktree.id,
+    ...(worktree.hostId ? { worktreeHostId: worktree.hostId } : {}),
     matchedField,
     displayNameRange: null,
     branchRange: null,
@@ -304,7 +305,7 @@ export function matchWorktreePaletteTaskUrl(args: {
       return null
     }
     return result(
-      worktree.id,
+      worktree,
       intent.link.type === 'pr' ? 'pr' : 'issue',
       supportingText(
         intent.link.type === 'pr' ? 'pr' : 'issue',
@@ -316,14 +317,14 @@ export function matchWorktreePaletteTaskUrl(args: {
     if (!worktreeMatchesLinearUrl(worktree, intent.intent)) {
       return null
     }
-    return result(worktree.id, 'issue', supportingText('issue', intent.intent.identifier))
+    return result(worktree, 'issue', supportingText('issue', intent.intent.identifier))
   }
   if (intent.provider === 'gitlab') {
     if (!worktreeMatchesGitLabUrl(worktree, intent.link, repo, review)) {
       return null
     }
     return result(
-      worktree.id,
+      worktree,
       intent.link.type === 'mr' ? 'pr' : 'issue',
       supportingText(
         intent.link.type === 'mr' ? 'mr' : 'issue',
@@ -334,5 +335,5 @@ export function matchWorktreePaletteTaskUrl(args: {
   if (!worktreeMatchesJiraUrl(worktree, intent.parsed)) {
     return null
   }
-  return result(worktree.id, 'issue', supportingText('issue', intent.parsed.issueKey))
+  return result(worktree, 'issue', supportingText('issue', intent.parsed.issueKey))
 }
