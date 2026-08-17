@@ -803,7 +803,7 @@ describe('useNativeChatLiveSession — window-head marker rule', () => {
   }
 
   /** Renders a two-turn window whose head and tail both carry a literal marker. */
-  async function blocksById(hasMore: boolean): Promise<Map<string, unknown>> {
+  async function blocksById(earlierHistoryConfirmed: boolean): Promise<Map<string, unknown>> {
     const container = document.createElement('div')
     const root = createRoot(container)
     roots.push(root)
@@ -827,7 +827,10 @@ describe('useNativeChatLiveSession — window-head marker rule', () => {
           markerTurn('u-head', '[Image #1] hello', 1),
           markerTurn('u-tail', '[Image #2] bye', 2)
         ],
-        hasMore
+        hasMore: earlierHistoryConfirmed,
+        // Only the host's own answer may gate the fold; `hasMore` alone folds in
+        // a count inference that over-reports on an exactly full window.
+        hasMoreReported: earlierHistoryConfirmed
       })
     })
     return new Map((latest?.messages ?? []).map((message) => [message.id, message.blocks]))
