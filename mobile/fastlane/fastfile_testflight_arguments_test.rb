@@ -80,9 +80,6 @@ class FastfileTestflightArgumentsTest < Minitest::Test
   end
 
   def test_distribute_only_uploads_pass_the_app_platform
-    distribute_only_calls = @calls.select { |arguments| arguments["distribute_only"] == "true" }
-
-    refute_empty(distribute_only_calls, "expected a distribute_only upload_to_testflight call")
     distribute_only_calls.each do |arguments|
       # Without a local .ipa to sniff, pilot falls through to an interactive
       # platform prompt and crashes the ubuntu distribute job (#14087).
@@ -91,7 +88,7 @@ class FastfileTestflightArgumentsTest < Minitest::Test
   end
 
   def test_distribute_only_uploads_clear_a_build_stuck_in_beta_review
-    @calls.select { |arguments| arguments["distribute_only"] == "true" }.each do |arguments|
+    distribute_only_calls.each do |arguments|
       # submit_beta_review defaults on, so a superseded same-train build left in
       # beta review fails the submission with "Another build is in review".
       assert_equal("true", arguments["reject_build_waiting_for_review"])
@@ -114,5 +111,16 @@ class FastfileTestflightArgumentsTest < Minitest::Test
 
     assert_equal("true", arguments["distribute_only"])
     assert_nil(arguments["app_platform"])
+  end
+
+  private
+
+  # Asserting on an empty selection would pass vacuously, so the lane's presence
+  # is part of the contract.
+  def distribute_only_calls
+    calls = @calls.select { |arguments| arguments["distribute_only"] == "true" }
+    refute_empty(calls, "expected a distribute_only upload_to_testflight call")
+
+    calls
   end
 end
