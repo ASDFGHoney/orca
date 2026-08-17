@@ -43,10 +43,9 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@b6d5972ec4`; all 68 pre-ledger
-  patches are identical by `git range-diff`. The sole commit after the preceding reviewed base is
-  mobile Relay recovery work; only the reliability manifest overlaps, and its additive gate
-  composes without conflict with STA-4150.
+  sequence. The current local series is rebased onto `origin/main@e16a22ef58`. Range-diff preserves
+  the 68 preceding patches except the expected deferred-test signature context and the additive
+  activation-manifest composition; the new lifecycle fix is the only new functional patch.
   The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
   #14956, #14957 pass 46. The refreshed substantive PR-check runs are also green on all five
   rebased heads, as are the replacement computer-use runs. GitHub's #14954 rollup still counts an
@@ -355,12 +354,28 @@ boundary` successfully; its Windows package boundary also passed before post-job
   existing registration guard and dependency contract moved into concrete modules with no behavior
   change. Focused tests pass 31/31, the exact layer-4 shard passes 365 files / 3,110 tests, and the
   cumulative shard passes 367 files / 3,132 tests, each with one intentional skip.
+- A real two-launch Electron oracle reproduced a persisted service worker reaching desktop
+  localhost when forced awake before proxy setup. Invoking `setProxy` synchronously after Session
+  creation routes the same forced wake and a later worker fetch through SOCKS with zero
+  path-attributed direct requests. The lifecycle layer now starts proxy setup before synchronous
+  policy installation, waits failed setup through proxy settlement and connection cleanup, and
+  keeps concurrent retries joined for both resolved and rejected proxy promises. Three fresh
+  security, lifecycle, and resource reviews found no remaining P0/P1/P2.
+- After rebasing the five landing layers onto `origin/main@e16a22ef58`, full Node/CLI/web typecheck,
+  lint and native/type-aware audits, 89 reliability gates, max-lines, skills, localization, and
+  formatting pass. The cumulative lifecycle slice passes 9 files / 123 tests; activated placement,
+  mixed-version wire, routing, and package contracts pass 19 files / 168 tests. A fresh E2E build
+  passes both production journeys: headed paired Electron and real headless `orca serve`, with
+  client ownership, no server duplicate or screencast, local snapshot automation, new-page-only
+  disablement, and server fallback. `test-results/.last-run.json` records `status: passed`.
 
-The cumulative local tree is rebased onto `origin/main@b6d5972ec4`. Safety refs
+The cumulative local tree is rebased onto `origin/main@e16a22ef58`. Safety refs
 `sta-4150-safety-pre-21ed-main-rebase-20260816` and
 `sta-4150-safety-pre-b6d-main-rebase-20260816` preserve the preceding reviewed tips. All 68
-pre-ledger patches are identical by `git range-diff`; the intervening mobile Relay recovery commit
-overlaps only the reliability manifest and changes no STA-4150 behavior.
+preceding patches retain their behavior by `git range-diff`; the two contextual diffs are the
+deferred-test helper signature and the activation manifest composing the new lifecycle evidence.
+The new immediate-proxy lifecycle commit sits between #14955 and the unchanged command/activation
+behavior above it.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, packaged Windows/Linux skew, and broader live network
 containment beyond the current HTTP/DNS routes. Deterministic WSL, SSH, folder-workspace,
@@ -915,7 +930,7 @@ Validation and review:
 | ------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------- |
 | Negotiated contracts, placement, leases and generations | Implemented | Optional/capability-gated wire matrix and deterministic authority tests are green |
 | Fail-closed tunnel and native/SSH/WSL execution routes  | Implemented | Bounded route, remote-DNS, reconnect, Docker/OpenSSH, and WSL gates are green     |
-| Electron partition, retained guest and local UI/input   | Implemented | Lifecycle tests, Electron/CDP proof, and headed paired product journey are green  |
+| Electron partition, retained guest and local UI/input   | Implemented | Lifecycle, persisted-worker, Electron/CDP, and headed paired proofs are green     |
 | Agent/CLI routing and reconciliation                    | Implemented | Bounded automation, lost-ack, replacement, reconnect, and restart gates are green |
 | No client-placement screencast or duplicate server page | Proven      | Headed and headless paired E2E assert zero host guest and no screencast           |
 | Old/mobile/web/ineligible and explicit-server behavior  | Preserved   | Omitted placement stays server-hosted; compatibility and fallback tests are green |
@@ -936,9 +951,11 @@ Validation and review:
   without proof risks desktop-network leakage or targeting a replacement guest.
 - Electron partitions are session-wide. A profile/execution-host change requires a new engine and
   partition, never proxy retargeting.
-- Service workers, speculative connections, QUIC/HTTP3, DoH, WebTransport, network-service
-  restarts, downloads, and other non-WebRTC direct-egress paths remain unproven. WebRTC direct UDP
-  is denied on the exact routed guest, with real Electron packet-capture evidence.
+- A forced persisted-worker wake is contained after immediate proxy invocation; spontaneous
+  background-event timing still needs cross-platform soak evidence. Speculative connections,
+  QUIC/HTTP3, DoH, WebTransport, network-service restarts, downloads, and other non-WebRTC
+  direct-egress paths remain unproven. WebRTC direct UDP is denied on the exact routed guest, with
+  real Electron packet-capture evidence.
 - Renderer crash or last hosting-window close suspends/closes client page generations; no server
   fallback is allowed.
 - The open draft stack is intentionally large. Review/landing order and rebasing are delivery
