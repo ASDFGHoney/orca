@@ -46,7 +46,10 @@ Old clients and callers that omit placement must retain current server-hosted be
   sequence. The current local series is rebased onto `origin/main@96b03bab4f`; all 58 patches are
   identical by `git range-diff`, and the three new upstream commits have no changed-file overlap.
   The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
-  #14956, #14957 pass 46. Refreshed CI is required after the rebased heads are pushed.
+  #14956, #14957 pass 46. The refreshed substantive PR-check runs are also green on all five
+  rebased heads, as are the replacement computer-use runs. GitHub's #14954 rollup still counts an
+  immediately cancelled duplicate run and its failed aggregate `verify`; `gh pr checks` reports
+  the superseding 46 checks passed and five intentional skips.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -312,7 +315,24 @@ Current validation is green on the cumulative tree:
   were stopped afterward.
 - The Linux package job now mirrors Windows by running the real retained-guest Electron lifecycle
   fixture under Xvfb before packaging. Its workflow contract passes 23/23 and the fixture passes
-  1/1 locally; actual Ubuntu execution remains pending until the rebased #14956 package job runs.
+  1/1 locally. The rebased #14956 Ubuntu package job executed `Test Linux Electron lifecycle
+boundary` successfully; its Windows package boundary also passed before post-job cleanup.
+- Fresh performance/resource review found no P0/P1/P2 and passed 10 files / 89 tests across the
+  tunnel, SSH, WSL, SOCKS, route, and host lifecycle. Fresh cross-platform review found one P2 in
+  the packaged-skew harness: partial startup or one rejected cleanup could skip later teardown and
+  leak Electron or the HTTP fixture. The top evidence layer now registers each acquired resource,
+  attempts every cleanup in reverse order, and preserves both test and cleanup failures. Full
+  Node/CLI/web typecheck, formatting/lint, 89 reliability gates, max-lines, and the packaged-skew
+  oracle pass after the fix; the latter is green 2/2 in 8.7 seconds.
+- Fresh wire/mobile/security review found one P1 before publication: a routed Electron guest still
+  sent WebRTC STUN directly from the viewing desktop instead of through the SOCKS route. A real
+  Electron 43.1.0 control emitted four direct UDP packets; Chromium command-line and Blink-feature
+  switches did not stop them. Applying `disable_non_proxied_udp` to the exact route guest before
+  registry admission reduced the same capture to zero packets, while preserving exact SOCKS proxy
+  resolution. The registry now fails closed if Electron rejects that per-WebContents policy. The
+  2-file regression gate passes 23/23, and the package workflow contract pins the real Electron
+  capture into both native Linux and Windows package lanes. This changes no wire field or server,
+  mobile, web, browserless, explicit-server, SSH, WSL, folder-workspace, or worktree selection.
 
 The cumulative local tree is rebased onto `origin/main@96b03bab4f`. Safety refs
 `sta-4150-safety-pre-packaged-linux-rebase-20260816` and
@@ -326,10 +346,13 @@ git-worktree, browserless, mixed-version, packaged-macOS, and package-contract e
 
 The remaining ownership work, in execution order, is:
 
-1. Obtain human review for the five green landing PRs without marking them ready or merging here.
-2. Before release, run or explicitly accept the remaining physical Windows/Linux/mobile,
+1. Finish local/package validation and the final security, cross-platform, and resource rereviews,
+   then publish the WebRTC fix in #14955, native-host CI contract in #14956, and test-harness
+   cleanup in #14957 without marking any PR ready or merging.
+2. Obtain human review for the five landing PRs.
+3. Before release, run or explicitly accept the remaining physical Windows/Linux/mobile,
    packaged Windows/Linux, and broader protocol-containment gaps.
-3. Close superseded development drafts only after reviewers accept the replacement stack; their
+4. Close superseded development drafts only after reviewers accept the replacement stack; their
    complete mapping is already durable in #14957.
 
 ### Phase B: replace development history with the landing stack — completed

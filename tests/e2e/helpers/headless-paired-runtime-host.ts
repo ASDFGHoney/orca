@@ -32,6 +32,22 @@ export type HeadlessPairedRuntimeHost = {
   offer: RuntimeDesktopPairingOffer
 }
 
+type HeadlessHostCleanup = () => Promise<void> | void
+
+async function cleanupHeadlessHostResources(cleanups: HeadlessHostCleanup[]): Promise<void> {
+  const failures: unknown[] = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Failed to clean up headless paired runtime host')
+  }
+}
+
 export class HeadlessPairedRuntimeStartupDiagnosticBuffer {
   private completed = ''
   private discardingOversizedLine = false
@@ -243,25 +259,28 @@ export async function launchHeadlessPairedRuntimeHost(
       client: new RuntimeClient(userDataDir, 5_000),
       offer,
       dispose: async () => {
-        await closeElectronAppForE2E(app)
-        await cleanupE2EDaemons(userDataDir)
-        rmSync(userDataDir, { recursive: true, force: true })
-        if (agentBrowserSocketDir) {
-          rmSync(agentBrowserSocketDir, { recursive: true, force: true })
-        }
+        await cleanupHeadlessHostResources([
+          () => closeElectronAppForE2E(app),
+          () => cleanupE2EDaemons(userDataDir),
+          () => rmSync(userDataDir, { recursive: true, force: true }),
+          ...(agentBrowserSocketDir
+            ? [() => rmSync(agentBrowserSocketDir, { recursive: true, force: true })]
+            : [])
+        ])
       }
     }
   } catch (error) {
     try {
-      if (app) {
-        await closeElectronAppForE2E(app)
-      }
-      await cleanupE2EDaemons(userDataDir)
-    } finally {
-      rmSync(userDataDir, { recursive: true, force: true })
-      if (agentBrowserSocketDir) {
-        rmSync(agentBrowserSocketDir, { recursive: true, force: true })
-      }
+      await cleanupHeadlessHostResources([
+        ...(app ? [() => closeElectronAppForE2E(app)] : []),
+        () => cleanupE2EDaemons(userDataDir),
+        () => rmSync(userDataDir, { recursive: true, force: true }),
+        ...(agentBrowserSocketDir
+          ? [() => rmSync(agentBrowserSocketDir, { recursive: true, force: true })]
+          : [])
+      ])
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Headless runtime startup and cleanup failed')
     }
     throw error
   }

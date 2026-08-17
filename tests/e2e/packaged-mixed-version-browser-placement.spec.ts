@@ -46,6 +46,42 @@ type BrowserCreateResult = {
   browserPageId: string
 }
 
+type PackagedPlacementCleanup = () => Promise<void> | void
+
+async function collectCleanupFailures(cleanups: PackagedPlacementCleanup[]): Promise<unknown[]> {
+  const failures: unknown[] = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  return failures
+}
+
+async function withPackagedPlacementCleanup(
+  run: (registerCleanup: (cleanup: PackagedPlacementCleanup) => void) => Promise<void>
+): Promise<void> {
+  const cleanups: PackagedPlacementCleanup[] = []
+  let testError: unknown
+  try {
+    await run((cleanup) => cleanups.unshift(cleanup))
+  } catch (error) {
+    testError = error
+  }
+  const cleanupErrors = await collectCleanupFailures(cleanups)
+  if (testError !== undefined && cleanupErrors.length > 0) {
+    throw new AggregateError([testError, ...cleanupErrors], 'Placement test and cleanup failed')
+  }
+  if (testError !== undefined) {
+    throw testError
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'Packaged placement cleanup failed')
+  }
+}
+
 async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.closeAllConnections()
@@ -163,17 +199,28 @@ async function launchPackagedPairedClient(args: {
       status,
       version,
       dispose: async () => {
-        await closeElectronAppForE2E(app!)
-        await cleanupE2EDaemons(userDataDir)
-        await removeProfile(userDataDir)
+        const failures = await collectCleanupFailures([
+          () => closeElectronAppForE2E(app!),
+          () => cleanupE2EDaemons(userDataDir),
+          () => removeProfile(userDataDir)
+        ])
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'Failed to clean up packaged paired client')
+        }
       }
     }
   } catch (error) {
-    if (app) {
-      await closeElectronAppForE2E(app)
+    const cleanupErrors = await collectCleanupFailures([
+      ...(app ? [() => closeElectronAppForE2E(app)] : []),
+      () => cleanupE2EDaemons(userDataDir),
+      () => removeProfile(userDataDir)
+    ])
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        'Packaged client startup and cleanup failed'
+      )
     }
-    await cleanupE2EDaemons(userDataDir)
-    await removeProfile(userDataDir)
     throw error
   }
 }
@@ -348,16 +395,18 @@ test.describe('packaged mixed-version browser placement', () => {
     testRepoPath
   }, testInfo) => {
     test.setTimeout(300_000)
-    const host = await launchHeadlessPairedRuntimeHost()
-    const fixture = await startBrowserFixture()
-    let client: PackagedPairedClient | null = null
-    try {
+    await withPackagedPlacementCleanup(async (registerCleanup) => {
+      const host = await launchHeadlessPairedRuntimeHost()
+      registerCleanup(() => host.dispose())
+      const fixture = await startBrowserFixture()
+      registerCleanup(() => fixture.close())
       await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
-      client = await launchPackagedPairedClient({
+      const client = await launchPackagedPairedClient({
         executablePath: packagedExecutable!,
         offer: host.offer,
         testInfo
       })
+      registerCleanup(() => client.dispose())
       expect(client.status.capabilities).not.toContain(CLIENT_HOST_CAPABILITY)
       expect(client.status.capabilities).not.toContain(TUNNEL_CAPABILITY)
 
@@ -377,37 +426,35 @@ test.describe('packaged mixed-version browser placement', () => {
         })
       ).toContain('packaged-skew-marker')
       expect(client.version).toMatch(/^1\./)
-    } finally {
-      await client?.dispose()
-      await host.dispose()
-      await fixture.close()
-    }
+    })
   })
 
   test('keeps a current client on an old packaged server-hosted path', async ({
     testRepoPath
   }, testInfo) => {
     test.setTimeout(300_000)
-    const host = await launchHeadlessPairedRuntimeHost({
-      executablePath: packagedExecutable!,
-      // Why: the old macOS helper has a 103-byte Unix socket ceiling.
-      ...(process.platform === 'darwin'
-        ? { agentBrowserSocketParent: '/tmp', userDataParent: '/tmp' }
-        : {})
-    })
-    const fixture = await startBrowserFixture()
-    let client: PairedElectronClient | null = null
-    try {
+    await withPackagedPlacementCleanup(async (registerCleanup) => {
+      const host = await launchHeadlessPairedRuntimeHost({
+        executablePath: packagedExecutable!,
+        // Why: the old macOS helper has a 103-byte Unix socket ceiling.
+        ...(process.platform === 'darwin'
+          ? { agentBrowserSocketParent: '/tmp', userDataParent: '/tmp' }
+          : {})
+      })
+      registerCleanup(() => host.dispose())
+      const fixture = await startBrowserFixture()
+      registerCleanup(() => fixture.close())
       await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
       await host.client.call('terminal.create', {
         worktree: `path:${testRepoPath}`,
         title: 'Packaged mixed-version browser canary'
       })
-      client = await launchPairedElectronClient(
+      const client: PairedElectronClient = await launchPairedElectronClient(
         host.offer,
         testInfo,
         'STA-4150 current client to packaged old host'
       )
+      registerCleanup(() => client.dispose())
       const status = await client.page.evaluate(async (environmentId) => {
         const response = await window.api.runtimeEnvironments.getStatus({
           selector: environmentId,
@@ -447,10 +494,6 @@ test.describe('packaged mixed-version browser placement', () => {
           worktreePath: testRepoPath
         })
       ).toContain('packaged-skew-marker')
-    } finally {
-      await client?.dispose()
-      await host.dispose()
-      await fixture.close()
-    }
+    })
   })
 })
