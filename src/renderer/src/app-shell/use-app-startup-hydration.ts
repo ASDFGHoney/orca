@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { syncZoomCSSVar } from '@/lib/ui-zoom'
 import { installCodexDetachedPaneRestartExecutor } from '@/components/terminal-pane/codex-detached-pane-restart-scheduler'
 import { useAppStore } from '../store'
+import { useStartupActions } from './use-app-startup-actions'
 import { WORKTREE_REFRESH_CONCURRENCY } from '../store/slices/worktrees'
 import { sweepRestoredCodexPanesForStaleAccounts } from '../lib/codex-stale-pane-sweep'
 import { fetchWorkspaceSessionWithRuntimeHostOwners } from '../lib/workspace-session-host-persistence'
@@ -44,40 +44,6 @@ async function listRuntimeSessionHostIdsForStartup(): Promise<ExecutionHostId[]>
     console.warn('Failed to list runtime session hosts for startup:', err)
     return []
   }
-}
-
-function useStartupActions() {
-  // Why: consolidate action refs into one useShallow subscription so React runs one equality check per store mutation instead of one per action.
-  return useAppStore(
-    useShallow((s) => ({
-      fetchReposForAllHosts: s.fetchReposForAllHosts,
-      awaitLocalRepoCatalogSettlement: s.awaitLocalRepoCatalogSettlement,
-      fetchProjectGroupsForAllHosts: s.fetchProjectGroupsForAllHosts,
-      fetchFolderWorkspacesForAllHosts: s.fetchFolderWorkspacesForAllHosts,
-      fetchAllWorktrees: s.fetchAllWorktrees,
-      fetchWorktrees: s.fetchWorktrees,
-      fetchWorktreeLineage: s.fetchWorktreeLineage,
-      fetchOrcaProfiles: s.fetchOrcaProfiles,
-      fetchSettings: s.fetchSettings,
-      awaitOwnerWorktreeVisibilityDefaultsHydration:
-        s.awaitOwnerWorktreeVisibilityDefaultsHydration,
-      fetchKeybindings: s.fetchKeybindings,
-      initGitHubCache: s.initGitHubCache,
-      hydrateWorkspaceSession: s.hydrateWorkspaceSession,
-      hydrateTabsSession: s.hydrateTabsSession,
-      hydrateEditorSession: s.hydrateEditorSession,
-      hydrateBrowserSession: s.hydrateBrowserSession,
-      fetchBrowserSessionProfiles: s.fetchBrowserSessionProfiles,
-      reconnectPersistedTerminals: s.reconnectPersistedTerminals,
-      setTerminalStartupRestorationReady: s.setTerminalStartupRestorationReady,
-      setDeferredSshReconnectTargets: s.setDeferredSshReconnectTargets,
-      setSshConnectionState: s.setSshConnectionState,
-      hydratePersistedUI: s.hydratePersistedUI,
-      setHydrationSucceeded: s.setHydrationSucceeded,
-      pruneLastVisitedTimestamps: s.pruneLastVisitedTimestamps,
-      seedActiveWorktreeLastVisitedIfMissing: s.seedActiveWorktreeLastVisitedIfMissing
-    }))
-  )
 }
 
 /**

@@ -228,7 +228,7 @@ import {
 } from '../../../../src/dictation/mobile-dictation-setup'
 import { TerminalPaneView } from '../../../../src/session/TerminalPaneView'
 import { MobileNativeChatOverlay } from '../../../../src/session/MobileNativeChatOverlay'
-import { MobileStructuredAgentSessionView } from '../../../../src/session/MobileStructuredAgentSessionView'
+import { MobileStructuredSessionPane } from '../../../../src/session/MobileStructuredSessionPane'
 import { MobileStructuredSessionCreateError } from '../../../../src/session/MobileStructuredSessionCreateError'
 import { useMobileStructuredSessionEntry } from '../../../../src/session/use-mobile-structured-session-entry'
 import { showMobileStructuredChatChoice } from '../../../../src/session/mobile-structured-session-create'
@@ -4684,36 +4684,10 @@ export default function SessionScreen() {
                 )}
               </View>
             ) : activeStructuredTab ? (
-              <MobileStructuredAgentSessionView
+              <MobileStructuredSessionPane
                 key={activeStructuredTab.sessionId}
-                items={structuredSessionEntry.session.items}
-                status={structuredSessionEntry.session.status}
-                error={structuredSessionEntry.session.error}
-                hasOlder={structuredSessionEntry.session.hasOlder}
-                loadingOlder={structuredSessionEntry.session.loadingOlder}
-                onLoadOlder={structuredSessionEntry.session.loadOlder}
+                entry={structuredSessionEntry}
                 onOpenFile={handleNativeChatFileTap}
-                outbox={structuredSessionEntry.writes.outbox}
-                writeError={structuredSessionEntry.writes.error}
-                onSend={async (text, restored) => {
-                  const accepted = await structuredSessionEntry.writes.send(text, [
-                    ...restored,
-                    ...structuredSessionEntry.attachments.attachments
-                  ])
-                  if (accepted) {
-                    structuredSessionEntry.attachments.clear()
-                  }
-                  return accepted
-                }}
-                onTakeQueuedForEdit={structuredSessionEntry.writes.takeQueuedForEdit}
-                onRetry={structuredSessionEntry.writes.retry}
-                onRespondToPrompt={structuredSessionEntry.writes.respondToPrompt}
-                sessionOptions={structuredSessionEntry.sessionOptions}
-                attachments={structuredSessionEntry.attachments.attachments}
-                isAttaching={structuredSessionEntry.attachments.attaching}
-                onAttachImage={() => void structuredSessionEntry.attachments.attach('library')}
-                onRemoveAttachment={structuredSessionEntry.attachments.remove}
-                onCancel={structuredSessionEntry.writes.cancel}
               />
             ) : activePendingTerminalTab ? (
               <View style={styles.emptyState}>
