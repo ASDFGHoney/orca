@@ -399,7 +399,16 @@ describe('WorkspaceCleanupDialog stale-while-revalidate', () => {
     })
     await flush()
 
-    // Both rows are default-selected suggestions after the first settle.
+    // Nothing is pre-selected: the dialog no longer acts on its own verdict.
+    expect(rowCheckbox('alpha')?.getAttribute('aria-checked')).toBe('false')
+    expect(rowCheckbox('beta')?.getAttribute('aria-checked')).toBe('false')
+
+    // The user selects both, which is what must survive the refresh.
+    await act(async () => {
+      rowCheckbox('alpha')?.click()
+      rowCheckbox('beta')?.click()
+    })
+    await flush()
     expect(rowCheckbox('alpha')?.getAttribute('aria-checked')).toBe('true')
     expect(rowCheckbox('beta')?.getAttribute('aria-checked')).toBe('true')
 

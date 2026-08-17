@@ -92,4 +92,28 @@ describe('WorkspaceCleanupSortHeader', () => {
       container?.querySelector<HTMLButtonElement>('[role="checkbox"]')?.getAttribute('aria-checked')
     ).toBe('mixed')
   })
+  it('states how many workspaces select-all would take', () => {
+    render({ field: 'name', direction: 'asc' }, { selectableCount: 12 })
+
+    // Why: select-all takes the deletable subset, not every matched row; an
+    // unqualified label would overstate a destructive action's scope.
+    expect(container?.textContent).toContain('Select all 12 deletable workspaces')
+  })
+
+  it('does not report all-selected when the selected rows are not the selectable ones', () => {
+    const onToggleSelectAll = vi.fn()
+    // Why: `selectedCount` used to be canQueue-scoped while `selectableCount`
+    // is canSelect-scoped, so hand-picking review rows flipped the header to
+    // fully-checked and the next click cleared the whole selection.
+    render(
+      { field: 'name', direction: 'asc' },
+      { selectableCount: 3, selectedCount: 0, onToggleSelectAll }
+    )
+
+    const checkbox = container?.querySelector('[role="checkbox"]')
+    expect(checkbox?.getAttribute('aria-checked')).toBe('false')
+
+    act(() => (checkbox as HTMLElement | null)?.click())
+    expect(onToggleSelectAll).toHaveBeenCalledWith(true)
+  })
 })

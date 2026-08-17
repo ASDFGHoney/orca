@@ -52,9 +52,13 @@ export function WorkspaceCleanupSortHeader({
         ) : null}
       </button>
       <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+        {/* Why the count: select-all takes the deletable subset of the matched
+            rows, not every matched row — an unqualified label would overstate
+            the scope of a destructive action. */}
         {translate(
-          'components.workspace.cleanup.browse.selectAll',
-          'Select all matching workspaces'
+          'components.workspace.cleanup.browse.selectAllCount',
+          'Select all {{value0}} deletable workspaces',
+          { value0: selectableCount }
         )}
       </span>
       <DropdownMenu modal={false}>
