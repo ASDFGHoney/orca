@@ -6,6 +6,7 @@ import {
   restoreMobileStructuredAttachments
 } from './mobile-structured-session-timeline'
 import type { MobileStructuredOutboxEntry } from './mobile-structured-outbox-store'
+import { agentJournalSubmissionKey } from '../../../src/shared/agent-session-journal-item-key'
 
 const APPROVAL: AgentJournalRenderItem = {
   itemId: 'orca:approval',
@@ -72,6 +73,25 @@ describe('mobile structured session timeline', () => {
       outbox: { state: 'unconfirmed' },
       message: { blocks: [{ type: 'text', text: 'look' }, { url: 'file:///preview.png' }] }
     })
+  })
+
+  it('renders a WAL-published pending send once, as the outbox bubble', () => {
+    const walItem: AgentJournalRenderItem = {
+      itemId: agentJournalSubmissionKey('mobile-send:1:id'),
+      revision: 0,
+      sequence: 9,
+      observedAt: 3,
+      body: {
+        kind: 'message',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'look' }]
+      }
+    }
+
+    const rows = buildMobileStructuredTimeline([walItem], [OUTBOX])
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'message', key: 'mobile-send:1:id' })
   })
 
   it('restores host paths and local previews when a queued send is edited', () => {

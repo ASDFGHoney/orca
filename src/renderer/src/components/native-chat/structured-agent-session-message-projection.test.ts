@@ -3,6 +3,7 @@ import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
 } from '../../../../shared/agent-session-journal-types'
+import { agentJournalSubmissionKey } from '../../../../shared/agent-session-journal-item-key'
 import { createStructuredAgentSessionOutboxEntry } from '../../../../shared/structured-agent-session-outbox'
 import { projectStructuredAgentSessionMessages } from './structured-agent-session-message-projection'
 
@@ -50,6 +51,31 @@ describe('structured agent session message projection', () => {
     expect(messages.map((message) => message.id)).toEqual(
       Array.from({ length: sendCount }, (_, index) => `journal-${index}`)
     )
+  })
+
+  it('renders a WAL-published pending send once, as the optimistic bubble', () => {
+    const outbox = [
+      createStructuredAgentSessionOutboxEntry({
+        clientMessageId: 'client-0',
+        sessionId: 'session-1',
+        text: 'pending send',
+        attachments: [],
+        queuedAt: 1
+      })
+    ]
+    const walItem: AgentJournalRenderItem = {
+      itemId: agentJournalSubmissionKey('client-0'),
+      revision: 0,
+      sequence: 7,
+      observedAt: 1,
+      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'pending send' }] }
+    }
+    const pending: AgentJournalSubmission = { ...submission(0), dispatchState: 'pending' }
+
+    const messages = projectStructuredAgentSessionMessages([walItem], outbox, [pending])
+
+    expect(messages.filter((message) => message.role === 'user')).toHaveLength(1)
+    expect(messages[0]?.id).toBe('client-0')
   })
 
   it('keeps an optimistic send until its acceptance arrives', () => {

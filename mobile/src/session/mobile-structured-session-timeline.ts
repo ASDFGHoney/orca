@@ -7,6 +7,7 @@ import {
   activeStructuredAgentSessionTurnId,
   projectStructuredItemToNativeChat
 } from '../../../src/shared/structured-agent-session-projection'
+import { agentJournalSubmissionKey } from '../../../src/shared/agent-session-journal-item-key'
 
 export type MobileStructuredTimelineRow =
   | {
@@ -45,7 +46,16 @@ export function buildMobileStructuredTimeline(
   items: readonly AgentJournalRenderItem[],
   outbox: readonly MobileStructuredOutboxEntry[]
 ): MobileStructuredTimelineRow[] {
+  // The WAL row publishes before the provider accepts, so a live outbox entry
+  // can coexist with its canonical submission item; the outbox row wins until
+  // acceptance removes it (and keeps the local image previews meanwhile).
+  const outboxItemIds = new Set(
+    outbox.map((entry) => agentJournalSubmissionKey(entry.clientMessageId))
+  )
   const canonical = items.flatMap((item): MobileStructuredTimelineRow[] => {
+    if (outboxItemIds.has(item.itemId)) {
+      return []
+    }
     if (isPendingPrompt(item)) {
       return [{ kind: 'prompt', key: item.itemId, item }]
     }
