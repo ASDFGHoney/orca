@@ -97,6 +97,21 @@ describe('legacy remote browser input', () => {
     expect(onInput).not.toHaveBeenCalled()
   })
 
+  it('does not insert a newline into a readonly textarea', () => {
+    const textarea = document.createElement('textarea')
+    textarea.value = 'locked'
+    textarea.readOnly = true
+    document.body.append(textarea)
+    textarea.focus()
+    const onInput = vi.fn()
+    textarea.addEventListener('input', onInput)
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('Enter')!)
+
+    expect(textarea.value).toBe('locked')
+    expect(onInput).not.toHaveBeenCalled()
+  })
+
   it('types into selection-less value inputs without setRangeText', () => {
     const input = document.createElement('input')
     input.type = 'number'
