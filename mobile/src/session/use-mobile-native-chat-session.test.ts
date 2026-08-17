@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import type { RpcClient } from '../transport/rpc-client'
 import {
+  reportedHasMore,
   useMobileNativeChatSession,
   type MobileNativeChatSession
 } from './use-mobile-native-chat-session'
@@ -632,5 +633,25 @@ describe('useMobileNativeChatSession transcriptLoading', () => {
       transcriptLoading: true,
       ids: []
     })
+  })
+})
+
+// Both mobile hops cast the wire payload without validating per-field types, so
+// the host's paging answer has to be type-checked here or a non-boolean decides
+// it. That matters beyond the scroll affordance: the marker fold reads this to
+// decide whether a window-head `[Image #n]` is the user's text or a placeholder.
+describe('reportedHasMore', () => {
+  it('takes the host answer only when it is a real boolean', () => {
+    expect(reportedHasMore(true)).toBe(true)
+    expect(reportedHasMore(false)).toBe(false)
+  })
+
+  it('reads anything else as unanswered rather than a paging verdict', () => {
+    // 'no' and 0 are the dangerous ones: truthiness would invert or force them.
+    expect(reportedHasMore('no')).toBeUndefined()
+    expect(reportedHasMore(0)).toBeUndefined()
+    expect(reportedHasMore(1)).toBeUndefined()
+    expect(reportedHasMore(null)).toBeUndefined()
+    expect(reportedHasMore(undefined)).toBeUndefined()
   })
 })

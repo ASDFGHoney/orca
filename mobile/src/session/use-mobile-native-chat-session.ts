@@ -41,6 +41,14 @@ export type MobileNativeChatSession = {
 
 // Small first page for a fast first paint; grows by a page as the user scrolls.
 const INITIAL_LIMIT = 40
+
+/** The host's paging answer, or undefined when it did not give one. Both mobile
+ *  hops cast the wire payload without validating per-field types, so a
+ *  non-boolean must read as "unanswered" rather than force a paging verdict —
+ *  the same guard the desktop runtime parser enforces. */
+export function reportedHasMore(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
 const PAGE = 60
 const MAX_MESSAGES = 2000
 
@@ -190,13 +198,14 @@ export function useMobileNativeChatSession(args: {
           // overlapping reconnect replay keeps the paged-in history and limit.
           limitRef.current = INITIAL_LIMIT
           beforeOffsetRef.current = applied.beforeOffset ?? null
-          setHasMore(applied.hasMore ?? applied.messages.length >= INITIAL_LIMIT)
-          setEarlierHistoryConfirmed(applied.hasMore === true)
+          setHasMore(reportedHasMore(applied.hasMore) ?? applied.messages.length >= INITIAL_LIMIT)
+          setEarlierHistoryConfirmed(reportedHasMore(applied.hasMore) === true)
         }
         setMessages(applied.messages)
-        if (!applied.windowReplaced && applied.hasMore != null) {
-          setHasMore(applied.hasMore)
-          setEarlierHistoryConfirmed(applied.hasMore === true)
+        const appliedHasMore = reportedHasMore(applied.hasMore)
+        if (!applied.windowReplaced && appliedHasMore !== undefined) {
+          setHasMore(appliedHasMore)
+          setEarlierHistoryConfirmed(appliedHasMore)
         }
         if (!applied.windowReplaced && applied.beforeOffset != null) {
           beforeOffsetRef.current = applied.beforeOffset
@@ -265,9 +274,10 @@ export function useMobileNativeChatSession(args: {
           beforeOffsetRef.current = result.beforeOffset
           setList([...result.messages, ...mergerRef.current.list])
           setHasMore(
-            nextLimit < MAX_MESSAGES && (result.hasMore ?? result.messages.length >= pageLimit)
+            nextLimit < MAX_MESSAGES &&
+              (reportedHasMore(result.hasMore) ?? result.messages.length >= pageLimit)
           )
-          setEarlierHistoryConfirmed(result.hasMore === true)
+          setEarlierHistoryConfirmed(reportedHasMore(result.hasMore) === true)
         } else {
           // Older runtimes ignore the cursor and return the growing tail.
           setList(result.messages)
