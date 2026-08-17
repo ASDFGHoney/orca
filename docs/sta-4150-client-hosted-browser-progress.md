@@ -347,11 +347,13 @@ boundary` successfully; its Windows package boundary also passed before post-job
   `status: passed`. A separate clean headless rerun rebuilt Electron and CLI artifacts and passed
   both product journeys 2/2 in 47.1 seconds, including client hosting, new-page-only disablement,
   and server fallback without duplicate execution.
-- Fresh Node 24 CI then caught one stale top-layer integration guest double that omitted Electron's
-  required WebRTC policy method, so its fail-closed admission correctly returned cleanup failure.
-  The exact test was red locally 1/1; the double now models and asserts
-  `disable_non_proxied_udp`. Its focused package is green 63/63, and the exact CI shard is green
-  across 367 files / 3,132 tests with one intentional skip.
+- Fresh Node 24 and 26 CI then caught one stale layer-4 integration guest double that omitted
+  Electron's required WebRTC policy method, so its fail-closed admission correctly returned cleanup
+  failure. The exact test was red locally 1/1; the double now models and asserts
+  `disable_non_proxied_udp`. The same layer exceeded its effective max-lines limit by one, so the
+  existing registration guard and dependency contract moved into concrete modules with no behavior
+  change. Focused tests pass 31/31, the exact layer-4 shard passes 365 files / 3,110 tests, and the
+  cumulative shard passes 367 files / 3,132 tests, each with one intentional skip.
 
 The cumulative local tree is rebased onto `origin/main@21ed09e45c`. Safety refs
 `sta-4150-safety-pre-886-main-rebase-20260816` and
