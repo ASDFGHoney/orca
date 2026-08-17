@@ -1,6 +1,6 @@
 # STA-4150 Client-Hosted Browser Progress
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 This is the durable ownership ledger for
 [STA-4150](https://linear.app/stably/issue/STA-4150/refactor-remote-browser-to-client-hosted-electron-webviews).
@@ -33,6 +33,25 @@ Old clients and callers that omit placement must retain current server-hosted be
 ## Current status
 
 - Linear: **In Progress**, assigned to Jinwoo.
+- The terminal-link acceptance slice now proves the complete user journey: a paired remote terminal
+  opens one client-hosted Electron guest, the authoritative runtime retains one logical tab, the
+  server owns no guest, pointer/keyboard input stays local, screencast and PTY subscriptions do not
+  churn, close converges every inventory to baseline, and the remote terminal remains live with no
+  reconnect/error UI. The close regression was caused by the runtime page registry cloning an
+  immutable placement proof while retirement required the authority registry's canonical object.
+  A deterministic test failed 1/7 before canonical re-resolution and now passes, including a late
+  acknowledgement oracle that cannot retire a replacement generation. Recovery uses the same
+  canonical-placement rule.
+- Validation after the close fix: full Node/CLI/web typecheck, focused oxlint, `git diff --check`,
+  31 focused main/renderer tests, one rebuilt paired Electron run, three isolated no-build repeats,
+  and a final rebuilt post-review run all pass. Independent authority review found no issue. Review
+  hardening made inventory RPC failures terminal, force-closes fixture connections, and preserves
+  ambiguous multi-runtime ownership as unknown instead of destructively falling back locally. All
+  three reviewer tabs were closed.
+- The cumulative feature is still not release-complete. Remaining acceptance gaps are the explicit
+  unauthenticated local-SOCKS security decision, broader egress-containment adjudication, and final
+  physical-platform coverage where CI/simulator evidence is not equivalent to Windows, Linux, or
+  mobile hardware.
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
