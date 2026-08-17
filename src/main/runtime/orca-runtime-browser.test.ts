@@ -636,36 +636,53 @@ describe('RuntimeBrowserCommands browser screencast', () => {
     )
   })
 
-  it('lets a new same-page stream take over an active stale stream', async () => {
+  it('fans one page screencast out to multiple subscribers', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })
-    const firstDone = deferred<void>()
-    const secondDone = deferred<void>()
-    const firstStop = vi.fn(() => firstDone.resolve())
-    const secondStop = vi.fn(() => secondDone.resolve())
-    startBrowserScreencastMock
-      .mockResolvedValueOnce({ stop: firstStop, done: firstDone.promise })
-      .mockResolvedValueOnce({ stop: secondStop, done: secondDone.promise })
+    const done = deferred<void>()
+    const stop = vi.fn(() => done.resolve())
+    const updateViewport = vi.fn(async () => {})
+    startBrowserScreencastMock.mockResolvedValue({ stop, done: done.promise, updateViewport })
 
     const commands = new RuntimeBrowserCommands(createHost())
+    const firstSend = vi.fn(() => false)
+    const secondSend = vi.fn(() => true)
     const first = await commands.browserScreencast(
-      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: vi.fn() }
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: firstSend }
+    )
+    const second = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 800,
+        viewportHeight: 600
+      },
+      { sendBinary: secondSend }
     )
 
-    const secondPromise = commands.browserScreencast(
-      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: vi.fn() }
-    )
-
-    await vi.waitFor(() => expect(firstStop).toHaveBeenCalledTimes(1))
-    const second = await secondPromise
-
-    expect(startBrowserScreencastMock).toHaveBeenCalledTimes(2)
+    expect(startBrowserScreencastMock).toHaveBeenCalledOnce()
     expect(first.subscriptionId).not.toBe(second.subscriptionId)
+    const frame = new Uint8Array([1, 2, 3])
+    expect(startBrowserScreencastMock.mock.calls[0][1].onFrame(frame)).toBe(true)
+    expect(firstSend).toHaveBeenCalledWith(frame)
+    expect(secondSend).toHaveBeenCalledWith(frame)
+    expect(updateViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ viewportWidth: 800, viewportHeight: 600 })
+    )
     second.session.stop()
     await second.session.done
-    expect(secondStop).toHaveBeenCalledTimes(1)
+    expect(stop).not.toHaveBeenCalled()
+    first.session.stop()
+    await first.session.done
+    expect(stop).toHaveBeenCalledOnce()
   }, 10_000)
 
   it('admits screencast frames through the paired-runtime size guard', async () => {
@@ -674,7 +691,8 @@ describe('RuntimeBrowserCommands browser screencast', () => {
     const done = deferred<void>()
     startBrowserScreencastMock.mockResolvedValue({
       stop: vi.fn(() => done.resolve()),
-      done: done.promise
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
     })
     const sendBinary = vi.fn(() => true)
 

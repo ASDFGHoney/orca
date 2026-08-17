@@ -3222,7 +3222,7 @@ export class OrcaRuntimeService {
   >()
   private activeBrowserScreencastsByPage = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    Set<{ cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }>
   >()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
@@ -14821,7 +14821,9 @@ export class OrcaRuntimeService {
 
   reclaimBrowserForDesktop(browserPageId: string): boolean {
     this.setBrowserDriver(browserPageId, { kind: 'desktop' })
-    this.activeBrowserScreencastsByPage.get(browserPageId)?.cancel(true)
+    for (const stream of this.activeBrowserScreencastsByPage.get(browserPageId) ?? []) {
+      stream.cancel(true)
+    }
     return true
   }
 
@@ -37519,18 +37521,6 @@ export class OrcaRuntimeService {
     }
 
     const connectionKey = options.connectionId ?? 'local'
-    const requestedPageId = typeof params.page === 'string' ? params.page : null
-    let existingPageStream = requestedPageId
-      ? this.activeBrowserScreencastsByPage.get(requestedPageId)
-      : undefined
-    while (existingPageStream) {
-      // Why: CDP allows only one screencast per page; cancel a stale stream so the next tab activation isn't stuck on an already-active error or old viewport.
-      existingPageStream.cancel(existingPageStream.connectionKey !== connectionKey)
-      await existingPageStream.done
-      existingPageStream = requestedPageId
-        ? this.activeBrowserScreencastsByPage.get(requestedPageId)
-        : undefined
-    }
     let existingStream = this.activeBrowserScreencastsByConnection.get(connectionKey)
     while (existingStream) {
       existingStream.cancel()
@@ -37544,6 +37534,11 @@ export class OrcaRuntimeService {
     let screencast: Awaited<ReturnType<RuntimeBrowserCommands['browserScreencast']>> | null = null
     let registeredSubscriptionId: string | null = null
     let activeBrowserPageId: string | null = null
+    let activePageStream: {
+      cancel: (emitEnd?: boolean) => void
+      done: Promise<void>
+      connectionKey: string
+    } | null = null
     let ended = false
     let cancelledBeforeStart = false
     let readyEmitted = false
@@ -37595,11 +37590,20 @@ export class OrcaRuntimeService {
         return
       }
       activeBrowserPageId = screencast.ready.browserPageId
-      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, {
+      activePageStream = {
         cancel,
         done: activeDone,
         connectionKey
-      })
+      }
+      const pageStreams =
+        this.activeBrowserScreencastsByPage.get(activeBrowserPageId) ??
+        new Set<{
+          cancel: (emitEnd?: boolean) => void
+          done: Promise<void>
+          connectionKey: string
+        }>()
+      pageStreams.add(activePageStream)
+      this.activeBrowserScreencastsByPage.set(activeBrowserPageId, pageStreams)
       this.setBrowserDriver(activeBrowserPageId, { kind: 'mobile', clientId: connectionKey })
 
       // Why: screencast frames are connection-scoped; tie Page.stopScreencast to the exact socket so dropped connections don't leave Chromium streaming.
@@ -37627,13 +37631,20 @@ export class OrcaRuntimeService {
         this.activeBrowserScreencastsByConnection.delete(connectionKey)
       }
       if (activeBrowserPageId) {
-        const activePageStream = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
-        if (activePageStream?.done === activeDone) {
-          this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
+        const pageStreams = this.activeBrowserScreencastsByPage.get(activeBrowserPageId)
+        if (activePageStream && pageStreams) {
+          pageStreams.delete(activePageStream)
+          if (pageStreams.size === 0) {
+            this.activeBrowserScreencastsByPage.delete(activeBrowserPageId)
+          }
         }
         const driver = this.getBrowserDriver(activeBrowserPageId)
         if (driver.kind === 'mobile' && driver.clientId === connectionKey) {
-          this.setBrowserDriver(activeBrowserPageId, { kind: 'idle' })
+          const fallback = Array.from(pageStreams ?? []).at(-1)
+          this.setBrowserDriver(
+            activeBrowserPageId,
+            fallback ? { kind: 'mobile', clientId: fallback.connectionKey } : { kind: 'idle' }
+          )
         }
       }
       resolveActiveDone()

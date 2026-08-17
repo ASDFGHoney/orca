@@ -62,7 +62,10 @@ import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
 import { BrowserError } from '../browser/cdp-bridge'
 import { startBrowserScreencast } from '../browser/browser-screencast-stream'
-import type { BrowserScreencastSession } from '../browser/browser-screencast-stream-types'
+import type {
+  BrowserScreencastSession,
+  BrowserScreencastViewport
+} from '../browser/browser-screencast-stream-types'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import {
   detectInstalledBrowsers,
@@ -119,9 +122,30 @@ type BrowserScreencastStartResult = {
   session: BrowserScreencastSession
 }
 
-type ActiveBrowserScreencastPage = {
-  stop: () => void
+type ActiveBrowserScreencastSubscriber = {
+  sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
+  emit?: (event: BrowserScreencastResult) => void
   done: Promise<void>
+  resolveDone: () => void
+  viewport: BrowserScreencastViewport
+}
+
+type ActiveBrowserScreencastPage = {
+  format: 'jpeg' | 'png'
+  session: BrowserScreencastSession | null
+  started: Promise<BrowserScreencastSession>
+  stopping: boolean
+  subscribers: Map<string, ActiveBrowserScreencastSubscriber>
+  viewportOwnerSubscriptionId: string | null
+}
+
+function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserScreencastViewport {
+  return {
+    viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
+    viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
+    deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
+    mobile: params.mobile === true
+  }
 }
 
 function clampInteger(
@@ -192,9 +216,7 @@ export type RuntimeBrowserCommandHost = {
 }
 
 export class RuntimeBrowserCommands {
-  private readonly activeScreencastPageIds = new Set<string>()
   private readonly activeScreencastsByPageId = new Map<string, ActiveBrowserScreencastPage>()
-  private readonly stoppingScreencastPageIds = new Map<string, Promise<void>>()
 
   constructor(private readonly host: RuntimeBrowserCommandHost) {}
 
@@ -503,118 +525,123 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    let stopping = this.stoppingScreencastPageIds.get(browserPageId)
-    if (stopping) {
-      await stopping
-    }
+    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
+    const viewport = normalizeScreencastViewport(params)
+    let resolveSubscriberDone!: () => void
+    const subscriberDone = new Promise<void>((resolve) => {
+      resolveSubscriberDone = resolve
+    })
+    let createdPageStream = false
     let active = this.activeScreencastsByPageId.get(browserPageId)
-    while (active) {
-      // Why: CDP allows one Page.startScreencast per page, so a new subscriber takes over a stale/hidden client instead of erroring.
-      active.stop()
-      await active.done
-      stopping = this.stoppingScreencastPageIds.get(browserPageId)
-      if (stopping) {
-        await stopping
-      }
+    while (active?.stopping) {
+      await active.session?.done
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
-    this.activeScreencastPageIds.add(browserPageId)
-    const format = params.format
-    const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
-    let session: BrowserScreencastSession | null = null
-    let resolveActiveDone!: () => void
-    const activeDone = new Promise<void>((resolve) => {
-      resolveActiveDone = resolve
-    })
-    let cancelledBeforeStart = false
-    const activeRecord: ActiveBrowserScreencastPage = {
-      stop: () => {
-        if (session) {
-          session.stop()
-          return
-        }
-        cancelledBeforeStart = true
-      },
-      done: activeDone
-    }
-    this.activeScreencastsByPageId.set(browserPageId, activeRecord)
-    try {
-      session = await startBrowserScreencast(guest, {
-        format,
+    if (!active) {
+      createdPageStream = true
+      const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
+      const record = {
+        format: params.format,
+        session: null,
+        stopping: false,
+        subscribers,
+        viewportOwnerSubscriptionId: null
+      } as ActiveBrowserScreencastPage
+      record.started = startBrowserScreencast(guest, {
+        format: params.format,
         quality: clampInteger(params.quality, 10, 100, 70),
         maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
         maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
-        viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
-        viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
-        deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
-        mobile: params.mobile === true,
+        ...viewport,
         everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
         minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
-        onFrame: (bytes) => sendRemoteBrowserScreencastFrame(stream.sendBinary, bytes),
-        onEvent: stream.emit,
-        onError: (message) => stream.emit?.({ type: 'error', message })
-      })
-      if (cancelledBeforeStart) {
-        session.stop()
-        await session.done
-        throw new BrowserError('browser_error', 'Browser screencast was cancelled.')
-      }
-    } catch (error) {
-      this.activeScreencastPageIds.delete(browserPageId)
-      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
-        this.activeScreencastsByPageId.delete(browserPageId)
-      }
-      resolveActiveDone()
-      throw error
-    }
-    let stoppingPromise: Promise<void> | null = null
-    const clearPageGate = (): void => {
-      this.activeScreencastPageIds.delete(browserPageId)
-      if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
-        this.activeScreencastsByPageId.delete(browserPageId)
-      }
-      if (
-        stoppingPromise &&
-        this.stoppingScreencastPageIds.get(browserPageId) === stoppingPromise
-      ) {
-        this.stoppingScreencastPageIds.delete(browserPageId)
-      }
-      resolveActiveDone()
-    }
-    const markStopping = (): void => {
-      if (stoppingPromise || !session) {
-        return
-      }
-      // Why: mobile can unsubscribe and instantly resubscribe on rotation; new streams wait for CDP teardown instead of failing already-active.
-      stoppingPromise = session.done.finally(clearPageGate)
-      this.stoppingScreencastPageIds.set(browserPageId, stoppingPromise)
-    }
-    void session.done.finally(() => {
-      clearPageGate()
-    })
-
-    try {
-      return {
-        subscriptionId,
-        session: {
-          done: session.done,
-          stop: () => {
-            markStopping()
-            session?.stop()
+        onFrame: (bytes) => {
+          for (const subscriber of record.subscribers.values()) {
+            // A slow viewer drops this frame without stalling every other viewer.
+            sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+          }
+          return true
+        },
+        onEvent: (event) => {
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.emit?.(event)
           }
         },
-        ready: {
-          type: 'ready',
-          subscriptionId,
-          browserPageId,
-          format,
-          tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+        onError: (message) => {
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.emit?.({ type: 'error', message })
+          }
         }
-      }
+      })
+      active = record
+      this.activeScreencastsByPageId.set(browserPageId, record)
+      void record.started
+        .then((session) => {
+          record.session = session
+          return session.done
+        })
+        .finally(() => {
+          if (this.activeScreencastsByPageId.get(browserPageId) === record) {
+            this.activeScreencastsByPageId.delete(browserPageId)
+          }
+          for (const subscriber of record.subscribers.values()) {
+            subscriber.resolveDone()
+          }
+          record.subscribers.clear()
+        })
+        .catch(() => {})
+    }
+    active.subscribers.set(subscriptionId, {
+      sendBinary: stream.sendBinary,
+      emit: stream.emit,
+      done: subscriberDone,
+      resolveDone: resolveSubscriberDone,
+      viewport
+    })
+    active.viewportOwnerSubscriptionId = subscriptionId
+    let session: BrowserScreencastSession
+    try {
+      session = await active.started
     } catch (error) {
-      markStopping()
-      session.stop()
+      active.subscribers.delete(subscriptionId)
+      resolveSubscriberDone()
       throw error
+    }
+    if (!createdPageStream && active.viewportOwnerSubscriptionId === subscriptionId) {
+      await session.updateViewport(viewport)
+    }
+    return {
+      subscriptionId,
+      session: {
+        done: subscriberDone,
+        stop: () => {
+          const subscriber = active.subscribers.get(subscriptionId)
+          if (!subscriber) {
+            return
+          }
+          active.subscribers.delete(subscriptionId)
+          subscriber.resolveDone()
+          if (active.viewportOwnerSubscriptionId === subscriptionId) {
+            const fallback = Array.from(active.subscribers.entries()).at(-1)
+            active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
+            if (fallback) {
+              void session.updateViewport(fallback[1].viewport).catch(() => {})
+            }
+          }
+          if (active.subscribers.size === 0) {
+            active.stopping = true
+            session.stop()
+          }
+        },
+        updateViewport: session.updateViewport
+      },
+      ready: {
+        type: 'ready',
+        subscriptionId,
+        browserPageId,
+        format: active.format,
+        tab: this.describeBrowserTab(browserPageId, target.worktreeId)
+      }
     }
   }
 
