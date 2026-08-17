@@ -294,6 +294,24 @@ describe('origin repository cache', () => {
     expect(getEnterpriseGitHubRepoSlugMock).toHaveBeenCalledTimes(2)
   })
 
+  it('does not reuse a cached negative after the SSH provider reconnects', async () => {
+    const repository = {
+      owner: 'acme',
+      repo: 'widgets',
+      host: 'github.acme-corp.com'
+    }
+    getSshGitProviderGenerationMock.mockReturnValue(1)
+    getEnterpriseGitHubRepoSlugMock.mockResolvedValueOnce(null).mockResolvedValueOnce(repository)
+
+    await expect(getOriginGitHubApiRepository('/repo', 'ssh-1')).resolves.toBeNull()
+    await expect(getOriginGitHubApiRepository('/repo', 'ssh-1')).resolves.toBeNull()
+    expect(getEnterpriseGitHubRepoSlugMock).toHaveBeenCalledTimes(1)
+
+    getSshGitProviderGenerationMock.mockReturnValue(2)
+    await expect(getOriginGitHubApiRepository('/repo', 'ssh-1')).resolves.toEqual(repository)
+    expect(getEnterpriseGitHubRepoSlugMock).toHaveBeenCalledTimes(2)
+  })
+
   it('isolates an in-flight probe from an older SSH provider generation', async () => {
     const oldRepository = {
       owner: 'old-owner',
