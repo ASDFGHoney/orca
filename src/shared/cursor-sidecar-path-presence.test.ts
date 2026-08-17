@@ -43,4 +43,18 @@ describe('Cursor sidecar path presence', () => {
     ).resolves.toBe(false)
     expect(lstat).toHaveBeenCalledWith('\\\\wsl.localhost\\Ubuntu\\')
   })
+
+  it('does not turn a cancelled ancestor probe into missing history', async () => {
+    const cancelled = new Error('cursor_sidecar_scan_cancelled')
+
+    await expect(
+      isConfirmedCursorPathMissing(
+        '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.cursor\\chats',
+        missing,
+        async () => {
+          throw cancelled
+        }
+      )
+    ).rejects.toBe(cancelled)
+  })
 })

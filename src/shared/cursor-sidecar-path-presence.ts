@@ -1,5 +1,6 @@
 import type { Stats } from 'node:fs'
 import { win32 } from 'node:path'
+import { isCursorSidecarScanCancelledError } from './cursor-sidecar-scan-cancellation'
 import { parseWslUncPath } from './wsl-paths'
 
 type LstatPath = (path: string) => Promise<Stats>
@@ -32,6 +33,12 @@ export async function isConfirmedCursorPathMissing(
       await lstatPath(ancestor)
       return true
     } catch (ancestorError) {
+      if (
+        isCursorSidecarScanCancelledError(ancestorError) ||
+        (ancestorError instanceof Error && ancestorError.name === 'AbortError')
+      ) {
+        throw ancestorError
+      }
       if (!isCursorMissingPathError(ancestorError)) {
         return false
       }

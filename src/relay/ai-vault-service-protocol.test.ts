@@ -12,4 +12,12 @@ describe('relay AI Vault service protocol', () => {
     expect(message).toBe(AI_VAULT_SCAN_CANCELLED_MESSAGE)
     expect(isAiVaultScanCancelledError(new Error(message))).toBe(true)
   })
+
+  it('preserves AbortError cancellation after IPC drops the error name', () => {
+    const aborted = Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })
+    const message = relayAiVaultServiceErrorMessage(aborted)
+
+    expect(message).toBe(AI_VAULT_SCAN_CANCELLED_MESSAGE)
+    expect(isAiVaultScanCancelledError(new Error(message))).toBe(true)
+  })
 })

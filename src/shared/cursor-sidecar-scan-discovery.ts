@@ -307,11 +307,13 @@ function addIssue(response: CursorSidecarScanState, path: string, error: unknown
   })
 }
 
-function confirmedMissing(path: string, error: unknown, args: ScanArgs): Promise<boolean> {
-  return isConfirmedCursorPathMissing(path, error, async (ancestor) => {
+async function confirmedMissing(path: string, error: unknown, args: ScanArgs): Promise<boolean> {
+  const missing = await isConfirmedCursorPathMissing(path, error, async (ancestor) => {
     args.response.counters.fileLstat++
     return args.io.lstat(ancestor)
   })
+  args.cancellation.throwIfCancelled()
+  return missing
 }
 
 function isFiniteNonnegative(value: number): boolean {

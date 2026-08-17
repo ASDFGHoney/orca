@@ -134,14 +134,6 @@ export async function walkSessionFiles(
   const files: string[] = []
   for (const entry of entries) {
     options.signal?.throwIfAborted()
-    if (options.budget && options.budget.entriesRemaining <= 0) {
-      options.budget.truncated = true
-      options.budget.entriesTruncated = true
-      break
-    }
-    if (options.budget) {
-      options.budget.entriesRemaining--
-    }
     const fullPath = join(dirPath, entry.name)
     if (entry.isDirectory()) {
       // Skip whole subtrees an agent never wants (e.g. subagent transcripts),
@@ -182,11 +174,12 @@ async function readBoundedDirectoryEntries(
       if (next.done) {
         break
       }
-      if (entries.length >= budget.entriesRemaining) {
+      if (budget.entriesRemaining <= 0) {
         budget.truncated = true
         budget.entriesTruncated = true
         break
       }
+      budget.entriesRemaining--
       entries.push(next.value)
     }
   } finally {

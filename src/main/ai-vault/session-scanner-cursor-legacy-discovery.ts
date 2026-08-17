@@ -118,7 +118,16 @@ async function localScopeCandidates(
   counters: CursorLegacyScanCounters
 ): Promise<string[]> {
   const candidates = new Set<string>()
-  for (const scopePath of (args.options.scopePaths ?? []).slice(0, CURSOR_SCOPE_PATH_LIMIT)) {
+  const scopePaths = relevantScopePaths(args)
+  if (scopePaths.length > CURSOR_SCOPE_PATH_LIMIT) {
+    args.issues.push({
+      agent: 'cursor',
+      kind: 'notice',
+      path: args.roots.projectsDir,
+      message: `Cursor legacy discovery reached its ${CURSOR_SCOPE_PATH_LIMIT}-path scope limit.`
+    })
+  }
+  for (const scopePath of scopePaths.slice(0, CURSOR_SCOPE_PATH_LIMIT)) {
     addScopeCandidates(candidates, scopePath, args)
     try {
       counters.scopeRealpath += 1
@@ -132,6 +141,24 @@ async function localScopeCandidates(
     }
   }
   return [...candidates]
+}
+
+function relevantScopePaths(args: Parameters<typeof discoverCursorLegacy>[0]): string[] {
+  const paths = new Set<string>()
+  for (const rawPath of args.options.scopePaths ?? []) {
+    const scopePath = rawPath.trim()
+    if (
+      scopePath &&
+      cursorScopeCwdCandidates({
+        scopePath,
+        platform: args.roots.targetPlatform,
+        storageContextKey: args.roots.storageContextKey
+      }).length > 0
+    ) {
+      paths.add(scopePath)
+    }
+  }
+  return [...paths]
 }
 
 function addScopeCandidates(

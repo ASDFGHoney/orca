@@ -5,7 +5,10 @@ import type {
 } from '../shared/ai-vault-session-title'
 import type { SshAiVaultRelayListParams } from '../shared/ssh-ai-vault-relay'
 import type { RemoteHostPlatform } from '../main/ssh/ssh-remote-platform'
-import { AI_VAULT_SCAN_CANCELLED_MESSAGE } from '../shared/ai-vault-types'
+import {
+  AI_VAULT_SCAN_CANCELLED_MESSAGE,
+  isAiVaultScanCancelledError
+} from '../shared/ai-vault-types'
 import { isCursorSidecarScanCancelledError } from '../shared/cursor-sidecar-scan-cancellation'
 
 export const RELAY_AI_VAULT_SERVICE_PROTOCOL = 1
@@ -88,7 +91,7 @@ export function isRelayAiVaultServiceChildMessage(
 }
 
 export function relayAiVaultServiceErrorMessage(error: unknown): string {
-  return isCursorSidecarScanCancelledError(error)
+  return isCursorSidecarScanCancelledError(error) || isAiVaultScanCancelledError(error)
     ? AI_VAULT_SCAN_CANCELLED_MESSAGE
     : error instanceof Error
       ? error.message

@@ -97,6 +97,43 @@ describe('walkSessionFiles directory reader', () => {
     })
   })
 
+  it('charges nested dirents when read instead of after recursive descent', async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), 'orca-session-nested-budget-'))
+    await Promise.all(
+      ['a', 'b'].map(async (directory) => {
+        const nested = join(tempRoot!, directory)
+        await mkdir(nested)
+        await Promise.all(
+          Array.from({ length: 4 }, (_, index) => writeFile(join(nested, `${index}.jsonl`), '{}\n'))
+        )
+      })
+    )
+    const budget = {
+      entriesRemaining: 4,
+      filesRemaining: 4,
+      truncated: false,
+      entriesTruncated: false,
+      filesTruncated: false,
+      directoriesRead: 0,
+      direntsRead: 0
+    }
+
+    const result = await discoverFiles({
+      rootDir: tempRoot,
+      limit: 10,
+      agent: 'cursor',
+      issues: [],
+      extensions: ['.jsonl'],
+      budget
+    })
+
+    expect(result.files).toHaveLength(2)
+    expect(budget.entriesRemaining).toBe(0)
+    expect(budget.direntsRead).toBe(5)
+    expect(budget.directoriesRead).toBe(2)
+    expect(budget.entriesTruncated).toBe(true)
+  })
+
   it('stops a bounded directory read when cancellation lands during an entry read', async () => {
     tempRoot = await mkdtemp(join(tmpdir(), 'orca-session-cancel-budget-'))
     await Promise.all(
