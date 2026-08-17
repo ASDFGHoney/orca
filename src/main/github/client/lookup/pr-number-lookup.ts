@@ -1,7 +1,18 @@
-import { ghExecFileAsync, ghRepoExecOptions, type OwnerRepo } from '../../gh-utils'
+import { ghExecFileAsync } from '../../gh-utils'
+import type { OwnerRepo, ghRepoExecOptions } from '../../gh-utils'
 import { githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
-import { isNoPullRequestError, isNotFoundGhError, shouldStopAfterExactLookupError } from './../gh-error-predicates'
-import { PR_LOOKUP_JSON_FIELDS, mapRestPullRequest, normalizePullRequestLookupData, type PullRequestLookupData, type RestPullRequest } from './pull-request-lookup-data'
+import {
+  isNoPullRequestError,
+  isNotFoundGhError,
+  shouldStopAfterExactLookupError
+} from './../gh-error-predicates'
+import {
+  PR_LOOKUP_JSON_FIELDS,
+  mapRestPullRequest,
+  normalizePullRequestLookupData,
+  type PullRequestLookupData,
+  type RestPullRequest
+} from './pull-request-lookup-data'
 import { hydratePullRequestLookupData } from './pull-request-lookup-hydration'
 import { isGitObjectId, isUsableRestStackMetadata } from './rest-stack-metadata-validation'
 export async function getRestPRByNumber(

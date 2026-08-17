@@ -1,4 +1,10 @@
-import { ghExecFileAsync, acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  classifyGhError,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 /**
  * Update a PR's title.

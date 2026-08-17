@@ -1,6 +1,11 @@
 import { ghRepoExecOptions, githubRepoContext, type LocalGitExecOptions } from '../../gh-utils'
 import { getOriginGitHubApiRepository, type GitHubApiRepository } from '../../github-api-repository'
-import { getRateLimit, repositoryRateLimitGuard, spendsSharedGitHubComQuota, type RateLimitBucketKind } from '../../rate-limit'
+import {
+  getRateLimit,
+  repositoryRateLimitGuard,
+  spendsSharedGitHubComQuota,
+  type RateLimitBucketKind
+} from '../../rate-limit'
 import type { GhExecOptions } from './../github-exec-scope'
 // Why: a branch lookup prefers REST but can fall back to `gh pr list` and
 // `gh pr view`, so both buckets are guarded and charged. Mirrors the PR refresh

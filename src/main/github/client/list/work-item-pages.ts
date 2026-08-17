@@ -2,12 +2,24 @@ import type { ClassifiedError } from '../../../../shared/classified-error'
 import { classifyGitHubUnavailable } from '../../../../shared/github/api-availability'
 import { parseTaskQuery, type ParsedTaskQuery } from '../../../../shared/task-query'
 import { sortWorkItemsByNumber } from '../../../../shared/work-items'
-import { ghExecFileAsync, classifyListIssuesError, classifyListPrsError, ghRepoExecOptions, githubRepoContext, type LocalGitExecOptions, type OwnerRepo } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  classifyListIssuesError,
+  classifyListPrsError,
+  ghRepoExecOptions,
+  githubRepoContext,
+  type LocalGitExecOptions,
+  type OwnerRepo
+} from '../../gh-utils'
 import { githubHostExecOptions } from '../../github-api-repository'
 import { hydrateWorkItemRepositoryMergeMetadata } from './../detect/hydrate-work-item-merge-metadata'
 import type { MainWorkItem } from './../map/work-item-field-coercion'
 import { mapIssueWorkItem, mapPullRequestWorkItem } from './../map/work-item'
-import { buildWorkItemListRequest, assertSshRepoHasResolvedGitHubSource, type PartialWorkItemsResult } from './work-item-list-request'
+import {
+  buildWorkItemListRequest,
+  assertSshRepoHasResolvedGitHubSource,
+  type PartialWorkItemsResult
+} from './work-item-list-request'
 export async function listRecentWorkItems(
   repoPath: string,
   issueOwnerRepo: OwnerRepo | null,

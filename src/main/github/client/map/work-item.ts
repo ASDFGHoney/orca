@@ -1,5 +1,16 @@
-import { type OwnerRepo } from '../../gh-utils'
-import { authorFieldsFromUnknown, extractHeadOwnerLogin, usersFromUnknown, latestReviewsFromUnknown, numberFromUnknown, normalizePRMergeable, normalizeReviewDecision, isAutoMergeEnabled, deriveWorkItemCheckSummary, type MainWorkItem } from './work-item-field-coercion'
+import type { OwnerRepo } from '../../gh-utils'
+import {
+  authorFieldsFromUnknown,
+  extractHeadOwnerLogin,
+  usersFromUnknown,
+  latestReviewsFromUnknown,
+  numberFromUnknown,
+  normalizePRMergeable,
+  normalizeReviewDecision,
+  isAutoMergeEnabled,
+  deriveWorkItemCheckSummary,
+  type MainWorkItem
+} from './work-item-field-coercion'
 export function mapIssueWorkItem(item: Record<string, unknown>): MainWorkItem {
   return {
     id: `issue:${String(item.number)}`,

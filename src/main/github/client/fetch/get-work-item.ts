@@ -1,9 +1,18 @@
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import { acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
-import { resolveGitHubApiRepository, resolveGitHubApiRepositoryCandidates, resolveIssueGitHubApiRepositorySource, type GitHubApiRepository } from '../../github-api-repository'
+import {
+  resolveGitHubApiRepository,
+  resolveGitHubApiRepositoryCandidates,
+  resolveIssueGitHubApiRepositorySource,
+  type GitHubApiRepository
+} from '../../github-api-repository'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import type { MainWorkItem } from './../map/work-item-field-coercion'
-import { fetchIssueWorkItem, fetchPullRequestWorkItem, fetchPullRequestWorkItemFromCandidates } from './work-item-fetch'
+import {
+  fetchIssueWorkItem,
+  fetchPullRequestWorkItem,
+  fetchPullRequestWorkItemFromCandidates
+} from './work-item-fetch'
 export async function getWorkItem(
   repoPath: string,
   number: number,

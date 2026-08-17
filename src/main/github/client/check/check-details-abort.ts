@@ -4,7 +4,10 @@ export function rethrowCheckDetailsAbort(signal: AbortSignal | undefined, error:
   }
 }
 
-export function waitForCheckDetailsResolution<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+export function waitForCheckDetailsResolution<T>(
+  operation: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
   if (signal.aborted) {
     return Promise.reject(signal.reason)
   }

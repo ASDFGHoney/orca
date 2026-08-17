@@ -1,9 +1,21 @@
-import type { GitHubPRMergeMethodSettings, GitHubPRStack, PRMergeableState, PRReviewDecision } from '../../../../shared/github/pull-request-types'
+import type {
+  GitHubPRMergeMethodSettings,
+  GitHubPRStack,
+  PRMergeableState,
+  PRReviewDecision
+} from '../../../../shared/github/pull-request-types'
 import { gitExecFileAsync } from '../../gh-utils'
-import { getSshGitProvider, SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE } from '../../../providers/ssh-git-dispatch'
-import { type HostedReviewExecutionOptions } from '../../../source-control/hosted-review-git-options'
+import {
+  getSshGitProvider,
+  SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE
+} from '../../../providers/ssh-git-dispatch'
+import type { HostedReviewExecutionOptions } from '../../../source-control/hosted-review-git-options'
 import { mapPRState } from '../../mappers'
-import { normalizePRMergeable, normalizeReviewDecision, isAutoMergeEnabled } from './../map/work-item-field-coercion'
+import {
+  normalizePRMergeable,
+  normalizeReviewDecision,
+  isAutoMergeEnabled
+} from './../map/work-item-field-coercion'
 export type PullRequestLookupData = {
   number: number
   title: string
@@ -112,7 +124,10 @@ export function mapRestPullRequest(pr: RestPullRequest): PullRequestLookupData {
   }
 }
 
-export function isMergedImplicitPR(data: PullRequestLookupData, linkedPRNumber?: number | null): boolean {
+export function isMergedImplicitPR(
+  data: PullRequestLookupData,
+  linkedPRNumber?: number | null
+): boolean {
   // Why: a merged PR without an explicit link is just a historical branch match, not implicit review context.
   return typeof linkedPRNumber !== 'number' && mapPRState(data.state, data.isDraft) === 'merged'
 }

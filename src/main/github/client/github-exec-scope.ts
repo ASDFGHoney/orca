@@ -1,6 +1,10 @@
-import { type LocalGitExecOptions, type OwnerRepo } from '../gh-utils'
-import { hasHostedReviewLocalGitOptions, getHostedReviewLocalGitOptions, type HostedReviewExecutionOptions } from '../../source-control/hosted-review-git-options'
-import { type GitHubRepoExecOptions } from '../github-api-repository'
+import type { LocalGitExecOptions, OwnerRepo } from '../gh-utils'
+import {
+  hasHostedReviewLocalGitOptions,
+  getHostedReviewLocalGitOptions
+} from '../../source-control/hosted-review-git-options'
+import type { HostedReviewExecutionOptions } from '../../source-control/hosted-review-git-options'
+import type { GitHubRepoExecOptions } from '../github-api-repository'
 import { githubRepoIdentityKey } from '../../../shared/github/repository-identity-key'
 export type GhExecOptions = GitHubRepoExecOptions & { signal?: AbortSignal }
 

@@ -4,7 +4,14 @@ import { githubHostExecOptions, type GitHubApiRepository } from '../../github-ap
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import { noteRepositoryRateLimitSpend, repositoryRateLimitGuard } from '../../rate-limit'
 import type { GhExecOptions } from './../github-exec-scope'
-import { MERGE_QUEUE_CACHE_TTL_MS, MERGE_QUEUE_UNKNOWN_CACHE_TTL_MS, repositoryMergeMetadataCache, pruneRepositoryMergeMetadataCache, cacheRepositoryMergeMetadata, type GitHubRepositoryMergeMetadata } from './repository-merge-metadata-cache'
+import {
+  MERGE_QUEUE_CACHE_TTL_MS,
+  MERGE_QUEUE_UNKNOWN_CACHE_TTL_MS,
+  repositoryMergeMetadataCache,
+  pruneRepositoryMergeMetadataCache,
+  cacheRepositoryMergeMetadata,
+  type GitHubRepositoryMergeMetadata
+} from './repository-merge-metadata-cache'
 export async function detectRepositoryMergeMetadata(
   ownerRepo: GitHubApiRepository,
   branchName: string | undefined,

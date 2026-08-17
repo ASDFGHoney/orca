@@ -1,7 +1,19 @@
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import type { GitPushTarget } from '../../../../shared/worktree/types'
-import { ghExecFileAsync, acquire, release, ghRepoExecOptions, githubRepoContext, getRemoteUrlForRepo, type LocalGitExecOptions } from '../../gh-utils'
-import { getGitHubApiRepositoryForRemote, githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  ghRepoExecOptions,
+  githubRepoContext,
+  getRemoteUrlForRepo,
+  type LocalGitExecOptions
+} from '../../gh-utils'
+import {
+  getGitHubApiRepositoryForRemote,
+  githubHostExecOptions,
+  type GitHubApiRepository
+} from '../../github-api-repository'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import { isNotFoundGhError } from './../gh-error-predicates'
 import { resolvePullRequestLookupCandidates } from './../pull-request-lookup-candidates'

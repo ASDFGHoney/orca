@@ -1,7 +1,25 @@
 import { gitExecFileAsync } from '../../gh-utils'
-import { getSshGitProvider, SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE } from '../../../providers/ssh-git-dispatch'
+import {
+  getSshGitProvider,
+  SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE
+} from '../../../providers/ssh-git-dispatch'
 import { readLocalGitConfigSignature } from '../../local-git-config-signature'
-import { TRACKED_UPSTREAM_SNAPSHOT_CACHE_TTL_MS, trackedUpstreamSnapshotCache, trackedUpstreamSnapshotInFlight, trackedUpstreamSnapshotGenerations, beginTrackedUpstreamSnapshotProbe, finishTrackedUpstreamSnapshotProbe, pruneTrackedUpstreamSnapshotCache, parseTrackedUpstreamBranch, getCacheableTrackedUpstreamSnapshot, canUseCachedTrackedUpstreamBranch, doesTrackedUpstreamCacheConfigSignatureMatch, getTrackedUpstreamBranchCacheKey, type TrackedUpstreamBranch, type TrackedUpstreamSnapshotProbeResult } from './tracked-upstream-cache'
+import {
+  TRACKED_UPSTREAM_SNAPSHOT_CACHE_TTL_MS,
+  trackedUpstreamSnapshotCache,
+  trackedUpstreamSnapshotInFlight,
+  trackedUpstreamSnapshotGenerations,
+  beginTrackedUpstreamSnapshotProbe,
+  finishTrackedUpstreamSnapshotProbe,
+  pruneTrackedUpstreamSnapshotCache,
+  parseTrackedUpstreamBranch,
+  getCacheableTrackedUpstreamSnapshot,
+  canUseCachedTrackedUpstreamBranch,
+  doesTrackedUpstreamCacheConfigSignatureMatch,
+  getTrackedUpstreamBranchCacheKey,
+  type TrackedUpstreamBranch,
+  type TrackedUpstreamSnapshotProbeResult
+} from './tracked-upstream-cache'
 export async function getTrackedUpstreamBranch(
   repoPath: string,
   branchName: string,
@@ -142,7 +160,9 @@ export async function probeTrackedUpstreamBranches(
   }
 }
 
-export function parseTrackedUpstreamBranches(stdout: string): Map<string, TrackedUpstreamBranch | null> {
+export function parseTrackedUpstreamBranches(
+  stdout: string
+): Map<string, TrackedUpstreamBranch | null> {
   const upstreamsByBranchName = new Map<string, TrackedUpstreamBranch | null>()
   for (const line of stdout.split(/\r?\n/)) {
     if (!line) {

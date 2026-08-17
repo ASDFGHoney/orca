@@ -1,5 +1,11 @@
 import type { GitHubPullRequestStateUpdate } from '../../../../shared/issue-mutation-types'
-import { ghExecFileAsync, acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  classifyGhError,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 export async function updatePRState(
   repoPath: string,

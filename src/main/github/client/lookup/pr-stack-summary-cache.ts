@@ -1,6 +1,6 @@
 import type { GitHubPRStack } from '../../../../shared/github/pull-request-types'
-import { ghRepoExecOptions } from '../../gh-utils'
-import { type GitHubApiRepository } from '../../github-api-repository'
+import type { ghRepoExecOptions } from '../../gh-utils'
+import type { GitHubApiRepository } from '../../github-api-repository'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import { getRestPRByNumber } from './pr-number-lookup'
 export const PR_STACK_SUMMARY_CACHE_TTL_MS = 60_000

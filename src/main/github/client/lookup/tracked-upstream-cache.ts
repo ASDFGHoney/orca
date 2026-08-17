@@ -1,5 +1,5 @@
 import { splitRemoteBranchName } from '../../../../shared/git-effective-upstream'
-import { type OwnerRepo } from '../../gh-utils'
+import type { OwnerRepo } from '../../gh-utils'
 import { readLocalGitConfigSignature } from '../../local-git-config-signature'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 export type TrackedUpstreamBranch = {

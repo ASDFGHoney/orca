@@ -25,7 +25,17 @@ export async function getPRForBranchOutcome(
 
   await acquire()
   try {
-    return await resolvePRForBranchOutcome({ repoPath, branchName, linkedPRNumber, connectionId, fallbackPRNumber, options, localGitOptions, ghOptions, executionScope })
+    return await resolvePRForBranchOutcome({
+      repoPath,
+      branchName,
+      linkedPRNumber,
+      connectionId,
+      fallbackPRNumber,
+      options,
+      localGitOptions,
+      ghOptions,
+      executionScope
+    })
   } catch (err) {
     return prRefreshUpstreamError(err)
   } finally {

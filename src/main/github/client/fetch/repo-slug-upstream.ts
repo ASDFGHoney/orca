@@ -1,6 +1,15 @@
 import { ghExecFileAsync, acquire, release, type OwnerRepo } from '../../gh-utils'
-import { getHostedReviewLocalGitOptions, type HostedReviewExecutionOptions } from '../../../source-control/hosted-review-git-options'
-import { getGitHubApiRepositoryForRemote, getOriginGitHubApiRepository, githubRepositorySlugArg, resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
+import {
+  getHostedReviewLocalGitOptions,
+  type HostedReviewExecutionOptions
+} from '../../../source-control/hosted-review-git-options'
+import {
+  getGitHubApiRepositoryForRemote,
+  getOriginGitHubApiRepository,
+  githubRepositorySlugArg,
+  resolveGitHubRepoExecution,
+  type GitHubApiRepository
+} from '../../github-api-repository'
 import { hostedReviewLocalGitOptionArgs, sameOwnerRepo } from './../github-exec-scope'
 export async function getRepoSlug(
   repoPath: string,

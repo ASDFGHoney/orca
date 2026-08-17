@@ -1,4 +1,7 @@
-import type { PRMergeableState, PRReviewDecision } from '../../../../shared/github/pull-request-types'
+import type {
+  PRMergeableState,
+  PRReviewDecision
+} from '../../../../shared/github/pull-request-types'
 import type { GitHubWorkItem } from '../../../../shared/github/work-item-types'
 import { summarizeProviderChecks } from '../../../../shared/provider-check-summary'
 // Why: omit repoId — the main process only has the path; the renderer stamps repoId after IPC.
@@ -123,7 +126,9 @@ export function usersFromUnknown(
   return users
 }
 
-export function latestReviewsFromUnknown(value: unknown): NonNullable<GitHubWorkItem['latestReviews']> {
+export function latestReviewsFromUnknown(
+  value: unknown
+): NonNullable<GitHubWorkItem['latestReviews']> {
   if (!Array.isArray(value)) {
     return []
   }

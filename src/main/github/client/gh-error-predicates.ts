@@ -1,5 +1,8 @@
 import type { PRRefreshOutcome } from '../../../shared/github/pull-request-refresh-types'
-import { classifyPRRefreshError, safePRRefreshErrorMessage } from '../pr-refresh-error-classification'
+import {
+  classifyPRRefreshError,
+  safePRRefreshErrorMessage
+} from '../pr-refresh-error-classification'
 import { classifyGhError } from '../gh-utils'
 // Why: import from the lightweight module (not ./gh-utils) so tests mocking gh-utils still get the real functions.
 import { extractExecError, parseRetryAfterMs } from '../../git/exec-error'

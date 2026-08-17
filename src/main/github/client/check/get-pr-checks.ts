@@ -7,8 +7,20 @@ import { mapCheckStatus, mapCheckConclusion } from '../../mappers'
 import { noteRepositoryRateLimitSpend } from '../../rate-limit'
 import type { GhExecOptions } from './../github-exec-scope'
 import { assertRateLimitBudget } from './../lookup/pr-lookup-rate-limit'
-import { PR_CHECKS_ROLLUP_QUERY, type GraphQLPRChecksResponse, type RestCheckRun, type RestCommitStatus, type RestCheckSuite } from './pr-checks-graphql-query'
-import { mapRestCheckRun, mapRestCommitStatus, mapGraphQLPRChecksResponse, getPendingApprovalCheckSuiteName, getPendingApprovalCheckSuiteUrl } from './pr-checks-response-mapping'
+import {
+  PR_CHECKS_ROLLUP_QUERY,
+  type GraphQLPRChecksResponse,
+  type RestCheckRun,
+  type RestCommitStatus,
+  type RestCheckSuite
+} from './pr-checks-graphql-query'
+import {
+  mapRestCheckRun,
+  mapRestCommitStatus,
+  mapGraphQLPRChecksResponse,
+  getPendingApprovalCheckSuiteName,
+  getPendingApprovalCheckSuiteUrl
+} from './pr-checks-response-mapping'
 import { parseActionsRunId } from './check-detail-field-mapping'
 export async function getPRChecksViaRestFallback(
   ownerRepo: GitHubApiRepository,

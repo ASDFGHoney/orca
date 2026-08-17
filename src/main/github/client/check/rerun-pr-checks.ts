@@ -1,5 +1,11 @@
 import type { GitHubRerunPRChecksResult } from '../../../../shared/github/check-types'
-import { ghExecFileAsync, acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  classifyGhError,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import { getPRChecks } from './get-pr-checks'
 import { parseActionsRunId } from './check-detail-field-mapping'

@@ -1,7 +1,20 @@
 import type { PRCheckDetail } from '../../../../shared/github/check-types'
 import { githubRepositoryWebHost, type GitHubApiRepository } from '../../github-api-repository'
-import { mapCheckRunRESTStatus, mapCheckRunRESTConclusion, mapCommitStatusRESTStatus, mapCommitStatusRESTConclusion } from '../../mappers'
-import type { GraphQLPRChecksResponse, GraphQLCheckRunContext, GraphQLStatusContext, GraphQLStatusCheckContext, GraphQLCheckSuite, RestCheckRun, RestCommitStatus } from './pr-checks-graphql-query'
+import {
+  mapCheckRunRESTStatus,
+  mapCheckRunRESTConclusion,
+  mapCommitStatusRESTStatus,
+  mapCommitStatusRESTConclusion
+} from '../../mappers'
+import type {
+  GraphQLPRChecksResponse,
+  GraphQLCheckRunContext,
+  GraphQLStatusContext,
+  GraphQLStatusCheckContext,
+  GraphQLCheckSuite,
+  RestCheckRun,
+  RestCommitStatus
+} from './pr-checks-graphql-query'
 import { nullableString, nullableNumber, parseActionsRunId } from './check-detail-field-mapping'
 export function isGraphQLCheckRunContext(
   context: GraphQLStatusCheckContext

@@ -1,9 +1,25 @@
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import { isGitHubWorkItemsQueryTooLarge } from '../../../../shared/github/work-items-query-bounds'
 import { parseTaskQuery, type ParsedTaskQuery } from '../../../../shared/task-query'
-import { ghExecFileAsync, acquire, release, ghRepoExecOptions, githubRepoContext, type LocalGitExecOptions, type OwnerRepo } from '../../gh-utils'
-import { githubHostExecOptions, resolveIssueGitHubApiRepositorySource } from '../../github-api-repository'
-import { getRateLimit, noteRepositoryRateLimitSpend, repositoryRateLimitGuard, spendsSharedGitHubComQuota } from '../../rate-limit'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  ghRepoExecOptions,
+  githubRepoContext,
+  type LocalGitExecOptions,
+  type OwnerRepo
+} from '../../gh-utils'
+import {
+  githubHostExecOptions,
+  resolveIssueGitHubApiRepositorySource
+} from '../../github-api-repository'
+import {
+  getRateLimit,
+  noteRepositoryRateLimitSpend,
+  repositoryRateLimitGuard,
+  spendsSharedGitHubComQuota
+} from '../../rate-limit'
 import { sameOwnerRepo } from './../github-exec-scope'
 import { resolvePrWorkItemSource } from './work-item-list-request'
 import { buildSearchQueryString, defaultOpenWorkItemQuery } from './work-item-search-query'

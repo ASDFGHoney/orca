@@ -1,10 +1,21 @@
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
-import { ghExecFileAsync, classifyGhError, ghRepoExecOptions, githubRepoContext, type LocalGitExecOptions } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  classifyGhError,
+  ghRepoExecOptions,
+  githubRepoContext,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
 import type { GhExecOptions } from './../github-exec-scope'
 import { resolvePullRequestLookupCandidates } from './../pull-request-lookup-candidates'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'
-import { WORK_ITEM_PR_DETAIL_JSON_FIELDS, usersFromUnknown, latestReviewsFromUnknown, type MainWorkItem } from './../map/work-item-field-coercion'
+import {
+  WORK_ITEM_PR_DETAIL_JSON_FIELDS,
+  usersFromUnknown,
+  latestReviewsFromUnknown,
+  type MainWorkItem
+} from './../map/work-item-field-coercion'
 import { mapIssueWorkItem, mapPullRequestWorkItem } from './../map/work-item'
 export async function fetchIssueWorkItem(
   repoPath: string,

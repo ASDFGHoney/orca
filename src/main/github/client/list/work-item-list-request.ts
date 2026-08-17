@@ -1,9 +1,12 @@
 import type { ClassifiedError } from '../../../../shared/classified-error'
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
-import { type ParsedTaskQuery } from '../../../../shared/task-query'
+import type { ParsedTaskQuery } from '../../../../shared/task-query'
 import { GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE } from '../../../../shared/work-items'
-import { type LocalGitExecOptions, type OwnerRepo } from '../../gh-utils'
-import { getGitHubApiRepositoryForRemote, getOriginGitHubApiRepository } from '../../github-api-repository'
+import type { LocalGitExecOptions, OwnerRepo } from '../../gh-utils'
+import {
+  getGitHubApiRepositoryForRemote,
+  getOriginGitHubApiRepository
+} from '../../github-api-repository'
 import { WORK_ITEM_PR_LIST_JSON_FIELDS, type MainWorkItem } from './../map/work-item-field-coercion'
 import { WORK_ITEM_NUMBER_SORT_QUALIFIER, quoteGitHubSearchValue } from './work-item-search-query'
 export type WorkItemListRequest = {

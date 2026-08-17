@@ -1,16 +1,23 @@
 import type { GitHubPRMergeMethod } from '../../../../shared/github/pull-request-types'
-import { ghExecFileAsync, acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  classifyGhError,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import type { GhExecOptions } from './../github-exec-scope'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'
 import { getRestPRByNumber } from './../lookup/pr-number-lookup'
 export const PR_AUTO_MERGE_IDENTITY_JSON_FIELDS = 'id,headRefOid,baseRefName'
 
-export const GITHUB_AUTO_MERGE_METHODS: Record<GitHubPRMergeMethod, 'MERGE' | 'SQUASH' | 'REBASE'> = {
-  merge: 'MERGE',
-  squash: 'SQUASH',
-  rebase: 'REBASE'
-}
+export const GITHUB_AUTO_MERGE_METHODS: Record<GitHubPRMergeMethod, 'MERGE' | 'SQUASH' | 'REBASE'> =
+  {
+    merge: 'MERGE',
+    squash: 'SQUASH',
+    rebase: 'REBASE'
+  }
 
 // Why: GitHub rejects auto-merge on an already-mergeable PR ("clean status"); surface an actionable message instead of the raw error.
 export function classifySetAutoMergeError(message: string): string {

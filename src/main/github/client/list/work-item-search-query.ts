@@ -1,4 +1,4 @@
-import { type ParsedTaskQuery } from '../../../../shared/task-query'
+import type { ParsedTaskQuery } from '../../../../shared/task-query'
 // Why: issue numbers follow creation order, so this sort aligns gh's PR rows with numbered Search API issue pages.
 export const WORK_ITEM_NUMBER_SORT_QUALIFIER = 'sort:created-desc'
 

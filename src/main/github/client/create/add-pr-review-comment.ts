@@ -1,5 +1,14 @@
-import type { GitHubCommentResult, GitHubPRReviewCommentInput } from '../../../../shared/github/comment-types'
-import { ghExecFileAsync, acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
+import type {
+  GitHubCommentResult,
+  GitHubPRReviewCommentInput
+} from '../../../../shared/github/comment-types'
+import {
+  ghExecFileAsync,
+  acquire,
+  release,
+  classifyGhError,
+  type LocalGitExecOptions
+} from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import { mapReviewCommentResponse } from './../map/review-comment-response'
 export async function addPRReviewComment(

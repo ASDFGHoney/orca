@@ -1,8 +1,16 @@
-import { ghExecFileAsync, ghRepoExecOptions, type OwnerRepo } from '../../gh-utils'
+import { ghExecFileAsync } from '../../gh-utils'
+import type { OwnerRepo, ghRepoExecOptions } from '../../gh-utils'
 import { githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
 import type { GhExecOptions } from './../github-exec-scope'
 import { isNoPullRequestError } from './../gh-error-predicates'
-import { PR_LOOKUP_JSON_FIELDS, PR_BRANCH_LIST_JSON_FIELDS, mapRestPullRequest, normalizePullRequestLookupData, type PullRequestLookupData, type RestPullRequest } from './pull-request-lookup-data'
+import {
+  PR_LOOKUP_JSON_FIELDS,
+  PR_BRANCH_LIST_JSON_FIELDS,
+  mapRestPullRequest,
+  normalizePullRequestLookupData,
+  type PullRequestLookupData,
+  type RestPullRequest
+} from './pull-request-lookup-data'
 import { getPRByNumber } from './pr-number-lookup'
 export async function getRestPRForBranch(
   prRepo: GitHubApiRepository,

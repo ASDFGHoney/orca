@@ -1,9 +1,17 @@
 import type { PRCheckRunDetails } from '../../../../shared/github/check-types'
 import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
-import { GITHUB_CHECK_DETAILS_HOST_TIMEOUT_MS, GITHUB_CHECK_DETAILS_TIMEOUT_MESSAGE } from '../../../../shared/github/check-details-deadline'
+import {
+  GITHUB_CHECK_DETAILS_HOST_TIMEOUT_MS,
+  GITHUB_CHECK_DETAILS_TIMEOUT_MESSAGE
+} from '../../../../shared/github/check-details-deadline'
 import type { GhExecOptions } from './../github-exec-scope'
-import { nullableString, mapCheckAnnotations, mapWorkflowJobs, getWorkflowRunIdFromCheckRun } from './check-detail-field-mapping'
+import {
+  nullableString,
+  mapCheckAnnotations,
+  mapWorkflowJobs,
+  getWorkflowRunIdFromCheckRun
+} from './check-detail-field-mapping'
 import { rethrowCheckDetailsAbort, waitForCheckDetailsResolution } from './check-details-abort'
 import { attachFailedJobLogTails } from './check-job-log-tails'
 export async function getPRCheckDetails(

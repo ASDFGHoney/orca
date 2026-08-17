@@ -1,7 +1,10 @@
-import { type OwnerRepo } from '../../gh-utils'
+import type { OwnerRepo } from '../../gh-utils'
 import type { GhExecOptions } from './../github-exec-scope'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'
-import { normalizePullRequestLookupData, type PullRequestLookupData } from './pull-request-lookup-data'
+import {
+  normalizePullRequestLookupData,
+  type PullRequestLookupData
+} from './pull-request-lookup-data'
 export async function hydratePullRequestLookupData(
   ownerRepo: OwnerRepo,
   data: PullRequestLookupData,
