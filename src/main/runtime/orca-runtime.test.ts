@@ -34788,11 +34788,18 @@ describe('OrcaRuntimeService', () => {
     expect(browserScreencast).toHaveBeenCalledTimes(2)
     expect(firstStop).not.toHaveBeenCalled()
 
-    runtime.cleanupSubscription('browser-screencast:page-1:first')
     runtime.cleanupSubscription('browser-screencast:page-1:second')
-    await Promise.all([first, second])
-    expect(firstStop).toHaveBeenCalledTimes(1)
+    await second
+    expect(runtime.getAllBrowserDrivers().get('page-1')).toEqual({
+      kind: 'mobile',
+      clientId: 'conn-1'
+    })
+    expect(firstStop).not.toHaveBeenCalled()
     expect(secondStop).toHaveBeenCalledTimes(1)
+    runtime.cleanupSubscription('browser-screencast:page-1:first')
+    await first
+    expect(firstStop).toHaveBeenCalledTimes(1)
+    expect(runtime.getAllBrowserDrivers().has('page-1')).toBe(false)
   })
 
   it('dedupes async subscription cleanup and retains a failed cleanup for retry', async () => {

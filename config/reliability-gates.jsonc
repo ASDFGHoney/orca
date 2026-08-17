@@ -2287,16 +2287,16 @@
       "providers": ["remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["remote-runtime"],
-      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection, legacy frame containment, and click mapping. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, visible frame, and absence of reconnect/toast failure.",
+      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection and acknowledgement, legacy frame containment, click mapping, multi-viewer viewport/driver handoff, and destroyed-page load cleanup. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, visible frame, and absence of reconnect/toast failure.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4525",
         "https://github.com/stablyai/orca/issues/14883",
         "https://github.com/stablyai/orca/pull/14987"
       ],
-      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page.",
-      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to contain a malformed legacy frame, map only its actual pixels, and reject gutter clicks. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
+      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. A shared page follows the latest viewer viewport and restores the surviving viewer on disconnect without idling its driver or retaining page-load waiters.",
+      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to contain a malformed legacy frame, map only its actual pixels, reject gutter clicks, acknowledge malformed CDP frames, restore the prior viewer viewport/driver after the latest viewer disconnects, and clean a destroyed page's load listeners and timer immediately. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
         "pnpm exec playwright test tests/e2e/paired-browser-host-generated-publication.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --reporter=line"
       ],
@@ -2304,7 +2304,11 @@
         "src/main/browser/agent-browser-bridge-mouse-input.test.ts",
         "src/main/browser/browser-history-navigation.test.ts",
         "src/main/browser/browser-screencast-host-surface-capture.test.ts",
+        "src/main/browser/browser-screencast-lifecycle.test.ts",
         "src/main/browser/browser-screencast-stream.test.ts",
+        "src/main/browser/offscreen-browser-backend-lifecycle.test.ts",
+        "src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
+        "src/main/runtime/orca-runtime-browser.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts",
@@ -2335,6 +2339,25 @@
           ]
         },
         {
+          "file": "src/main/browser/browser-screencast-lifecycle.test.ts",
+          "assertions": [
+            "a live shared stream switches and clears device metrics without publishing stale frames",
+            "malformed CDP frames with a valid session id are acknowledged"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts",
+          "assertions": [
+            "the latest subscriber owns a shared page viewport and disconnect restores the previous subscriber"
+          ]
+        },
+        {
+          "file": "src/main/browser/offscreen-browser-backend-lifecycle.test.ts",
+          "assertions": [
+            "destroying a page during load removes its listeners and timer immediately"
+          ]
+        },
+        {
           "file": "tests/e2e/paired-remote-browser-legacy-input.spec.ts",
           "assertions": [
             "a paired host with both direct capabilities disabled accepts visible click, Back, wheel, and keyboard input",
@@ -2354,10 +2377,10 @@
           "date": "2026-08-17",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
           "result": "passed",
           "durationSeconds": 12,
-          "summary": "Eight focused contract files passed with direct and legacy history, raw-input compatibility, exact 533x917 host-surface rejection/containment, viewport-correct host fallback, pointer mapping, and runtime capability coverage."
+          "summary": "Eleven focused contract files passed with direct and legacy history, raw-input compatibility, exact 533x917 host-surface rejection/containment, viewport-correct host fallback, pointer mapping, multi-viewer viewport/driver handoff, malformed-frame acknowledgement, and destroyed-load cleanup."
         },
         {
           "date": "2026-08-17",
@@ -2379,7 +2402,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The unchanged physical Windows 2 baseline created no browser under the original request shape and, after creation compatibility was restored, published 533x917 pixels for a claimed 1097x917 viewport; the original renderer stretched those pixels and misrouted clicks. The candidate created exactly one authoritative Windows page, safely contained the legacy frame, and completed click, Back, Forward, and Reload. The focused frame and history assertions fail against the prior fill-only renderer, unconditional capturePage fallback, and helper-owned Back path."
+        "evidence": "The unchanged physical Windows 2 baseline created no browser under the original request shape and, after creation compatibility was restored, published 533x917 pixels for a claimed 1097x917 viewport; the original renderer stretched those pixels and misrouted clicks. The candidate created exactly one authoritative Windows page, safely contained the legacy frame, and completed click, Back, Forward, and Reload. The focused frame and history assertions fail against the prior fill-only renderer, unconditional capturePage fallback, and helper-owned Back path. Disabling the lifecycle fixes on the same oracle produces five deterministic failures: viewport switch, viewport restoration, driver fallback, malformed-frame acknowledgement, and destroyed-load cleanup."
       },
       "performanceBudget": {
         "required": true,

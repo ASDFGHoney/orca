@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electronMocks = vi.hoisted(() => ({
   windows: [] as { webContents: MockWebContents; isDestroyed(): boolean; destroy(): void }[],
-  BrowserWindow: vi.fn()
+  BrowserWindow: vi.fn(),
+  finishLoads: true
 }))
 
 class MockWebContents extends EventEmitter {
@@ -15,7 +16,9 @@ class MockWebContents extends EventEmitter {
   }
 
   loadURL(): Promise<void> {
-    queueMicrotask(() => this.emit('did-finish-load'))
+    if (electronMocks.finishLoads) {
+      queueMicrotask(() => this.emit('did-finish-load'))
+    }
     return Promise.resolve()
   }
 }
@@ -60,6 +63,7 @@ import { OffscreenBrowserBackend } from './offscreen-browser-backend'
 describe('OffscreenBrowserBackend lifecycle', () => {
   beforeEach(() => {
     electronMocks.windows.length = 0
+    electronMocks.finishLoads = true
     electronMocks.BrowserWindow.mockImplementation(function BrowserWindowMock() {
       return new MockBrowserWindow()
     })
@@ -108,5 +112,29 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     )
     expect((backend as unknown as { pagesById: Map<string, unknown> }).pagesById.size).toBe(0)
     warn.mockRestore()
+  })
+
+  it('settles a pending load and removes its waiters when the page is destroyed', async () => {
+    vi.useFakeTimers()
+    electronMocks.finishLoads = false
+    const backend = new OffscreenBrowserBackend({
+      registerOffscreenGuest: vi.fn(),
+      unregisterGuest: vi.fn()
+    } as never)
+
+    await backend.createTab({
+      browserPageId: 'page-1',
+      url: 'https://example.com',
+      worktreeId: 'wt'
+    })
+    const webContents = electronMocks.windows[0].webContents
+    expect(webContents.listenerCount('did-finish-load')).toBe(1)
+    expect(webContents.listenerCount('did-fail-load')).toBe(1)
+
+    await backend.closeTab('page-1')
+    expect(webContents.listenerCount('did-finish-load')).toBe(0)
+    expect(webContents.listenerCount('did-fail-load')).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+    vi.useRealTimers()
   })
 })

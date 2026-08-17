@@ -58,7 +58,10 @@ import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
 import { BrowserError } from '../browser/cdp-bridge'
 import { startBrowserScreencast } from '../browser/browser-screencast-stream'
-import type { BrowserScreencastSession } from '../browser/browser-screencast-stream-types'
+import type {
+  BrowserScreencastSession,
+  BrowserScreencastViewport
+} from '../browser/browser-screencast-stream-types'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import {
   detectInstalledBrowsers,
@@ -110,6 +113,7 @@ type ActiveBrowserScreencastSubscriber = {
   emit?: (event: BrowserScreencastResult) => void
   done: Promise<void>
   resolveDone: () => void
+  viewport: BrowserScreencastViewport
 }
 
 type ActiveBrowserScreencastPage = {
@@ -118,6 +122,16 @@ type ActiveBrowserScreencastPage = {
   started: Promise<BrowserScreencastSession>
   stopping: boolean
   subscribers: Map<string, ActiveBrowserScreencastSubscriber>
+  viewportOwnerSubscriptionId: string | null
+}
+
+function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserScreencastViewport {
+  return {
+    viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
+    viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
+    deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
+    mobile: params.mobile === true
+  }
 }
 
 function clampInteger(
@@ -479,32 +493,33 @@ export class RuntimeBrowserCommands {
       target.browserPageId
     )
     const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
+    const viewport = normalizeScreencastViewport(params)
     let resolveSubscriberDone!: () => void
     const subscriberDone = new Promise<void>((resolve) => {
       resolveSubscriberDone = resolve
     })
+    let createdPageStream = false
     let active = this.activeScreencastsByPageId.get(browserPageId)
     while (active?.stopping) {
       await active.session?.done
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
     if (!active) {
+      createdPageStream = true
       const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
       const record = {
         format: params.format,
         session: null,
         stopping: false,
-        subscribers
+        subscribers,
+        viewportOwnerSubscriptionId: null
       } as ActiveBrowserScreencastPage
       record.started = startBrowserScreencast(guest, {
         format: params.format,
         quality: clampInteger(params.quality, 10, 100, 70),
         maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
         maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
-        viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
-        viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
-        deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
-        mobile: params.mobile === true,
+        ...viewport,
         everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
         minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
         onFrame: (bytes) => {
@@ -547,8 +562,10 @@ export class RuntimeBrowserCommands {
       sendBinary: stream.sendBinary,
       emit: stream.emit,
       done: subscriberDone,
-      resolveDone: resolveSubscriberDone
+      resolveDone: resolveSubscriberDone,
+      viewport
     })
+    active.viewportOwnerSubscriptionId = subscriptionId
     let session: BrowserScreencastSession
     try {
       session = await active.started
@@ -556,6 +573,9 @@ export class RuntimeBrowserCommands {
       active.subscribers.delete(subscriptionId)
       resolveSubscriberDone()
       throw error
+    }
+    if (!createdPageStream && active.viewportOwnerSubscriptionId === subscriptionId) {
+      await session.updateViewport(viewport)
     }
     return {
       subscriptionId,
@@ -568,11 +588,19 @@ export class RuntimeBrowserCommands {
           }
           active.subscribers.delete(subscriptionId)
           subscriber.resolveDone()
+          if (active.viewportOwnerSubscriptionId === subscriptionId) {
+            const fallback = Array.from(active.subscribers.entries()).at(-1)
+            active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
+            if (fallback) {
+              void session.updateViewport(fallback[1].viewport).catch(() => {})
+            }
+          }
           if (active.subscribers.size === 0) {
             active.stopping = true
             session.stop()
           }
-        }
+        },
+        updateViewport: session.updateViewport
       },
       ready: {
         type: 'ready',

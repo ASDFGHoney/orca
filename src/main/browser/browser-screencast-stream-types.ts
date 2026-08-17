@@ -19,7 +19,16 @@ export type BrowserScreencastOptions = {
   onError?: (message: string) => void
 }
 
-export type BrowserScreencastSession = { stop: () => void; done: Promise<void> }
+export type BrowserScreencastViewport = Pick<
+  BrowserScreencastOptions,
+  'viewportWidth' | 'viewportHeight' | 'deviceScaleFactor' | 'mobile'
+>
+
+export type BrowserScreencastSession = {
+  stop: () => void
+  done: Promise<void>
+  updateViewport: (viewport: BrowserScreencastViewport) => Promise<void>
+}
 
 export type BrowserScreencastEvent =
   | { type: 'dialog'; dialogType: string; message: string }

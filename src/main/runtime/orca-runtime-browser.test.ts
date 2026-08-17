@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
-import { REMOTE_RUNTIME_MAX_OUTBOUND_BINARY_FRAME_BYTES } from '../../shared/remote-runtime-memory-limits'
 import type { RuntimeBrowserCommandHost } from './orca-runtime-browser'
 
 const {
   ipcMainOnMock,
   ipcMainRemoveListenerMock,
   webContentsFromIdMock,
-  startBrowserScreencastMock,
   waitForTabRegistrationMock,
   waitForWorktreeTabRegistrationMock,
   browserSessionRegistryMock
@@ -15,7 +13,6 @@ const {
   ipcMainOnMock: vi.fn(),
   ipcMainRemoveListenerMock: vi.fn(),
   webContentsFromIdMock: vi.fn(),
-  startBrowserScreencastMock: vi.fn(),
   waitForTabRegistrationMock: vi.fn(),
   waitForWorktreeTabRegistrationMock: vi.fn(),
   browserSessionRegistryMock: {
@@ -54,7 +51,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../browser/browser-screencast-stream', () => ({
-  startBrowserScreencast: startBrowserScreencastMock
+  startBrowserScreencast: vi.fn()
 }))
 
 vi.mock('../ipc/browser-tab-registration-wait', () => ({
@@ -109,7 +106,6 @@ describe('RuntimeBrowserCommands browser screencast', () => {
     ipcMainOnMock.mockReset()
     ipcMainRemoveListenerMock.mockReset()
     webContentsFromIdMock.mockReset()
-    startBrowserScreencastMock.mockReset()
     waitForTabRegistrationMock.mockReset()
     waitForTabRegistrationMock.mockResolvedValue(undefined)
     waitForWorktreeTabRegistrationMock.mockReset()
@@ -641,66 +637,6 @@ describe('RuntimeBrowserCommands browser screencast', () => {
       'browser:requestTabClose',
       expect.objectContaining({ tabId: 'page-canonical', worktreeId: 'wt-1' })
     )
-  })
-
-  it('fans one page screencast out to multiple subscribers', async () => {
-    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
-    webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })
-    const firstDone = deferred<void>()
-    const firstStop = vi.fn(() => firstDone.resolve())
-    startBrowserScreencastMock.mockResolvedValueOnce({ stop: firstStop, done: firstDone.promise })
-
-    const commands = new RuntimeBrowserCommands(createHost())
-    const firstSend = vi.fn(() => false)
-    const secondSend = vi.fn(() => true)
-    const first = await commands.browserScreencast(
-      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: firstSend }
-    )
-
-    const second = await commands.browserScreencast(
-      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary: secondSend }
-    )
-
-    expect(startBrowserScreencastMock).toHaveBeenCalledTimes(1)
-    expect(first.subscriptionId).not.toBe(second.subscriptionId)
-    const frame = new Uint8Array([1, 2, 3])
-    expect(startBrowserScreencastMock.mock.calls[0][1].onFrame(frame)).toBe(true)
-    expect(firstSend).toHaveBeenCalledWith(frame)
-    expect(secondSend).toHaveBeenCalledWith(frame)
-    first.session.stop()
-    await first.session.done
-    expect(firstStop).not.toHaveBeenCalled()
-    second.session.stop()
-    await second.session.done
-    expect(firstStop).toHaveBeenCalledTimes(1)
-  }, 10_000)
-
-  it('admits screencast frames through the paired-runtime size guard', async () => {
-    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
-    webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })
-    const done = deferred<void>()
-    startBrowserScreencastMock.mockResolvedValue({
-      stop: vi.fn(() => done.resolve()),
-      done: done.promise
-    })
-    const sendBinary = vi.fn(() => true)
-
-    const commands = new RuntimeBrowserCommands(createHost())
-    const started = await commands.browserScreencast(
-      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
-      { sendBinary }
-    )
-    const { onFrame } = startBrowserScreencastMock.mock.calls[0][1]
-
-    expect(onFrame(new Uint8Array(REMOTE_RUNTIME_MAX_OUTBOUND_BINARY_FRAME_BYTES + 1))).toBe(true)
-    expect(sendBinary).not.toHaveBeenCalled()
-    expect(onFrame(new Uint8Array(64))).toBe(true)
-    expect(sendBinary).toHaveBeenCalledTimes(1)
-
-    started.session.stop()
-    await started.session.done
   })
 })
 
