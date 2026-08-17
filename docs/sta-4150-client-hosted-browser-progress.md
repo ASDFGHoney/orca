@@ -43,7 +43,7 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@88b1a69824`; range-diff marks all
+  sequence. The current local series is rebased onto `origin/main@71bbab72e1`; range-diff marks all
   72 previously published patches identical, and one additive audit-only test patch records the injected
   worker source. The preceding published heads are green: #14953 and #14955 pass 43 required
   checks, while #14954, #14956, and #14957 pass 46. The rewritten #14955 CI deterministically
@@ -371,8 +371,11 @@ boundary` successfully; its Windows package boundary also passed before post-job
   agent completion state; the combined latest-main lifecycle, placement, and wire gate passes 8
   files / 72 tests. The additive global-fetch audit correction changes no fixture or product
   behavior and passes the exact audit plus worker oracle 2/2.
+- The next rebase onto `origin/main@71bbab72e1` has no overlapping paths and preserves all 74
+  current patches exactly by range-diff. Its two upstream commits affect crash reporting and
+  Windows commit-message path handling, not browser placement or routing.
 
-The cumulative local tree is rebased onto `origin/main@88b1a69824`. Safety refs
+The cumulative local tree is rebased onto `origin/main@71bbab72e1`. Safety refs
 `sta-4150-safety-pre-21ed-main-rebase-20260816` and
 `sta-4150-safety-pre-b6d-main-rebase-20260816` preserve the preceding reviewed tips. All 68
 preceding patches retain their behavior by `git range-diff`; the two contextual diffs are the
@@ -472,11 +475,11 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main implementation head                     | Validation at layer tip                                    |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@982dae1e52`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@f41cf97605` | Typecheck, routing and transport suites; CI pending         |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@2324309e60`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@523b6de656`     | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@43b04904e0`    | Full cumulative and paired E2E proof; CI pending            |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@136329a060`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@14079a02c0` | Typecheck, routing and transport suites; CI pending         |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@4490d989f9`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@ea1b2bd64d`     | Typecheck and authority/reconciliation suites; CI pending   |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f4cd797444`    | Full cumulative and paired E2E proof; CI pending            |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1389,6 +1392,10 @@ topology, versions, and explicit gaps at every later checkpoint.
   Cascade-rebased #14956 and #14957, refreshed both affected PR descriptions, and resubmitted the
   draft stack for fresh CI without changing readiness or Linear state. Range-diff preserves all 72
   previously published patches; the audit correction is the only additive code/test patch.
+- Rebased the corrected five-layer stack onto `origin/main@71bbab72e1` after two unrelated commits
+  landed. There are no overlapping paths, and range-diff preserves all 74 current patches exactly.
+  Refreshed #14955/#14957 descriptions and resubmitted stack #14958 as drafts for fresh CI; no
+  Linear, readiness, superseded-PR, or merge state changed.
 
 ## Completion rule
 
