@@ -43,9 +43,10 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@21ed09e45c`; all 63 patches are
-  identical by `git range-diff`. The sole commit after the preceding reviewed base changes only
-  `mobile/app.json` and has no changed-file overlap with STA-4150.
+  sequence. The current local series is rebased onto `origin/main@b6d5972ec4`; all 68 pre-ledger
+  patches are identical by `git range-diff`. The sole commit after the preceding reviewed base is
+  mobile Relay recovery work; only the reliability manifest overlaps, and its additive gate
+  composes without conflict with STA-4150.
   The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
   #14956, #14957 pass 46. The refreshed substantive PR-check runs are also green on all five
   rebased heads, as are the replacement computer-use runs. GitHub's #14954 rollup still counts an
@@ -355,11 +356,11 @@ boundary` successfully; its Windows package boundary also passed before post-job
   change. Focused tests pass 31/31, the exact layer-4 shard passes 365 files / 3,110 tests, and the
   cumulative shard passes 367 files / 3,132 tests, each with one intentional skip.
 
-The cumulative local tree is rebased onto `origin/main@21ed09e45c`. Safety refs
-`sta-4150-safety-pre-886-main-rebase-20260816` and
-`sta-4150-safety-pre-21ed-main-rebase-20260816` preserve the preceding reviewed tips. All 63
-patches are identical by `git range-diff`; the intervening main commit only bumps the mobile app
-version and has no changed-file overlap with the feature.
+The cumulative local tree is rebased onto `origin/main@b6d5972ec4`. Safety refs
+`sta-4150-safety-pre-21ed-main-rebase-20260816` and
+`sta-4150-safety-pre-b6d-main-rebase-20260816` preserve the preceding reviewed tips. All 68
+pre-ledger patches are identical by `git range-diff`; the intervening mobile Relay recovery commit
+overlaps only the reliability manifest and changes no STA-4150 behavior.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
 ordering, physical mobile-client validation, packaged Windows/Linux skew, and broader live network
 containment beyond the current HTTP/DNS routes. Deterministic WSL, SSH, folder-workspace,
@@ -450,11 +451,11 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main published implementation head           | Validation at layer tip                                     |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@f04de37b30`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@c764292ff3` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@54d78c83c3`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b604f5850f`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@7bd2169d9a`    | Full cumulative and paired E2E proof; latest CI pending     |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@73b93bd627`   | Typecheck, full lint, 3 focused tests; latest CI pending    |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@2915411cfb` | Typecheck, full lint, 74 focused + 50 transport; CI pending |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@2024a2d5d4`    | Typecheck, full lint, 66 focused tests; latest CI pending   |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@1d9a7b1a2f`     | Typecheck, full lint, 107 focused tests; latest CI pending  |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@ee82963935`    | Full cumulative and paired E2E proof; latest CI pending     |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
