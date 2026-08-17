@@ -27,9 +27,10 @@ export type AssembleNativeChatSessionInput = {
    *  'working', or 'error' when out-of-band signals apply. */
   status?: NativeChatSessionStatus
   error?: string
-  /** Forwarded to the image-marker fold: true when the transcript read window has
-   *  older messages above it, so its head can sit inside a trimmed image run. */
-  hasEarlierHistory?: boolean
+  /** Forwarded to the image-marker fold: id of the transcript read window's
+   *  oldest row when older history exists above it, so that row alone can sit
+   *  inside a trimmed image run. */
+  windowHeadMessageId?: string
 }
 
 // Why: a turn can surface from several sources with different ids (a hook event
@@ -135,16 +136,17 @@ export function compareMessages(a: NativeChatMessage, b: NativeChatMessage): num
 export function assembleNativeChatSession(
   input: AssembleNativeChatSessionInput
 ): NativeChatSession {
-  const { sources, sessionId, agent, status, error, hasEarlierHistory } = input
+  const { sources, sessionId, agent, status, error, windowHeadMessageId } = input
 
   // Process highest priority first so a later, lower-priority duplicate is
   // dropped rather than overwriting. Within a source, order is preserved.
   const ordered: NativeChatMessage[] = [
-    ...normalizeImageTranscriptMessages(sources.transcript ?? [], { hasEarlierHistory }),
+    ...normalizeImageTranscriptMessages(sources.transcript ?? [], { windowHeadMessageId }),
     ...(sources.hook ?? []),
     // Scrape segments carry the same raw `[Image: source: …]` markers (e.g. from
-    // scrollback before the transcript loads), so normalize them too. `hasMore`
-    // describes transcript pagination only, so it is deliberately not applied here.
+    // scrollback before the transcript loads), so normalize them too. The window
+    // head is a transcript row, so it can never name a scrape row — scrape is not
+    // paginated and its markers are never un-anchorable.
     ...normalizeImageTranscriptMessages(sources.scrape ?? [])
   ]
 

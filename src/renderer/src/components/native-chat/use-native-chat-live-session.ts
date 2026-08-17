@@ -310,7 +310,9 @@ export function useNativeChatLiveSession(
     sessionId,
     baseMessages,
     appended,
-    hasEarlierHistory: hasMore
+    // Why: the oldest row of the paginated read, not a position in the merged
+    // list — see NormalizeImageTranscriptOptions.
+    windowHeadMessageId: hasMore ? baseMessages[0]?.id : undefined
   })
 
   return useMemo<NativeChatLiveSession>(() => {

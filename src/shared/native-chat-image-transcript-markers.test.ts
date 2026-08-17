@@ -351,7 +351,7 @@ describe('normalizeImageTranscriptMessages', () => {
 describe('normalizeImageTranscriptMessages with earlier history above the window', () => {
   it('strips markers from a head prompt whose whole source run was trimmed', () => {
     const out = normalizeImageTranscriptMessages([userText('b', '[Image #1] what do you see')], {
-      hasEarlierHistory: true
+      windowHeadMessageId: 'b'
     })
     expect(out[0]!.blocks).toEqual([{ type: 'text', text: 'what do you see' }])
   })
@@ -362,7 +362,7 @@ describe('normalizeImageTranscriptMessages with earlier history above the window
         userText('a', '[Image: source: /tmp/b.png]'),
         userText('b', '[Image #1] [Image #2] compare these')
       ],
-      { hasEarlierHistory: true }
+      { windowHeadMessageId: 'a' }
     )
     expect(out).toHaveLength(1)
     expect(out[0]!.blocks).toEqual([
@@ -380,15 +380,13 @@ describe('normalizeImageTranscriptMessages with earlier history above the window
         { ...userText('a', 'hello'), role: 'assistant' as const },
         userText('b', 'use [Image #1] as a label')
       ],
-      { hasEarlierHistory: true }
+      { windowHeadMessageId: 'a' }
     )
     expect(out[1]!.blocks).toEqual([{ type: 'text', text: 'use [Image #1] as a label' }])
   })
 
   it('keeps a head prompt verbatim when no older history exists', () => {
-    const out = normalizeImageTranscriptMessages([userText('b', '[Image #1] what do you see')], {
-      hasEarlierHistory: false
-    })
+    const out = normalizeImageTranscriptMessages([userText('b', '[Image #1] what do you see')], {})
     expect(out[0]!.blocks).toEqual([{ type: 'text', text: '[Image #1] what do you see' }])
   })
 
@@ -399,11 +397,34 @@ describe('normalizeImageTranscriptMessages with earlier history above the window
         userText('a', '[Image: source: /tmp/b.png]'),
         userText('b', '[Image #1] compare with the [Image #2] I mentioned')
       ],
-      { hasEarlierHistory: true }
+      { windowHeadMessageId: 'z' }
     )
     expect(out[1]!.blocks).toEqual([
       { type: 'image-ref', path: '/tmp/b.png' },
       { type: 'text', text: 'compare with the [Image #2] I mentioned' }
     ])
+  })
+
+  // Why: the head is named by id, never by position. Callers pass lists that were
+  // merged across sources and re-sorted, so index 0 is whichever row sorts first:
+  // an unpaginated scrape/hook row, or — for a transcript with no timestamps —
+  // the lexicographically smallest id. Stripping either would delete user text.
+  it('ignores a row that merely sorts first but is not the named head', () => {
+    const out = normalizeImageTranscriptMessages(
+      [
+        { ...userText('aaa-scrape', 'typed [Image #1] literally'), source: 'scrape' as const },
+        userText('zzz-head', '[Image #1] what do you see')
+      ],
+      { windowHeadMessageId: 'zzz-head' }
+    )
+    expect(out[0]!.blocks).toEqual([{ type: 'text', text: 'typed [Image #1] literally' }])
+    expect(out[1]!.blocks).toEqual([{ type: 'text', text: 'what do you see' }])
+  })
+
+  it('does nothing when the named head is not in the list', () => {
+    const out = normalizeImageTranscriptMessages([userText('b', '[Image #1] what do you see')], {
+      windowHeadMessageId: 'some-other-row'
+    })
+    expect(out[0]!.blocks).toEqual([{ type: 'text', text: '[Image #1] what do you see' }])
   })
 })

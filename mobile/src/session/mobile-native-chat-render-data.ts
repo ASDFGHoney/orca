@@ -48,12 +48,12 @@ export type MobileNativeChatPendingItem = {
 
 export function foldMobileNativeChatMessages(
   messages: NativeChatMessage[],
-  hasEarlierHistory = false
+  windowHeadMessageId?: string
 ): NativeChatMessage[] {
   // Normalize first (desktop assembler parity): image marker turns fold into
   // image-ref blocks instead of rendering as raw `[Image: …]` text.
   return foldToolMessages(
-    stripNoiseMessages(normalizeImageTranscriptMessages(messages, { hasEarlierHistory }))
+    stripNoiseMessages(normalizeImageTranscriptMessages(messages, { windowHeadMessageId }))
   )
 }
 

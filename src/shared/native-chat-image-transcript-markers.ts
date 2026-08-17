@@ -165,18 +165,24 @@ export function nativeChatUserMessageImageEvidenceCount(message: NativeChatMessa
 
 export type NormalizeImageTranscriptOptions = {
   /**
-   * True when older messages exist above this window. The read window is a hard
-   * count slice, so its head can sit *inside* an image run whose
-   * `[Image: source: …]` turns were trimmed. Markers at the head are then
-   * un-anchorable evidence rather than proof the user typed them, and stripping
-   * is the safer read: leaving them shows agent-internal markup in a message the
-   * user already sent, and the run's real image count is no longer knowable, so
-   * the count bound can't apply either.
+   * Id of the oldest row of the paginated transcript window, and only when older
+   * history exists above it. That row — alone — can sit *inside* an image run
+   * whose `[Image: source: …]` turns were trimmed away by the hard count slice.
+   * Its markers are then un-anchorable evidence rather than proof the user typed
+   * them, and stripping is the safer read: leaving them shows agent-internal
+   * markup in a message the user already sent, and the run's real image count is
+   * no longer knowable, so the count bound cannot apply either.
    *
-   * Only the head is ambiguous — a marker turn anywhere else in the window would
-   * have its source run visible above it, so its absence there is real evidence.
+   * Nowhere else is ambiguous — a marker turn further down would have its source
+   * run visible above it, so its absence there is real evidence.
+   *
+   * Deliberately an id, not a positional flag. Callers hand this function lists
+   * that have already been merged across sources and re-sorted, where index 0 is
+   * whichever row sorts first — a scrape or hook row that was never paginated, or
+   * for a transcript that carries no timestamps (some agents), the row with the
+   * lexicographically smallest id. Neither is the window head.
    */
-  hasEarlierHistory?: boolean
+  windowHeadMessageId?: string
 }
 
 /** Claude records image paths as source turns followed by a prompt carrying
@@ -185,7 +191,7 @@ export function normalizeImageTranscriptMessages(
   messages: readonly NativeChatMessage[],
   options?: NormalizeImageTranscriptOptions
 ): NativeChatMessage[] {
-  const headMayBeMidRun = options?.hasEarlierHistory === true
+  const windowHeadMessageId = options?.windowHeadMessageId
   let normalized: NativeChatMessage[] | null = null
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]!
@@ -215,7 +221,8 @@ export function normalizeImageTranscriptMessages(
       ) {
         // Why: a run touching the window head may have lost earlier source turns,
         // so the visible image count is a floor, not the run's real size.
-        const limit = headMayBeMidRun && index === 0 ? Number.POSITIVE_INFINITY : imagePaths.length
+        const limit =
+          message.id === windowHeadMessageId ? Number.POSITIVE_INFINITY : imagePaths.length
         normalized.push({
           ...prompt,
           blocks: [
@@ -235,7 +242,7 @@ export function normalizeImageTranscriptMessages(
     // Why: the whole source run above the head can be trimmed away, leaving the
     // prompt alone at index 0 with markers no anchor can vouch for.
     const blocks =
-      headMayBeMidRun && index === 0 && hasImagePromptMarker(message)
+      message.id === windowHeadMessageId && hasImagePromptMarker(message)
         ? stripImagePromptMarkersFromTextBlocks(message.blocks, Number.POSITIVE_INFINITY)
         : removeEmptyFirstTextBlock(message.blocks)
     if (blocks === message.blocks) {

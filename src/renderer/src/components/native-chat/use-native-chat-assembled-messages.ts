@@ -43,12 +43,13 @@ export function useNativeChatAssembledMessages(args: {
   sessionId: string | null
   baseMessages: readonly NativeChatMessage[]
   appended: NativeChatMessage[]
-  /** True while older history is still pageable, so the window head can sit
-   *  inside an image run whose source turns were trimmed. */
-  hasEarlierHistory?: boolean
+  /** Id of the read window's oldest row while older history is still pageable,
+   *  so that row alone can sit inside an image run whose source turns were
+   *  trimmed. Undefined when the window holds the whole conversation. */
+  windowHeadMessageId?: string
 }): { assembledMessages: NativeChatMessage[]; normalizedMessages: NativeChatMessage[] } {
   const committedCacheRef = useRef<AssemblyCache | null>(null)
-  const { agent, sessionId, baseMessages, appended, hasEarlierHistory = false } = args
+  const { agent, sessionId, baseMessages, appended, windowHeadMessageId } = args
 
   const assembly = useMemo<AssemblyCache>(() => {
     const committed = committedCacheRef.current
@@ -82,8 +83,8 @@ export function useNativeChatAssembledMessages(args: {
   }, [assembly])
 
   const normalizedMessages = useMemo(
-    () => prepareNativeChatLiveMessages(assembly.assembledMessages, agent, hasEarlierHistory),
-    [agent, assembly.assembledMessages, hasEarlierHistory]
+    () => prepareNativeChatLiveMessages(assembly.assembledMessages, agent, windowHeadMessageId),
+    [agent, assembly.assembledMessages, windowHeadMessageId]
   )
   return { assembledMessages: assembly.assembledMessages, normalizedMessages }
 }

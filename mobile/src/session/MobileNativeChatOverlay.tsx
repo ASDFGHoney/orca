@@ -47,7 +47,11 @@ export function MobileNativeChatOverlay({
 }: Props): React.JSX.Element | null {
   const session = controller.nativeChatSession
   const folded = useMemo(
-    () => foldMobileNativeChatMessages(session.messages, session.hasMore),
+    () =>
+      foldMobileNativeChatMessages(
+        session.messages,
+        session.hasMore ? session.messages[0]?.id : undefined
+      ),
     [session.messages, session.hasMore]
   )
   const streaming = useMobileNativeChatStreamingBubble(

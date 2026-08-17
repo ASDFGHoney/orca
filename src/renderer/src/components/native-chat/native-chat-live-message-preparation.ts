@@ -7,11 +7,11 @@ import { assembleNativeChatSession } from './native-chat-session-assembler'
 export function prepareNativeChatLiveMessages(
   messages: NativeChatMessage[],
   agent: AgentType,
-  hasEarlierHistory = false
+  windowHeadMessageId?: string
 ): NativeChatMessage[] {
   const commandNames = new Set(getVerifiedNativeChatCommands(agent).map((command) => command.name))
   const surfaced = surfaceSkillInvocationUserTurns(messages, commandNames)
-  const normalized = normalizeImageTranscriptMessages(surfaced, { hasEarlierHistory })
+  const normalized = normalizeImageTranscriptMessages(surfaced, { windowHeadMessageId })
   if (!hasMixedSources(normalized)) {
     return normalized
   }
@@ -20,7 +20,7 @@ export function prepareNativeChatLiveMessages(
     sources: { transcript: surfaced },
     sessionId: null,
     agent,
-    hasEarlierHistory
+    windowHeadMessageId
   }).messages
 }
 
