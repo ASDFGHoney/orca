@@ -60,14 +60,13 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14953](https://github.com/stablyai/orca/pull/14953), paired tunnel/routing
   [#14954](https://github.com/stablyai/orca/pull/14954), Electron lifecycle
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
-  [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
-  [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence. The current local series is rebased onto `origin/main@71bbab72e1`; range-diff marks all
-  72 previously published patches identical, and one additive audit-only test patch records the injected
-  worker source. The preceding published heads are green: #14953 and #14955 pass 43 required
-  checks, while #14954, #14956, and #14957 pass 46. The rewritten #14955 CI deterministically
-  exposed the missing global-fetch audit entry; its correction passes the exact audit and worker
-  oracle 2/2 and requires fresh upstack CI. No PR has been merged or marked ready.
+  [#14956](https://github.com/stablyai/orca/pull/14956), desktop activation
+  [#14957](https://github.com/stablyai/orca/pull/14957), and terminal-link lifecycle acceptance
+  [#15038](https://github.com/stablyai/orca/pull/15038). All remain draft and correctly based in
+  sequence. The six-layer series is rebased onto `origin/main@2fdaa10fd1`; range-diff marks all 79
+  commits identical across that rebase. The first five PRs were green before the latest rebase;
+  #15038 has fresh deterministic, typecheck, lint, and paired Electron proof while draft CI runs.
+  No PR has been merged or marked ready.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -399,28 +398,22 @@ boundary` successfully; its Windows package boundary also passed before post-job
   Windows named pipes to prove publication while retaining the filesystem assertion on POSIX; the
   local built-daemon journey passes end to end and the workflow contract passes 14/14.
 
-The cumulative local tree is rebased onto `origin/main@71bbab72e1`. Safety refs
-`sta-4150-safety-pre-21ed-main-rebase-20260816` and
-`sta-4150-safety-pre-b6d-main-rebase-20260816` preserve the preceding reviewed tips. All 68
-preceding patches retain their behavior by `git range-diff`; the two contextual diffs are the
-deferred-test helper signature and the activation manifest composing the new lifecycle evidence.
-The new immediate-proxy lifecycle commit sits between #14955 and the unchanged command/activation
-behavior above it.
-The feature series preserves the complete preceding result and adds only the audit correction;
-later tracker commits record that state. Remaining explicit validation gaps are physical Windows and Linux Electron ordering,
-physical mobile-client validation, packaged Windows/Linux skew, spontaneous worker timing across
-platforms, broader direct-egress containment, the joined terminal-link/no-reconnect assertion,
-local-input and zero-screencast counters, large binary-result secondary transport, and mobile
-mirroring transport. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless,
-mixed-version, packaged-macOS, and package-contract evidence is green.
+The cumulative local tree is rebased onto `origin/main@2fdaa10fd1`. Safety ref
+`sta-4150-safety-pre-client-mirror-rebase-20260817` preserves the preceding reviewed tip, and
+`git range-diff` marks all 79 commits identical. The terminal-link acceptance layer closes the
+joined no-reconnect, local-input, zero-screencast, PTY-churn, and close-reconciliation gaps.
+Remaining release decisions and validation are the unauthenticated local-SOCKS security posture,
+broader direct-egress containment, and physical Windows/Linux/mobile evidence where existing CI,
+simulator, and deterministic route coverage are not equivalent to hardware. Deterministic WSL,
+SSH, folder-workspace, git-worktree, browserless, mixed-version, packaged-macOS, and
+package-contract evidence is green.
 
 The remaining ownership work, in execution order, is:
 
-1. Publish the latest-main heads without marking any PR ready or merging, then monitor the native
-   Linux and Windows WebRTC/lifecycle jobs and fix only reproducible, actionable failures.
-2. Obtain human review for the five landing PRs.
-3. Before release, run or explicitly accept the remaining physical Windows/Linux/mobile,
-   packaged Windows/Linux, and broader protocol-containment gaps.
+1. Monitor the six draft PRs and fix only reproducible, actionable failures.
+2. Obtain human review for the six landing PRs.
+3. Before release, decide the local-SOCKS posture and run or explicitly accept the remaining
+   physical Windows/Linux/mobile and broader protocol-containment gaps.
 4. Close superseded development drafts only after reviewers accept the replacement stack; their
    complete mapping is already durable in #14957.
 
@@ -499,11 +492,12 @@ ownership.
 
 | Order | Draft PR                                              | Latest-main implementation head                     | Validation at layer tip                                    |
 | ----- | ----------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------- |
-| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@136329a060`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
-| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@14079a02c0` | Typecheck, routing and transport suites; CI pending         |
-| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@4490d989f9`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
-| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@ea1b2bd64d`     | Typecheck and authority/reconciliation suites; CI pending   |
-| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@2691fc7449`    | Full cumulative, paired E2E, and daemon-smoke proof         |
+| 1     | [#14953](https://github.com/stablyai/orca/pull/14953) | `sta-4150-landing-contracts-placement@230f2df59e`   | Typecheck, full lint, 3 focused tests; refreshed CI pending |
+| 2     | [#14954](https://github.com/stablyai/orca/pull/14954) | `sta-4150-landing-paired-tunnel-routing@0fd0dc0ac7` | Typecheck, routing and transport suites; CI pending         |
+| 3     | [#14955](https://github.com/stablyai/orca/pull/14955) | `sta-4150-landing-electron-lifecycle@a46c591a66`    | 28 lifecycle tests plus exact audit/worker 2/2; CI pending  |
+| 4     | [#14956](https://github.com/stablyai/orca/pull/14956) | `sta-4150-landing-command-authority@b882620bbf`     | Typecheck and authority/reconciliation suites; CI pending   |
+| 5     | [#14957](https://github.com/stablyai/orca/pull/14957) | `sta-4150-landing-desktop-activation@f63ca30fb1`    | Full cumulative, paired E2E, and daemon-smoke proof         |
+| 6     | [#15038](https://github.com/stablyai/orca/pull/15038) | `sta-4150-landing-client-mirror-transport@86099c72d5` | Terminal-link close reconciliation and paired Electron E2E  |
 
 GitHub stack [#14958](https://github.com/stablyai/orca/stacks/14958) records the dependency order.
 The old-to-new PR mapping is recorded in #14957 before any superseded draft is closed.
@@ -1425,6 +1419,14 @@ topology, versions, and explicit gaps at every later checkpoint.
   Windows publication assertion with a real connection probe in the top layer, kept POSIX behavior
   unchanged, and validated the local built-daemon journey plus 14/14 workflow-contract tests.
   Refreshed #14957 and resubmitted it as draft for Windows and full PR CI.
+- Rebased the six-layer series onto `origin/main@2fdaa10fd1`; range-diff marked all 79 commits
+  identical. Published terminal-link lifecycle acceptance as draft PR
+  [#15038](https://github.com/stablyai/orca/pull/15038) atop #14957. The deterministic close oracle
+  was red 1/7 before canonical placement re-resolution and is green with 31 focused tests, full
+  Node/CLI/web typecheck, focused oxlint, and a fresh post-rebase paired Electron run. The live
+  journey proves one client guest, zero host guests, no screencast or PTY churn, local input, no
+  reconnect/error UI, exact close convergence, and a still-live terminal. No PR was merged or
+  marked ready.
 
 ## Completion rule
 
