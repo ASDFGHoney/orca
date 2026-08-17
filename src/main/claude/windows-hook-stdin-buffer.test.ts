@@ -96,6 +96,11 @@ describe('Windows Claude hook stdin buffer', () => {
     expect(command).toContain('[System.IO.File]::WriteAllBytes($f, $p.ToArray())')
     expect(command).toContain('Remove-Item -LiteralPath $f -Force')
     expect(command).toContain(`$env:${WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV} = $f`)
+    const payloadPathIndex = command.indexOf('$f = Join-Path $g')
+    const payloadCleanupTryIndex = command.indexOf('  try {', payloadPathIndex)
+    expect(payloadCleanupTryIndex).toBeLessThan(
+      command.indexOf('[System.IO.File]::WriteAllBytes($f, $p.ToArray())')
+    )
     expect(command.indexOf('ORCA_PANE_KEY')).toBeLessThan(command.indexOf('$i.ReadAsync'))
     expect(command.indexOf('$i.ReadAsync')).toBeLessThan(command.indexOf('& $scriptPath'))
   })
