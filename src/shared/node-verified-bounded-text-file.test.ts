@@ -51,11 +51,11 @@ describe('readBoundedFileHandle', () => {
     ).rejects.toThrow('file_too_large')
   })
 
-  it('falls back to size and mtime when a provider reports zero file identity', async () => {
+  it('rejects when a provider cannot report stable file identity', async () => {
     const root = resolve('cursor-identity-root')
     const filePath = join(root, 'session', 'meta.json')
     const beforeOpen = fakeStats('file', 6, 10)
-    const opened = fakeStats('file', 7, 20)
+    const opened = fakeStats('file', 6, 10)
     const handle = {
       close: vi.fn(async () => undefined),
       read: vi.fn(),

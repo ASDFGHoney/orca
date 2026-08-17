@@ -20,6 +20,8 @@ const CURSOR_LEGACY_MAX_ENTRIES_EXAMINED = 8_192
 const CURSOR_LEGACY_MAX_FILES_STAT = 2_000
 const CURSOR_SCOPE_PATH_LIMIT = 64
 
+type CursorLegacyScanCounters = { scopeRealpath: number }
+
 export async function discoverCursorLegacy(args: {
   roots: {
     projectsDir: string
@@ -33,7 +35,8 @@ export async function discoverCursorLegacy(args: {
   const evidenceByPath = new Map<string, CursorCwdEvidence>()
   const scopedBudget = cursorLegacyBudget()
   const unscopedBudget = cursorLegacyBudget()
-  const scopedFiles = await discoverScopedLegacyFiles(args, evidenceByPath, scopedBudget)
+  const counters: CursorLegacyScanCounters = { scopeRealpath: 0 }
+  const scopedFiles = await discoverScopedLegacyFiles(args, evidenceByPath, scopedBudget, counters)
   const discovered = await discoverFiles({
     rootDir: args.roots.projectsDir,
     limit: args.limit,
@@ -60,17 +63,34 @@ export async function discoverCursorLegacy(args: {
     files: dedupeCursorLegacyFiles([...scopedFiles, ...discovered.files]),
     cursorLayout: 'legacy',
     cursorStorageContextKey: args.roots.storageContextKey,
-    cursorCwdEvidenceByPath: evidenceByPath
+    cursorCwdEvidenceByPath: evidenceByPath,
+    cursorLegacyDiscoveryCounters: {
+      directoryReaddir: scopedBudget.directoriesRead + unscopedBudget.directoriesRead,
+      direntsRead:
+        CURSOR_LEGACY_MAX_ENTRIES_EXAMINED * 2 -
+        scopedBudget.entriesRemaining -
+        unscopedBudget.entriesRemaining,
+      fileStat:
+        CURSOR_LEGACY_MAX_FILES_STAT * 2 -
+        scopedBudget.filesRemaining -
+        unscopedBudget.filesRemaining,
+      scopeRealpath: counters.scopeRealpath
+    },
+    cursorLegacyDiscoveryTruncated: {
+      entries: scopedBudget.entriesTruncated || unscopedBudget.entriesTruncated,
+      files: scopedBudget.filesTruncated || unscopedBudget.filesTruncated
+    }
   }
 }
 
 async function discoverScopedLegacyFiles(
   args: Parameters<typeof discoverCursorLegacy>[0],
   evidenceByPath: Map<string, CursorCwdEvidence>,
-  budget: SessionDiscoveryBudget
+  budget: SessionDiscoveryBudget,
+  counters: CursorLegacyScanCounters
 ): Promise<FileWithMtime[]> {
   const files: FileWithMtime[] = []
-  for (const cwd of await localScopeCandidates(args)) {
+  for (const cwd of await localScopeCandidates(args, counters)) {
     const slug = cursorLegacySlug(cwd)
     if (!slug) {
       continue
@@ -97,12 +117,14 @@ async function discoverScopedLegacyFiles(
 }
 
 async function localScopeCandidates(
-  args: Parameters<typeof discoverCursorLegacy>[0]
+  args: Parameters<typeof discoverCursorLegacy>[0],
+  counters: CursorLegacyScanCounters
 ): Promise<string[]> {
   const candidates = new Set<string>()
   for (const scopePath of (args.options.scopePaths ?? []).slice(0, CURSOR_SCOPE_PATH_LIMIT)) {
     addScopeCandidates(candidates, scopePath, args)
     try {
+      counters.scopeRealpath += 1
       addScopeCandidates(
         candidates,
         await wslGatedRealpath(scopePath, 'scan', args.options.signal),
@@ -133,7 +155,10 @@ function cursorLegacyBudget(): SessionDiscoveryBudget {
   return {
     entriesRemaining: CURSOR_LEGACY_MAX_ENTRIES_EXAMINED,
     filesRemaining: CURSOR_LEGACY_MAX_FILES_STAT,
-    truncated: false
+    truncated: false,
+    entriesTruncated: false,
+    filesTruncated: false,
+    directoriesRead: 0
   }
 }
 

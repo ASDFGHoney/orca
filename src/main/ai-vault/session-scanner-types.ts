@@ -101,6 +101,16 @@ export type SessionFileDiscovery = {
     sessionDirs: boolean
     sidecarBytes: boolean
   }
+  cursorLegacyDiscoveryCounters?: {
+    directoryReaddir: number
+    direntsRead: number
+    fileStat: number
+    scopeRealpath: number
+  }
+  cursorLegacyDiscoveryTruncated?: {
+    entries: boolean
+    files: boolean
+  }
 }
 
 export type CursorLayout = 'sidecar' | 'legacy'

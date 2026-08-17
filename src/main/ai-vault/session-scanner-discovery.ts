@@ -15,6 +15,9 @@ export type SessionDiscoveryBudget = {
   entriesRemaining: number
   filesRemaining: number
   truncated: boolean
+  entriesTruncated: boolean
+  filesTruncated: boolean
+  directoriesRead: number
 }
 
 export async function discoverFiles(args: {
@@ -55,6 +58,7 @@ export async function discoverFiles(args: {
   for (const path of paths) {
     if (args.budget && args.budget.filesRemaining <= 0) {
       args.budget.truncated = true
+      args.budget.filesTruncated = true
       break
     }
     if (args.budget) {
@@ -106,6 +110,7 @@ export async function walkSessionFiles(
   options.signal?.throwIfAborted()
   if (options.budget && options.budget.entriesRemaining <= 0) {
     options.budget.truncated = true
+    options.budget.entriesTruncated = true
     return []
   }
   let entries
@@ -130,6 +135,7 @@ export async function walkSessionFiles(
     options.signal?.throwIfAborted()
     if (options.budget && options.budget.entriesRemaining <= 0) {
       options.budget.truncated = true
+      options.budget.entriesTruncated = true
       break
     }
     if (options.budget) {
@@ -161,14 +167,23 @@ async function readBoundedDirectoryEntries(
   signal?: AbortSignal
 ): Promise<Dirent[]> {
   const directory = await wslGatedOpendir(dirPath, 'scan', signal)
+  budget.directoriesRead += 1
   const entries: Dirent[] = []
+  const iterator = directory[Symbol.asyncIterator]()
   try {
-    for await (const entry of directory) {
-      if (entries.length >= budget.entriesRemaining) {
-        budget.truncated = true
+    while (true) {
+      signal?.throwIfAborted()
+      const next = await iterator.next()
+      signal?.throwIfAborted()
+      if (next.done) {
         break
       }
-      entries.push(entry)
+      if (entries.length >= budget.entriesRemaining) {
+        budget.truncated = true
+        budget.entriesTruncated = true
+        break
+      }
+      entries.push(next.value)
     }
   } finally {
     await directory.close().catch(() => undefined)

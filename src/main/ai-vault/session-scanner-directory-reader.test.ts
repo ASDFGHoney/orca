@@ -66,7 +66,14 @@ describe('walkSessionFiles directory reader', () => {
     await Promise.all(
       Array.from({ length: 4 }, (_, index) => writeFile(join(tempRoot!, `${index}.jsonl`), '{}\n'))
     )
-    const budget = { entriesRemaining: 3, filesRemaining: 2, truncated: false }
+    const budget = {
+      entriesRemaining: 3,
+      filesRemaining: 2,
+      truncated: false,
+      entriesTruncated: false,
+      filesTruncated: false,
+      directoriesRead: 0
+    }
 
     const result = await discoverFiles({
       rootDir: tempRoot,
@@ -78,6 +85,55 @@ describe('walkSessionFiles directory reader', () => {
     })
 
     expect(result.files).toHaveLength(2)
-    expect(budget).toEqual({ entriesRemaining: 0, filesRemaining: 0, truncated: true })
+    expect(budget).toEqual({
+      entriesRemaining: 0,
+      filesRemaining: 0,
+      truncated: true,
+      entriesTruncated: true,
+      filesTruncated: true,
+      directoriesRead: 1
+    })
+  })
+
+  it('stops a bounded directory read when cancellation lands during an entry read', async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), 'orca-session-cancel-budget-'))
+    await Promise.all(
+      Array.from({ length: 4 }, (_, index) => writeFile(join(tempRoot!, `${index}.jsonl`), '{}\n'))
+    )
+    const controller = new AbortController()
+    const cancelled = new Error('scan cancelled during directory read')
+    const originalThrowIfAborted = controller.signal.throwIfAborted.bind(controller.signal)
+    let checks = 0
+    vi.spyOn(controller.signal, 'throwIfAborted').mockImplementation(() => {
+      checks += 1
+      if (checks === 3) {
+        controller.abort(cancelled)
+      }
+      originalThrowIfAborted()
+    })
+    const budget = {
+      entriesRemaining: 4,
+      filesRemaining: 4,
+      truncated: false,
+      entriesTruncated: false,
+      filesTruncated: false,
+      directoriesRead: 0
+    }
+
+    await expect(
+      discoverFiles({
+        rootDir: tempRoot,
+        limit: 4,
+        agent: 'cursor',
+        issues: [],
+        extensions: ['.jsonl'],
+        signal: controller.signal,
+        budget
+      })
+    ).rejects.toBe(cancelled)
+
+    expect(budget.entriesRemaining).toBe(4)
+    expect(budget.filesRemaining).toBe(4)
+    expect(budget.directoriesRead).toBe(1)
   })
 })

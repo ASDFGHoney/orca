@@ -167,13 +167,10 @@ function samePath(left: string, right: string): boolean {
 function sameFileIdentity(beforeOpen: Stats, opened: Stats): boolean {
   const beforeHasIdentity = hasStableFileIdentity(beforeOpen)
   const openedHasIdentity = hasStableFileIdentity(opened)
-  if (beforeHasIdentity || openedHasIdentity) {
-    if (!beforeHasIdentity || !openedHasIdentity) {
-      return false
-    }
-    return beforeOpen.dev === opened.dev && beforeOpen.ino === opened.ino
+  if (!beforeHasIdentity || !openedHasIdentity) {
+    return false
   }
-  return beforeOpen.size === opened.size && beforeOpen.mtimeMs === opened.mtimeMs
+  return beforeOpen.dev === opened.dev && beforeOpen.ino === opened.ino
 }
 
 function hasStableFileIdentity(stats: Stats): boolean {

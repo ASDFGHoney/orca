@@ -46,10 +46,11 @@ export function recordLocalCursorDiscoverySpan(
   span: ActiveSpan,
   discoveries: readonly SessionFileDiscovery[]
 ): void {
+  const cursorDiscoveries = discoveries.filter((discovery) => discovery.agent === 'cursor')
   const sidecarDiscoveries = discoveries.filter(
     (discovery) => discovery.agent === 'cursor' && discovery.cursorLayout === 'sidecar'
   )
-  if (sidecarDiscoveries.length === 0) {
+  if (cursorDiscoveries.length === 0) {
     return
   }
   const counters = sidecarDiscoveries.reduce(
@@ -86,6 +87,26 @@ export function recordLocalCursorDiscoverySpan(
     sessionDirs: sidecarDiscoveries.some((d) => d.cursorDiscoveryTruncated?.sessionDirs),
     sidecarBytes: sidecarDiscoveries.some((d) => d.cursorDiscoveryTruncated?.sidecarBytes)
   }
+  const legacyCounters = cursorDiscoveries.reduce(
+    (total, discovery) => {
+      const c = discovery.cursorLegacyDiscoveryCounters
+      if (!c) {
+        return total
+      }
+      return {
+        directoryReaddir: total.directoryReaddir + c.directoryReaddir,
+        direntsRead: total.direntsRead + c.direntsRead,
+        fileStat: total.fileStat + c.fileStat,
+        scopeRealpath: total.scopeRealpath + c.scopeRealpath
+      }
+    },
+    { directoryReaddir: 0, direntsRead: 0, fileStat: 0, scopeRealpath: 0 }
+  )
+  const legacyOperations =
+    legacyCounters.directoryReaddir +
+    legacyCounters.direntsRead +
+    legacyCounters.fileStat +
+    legacyCounters.scopeRealpath
   span.setAttribute(
     'cursorLocalFilesystemOperations',
     counters.rootReaddir +
@@ -93,7 +114,8 @@ export function recordLocalCursorDiscoverySpan(
       counters.direntsRead +
       counters.fileLstat +
       counters.boundedReads +
-      counters.scopeRealpath
+      counters.scopeRealpath +
+      legacyOperations
   )
   span.setAttribute('cursorLocalRootReaddir', counters.rootReaddir)
   span.setAttribute('cursorLocalBucketReaddir', counters.bucketReaddir)
@@ -107,4 +129,16 @@ export function recordLocalCursorDiscoverySpan(
   span.setAttribute('cursorLocalTruncatedBuckets', truncated.buckets)
   span.setAttribute('cursorLocalTruncatedSessionDirs', truncated.sessionDirs)
   span.setAttribute('cursorLocalTruncatedSidecarBytes', truncated.sidecarBytes)
+  span.setAttribute('cursorLocalLegacyDirectoryReaddir', legacyCounters.directoryReaddir)
+  span.setAttribute('cursorLocalLegacyDirentsRead', legacyCounters.direntsRead)
+  span.setAttribute('cursorLocalLegacyFileStat', legacyCounters.fileStat)
+  span.setAttribute('cursorLocalLegacyScopeRealpath', legacyCounters.scopeRealpath)
+  span.setAttribute(
+    'cursorLocalLegacyTruncatedEntries',
+    cursorDiscoveries.some((d) => d.cursorLegacyDiscoveryTruncated?.entries)
+  )
+  span.setAttribute(
+    'cursorLocalLegacyTruncatedFiles',
+    cursorDiscoveries.some((d) => d.cursorLegacyDiscoveryTruncated?.files)
+  )
 }
