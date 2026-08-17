@@ -67,6 +67,64 @@ describe('structured agent session reducer', () => {
     expect(afterRefresh).toBe(streamed)
   })
 
+  it('keeps paged-in older items when a focus refresh carries nothing new', () => {
+    const snapshot = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
+      type: 'event',
+      event: {
+        type: 'snapshot',
+        sessionId: 'session-a',
+        fence: 1,
+        snapshot: {
+          sessionId: 'session-a',
+          cursor: { epoch: 'epoch-a', sequence: 50 },
+          items: [item('newest', 50)],
+          submissions: []
+        }
+      }
+    })
+    const withOlder = reduceStructuredAgentSession(snapshot, {
+      type: 'older-page',
+      requestedEpoch: 'epoch-a',
+      page: {
+        sessionId: 'session-a',
+        epoch: 'epoch-a',
+        direction: 'before',
+        items: [item('older', 10)],
+        removedItemIds: [],
+        submissions: [],
+        window: {
+          oldest: { epoch: 'epoch-a', sequence: 10 },
+          newest: { epoch: 'epoch-a', sequence: 10 },
+          nextCursor: { epoch: 'epoch-a', sequence: 10 }
+        },
+        hasOlder: false,
+        hasNewer: true
+      }
+    })
+    const afterRefresh = reduceStructuredAgentSession(withOlder, {
+      type: 'tail-page',
+      page: {
+        sessionId: 'session-a',
+        epoch: 'epoch-a',
+        direction: 'tail',
+        items: [item('newest', 50)],
+        removedItemIds: [],
+        submissions: [],
+        window: {
+          oldest: { epoch: 'epoch-a', sequence: 50 },
+          newest: { epoch: 'epoch-a', sequence: 50 },
+          nextCursor: { epoch: 'epoch-a', sequence: 50 }
+        },
+        liveCursor: { epoch: 'epoch-a', sequence: 50 },
+        hasOlder: true,
+        hasNewer: false
+      }
+    })
+
+    expect(afterRefresh).toBe(withOlder)
+    expect(afterRefresh.items.map((entry) => entry.itemId)).toEqual(['older', 'newest'])
+  })
+
   it('keeps rapid-send submissions when a newer tail refresh contains only the last one', () => {
     const initial = reduceStructuredAgentSession(EMPTY_STRUCTURED_AGENT_SESSION, {
       type: 'event',
