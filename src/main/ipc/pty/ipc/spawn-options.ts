@@ -156,6 +156,10 @@ export async function buildPtyIpcSpawnOptions(
   if (ctx.preSpawnHiddenMarkId !== null) {
     ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState(ctx.preSpawnHiddenMarkId, true)
   }
-  ctx.releaseWorktreeSpawn = await ctx.deps.runtime?.acquireWorktreeTerminalSpawn?.(args.worktreeId)
+  const runtime = ctx.deps.runtime
+  const acquireWorktreeSpawn = runtime?.acquireWorktreeTerminalSpawn
+  ctx.releaseWorktreeSpawn = acquireWorktreeSpawn
+    ? await acquireWorktreeSpawn.call(runtime, args.worktreeId)
+    : undefined
   return null
 }

@@ -1,5 +1,13 @@
 import type { AgentSessionClaimedSpawnResult } from '../../../../shared/agent-session-host-authority'
-import { rejectPaneSpawnReservation } from '../pane/spawn-reservation'
+import { isTerminalLeafId, makePaneKey } from '../../../../shared/stable-pane-id'
+import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
+import {
+  makePaneSpawnReservationKey,
+  paneSpawnReservationsByOwnerKey,
+  rejectPaneSpawnReservation,
+  reservePaneSpawn
+} from '../pane/spawn-reservation'
+import { resolveStablePaneOwner } from '../pane/stable-owner'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
 import { adoptMaterializedRuntimePtySpawn } from './spawn-early'
 import { prepareRuntimePtySpawn } from './spawn-preflight'
@@ -29,7 +37,35 @@ export async function spawnPtyFromRuntimeController(
   args: RuntimePtySpawnArgs
 ) {
   const ctx = createRuntimePtySpawnState(deps, args)
-  const materialized = await adoptMaterializedRuntimePtySpawn(ctx)
+  if (!args.adoptedStablePane) {
+    const leafId =
+      typeof args.leafId === 'string' && isTerminalLeafId(args.leafId) ? args.leafId : null
+    const paneKey =
+      typeof args.worktreeId === 'string' &&
+      typeof args.tabId === 'string' &&
+      isValidTerminalTabId(args.tabId) &&
+      args.tabId.length <= 512 &&
+      leafId
+        ? makePaneKey(args.tabId, leafId)
+        : null
+    const ownerKey = makePaneSpawnReservationKey(args.worktreeId, args.connectionId, paneKey)
+    const existingOwner = paneKey
+      ? resolveStablePaneOwner(
+          deps.runtime,
+          deps.store,
+          paneKey,
+          args.worktreeId,
+          args.connectionId
+        )
+      : null
+    if (ownerKey && !existingOwner && !paneSpawnReservationsByOwnerKey.has(ownerKey)) {
+      ctx.paneSpawnReservationKey = ownerKey
+      ctx.paneSpawnReservation = reservePaneSpawn(ownerKey)
+    }
+  }
+  const materializedOrPromise = adoptMaterializedRuntimePtySpawn(ctx)
+  const materialized =
+    materializedOrPromise instanceof Promise ? await materializedOrPromise : materializedOrPromise
   if (materialized) {
     return toRuntimeSpawnReply(materialized)
   }

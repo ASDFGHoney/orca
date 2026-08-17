@@ -88,7 +88,7 @@ export type PtySpawnIpcDeps = {
   }
   getLocalPtyStartupPromise: (connectionId?: string | null) => Promise<void> | undefined
   adoptStablePane: (args: AdoptStablePaneArgs) => Promise<AdoptStablePaneResult | null>
-  assertFolderWorkspacePtyPathUsable: (worktreeId: string | undefined) => Promise<void>
+  assertFolderWorkspacePtyPathUsable: (worktreeId: string | undefined) => Promise<void> | void
   resolvePtySpawnStartupCwd: (
     worktreeId: string | undefined,
     cwd: string | undefined,

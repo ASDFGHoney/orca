@@ -97,8 +97,8 @@ export async function beginPtyIpcSpawn(
         )
       : null
   ctx.earlyWorktreeId = args.worktreeId
-  ctx.paneSpawnReservationKey =
-    ctx.earlyStablePaneOwner && earlyReservationKey ? earlyReservationKey : null
+  // Reserve early so renderer/runtime materialization cannot start duplicate provider spawns.
+  ctx.paneSpawnReservationKey = earlyReservationKey
   ctx.paneSpawnReservation = ctx.paneSpawnReservationKey
     ? reservePaneSpawn(ctx.paneSpawnReservationKey)
     : null

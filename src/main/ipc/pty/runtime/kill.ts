@@ -1,4 +1,5 @@
 import type { IPtyProvider } from '../../../providers/types'
+import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../../../shared/pty-liveness-verdict'
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { ptyOwnership, ptyIncarnationById } from '../provider/ownership-state'
 import { getProvider, getProviderForPty } from '../provider/registry'
@@ -35,7 +36,8 @@ export function killPtyFromRuntimeController(
         runtime?.onPtyExit(ptyId, -1, incarnationId)
         rememberSyntheticKillExit(ptyId)
         sendPtyExitToRenderer({ id: ptyId, code: -1 })
-        return true
+        runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
+        return false
       }
       return false
     }
@@ -67,6 +69,12 @@ export function killPtyFromRuntimeController(
         // Why: close runtime tails without clearing provider ownership, so
         // a retry can still target a PTY that survived the failed shutdown.
         if (!retired) {
+          if (connectionId) {
+            runtime?.markPtyLivenessUnverifiable?.(
+              ptyId,
+              err instanceof Error ? err.message : String(err)
+            )
+          }
           runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
         }
       })
@@ -90,7 +98,8 @@ export function killPtyFromRuntimeController(
 
 export function retireRejectedPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
-  ptyId: string
+  ptyId: string,
+  stopConfirmed: boolean
 ): void {
   const {
     runtime,
@@ -101,6 +110,19 @@ export function retireRejectedPtyFromRuntimeController(
     finishPtyShutdown
   } = deps
   rememberRetiredRejectedPty(ptyId)
+  if (!stopConfirmed) {
+    runtime?.markPtyLivenessUnverifiable?.(
+      ptyId,
+      'a follow-up stop was issued but its outcome could not be verified'
+    )
+    if (!ptyOwnership.has(ptyId)) {
+      return
+    }
+    runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
+    rememberSyntheticKillExit(ptyId)
+    sendPtyExitToRenderer({ id: ptyId, code: -1 })
+    return
+  }
   // Why: a completed stop already cleared provider state, tombstoned the lease and told the
   // renderer; repeating that double-fires the exit IPC. The runtime still needs code 0 so an
   // SSH pane retires for good instead of staying preserved by the stop's negative exit.
@@ -197,7 +219,7 @@ export async function stopAndWaitPtyFromRuntimeController(
       runtime?.onPtyExit(ptyId, -1, incarnationId)
       rememberSyntheticKillExit(ptyId)
       sendPtyExitToRenderer({ id: ptyId, code: -1 })
-      return true
+      runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
     }
     return false
   }
@@ -210,6 +232,12 @@ export async function stopAndWaitPtyFromRuntimeController(
     })
   } catch (err) {
     if (!isPtyAlreadyGoneError(err)) {
+      if (connectionId) {
+        runtime?.markPtyLivenessUnverifiable?.(
+          ptyId,
+          err instanceof Error ? err.message : String(err)
+        )
+      }
       console.warn(
         `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
       )
@@ -218,9 +246,16 @@ export async function stopAndWaitPtyFromRuntimeController(
   }
   try {
     if (!(await verifyPtyStopped(provider, ptyId, opts))) {
+      runtime?.markPtyLivenessLive?.(ptyId)
       return false
     }
   } catch (err) {
+    if (connectionId) {
+      runtime?.markPtyLivenessUnverifiable?.(
+        ptyId,
+        err instanceof Error ? err.message : String(err)
+      )
+    }
     console.warn(
       `[pty] Failed to verify PTY ${ptyId} stopped: ${
         err instanceof Error ? err.message : String(err)
@@ -230,9 +265,11 @@ export async function stopAndWaitPtyFromRuntimeController(
   }
   const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
   if (!providerExitObserved) {
-    runtime?.onPtyExit(ptyId, -1, incarnationId)
+    // The owning provider's fresh inventory observed absence, so this is a
+    // death certificate even when its exit event was missed.
+    runtime?.onPtyExit(ptyId, 0, incarnationId)
     rememberSyntheticKillExit(ptyId)
-    sendPtyExitToRenderer({ id: ptyId, code: -1 })
+    sendPtyExitToRenderer({ id: ptyId, code: 0 })
   }
   return true
 }

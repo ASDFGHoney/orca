@@ -20,10 +20,37 @@ import type { PtyIpcSpawnState } from './spawn-state'
 
 export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promise<void> {
   const args = ctx.args
-  if (!ctx.earlyStablePaneOwner) {
-    await ctx.deps.assertFolderWorkspacePtyPathUsable(args.worktreeId)
-  }
+  // Establish daemon identity before the first await so hidden delivery is gated before byte zero.
   ctx.provider = getProvider(args.connectionId)
+  ctx.isDaemonHostSpawn =
+    !args.connectionId &&
+    !(ctx.provider instanceof LocalPtyProvider) &&
+    !routesFreshSpawnsToLocalProvider(ctx.provider)
+  ctx.isMintedSessionId = args.sessionId === undefined && ctx.isDaemonHostSpawn
+  ctx.effectiveSessionId =
+    args.sessionId ?? (ctx.isDaemonHostSpawn ? mintPtySessionId(args.worktreeId) : undefined)
+  ctx.effectiveSessionAppId =
+    ctx.effectiveSessionId !== undefined
+      ? getAppPtyId(args.connectionId, ctx.effectiveSessionId)
+      : undefined
+  ctx.effectiveSessionRelayId =
+    ctx.effectiveSessionId !== undefined
+      ? getRelayPtyId(args.connectionId, ctx.effectiveSessionId)
+      : undefined
+  ctx.initiallyHidden = args.initiallyHidden === true
+  ctx.preSpawnHiddenMarkId =
+    ctx.initiallyHidden && ctx.isDaemonHostSpawn && ctx.effectiveSessionAppId !== undefined
+      ? ctx.effectiveSessionAppId
+      : null
+  if (ctx.preSpawnHiddenMarkId !== null) {
+    ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState(ctx.preSpawnHiddenMarkId, true)
+  }
+  if (!ctx.earlyStablePaneOwner) {
+    const pathUsable = ctx.deps.assertFolderWorkspacePtyPathUsable(args.worktreeId)
+    if (pathUsable) {
+      await pathUsable
+    }
+  }
   ctx.spawnTiming.mark('stable_adoption_setup')
   ctx.preAdoptedStablePane =
     ctx.earlyStablePaneOwner && ctx.earlyWorktreeId
@@ -40,7 +67,10 @@ export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promis
       : null
   ctx.spawnTiming.mark('stable_adoption')
   if (ctx.earlyStablePaneOwner && !ctx.preAdoptedStablePane) {
-    await ctx.deps.assertFolderWorkspacePtyPathUsable(args.worktreeId)
+    const pathUsable = ctx.deps.assertFolderWorkspacePtyPathUsable(args.worktreeId)
+    if (pathUsable) {
+      await pathUsable
+    }
   }
   if (!ctx.preAdoptedStablePane) {
     // Why: reattach needs exact cwd, SSH cannot probe locally, and successful stable-pane adoption needs no launch preflight.
@@ -131,6 +161,34 @@ export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promis
     : recoverFreshSpawnProviderRouting(ctx.provider, args.connectionId, args.sessionId)
   if (freshSpawnRecovery) {
     await freshSpawnRecovery
+    const previousHiddenMarkId = ctx.preSpawnHiddenMarkId
+    ctx.isDaemonHostSpawn =
+      !args.connectionId &&
+      !(ctx.provider instanceof LocalPtyProvider) &&
+      !routesFreshSpawnsToLocalProvider(ctx.provider)
+    ctx.isMintedSessionId = args.sessionId === undefined && ctx.isDaemonHostSpawn
+    ctx.effectiveSessionId =
+      args.sessionId ?? (ctx.isDaemonHostSpawn ? mintPtySessionId(args.worktreeId) : undefined)
+    ctx.effectiveSessionAppId =
+      ctx.effectiveSessionId !== undefined
+        ? getAppPtyId(args.connectionId, ctx.effectiveSessionId)
+        : undefined
+    ctx.effectiveSessionRelayId =
+      ctx.effectiveSessionId !== undefined
+        ? getRelayPtyId(args.connectionId, ctx.effectiveSessionId)
+        : undefined
+    ctx.preSpawnHiddenMarkId =
+      ctx.initiallyHidden && ctx.isDaemonHostSpawn && ctx.effectiveSessionAppId !== undefined
+        ? ctx.effectiveSessionAppId
+        : null
+    if (previousHiddenMarkId !== ctx.preSpawnHiddenMarkId) {
+      if (previousHiddenMarkId !== null) {
+        ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState(previousHiddenMarkId, false)
+      }
+      if (ctx.preSpawnHiddenMarkId !== null) {
+        ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState(ctx.preSpawnHiddenMarkId, true)
+      }
+    }
   }
   ctx.isClaudeLaunch =
     !ctx.preAdoptedStablePane && !args.connectionId && isClaudeLaunchCommand(args.command)
@@ -147,24 +205,9 @@ export async function preparePtyIpcSpawnPreflight(ctx: PtyIpcSpawnState): Promis
         })
       : { shellOverride: args.shellOverride, terminalWindowsWslDistro: null }
   const initialShellOverride = ctx.terminalRuntimeOptions.shellOverride
-  ctx.isDaemonHostSpawn =
-    !args.connectionId &&
-    !(ctx.provider instanceof LocalPtyProvider) &&
-    !routesFreshSpawnsToLocalProvider(ctx.provider)
   // Why: daemon host-env setup needs a stable id BEFORE provider.spawn so buildPtyHostEnv hooks/Pi cleanup can run; daemon still honors opts.sessionId ?? mint().
   // Note: sessionId is STABLE across daemon restarts by design — do NOT simplify to a fresh UUID per spawn; that orphans reconnectable state.
   // Why: only clear ids minted in THIS request on failure — a caller-supplied args.sessionId may name an existing PTY we must not clobber.
-  ctx.isMintedSessionId = args.sessionId === undefined && ctx.isDaemonHostSpawn
-  ctx.effectiveSessionId =
-    args.sessionId ?? (ctx.isDaemonHostSpawn ? mintPtySessionId(args.worktreeId) : undefined)
-  ctx.effectiveSessionAppId =
-    ctx.effectiveSessionId !== undefined
-      ? getAppPtyId(args.connectionId, ctx.effectiveSessionId)
-      : undefined
-  ctx.effectiveSessionRelayId =
-    ctx.effectiveSessionId !== undefined
-      ? getRelayPtyId(args.connectionId, ctx.effectiveSessionId)
-      : undefined
   ctx.expectedWslDistro = !args.connectionId
     ? (resolveWslSessionContext({
         cwd: ctx.cwd,

@@ -21,6 +21,7 @@ import {
   hasRendererSerializerFromRuntimeController,
   inspectProcessFromRuntimeController,
   listProcessesFromRuntimeController,
+  listProcessesWithHostScopeFromRuntimeController,
   probePtyLivenessFromRuntimeController,
   resizePtyFromRuntimeController,
   serializeProviderBufferFromRuntimeController,
@@ -47,7 +48,8 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
     // attach. Attach-only and false-on-doubt: never creates or resizes.
     attach: (ptyId) => attachPtyFromRuntimeController(deps, ptyId),
     kill: (ptyId) => killPtyFromRuntimeController(deps, ptyId),
-    retireRejectedPty: (ptyId) => retireRejectedPtyFromRuntimeController(deps, ptyId),
+    retireRejectedPty: (ptyId, stopConfirmed) =>
+      retireRejectedPtyFromRuntimeController(deps, ptyId, stopConfirmed),
     markReversibleStops: (ptyIds) => markReversibleStopsFromRuntimeController(deps, ptyIds),
     stopAndWait: (ptyId, opts) => stopAndWaitPtyFromRuntimeController(deps, ptyId, opts),
     getForegroundProcess: (ptyId) => getForegroundProcessFromRuntimeController(ptyId),
@@ -57,7 +59,8 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
     hasChildProcesses: (ptyId) => hasChildProcessesFromRuntimeController(ptyId),
     clearBuffer: (ptyId) => clearBufferFromRuntimeController(deps, ptyId),
     hasPty: (ptyId) => hasPtyFromRuntimeController(ptyId),
-    listProcesses: (connectionId) => listProcessesFromRuntimeController(connectionId),
+    listProcesses: (connectionId) => listProcessesFromRuntimeController(deps, connectionId),
+    listProcessesWithHostScope: () => listProcessesWithHostScopeFromRuntimeController(deps),
     serializeBuffer: (ptyId, opts) => {
       // Why: mobile xterm must start from the desktop's exact screen state/dimensions before live TUI chunks render correctly.
       return requestSerializedBuffer(ptyId, opts)

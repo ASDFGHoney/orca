@@ -6,9 +6,10 @@ import { ensureWslHookRelayForReattach } from '../../../agent-hooks/wsl-hook-rel
 import type { CodexPaneHomeRoute } from '../../../codex/codex-pane-account-registry'
 import type { RuntimePtySpawnState } from './spawn-state'
 
-export async function adoptMaterializedRuntimePtySpawn(
-  ctx: RuntimePtySpawnState
-): Promise<PtySpawnResult | null> {
+export function adoptMaterializedRuntimePtySpawn(
+  ctx: RuntimePtySpawnState,
+  startupAlreadyAwaited = false
+): Promise<PtySpawnResult | null> | PtySpawnResult | null {
   const args = ctx.args
   ctx.codexHomeLaunchStartedAt = !args.connectionId ? new Date() : undefined
   ctx.codexHomeLaunchStartedSequence = !args.connectionId
@@ -24,8 +25,8 @@ export async function adoptMaterializedRuntimePtySpawn(
       )
     : new Map<string, CodexPaneHomeRoute | null>()
   const startupPromise = ctx.deps.getLocalPtyStartupPromise(args.connectionId)
-  if (startupPromise) {
-    await startupPromise
+  if (startupPromise && !startupAlreadyAwaited) {
+    return startupPromise.then(() => adoptMaterializedRuntimePtySpawn(ctx, true))
   }
   if (!ctx.preAdoptedStablePane?.materialized) {
     return null

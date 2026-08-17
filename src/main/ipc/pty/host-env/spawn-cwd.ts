@@ -12,20 +12,19 @@ import {
 } from '../../../project-groups/folder-workspace-path-status'
 import { getSshFilesystemProvider } from '../../../providers/ssh-filesystem-dispatch'
 
-export async function assertFolderWorkspacePtyPathUsable(
+export function assertFolderWorkspacePtyPathUsable(
   store: Store | undefined,
   worktreeId: string | undefined
-): Promise<void> {
+): Promise<void> | void {
   const workspaceScope = typeof worktreeId === 'string' ? parseWorkspaceKey(worktreeId) : null
   if (!store || workspaceScope?.type !== 'folder') {
     return
   }
-  const status = await getFolderWorkspacePathStatus(
+  return getFolderWorkspacePathStatus(
     store,
     { scope: 'folder-workspace', folderWorkspaceId: workspaceScope.folderWorkspaceId },
     { getSshFilesystemProvider }
-  )
-  assertFolderWorkspacePathUsable(status)
+  ).then(assertFolderWorkspacePathUsable)
 }
 
 export function resolvePtySpawnStartupCwd(

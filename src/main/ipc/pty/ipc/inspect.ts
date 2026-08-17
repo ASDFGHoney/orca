@@ -9,6 +9,7 @@ import {
   visitPtyProcessListingsInBatches
 } from '../../../providers/pty-process-list-admission'
 import type { PtyListedSession } from '../../../../shared/pty-listed-session'
+import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../../../shared/pty-liveness-verdict'
 import { ptyOwnership } from '../provider/ownership-state'
 import {
   getProviderForPty,
@@ -70,6 +71,7 @@ export function installPtyInspectIpcHandlers(deps: {
       runtime?.onPtyExit(args.id, -1, incarnationId)
       rememberSyntheticKillExit(args.id)
       sendPtyExitToRenderer({ id: args.id, code: -1 })
+      runtime?.markPtyLivenessUnverifiable?.(args.id, SSH_PROVIDER_UNREGISTERED_REASON)
       return
     }
     const shutdownProvider = provider ?? getProviderForPty(args.id)

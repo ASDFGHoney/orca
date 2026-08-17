@@ -19,7 +19,11 @@ import type { RuntimePtySpawnState } from './spawn-state'
 
 export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise<void> {
   const args = ctx.args
-  ctx.releaseWorktreeSpawn = await ctx.deps.runtime?.acquireWorktreeTerminalSpawn?.(args.worktreeId)
+  const runtime = ctx.deps.runtime
+  const acquireWorktreeSpawn = runtime?.acquireWorktreeTerminalSpawn
+  ctx.releaseWorktreeSpawn = acquireWorktreeSpawn
+    ? await acquireWorktreeSpawn.call(runtime, args.worktreeId)
+    : undefined
   try {
     if (args.preAllocatedHandle) {
       ctx.deps.trustedTerminalHandleEnv.add(args.preAllocatedHandle)

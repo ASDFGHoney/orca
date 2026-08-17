@@ -174,8 +174,9 @@ export function registerPtyHandlers(
     mainWindow.webContents.on('did-finish-load', finishLoadHandler)
   }
 
-  const assertFolderWorkspacePtyPathUsable = (worktreeId: string | undefined): Promise<void> =>
-    assertFolderWorkspacePtyPathUsableImpl(store, worktreeId)
+  const assertFolderWorkspacePtyPathUsable = (
+    worktreeId: string | undefined
+  ): Promise<void> | void => assertFolderWorkspacePtyPathUsableImpl(store, worktreeId)
   const resolvePtySpawnStartupCwd = (
     worktreeId: string | undefined,
     cwd: string | undefined,

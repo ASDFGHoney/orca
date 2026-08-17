@@ -170,44 +170,53 @@ export async function buildRuntimePtySpawnOptions(
     ctx.spawnOptions.onPtySpawnCommitted = ctx.reportPtySpawnCommitted
   }
 
-  ctx.paneSpawnReservationKey = makePaneSpawnReservationKey(
+  const resolvedPaneSpawnReservationKey = makePaneSpawnReservationKey(
     args.worktreeId,
     args.connectionId,
     ctx.spawnIdentityPaneKey
   )
-  const existingPaneSpawn = ctx.paneSpawnReservationKey
-    ? paneSpawnReservationsByOwnerKey.get(ctx.paneSpawnReservationKey)
-    : undefined
-  if (existingPaneSpawn) {
-    const concurrentResult = await existingPaneSpawn.promise
-    const concurrentOwner = resolveStablePaneOwner(
-      ctx.deps.runtime,
-      ctx.deps.store,
-      ctx.spawnIdentityPaneKey,
-      args.worktreeId,
-      args.connectionId
-    )
-    if (
-      !concurrentOwner?.handle ||
-      concurrentOwner.ptyId !== concurrentResult.id ||
-      (concurrentOwner.incarnationId !== undefined &&
-        concurrentResult.incarnationId !== undefined &&
-        concurrentOwner.incarnationId !== concurrentResult.incarnationId)
-    ) {
-      throw new Error('terminal_pane_owner_unknown')
-    }
-    return {
-      id: concurrentOwner.ptyId,
-      ...(concurrentOwner.incarnationId ? { incarnationId: concurrentOwner.incarnationId } : {}),
-      stablePaneOwner: {
-        handle: concurrentOwner.handle,
-        tabId: concurrentOwner.tabId,
-        leafId: concurrentOwner.leafId
+  if (
+    ctx.paneSpawnReservationKey &&
+    ctx.paneSpawnReservationKey !== resolvedPaneSpawnReservationKey
+  ) {
+    throw new Error('terminal_pane_identity_changed')
+  }
+  if (!ctx.paneSpawnReservationKey) {
+    ctx.paneSpawnReservationKey = resolvedPaneSpawnReservationKey
+    const existingPaneSpawn = ctx.spawnIdentityPaneKey
+      ? paneSpawnReservationsByOwnerKey.get(resolvedPaneSpawnReservationKey!)
+      : undefined
+    if (existingPaneSpawn) {
+      const concurrentResult = await existingPaneSpawn.promise
+      const concurrentOwner = resolveStablePaneOwner(
+        ctx.deps.runtime,
+        ctx.deps.store,
+        ctx.spawnIdentityPaneKey,
+        args.worktreeId,
+        args.connectionId
+      )
+      if (
+        !concurrentOwner?.handle ||
+        concurrentOwner.ptyId !== concurrentResult.id ||
+        (concurrentOwner.incarnationId !== undefined &&
+          concurrentResult.incarnationId !== undefined &&
+          concurrentOwner.incarnationId !== concurrentResult.incarnationId)
+      ) {
+        throw new Error('terminal_pane_owner_unknown')
+      }
+      return {
+        id: concurrentOwner.ptyId,
+        ...(concurrentOwner.incarnationId ? { incarnationId: concurrentOwner.incarnationId } : {}),
+        stablePaneOwner: {
+          handle: concurrentOwner.handle,
+          tabId: concurrentOwner.tabId,
+          leafId: concurrentOwner.leafId
+        }
       }
     }
   }
   ctx.finishTerminalInstall = beginPtySpawnForWorktree(args.worktreeId, ctx.cwd, args.connectionId)
-  ctx.paneSpawnReservation = ctx.paneSpawnReservationKey
+  ctx.paneSpawnReservation ??= ctx.paneSpawnReservationKey
     ? reservePaneSpawn(ctx.paneSpawnReservationKey)
     : null
   ctx.stablePaneOwner = null
