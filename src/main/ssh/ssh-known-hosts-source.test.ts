@@ -491,6 +491,24 @@ describe('parsing real ssh -G output from Windows OpenSSH', () => {
     }
   })
 
+  it('does not rewrite a path that merely BEGINS with the token characters', () => {
+    // `startsWith` alone also matches `__PROGRAMDATA__evil/x`, rewriting a file the user never named
+    // into a directory they did not choose. The token has to be the whole path or be followed by a
+    // separator. Found by probing the expansion rather than by reading it.
+    const previous = process.env.ProgramData
+    process.env.ProgramData = 'C:\\ProgramData'
+    try {
+      const resolved = parseSshGOutput('userknownhostsfile __PROGRAMDATA__evil/known_hosts')
+      expect(resolved.userKnownHostsFiles).toEqual(['__PROGRAMDATA__evil/known_hosts'])
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ProgramData
+      } else {
+        process.env.ProgramData = previous
+      }
+    }
+  })
+
   it('keeps a drive-letter path with mixed separators intact', () => {
     // `C:\Users\neil/.ssh/known_hosts` is what it really prints. Node's fs accepts both separators
     // on Windows, so the requirement is that nothing here rewrites or truncates it.
