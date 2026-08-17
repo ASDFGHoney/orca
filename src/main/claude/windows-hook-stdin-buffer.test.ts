@@ -74,7 +74,7 @@ async function runWindowsHook(
 }
 
 describe('Windows Claude hook stdin buffer', () => {
-  it('bounds the reader before launching children and makes the payload file crash-cleanup-safe', () => {
+  it('bounds the reader before launching children and owns payload-file cleanup', () => {
     const command = buildWindowsClaudeHookStdinBuffer('& $scriptPath')
 
     expect(command).toContain('$i.ReadAsync')
@@ -91,7 +91,10 @@ describe('Windows Claude hook stdin buffer', () => {
     ).toBe(MANAGED_HOOK_TIMEOUT_SECONDS * 1_000)
     expect(command).toContain("if (-not $c -or $x) { Write-Output '{}'; exit 0 }")
     expect(command).toContain('ConvertFrom-Json')
-    expect(command).toContain('[System.IO.FileOptions]::DeleteOnClose')
+    expect(command).toContain("Join-Path ([System.IO.Path]::GetTempPath()) 'orca-claude-hooks'")
+    expect(command).toContain("Get-ChildItem -LiteralPath $g -Filter '*.json'")
+    expect(command).toContain('[System.IO.File]::WriteAllBytes($f, $p.ToArray())')
+    expect(command).toContain('Remove-Item -LiteralPath $f -Force')
     expect(command).toContain(`$env:${WINDOWS_CLAUDE_HOOK_PAYLOAD_FILE_ENV} = $f`)
     expect(command.indexOf('ORCA_PANE_KEY')).toBeLessThan(command.indexOf('$i.ReadAsync'))
     expect(command.indexOf('$i.ReadAsync')).toBeLessThan(command.indexOf('& $scriptPath'))
