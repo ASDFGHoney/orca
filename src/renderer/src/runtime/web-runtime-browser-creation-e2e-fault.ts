@@ -12,6 +12,7 @@ type BrowserCreationFaultApi = {
   arm: () => void
   armCapabilityRejection: () => void
   release: () => boolean
+  releaseWithPublicationLag: () => boolean
   reset: () => void
   snapshot: () => BrowserCreationFaultSnapshot
 }
@@ -24,6 +25,7 @@ let armed = false
 let capabilityRejectionArmed = false
 let createdPageId: string | null = null
 let failNextReconciliation = false
+let suppressNextReleasedPageSnapshot = false
 let releaseCreatedPage: (() => void) | null = null
 let createdPageBarrier: Promise<void> | null = null
 const suppressedPageIds = new Set<string>()
@@ -35,6 +37,7 @@ function resetFault(): void {
   capabilityRejectionArmed = false
   createdPageId = null
   failNextReconciliation = false
+  suppressNextReleasedPageSnapshot = false
   releaseCreatedPage = null
   createdPageBarrier = null
   suppressedPageIds.clear()
@@ -62,6 +65,16 @@ function exposeFaultApi(): void {
         return false
       }
       failNextReconciliation = true
+      const release = releaseCreatedPage
+      releaseCreatedPage = null
+      release()
+      return true
+    },
+    releaseWithPublicationLag: () => {
+      if (!armed || !createdPageId || !releaseCreatedPage) {
+        return false
+      }
+      suppressNextReleasedPageSnapshot = true
       const release = releaseCreatedPage
       releaseCreatedPage = null
       release()
@@ -117,6 +130,11 @@ export function suppressE2eWebRuntimeBrowserSnapshot(
       break
     }
     suppressedPageIds.add(pageId)
+  }
+  if (pageIds.length > 0 && suppressNextReleasedPageSnapshot) {
+    suppressNextReleasedPageSnapshot = false
+    armed = false
+    return true
   }
   return pageIds.length > 0
 }
