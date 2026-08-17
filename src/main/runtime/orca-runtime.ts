@@ -34670,9 +34670,11 @@ export class OrcaRuntimeService {
     return this.leaves.get(this.getLeafKey(captured.tabId, captured.leafId)) ?? captured
   }
 
-  /** Same re-read for PTY records. These are mutated in place today, but a drop and
-   *  re-register under the same id (restore, reconnect, disconnected-record prune) mints a
-   *  new object, which would strand this poll the same way. */
+  /** Same re-read for PTY records, and a no-op today by construction: `ptysById` has one
+   *  `set` site guarded by `if (!pty)`, so records are create-once and mutated in place, and
+   *  the only path that mints a fresh object under the same id — `dropDisconnectedPtyRecord`
+   *  — rejects the handle's waiters on its way through. Kept so the two polls cannot drift:
+   *  a second `set` site would otherwise reintroduce the leaf hang here, silently. */
   private getLivePtyRecord(captured: RuntimePtyWorktreeRecord): RuntimePtyWorktreeRecord {
     return this.ptysById.get(captured.ptyId) ?? captured
   }

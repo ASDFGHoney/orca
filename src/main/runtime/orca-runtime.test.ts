@@ -16568,69 +16568,6 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  // Why: PTY records are mutated in place today, but `dropDisconnectedPtyRecord` +
-  // re-registration mints a fresh object under the same id (restore, reconnect, prune).
-  // The PTY poll closes over the same kind of reference as the leaf poll, so it is fixed
-  // symmetrically rather than left to rot until that path is hit in production.
-  it('polls the live pty record after it is replaced under the same id', async () => {
-    vi.useFakeTimers()
-    try {
-      const runtime = new OrcaRuntimeService(store)
-      runtime.setPtyController({
-        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
-        write: () => true,
-        kill: () => true,
-        getForegroundProcess: async () => null
-      })
-      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
-      runtime.onPtyData('pty-bg', 'booting\n', Date.now())
-
-      const waitPromise = runtime.waitForTerminal(handle, {
-        condition: 'tui-idle',
-        timeoutMs: 60_000
-      })
-      let settled = false
-      void waitPromise.then(
-        () => {
-          settled = true
-        },
-        () => {
-          settled = true
-        }
-      )
-      await vi.advanceTimersByTimeAsync(1_000)
-      expect(settled).toBe(false)
-
-      const internals = runtime as unknown as {
-        ptysById: Map<string, Record<string, unknown>>
-      }
-      const captured = internals.ptysById.get('pty-bg')
-      expect(captured).toBeDefined()
-      // Stand in for drop + re-register: same id, new object, ready prompt in its body.
-      const readyPrompt = [
-        ' >_ OpenAI Codex (v0.131.0)',
-        ' model:       gpt-5.5 high   /model to change',
-        ' directory:   ~/orca/workspaces/orca/cli-debug'
-      ].join('\n')
-      internals.ptysById.set('pty-bg', {
-        ...(captured as Record<string, unknown>),
-        preview: readyPrompt,
-        tailBuffer: readyPrompt.split('\n'),
-        tailPartialLine: ''
-      })
-
-      await vi.advanceTimersByTimeAsync(5_000)
-
-      await expect(waitPromise).resolves.toMatchObject({
-        handle,
-        condition: 'tui-idle',
-        satisfied: true
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   // Why: the transition itself is only a title sample. A name-only title classifies as
   // 'idle' by default, so resolving on the transition alone is how a mid-turn Claude `✳`
   // frame reported a finished turn. The first-party stream still says working — re-rank
