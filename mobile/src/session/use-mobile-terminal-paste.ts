@@ -5,6 +5,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
+import { isTerminalSendRpcAccepted } from '../terminal/terminal-send-rpc-response'
 import {
   buildMobileImagePastePayload,
   prepareMobileClipboardImageBase64,
@@ -141,7 +142,7 @@ export function useMobileTerminalPaste({
       ) {
         return
       }
-      await currentClient.sendRequest('terminal.send', {
+      const response = await currentClient.sendRequest('terminal.send', {
         terminal: targetHandle,
         text: payload,
         enter: false,
@@ -149,6 +150,9 @@ export function useMobileTerminalPaste({
           ? { client: { id: deviceTokenRef.current, type: 'mobile' as const } }
           : {})
       })
+      if (!isTerminalSendRpcAccepted(response)) {
+        throw new Error('Terminal rejected paste')
+      }
       onSuccess()
       refreshCanPaste()
     } catch (e) {

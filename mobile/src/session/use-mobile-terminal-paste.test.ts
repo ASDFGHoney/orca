@@ -43,7 +43,10 @@ describe('useMobileTerminalPaste', () => {
   let modes = new Map<string, TerminalModes>()
 
   beforeEach(() => {
-    sendRequest = vi.fn().mockResolvedValue({})
+    sendRequest = vi.fn().mockResolvedValue({
+      ok: true,
+      result: { send: { accepted: true } }
+    })
     flushPendingInput = vi.fn().mockResolvedValue(true)
     onError = vi.fn()
     onSuccess = vi.fn()
@@ -129,6 +132,16 @@ describe('useMobileTerminalPaste', () => {
       'terminal.send',
       expect.objectContaining({ text: 'line one\nline two' })
     )
+  })
+
+  it('reports a host-rejected paste instead of treating it as successful', async () => {
+    sendRequest.mockResolvedValue({ ok: true, result: { send: { accepted: false } } })
+
+    await mountAndPaste('line one\nline two')
+
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledOnce()
+    expect(showToast).toHaveBeenCalledWith('Paste failed', 1500)
   })
 
   it('enforces the 256 KiB cap on the final framed payload', async () => {

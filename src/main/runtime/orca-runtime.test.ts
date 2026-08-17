@@ -137,6 +137,9 @@ const ORIGINAL_PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, 'p
 const removeWorktreeLinkedPathsMock = vi.hoisted(() => vi.fn())
 const findExistingWorktreeSymlinkPathsMock = vi.hoisted(() => vi.fn())
 const resolveLocalGitUsernameMock = vi.hoisted(() => vi.fn(async () => ''))
+const getRegisteredSshStateMock = vi.hoisted(() =>
+  vi.fn((): { remotePlatform: NodeJS.Platform } => ({ remotePlatform: 'linux' }))
+)
 
 vi.mock('../ipc/worktree-symlinks', () => ({
   createWorktreeCopiedPaths: vi.fn(),
@@ -457,7 +460,7 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
 
 vi.mock('../ipc/ssh', () => ({
   getActiveMultiplexer: getActiveMultiplexerMock,
-  getRegisteredSshState: () => ({ remotePlatform: 'linux' })
+  getRegisteredSshState: getRegisteredSshStateMock
 }))
 
 vi.mock('../ipc/preflight', () => ({
@@ -674,6 +677,8 @@ vi.mock('../git/git-username', async () => {
 })
 
 function resetRuntimeTestMocks(): void {
+  getRegisteredSshStateMock.mockReset()
+  getRegisteredSshStateMock.mockReturnValue({ remotePlatform: 'linux' })
   resetPlatform()
   electronMocks.app.isPackaged = false
   clearConfiguredWorktreeSharedDirectoriesCacheForTests()
@@ -2609,6 +2614,57 @@ describe('OrcaRuntimeService', () => {
     expect(runtime.getStatus().graphStatus).toBe('reloading')
     expect(runtime.markRendererReloadCancelled(TEST_WINDOW_ID, fence)).toBe(true)
     expect(runtime.getStatus().graphStatus).toBe('ready')
+  })
+
+  it('keeps each terminal summary on its spawn-time SSH platform', async () => {
+    const runtime = createRuntime()
+    const ptyId = 'ssh:ssh-1@@platform'
+    getRegisteredSshStateMock.mockReturnValue({ remotePlatform: 'win32' })
+    syncSinglePty(runtime, ptyId)
+    runtime.registerPty(ptyId, TEST_WORKTREE_ID, 'ssh-1', {
+      tabId: 'tab-1',
+      leafId: 'pane:1',
+      incarnationId: 'inc-1'
+    })
+
+    getRegisteredSshStateMock.mockReturnValue({ remotePlatform: 'linux' })
+
+    const terminal = (await runtime.listTerminals()).terminals.find(
+      (candidate) => candidate.ptyId === ptyId
+    )
+    expect(terminal).toMatchObject({
+      executionHostId: 'ssh:ssh-1',
+      hostPlatform: 'win32'
+    })
+  })
+
+  it('replaces WSL platform metadata when a PTY id starts a native incarnation', async () => {
+    setPlatform('win32')
+    const runtime = createRuntime()
+    syncSinglePty(runtime, 'pty-reused-platform')
+    runtime.preparePtyExecutionContext('pty-reused-platform', 'Ubuntu', {
+      resetIncarnation: true
+    })
+    runtime.registerPty('pty-reused-platform', TEST_WORKTREE_ID, null, {
+      tabId: 'tab-1',
+      leafId: 'pane:1'
+    })
+    const wslTerminal = (await runtime.listTerminals()).terminals.find(
+      (candidate) => candidate.ptyId === 'pty-reused-platform'
+    )
+    expect(wslTerminal?.hostPlatform).toBe('linux')
+    runtime.preparePtyExecutionContext('pty-reused-platform', null, {
+      resetIncarnation: true
+    })
+    runtime.registerPty('pty-reused-platform', TEST_WORKTREE_ID, null, {
+      tabId: 'tab-1',
+      leafId: 'pane:1'
+    })
+
+    const terminal = (await runtime.listTerminals()).terminals.find(
+      (candidate) => candidate.ptyId === 'pty-reused-platform'
+    )
+    expect(terminal?.hostPlatform).toBe('win32')
   })
 
   it('keeps an earlier committed reload fenced when a later reload is cancelled', async () => {
