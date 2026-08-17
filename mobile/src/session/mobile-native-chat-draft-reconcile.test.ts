@@ -25,6 +25,73 @@ function pending(id: string, images: string[], expectedOccurrence = 1): PendingI
 }
 
 describe('mobile native chat image preview reconciliation', () => {
+  // Some hosts echo an image send as a user turn they kept no content for. The
+  // preview-binding path already accepts that shape and shows the photo, so the
+  // send must reconcile against it too — otherwise the send stays held and the
+  // 20s deadline warns "delivery unknown" about a message that plainly landed.
+  // Keyed under '' either way, so only a captionless send can reach it.
+  it('reconciles an image-only send against an echo the host left empty', () => {
+    const messages = [
+      {
+        id: 'base',
+        role: 'assistant' as const,
+        blocks: [{ type: 'text' as const, text: 'ready' }],
+        timestamp: null,
+        source: 'transcript' as const
+      },
+      {
+        id: 'echo',
+        role: 'user' as const,
+        blocks: [],
+        timestamp: null,
+        source: 'transcript' as const
+      }
+    ]
+    const unconfirmed: UnconfirmedSend = {
+      draftKey: 'draft',
+      pendingKey: 'pending-key',
+      text: '',
+      normalizedText: '',
+      imageCount: 1,
+      baselineTailMessageId: 'base',
+      deadline: null
+    }
+
+    expect(findLandedUnconfirmedSends(messages, [unconfirmed])).toEqual([unconfirmed])
+  })
+
+  // The empty turn says nothing about a caption, so a send that carried one must
+  // not claim it — that would retire a bubble whose text never landed.
+  it('does not let an empty echo claim a captioned image send', () => {
+    const messages = [
+      {
+        id: 'base',
+        role: 'assistant' as const,
+        blocks: [{ type: 'text' as const, text: 'ready' }],
+        timestamp: null,
+        source: 'transcript' as const
+      },
+      {
+        id: 'echo',
+        role: 'user' as const,
+        blocks: [],
+        timestamp: null,
+        source: 'transcript' as const
+      }
+    ]
+    const unconfirmed: UnconfirmedSend = {
+      draftKey: 'draft',
+      pendingKey: 'pending-key',
+      text: 'look at this',
+      normalizedText: 'look at this',
+      imageCount: 1,
+      baselineTailMessageId: 'base',
+      deadline: null
+    }
+
+    expect(findLandedUnconfirmedSends(messages, [unconfirmed])).toEqual([])
+  })
+
   it('reconciles a trailing-marker echo and hands its preview to that echo', () => {
     const messages = [
       userText('source', '[Image: source: /tmp/a.png]'),

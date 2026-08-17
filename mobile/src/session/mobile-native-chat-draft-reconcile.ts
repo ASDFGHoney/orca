@@ -245,11 +245,16 @@ export function findLandedUnconfirmedSends(
   // (`[Image: source: …]` or no text) keys under '' so an empty-text send can
   // claim it.
   const messageIndexById = new Map(messages.map((message, index) => [message.id, index]))
-  const literalMessagesByText = new Map<
-    string,
-    { id: string; index: number; imageCount: number }[]
-  >()
-  const imageMessagesByText = new Map<string, { id: string; index: number; imageCount: number }[]>()
+  type EchoCandidate = {
+    id: string
+    index: number
+    imageCount: number
+    /** The host kept no content for this turn, so it testifies to no particular
+     *  number of images — it can stand for a send of any size. */
+    countUnknown?: boolean
+  }
+  const literalMessagesByText = new Map<string, EchoCandidate[]>()
+  const imageMessagesByText = new Map<string, EchoCandidate[]>()
   for (const message of normalizeImageTranscriptMessages(messages)) {
     const index = messageIndexById.get(message.id)
     if (index === undefined) {
@@ -260,14 +265,26 @@ export function findLandedUnconfirmedSends(
     }
     const isImageSource = isImageSourceUserTurn(message)
     const imageCount = nativeChatUserMessageImageEvidenceCount(message)
-    const candidate = { id: message.id, index, imageCount }
+    // A turn the host echoed with nothing at all is the compatibility shape for
+    // an image send it kept no text for. Its evidence count is 0, so requiring
+    // the count to cover the send would hold that send open until the deadline
+    // fired a false "delivery unknown" — while the sibling preview-binding path
+    // accepts exactly this shape and binds the photo. Keys under '' either way,
+    // so only a captionless send can reach it.
+    const countUnknown = message.blocks.length === 0
+    const candidate: EchoCandidate = {
+      id: message.id,
+      index,
+      imageCount,
+      ...(countUnknown ? { countUnknown } : {})
+    }
     if (!message.blocks.some(isImageRefBlock)) {
       const literalKey = isImageSource ? '' : (nativeChatUserMessageMatchText(message) ?? '')
       const current = literalMessagesByText.get(literalKey) ?? []
       current.push(candidate)
       literalMessagesByText.set(literalKey, current)
     }
-    if (imageCount > 0) {
+    if (imageCount > 0 || countUnknown) {
       const imageKey = isImageSource ? '' : (normalizedUserText(message) ?? '')
       const current = imageMessagesByText.get(imageKey) ?? []
       current.push(candidate)
@@ -290,7 +307,7 @@ export function findLandedUnconfirmedSends(
       ?.find(
         (message) =>
           message.index > tailIndex &&
-          message.imageCount >= entry.imageCount &&
+          (message.countUnknown === true || message.imageCount >= entry.imageCount) &&
           !claimedMessageIds.has(message.id)
       )
     if (echo) {
