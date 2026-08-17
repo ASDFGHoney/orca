@@ -69,7 +69,7 @@ export class FolderWorkspacePersistenceOperations {
     // Why trim: the guard below accepts a padded path, so persist the same value it validated.
     const folderPath =
       typeof input.folderPath === 'string' && input.folderPath.trim().length > 0
-        ? input.folderPath.trim()
+        ? input.folderPath
         : group?.parentPath?.trim()
     if (!group || !folderPath) {
       throw new Error('Folder-backed project group not found.')
