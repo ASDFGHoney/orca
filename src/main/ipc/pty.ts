@@ -1,4 +1,4 @@
-export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
+export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready-bash-rcfile'
 export {
   isCurrentPtyExit,
   deletePtyOwnership,
