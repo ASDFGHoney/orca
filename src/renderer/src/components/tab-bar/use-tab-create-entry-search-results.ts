@@ -18,10 +18,11 @@ export function useTabCreateEntrySearchResults({
     worktreeId
   })
   // Why retain instead of clearing: emptying deferred rows flashes the list on
-  // every keystroke. Kept rows still mention the live query, so Enter cannot
-  // submit a tab the current text never matched.
+  // every keystroke. Retention re-checks each row against the live query, so
+  // Enter cannot submit a tab the current text never matched.
   return enabled
     ? retainOpenTabResultsForQuery({
+        entries: tabSearch.entries,
         query,
         results: tabSearch.results,
         resultsQuery: tabSearch.query
