@@ -245,6 +245,7 @@ import {
 import { createCodexSessionMigrationScheduler } from './codex/codex-session-migration-scheduler'
 import { prepareCodexAiVaultSessionResume } from './codex/codex-ai-vault-session-resume'
 import { prepareLegacySharedCodexSessionResume } from './codex/codex-legacy-session-resume'
+import { ManagedCodexHomeTemporarilyUnavailableError } from './codex-accounts/host-codex-managed-home-ownership'
 import { resolveHostCodexSessionSourceHome } from './codex/codex-session-source-home'
 import type { CodexSessionResumePreparation } from './codex/codex-session-resume-home'
 import { prepareCodexSessionResume } from './codex/codex-session-resume-preparation'
@@ -1187,6 +1188,9 @@ async function prepareCodexSessionResumeForLaunch(args: {
           }
         )
       } catch (error) {
+        if (error instanceof ManagedCodexHomeTemporarilyUnavailableError) {
+          throw error
+        }
         // Why: migration is a compatibility repair; its failure must not prevent the PTY from resuming from its trusted origin home.
         console.warn(
           '[codex-session-resume] Legacy rollout migration failed; using origin home:',

@@ -176,17 +176,20 @@ export async function resolveCodexSessionResumeProvenance(args: {
  * account's ownership marker, and the far more common provenance-present
  * resume never reaches the ranking at all.
  */
-function rankTrustedCodexHomesForRescan(args: {
-  trustedCodexHomes: readonly string[]
-  getSelectedAccountCodexHome: () => string | null
-  systemCodexHomePath: string | null
-  sharedRuntimeCodexHomePath: string | null
-}): string[] {
+function rankTrustedCodexHomesForRescan(
+  args: {
+    trustedCodexHomes: readonly string[]
+    getSelectedAccountCodexHome: () => string | null
+    systemCodexHomePath: string | null
+    sharedRuntimeCodexHomePath: string | null
+  },
+  selectedAccountHome = args.getSelectedAccountCodexHome()
+): string[] {
   const toComparisonHome = (value: string | null | undefined): string | null => {
     const trimmed = value?.trim()
     return trimmed ? normalizeRuntimePathForComparison(trimmed) : null
   }
-  const selectedComparison = toComparisonHome(args.getSelectedAccountCodexHome())
+  const selectedComparison = toComparisonHome(selectedAccountHome)
   const systemComparison = toComparisonHome(args.systemCodexHomePath)
   const sharedRuntimeComparison = toComparisonHome(args.sharedRuntimeCodexHomePath)
   const rankOf = (comparisonHome: string): number => {
@@ -248,6 +251,11 @@ function sessionsTreeIsPresent(sessionsRoot: string, isSelectedAccount: boolean)
   }
 }
 
+function isDefinitiveSessionTreeAbsence(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 export async function findTrustedCodexSessionResume(args: {
   sessionId: string
   transcriptPath: string | undefined
@@ -270,14 +278,28 @@ export async function findTrustedCodexSessionResume(args: {
     return null
   }
 
+  const selectedAccountHome = args.getSelectedAccountCodexHome()
+  const selectedSessionsRoot = selectedAccountHome
+    ? normalizeRuntimePathForComparison(join(selectedAccountHome, 'sessions'))
+    : null
   const listSessionFiles =
     args.listSessionFiles ??
     ((sessionsRoot: string) =>
-      listCodexSessionRolloutFilesIncrementally(sessionsRoot, { batchSize: 64, yieldMs: 0 }))
+      listCodexSessionRolloutFilesIncrementally(
+        sessionsRoot,
+        { batchSize: 64, yieldMs: 0 },
+        (_directoryPath, error) => {
+          if (
+            selectedSessionsRoot === normalizeRuntimePathForComparison(sessionsRoot) &&
+            !isDefinitiveSessionTreeAbsence(error)
+          ) {
+            throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, { cause: error })
+          }
+        }
+      ))
   const expectedSuffix = `-${args.sessionId}.jsonl`.toLowerCase()
   const seenHomes = new Set<string>()
-  const selectedAccountHome = args.getSelectedAccountCodexHome()
-  for (const homePath of rankTrustedCodexHomesForRescan(args)) {
+  for (const homePath of rankTrustedCodexHomesForRescan(args, selectedAccountHome)) {
     const comparisonHome = normalizeRuntimePathForComparison(homePath)
     if (seenHomes.has(comparisonHome)) {
       continue

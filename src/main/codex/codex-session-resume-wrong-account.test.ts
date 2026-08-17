@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type * as NodeFs from 'node:fs'
+import type * as NodeFsPromises from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,6 +41,16 @@ const statFaults = vi.hoisted(() => {
   return state
 })
 
+const listingFaults = vi.hoisted(() => ({
+  held: new Set<string>(),
+  hold(path: string): void {
+    listingFaults.held.add(path)
+  },
+  reset(): void {
+    listingFaults.held.clear()
+  }
+}))
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFs>()
   const originalStat = actual.statSync as (...args: unknown[]) => unknown
@@ -51,6 +62,25 @@ vi.mock('node:fs', async (importOriginal) => {
     }, originalStat)
   }
   return { ...patched, default: patched }
+})
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFsPromises>()
+  return {
+    ...actual,
+    opendir: async (...args: Parameters<typeof actual.opendir>) => {
+      if (typeof args[0] === 'string' && listingFaults.held.has(args[0])) {
+        const error: NodeJS.ErrnoException = new Error(
+          `EBUSY: resource busy or locked, opendir '${args[0]}'`
+        )
+        error.code = 'EBUSY'
+        error.syscall = 'opendir'
+        error.path = args[0]
+        throw error
+      }
+      return actual.opendir(...args)
+    }
+  }
 })
 
 const { findTrustedCodexSessionResume } = await import('./codex-session-resume-home')
@@ -70,10 +100,12 @@ function makeHomeWithRollout(root: string, name: string): string {
 
 beforeEach(() => {
   statFaults.reset()
+  listingFaults.reset()
 })
 
 afterEach(() => {
   statFaults.reset()
+  listingFaults.reset()
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -144,6 +176,26 @@ describe('STA-4607 session resume under a briefly unreadable sessions tree', () 
       homePath: otherHome,
       transcriptPath: join(otherHome, 'sessions', '2026', '07', '20', `rollout-${SESSION_ID}.jsonl`)
     })
+  })
+
+  it('refuses when the selected tree locks during listing after stat succeeds', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-sta4607-'))
+    tempRoots.push(root)
+    const selectedHome = makeHomeWithRollout(root, 'account-a')
+    const otherHome = makeHomeWithRollout(root, 'account-b')
+    const selectedSessionsRoot = join(selectedHome, 'sessions')
+    listingFaults.hold(selectedSessionsRoot)
+
+    await expect(
+      findTrustedCodexSessionResume({
+        sessionId: SESSION_ID,
+        transcriptPath: undefined,
+        trustedCodexHomes: [selectedHome, otherHome],
+        getSelectedAccountCodexHome: (): string | null => selectedHome,
+        systemCodexHomePath: null,
+        sharedRuntimeCodexHomePath: null
+      })
+    ).rejects.toBeInstanceOf(ManagedCodexHomeTemporarilyUnavailableError)
   })
 
   it('skips an unreadable home that is NOT the selected account', async () => {
