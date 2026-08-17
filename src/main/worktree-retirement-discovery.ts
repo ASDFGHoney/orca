@@ -65,17 +65,33 @@ async function readDirectoryNames(path: string): Promise<{ names: string[]; refu
       refused: false
     }
   } catch (error) {
-    // A missing root is itself a complete answer: the agent may never have run on this machine.
-    // Anything else — a gate refusal, an EIO on a redirected or network home — leaves names
-    // unread, and memoizing that as "nothing is retired" is the under-retiring direction.
-    //
-    // Never on UNC though: Windows reports an unreachable 9P route as ENOENT, so a distro that is
-    // merely shut down is indistinguishable from one that never held buckets. `wsl.ts` already
-    // refuses to trust a UNC ENOENT for the same reason. Believing it here would memoize the
-    // STA-4472 hole for the process lifetime, since the cached distro home still resolves.
+    // A missing directory is itself a complete answer: the agent may never have run on this
+    // machine. Anything else — a gate refusal, an EIO on a redirected or network home — leaves
+    // names unread, and memoizing that as "nothing is retired" is the under-retiring direction.
     const code = (error as NodeJS.ErrnoException | null)?.code
-    const absent = code === 'ENOENT' || code === 'ENOTDIR'
-    return { names: [], refused: !absent || isWslUncPath(path) }
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      return { names: [], refused: true }
+    }
+    return { names: [], refused: isWslUncPath(path) && !(await uncParentLists(path)) }
+  }
+}
+
+/** Windows reports an unreachable 9P route as ENOENT, so a shut-down distro is indistinguishable
+ *  from one that simply never held buckets — `wsl.ts` refuses to trust a UNC ENOENT for the same
+ *  reason. The parent settles it: if it lists, the child really is absent and the answer is
+ *  complete; if it does not, the route is down and the scan has to stay retryable. Trusting ENOENT
+ *  outright memoized the STA-4472 hole after `wsl --shutdown`; distrusting it outright made every
+ *  distro without `~/.claude/projects` rescan on a 60s loop for the life of the process. */
+async function uncParentLists(path: string): Promise<boolean> {
+  const parent = path.replace(/[/\\]+[^/\\]+[/\\]*$/, '')
+  if (!parent || parent === path || !isWslUncPath(parent)) {
+    return false
+  }
+  try {
+    await wslGatedReaddir(parent, 'scan')
+    return true
+  } catch {
+    return false
   }
 }
 

@@ -52,13 +52,24 @@ describe('retirement discovery on WSL', () => {
       resolveWslHome: async () => '\\\\wsl.localhost\\Ubuntu\\home\\ada'
     })
 
-    // Both UNC reads — the workspace root and the distro's bucket directory — are admitted, at the
-    // scan priority that leaves the exact-probe permit free.
+    // Every UNC read is admitted, at the scan priority that leaves the exact-probe permit free.
+    // Neither directory exists here, so each listing is followed by the parent probe that tells a
+    // genuinely absent directory apart from an unreachable 9P route.
     expect(runWslTranscriptFsTaskMock.mock.calls.map(([options]) => options)).toEqual([
       expect.objectContaining({ operation: 'readdir', path: DISTRO_ROOT, priority: 'scan' }),
       expect.objectContaining({
         operation: 'readdir',
+        path: '\\\\wsl.localhost\\Ubuntu\\home\\ada\\orca',
+        priority: 'scan'
+      }),
+      expect.objectContaining({
+        operation: 'readdir',
         path: join('\\\\wsl.localhost\\Ubuntu\\home\\ada', '.claude', 'projects'),
+        priority: 'scan'
+      }),
+      expect.objectContaining({
+        operation: 'readdir',
+        path: join('\\\\wsl.localhost\\Ubuntu\\home\\ada', '.claude'),
         priority: 'scan'
       })
     ])
@@ -107,6 +118,28 @@ describe('retirement discovery on WSL', () => {
     } finally {
       await rm(hostHome, { force: true, recursive: true })
     }
+  })
+
+  it('accepts a UNC ENOENT as absence once the parent directory still lists', async () => {
+    // The common WSL shape: the distro is up, but nobody has ever run Claude inside it, so
+    // `~/.claude/projects` genuinely does not exist. Treating that as a hole would turn the
+    // one-time seed into a 60s rescan loop for the life of the process.
+    const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    const distroHome = '\\\\wsl.localhost\\Ubuntu\\home\\ada'
+    // Only the two leaves are missing; every parent lists, which is what a live distro looks like.
+    const missing = new Set([DISTRO_ROOT, join(distroHome, '.claude', 'projects')])
+    runWslTranscriptFsTaskMock.mockImplementation((options: { path: string }) =>
+      missing.has(options.path) ? Promise.reject(enoent) : Promise.resolve([])
+    )
+
+    const retired = await discoverRetiredWorktreeNames({
+      workspaceRoots: [DISTRO_ROOT],
+      home: '/nonexistent-home',
+      env: {},
+      resolveWslHome: async () => distroHome
+    })
+
+    expect(retired.complete).toBe(true)
   })
 
   it('does not trust a UNC ENOENT, which is what a shut-down distro looks like', async () => {
