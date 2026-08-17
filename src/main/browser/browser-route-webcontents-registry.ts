@@ -18,6 +18,7 @@ import {
   isValidRoutePageRetirement
 } from './browser-route-guest-guard'
 import type { BrowserRouteGuestState as GuestState } from './browser-route-webcontents-state'
+import { enforceBrowserRouteWebRtcPolicy } from './browser-route-webrtc-policy'
 
 type BrowserRouteWebContentsRegistryDependencies = {
   getPartitionForSession(session: Session): string | null
@@ -50,6 +51,9 @@ export class BrowserRouteWebContentsRegistry {
     const existing = this.guests.get(guest.id)
     if (existing?.guest === guest) {
       return true
+    }
+    if (!enforceBrowserRouteWebRtcPolicy(guest)) {
+      return false
     }
     const state = this.createGuestState(guest, partition)
     try {

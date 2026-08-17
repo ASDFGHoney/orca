@@ -62,6 +62,7 @@ function createGuest(options: {
   destroyed?: boolean
   closeDestroys?: boolean
   closeError?: Error
+  webRtcPolicyError?: Error
 }) {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   let destroyed = options.destroyed ?? false
@@ -89,6 +90,11 @@ function createGuest(options: {
     }),
     off: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
       listeners.get(event)?.delete(listener)
+    }),
+    setWebRTCIPHandlingPolicy: vi.fn(() => {
+      if (options.webRtcPolicyError) {
+        throw options.webRtcPolicyError
+      }
     }),
     setWindowOpenHandler: vi.fn((handler: () => { action: 'deny' }) => {
       windowOpenHandler = handler
@@ -156,6 +162,26 @@ describe('BrowserRouteWebContentsRegistry', () => {
     expect(registry.attachGuest(guest.guest)).toBe(true)
     expect(registry.registerGuest(siblingClaim)).toBe(false)
     expect(registry.grantNavigation(siblingClaim)).toBe(false)
+  })
+
+  it('blocks non-proxied WebRTC before admitting a route guest', () => {
+    const { registry, routeSession } = createHarness()
+    const guest = createGuest({ session: routeSession })
+
+    expect(registry.attachGuest(guest.guest)).toBe(true)
+    expect(guest.guest.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith('disable_non_proxied_udp')
+  })
+
+  it('fails closed when WebRTC route policy cannot be applied', () => {
+    const { registry, routeSession } = createHarness()
+    const guest = createGuest({
+      session: routeSession,
+      webRtcPolicyError: new Error('policy unavailable')
+    })
+
+    expect(registry.attachGuest(guest.guest)).toBe(false)
+    expect(guest.guest.close).toHaveBeenCalledOnce()
+    expect(registry.registerGuest(page)).toBe(false)
   })
 
   it('allows blank navigation while quarantined but blocks invalid schemes after a grant', () => {
