@@ -1,4 +1,4 @@
-Final head: `8ee8fa4e609468ede62a025063eb627503117e23` (rebased on pinned base `be07b43a2b7377b69bed04e0f39bc4cbb70593fc`).
+Final head: `47a6c682390a9a09bc2d535e7fd5784d516f8781` (rebased on pinned base `be07b43a2b7377b69bed04e0f39bc4cbb70593fc`).
 
 Seven independent same-model review rounds ran. Rounds 1–6 found and fixed launch-path fail-open handling, freshness/parser mismatches, file publication races, managed-store fallback, snapshot recovery, and unsupported-filesystem handling; round 7 still identified residual external Keychain TOCTOU and hard-link-less filesystem race windows, plus recovery gaps.
 
