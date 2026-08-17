@@ -38,7 +38,12 @@ describe('useMobileNativeChatMessageSend', () => {
   let renderer: ReactTestRenderer | null = null
   let api: Send | null = null
   const acceptSend = vi.fn()
-  const captureSendOrigin = vi.fn(() => ({ draftKey: 'k', pendingKey: 'p' }) as never)
+  // Declares the real parameters so `mock.calls[0][0]` is typed; a no-arg mock
+  // gives `calls` an empty tuple, which mobile `tsc` never surfaces (it excludes
+  // test files) but a full type pass does.
+  const captureSendOrigin = vi.fn(
+    (_text: string, _images?: readonly string[]) => ({ draftKey: 'k', pendingKey: 'p' }) as never
+  )
   const clearDraftForSend = vi.fn()
   const restoreRejectedDraft = vi.fn()
   const holdUnconfirmedSend = vi.fn()
