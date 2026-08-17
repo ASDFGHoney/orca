@@ -2,7 +2,7 @@
 // injects its own baseSend stub, so it never observes the real send params.
 
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Type-only, so it is erased before the `./mobile-native-chat-send` mock below applies.
 import type { MobileNativeChatSendOutcome } from './mobile-native-chat-send'
@@ -31,11 +31,15 @@ import {
 import { buildAgentTuiClearInputForText } from '../../../src/shared/agent-tui-input-clear'
 
 type Send = ReturnType<typeof useMobileNativeChatMessageSend>
+type MountedRenderer = {
+  unmount: () => void
+}
+type TestHostPlatform = 'darwin' | 'win32' | null
 
 const DRAFT = 'Linked Linear issue: ABC-123\nhttps://linear.app/x/issue/ABC-123'
 
 describe('useMobileNativeChatMessageSend', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer: MountedRenderer | null = null
   let api: Send | null = null
   const acceptSend = vi.fn()
   const captureSendOrigin = vi.fn(() => ({ draftKey: 'k', pendingKey: 'p' }) as never)
@@ -50,7 +54,7 @@ describe('useMobileNativeChatMessageSend', () => {
   const mount = (
     readSeededLaunchDraftSeed: () => { text: string; createdAt: number | null } | null,
     agent: string | null = 'claude',
-    terminalHostPlatform: NodeJS.Platform | null = 'darwin'
+    terminalHostPlatform: TestHostPlatform = 'darwin'
   ): void => {
     agentRef.current = agent
     function Probe(): null {

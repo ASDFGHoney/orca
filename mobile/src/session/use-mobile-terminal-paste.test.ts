@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
@@ -33,8 +33,14 @@ const MODES: TerminalModes = {
   sgrMousePixelsMode: false
 }
 
+type MountedRenderer = {
+  unmount: () => void
+}
+
+type TestHostPlatform = 'win32' | null
+
 describe('useMobileTerminalPaste', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer: MountedRenderer | null = null
   let paste: (() => Promise<void>) | null = null
   let sendRequest = vi.fn()
   let flushPendingInput = vi.fn()
@@ -43,7 +49,7 @@ describe('useMobileTerminalPaste', () => {
   let showToast = vi.fn()
   let modes = new Map<string, TerminalModes>()
   let terminalAgent: TuiAgent | null = null
-  let terminalHostPlatform: NodeJS.Platform | null = null
+  let terminalHostPlatform: TestHostPlatform = null
 
   beforeEach(() => {
     sendRequest = vi.fn().mockResolvedValue({
