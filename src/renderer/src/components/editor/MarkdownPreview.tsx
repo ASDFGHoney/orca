@@ -14,7 +14,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import remarkFrontmatter from 'remark-frontmatter'
-import { remarkCurrencyAwareMath } from './remark-currency-aware-math'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
@@ -341,7 +341,7 @@ const MARKDOWN_REMARK_PLUGINS: MarkdownPluginList = [
   remarkGfm,
   remarkBreaks,
   remarkFrontmatter,
-  remarkCurrencyAwareMath,
+  [remarkMath, { singleDollarTextMath: false }],
   remarkMarkdownDocLinks
 ]
 // Why: sanitize raw HTML before KaTeX/highlight expand it, so their generated markup needn't be whitelisted in the schema.
