@@ -1,14 +1,13 @@
-import type { Session, WebContents } from 'electron'
+import type { WebContents } from 'electron'
 import {
   browserRoutePageKey,
   type BrowserRouteGuestLifecycleClaim,
-  type BrowserRoutePageAuthority,
   type BrowserRoutePageAuthorityRetirement,
-  type BrowserRoutePageGuestIdentity as GuestIdentity,
-  type BrowserRoutePageOwnerIdentity
+  type BrowserRoutePageGuestIdentity as GuestIdentity
 } from './browser-route-page-authority'
 import {
   closeRouteGuest,
+  browserRouteRegistrationMatchesGuest,
   isBlankRouteGuest,
   isRouteGuestDestroyed,
   isRouteGuestOwnedByRenderer,
@@ -30,25 +29,13 @@ import {
 } from './browser-route-guest-lifecycle'
 import type { BrowserRouteGuestState as GuestState } from './browser-route-webcontents-state'
 import { enforceBrowserRouteWebRtcPolicy } from './browser-route-webrtc-policy'
-import type { BrowserRouteSessionRekey } from './browser-route-session-state'
 import {
   grantReconciledBrowserRouteGuestNavigation,
   rekeyBrowserRouteGuest,
   type BrowserRouteGuestLifecycleRekey
 } from './browser-route-webcontents-rekey'
 import { registerBrowserRouteGuest } from './browser-route-webcontents-registration'
-
-type BrowserRouteWebContentsRegistryDependencies = {
-  getPartitionForSession(session: Session): string | null
-  getPreparedPageAuthority(input: BrowserRoutePageOwnerIdentity): symbol | null
-  rekeyPreparedPage?(
-    previous: BrowserRoutePageAuthority,
-    next: BrowserRoutePageOwnerIdentity
-  ): BrowserRouteSessionRekey | null
-  retirePreparedPage(input: BrowserRoutePageAuthority): boolean
-  retirePreparedPagesOwnedByRenderer(rendererWebContentsId: number): number
-  maxGuests?: number
-}
+import type { BrowserRouteWebContentsRegistryDependencies } from './browser-route-webcontents-registry-dependencies'
 
 export class BrowserRouteWebContentsRegistry {
   private readonly maxGuests: number
@@ -258,19 +245,11 @@ export class BrowserRouteWebContentsRegistry {
   }
 
   private registrationMatchesGuest(state: GuestState, registration: GuestIdentity): boolean {
-    try {
-      const guest = state.guest
-      return (
-        !guest.isDestroyed() &&
-        guest.getType() === 'webview' &&
-        guest.id === registration.webContentsId &&
-        guest.hostWebContents?.id === registration.rendererWebContentsId &&
-        state.partition === registration.partition &&
-        this.dependencies.getPartitionForSession(guest.session) === registration.partition
-      )
-    } catch {
-      return false
-    }
+    return browserRouteRegistrationMatchesGuest(
+      state,
+      registration,
+      this.dependencies.getPartitionForSession
+    )
   }
 
   private hasLivePageAuthority(state: GuestState): boolean {
