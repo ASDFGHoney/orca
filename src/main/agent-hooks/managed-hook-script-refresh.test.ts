@@ -14,6 +14,7 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as osModule from 'node:os'
@@ -110,6 +111,47 @@ describe('refreshManagedScriptIfPresent', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  /**
+   * Why (#14221): a Grok hook stayed broken because the script on disk was never replaced
+   * with the fixed one. On Windows any open read handle on the target — AV, backup agent,
+   * indexer, editor — fails the atomic rename with EPERM; the caller only logs, so the
+   * stale script survives every launch. An in-place write still lands against that handle.
+   */
+  it.skipIf(process.platform !== 'win32')(
+    'refreshes past an open read handle that blocks the atomic replace',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-locked-'))
+      const scriptPath = join(dir, 'grok-hook.cmd')
+      writeFileSync(scriptPath, 'stale')
+      const handle = await open(scriptPath, 'r')
+      try {
+        expect(await refreshManagedScriptIfPresent(scriptPath, 'fresh')).toBe(true)
+        expect(readFileSync(scriptPath, 'utf8')).toBe('fresh')
+      } finally {
+        await handle.close()
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform !== 'win32')(
+    'leaves no temp files behind when the atomic replace is blocked',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-locked-tmp-'))
+      const scriptPath = join(dir, 'grok-hook.cmd')
+      writeFileSync(scriptPath, 'stale')
+      const handle = await open(scriptPath, 'r')
+      try {
+        await refreshManagedScriptIfPresent(scriptPath, 'fresh')
+
+        expect(readdirSync(dir)).toEqual(['grok-hook.cmd'])
+      } finally {
+        await handle.close()
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
 })
 
 describe('managed hook script refresh', () => {
