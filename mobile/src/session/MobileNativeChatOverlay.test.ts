@@ -24,9 +24,13 @@ type Tick = {
   streamingText?: string
   streamLive?: boolean
   identity?: string
-  /** The host's paging answer, which decides whether the oldest visible row is
-   *  a window head that may have lost its image-source run. */
+  /** The load-earlier affordance, which may over-report on a window filled to
+   *  exactly the limit. Deliberately NOT what the fold reads. */
   hasMore?: boolean
+  /** The host's own paging answer. Only this may decide whether the oldest
+   *  visible row is a window head that lost its image-source run — an inferred
+   *  true here would erase an `[Image #n]` the user typed. */
+  earlierHistoryConfirmed?: boolean
 }
 
 function overlayElement(tick: Tick): ReturnType<typeof createElement> {
@@ -35,7 +39,8 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
     nativeChatSession: {
       messages: tick.messages ?? [],
       status: 'ready',
-      hasMore: tick.hasMore ?? false
+      hasMore: tick.hasMore ?? false,
+      earlierHistoryConfirmed: tick.earlierHistoryConfirmed ?? false
     },
     nativeChatAgent: 'claude',
     nativeChatAgentWorking: tick.streamLive ?? false,
@@ -197,11 +202,11 @@ describe('MobileNativeChatOverlay window-head marker rule', () => {
     return { id, role: 'user', blocks: [{ type: 'text', text }], timestamp, source: 'transcript' }
   }
 
-  async function foldedById(hasMore: boolean): Promise<Map<string, unknown>> {
+  async function foldedById(earlierHistoryConfirmed: boolean): Promise<Map<string, unknown>> {
     await act(async () => {
       renderer = create(
         overlayElement({
-          hasMore,
+          earlierHistoryConfirmed,
           messages: [
             markerTurn('u-head', '[Image #1] hello', 1),
             markerTurn('u-tail', '[Image #2] bye', 2)
@@ -222,6 +227,25 @@ describe('MobileNativeChatOverlay window-head marker rule', () => {
 
   it('strips the head turn’s markers only while older history is still pageable', async () => {
     expect((await foldedById(true)).get('u-head')).toEqual([{ type: 'text', text: 'hello' }])
+  })
+
+  // `hasMore` also reports true for a window filled to exactly the limit, where
+  // nothing older exists. Riding it here would erase a marker the user typed at
+  // the true start of the conversation — the ticket's own defect. Mobile's window
+  // is 40, so that exact fill is reachable.
+  it('does not strip on an inferred paging answer the host never confirmed', async () => {
+    await act(async () => {
+      renderer = create(
+        overlayElement({
+          hasMore: true,
+          earlierHistoryConfirmed: false,
+          messages: [markerTurn('u-head', '[Image #1] hello', 1)]
+        })
+      )
+    })
+    const folded = renderer!.root.findAll((node) => node.type === 'ChatView')[0].props
+      .folded as NativeChatMessage[]
+    expect(folded[0]?.blocks).toEqual([{ type: 'text', text: '[Image #1] hello' }])
   })
 
   it('leaves a turn below the head literal even while older history exists', async () => {
