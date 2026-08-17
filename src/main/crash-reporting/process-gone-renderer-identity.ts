@@ -1,6 +1,17 @@
 import type { WebContents } from 'electron'
 
 /**
+ * Both ids travel under their names: positional `number` params let a caller
+ * transpose them silently, re-keying dedupe on the webContents id (#15063).
+ */
+export type ProcessGoneRendererIdentity = {
+  /** Which webContents observed the death — attribution evidence, never dedupe identity. */
+  webContentsId: number
+  /** Render-process-host id of the dead process; undefined when unreadable at event time. */
+  rendererProcessId: number | undefined
+}
+
+/**
  * Reads the identity of the renderer process a render-process-gone event is
  * about. webContents.getProcessId() is the Chromium render-process-host id:
  * webContents sharing one OS renderer process (same-site popups, #15063)

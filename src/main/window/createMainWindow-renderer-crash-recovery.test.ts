@@ -317,6 +317,60 @@ describe('createMainWindow', () => {
     consoleError.mockRestore()
   })
 
+  it('still delivers the crash report when the window webContents getter is destroyed', () => {
+    const windowHandlers: Record<string, (...args: any[]) => void> = {}
+    const webContents = {
+      id: 142,
+      isDestroyed: vi.fn(() => false),
+      getProcessId: vi.fn(() => 7),
+      on: vi.fn((event, handler) => {
+        windowHandlers[event] = handler
+      }),
+      setZoomLevel: vi.fn(),
+      setBackgroundThrottling: vi.fn(),
+      invalidate: vi.fn(),
+      setWindowOpenHandler: vi.fn(),
+      send: vi.fn()
+    }
+    let windowDestroyed = false
+    const browserWindowInstance = {
+      // Why: BrowserWindow.webContents throws once the window is destroyed; the
+      // gone handler must read the emitting webContents, not this getter (#15063).
+      get webContents() {
+        if (windowDestroyed) {
+          throw new Error('Object has been destroyed')
+        }
+        return webContents
+      },
+      on: vi.fn(),
+      isDestroyed: vi.fn(() => windowDestroyed),
+      isMaximized: vi.fn(() => true),
+      isFullScreen: vi.fn(() => false),
+      getSize: vi.fn(() => [1200, 800]),
+      setSize: vi.fn(),
+      maximize: vi.fn(),
+      show: vi.fn(),
+      loadFile: vi.fn(),
+      loadURL: vi.fn()
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    browserWindowMock.mockImplementation(function () {
+      return browserWindowInstance
+    })
+    const onRendererProcessGone = vi.fn()
+
+    try {
+      createMainWindow(null, { onRendererProcessGone })
+
+      windowDestroyed = true
+      const details = { reason: 'killed', exitCode: 15 } as Electron.RenderProcessGoneDetails
+      expect(() => windowHandlers['render-process-gone']?.({} as never, details)).not.toThrow()
+      expect(onRendererProcessGone).toHaveBeenCalledWith(details, 142, 7)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   const createRendererRecoveryWindowHarness = () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {

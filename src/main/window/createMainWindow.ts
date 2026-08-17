@@ -651,7 +651,11 @@ export function createMainWindow(
       loadMainWindow(mainWindow)
     }, 250)
   }
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+  // Why: hold the emitting webContents directly — BrowserWindow.webContents is a
+  // getter that throws once the window is destroyed, and a throw here would drop
+  // the crash report and skip recovery (#15063).
+  const rendererWebContents = mainWindow.webContents
+  rendererWebContents.on('render-process-gone', (_event, details) => {
     rendererProcessGone = true
     resetMarkdownEditorFocus()
     resetTerminalInputFocus()
@@ -665,7 +669,7 @@ export function createMainWindow(
       opts?.onRendererProcessGone?.(
         details,
         rendererWebContentsId,
-        readGoneRendererProcessId(mainWindow.webContents)
+        readGoneRendererProcessId(rendererWebContents)
       )
     }
     if (!windowClosing) {
