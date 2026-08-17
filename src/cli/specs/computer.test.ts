@@ -3,14 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { COMPUTER_COMMAND_SPECS } from './computer'
 
 describe('computer command specs', () => {
-  it('identifies provider capabilities as declared support', () => {
-    const capabilities = COMPUTER_COMMAND_SPECS.find(
-      (spec) => spec.path.join(' ') === 'computer capabilities'
-    )
-
-    expect(capabilities?.summary).toBe('Show declared provider capabilities')
-  })
-
   it('does not advertise ignored worktree/session scoping for app and window listing', () => {
     const listApps = COMPUTER_COMMAND_SPECS.find(
       (spec) => spec.path.join(' ') === 'computer list-apps'

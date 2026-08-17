@@ -51,16 +51,11 @@ describe('computer-use skill guidance', () => {
     expect(bundledGuide).toBeDefined()
 
     for (const skill of [readFileSync(guidePath, 'utf8'), bundledGuide]) {
-      expect(skill).toContain('Captures normally use a temporary `result.screenshot.path`')
-      expect(skill).toContain('read inline `result.screenshot.data`')
-      expect(skill).not.toContain(
-        'Screenshot bytes are omitted from JSON and written to `screenshot.path`'
-      )
-      expect(skill).toContain('a successful capture is normally written to disk')
+      expect(skill).toContain('request screenshots by default unless `--no-screenshot`')
+      expect(skill).toContain('A successful `--json` capture')
       expect(skill).toContain('`result.screenshot.path`')
-      expect(skill).toContain('base64 bytes at')
-      expect(skill).toContain('`result.screenshot.data` and omits `path`')
-      expect(skill).toContain('Pretty mode writes no image file')
+      expect(skill).toContain('inline base64 `result.screenshot.data`')
+      expect(skill).toContain('Pretty output does not save')
     }
   })
 
