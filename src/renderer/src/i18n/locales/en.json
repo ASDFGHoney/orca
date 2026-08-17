@@ -15758,11 +15758,15 @@
         "previewUnavailable": "Preview unavailable",
         "previewUnavailableDescription": "Open this artifact in your browser to view it.",
         "actions": "Artifact actions",
+        "ArtifactActions": {
+          "more": "More artifact actions"
+        },
         "ArtifactCollection": {
           "loadMore": "Load more"
         },
         "ArtifactDetailHeader": {
-          "publicLink": "Anyone with this link can view it"
+          "publicLink": "Anyone with this link can view it",
+          "close": "Close"
         },
         "ArtifactListPane": {
           "search": "Search artifacts",
@@ -15811,7 +15815,32 @@
           "openLink": "Open link",
           "updating": "Updating…",
           "update": "Update shared content"
-        }
+        },
+        "ArtifactDetailDrawer": {
+          "description": "Preview and manage this shared artifact."
+        },
+        "ArtifactListRows": {
+          "actions": "Artifact actions"
+        },
+        "ArtifactListSearchField": {
+          "label": "Search artifacts",
+          "placeholder": "Search...",
+          "clear": "Clear search"
+        },
+        "ArtifactListTableHeader": {
+          "name": "Name",
+          "type": "Type",
+          "size": "Size",
+          "updated": "Updated",
+          "expires": "Expires",
+          "actions": "Actions"
+        },
+        "ArtifactsPageSkeleton": {
+          "loading": "Loading artifacts"
+        },
+        "expiredCompact": "Expired",
+        "typeMarkdown": "Markdown",
+        "typeHtml": "HTML"
       }
     },
     "i18n": {
