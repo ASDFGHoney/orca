@@ -9,6 +9,7 @@
 
 import type {
   AgentJournalAcceptanceReceipt,
+  AgentJournalItemBody,
   AgentJournalRenderItem,
   AgentJournalSnapshot,
   AgentJournalSubmission
@@ -232,17 +233,25 @@ export function renderJournalState(state: JournalReducerState): AgentJournalSnap
   }
 }
 
+/** Blob digests one body points at. A retained row can outlive its render item
+ *  (a tombstone drops the item), so compaction reads rows through this too. */
+export function blobDigestsInBody(body: AgentJournalItemBody, into: Set<string>): void {
+  if (body.kind === 'tool-call' && body.output?.truncated) {
+    into.add(body.output.digest)
+  }
+  if (body.kind === 'diff' && body.patch.truncated) {
+    into.add(body.patch.digest)
+  }
+  if (body.kind === 'status' && body.providerFrame?.payload.truncated) {
+    into.add(body.providerFrame.payload.digest)
+  }
+}
+
 /** Digests referenced by live rows, so compaction knows which blobs to keep. */
 export function referencedBlobDigests(state: JournalReducerState): Set<string> {
   const digests = new Set<string>()
   for (const item of state.items.values()) {
-    const body = item.body
-    if (body.kind === 'tool-call' && body.output?.truncated) {
-      digests.add(body.output.digest)
-    }
-    if (body.kind === 'diff' && body.patch.truncated) {
-      digests.add(body.patch.digest)
-    }
+    blobDigestsInBody(item.body, digests)
   }
   return digests
 }
