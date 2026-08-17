@@ -52,8 +52,10 @@ export function nativeChatPendingContentKey(
  * of a row — the only thing that can tell that reading apart from the
  * marker-as-placeholder one, which is byte-identical in the row itself.
  *
- * Computed once from the whole pending list: it says which readings are spoken
- * for, which never varies with the per-send boundary each count is sliced at.
+ * Derived from the whole pending list rather than the row: it says which readings
+ * are spoken for, which never varies with the per-send boundary each count is
+ * sliced at. That invariance is why each count builder can rebuild it — the queue
+ * is capped at 8 — instead of threading a shared "row is spent" state through.
  */
 export function literalContentKeysClaimedByPendings(
   pending: readonly Pick<NativeChatPendingOccurrence, 'text' | 'imagePaths'>[]

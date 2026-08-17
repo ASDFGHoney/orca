@@ -191,31 +191,31 @@ describe('MobileNativeChatOverlay streaming gate', () => {
 // read list, mobile from the merged list, so pin mobile's own derivation: a
 // pure-function test of the fold cannot see this call site stop guarding it.
 describe('MobileNativeChatOverlay window-head marker rule', () => {
-  let renderer: ReactTestRenderer | null = null
-
-  afterEach(() => {
-    act(() => renderer?.unmount())
-    renderer = null
-  })
-
   function markerTurn(id: string, text: string, timestamp: number): NativeChatMessage {
     return { id, role: 'user', blocks: [{ type: 'text', text }], timestamp, source: 'transcript' }
   }
 
-  async function foldedById(earlierHistoryConfirmed: boolean): Promise<Map<string, unknown>> {
-    await act(async () => {
-      renderer = create(
-        overlayElement({
-          earlierHistoryConfirmed,
-          messages: [
-            markerTurn('u-head', '[Image #1] hello', 1),
-            markerTurn('u-tail', '[Image #2] bye', 2)
-          ]
-        })
-      )
-    })
-    const folded = renderer!.root.findAll((node) => node.type === 'ChatView')[0].props
+  /** Mounts the overlay, reads the rows it handed the chat view, unmounts. Each
+   *  case owns its renderer, so nothing leaks between them. Inferred rather than
+   *  annotated: `react-test-renderer` ships no usable types here, so naming the
+   *  handle in a union with null yields a redundant `any` constituent. */
+  async function foldedFor(tick: Tick): Promise<NativeChatMessage[]> {
+    const mounted = create(overlayElement(tick))
+    await act(async () => {})
+    const folded = mounted.root.findAll((node) => node.type === 'ChatView')[0].props
       .folded as NativeChatMessage[]
+    mounted.unmount()
+    return folded
+  }
+
+  async function foldedById(earlierHistoryConfirmed: boolean): Promise<Map<string, unknown>> {
+    const folded = await foldedFor({
+      earlierHistoryConfirmed,
+      messages: [
+        markerTurn('u-head', '[Image #1] hello', 1),
+        markerTurn('u-tail', '[Image #2] bye', 2)
+      ]
+    })
     return new Map(folded.map((message) => [message.id, message.blocks]))
   }
 
@@ -234,17 +234,11 @@ describe('MobileNativeChatOverlay window-head marker rule', () => {
   // the true start of the conversation — the ticket's own defect. Mobile's window
   // is 40, so that exact fill is reachable.
   it('does not strip on an inferred paging answer the host never confirmed', async () => {
-    await act(async () => {
-      renderer = create(
-        overlayElement({
-          hasMore: true,
-          earlierHistoryConfirmed: false,
-          messages: [markerTurn('u-head', '[Image #1] hello', 1)]
-        })
-      )
+    const folded = await foldedFor({
+      hasMore: true,
+      earlierHistoryConfirmed: false,
+      messages: [markerTurn('u-head', '[Image #1] hello', 1)]
     })
-    const folded = renderer!.root.findAll((node) => node.type === 'ChatView')[0].props
-      .folded as NativeChatMessage[]
     expect(folded[0]?.blocks).toEqual([{ type: 'text', text: '[Image #1] hello' }])
   })
 
