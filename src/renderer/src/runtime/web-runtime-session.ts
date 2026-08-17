@@ -598,7 +598,11 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           )
         })
     }
-    await pauseAfterE2eWebRuntimeBrowserCreate(created.browserPageId, provisionalPageId)
+    await pauseAfterE2eWebRuntimeBrowserCreate(
+      created.browserPageId,
+      provisionalPageId,
+      hostSupportsKnownPageId === true
+    )
     if (created.browserPageId !== provisionalPageId) {
       moveWebSessionBrowserPlacement({
         environmentId,

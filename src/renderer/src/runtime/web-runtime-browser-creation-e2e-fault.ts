@@ -6,6 +6,7 @@ type BrowserCreationFaultSnapshot = {
   capabilityRejectionArmed: boolean
   createdPageId: string | null
   provisionalPageId: string | null
+  requestedKnownPageId: boolean | null
   releasedPageSnapshotSuppressed: boolean
   suppressedPageIds: string[]
 }
@@ -27,6 +28,7 @@ let armed = false
 let capabilityRejectionArmed = false
 let createdPageId: string | null = null
 let provisionalPageId: string | null = null
+let requestedKnownPageId: boolean | null = null
 let failNextReconciliation = false
 let suppressNextReleasedPageSnapshot = false
 let releasedPageSnapshotSuppressed = false
@@ -41,6 +43,7 @@ function resetFault(): void {
   capabilityRejectionArmed = false
   createdPageId = null
   provisionalPageId = null
+  requestedKnownPageId = null
   failNextReconciliation = false
   suppressNextReleasedPageSnapshot = false
   releasedPageSnapshotSuppressed = false
@@ -92,6 +95,7 @@ function exposeFaultApi(): void {
       capabilityRejectionArmed,
       createdPageId,
       provisionalPageId,
+      requestedKnownPageId,
       releasedPageSnapshotSuppressed,
       suppressedPageIds: [...suppressedPageIds]
     })
@@ -110,13 +114,15 @@ export function throwIfE2eWebRuntimeBrowserCapabilityUnavailable(): void {
 
 export async function pauseAfterE2eWebRuntimeBrowserCreate(
   remotePageId: string,
-  clientProvisionalPageId: string
+  clientProvisionalPageId: string,
+  clientRequestedKnownPageId: boolean
 ): Promise<void> {
   if (!e2eConfig.exposeStore || !armed || !createdPageBarrier) {
     return
   }
   createdPageId = remotePageId
   provisionalPageId = clientProvisionalPageId
+  requestedKnownPageId = clientRequestedKnownPageId
   await createdPageBarrier
 }
 
@@ -143,7 +149,7 @@ export function suppressE2eWebRuntimeBrowserSnapshot(
     }
     suppressedPageIds.add(pageId)
   }
-  if (pageIds.length > 0 && suppressNextReleasedPageSnapshot) {
+  if (createdPageId && pageIds.includes(createdPageId) && suppressNextReleasedPageSnapshot) {
     suppressNextReleasedPageSnapshot = false
     releasedPageSnapshotSuppressed = true
     armed = false

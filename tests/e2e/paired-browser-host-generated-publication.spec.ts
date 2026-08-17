@@ -14,6 +14,7 @@ type FaultSnapshot = {
   armed: boolean
   createdPageId: string | null
   provisionalPageId: string | null
+  requestedKnownPageId: boolean | null
   releasedPageSnapshotSuppressed: boolean
   suppressedPageIds: string[]
 }
@@ -165,6 +166,7 @@ test('materializes a host-generated browser id after stale publication @headful'
       throw new Error('Host-generated browser page id was not captured')
     }
     expect(createdPageId).not.toBe(held?.provisionalPageId)
+    expect(held?.requestedKnownPageId).toBe(false)
     expect(held.suppressedPageIds).toContain(createdPageId)
     expect(await readClientRemotePageIds(client.page, worktreeId)).not.toContain(createdPageId)
     expect(await readHostBrowserPageIds(hostClient, worktreeId)).toContain(createdPageId)
