@@ -45,6 +45,12 @@ describe('buildMobileNativeChatBodyText', () => {
       `${BRACKETED_PASTE_START}café 😀\rnext␛[201~tail${BRACKETED_PASTE_END}`
     )
   })
+
+  it('uses Windows input records instead of paste frames when the agent requires them', () => {
+    expect(buildMobileNativeChatBodyText('line one\r\nline two\x1b[201~', 'alt-enter')).toBe(
+      'line one\x1b\rline two␛[201~'
+    )
+  })
 })
 
 describe('sendMobileNativeChatMessage', () => {

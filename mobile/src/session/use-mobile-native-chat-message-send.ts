@@ -18,6 +18,7 @@ import {
 import type { MobileNativeChatSendOrigin } from './use-mobile-native-chat-drafts'
 import type { MobileNativeChatLaunchDraftSeed } from './use-mobile-native-chat-launch-draft-seed'
 import { buildAgentTuiClearInputForText } from '../../../src/shared/agent-tui-input-clear'
+import { resolveWindowsInputRecordPasteNewline } from '../../../src/shared/terminal-input-record-paste'
 
 export type MobileNativeChatMessageSend = {
   /** Composer send that syncs the draft (clear on send, restore on rejection). */
@@ -50,6 +51,7 @@ export function useMobileNativeChatMessageSend(args: {
   deviceTokenRef: MutableRefObject<string | null>
   /** Active tab's agent — classification is per-agent (command catalogs differ). */
   agentRef: MutableRefObject<string | null>
+  hostPlatform: NodeJS.Platform | null
   /** Captured when a control send starts so a later tab switch cannot record its
    *  session-option effects against the newly active tab. */
   commandSendRef: MutableRefObject<(command: string) => void>
@@ -73,6 +75,7 @@ export function useMobileNativeChatMessageSend(args: {
     handleRef,
     deviceTokenRef,
     agentRef,
+    hostPlatform,
     commandSendRef,
     captureSendOrigin,
     readSeededLaunchDraftSeed,
@@ -186,6 +189,7 @@ export function useMobileNativeChatMessageSend(args: {
               client,
               terminal: handle,
               text,
+              windowsInputRecordNewline: resolveWindowsInputRecordPasteNewline(hostPlatform, agent),
               // Why: an image send already cleared before its paste; a second
               // clear here would wipe the image before submission.
               clearInputFirst: !images?.length && !seededLaunchDraft,
@@ -236,6 +240,7 @@ export function useMobileNativeChatMessageSend(args: {
       enabled,
       handleRef,
       holdUnconfirmedSend,
+      hostPlatform,
       onSendError,
       readSeededLaunchDraftSeed,
       restoreRejectedDraft

@@ -49,7 +49,8 @@ describe('useMobileNativeChatMessageSend', () => {
 
   const mount = (
     readSeededLaunchDraftSeed: () => { text: string; createdAt: number | null } | null,
-    agent: string | null = 'claude'
+    agent: string | null = 'claude',
+    hostPlatform: NodeJS.Platform | null = 'darwin'
   ): void => {
     agentRef.current = agent
     function Probe(): null {
@@ -59,6 +60,7 @@ describe('useMobileNativeChatMessageSend', () => {
         handleRef: { current: 'term' },
         deviceTokenRef: { current: 'device' },
         agentRef,
+        hostPlatform,
         commandSendRef,
         captureSendOrigin,
         readSeededLaunchDraftSeed,
@@ -78,6 +80,7 @@ describe('useMobileNativeChatMessageSend', () => {
   const sentArgs = (): {
     text?: string
     clearInputFirst?: boolean
+    windowsInputRecordNewline?: string
     resolvedLaunchDraft?: { text: string; createdAt: number }
   } =>
     sendWithOutcome.mock.calls[0]![0] as {
@@ -132,6 +135,14 @@ describe('useMobileNativeChatMessageSend', () => {
     expect(clearInputWrite.mock.invocationCallOrder[0]).toBeLessThan(
       sendWithOutcome.mock.invocationCallOrder[0]!
     )
+  })
+
+  it('selects input-record newlines for Codex on a Windows host', async () => {
+    mount(() => null, 'codex', 'win32')
+    await act(async () => {
+      await api!.send('line one\nline two')
+    })
+    expect(sentArgs()).toMatchObject({ windowsInputRecordNewline: 'alt-enter' })
   })
 
   it('aborts without sending the body when the clear is rejected', async () => {

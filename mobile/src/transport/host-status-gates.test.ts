@@ -77,6 +77,7 @@ describe('useHostStatusGates', () => {
       ok: true,
       result: {
         capabilities: ['browser.screencast.v1'],
+        hostPlatform: 'win32',
         floatingWorkspaceEnabled: true
       }
     })
@@ -96,6 +97,7 @@ describe('useHostStatusGates', () => {
       })
       expect(gates).toMatchObject({
         hostCapabilities: ['browser.screencast.v1'],
+        hostPlatform: 'win32',
         floatingWorkspaceEnabled: true
       })
 

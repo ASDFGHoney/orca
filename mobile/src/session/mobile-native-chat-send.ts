@@ -7,6 +7,10 @@ import {
   sanitizeBracketedPasteText,
   wrapTerminalBracketedPasteText
 } from '../../../src/shared/terminal-bracketed-paste-text'
+import {
+  encodeWindowsInputRecordPasteText,
+  type WindowsInputRecordPasteNewline
+} from '../../../src/shared/terminal-input-record-paste'
 
 type MobileTerminalClient = {
   id: string
@@ -24,7 +28,13 @@ type MobileTerminalClient = {
 const CLEAR_UNSUBMITTED_INPUT = '\x15'
 
 /** Match desktop native-chat framing; native chat has no mode/readiness signal (#14888). */
-export function buildMobileNativeChatBodyText(text: string): string {
+export function buildMobileNativeChatBodyText(
+  text: string,
+  windowsInputRecordNewline?: WindowsInputRecordPasteNewline
+): string {
+  if (windowsInputRecordNewline) {
+    return encodeWindowsInputRecordPasteText(text, windowsInputRecordNewline)
+  }
   if (/[\r\n]/.test(text)) {
     return wrapTerminalBracketedPasteText(text)
   }
@@ -37,6 +47,7 @@ type MobileNativeChatSendArgs = {
   text: string
   enter?: boolean
   rawTerminalInput?: boolean
+  windowsInputRecordNewline?: WindowsInputRecordPasteNewline
   clearInputFirst?: boolean
   /** Exact host launch draft this submitting write resolves when accepted. */
   resolvedLaunchDraft?: { text: string; createdAt: number }
@@ -74,7 +85,9 @@ export async function sendMobileNativeChatMessageWithOutcome(
     return 'rejected'
   }
   try {
-    const body = args.rawTerminalInput ? args.text : buildMobileNativeChatBodyText(args.text)
+    const body = args.rawTerminalInput
+      ? args.text
+      : buildMobileNativeChatBodyText(args.text, args.windowsInputRecordNewline)
     const response = await args.client.sendRequest(
       'terminal.send',
       {

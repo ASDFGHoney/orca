@@ -105,6 +105,21 @@ describe('useMobileTerminalPaste', () => {
     expect(onSuccess).toHaveBeenCalledOnce()
   })
 
+  it('delivers a non-aligned payload above 1,024 bytes without dropping a prefix', async () => {
+    const text = Array.from(
+      { length: 150 },
+      (_, index) => `${index.toString().padStart(6, '0')}:abcdefghij`
+    ).join('\n')
+    const expected = `${BRACKETED_PASTE_START}${text.replace(/\n/g, '\r')}${BRACKETED_PASTE_END}`
+
+    await mountAndPaste(text)
+
+    const params = sendRequest.mock.calls[0]?.[1] as { text?: string } | undefined
+    expect(text.length).toBeGreaterThan(1024)
+    expect(text.length % 1024).not.toBe(0)
+    expect(params?.text).toBe(expected)
+  })
+
   it('preserves fail-open unframed behavior when bracketed paste mode is off', async () => {
     modes.set('terminal', { ...MODES, bracketedPasteMode: false })
 
@@ -120,8 +135,11 @@ describe('useMobileTerminalPaste', () => {
     const cap = 256 * 1024
     const frameBytes = BRACKETED_PASTE_START.length + BRACKETED_PASTE_END.length
 
-    await mountAndPaste('x'.repeat(cap - frameBytes))
+    const acceptedText = 'x'.repeat(cap - frameBytes)
+    await mountAndPaste(acceptedText)
     expect(sendRequest).toHaveBeenCalledOnce()
+    const params = sendRequest.mock.calls[0]?.[1] as { text?: string } | undefined
+    expect(params?.text).toBe(`${BRACKETED_PASTE_START}${acceptedText}${BRACKETED_PASTE_END}`)
 
     act(() => renderer?.unmount())
     renderer = null

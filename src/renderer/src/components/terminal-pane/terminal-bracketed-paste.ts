@@ -3,6 +3,7 @@ import {
   sanitizeBracketedPasteText,
   wrapTerminalBracketedPasteText
 } from '../../../../shared/terminal-bracketed-paste-text'
+import { encodeWindowsInputRecordPasteText } from '../../../../shared/terminal-input-record-paste'
 
 export {
   BRACKETED_PASTE_END,
@@ -11,6 +12,7 @@ export {
   sanitizeBracketedPasteText,
   wrapTerminalBracketedPasteText
 } from '../../../../shared/terminal-bracketed-paste-text'
+export { encodeWindowsInputRecordPasteText } from '../../../../shared/terminal-input-record-paste'
 import type { WindowsInputRecordNewline } from './terminal-paste-model'
 
 type BracketedPasteTerminal = {
@@ -59,27 +61,6 @@ export function sanitizeTerminalPasteText(text: string): string {
   return sanitizeBracketedPasteText(text)
 }
 
-export function encodeWindowsInputRecordPasteText(
-  text: string,
-  newline: WindowsInputRecordNewline
-): string {
-  const newlineSequence = newline === 'csi-u' ? '\x1b[13;2u' : '\x1b\r'
-  let encoded = ''
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index]
-    if (char === '\r') {
-      encoded += newlineSequence
-      if (text[index + 1] === '\n') {
-        index += 1
-      }
-    } else if (char === '\n') {
-      encoded += newlineSequence
-    } else {
-      encoded += char === ESCAPE ? '\u241b' : char
-    }
-  }
-  return encoded
-}
 function forceBracketedPaste(terminal: PasteTerminal, text: string): void {
   // Why: forced callers already built the exact paste protocol bytes. Send
   // them as PTY input so xterm's DOM/native paste machinery cannot defer them.
