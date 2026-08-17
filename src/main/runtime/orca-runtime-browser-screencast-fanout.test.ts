@@ -83,7 +83,7 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
         },
         { sendBinary: secondSend }
       )
-    ).rejects.toThrow('already streaming at a different viewport')
+    ).rejects.toThrow('already streaming with incompatible options')
 
     const frame = new Uint8Array([1, 2, 3])
     expect(startBrowserScreencast).toHaveBeenCalledOnce()
@@ -127,6 +127,82 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     expect(secondSend).toHaveBeenCalledWith(frame)
     second.session.stop()
     await second.session.done
+    expect(stop).not.toHaveBeenCalled()
+    first.session.stop()
+    await first.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('replays the latest frame to a late subscriber on a static page', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const firstSend = vi.fn(() => true)
+    const secondSend = vi.fn(() => true)
+    const params = {
+      worktree: 'id:wt-1',
+      page: 'page-1',
+      format: 'jpeg' as const,
+      viewportWidth: 1200,
+      viewportHeight: 800
+    }
+    const first = await commands.browserScreencast(params, { sendBinary: firstSend })
+    const frame = new Uint8Array([1, 2, 3])
+    startBrowserScreencast.mock.calls[0][1].onFrame(frame)
+
+    const second = await commands.browserScreencast(params, { sendBinary: secondSend })
+
+    expect(secondSend).toHaveBeenCalledOnce()
+    expect(secondSend).toHaveBeenCalledWith(frame)
+    second.session.stop()
+    first.session.stop()
+    await Promise.all([first.session.done, second.session.done])
+  })
+
+  it('rejects incompatible encoding and cadence without disturbing the live stream', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const first = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        quality: 10,
+        everyNthFrame: 10,
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: vi.fn(() => true) }
+    )
+
+    await expect(
+      commands.browserScreencast(
+        {
+          worktree: 'id:wt-1',
+          page: 'page-1',
+          format: 'png',
+          quality: 100,
+          everyNthFrame: 1,
+          viewportWidth: 1200,
+          viewportHeight: 800
+        },
+        { sendBinary: vi.fn(() => true) }
+      )
+    ).rejects.toThrow('already streaming with incompatible options')
+
     expect(stop).not.toHaveBeenCalled()
     first.session.stop()
     await first.session.done

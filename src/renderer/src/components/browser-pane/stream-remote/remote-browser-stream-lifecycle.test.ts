@@ -57,6 +57,45 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.currentStatusKind).toBe('live')
   })
 
+  it('shares one authoritative page when navigation overlaps the initial remote create', async () => {
+    const harness = createHarness()
+    const createGate = harness.holdNextTabCreate()
+    harness.lifecycle.open()
+    await settle()
+
+    const navigationToken = harness.lifecycle.tokens.createOperationToken()
+    expect(navigationToken).not.toBeNull()
+    const navigationPage = harness.lifecycle.session.ensureRemotePage(navigationToken!)
+    await settle()
+
+    expect(harness.tabCreateAttempts).toBe(1)
+    createGate.release()
+    await expect(navigationPage).resolves.toBe('page-1')
+    await settle()
+
+    expect(harness.streams).toHaveLength(1)
+    expect(harness.streams[0].pageId).toBe('page-1')
+  })
+
+  it('closes the created page when every overlapping waiter is superseded', async () => {
+    const harness = createHarness()
+    const createGate = harness.holdNextTabCreate()
+    const close = harness.lifecycle.open()
+    await settle()
+
+    const overlapping = harness.lifecycle.session.ensureRemotePage(
+      harness.lifecycle.tokens.createOperationToken()!
+    )
+    close()
+    createGate.release()
+    await expect(overlapping).resolves.toBeNull()
+    await settle()
+
+    expect(harness.tabCreateAttempts).toBe(1)
+    expect(harness.closedCreatedPages).toEqual(['page-1'])
+    expect(harness.streams).toHaveLength(0)
+  })
+
   // Closing a tab while its stream is parked runs dispose() with no effect cleanup left to pair
   // with it, so unmount safety rests entirely on parking having already unsubscribed.
   it('leaves nothing subscribed when the pane unmounts while its stream is parked', async () => {

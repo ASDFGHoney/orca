@@ -60,6 +60,7 @@ export function createHarness() {
   const closedPages: (string | null)[] = []
   const streams: FakeScreencastStream[] = []
   const rpcLog: string[] = []
+  const closedCreatedPages: string[] = []
   const syncedViewportSizes: (RemoteBrowserViewportSize | null)[] = []
 
   let capabilities: string[] = ['browser.screencast.v1']
@@ -68,13 +69,15 @@ export function createHarness() {
   let statusGate: Gate | null = null
   let viewportGate: Gate | null = null
   let tabShowGate: Gate | null = null
+  let tabCreateGate: Gate | null = null
   let subscribeGate: Gate | null = null
   let persistentSubscribeError: unknown = null
   const subscribeErrorQueue: unknown[] = []
   let subscribeAttempts = 0
+  let tabCreateAttempts = 0
   let closeBeforeNextSubscribeRejects = false
 
-  const callRpc = (async (_target: unknown, method: string) => {
+  const callRpc = (async (_target: unknown, method: string, params?: unknown) => {
     rpcLog.push(method)
     if (method === 'status.get') {
       if (statusGate) {
@@ -93,7 +96,16 @@ export function createHarness() {
       return { tab: { url: 'https://example.test/', title: 'Example' } }
     }
     if (method === 'browser.tabCreate') {
-      return { browserPageId: 'page-1' }
+      tabCreateAttempts += 1
+      if (tabCreateGate) {
+        const gate = tabCreateGate
+        tabCreateGate = null
+        await gate.wait
+      }
+      return { browserPageId: `page-${tabCreateAttempts}` }
+    }
+    if (method === 'browser.tabClose') {
+      closedCreatedPages.push((params as { page: string }).page)
     }
     return {}
   }) as unknown as RemoteBrowserRpcCall
@@ -209,9 +221,13 @@ export function createHarness() {
     closedPages,
     streams,
     rpcLog,
+    closedCreatedPages,
     syncedViewportSizes,
     get subscribeAttempts(): number {
       return subscribeAttempts
+    },
+    get tabCreateAttempts(): number {
+      return tabCreateAttempts
     },
     // Kept as accessors so the assertions written against the old three-variable shape still read
     // naturally — they now derive from the one status, which is the point of the change.
@@ -260,6 +276,11 @@ export function createHarness() {
     holdNextTabShow: (): Gate => {
       const gate = createGate()
       tabShowGate = gate
+      return gate
+    },
+    holdNextTabCreate: (): Gate => {
+      const gate = createGate()
+      tabCreateGate = gate
       return gate
     },
     holdNextSubscribe: (): Gate => {

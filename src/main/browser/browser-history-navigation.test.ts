@@ -38,7 +38,11 @@ describe('browser history navigation', () => {
       canGoForward: true
     })
     history[direction === 'back' ? 'goBack' : 'goForward'].mockImplementation(() => {
-      queueMicrotask(() => emitter.emit(event))
+      queueMicrotask(() =>
+        event === 'did-navigate-in-page'
+          ? emitter.emit(event, {}, 'https://example.com', true)
+          : emitter.emit(event)
+      )
     })
 
     await expect(waitForBrowserHistoryNavigation(webContents, direction)).resolves.toBe('navigated')

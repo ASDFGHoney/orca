@@ -116,32 +116,55 @@ type ActiveBrowserScreencastSubscriber = {
 }
 
 type ActiveBrowserScreencastPage = {
-  format: 'jpeg' | 'png'
+  latestFrame: Uint8Array<ArrayBufferLike> | null
   session: BrowserScreencastSession | null
+  settings: NormalizedBrowserScreencastSettings
   started: Promise<BrowserScreencastSession>
   stopping: boolean
   subscribers: Map<string, ActiveBrowserScreencastSubscriber>
-  viewport: BrowserScreencastViewport
 }
 
-function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserScreencastViewport {
+type NormalizedBrowserScreencastSettings = BrowserScreencastViewport & {
+  format: 'jpeg' | 'png'
+  quality: number
+  maxWidth: number
+  maxHeight: number
+  everyNthFrame: number
+  minFrameIntervalMs: number
+}
+
+function normalizeScreencastSettings(
+  params: BrowserScreencastParams
+): NormalizedBrowserScreencastSettings {
   return {
+    format: params.format,
+    quality: clampInteger(params.quality, 10, 100, 70),
+    maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
+    maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
     viewportWidth: clampOptionalInteger(params.viewportWidth, 320, 3840),
     viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
     deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
-    mobile: params.mobile === true
+    mobile: params.mobile === true,
+    everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
+    minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0)
   }
 }
 
-function sameScreencastViewport(
-  left: BrowserScreencastViewport,
-  right: BrowserScreencastViewport
+function sameScreencastSettings(
+  left: NormalizedBrowserScreencastSettings,
+  right: NormalizedBrowserScreencastSettings
 ): boolean {
   return (
+    left.format === right.format &&
+    left.quality === right.quality &&
+    left.maxWidth === right.maxWidth &&
+    left.maxHeight === right.maxHeight &&
     left.viewportWidth === right.viewportWidth &&
     left.viewportHeight === right.viewportHeight &&
     left.deviceScaleFactor === right.deviceScaleFactor &&
-    left.mobile === right.mobile
+    left.mobile === right.mobile &&
+    left.everyNthFrame === right.everyNthFrame &&
+    left.minFrameIntervalMs === right.minFrameIntervalMs
   )
 }
 
@@ -503,36 +526,31 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    const viewport = normalizeScreencastViewport(params)
+    const settings = normalizeScreencastSettings(params)
     let active = this.activeScreencastsByPageId.get(browserPageId)
     while (active?.stopping) {
       await active.session?.done
       active = this.activeScreencastsByPageId.get(browserPageId)
     }
-    if (active && !sameScreencastViewport(active.viewport, viewport)) {
+    if (active && !sameScreencastSettings(active.settings, settings)) {
       throw new BrowserError(
         'browser_error',
-        `Browser page ${browserPageId} is already streaming at a different viewport.`
+        `Browser page ${browserPageId} is already streaming with incompatible options.`
       )
     }
     if (!active) {
       const subscribers = new Map<string, ActiveBrowserScreencastSubscriber>()
       const record = {
-        format: params.format,
+        latestFrame: null,
         session: null,
+        settings,
         stopping: false,
-        subscribers,
-        viewport
+        subscribers
       } as ActiveBrowserScreencastPage
       record.started = startBrowserScreencast(guest, {
-        format: params.format,
-        quality: clampInteger(params.quality, 10, 100, 70),
-        maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
-        maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
-        ...viewport,
-        everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
-        minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
+        ...settings,
         onFrame: (bytes) => {
+          record.latestFrame = bytes
           for (const subscriber of record.subscribers.values()) {
             // A slow viewer drops this frame without stalling every other viewer.
             sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
@@ -573,12 +591,16 @@ export class RuntimeBrowserCommands {
     const subscriberDone = new Promise<void>((resolve) => {
       resolveSubscriberDone = resolve
     })
-    active.subscribers.set(subscriptionId, {
+    const subscriber = {
       sendBinary: stream.sendBinary,
       emit: stream.emit,
       done: subscriberDone,
       resolveDone: resolveSubscriberDone
-    })
+    }
+    active.subscribers.set(subscriptionId, subscriber)
+    if (active.latestFrame) {
+      sendRemoteBrowserScreencastFrame(subscriber.sendBinary, active.latestFrame)
+    }
     let session: BrowserScreencastSession
     try {
       session = await active.started
@@ -609,7 +631,7 @@ export class RuntimeBrowserCommands {
         type: 'ready',
         subscriptionId,
         browserPageId,
-        format: active.format,
+        format: active.settings.format,
         tab: this.describeBrowserTab(browserPageId, target.worktreeId)
       }
     }

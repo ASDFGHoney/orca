@@ -34918,6 +34918,61 @@ describe('OrcaRuntimeService', () => {
     await task
   })
 
+  it('retries a retained startup frame after transport backpressure clears', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = createRuntime()
+      const done = deferred<void>()
+      const stop = vi.fn(() => done.resolve())
+      const startupFrame = new Uint8Array([1, 2, 3])
+      const sendBinary = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+      const emit = vi.fn()
+      const browserScreencast = vi.fn(
+        async (_params: unknown, stream: { sendBinary: typeof sendBinary }) => {
+          expect(stream.sendBinary(startupFrame)).toBe(true)
+          return {
+            subscriptionId: 'browser-screencast:page-1:first',
+            ready: {
+              type: 'ready',
+              subscriptionId: 'browser-screencast:page-1:first',
+              browserPageId: 'page-1',
+              format: 'jpeg',
+              tab: {
+                browserPageId: 'page-1',
+                index: 0,
+                url: 'about:blank',
+                title: 'Browser',
+                active: true
+              }
+            },
+            session: { stop, done: done.promise }
+          }
+        }
+      )
+      ;(
+        runtime as unknown as { browserCommands: { browserScreencast: typeof browserScreencast } }
+      ).browserCommands = { browserScreencast }
+
+      const task = runtime.browserScreencast(
+        { worktree: `id:${TEST_WORKTREE_ID}`, page: 'page-1', format: 'jpeg' },
+        { connectionId: 'conn-1', sendBinary, emit }
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(sendBinary).toHaveBeenCalledOnce()
+
+      await vi.advanceTimersByTimeAsync(50)
+
+      expect(sendBinary).toHaveBeenCalledTimes(2)
+      expect(sendBinary).toHaveBeenNthCalledWith(1, startupFrame)
+      expect(sendBinary).toHaveBeenNthCalledWith(2, startupFrame)
+      runtime.cleanupSubscription('browser-screencast:page-1:first')
+      await task
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('delivers pending mail via notifyMessageArrived when the recipient is already idle', async () => {
     vi.useFakeTimers()
     try {
