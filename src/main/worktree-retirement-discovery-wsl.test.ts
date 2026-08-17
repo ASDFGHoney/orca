@@ -52,27 +52,18 @@ describe('retirement discovery on WSL', () => {
       resolveWslHome: async () => '\\\\wsl.localhost\\Ubuntu\\home\\ada'
     })
 
-    // Every UNC read is admitted, at the scan priority that leaves the exact-probe permit free.
-    // Neither directory exists here, so each listing is followed by the parent probe that tells a
-    // genuinely absent directory apart from an unreachable 9P route.
-    expect(runWslTranscriptFsTaskMock.mock.calls.map(([options]) => options)).toEqual([
-      expect.objectContaining({ operation: 'readdir', path: DISTRO_ROOT, priority: 'scan' }),
-      expect.objectContaining({
-        operation: 'readdir',
-        path: '\\\\wsl.localhost\\Ubuntu\\home\\ada\\orca',
-        priority: 'scan'
-      }),
-      expect.objectContaining({
-        operation: 'readdir',
-        path: join('\\\\wsl.localhost\\Ubuntu\\home\\ada', '.claude', 'projects'),
-        priority: 'scan'
-      }),
-      expect.objectContaining({
-        operation: 'readdir',
-        path: join('\\\\wsl.localhost\\Ubuntu\\home\\ada', '.claude'),
-        priority: 'scan'
-      })
-    ])
+    // Both UNC reads — the workspace root and the distro's bucket directory — are admitted, and
+    // every listing goes at the scan priority that leaves the exact-probe permit free. Nothing
+    // exists under this fixture, so each is followed by the ancestor walk that tells a genuinely
+    // absent directory apart from an unreachable 9P route; those are gated too.
+    const calls = runWslTranscriptFsTaskMock.mock.calls.map(([options]) => options)
+    expect(calls.every((options) => options.priority === 'scan')).toBe(true)
+    expect(calls.map((options) => options.path)).toEqual(
+      expect.arrayContaining([
+        DISTRO_ROOT,
+        join('\\\\wsl.localhost\\Ubuntu\\home\\ada', '.claude', 'projects')
+      ])
+    )
   })
 
   it('leaves no listing ungated when the workspace root is on the Windows side', async () => {
@@ -126,8 +117,15 @@ describe('retirement discovery on WSL', () => {
     // one-time seed into a 60s rescan loop for the life of the process.
     const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
     const distroHome = '\\\\wsl.localhost\\Ubuntu\\home\\ada'
-    // Only the two leaves are missing; every parent lists, which is what a live distro looks like.
-    const missing = new Set([DISTRO_ROOT, join(distroHome, '.claude', 'projects')])
+    // A distro where Claude never ran has no `~/.claude` at all, and a repo with no workspaces yet
+    // has neither the workspace root nor its parent — so the whole chain up to the home is absent.
+    // Only the home itself lists, which is what proves the route is up.
+    const missing = new Set([
+      DISTRO_ROOT,
+      '\\\\wsl.localhost\\Ubuntu\\home\\ada\\orca',
+      join(distroHome, '.claude', 'projects'),
+      join(distroHome, '.claude')
+    ])
     runWslTranscriptFsTaskMock.mockImplementation((options: { path: string }) =>
       missing.has(options.path) ? Promise.reject(enoent) : Promise.resolve([])
     )

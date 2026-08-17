@@ -72,27 +72,40 @@ async function readDirectoryNames(path: string): Promise<{ names: string[]; refu
     if (code !== 'ENOENT' && code !== 'ENOTDIR') {
       return { names: [], refused: true }
     }
-    return { names: [], refused: isWslUncPath(path) && !(await uncParentLists(path)) }
+    return { names: [], refused: isWslUncPath(path) && !(await uncRouteIsReachable(path)) }
   }
 }
 
 /** Windows reports an unreachable 9P route as ENOENT, so a shut-down distro is indistinguishable
  *  from one that simply never held buckets — `wsl.ts` refuses to trust a UNC ENOENT for the same
- *  reason. The parent settles it: if it lists, the child really is absent and the answer is
- *  complete; if it does not, the route is down and the scan has to stay retryable. Trusting ENOENT
- *  outright memoized the STA-4472 hole after `wsl --shutdown`; distrusting it outright made every
- *  distro without `~/.claude/projects` rescan on a 60s loop for the life of the process. */
-async function uncParentLists(path: string): Promise<boolean> {
-  const parent = path.replace(/[/\\]+[^/\\]+[/\\]*$/, '')
-  if (!parent || parent === path || !isWslUncPath(parent)) {
-    return false
+ *  reason. One reachable ancestor settles it: the route is up, so the ENOENT below it is real
+ *  absence and the answer is complete.
+ *
+ *  Walking rather than checking one level, because the ancestors are usually missing too: a distro
+ *  where Claude never ran has no `~/.claude` either, and a repo with no workspaces yet has neither
+ *  the workspace root nor its parent. Stopping at the first level called those complete-looking
+ *  cases unreachable, which is the 60s rescan loop this exists to avoid. */
+async function uncRouteIsReachable(path: string): Promise<boolean> {
+  let current = path
+  // Bounded so a pathological path cannot spend the gate's scan slot indefinitely; the distro root
+  // is only a few levels above anything discovery lists.
+  for (let depth = 0; depth < 8; depth += 1) {
+    const parent = current.replace(/[/\\]+[^/\\]+[/\\]*$/, '')
+    if (!parent || parent === current || !isWslUncPath(parent)) {
+      return false
+    }
+    try {
+      await wslGatedReaddir(parent, 'scan')
+      return true
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        return false
+      }
+      current = parent
+    }
   }
-  try {
-    await wslGatedReaddir(parent, 'scan')
-    return true
-  } catch {
-    return false
-  }
+  return false
 }
 
 /** Claude buckets its per-conversation state under a directory derived from the workspace cwd. A
