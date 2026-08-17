@@ -52,6 +52,15 @@ export function useVisibleSidebarWorktrees(args: {
   const workspaceStatuses = useAppStore((s) =>
     filterWorkspaceStatuses?.length ? s.workspaceStatuses : undefined
   )
+  // Why pin the active workspace while a status filter is on: "Move to Status"
+  // sits on the row itself, so restatusing the workspace you are working in
+  // would otherwise delete its row while its panes stay open, with nothing on
+  // screen explaining why. Status is the only filter dimension reachable from
+  // the row, so no other filter can be turned against the row that turned it —
+  // hence the gate rather than pinning the active row unconditionally.
+  const activeWorktreeId = useAppStore((s) =>
+    filterWorkspaceStatuses?.length ? s.activeWorktreeId : null
+  )
   const agentStatusEpoch = useAppStore((s) => (!showSleepingWorkspaces ? s.agentStatusEpoch : 0))
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
@@ -103,12 +112,13 @@ export function useVisibleSidebarWorktrees(args: {
       visibleWorkspaceHostIds,
       defaultHostId: getSettingsFocusedExecutionHostId(settings),
       worktreeLineageById,
-      forcedVisibleWorktreeIds: args.agentSendTargetWorktreeId
-        ? [args.agentSendTargetWorktreeId]
-        : undefined
+      forcedVisibleWorktreeIds: [args.agentSendTargetWorktreeId, activeWorktreeId].filter(
+        (id): id is string => id != null
+      )
     })
   }, [
     args.agentSendTargetWorktreeId,
+    activeWorktreeId,
     agentStatusEpoch,
     filterRepoIds,
     filterWorkspaceStatuses,
