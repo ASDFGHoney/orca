@@ -61,6 +61,7 @@ export function recordLocalCursorDiscoverySpan(
       return {
         rootReaddir: total.rootReaddir + c.rootReaddir,
         bucketReaddir: total.bucketReaddir + c.bucketReaddir,
+        direntsRead: total.direntsRead + c.direntsRead,
         fileLstat: total.fileLstat + c.fileLstat,
         boundedReads: total.boundedReads + c.boundedReads,
         scopeRealpath: total.scopeRealpath + c.scopeRealpath,
@@ -71,6 +72,7 @@ export function recordLocalCursorDiscoverySpan(
     {
       rootReaddir: 0,
       bucketReaddir: 0,
+      direntsRead: 0,
       fileLstat: 0,
       boundedReads: 0,
       scopeRealpath: 0,
@@ -88,12 +90,14 @@ export function recordLocalCursorDiscoverySpan(
     'cursorLocalFilesystemOperations',
     counters.rootReaddir +
       counters.bucketReaddir +
+      counters.direntsRead +
       counters.fileLstat +
       counters.boundedReads +
       counters.scopeRealpath
   )
   span.setAttribute('cursorLocalRootReaddir', counters.rootReaddir)
   span.setAttribute('cursorLocalBucketReaddir', counters.bucketReaddir)
+  span.setAttribute('cursorLocalDirentsRead', counters.direntsRead)
   span.setAttribute('cursorLocalFileLstat', counters.fileLstat)
   span.setAttribute('cursorLocalBoundedReads', counters.boundedReads)
   span.setAttribute('cursorLocalScopeRealpath', counters.scopeRealpath)

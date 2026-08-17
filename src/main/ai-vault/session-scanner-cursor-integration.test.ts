@@ -114,5 +114,6 @@ describe('Cursor session scanner integration', () => {
     expect(result.sessions.map((session) => session.filePath).sort()).toEqual(
       [sessionPaths[0], sessionPaths[2]].sort()
     )
+    expect(result.sessions.every((session) => session.messageCount === 1)).toBe(true)
   })
 })

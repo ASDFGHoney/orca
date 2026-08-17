@@ -1,4 +1,7 @@
-import type { CursorSidecarScanState } from './cursor-sidecar-scan'
+import {
+  CURSOR_SIDECAR_MAX_SESSION_ENTRIES_EXAMINED,
+  type CursorSidecarScanState
+} from './cursor-sidecar-scan'
 import type { CursorSidecarScanIo } from './cursor-sidecar-scan-discovery'
 import {
   isCursorSidecarScanCancelledError,
@@ -97,19 +100,21 @@ async function retainUnscopedSessions(
   retained: CursorSidecarScanSession[],
   args: RetentionArgs
 ): Promise<void> {
+  let remainingEntryBudget = CURSOR_SIDECAR_MAX_SESSION_ENTRIES_EXAMINED
   for (let index = 0; index < buckets.length; index += CURSOR_SIDECAR_SCAN_CONCURRENCY) {
     args.cancellation.throwIfCancelled()
     const batch = buckets.slice(index, index + CURSOR_SIDECAR_SCAN_CONCURRENCY)
+    const perBucketBudget = Math.floor(remainingEntryBudget / batch.length)
+    if (perBucketBudget === 0) {
+      args.response.truncated.sessionDirs = true
+      break
+    }
     const listings = await Promise.all(
       batch.map((bucket) =>
-        listBucketSessions(
-          bucket,
-          args,
-          args.sessionLimit - retained.length,
-          CURSOR_DIR_MAX_ENTRIES_EXAMINED
-        )
+        listBucketSessions(bucket, args, args.sessionLimit - retained.length, perBucketBudget)
       )
     )
+    remainingEntryBudget -= listings.reduce((total, listing) => total + listing.entriesExamined, 0)
     args.cancellation.throwIfCancelled()
     retainUnscopedSessionListings(listings, retained, args)
     if (retained.length >= args.sessionLimit && index + batch.length < buckets.length) {
@@ -145,6 +150,7 @@ type BucketSessionListing = {
   bucket: CursorSidecarScanBucket
   names: string[]
   truncated: boolean
+  entriesExamined: number
 }
 
 async function listBucketSessions(
@@ -158,7 +164,7 @@ async function listBucketSessions(
       args.response.counters.fileLstat++
       const stats = await args.io.lstat(bucket.path)
       if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        return { bucket, names: [], truncated: false }
+        return { bucket, names: [], truncated: false, entriesExamined: 0 }
       }
     }
     args.response.counters.bucketReaddir++
@@ -170,7 +176,13 @@ async function listBucketSessions(
       onDirent: createDirentCancelChecker(args.cancellation),
       opendir: args.io.opendir
     })
-    return { bucket, names: listed.names, truncated: listed.truncated }
+    args.response.counters.direntsRead += listed.direntsRead
+    return {
+      bucket,
+      names: listed.names,
+      truncated: listed.truncated,
+      entriesExamined: listed.entriesExamined
+    }
   } catch (error) {
     if (isCursorSidecarScanCancelledError(error)) {
       throw error
@@ -178,7 +190,7 @@ async function listBucketSessions(
     if (!isMissing(error)) {
       addIssue(args.response, bucket.path, error)
     }
-    return { bucket, names: [], truncated: false }
+    return { bucket, names: [], truncated: false, entriesExamined: 0 }
   }
 }
 

@@ -88,6 +88,7 @@ export type SessionFileDiscovery = {
   cursorDiscoveryCounters?: {
     rootReaddir: number
     bucketReaddir: number
+    direntsRead: number
     fileLstat: number
     boundedReads: number
     scopeRealpath: number

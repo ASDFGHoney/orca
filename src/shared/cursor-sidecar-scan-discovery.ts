@@ -147,7 +147,7 @@ async function enumeratedBuckets(
   args.cancellation.throwIfCancelled()
   try {
     args.response.counters.rootReaddir++
-    const { names, truncated } = await listLexicographicDirectoryNames({
+    const { names, truncated, direntsRead } = await listLexicographicDirectoryNames({
       dirPath: chatsRoot,
       limit: args.caps.buckets,
       maxEntriesExamined: CURSOR_DIR_MAX_ENTRIES_EXAMINED,
@@ -159,6 +159,7 @@ async function enumeratedBuckets(
       onDirent: createDirentCancelChecker(args.cancellation),
       opendir: args.io.opendir
     })
+    args.response.counters.direntsRead += direntsRead
     args.cancellation.throwIfCancelled()
     args.response.truncated.buckets = truncated
     return names.map((name) => ({ name, path: join(chatsRoot, name), scopeCwd: null }))
@@ -220,6 +221,7 @@ async function inspectSession(
       return null
     }
     if (meta.size > args.caps.sidecarBytes) {
+      args.response.truncated.sidecarBytes = true
       addIssue(
         args.response,
         metaPath,

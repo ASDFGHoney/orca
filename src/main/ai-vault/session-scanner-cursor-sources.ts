@@ -1,19 +1,16 @@
 import { join } from 'node:path'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
 import {
-  cursorBucketForCwd,
   cursorContextPathForHash,
-  cursorLegacySlug,
   cursorSessionActivityMtimeMs,
   cursorScopeCwdCandidates,
   cursorStorageContextKey,
   resolveCursorLocalRoots
 } from './session-scanner-cursor-paths'
 import { discoverLocalCursorSidecarsBounded } from './session-scanner-cursor-local-files'
-import { discoverFiles } from './session-scanner-discovery'
+import { discoverCursorLegacy } from './session-scanner-cursor-legacy-discovery'
 import type {
   AiVaultScanOptions,
-  CursorCwdEvidence,
   FileWithMtime,
   SessionFileDiscovery
 } from './session-scanner-types'
@@ -23,9 +20,6 @@ import {
 } from './ai-vault-scan-cancellation'
 import { errorMessage } from './session-scanner-values'
 import { wslGatedRealpath } from '../native-chat/wsl-transcript-fs-access'
-
-// Matches the shared owning-host scope cap; conversion work stays bounded too.
-const CURSOR_SCOPE_PATH_LIMIT = 64
 
 type CursorRootPair = {
   chatsDir: string
@@ -149,85 +143,6 @@ async function discoverCursorSidecars(args: {
     cursorDiscoveryCounters: counters,
     cursorDiscoveryTruncated: discovery.truncated
   }
-}
-
-async function discoverCursorLegacy(args: {
-  roots: CursorRootPair
-  options: AiVaultScanOptions
-  limit: number
-  issues: AiVaultScanIssue[]
-}): Promise<SessionFileDiscovery> {
-  const discovered = await discoverFiles({
-    rootDir: args.roots.projectsDir,
-    limit: args.limit,
-    agent: 'cursor',
-    issues: args.issues,
-    extensions: ['.jsonl'],
-    filePredicate: (filePath) => filePath.split(/[\\/]/).includes('agent-transcripts'),
-    signal: args.options.signal
-  })
-  const evidenceByPath = new Map<string, CursorCwdEvidence>()
-  const scopedFiles: FileWithMtime[] = []
-  for (const cwd of await localScopeCandidates(args)) {
-    const slug = cursorLegacySlug(cwd)
-    if (!slug) {
-      continue
-    }
-    const scopeDiscovery = await discoverFiles({
-      rootDir: join(args.roots.projectsDir, slug, 'agent-transcripts'),
-      limit: Math.max(args.limit, 2000),
-      agent: 'cursor',
-      issues: args.issues,
-      extensions: ['.jsonl'],
-      signal: args.options.signal
-    })
-    for (const file of scopeDiscovery.files) {
-      evidenceByPath.set(file.path, {
-        kind: 'legacy-scope-only',
-        cwd: null,
-        bucket: cursorBucketForCwd(cwd, args.roots.targetPlatform)
-      })
-      scopedFiles.push(file)
-    }
-  }
-  return {
-    agent: 'cursor',
-    rootDir: args.roots.projectsDir,
-    files: dedupeFiles([...scopedFiles, ...discovered.files]),
-    cursorLayout: 'legacy',
-    cursorStorageContextKey: args.roots.storageContextKey,
-    cursorCwdEvidenceByPath: evidenceByPath
-  }
-}
-
-async function localScopeCandidates(args: {
-  roots: CursorRootPair
-  options: AiVaultScanOptions
-}): Promise<string[]> {
-  const candidates = new Set<string>()
-  for (const scopePath of (args.options.scopePaths ?? []).slice(0, CURSOR_SCOPE_PATH_LIMIT)) {
-    for (const cwd of cursorScopeCwdCandidates({
-      scopePath,
-      platform: args.roots.targetPlatform,
-      storageContextKey: args.roots.storageContextKey
-    })) {
-      candidates.add(cwd)
-    }
-    try {
-      const resolved = await wslGatedRealpath(scopePath, 'scan', args.options.signal)
-      for (const cwd of cursorScopeCwdCandidates({
-        scopePath: resolved,
-        platform: args.roots.targetPlatform,
-        storageContextKey: args.roots.storageContextKey
-      })) {
-        candidates.add(cwd)
-      }
-    } catch {
-      throwIfAiVaultScanCancelled(args.options.signal)
-      // A scope path need not exist in every selected storage context.
-    }
-  }
-  return [...candidates]
 }
 
 function localSidecarScopePaths(args: {

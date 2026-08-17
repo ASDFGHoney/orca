@@ -3,11 +3,23 @@ import type { Stats } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import {
+  isVerifiedFileDescendant,
   readBoundedFileHandle,
   readVerifiedBoundedTextFile
 } from './node-verified-bounded-text-file'
 
 describe('readBoundedFileHandle', () => {
+  it('keeps WSL filesystem path segments case-sensitive', () => {
+    const root = '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.cursor\\chats'
+    expect(isVerifiedFileDescendant(root, `${root}\\bucket\\session\\meta.json`)).toBe(true)
+    expect(
+      isVerifiedFileDescendant(
+        root,
+        '\\\\wsl.localhost\\ubuntu\\home\\ada\\.cursor\\Chats\\meta.json'
+      )
+    ).toBe(false)
+  })
+
   it('continues after short reads until EOF', async () => {
     const source = Buffer.from('abcdef')
     const read = vi.fn(async (buffer: Buffer, offset: number, length: number, position: number) => {

@@ -60,6 +60,7 @@ export function materializeCursorSession(args: {
     legacySource?.legacy.updatedAt,
     legacySource?.legacy.modifiedAt
   ])
+  const hasSidecarConversation = sidecars.some((candidate) => candidate.sidecar.hasConversation)
   return {
     id: buildAiVaultSessionId({
       executionHostId: args.executionHostId,
@@ -89,8 +90,8 @@ export function materializeCursorSession(args: {
       legacySource?.legacy.updatedAt
     ]),
     modifiedAt,
-    messageCount: legacySource?.legacy.messageCount ?? 0,
-    hasConversation: sidecars.some((candidate) => candidate.sidecar.hasConversation),
+    messageCount: Math.max(legacySource?.legacy.messageCount ?? 0, Number(hasSidecarConversation)),
+    hasConversation: hasSidecarConversation,
     totalTokens: legacySource?.legacy.totalTokens ?? 0,
     previewMessages: legacySource?.legacy.previewMessages ?? [],
     ...(legacySource?.legacy.lastUserPrompt

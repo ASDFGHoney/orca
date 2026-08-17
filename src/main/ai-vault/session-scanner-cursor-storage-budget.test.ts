@@ -517,6 +517,7 @@ function sidecarDiscovery(
     cursorDiscoveryCounters: {
       boundedReads: 0,
       bucketReaddir: 0,
+      direntsRead: 0,
       elapsedMs: 0,
       fileLstat: 0,
       returnedBytes: 0,

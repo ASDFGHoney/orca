@@ -8,11 +8,13 @@ import {
   CURSOR_SIDECAR_MAX_BUCKETS,
   CURSOR_SIDECAR_MAX_BYTES,
   CURSOR_SIDECAR_MAX_SCOPE_PATHS,
-  CURSOR_SIDECAR_MAX_SESSION_DIRS
+  CURSOR_SIDECAR_MAX_SESSION_DIRS,
+  CURSOR_SIDECAR_MAX_SESSION_ENTRIES_EXAMINED
 } from '../../shared/cursor-sidecar-scan'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
 import { discoverLocalCursorSidecarsBounded } from './session-scanner-cursor-local-files'
 import { cursorBucketForCwd } from './session-scanner-cursor-paths'
+import { CURSOR_SIDECAR_SCAN_CONCURRENCY } from '../../shared/cursor-sidecar-scan-session-retention'
 import { scanAiVaultSessions } from './session-scanner'
 import { isolatedScanRoots } from './session-scanner-test-fixtures'
 
@@ -82,16 +84,22 @@ describe('local Cursor sidecar discovery bounds', () => {
     const filesystemOperations =
       result.counters.rootReaddir +
       result.counters.bucketReaddir +
+      result.counters.direntsRead +
       result.counters.fileLstat +
       result.counters.boundedReads +
       result.counters.scopeRealpath
 
     const maxBucketReaddirs = Math.min(bucketCount, CURSOR_SIDECAR_MAX_BUCKETS)
     const maxSessions = Math.min(bucketCount * sessionsPerBucket, CURSOR_SIDECAR_MAX_SESSION_DIRS)
-    const maxOps = 1 + maxBucketReaddirs + maxSessions * 2
+    const retainedBatchSize = CURSOR_SIDECAR_SCAN_CONCURRENCY * sessionsPerBucket
+    const examinedSessionDirs = Math.ceil(maxSessions / retainedBatchSize) * retainedBatchSize
+    const maxOps = 1 + maxBucketReaddirs + bucketCount + examinedSessionDirs + maxSessions * 2
 
     expect(result.files.length).toBeLessThanOrEqual(CURSOR_SIDECAR_MAX_SESSION_DIRS)
     expect(result.files.length).toBe(maxSessions)
+    expect(result.counters.direntsRead).toBeLessThanOrEqual(
+      CURSOR_SIDECAR_MAX_SESSION_ENTRIES_EXAMINED + CURSOR_SIDECAR_MAX_BUCKETS
+    )
     expect(result.truncated.sessionDirs).toBe(true)
     expect(result.truncated.buckets).toBe(false)
     expect(filesystemOperations).toBeLessThanOrEqual(maxOps)
@@ -404,6 +412,22 @@ describe('local Cursor sidecar discovery bounds', () => {
     expect(issues.some((issue) => issue.message.includes('sidecar bytes'))).toBe(true)
   })
 
+  it('marks metadata rejected by the per-file size cap as truncated', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-cursor-oversized-meta-'))
+    tempRoots.push(root)
+    const chatsDir = join(root, 'chats')
+    const metaPath = await addSession(chatsDir, bucketName('oversized-meta'), 'oversized')
+    await writeFile(metaPath, 'x'.repeat(CURSOR_SIDECAR_MAX_BYTES + 1))
+    const issues: AiVaultScanIssue[] = []
+
+    const result = await discoverLocalCursorSidecarsBounded({ chatsDir, scopePaths: [], issues })
+
+    expect(result.files).toEqual([])
+    expect(result.truncated.sidecarBytes).toBe(true)
+    expect(issues.some((issue) => issue.message.includes('exceeds the read limit'))).toBe(true)
+    expect(issues.some((issue) => issue.message.includes('sidecar bytes'))).toBe(true)
+  })
+
   it('applies newest-first mtime retention before the aggregate byte cap', async () => {
     const { utimes } = await import('node:fs/promises')
     const root = await mkdtemp(join(tmpdir(), 'orca-cursor-mtime-ret-'))
@@ -451,6 +475,7 @@ describe('local Cursor sidecar discovery bounds', () => {
       counters: {
         rootReaddir: 0,
         bucketReaddir: 0,
+        direntsRead: 0,
         fileLstat: 0,
         boundedReads: 0,
         scopeRealpath: 0,
@@ -545,6 +570,7 @@ function emptyScanResponse() {
     counters: {
       rootReaddir: 0,
       bucketReaddir: 0,
+      direntsRead: 0,
       fileLstat: 0,
       boundedReads: 0,
       scopeRealpath: 0,

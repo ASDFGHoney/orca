@@ -1,11 +1,21 @@
 import type { Dirent } from 'node:fs'
 import { extname, join } from 'node:path'
 import type { AiVaultAgent, AiVaultScanIssue } from '../../shared/ai-vault-types'
-import { wslGatedReaddir, wslGatedStat } from '../native-chat/wsl-transcript-fs-access'
+import {
+  wslGatedOpendir,
+  wslGatedReaddir,
+  wslGatedStat
+} from '../native-chat/wsl-transcript-fs-access'
 import { WslTranscriptFsError } from '../native-chat/wsl-transcript-fs-gate'
 import { recordSessionScanIssue } from './session-scan-issues'
 import type { FileWithMtime, SessionFileDiscovery } from './session-scanner-types'
 import { errorMessage } from './session-scanner-values'
+
+export type SessionDiscoveryBudget = {
+  entriesRemaining: number
+  filesRemaining: number
+  truncated: boolean
+}
 
 export async function discoverFiles(args: {
   rootDir: string
@@ -16,6 +26,7 @@ export async function discoverFiles(args: {
   filePredicate?: (path: string) => boolean
   directoryPredicate?: (name: string, depth: number) => boolean
   signal?: AbortSignal
+  budget?: SessionDiscoveryBudget
 }): Promise<SessionFileDiscovery> {
   let paths: string[]
   try {
@@ -23,7 +34,8 @@ export async function discoverFiles(args: {
       extensions: new Set(args.extensions),
       filePredicate: args.filePredicate,
       directoryPredicate: args.directoryPredicate,
-      signal: args.signal
+      signal: args.signal,
+      budget: args.budget
     })
   } catch (err) {
     // Why: discoverAiVaultSessionSources fans out with Promise.all, so one
@@ -41,6 +53,13 @@ export async function discoverFiles(args: {
   }
   const files: FileWithMtime[] = []
   for (const path of paths) {
+    if (args.budget && args.budget.filesRemaining <= 0) {
+      args.budget.truncated = true
+      break
+    }
+    if (args.budget) {
+      args.budget.filesRemaining--
+    }
     try {
       const fileStat = await wslGatedStat(path, 'scan', args.signal)
       files.push({
@@ -80,15 +99,22 @@ export async function walkSessionFiles(
     directoryPredicate?: (name: string, depth: number) => boolean
     readDirectory?: (dirPath: string) => Promise<Dirent[]>
     signal?: AbortSignal
+    budget?: SessionDiscoveryBudget
   },
   depth = 0
 ): Promise<string[]> {
   options.signal?.throwIfAborted()
+  if (options.budget && options.budget.entriesRemaining <= 0) {
+    options.budget.truncated = true
+    return []
+  }
   let entries
   try {
     entries = options.readDirectory
       ? await options.readDirectory(dirPath)
-      : await wslGatedReaddir(dirPath, 'scan', options.signal)
+      : options.budget
+        ? await readBoundedDirectoryEntries(dirPath, options.budget, options.signal)
+        : await wslGatedReaddir(dirPath, 'scan', options.signal)
   } catch (error) {
     options.signal?.throwIfAborted()
     // Why: a gate refusal means the scan could not run, not that the tree is
@@ -102,6 +128,13 @@ export async function walkSessionFiles(
   const files: string[] = []
   for (const entry of entries) {
     options.signal?.throwIfAborted()
+    if (options.budget && options.budget.entriesRemaining <= 0) {
+      options.budget.truncated = true
+      break
+    }
+    if (options.budget) {
+      options.budget.entriesRemaining--
+    }
     const fullPath = join(dirPath, entry.name)
     if (entry.isDirectory()) {
       // Skip whole subtrees an agent never wants (e.g. subagent transcripts),
@@ -120,4 +153,25 @@ export async function walkSessionFiles(
     }
   }
   return files
+}
+
+async function readBoundedDirectoryEntries(
+  dirPath: string,
+  budget: SessionDiscoveryBudget,
+  signal?: AbortSignal
+): Promise<Dirent[]> {
+  const directory = await wslGatedOpendir(dirPath, 'scan', signal)
+  const entries: Dirent[] = []
+  try {
+    for await (const entry of directory) {
+      if (entries.length >= budget.entriesRemaining) {
+        budget.truncated = true
+        break
+      }
+      entries.push(entry)
+    }
+  } finally {
+    await directory.close().catch(() => undefined)
+  }
+  return entries
 }

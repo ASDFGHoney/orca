@@ -113,9 +113,14 @@ export async function listLexicographicDirectoryNames(args: {
   maxEntriesExamined?: number
   onDirent?: () => void
   opendir?: (path: string) => Promise<CursorDirectoryStream>
-}): Promise<{ names: string[]; truncated: boolean; entriesExamined: number }> {
+}): Promise<{
+  names: string[]
+  truncated: boolean
+  entriesExamined: number
+  direntsRead: number
+}> {
   if (args.limit <= 0) {
-    return { names: [], truncated: true, entriesExamined: 0 }
+    return { names: [], truncated: true, entriesExamined: 0, direntsRead: 0 }
   }
   const selected: string[] = []
   let truncated = false
@@ -141,7 +146,8 @@ export async function listLexicographicDirectoryNames(args: {
   if (selected.length < args.limit) {
     selected.sort(compareCursorSidecarNames)
   }
-  return { names: selected, truncated, entriesExamined }
+  const direntsRead = entriesExamined + Number(examinationTruncated && entriesExamined > 0)
+  return { names: selected, truncated, entriesExamined, direntsRead }
 }
 
 export function targetPathVariants(value: string, pathPlatform: NodeJS.Platform): string[] {

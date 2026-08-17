@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { walkSessionFiles } from './session-scanner-discovery'
+import { discoverFiles, walkSessionFiles } from './session-scanner-discovery'
 
 let tempRoot: string | null = null
 
@@ -59,5 +59,25 @@ describe('walkSessionFiles directory reader', () => {
         signal: controller.signal
       })
     ).rejects.toBe(cancelled)
+  })
+
+  it('shares entry and stat budgets across bounded discovery', async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), 'orca-session-budget-'))
+    await Promise.all(
+      Array.from({ length: 4 }, (_, index) => writeFile(join(tempRoot!, `${index}.jsonl`), '{}\n'))
+    )
+    const budget = { entriesRemaining: 3, filesRemaining: 2, truncated: false }
+
+    const result = await discoverFiles({
+      rootDir: tempRoot,
+      limit: 10,
+      agent: 'cursor',
+      issues: [],
+      extensions: ['.jsonl'],
+      budget
+    })
+
+    expect(result.files).toHaveLength(2)
+    expect(budget).toEqual({ entriesRemaining: 0, filesRemaining: 0, truncated: true })
   })
 })

@@ -122,6 +122,7 @@ function emptyLocalScanResponse(): CursorSidecarScanState {
     counters: {
       rootReaddir: 0,
       bucketReaddir: 0,
+      direntsRead: 0,
       fileLstat: 0,
       boundedReads: 0,
       scopeRealpath: 0,

@@ -2,7 +2,8 @@ import { constants } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { lstat, open, realpath } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
+import { relativePathInsideRoot } from './cross-platform-path'
 
 const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
 const STRICT_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
@@ -34,7 +35,7 @@ export async function readVerifiedBoundedTextFile(
   const maxBytes = validatedByteLimit(options.maxBytes)
   const io = options.io ?? defaultVerifiedBoundedTextFileIo
   const resolvedFilePath = await io.realpath(filePath)
-  if (!isPathInsideRoot(options.expectedRootRealPath, resolvedFilePath)) {
+  if (!isVerifiedFileDescendant(options.expectedRootRealPath, resolvedFilePath)) {
     throw new Error('verified_file_outside_root')
   }
   const lexicalRoot = await findLexicalRoot(filePath, options.expectedRootRealPath, io)
@@ -154,14 +155,9 @@ function validatedByteLimit(value: number): number {
   return value
 }
 
-function isPathInsideRoot(rootRealPath: string, fileRealPath: string): boolean {
-  const difference = relative(rootRealPath, fileRealPath)
-  return (
-    difference !== '' &&
-    !isAbsolute(difference) &&
-    difference !== '..' &&
-    !difference.startsWith(`..${sep}`)
-  )
+export function isVerifiedFileDescendant(rootRealPath: string, fileRealPath: string): boolean {
+  const difference = relativePathInsideRoot(rootRealPath, fileRealPath)
+  return difference !== null && difference !== ''
 }
 
 function samePath(left: string, right: string): boolean {
