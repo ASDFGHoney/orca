@@ -9,6 +9,7 @@
 // client that was merely asleep gets a full snapshot reload instead of a resume.
 
 import {
+  blobDigestsInBody,
   referencedBlobDigests,
   renderJournalState,
   type JournalReducerState
@@ -58,6 +59,7 @@ export async function compactJournal(input: {
     v: AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
     epoch: input.state.epoch,
     compactedThrough,
+    highestFence: input.state.highestFence,
     items: rendered.items,
     submissions: rendered.submissions,
     receipts: [...input.state.receipts.values()].map((receipt) => ({
@@ -71,6 +73,10 @@ export async function compactJournal(input: {
       providerItemId,
       itemId
     })),
+    tombstones: [...input.state.tombstones.entries()].map(([itemId, revision]) => ({
+      itemId,
+      revision
+    })),
     tail: retained
   }
 
@@ -78,7 +84,13 @@ export async function compactJournal(input: {
   await rewriteJournalLog(input.journalDir, retained)
   // Blobs are pruned last: a crash before this leaks bytes, whereas pruning
   // first would strand a snapshot pointing at a payload that no longer exists.
-  await pruneJournalBlobs(input.journalDir, referencedBlobDigests(input.state))
+  const retainedDigests = referencedBlobDigests(input.state)
+  for (const row of retained) {
+    if (row.kind === 'item') {
+      blobDigestsInBody(row.body, retainedDigests)
+    }
+  }
+  await pruneJournalBlobs(input.journalDir, retainedDigests)
 
   return {
     tailRows: retained,

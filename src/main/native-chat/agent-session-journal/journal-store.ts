@@ -18,15 +18,24 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
-import { compactJournal, type JournalCompactionPolicy } from './journal-compaction'
-import { resolveJournalResume, type JournalResume } from './journal-cursor'
+import {
+  compactJournal,
+  DEFAULT_JOURNAL_COMPACTION_POLICY,
+  type JournalCompactionPolicy
+} from './journal-compaction'
+import { readJournalSince } from './journal-cursor'
 import { publishNewEpoch } from './journal-epoch-rollover'
 import { appendJournalRows, ensureJournalDir } from './journal-log-file'
+import {
+  quarantineCorruptSuffix,
+  quarantineUnreadableSchema
+} from './journal-corruption-quarantine'
 import { loadJournal } from './journal-open'
 import { DEFAULT_JOURNAL_PAYLOAD_LIMITS } from './journal-payload-bounds'
 import {
   applyJournalRow,
   createJournalReducerState,
+  referencedBlobDigests,
   renderJournalState,
   resolveJournalItemId,
   type JournalReducerState
@@ -62,7 +71,7 @@ export class AgentSessionJournal {
   private readonly identity: AgentSessionJournalIdentity
   private readonly journalDir: string
   private readonly budget: JournalAppendBudget
-  private readonly compaction: JournalCompactionPolicy | undefined
+  private readonly compaction: JournalCompactionPolicy
   private readonly now: () => number
   private readonly mintEpoch: () => string
 
@@ -81,7 +90,7 @@ export class AgentSessionJournal {
       options.identity.sessionId,
       options.limits ?? DEFAULT_JOURNAL_PAYLOAD_LIMITS
     )
-    this.compaction = options.compaction
+    this.compaction = options.compaction ?? DEFAULT_JOURNAL_COMPACTION_POLICY
     this.now = options.now ?? (() => Date.now())
     this.mintEpoch = options.mintEpoch ?? randomUUID
     this.state = createJournalReducerState(options.identity.sessionId, '')
@@ -118,9 +127,8 @@ export class AgentSessionJournal {
     this.sizeBytes = loaded.sizeBytes
     this.readOnly = loaded.readOnly
     if (loaded.corrupt && !loaded.readOnly) {
-      // A reader that observes a gap rolls the epoch rather than rendering a
-      // partial timeline; clients take the snapshot reload they already handle.
-      await this.rollEpoch('corruption', this.state.highestFence)
+      // The epoch stays put: no intact history is discarded to recover.
+      await quarantineCorruptSuffix(this.journalDir, this.tailRows, loaded.quarantineRemainder)
     }
   }
 
@@ -149,29 +157,16 @@ export class AgentSessionJournal {
   canonicalItemId(itemId: string): string {
     return resolveJournalItemId(this.state, itemId)
   }
-  readSince(cursor: AgentJournalCursor): JournalReadSince {
-    const resume = this.resume(cursor)
-    if (!resume.ok) {
-      return { ok: false, reset: resume.reset }
-    }
-    return {
-      ok: true,
-      rows: this.tailRows.filter((row) => row.seq > resume.afterSequence),
-      cursor: this.cursor()
-    }
+
+  referencedBlobDigests(): Set<string> {
+    return referencedBlobDigests(this.state)
   }
 
-  private resume(cursor: AgentJournalCursor): JournalResume {
-    if (this.readOnly) {
-      return { ok: false, reset: 'schema_unreadable' }
-    }
-    return resolveJournalResume(
-      {
-        epoch: this.state.epoch,
-        lastSequence: this.state.lastSequence,
-        oldestSequence: this.state.oldestSequence
-      },
-      cursor
+  readSince(cursor: AgentJournalCursor): JournalReadSince {
+    return readJournalSince(
+      { state: this.state, tailRows: this.tailRows, readOnly: this.readOnly },
+      cursor,
+      () => this.cursor()
     )
   }
 
@@ -271,14 +266,14 @@ export class AgentSessionJournal {
     return pending
   }
 
-  async compact(): Promise<void> {
+  async compact(now = this.now()): Promise<void> {
     assertJournalWritable(this.readOnly, this.identity.sessionId)
     const result = await compactJournal({
       journalDir: this.journalDir,
       state: this.state,
       tailRows: this.tailRows,
       policy: this.compaction,
-      now: this.now()
+      now
     })
     this.tailRows = result.tailRows
     this.compactedThrough = result.compactedThrough
@@ -289,8 +284,13 @@ export class AgentSessionJournal {
   /** The escape hatch for corruption, an unreconcilable prefix, a forked handle,
    *  and an unreadable schema. It invalidates every cursor; clients reload. */
   async rollEpoch(reason: AgentJournalEpochReason, fence: number): Promise<AgentJournalCursor> {
-    assertJournalWritable(this.readOnly, this.identity.sessionId)
+    if (reason !== 'schema_unreadable') {
+      assertJournalWritable(this.readOnly, this.identity.sessionId)
+    } else if (this.readOnly) {
+      await quarantineUnreadableSchema(this.journalDir)
+    }
     await this.startEpoch(reason, fence)
+    this.readOnly = false
     return this.cursor()
   }
 
