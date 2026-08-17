@@ -169,17 +169,21 @@ async function terminateLegacyCloseClient(
     return 'already-exited'
   }
   if (identity) {
-    await terminateRecordedTree(await recordProcessTree(identity))
-    return 'termination-attempted'
+    // Why: tree capture fails once the recorded root exits on its own, which is a normal exit.
+    const tree = await recordProcessTree(identity).catch(() => null)
+    if (!tree) {
+      return 'already-exited'
+    }
+    return (await terminateRecordedTree(tree)) ? 'termination-attempted' : 'already-exited'
   }
   // Why: identity capture can race with teardown; the direct child handle is the last cleanup path.
-  client.child.kill('SIGKILL')
+  const signalled = client.child.kill('SIGKILL')
   await waitForCondition(
     'forced legacy close client exit',
     () => legacyCloseClientExited(client),
     5_000
   )
-  return 'termination-attempted'
+  return signalled ? 'termination-attempted' : 'already-exited'
 }
 
 function legacyCloseClientExited(client: ReturnType<typeof launchLegacyCloseClient>): boolean {
