@@ -270,6 +270,7 @@ export function createCodexJournalTranslator(
         const turnId = readCodexTurnId(event.params) ?? currentTurnIds.get(event.threadId)
         if (turnId) {
           publishTurnLifecycle(event.sessionId, event.threadId, turnId, 'completed')
+          ordinals.forgetTurn(event.threadId, turnId)
         }
         // A later item with no turn of its own belongs to no turn, not to the
         // one that just ended.

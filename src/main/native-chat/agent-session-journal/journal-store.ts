@@ -21,12 +21,14 @@ import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-
 import {
   compactJournal,
   DEFAULT_JOURNAL_COMPACTION_POLICY,
+  journalTailIsReadyToCompact,
   type JournalCompactionPolicy
 } from './journal-compaction'
 import { readJournalSince } from './journal-cursor'
 import { publishNewEpoch } from './journal-epoch-rollover'
 import { appendJournalRows, ensureJournalDir } from './journal-log-file'
 import {
+  malformedRowsDisclosure,
   quarantineCorruptSuffix,
   quarantineUnreadableSchema
 } from './journal-corruption-quarantine'
@@ -81,6 +83,7 @@ export class AgentSessionJournal {
   private compactedThrough = 0
   private sizeBytes = 0
   private readOnly = false
+  private malformedRows = 0
   /** Serializes sequence assignment with the durable write behind it. */
   private writes: Promise<unknown> = Promise.resolve()
 
@@ -128,9 +131,16 @@ export class AgentSessionJournal {
     this.compactedThrough = loaded.compactedThrough
     this.sizeBytes = loaded.sizeBytes
     this.readOnly = loaded.readOnly
+    this.malformedRows = loaded.malformedRows
     if (loaded.corrupt && !loaded.readOnly) {
       // The epoch stays put: no intact history is discarded to recover.
       await quarantineCorruptSuffix(this.journalDir, this.tailRows, loaded.quarantineRemainder)
+    }
+    if (this.malformedRows > 0 && !this.readOnly) {
+      const disclosure = malformedRowsDisclosure(this.malformedRows)
+      await this.appendItem(disclosure.identity, disclosure.body, {
+        fence: this.state.highestFence
+      })
     }
   }
 
@@ -268,16 +278,6 @@ export class AgentSessionJournal {
     return pending
   }
 
-  /** Only when the retention window would actually drop rows: inside it,
-   *  compaction rewrites an identical log, and doing that per append is a full
-   *  state serialization on the hot path. */
-  private shouldAutoCompact(now: number): boolean {
-    if (!this.autoCompact || this.tailRows.length <= this.compaction.minTailRows * 2) {
-      return false
-    }
-    return (this.tailRows[0]?.ts ?? now) < now - this.compaction.retainTailMs
-  }
-
   async compact(now = this.now()): Promise<void> {
     assertJournalWritable(this.readOnly, this.identity.sessionId)
     const result = await compactJournal({
@@ -354,7 +354,7 @@ export class AgentSessionJournal {
       this.sizeBytes += journalRowByteLength(row)
       // Nothing else calls compact(), so without this the log only ever grows —
       // until the size bound refuses every append for the rest of the session.
-      if (this.shouldAutoCompact(ts)) {
+      if (this.autoCompact && journalTailIsReadyToCompact(this.tailRows, this.compaction, ts)) {
         await this.compact(ts)
       }
       return row

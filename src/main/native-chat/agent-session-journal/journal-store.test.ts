@@ -384,7 +384,7 @@ describe('schema', () => {
     expect(await readFile(logPath, 'utf-8')).toContain('"v":99')
   })
 
-  it('skips a malformed line without giving up the journal', async () => {
+  it('skips a malformed line without giving up the journal, and discloses the skip', async () => {
     const journal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })
     const logPath = join(root, JOURNAL_LOG_FILE)
@@ -392,7 +392,32 @@ describe('schema', () => {
 
     const reopened = await open()
     expect(reopened.isReadOnly).toBe(false)
-    expect(reopened.snapshot().items).toHaveLength(1)
+    const items = reopened.snapshot().items
+    // The surviving row is untouched…
+    expect(items.some((entry) => entry.body.kind === 'message')).toBe(true)
+    // …and the skip is visible in the timeline instead of silently swallowed.
+    expect(
+      items.some(
+        (entry) => entry.body.kind === 'status' && entry.body.text.includes('could not be read')
+      )
+    ).toBe(true)
+  })
+
+  it('keeps one disclosure row across reopens instead of stacking duplicates', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    await writeFile(logPath, `${await readFile(logPath, 'utf-8')}{not json\n`, 'utf-8')
+
+    await open()
+    const reopened = await open()
+    expect(
+      reopened
+        .snapshot()
+        .items.filter(
+          (entry) => entry.body.kind === 'status' && entry.body.text.includes('could not be read')
+        )
+    ).toHaveLength(1)
   })
 
   it('repairs a torn tail before acknowledging the next append', async () => {

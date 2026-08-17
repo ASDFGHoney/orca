@@ -113,3 +113,17 @@ function retainTail(
   const start = byAge === -1 ? byCount : Math.min(byAge, byCount)
   return rows.slice(start)
 }
+
+/** Only when the retention window would actually drop rows: inside it,
+ *  compaction rewrites an identical log, and doing that per append is a full
+ *  state serialization on the hot path. */
+export function journalTailIsReadyToCompact(
+  tailRows: readonly JournalRow[],
+  policy: JournalCompactionPolicy,
+  now: number
+): boolean {
+  if (tailRows.length <= policy.minTailRows * 2) {
+    return false
+  }
+  return (tailRows[0]?.ts ?? now) < now - policy.retainTailMs
+}
