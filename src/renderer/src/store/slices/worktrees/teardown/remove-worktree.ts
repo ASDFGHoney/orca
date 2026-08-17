@@ -48,6 +48,11 @@ export function createRemoveWorktree(
     const forgetLocalOnly = options?.mode === 'forget-local'
     const removalRoute = resolveWorktreeOperationRoute(get(), worktreeId)
     if (!forgetLocalOnly && !removalRoute) {
+      // Why: callers mark rows deleting up front for immediate sidebar feedback
+      // (worktree-delete-execution.ts), and these refusals return before the
+      // try/catch that would otherwise clear it — so the row would sit on a
+      // "Deleting…" spinner forever after the toast auto-dismisses.
+      get().clearWorktreeDeleteState(worktreeId)
       return { ok: false, error: WORKTREE_REMOVAL_AMBIGUOUS_ERROR }
     }
     // Why (STA-4448): this is the ONE chokepoint every delete entry point shares,
@@ -60,6 +65,7 @@ export function createRemoveWorktree(
       ? null
       : refuseWrongHostWorktreeRemoval(get(), removalTarget, removalRoute?.executionHostId ?? null)
     if (wrongHostRefusal) {
+      get().clearWorktreeDeleteState(worktreeId)
       return { ok: false, error: wrongHostRefusal }
     }
     // The confirmed host outranks the route: they can only differ on the

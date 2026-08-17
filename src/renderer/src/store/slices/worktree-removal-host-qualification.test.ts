@@ -231,6 +231,38 @@ describe('STA-4448: a colliding id cannot delete the host the user did not confi
   })
 })
 
+describe('a refused removal must not strand the row on a "Deleting…" spinner', () => {
+  it.each([
+    {
+      label: 'the wrong-host refusal',
+      seedRows: () => [rowOnHost(LOCAL_HOST), rowOnHost(SSH_HOST)],
+      target: { id: WORKTREE_ID, executionHostId: SSH_HOST } as const
+    },
+    {
+      label: 'the unresolvable-route refusal',
+      seedRows: () => [rowOnHost(LOCAL_HOST), rowOnHost(SSH_HOST)],
+      target: { id: WORKTREE_ID, executionHostId: null } as const
+    }
+  ])('clears the delete state after $label', async ({ seedRows, target }) => {
+    const store = createTestStore()
+    seedHosts(store, seedRows(), {
+      activeWorktreeId: WORKTREE_ID,
+      activeWorkspaceExecutionHostId: LOCAL_HOST
+    } as Partial<AppState>)
+
+    // Callers mark rows deleting up front so the sidebar shows progress immediately.
+    store.getState().markWorktreesDeleting([WORKTREE_ID])
+    expect(store.getState().deleteStateByWorktreeId[WORKTREE_ID]?.isDeleting).toBe(true)
+
+    const result = await store.getState().removeWorktree(target, false, undefined)
+
+    expect(result.ok).toBe(false)
+    // Why: the refusal returns before removeWorktree's try/catch, so without an
+    // explicit clear the row keeps spinning long after the toast auto-dismisses.
+    expect(store.getState().deleteStateByWorktreeId[WORKTREE_ID]?.isDeleting).toBeFalsy()
+  })
+})
+
 describe('STA-4448: ordinary single-host deletion still deletes for real', () => {
   it.each([
     { label: 'a normal delete', force: false, options: undefined },
