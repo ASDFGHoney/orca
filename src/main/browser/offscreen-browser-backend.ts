@@ -24,6 +24,7 @@ type OffscreenBrowserPage = {
 
 export class OffscreenBrowserBackend implements BrowserBackend {
   private readonly pagesById = new Map<string, OffscreenBrowserPage>()
+  private readonly pendingCloseById = new Map<string, Promise<void>>()
 
   constructor(
     private readonly browserManager: BrowserManager,
@@ -32,6 +33,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   async createTab(params: BrowserBackendCreateTab): Promise<{ browserPageId: string }> {
     const browserPageId = params.browserPageId ?? randomUUID()
+    await this.pendingCloseById.get(browserPageId)?.catch(() => {})
     if (this.pagesById.has(browserPageId)) {
       throw new Error(`Browser page ${browserPageId} already exists`)
     }
@@ -98,12 +100,23 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   async closeTab(browserPageId: string): Promise<void> {
     const page = this.pagesById.get(browserPageId)
+    if (!page) {
+      await this.pendingCloseById.get(browserPageId)
+      return
+    }
     this.pagesById.delete(browserPageId)
-    const cleanup = page?.reportClosed() ?? Promise.resolve()
-    if (page && !page.window.isDestroyed()) {
+    const cleanup = page.reportClosed()
+    this.pendingCloseById.set(browserPageId, cleanup)
+    if (!page.window.isDestroyed()) {
       page.window.destroy()
     }
-    await cleanup
+    try {
+      await cleanup
+    } finally {
+      if (this.pendingCloseById.get(browserPageId) === cleanup) {
+        this.pendingCloseById.delete(browserPageId)
+      }
+    }
   }
 
   getWebContentsId(browserPageId: string): number | null {
