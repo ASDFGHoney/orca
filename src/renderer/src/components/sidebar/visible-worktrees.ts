@@ -26,7 +26,7 @@ import type {
   WorkspaceStatus,
   WorkspaceStatusDefinition
 } from '../../../../shared/worktree/types'
-import { getWorkspaceStatus } from '../../../../shared/workspace-statuses'
+import { filterWorktreesByWorkspaceStatus } from './visible-worktree-status-filter'
 import { buildWorktreeComparator, sortWorktreesSmart } from './smart-sort'
 import { getWorktreeIdsWithLiveAgent, isInactiveWorkspace } from '@/lib/worktree-activity-state'
 import { useAppStore } from '@/store'
@@ -68,15 +68,9 @@ import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualif
  */
 type VisibleWorktreeOptions = {
   filterRepoIds: readonly string[]
-  /**
-   * Selected workspace-status ids; empty shows every status.
-   *
-   * Why optional, and why paired with `workspaceStatuses`: resolving a
-   * worktree's effective status needs the live catalog to fall back on. A
-   * caller that passes ids without the catalog would resolve every row to the
-   * default id and narrow the list to one status, so the pair fails *open* —
-   * omit either and no status filtering happens.
-   */
+  /** Selected workspace-status ids; empty shows every status. Why paired with
+   *  `workspaceStatuses`: resolving a row's effective status needs the catalog
+   *  to fall back on, so the pair fails *open* — omit either and nothing filters. */
   filterWorkspaceStatuses?: readonly WorkspaceStatus[]
   workspaceStatuses?: readonly WorkspaceStatusDefinition[]
   showSleepingWorkspaces: boolean
@@ -157,15 +151,10 @@ export function computeVisibleWorktrees(
     all = all.filter((w) => selectedRepoIds.has(w.repoId))
   }
 
-  // Filter by workspace (card) status. Empty selection shows every status.
-  // Why here and not per row at render time: workspaceStatus is a plain field
-  // on the worktree, so this is one O(worktrees) pass with a Set lookup inside
-  // the pipeline that already runs once per filter/sort snapshot.
-  if (opts.filterWorkspaceStatuses?.length && opts.workspaceStatuses) {
-    const selectedStatusIds = new Set(opts.filterWorkspaceStatuses)
-    const statuses = opts.workspaceStatuses
-    all = all.filter((w) => selectedStatusIds.has(getWorkspaceStatus(w, statuses)))
-  }
+  // Why here and not per row at render time: workspaceStatus is a plain field on
+  // the worktree, so this is one O(worktrees) pass inside the pipeline that
+  // already runs once per filter/sort snapshot.
+  all = filterWorktreesByWorkspaceStatus(all, opts.filterWorkspaceStatuses, opts.workspaceStatuses)
 
   if (!opts.showSleepingWorkspaces) {
     // Why no !hideDefaultBranchWorkspace term: that filter already ran above, so
