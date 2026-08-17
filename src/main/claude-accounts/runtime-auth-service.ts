@@ -2237,7 +2237,11 @@ export class ClaudeRuntimeAuthService {
         })
       } catch {
         // Some SSH/NFS homes do not support hard links; retain the read-before-write check there.
-        if (!this.fileContentsEqual(credentialsPath, expectedContents)) {
+        const unchanged =
+          expectedContents === null
+            ? !existsSync(credentialsPath)
+            : this.fileContentsEqual(credentialsPath, expectedContents)
+        if (!unchanged) {
           console.warn(
             '[claude-runtime-auth] Skipping shared Claude credential write because guarded publication is unavailable'
           )
