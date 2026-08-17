@@ -1,7 +1,11 @@
 import { readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getRepoExecutionHostId } from '../shared/execution-host'
+import {
+  getRepoExecutionHostId,
+  isRuntimeOwnedSshTargetId,
+  parseExecutionHostId
+} from '../shared/execution-host'
 import {
   creatureNameTier,
   EMPTY_RETIRED_NAME_REGISTRY,
@@ -169,6 +173,13 @@ async function getRetirementCollisionKey(
   return key
 }
 
+/** True when the repo executes on an Orca-provisioned on-demand runtime, whose address and
+ *  filesystem are both replaced on every provision. */
+function isRuntimeOwnedRetirementHost(repo: Repo): boolean {
+  const parsed = parseExecutionHostId(getRepoExecutionHostId(repo))
+  return parsed?.kind === 'ssh' && isRuntimeOwnedSshTargetId(parsed.targetId)
+}
+
 /** Bound so the store's own method keeps its receiver when passed down as a lookup. */
 function sshTargetLookup(store: { getSshTarget?: SshTargetLookup }): SshTargetLookup {
   return (targetId) => store.getSshTarget?.(targetId)
@@ -245,7 +256,16 @@ export async function retireGeneratedWorktreeName(
   store.addRetiredWorktreeName(repo.id, name)
   // Why local too: the repo-id row dies with the project, and the on-disk backfill cannot recover a
   // name whose only surviving history is a Codex rollout file rather than a directory.
-  if (isFolderRepo(repo) || !store.mergeRetiredWorktreeNamesForNamespace) {
+  //
+  // On-demand runtimes are the exception: each provision reaches a discarded filesystem under a
+  // fresh address, so the mirror could never match a later run and would mint a namespace per run —
+  // spending the cap on buckets that can never be read, and evicting the tombstones of the local and
+  // SSH projects that depend on it. The repo-id row still records the name for the live session.
+  if (
+    isFolderRepo(repo) ||
+    !store.mergeRetiredWorktreeNamesForNamespace ||
+    isRuntimeOwnedRetirementHost(repo)
+  ) {
     return
   }
   try {

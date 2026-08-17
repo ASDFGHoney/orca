@@ -334,6 +334,29 @@ describe('worktree name retirement registry', () => {
     ).resolves.toEqual({ exhaustedTiers: 0, names: ['nautilus'] })
   })
 
+  it('does not spend namespace slots on on-demand runtime workspaces', async () => {
+    // Each provision reaches a discarded filesystem under a fresh address, so a mirror written here
+    // could never be read back — it would only consume the cap and evict real projects' tombstones.
+    const store = await createStore()
+    const runtimeId = getRuntimeOwnedSshTargetId('vm-1')
+    store.addSshTarget({
+      ...sshTarget(runtimeId, { host: 'vm-old.example.com' }),
+      owner: { type: 'on-demand-runtime', runtimeId: 'vm-1' }
+    })
+    const repo = { ...REMOTE_REPO, connectionId: runtimeId }
+    store.addRepo(repo)
+    const { retireGeneratedWorktreeName, getRemoteRetirementNamespaceKey } =
+      await import('./worktree-name-retirement')
+    await retireGeneratedWorktreeName(store, repo, store.getSettings(), 'nautilus')
+
+    // The repo-id row still records it for the live session; the shared namespace map does not.
+    expect(store.getRetiredWorktreeNameRegistry(REPO).names).toEqual(['nautilus'])
+    const namespaceKey = getRemoteRetirementNamespaceKey(repo, store.getSettings(), (id) =>
+      store.getSshTarget(id)
+    )!
+    expect(store.getRetiredWorktreeNameRegistryForNamespace(namespaceKey).names).toEqual([])
+  })
+
   it('does not carry retirements forward when an on-demand runtime target is reprovisioned', async () => {
     // Each provision mints a fresh address onto a discarded filesystem, so the old names collide
     // with nothing. Copying per run would also churn the namespace cap out from under real hosts.

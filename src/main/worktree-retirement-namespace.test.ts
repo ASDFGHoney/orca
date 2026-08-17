@@ -139,10 +139,18 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
     expect(namespaces['ssh:new|22|dev:posix:/srv/a'].names).toContain('seahorse-2')
   })
 
-  it('keeps the namespace map within its cap when a copy grows it', () => {
-    const namespaces: Record<string, RetiredNameRegistry> = {}
-    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES; index += 1) {
-      namespaces[`ssh:old|22|dev:posix:/srv/${index}`] = registry('nautilus')
+  it('keeps the namespace map within its cap by evicting bystanders, not the copy itself', () => {
+    // The cap must not turn a copy back into a move: the source buckets are older than the
+    // destinations just appended, so a naive oldest-first trim would delete exactly what the copy
+    // was retaining for a live sibling target.
+    // The source buckets are the OLDEST entries, so an oldest-first trim would take them first —
+    // which is precisely the copy collapsing back into a move.
+    const namespaces: Record<string, RetiredNameRegistry> = {
+      'ssh:old|22|dev:posix:/srv/a': registry('nautilus'),
+      'ssh:old|22|dev:posix:/srv/b': registry('manta')
+    }
+    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES - 2; index += 1) {
+      namespaces[`local:posix:/w/${index}`] = registry('dolphin')
     }
 
     expect(
@@ -152,6 +160,37 @@ describe('migrateRetirementNamespaceHostIdentity', () => {
       })
     ).toBe(true)
     expect(Object.keys(namespaces).length).toBe(MAX_RETIREMENT_NAMESPACES)
+    // Both halves of the copy survive; the two oldest bystanders are what give way.
+    expect(namespaces['ssh:old|22|dev:posix:/srv/a']).toBeDefined()
+    expect(namespaces['ssh:old|22|dev:posix:/srv/b']).toBeDefined()
+    expect(namespaces['ssh:new|22|dev:posix:/srv/a']).toBeDefined()
+    expect(namespaces['ssh:new|22|dev:posix:/srv/b']).toBeDefined()
+    expect(namespaces['local:posix:/w/0']).toBeUndefined()
+    expect(namespaces['local:posix:/w/1']).toBeUndefined()
+    expect(namespaces['local:posix:/w/2']).toBeDefined()
+  })
+
+  it('does not let the cap evict a destination it just merged into', () => {
+    // Assigning to an existing key leaves it in its original slot, so the merged destination is the
+    // OLDEST entry here and an unguarded oldest-first trim would drop the name it just absorbed.
+    const namespaces: Record<string, RetiredNameRegistry> = {
+      'ssh:new|22|dev:posix:/srv/a': registry('seahorse')
+    }
+    for (let index = 0; index < MAX_RETIREMENT_NAMESPACES - 2; index += 1) {
+      namespaces[`local:posix:/w/${index}`] = registry('dolphin')
+    }
+    namespaces['ssh:old|22|dev:posix:/srv/a'] = registry('nautilus')
+    namespaces['ssh:old|22|dev:posix:/srv/b'] = registry('manta')
+
+    expect(
+      migrateRetirementNamespaceHostIdentity(namespaces, {
+        copyFrom: ['ssh:old|22|dev'],
+        to: 'ssh:new|22|dev'
+      })
+    ).toBe(true)
+    const destination = namespaces['ssh:new|22|dev:posix:/srv/a']
+    expect(destination).toBeDefined()
+    expect(destination.names.toSorted()).toEqual(['nautilus', 'seahorse'])
   })
 
   it('leaves an identity that merely shares a prefix with the old one alone', () => {
