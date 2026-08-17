@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import {
+  createStoreWriteChainTelemetry,
   installStoreWriteChainTelemetry,
   STORE_WRITE_CHAIN_CAPTURE_INTERVAL_MS,
   STORE_WRITE_CHAIN_STACK_THRESHOLD
@@ -60,7 +61,7 @@ describe('store write chain telemetry', () => {
     expect(data.depth).toBe(STORE_WRITE_CHAIN_STACK_THRESHOLD)
     const stack = String(data.stack)
     expect(stack).toContain('driverEffectLoopWrite')
-    // The bystander sits ~39 chained hops below the capture; the raised frame
+    // The bystander sits ~24 chained hops below the capture; the raised frame
     // budget reaches the ring, not the bottom of the stack — exactly the
     // attribution React's bystander-blaming throw cannot make.
     expect(stack).not.toContain('innocentBystanderDispatch')
@@ -122,12 +123,14 @@ describe('store write chain telemetry', () => {
   it('resets the depth counter when the app genuinely yields', async () => {
     const record = vi.fn()
     const api = createInstrumentedStore({ record })
+    // Two bursts that only cross the threshold if a missing reset lets them sum.
+    const subThresholdBurst = STORE_WRITE_CHAIN_STACK_THRESHOLD - 5
 
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < subThresholdBurst; i += 1) {
       api.setState({ n: i })
     }
     await yieldMicrotasks()
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < subThresholdBurst; i += 1) {
       api.setState({ n: 100 + i })
     }
     expect(record).not.toHaveBeenCalled()
@@ -177,6 +180,32 @@ describe('store write chain telemetry', () => {
     const [, data] = record.mock.calls[1] as [string, Record<string, unknown>]
     // The skipped burst stays visible as a delta between captured crumbs.
     expect(data.burstsSinceInstall).toBe(3)
+  })
+
+  it('sums a cascade across stores sharing one tracker', () => {
+    const record = vi.fn()
+    const tracker = createStoreWriteChainTelemetry({ record })
+    const storeA = createStore<RingState>(() => ({ n: 0 }))
+    const storeB = createStore<RingState>(() => ({ n: 0 }))
+    tracker.install(storeA)
+    tracker.install(storeB)
+
+    // Alternate writes so each store alone stays well under the threshold —
+    // only the shared counter sees the combined chain cross it.
+    for (let i = 0; i < STORE_WRITE_CHAIN_STACK_THRESHOLD; i += 1) {
+      ;(i % 2 === 0 ? storeA : storeB).setState({ n: i })
+    }
+
+    expect(record).toHaveBeenCalledTimes(1)
+    const [, data] = record.mock.calls[0] as [string, Record<string, unknown>]
+    expect(data.depth).toBe(STORE_WRITE_CHAIN_STACK_THRESHOLD)
+  })
+
+  it('pins the threshold to half the React nested-update limit', () => {
+    // (1+k)·(T−1) ≤ 50 for k non-store commits per store write: T=25 keeps
+    // the capture ahead of the throw for mixed rings up to k=1 (2·24 = 48).
+    // Raising T silently gives that coverage back — see the constant's doc.
+    expect(STORE_WRITE_CHAIN_STACK_THRESHOLD).toBe(25)
   })
 
   it('never blocks or alters writes, even when recording fails', () => {
