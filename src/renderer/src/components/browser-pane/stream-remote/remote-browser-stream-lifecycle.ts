@@ -9,6 +9,10 @@ import { RemoteBrowserStreamRestartScheduler } from './remote-browser-stream-res
 import { RemoteBrowserStreamLiveness } from './remote-browser-stream-liveness'
 import { createRemoteBrowserStreamRestartAttempt } from './remote-browser-stream-restart-attempt'
 import {
+  releaseFailedRemoteBrowserStream,
+  retireRemoteBrowserStreamWork
+} from './remote-browser-stream-retirement'
+import {
   REMOTE_BROWSER_STREAM_OPENING,
   remoteBrowserStreamLostNotice,
   remoteBrowserStreamRetrying,
@@ -232,13 +236,13 @@ export class RemoteBrowserStreamLifecycle {
   // Retires every in-flight guard token and the pending retry, and hands back the subscription the
   // caller is displacing so it can be released at the point the original code released it.
   private retireInFlightWork(): RemoteBrowserStreamSubscription | null {
-    this.tokens.supersedeOperations()
-    this.tokens.supersedeStream()
-    this.tokens.releaseStreamToken()
-    this.liveness.clear()
-    const previous = this.subscription
+    const previous = retireRemoteBrowserStreamWork({
+      tokens: this.tokens,
+      liveness: this.liveness,
+      subscription: this.subscription,
+      cancelRestart: () => this.restartScheduler.cancel()
+    })
     this.subscription = null
-    this.restartScheduler.cancel()
     return previous
   }
 
@@ -301,15 +305,19 @@ export class RemoteBrowserStreamLifecycle {
           ...deps,
           tokens,
           liveness: this.liveness,
-          handleClosed: (restart) => this.handleStreamClosed(token, restart)
+          handleClosed: (restart) => this.handleStreamClosed(token, restart),
+          onSubscriptionStart: (handle) =>
+            this.adoptSubscription({ token, unsubscribe: handle.unsubscribe })
         })
       )
       return { token, unsubscribe: subscription.unsubscribe }
     } catch (error) {
-      if (tokens.isCurrentStreamToken(token)) {
-        this.liveness.clear()
-        tokens.releaseStreamToken()
-      }
+      this.subscription = releaseFailedRemoteBrowserStream(
+        this.subscription,
+        tokens,
+        this.liveness,
+        tokens.isCurrentStreamToken(token)
+      )
       throw error
     }
   }

@@ -6,6 +6,35 @@ export function createRuntimeRpcAbortError(): Error {
   return error
 }
 
+export function waitForRuntimeRpcPromise<TResult>(
+  request: Promise<TResult>,
+  signal?: AbortSignal
+): Promise<TResult> {
+  if (!signal) {
+    return request
+  }
+  if (signal.aborted) {
+    return Promise.reject(createRuntimeRpcAbortError())
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (complete: () => void): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      complete()
+    }
+    const onAbort = (): void => finish(() => reject(createRuntimeRpcAbortError()))
+    signal.addEventListener('abort', onAbort, { once: true })
+    void request.then(
+      (result) => finish(() => resolve(result)),
+      (error) => finish(() => reject(error))
+    )
+  })
+}
+
 export async function callAbortableRuntimeEnvironment(
   environmentId: string,
   method: string,

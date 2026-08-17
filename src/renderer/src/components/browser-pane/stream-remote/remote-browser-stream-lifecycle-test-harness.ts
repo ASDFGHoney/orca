@@ -95,25 +95,6 @@ export function createHarness() {
 
   const subscribeScreencast: RemoteBrowserScreencastSubscribe = async (args, callbacks) => {
     subscribeAttempts += 1
-    if (subscribeGate) {
-      const gate = subscribeGate
-      subscribeGate = null
-      await gate.wait
-    }
-    // Models the host closing the subscription and only then rejecting the request, which is what
-    // src/main/ipc/runtime-environments.ts does on a stale pairing.
-    if (closeBeforeNextSubscribeRejects) {
-      closeBeforeNextSubscribeRejects = false
-      callbacks.onClose?.()
-      throw rpcError(
-        'runtime_unavailable',
-        'Runtime environment pairing changed; refresh and try again'
-      )
-    }
-    const error = subscribeErrorQueue.shift() ?? persistentSubscribeError
-    if (error) {
-      throw error
-    }
     const params = args.params as {
       page: string
       viewportWidth?: number
@@ -150,12 +131,37 @@ export function createHarness() {
       emitTransportError: (code, message) => callbacks.onError?.({ code, message }),
       emitClose: () => callbacks.onClose?.()
     }
-    streams.push(stream)
-    return {
+    let unsubscribed = false
+    const handle = {
       unsubscribe: () => {
-        stream.unsubscribeCount += 1
+        if (!unsubscribed) {
+          unsubscribed = true
+          stream.unsubscribeCount += 1
+        }
       }
     }
+    callbacks.onSubscriptionStart?.(handle)
+    if (subscribeGate) {
+      const gate = subscribeGate
+      subscribeGate = null
+      await gate.wait
+    }
+    // Models the host closing the subscription and only then rejecting the request, which is what
+    // src/main/ipc/runtime-environments.ts does on a stale pairing.
+    if (closeBeforeNextSubscribeRejects) {
+      closeBeforeNextSubscribeRejects = false
+      callbacks.onClose?.()
+      throw rpcError(
+        'runtime_unavailable',
+        'Runtime environment pairing changed; refresh and try again'
+      )
+    }
+    const error = subscribeErrorQueue.shift() ?? persistentSubscribeError
+    if (error) {
+      throw error
+    }
+    streams.push(stream)
+    return handle
   }
 
   let lifecycle!: RemoteBrowserStreamLifecycle

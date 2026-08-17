@@ -61,6 +61,8 @@ describe('RemoteBrowserStreamLifecycle first frame', () => {
     expect(harness.busyLog.at(-1)).toBe(false)
     expect(harness.currentError).not.toBeNull()
     expect(harness.subscribeAttempts).toBe(6)
+    expect(harness.streams).toHaveLength(6)
+    expect(harness.streams.map((stream) => stream.unsubscribeCount)).toEqual([1, 1, 1, 1, 1, 1])
     expect(harness.rpcLog.filter((method) => method === 'browser.eval')).toHaveLength(6)
 
     await vi.advanceTimersByTimeAsync(120_000)

@@ -26,6 +26,7 @@ type RemoteBrowserStreamEventDeps = Pick<
   tokens: RemoteBrowserOperationTokens
   liveness: RemoteBrowserStreamLiveness
   handleClosed: (restart: boolean) => void
+  onSubscriptionStart?: (handle: { unsubscribe: () => void }) => void
 }
 
 export function createRemoteBrowserStreamEvents(
@@ -71,6 +72,7 @@ export function createRemoteBrowserStreamEvents(
       }
       deps.handleFrameBytes(token, bytes)
     },
-    onClosed: () => deps.handleClosed(true)
+    onClosed: () => deps.handleClosed(true),
+    onSubscriptionStart: deps.onSubscriptionStart
   }
 }

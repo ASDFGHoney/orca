@@ -651,6 +651,20 @@ describe('RemoteBrowserStreamLifecycle', () => {
 
     expect(harness.reconnectOffered).toBe(true)
   })
+
+  it('unsubscribes while a stream is still opening', async () => {
+    const harness = createHarness()
+    const pendingSubscribe = harness.holdNextSubscribe()
+    const close = harness.lifecycle.open()
+    await settle()
+
+    close()
+    pendingSubscribe.release()
+    await settle()
+
+    expect(harness.streams).toHaveLength(1)
+    expect(harness.streams[0].unsubscribeCount).toBe(1)
+  })
 })
 
 // Why these exist: deleting every setReconnectAvailable call site left the whole suite green, so the
