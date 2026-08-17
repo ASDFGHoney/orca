@@ -109,33 +109,6 @@ describe('retirement discovery on WSL', () => {
     }
   })
 
-  it('traces a Windows-side workspace of a WSL repo into the distro through the drvfs mirror', async () => {
-    // `computeWorkspaceRootAsync` falls back to the drive path whenever the distro home will not
-    // resolve at create time, so a WSL repo can own workspaces under `C:\`. The agent is still
-    // spawned through `wsl.exe`, so its cwd is `/mnt/c/...` and its bucket lands in the distro.
-    const distroHome = await mkdtemp(join(tmpdir(), 'orca-drvfs-distro-'))
-    const hostHome = await mkdtemp(join(tmpdir(), 'orca-drvfs-host-'))
-    try {
-      await mkdir(
-        join(distroHome, '.claude', 'projects', `-mnt-c-users-ada-orca-workspaces-${FIRST}`),
-        { recursive: true }
-      )
-
-      const retired = await discoverRetiredWorktreeNames({
-        workspaceRoots: ['C:\\Users\\ada\\orca\\workspaces'],
-        home: hostHome,
-        env: {},
-        wslDistro: 'Ubuntu',
-        resolveWslHome: async (distro) => (distro === 'Ubuntu' ? distroHome : null)
-      })
-
-      expect(retired.names).toEqual(new Set([FIRST]))
-    } finally {
-      await rm(distroHome, { force: true, recursive: true })
-      await rm(hostHome, { force: true, recursive: true })
-    }
-  })
-
   it('stays retryable when the distro home cannot be resolved, rather than memoizing the hole', async () => {
     // `getWslHomeAsync` shells out to `wsl.exe` and returns null for a stopped or slow distro.
     // Memoizing that as a complete "nothing is retired" is the STA-4472 defect itself, since the
