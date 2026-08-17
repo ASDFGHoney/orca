@@ -104,12 +104,15 @@ describe('legacy remote browser input', () => {
     document.body.append(textarea)
     textarea.focus()
     const onInput = vi.fn()
+    const onClick = vi.fn()
     textarea.addEventListener('input', onInput)
+    textarea.addEventListener('click', onClick)
 
     window.eval(buildLegacyRemoteBrowserKeypressExpression('Enter')!)
 
     expect(textarea.value).toBe('locked')
     expect(onInput).not.toHaveBeenCalled()
+    expect(onClick).not.toHaveBeenCalled()
   })
 
   it('types into selection-less value inputs without setRangeText', () => {

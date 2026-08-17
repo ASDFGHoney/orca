@@ -159,7 +159,10 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       return finish('focus');
     }
     if (input.key === 'Enter') {
-      if (selectionEditable && target instanceof HTMLTextAreaElement) replaceSelection('\\n', 'insertLineBreak');
+      if (target instanceof HTMLTextAreaElement) {
+        if (selectionEditable) replaceSelection('\\n', 'insertLineBreak');
+        return finish('enter');
+      }
       else if (rich) document.execCommand('insertParagraph');
       else if (target instanceof HTMLInputElement && target.form) target.form.requestSubmit();
       else if (target instanceof HTMLElement) target.click();
