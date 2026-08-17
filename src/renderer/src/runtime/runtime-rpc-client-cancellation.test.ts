@@ -67,4 +67,43 @@ describe('runtime RPC client cancellation', () => {
       'repo.list'
     ])
   })
+
+  it('unsubscribes when cancellation wins before subscription admission resolves', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'status',
+      ok: true,
+      result: {
+        runtimeId: 'remote-runtime',
+        graphStatus: 'ready',
+        runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+        minCompatibleRuntimeClientVersion: MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION
+      },
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+    let resolveSubscription!: (subscription: { unsubscribe: () => void }) => void
+    const unsubscribe = vi.fn()
+    runtimeEnvironmentSubscribe.mockImplementation((_args, callbacks) => {
+      const handle = { unsubscribe }
+      callbacks.onSubscriptionStart?.(handle)
+      return new Promise((resolve) => {
+        resolveSubscription = () => resolve(handle)
+      })
+    })
+    const controller = new AbortController()
+    const request = callRuntimeRpc(
+      { kind: 'environment', environmentId: 'env-pending-abort' },
+      'browser.eval',
+      {},
+      { signal: controller.signal }
+    )
+
+    await vi.waitFor(() => expect(runtimeEnvironmentSubscribe).toHaveBeenCalledOnce())
+    controller.abort()
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    resolveSubscription({ unsubscribe })
+    await Promise.resolve()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
 })

@@ -78,6 +78,9 @@ export async function callAbortableRuntimeEnvironment(
       .subscribe(
         { selector: environmentId, method, params, timeoutMs, expectedEnvironmentPairingRevision },
         {
+          onSubscriptionStart: (subscription) => {
+            handle = subscription
+          },
           onResponse: (response) => finish(() => resolve(response)),
           onError: (error) => finish(() => reject(new Error(error.message))),
           onClose: () =>
@@ -85,8 +88,9 @@ export async function callAbortableRuntimeEnvironment(
         }
       )
       .then((subscription) => {
+        const wasKnownAtStart = handle === subscription
         handle = subscription
-        if (settled) {
+        if (settled && !wasKnownAtStart) {
           subscription.unsubscribe()
         }
       })
