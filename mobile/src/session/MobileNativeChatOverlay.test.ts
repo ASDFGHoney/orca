@@ -31,6 +31,8 @@ type Tick = {
    *  visible row is a window head that lost its image-source run — an inferred
    *  true here would erase an `[Image #n]` the user typed. */
   earlierHistoryConfirmed?: boolean
+  /** The row the host answered about, while it is still on screen. */
+  windowHeadMessageId?: string
 }
 
 function overlayElement(tick: Tick): ReturnType<typeof createElement> {
@@ -40,7 +42,8 @@ function overlayElement(tick: Tick): ReturnType<typeof createElement> {
       messages: tick.messages ?? [],
       status: 'ready',
       hasMore: tick.hasMore ?? false,
-      earlierHistoryConfirmed: tick.earlierHistoryConfirmed ?? false
+      earlierHistoryConfirmed: tick.earlierHistoryConfirmed ?? false,
+      windowHeadMessageId: tick.windowHeadMessageId
     },
     nativeChatAgent: 'claude',
     nativeChatAgentWorking: tick.streamLive ?? false,
@@ -211,6 +214,7 @@ describe('MobileNativeChatOverlay window-head marker rule', () => {
   async function foldedById(earlierHistoryConfirmed: boolean): Promise<Map<string, unknown>> {
     const folded = await foldedFor({
       earlierHistoryConfirmed,
+      windowHeadMessageId: earlierHistoryConfirmed ? 'u-head' : undefined,
       messages: [
         markerTurn('u-head', '[Image #1] hello', 1),
         markerTurn('u-tail', '[Image #2] bye', 2)
@@ -237,6 +241,21 @@ describe('MobileNativeChatOverlay window-head marker rule', () => {
     const folded = await foldedFor({
       hasMore: true,
       earlierHistoryConfirmed: false,
+      messages: [markerTurn('u-head', '[Image #1] hello', 1)]
+    })
+    expect(folded[0]?.blocks).toEqual([{ type: 'text', text: '[Image #1] hello' }])
+  })
+
+  // A live append past the window trims the front, so the row that slides up was
+  // already on screen rendered literally. Re-reading it as a window head would
+  // rewrite a message the user had seen — the ticket's own defect, on mobile's
+  // 40-turn window, during any active agent run.
+  it('does not strip a row that only became the head after a live trim', async () => {
+    const folded = await foldedFor({
+      earlierHistoryConfirmed: true,
+      // The recorded head has been trimmed away; nothing on screen is known to
+      // sit mid-run any more.
+      windowHeadMessageId: 'u-trimmed-away',
       messages: [markerTurn('u-head', '[Image #1] hello', 1)]
     })
     expect(folded[0]?.blocks).toEqual([{ type: 'text', text: '[Image #1] hello' }])

@@ -38,6 +38,10 @@ export type MobileNativeChatSession = {
    *  dropped its oldest row really does have history behind it. Both are facts
    *  about the transcript; neither is a count standing in for one. */
   earlierHistoryConfirmed: boolean
+  /** The oldest row of the window the host answered about, while it is still on
+   *  screen. Only that row may have lost the `[Image: source: …]` turns that
+   *  vouch for its markers; undefined means no row may lose any. */
+  windowHeadMessageId: string | undefined
   /** Whether an older-history page is currently loading. */
   loadingEarlier: boolean
   /** Grow the window to page in older history. */
@@ -109,6 +113,11 @@ export function useMobileNativeChatSession(args: {
   const [error, setError] = useState<string | undefined>(undefined)
   const [hasMore, setHasMore] = useState(false)
   const [earlierHistoryConfirmed, setEarlierHistoryConfirmed] = useState(false)
+  // The oldest row of the window the host answered about. Recorded from reads
+  // only: a live append trims the front locally, and the row that slides up was
+  // already on screen rendered literally, so re-reading it as a window head
+  // would rewrite a message the user had already seen.
+  const [windowHeadMessageId, setWindowHeadMessageId] = useState<string | undefined>(undefined)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const loadingEarlierRef = useRef(false)
   const beforeOffsetRef = useRef<number | null>(null)
@@ -152,6 +161,7 @@ export function useMobileNativeChatSession(args: {
     setError(undefined)
     setHasMore(false)
     setEarlierHistoryConfirmed(false)
+    setWindowHeadMessageId(undefined)
     beforeOffsetRef.current = null
     if (!client || !agent) {
       return
@@ -205,6 +215,7 @@ export function useMobileNativeChatSession(args: {
           beforeOffsetRef.current = applied.beforeOffset ?? null
           setHasMore(reportedHasMore(applied.hasMore) ?? applied.messages.length >= INITIAL_LIMIT)
           setEarlierHistoryConfirmed(reportedHasMore(applied.hasMore) === true)
+          setWindowHeadMessageId(applied.messages[0]?.id)
         }
         setMessages(applied.messages)
         const appliedHasMore = reportedHasMore(applied.hasMore)
@@ -246,6 +257,7 @@ export function useMobileNativeChatSession(args: {
     if (pageLimit <= 0) {
       setHasMore(false)
       setEarlierHistoryConfirmed(false)
+      setWindowHeadMessageId(undefined)
       return
     }
     const beforeOffset = beforeOffsetRef.current
@@ -283,11 +295,13 @@ export function useMobileNativeChatSession(args: {
               (reportedHasMore(result.hasMore) ?? result.messages.length >= pageLimit)
           )
           setEarlierHistoryConfirmed(reportedHasMore(result.hasMore) === true)
+          setWindowHeadMessageId(result.messages[0]?.id)
         } else {
           // Older runtimes ignore the cursor and return the growing tail.
           setList(result.messages)
           setHasMore(result.messages.length >= nextLimit)
           setEarlierHistoryConfirmed(false)
+          setWindowHeadMessageId(undefined)
         }
       } finally {
         // A late page from a prior tab must not unlock the current tab's request.
@@ -319,6 +333,12 @@ export function useMobileNativeChatSession(args: {
     error,
     hasMore,
     earlierHistoryConfirmed,
+    // Undefined once a live trim drops the recorded head: nothing on screen is
+    // then known to sit mid-image-run, so no row may lose its markers.
+    windowHeadMessageId:
+      earlierHistoryConfirmed && visibleMessages.some((m) => m.id === windowHeadMessageId)
+        ? windowHeadMessageId
+        : undefined,
     loadingEarlier,
     loadEarlier
   }

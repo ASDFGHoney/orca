@@ -382,6 +382,32 @@ describe('useMobileNativeChatSession', () => {
     expect(state?.messages.map((entry) => entry.id)).toEqual(['early-b', 'base-c'])
   })
 
+  // The window head is what licenses stripping a row's `[Image #n]` markers, so
+  // it has to name the row the HOST answered about. Live appends trim the front
+  // locally (the window is 40), and the row that slides up was already on screen
+  // rendered literally — naming it would rewrite a message the user had read,
+  // which is this ticket's own defect.
+  it('stops naming a window head once a live append trims the one the host answered about', async () => {
+    const sendRequest = vi.fn()
+    const subscribe: RpcClient['subscribe'] = vi.fn((_method, _params, onData) => {
+      emit = onData
+      return () => {}
+    })
+    await mount({ sendRequest, subscribe } as unknown as RpcClient)
+    const base = Array.from({ length: 40 }, (_unused, n) => message(`base-${n}`))
+    await act(async () =>
+      emit({ type: 'snapshot', messages: base, hasMore: true, beforeOffset: 1 })
+    )
+
+    expect(state?.windowHeadMessageId).toBe('base-0')
+
+    // One ordinary append past the window drops `base-0` off the front.
+    await act(async () => emit({ type: 'appended', messages: [message('live-0')] }))
+
+    expect(state?.messages.some((entry) => entry.id === 'base-0')).toBe(false)
+    expect(state?.windowHeadMessageId).toBeUndefined()
+  })
+
   it('rejects a cursor page invalidated by live trim and retries with a growing tail', async () => {
     let resolveCursorPage: (response: unknown) => void = () => {}
     const sendRequest = vi
