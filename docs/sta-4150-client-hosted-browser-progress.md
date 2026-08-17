@@ -43,8 +43,10 @@ Old clients and callers that omit placement must retain current server-hosted be
   [#14955](https://github.com/stablyai/orca/pull/14955), command authority/reconciliation
   [#14956](https://github.com/stablyai/orca/pull/14956), and desktop activation
   [#14957](https://github.com/stablyai/orca/pull/14957). All remain draft, correctly based in
-  sequence, and locally rebased onto `origin/main@85565a9302`; the preceding implementation-base
-  CI is green and refreshed latest-main CI is pending.
+  sequence. The current local series is rebased onto `origin/main@96b03bab4f`; all 58 patches are
+  identical by `git range-diff`, and the three new upstream commits have no changed-file overlap.
+  The preceding published heads are green: #14953, #14955 pass 43 required checks and #14954,
+  #14956, #14957 pass 46. Refreshed CI is required after the rebased heads are pushed.
 - The initial published landing tip was `df7e7d616b`. Its tree
   (`ccd5255f765c815362c61ece71c92350c210d261`) exactly equals safety ref
   `sta-4150-safety-rebased-validated-cumulative-20260816`. The final non-ledger tip before this
@@ -264,7 +266,8 @@ Current validation is green on the cumulative tree:
   `sta-4150-safety-pre-9c4-windows-ci-rebase-20260816` retain the preceding tips.
 - The Windows package lane previously omitted the real Electron guest mount/retirement fixture; a
   workflow contract was red 1/23 before adding it to the native Windows boundary. The contract and
-  fixture pass 24/24 locally, and refreshed Windows CI is pending. A new release-extracted oracle
+  fixture pass 24/24 locally, and the refreshed Windows package lane passes the real Electron
+  lifecycle fixture. A new release-extracted oracle
   passes 3/3 against published `v1.4.182`: the old schema strips additive placement without changing
   legacy fields, the release lacks both negotiated capabilities, and the current schema preserves
   an old request with placement omitted. The combined browser/terminal skew package passes 8/8.
@@ -292,20 +295,40 @@ Current validation is green on the cumulative tree:
   Lifecycle/cross-platform review found the headed-close, stale-snapshot, and headed graph-pruning
   defects above; all are fixed. Its final post-fix rereview found no remaining proven P0/P1/P2 and
   passed 1,188 focused tests with one intentional skip.
+- A durable opt-in packaged-skew E2E now passes 2/2 four times (9.6, 10.3, 9.5, and 10.3 seconds),
+  including after the latest-main rebase, against installed
+  `v1.4.184-adhoc.20260815121040`. Old packaged client to current host preserves omitted-placement
+  server hosting; current client to old packaged host capability-downgrades to server hosting. In
+  both directions the host owns exactly one guest, the client owns none, and `browser.snapshot`
+  returns `packaged-skew-marker`. The old macOS helper required only shorter isolated `/tmp`
+  profile/socket roots to stay below the platform's Unix-socket path ceiling; the product oracle
+  was unchanged.
+- A separate iPhone 17 Pro / iOS 26.5 Simulator journey ran current mobile code against the same
+  isolated legacy packaged host. Through the real mobile UI it paired, opened the STA-4150
+  workspace, created one Browser tab, and visibly progressed from `about:blank` through loading to
+  `Example Domain` at `https://example.com/`. The legacy host owned the isolated `orca-browser`
+  partition; mobile remained on the server-hosted surface. This is simulator evidence, not a
+  physical-phone claim. The recorded helper, Metro server, packaged host, listener, and simulator
+  were stopped afterward.
+- The Linux package job now mirrors Windows by running the real retained-guest Electron lifecycle
+  fixture under Xvfb before packaging. Its workflow contract passes 23/23 and the fixture passes
+  1/1 locally; actual Ubuntu execution remains pending until the rebased #14956 package job runs.
 
-The cumulative tree is rebased onto latest `origin/main@85565a9302`. The non-ledger tip before this
-update is `18a3c873a1`. The pre-rebase checkpoint and explicit safety refs
-preserve the prior exact validated tree.
+The cumulative local tree is rebased onto `origin/main@96b03bab4f`. Safety refs
+`sta-4150-safety-pre-packaged-linux-rebase-20260816` and
+`sta-4150-safety-pre-96b-packaged-linux-rebase-20260816` preserve the pre-split and pre-main-rebase
+tips. All 58 patches are identical by `git range-diff`, and the three upstream commits have no
+changed-file overlap with the feature.
 Remaining explicit validation gaps are physical Windows Electron ordering, physical Linux Electron
-ordering, physical mobile-client validation, and packaged mixed-release client/server browser
-journeys. Deterministic WSL, SSH, folder-workspace, git-worktree, browserless, mixed-version, and
-package-contract evidence is green.
+ordering, physical mobile-client validation, packaged Windows/Linux skew, and broader live network
+containment beyond the current HTTP/DNS routes. Deterministic WSL, SSH, folder-workspace,
+git-worktree, browserless, mixed-version, packaged-macOS, and package-contract evidence is green.
 
 The remaining ownership work, in execution order, is:
 
 1. Obtain human review for the five green landing PRs without marking them ready or merging here.
-2. Before release, run or explicitly accept the physical Windows/Linux/mobile and packaged
-   mixed-release validation gaps.
+2. Before release, run or explicitly accept the remaining physical Windows/Linux/mobile,
+   packaged Windows/Linux, and broader protocol-containment gaps.
 3. Close superseded development drafts only after reviewers accept the replacement stack; their
    complete mapping is already durable in #14957.
 

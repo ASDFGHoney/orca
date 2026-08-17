@@ -183,10 +183,22 @@ async function readPairingOffer(app: ElectronApplication): Promise<RuntimeDeskto
   })
 }
 
-export async function launchHeadlessPairedRuntimeHost(): Promise<HeadlessPairedRuntimeHost> {
-  const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-headless-paired-'))
+export async function launchHeadlessPairedRuntimeHost(
+  options: {
+    agentBrowserSocketParent?: string
+    executablePath?: string
+    userDataParent?: string
+  } = {}
+): Promise<HeadlessPairedRuntimeHost> {
+  const userDataDir = mkdtempSync(
+    path.join(options.userDataParent ?? os.tmpdir(), 'orca-e2e-headless-paired-')
+  )
+  let agentBrowserSocketDir: string | null = null
   let app: ElectronApplication | undefined
   try {
+    agentBrowserSocketDir = options.agentBrowserSocketParent
+      ? mkdtempSync(path.join(options.agentBrowserSocketParent, 'orca-ab-'))
+      : null
     writeFileSync(
       path.join(userDataDir, 'orca-data.json'),
       `${JSON.stringify(getE2ECompletedOnboardingProfile(), null, 2)}\n`
@@ -203,10 +215,14 @@ export async function launchHeadlessPairedRuntimeHost(): Promise<HeadlessPairedR
       extraEnv: {},
       userDataDir
     })
+    if (agentBrowserSocketDir) {
+      isolation.env.AGENT_BROWSER_SOCKET_DIR = agentBrowserSocketDir
+    }
     const mainPath = path.join(process.cwd(), 'out', 'main', 'index.js')
     app = await electron.launch({
+      ...(options.executablePath ? { executablePath: options.executablePath } : {}),
       args: [
-        ...getOrcaElectronLaunchArgs(mainPath, false),
+        ...(options.executablePath ? [] : getOrcaElectronLaunchArgs(mainPath, false)),
         '--serve',
         '--serve-json',
         '--serve-port',
@@ -230,6 +246,9 @@ export async function launchHeadlessPairedRuntimeHost(): Promise<HeadlessPairedR
         await closeElectronAppForE2E(app)
         await cleanupE2EDaemons(userDataDir)
         rmSync(userDataDir, { recursive: true, force: true })
+        if (agentBrowserSocketDir) {
+          rmSync(agentBrowserSocketDir, { recursive: true, force: true })
+        }
       }
     }
   } catch (error) {
@@ -240,6 +259,9 @@ export async function launchHeadlessPairedRuntimeHost(): Promise<HeadlessPairedR
       await cleanupE2EDaemons(userDataDir)
     } finally {
       rmSync(userDataDir, { recursive: true, force: true })
+      if (agentBrowserSocketDir) {
+        rmSync(agentBrowserSocketDir, { recursive: true, force: true })
+      }
     }
     throw error
   }
