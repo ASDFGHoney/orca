@@ -535,4 +535,38 @@ describe('browserManager', () => {
     vi.advanceTimersByTime(500)
     expect(debuggerAttachMock).toHaveBeenCalledTimes(1)
   })
+
+  it('ignores stale cleanup after a page id is replaced', () => {
+    const firstGuest = {
+      id: 810,
+      isDestroyed: vi.fn(() => false),
+      getType: vi.fn(() => 'webview'),
+      setBackgroundThrottling: guestSetBackgroundThrottlingMock,
+      setWindowOpenHandler: guestSetWindowOpenHandlerMock,
+      on: guestOnMock,
+      off: guestOffMock,
+      openDevTools: guestOpenDevToolsMock
+    }
+    const replacementGuest = { ...firstGuest, id: 811 }
+    webContentsFromIdMock.mockImplementation((id: number) =>
+      id === firstGuest.id ? firstGuest : replacementGuest
+    )
+
+    browserManager.attachGuestPolicies(firstGuest as never)
+    browserManager.registerGuest({
+      browserPageId: 'browser-replaced',
+      webContentsId: firstGuest.id,
+      rendererWebContentsId
+    })
+    browserManager.attachGuestPolicies(replacementGuest as never)
+    browserManager.registerGuest({
+      browserPageId: 'browser-replaced',
+      webContentsId: replacementGuest.id,
+      rendererWebContentsId
+    })
+
+    browserManager.unregisterGuest('browser-replaced', firstGuest.id)
+
+    expect(browserManager.getGuestWebContentsId('browser-replaced')).toBe(replacementGuest.id)
+  })
 })
