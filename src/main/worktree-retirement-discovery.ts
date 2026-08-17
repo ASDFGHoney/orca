@@ -116,8 +116,9 @@ async function claudeProjectsSources(args: {
   home?: string
   env?: NodeJS.ProcessEnv
   resolveWslHome?: (distro: string) => Promise<string | null>
-}): Promise<ClaudeProjectsSource[]> {
+}): Promise<{ sources: ClaudeProjectsSource[]; complete: boolean }> {
   const sources: ClaudeProjectsSource[] = []
+  let complete = true
   const hostParents = encodeParents(args.workspaceRoots)
   if (hostParents.length > 0) {
     sources.push({
@@ -143,9 +144,14 @@ async function claudeProjectsSources(args: {
         projectsDir: join(distroHome, '.claude', 'projects'),
         encodedParents: encodeParents(linuxRoots)
       })
+      continue
     }
+    // Resolving the home shells out to `wsl.exe`, which returns nothing for a stopped or slow
+    // distro. Treating that as "no buckets" would memoize the STA-4472 hole itself: the distro
+    // is exactly where a WSL workspace's history lives, so an unread one must stay retryable.
+    complete = false
   }
-  return sources
+  return { sources, complete }
 }
 
 /** Discovers names already spent for a repo, for the one-time seed of the retirement registry.
@@ -166,7 +172,9 @@ export async function discoverRetiredWorktreeNames(args: {
     leafNames.push(...listing.names)
   }
 
-  for (const source of await claudeProjectsSources(args)) {
+  const bucketSources = await claudeProjectsSources(args)
+  refused ||= !bucketSources.complete
+  for (const source of bucketSources.sources) {
     const listing = await readDirectoryNames(source.projectsDir)
     refused ||= listing.refused
     for (const bucket of listing.names) {

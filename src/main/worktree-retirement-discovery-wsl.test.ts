@@ -109,6 +109,20 @@ describe('retirement discovery on WSL', () => {
     }
   })
 
+  it('stays retryable when the distro home cannot be resolved, rather than memoizing the hole', async () => {
+    // `getWslHomeAsync` shells out to `wsl.exe` and returns null for a stopped or slow distro.
+    // Memoizing that as a complete "nothing is retired" is the STA-4472 defect itself, since the
+    // distro is precisely where a WSL workspace's history lives.
+    const retired = await discoverRetiredWorktreeNames({
+      workspaceRoots: [DISTRO_ROOT],
+      home: '/nonexistent-home',
+      env: {},
+      resolveWslHome: async () => null
+    })
+
+    expect(retired.complete).toBe(false)
+  })
+
   it('keeps a deleted WSL workspace name spent, so the next create cannot reuse its cwd', async () => {
     // Delete/recreate: the workspace directory is gone, but the agent ran inside the distro and its
     // bucket survives there. That bucket is the only remaining evidence the cwd is unsafe.
