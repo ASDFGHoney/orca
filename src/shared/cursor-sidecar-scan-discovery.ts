@@ -82,7 +82,7 @@ export async function discoverCursorSidecarCandidates(args: {
   try {
     rootRealPath = await scanArgs.io.realpath(chatsRoot)
   } catch (error) {
-    rethrowCancel(error)
+    rethrowCancel(error, args.cancellation)
     args.cancellation.throwIfCancelled()
     if (!isMissing(error)) {
       addIssue(args.response, chatsRoot, error)
@@ -125,7 +125,7 @@ async function scopeBuckets(
       })
       variants.forEach((cwd) => cwds.add(cwd))
     } catch (error) {
-      rethrowCancel(error)
+      rethrowCancel(error, args.cancellation)
     }
     args.cancellation.throwIfCancelled()
   }
@@ -164,7 +164,7 @@ async function enumeratedBuckets(
     args.response.truncated.buckets = truncated
     return names.map((name) => ({ name, path: join(chatsRoot, name), scopeCwd: null }))
   } catch (error) {
-    rethrowCancel(error)
+    rethrowCancel(error, args.cancellation)
     if (!isMissing(error)) {
       addIssue(args.response, chatsRoot, error)
     }
@@ -231,7 +231,7 @@ async function inspectSession(
     }
     return { ...session, metaPath, meta, store }
   } catch (error) {
-    rethrowCancel(error)
+    rethrowCancel(error, args.cancellation)
     if (!isMissing(error)) {
       addIssue(args.response, metaPath, error)
     }
@@ -292,7 +292,8 @@ function createDirentCancelChecker(cancellation: CursorSidecarScanCancellation):
   }
 }
 
-function rethrowCancel(error: unknown): void {
+function rethrowCancel(error: unknown, cancellation: CursorSidecarScanCancellation): void {
+  cancellation.throwIfCancelled()
   if (isCursorSidecarScanCancelledError(error)) {
     throw error
   }

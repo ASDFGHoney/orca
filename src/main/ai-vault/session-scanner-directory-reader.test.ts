@@ -72,7 +72,8 @@ describe('walkSessionFiles directory reader', () => {
       truncated: false,
       entriesTruncated: false,
       filesTruncated: false,
-      directoriesRead: 0
+      directoriesRead: 0,
+      direntsRead: 0
     }
 
     const result = await discoverFiles({
@@ -91,7 +92,8 @@ describe('walkSessionFiles directory reader', () => {
       truncated: true,
       entriesTruncated: true,
       filesTruncated: true,
-      directoriesRead: 1
+      directoriesRead: 1,
+      direntsRead: 4
     })
   })
 
@@ -117,7 +119,8 @@ describe('walkSessionFiles directory reader', () => {
       truncated: false,
       entriesTruncated: false,
       filesTruncated: false,
-      directoriesRead: 0
+      directoriesRead: 0,
+      direntsRead: 0
     }
 
     await expect(
@@ -135,5 +138,6 @@ describe('walkSessionFiles directory reader', () => {
     expect(budget.entriesRemaining).toBe(4)
     expect(budget.filesRemaining).toBe(4)
     expect(budget.directoriesRead).toBe(1)
+    expect(budget.direntsRead).toBe(1)
   })
 })

@@ -18,6 +18,7 @@ export type SessionDiscoveryBudget = {
   entriesTruncated: boolean
   filesTruncated: boolean
   directoriesRead: number
+  direntsRead: number
 }
 
 export async function discoverFiles(args: {
@@ -174,6 +175,9 @@ async function readBoundedDirectoryEntries(
     while (true) {
       signal?.throwIfAborted()
       const next = await iterator.next()
+      if (!next.done) {
+        budget.direntsRead += 1
+      }
       signal?.throwIfAborted()
       if (next.done) {
         break

@@ -66,10 +66,7 @@ export async function discoverCursorLegacy(args: {
     cursorCwdEvidenceByPath: evidenceByPath,
     cursorLegacyDiscoveryCounters: {
       directoryReaddir: scopedBudget.directoriesRead + unscopedBudget.directoriesRead,
-      direntsRead:
-        CURSOR_LEGACY_MAX_ENTRIES_EXAMINED * 2 -
-        scopedBudget.entriesRemaining -
-        unscopedBudget.entriesRemaining,
+      direntsRead: scopedBudget.direntsRead + unscopedBudget.direntsRead,
       fileStat:
         CURSOR_LEGACY_MAX_FILES_STAT * 2 -
         scopedBudget.filesRemaining -
@@ -158,7 +155,8 @@ function cursorLegacyBudget(): SessionDiscoveryBudget {
     truncated: false,
     entriesTruncated: false,
     filesTruncated: false,
-    directoriesRead: 0
+    directoriesRead: 0,
+    direntsRead: 0
   }
 }
 

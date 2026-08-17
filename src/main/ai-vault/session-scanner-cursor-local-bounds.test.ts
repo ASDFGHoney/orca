@@ -345,6 +345,42 @@ describe('local Cursor sidecar discovery bounds', () => {
     expect(fileLstat).not.toHaveBeenCalled()
   })
 
+  it('rethrows iterator aborts as cancellation instead of returning an empty scan', async () => {
+    const controller = new AbortController()
+    const iteratorAbort = new Error('directory iterator aborted')
+    const response = emptyScanResponse()
+    const { discoverCursorSidecarCandidates, cursorSidecarScanCancellationFromSignal } =
+      await import('../../shared/cursor-sidecar-scan-discovery')
+
+    await expect(
+      discoverCursorSidecarCandidates({
+        chatsRoot: '/cursor/chats',
+        scopePaths: [],
+        caps: localScanCaps(),
+        response,
+        cancellation: cursorSidecarScanCancellationFromSignal(controller.signal),
+        io: {
+          realpath: async (path) => path,
+          lstat,
+          opendir: async () => ({
+            close: vi.fn(async () => undefined),
+            read: vi.fn(async () => null),
+            [Symbol.asyncIterator]() {
+              return {
+                next: async () => {
+                  controller.abort(iteratorAbort)
+                  throw iteratorAbort
+                }
+              }
+            }
+          })
+        }
+      })
+    ).rejects.toThrow('cursor_sidecar_scan_cancelled')
+
+    expect(response.issues).toEqual([])
+  })
+
   it('skips a sidecar that disappears during metadata inspection', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-cursor-vanished-'))
     tempRoots.push(root)

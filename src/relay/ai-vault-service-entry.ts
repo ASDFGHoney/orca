@@ -1,7 +1,6 @@
-import { LOCAL_EXECUTION_HOST_ID } from '../shared/execution-host'
-import { scanRemoteAiVaultSessions } from '../main/ai-vault/remote-session-scanner'
 import { readAiVaultSessionTitlesFromFiles } from '../main/ai-vault/session-title-file-reader'
 import { createRelayAiVaultFilesystemProvider } from './ai-vault-service-filesystem'
+import { scanRelayAiVaultSessions } from './ai-vault-service-scan'
 import {
   RELAY_AI_VAULT_SERVICE_PROTOCOL,
   isRelayAiVaultServiceRequest,
@@ -46,9 +45,8 @@ async function execute(request: RelayAiVaultServiceRequest): Promise<void> {
       send({ type: 'result', id: request.id, operation: 'titles', value })
       return
     }
-    const value = await scanRemoteAiVaultSessions({
+    const value = await scanRelayAiVaultSessions({
       provider,
-      executionHostId: LOCAL_EXECUTION_HOST_ID,
       remoteHome: init.remoteHome,
       hostPlatform: init.hostPlatform,
       limit: request.params.limit,
