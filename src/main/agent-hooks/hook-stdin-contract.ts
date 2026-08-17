@@ -46,6 +46,16 @@ export function buildWindowsHookEnvironmentGuardLines(): string[] {
   ]
 }
 
-export function buildWindowsHookStdinDrainEpilogue(): string[] {
-  return [`:${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`, WINDOWS_HOOK_STDIN_DRAIN_COMMAND, 'exit /b 0']
+export function buildWindowsHookStdinDrainEpilogue(
+  payloadFileEnvironmentVariable?: string
+): string[] {
+  if (!payloadFileEnvironmentVariable) {
+    return [`:${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`, WINDOWS_HOOK_STDIN_DRAIN_COMMAND, 'exit /b 0']
+  }
+  return [
+    `:${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`,
+    `if defined ${payloadFileEnvironmentVariable} ${WINDOWS_HOOK_STDIN_READER} < "%${payloadFileEnvironmentVariable}%" >nul 2>nul`,
+    `if not defined ${payloadFileEnvironmentVariable} ${WINDOWS_HOOK_STDIN_DRAIN_COMMAND}`,
+    'exit /b 0'
+  ]
 }

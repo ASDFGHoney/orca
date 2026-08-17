@@ -45,8 +45,6 @@ export type HooksConfig = {
 // Why: host-level backstop timeout for status hooks, independent of the curl --max-time and Copilot's timeoutSec (#4633).
 export const MANAGED_HOOK_TIMEOUT_SECONDS = 10
 export const MANAGED_HOOK_TIMEOUT_MILLISECONDS = MANAGED_HOOK_TIMEOUT_SECONDS * 1000
-// Why (#13285): Windows Claude's batch reader can block until stdin EOF outside curl's budget.
-export const WINDOWS_CLAUDE_HOOK_TIMEOUT_SECONDS = 2
 
 // Nested command hook for the Claude-shaped `hooks: [...]` schema (Claude, Codex, Gemini, Droid, Grok, Command Code, Devin).
 export function buildManagedCommandHook(
@@ -182,7 +180,11 @@ export function buildWindowsAgentHookPostCommand(
 
 // Why: PowerShell per-post costs ~300ms startup and mangles UTF-8 via code-page translation; curl.exe (Win10 1803+) avoids both.
 // Why (#13285): same payload@- EOF/host-timeout contract as buildWindowsAgentHookPostCommand.
-export function buildWindowsAgentHookCurlPostCommand(source: AgentHookSource): string {
+export function buildWindowsAgentHookCurlPostCommand(
+  source: AgentHookSource,
+  payloadFileEnvironmentVariable?: string
+): string {
+  const payloadSource = payloadFileEnvironmentVariable ? `%${payloadFileEnvironmentVariable}%` : '-'
   return [
     '"%SystemRoot%\\System32\\curl.exe" -sS -X POST',
     `"http://127.0.0.1:%ORCA_AGENT_HOOK_PORT%/hook/${source}"`,
@@ -195,7 +197,7 @@ export function buildWindowsAgentHookCurlPostCommand(source: AgentHookSource): s
     '--data-urlencode "worktreeId=%ORCA_WORKTREE_ID%"',
     '--data-urlencode "env=%ORCA_AGENT_HOOK_ENV%"',
     '--data-urlencode "version=%ORCA_AGENT_HOOK_VERSION%"',
-    '--data-urlencode "payload@-"',
+    `--data-urlencode "payload@${payloadSource}"`,
     '>nul 2>&1'
   ].join(' ')
 }
