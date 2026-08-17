@@ -46,7 +46,6 @@ import {
   type UseWorkspaceKanbanCardPointerDragParams
 } from './workspace-kanban-pointer-drag-selection'
 
-
 export function useWorkspaceKanbanCardPointerDrag({
   open,
   boardRef,
