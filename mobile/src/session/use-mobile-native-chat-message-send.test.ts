@@ -205,6 +205,16 @@ describe('useMobileNativeChatMessageSend', () => {
     expect(sentArgs().resolvedLaunchDraft).toEqual({ text: DRAFT, createdAt: 1 })
   })
 
+  // Without the image list the origin keys as a markerless text send, so an
+  // `[Image #n]` caption stays literal and the echo can never match its own turn.
+  it('hands the attached images to the send origin', async () => {
+    mount(() => null)
+    await act(async () => {
+      await api!.send('[Image #1] look', ['file:///a.png'])
+    })
+    expect(captureSendOrigin.mock.calls[0]![1]).toEqual(['file:///a.png'])
+  })
+
   it('does not resolve a composer seed from a question-card answer', async () => {
     mount(() => ({ text: DRAFT, createdAt: 1 }))
     await act(async () => {
