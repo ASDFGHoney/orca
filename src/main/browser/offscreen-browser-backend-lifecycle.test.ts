@@ -152,6 +152,37 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     expect(backend.getWebContentsId('page-1')).toBe(2)
   })
 
+  it('waits for unexpected destruction cleanup before replacing a page id', async () => {
+    let finishCleanup: (() => void) | undefined
+    const cleanupBarrier = new Promise<void>((resolve) => {
+      finishCleanup = resolve
+    })
+    const browserManager = {
+      registerOffscreenGuest: vi.fn(),
+      unregisterGuest: vi.fn()
+    }
+    const backend = new OffscreenBrowserBackend(
+      browserManager as never,
+      vi.fn(() => cleanupBarrier)
+    )
+    await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt-1' })
+
+    electronMocks.windows[0].destroy()
+    const recreate = backend.createTab({
+      browserPageId: 'page-1',
+      url: 'about:blank',
+      worktreeId: 'wt-1'
+    })
+    await Promise.resolve()
+    expect(browserManager.registerOffscreenGuest).toHaveBeenCalledTimes(1)
+
+    finishCleanup?.()
+    await recreate
+
+    expect(browserManager.registerOffscreenGuest).toHaveBeenCalledTimes(2)
+    expect(backend.getWebContentsId('page-1')).toBe(2)
+  })
+
   it('contains asynchronous cleanup failures during bulk destruction', async () => {
     const cleanupError = new Error('cleanup failed')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

@@ -80,6 +80,23 @@ describe('legacy remote browser input', () => {
     expect(onInput).toHaveBeenCalledOnce()
   })
 
+  it('does not mutate a readonly input', () => {
+    const input = document.createElement('input')
+    input.value = 'locked'
+    input.readOnly = true
+    document.body.append(input)
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+    const onInput = vi.fn()
+    input.addEventListener('input', onInput)
+
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('x')!)
+    window.eval(buildLegacyRemoteBrowserKeypressExpression('Backspace')!)
+
+    expect(input.value).toBe('locked')
+    expect(onInput).not.toHaveBeenCalled()
+  })
+
   it('types into selection-less value inputs without setRangeText', () => {
     const input = document.createElement('input')
     input.type = 'number'

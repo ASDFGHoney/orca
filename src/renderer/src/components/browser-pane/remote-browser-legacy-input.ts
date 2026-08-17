@@ -74,8 +74,9 @@ export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string
       target.dispatchEvent(new KeyboardEvent('keyup', init));
       return { handled: 'page' };
     }
-    const selectionEditable = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && /^(text|search|tel|url|password)$/i.test(target.type));
-    const valueEditable = target instanceof HTMLInputElement && /^(date|datetime-local|email|month|number|time|week)$/i.test(target.type);
+    const mutableControl = (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && !target.disabled && !target.readOnly;
+    const selectionEditable = mutableControl && (target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && /^(text|search|tel|url|password)$/i.test(target.type)));
+    const valueEditable = mutableControl && target instanceof HTMLInputElement && /^(date|datetime-local|email|month|number|time|week)$/i.test(target.type);
     const editable = selectionEditable || valueEditable;
     const rich = target instanceof HTMLElement && target.isContentEditable;
     const valueSelectionKey = Symbol.for('orca.legacy.value-selection');

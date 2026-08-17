@@ -70,7 +70,9 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       if (this.pagesById.get(browserPageId)?.window === win) {
         this.pagesById.delete(browserPageId)
       }
-      void reportClosed().catch((error) => this.logCleanupFailure(error))
+      void this.trackPendingClose(browserPageId, reportClosed()).catch((error) =>
+        this.logCleanupFailure(error)
+      )
     })
 
     // Why: register the guest and return immediately so the new tab appears
@@ -105,18 +107,11 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       return
     }
     this.pagesById.delete(browserPageId)
-    const cleanup = page.reportClosed()
-    this.pendingCloseById.set(browserPageId, cleanup)
+    const cleanup = this.trackPendingClose(browserPageId, page.reportClosed())
     if (!page.window.isDestroyed()) {
       page.window.destroy()
     }
-    try {
-      await cleanup
-    } finally {
-      if (this.pendingCloseById.get(browserPageId) === cleanup) {
-        this.pendingCloseById.delete(browserPageId)
-      }
-    }
+    await cleanup
   }
 
   getWebContentsId(browserPageId: string): number | null {
@@ -145,6 +140,21 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       }
       return report
     }
+  }
+
+  private trackPendingClose(browserPageId: string, cleanup: Promise<void>): Promise<void> {
+    const existing = this.pendingCloseById.get(browserPageId)
+    if (existing) {
+      return existing
+    }
+    this.pendingCloseById.set(browserPageId, cleanup)
+    const clear = (): void => {
+      if (this.pendingCloseById.get(browserPageId) === cleanup) {
+        this.pendingCloseById.delete(browserPageId)
+      }
+    }
+    void cleanup.then(clear, clear)
+    return cleanup
   }
 
   private logCleanupFailure(error: unknown): void {
