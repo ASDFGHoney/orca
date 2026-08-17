@@ -26,12 +26,17 @@ export type MobileNativeChatSession = {
   error?: string
   /** True when an older page may exist (the last read filled the window). */
   hasMore: boolean
-  /** True only when the HOST said older history exists. `hasMore` falls back to
-   *  a count inference that reports true for a window filled to exactly the
-   *  limit; that is fine for the "load earlier" affordance but not for the
-   *  marker fold, which changes what a message says — a false positive there
-   *  erases an `[Image #n]` the user typed. The window limit here is 40, so the
-   *  exact-fill case is far more reachable than on desktop. */
+  /** True when older history is KNOWN to exist, rather than guessed from a full
+   *  window. `hasMore` falls back to a count inference that reports true for a
+   *  window filled to exactly the limit; that is fine for the "load earlier"
+   *  affordance but not for the marker fold, which changes what a message says —
+   *  a false positive there erases an `[Image #n]` the user typed, and the limit
+   *  here is 40, so an exact fill is far likelier than on desktop.
+   *
+   *  Usually that knowledge is the host's own answer. It is not always: a replay
+   *  that invalidates the cursor synthesizes it, because a bounded window that
+   *  dropped its oldest row really does have history behind it. Both are facts
+   *  about the transcript; neither is a count standing in for one. */
   earlierHistoryConfirmed: boolean
   /** Whether an older-history page is currently loading. */
   loadingEarlier: boolean
