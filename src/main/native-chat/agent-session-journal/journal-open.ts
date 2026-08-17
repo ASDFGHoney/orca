@@ -31,6 +31,9 @@ export type JournalLoad = {
   readOnly: boolean
   /** Set when the surviving prefix is unusable and the caller must roll the epoch. */
   corrupt: boolean
+  /** Log lines skipped because they failed to parse (schema-version rows are
+   *  `readOnly`, never counted here). The store discloses these in the timeline. */
+  malformedRows: number
   sizeBytes: number
   /** Raw unreadable suffix retained for quarantine instead of deletion. */
   quarantineRemainder?: string
@@ -88,6 +91,7 @@ export async function loadJournal(
     compactedThrough,
     readOnly: log.unreadable || (snapshot?.v ?? 0) > AGENT_SESSION_JOURNAL_SCHEMA_VERSION,
     corrupt,
+    malformedRows: log.malformed,
     sizeBytes: tailRows.reduce((total, row) => total + journalRowByteLength(row), 0),
     quarantineRemainder
   }
@@ -101,6 +105,7 @@ function emptyReadOnlyLoad(sessionId: string): JournalLoad {
     compactedThrough: 0,
     readOnly: true,
     corrupt: false,
+    malformedRows: 0,
     sizeBytes: 0
   }
 }

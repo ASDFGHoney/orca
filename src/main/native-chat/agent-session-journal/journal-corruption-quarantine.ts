@@ -38,3 +38,20 @@ export async function quarantineUnreadableSchema(journalDir: string): Promise<vo
     await quarantineJournalRemainder(journalDir, preserved)
   }
 }
+
+/** The disclosure row for lines that failed to parse. Skipped lines are lost
+ *  rows; counting them silently is the drop this exists to prevent. */
+export function malformedRowsDisclosure(count: number): {
+  identity: { provider: 'orca'; clientMessageId: string }
+  body: { kind: 'status'; text: string }
+} {
+  const plural = count === 1 ? '' : 's'
+  return {
+    // One stable identity, so a reopen upserts the same row instead of adding one.
+    identity: { provider: 'orca', clientMessageId: 'journal-malformed-lines' },
+    body: {
+      kind: 'status',
+      text: `${count} journal line${plural} could not be read and ${count === 1 ? 'was' : 'were'} skipped`
+    }
+  }
+}

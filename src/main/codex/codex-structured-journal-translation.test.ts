@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalItemBody,
   AgentJournalItemIdentity
@@ -6,6 +6,7 @@ import type {
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
 import { projectStructuredItemsToNativeChat } from '../../shared/structured-agent-session-projection'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { CodexTurnOrdinals } from './codex-structured-item-translation'
 import {
   createCodexJournalTranslator,
   MAX_CODEX_GENERIC_ROWS_PER_TURN
@@ -460,6 +461,18 @@ describe('codex journal translation', () => {
     )
 
     expect(tap.publishes()).toBe(1)
+  })
+
+  it('releases a turn ordinal map when the turn completes', () => {
+    const spy = vi.spyOn(CodexTurnOrdinals.prototype, 'forgetTurn')
+    try {
+      const { translator } = translatorWith()
+      translator.handle(TURN_STARTED)
+      translator.handle(notification('turn/completed', { turn: { id: TURN_ID } }))
+      expect(spy).toHaveBeenCalledWith(THREAD_ID, TURN_ID)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('journals malformed item events but never malformed deltas', () => {

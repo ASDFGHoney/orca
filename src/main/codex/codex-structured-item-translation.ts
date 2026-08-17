@@ -54,23 +54,33 @@ export function readCodexThreadItem(value: unknown): CodexThreadItem | null {
  * than no key, because it would look reconcilable and reconcile wrongly.
  */
 export class CodexTurnOrdinals {
-  private readonly turns = new Map<string, Map<string, number>>()
+  private readonly turns = new Map<string, { assigned: Map<string, number>; next: number }>()
 
   ordinalFor(threadId: string, turnId: string, codexItemId: string): number {
     const turnKey = `${encodeURIComponent(threadId)}:${encodeURIComponent(turnId)}`
-    const assigned = this.turns.get(turnKey) ?? new Map<string, number>()
-    this.turns.set(turnKey, assigned)
-    const existing = assigned.get(codexItemId)
+    let turn = this.turns.get(turnKey)
+    if (!turn) {
+      turn = { assigned: new Map(), next: 0 }
+      this.turns.set(turnKey, turn)
+    }
+    const existing = turn.assigned.get(codexItemId)
     if (existing !== undefined) {
       return existing
     }
-    const ordinal = assigned.size
-    assigned.set(codexItemId, ordinal)
+    const ordinal = turn.next
+    turn.assigned.set(codexItemId, ordinal)
+    turn.next += 1
     return ordinal
   }
 
-  forgetTurn(turnId: string): void {
-    this.turns.delete(turnId)
+  /** Releases a finished turn's per-item map while keeping its counter, so a
+   *  straggler frame can never be assigned an ordinal the turn already used —
+   *  a reused slot would upsert another item's journal row. */
+  forgetTurn(threadId: string, turnId: string): void {
+    const turn = this.turns.get(`${encodeURIComponent(threadId)}:${encodeURIComponent(turnId)}`)
+    if (turn) {
+      turn.assigned = new Map()
+    }
   }
 }
 
