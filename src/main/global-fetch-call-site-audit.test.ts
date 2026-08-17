@@ -31,6 +31,7 @@ const AUDITED_GLOBAL_FETCH_LINES = new Map<string, number>([
   // call this process makes
   ['main/amp/agent-status-plugin-source.ts', 1],
   ['main/browser/browser-route-persisted-worker-fixture.ts', 3],
+  ['main/browser/browser-route-tcp-egress-fixture.ts', 1],
   ['main/opencode/hook-service.ts', 1],
   ['main/pi/agent-status-extension-source.ts', 1],
   // local identifiers named `fetch` (git fetch), not HTTP

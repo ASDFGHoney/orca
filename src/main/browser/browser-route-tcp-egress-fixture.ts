@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { lookup } from 'node:dns/promises'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import type { Server, Socket } from 'node:net'
@@ -10,11 +11,12 @@ import {
   LOCAL_HTTPS_TEST_PRIVATE_KEY
 } from './browser-local-https-test-certificate'
 import { runBrowserRouteTcpEgressElectron } from './browser-route-tcp-egress-electron-process'
+import { cleanupBrowserRouteTcpEgressFixture } from './browser-route-tcp-egress-fixture-cleanup'
 import { createBrowserRouteTcpEgressSocksRecorder } from './browser-route-tcp-egress-socks-recorder'
 
 const REMOTE_HOST = 'remote-browser.test'
 
-type TargetObservation = Readonly<{ path: string; remotePort: number }>
+type TargetObservation = Readonly<{ path: string; remotePort: number; routed: boolean }>
 
 export type BrowserRouteTcpEgressProbeResult = {
   resolvedProxy: string
@@ -31,13 +33,16 @@ export async function runBrowserRouteTcpEgressProbe(
   const routedSourcePorts = new Set<number>()
   const socksHosts = new Set<string>()
   const sockets = new Set<Socket>()
-  const http = createHttpTarget(observations)
-  const https = createHttpsTarget(observations)
-  const webSocket = attachWebSocketTarget(http, observations)
+  const http = createHttpTarget(observations, routedSourcePorts)
+  const https = createHttpsTarget(observations, routedSourcePorts)
+  const webSocket = attachWebSocketTarget(http, observations, routedSourcePorts)
   let socks: Server | null = null
   let result: BrowserRouteTcpEgressProbeResult | null = null
   let primaryFailure: unknown = null
   try {
+    if (protectedSession) {
+      await assertLocallyUnresolvable(REMOTE_HOST)
+    }
     const [httpPort, httpsPort] = await Promise.all([listen(http, sockets), listen(https, sockets)])
     socks = createBrowserRouteTcpEgressSocksRecorder(
       new Set([httpPort, httpsPort]),
@@ -54,12 +59,17 @@ export async function runBrowserRouteTcpEgressProbe(
       JSON.stringify({ httpPort, httpsPort, protectedSession, resultPath, socksPort })
     )
     const resolvedProxy = await runBrowserRouteTcpEgressElectron(root, mainPath)
-    const classified = classifyObservations(observations, routedSourcePorts)
+    const classified = classifyObservations(observations)
     result = { resolvedProxy, ...classified, socksHosts: [...socksHosts].sort() }
   } catch (error) {
     primaryFailure = error
   }
-  const cleanupFailures = await cleanup(root, [socks, https, http], webSocket, sockets)
+  const cleanupFailures = await cleanupBrowserRouteTcpEgressFixture(
+    root,
+    [socks, https, http],
+    webSocket,
+    sockets
+  )
   if (primaryFailure || cleanupFailures.length > 0) {
     throw new AggregateError(
       [...(primaryFailure ? [primaryFailure] : []), ...cleanupFailures],
@@ -70,6 +80,15 @@ export async function runBrowserRouteTcpEgressProbe(
     throw new Error('browser_route_tcp_probe_result_missing')
   }
   return result
+}
+
+async function assertLocallyUnresolvable(host: string): Promise<void> {
+  try {
+    await lookup(host)
+  } catch {
+    return
+  }
+  throw new Error(`browser_route_tcp_probe_host_resolved_locally:${host}`)
 }
 
 function electronMain(): string {
@@ -99,14 +118,16 @@ async function probe() {
   const partition = 'persist:tcp-egress-' + config.protectedSession + '-' + Date.now()
   const routeSession = session.fromPartition(partition, { cache: false })
   routeSession.setCertificateVerifyProc((_request, callback) => callback(0))
-  if (config.protectedSession) {
-    await routeSession.setProxy({
-      mode: 'fixed_servers',
-      proxyRules: 'socks5://127.0.0.1:' + config.socksPort,
-      proxyBypassRules: '<-loopback>'
-    })
-    await routeSession.closeAllConnections()
-  }
+  await routeSession.setProxy(
+    config.protectedSession
+      ? {
+          mode: 'fixed_servers',
+          proxyRules: 'socks5://127.0.0.1:' + config.socksPort,
+          proxyBypassRules: '<-loopback>'
+        }
+      : { mode: 'direct' }
+  )
+  await routeSession.closeAllConnections()
   const resolvedProxy = await routeSession.resolveProxy('http://' + config.host + '/')
   const window = new BrowserWindow({
     show: false,
@@ -144,9 +165,12 @@ run().catch((error) => {
 `
 }
 
-function createHttpTarget(observations: TargetObservation[]): HttpServer {
+function createHttpTarget(
+  observations: TargetObservation[],
+  routedSourcePorts: Set<number>
+): HttpServer {
   return createHttpServer((request, response) => {
-    observeRequest(observations, request.url, request.socket.remotePort)
+    observeRequest(observations, request.url, request.socket.remotePort, routedSourcePorts)
     if (request.url === '/redirect') {
       response.writeHead(302, { Location: '/page' })
       response.end()
@@ -175,11 +199,14 @@ function createHttpTarget(observations: TargetObservation[]): HttpServer {
   })
 }
 
-function createHttpsTarget(observations: TargetObservation[]): HttpServer {
+function createHttpsTarget(
+  observations: TargetObservation[],
+  routedSourcePorts: Set<number>
+): HttpServer {
   return createHttpsServer(
     { key: LOCAL_HTTPS_TEST_PRIVATE_KEY, cert: LOCAL_HTTPS_TEST_CERTIFICATE },
     (request, response) => {
-      observeRequest(observations, request.url, request.socket.remotePort)
+      observeRequest(observations, request.url, request.socket.remotePort, routedSourcePorts)
       response.writeHead(request.url === '/secure' ? 200 : 404, {
         'Access-Control-Allow-Origin': '*',
         'Content-Type': 'text/plain'
@@ -191,11 +218,12 @@ function createHttpsTarget(observations: TargetObservation[]): HttpServer {
 
 function attachWebSocketTarget(
   server: HttpServer,
-  observations: TargetObservation[]
+  observations: TargetObservation[],
+  routedSourcePorts: Set<number>
 ): WebSocketServer {
   const webSocket = new WebSocketServer({ noServer: true })
   server.on('upgrade', (request, socket, head) => {
-    observeRequest(observations, request.url, request.socket.remotePort)
+    observeRequest(observations, request.url, request.socket.remotePort, routedSourcePorts)
     if (request.url !== '/socket') {
       socket.destroy()
       return
@@ -208,19 +236,24 @@ function attachWebSocketTarget(
 function observeRequest(
   observations: TargetObservation[],
   path: string | undefined,
-  remotePort: number | undefined
+  remotePort: number | undefined,
+  routedSourcePorts: Set<number>
 ): void {
-  observations.push({ path: path ?? '', remotePort: remotePort ?? -1 })
+  const sourcePort = remotePort ?? -1
+  observations.push({
+    path: path ?? '',
+    remotePort: sourcePort,
+    routed: routedSourcePorts.has(sourcePort)
+  })
 }
 
 function classifyObservations(
-  observations: TargetObservation[],
-  routedSourcePorts: Set<number>
+  observations: TargetObservation[]
 ): Pick<BrowserRouteTcpEgressProbeResult, 'directPaths' | 'routedPaths'> {
   const directPaths = new Set<string>()
   const routedPaths = new Set<string>()
   for (const observation of observations) {
-    const target = routedSourcePorts.has(observation.remotePort) ? routedPaths : directPaths
+    const target = observation.routed ? routedPaths : directPaths
     target.add(observation.path)
   }
   return { directPaths: [...directPaths].sort(), routedPaths: [...routedPaths].sort() }
@@ -246,40 +279,4 @@ function trackSocket(socket: Socket, sockets: Set<Socket>): void {
   sockets.add(socket)
   socket.on('error', () => socket.destroy())
   socket.once('close', () => sockets.delete(socket))
-}
-
-async function cleanup(
-  root: string,
-  servers: (Server | HttpServer | null)[],
-  webSocket: WebSocketServer,
-  sockets: Set<Socket>
-): Promise<unknown[]> {
-  const failures: unknown[] = []
-  for (const client of webSocket.clients) {
-    client.terminate()
-  }
-  try {
-    await new Promise<void>((resolve) => webSocket.close(() => resolve()))
-  } catch (error) {
-    failures.push(error)
-  }
-  for (const socket of sockets) {
-    socket.destroy()
-  }
-  for (const server of servers) {
-    if (!server?.listening) {
-      continue
-    }
-    try {
-      await new Promise<void>((resolve) => server.close(() => resolve()))
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  try {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-  } catch (error) {
-    failures.push(error)
-  }
-  return failures
 }
