@@ -2184,8 +2184,10 @@ const api = {
     list: (): Promise<unknown> => ipcRenderer.invoke('codexAccounts:list'),
     add: (args?: { runtime?: 'host' | 'wsl'; wslDistro?: string | null }): Promise<unknown> =>
       ipcRenderer.invoke('codexAccounts:add', args),
-    reauthenticate: (args: { accountId: string }): Promise<unknown> =>
-      ipcRenderer.invoke('codexAccounts:reauthenticate', args),
+    reauthenticate: (args: {
+      accountId: string
+      activateIfSelectionWasEmpty?: boolean
+    }): Promise<unknown> => ipcRenderer.invoke('codexAccounts:reauthenticate', args),
     remove: (args: { accountId: string }): Promise<unknown> =>
       ipcRenderer.invoke('codexAccounts:remove', args),
     select: (args: {
@@ -4882,6 +4884,8 @@ const api = {
       | {
           available: true
           qrDataUrl: string | null
+          /** Natural bitmap width and height in pixels. */
+          qrSize: number | null
           qrError?: 'encoding_failed'
           pairingUrl: string
           /** Null when no direct address was advertised — the QR pairs over Relay alone. */

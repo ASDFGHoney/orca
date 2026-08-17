@@ -2646,7 +2646,7 @@
               "346d409ab2": "Elige agente",
               "0adba8fa0c": "Agente",
               "ec8f081919": "Acción",
-              "ed04233b3e": "Guarda comandos de terminal o prompts de agente para acceso rápido.",
+              "ed04233b3e": "Los elementos guardados aparecen en el menú de la barra de pestañas para ejecutarlos con un clic.",
               "ca414324ee": "Texto de comando",
               "dc921c17ee": "Prompt",
               "5b3f634a55": "Agregar comando rápido",
@@ -3276,7 +3276,9 @@
             "antigravityUsageDetails": "Abrir detalles de uso de Antigravity",
             "grokUsageAria": "Abrir detalles de uso de Grok",
             "grokUsageMenu": "Uso de Grok",
-            "floatingTerminalNewActivity": "{{label}}, nueva actividad"
+            "floatingTerminalNewActivity": "{{label}}, nueva actividad",
+            "codexSignInSuccess": "Sesión iniciada en Codex",
+            "codexSignInError": "No se pudo iniciar sesión en Codex. Inténtalo de nuevo."
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "Conectar una cuenta",
@@ -5338,6 +5340,7 @@
           "codexSystemDefaultNeedsSignIn": "No se encontró ningún inicio de sesión de Codex para {{value0}}.",
           "codexConfigSyncMissingSource": "Codex is still using the settings it last synced because {{value0}} is missing. Restore that file to resume syncing.",
           "codexConfigSyncBlankSource": "Codex is still using the settings it last synced because {{value0}} is empty. That is expected while a synced folder finishes downloading.",
+          "codexConfigSyncManagedHomeUnavailable": "Orca no pudo leer los archivos de Codex de esta cuenta en este momento, por lo que es posible que la configuración no se esté sincronizando. Normalmente se resuelve solo: un antivirus o una herramienta de copia de seguridad puede bloquearlos brevemente.",
           "codexConfigSyncUnreadableSource": "Codex is still using the settings it last synced because {{value0}} could not be read. Check that file's permissions."
         },
         "AdvancedPane": {

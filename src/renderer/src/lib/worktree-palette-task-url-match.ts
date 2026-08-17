@@ -22,7 +22,8 @@ import {
   type GitLabIssueOrMRLink
 } from './worktree-palette-gitlab-url-match'
 import { isWorktreePaletteQueryTooLarge } from './worktree-palette-query-bounds'
-import type { PaletteSearchResult, PaletteSupportingText } from './worktree-palette-search'
+import { buildWorktreePaletteTaskUrlResult } from './worktree-palette-task-url-result'
+import type { PaletteSearchResult } from './worktree-palette-search'
 
 export type CmdJTaskSourceUrl =
   | { provider: 'github'; link: GitHubIssueOrPRLink }
@@ -194,29 +195,6 @@ export function getCmdJTaskUrlCreatePreview(
   }
 }
 
-function supportingText(
-  labelKind: PaletteSupportingText['labelKind'],
-  text: string
-): PaletteSupportingText {
-  return { labelKind, text, matchRange: { start: 0, end: text.length } }
-}
-
-function result(
-  worktree: Pick<Worktree, 'id' | 'hostId'>,
-  matchedField: PaletteSearchResult['matchedField'],
-  text: PaletteSupportingText
-): PaletteSearchResult {
-  return {
-    worktreeId: worktree.id,
-    ...(worktree.hostId ? { worktreeHostId: worktree.hostId } : {}),
-    matchedField,
-    displayNameRange: null,
-    branchRange: null,
-    repoRange: null,
-    supportingText: text
-  }
-}
-
 function worktreeMatchesGitHubUrl(
   worktree: Worktree,
   link: GitHubIssueOrPRLink,
@@ -304,36 +282,38 @@ export function matchWorktreePaletteTaskUrl(args: {
     if (!worktreeMatchesGitHubUrl(worktree, intent.link, repo, review)) {
       return null
     }
-    return result(
-      worktree,
-      intent.link.type === 'pr' ? 'pr' : 'issue',
-      supportingText(
-        intent.link.type === 'pr' ? 'pr' : 'issue',
-        `${intent.link.type === 'pr' ? 'PR' : 'Issue'} #${intent.link.number}`
-      )
-    )
+    return buildWorktreePaletteTaskUrlResult({
+      worktreeId: worktree.id,
+      labelKind: intent.link.type === 'pr' ? 'pr' : 'issue',
+      text: `${intent.link.type === 'pr' ? 'PR' : 'Issue'} #${intent.link.number}`
+    })
   }
   if (intent.provider === 'linear') {
     if (!worktreeMatchesLinearUrl(worktree, intent.intent)) {
       return null
     }
-    return result(worktree, 'issue', supportingText('issue', intent.intent.identifier))
+    return buildWorktreePaletteTaskUrlResult({
+      worktreeId: worktree.id,
+      labelKind: 'issue',
+      text: intent.intent.identifier
+    })
   }
   if (intent.provider === 'gitlab') {
     if (!worktreeMatchesGitLabUrl(worktree, intent.link, repo, review)) {
       return null
     }
-    return result(
-      worktree,
-      intent.link.type === 'mr' ? 'pr' : 'issue',
-      supportingText(
-        intent.link.type === 'mr' ? 'mr' : 'issue',
-        `${intent.link.type === 'mr' ? 'MR' : 'Issue'} #${intent.link.number}`
-      )
-    )
+    return buildWorktreePaletteTaskUrlResult({
+      worktreeId: worktree.id,
+      labelKind: intent.link.type === 'mr' ? 'mr' : 'issue',
+      text: `${intent.link.type === 'mr' ? 'MR' : 'Issue'} #${intent.link.number}`
+    })
   }
   if (!worktreeMatchesJiraUrl(worktree, intent.parsed)) {
     return null
   }
-  return result(worktree, 'issue', supportingText('issue', intent.parsed.issueKey))
+  return buildWorktreePaletteTaskUrlResult({
+    worktreeId: worktree.id,
+    labelKind: 'issue',
+    text: intent.parsed.issueKey
+  })
 }
