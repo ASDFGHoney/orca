@@ -107,8 +107,19 @@ function missing(): Error {
   return Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
 }
 
+// Complete: UNC readdir results pass through the child dispatcher's dirent
+// serializer, which reads every kind flag.
 function dirent(name: string) {
-  return { name, isFile: () => true }
+  return {
+    name,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+    isDirectory: () => false,
+    isFIFO: () => false,
+    isFile: () => true,
+    isSocket: () => false,
+    isSymbolicLink: () => false
+  }
 }
 
 function candidate(agent: SessionFileCandidate['agent'], path: string): SessionFileCandidate {

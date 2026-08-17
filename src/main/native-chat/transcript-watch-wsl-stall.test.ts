@@ -82,7 +82,13 @@ const EMPTY_STATS = { size: 0, mtimeMs: 1, ctimeMs: 1, ino: 1, dev: 1, mtime: ne
 describe('native chat transcript subscription with a stalled install stat', () => {
   it('keeps watching and emits exactly one retryable snapshot, then the real one', async () => {
     mocks.resolve.mockResolvedValue(UNC_PATH)
-    mocks.stat.mockImplementationOnce(stalls).mockResolvedValue(EMPTY_STATS)
+    // Every stat stalls until the distro "wakes": the first-strike quarantine
+    // lifts after WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS, so a retry probe
+    // is admitted mid-test and must find the mount still hung.
+    const pendingStats: ((stats: typeof EMPTY_STATS) => void)[] = []
+    mocks.stat.mockImplementation(
+      () => new Promise((resolve) => pendingStats.push(resolve as never))
+    )
     const snapshots: Snapshot[] = []
 
     // Not awaited yet: the setup install is itself blocked on the stalled stat.
@@ -99,7 +105,10 @@ describe('native chat transcript subscription with a stalled install stat', () =
     expect(snapshots).toHaveLength(1)
 
     // The distro wakes: the same subscription still delivers a real snapshot.
-    releaseStall?.()
+    mocks.stat.mockResolvedValue(EMPTY_STATS)
+    for (const release of pendingStats.splice(0)) {
+      release(EMPTY_STATS)
+    }
     await vi.advanceTimersByTimeAsync(500)
 
     expect(snapshots.length).toBeGreaterThan(1)

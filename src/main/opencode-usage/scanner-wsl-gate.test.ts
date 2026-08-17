@@ -36,8 +36,19 @@ function stalls<T>(): Promise<T> {
   })
 }
 
+// Complete: UNC readdir results pass through the child dispatcher's dirent
+// serializer, which reads every kind flag.
 function dirent(name: string) {
-  return { name, isFile: () => true }
+  return {
+    name,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+    isDirectory: () => false,
+    isFIFO: () => false,
+    isFile: () => true,
+    isSocket: () => false,
+    isSymbolicLink: () => false
+  }
 }
 
 // The point of the gate: an ungated syscall on a stalled 9P mount never returns,

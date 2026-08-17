@@ -5,6 +5,7 @@ import {
   WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS,
   WSL_TRANSCRIPT_FS_MAX_PENDING_TASKS,
   WSL_TRANSCRIPT_FS_MAX_WAITERS_PER_TASK,
+  WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
   WslTranscriptFsError
 } from './wsl-transcript-fs-gate'
@@ -434,6 +435,55 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
+  it('lifts a first-strike quarantine quickly and escalates on repeat stalls', async () => {
+    // performance.now drives the quarantine clock, so it must be faked too.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+    const path = '\\\\wsl.localhost\\Ubuntu\\cold-start'
+    const stallOnce = (): Promise<string> =>
+      runWslTranscriptFsTask(
+        { operation: 'open', path, priority: 'exact', dedupe: false },
+        (signal) =>
+          new Promise<string>((_resolve, reject) =>
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          )
+      )
+    try {
+      const first = stallOnce()
+      const firstRejected = expect(first).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
+      await firstRejected
+      await expect(run(path, 'exact', async () => 'early')).rejects.toMatchObject({
+        code: 'unavailable'
+      })
+
+      // A cold-booted distro recovers here: admitted again after the base window.
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
+      const second = stallOnce()
+      const secondRejected = expect(second).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
+      await secondRejected
+
+      // Second strike doubles the back-off: still blocked after one base window.
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
+      await expect(run(path, 'exact', async () => 'still-blocked')).rejects.toMatchObject({
+        code: 'unavailable'
+      })
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
+      await expect(run(path, 'exact', async () => 'recovered')).resolves.toBe('recovered')
+
+      // The success reset the strikes: the next stall quarantines for the base
+      // window again instead of continuing the escalation.
+      const third = stallOnce()
+      const thirdRejected = expect(third).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
+      await thirdRejected
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
+      await expect(run(path, 'exact', async () => 'reset')).resolves.toBe('reset')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('lets abandoned running work finish instead of aborting its process', async () => {
     const work = deferred<string>()
     const controller = new AbortController()
@@ -588,7 +638,7 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
-  it('drains queued work on an expired route without starting it', async () => {
+  it('fails queued same-route work fast when the deadline quarantines it', async () => {
     vi.useFakeTimers()
     const stalled = deferred<string>()
     const queuedTask = vi.fn(async () => 'queued')
@@ -596,14 +646,15 @@ describe('WSL transcript filesystem task scheduling', () => {
       const stuck = run('\\\\wsl.localhost\\Ubuntu\\trap-hung', 'exact', () => stalled.promise)
       const stuckRejected = expect(stuck).rejects.toMatchObject({ code: 'timeout' })
       await vi.advanceTimersByTimeAsync(5_000)
-      // Queued behind the same route before the hang is detected.
+      // Queued behind the same route before the hang is detected. Left queued
+      // it would strand a full waiter deadline; a sequential multi-file scan
+      // would then pay one deadline per file.
       const queuedPath = '\\\\wsl.localhost\\Ubuntu\\trap-queued'
       const queued = run(queuedPath, 'exact', queuedTask)
-      const queuedRejected = expect(queued).rejects.toMatchObject({ code: 'timeout' })
+      const queuedRejected = expect(queued).rejects.toMatchObject({ code: 'unavailable' })
 
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS - 5_000)
       await stuckRejected
-      await vi.advanceTimersByTimeAsync(5_000)
       await queuedRejected
       expect(queuedTask).not.toHaveBeenCalled()
     } finally {

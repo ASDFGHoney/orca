@@ -2,10 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as NodeFsModule from 'node:fs'
 import type * as NodeFsPromisesModule from 'node:fs/promises'
 import type * as GateModule from './wsl-transcript-fs-gate'
-import type * as ProcessDispatchModule from './wsl-transcript-fs-process-dispatch'
 
 const UNC_PATH = '\\\\wsl.localhost\\Ubuntu\\home\\ada\\.codex\\sessions\\a.jsonl'
-const OTHER_DISTRO_UNC_PATH = '\\\\wsl.localhost\\Debian\\home\\ada\\.codex\\sessions\\a.jsonl'
 const LEGACY_UNC_PATH = '\\\\wsl$\\Ubuntu\\home\\ada\\.codex\\sessions\\a.jsonl'
 const WINDOWS_PATH = 'C:\\Users\\ada\\.codex\\sessions\\a.jsonl'
 const POSIX_PATH = '/home/ada/.codex/sessions/a.jsonl'
@@ -17,8 +15,7 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   open: vi.fn(),
   createReadStream: vi.fn(),
-  runTask: vi.fn(),
-  runProcess: vi.fn()
+  runTask: vi.fn()
 }))
 
 vi.mock('node:fs', async (importOriginal) => ({
@@ -40,11 +37,6 @@ vi.mock('./wsl-transcript-fs-gate', async (importOriginal) => {
   mocks.runTask.mockImplementation(original.runWslTranscriptFsTask)
   return { ...original, runWslTranscriptFsTask: mocks.runTask }
 })
-
-vi.mock('./wsl-transcript-fs-process-dispatch', async (importOriginal) => ({
-  ...(await importOriginal<typeof ProcessDispatchModule>()),
-  runWslTranscriptFsProcess: mocks.runProcess
-}))
 
 import {
   closeTranscriptHandle,
@@ -76,35 +68,8 @@ beforeEach(() => {
   // runTask keeps the real gate implementation installed by the mock factory;
   // only its call log is cleared.
   mocks.runTask.mockClear()
-  mocks.runProcess.mockClear()
-  mocks.runProcess.mockImplementation(async (request) => {
-    switch (request.operation) {
-      case 'access':
-        return true
-      case 'stat':
-        return mocks.stat(request.path)
-      case 'lstat':
-        return mocks.lstat(request.path)
-      case 'readdir':
-        return mocks.readdir(request.path, { withFileTypes: true })
-      case 'readfile':
-        return mocks.readFile(request.path, request.encoding)
-      case 'open':
-        return true
-      case 'read': {
-        const handle = await mocks.open(request.path, 'r')
-        try {
-          const buffer = Buffer.allocUnsafe(request.length)
-          const result = await handle.read(buffer, 0, request.length, request.position)
-          return buffer.subarray(0, result.bytesRead)
-        } finally {
-          await handle.close()
-        }
-      }
-    }
-  })
   for (const [name, mock] of Object.entries(mocks)) {
-    if (name !== 'runTask' && name !== 'runProcess') {
+    if (name !== 'runTask') {
       mock.mockReset()
     }
   }
@@ -237,31 +202,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
     await new Promise((resolve) => setImmediate(resolve))
   })
 
-  it('drains handle closes one at a time so teardown cannot flood the thread pool', async () => {
-    let releaseFirst: (() => void) | undefined
-    const first = fakeHandle()
-    first.close.mockReturnValue(
-      new Promise<void>((resolve) => {
-        releaseFirst = resolve
-      })
-    )
-    const second = fakeHandle()
-
-    await closeTranscriptHandle(first as never, UNC_PATH)
-    await closeTranscriptHandle(second as never, UNC_PATH)
-    await new Promise((resolve) => setImmediate(resolve))
-
-    // A blocked uv_fs_close holds a libuv thread the gate cannot see, so the
-    // second one must wait rather than occupy a thread of its own.
-    expect(first.close).toHaveBeenCalledTimes(1)
-    expect(second.close).not.toHaveBeenCalled()
-
-    releaseFirst?.()
-    await new Promise((resolve) => setImmediate(resolve))
-    expect(second.close).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps a blocked close on one distro from stranding teardown on another', async () => {
+  it('does not await a UNC close, mirroring the process-handle contract', async () => {
     let releaseStuck: (() => void) | undefined
     const stuck = fakeHandle()
     stuck.close.mockReturnValue(
@@ -269,17 +210,11 @@ describe('transcript filesystem accessor on WSL UNC', () => {
         releaseStuck = resolve
       })
     )
-    const healthy = fakeHandle()
 
     try {
-      await closeTranscriptHandle(stuck as never, UNC_PATH)
-      await closeTranscriptHandle(healthy as never, OTHER_DISTRO_UNC_PATH)
-      await new Promise((resolve) => setImmediate(resolve))
-
-      // A close that never settles on a stalled mount would hold a shared lane
-      // for the process lifetime, leaking every later descriptor with it.
+      // A close blocked on a stalled mount must not block the caller's teardown.
+      await expect(closeTranscriptHandle(stuck as never, UNC_PATH)).resolves.toBeUndefined()
       expect(stuck.close).toHaveBeenCalledTimes(1)
-      expect(healthy.close).toHaveBeenCalledTimes(1)
     } finally {
       releaseStuck?.()
       await new Promise((resolve) => setImmediate(resolve))
@@ -331,7 +266,6 @@ describe('transcript filesystem accessor on WSL UNC', () => {
         release = resolve
       })
     )
-    mocks.runProcess.mockImplementationOnce(() => mocks.open())
     try {
       const handle = fakeHandle()
       const refused = wslGatedOpen(UNC_PATH, 'exact').catch((error: unknown) => error)

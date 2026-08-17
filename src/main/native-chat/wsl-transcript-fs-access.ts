@@ -12,7 +12,6 @@ import {
   runWslTranscriptFsProcess,
   type WslTranscriptFsProcessHandle
 } from './wsl-transcript-fs-process-dispatch'
-import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 
 /** Never nest a gated call inside another — that deadlocks the scan slot. */
 
@@ -51,11 +50,7 @@ export function wslGatedAccess(
       await access(path)
       return true
     },
-    (taskSignal) =>
-      runWslTranscriptFsProcess({ operation: 'access', path }, taskSignal, async () => {
-        await access(path)
-        return true
-      })
+    (taskSignal) => runWslTranscriptFsProcess({ operation: 'access', path }, taskSignal)
   )
 }
 
@@ -70,8 +65,7 @@ export function wslGatedStat(
     priority,
     signal,
     () => stat(path),
-    (taskSignal) =>
-      runWslTranscriptFsProcess({ operation: 'stat', path }, taskSignal, () => stat(path))
+    (taskSignal) => runWslTranscriptFsProcess({ operation: 'stat', path }, taskSignal)
   )
 }
 
@@ -86,8 +80,7 @@ export function wslGatedLstat(
     priority,
     signal,
     () => lstat(path),
-    (taskSignal) =>
-      runWslTranscriptFsProcess({ operation: 'lstat', path }, taskSignal, () => lstat(path))
+    (taskSignal) => runWslTranscriptFsProcess({ operation: 'lstat', path }, taskSignal)
   )
 }
 
@@ -102,10 +95,7 @@ export function wslGatedReaddir(
     priority,
     signal,
     () => readdir(path, { withFileTypes: true }),
-    (taskSignal) =>
-      runWslTranscriptFsProcess({ operation: 'readdir', path }, taskSignal, () =>
-        readdir(path, { withFileTypes: true })
-      )
+    (taskSignal) => runWslTranscriptFsProcess({ operation: 'readdir', path }, taskSignal)
   )
 }
 
@@ -121,10 +111,7 @@ export function wslGatedReadFile(
     priority,
     signal,
     () => readFile(path, encoding),
-    (taskSignal) =>
-      runWslTranscriptFsProcess({ operation: 'readfile', path, encoding }, taskSignal, () =>
-        readFile(path, encoding)
-      )
+    (taskSignal) => runWslTranscriptFsProcess({ operation: 'readfile', path, encoding }, taskSignal)
   )
 }
 
@@ -140,7 +127,7 @@ export function wslGatedOpen(
     priority,
     signal,
     () => open(path, 'r'),
-    (taskSignal) => openWslTranscriptFsProcess(path, taskSignal, () => open(path, 'r')),
+    (taskSignal) => openWslTranscriptFsProcess(path, taskSignal),
     {
       dedupe: false,
       onAbandonedResult: (handle) => void closeTranscriptHandle(handle, path)
@@ -183,36 +170,7 @@ export function wslGatedRead(
   )
 }
 
-// Vitest's in-process fallback serializes UNC closes per route to contain libuv stalls.
-const MAX_CONCURRENT_UNC_CLOSES_PER_ROUTE = 1
-type RouteCloseQueue = { queued: FileHandle[]; active: number }
-const closeQueuesByRoute = new Map<string, RouteCloseQueue>()
-
-function drainQueuedCloses(route: string): void {
-  const lane = closeQueuesByRoute.get(route)
-  if (!lane) {
-    return
-  }
-  while (lane.active < MAX_CONCURRENT_UNC_CLOSES_PER_ROUTE) {
-    const handle = lane.queued.shift()
-    if (!handle) {
-      if (lane.active === 0) {
-        closeQueuesByRoute.delete(route)
-      }
-      return
-    }
-    lane.active += 1
-    void handle
-      .close()
-      .catch(() => {})
-      .finally(() => {
-        lane.active -= 1
-        drainQueuedCloses(route)
-      })
-  }
-}
-
-/** Never gated; process-owned handles retire on a separate bounded deadline. */
+/** Never gated; process-owned handles retire on the client's bounded deadline. */
 export function closeTranscriptHandle(handle: TranscriptFileHandle, path: string): Promise<void> {
   if (isWslTranscriptFsProcessHandle(handle)) {
     void closeWslTranscriptFsProcess(handle).catch(() => {})
@@ -221,11 +179,9 @@ export function closeTranscriptHandle(handle: TranscriptFileHandle, path: string
   if (!isWslUncPath(path)) {
     return handle.close()
   }
-  const route = wslTranscriptFsRouteKey(path)
-  const lane = closeQueuesByRoute.get(route) ?? { queued: [], active: 0 }
-  closeQueuesByRoute.set(route, lane)
-  lane.queued.push(handle)
-  drainQueuedCloses(route)
+  // Only the vitest fallback pairs a FileHandle with a UNC path; mirror the
+  // process-handle contract there: fire-and-forget, close failures swallowed.
+  void handle.close().catch(() => {})
   return Promise.resolve()
 }
 
