@@ -2271,6 +2271,125 @@
       "demotionRule": "Demote if one runtime terminal link creates a client-owned or duplicate browser, targets a runtime other than the pane owner, invokes the client external browser for Orca Browser, or removes the source terminal."
     },
     {
+      "id": "browser-session.mixed-version-remote-interaction",
+      "title": "Mixed-version paired browsers keep correct authority, input, history, and frame geometry",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "browser-runtime",
+      "layer": "paired-browser-wire-compatibility",
+      "surfaces": [
+        "headed paired-runtime browser panes",
+        "headless paired-runtime browser panes",
+        "mixed-version browser input and history",
+        "remote screencast frame geometry"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["remote-runtime"],
+      "coveredPlatforms": ["macos", "windows"],
+      "coveredProviders": ["remote-runtime"],
+      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection, legacy frame containment, and click mapping. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, visible frame, and absence of reconnect/toast failure.",
+      "motivatingLinks": [
+        "https://linear.app/stably/issue/STA-4525",
+        "https://github.com/stablyai/orca/issues/14883",
+        "https://github.com/stablyai/orca/pull/14987"
+      ],
+      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page.",
+      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to contain a malformed legacy frame, map only its actual pixels, and reject gutter clicks. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+        "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line"
+      ],
+      "testFiles": [
+        "src/main/browser/agent-browser-bridge-mouse-input.test.ts",
+        "src/main/browser/browser-history-navigation.test.ts",
+        "src/main/browser/browser-screencast-host-surface-capture.test.ts",
+        "src/main/browser/browser-screencast-stream.test.ts",
+        "src/main/runtime/orca-runtime.test.ts",
+        "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
+        "src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts",
+        "src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts",
+        "tests/e2e/paired-remote-browser-legacy-input.spec.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/browser/browser-screencast-host-surface-capture.test.ts",
+          "assertions": [
+            "a 533x917 host capture falls through to a 1097x917 client-authoritative capture",
+            "no malformed frame is published when both fallback paths retain host geometry"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
+          "assertions": [
+            "legacy host pixels map one-to-one to authoritative pointer coordinates",
+            "blank containment gutters reject pointer input"
+          ]
+        },
+        {
+          "file": "src/main/browser/browser-history-navigation.test.ts",
+          "assertions": [
+            "direct Back and Forward settle on navigation events",
+            "navigation failure and timeout remove every listener and timer owner"
+          ]
+        },
+        {
+          "file": "tests/e2e/paired-remote-browser-legacy-input.spec.ts",
+          "assertions": [
+            "a paired host with both direct capabilities disabled accepts visible click, Back, wheel, and keyboard input",
+            "the client browser stream stays live without a remote-browser error"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-17",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 12,
+          "summary": "Eight focused contract files passed with direct and legacy history, raw-input compatibility, exact 533x917 host-surface rejection/containment, viewport-correct host fallback, pointer mapping, and runtime capability coverage."
+        },
+        {
+          "date": "2026-08-17",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
+          "result": "passed",
+          "durationSeconds": 15.9,
+          "summary": "One isolated paired-runtime Electron journey passed with both direct capabilities disabled; click, Back, wheel, keyboard, host-page state, and stream health all converged."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 45,
+        "scope": "focused mixed-version contracts plus one isolated paired-runtime Electron journey"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "Fresh deterministic local contracts and isolated paired-runtime E2E pass; CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The unchanged physical Windows 2 baseline created no browser under the original request shape and, after creation compatibility was restored, published 533x917 pixels for a claimed 1097x917 viewport; the original renderer stretched those pixels and misrouted clicks. The candidate created exactly one authoritative Windows page, safely contained the legacy frame, and completed click, Back, Forward, and Reload. The focused frame and history assertions fail against the prior fill-only renderer, unconditional capturePage fallback, and helper-owned Back path."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "New clients add only constant-time capability and frame-geometry checks, reuse existing RPCs, and add no opcode, polling, retry loop, subprocess, or local browser. New hosts remove helper-process history navigation. Snapshot capture performs one extra existing CDP fallback only when capturePage returns incompatible geometry, and malformed frames are dropped rather than retried or fanned out."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
+        "Collect a physical Windows candidate-host run proving full-width viewport-correct capture.",
+        "Collect live Linux paired-host and multi-client reconnect evidence.",
+        "Keep mixed-version create, input, history, frame geometry, and no-local-fallback assertions green."
+      ],
+      "knownGaps": [
+        "The unchanged old Windows host cannot send pixels outside its 533-pixel BrowserView, so the new client preserves those pixels with a blank gutter instead of reconstructing missing content.",
+        "The final upgraded Windows host full-width capture path is contract-covered but not yet physically exercised.",
+        "Live Linux, multiple simultaneous clients, folder workspaces, and SSH-owned workspace journeys remain uncollected for this gate; SSH uses a distinct provider path."
+      ],
+      "demotionRule": "Demote if a remotely owned pane falls back locally, an old host can wedge acknowledged input/history, an upgraded host publishes host-sized pixels for a client viewport, malformed legacy pixels are stretched or receive gutter input, or disconnect/reconnect leaves a stale page, frame, listener, timer, or stream error."
+    },
+    {
       "id": "browser-session.remote-html-preview-ownership",
       "title": "Paired HTML previews keep one host page and one stable client split",
       "maturity": "experimental",

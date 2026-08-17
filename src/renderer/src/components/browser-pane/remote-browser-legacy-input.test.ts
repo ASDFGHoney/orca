@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildLegacyRemoteBrowserHistoryExpression,
   buildLegacyRemoteBrowserKeypressExpression,
   buildLegacyRemoteBrowserWheelExpression
 } from './remote-browser-legacy-input'
@@ -9,6 +10,25 @@ describe('legacy remote browser input', () => {
   beforeEach(() => {
     document.body.replaceChildren()
   })
+
+  it.each(['back', 'forward'] as const)(
+    'acknowledges legacy %s before changing the page history',
+    (direction) => {
+      const calls: string[] = []
+      vi.spyOn(window.history, direction).mockImplementation(() => calls.push(direction))
+      const schedule = vi.spyOn(window, 'setTimeout').mockImplementation((callback) => {
+        calls.push('scheduled')
+        ;(callback as () => void)()
+        return 1 as unknown as ReturnType<typeof window.setTimeout>
+      })
+
+      const result = window.eval(buildLegacyRemoteBrowserHistoryExpression(direction))
+
+      expect(result).toEqual({ scheduled: direction, url: window.location.href })
+      expect(calls).toEqual(['scheduled', direction])
+      expect(schedule).toHaveBeenCalledWith(expect.any(Function), 0)
+    }
+  )
 
   it('scrolls the nearest scrollable element without raw-input RPCs', () => {
     const scroller = document.createElement('div')

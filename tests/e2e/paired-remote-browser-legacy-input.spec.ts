@@ -64,7 +64,10 @@ test('keeps click, wheel, and keyboard usable when the host lacks direct raw inp
 }, testInfo) => {
   test.setTimeout(300_000)
   const host: HeadlessPairedRuntimeHost = await launchHeadlessPairedRuntimeHost({
-    extraEnv: { ORCA_E2E_DISABLE_BROWSER_DIRECT_RAW_INPUT: '1' }
+    extraEnv: {
+      ORCA_E2E_DISABLE_BROWSER_DIRECT_HISTORY_NAVIGATION: '1',
+      ORCA_E2E_DISABLE_BROWSER_DIRECT_RAW_INPUT: '1'
+    }
   })
   let client: PairedElectronClient | null = null
 
@@ -87,6 +90,7 @@ test('keeps click, wheel, and keyboard usable when the host lacks direct raw inp
       {}
     )
     expect(status.capabilities).not.toContain('browser.direct-raw-input.v1')
+    expect(status.capabilities).not.toContain('browser.direct-history-navigation.v1')
 
     const created = await callEnvironment<{ browserPageId: string }>(
       page,
@@ -102,7 +106,10 @@ test('keeps click, wheel, and keyboard usable when the host lacks direct raw inp
         document.body.style.minHeight = '3000px';
         const button = document.getElementById('target');
         button.style.cssText = 'position:fixed;left:20px;top:20px;width:100px;height:40px';
-        button.onclick = () => { document.body.dataset.clicked = 'yes'; };
+        button.onclick = () => {
+          document.body.dataset.clicked = 'yes';
+          history.pushState({}, '', '#clicked');
+        };
       })()`
     })
     await attachRemoteBrowserPane(page, client.environmentId, worktreeId, created.browserPageId)
@@ -118,6 +125,28 @@ test('keeps click, wheel, and keyboard usable when the host lacks direct raw inp
         }).then((result) => result.result)
       )
       .toBe('yes')
+    await expect
+      .poll(() =>
+        callEnvironment<{ result: string }>(page, client!.environmentId, 'browser.eval', {
+          ...target,
+          expression: 'location.hash'
+        }).then((result) => result.result)
+      )
+      .toBe('#clicked')
+
+    await page
+      .locator('[data-contextual-tour-target="browser-toolbar"]')
+      .getByRole('button')
+      .first()
+      .click()
+    await expect
+      .poll(() =>
+        callEnvironment<{ result: string }>(page, client!.environmentId, 'browser.eval', {
+          ...target,
+          expression: 'location.hash'
+        }).then((result) => result.result)
+      )
+      .toBe('')
 
     const box = await frame.boundingBox()
     if (!box) {

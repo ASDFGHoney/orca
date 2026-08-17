@@ -51,6 +51,13 @@ export function buildLegacyRemoteBrowserWheelExpression(
   })()`
 }
 
+export function buildLegacyRemoteBrowserHistoryExpression(direction: 'back' | 'forward'): string {
+  return `(() => {
+    setTimeout(() => history.${direction}(), 0);
+    return { scheduled: ${JSON.stringify(direction)}, url: location.href };
+  })()`
+}
+
 export function buildLegacyRemoteBrowserKeypressExpression(serializedKey: string): string | null {
   const input = parseLegacyKeypress(serializedKey)
   const shortcut = input.altKey || input.ctrlKey || input.metaKey

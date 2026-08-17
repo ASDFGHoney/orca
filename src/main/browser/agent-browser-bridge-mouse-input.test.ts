@@ -55,7 +55,8 @@ import {
   mockBrowserManager,
   mockWebContents,
   overrideBridgeWebContentsLookup,
-  resetAgentBrowserBridgeMocks
+  resetAgentBrowserBridgeMocks,
+  type ExecFileCallback
 } from './agent-browser-bridge-test-harness'
 
 overrideBridgeWebContentsLookup(AgentBrowserBridge.prototype, webContentsFromIdMock)
@@ -182,6 +183,76 @@ describe('AgentBrowserBridge', () => {
       (bridge as unknown as { commandQueues: Map<string, unknown[]> }).commandQueues.size
     ).toBe(0)
     expect((bridge as unknown as { processingQueues: Set<string> }).processingQueues.size).toBe(0)
+  })
+
+  it('navigates history directly without spawning the page helper', async () => {
+    const wc = mockWebContents(100)
+    let currentUrl = 'https://example.com/next'
+    const listeners = new Map<string, (...args: never[]) => void>()
+    wc.getURL = () => currentUrl
+    wc.on.mockImplementation((event: string, listener: (...args: never[]) => void) => {
+      listeners.set(event, listener)
+      return wc.on
+    })
+    wc.removeListener.mockImplementation((event: string) => {
+      listeners.delete(event)
+      return wc.removeListener
+    })
+    Object.assign(wc, {
+      navigationHistory: {
+        canGoBack: vi.fn(() => true),
+        canGoForward: vi.fn(() => false),
+        goBack: vi.fn(() => {
+          currentUrl = 'https://example.com/'
+          queueMicrotask(() => listeners.get('did-navigate')?.())
+        }),
+        goForward: vi.fn()
+      }
+    })
+    webContentsFromIdMock.mockReturnValue(wc)
+
+    await expect(bridge.back(undefined, 'tab-1')).resolves.toEqual({
+      url: 'https://example.com/',
+      title: 'Example'
+    })
+
+    expect(execFileMock).not.toHaveBeenCalled()
+    expect(listeners.size).toBe(0)
+  })
+
+  it('models the legacy helper losing its reply after history navigation', async () => {
+    vi.stubEnv('ORCA_E2E_DISABLE_BROWSER_DIRECT_HISTORY_NAVIGATION', '1')
+    let helperStarted = false
+    execFileMock.mockImplementation(
+      (_bin: string, args: string[], _options: unknown, callback: ExecFileCallback) => {
+        if (args.includes('back')) {
+          helperStarted = true
+        } else {
+          callback(null, JSON.stringify({ success: true, data: {} }), '')
+        }
+        return { stdin: { on: vi.fn(), end: vi.fn() } }
+      }
+    )
+
+    try {
+      const pending = bridge.back(undefined, 'tab-1')
+      let settled = false
+      void pending.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        }
+      )
+
+      await vi.waitFor(() => expect(helperStarted).toBe(true))
+      await Promise.resolve()
+
+      expect(settled).toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('keeps replacement-page input queued behind teardown of an in-flight command', async () => {

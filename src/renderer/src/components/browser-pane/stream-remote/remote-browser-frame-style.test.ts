@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { getRemoteBrowserFrameStyle } from './remote-browser-frame-style'
 
 describe('getRemoteBrowserFrameStyle', () => {
-  it('fills the client viewport even when stale metadata reports an oversized bitmap', () => {
+  it('contains a host-sized legacy frame without distorting it', () => {
     expect(
       getRemoteBrowserFrameStyle({
-        imageWidth: 2266,
-        imageHeight: 1309,
-        deviceWidth: 958,
-        deviceHeight: 609
+        imageWidth: 533,
+        imageHeight: 917,
+        deviceWidth: 1097,
+        deviceHeight: 917
       })
     ).toEqual({
       width: '100%',
       height: '100%',
-      objectFit: 'fill',
+      objectFit: 'contain',
       objectPosition: 'top left'
     })
   })
@@ -66,7 +66,7 @@ describe('getRemoteBrowserFrameStyle', () => {
     })
   })
 
-  it('does not shrink malformed frame metadata below the viewport', () => {
+  it('contains malformed non-uniform frame metadata', () => {
     expect(
       getRemoteBrowserFrameStyle({
         imageWidth: 10,
@@ -77,7 +77,7 @@ describe('getRemoteBrowserFrameStyle', () => {
     ).toEqual({
       width: '100%',
       height: '100%',
-      objectFit: 'fill',
+      objectFit: 'contain',
       objectPosition: 'top left'
     })
   })

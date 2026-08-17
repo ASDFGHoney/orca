@@ -51,6 +51,7 @@ import { assertClipboardTextWriteWithinLimitWithYield } from '../../shared/clipb
 import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
 import { iterateBrowserTextInsertionChunks } from './browser-text-insertion'
 import { AgentBrowserDirectInput } from './agent-browser-direct-input'
+import { waitForBrowserHistoryNavigation } from './browser-history-navigation'
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
@@ -1423,15 +1424,39 @@ export class AgentBrowserBridge {
   }
 
   async back(worktreeId?: string, browserPageId?: string): Promise<BrowserBackResult> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      return (await this.execAgentBrowser(sessionName, ['back'])) as BrowserBackResult
-    })
+    if (process.env.ORCA_E2E_DISABLE_BROWSER_DIRECT_HISTORY_NAVIGATION === '1') {
+      return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
+        return (await this.execAgentBrowser(sessionName, ['back'])) as BrowserBackResult
+      })
+    }
+    return this.navigateHistory('back', worktreeId, browserPageId)
   }
 
   async forward(worktreeId?: string, browserPageId?: string): Promise<BrowserBackResult> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
-      return (await this.execAgentBrowser(sessionName, ['forward'])) as BrowserBackResult
-    })
+    if (process.env.ORCA_E2E_DISABLE_BROWSER_DIRECT_HISTORY_NAVIGATION === '1') {
+      return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
+        return (await this.execAgentBrowser(sessionName, ['forward'])) as BrowserBackResult
+      })
+    }
+    return this.navigateHistory('forward', worktreeId, browserPageId)
+  }
+
+  private async navigateHistory(
+    direction: 'back' | 'forward',
+    worktreeId?: string,
+    browserPageId?: string
+  ): Promise<BrowserBackResult> {
+    return this.enqueueTargetedCommand(
+      worktreeId,
+      browserPageId,
+      async (_sessionName, target) => {
+        await waitForBrowserHistoryNavigation(this.requireTargetWebContents(target), direction)
+        const navigatedTarget = this.resolveCommandTarget(worktreeId, target.browserPageId)
+        const navigatedWebContents = this.requireTargetWebContents(navigatedTarget)
+        return { url: navigatedWebContents.getURL(), title: navigatedWebContents.getTitle() }
+      },
+      { ensureSession: false }
+    )
   }
 
   async reload(worktreeId?: string, browserPageId?: string): Promise<BrowserReloadResult> {
