@@ -12,6 +12,7 @@ import {
 
 let subscriptionCallbacks: MultiplexSubscriptionCallbacks = null
 let resolvedPaneHandle = 'terminal-1'
+const SCREEN_REPAINT = '\x1b[2J\x1b[H'
 
 const {
   runtimeSubscribe,
@@ -234,8 +235,9 @@ describe('createRemoteRuntimePtyTransport', () => {
     emitOutput(reconnectStreamId, 'LIVE_AFTER_RECONNECT')
     expect(onReplayData.mock.calls.map((call) => call[0])).toEqual([
       'INITIAL_SNAPSHOT',
-      'RECONNECT_SNAPSHOT'
+      `${SCREEN_REPAINT}RECONNECT_SNAPSHOT`
     ])
+    expect(onReplayData.mock.calls[1]?.[1]).toMatchObject({ clearBeforeReplay: false })
     expect(onData.mock.calls.map((call) => call[0])).toEqual(['LIVE_AFTER_RECONNECT'])
     expect(onOutputPauseChanged).toHaveBeenLastCalledWith(false, true)
     transport.destroy?.()
@@ -321,8 +323,9 @@ describe('createRemoteRuntimePtyTransport', () => {
     expect(onStreamRecovered).toHaveBeenCalledTimes(1)
     expect(onReplayData.mock.calls.map((call) => call[0])).toEqual([
       'INITIAL_SNAPSHOT',
-      'RECOVERY_SNAPSHOT'
+      `${SCREEN_REPAINT}RECOVERY_SNAPSHOT`
     ])
+    expect(onReplayData.mock.calls[1]?.[1]).toMatchObject({ clearBeforeReplay: false })
     transport.destroy?.()
   })
 

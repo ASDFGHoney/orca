@@ -13,7 +13,10 @@ const LIVE_TAIL_SUBSCRIPTION_TIMEOUT_MS = 10_000
 
 export type RuntimeTerminalDataSubscriptionOptions = {
   startAtLiveTail?: boolean
-  onSnapshot?: (data: string, meta?: { pendingEscapeTailAnsi?: string }) => void
+  onSnapshot?: (
+    data: string,
+    meta?: { clearBeforeReplay?: boolean; pendingEscapeTailAnsi?: string }
+  ) => void
   onEnd?: () => void
   onError?: (message: string) => void
   onTransportClose?: (event: { recoverable: boolean; retryWithBackoff?: boolean }) => void

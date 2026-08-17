@@ -586,28 +586,32 @@ describe('remote runtime terminal multiplex ACK gate', () => {
       },
       'recovered state'
     )
-    // Why: an unsolicited recovery snapshot replaces terminal state, so it
-    // clears screen and scrollback first and must not replay the subscribe
-    // lifecycle.
-    expect(onSnapshot).toHaveBeenCalledWith(`\x1b[2J\x1b[3J\x1b[H${'recovered state'}`, {
-      pendingEscapeTailAnsi: undefined
+    // Recovery replaces only the screen because the frame carries no scrollback.
+    expect(onSnapshot).toHaveBeenCalledWith(`\x1b[2J\x1b[H${'recovered state'}`, {
+      clearBeforeReplay: false,
+      kittyKeyboardFlags: undefined,
+      pendingEscapeTailAnsi: undefined,
+      seq: undefined
     })
     expect(onSubscribed).toHaveBeenCalledTimes(1)
 
-    // Why: an empty recovery snapshot means the model terminal is blank, so
-    // the client must still clear stale dropped output.
+    // A successful empty snapshot authoritatively clears only the visible screen.
     injectSnapshot(
       {
         kind: 'scrollback',
         cols: 120,
         rows: 40,
         reason: 'ack-pending-overflow',
+        seq: 42,
         truncated: false
       },
       ''
     )
-    expect(onSnapshot).toHaveBeenCalledWith('\x1b[2J\x1b[3J\x1b[H', {
-      pendingEscapeTailAnsi: undefined
+    expect(onSnapshot).toHaveBeenLastCalledWith('\x1b[2J\x1b[H', {
+      clearBeforeReplay: false,
+      kittyKeyboardFlags: undefined,
+      pendingEscapeTailAnsi: undefined,
+      seq: 42
     })
     expect(onSubscribed).toHaveBeenCalledTimes(1)
 

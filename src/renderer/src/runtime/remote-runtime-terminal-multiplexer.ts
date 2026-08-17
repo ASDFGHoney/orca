@@ -64,6 +64,7 @@ export type RemoteRuntimeMultiplexedTerminalCallbacks = {
   onSnapshot: (
     data: string,
     meta?: {
+      clearBeforeReplay?: boolean
       pendingEscapeTailAnsi?: string
       seq?: number
       kittyKeyboardFlags?: number
@@ -234,10 +235,12 @@ const REMOTE_TERMINAL_RESYNC_TIMEOUT_MS = 10_000
 // retrying once per incoming chunk would stampede it, so back off instead.
 const REMOTE_TERMINAL_RESYNC_RETRY_BASE_MS = 500
 const REMOTE_TERMINAL_RESYNC_RETRY_MAX_MS = 5_000
+const REMOTE_TERMINAL_RESYNC_MAX_ATTEMPTS = 5
 // Why: exported so the transport can classify it as benign — the snapshot was
 // skipped but live output continues, so it must not surface a fatal red banner.
 export const REMOTE_TERMINAL_SNAPSHOT_TOO_LARGE =
   'Remote terminal snapshot exceeded the 2 MiB replay limit; live output will continue.'
+export const REMOTE_TERMINAL_SCREEN_REPAINT = '\x1b[2J\x1b[H'
 
 type E2eRemoteTerminalMultiplexAckGateSnapshot = {
   droppedOutputBytes: number
@@ -876,6 +879,10 @@ class RemoteRuntimeTerminalMultiplexer {
       const info = stream.snapshotInfo
       const pendingRequest = stream.pendingSnapshotRequest
       const snapshotApplied = !stream.snapshotOverflowed && info?.truncated !== true
+      const recoverySnapshotApplied =
+        snapshotApplied &&
+        info?.unavailable === undefined &&
+        (data !== '' || typeof info?.seq === 'number')
       const matchesPendingRequest =
         target === 'request' &&
         pendingRequest &&
@@ -903,12 +910,10 @@ class RemoteRuntimeTerminalMultiplexer {
             seq: info?.seq,
             kittyKeyboardFlags: info?.kittyKeyboardFlags
           })
-        } else if (target === 'recovery') {
-          // Why: a server-pushed recovery snapshot replaces terminal state
-          // mid-session; clear the screen and scrollback before applying it.
-          // An empty snapshot is still applied so stale dropped output does
-          // not linger on a terminal the model says is blank.
-          stream.callbacks.onSnapshot(`\x1b[2J\x1b[3J\x1b[H${data ?? ''}`, {
+        } else if (target === 'recovery' && recoverySnapshotApplied) {
+          // Untagged resync and ACK-overflow replies are screen-only; preserve client scrollback.
+          stream.callbacks.onSnapshot(`${REMOTE_TERMINAL_SCREEN_REPAINT}${data ?? ''}`, {
+            clearBeforeReplay: false,
             pendingEscapeTailAnsi: info?.pendingEscapeTailAnsi,
             seq: info?.seq,
             kittyKeyboardFlags: info?.kittyKeyboardFlags
@@ -933,7 +938,7 @@ class RemoteRuntimeTerminalMultiplexer {
       } else if (target === 'recovery') {
         // Why: only an applied recovery is authoritative; retaining the prior
         // high-water after a discarded snapshot keeps the gap detectable.
-        if (snapshotApplied) {
+        if (recoverySnapshotApplied) {
           clearResyncTimer(stream)
           stream.expectedSeq = typeof info?.seq === 'number' ? info.seq : undefined
           stream.commandProbeBaselineSeq = undefined
@@ -994,7 +999,7 @@ class RemoteRuntimeTerminalMultiplexer {
 
   // Why: on a detected gap, discard the corrupt tail and pull a fresh
   // authoritative snapshot. The request carries no requestId so the server
-  // reply renders through the initial-snapshot path (full reset), self-healing
+  // reply renders through the recovery path (screen reset), self-healing
   // without surfacing an error to the user.
   private requestResyncSnapshot(stream: RemoteRuntimeMultiplexedTerminalState): void {
     if (stream.resyncInFlight) {
@@ -1023,6 +1028,7 @@ class RemoteRuntimeTerminalMultiplexer {
   private sendResyncSnapshot(stream: RemoteRuntimeMultiplexedTerminalState): void {
     stream.resyncPendingSend = false
     this.startResyncTimer(stream)
+    stream.resyncAttempts += 1
     const sent = this.sendFrame(
       stream.streamId,
       TerminalStreamOpcode.SnapshotRequest,
@@ -1032,13 +1038,17 @@ class RemoteRuntimeTerminalMultiplexer {
       // Transport is down; the reconnect path re-subscribes from scratch.
       clearResyncTimer(stream)
       stream.resyncInFlight = false
+      stream.resyncAttempts -= 1
     }
   }
 
   // Why: keep the gate shut across the backoff — the post-gap tail is corrupt
   // either way — and heal even if the flood ends with no further output.
   private scheduleResyncRetry(stream: RemoteRuntimeMultiplexedTerminalState): void {
-    stream.resyncAttempts += 1
+    if (stream.resyncAttempts >= REMOTE_TERMINAL_RESYNC_MAX_ATTEMPTS) {
+      this.recoverStalledStream(stream)
+      return
+    }
     const delay = Math.min(
       REMOTE_TERMINAL_RESYNC_RETRY_MAX_MS,
       REMOTE_TERMINAL_RESYNC_RETRY_BASE_MS * 2 ** Math.min(stream.resyncAttempts - 1, 4)

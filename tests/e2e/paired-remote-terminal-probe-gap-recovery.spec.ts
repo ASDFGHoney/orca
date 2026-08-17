@@ -9,9 +9,10 @@ import type {
 } from '../../src/shared/runtime-types'
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { expect, test } from './helpers/orca-app'
+import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import {
-  createRuntimeDesktopPairingOffer,
-  launchPairedWebClient
+  launchPairedElectronClient,
+  type PairedElectronClient
 } from './helpers/paired-electron-client'
 import { getTerminalContent, waitForActivePanePtyId } from './helpers/terminal'
 
@@ -34,6 +35,9 @@ writeFileSync(
     '  for (const input of commands) {',
     '    appendFileSync(processedInputPath, `${input}\\n`)',
     '    process.stdout.write(`LIVE:${input}\\r\\n`)',
+    "    if (input.startsWith('PROBE_GAP_HISTORY_')) {",
+    '      for (let line = 0; line < 120; line += 1) process.stdout.write(`SCROLL_FILL_${line}\\r\\n`)',
+    '    }',
     '  }',
     '})',
     'process.stdin.resume()'
@@ -55,53 +59,101 @@ function fixtureCommand(): string {
     : command.map(shellQuote).join(' ')
 }
 
-async function callRuntime<TResult>(page: Page, method: string, params: unknown): Promise<TResult> {
-  return page.evaluate(
-    async ({ method, params }) => {
-      const response = await window.api.runtime.call({ method, params })
+async function callEnvironment<TResult>(
+  client: PairedElectronClient,
+  method: string,
+  params: unknown
+): Promise<TResult> {
+  return client.page.evaluate(
+    async ({ environmentId, method, params }) => {
+      const response = await window.api.runtimeEnvironments.call({
+        selector: environmentId,
+        method,
+        params
+      })
       if (!response.ok) {
         throw new Error(`${response.error.code}: ${response.error.message}`)
       }
       return response.result
     },
-    { method, params }
+    { environmentId: client.environmentId, method, params }
   ) as Promise<TResult>
 }
 
-test('replaces a stale paired stream when the PTY snapshot advanced @headful', async ({
-  electronApp,
-  orcaPage
-}) => {
-  test.setTimeout(90_000)
-  const worktreeId = await orcaPage.evaluate(() => {
-    const state = window.__store?.getState()
-    const id = state?.activeWorktreeId
-    if (!id || !state?.allWorktrees().some((candidate) => candidate.id === id)) {
-      throw new Error('Headed host did not select its seeded worktree')
+async function getXtermBufferState(
+  page: Page,
+  tabId: string,
+  marker: string
+): Promise<{ baseY: number; eraseParams: number[]; hasMarker: boolean }> {
+  return page.evaluate(
+    ({ marker, tabId }) => {
+      const manager = window.__paneManagers?.get(tabId)
+      const pane = manager?.getActivePane?.() ?? manager?.getPanes?.()[0] ?? null
+      const buffer = pane?.terminal.buffer.active
+      if (!buffer) {
+        return { baseY: 0, eraseParams: [], hasMarker: false }
+      }
+      const eraseParams = JSON.parse(pane.container.dataset.e2eEraseParams ?? '[]') as number[]
+      for (let index = 0; index < buffer.length; index += 1) {
+        if (buffer.getLine(index)?.translateToString(true).includes(marker)) {
+          return { baseY: buffer.baseY, eraseParams, hasMarker: true }
+        }
+      }
+      return { baseY: buffer.baseY, eraseParams, hasMarker: false }
+    },
+    { marker, tabId }
+  )
+}
+
+async function observeXtermEraseInDisplay(page: Page, tabId: string): Promise<void> {
+  await page.evaluate((id) => {
+    const manager = window.__paneManagers?.get(id)
+    const pane = manager?.getActivePane?.() ?? manager?.getPanes?.()[0] ?? null
+    if (!pane) {
+      throw new Error('Remote terminal pane was not mounted')
     }
-    return id
+    pane.container.dataset.e2eEraseParams = '[]'
+    pane.terminal.parser.registerCsiHandler({ final: 'J' }, (params) => {
+      const observed = JSON.parse(pane.container.dataset.e2eEraseParams ?? '[]') as number[]
+      observed.push(params.length === 0 ? 0 : params[0])
+      pane.container.dataset.e2eEraseParams = JSON.stringify(observed)
+      return false
+    })
+  }, tabId)
+}
+
+test('replaces a stale paired stream when the PTY snapshot advanced @headful', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(150_000)
+  const host = await launchHeadlessPairedRuntimeHost()
+  await host.client.call('repo.add', { path: testRepoPath, kind: 'git' }).catch(async (error) => {
+    await host.dispose()
+    throw error
   })
-  const offer = await createRuntimeDesktopPairingOffer(orcaPage)
-  const client = await launchPairedWebClient(electronApp, offer)
+  const client = await launchPairedElectronClient(host.offer, testInfo, 'probe-gap-client').catch(
+    async (error) => {
+      await host.dispose()
+      throw error
+    }
+  )
   let terminal: string | null = null
   try {
     await expect
       .poll(
-        () =>
-          client.page.evaluate(
-            (id) =>
-              window.__store
-                ?.getState()
-                .allWorktrees()
-                .some((candidate) => candidate.id === id),
-            worktreeId
-          ),
+        () => client.page.evaluate(() => window.__store?.getState().allWorktrees().length ?? 0),
         { timeout: 30_000 }
       )
-      .toBe(true)
-    const created = await callRuntime<{
+      .toBeGreaterThan(0)
+    const worktreeId = await client.page.evaluate(
+      () => window.__store?.getState().allWorktrees()[0]?.id ?? null
+    )
+    if (!worktreeId) {
+      throw new Error('Paired client did not receive the host worktree')
+    }
+    const created = await callEnvironment<{
       tab: { parentTabId: string; terminal: string | null }
-    }>(client.page, 'session.tabs.createTerminal', {
+    }>(client, 'session.tabs.createTerminal', {
       worktree: `id:${worktreeId}`,
       command: fixtureCommand(),
       activate: false,
@@ -119,8 +171,8 @@ test('replaces a stale paired stream when the PTY snapshot advanced @headful', a
     await tab.click()
     await expect(tab).toHaveAttribute('data-active', 'true')
     const originalPtyId = await waitForActivePanePtyId(client.page, 30_000)
-    const originalHostTerminal = await callRuntime<{ terminal: RuntimeTerminalShow }>(
-      orcaPage,
+    const originalHostTerminal = await callEnvironment<{ terminal: RuntimeTerminalShow }>(
+      client,
       'terminal.show',
       { terminal }
     )
@@ -130,6 +182,23 @@ test('replaces a stale paired stream when the PTY snapshot advanced @headful', a
       .toContain('PROBE_GAP_READY')
     const textarea = client.page.locator('.xterm-helper-textarea:visible').first()
     await textarea.focus()
+
+    const historyMarker = `PROBE_GAP_HISTORY_${Date.now()}`
+    await client.page.keyboard.type(historyMarker)
+    await client.page.keyboard.press('Enter')
+    await expect
+      .poll(() => getTerminalContent(client.page, 20_000), { timeout: 10_000 })
+      .toContain('SCROLL_FILL_119')
+    await expect
+      .poll(() => readFileSync(processedInputPath, 'utf8'))
+      .toContain(`${historyMarker}\n`)
+    await expect
+      .poll(() => getXtermBufferState(client.page, webTabId, `LIVE:${historyMarker}`))
+      .toMatchObject({ hasMarker: true })
+    expect((await getXtermBufferState(client.page, webTabId, historyMarker)).baseY).toBeGreaterThan(
+      0
+    )
+    await observeXtermEraseInDisplay(client.page, webTabId)
 
     expect(
       await client.page.evaluate((target) => {
@@ -172,8 +241,8 @@ test('replaces a stale paired stream when the PTY snapshot advanced @headful', a
     await expect
       .poll(
         async () => {
-          const result = await callRuntime<{ terminal: RuntimeTerminalRead }>(
-            orcaPage,
+          const result = await callEnvironment<{ terminal: RuntimeTerminalRead }>(
+            client,
             'terminal.read',
             { terminal }
           )
@@ -187,18 +256,30 @@ test('replaces a stale paired stream when the PTY snapshot advanced @headful', a
     await expect
       .poll(() => getTerminalContent(client.page), { timeout: 20_000 })
       .toContain(`LIVE:${missingMarker}`)
+    const recoveredBuffer = await getXtermBufferState(
+      client.page,
+      webTabId,
+      `LIVE:${historyMarker}`
+    )
+    expect(recoveredBuffer.eraseParams).not.toContain(3)
+    expect(recoveredBuffer).toMatchObject({ hasMarker: true })
+    expect(readFileSync(processedInputPath, 'utf8')).toContain(`${historyMarker}\n`)
     await expect(tab).toHaveAttribute('data-active', 'true')
     expect(await waitForActivePanePtyId(client.page, 30_000)).toBe(originalPtyId)
-    const recoveredHostTerminal = await callRuntime<{ terminal: RuntimeTerminalShow }>(
-      orcaPage,
+    const recoveredHostTerminal = await callEnvironment<{ terminal: RuntimeTerminalShow }>(
+      client,
       'terminal.show',
       { terminal }
     )
     expect(recoveredHostTerminal.terminal.ptyId).toBe(originalHostTerminal.terminal.ptyId)
-    const hostTerminals = await callRuntime<RuntimeTerminalListResult>(orcaPage, 'terminal.list', {
-      worktree: `id:${worktreeId}`,
-      requireFreshPtyLiveness: true
-    })
+    const hostTerminals = await callEnvironment<RuntimeTerminalListResult>(
+      client,
+      'terminal.list',
+      {
+        worktree: `id:${worktreeId}`,
+        requireFreshPtyLiveness: true
+      }
+    )
     expect(
       hostTerminals.terminals
         .filter((candidate) => candidate.tabId === created.tab.parentTabId)
@@ -227,8 +308,9 @@ test('replaces a stale paired stream when the PTY snapshot advanced @headful', a
       })
       .catch(() => undefined)
     if (terminal) {
-      await callRuntime(orcaPage, 'terminal.closeTab', { terminal }).catch(() => undefined)
+      await callEnvironment(client, 'terminal.closeTab', { terminal }).catch(() => undefined)
     }
     await client.dispose()
+    await host.dispose()
   }
 })

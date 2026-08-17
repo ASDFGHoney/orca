@@ -43,6 +43,7 @@ import {
 } from '../../runtime/runtime-terminal-stream'
 import {
   getRemoteRuntimeTerminalMultiplexer,
+  REMOTE_TERMINAL_SCREEN_REPAINT,
   REMOTE_TERMINAL_SNAPSHOT_TOO_LARGE,
   type RemoteRuntimeMultiplexedTerminal,
   type RemoteRuntimeSnapshotOutcome
@@ -1586,7 +1587,8 @@ export function createRemoteRuntimePtyTransport(
       clearPublishedHandleWait()
       await subscribeToHandle(
         recoveryEpoch,
-        nextHandle === previousHandle && effectivePolicy === 'prefer-replacement'
+        nextHandle === previousHandle && effectivePolicy === 'prefer-replacement',
+        nextHandle === previousHandle
       )
       return
     } else if (tabId && leafId && worktreeId) {
@@ -1608,9 +1610,12 @@ export function createRemoteRuntimePtyTransport(
       if (resolved.handle !== previousHandle) {
         rebindRemoteTerminalHandle(resolved.handle)
       }
+      clearPublishedHandleWait()
+      await subscribeToHandle(recoveryEpoch, false, resolved.handle === previousHandle)
+      return
     }
     clearPublishedHandleWait()
-    await subscribeToHandle(recoveryEpoch)
+    await subscribeToHandle(recoveryEpoch, false, handle === previousHandle)
   }
 
   function scheduleResubscribeAfterTransportClose(
@@ -1724,7 +1729,8 @@ export function createRemoteRuntimePtyTransport(
 
   async function subscribeToHandle(
     expectedRecoveryEpoch?: number,
-    sameHandleEndRecovery = false
+    sameHandleEndRecovery = false,
+    preserveExistingScrollback = sameHandleEndRecovery
   ): Promise<void> {
     if (!handle) {
       return
@@ -1762,12 +1768,19 @@ export function createRemoteRuntimePtyTransport(
           // Why: an empty snapshot can still carry a pending mid-escape tail that must replay so the next live chunk completes it.
           if ((data || meta?.pendingEscapeTailAnsi) && isCurrentSubscription()) {
             subscriptionSnapshotHadContent = true
-            if (subscribedPtyId && bufferPtyShutdownReplayData(subscribedPtyId, data)) {
+            const preservesScrollback =
+              preserveExistingScrollback || meta?.clearBeforeReplay === false
+            const replayData =
+              preserveExistingScrollback && meta?.clearBeforeReplay !== false
+                ? `${REMOTE_TERMINAL_SCREEN_REPAINT}${data}`
+                : data
+            if (subscribedPtyId && bufferPtyShutdownReplayData(subscribedPtyId, replayData)) {
               return
             }
-            outputProcessor.processData(data, storedCallbacks, {
+            outputProcessor.processData(replayData, storedCallbacks, {
               replayingBufferedData: true,
               suppressAttentionEvents: true,
+              ...(preservesScrollback ? { clearBeforeReplay: false } : {}),
               ...(meta?.pendingEscapeTailAnsi
                 ? { pendingEscapeTailAnsi: meta.pendingEscapeTailAnsi }
                 : {}),
