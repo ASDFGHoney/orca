@@ -52,6 +52,13 @@ export function extractBucketLeafCandidates(
 /** WSL UNC listings go through the shared 9P gate, which bounds concurrency and deadlines each
  *  call; off UNC it is a plain `readdir`.
  *
+ *  Accepted cost of gating: the gate admits one `scan` task process-wide, and its stuck-task
+ *  check matches scan-against-scan regardless of route. So retirement discovery now queues with —
+ *  and, on a wedged distro, can fast-fail — native-chat transcript discovery, which an ungated
+ *  `readdir` never could. It is still the right trade: the gate has the only deadline and permit
+ *  accounting these UNC reads get, and without it a hung 9P route holds a libuv thread outright.
+ *  A dedicated lane would need a third priority, which is a change to the gate, not to this file.
+ *
  *  A gate refusal is reported rather than thrown. Throwing abandoned the whole scan at whichever
  *  source failed first — and for a WSL repo the very first listing is the UNC workspace root, so a
  *  stuck 9P route also lost the plain, readable Windows-side `~/.claude/projects` read that the
