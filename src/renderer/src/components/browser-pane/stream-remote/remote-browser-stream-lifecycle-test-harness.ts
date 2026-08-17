@@ -32,6 +32,7 @@ export type FakeScreencastStream = {
   pageId: string
   params: unknown
   viewportWidth: number | undefined
+  viewportHeight: number | undefined
   unsubscribeCount: number
   emitReady: () => void
   emitEnd: () => void
@@ -59,6 +60,7 @@ export function createHarness() {
   const closedPages: (string | null)[] = []
   const streams: FakeScreencastStream[] = []
   const rpcLog: string[] = []
+  const syncedViewportSizes: (RemoteBrowserViewportSize | null)[] = []
 
   let capabilities: string[] = ['browser.screencast.v1']
   let storedHandle: RemoteBrowserPageHandle | null = null
@@ -120,6 +122,7 @@ export function createHarness() {
     const params = args.params as {
       page: string
       viewportWidth?: number
+      viewportHeight?: number
     }
     const respond = (result: unknown): void => {
       callbacks.onResponse({ id: 'sub-1', ok: true, result, _meta: { runtimeId: 'runtime-1' } })
@@ -128,6 +131,7 @@ export function createHarness() {
       pageId: params.page,
       params: args.params,
       viewportWidth: params.viewportWidth,
+      viewportHeight: params.viewportHeight,
       unsubscribeCount: 0,
       emitReady: () =>
         respond({
@@ -188,7 +192,9 @@ export function createHarness() {
       return viewportSize
     },
     readViewportSize: () => viewportSize,
-    syncViewport: async () => {},
+    syncViewport: async (_pageId, size) => {
+      syncedViewportSizes.push(size)
+    },
     getDeviceScaleFactor: () => 1,
     setStatus: (status) => statusLog.push(status),
     clearFrame: () => {},
@@ -203,6 +209,7 @@ export function createHarness() {
     closedPages,
     streams,
     rpcLog,
+    syncedViewportSizes,
     get subscribeAttempts(): number {
       return subscribeAttempts
     },

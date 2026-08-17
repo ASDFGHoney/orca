@@ -202,6 +202,117 @@ describe('RemoteBrowserStreamLifecycle', () => {
     expect(harness.streams[1].viewportWidth).toBe(1200)
   })
 
+  it('renegotiates one legacy host-sized frame to a complete aspect-matched viewport', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+    const recovered = harness.lifecycle.recoverLegacyFrame({
+      imageWidth: 533,
+      imageHeight: 917,
+      deviceWidth: 1097,
+      deviceHeight: 917
+    })
+    await settle()
+
+    expect(recovered).toBe(true)
+    expect(harness.streams).toHaveLength(2)
+    expect(harness.streams[0].unsubscribeCount).toBe(1)
+    expect(harness.streams[1]).toMatchObject({ viewportWidth: 533, viewportHeight: 446 })
+    harness.streams[0].emitClose()
+    await settle()
+    expect(harness.streams).toHaveLength(2)
+    harness.streams[1].emitReady()
+    await settle()
+    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 446 })
+
+    const secondRecovery = harness.lifecycle.recoverLegacyFrame({
+      imageWidth: 320,
+      imageHeight: 446,
+      deviceWidth: 533,
+      deviceHeight: 446
+    })
+    await settle()
+
+    expect(secondRecovery).toBe(false)
+    expect(harness.streams).toHaveLength(2)
+  })
+
+  it('leaves a corrected host frame on its existing stream', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 2194,
+        imageHeight: 1834,
+        deviceWidth: 1097,
+        deviceHeight: 917
+      })
+    ).toBe(false)
+    expect(harness.streams).toHaveLength(1)
+    expect(harness.streams[0].unsubscribeCount).toBe(0)
+  })
+
+  it('keeps the compatibility viewport when a live stream reconnects', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 533,
+        imageHeight: 917,
+        deviceWidth: 1097,
+        deviceHeight: 917
+      })
+    ).toBe(true)
+    await settle()
+    harness.streams[1].emitReady()
+    await settle()
+
+    harness.streams[1].emitEnd()
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(harness.streams[2]).toMatchObject({ viewportWidth: 533, viewportHeight: 446 })
+    harness.streams[2].emitReady()
+    await settle()
+    expect(harness.syncedViewportSizes.at(-1)).toEqual({ width: 533, height: 446 })
+  })
+
+  it('allows one fresh compatibility negotiation after a real pane resize', async () => {
+    const harness = createHarness()
+    harness.setViewportSize({ width: 1097, height: 917 })
+    await openStreamAndConfirmReady(harness)
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 533,
+        imageHeight: 917,
+        deviceWidth: 1097,
+        deviceHeight: 917
+      })
+    ).toBe(true)
+    await settle()
+    harness.streams[1].emitReady()
+    await settle()
+
+    harness.setViewportSize({ width: 1200, height: 900 })
+    harness.lifecycle.restartForViewport('page-1')
+    await settle()
+    harness.streams[2].emitReady()
+    await settle()
+
+    expect(
+      harness.lifecycle.recoverLegacyFrame({
+        imageWidth: 533,
+        imageHeight: 900,
+        deviceWidth: 1200,
+        deviceHeight: 900
+      })
+    ).toBe(true)
+    await settle()
+    expect(harness.streams[3]).toMatchObject({ viewportWidth: 533, viewportHeight: 400 })
+  })
+
   // waitForViewportSize can block for a few frames while the element is unmeasurable. An attempt
   // superseded during that window used to resume and claim the stream token anyway, stranding the
   // live stream: its 'ready' was then dropped as stale, and because one ready-deadline is kept per

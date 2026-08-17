@@ -2287,16 +2287,17 @@
       "providers": ["remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["remote-runtime"],
-      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection and acknowledgement, legacy frame containment, click mapping, multi-viewer viewport/driver handoff, and destroyed-page load cleanup. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, visible frame, and absence of reconnect/toast failure.",
+      "coverageNotes": "Deterministic contracts cover old-host capability negotiation, acknowledged history fallback, direct new-host navigation cleanup, raw input fallback, malformed host-surface rejection and acknowledgement, one-shot legacy viewport renegotiation, legacy frame containment, click mapping, multi-viewer viewport/driver handoff, and destroyed-page load cleanup. An isolated macOS headless paired host/client covers click, wheel, keyboard, and Back with both direct capabilities disabled. A headed Mac dev client paired to unchanged physical Windows 2 (1.4.184) covers the actual New Browser Tab action, Example.com link click, Back, Forward, Reload, host page inventory, client store identity, a complete aspect-matched frame after the old host captures only 533 of 1097 requested pixels, and absence of reconnect/toast failure.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4525",
         "https://github.com/stablyai/orca/issues/14883",
         "https://github.com/stablyai/orca/pull/14987"
       ],
-      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. A shared page follows the latest viewer viewport and restores the surviving viewer on disconnect without idling its driver or retaining page-load waiters.",
-      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to contain a malformed legacy frame, map only its actual pixels, reject gutter clicks, acknowledge malformed CDP frames, restore the prior viewer viewport/driver after the latest viewer disconnects, and clean a destroyed page's load listeners and timer immediately. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
+      "invariant": "A browser pane owned by a paired runtime never creates or controls a local fallback page. New clients must remain usable against hosts without direct raw-input or history capabilities, and old clients must safely ignore the new optional capabilities. History actions acknowledge before an old host replaces the page, upgraded hosts navigate without a helper process, and every published or rendered frame preserves one uniform page-to-pixel transform so visible pointer coordinates reach the authoritative host page. When an old host captures only part of the requested viewport, the client renegotiates once to the largest complete aspect-matched viewport and keeps page layout, pixels, and input coordinates aligned across navigation and reconnect. A shared page follows the latest viewer viewport and restores the surviving viewer on disconnect without idling its driver or retaining page-load waiters.",
+      "oracle": "Run the focused contracts with the exact physical mismatch of a 1097x917 requested client viewport and a 533x917 headed-host capture. Require an upgraded host to reject capturePage, publish the viewport-correct CDP capture, and publish nothing if both paths remain malformed. Require a new client to renegotiate the legacy stream once to 533x446, synchronize the authoritative page viewport, preserve that fallback across navigation/reconnect, re-arm only after a real pane resize, and avoid looping if the fallback frame remains malformed. Also require legacy frame containment, actual-pixel click mapping, gutter rejection, malformed CDP acknowledgement, prior-viewer viewport restoration after disconnect, and destroyed-page load cleanup. Disable both direct capabilities on a real paired headless host and require click, Back, wheel, and keyboard to mutate the host page without a stream error. On physical Windows 2, require one host page and one matching Mac mirror after the actual New Browser Tab action, then require a complete aspect-matched frame plus visible click, Back, Forward, and Reload success with no local page, reconnect state, or failure toast.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/browser/agent-browser-bridge-mouse-input.test.ts src/main/browser/browser-history-navigation.test.ts src/main/browser/browser-screencast-host-surface-capture.test.ts src/main/browser/browser-screencast-lifecycle.test.ts src/main/browser/browser-screencast-stream.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/runtime/orca-runtime-browser-screencast-fanout.test.ts src/main/runtime/orca-runtime-browser.test.ts src/main/runtime/orca-runtime.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts --reporter=dot",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-legacy-input.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --reporter=line",
         "pnpm exec playwright test tests/e2e/paired-browser-host-generated-publication.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --reporter=line"
       ],
@@ -2313,6 +2314,7 @@
         "src/renderer/src/components/browser-pane/remote-browser-frame-point.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-frame-style.test.ts",
         "src/renderer/src/components/browser-pane/remote-browser-legacy-input.test.ts",
+        "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
         "tests/e2e/paired-remote-browser-legacy-input.spec.ts",
         "tests/e2e/paired-browser-host-generated-publication.spec.ts"
       ],
@@ -2322,6 +2324,13 @@
           "assertions": [
             "a 533x917 host capture falls through to a 1097x917 client-authoritative capture",
             "no malformed frame is published when both fallback paths retain host geometry"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+          "assertions": [
+            "a partial 533x917 legacy capture selects a complete 533x446 compatibility viewport",
+            "uniformly scaled corrected frames and undersized captures do not trigger fallback"
           ]
         },
         {
@@ -2819,9 +2828,11 @@
       "oracle": "With one fake clock and exact pane, operation, stream, page, and runtime identities, drop a confirmed stream and require the counted delay sequence, one active chain, stale-token rejection, exact cancellation, full cleanup, and either a new live subscription or one stopped state with Reconnect after exhaustion. Inject transport error without close, close racing rejection, never-ready subscriptions, ready-then-end flapping, viewport supersession, missing pages, and permanent failures. In a separate paired client against an isolated headless Orca host, paint one remote frame, disconnect the owning runtime, require the bounded-retry notice and Reconnect control, reconnect, click once, and require a different frame object URL from the recovered stream.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-status.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
         "pnpm exec playwright test tests/e2e/paired-remote-browser-stream-reconnect.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
       ],
       "testFiles": [
+        "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-errors.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-lifecycle.test.ts",
         "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts",
@@ -2829,6 +2840,13 @@
         "tests/e2e/paired-remote-browser-stream-reconnect.spec.ts"
       ],
       "assertionRefs": [
+        {
+          "file": "src/renderer/src/components/browser-pane/remote-browser-legacy-viewport.test.ts",
+          "assertions": [
+            "legacy partial frames choose a bounded aspect-preserving viewport",
+            "corrected or unusably small frames do not trigger compatibility recovery"
+          ]
+        },
         {
           "file": "src/renderer/src/components/browser-pane/stream-remote/remote-browser-stream-restart-scheduler.test.ts",
           "assertions": [
