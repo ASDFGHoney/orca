@@ -199,6 +199,15 @@ function NativeChatResolvedView({
     transcriptOrder: order,
     onWorkingInterruptReset: resetWorkingInterrupted
   })
+  const handleSlashCommand = useCallback(
+    (command: string) => {
+      if (command.trim().toLowerCase().startsWith('/clear')) {
+        setPending(writePendingSendCache(pendingScope, []))
+      }
+      onSlashCommand(command)
+    },
+    [onSlashCommand, pendingScope]
+  )
   // Reset the optimistic queue only when the pane/agent changes. A fresh launch
   // often learns its provider session id after the first send; clearing pending
   // on that transition briefly flashes the empty state before the transcript
@@ -428,9 +437,11 @@ function NativeChatResolvedView({
         messages={sessionAfterCommandBoundaries.messages}
         transcriptSettled={session.readPhase === 'ready'}
         clearBoundaryUnavailable={clearBoundaryUnavailable}
-        hasClearMarker={commandMarkers.some((marker) =>
-          marker.command.trim().toLowerCase().startsWith('/clear')
-        )}
+        hasClearMarker={
+          commandMarkers.some((marker) =>
+            marker.command.trim().toLowerCase().startsWith('/clear')
+          ) && sessionAfterCommandBoundaries.messages.length === 0
+        }
         onShowingQuestionChange={setQuestionActive}
         answerInputRef={questionAnswerInputRef}
       />
@@ -449,7 +460,7 @@ function NativeChatResolvedView({
           onStop={stopAgent}
           onOptimisticSend={onOptimisticSend}
           onOptimisticSendCanceled={onOptimisticSendCanceled}
-          onSlashCommand={onSlashCommand}
+          onSlashCommand={handleSlashCommand}
           onSwitchToTerminal={onSwitchToTerminal}
           readTerminalScreen={readTerminalScreen}
           {...launchDraftSignal}

@@ -135,6 +135,9 @@ export function applyCommandMarkerBoundaries(
     clearMarker.clearTranscriptHighWater !== undefined
   ) {
     const highWater = clearMarker.clearTranscriptHighWater
+    if (transcriptOrder.messageSequenceById.size === 0) {
+      return messages as NativeChatMessage[]
+    }
     return messages.filter((message) => {
       const sequence = transcriptOrder.messageSequenceById.get(message.id)
       return sequence !== undefined && sequence > highWater
@@ -167,9 +170,10 @@ export function hasUnavailableNativeChatClearBoundary(
     clearMarker.clearTranscriptGeneration === transcriptOrder.generation &&
     clearMarker.clearTranscriptHighWater !== undefined
   ) {
-    return ![...transcriptOrder.messageSequenceById.values()].some(
+    const hasPostClearSequence = [...transcriptOrder.messageSequenceById.values()].some(
       (sequence) => sequence > clearMarker.clearTranscriptHighWater!
     )
+    return !hasPostClearSequence
   }
   return true
 }

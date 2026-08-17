@@ -783,7 +783,7 @@ describe('applyCommandMarkerBoundaries', () => {
     ).toEqual(['new'])
   })
 
-  it('hides late backfill after clear on an empty snapshot', () => {
+  it('keeps late backfill visible when clear ordering is unavailable', () => {
     const lateBackfill = [userMessage('old-u', 'old')]
 
     expect(
@@ -801,7 +801,7 @@ describe('applyCommandMarkerBoundaries', () => {
         ],
         transcriptOrder(3, 0)
       )
-    ).toEqual([])
+    ).toEqual(lateBackfill)
   })
 
   it('shows same-generation live rows after clear on an empty snapshot', () => {
