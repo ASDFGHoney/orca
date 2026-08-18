@@ -20,6 +20,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { stripAnsiEscapeSequences } from '../../shared/ansi-escape-sequences'
+import { isWideGlyph } from '../daemon/__fixtures__/terminal-wide-cell-grid'
 
 const itOnWindows = process.platform === 'win32' ? it : it.skip
 
@@ -27,15 +28,12 @@ const KOREAN_LINE = '안녕하세요 오르카 테스트입니다. 결론부터 
 const LATIN_LINE = 'roadmap/complete-overhaul-backlog-history.md (1.75) R-08)'
 const LINE_REPEATS = 12
 
-/** Hangul syllables + CJK ideographs + fullwidth forms: the code points that occupy two console cells. */
-const WIDE = /[ᄀ-ᅟ⺀-鿿가-힣豈-﫿︰-﹏！-｠￠-￦]/
-
 /** Adjacent identical wide characters. The fixtures contain none, so any hit is duplication. */
 function doubledWideRuns(text: string): string[] {
   const hits: string[] = []
   for (let i = 1; i < text.length; i++) {
     const ch = text[i]!
-    if (ch === text[i - 1] && WIDE.test(ch)) {
+    if (ch === text[i - 1] && isWideGlyph(ch)) {
       hits.push(`${text.slice(Math.max(0, i - 12), i + 12)}`)
     }
   }
