@@ -88,10 +88,10 @@ index 497afcf535f3eaca00889525a77e15eb633ccd96..96d499b34605f860608382114c3fbdc0
  
  export interface IBrowser {
 diff --git a/src/browser/input/CompositionHelper.ts b/src/browser/input/CompositionHelper.ts
-index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8d94e8797 100644
+index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..9677d96878afbe247d86fae9747c892c45cb9265 100644
 --- a/src/browser/input/CompositionHelper.ts
 +++ b/src/browser/input/CompositionHelper.ts
-@@ -12,6 +12,28 @@ interface IPosition {
+@@ -12,6 +12,55 @@ interface IPosition {
    end: number;
  }
  
@@ -112,6 +112,33 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +  nextCompositionStart?: number;
 +}
 +
++/**
++ * Hangul jamo a hardware keyboard reports directly. iPadOS Hangul fires no composition events at
++ * all: each jamo arrives as a plain keydown while the IME rewrites the syllable in place in the
++ * textarea, so the jamo key is the only signal that a composition is under way (#13345).
++ */
++const HANGUL_JAMO_KEY = /^[\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\uFFA0-\uFFDC]$/;
++
++interface IHangulKeydownPreedit {
++  /** Textarea text preceding the preedit; everything after it is uncommitted. */
++  baseValue: string;
++  /** The syllable being held: rendered, not sent. */
++  text: string;
++  valueAtKeydown: string;
++  key: string;
++  timer?: ReturnType<typeof setTimeout>;
++}
++
++/**
++ * iPadOS with a hardware keyboard, which reports a Mac user agent. Read per call rather than at
++ * module load so the check follows the live navigator.
++ */
++function isTouchIOS(): boolean {
++  return typeof navigator !== 'undefined' &&
++    navigator.userAgent.includes('Mac') &&
++    navigator.maxTouchPoints > 1;
++}
++
 +const XTERM_COMPOSITION_SESSION_START_EVENT = 'xterm-composition-session-start';
 +const XTERM_COMPOSITION_SESSION_END_EVENT = 'xterm-composition-session-end';
 +const XTERM_COMPOSITION_TRANSACTION_ACCEPTED_EVENT =
@@ -120,7 +147,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
  /**
   * Encapsulates the logic for handling compositionstart, compositionupdate and compositionend
   * events, displaying the in-progress composition to the UI and forwarding the final composition
-@@ -24,6 +46,15 @@ export class CompositionHelper {
+@@ -24,6 +73,15 @@ export class CompositionHelper {
     */
    private _isComposing: boolean;
    public get isComposing(): boolean { return this._isComposing; }
@@ -136,7 +163,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
  
    /**
     * The position within the input textarea's value of the current composition.
-@@ -36,22 +67,63 @@ export class CompositionHelper {
+@@ -36,22 +94,66 @@ export class CompositionHelper {
     */
    private _compositionSuffix: string;
  
@@ -178,6 +205,9 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +   */
 +  private _imeKeydownAwaitingCommit: boolean;
 +
++  /** The Hangul syllable a keydown-only IME is still composing, held back from the pty. */
++  private _hangulPreedit?: IHangulKeydownPreedit;
++
 +  /**
 +   * Identifies the composition transaction that owns deferred work.
 +   */
@@ -206,7 +236,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    constructor(
      private readonly _textarea: HTMLTextAreaElement,
      private readonly _compositionView: HTMLElement,
-@@ -61,27 +133,61 @@ export class CompositionHelper {
+@@ -61,27 +163,63 @@ export class CompositionHelper {
      @IRenderService private readonly _renderService: IRenderService
    ) {
      this._isComposing = false;
@@ -230,6 +260,8 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
     */
    public compositionstart(): void {
 -    this._isComposing = true;
++    // A real session owns the text from here, so anything held for a keydown-only IME is final.
++    this._commitHangulPreedit();
 +    this._cancelDeferredTimer(this._compositionPositionTimer);
 +    this._compositionPositionTimer = undefined;
 +    this._cancelDeferredTimer(this._compositionViewTimer);
@@ -271,7 +303,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    }
  
    /**
-@@ -89,22 +195,90 @@ export class CompositionHelper {
+@@ -89,22 +227,92 @@ export class CompositionHelper {
     * @param ev The event.
     */
    public compositionupdate(ev: Pick<CompositionEvent, 'data'>): void {
@@ -341,6 +373,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +  }
 +
 +  public blur(): void {
++    this._commitHangulPreedit();
 +    this._cancelDeferredTimer(this._compositionEndTimer);
 +    this._compositionEndTimer = undefined;
 +    if (this._isComposing) {
@@ -353,6 +386,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +  }
 +
 +  public dispose(): void {
++    this._endHangulPreedit();
 +    if (this._textareaChangeTimer !== undefined) {
 +      clearTimeout(this._textareaChangeTimer);
 +      this._textareaChangeTimer = undefined;
@@ -371,7 +405,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    }
  
    /**
-@@ -113,7 +287,19 @@ export class CompositionHelper {
+@@ -113,7 +321,29 @@ export class CompositionHelper {
     * @returns Whether the Terminal should continue processing the keydown event.
     */
    public keydown(ev: KeyboardEvent): boolean {
@@ -385,6 +419,16 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +      this._cancelComposition();
 +      return false;
 +    }
++    if (this._hangulPreedit) {
++      const outcome = this._handleHangulPreeditKeydown(ev);
++      if (outcome !== undefined) {
++        return outcome;
++      }
++    }
++    if (this._shouldHoldHangulKeydown(ev)) {
++      this._beginHangulPreedit(ev);
++      return false;
++    }
 +    if (this._isComposing || this.hasPendingCompositionFinalization) {
 +      // A key the IME swallows can also empty the preedit — backspacing over the last radical of a
 +      // Cangjie composition — and some IMEs report that with no composition event at all.
@@ -392,7 +436,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
        if (ev.keyCode === 20 || ev.keyCode === 229) {
          // 20 is CapsLock, 229 is Enter
          // Continue composing if the keyCode is the "composition character"
-@@ -128,6 +314,10 @@ export class CompositionHelper {
+@@ -128,6 +358,10 @@ export class CompositionHelper {
        this._finalizeComposition(false);
      }
  
@@ -403,7 +447,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
      if (ev.keyCode === 229) {
        // If the "composition character" is used but gets to this point it means a non-composition
        // character (eg. numbers and punctuation) was pressed when the IME was active.
-@@ -138,6 +328,74 @@ export class CompositionHelper {
+@@ -138,6 +372,220 @@ export class CompositionHelper {
      return true;
    }
  
@@ -412,6 +456,9 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +   * after reconciliation with the final textarea candidate.
 +   */
 +  public keypress(text: string): boolean {
++    if (this._hangulPreedit) {
++      return true;
++    }
 +    const pending = this._pendingComposition;
 +    if (!pending) {
 +      return false;
@@ -429,6 +476,9 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +  }
 +
 +  public input(text: string): boolean {
++    if (this._hangulPreedit) {
++      return true;
++    }
 +    if (this._isComposing) {
 +      this._compositionHasObservedProgress ||= this._hasCompositionProgress();
 +      this._compositionInputData += text;
@@ -455,6 +505,146 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +    return true;
 +  }
 +
++  private _isHangulJamoKey(ev: KeyboardEvent): boolean {
++    return HANGUL_JAMO_KEY.test(ev.key) && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
++  }
++
++  private _shouldHoldHangulKeydown(ev: KeyboardEvent): boolean {
++    return (
++      this._isHangulJamoKey(ev) &&
++      !this._isComposing &&
++      !this.hasPendingCompositionFinalization &&
++      // Screen reader mode writes the textarea itself, so the diff read below would not be the
++      // IME's alone; leaving the key on its normal path keeps that mode's input intact.
++      !this._optionsService.rawOptions.screenReaderMode &&
++      isTouchIOS()
++    );
++  }
++
++  /**
++   * @returns What `keydown` should return, or undefined to let the key take its normal path.
++   */
++  private _handleHangulPreeditKeydown(ev: KeyboardEvent): boolean | undefined {
++    if (ev.key === 'Escape') {
++      // Cancels the syllable the way Escape cancels a composition; none of it was sent.
++      this._canceledKey = { code: ev.code, timeStamp: ev.timeStamp };
++      this._discardHangulPreedit();
++      return false;
++    }
++    const editsPreedit =
++      this._isHangulJamoKey(ev) ||
++      (ev.key === 'Backspace' && !ev.ctrlKey && !ev.altKey && !ev.metaKey);
++    if (editsPreedit) {
++      // Backspace decomposes the held syllable in the textarea rather than deleting a written cell.
++      this._armHangulPreeditSync(ev);
++      return false;
++    }
++    this._commitHangulPreedit();
++    return undefined;
++  }
++
++  private _beginHangulPreedit(ev: KeyboardEvent): void {
++    // This keydown forwards nothing but owns its own commit, so no earlier one is left owing it.
++    this._imeKeydownAwaitingCommit = false;
++    this._hangulPreedit = {
++      baseValue: this._textarea.value,
++      text: '',
++      valueAtKeydown: this._textarea.value,
++      key: ev.key
++    };
++    this._armHangulPreeditSync(ev);
++  }
++
++  private _armHangulPreeditSync(ev: KeyboardEvent): void {
++    const preedit = this._hangulPreedit;
++    if (!preedit) {
++      return;
++    }
++    preedit.valueAtKeydown = this._textarea.value;
++    preedit.key = ev.key;
++    this._cancelDeferredTimer(preedit.timer);
++    preedit.timer = this._defer(() => this._syncHangulPreedit());
++  }
++
++  /**
++   * Re-derives the preedit from the textarea once the IME's rewrite has landed. The IME replaces
++   * the syllable it is still building and appends once that syllable is final, so a tail that grew
++   * past what was held is the one signal that the held syllable can be committed.
++   */
++  private _syncHangulPreedit(): void {
++    const preedit = this._hangulPreedit;
++    if (!preedit) {
++      return;
++    }
++    preedit.timer = undefined;
++    const value = this._textarea.value;
++    if (!value.startsWith(preedit.baseValue)) {
++      // The textarea was rewritten from under the preedit, so there is nothing left to diff
++      // against; commit what is held rather than measure against text that is gone.
++      this._commitHangulPreedit();
++      return;
++    }
++    let tail = value.substring(preedit.baseValue.length);
++    if (tail.length === 0) {
++      if (
++        preedit.text.length === 0 &&
++        value === preedit.valueAtKeydown &&
++        HANGUL_JAMO_KEY.test(preedit.key)
++      ) {
++        // No rewrite happened, so no diff can carry this key. Send it rather than drop it.
++        this._coreService.triggerDataEvent(preedit.key, true);
++      }
++      // Otherwise the IME emptied the preedit; none of it was sent, so nothing needs undoing.
++      this._endHangulPreedit();
++      return;
++    }
++    if (
++      preedit.text.length > 0 &&
++      tail.length > preedit.text.length &&
++      tail.startsWith(preedit.text)
++    ) {
++      this._coreService.triggerDataEvent(preedit.text, true);
++      preedit.baseValue += preedit.text;
++      tail = tail.substring(preedit.text.length);
++    }
++    preedit.text = tail;
++    this._renderCompositionView(tail);
++    this._compositionView.classList.add('active');
++    this.updateCompositionElements();
++  }
++
++  private _commitHangulPreedit(): void {
++    const preedit = this._hangulPreedit;
++    if (!preedit) {
++      return;
++    }
++    this._endHangulPreedit();
++    if (preedit.text.length > 0) {
++      this._coreService.triggerDataEvent(preedit.text, true);
++    }
++  }
++
++  private _discardHangulPreedit(): void {
++    const preedit = this._hangulPreedit;
++    if (!preedit) {
++      return;
++    }
++    // The cancelled text never reached the pty, so it must not survive in the textarea either.
++    this._textarea.value = preedit.baseValue;
++    this._endHangulPreedit();
++  }
++
++  private _endHangulPreedit(): void {
++    const preedit = this._hangulPreedit;
++    if (!preedit) {
++      return;
++    }
++    this._hangulPreedit = undefined;
++    this._cancelDeferredTimer(preedit.timer);
++    this._compositionView.classList.remove('active');
++    this._resetCompositionView();
++  }
++
 +  /**
 +   * Settles the commit a keydown the IME consumed still owes. That commit normally arrives as the
 +   * deferred textarea diff, but an asynchronous IME can deliver it after the diff has already run
@@ -478,7 +668,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    /**
     * Finalizes the composition, resuming regular input actions. This is called when a composition
     * is ending.
-@@ -146,23 +404,52 @@ export class CompositionHelper {
+@@ -146,23 +594,52 @@ export class CompositionHelper {
     *   compositionend event is triggered, such as enter, so that the composition is sent before
     *   the command is executed.
     */
@@ -542,7 +732,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
  
        // Since composition* events happen before the changes take place in the textarea on most
        // browsers, use a setTimeout with 0ms time to allow the native compositionend event to
-@@ -172,37 +459,310 @@ export class CompositionHelper {
+@@ -172,37 +649,310 @@ export class CompositionHelper {
        // - The last compositionupdate event's data property does not always accurately describe
        //   the character, a counter example being Korean where an ending consonsant can move to
        //   the following character if the following input is a vowel.
@@ -576,15 +766,15 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +        pending.finalizerTimer = undefined;
 +        if (this._compositionTransactionId === pending.transactionId) {
 +          this._isAwaitingCompositionEnd = false;
-+        }
-+        if (this._pendingComposition === pending) {
-+          this._sendPendingComposition(pending, true);
          }
 -      }, 0);
++        if (this._pendingComposition === pending) {
++          this._sendPendingComposition(pending, true);
++        }
 +      });
-     }
-   }
- 
++    }
++  }
++
 +  private _sendPendingComposition(
 +    pending: IPendingComposition,
 +    includeFollowingInput: boolean = false
@@ -731,9 +921,9 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
 +    this._sendCompositionInput(transactionId, '');
 +    if (settlesPending && pending) {
 +      this._settlePendingComposition(pending);
-+    }
-+  }
-+
+     }
+   }
+ 
 +  private _sendCompositionInput(
 +    transactionId: number,
 +    input: string,
@@ -880,7 +1070,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    /**
     * Apply any changes made to the textarea after the current event chain is allowed to complete.
     * This should be called when not currently composing but a keydown event with the "composition
-@@ -222,6 +782,9 @@ export class CompositionHelper {
+@@ -222,6 +972,9 @@ export class CompositionHelper {
  
          const diff = newValue.replace(oldValue, '');
  
@@ -890,7 +1080,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
          this._dataAlreadySent = diff;
  
          if (newValue.length > oldValue.length) {
-@@ -236,6 +799,77 @@ export class CompositionHelper {
+@@ -236,6 +989,77 @@ export class CompositionHelper {
      }, 0);
    }
  
@@ -968,7 +1158,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
    /**
     * Positions the composition view on top of the cursor and the textarea just below it (so the
     * IME helper dialog is positioned correctly).
-@@ -243,10 +877,22 @@ export class CompositionHelper {
+@@ -243,10 +1067,22 @@ export class CompositionHelper {
     *   necessary as the IME events across browsers are not consistently triggered.
     */
    public updateCompositionElements(dontRecurse?: boolean): void {
@@ -992,7 +1182,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
      if (this._bufferService.buffer.isCursorInViewport) {
        const cursorX = Math.min(this._bufferService.buffer.x, this._bufferService.cols - 1);
  
-@@ -265,10 +911,17 @@ export class CompositionHelper {
+@@ -265,10 +1101,17 @@ export class CompositionHelper {
        const maxWidth = this._bufferService.cols * this._renderService.dimensions.css.cell.width - cursorLeft;
        this._compositionView.style.maxWidth = maxWidth + 'px';
        this._compositionView.style.overflow = 'hidden';
@@ -1014,7 +1204,7 @@ index c9ec396ab66cb966d49aa63bed09cdf9cd6c4246..808c710356fe026471467e35ad776af8
        this._textarea.style.left = cursorLeft + 'px';
        this._textarea.style.top = cursorTop + 'px';
        // Ensure the text area is at least 1x1, otherwise certain IMEs may break
-@@ -278,7 +931,8 @@ export class CompositionHelper {
+@@ -278,7 +1121,8 @@ export class CompositionHelper {
      }
  
      if (!dontRecurse) {
