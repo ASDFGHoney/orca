@@ -18601,7 +18601,7 @@ export class OrcaRuntimeService {
     // Bounded because it reaches a PTY controller that can be a remote host: a wedged probe
     // must leave the wait unevaluated, never stall every caller of showTerminal.
     const status = await withTimeout(
-      this.getTerminalAgentStatus(handle).catch(() => undefined),
+      this.probeAgentStatusOncePerPty(handle, ptyId),
       TERMINAL_INTERACTIVE_WAIT_PROBE_TIMEOUT_MS,
       undefined
     )
@@ -18611,6 +18611,32 @@ export class OrcaRuntimeService {
     return status.isRunningAgent && status.status === 'permission'
       ? { source: 'hook', since: explicitStatus.updatedAt }
       : null
+  }
+
+  // Why single-flight: the timeout above abandons the wait, not the request. A wedged remote
+  // host would otherwise accrue one live probe per poll for as long as a coordinator watches.
+  private readonly interactiveWaitProbesByPtyId = new Map<
+    string,
+    Promise<RuntimeTerminalAgentStatus | undefined>
+  >()
+
+  private probeAgentStatusOncePerPty(
+    handle: string,
+    ptyId: string
+  ): Promise<RuntimeTerminalAgentStatus | undefined> {
+    const inFlight = this.interactiveWaitProbesByPtyId.get(ptyId)
+    if (inFlight) {
+      return inFlight
+    }
+    const probe = this.getTerminalAgentStatus(handle)
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.interactiveWaitProbesByPtyId.get(ptyId) === probe) {
+          this.interactiveWaitProbesByPtyId.delete(ptyId)
+        }
+      })
+    this.interactiveWaitProbesByPtyId.set(ptyId, probe)
+    return probe
   }
 
   private async terminalHasShellForegroundProcess(handle: string, ptyId: string): Promise<boolean> {
@@ -39613,8 +39639,10 @@ function findCursorApprovalPromptIndex(normalized: string): number | null {
 
 // Why the trailing key and not the wording alone: an agent narrating "next time I'll suggest
 // Run Everything" writes the same words as the menu. A selectable row ends in the key that
-// picks it, and prose does not.
-const CURSOR_APPROVAL_CHOICE_KEY_RE = /\([a-z+ ]{1,12}\)\s*$/
+// picks it, and prose does not. Spelled as key names rather than a character class, because
+// any lowercase run would readmit "…suggest Run Everything (as before)".
+const CURSOR_APPROVAL_CHOICE_KEY_RE =
+  /\((?:shift\+tab|ctrl\+[a-z]|esc(?: or [a-z])*|tab|enter|return|space|[a-z]|[\u21b5\u21e7\u21b9\u238b\u23ce]{1,3})\)\s*$/
 
 function isCursorApprovalChoiceLine(line: string): boolean {
   return (

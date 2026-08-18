@@ -608,8 +608,10 @@ export type RuntimeWorktreeTerminalSleepResult = {
  *  `prompt-text` is a matched prompt in the retained tail, `title` is a live OSC title. */
 export type RuntimeTerminalInteractiveWaitSource = 'hook' | 'prompt-text' | 'title'
 
-/** Present only while the wait is live. Absence means "no proof of a wait", not "not waiting" —
- *  an unreadable or hookless pane reports nothing rather than a false negative dressed as fact. */
+/** Present only while the wait is live. A `null` field means the pane was evaluated and nothing
+ *  proves a wait; an absent field means it was never evaluated — an older host, an unverifiable
+ *  worker identity, an unreadable pane, or an agent probe that did not answer in time. Absence
+ *  is never "not waiting". */
 export type RuntimeTerminalInteractiveWait = {
   source: RuntimeTerminalInteractiveWaitSource
   /** Named prompt when the tail identified one. Absent for hook and title evidence. */

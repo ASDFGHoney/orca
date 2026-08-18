@@ -47,6 +47,7 @@ async function createPane(options: {
   connectionId?: string
   /** Simulates a PTY controller whose foreground probe never settles. */
   foregroundProbeHangs?: boolean
+  onForegroundProbe?: () => void
 }): Promise<{ runtime: OrcaRuntimeService; handle: string }> {
   const runtime = new OrcaRuntimeService(null)
   const internals = runtime as unknown as {
@@ -63,10 +64,12 @@ async function createPane(options: {
     spawn: vi.fn().mockResolvedValue({ id: PTY_ID, incarnationId: 'inc-1' }),
     write: () => true,
     kill: () => true,
-    getForegroundProcess:
-      options.foregroundProbeHangs === true
-        ? () => new Promise<string | null>(() => {})
-        : async () => options.foregroundProcess
+    getForegroundProcess: (): Promise<string | null> => {
+      options.onForegroundProbe?.()
+      return options.foregroundProbeHangs === true
+        ? new Promise<string | null>(() => {})
+        : Promise.resolve(options.foregroundProcess)
+    }
   })
   const terminal = await runtime.createTerminal(`id:${WORKTREE_ID}`, {
     tabId: TAB_ID,
@@ -409,6 +412,55 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
     runtime.onPtyExit(PTY_ID, 0)
 
     await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeUndefined()
+  })
+
+  it('does not accrue a probe per poll while the foreground probe wedges', async () => {
+    // Why: the timeout abandons the wait, not the request. Without single-flighting, a
+    // coordinator watching a wedged remote host adds one live probe on every poll.
+    let probes = 0
+    const { runtime, handle } = await createPane({
+      paneTitle: '✻ Claude Code',
+      foregroundProcess: 'claude',
+      data: agentStatusOsc('waiting'),
+      onForegroundProbe: () => {
+        probes += 1
+      },
+      foregroundProbeHangs: true
+    })
+
+    await Promise.all([
+      runtime.getTerminalInteractiveWait(handle),
+      runtime.getTerminalInteractiveWait(handle),
+      runtime.getTerminalInteractiveWait(handle)
+    ])
+
+    expect(probes).toBe(1)
+  }, 20_000)
+
+  it('accepts a menu whose keys are rendered as glyphs', async () => {
+    const { runtime, handle } = await createPane({
+      paneTitle: CURSOR_TITLE,
+      foregroundProcess: 'cursor-agent',
+      data: [
+        'Run this command?\n',
+        '  → Run (once) (\u21b5)\n',
+        '    Run Everything (\u21e7\u21b9)\n'
+      ].join('')
+    })
+
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
+      reason: 'agent-approval-prompt'
+    })
+  })
+
+  it('still rejects prose that merely ends in parentheses', async () => {
+    const { runtime, handle } = await createPane({
+      paneTitle: CURSOR_TITLE,
+      foregroundProcess: 'cursor-agent',
+      data: `${CURSOR_APPROVAL}\nNext time I will suggest Run Everything (as before)\n`
+    })
+
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
   })
 
   it('leaves the wait unevaluated when the foreground probe wedges', async () => {

@@ -158,6 +158,11 @@ describe('worker-show interactive wait (STA-3714, STA-4513)', () => {
       observation: { agentWait: unknown }
     }
 
+    // Why the explicit shape first: comparing the two fields alone passes when both are absent.
+    expect(result.observation.agentWait).toMatchObject({
+      source: 'prompt-text',
+      reason: 'agent-approval-prompt'
+    })
     expect(result.observation.agentWait).toEqual(result.terminal?.agentWait)
   })
 })
