@@ -250,6 +250,65 @@ describe('registerWorktreeHandlers', () => {
     )
   })
 
+  it('suffixes SSH worktree creation when a nested local ref blocks the requested branch', async () => {
+    // STA-4762: refs/heads/feature/tti_fix_1440 makes `feature` uncreatable; without
+    // detection the SSH flow surfaced raw `cannot lock ref` text from git.
+    const repo = {
+      id: 'repo-ssh',
+      path: '/remote/repo',
+      displayName: 'ssh',
+      badgeColor: '#000',
+      addedAt: 0,
+      connectionId: 'conn-1',
+      worktreeBaseRef: 'origin/main'
+    }
+    const provider = {
+      exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'remote') {
+          return { stdout: 'origin\n', stderr: '' }
+        }
+        if (args[0] === 'for-each-ref') {
+          return args.includes('refs/heads/feature')
+            ? { stdout: 'refs/heads/feature/tti_fix_1440\n', stderr: '' }
+            : { stdout: '', stderr: '' }
+        }
+        if (args[0] === 'rev-parse') {
+          throw new Error('missing local branch')
+        }
+        return { stdout: '', stderr: '' }
+      }),
+      fetchRemoteTrackingRef: vi.fn().mockResolvedValue(undefined),
+      addWorktree: vi.fn().mockResolvedValue(undefined),
+      removeWorktree: vi.fn().mockResolvedValue(undefined),
+      listWorktrees: vi.fn().mockResolvedValue([
+        {
+          path: '/remote/repo-feature-2',
+          head: 'abc123',
+          branch: 'refs/heads/feature-2',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ])
+    }
+    const mux = {
+      request: vi.fn().mockResolvedValue(undefined),
+      notify: vi.fn()
+    }
+    store.getRepos.mockReturnValue([repo])
+    store.getRepo.mockReturnValue(repo)
+    getSshGitProviderMock.mockReturnValue(provider)
+    getActiveMultiplexerMock.mockReturnValue(mux)
+
+    await handlers['worktrees:create'](null, { repoId: 'repo-ssh', name: 'feature' })
+
+    expect(provider.addWorktree).toHaveBeenCalledWith(
+      '/remote/repo',
+      'feature-2',
+      '/remote/repo-feature-2',
+      { base: 'origin/main' }
+    )
+  })
+
   it('suffixes SSH worktree creation when a slashed remote owns the requested branch', async () => {
     const repo = {
       id: 'repo-ssh',

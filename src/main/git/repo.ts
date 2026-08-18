@@ -10,6 +10,11 @@ import { parseWslUncPath } from '../../shared/wsl-paths'
 import { toWindowsWslPath } from '../wsl'
 import { buildHostedRemoteCommitUrl, buildHostedRemoteFileUrl } from './hosted-remote-url'
 import { getLocalGitCapabilityCache } from './git-capability-state'
+import {
+  buildBranchRefConflictArgv,
+  classifyBranchRefDirectoryConflict,
+  type BranchConflictKind
+} from './branch-ref-conflict'
 
 type LocalGitExecOptions = {
   wslDistro?: string
@@ -987,7 +992,29 @@ async function hasGitRefAsync(
   }
 }
 
-export type BranchConflictKind = 'local' | 'remote'
+export type { BranchConflictKind }
+
+/**
+ * Detect a git directory/file ref collision (`feature` vs `feature/x`) that
+ * would make `git worktree add -b` fail with raw `cannot lock ref` text.
+ * Failures are swallowed: a probe that cannot run must not block a create that
+ * git may well accept.
+ */
+async function hasLocalRefDirectoryConflict(
+  path: string,
+  branchName: string,
+  options: LocalGitExecOptions
+): Promise<boolean> {
+  try {
+    const { stdout } = await gitExecFileAsync(
+      buildBranchRefConflictArgv(branchName),
+      gitExecOptions(path, options)
+    )
+    return classifyBranchRefDirectoryConflict(branchName, stdout) !== null
+  } catch {
+    return false
+  }
+}
 
 export async function getBranchConflictKind(
   path: string,
@@ -997,6 +1024,9 @@ export async function getBranchConflictKind(
 ): Promise<BranchConflictKind | null> {
   if (await hasGitRefAsync(path, `refs/heads/${branchName}`, options)) {
     return 'local'
+  }
+  if (await hasLocalRefDirectoryConflict(path, branchName, options)) {
+    return 'local-directory'
   }
 
   try {
