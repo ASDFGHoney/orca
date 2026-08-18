@@ -36,6 +36,24 @@ export class DaemonConnectionLostError extends DaemonProtocolError {
   }
 }
 
+/**
+ * Nothing came back before our own deadline. The daemon may still be alive and merely
+ * slow, so this is not a connection loss — but a request AND the cancel sent to clean
+ * it up both hitting this means the daemon is wedged with its socket still open.
+ */
+export class DaemonRequestTimeoutError extends DaemonProtocolError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DaemonRequestTimeoutError'
+  }
+}
+
+/**
+ * The one message `isDaemonGoneError` matches that a still-open connection can produce,
+ * so it is the only way a wedged-but-connected daemon reaches the respawn path.
+ */
+export const DAEMON_UNAVAILABLE_RECONNECT_MESSAGE = 'Daemon temporarily unavailable; reconnect'
+
 export class SessionNotFoundError extends Error {
   constructor(sessionId: string) {
     super(`Session not found: ${sessionId}`)

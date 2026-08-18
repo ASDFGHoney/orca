@@ -2,7 +2,13 @@ import type { Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DaemonPendingRequests } from './daemon-client-pending-requests'
 import { requestDaemonRpc } from './daemon-client-rpc-request'
-import { DaemonConnectionLostError, DaemonProtocolError } from './types'
+import { isDaemonGoneError } from './daemon-pty-adapter'
+import {
+  DAEMON_UNAVAILABLE_RECONNECT_MESSAGE,
+  DaemonConnectionLostError,
+  DaemonProtocolError,
+  DaemonRequestTimeoutError
+} from './types'
 
 /** Mirrors DaemonClient: a sibling session's in-flight request on the same connection. */
 function addSiblingRequest(pendingRequests: DaemonPendingRequests, reject: () => void): void {
@@ -181,11 +187,12 @@ describe('requestDaemonRpc', () => {
       return { request, pendingRequests, onCreateCancellationFailure, rejectSibling }
     }
 
-    it('keeps the connection when the cancel RPC times out', async () => {
+    it('keeps the connection, and stays abort-shaped, when the cancel RPC times out', async () => {
       vi.useFakeTimers()
+      // The caller asked to stop, so a wedged daemon must not turn this into a respawn.
       const { request, pendingRequests, onCreateCancellationFailure, rejectSibling } =
         await abortWithFailingCancel(
-          new DaemonProtocolError('Request cancelCreateOrAttach timed out after 5000ms')
+          new DaemonRequestTimeoutError('Request cancelCreateOrAttach timed out after 5000ms')
         )
       const rejected = expect(request).rejects.toThrow('client_disconnected')
 
@@ -217,6 +224,43 @@ describe('requestDaemonRpc', () => {
       expect(rejectSibling).not.toHaveBeenCalled()
       expect(pendingRequests.size).toBe(1)
     })
+  })
+
+  it('reports a wedged daemon when the request and its cancel both time out', async () => {
+    // Why: neither RPC was answered but the socket never closed, so no disconnect fires.
+    // The only remaining recovery is rejecting with the message isDaemonGoneError matches,
+    // which lets withDaemonRetry respawn instead of retrying forever against a dead loop.
+    vi.useFakeTimers()
+    const pendingRequests = new DaemonPendingRequests()
+    const rejectSibling = vi.fn()
+    addSiblingRequest(pendingRequests, rejectSibling)
+    const onCreateCancellationFailure = vi.fn(() => {
+      pendingRequests.rejectAll('Connection lost')
+    })
+    const request = requestDaemonRpc({
+      socket: { write: vi.fn() } as unknown as Socket,
+      pendingRequests,
+      id: 'req-1',
+      type: 'createOrAttach',
+      payload: { sessionId: 'wedged-spawn' },
+      timeoutMs: 30_000,
+      unmatchedCancelGraceMs: 5_000,
+      onCreateCancellationFailure,
+      settleCreateCancellation: vi.fn(async () => {
+        throw new DaemonRequestTimeoutError('Request cancelCreateOrAttach timed out after 5000ms')
+      })
+    })
+    const rejected = expect(request).rejects.toThrow(DAEMON_UNAVAILABLE_RECONNECT_MESSAGE)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    await rejected
+    // The whole point: withDaemonRetry only respawns for errors this predicate matches.
+    await request.catch((err: unknown) => expect(isDaemonGoneError(err)).toBe(true))
+    expect(onCreateCancellationFailure).not.toHaveBeenCalled()
+    expect(rejectSibling).not.toHaveBeenCalled()
+    expect(pendingRequests.size).toBe(1)
   })
 
   it('drops the pending entry when the control socket write throws', async () => {

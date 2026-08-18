@@ -402,5 +402,7 @@ export {
   TerminalAttachCanceledError,
   DaemonConnectionLostError,
   DaemonProtocolError,
+  DaemonRequestTimeoutError,
+  DAEMON_UNAVAILABLE_RECONNECT_MESSAGE,
   SessionNotFoundError
 } from './daemon-errors'

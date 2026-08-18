@@ -1,6 +1,10 @@
 import type { Socket } from 'node:net'
 import { encodeNdjson } from './ndjson'
-import { DaemonConnectionLostError, DaemonProtocolError } from './types'
+import {
+  DAEMON_UNAVAILABLE_RECONNECT_MESSAGE,
+  DaemonConnectionLostError,
+  DaemonRequestTimeoutError
+} from './types'
 import { isTerminalAttachCanceledMessage } from './daemon-errors'
 import type { DaemonPendingRequests } from './daemon-client-pending-requests'
 
@@ -22,10 +26,31 @@ type DaemonRpcRequestOptions = {
    * Escalation of last resort: called only when the cancel RPC could not be put on
    * the wire at all. Never called for a cancel the daemon answered with an error,
    * or one that timed out — those say nothing about the sibling sessions sharing
-   * this connection.
+   * this connection. A cancel that timed out is instead reported through
+   * `wedgedDaemonError` on this request alone.
    */
   onCreateCancellationFailure: () => void
   settleCreateCancellation: (sessionId: string, requestId: string) => Promise<{ canceled: boolean }>
+}
+
+/**
+ * Why: the request timed out and so did the cancel sent to clean it up, so the daemon
+ * is wedged with its socket still open — no close event, no disconnect, and nothing
+ * else in the client notices (#8689 is the same shape). Re-message it to the one
+ * string `isDaemonGoneError` matches, so the caller's retry can respawn the daemon
+ * instead of retrying against a daemon that will never answer. Aborts are excluded:
+ * the caller asked to stop, not to retry.
+ */
+function wedgedDaemonError(requestError: Error, cancelError: unknown): Error | null {
+  if (
+    !(requestError instanceof DaemonRequestTimeoutError) ||
+    !(cancelError instanceof DaemonRequestTimeoutError)
+  ) {
+    return null
+  }
+  const wedged = new DaemonRequestTimeoutError(DAEMON_UNAVAILABLE_RECONNECT_MESSAGE)
+  wedged.cause = requestError
+  return wedged
 }
 
 export function requestDaemonRpc<T>(opts: DaemonRpcRequestOptions): Promise<T> {
@@ -111,16 +136,19 @@ export function requestDaemonRpc<T>(opts: DaemonRpcRequestOptions): Promise<T> {
           // share) proves nothing about the other sessions on this connection, so it
           // must not tear it down. Only an undeliverable cancel does. Unrecognized
           // errors deliberately fall through to the bounded wait: the fail-safe
-          // direction is leaving siblings alone.
+          // direction is leaving siblings alone. A wedged daemon is still reported —
+          // on this request only — via wedgedDaemonError.
           if (cancelError instanceof DaemonConnectionLostError) {
             opts.onCreateCancellationFailure()
             return
           }
-          awaitLateResponseThenReject(error)
+          awaitLateResponseThenReject(wedgedDaemonError(error, cancelError) ?? error)
         })
     }
     const timer = setTimeout(() => {
-      const error = new DaemonProtocolError(`Request ${type} timed out after ${opts.timeoutMs}ms`)
+      const error = new DaemonRequestTimeoutError(
+        `Request ${type} timed out after ${opts.timeoutMs}ms`
+      )
       if (typeof createSessionId === 'string') {
         cancelCreate(error)
       } else {
