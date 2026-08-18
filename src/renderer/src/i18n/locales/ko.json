@@ -14683,5 +14683,14 @@
         "unknown": "Restart Orca to try again."
       }
     }
+  },
+  "window": {
+    "unresponsiveClose": {
+      "wait": "대기",
+      "close": "창 닫기",
+      "title": "Orca가 응답하지 않습니다",
+      "message": "이 Orca 창이 닫기 요청에 응답하지 않았습니다.",
+      "detail": "대기를 선택하면 창이 복구될 경우에 대비해 창을 열어 둡니다. 창 닫기를 선택하면 이 창의 터미널 세션이 종료되고 저장되지 않은 편집기 변경사항이 삭제됩니다."
+    }
   }
 }

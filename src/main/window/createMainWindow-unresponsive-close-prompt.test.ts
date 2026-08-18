@@ -18,7 +18,8 @@ import { ipcMain } from 'electron'
 import {
   createMainWindow,
   WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS,
-  WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS
+  WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS,
+  WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS
 } from './createMainWindow'
 import {
   browserWindowMock,
@@ -81,6 +82,21 @@ function setupWindow(): {
   return { windowHandlers, ipcHandlers, webContents, destroy, isDestroyed }
 }
 
+/** Why: the Wait branch resumes in a microtask after showMessageBox settles; advancing timers alone can run the next deadline before that continuation. */
+async function flushDialogDecision(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+/** All window:close-requested payloads sent so far, oldest first. */
+function closeRequests(webContents: {
+  send: ReturnType<typeof vi.fn>
+}): { isQuitting: boolean; requestId: number }[] {
+  return webContents.send.mock.calls
+    .filter(([channel]) => channel === 'window:close-requested')
+    .map(([, payload]) => payload as { isQuitting: boolean; requestId: number })
+}
+
 /** Reads the requestId off the Nth window:close-requested send (0-based). */
 function closeRequestIdAt(webContents: { send: ReturnType<typeof vi.fn> }, index: number): number {
   const requests = webContents.send.mock.calls.filter(
@@ -125,18 +141,112 @@ describe('unresponsive ordinary window close', () => {
 
   // Why: the renderer-drawn X is dead while the renderer is wedged, so a one-shot
   // prompt the user dismisses would strand them with no way to ask again.
-  it('re-arms the deadline when the user picks Wait', async () => {
+  it('re-probes with a NEW request after Wait, so a recovered renderer can answer', async () => {
     showMessageBoxMock.mockResolvedValue({ response: 0 })
-    const { windowHandlers, destroy } = setupWindow()
+    const { windowHandlers, webContents, destroy } = setupWindow()
     createMainWindow(null, { getIsQuitting: () => false })
 
     windowHandlers.close({ preventDefault: vi.fn() } as never)
     await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
     expect(showMessageBoxMock).toHaveBeenCalledOnce()
+
+    // The defect this pins: re-ARMING the consumed requestId left a deadline that
+    // preload could never ack, because main never sent that id again.
+    const requests = closeRequests(webContents)
+    expect(requests).toHaveLength(2)
+    expect(requests[1].requestId).toBeGreaterThan(requests[0].requestId)
+    expect(requests[1].isQuitting).toBe(false)
+    expect(destroy).not.toHaveBeenCalled()
+  })
+
+  it('stops probing once the renderer acknowledges the re-sent request', async () => {
+    showMessageBoxMock.mockResolvedValue({ response: 0 })
+    const { windowHandlers, ipcHandlers, webContents } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => false })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
+    ipcHandlers['window:close-request-received']?.(
+      { sender: { id: RENDERER_WEB_CONTENTS_ID } },
+      closeRequestIdAt(webContents, 1)
+    )
+    await vi.advanceTimersByTimeAsync(WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS * 5)
+
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
+    expect(closeRequests(webContents)).toHaveLength(2)
+  })
+
+  // The loop this pins: the deadline nulls the armed id, so an ack that lands while
+  // the dialog is up used to be discarded and a healthy renderer was re-accused every 10s.
+  it('does not re-prompt when the renderer acknowledges while the prompt is open', async () => {
+    let resolveDialog: (value: { response: number }) => void = () => {}
+    showMessageBoxMock.mockImplementation(
+      () =>
+        new Promise<{ response: number }>((resolve) => {
+          resolveDialog = resolve
+        })
+    )
+    const { windowHandlers, ipcHandlers, webContents, destroy } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => false })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
+
+    // Renderer unwedges mid-dialog and acks the request it finally drained.
+    ipcHandlers['window:close-request-received']?.(
+      { sender: { id: RENDERER_WEB_CONTENTS_ID } },
+      closeRequestIdAt(webContents, 0)
+    )
+    resolveDialog({ response: 0 })
+    await flushDialogDecision()
+    await vi.advanceTimersByTimeAsync(WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS * 5)
+
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
+    expect(closeRequests(webContents)).toHaveLength(1)
+    expect(destroy).not.toHaveBeenCalled()
+  })
+
+  // Why: a fixed 10s beat turns Wait into a nag with a destructive button at a fixed
+  // screen position; a renderer busy for minutes deserves a widening interval.
+  it('backs the re-probe off and caps it', async () => {
+    showMessageBoxMock.mockResolvedValue({ response: 0 })
+    const { windowHandlers } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => false })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
+
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS * 2 - 1)
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(showMessageBoxMock).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS * 4)
+    expect(showMessageBoxMock).toHaveBeenCalledTimes(3)
+
+    // Capped: no interval ever exceeds the ceiling.
+    await vi.advanceTimersByTimeAsync(WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS)
+    expect(showMessageBoxMock).toHaveBeenCalledTimes(4)
+  })
+
+  // Why: a dialog that throws must not silently restore the unbounded wait.
+  it('treats a failed dialog as Wait and keeps the close bounded', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    showMessageBoxMock.mockRejectedValue(new Error('no display'))
+    const { windowHandlers, webContents, destroy } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => false })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
     await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
 
-    expect(showMessageBoxMock).toHaveBeenCalledTimes(2)
+    expect(consoleError).toHaveBeenCalled()
     expect(destroy).not.toHaveBeenCalled()
+    expect(closeRequests(webContents)).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS * 2)
+    expect(showMessageBoxMock).toHaveBeenCalledTimes(2)
+    consoleError.mockRestore()
   })
 
   it('leaves a healthy close untouched — no dialog, no destroy, no added latency', async () => {
@@ -216,6 +326,7 @@ describe('unresponsive ordinary window close', () => {
       )
     ).not.toThrow()
     resolveDialog({ response: 1 })
+    await flushDialogDecision()
     await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
 
     expect(showMessageBoxMock).toHaveBeenCalledOnce()
@@ -257,6 +368,39 @@ describe('unresponsive ordinary window close', () => {
 
     expect(destroy).toHaveBeenCalledOnce()
     expect(showMessageBoxMock).not.toHaveBeenCalled()
+  })
+
+  // Why: a quit that inherits an almost-expired ordinary deadline would destroy the
+  // window milliseconds after Cmd+Q, where main has always granted a full 10s.
+  it('gives a quit its own full grace even when an ordinary deadline is nearly up', async () => {
+    let isQuitting = false
+    const { windowHandlers, destroy } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => isQuitting })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS - 100)
+    isQuitting = true
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+
+    await vi.advanceTimersByTimeAsync(WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS - 1)
+    expect(destroy).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(destroy).toHaveBeenCalledOnce()
+    expect(showMessageBoxMock).not.toHaveBeenCalled()
+  })
+
+  // Why: only the quit escalation re-arms — repeated Alt+F4 on a wedged renderer must
+  // not push the bound out forever.
+  it('does not defer the deadline when ordinary closes repeat', async () => {
+    const { windowHandlers } = setupWindow()
+    createMainWindow(null, { getIsQuitting: () => false })
+
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS - 1)
+    windowHandlers.close({ preventDefault: vi.fn() } as never)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(showMessageBoxMock).toHaveBeenCalledOnce()
   })
 
   it('does not prompt after the window is already destroyed', async () => {

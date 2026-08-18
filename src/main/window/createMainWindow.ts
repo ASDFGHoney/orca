@@ -68,6 +68,8 @@ const activeRepaintJiggles = new WeakSet<BrowserWindow>()
 export const WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS = 10_000
 // Why: same bound for an ordinary close — a healthy renderer acks receipt in one tick, so overrunning it means the renderer's main thread is wedged.
 export const WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS = 10_000
+// Why: each Wait doubles the next probe (10s, 20s, 40s...) up to this cap, so a genuinely busy renderer stops drawing a destructive modal on a fixed 10s beat.
+export const WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS = 60_000
 
 function forceRepaint(window: BrowserWindow): void {
   // Why: webContents can be destroyed a beat before the BrowserWindow during close, and this runs from timers/focus events in that gap.
@@ -975,20 +977,32 @@ export function createMainWindow(
   let rendererAckTimer: ReturnType<typeof setTimeout> | null = null
   let rendererAckDeadlineIsQuitting = false
   let unresponsiveClosePromptOpen = false
+  let unresponsiveClosePromptCount = 0
+  // Why: liveness evidence must outlive the deadline that consumed the requestId — an ack landing while the prompt is up is how a recovered renderer proves itself.
+  let lastAckedRequestId: number | null = null
   const clearRendererAckTimer = (): void => {
     rendererAckRequestId = null
     rendererAckDeadlineIsQuitting = false
+    unresponsiveClosePromptCount = 0
     if (rendererAckTimer) {
       clearTimeout(rendererAckTimer)
       rendererAckTimer = null
     }
   }
-  // Why: the renderer-drawn X is dead while the renderer is wedged, so re-arm after Wait instead of making the user rediscover Alt+F4.
+  // Why: 'Wait' means "ask again later", so back the re-probe off — a renderer legitimately busy for minutes must not draw a destructive modal every 10s (the shape of the "problem infinitly repeat" report).
+  const nextUnresponsiveCloseProbeDelayMs = (): number =>
+    Math.min(
+      WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS * 2 ** unresponsiveClosePromptCount,
+      WINDOW_UNRESPONSIVE_CLOSE_MAX_PROBE_INTERVAL_MS
+    )
+  // Why: the renderer-drawn X is dead while the renderer is wedged, so keep probing after Wait instead of making the user rediscover Alt+F4.
   const promptToCloseUnresponsiveWindow = async (): Promise<void> => {
     if (unresponsiveClosePromptOpen || mainWindow.isDestroyed()) {
       return
     }
     unresponsiveClosePromptOpen = true
+    unresponsiveClosePromptCount += 1
+    const probeDelayMs = nextUnresponsiveCloseProbeDelayMs()
     console.warn(
       '[window] Renderer did not acknowledge close; prompting to close unresponsive window'
     )
@@ -1007,10 +1021,22 @@ export function createMainWindow(
         mainWindow.destroy()
         return
       }
-      armRendererAckTimer(closeRequestSequence, false)
+    } catch (error) {
+      // Why: a dialog that fails must still fall through to Wait; skipping the re-probe would silently restore the unbounded wait this deadline exists to remove.
+      console.error('[window] Unresponsive-close prompt failed; treating it as Wait', error)
+      if (mainWindow.isDestroyed()) {
+        return
+      }
     } finally {
       unresponsiveClosePromptOpen = false
     }
+    if (lastAckedRequestId === closeRequestSequence) {
+      // Why: the renderer acked while the prompt was up, so it is alive and owns the decision — probing again would only replay its own close confirmation.
+      console.warn('[window] Renderer acknowledged close while the prompt was open; not re-probing')
+      return
+    }
+    // Why: re-SEND rather than re-arm the expired requestId — preload only acks a message it receives, so a recovered renderer can never clear a deadline armed on an id main never sent again.
+    sendWindowCloseRequest(false, probeDelayMs)
   }
   const onRendererAckDeadline = (): void => {
     const deadlineWasQuitting = rendererAckDeadlineIsQuitting
@@ -1028,30 +1054,43 @@ export function createMainWindow(
       mainWindow.destroy()
       return
     }
-    void promptToCloseUnresponsiveWindow()
+    void promptToCloseUnresponsiveWindow().catch((error) => {
+      console.error('[window] Unresponsive-close prompt handling failed', error)
+    })
   }
-  const armRendererAckTimer = (requestId: number, isQuitting: boolean): void => {
+  const armRendererAckTimer = (requestId: number, isQuitting: boolean, delayMs: number): void => {
     rendererAckRequestId = requestId
     // Why: an in-flight quit can't be downgraded by a later ordinary close — will-quit stays blocked, so the deadline must still destroy.
+    const escalatingToQuit = isQuitting && !rendererAckDeadlineIsQuitting
     rendererAckDeadlineIsQuitting = rendererAckDeadlineIsQuitting || isQuitting
     if (rendererAckTimer) {
-      return
+      // Why: only the ordinary->quit escalation re-arms. Inheriting an almost-expired ordinary deadline would destroy the window milliseconds after Cmd+Q, while re-arming on every ordinary close would let repeated Alt+F4 defer the bound forever.
+      if (!escalatingToQuit) {
+        return
+      }
+      clearTimeout(rendererAckTimer)
     }
-    rendererAckTimer = setTimeout(
-      onRendererAckDeadline,
-      isQuitting ? WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS : WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS
-    )
+    rendererAckTimer = setTimeout(onRendererAckDeadline, delayMs)
     rendererAckTimer.unref?.()
   }
   // Why: preload acks receipt before running any app logic, so every close path must carry a requestId — the renderer-drawn X sent none and could never be bounded.
-  const sendWindowCloseRequest = (isQuitting: boolean): void => {
+  const sendWindowCloseRequest = (isQuitting: boolean, delayMs?: number): void => {
     const requestId = ++closeRequestSequence
-    armRendererAckTimer(requestId, isQuitting)
+    armRendererAckTimer(
+      requestId,
+      isQuitting,
+      delayMs ??
+        (isQuitting ? WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS : WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS)
+    )
     // Why: renderer owns the close decision; the always-mounted App root subscription lets even pre-workspace states reply (#5144).
     mainWindow.webContents.send('window:close-requested', { isQuitting, requestId })
   }
   const onCloseRequestReceived = (event: Electron.IpcMainEvent, requestId: number): void => {
-    if (event.sender.id === rendererWebContentsId && requestId === rendererAckRequestId) {
+    if (event.sender.id !== rendererWebContentsId) {
+      return
+    }
+    lastAckedRequestId = requestId
+    if (requestId === rendererAckRequestId) {
       clearRendererAckTimer()
     }
   }

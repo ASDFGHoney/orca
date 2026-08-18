@@ -14654,5 +14654,14 @@
         "unknown": "Restart Orca to try again."
       }
     }
+  },
+  "window": {
+    "unresponsiveClose": {
+      "wait": "Esperar",
+      "close": "Cerrar ventana",
+      "title": "Orca no responde",
+      "message": "Esta ventana de Orca no respondió a la solicitud de cierre.",
+      "detail": "Esperar mantiene la ventana abierta por si se recupera. Cerrar ventana finaliza las sesiones de terminal de esta ventana y descarta los cambios no guardados del editor que contiene."
+    }
   }
 }

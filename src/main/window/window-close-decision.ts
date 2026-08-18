@@ -19,9 +19,11 @@ export type WindowCloseState = {
  * what silently destroyed other sessions in #5787. An unresponsive-but-alive
  * renderer (rendererProcessGone=false, isRendererCrashed=false) still resolves
  * to 'request-confirmation' so the save guard runs. Both quit and ordinary close
- * bound failure to ACKNOWLEDGE that request, but neither bound may decide on its
- * own to discard sessions: the ordinary-close deadline asks the user in a native
- * main-process dialog, which is what keeps #5787's guarantee intact.
+ * now bound failure to ACKNOWLEDGE that request, but they end differently: the
+ * quit deadline destroys (its pre-existing rule, which also covers a close main
+ * still believes belongs to a quit), while the ordinary-close deadline only asks
+ * the user in a native main-process dialog. Main never decides on its own to
+ * discard sessions, which is what keeps #5787's guarantee intact.
  * A genuinely gone renderer still bypasses so the window stays closable
  * (#5144/#5314).
  */

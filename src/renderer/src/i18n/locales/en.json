@@ -16434,5 +16434,14 @@
   },
   "quickOpen": {
     "moreMatchesAvailable": "More matches may be available. Refine your search to narrow the results."
+  },
+  "window": {
+    "unresponsiveClose": {
+      "wait": "Wait",
+      "close": "Close Window",
+      "title": "Orca isn’t responding",
+      "message": "This Orca window didn’t respond to the close request.",
+      "detail": "Wait keeps the window open in case it recovers. Close Window ends this window’s terminal sessions and discards unsaved editor changes in it."
+    }
   }
 }
