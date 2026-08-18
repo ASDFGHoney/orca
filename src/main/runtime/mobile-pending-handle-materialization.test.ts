@@ -1,29 +1,30 @@
-/**
- * A terminal tab published as `pending-handle` is a promise that the host will
- * say something else later. Mobile bounds its pending-handle recovery polling to
- * 5 attempts ~2s apart (STA-4407), so a client that is told `pending-handle` and
- * never told otherwise stops asking after ~10s and strands the pane on the
- * spinner with no composer at all — no terminal keystrokes, no native chat
- * (STA-4256).
- *
- * The gap these pin: the tab is published before its PTY exists, so the snapshot
- * does not name the ptyId and `touchMobileSessionSnapshotsForPty` cannot find it.
- * PTY registration is the only moment that resolves it.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   RuntimeMobileSessionTabsResult,
   RuntimeMobileSessionTabsSnapshot
 } from '../../shared/runtime-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
+import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import { OrcaRuntimeService } from './orca-runtime'
 
 const WT = 'repo-1::/tmp/worktree-a'
-// Why real UUIDs: registerPty only records tabId/paneKey when the leaf id is a
-// stable pane id, and the pending tab is matched back by exactly that paneKey.
+const PARKED_WT = 'repo-1::/tmp/worktree-parked'
+// Why: registration records pane identity only for stable tab and leaf IDs.
 const TAB = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
 const LEAF = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
-const LATE_PTY = 'pty-late'
+const LATE_PTY = `${WT}@@late-pty`
+const worktreeMeta: WorktreeMeta = {
+  displayName: '',
+  comment: '',
+  linkedIssue: null,
+  linkedPR: null,
+  linkedLinearIssue: null,
+  isArchived: false,
+  isUnread: false,
+  isPinned: false,
+  sortOrder: 0,
+  lastActivityAt: 0
+}
 
 const storeBase = {
   getRepo: () => ({
@@ -35,11 +36,11 @@ const storeBase = {
   }),
   getRepos: () => [storeBase.getRepo()],
   addRepo: () => {},
-  updateRepo: () => undefined as never,
+  updateRepo: () => storeBase.getRepo(),
   getAllWorktreeMeta: () => ({}),
   getWorktreeMeta: () => undefined,
   getGitHubCache: () => ({ pr: {}, issue: {} }),
-  setWorktreeMeta: () => undefined as never,
+  setWorktreeMeta: () => worktreeMeta,
   removeWorktreeMeta: () => {},
   getRetiredWorktreeNameRegistry: () => ({ exhaustedTiers: 0, names: [] }),
   addRetiredWorktreeName: () => {},
@@ -63,23 +64,34 @@ function makeSession(): WorkspaceSessionState {
   }
 }
 
-/** A renderer snapshot naming a PTY that has not registered yet. */
-function makeRendererSnapshot(version: number): RuntimeMobileSessionTabsSnapshot {
+function makeRendererSnapshot(
+  version: number,
+  options: {
+    worktree?: string
+    tabId?: string
+    leafId?: string
+    ptyId?: string | null
+  } = {}
+): RuntimeMobileSessionTabsSnapshot {
+  const worktree = options.worktree ?? WT
+  const tabId = options.tabId ?? TAB
+  const leafId = options.leafId ?? LEAF
+  const ptyId = options.ptyId ?? null
   return {
-    worktree: WT,
+    worktree,
     publicationEpoch: 'renderer:test-epoch',
     snapshotVersion: version,
     activeGroupId: 'group-1',
-    activeTabId: `${TAB}::${LEAF}`,
+    activeTabId: `${tabId}::${leafId}`,
     activeTabType: 'terminal',
     tabs: [
       {
         type: 'terminal',
-        id: `${TAB}::${LEAF}`,
-        parentTabId: TAB,
-        leafId: LEAF,
+        id: `${tabId}::${leafId}`,
+        parentTabId: tabId,
+        leafId,
         title: 'Claude Code',
-        ptyId: LATE_PTY,
+        ...(ptyId ? { ptyId } : {}),
         isActive: true
       }
     ]
@@ -98,12 +110,11 @@ function createRuntime() {
   const events: RuntimeMobileSessionTabsResult[] = []
   runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
   const sync = (mobileSessionTabs: RuntimeMobileSessionTabsSnapshot[]): void => {
-    runtime.syncWindowGraph(1, { tabs: [] as never, leaves: [] as never, mobileSessionTabs })
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [], mobileSessionTabs })
   }
   return { runtime, events, sync }
 }
 
-/** Drives the tab to the published `pending-handle` state and returns that frame. */
 function publishPendingHandleTab(): {
   runtime: OrcaRuntimeService
   events: RuntimeMobileSessionTabsResult[]
@@ -114,8 +125,11 @@ function publishPendingHandleTab(): {
   vi.advanceTimersByTime(300)
   const pendingFrame = events.at(-1)
   expect(pendingFrame?.tabs[0]).toMatchObject({ status: 'pending-handle', terminal: null })
+  if (!pendingFrame) {
+    throw new Error('expected pending frame')
+  }
   events.length = 0
-  return { runtime, events, pendingFrame: pendingFrame! }
+  return { runtime, events, pendingFrame }
 }
 
 describe('mobile pending-handle materialization', () => {
@@ -130,9 +144,9 @@ describe('mobile pending-handle materialization', () => {
   it('pushes the materialized handle when the PTY registers with no further renderer sync', () => {
     const { runtime, events, pendingFrame } = publishPendingHandleTab()
 
-    // The spawn completes. No graph sync, no renderer republication — this
-    // registration is the whole event, exactly as it is for an agent tab the
-    // renderer published before its PTY existed.
+    runtime.onPtySpawned(LATE_PTY)
+    vi.advanceTimersByTime(300)
+    expect(events).toEqual([])
     runtime.registerPty(LATE_PTY, WT, null, { tabId: TAB, leafId: LEAF })
     vi.advanceTimersByTime(300)
 
@@ -141,15 +155,10 @@ describe('mobile pending-handle materialization', () => {
       status: 'ready',
       terminal: expect.stringMatching(/^term_/)
     })
-    // Why this assertion and not just "an event fired": clients gate mirrored
-    // snapshots on a strictly increasing snapshotVersion within an epoch, so a
-    // re-emit at the pending frame's version is dropped and the pane stays stuck.
     expect(ready?.publicationEpoch).toBe(pendingFrame.publicationEpoch)
-    expect(ready!.snapshotVersion).toBeGreaterThan(pendingFrame.snapshotVersion)
+    expect(ready?.snapshotVersion).toBeGreaterThan(pendingFrame.snapshotVersion)
   })
 
-  // Not a repro of the bug — it passes against the pre-fix source by construction,
-  // because pre-fix nothing ever pushes. It guards the fix against over-publishing.
   it('does not push for an unrelated worktree once nothing is pending', () => {
     const { runtime, events } = publishPendingHandleTab()
 
@@ -157,10 +166,79 @@ describe('mobile pending-handle materialization', () => {
     vi.advanceTimersByTime(300)
     events.length = 0
 
-    // The debt is settled; a later spawn elsewhere must not keep republishing.
     runtime.registerPty('pty-unrelated', 'repo-1::/tmp/worktree-b', null)
     vi.advanceTimersByTime(300)
 
+    expect(events).toEqual([])
+  })
+
+  it('does not bump an already-addressable pane on duplicate registration', () => {
+    const { runtime, events } = publishPendingHandleTab()
+    runtime.onPtySpawned(LATE_PTY)
+    runtime.registerPty(LATE_PTY, WT, null, { tabId: TAB, leafId: LEAF })
+    vi.advanceTimersByTime(300)
+    events.length = 0
+    const touch = vi.spyOn(runtime, 'touchMobileSessionTabsForWorktree')
+
+    runtime.registerPty(LATE_PTY, WT, null, { tabId: TAB, leafId: LEAF })
+    vi.advanceTimersByTime(300)
+
+    expect(touch).not.toHaveBeenCalled()
+    expect(events).toEqual([])
+  })
+
+  it('does not push when the renderer published a different PTY identity', () => {
+    const { runtime, events, sync } = createRuntime()
+    sync([makeRendererSnapshot(1, { ptyId: 'stale-pty' })])
+    vi.advanceTimersByTime(300)
+    events.length = 0
+    const touch = vi.spyOn(runtime, 'touchMobileSessionTabsForWorktree')
+
+    runtime.onPtySpawned(LATE_PTY)
+    runtime.registerPty(LATE_PTY, WT, null, { tabId: TAB, leafId: LEAF })
+    vi.advanceTimersByTime(300)
+
+    expect(touch).not.toHaveBeenCalled()
+    expect(events).toEqual([])
+  })
+
+  it('does not touch an unrelated parked pending pane when a PTY registers', () => {
+    const { runtime, events, sync } = createRuntime()
+    sync([
+      makeRendererSnapshot(1),
+      makeRendererSnapshot(1, {
+        worktree: PARKED_WT,
+        tabId: 'cccccccc-3333-4333-8333-cccccccccccc',
+        leafId: 'dddddddd-4444-4444-8444-dddddddddddd',
+        ptyId: 'pty-parked'
+      })
+    ])
+    vi.advanceTimersByTime(300)
+    events.length = 0
+    const touch = vi.spyOn(runtime, 'touchMobileSessionTabsForWorktree')
+
+    runtime.onPtySpawned(LATE_PTY)
+    runtime.registerPty(LATE_PTY, WT, null, { tabId: TAB, leafId: LEAF })
+    vi.advanceTimersByTime(300)
+
+    expect(touch).toHaveBeenCalledTimes(1)
+    expect(touch).toHaveBeenCalledWith(WT)
+    expect(events.map((event) => event.worktree)).toEqual([WT])
+  })
+
+  it('does not retain deleted pending worktrees in the registration path', () => {
+    const { runtime, events, sync } = createRuntime()
+    sync([makeRendererSnapshot(1)])
+    vi.advanceTimersByTime(300)
+    sync([])
+    vi.advanceTimersByTime(300)
+    events.length = 0
+    const touch = vi.spyOn(runtime, 'touchMobileSessionTabsForWorktree')
+
+    runtime.registerPty('pty-unrelated', 'repo-1::/tmp/worktree-b', null)
+    vi.advanceTimersByTime(300)
+
+    expect(touch).not.toHaveBeenCalled()
     expect(events).toEqual([])
   })
 })
