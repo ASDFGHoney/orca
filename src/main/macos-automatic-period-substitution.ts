@@ -15,6 +15,16 @@ import { systemPreferences } from 'electron'
  * Writing the key into Orca's own defaults domain overrides the global value for this app alone
  * and leaves the user's system-wide setting untouched. It necessarily covers every Orca text
  * field, not only terminals — AppKit offers no narrower scope.
+ *
+ * Why not the field-level opt-out: xterm already sets `autocorrect="off"` on its helper textarea,
+ * and the substitution still fired on the Chromium we pin. That attribute reaches AppKit through
+ * quote, dash and text-replacement selectors only; the shipped framework binary declares no
+ * period selector at all. Nor is a focus-scoped write viable — AppKit latches the value at first
+ * read, and a later removeUserDefault does not bring the behaviour back in the same process.
+ *
+ * If this is ever reverted, remove the key as well. AppKit reads the app's plist, not our code,
+ * so a bare revert leaves the override in place permanently with nothing left to explain it —
+ * which is how this fix was lost once already.
  */
 export const AUTOMATIC_PERIOD_SUBSTITUTION_KEY = 'NSAutomaticPeriodSubstitutionEnabled'
 
