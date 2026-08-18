@@ -1292,6 +1292,36 @@ Current local authority-transition stage:
 Do not promote narrow deterministic evidence into a live-topology claim. Record exact commands,
 topology, versions, and explicit gaps at every later checkpoint.
 
+### Partition storage identity, lifecycle, and cookie-import retargeting
+
+- Split storage identity from route fencing. `browserNetworkExecutionHostStorageIdentity` derives
+  the partition's execution-host component from stable values only (native: `runtimeId`; WSL:
+  `runtimeId` + `distro`; SSH: `targetId`), while `browserNetworkExecutionHostKey` keeps the full
+  per-boot key for route fencing and `isValid()`. Previously the partition hashed the route key, so
+  every remote runtime restart (`revision` = `getStartedAt()`) and every SSH reconnect minted a new
+  Chromium partition, dropping cookies and localStorage and filling the 512-entry binding store.
+- Deviation from the brief, deliberate: `providerEpoch` is excluded from the SSH storage tuple.
+  `createAuthority` in `src/main/ssh/ssh-provider-authority.ts` mints a fresh random epoch on every
+  connection-generation change and on every process start, so it is a per-connection fencing nonce,
+  not a record identity. Keeping it would have left SSH partitions churning exactly as before. The
+  design's non-reuse requirement is satisfied by `targetId`, which `SshConnectionStore.addTarget`
+  mints as `ssh-<now>-<random>` per record, so delete-and-readd never reuses one.
+- Binding metadata moved to version 2 and now records a `storageScope` per partition: an opaque
+  digest of the owning Orca profile and environment record. Version 1 entries load as unscoped.
+- Startup sweeps orphans: bindings whose `storageScope` names no environment still in the store,
+  plus unscoped pre-scope entries whose partition names the stable scheme can never re-derive. A
+  disconnected host keeps its record and therefore its storage; a partition with prepared pages is
+  never touched. `runtimeEnvironments:remove` clears its environment's partitions immediately;
+  `runtimeEnvironments:disconnect` deliberately does not.
+- Cookie import retargeting: with a client host live for a paired server, `Import Browser Cookies`
+  now detects and imports on the desktop into the route partition main derives for that server
+  (`browser:session:importFromBrowserForClientHost`), because the remote runtime is usually
+  headless. The renderer names only an environment and a browser session profile. A null result
+  means the desktop hosts no pages for that server and the existing `browser.profileImportFromBrowser`
+  RPC path runs unchanged.
+- No remote wire surface changed: no RPC method, command type, stream frame, or published content.
+  The new channel is local main/renderer IPC, and the binding store is local disk.
+
 ## Public mutation ledger
 
 - Pushed the STA-4150 staged branches listed in the draft-stack table.
