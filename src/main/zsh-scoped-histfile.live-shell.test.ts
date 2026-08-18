@@ -34,6 +34,35 @@ const ZSH_PATH = hasZsh
   : ''
 const itWithZsh = hasZsh ? it : it.skip
 
+/**
+ * Whether this host's system zsh startup files actually clobber an injected
+ * HISTFILE.
+ *
+ * Why probed instead of assumed: that clobber is the entire premise of the
+ * `RESULT=<scoped>` cases. macOS `/etc/zshrc` always does it; a stock Linux
+ * image usually has no such assignment, so there an unwrapped zsh returns the
+ * injected value too and those cases would pass with the wrapper removed. Skip
+ * rather than assert, so Linux CI reports "not applicable" instead of green.
+ */
+function systemZshClobbersInjectedHistfile(): boolean {
+  const home = mkdtempSync(join(tmpdir(), 'orca-histfile-clobber-probe-'))
+  try {
+    const probe = join(home, 'injected', 'zsh_history')
+    const output = execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: { PATH: '/usr/bin:/bin', HOME: home, HISTFILE: probe }
+    })
+    return !output.includes(`RESULT=${probe}`)
+  } catch {
+    return false
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+const itWithHistfileClobber = hasZsh && systemZshClobbersInjectedHistfile() ? it : it.skip
+
 function runLoginZsh(home: string, zdotdir: string, env: Record<string, string>): string {
   // -o noglobalrcs is deliberately NOT passed: /etc/zshrc is the thing under test.
   return execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
@@ -65,7 +94,7 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
     }
   }
 
-  itWithZsh('keeps the injected path that a system zshrc would otherwise clobber', () => {
+  itWithHistfileClobber('keeps the injected path that a system zshrc would otherwise clobber', () => {
     withWrapper((home, zdotdir) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
 
@@ -75,7 +104,7 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
     })
   })
 
-  itWithZsh('never leaves history inside Orca’s own wrapper directory', () => {
+  itWithHistfileClobber('never leaves history inside Orca’s own wrapper directory', () => {
     withWrapper((home, zdotdir) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
 
@@ -160,7 +189,12 @@ describe('a plain pane reaches zsh with the wrapper its launch config describes'
   ): string {
     return execFileSync(
       ZSH_PATH,
-      [...launchArgs, '-i', '-c', 'echo "RESULT=$HISTFILE"; echo "PRECMD=$precmd_functions"'],
+      [
+        ...launchArgs,
+        '-i',
+        '-c',
+        'echo "RESULT=$HISTFILE"; echo "PRECMD=$precmd_functions"; echo "MARKERS=${ORCA_SHELL_COMMAND_MARKERS-unset}"'
+      ],
       {
         encoding: 'utf8',
         timeout: 20_000,
@@ -169,7 +203,7 @@ describe('a plain pane reaches zsh with the wrapper its launch config describes'
     )
   }
 
-  itWithZsh('keeps the scoped HISTFILE for a local plain pane', () => {
+  itWithHistfileClobber('keeps the scoped HISTFILE for a local plain pane', () => {
     withSandboxedHome((home) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
       const spawnEnv = { HISTFILE: scoped, ORCA_HISTFILE: scoped }
@@ -182,14 +216,29 @@ describe('a plain pane reaches zsh with the wrapper its launch config describes'
       const output = runLaunchedZsh(home, launch.args ?? ['-l'], { ...spawnEnv, ...launch.env })
 
       expect(output).toContain(`RESULT=${scoped}`)
+    })
+  })
+
+  itWithZsh('keeps a history-only pane out of OSC 133, without leaking that to children', () => {
+    withSandboxedHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const spawnEnv = { HISTFILE: scoped, ORCA_HISTFILE: scoped }
+
+      const launch = getHistoryRestoreShellLaunchConfig(ZSH_PATH)
+      const output = runLaunchedZsh(home, launch.args ?? ['-l'], { ...spawnEnv, ...launch.env })
+
       // Wrapping for history alone must not enroll the pane in OSC 133: it emitted
       // no command markers while it launched unwrapped, and every consumer of them
       // (agent-status drops, git-status refresh) would start firing per command.
       expect(output).not.toContain('__orca_osc133_precmd')
+      // ...and the suppression must not outlive the wrapper. It is exported, so a
+      // `pn dev`/CLI run started here would hand its `0` to the new Orca, whose
+      // every overlay and startup pane would then go silent instead.
+      expect(output).toContain('MARKERS=unset')
     })
   })
 
-  itWithZsh('keeps the scoped HISTFILE for a relay plain pane', () => {
+  itWithHistfileClobber('keeps the scoped HISTFILE for a relay plain pane', () => {
     withSandboxedHome((home) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
       const spawnEnv = { HOME: home, HISTFILE: scoped, ORCA_HISTFILE: scoped }

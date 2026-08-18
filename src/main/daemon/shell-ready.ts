@@ -202,7 +202,11 @@ function getWrappedShellLaunchConfig(
         ORCA_ZSHENV_SOURCE_DIR: resolveOriginalZshenvSourceDir(),
         ZDOTDIR: join(root, 'zsh'),
         ORCA_SHELL_READY_MARKER: options.emitReadyMarker ? '1' : '0',
-        ORCA_SHELL_STARTUP_IDENTITY: options.emitReadyMarker ? '1' : '0'
+        ORCA_SHELL_STARTUP_IDENTITY: options.emitReadyMarker ? '1' : '0',
+        // Why pinned: the daemon fork inherits process.env, so a `0` exported by the
+        // history-only pane that launched Orca would otherwise reach this wrapper and
+        // silence OSC 133 for every overlay/startup pane.
+        ORCA_SHELL_COMMAND_MARKERS: '1'
       },
       supportsReadyMarker: options.emitReadyMarker
     }
@@ -265,9 +269,15 @@ export function getMarkerlessShellLaunchConfig(shellPath: string): ShellLaunchCo
 /** Mirrors local-pty-shell-ready.ts: history-restore-only wrapping keeps the pane's
  *  pre-wrapper command lifecycle (no OSC 133), and never wraps a non-zsh shell. */
 export function getHistoryRestoreShellLaunchConfig(shellPath: string): ShellLaunchConfig {
+  const unwrapped = { args: null, env: {}, supportsReadyMarker: false }
   if (pathWin32.basename(basename(shellPath)).toLowerCase() !== 'zsh') {
-    return { args: null, env: {}, supportsReadyMarker: false }
+    return unwrapped
   }
   const config = getMarkerlessShellLaunchConfig(shellPath)
+  // Why: wrapper generation degrades silently (read-only userData, bad perms, full
+  // disk); a ZDOTDIR pointing at an empty dir would drop the user's whole zsh config.
+  if (!shellReadyWrappersExist()) {
+    return unwrapped
+  }
   return { ...config, env: { ...config.env, ORCA_SHELL_COMMAND_MARKERS: '0' } }
 }

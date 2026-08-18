@@ -15,6 +15,7 @@ import { getFishShellReadyInitCommand } from '../shell-templates'
 import { ensureShellReadyWrappers } from './local-pty-shell-ready-wrapper-generation'
 import {
   getShellReadyWrapperRoot,
+  shellReadyWrappersExist,
   SHELL_READY_MARKER_ESCAPED
 } from './local-pty-shell-ready-wrapper-root'
 export {
@@ -72,7 +73,11 @@ function getWrappedShellLaunchConfig(
         ORCA_ZSHENV_SOURCE_DIR: resolveOriginalZshenvSourceDir(),
         ZDOTDIR: `${getShellReadyWrapperRoot()}/zsh`,
         ORCA_SHELL_READY_MARKER: options.emitReadyMarker ? '1' : '0',
-        ORCA_SHELL_STARTUP_IDENTITY: options.emitReadyMarker ? '1' : '0'
+        ORCA_SHELL_STARTUP_IDENTITY: options.emitReadyMarker ? '1' : '0',
+        // Why pinned: an Orca launched from a history-only pane inherits that pane's
+        // `0`, and every spawn env merges process.env — so an unpinned wrapper would
+        // silently lose OSC 133 for every overlay/startup pane it spawns.
+        ORCA_SHELL_COMMAND_MARKERS: '1'
       },
       supportsReadyMarker: options.emitReadyMarker
     }
@@ -140,9 +145,16 @@ export function getMarkerlessShellLaunchConfig(shellPath: string): ShellReadyLau
  * a bash fallback has nothing to restore.
  */
 export function getHistoryRestoreShellLaunchConfig(shellPath: string): ShellReadyLaunchConfig {
+  const unwrapped = { args: null, env: {}, supportsReadyMarker: false }
   if (pathWin32.basename(basename(shellPath)).toLowerCase() !== 'zsh') {
-    return { args: null, env: {}, supportsReadyMarker: false }
+    return unwrapped
   }
   const config = getMarkerlessShellLaunchConfig(shellPath)
+  // Why: wrapper generation degrades silently (read-only userData, bad perms, full
+  // disk); a ZDOTDIR pointing at an empty dir would drop the user's whole zsh
+  // config. Scoped history is not worth that, so fall back to the plain launch.
+  if (!shellReadyWrappersExist()) {
+    return unwrapped
+  }
   return { ...config, env: { ...config.env, ORCA_SHELL_COMMAND_MARKERS: '0' } }
 }

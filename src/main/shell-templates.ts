@@ -182,7 +182,11 @@ __orca_osc133_preexec() {
 # Why: prepend so Orca captures $? before user prompt hooks can overwrite it.
 precmd_functions=(__orca_osc133_precmd \${precmd_functions[@]})
 preexec_functions=(__orca_osc133_preexec \${preexec_functions[@]})
-fi`
+fi
+# Why: it is a per-pane launch flag, and the pane exports it to every child. An
+# Orca started from a history-only pane would otherwise inherit the suppression
+# and silence OSC 133 in every pane that new instance spawns.
+unset ORCA_SHELL_COMMAND_MARKERS`
 }
 
 // Why: zsh precmd fires before zle switches the PTY into line-editing mode,

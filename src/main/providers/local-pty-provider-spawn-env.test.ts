@@ -425,7 +425,36 @@ describe('LocalPtyProvider', () => {
 
       const spawnCall = spawnMock.mock.calls.at(-1)!
       expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
-      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBeUndefined()
+      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('1')
+    })
+
+    it('ignores an inherited command-marker suppression for an overlay pane', async () => {
+      // Why: a history-only pane exports ORCA_SHELL_COMMAND_MARKERS=0, so an Orca
+      // started from one (pn dev, the CLI) carries it in process.env and merges it
+      // into every spawn env. Honoring it would drop 133;A/C/D for this pane, and
+      // with them the agent-status "working" clear and the git-status refresh.
+      process.env.ORCA_SHELL_COMMAND_MARKERS = '0'
+
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        worktreeId: '/repo/worktree-a',
+        env: { ORCA_CODEX_HOME: '/tmp/orca-codex-home' }
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
+      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('1')
+    })
+
+    it('ignores an inherited command-marker suppression for a startup-command pane', async () => {
+      process.env.ORCA_SHELL_COMMAND_MARKERS = '0'
+
+      await provider.spawn({ cols: 80, rows: 24, command: 'echo hi' })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('1')
+      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('1')
     })
 
     it('keeps a plain pane unwrapped when history scoping is off', async () => {

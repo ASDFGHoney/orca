@@ -1,5 +1,8 @@
 // Daemon-managed agent env: shell wrapper survival and overlay deletion.
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type * as LocalPtyUtils from '../providers/local-pty-utils'
 
 const {
@@ -145,6 +148,76 @@ describe('createPtySubprocess', () => {
     // History is the only reason to wrap, so the pane keeps the OSC 133 silence
     // it had while it launched unwrapped.
     expect(lastCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('0')
+  })
+
+  it('leaves a history-only pane unwrapped when the wrapper files could not be written', async () => {
+    // Why: wrapper generation degrades silently, but ZDOTDIR was still returned — the
+    // pane would launch pointed at a directory with no .zshenv/.zshrc and never source
+    // the user's zsh config. A file where the root must be a directory makes mkdir fail
+    // with ENOTDIR for every user, root included, so this does not depend on the CI uid.
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    const blocked = join(mkdtempSync(join(tmpdir(), 'orca-daemon-userdata-')), 'userdata')
+    writeFileSync(blocked, '')
+    const previousUserDataPath = process.env.ORCA_USER_DATA_PATH
+    process.env.ORCA_USER_DATA_PATH = blocked
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      await createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        env: {
+          SHELL: '/bin/zsh',
+          HISTFILE: '/tmp/orca-history/abc/zsh_history',
+          ORCA_HISTFILE: '/tmp/orca-history/abc/zsh_history'
+        }
+      })
+    } finally {
+      consoleError.mockRestore()
+      process.env.ORCA_USER_DATA_PATH = previousUserDataPath
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const lastCall = spawnMock.mock.calls.at(-1)!
+    expect(lastCall[1]).toEqual(['-l'])
+    expect(lastCall[2].env.ZDOTDIR).toBeUndefined()
+  })
+
+  it('ignores a command-marker suppression the daemon inherited from its launcher', async () => {
+    // Why: the daemon is forked from an Orca that may itself have been started in a
+    // history-only pane, whose exported `0` then reaches every wrapper it builds —
+    // silencing 133;A/C/D for overlay panes and with them the agent-status clear.
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    process.env.ORCA_SHELL_COMMAND_MARKERS = '0'
+
+    try {
+      await createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        env: {
+          SHELL: '/bin/zsh',
+          ORCA_OPENCODE_CONFIG_DIR: '/tmp/orca-opencode-config'
+        }
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const lastCall = spawnMock.mock.calls.at(-1)!
+    expect(lastCall[2].env.ZDOTDIR).toMatch(ZSH_SHELL_READY_DIR)
+    expect(lastCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('1')
   })
 
   it('drops an ORCA_HISTFILE the daemon inherited from the pane that launched it', async () => {

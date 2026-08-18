@@ -28,6 +28,30 @@ describe('shell-ready wrapper root resolution', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  // Why: wrapper generation degrades silently, but ZDOTDIR was still returned — so a
+  // pane wrapped only for scoped history would launch pointed at a directory with no
+  // .zshenv/.zshrc and never source the user's zsh config at all.
+  it('leaves a history-only pane unwrapped when the wrapper files could not be written', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-userdata-unwritable-'))
+    // A file where the wrapper root must be a directory: mkdir fails with ENOTDIR
+    // for every user, root included, so this does not depend on the CI uid.
+    const blocked = join(root, 'userdata')
+    writeFileSync(blocked, '')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      setTestUserDataPath(blocked)
+      const { getHistoryRestoreShellLaunchConfig } = await importFreshLocalPtyShellReady()
+
+      const config = getHistoryRestoreShellLaunchConfig('/bin/zsh')
+
+      expect(config.args).toBeNull()
+      expect(config.env).toEqual({})
+    } finally {
+      consoleError.mockRestore()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 const hasBash = process.platform !== 'win32' && spawnSync('bash', ['--version']).status === 0
