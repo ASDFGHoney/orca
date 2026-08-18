@@ -147,6 +147,8 @@ describe('EntryActionRow', () => {
     })
 
     expect(container.querySelector('[data-agent-icon]')).toBeNull()
+    // Guard against the row rendering no icon at all, which "no agent icon" alone would pass.
+    expect(container.querySelector('svg.lucide-square-terminal')).toBeTruthy()
     expect(container.textContent).toContain('Switch to tab')
   })
 })

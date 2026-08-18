@@ -111,7 +111,6 @@ describe('resolveOpenTabOccupantAgent', () => {
   })
 
   it('uses the tab-strip title identity when hooks have not reported yet', () => {
-    expect(resolve({ recordTitle: 'grok' })).toBe('grok')
     expect(resolve({ title: 'grok' })).toBe('grok')
   })
 
@@ -119,14 +118,13 @@ describe('resolveOpenTabOccupantAgent', () => {
     expect(
       resolve({
         launchAgent: 'claude',
-        recordTitle: 'fix grok parser',
         title: 'fix grok parser'
       })
     ).toBe('claude')
   })
 
   it('does not treat a hyphenated grok mention as occupancy', () => {
-    expect(resolve({ recordTitle: 'session-scanner-grok-parser' })).toBeNull()
+    expect(resolve({ title: 'session-scanner-grok-parser' })).toBeNull()
   })
 
   it('uses the focused sleeping session, matching useTabAgent', () => {

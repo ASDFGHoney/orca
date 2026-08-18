@@ -275,8 +275,8 @@ export function buildSearchableWorkspaceTabs({
           agentMetadata: collectAgentMetadataFromIndex(agentIndex, tab.entityId, worktree.id),
           occupantAgent: resolveOpenTabOccupantAgent({
             tabId: tab.entityId,
+            // The unified label, not terminalTab.title: the record can lag it (see above).
             title,
-            recordTitle: terminalTab?.title,
             defaultTitle: terminalTab?.defaultTitle,
             launchAgent: terminalTab?.launchAgent,
             layout: terminalLayoutsByTabId?.[tab.entityId],

@@ -569,6 +569,15 @@ describe('workspace-tab-palette-search', () => {
     expect(searchWorkspaceTabs(titledOnly, 'grok')[0]?.occupantAgent).toBe('grok')
   })
 
+  it('stamps occupancy from the live unified label when the terminal record title is stale', () => {
+    const staleRecord = buildEntries({
+      tabsByWorktree: { 'wt-1': [makeTerminalTab({ title: 'Terminal 1' })] },
+      unifiedTabsByWorktree: { 'wt-1': [makeUnifiedTab({ label: 'grok' })] }
+    })
+    expect(staleRecord[0]?.title).toBe('grok')
+    expect(staleRecord[0]?.occupantAgent).toBe('grok')
+  })
+
   it('does not stamp grok occupancy from a hyphenated filename-style title', () => {
     const hyphenated = buildEntries({
       tabsByWorktree: { 'wt-1': [makeTerminalTab({ title: 'session-scanner-grok-parser' })] },

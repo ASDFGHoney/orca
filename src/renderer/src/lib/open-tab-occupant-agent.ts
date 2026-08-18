@@ -18,10 +18,12 @@ import { resolveTabAgentFromSignals } from './use-tab-agent'
 
 export type OpenTabOccupantAgentInput = {
   tabId: string
-  /** Visible search/tab-strip label. Used only when the terminal record title is empty. */
+  /**
+   * Resolved unified tab label — the same string the tab strip feeds `useTabAgent`.
+   * The terminal record's own title is not used: it can stay a stale "Terminal N"
+   * while the unified label already carries the live OSC title.
+   */
   title?: string
-  /** OSC title `useTabAgent` reads. */
-  recordTitle?: string
   defaultTitle?: string
   launchAgent?: TuiAgent
   layout?: TerminalLayoutSnapshot
@@ -38,7 +40,6 @@ export type OpenTabOccupantAgentInput = {
 export function resolveOpenTabOccupantAgent({
   tabId,
   title,
-  recordTitle,
   defaultTitle,
   launchAgent,
   layout,
@@ -61,7 +62,7 @@ export function resolveOpenTabOccupantAgent({
   const sleepingSessionAgent = focusedPaneKey
     ? (sleepingAgentSessionsByPaneKey[focusedPaneKey]?.agent ?? null)
     : null
-  const oscTitle = recordTitle?.trim() || title?.trim() || ''
+  const oscTitle = title?.trim() || ''
   const explicitTitleAgent = resolveExplicitTerminalTitleAgentType(oscTitle)
   const fallbackAgentSignal = launchAgent
     ? explicitTitleAgent === launchAgent
