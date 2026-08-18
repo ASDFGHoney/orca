@@ -2625,7 +2625,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         // Why the normalizer rather than a cast: this blob is hand-editable and
         // may come from an older or newer build; it degrades field by field
         // instead of bricking the cleanup dialog.
-        workspaceCleanupBrowse: normalizeWorkspaceCleanupBrowseState(ui.workspaceCleanup?.browse),
+        // Why startup-only, like activeView below: the browse writer debounces 250ms, so
+        // any other ui.set inside that window broadcasts state still holding the previous
+        // filters. Re-hydrating it here reverted the edit, and the pending debounce then
+        // persisted the revert. Nothing else edits browse state (mobile has no cleanup
+        // consumer, the popout is a separate store), so filters are per-window.
+        workspaceCleanupBrowse:
+          source === 'startup'
+            ? normalizeWorkspaceCleanupBrowseState(ui.workspaceCleanup?.browse)
+            : s.workspaceCleanupBrowse,
         // Why: restore only on startup; on 'sync' broadcasts it would clobber the window's current per-window view.
         activeView:
           source === 'startup'
