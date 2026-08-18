@@ -193,11 +193,18 @@ export class SessionShellReadyBarrier {
    *  the daemon's session lifecycle events, so it is only correlation here. */
   private reportReadiness(event: string, details: Record<string, unknown>): void {
     const shellPath = this.deps.subprocess.shellPath
-    this.deps.reportReadinessEvent?.(event, {
-      sessionId: this.deps.sessionId,
-      shell: shellPath ? basename(shellPath) : 'unknown',
-      ...details
-    })
+    try {
+      this.deps.reportReadinessEvent?.(event, {
+        sessionId: this.deps.sessionId,
+        shell: shellPath ? basename(shellPath) : 'unknown',
+        ...details
+      })
+    } catch {
+      // Why swallow: this runs before the state transition that releases held
+      // PTY bytes and flushes queued stdin, and the ready timer is already
+      // cleared. A throwing sink must never strand the barrier in `pending`
+      // with nothing left to wake it -- diagnostics cannot break the terminal.
+    }
   }
 
   private onShellReadyTimeout(): void {

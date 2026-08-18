@@ -587,6 +587,24 @@ describe('Session', () => {
       expect(String(events[0]?.details.shell)).not.toContain('/')
     })
 
+    // Why: the report runs before the transition that releases held PTY bytes and
+    // flushes queued stdin, and the ready timer is already cleared by then. A
+    // throwing sink must not leave the barrier stuck in `pending` forever.
+    it('still releases the barrier when the diagnostic sink throws', () => {
+      createSession({
+        shellReadySupported: true,
+        reportReadinessEvent: () => {
+          throw new Error('log sink unavailable')
+        }
+      })
+      session.write('waiting input')
+
+      vi.advanceTimersByTime(15_000)
+
+      expect(session.shellState).toBe('timed_out' satisfies ShellReadyState)
+      expect(subprocess.written).toEqual(['waiting input'])
+    })
+
     it('honors a shorter shell-ready timeout for Codex startup sessions', () => {
       createSession({ shellReadySupported: true, shellReadyTimeoutMs: 300 })
       session.write('codex\n')

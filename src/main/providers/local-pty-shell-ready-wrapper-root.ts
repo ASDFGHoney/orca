@@ -10,11 +10,12 @@ import { buildLocalShellReadyWrapperFiles } from './local-pty-shell-ready-wrappe
 
 export { SHELL_READY_MARKER_ESCAPED } from './local-pty-shell-ready-marker'
 
-export function getShellReadyWrapperBaseDir(): string {
+// Module-private, matching the daemon's twin: nothing outside needs the base.
+function getShellReadyWrapperBaseDir(): string {
   // Why: bundled into the daemon fork (no electron), so read ORCA_USER_DATA_PATH rather than electron's userData; main and the fork both set it to the same path.
   // Why a truthiness test rather than `??`: a set-but-empty ORCA_USER_DATA_PATH
-  // would leave a relative base dir, and the pruner recursively removes
-  // directories under it -- that must never resolve against the process cwd.
+  // would leave a relative base dir, so wrapper trees would be written under
+  // whatever the process cwd happens to be.
   const userDataPath = process.env.ORCA_USER_DATA_PATH
   // Why not the legacy `shell-ready/`: daemons of older builds still write that
   // path unconditionally, so this build's trees live out of their reach. Why the
