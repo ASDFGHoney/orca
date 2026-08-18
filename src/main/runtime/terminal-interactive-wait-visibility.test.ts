@@ -373,6 +373,21 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
     await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
   })
 
+  it('stops reporting a wait once the pane is no longer running', async () => {
+    // Why: the menu stays at the bottom of a dead pane's tail forever. A worker whose process
+    // is gone needs intervention, not an answer, so it must not read as blocked on a human.
+    const { runtime, handle } = await createPane({
+      paneTitle: CURSOR_TITLE,
+      foregroundProcess: 'cursor-agent',
+      data: CURSOR_APPROVAL
+    })
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.not.toBeNull()
+
+    runtime.onPtyExit(PTY_ID, 0)
+
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
+  })
+
   it('answers null rather than "not waiting" for a pane it cannot read', async () => {
     const { runtime } = await createPane({
       paneTitle: CURSOR_TITLE,
