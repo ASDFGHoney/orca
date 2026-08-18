@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ArtifactListItem } from '../../../../shared/artifacts'
-import { artifactMatchesSearchQuery, filterArtifactsBySearchQuery } from './artifact-list-search'
+import {
+  ARTIFACT_LIST_SEARCH_QUERY_MAX_BYTES,
+  artifactMatchesSearchQuery,
+  clampArtifactListSearchQuery,
+  filterArtifactsBySearchQuery
+} from './artifact-list-search'
 
 function item(overrides: Partial<ArtifactListItem['artifact']> = {}): ArtifactListItem {
   return {
@@ -44,5 +49,22 @@ describe('artifact list search', () => {
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.artifact.slug).toBe('notes')
     expect(items).toHaveLength(2)
+  })
+
+  it('leaves the list unfiltered rather than scanning an oversized query', () => {
+    const oversized = 'a'.repeat(ARTIFACT_LIST_SEARCH_QUERY_MAX_BYTES + 1)
+    const items = [item()]
+
+    expect(filterArtifactsBySearchQuery(items, oversized)).toBe(items)
+    expect(artifactMatchesSearchQuery(item(), oversized)).toBe(true)
+  })
+
+  it('clamps a multi-MB paste before it reaches state', () => {
+    const paste = 'x'.repeat(4 * 1024 * 1024)
+
+    expect(clampArtifactListSearchQuery(paste)).toHaveLength(
+      ARTIFACT_LIST_SEARCH_QUERY_MAX_BYTES + 1
+    )
+    expect(clampArtifactListSearchQuery('short')).toBe('short')
   })
 })

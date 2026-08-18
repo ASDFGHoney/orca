@@ -24,7 +24,9 @@ export function ArtifactDetailDrawer({
         showCloseButton={false}
         // Why: Electron webviews do not paint inside transformed ancestors, so this
         // sheet must not use the default slide translate.
-        className="h-full w-[min(96rem,96vw)] max-w-none translate-x-0 p-0 sm:max-w-[min(96rem,96vw)] data-[state=closed]:translate-x-0 data-[state=open]:translate-x-0"
+        // Why: leave the native macOS traffic-light area uncovered when the
+        // drawer is intentionally wider than the standard sheet max-width.
+        className="h-full w-[min(96rem,calc(100vw-80px))] max-w-none translate-x-0 p-0 sm:max-w-[min(96rem,calc(100vw-80px))] data-[state=closed]:translate-x-0 data-[state=open]:translate-x-0"
       >
         {item ? (
           <div className="flex h-full min-h-0 flex-col">

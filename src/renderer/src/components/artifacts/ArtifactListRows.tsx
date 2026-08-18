@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import { isPortaledRowMenuClick, isRowActivationKey } from './artifact-list-row-interaction'
+import { isPortaledRowMenuClick, isRowActivationKey } from '@/lib/list-row-interaction'
 import {
   artifactName,
   artifactTypeLabel,
@@ -26,11 +26,8 @@ import {
   formatByteSize
 } from './artifact-display-labels'
 import { copyArtifactLink, openArtifactInBrowser } from './artifact-link-actions'
-import {
-  ARTIFACTS_TABLE_GRID_CLASS,
-  ARTIFACTS_TABLE_ROW_CLASS,
-  ARTIFACTS_TABLE_ROW_SELECTED_CLASS
-} from './artifacts-table-layout'
+import { ARTIFACTS_TABLE_GRID_CLASS } from './artifacts-table-layout'
+import { LIST_TABLE_ROW_CLASS, LIST_TABLE_ROW_SELECTED_CLASS } from '@/lib/list-table-layout'
 
 export function ArtifactListRows({
   artifacts,
@@ -78,8 +75,8 @@ export function ArtifactListRows({
                 }}
                 className={cn(
                   ARTIFACTS_TABLE_GRID_CLASS,
-                  ARTIFACTS_TABLE_ROW_CLASS,
-                  isSelected && ARTIFACTS_TABLE_ROW_SELECTED_CLASS
+                  LIST_TABLE_ROW_CLASS,
+                  isSelected && LIST_TABLE_ROW_SELECTED_CLASS
                 )}
               >
                 <span className="min-w-0 truncate font-medium" title={name}>
@@ -105,7 +102,7 @@ export function ArtifactListRows({
                       size="icon-xs"
                       className="size-7 text-muted-foreground"
                       aria-label={translate(
-                        'auto.components.artifacts.ArtifactListRows.actions',
+                        'auto.components.artifacts.actions',
                         'Artifact actions'
                       )}
                       onClick={(event) => event.stopPropagation()}

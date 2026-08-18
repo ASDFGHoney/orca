@@ -12,7 +12,7 @@ vi.mock('./ArtifactPreview', () => ({
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ArtifactCollection } from './ArtifactCollection'
-import { ARTIFACTS_TABLE_CONTAINER_CLASS } from './artifacts-table-layout'
+import { LIST_TABLE_CONTAINER_CLASS } from '@/lib/list-table-layout'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -67,7 +67,7 @@ describe('ArtifactCollection', () => {
     const items = [artifact('first', 'First artifact'), artifact('second', 'Second artifact')]
     const { container, selectArtifact } = renderCollection(items)
 
-    const table = container.querySelector(`.${ARTIFACTS_TABLE_CONTAINER_CLASS.split(' ')[0]}`)
+    const table = container.querySelector(`.${LIST_TABLE_CONTAINER_CLASS.split(' ')[0]}`)
     expect(table).toHaveClass('rounded-md', 'border')
     expect(screen.getByText('Name')).toBeInTheDocument()
     expect(screen.getByText('Type')).toBeInTheDocument()

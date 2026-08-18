@@ -11,3 +11,8 @@ export const hasCustomTitleBar = shouldRenderDesktopWindowChrome({
   platform: shortcutPlatform,
   isWebClient: isPairedWebClientWindow()
 })
+
+// Why: the three 46px window-control buttons and the 36px titlebar they sit in.
+// Surfaces offset by these instead of hardcoding the pixels.
+export const WINDOW_CONTROLS_WIDTH = hasCustomTitleBar ? '138px' : '0px'
+export const WINDOW_CONTROLS_HEIGHT = hasCustomTitleBar ? '36px' : '0px'

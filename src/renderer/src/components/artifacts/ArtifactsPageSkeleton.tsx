@@ -1,10 +1,7 @@
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
-import {
-  ARTIFACTS_TABLE_CONTAINER_CLASS,
-  ARTIFACTS_TABLE_GRID_CLASS,
-  ARTIFACTS_TABLE_HEADER_CLASS
-} from './artifacts-table-layout'
+import { ARTIFACTS_TABLE_GRID_CLASS } from './artifacts-table-layout'
+import { LIST_TABLE_CONTAINER_CLASS, LIST_TABLE_HEADER_CLASS } from '@/lib/list-table-layout'
 
 function SkeletonBar({ className }: { className?: string }): React.JSX.Element {
   return <div className={cn('animate-pulse rounded bg-muted/60', className)} />
@@ -33,8 +30,8 @@ export function ArtifactsPageSkeleton(): React.JSX.Element {
         <SkeletonBar className="h-8 w-56 shrink-0 rounded-md" />
         <SkeletonBar className="size-8 shrink-0 rounded-md" />
       </div>
-      <div className={cn('min-h-0 flex-1 overflow-hidden', ARTIFACTS_TABLE_CONTAINER_CLASS)}>
-        <div className={cn(ARTIFACTS_TABLE_GRID_CLASS, ARTIFACTS_TABLE_HEADER_CLASS)}>
+      <div className={cn('min-h-0 flex-1 overflow-hidden', LIST_TABLE_CONTAINER_CLASS)}>
+        <div className={cn(ARTIFACTS_TABLE_GRID_CLASS, LIST_TABLE_HEADER_CLASS)}>
           <SkeletonBar className="h-2.5 w-12" />
           <SkeletonBar className="h-2.5 w-10" />
           <SkeletonBar className="h-2.5 w-8" />

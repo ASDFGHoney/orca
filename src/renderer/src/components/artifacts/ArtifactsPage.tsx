@@ -13,10 +13,6 @@ import {
   ArtifactsPageEmptyState,
   ArtifactsPageErrorBanner
 } from './ArtifactsPageStates'
-import {
-  createArtifactListVisualMock,
-  shouldShowArtifactListVisualMock
-} from './artifact-list-visual-mock'
 import { artifactAccountIdentity, useArtifactPagination } from './useArtifactPagination'
 
 const LOCAL_RUNTIME = { kind: 'local' } as const
@@ -37,9 +33,6 @@ export default function ArtifactsPage(): React.JSX.Element {
   const publishingBlocked = settings ? settings.artifactSharingEnabled !== true : false
   const [deleting, setDeleting] = useState<{ identity: string; slug: string } | null>(null)
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
-  const [mockArtifacts, setMockArtifacts] = useState<readonly ArtifactListItem[]>(() =>
-    shouldShowArtifactListVisualMock() ? createArtifactListVisualMock() : []
-  )
   const signedIn = authStatus?.state === 'connected'
   const needsReconnect = authStatus?.state === 'reconnect-required'
   const openAccountSettings = (): void => {
@@ -59,19 +52,16 @@ export default function ArtifactsPage(): React.JSX.Element {
     setError
   } = useArtifactPagination(authStatus, refreshAuth)
   const deletingId = deleting?.identity === accountIdentity ? deleting.slug : null
-  const usingVisualMock =
-    shouldShowArtifactListVisualMock() && artifacts.length === 0 && mockArtifacts.length > 0
-  const visibleArtifacts = usingVisualMock ? mockArtifacts : artifacts
   const selectedArtifact =
     selectedSlug === null
       ? null
-      : (visibleArtifacts.find(({ artifact }) => artifact.slug === selectedSlug) ?? null)
+      : (artifacts.find(({ artifact }) => artifact.slug === selectedSlug) ?? null)
 
   useEffect(() => {
-    if (selectedSlug && !visibleArtifacts.some(({ artifact }) => artifact.slug === selectedSlug)) {
+    if (selectedSlug && !artifacts.some(({ artifact }) => artifact.slug === selectedSlug)) {
       setSelectedSlug(null)
     }
-  }, [selectedSlug, visibleArtifacts])
+  }, [selectedSlug, artifacts])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -119,28 +109,20 @@ export default function ArtifactsPage(): React.JSX.Element {
         ),
         confirmLabel: translate('auto.components.artifacts.ArtifactsPage.delete', 'Delete'),
         confirmVariant: 'destructive',
-        dontAskAgain: usingVisualMock
-          ? undefined
-          : {
-              onConfirmed: () =>
-                persistConfirmationSkipPreference({
-                  updates: { skipDeleteArtifactConfirm: true },
-                  settingsSectionId: 'general-skip-delete-artifact-confirm',
-                  updateSettings,
-                  openSettingsPage,
-                  openSettingsTarget
-                })
-            }
+        dontAskAgain: {
+          onConfirmed: () =>
+            persistConfirmationSkipPreference({
+              updates: { skipDeleteArtifactConfirm: true },
+              settingsSectionId: 'general-skip-delete-artifact-confirm',
+              updateSettings,
+              openSettingsPage,
+              openSettingsTarget
+            })
+        }
       })
       if (!accepted) {
         return
       }
-    }
-    if (usingVisualMock) {
-      setMockArtifacts((current) =>
-        current.filter(({ artifact }) => artifact.slug !== item.artifact.slug)
-      )
-      return
     }
     const requestedIdentity = accountIdentity
     if (!requestedIdentity) {
@@ -201,27 +183,14 @@ export default function ArtifactsPage(): React.JSX.Element {
         </h1>
       </header>
 
-      {error && !usingVisualMock ? (
+      {error ? (
         <ArtifactsPageErrorBanner
           error={error}
           loading={loading}
           onRetry={() => void loadArtifacts()}
         />
       ) : null}
-      {usingVisualMock ? (
-        <ArtifactCollection
-          artifacts={visibleArtifacts}
-          deletingId={deletingId}
-          selectedSlug={selectedSlug}
-          selectArtifact={setSelectedSlug}
-          deleteArtifact={(target) => void deleteArtifact(target)}
-          hasMore={false}
-          loadingMore={false}
-          loadMore={() => undefined}
-          onRefresh={() => undefined}
-          isRefreshing={false}
-        />
-      ) : !signedIn ? (
+      {!signedIn ? (
         <ArtifactsPageAuthState
           connecting={connecting}
           needsReconnect={needsReconnect}
@@ -244,7 +213,7 @@ export default function ArtifactsPage(): React.JSX.Element {
         />
       ) : (
         <ArtifactCollection
-          artifacts={visibleArtifacts}
+          artifacts={artifacts}
           deletingId={deletingId}
           selectedSlug={selectedSlug}
           selectArtifact={setSelectedSlug}

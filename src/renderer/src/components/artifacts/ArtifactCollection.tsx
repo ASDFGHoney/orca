@@ -4,11 +4,11 @@ import type { ArtifactListItem } from '../../../../shared/artifacts'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import { filterArtifactsBySearchQuery } from './artifact-list-search'
+import { clampArtifactListSearchQuery, filterArtifactsBySearchQuery } from './artifact-list-search'
 import { ArtifactListRows } from './ArtifactListRows'
 import { ArtifactListTableHeader } from './ArtifactListTableHeader'
 import { ArtifactListToolbar } from './ArtifactListToolbar'
-import { ARTIFACTS_TABLE_CONTAINER_CLASS } from './artifacts-table-layout'
+import { LIST_TABLE_CONTAINER_CLASS } from '@/lib/list-table-layout'
 
 export function ArtifactCollection({
   artifacts,
@@ -34,6 +34,8 @@ export function ArtifactCollection({
   isRefreshing: boolean
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
+  // Why: clamp on the way in so a multi-MB paste never reaches state or filtering.
+  const onQueryChange = (next: string): void => setQuery(clampArtifactListSearchQuery(next))
   const matches = useMemo(() => filterArtifactsBySearchQuery(artifacts, query), [artifacts, query])
 
   return (
@@ -41,15 +43,12 @@ export function ArtifactCollection({
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         <ArtifactListToolbar
           query={query}
-          onQueryChange={setQuery}
+          onQueryChange={onQueryChange}
           onRefresh={onRefresh}
           isRefreshing={isRefreshing}
         />
         <div
-          className={cn(
-            'scrollbar-sleek min-h-0 flex-1 overflow-auto',
-            ARTIFACTS_TABLE_CONTAINER_CLASS
-          )}
+          className={cn('scrollbar-sleek min-h-0 flex-1 overflow-auto', LIST_TABLE_CONTAINER_CLASS)}
         >
           <ArtifactListTableHeader />
           {matches.length > 0 ? (
@@ -64,7 +63,7 @@ export function ArtifactCollection({
             </div>
           ) : (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              {translate('auto.components.artifacts.ArtifactListPane.noMatches', 'No matches')}
+              {translate('auto.components.artifacts.ArtifactCollection.noMatches', 'No matches')}
             </p>
           )}
           {hasMore ? (

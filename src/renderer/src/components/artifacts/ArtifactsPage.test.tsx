@@ -51,11 +51,6 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: mocks.rpc
 }))
 
-vi.mock('./artifact-list-visual-mock', () => ({
-  shouldShowArtifactListVisualMock: () => false,
-  createArtifactListVisualMock: () => []
-}))
-
 vi.mock('@/store', () => ({
   useAppStore: Object.assign(
     (selector: (state: Record<string, unknown>) => unknown) => selector(storeState()),
@@ -153,7 +148,16 @@ describe('ArtifactsPage', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Quarterly report' })
     ).toBeInTheDocument()
-    expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass('w-[min(96rem,96vw)]')
+    expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass(
+      'w-[min(96rem,calc(100vw-80px))]'
+    )
+    // Why: the drawer is right-anchored under the fixed Windows/Linux window-controls
+    // overlay, so its actions must sit inside an element inset past that overlay.
+    expect(
+      screen
+        .getByRole('button', { name: 'Close' })
+        .closest('.pr-\\[max\\(1rem\\,var\\(--window-controls-width\\,0px\\)\\)\\]')
+    ).not.toBeNull()
     const copyButton = screen.getByRole('button', { name: 'Copy link' })
     expect(copyButton).toHaveAttribute('data-variant', 'default')
     expect(copyButton.parentElement).toHaveAttribute('aria-label', 'Artifact actions')
