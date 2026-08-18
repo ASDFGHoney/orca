@@ -39,6 +39,7 @@ import type { RemoteServerUpdateSupport } from './remote-server-update'
 import type { ExecutionHostId } from './execution-host'
 import type { PtyIncarnationId } from './pty-incarnation'
 import type { RasterImageDimensions } from './raster-image-dimensions'
+import type { TerminalExitCause } from './terminal-exit-cause'
 
 export type { RuntimeMarkdownReadTabResult, RuntimeMarkdownSaveTabResult }
 
@@ -181,6 +182,8 @@ export type RuntimeMobileSessionTerminalTab = {
   ptyId?: string | null
   terminalTheme?: RuntimeMobileTerminalTheme
   agentStatus?: AgentStatusEntry | null
+  /** Event-only lead-turn end time for paired clients; never persisted in AgentStatusEntry. */
+  turnCompletedAt?: number
   launchAgent?: TuiAgent
   startupCwd?: string
   parentLayout?: TerminalLayoutSnapshot
@@ -463,6 +466,13 @@ export type RuntimeTerminalSummary = {
   writable: boolean
   lastOutputAt: number | null
   preview: string
+  /** Why this terminal's process is gone. Absent while it is still running, and
+   *  absent from a host predating the field — never read an absent value as a
+   *  clean finish (STA-4536). */
+  exitCause?: TerminalExitCause
+  /** Where this terminal actually runs. Absent when the host predates the field
+   *  or could not name the host — never read an absent value as local. */
+  executionHostId?: ExecutionHostId
 }
 
 export type RuntimeTerminalVisualTerminalNode = {
@@ -513,12 +523,24 @@ export type RuntimeTerminalVisualLayout = {
   root: RuntimeTerminalVisualLayoutNode
 }
 
+/** Which execution hosts a listing answered for, so an empty or partial result
+ *  reads as "none here" instead of "none anywhere". Host ids are as the
+ *  answering runtime names them — `_meta.runtimeId` says which runtime that is. */
+export type RuntimeTerminalListHostScope = {
+  hostIds: ExecutionHostId[]
+  /** Known hosts this listing skipped; a live terminal on one of them can be
+   *  absent from `terminals` without having exited. */
+  omittedHostIds: ExecutionHostId[]
+}
+
 export type RuntimeTerminalListResult = {
   terminals: RuntimeTerminalSummary[]
   visualLayouts?: RuntimeTerminalVisualLayout[]
   topologyRevisions?: Record<string, number>
   totalCount: number
   truncated: boolean
+  /** Absent from hosts that predate the field — treat that scope as unverifiable. */
+  hostScope?: RuntimeTerminalListHostScope
 }
 
 export type RuntimeTerminalOrphanAdoptionClaim = {
@@ -717,6 +739,14 @@ export type RuntimeTerminalClose = {
   /** Present for the durable whole-tab lifecycle without changing legacy receipts. */
   closeMode?: 'tab'
   ptyKilled: boolean
+  /**
+   * Why the PTY was not killed, when we know. Absent means today's answer —
+   * nothing observed either way — so older clients reading only `ptyKilled` are
+   * unaffected. `exited` never appears here: that is what `ptyKilled` reports.
+   */
+  ptyStopVerdict?: 'live' | 'unverifiable'
+  /** Set with `ptyStopVerdict: 'unverifiable'`; names what we lost contact with. */
+  ptyStopReason?: string
 }
 
 export type RuntimeTerminalWaitCondition = 'exit' | 'tui-idle'
@@ -734,6 +764,8 @@ export type RuntimeTerminalWait = {
   satisfied: boolean
   status: RuntimeTerminalState
   exitCode: number | null
+  /** Why it exited. `exitCode` alone cannot answer that — see {@link TerminalExitCause}. */
+  exitCause?: TerminalExitCause
   blockedReason?: RuntimeTerminalWaitBlockedReason
 }
 
