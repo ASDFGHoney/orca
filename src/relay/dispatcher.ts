@@ -99,11 +99,20 @@ type PreparedRelayFrame = Readonly<{
 // grow it inside one generation — cap it well above the fixed relay method vocabulary.
 const DROPPED_NOTIFICATION_LOG_KEY_LIMIT = 64
 
+// Why: the per-key first-occurrence line is deliberately one-shot, so a sustained storm
+// would otherwise log once and look identical to a single blip. Summaries are emitted from
+// the drop path itself rather than a timer, so they cost nothing while traffic is healthy.
+const DROPPED_NOTIFICATION_SUMMARY_INTERVAL_MS = 10_000
+
 const RESPONSE_OVER_CAPACITY_MESSAGE = 'Relay response exceeded the bounded transport capacity'
 
 type DroppedProducerNotificationLog = {
   generation: number
   loggedKeys: Set<string>
+  droppedFrames: number
+  droppedBytes: number
+  vetoedFrames: number
+  lastSummaryAt: number
 }
 
 type PendingRelayRequest = {
@@ -656,24 +665,72 @@ export class RelayDispatcher {
 
   // Why: one line per generation, method and drop reason — a flooding producer retries every batch and would
   // spam stderr, but a transient queue-full drop must not consume the slot a real over-capacity drop needs.
+  // Why a per-generation record: client ids are reused across reconnects, so counters and
+  // logged keys must reset when the generation turns over or a new client inherits stale totals.
+  private producerNotificationLog(client: RelayClient): DroppedProducerNotificationLog {
+    let log = client.droppedNotificationLog
+    if (!log || log.generation !== client.generation) {
+      log = {
+        generation: client.generation,
+        loggedKeys: new Set(),
+        droppedFrames: 0,
+        droppedBytes: 0,
+        vetoedFrames: 0,
+        lastSummaryAt: Date.now()
+      }
+      client.droppedNotificationLog = log
+    }
+    return log
+  }
+
   private logDroppedProducerNotification(client: RelayClient, method: string, bytes: number): void {
     const capacity = client.writer.producerFrameCapacity
     const overCapacity = bytes > capacity
     const key = `${method}:${overCapacity ? 'over-capacity' : 'queue-full'}`
-    let log = client.droppedNotificationLog
-    if (!log || log.generation !== client.generation) {
-      log = { generation: client.generation, loggedKeys: new Set() }
-      client.droppedNotificationLog = log
+    const log = this.producerNotificationLog(client)
+    log.droppedFrames += 1
+    log.droppedBytes += bytes
+    if (!log.loggedKeys.has(key) && log.loggedKeys.size < DROPPED_NOTIFICATION_LOG_KEY_LIMIT) {
+      log.loggedKeys.add(key)
+      process.stderr.write(
+        overCapacity
+          ? `[relay] Dropped ${method} (${bytes}B > producer frame capacity ${capacity}B)\n`
+          : `[relay] Dropped ${method} (${bytes}B, producer queue full; frame capacity ${capacity}B)\n`
+      )
     }
-    if (log.loggedKeys.has(key) || log.loggedKeys.size >= DROPPED_NOTIFICATION_LOG_KEY_LIMIT) {
+    this.flushProducerLossSummary(client, log)
+  }
+
+  // Why: an admission veto silently filters a frame out of the client list, and in legacy
+  // (non-credit) mode that is real loss with no other trace. Counting is enough — vetoes are
+  // routine while a delivery retires, so a line per veto would drown the signal.
+  private recordPtyDataAdmissionVeto(clientId: number): void {
+    const client = this.clients.get(clientId)
+    if (!client) {
       return
     }
-    log.loggedKeys.add(key)
+    const log = this.producerNotificationLog(client)
+    log.vetoedFrames += 1
+    this.flushProducerLossSummary(client, log)
+  }
+
+  private flushProducerLossSummary(client: RelayClient, log: DroppedProducerNotificationLog): void {
+    const now = Date.now()
+    const elapsed = now - log.lastSummaryAt
+    if (elapsed < DROPPED_NOTIFICATION_SUMMARY_INTERVAL_MS) {
+      return
+    }
+    if (log.droppedFrames === 0 && log.vetoedFrames === 0) {
+      return
+    }
     process.stderr.write(
-      overCapacity
-        ? `[relay] Dropped ${method} (${bytes}B > producer frame capacity ${capacity}B)\n`
-        : `[relay] Dropped ${method} (${bytes}B, producer queue full; frame capacity ${capacity}B)\n`
+      `[relay] Producer loss on client ${this.clientKey(client)} over ${elapsed}ms: ` +
+        `${log.droppedFrames} dropped (${log.droppedBytes}B), ${log.vetoedFrames} vetoed by admission\n`
     )
+    log.droppedFrames = 0
+    log.droppedBytes = 0
+    log.vetoedFrames = 0
+    log.lastSummaryAt = now
   }
 
   notifyClient(clientId: number, method: string, params?: Record<string, unknown>): void {
@@ -1212,11 +1269,17 @@ export class RelayDispatcher {
     return Array.from(this.clients.values()).filter((client) => !client.closed)
   }
 
+  // Why count here: every veto path — publish-time client filtering and the drain-time
+  // isStillAdmitted recheck — resolves through this one predicate.
   private admitsPtyDataPublication(
     clientId: number,
     params: Readonly<Record<string, unknown>>
   ): boolean {
-    return this.ptyDataPublicationAdmission?.(clientId, params) ?? true
+    const admitted = this.ptyDataPublicationAdmission?.(clientId, params) ?? true
+    if (!admitted) {
+      this.recordPtyDataAdmissionVeto(clientId)
+    }
+    return admitted
   }
 
   private activeClientKeys(): string[] {
