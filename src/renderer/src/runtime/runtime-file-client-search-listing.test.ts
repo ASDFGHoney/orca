@@ -17,6 +17,7 @@ import {
   runtimeEnvironmentCall,
   installRuntimeFileClientEnvironment
 } from './runtime-file-client-test-harness'
+import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
 installRuntimeFileClientEnvironment()
 
@@ -202,12 +203,33 @@ describe('runtime file client', () => {
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
-  it('fails closed with update guidance when a paired host lacks path search', async () => {
-    runtimeEnvironmentCall.mockResolvedValue({
-      id: 'rpc-legacy',
-      ok: false,
-      error: { code: 'method_not_found', message: 'Unknown method: files.searchPaths' },
-      _meta: { runtimeId: 'legacy-runtime' }
+  it('falls back to one cached legacy inventory and ranks evolving queries locally', async () => {
+    replaceRuntimeEnvironmentRevisions([{ id: 'env-1', createdAt: 1 }])
+    runtimeEnvironmentCall.mockImplementation(({ method }) => {
+      if (method === 'files.searchPaths') {
+        return Promise.resolve({
+          id: 'rpc-search-legacy',
+          ok: false,
+          error: { code: 'method_not_found', message: 'Unknown method: files.searchPaths' },
+          _meta: { runtimeId: 'legacy-runtime' }
+        })
+      }
+      return Promise.resolve({
+        id: 'rpc-list-legacy',
+        ok: true,
+        result: {
+          worktree: 'wt-1',
+          rootPath: '/remote/repo',
+          files: [
+            { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' },
+            { relativePath: 'src/other.ts', basename: 'other.ts', kind: 'text' },
+            { relativePath: 'nested/target.ts', basename: 'target.ts', kind: 'text' }
+          ],
+          totalCount: 7_000,
+          truncated: true
+        },
+        _meta: { runtimeId: 'legacy-runtime' }
+      })
     })
 
     await expect(
@@ -215,6 +237,68 @@ describe('runtime file client', () => {
         {
           settings: { activeRuntimeEnvironmentId: 'env-1' },
           worktreeId: 'wt-1',
+          worktreePath: '/remote/repo'
+        },
+        {
+          query: 'target',
+          limit: 32,
+          excludePaths: ['/remote/repo/nested']
+        }
+      )
+    ).resolves.toEqual({ files: ['src/target.ts'], truncated: true })
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/remote/repo'
+        },
+        { query: 'other', limit: 32 }
+      )
+    ).resolves.toEqual({ files: ['src/other.ts'], truncated: true })
+
+    expect(runtimeEnvironmentCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'files.searchPaths',
+      'files.list'
+    ])
+
+    replaceRuntimeEnvironmentRevisions([{ id: 'env-1', createdAt: 2 }])
+    await searchRuntimeFilePaths(
+      {
+        settings: { activeRuntimeEnvironmentId: 'env-1' },
+        worktreeId: 'wt-1',
+        worktreePath: '/remote/repo'
+      },
+      { query: 'target', limit: 32 }
+    )
+    expect(runtimeEnvironmentCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'files.searchPaths',
+      'files.list',
+      'files.searchPaths',
+      'files.list'
+    ])
+    expect(
+      runtimeEnvironmentCall.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === 'files.list')
+        .map((request) => request.expectedEnvironmentPairingRevision)
+    ).toEqual([1, 2])
+  })
+
+  it('keeps update guidance when a paired host lacks both search and legacy listing', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-legacy',
+      ok: false,
+      error: { code: 'method_not_found', message: 'Unknown method' },
+      _meta: { runtimeId: 'legacy-runtime' }
+    })
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-legacy' },
+          worktreeId: 'wt-legacy',
           worktreePath: '/remote/repo'
         },
         { query: 'target', limit: 32 }

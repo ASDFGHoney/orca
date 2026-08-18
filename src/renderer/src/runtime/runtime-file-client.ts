@@ -41,6 +41,10 @@ import {
   captureRuntimeEnvironmentRequestRevision,
   getRuntimeEnvironmentRevision
 } from './runtime-environment-revision'
+import {
+  hasCachedLegacyQuickOpenInventory,
+  searchLegacyQuickOpenInventory
+} from './runtime-legacy-quick-open-inventory'
 
 export type RuntimeReadableFileContent = {
   content: string
@@ -1015,15 +1019,27 @@ export async function searchRuntimeFilePaths(
   if (!context.worktreeId) {
     return { files: [], truncated: false }
   }
+  const worktreeSelector = toRuntimeWorktreeSelector(context.worktreeId)
+  const limit = args.limit ?? 32
+  if (hasCachedLegacyQuickOpenInventory(target, worktreeSelector)) {
+    return searchLegacyQuickOpenInventory({
+      target,
+      worktreeSelector,
+      query: args.query,
+      limit,
+      worktreePath: context.worktreePath,
+      excludePaths: args.excludePaths
+    })
+  }
   let result: RuntimeFileListResult
   try {
     result = await callRuntimeRpc<RuntimeFileListResult>(
       target,
       'files.searchPaths',
       {
-        worktree: toRuntimeWorktreeSelector(context.worktreeId),
+        worktree: worktreeSelector,
         query: args.query,
-        limit: args.limit,
+        limit,
         excludePaths: args.excludePaths,
         mode: 'quick-open'
       },
@@ -1031,7 +1047,21 @@ export async function searchRuntimeFilePaths(
     )
   } catch (error) {
     if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
-      throw new Error(QUICK_OPEN_REMOTE_UPDATE_REQUIRED_MESSAGE)
+      try {
+        return await searchLegacyQuickOpenInventory({
+          target,
+          worktreeSelector,
+          query: args.query,
+          limit,
+          worktreePath: context.worktreePath,
+          excludePaths: args.excludePaths
+        })
+      } catch (legacyError) {
+        if (legacyError instanceof RuntimeRpcCallError && legacyError.code === 'method_not_found') {
+          throw new Error(QUICK_OPEN_REMOTE_UPDATE_REQUIRED_MESSAGE)
+        }
+        throw legacyError
+      }
     }
     throw error
   }
