@@ -211,6 +211,49 @@ describe('createBrowserSlice runtime guard', () => {
     })
   })
 
+  it('imports client-hosted logins on this desktop instead of the headless server', async () => {
+    const store = createTestStore()
+    store.setState({ settings: settingsWithRuntime('env-1') })
+    mockApi.browser.sessionImportFromBrowserForClientHost.mockResolvedValueOnce({
+      ok: true,
+      profileId: 'default',
+      summary: { totalCookies: 3, importedCookies: 3, skippedCookies: 0, domains: [] }
+    })
+
+    const result = await store.getState().importCookiesFromBrowser('default', 'chrome', 'Default')
+
+    expect(mockApi.browser.sessionImportFromBrowserForClientHost).toHaveBeenCalledWith({
+      environmentId: 'env-1',
+      profileId: 'default',
+      browserFamily: 'chrome',
+      browserProfile: 'Default'
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'browser.profileImportFromBrowser' })
+    )
+    expect(result).toMatchObject({ ok: true, executionHostId: 'runtime:env-1' })
+  })
+
+  it('falls back to the server-side import when the desktop hosts no pages', async () => {
+    const store = createTestStore()
+    store.setState({ settings: settingsWithRuntime('env-1') })
+    runtimeEnvironmentCall.mockResolvedValueOnce({
+      id: 'rpc-import',
+      ok: true,
+      result: {
+        ok: true,
+        profileId: 'default',
+        summary: { totalCookies: 1, importedCookies: 1, skippedCookies: 0, domains: [] }
+      },
+      _meta: { runtimeId: 'runtime-1' }
+    })
+
+    const result = await store.getState().importCookiesFromBrowser('default', 'chrome', 'Default')
+
+    expect(mockApi.browser.sessionImportFromBrowserForClientHost).toHaveBeenCalled()
+    expect(result).toMatchObject({ ok: true })
+  })
+
   it('uses local browser IPC when no runtime environment is active', async () => {
     const store = createTestStore()
     mockApi.browser.sessionListProfiles.mockResolvedValueOnce([

@@ -3031,6 +3031,15 @@ const api = {
       { ok: true; profileId: string; summary: unknown } | { ok: false; reason: string }
     > => ipcRenderer.invoke('browser:session:importFromBrowser', args),
 
+    sessionImportFromBrowserForClientHost: (args: {
+      environmentId: string
+      profileId: string
+      browserFamily: string
+      browserProfile?: string
+    }): Promise<
+      { ok: true; profileId: string; summary: unknown } | { ok: false; reason: string } | null
+    > => ipcRenderer.invoke('browser:session:importFromBrowserForClientHost', args),
+
     sessionClearDefaultCookies: (): Promise<boolean> =>
       ipcRenderer.invoke('browser:session:clearDefaultCookies'),
 

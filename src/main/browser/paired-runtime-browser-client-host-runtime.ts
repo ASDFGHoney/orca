@@ -7,6 +7,7 @@ import {
   type KnownRuntimeEnvironment
 } from '../../shared/runtime-environments'
 import { BrowserClientNetworkRouteRegistry } from './browser-client-network-route-registry'
+import { browserNativeExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
 import {
@@ -26,6 +27,13 @@ import {
   browserRouteWebContentsRegistry
 } from './browser-route-session-runtime'
 
+export type ClientHostRouteIdentity = {
+  orcaProfileId: string
+  authorityConnectionIdentity: string
+  executionHostIdentity: string
+  storageScope: string
+}
+
 type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
   pairing: PairingOffer
   orcaProfileId: string
@@ -35,6 +43,8 @@ type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
 
 const browserHostClientId = randomUUID()
 let activeOrcaProfileId: string | null = null
+/** Route identity of each live client host, for storage operations without a page. */
+const clientHostRouteIdentities = new Map<string, ClientHostRouteIdentity>()
 
 const browserClientHosts =
   new PairedRuntimeBrowserClientHostRegistry<ProductionBrowserClientHostStart>({
@@ -95,11 +105,7 @@ export async function startPairedRuntimeBrowserClientHost(options: {
   }
   const pairingRevision = options.environment.pairingRevision ?? options.environment.createdAt
   const pairing = getPreferredPairingOffer(options.environment)
-  return browserClientHosts.start({
-    environmentId: options.environment.id,
-    pairingRevision,
-    authorityRuntimeId: options.authorityRuntimeId,
-    pairing,
+  const routeIdentity: ClientHostRouteIdentity = {
     orcaProfileId,
     storageScope: deriveBrowserRoutePartitionStorageScope({
       orcaProfileId,
@@ -111,8 +117,21 @@ export async function startPairedRuntimeBrowserClientHost(options: {
       pairingRevision,
       options.authorityRuntimeId,
       pairing
-    )
+    ),
+    // Why: settings-level operations target the server's own machine, not a nested SSH/WSL host.
+    executionHostIdentity: browserNativeExecutionHostStorageIdentity(options.authorityRuntimeId)
+  }
+  const authority = await browserClientHosts.start({
+    environmentId: options.environment.id,
+    pairingRevision,
+    authorityRuntimeId: options.authorityRuntimeId,
+    pairing,
+    orcaProfileId,
+    storageScope: routeIdentity.storageScope,
+    authorityConnectionIdentity: routeIdentity.authorityConnectionIdentity
   })
+  clientHostRouteIdentities.set(options.environment.id, routeIdentity)
+  return authority
 }
 
 export function retirePairedRuntimeBrowserClientPage(
@@ -123,14 +142,27 @@ export function retirePairedRuntimeBrowserClientPage(
   return browserClientHosts.retirePage(environmentId, browserPageId, pageHostGeneration)
 }
 
+/**
+ * Route identity of the client host serving `environmentId`, or null when the
+ * desktop is not hosting that server's pages. Names the environment's own
+ * execution host: the target a settings-level cookie import applies to.
+ */
+export function getPairedRuntimeBrowserClientRouteIdentity(
+  environmentId: string
+): ClientHostRouteIdentity | null {
+  return clientHostRouteIdentities.get(environmentId) ?? null
+}
+
 export function closePairedRuntimeBrowserClientHostEnvironment(
   environmentId: string,
   error?: Error
 ): Promise<boolean> {
+  clientHostRouteIdentities.delete(environmentId)
   return browserClientHosts.closeEnvironment(environmentId, error)
 }
 
 export function shutdownPairedRuntimeBrowserClientHosts(): Promise<void> {
+  clientHostRouteIdentities.clear()
   return browserClientHosts.close()
 }
 

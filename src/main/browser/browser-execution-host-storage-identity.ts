@@ -22,7 +22,7 @@ export function browserNetworkExecutionHostStorageIdentity(
   host: BrowserNetworkExecutionHost
 ): string {
   if (host.kind === 'native') {
-    return storageIdentity(['native', host.runtimeId])
+    return browserNativeExecutionHostStorageIdentity(host.runtimeId)
   }
   if (host.kind === 'wsl') {
     return storageIdentity(['wsl', host.runtimeId, host.distro])
@@ -30,6 +30,11 @@ export function browserNetworkExecutionHostStorageIdentity(
   // Why: providerEpoch is a per-connection fencing nonce reissued on every
   // reconnect, not a persistent record id -- targetId already carries non-reuse.
   return storageIdentity(['ssh', host.targetId])
+}
+
+/** Storage identity of a runtime's own machine, for callers with no execution-host record. */
+export function browserNativeExecutionHostStorageIdentity(runtimeId: string): string {
+  return storageIdentity(['native', runtimeId])
 }
 
 function storageIdentity(components: readonly string[]): string {

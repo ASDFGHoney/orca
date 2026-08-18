@@ -2200,12 +2200,21 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         })
       )
       try {
-        const result = await callRuntimeRpc<BrowserProfileImportFromBrowserResult>(
-          { kind: 'environment', environmentId: runtimeEnvironmentId },
-          'browser.profileImportFromBrowser',
-          { profileId, browserFamily, browserProfile },
-          { timeoutMs: 30_000 }
-        )
+        // Why: client-hosted pages render on this desktop, so their logins live
+        // here -- detecting and importing on the headless remote finds nothing.
+        const result =
+          (await window.api.browser.sessionImportFromBrowserForClientHost({
+            environmentId: runtimeEnvironmentId,
+            profileId,
+            browserFamily,
+            browserProfile
+          })) ??
+          (await callRuntimeRpc<BrowserProfileImportFromBrowserResult>(
+            { kind: 'environment', environmentId: runtimeEnvironmentId },
+            'browser.profileImportFromBrowser',
+            { profileId, browserFamily, browserProfile },
+            { timeoutMs: 30_000 }
+          ))
         if (result.ok) {
           set((state) =>
             browserImportStateForHostUpdate(state, hostId, {

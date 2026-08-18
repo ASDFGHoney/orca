@@ -133,6 +133,13 @@ export type BrowserApi = {
     browserFamily: string
     browserProfile?: string
   }) => Promise<BrowserCookieImportResult>
+  /** Null when the environment's pages are not client-hosted on this desktop. */
+  sessionImportFromBrowserForClientHost: (args: {
+    environmentId: string
+    profileId: string
+    browserFamily: string
+    browserProfile?: string
+  }) => Promise<BrowserCookieImportResult | null>
   sessionClearDefaultCookies: () => Promise<boolean>
   notifyActiveTabChanged: (args: { browserPageId: string }) => Promise<boolean>
 }
