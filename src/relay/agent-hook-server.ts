@@ -16,7 +16,6 @@ import {
   HOOK_REQUEST_SLOWLORIS_MS,
   normalizeHookPayload,
   readRequestBody,
-  resolveCachedClaudeCompactOwnership,
   resolveHookSource,
   writeEndpointFile,
   type AgentHookEventPayload,
@@ -248,10 +247,7 @@ export class RelayAgentHookServer {
         res.end()
         return
       }
-      const event = normalizeHookPayload(this.state, source, body, this.env, {
-        allowUnanchoredPreCompact: true,
-        allowUnanchoredPostCompact: true
-      })
+      const event = normalizeHookPayload(this.state, source, body, this.env)
       if (event) {
         // TODO: once normalizeHookPayload returns validated env/version, drop bodyEnv/bodyVersion and source them from the listener result.
         const env = hookBodyEnv(body)
@@ -286,8 +282,15 @@ export class RelayAgentHookServer {
     if (event.payload.state !== 'done' || event.payload.lastAssistantMessage) {
       this.retryScheduler.clearAssistantMessageRetry(event.paneKey)
     }
-    const previous = this.state.lastStatusByPaneKey.get(event.paneKey)
-    const cachedEvent = resolveCachedClaudeCompactOwnership(previous, event)
+    // Why: a reconnecting client receives the pane's last event as an isReplay rebuild of this
+    // cache, and after a compact that entry IS the PostCompact. Cache it stripped of its compact
+    // identity so the replay arrives as an ordinary status row the client applies normally —
+    // otherwise the only channel that can deliver the clearing `done` to a client that was offline
+    // during the compact is the one path a compact-event guard would reject.
+    const cachedEvent =
+      event.hookEventName === 'PostCompact'
+        ? { ...event, hookEventName: undefined, compactTrigger: undefined }
+        : event
     // Why: delete-then-set makes Map insertion order = recency, so the cap below evicts the longest-idle pane.
     this.state.lastStatusByPaneKey.delete(event.paneKey)
     this.state.lastStatusByPaneKey.set(event.paneKey, cachedEvent)

@@ -57,7 +57,6 @@ import {
 import { ORCA_HOOK_PROTOCOL_VERSION } from './agent-hook-types'
 import { REMOTE_AGENT_HOOK_ENV, type AgentHookSource } from './agent-hook-relay'
 import {
-  agentProviderSessionsEqual,
   extractAgentProviderSession,
   type AgentProviderSessionMetadata
 } from './agent-session-resume'
@@ -75,6 +74,11 @@ import {
   resolveGrokChatHistoryPathSync,
   resolveGrokSessionsDir
 } from './grok-session-paths'
+import {
+  canAcceptClaudeCompactCompletion,
+  isClaudeCompactCompletionConsumed,
+  markClaudeCompactCompletionConsumed
+} from './claude-compact-completion'
 import { sweepStaleAgentHookEndpointTemps } from './agent-hook-endpoint-temp-cleanup'
 import { classifyTruncatedHookRequest } from './agent-hook-transport-interference'
 import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit'
@@ -142,6 +146,8 @@ export type HookListenerState = {
   claudeRunningNonAgentTaskPaneKeys: Set<string>
   /** Panes whose latest authoritative Claude cron inventory still has a scheduled job. */
   claudeActiveSessionCronPaneKeys: Set<string>
+  /** Compact whose completion each pane already applied, so relay duplicates can't refresh the row. */
+  claudeConsumedCompactPromptIdByPaneKey: Map<string, string>
   /** Live thread-spawn children per Codex pane. */
   codexSubagentRosterByPaneKey: Map<string, CodexSubagentRoster>
   /** Incremental parent/child rollout cursors for Codex collaboration v2. */
@@ -182,6 +188,7 @@ export function createHookListenerState(): HookListenerState {
     claudeUnconfirmedRestoredStatusPaneKeys: new Set(),
     claudeRunningNonAgentTaskPaneKeys: new Set(),
     claudeActiveSessionCronPaneKeys: new Set(),
+    claudeConsumedCompactPromptIdByPaneKey: new Map(),
     codexSubagentRosterByPaneKey: new Map(),
     codexSubagentTranscriptByPaneKey: new Map(),
     codexLeadStateByPaneKey: new Map()
@@ -366,92 +373,6 @@ export type AgentHookEventPayload = {
   /** Transport-only Claude background-work evidence used to reject false input-based interrupts. */
   claudeRunningNonAgentTask?: boolean
   payload: ParsedAgentStatusPayload
-}
-
-type ClaudeCompactIdentity = Pick<
-  AgentHookEventPayload,
-  | 'source'
-  | 'connectionId'
-  | 'hookEventName'
-  | 'providerPromptId'
-  | 'compactTrigger'
-  | 'providerSession'
->
-
-export function canAcceptClaudeCompactTransition(
-  previous: AgentHookEventPayload | undefined,
-  incoming: ClaudeCompactIdentity,
-  options: { allowUnanchoredPreCompact?: boolean; allowUnanchoredPostCompact?: boolean } = {}
-): boolean {
-  if (
-    incoming.source !== 'claude' ||
-    incoming.compactTrigger === undefined ||
-    incoming.providerPromptId === undefined ||
-    (incoming.hookEventName !== 'PreCompact' && incoming.hookEventName !== 'PostCompact')
-  ) {
-    return false
-  }
-  if (incoming.hookEventName === 'PreCompact' && options.allowUnanchoredPreCompact) {
-    return true
-  }
-  if (incoming.hookEventName === 'PostCompact' && options.allowUnanchoredPostCompact) {
-    return true
-  }
-  if (
-    previous?.source !== 'claude' ||
-    previous.payload.agentType !== 'claude' ||
-    previous.connectionId !== incoming.connectionId ||
-    !agentProviderSessionsEqual('claude', previous.providerSession, incoming.providerSession)
-  ) {
-    return false
-  }
-  if (incoming.hookEventName === 'PostCompact') {
-    return (
-      previous.compactTrigger === incoming.compactTrigger &&
-      previous.providerPromptId === incoming.providerPromptId
-    )
-  }
-  return incoming.compactTrigger === 'manual'
-    ? previous.providerPromptId !== undefined
-    : previous.providerPromptId === incoming.providerPromptId
-}
-
-export function resolveCachedClaudeCompactOwnership(
-  previous: AgentHookEventPayload | undefined,
-  incoming: AgentHookEventPayload
-): AgentHookEventPayload {
-  const sameClaudeOwner =
-    previous?.source === 'claude' &&
-    previous.payload.agentType === 'claude' &&
-    incoming.source === 'claude' &&
-    incoming.payload.agentType === 'claude' &&
-    incoming.connectionId === previous.connectionId &&
-    agentProviderSessionsEqual('claude', previous.providerSession, incoming.providerSession)
-      ? previous
-      : undefined
-  if (incoming.hookEventName === 'PreCompact' && incoming.compactTrigger) {
-    return sameClaudeOwner?.payload.prompt && incoming.payload.prompt.length === 0
-      ? { ...incoming, payload: { ...incoming.payload, prompt: sameClaudeOwner.payload.prompt } }
-      : incoming
-  }
-  if (incoming.hookEventName === 'PostCompact') {
-    return incoming.compactTrigger ? { ...incoming, compactTrigger: undefined } : incoming
-  }
-  const ownsCompact =
-    sameClaudeOwner?.compactTrigger !== undefined &&
-    sameClaudeOwner.providerPromptId !== undefined &&
-    incoming.providerPromptId === sameClaudeOwner.providerPromptId
-  if (ownsCompact) {
-    return {
-      ...incoming,
-      compactTrigger: sameClaudeOwner.compactTrigger,
-      payload:
-        incoming.payload.prompt.length === 0 && sameClaudeOwner.payload.prompt
-          ? { ...incoming.payload, prompt: sameClaudeOwner.payload.prompt }
-          : incoming.payload
-    }
-  }
-  return incoming.compactTrigger ? { ...incoming, compactTrigger: undefined } : incoming
 }
 
 // ─── Body parsing ───────────────────────────────────────────────────
@@ -2979,19 +2900,21 @@ function normalizeClaudeEvent(
     (eventName === 'PreToolUse' || eventName === 'PermissionRequest') &&
     isAskUserQuestionTool(eventToolName)
   const isAskUserQuestion = eventName === 'PreToolUse' && isAskUserQuestionWait
-  // Why: /compact can take minutes and does not emit Stop. PreCompact marks the pane busy;
-  // PostCompact clears it so a finished compact cannot leave a sticky working spinner (#11352).
+  // Why: a manual /compact swallows the turn boundary — it ends at an idle prompt and emits no
+  // Stop, so PostCompact is the pane's only clearing signal (STA-2915). An auto compact runs INSIDE
+  // a turn that resumes and emits its own Stop, so it must claim nothing. PreCompact fires before
+  // the compact is validated (an aborted compact emits it alone), so it is neither registered nor
+  // mapped — see claude-compact-completion.ts.
+  const isManualCompactCompletion = eventName === 'PostCompact' && hookPayload.trigger === 'manual'
   const reportedStateName =
     eventName === 'UserPromptSubmit' ||
     eventName === 'PostToolUse' ||
     eventName === 'PostToolUseFailure' ||
-    eventName === 'PreCompact' ||
-    (eventName === 'PostCompact' && hookPayload.trigger === 'auto') ||
     (eventName === 'PreToolUse' && !isAskUserQuestion)
       ? 'working'
       : eventName === 'PermissionRequest' || isAskUserQuestion
         ? 'waiting'
-        : isTurnBoundary || (eventName === 'PostCompact' && hookPayload.trigger === 'manual')
+        : isTurnBoundary || isManualCompactCompletion
           ? 'done'
           : null
 
@@ -3161,6 +3084,10 @@ function normalizeClaudeEvent(
     stateName: effectiveState,
     updateToolSnapshot: true,
     interrupted,
+    // Why: a finished compact is a session-shaped boundary, not a completed turn. Without this the
+    // clearing `done` would fire completion notifications, unread counts and automation-run
+    // completion evidence for work nobody did.
+    sessionBoundary: isManualCompactCompletion ? true : undefined,
     turnCompletedAt
   })
 }
@@ -4391,8 +4318,7 @@ export function normalizeHookPayload(
   state: HookListenerState,
   source: AgentHookSource,
   body: unknown,
-  expectedEnv: string,
-  options: { allowUnanchoredPreCompact?: boolean; allowUnanchoredPostCompact?: boolean } = {}
+  expectedEnv: string
 ): AgentHookEventPayload | null {
   if (typeof body !== 'object' || body === null) {
     return null
@@ -4457,38 +4383,43 @@ export function normalizeHookPayload(
     (hookPayloadRecord.trigger === 'manual' || hookPayloadRecord.trigger === 'auto')
       ? hookPayloadRecord.trigger
       : undefined
-  const isCompactEvent = eventName === 'PreCompact' || eventName === 'PostCompact'
-  if (isCompactEvent && compactTrigger === undefined) {
+  // Why: fail closed for Claude only. A malformed compact payload must not reach the mapping, but
+  // the old guard was source-BLIND and pre-empted every other provider's normalizer before it ran.
+  if (
+    source === 'claude' &&
+    (eventName === 'PreCompact' || eventName === 'PostCompact') &&
+    compactTrigger === undefined
+  ) {
     return null
   }
   const previousStatus = state.lastStatusByPaneKey.get(paneKey)
-  if (
-    compactTrigger !== undefined &&
-    !canAcceptClaudeCompactTransition(
-      previousStatus,
-      {
+  const isCompactCompletion = source === 'claude' && eventName === 'PostCompact'
+  if (isCompactCompletion) {
+    if (
+      isClaudeCompactCompletionConsumed(
+        state.claudeConsumedCompactPromptIdByPaneKey,
+        paneKey,
+        providerPromptId
+      ) ||
+      !canAcceptClaudeCompactCompletion(previousStatus, {
         source,
         connectionId: null,
-        hookEventName: typeof eventName === 'string' ? eventName : undefined,
         providerPromptId,
-        compactTrigger,
         providerSession: providerSession ?? undefined
-      },
-      {
-        allowUnanchoredPreCompact: options.allowUnanchoredPreCompact,
-        allowUnanchoredPostCompact: options.allowUnanchoredPostCompact
-      }
+      })
+    ) {
+      return null
+    }
+    markClaudeCompactCompletionConsumed(
+      state.claudeConsumedCompactPromptIdByPaneKey,
+      paneKey,
+      providerPromptId
     )
-  ) {
-    return null
-  }
-  if (
-    eventName === 'PostCompact' &&
-    compactTrigger !== undefined &&
-    previousStatus?.payload.prompt &&
-    !state.lastPromptByPaneKey.has(paneKey)
-  ) {
-    state.lastPromptByPaneKey.set(paneKey, previousStatus.payload.prompt)
+    // Why: the compact's own event carries no prompt; keep the pane's label from the turn it
+    // summarized rather than blanking the row as it clears.
+    if (previousStatus?.payload.prompt && !state.lastPromptByPaneKey.has(paneKey)) {
+      state.lastPromptByPaneKey.set(paneKey, previousStatus.payload.prompt)
+    }
   }
   const extractedPrompt = extractPromptText(hookPayload as Record<string, unknown>)
   const promptText = extractedPrompt.text

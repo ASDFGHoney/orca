@@ -12,25 +12,11 @@ vi.mock('../telemetry/client', () => ({ track: vi.fn() }))
 vi.mock('../telemetry/cohort-classifier', () => ({ getCohortAtEmit: vi.fn(() => ({})) }))
 
 const PANE_KEY = makePaneKey('manual-compact', '11111111-1111-4111-8111-111111111111')
-const PROMPT_ID_1 = '22222222-2222-4222-8222-222222222222'
-const PROMPT_ID_2 = '33333333-3333-4333-8333-333333333333'
+const COMPACT_PROMPT_ID = '22222222-2222-4222-8222-222222222222'
+const TURN_PROMPT_ID = '33333333-3333-4333-8333-333333333333'
 const SESSION = { key: 'session_id' as const, id: 'session-a' }
 
-type ClaudeHook = {
-  hook_event_name: string
-  prompt?: string
-  prompt_id: string
-  session_id: string
-  trigger?: 'manual' | 'auto'
-  agent_id?: string
-  agent_type?: string
-}
-
-function claudeHook(
-  hookEventName: string,
-  promptId: string,
-  extra: Partial<ClaudeHook> = {}
-): ClaudeHook {
+function claudeHook(hookEventName: string, promptId: string, extra: Record<string, unknown> = {}) {
   return {
     hook_event_name: hookEventName,
     prompt_id: promptId,
@@ -39,28 +25,44 @@ function claudeHook(
   }
 }
 
-function manualEnvelope(hookEventName: string, state: 'working' | 'done') {
-  return {
-    source: 'claude' as const,
-    paneKey: PANE_KEY,
-    hasExplicitPrompt: hookEventName === 'UserPromptSubmit' ? true : undefined,
-    hookEventName,
-    providerPromptId: hookEventName === 'UserPromptSubmit' ? PROMPT_ID_2 : PROMPT_ID_1,
-    compactTrigger: hookEventName === 'UserPromptSubmit' ? undefined : ('manual' as const),
-    providerSession: SESSION,
-    payload: { state, prompt: 'work before compact', agentType: 'claude' as const }
-  }
-}
-
 function postHook(port: number, token: string, payload: Record<string, unknown>) {
   return fetch(`http://127.0.0.1:${port}/hook/claude`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Orca-Agent-Hook-Token': token
-    },
+    headers: { 'Content-Type': 'application/json', 'X-Orca-Agent-Hook-Token': token },
     body: JSON.stringify({ paneKey: PANE_KEY, payload })
   })
+}
+
+function turnEnvelope(): AgentHookRelayEnvelope {
+  return {
+    source: 'claude',
+    paneKey: PANE_KEY,
+    connectionId: null,
+    hasExplicitPrompt: true,
+    hookEventName: 'UserPromptSubmit',
+    providerPromptId: TURN_PROMPT_ID,
+    providerSession: SESSION,
+    payload: { state: 'working', prompt: 'work before compact', agentType: 'claude' }
+  } as AgentHookRelayEnvelope
+}
+
+/** What a relay predating this change forwards: it ran its own shipped normalizer, so a manual
+ *  compact arrives as a PLAIN `done` (no session boundary) and an auto compact as `working`. */
+function legacyRelayCompactEnvelope(
+  state: 'done' | 'working',
+  overrides: Partial<AgentHookRelayEnvelope> = {}
+): AgentHookRelayEnvelope {
+  return {
+    source: 'claude',
+    paneKey: PANE_KEY,
+    connectionId: null,
+    hookEventName: 'PostCompact',
+    providerPromptId: COMPACT_PROMPT_ID,
+    compactTrigger: state === 'done' ? 'manual' : 'auto',
+    providerSession: SESSION,
+    payload: { state, prompt: 'work before compact', agentType: 'claude' },
+    ...overrides
+  } as AgentHookRelayEnvelope
 }
 
 describe('manual Claude compact hook stream', () => {
@@ -76,75 +78,51 @@ describe('manual Claude compact hook stream', () => {
     }
   })
 
-  it('settles an exact local HTTP lifecycle and rejects a duplicate completion', async () => {
+  it('settles the measured local lifecycle and rejects a duplicate completion', async () => {
     const server = new AgentHookServer()
     servers.push(server)
     await server.start({ env: 'production' })
     const env = server.buildPtyEnv()
+    const port = Number(env.ORCA_AGENT_HOOK_PORT)
+    const token = env.ORCA_AGENT_HOOK_TOKEN
     const events: string[] = []
     const unsubscribe = server.subscribeEnrichedStatus((event) => {
       events.push(`${event.hookEventName}:${event.payload.state}`)
     })
 
+    await postHook(port, token, claudeHook('UserPromptSubmit', TURN_PROMPT_ID, { prompt: 'work' }))
+    // Measured stream for a successful manual /compact. PreCompact is not registered in production
+    // and is rejected here too; the summarizer's start-less SubagentStop only republishes state.
+    await postHook(port, token, claudeHook('PreCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
     await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('UserPromptSubmit', PROMPT_ID_2, { prompt: 'work before compact' })
-    )
-    await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PreCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
-    await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('SubagentStart', PROMPT_ID_1, {
-        agent_id: 'compact-agent',
-        agent_type: 'general-purpose'
+      port,
+      token,
+      claudeHook('SubagentStop', COMPACT_PROMPT_ID, {
+        agent_id: 'a75b38b59774e1f31',
+        agent_type: '',
+        background_tasks: [],
+        session_crons: []
       })
     )
     await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('SubagentStop', PROMPT_ID_1, {
-        agent_id: 'compact-agent',
-        agent_type: 'general-purpose'
-      })
+      port,
+      token,
+      claudeHook('SessionStart', COMPACT_PROMPT_ID, { source: 'compact' })
     )
-    await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PostCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
-    await postHook(
-      Number(env.ORCA_AGENT_HOOK_PORT),
-      env.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PostCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
 
-    expect(events).toEqual([
-      'UserPromptSubmit:working',
-      'PreCompact:working',
-      'SubagentStart:working',
-      'SubagentStop:working',
-      'PostCompact:done'
-    ])
+    expect(events).toEqual(['UserPromptSubmit:working', 'SubagentStop:working', 'PostCompact:done'])
     expect(server.getStatusSnapshot()).toEqual([
-      expect.objectContaining({
-        state: 'done',
-        prompt: 'work before compact',
-        agentType: 'claude'
-      })
+      expect.objectContaining({ state: 'done', prompt: 'work', agentType: 'claude' })
     ])
     unsubscribe()
   })
 
-  it('preserves the manual identity over relay and rejects stale transport identities', async () => {
+  it('forwards the completion over the relay and neutralizes its cached compact identity', async () => {
     const main = new AgentHookServer()
     const forwarded: AgentHookRelayEnvelope[] = []
     const emitted: string[] = []
-    const connectionId = 'conn-a'
     const endpointDir = mkdtempSync(join(tmpdir(), 'orca-compact-relay-'))
     temporaryPaths.push(endpointDir)
     const relay = new RelayAgentHookServer({
@@ -152,7 +130,7 @@ describe('manual Claude compact hook stream', () => {
       token: 'manual-compact-token',
       forward: (envelope) => {
         forwarded.push(envelope)
-        main.ingestRemote(envelope, connectionId)
+        main.ingestRemote(envelope, 'conn-a')
       }
     })
     servers.push(main, relay)
@@ -160,208 +138,154 @@ describe('manual Claude compact hook stream', () => {
       emitted.push(`${event.hookEventName}:${event.payload.state}`)
     })
     await relay.start({ publishEndpoint: false })
-    const coordinates = relay.getCoordinates()
+    const { port, token } = relay.getCoordinates()
 
-    await postHook(
-      coordinates.port,
-      coordinates.token,
-      claudeHook('UserPromptSubmit', PROMPT_ID_2, { prompt: 'work before compact' })
-    )
-    // A restarted relay has no prior listener cache; main still owns the status boundary.
-    relay.clearPaneState(PANE_KEY)
-    await postHook(
-      coordinates.port,
-      coordinates.token,
-      claudeHook('PreCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
-    const validPost = {
-      ...forwarded.at(-1)!,
-      hookEventName: 'PostCompact',
-      payload: {
-        state: 'done' as const,
-        prompt: 'work before compact',
-        agentType: 'claude' as const
-      }
-    }
-
-    main.ingestRemote({ ...validPost, providerPromptId: PROMPT_ID_2 }, 'conn-a')
-    main.ingestRemote({ ...validPost, providerPromptId: undefined }, 'conn-a')
-    main.ingestRemote({ ...validPost, providerSession: undefined }, 'conn-a')
-    main.ingestRemote({ ...validPost, source: 'codex' }, 'conn-a')
-    main.ingestRemote(validPost, 'conn-b')
-
-    expect(emitted).toEqual(['UserPromptSubmit:working', 'PreCompact:working'])
-    expect(main.getStatusSnapshot()[0]).toMatchObject({
-      state: 'working',
-      prompt: 'work before compact'
-    })
-
-    await postHook(
-      coordinates.port,
-      coordinates.token,
-      claudeHook('SubagentStart', PROMPT_ID_1, {
-        agent_id: 'compact-agent',
-        agent_type: 'general-purpose'
-      })
-    )
-    await postHook(
-      coordinates.port,
-      coordinates.token,
-      claudeHook('SubagentStop', PROMPT_ID_1, {
-        agent_id: 'compact-agent',
-        agent_type: 'general-purpose'
-      })
-    )
-    await postHook(
-      coordinates.port,
-      coordinates.token,
-      claudeHook('PostCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
+    await postHook(port, token, claudeHook('UserPromptSubmit', TURN_PROMPT_ID, { prompt: 'work' }))
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
 
     expect(forwarded.at(-1)).toMatchObject({
       source: 'claude',
-      providerPromptId: PROMPT_ID_1,
+      hookEventName: 'PostCompact',
       compactTrigger: 'manual',
-      providerSession: SESSION,
-      hookEventName: 'PostCompact'
+      providerPromptId: COMPACT_PROMPT_ID
     })
     expect(emitted.at(-1)).toBe('PostCompact:done')
-    expect(emitted.slice(-3)).toEqual([
-      'SubagentStart:working',
-      'SubagentStop:working',
-      'PostCompact:done'
-    ])
-    expect(main.getStatusSnapshot()[0]).toMatchObject({
-      state: 'done',
-      prompt: 'work before compact'
-    })
+    expect(main.getStatusSnapshot()[0]).toMatchObject({ state: 'done', sessionBoundary: true })
+
+    // Why: a client that was offline during the compact receives the row only as a reconnect
+    // replay of this cache. Cached with its compact identity stripped, that replay is an ordinary
+    // status row rather than a compact event a guard would reject.
+    const replayed = relay.replayCachedPayloadsForPanes()
+    expect(replayed).toBeGreaterThan(0)
+    expect(forwarded.at(-1)).toMatchObject({ isReplay: true, payload: { state: 'done' } })
+    expect(forwarded.at(-1)?.hookEventName).toBeUndefined()
+    expect(forwarded.at(-1)?.compactTrigger).toBeUndefined()
     unsubscribe()
   })
 
-  it('invalidates a compact completion when later provider work owns the pane', () => {
+  it('stamps the silent boundary on a manual completion from a relay that predates it', () => {
     const server = new AgentHookServer()
     servers.push(server)
-    server.ingestRemote(manualEnvelope('UserPromptSubmit', 'working'), 'conn-a')
-    server.ingestRemote(manualEnvelope('PreCompact', 'working'), 'conn-a')
+    server.ingestRemote(turnEnvelope(), 'conn-a')
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+
+    server.ingestRemote(legacyRelayCompactEnvelope('done'), 'conn-a')
+
+    // Why: the old relay built this payload before the flag existed, so it arrives as a plain
+    // `done` that every completion-reactive consumer would read as a finished turn.
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done', sessionBoundary: true })
+  })
+
+  it('drops an auto compact from a relay that predates it, instead of minting working', () => {
+    const server = new AgentHookServer()
+    servers.push(server)
+    server.ingestRemote(turnEnvelope(), 'conn-a')
     server.ingestRemote(
       {
-        source: 'codex',
-        paneKey: PANE_KEY,
-        hookEventName: 'UserPromptSubmit',
-        hasExplicitPrompt: true,
-        payload: { state: 'working', prompt: 'new work', agentType: 'codex' }
-      },
+        ...turnEnvelope(),
+        payload: { state: 'done', prompt: 'work', agentType: 'claude' },
+        hookEventName: 'Stop'
+      } as AgentHookRelayEnvelope,
       'conn-a'
     )
-    server.ingestRemote({ ...manualEnvelope('PreCompact', 'working'), isReplay: true }, 'conn-a')
-    server.ingestRemote(manualEnvelope('PostCompact', 'done'), 'conn-a')
+    const before = server.getStatusSnapshot()[0]
+    expect(before).toMatchObject({ state: 'done' })
 
-    expect(server.getStatusSnapshot()[0]).toMatchObject({
-      state: 'working',
-      prompt: 'new work',
-      agentType: 'claude'
-    })
-    expect(server._getStateForTests().lastStatusByPaneKey.get(PANE_KEY)).toMatchObject({
-      source: 'codex',
-      hookEventName: 'UserPromptSubmit'
-    })
+    server.ingestRemote(legacyRelayCompactEnvelope('working'), 'conn-a')
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done' })
   })
 
-  it('keeps automatic compact hooks working without settling the turn', async () => {
-    const main = new AgentHookServer()
-    const forwarded: AgentHookRelayEnvelope[] = []
-    const endpointDir = mkdtempSync(join(tmpdir(), 'orca-auto-compact-relay-'))
-    temporaryPaths.push(endpointDir)
-    const relay = new RelayAgentHookServer({
-      endpointDir,
-      forward: (envelope) => {
-        forwarded.push(envelope)
-        main.ingestRemote(envelope, 'conn-auto')
-      }
-    })
-    servers.push(main, relay)
-    await relay.start({ publishEndpoint: false })
-    const { port, token } = relay.getCoordinates()
-
-    await postHook(
-      port,
-      token,
-      claudeHook('UserPromptSubmit', PROMPT_ID_1, { prompt: 'continue the task' })
-    )
-    await postHook(port, token, claudeHook('PreCompact', PROMPT_ID_1, { trigger: 'auto' }))
-    await postHook(port, token, claudeHook('PostCompact', PROMPT_ID_1, { trigger: 'auto' }))
-
-    expect(forwarded.map((event) => event.hookEventName)).toEqual([
-      'UserPromptSubmit',
-      'PreCompact',
-      'PostCompact'
-    ])
-    expect(main.getStatusSnapshot()[0]).toMatchObject({ state: 'working', agentType: 'claude' })
-    expect(main._getStateForTests().lastStatusByPaneKey.get(PANE_KEY)).toMatchObject({
-      hookEventName: 'PostCompact',
-      compactTrigger: undefined
-    })
-  })
-
-  it('rejects unproven compact sources at the main relay boundary', () => {
+  it('suppresses a duplicate completion arriving twice over the relay', () => {
     const server = new AgentHookServer()
     servers.push(server)
-    server.ingestRemote(
-      {
-        ...manualEnvelope('PreCompact', 'working'),
-        source: 'kimi',
-        payload: { state: 'working', prompt: '', agentType: 'kimi' }
-      },
-      'conn-kimi'
-    )
-    server.ingestRemote(
-      { ...manualEnvelope('PreCompact', 'working'), compactTrigger: undefined },
-      'conn-auto'
-    )
+    const emitted: string[] = []
+    const unsubscribe = server.subscribeEnrichedStatus((event) => {
+      emitted.push(`${event.hookEventName}:${event.payload.state}`)
+    })
+    server.ingestRemote(turnEnvelope(), 'conn-a')
+    server.ingestRemote(legacyRelayCompactEnvelope('done'), 'conn-a')
+    const applied = server._getStateForTests().lastStatusByPaneKey.get(PANE_KEY)
+    expect(applied?.payload.state).toBe('done')
 
-    expect(server.getStatusSnapshot()).toEqual([])
-    expect(server._getStateForTests().lastStatusByPaneKey.size).toBe(0)
+    server.ingestRemote(legacyRelayCompactEnvelope('done'), 'conn-a')
+
+    // Why: the deleted ownership cache used to reject a repeat; a same-owner guard alone would
+    // accept it and keep refreshing the row, so suppression is keyed on the consumed compact id.
+    expect(emitted).toEqual(['UserPromptSubmit:working', 'PostCompact:done'])
+    expect(server._getStateForTests().lastStatusByPaneKey.get(PANE_KEY)).toBe(applied)
+    unsubscribe()
   })
 
-  it('hydrates a manual PreCompact identity and accepts only its exact local completion', async () => {
-    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-compact-restore-'))
-    temporaryPaths.push(userDataPath)
-    const first = new AgentHookServer()
-    servers.push(first)
-    await first.start({ env: 'production', userDataPath })
-    const firstEnv = first.buildPtyEnv()
-    await postHook(
-      Number(firstEnv.ORCA_AGENT_HOOK_PORT),
-      firstEnv.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('UserPromptSubmit', PROMPT_ID_2, { prompt: 'work before compact' })
+  it('classifies a triggerless replay by payload state and still checks ownership', () => {
+    const done = new AgentHookServer()
+    servers.push(done)
+    done.ingestRemote(turnEnvelope(), 'conn-a')
+    // An older relay strips compactTrigger from its cached PostCompact before replaying it.
+    done.ingestRemote(
+      legacyRelayCompactEnvelope('done', { compactTrigger: undefined, isReplay: true }),
+      'conn-a'
     )
-    await postHook(
-      Number(firstEnv.ORCA_AGENT_HOOK_PORT),
-      firstEnv.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PreCompact', PROMPT_ID_1, { trigger: 'manual' })
-    )
-    first.stop()
+    expect(done.getStatusSnapshot()[0]).toMatchObject({ state: 'done', sessionBoundary: true })
 
-    const restored = new AgentHookServer()
-    servers.push(restored)
-    await restored.start({ env: 'production', userDataPath })
-    const restoredEnv = restored.buildPtyEnv()
-    await postHook(
-      Number(restoredEnv.ORCA_AGENT_HOOK_PORT),
-      restoredEnv.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PostCompact', PROMPT_ID_2, { trigger: 'manual' })
+    const working = new AgentHookServer()
+    servers.push(working)
+    working.ingestRemote(turnEnvelope(), 'conn-a')
+    working.ingestRemote(
+      legacyRelayCompactEnvelope('working', { compactTrigger: undefined, isReplay: true }),
+      'conn-a'
     )
-    expect(restored.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+    expect(working.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
 
-    await postHook(
-      Number(restoredEnv.ORCA_AGENT_HOOK_PORT),
-      restoredEnv.ORCA_AGENT_HOOK_TOKEN,
-      claudeHook('PostCompact', PROMPT_ID_1, { trigger: 'manual' })
+    const foreign = new AgentHookServer()
+    servers.push(foreign)
+    foreign.ingestRemote(turnEnvelope(), 'conn-a')
+    // Payload state substitutes for the missing trigger only — ownership is still enforced.
+    foreign.ingestRemote(
+      legacyRelayCompactEnvelope('done', {
+        compactTrigger: undefined,
+        isReplay: true,
+        providerSession: { key: 'session_id', id: 'a-different-session' }
+      }),
+      'conn-a'
     )
-    expect(restored.getStatusSnapshot()[0]).toMatchObject({
-      state: 'done',
-      prompt: 'work before compact',
-      agentType: 'claude'
-    })
+    expect(foreign.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+  })
+
+  it('rejects a completion with no provider prompt id', () => {
+    const server = new AgentHookServer()
+    servers.push(server)
+    server.ingestRemote(turnEnvelope(), 'conn-a')
+
+    server.ingestRemote(
+      legacyRelayCompactEnvelope('done', { providerPromptId: undefined }),
+      'conn-a'
+    )
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+  })
+
+  it('never lets a PreCompact envelope drive pane state', () => {
+    const server = new AgentHookServer()
+    servers.push(server)
+    server.ingestRemote(turnEnvelope(), 'conn-a')
+    server.ingestRemote(
+      {
+        ...turnEnvelope(),
+        payload: { state: 'done', prompt: 'work', agentType: 'claude' },
+        hookEventName: 'Stop'
+      } as AgentHookRelayEnvelope,
+      'conn-a'
+    )
+
+    server.ingestRemote(
+      legacyRelayCompactEnvelope('working', {
+        hookEventName: 'PreCompact',
+        compactTrigger: 'manual'
+      }),
+      'conn-a'
+    )
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'done' })
   })
 })

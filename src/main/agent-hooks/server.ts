@@ -22,14 +22,12 @@ import {
   markCodexLeadTurnInterrupted,
   MAX_PANE_KEY_LEN,
   movePaneCacheState,
-  canAcceptClaudeCompactTransition,
   normalizeClaudePromptId,
   normalizeHookPayload,
   parseFormEncodedBody,
   readRequestBody,
   reapRestoredClaudeSubagentsForDeadPane,
   reconcileRemoteCodexState,
-  resolveCachedClaudeCompactOwnership,
   resolveHookSource,
   preparePendingGrokResultDiscovery,
   readHookBodyProviderSessionId,
@@ -41,6 +39,12 @@ import {
   type AgentHookEventPayload,
   type HookListenerState
 } from '../../shared/agent-hook-listener'
+import {
+  canAcceptClaudeCompactCompletion,
+  isClaudeCompactCompletionConsumed,
+  markClaudeCompactCompletionConsumed,
+  resolveLegacyCompactTrigger
+} from '../../shared/claude-compact-completion'
 import {
   createHookTransportInterferenceTracker,
   describeHookTransportInterference,
@@ -1432,8 +1436,7 @@ export class AgentHookServer {
     if (!identity.inheritedFromActivePane) {
       this.maybeTrackAgentPromptSent(effectivePayload, previous)
     }
-    const cachedPayload = resolveCachedClaudeCompactOwnership(previous, boundaryAwarePayload)
-    const enriched = this.attachStatusTiming(cachedPayload, now)
+    const enriched = this.attachStatusTiming(boundaryAwarePayload, now)
     if (
       typeof enriched.payload.turnCompletedAt === 'number' &&
       Number.isFinite(enriched.payload.turnCompletedAt)
@@ -2317,33 +2320,48 @@ export class AgentHookServer {
     )
     const previousStatus = this.state.lastStatusByPaneKey.get(paneKey)
     if (hookEventName === 'PreCompact' || hookEventName === 'PostCompact') {
-      if (
-        source !== 'claude' ||
-        compactTrigger === undefined ||
-        normalizedPayload.agentType !== source
-      ) {
+      // Why: PreCompact is never registered and proves nothing (an aborted compact emits it alone);
+      // reject it here too so a host on any version cannot drive pane state from it.
+      if (hookEventName === 'PreCompact' || source !== 'claude') {
+        return
+      }
+      // Why: a relay predating this change strips `compactTrigger` from its cached PostCompact
+      // before replaying it, so the replay has no manual/auto discriminator. That relay's mapping is
+      // fixed and known — manual produced `done`, auto produced `working` — so the payload state
+      // stands in for the missing trigger. Trigger substitution only; ownership is still checked.
+      const effectiveTrigger = resolveLegacyCompactTrigger(compactTrigger, normalizedPayload.state)
+      // Why: an auto compact happens inside a turn that resumes and emits its own Stop. An older
+      // relay maps it to `working`, and this ingest applies the relay's payload verbatim — so
+      // without this drop, every auto compact on such a host mints exactly the stuck `working` this
+      // change removes.
+      if (effectiveTrigger !== 'manual' || normalizedPayload.agentType !== source) {
         return
       }
       if (
-        hookEventName === 'PreCompact' &&
-        envelope.isReplay === true &&
-        (previousStatus?.hookEventName !== 'PreCompact' ||
-          previousStatus.compactTrigger !== compactTrigger ||
-          previousStatus.providerPromptId !== providerPromptId)
-      ) {
-        return
-      }
-      if (
-        !canAcceptClaudeCompactTransition(previousStatus, {
+        isClaudeCompactCompletionConsumed(
+          this.state.claudeConsumedCompactPromptIdByPaneKey,
+          paneKey,
+          providerPromptId
+        ) ||
+        !canAcceptClaudeCompactCompletion(previousStatus, {
           source,
           connectionId: trimmedConnectionId,
-          hookEventName,
           providerPromptId,
-          compactTrigger,
           providerSession
         })
       ) {
         return
+      }
+      markClaudeCompactCompletionConsumed(
+        this.state.claudeConsumedCompactPromptIdByPaneKey,
+        paneKey,
+        providerPromptId
+      )
+      // Why: an older relay built this payload before the boundary flag existed, so it arrives as a
+      // plain `done` — which every completion-reactive consumer reads as a finished turn. Stamp the
+      // boundary here so a compact stays silent regardless of which relay normalized it.
+      if (normalizedPayload.sessionBoundary !== true) {
+        normalizedPayload = { ...normalizedPayload, sessionBoundary: true }
       }
     }
     if (
