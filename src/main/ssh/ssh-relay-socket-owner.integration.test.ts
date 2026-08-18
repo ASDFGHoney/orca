@@ -21,7 +21,9 @@ import {
   createLocalShellConnection,
   delay,
   isProcessAlive,
-  relayBundleDirForHost
+  killProcessTree,
+  relayBundleDirForHost,
+  waitForExit
 } from './ssh-relay-live-daemon-harness'
 import {
   isRelaySocketOwnerLiveError,
@@ -42,8 +44,8 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
   let fixture: LiveRelayFixture | null = null
   let root: string | null = null
 
-  afterEach(() => {
-    fixture?.dispose()
+  afterEach(async () => {
+    await fixture?.dispose()
     fixture = null
     if (root) {
       rmSync(root, { recursive: true, force: true })
@@ -77,7 +79,7 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
     await expect(probeRelaySocketOwner(conn, process.execPath, live.sockPath)).resolves.toBe('live')
 
     // A crashed relay leaves the inode behind; that, and only that, is a stale socket.
-    process.kill(pid, 'SIGKILL')
+    killProcessTree(pid)
     await delay(500)
     expect(existsSync(live.sockPath)).toBe(true)
     await expect(probeRelaySocketOwner(conn, process.execPath, live.sockPath)).resolves.toBe(
@@ -98,8 +100,8 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
 
     // The socket kept its owner, so a fresh daemon hits EADDRINUSE, finds a live
     // listener, and refuses to start — the interlock the unconditional rm -f defeated.
-    live.launchDaemon('replacement')
-    await delay(2_000)
+    const replacement = live.launchDaemon('replacement')
+    expect(await waitForExit(replacement)).not.toBe(0)
     const bridge = live.openBridge()
     await bridge.waitForSentinel()
     const status = await bridge.request<RelayStatus>('relay.status')

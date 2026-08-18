@@ -3,7 +3,7 @@
 //
 // Needs `pnpm build:relay` — callers skip when relayBundleDirForHost() is null.
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { cpSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -30,6 +30,51 @@ export function isProcessAlive(pid: number): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * SIGKILL a process and every descendant, deepest first.
+ *
+ * Why: a relay killed on its own leaves its PTY shells reparented to init — the very
+ * leak these tests are about, reproduced on the machine running them.
+ */
+export function killProcessTree(pid: number): void {
+  const listing = spawnSync('ps', ['-eo', 'pid=,ppid=']).stdout?.toString() ?? ''
+  const childrenByParent = new Map<number, number[]>()
+  for (const line of listing.split('\n')) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number)
+    if (Number.isInteger(child) && Number.isInteger(parent)) {
+      childrenByParent.set(parent, [...(childrenByParent.get(parent) ?? []), child])
+    }
+  }
+  const ordered: number[] = []
+  const visit = (current: number): void => {
+    for (const child of childrenByParent.get(current) ?? []) {
+      visit(child)
+    }
+    ordered.push(current)
+  }
+  visit(pid)
+  for (const target of ordered) {
+    try {
+      process.kill(target, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+export function waitForExit(child: ChildProcess, timeoutMs = 20_000): Promise<number | null> {
+  if (child.exitCode !== null) {
+    return Promise.resolve(child.exitCode)
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('relay daemon never exited')), timeoutMs)
+    child.once('exit', (code) => {
+      clearTimeout(timer)
+      resolve(code)
+    })
+  })
 }
 
 export class LiveRelayFixture {
@@ -112,7 +157,8 @@ export class LiveRelayFixture {
     return bridge
   }
 
-  dispose(): void {
+  /** Ask each daemon to shut down (which disposes its PTYs), then kill whatever is left. */
+  async dispose(): Promise<void> {
     for (const child of this.children) {
       try {
         child.kill('SIGKILL')
@@ -122,10 +168,16 @@ export class LiveRelayFixture {
     }
     for (const pid of this.daemonPids) {
       try {
-        process.kill(pid, 'SIGKILL')
+        process.kill(pid, 'SIGTERM')
       } catch {
         /* already gone */
       }
+    }
+    for (let attempt = 0; attempt < 30 && [...this.daemonPids].some(isProcessAlive); attempt++) {
+      await delay(100)
+    }
+    for (const pid of this.daemonPids) {
+      killProcessTree(pid)
     }
   }
 }
@@ -160,13 +212,16 @@ export class RelayBridge {
 
   private ingest(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk])
-    if (!this.sentinelSeen) {
+    while (!this.sentinelSeen) {
       const newline = this.buffer.indexOf('\n')
       if (newline === -1) {
         return
       }
-      this.sentinelSeen = true
+      // Why: consume whole lines until the sentinel; a stray pre-sentinel line would
+      // otherwise be mistaken for it and desynchronise every frame after it.
+      const line = this.buffer.subarray(0, newline).toString('utf-8')
       this.buffer = this.buffer.subarray(newline + 1)
+      this.sentinelSeen = line.includes('ORCA-RELAY')
     }
     while (this.buffer.length >= FRAME_HEADER_BYTES) {
       const length = this.buffer.readUInt32BE(9)
