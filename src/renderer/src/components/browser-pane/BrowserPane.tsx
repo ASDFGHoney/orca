@@ -225,6 +225,7 @@ import {
   type BrowserPageUrlSetter,
   type BrowserTabPageState
 } from './ClientHostedBrowserPagePane'
+import { ReopenBrowserPageOnServerButton } from './ReopenBrowserPageOnServerButton'
 
 type BrowserDownloadState = Omit<BrowserDownloadRequestedEvent, 'status' | 'savePath'> & {
   receivedBytes: number
@@ -816,6 +817,7 @@ export default function BrowserPane({
           key={`${clientPlacement.browserHostClientId}:${activeBrowserPage.id}:${clientPlacement.pageHostGeneration}`}
           browserTab={activeBrowserPage}
           runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
+          worktreeId={browserTab.worktreeId}
           placement={clientPlacement}
           isActive={isActive}
           onUpdatePageState={updateBrowserPageState}
@@ -2378,6 +2380,16 @@ function RemoteBrowserPagePane({
             className="absolute bottom-4 left-1/2 z-30 flex max-w-md -translate-x-1/2 items-center gap-2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md"
           >
             <span>{remoteError}</span>
+            {/* Why: the runtime refuses server screencast for a client-placed page, so reconnecting
+                can never render it here. A new server-placed page is the only way through. */}
+            {remotePageHandle?.placement?.kind === 'client' ? (
+              <ReopenBrowserPageOnServerButton
+                environmentId={remotePageHandle.environmentId}
+                worktreeId={worktreeId}
+                lastCommittedUrl={browserTab.url}
+                className="h-6 shrink-0 px-2 text-xs"
+              />
+            ) : null}
             {canReconnectRemoteBrowserStream(streamStatus) ? (
               <Button
                 size="sm"

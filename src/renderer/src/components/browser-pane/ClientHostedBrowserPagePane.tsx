@@ -14,6 +14,10 @@ import {
   type BrowserClientPageMetadataSnapshot
 } from './browser-client-page-metadata-publisher'
 import { attachBrowserClientPageToViewport } from './browser-client-page-renderer-installation'
+import {
+  ReopenBrowserPageOnServerButton,
+  reopenOnServerCaveat
+} from './ReopenBrowserPageOnServerButton'
 import BrowserAddressBar from './BrowserAddressBar'
 
 export type BrowserTabPageState = Partial<
@@ -32,6 +36,7 @@ export type BrowserPageUrlSetter = (
 export function ClientHostedBrowserPagePane({
   browserTab,
   runtimeEnvironmentId,
+  worktreeId,
   placement,
   isActive,
   onUpdatePageState,
@@ -39,6 +44,7 @@ export function ClientHostedBrowserPagePane({
 }: {
   browserTab: BrowserPageState
   runtimeEnvironmentId: string
+  worktreeId: string
   placement: RuntimeBrowserClientPlacement
   isActive: boolean
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
@@ -214,6 +220,14 @@ export function ClientHostedBrowserPagePane({
                   'This page is attached to a different desktop or is no longer available.'
                 )}
               </div>
+              <div className="text-xs leading-5 text-muted-foreground">
+                {reopenOnServerCaveat()}
+              </div>
+              <ReopenBrowserPageOnServerButton
+                environmentId={runtimeEnvironmentId}
+                worktreeId={worktreeId}
+                lastCommittedUrl={browserTab.url}
+              />
             </div>
           </div>
         ) : null}

@@ -5,8 +5,15 @@ import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(),
-  call: vi.fn()
+  call: vi.fn(),
+  createBrowserTab: vi.fn(async () => true)
 }))
+
+vi.mock('@/runtime/web-runtime-session', () => ({
+  createWebRuntimeSessionBrowserTab: mocks.createBrowserTab
+}))
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 const PLACEMENT = {
   kind: 'client' as const,
@@ -46,6 +53,7 @@ describe('ClientHostedBrowserPagePane', () => {
       <ClientHostedBrowserPagePane
         browserTab={page()}
         runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive={false}
         onUpdatePageState={onUpdatePageState}
@@ -62,6 +70,7 @@ describe('ClientHostedBrowserPagePane', () => {
       <ClientHostedBrowserPagePane
         browserTab={page()}
         runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive
         onUpdatePageState={onUpdatePageState}
@@ -84,6 +93,7 @@ describe('ClientHostedBrowserPagePane', () => {
       <ClientHostedBrowserPagePane
         browserTab={page()}
         runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive
         onUpdatePageState={onUpdatePageState}
@@ -121,6 +131,7 @@ describe('ClientHostedBrowserPagePane', () => {
       <ClientHostedBrowserPagePane
         browserTab={page()}
         runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
         placement={{ ...PLACEMENT, pageHostGeneration: 8 }}
         isActive
         onUpdatePageState={vi.fn()}
@@ -133,6 +144,36 @@ describe('ClientHostedBrowserPagePane', () => {
     expect(document.querySelector('webview')).toBeNull()
   })
 
+  it('escapes an unrenderable page to a NEW server-placed page at its last committed URL', async () => {
+    mocks.attach.mockReturnValue(null)
+    mocks.createBrowserTab.mockClear()
+
+    render(
+      <ClientHostedBrowserPagePane
+        browserTab={{ ...page(), url: 'https://remote.internal/path' }}
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={PLACEMENT}
+        isActive
+        onUpdatePageState={vi.fn()}
+        onSetUrl={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(/Signed-in and other transient page state may differ/)).not.toBeNull()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Reopen on server' }).click()
+    })
+
+    expect(mocks.createBrowserTab).toHaveBeenCalledWith({
+      worktreeId: 'worktree-a',
+      environmentId: 'environment-a',
+      url: 'https://remote.internal/path',
+      placementPreference: 'server',
+      focusOnCreate: true
+    })
+  })
+
   it('publishes full guest metadata through the exact runtime placement', async () => {
     const { webview, setUrl, setTitle } = createWebview()
     mocks.attach.mockReturnValue(retainedAttachment(webview))
@@ -140,6 +181,7 @@ describe('ClientHostedBrowserPagePane', () => {
       <ClientHostedBrowserPagePane
         browserTab={page()}
         runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive
         onUpdatePageState={vi.fn()}
