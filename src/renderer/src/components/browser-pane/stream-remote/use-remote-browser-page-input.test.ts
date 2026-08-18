@@ -179,6 +179,25 @@ describe('remote browser pointer input', () => {
     expect(calledMethods()).toEqual([])
   })
 
+  it('drops a release whose button differs from the recorded press', async () => {
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ button: 1 }))
+    input.handleRemotePointerUp(pointerEvent({ button: 0 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([])
+  })
+
+  it('sends a middle click atomically', async () => {
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ button: 1 }))
+    input.handleRemotePointerUp(pointerEvent({ button: 1 }))
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseClick'])
+    expect(mocks.callRuntimeRpc.mock.calls[0][2]).toMatchObject({ button: 'middle' })
+  })
+
   it('leaves right-button presses to the context-menu path', async () => {
     const { input, settle } = renderInput()
     input.handleRemotePointerDown(pointerEvent({ button: 2 }))

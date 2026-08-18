@@ -199,7 +199,13 @@ export function useRemoteBrowserPageInput({
       point,
       modified: hasRemoteBrowserClickModifier(event)
     }
-    if (press.environmentId !== release.environmentId || press.pageId !== release.pageId) {
+    // Why drop instead of replay: an incoherent pair (page swapped, or a second button pressed
+    // before this release) would put a button down that nothing releases.
+    if (
+      press.environmentId !== release.environmentId ||
+      press.pageId !== release.pageId ||
+      press.button !== release.button
+    ) {
       return
     }
     event.preventDefault()
