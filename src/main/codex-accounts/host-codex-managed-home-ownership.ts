@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 
 type HostCodexManagedHomeOwnershipOptions = {
   candidatePath: string
@@ -38,15 +39,6 @@ export class ManagedCodexHomeTemporarilyUnavailableError extends Error {
   ) {
     super(message, options)
   }
-}
-
-/**
- * The one predicate both Codex credential lanes share. Exported so a second
- * lane cannot drift by keeping its own copy of the errno allowlist.
- */
-export function isDefinitiveAbsence(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code
-  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 function pathsEqual(left: string, right: string): boolean {

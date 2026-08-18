@@ -58,9 +58,9 @@ import {
 } from './runtime-selection'
 import {
   assertOwnedHostCodexManagedHomePath,
-  isDefinitiveAbsence,
   ManagedCodexHomeTemporarilyUnavailableError
 } from './host-codex-managed-home-ownership'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 
 const LOGIN_TIMEOUT_MS = 120_000
 const MAX_LOGIN_OUTPUT_CHARS = 4_000
