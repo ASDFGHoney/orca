@@ -51,6 +51,20 @@ describe('relay socket release command', () => {
     expect(command).toContain('left=3')
     expect(command).toContain('ECONNREFUSED')
   })
+
+  it('needs an owner inventory, not just refusals, before it may unlink', () => {
+    // Why: refusals are an inference. /proc/net/unix, or an lsof proven able to inspect
+    // this user's own process, is the evidence — with neither the answer is unverifiable.
+    expect(command).toContain('/proc/net/unix')
+    expect(command).toContain('lsof -t -p $$')
+    expect(command).toContain('proof=none')
+  })
+
+  it('compares the pathname column exactly rather than matching a line suffix', () => {
+    // Why: a live socket whose own path ends with " " plus ours would match a suffix test,
+    // and a path holding regex metacharacters would break an interpolated pattern.
+    expect(command).toContain('replace(/^(?:[^ ]+ +){7}/,"")===p')
+  })
 })
 
 describe('relay socket release outcome', () => {

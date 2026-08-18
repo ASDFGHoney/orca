@@ -31,6 +31,16 @@ fi`
 /** How the sandboxed host behaves while the reset script runs. */
 type HostMode = 'lsof-finds-owner' | 'only-pgrep-finds-owner' | 'kill-refused' | 'no-process-tools'
 
+function resolveTool(tool: string): string | null {
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    const candidate = join(dir, tool)
+    if (dir && existsSync(candidate)) {
+      return candidate
+    }
+  }
+  return null
+}
+
 function writeExecutable(filePath: string, body: string): void {
   writeFileSync(filePath, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
 }
@@ -124,7 +134,15 @@ printf '%s\\n' "$OWNER_PID"`
   }
   // Why a real sleep: the script's post-kill re-check is only meaningful once the owner has
   // actually gone, and a no-op stub made it observe a process that was still dying.
-  writeExecutable(join(binDir, 'sleep'), 'exec /bin/sleep "$@"')
+  // Why link the ordinary utilities: the no-process-tools host is one without lsof and
+  // pgrep, not one without a shell. Stripping PATH outright also removed awk and tr, and the
+  // script then took a branch no real host takes.
+  for (const tool of ['awk', 'sleep', 'tr']) {
+    const resolved = resolveTool(tool)
+    if (resolved) {
+      writeExecutable(join(binDir, tool), `exec ${resolved} "$@"`)
+    }
+  }
 
   // Why a shell function: it records what reset asked for, and in the refused mode it lets
   // the owner survive the signal the way a permission error would.

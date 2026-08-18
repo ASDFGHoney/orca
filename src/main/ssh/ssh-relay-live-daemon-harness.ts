@@ -8,7 +8,15 @@ import { RelayBridge } from './ssh-relay-bridge-client'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import type { Writable } from 'node:stream'
-import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import type { SshConnection } from './ssh-connection'
@@ -39,7 +47,7 @@ export function isProcessAlive(pid: number): boolean {
  * leak these tests are about, reproduced on the machine running them.
  */
 export function killProcessTree(pid: number): void {
-  const listing = spawnSync('ps', ['-eo', 'pid=,ppid=']).stdout?.toString() ?? ''
+  const listing = spawnSync('ps', ['-eo', 'pid=,ppid=']).stdout?.toString() || readProcPpids()
   const childrenByParent = new Map<number, number[]>()
   for (const line of listing.split('\n')) {
     const [child, parent] = line.trim().split(/\s+/).map(Number)
@@ -77,7 +85,60 @@ function pidsHoldingSockPath(sockPath: string): number[] {
       pids.push(pid)
     }
   }
+  // Why the /proc fallback: a slim Linux image ships without procps, and an empty listing
+  // would silently leave a daemon (and its PTY shell) running after teardown.
+  return pids.length > 0 ? pids : pidsFromProcCmdline(sockPath)
+}
+
+function pidsFromProcCmdline(sockPath: string): number[] {
+  let entries: string[]
+  try {
+    entries = readdirSync('/proc')
+  } catch {
+    return []
+  }
+  const pids: number[] = []
+  for (const entry of entries) {
+    const pid = Number(entry)
+    if (!Number.isInteger(pid) || pid === process.pid) {
+      continue
+    }
+    try {
+      const argv = readFileSync(`/proc/${entry}/cmdline`, 'utf-8').split('\0')
+      if (argv.includes(sockPath) && argv.some((arg) => arg.endsWith('relay.js'))) {
+        pids.push(pid)
+      }
+    } catch {
+      /* vanished or unreadable */
+    }
+  }
   return pids
+}
+
+/** `pid ppid` per line from /proc, for hosts whose image ships no procps. */
+function readProcPpids(): string {
+  let entries: string[]
+  try {
+    entries = readdirSync('/proc')
+  } catch {
+    return ''
+  }
+  const rows: string[] = []
+  for (const entry of entries) {
+    if (!Number.isInteger(Number(entry))) {
+      continue
+    }
+    try {
+      const status = readFileSync(`/proc/${entry}/status`, 'utf-8')
+      const ppid = /^PPid:\s*(\d+)/m.exec(status)?.[1]
+      if (ppid) {
+        rows.push(`${entry} ${ppid}`)
+      }
+    } catch {
+      /* vanished or unreadable */
+    }
+  }
+  return rows.join('\n')
 }
 
 export function waitForExit(child: ChildProcess, timeoutMs = 20_000): Promise<number | null> {

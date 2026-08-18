@@ -31,10 +31,13 @@ const RELAY_SOCKET_RELEASE_SCRIPT =
   'var net=require("net"),fs=require("fs"),p=process.argv[1],lsofProof=process.argv[2]==="lsof",' +
   `left=${PROBE_ATTEMPTS},mark=null,done=false,sock=null,timer=null;` +
   // "live" if an inventory lists the path, "absent" if one ran without it, null if none ran.
+  // Why the field strip rather than a suffix test: the pathname is everything after the
+  // seventh column, so a socket whose own path ends with " " + ours would match a suffix.
   'function inventory(){var data;try{data=fs.readFileSync("/proc/net/unix","utf8")}' +
   'catch(e){return lsofProof?"absent":null}' +
-  'var lines=data.split(String.fromCharCode(10)),tail=" "+p;' +
-  'for(var i=0;i<lines.length;i++){if(lines[i].slice(-tail.length)===tail){return "live"}}' +
+  'var lines=data.split(String.fromCharCode(10));' +
+  'for(var i=1;i<lines.length;i++){' +
+  'if(lines[i].replace(/^(?:[^ ]+ +){7}/,"")===p){return "live"}}' +
   'return "absent"}' +
   // Why ctime too: inode numbers are recycled, so dev+ino alone can match a socket that
   // was unlinked and recreated inside the probe window. Same identity as relay.ts.
@@ -64,7 +67,11 @@ export function relaySocketReleaseCommand(nodePath: string, sockPath: string): s
   // Why -a: lsof ORs selectors by default, which would match every Unix-socket holder (#8762).
   return (
     `sock=${shellEscape(sockPath)}; holders=; proof=none; ` +
-    'if command -v lsof >/dev/null 2>&1; then ' +
+    // Why probe lsof against our own process first: an lsof that is present but cannot
+    // inspect anything reports nothing, and reading that silence as "no owner" is the
+    // inference this whole change exists to remove. The relay runs as this same user, so
+    // an lsof that can see our files can see its socket.
+    'if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -t -p $$ 2>/dev/null)" ]; then ' +
     'holders=$(lsof -t -a -U "$sock" 2>/dev/null); [ -n "$holders" ] || proof=lsof; fi; ' +
     'if [ -n "$holders" ]; then echo LIVE; ' +
     // Why argv: passing the path and proof as arguments dodges quoting issues inside -e.

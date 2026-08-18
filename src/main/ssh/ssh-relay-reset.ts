@@ -44,10 +44,19 @@ export async function forceStopRelayForTarget(
     // simply have been unable to look, and reset must not read that silence as a stop.
     // 0 = a process holds the socket, 1 = an inventory ran and none does, 2 = none ran.
     'socket_listed() {',
-    '  if [ -r /proc/net/unix ]; then',
-    '    grep -q " $1$" /proc/net/unix && return 0 || return 1',
+    // Why the columns are spelled out below: mawk, Debian's default awk, does not support
+    // {n} interval expressions, and the strip silently matched nothing there.
+    // Why awk on the eighth column rather than grep on the line: the pathname may contain
+    // spaces and regex metacharacters, and an interpolated pattern would both over-match and
+    // fail on a legal path. Why the exit-code split: a missing or failing tool answers
+    // nothing, and reading that as "no owner" is the inference this change removes.
+    '  if [ -r /proc/net/unix ] && command -v awk >/dev/null 2>&1; then',
+    '    awk -v target="$1" \'NR>1{line=$0;' +
+      'sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/,"",line);' +
+      "if(line==target){found=1}}END{exit(found?0:1)}' /proc/net/unix",
+    '    case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac',
     '  fi',
-    '  if command -v lsof >/dev/null 2>&1; then',
+    '  if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -t -p $$ 2>/dev/null)" ]; then',
     '    [ -n "$(lsof -t -a -U "$1" 2>/dev/null)" ] && return 0 || return 1',
     '  fi',
     '  return 2',
