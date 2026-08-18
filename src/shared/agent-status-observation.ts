@@ -71,7 +71,7 @@ export type WithAgentStatusObservation = { observation?: AgentStatusObservation 
  *
  *  Declared here beside the observation facet because both are per-write facets mixed into
  *  `AgentStatusEntry` rather than fields a reporter supplies. */
-export type WithAcceptedStatusSeq = { acceptedStatusSeq?: number }
+export type AgentStatusRowFacets = WithAgentStatusObservation & { acceptedStatusSeq?: number }
 
 // ─── THE ORDERING RULE ──────────────────────────────────────────────────────
 // `(authorityId, incarnation, revision)` is a total order ONLY within one authorityId.
