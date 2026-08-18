@@ -34,6 +34,12 @@ export type ShellWrapperFileBuilder = (root: string) => readonly ShellWrapperFil
 // Note this string is itself part of the digest, because it appears in the baked
 // content. Renaming it re-keys every tree -- which costs one extra ~48KB
 // directory per install and nothing else, so it is not worth normalizing out.
+//
+// The digest therefore covers the probe build, not the literal bytes on disk.
+// That holds only while the sole path-dependent thing in a wrapper is the root
+// itself. A future template that varies on something else about its location
+// would need that input folded in here, or two genuinely different trees would
+// collide on one directory.
 const HASH_PROBE_ROOT = '/__orca_shell_wrapper_root__'
 const ROOT_HASH_LENGTH = 16
 // Why the hash sits ABOVE this leaf rather than below it: ZDOTDIR

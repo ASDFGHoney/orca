@@ -1,7 +1,7 @@
 /**
  * The wrapper files main's local PTY path launches shells with, built against a
  * caller-supplied root so the tree can be content-addressed (see
- * shell-ready-wrapper-store.ts).
+ * shell-wrapper-content-address.ts).
  */
 import { ZSH_WRAPPER_DIR_MARKER_CONTENT, ZSH_WRAPPER_DIR_MARKER_FILE } from '../shell-templates'
 import type { ShellWrapperFile } from '../shell-wrapper-file-writer'
@@ -31,6 +31,11 @@ export function getLocalZshWrapperSpec(zshDir: string): ZshStartupWrapperSpec {
   }
 }
 
+// Why `/` concatenation rather than path.join: these paths are baked into
+// .zshenv as a shell literal and handed to bash as `--rcfile`, and the launch
+// config builds the matching values the same way (local-pty-shell-ready.ts).
+// path.join would emit backslashes on Windows, where a shell literal reads them
+// as escapes -- and would desync the written path from the launched one.
 export function buildLocalShellReadyWrapperFiles(root: string): readonly ShellWrapperFile[] {
   const zshDir = `${root}/zsh`
   const zsh = buildZshStartupWrapperFiles(getLocalZshWrapperSpec(zshDir))

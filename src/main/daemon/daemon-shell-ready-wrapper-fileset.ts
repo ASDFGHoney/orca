@@ -1,7 +1,7 @@
 /**
  * The wrapper files the daemon launches shells with, built against a
  * caller-supplied root so the tree can be content-addressed (see
- * shell-ready-wrapper-store.ts).
+ * shell-wrapper-content-address.ts).
  */
 import { join } from 'node:path'
 import { ZSH_WRAPPER_DIR_MARKER_CONTENT, ZSH_WRAPPER_DIR_MARKER_FILE } from '../shell-templates'
