@@ -41,13 +41,12 @@ and are tracked separately; see [Known Gaps](#known-gaps).
    silently patch the wrong tree.
 5. Sourcemaps move with the bundle, and are never silently omitted. The patch
    moves the code, so dropping only the map hunks would ship offsets pointing at
-   the wrong lines. `sourcemaps.policy` in the manifest picks between patching
-   them (`include`, today) and deleting them (`delete`); omitting them is not an
-   option either setting offers. `include` costs about 5.8 MB of the emitted
-   patch and is required because
+   the wrong lines. `sourcemaps.policy` accepts `include` and nothing else: it
+   costs about 5.8 MB of the emitted patch and is required because
    `src/renderer/src/components/terminal-pane/terminal-ime-xterm-transaction-events.test.ts`
    reads `lib/*.map` and asserts the mapped `Version.ts` matches the runtime
-   version. `delete` becomes available again only once nothing reads them.
+   version. Deleting the maps was once an option; the code that did it was
+   removed as unreachable, so re-adding the policy means re-adding that code.
 6. `--check` is the authority on the lockfile, not `pnpm install`. pnpm writes the
    patch hash in two places — `patchedDependencies` and every resolution key that
    depends on the patched package — and on a warm store it will leave the
@@ -231,8 +230,10 @@ and which folding them into this manifest would also fix.
 Both addons do build from the pinned commit: the registry stamps
 `53a98a720ae4a973e384fa2440880d09537132f3` on `addon-webgl@0.20.0-beta.286` and
 `addon-serialize@0.15.0-beta.287` alike, despite the mismatched version numbers.
-Their published `lib/*.mjs` and `lib/*.mjs.map` reproduce byte for byte from that
-commit; this was measured, not assumed.
+On 2026-08-17 their published `lib/*.mjs` and `lib/*.mjs.map` reproduced byte for
+byte from that commit. That was a one-off measurement, not an invariant: no check
+in this repo re-runs it, so treat it as a starting point to re-measure rather than
+as something the harness holds true.
 
 What blocks folding them in is the other half of their published output. Both
 also ship a CJS `lib/addon-*.js`, and the root `package` script does not build

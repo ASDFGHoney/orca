@@ -13,7 +13,6 @@ import {
   assertSourcemapPolicy,
   firstDifferenceIndex,
   formatCheckFailure,
-  generatedHunks,
   lockfilePatchHashIsStale,
   normalizePnpmDiff,
   patchHash,
@@ -25,6 +24,15 @@ import {
   stampVersionSource,
   updateLockfilePatchHash
 } from './regenerate-xterm-patches.mjs'
+
+// Only the tests need to slice the generated half out of a patch; the generator
+// reads `generatedPaths` directly where it compares against the pristine build.
+function generatedHunks(patchText, generatedPaths) {
+  return splitPatchEntries(patchText)
+    .filter((entry) => generatedPaths.some((prefix) => entry.path.startsWith(prefix)))
+    .map((entry) => entry.text)
+    .join('')
+}
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..')
 const MANIFEST_PATH = path.join(REPO_ROOT, 'config', 'patches', 'xterm-upstream.json')
@@ -318,10 +326,14 @@ describe('manifest guards', () => {
   })
 
   it('refuses a sourcemap policy it does not implement', () => {
-    expect(assertSourcemapPolicy({ sourcemaps: { policy: 'delete' } })).toBe('delete')
     expect(assertSourcemapPolicy({ sourcemaps: { policy: 'include' } })).toBe('include')
+    // `delete` named a code path that no longer exists; accepting it would ship
+    // maps that do not match the bundle.
+    expect(() => assertSourcemapPolicy({ sourcemaps: { policy: 'delete' } })).toThrow(
+      /must be one of include, got "delete"/
+    )
     expect(() => assertSourcemapPolicy({ sourcemaps: { policy: 'exclude' } })).toThrow(
-      /must be one of include, delete, got "exclude"/
+      /must be one of include, got "exclude"/
     )
     expect(() => assertSourcemapPolicy({})).toThrow(/got undefined/)
   })

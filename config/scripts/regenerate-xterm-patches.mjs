@@ -139,13 +139,6 @@ export function assertSourceDerivationsAgree(checkoutSource, patchText) {
   )
 }
 
-/** The derived half of a patch: build output, never edited by hand. */
-export function generatedHunks(patchText, generatedPaths) {
-  return selectPatchEntries(patchText, (file) =>
-    generatedPaths.some((prefix) => file.startsWith(prefix))
-  )
-}
-
 export function stampVersionSource(source, version) {
   const stamped = source.replace(
     /export const XTERM_VERSION = '[^']+';/,
@@ -196,9 +189,11 @@ export function assertBuildStepsAllowed(manifest) {
   }
 }
 
-export const SOURCEMAP_POLICIES = new Set(['include', 'delete'])
+// `delete` was dropped with the code that implemented it: accepting a policy
+// nothing honours would silently ship maps that do not match the bundle.
+export const SOURCEMAP_POLICIES = new Set(['include'])
 
-/** A typo would fall through to `include` and re-inflate the patch by 5.8 MB. */
+/** An unrecognised policy is a manifest bug, not a default to fall through to. */
 export function assertSourcemapPolicy(manifest) {
   const policy = manifest.sourcemaps?.policy
   if (!SOURCEMAP_POLICIES.has(policy)) {
@@ -298,11 +293,17 @@ export function formatCheckFailure({ name, patchPath, committed, regenerated }) 
   ].join('\n')
 }
 
+// npm ships as `npm.cmd` on Windows, and execFile applies no PATHEXT and refuses
+// a `.cmd` target without a shell (CVE-2024-27980). git and tar are real .exe.
+const WINDOWS_SHIM_COMMANDS = new Set(['npm', 'npx', 'pnpm', 'yarn'])
+
 function run(command, args, options = {}) {
-  return execFileSync(command, args, {
+  const shim = process.platform === 'win32' && WINDOWS_SHIM_COMMANDS.has(command)
+  return execFileSync(shim ? `${command}.cmd` : command, args, {
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'inherit'],
+    shell: shim,
     ...options
   })
 }
@@ -504,29 +505,6 @@ function diffFolders(folderA, folderB) {
   return normalizePnpmDiff(stdout, folderA, folderB)
 }
 
-// Why: dropping only the map hunks would ship maps whose offsets no longer line
-// up with the patched bundle. Deleting the maps outright is the honest form of
-// the same size saving, and the diff carries it as a file-deletion stanza.
-function deleteGeneratedSourcemaps(patchedDir, packageEntry) {
-  for (const relative of listFilesRelative(patchedDir)) {
-    const posix = toPosix(relative)
-    if (!packageEntry.generatedPaths.some((prefix) => posix.startsWith(prefix))) {
-      continue
-    }
-    const absolute = path.join(patchedDir, relative)
-    if (posix.endsWith('.map')) {
-      rmSync(absolute)
-      continue
-    }
-    // The reference outlives the file it points at, so it goes with it.
-    const text = readFileSync(absolute, 'utf8')
-    const stripped = text.replace(/\n\/\/# sourceMappingURL=[^\n]*\n?$/, '')
-    if (stripped !== text) {
-      writeFileSync(absolute, stripped)
-    }
-  }
-}
-
 /** The source of truth for the hand-written half: what the checkout itself holds. */
 function diffCheckoutSource(packageRoot) {
   return run('git', [...CHECKOUT_DIFF_FLAGS, '--', 'src/'], {
@@ -557,9 +535,6 @@ function regeneratePackage(packageEntry, manifest, context) {
 
   const patchedDir = path.join(workDir, 'patched', packageEntry.name.replace(/[@/]/g, '_'))
   overlayBuildOutput(pristineDir, upstreamRoot, packageEntry, patchedDir)
-  if (assertSourcemapPolicy(manifest) === 'delete') {
-    deleteGeneratedSourcemaps(patchedDir, packageEntry)
-  }
 
   // Leave the checkout diffable: the pinned commit plus the source patch, with
   // no publish-time version stamp mixed in, so `git diff` there is the source
