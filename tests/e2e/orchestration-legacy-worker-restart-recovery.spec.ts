@@ -31,6 +31,7 @@ const spawnLedgerPath = path.join(fakeCliDir, 'spawn.jsonl')
 const interruptionLedgerPath = path.join(fakeCliDir, 'interruption.jsonl')
 const authorityLedgerPath = path.join(fakeCliDir, 'authority.jsonl')
 const lifecycleLedgerPath = path.join(fakeCliDir, 'lifecycle.jsonl')
+const fakeCodexCommand = path.join(fakeCliDir, process.platform === 'win32' ? 'codex.cmd' : 'codex')
 const fakeCodexSource = `
 const { appendFileSync } = require('node:fs')
 const { spawnSync } = require('node:child_process')
@@ -414,6 +415,11 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
       firstApp = first.app
       const worktreeId = await attachRepoAndOpenTerminal(first.page, repoPath)
       await waitForSessionReady(first.page)
+      await first.page.evaluate(async (agentCommand) => {
+        await window.__store?.getState().updateSettings({
+          agentCmdOverrides: { codex: agentCommand }
+        })
+      }, fakeCodexCommand)
       await ensureTerminalVisible(first.page)
       const coordinatorTabId = await getActiveTabId(first.page)
       expect(coordinatorTabId).toBeTruthy()
@@ -512,7 +518,6 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
       await expect
         .poll(() => readLedger(authorityLedgerPath))
         .toEqual([expect.objectContaining({ event: 'authority-hook', status: 204 })])
-
       const transcriptPath = session.seedCodexResumeRollout(PROVIDER_SESSION_ID, repoPath)
       await first.page.evaluate(
         ({ paneKey, tabId, worktreeId: workerWorktreeId, terminalHandle, transcript }) => {

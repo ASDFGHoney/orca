@@ -12,6 +12,7 @@ import type { RuntimeTerminalListResult, RuntimeTerminalRead } from '../../src/s
 const fakeCliDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-settlement-release-'))
 const cliLedgerPath = path.join(fakeCliDir, 'cli.jsonl')
 const cliEntry = path.join(process.cwd(), 'out', 'cli', 'index.js')
+const fakeCodexCommand = path.join(fakeCliDir, process.platform === 'win32' ? 'codex.cmd' : 'codex')
 const fakeCodexSource = `
 const { appendFileSync } = require('node:fs')
 const { spawnSync } = require('node:child_process')
@@ -125,6 +126,11 @@ test('compiled CLI rejects false completion then reconciles the dead retained wo
   test.setTimeout(180_000)
   rmSync(cliLedgerPath, { force: true })
   await waitForSessionReady(orcaPage)
+  await orcaPage.evaluate(async (agentCommand) => {
+    await window.__store?.getState().updateSettings({
+      agentCmdOverrides: { codex: agentCommand }
+    })
+  }, fakeCodexCommand)
   const worktreeId = await waitForActiveWorktree(orcaPage)
   await ensureTerminalVisible(orcaPage)
   await waitForActivePanePtyId(orcaPage)
