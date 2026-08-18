@@ -372,14 +372,15 @@ describe('two concurrent NATIVE imports into one partition', () => {
       []
     ).close()
 
+    // Start both calls before either reaches its write. This makes the detector cover the full
+    // lock boundary: B's staging copy must be blocked too, not merely B's live clear/write.
     const first = importCookiesFromBrowser(chromeBrowser(sourceA), 'persist:native-conc')
-    // Wait until A is parked in its write. This makes the detector independent of scheduler luck:
-    // B's staging copy must be blocked by the transaction lock, not merely happen to run later.
+    const second = importCookiesFromBrowser(chromeBrowser(sourceB), 'persist:native-conc')
+    // Wait until A is parked in its write so the assertions below have a deterministic hold point.
     for (let i = 0; i < 100 && !events.includes('set:first'); i++) {
       await new Promise((resolve) => setTimeout(resolve, 1))
     }
     expect(events).toContain('set:first')
-    const second = importCookiesFromBrowser(chromeBrowser(sourceB), 'persist:native-conc')
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     // The first import is parked inside its write. The second must not stage a stale image while
