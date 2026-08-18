@@ -139,15 +139,7 @@ function removableCookieEntries(
         continue
       }
     }
-    // Why: a backstop, not a live path — scopedDomain already parsed as a hostname above, so a URL
-    // always builds from here. It fails closed rather than silently narrowing the removal plan if
-    // that ever stops being true. The cookies that used to reach it — blank or unparseable domains
-    // — are skipped by the scope test above now, so one junk cookie no longer aborts every import.
-    const url = cookieRemovalUrl(cookie, scopedDomain)
-    if (!url) {
-      throw new Error('Could not clear existing cookies; the session was left unchanged')
-    }
-    removable.push({ cookie, url })
+    removable.push({ cookie, url: cookieRemovalUrl(cookie, scopedDomain) })
   }
   return removable
 }

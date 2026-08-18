@@ -193,14 +193,14 @@ export function domainIsInImportedScope(
   return domainSuffixes(domain).some((suffix) => scope.descendantRoots.has(suffix))
 }
 
-export function cookieRemovalUrl(cookie: Cookie, domain: string): string | null {
-  try {
-    const url = new URL(`${cookie.secure ? 'https' : 'http'}://${domain}/`)
-    url.pathname = cookie.path?.startsWith('/') ? cookie.path : '/'
-    return url.toString()
-  } catch {
-    return null
-  }
+// Why: takes a normalizeCookieDomain output, never a raw cookie domain. That host already parsed
+// as a URL hostname, and assigning pathname cannot throw, so this always builds — both callers
+// used to carry a branch for a null that could not happen, one of them a throw that failed an
+// import for a reason it could never actually hit.
+export function cookieRemovalUrl(cookie: Cookie, normalizedDomain: string): string {
+  const url = new URL(`${cookie.secure ? 'https' : 'http'}://${normalizedDomain}/`)
+  url.pathname = cookie.path?.startsWith('/') ? cookie.path : '/'
+  return url.toString()
 }
 
 // Why (STA-4097): 'set' stays out so the partition-dropping reconstruction cannot return.
@@ -254,10 +254,7 @@ export async function replaceCookiesForImportedDomains(
     if (!domain || !domainIsInImportedScope(scope, domain, cookie.hostOnly === true)) {
       continue
     }
-    const url = cookieRemovalUrl(cookie, domain)
-    if (url) {
-      removable.push({ cookie, url })
-    }
+    removable.push({ cookie, url: cookieRemovalUrl(cookie, domain) })
   }
   if (removable.length === 0) {
     return { removed: [], identities: [] }
