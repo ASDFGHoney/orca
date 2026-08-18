@@ -10,6 +10,15 @@ import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
 const RESET_NO_OWNER_PROOF_MARKER = 'ORCA-RELAY-RESET-NO-OWNER-PROOF'
 const RESET_OWNER_SURVIVED_MARKER = 'ORCA-RELAY-RESET-OWNER-SURVIVED'
 
+/**
+ * Stop the relay owning this target's socket.
+ *
+ * Why it no longer removes the socket: a relay that stops cleanly unlinks its own path, and
+ * one that had to be killed leaves an inode the next deploy releases under its identity
+ * guard. Removing it here would need the same guard and would still race a relay binding the
+ * path between the check and the unlink — for no gain, since the leftover inode blocks
+ * nothing.
+ */
 export async function forceStopRelayForTarget(
   conn: SshConnection,
   relayInstanceId: string
@@ -32,7 +41,7 @@ export async function forceStopRelayForTarget(
     '  fi',
     '}',
     // Why an inventory rather than "no pid found": a lookup that returned nothing may
-    // simply have been unable to look, and reset must not read that silence as absence.
+    // simply have been unable to look, and reset must not read that silence as a stop.
     // 0 = a process holds the socket, 1 = an inventory ran and none does, 2 = none ran.
     'socket_listed() {',
     '  if [ -r /proc/net/unix ]; then',
@@ -46,27 +55,25 @@ export async function forceStopRelayForTarget(
     'if [ -d "$base" ]; then',
     '  for sock in "$base"/relay-*/"$sock_name" "$base"/"$sock_name"; do',
     '    [ -S "$sock" ] || continue',
+    '    signalled=no',
     '    find_holder "$sock"',
     '    if [ -n "$holder" ]; then',
+    '      signalled=yes',
     '      kill -TERM $holder 2>/dev/null || true',
     '      sleep 0.2',
     '      kill -KILL $holder 2>/dev/null || true',
     '      sleep 0.2',
     '    fi',
     // Why re-check both: a refused kill (permissions, a wedged process) leaves the owner
-    // listening, and removing its socket then hides it instead of stopping it.
+    // running, and reporting success then tells the user a relay was stopped that was not.
     '    socket_listed "$sock"',
     '    listed=$?',
     '    find_holder "$sock"',
-    '    if [ "$listed" = 2 ]; then',
-    `      echo ${RESET_NO_OWNER_PROOF_MARKER}`,
-    '      continue',
-    '    fi',
     '    if [ "$listed" = 0 ] || [ -n "$holder" ]; then',
     `      echo ${RESET_OWNER_SURVIVED_MARKER}`,
-    '      continue',
+    '    elif [ "$listed" = 2 ] && [ "$signalled" = no ]; then',
+    `      echo ${RESET_NO_OWNER_PROOF_MARKER}`,
     '    fi',
-    '    rm -f "$sock"',
     '  done',
     'fi'
   ].join('\n')
@@ -74,14 +81,14 @@ export async function forceStopRelayForTarget(
   const output = await execCommand(conn, script)
   if (output.includes(RESET_OWNER_SURVIVED_MARKER)) {
     throw new Error(
-      'The remote relay is still running after the reset signal, so its socket was left in ' +
-        'place rather than stranding it. Stop the relay process on the host, then retry.'
+      'The remote relay is still running after the reset signal. Stop the relay process on ' +
+        'the host, then retry.'
     )
   }
   if (output.includes(RESET_NO_OWNER_PROOF_MARKER)) {
     throw new Error(
       'This host offers no way to see which process owns the relay socket (no /proc/net/unix ' +
-        'and no lsof), so it was left in place. Stop the relay process on the host, then retry.'
+        'and no lsof), so nothing was stopped. Stop the relay process on the host, then retry.'
     )
   }
 }

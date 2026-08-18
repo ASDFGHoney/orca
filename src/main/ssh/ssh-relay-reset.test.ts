@@ -187,7 +187,9 @@ describe('forceStopRelayForTarget', () => {
     expect(command).toContain('lsof -t -a -U "$1"')
     expect(command).toContain('pgrep -f "$sock_name"')
     expect(command).toContain('/proc/net/unix')
-    expect(command).toContain('rm -f "$sock"')
+    // Why not: a stopped relay unlinks its own socket, and one that was killed leaves an
+    // inode the next deploy releases under its identity guard (STA-1756).
+    expect(command).not.toContain('rm -f')
   })
 
   it.skipIf(process.platform === 'win32')(
@@ -198,7 +200,6 @@ describe('forceStopRelayForTarget', () => {
       expect(result.killCalls.join(' ')).toContain('-TERM')
       expect(result.killCalls.join(' ')).not.toContain(UNRELATED_PID)
       expect(result.ownerAlive).toBe(false)
-      expect(result.socketExists).toBe(false)
       expect(result.error).toBeNull()
     }
   )
@@ -210,7 +211,6 @@ describe('forceStopRelayForTarget', () => {
 
       expect(result.pgrepCalls.length).toBeGreaterThan(0)
       expect(result.ownerAlive).toBe(false)
-      expect(result.socketExists).toBe(false)
       expect(result.error).toBeNull()
     }
   )
