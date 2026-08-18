@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { beginHostQualifiedRemoval } from './host-qualified-worktree-removal'
+import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
 
 const WORKTREE_ID = 'repo1::/shared/workspace/path'
 
@@ -40,5 +41,70 @@ describe('beginHostQualifiedRemoval refusals clear the delete state', () => {
 
     expect(start.ok).toBe(false)
     expect(clearWorktreeDeleteState).toHaveBeenCalledWith(WORKTREE_ID)
+  })
+
+  // The store above is deliberately empty, which proves the clear but not that a real user can
+  // land here. These two cases route through populated state a user actually has, and still
+  // resolve to no route — the states that leave the row spinning in the product.
+  function makeRoutedGet(
+    clearWorktreeDeleteState: ReturnType<typeof vi.fn>,
+    overrides: Record<string, unknown>
+  ) {
+    return () =>
+      ({
+        clearWorktreeDeleteState,
+        allWorktrees: () => [],
+        worktreesByRepo: {},
+        repos: [],
+        detectedWorktreesByRepo: {},
+        settings: {},
+        runtimeEnvironments: [],
+        folderWorkspaces: [],
+        projectGroups: [],
+        sshConnectionStates: new Map(),
+        sshTargetLabels: new Map(),
+        workspaceCleanupScan: null,
+        ...overrides
+      }) as never
+  }
+
+  // A hostless row (folder-workspace meta never sets hostId, and runtime rows omit the field
+  // when the repo is unresolved) plus more than one saved runtime environment trips the legacy
+  // single-runtime gate in resolveWorktreeOperationRouteResult, which returns `missing`.
+  it('clears when a known worktree has no host and the legacy runtime is ambiguous', () => {
+    const clearWorktreeDeleteState = vi.fn()
+    const start = beginHostQualifiedRemoval(
+      makeRoutedGet(clearWorktreeDeleteState, {
+        repos: [{ id: 'repo1', connectionId: null, executionHostId: undefined }],
+        worktreesByRepo: { repo1: [{ id: WORKTREE_ID, repoId: 'repo1' }] },
+        settings: { activeRuntimeEnvironmentId: 'env-a' },
+        runtimeEnvironments: [{ id: 'env-a' }, { id: 'env-b' }]
+      }),
+      WORKTREE_ID,
+      null,
+      false
+    )
+
+    expect(start.ok).toBe(false)
+    expect(clearWorktreeDeleteState).toHaveBeenCalledWith(WORKTREE_ID)
+  })
+
+  // Folder workspaces fail closed on a stale id by design, so a row whose folder record is gone
+  // refuses instead of routing.
+  it('clears when a folder workspace id no longer has an owner', () => {
+    const clearWorktreeDeleteState = vi.fn()
+    const folderId = folderWorkspaceKey('fw-removed')
+    const start = beginHostQualifiedRemoval(
+      makeRoutedGet(clearWorktreeDeleteState, {
+        repos: [{ id: 'repo1', connectionId: null, executionHostId: 'local' }],
+        folderWorkspaces: []
+      }),
+      folderId,
+      null,
+      false
+    )
+
+    expect(start.ok).toBe(false)
+    expect(clearWorktreeDeleteState).toHaveBeenCalledWith(folderId)
   })
 })
