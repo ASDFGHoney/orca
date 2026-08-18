@@ -26,7 +26,7 @@ Rule 1 is stated at `src/main/source-control/repo-default-branch.ts:76-78`, `src
 | filesystem, watching, search                                   | **remote**         |                                                                      |
 | repo setup hooks (`--setup`)                                   | **remote**         | identical policy to local                                            |
 | commit-message / PR-field AI generation                        | **remote**         | uses the remote agent CLI and its auth                               |
-| `gh` / GitHub API, `glab` / GitLab                             | **client**         | a boundary violation; see Known gaps                                 |
+| `gh` / GitHub API, `glab` / GitLab                             | **client**         | inconsistent with the rule; PRs carry the client's identity          |
 | the `orca` CLI inside a remote terminal                        | **client runtime** | control plane only — your files and processes stay remote; see below |
 
 ## Survival: what a disconnect does _not_ do
@@ -35,7 +35,7 @@ By default, remote work survives your machine going away. The relay is a detache
 
 Two ways remote work _can_ actually stop:
 
-- **A bounded grace period.** The shipped default is `0` = keep alive until reset. If "keep terminals alive until reset" is unchecked, the configurable range is **60s–7d** and the form defaults to **24h**. The countdown starts when the client disconnects, after which the relay SIGKILLs every PTY. Note the asymmetry: sleep protects you, but ordinary disconnect and app quit do not. There is currently **no command that reports which setting is in effect for a target** — see Known gaps.
+- **A bounded grace period.** The shipped default is `0` = keep alive until reset. If "keep terminals alive until reset" is unchecked, the configurable range is **60s–7d** and the form defaults to **24h**. The countdown starts when the client disconnects, after which the relay SIGKILLs every PTY. Note the asymmetry: sleep protects you, but ordinary disconnect and app quit do not. No command reports which setting is in effect for a target, so at N hours since disconnect you cannot tell "unlimited" from "24h with 7 left" — treat the remote as `unverifiable`, not `exited`.
 - **Host-acknowledged explicit user action** — End Remote Terminals, Reset Relay, removing the target, or closing the tab. When the host cannot acknowledge the request, closing a tab or removing a target may clear only client state; the remote verdict remains `unverifiable`.
 
 Reconnect re-attaches to the same live PTYs and replays a bounded buffer (`REPLAY_BUFFER_MAX`, a 102,400-code-unit tail). Output beyond that while you were away is lost to the client even though the process was never interrupted: **the transcript is truncated; the work stays `live`.**
@@ -50,41 +50,25 @@ Orchestration state (Runs, Tasks, Dispatches, mailboxes) is client-resident for 
 
 ## Distinguishing `unverifiable` from `exited`
 
-Several signals report the first as the second. Treat every row here as `unverifiable` unless you have confirmed, against the current code, that its fix has landed — the stop/close rows are addressed by #14977, but a signal from an older host or client still carries the old meaning:
+A verdict needs evidence from the host that owns the process. Apply these tests in order.
 
-| Signal                                 | Says                        | May actually mean                        |
-| -------------------------------------- | --------------------------- | ---------------------------------------- |
-| `connected: false`                     | process exited              | relay dropped                            |
-| `terminal_not_writable`                | terminal won't accept input | link down; bytes may already have landed |
-| `worker-stop` → "process is exited"    | agent `exited`              | transport failure                        |
-| `terminal close` → "PTY killed"        | PTY `exited`                | termination was not acknowledged         |
-| `hasChildProcesses: false`             | idle                        | `unverifiable`, possibly busy            |
-| `runtime_unavailable` → "Restart Orca" | the command failed          | it may have fully succeeded              |
+**Was the signal produced by the owning host, or by the client's own bookkeeping?** Absence from a client-side set, a lookup that threw, a socket that closed, a command that timed out — none of these observe the process. They are `unverifiable` by construction, whatever the field is named.
 
-**The one real discriminator:** a relay drop makes every remote PTY on that target `unverifiable` together. A host-delivered termination event for the current PTY incarnation and provider generation, while its siblings remain `live`, establishes that PTY as `exited`; a stale event or one quiet terminal without host evidence does not. Check the siblings, event identity, and the source of the signal before assigning a verdict.
+**Did every remote PTY on that target go quiet at once?** A transport drop takes them all together. Simultaneous silence across a host indicates a lost link, not simultaneous death.
 
-**Prefer artifacts over process state, but read them precisely.** A matching expected commit from `git ls-remote --heads origin <branch>` or a PR head lookup proves that commit reached the remote. A branch or PR alone does not prove the latest work was pushed, and an absent result does not prove that nothing was ever pushed: the ref may have been deleted, the PR may be closed, or the query may have failed. A clean _local_ worktree says nothing at all about the remote one.
+**Does the termination event match the current identity?** A host-delivered exit for the live PTY incarnation and provider generation, while its siblings still report, establishes `exited`. A stale event, an event for a superseded incarnation, or one quiet terminal with no host evidence does not.
 
-`orca terminal list` reports an execution-host field and a listing scope naming the hosts it covered and omitted (#14973). On an older client or host those fields are absent and the listing is silently scoped to one runtime — when they are missing, **an empty result is not evidence that nothing is running elsewhere.**
+**Is a returned status actually a claim of success?** An operation that reports failure may have succeeded, and one that reports success may not have run — check the durable state it should have changed rather than trusting the return.
 
-## Known gaps
+Anything short of positive host evidence is `unverifiable`. Reporting it as `exited` is the error this document exists to prevent: it orphans live work and can cold-start a duplicate over the same worktree.
 
-> **This list is dated and goes stale as fixes land. Verify any entry against the current code before acting on it** — several were fixed within days of being written. Each entry names the PR that addresses it; check whether that PR merged before treating the gap as real. The rules above are durable; this section is not.
+## Reading artifacts instead of process state
 
-Landed: client-git fallback in `src/main/github/client.ts` (#14945), repo-icon local filesystem probe (#14947), the `unverifiable` stop verdict (#14977), and the `terminal list` execution-host field and listing scope (#14973).
+Artifacts are stronger evidence than liveness signals, but they answer a narrower question than they appear to.
 
-Outstanding, roughly by impact on reaching a wrong conclusion:
+A matching commit from `git ls-remote --heads origin <branch>` or a PR head lookup proves **that commit reached the remote** — not that the current run pushed it, and not that the latest work was included. An absent result proves nothing was found, not that nothing was pushed: the ref may have been deleted, the PR closed, or the query may simply have failed.
 
-- **`restoreRequired` is relabeled `SSH_SESSION_EXPIRED`** in `SshPtyProvider.spawn` (`src/main/providers/ssh-pty-provider.ts`) — **fix in flight, #14974.** A delivery-layer "cannot resume your output stream" becomes a claim the session `exited`; the lease is marked `expired`, filtered from all future reattaches, and a duplicate agent is cold-started over the same worktree while the original may still be `live`. Highest-impact open item. `abandonPtySourceRecovery` (`src/main/ssh/ssh-relay-session.ts:3006-3008`) handles the same relay answer correctly and is the model to copy.
-- **GHES auth cache key omits the executing connection** — **fix in flight, #14948.** An unverifiable Enterprise auth inventory collapses into a definitive negative, so a repository with a PR can report none.
-- **No way to observe a target's effective grace period.** At 17 hours since disconnect, "unlimited" and "24h with 7 hours left" demand opposite actions, and nothing reports which applies.
-- **Nothing in any error or command output points at this document.** A reader only finds these rules by being told they exist.
-- **Credentials are not provisioned on SSH hosts**: `gh` auth is never probed (`src/main/ipc/preflight.ts` is local/WSL only), git `user.name`/`user.email` produce an error message only, SSH agent forwarding happens only if your own `~/.ssh/config` sets `ForwardAgent yes`, and provider API keys are not carried at all. An agent can do all the work and fail at the push — which also makes artifact-checking inconclusive.
-- **`ORCA_CLI_COMMAND` is not set on SSH hosts** (`src/main/ipc/pty.ts:1883-1893` is WSL-only) although the bundled guides tell agents to prefer it. On Linux, bare `orca` is usually `/usr/bin/orca`, the GNOME screen reader. Orca's own PTYs prepend `~/.orca-relay/bin` to `PATH`, but a process launched outside an Orca-managed PTY does not inherit that override.
-- **`gh`/`glab` execute on the client** for SSH repos (`src/main/github/github-repository-identity.ts:41-52`, `src/main/gitlab/gitlab-project-ref-resolution.ts:245-256`). PRs are authored by the client's GitHub identity, the client's rate limit is spent, and the PR body is written to the client's tmpdir. Moving this to the execution host needs a new relay RPC surface — the relay has no `gh.*` method today.
-- **`doResetRelay` marks every lease `expired` in a `finally`** (`src/main/ipc/ssh.ts:1393-1399`). The code carries an explicit rationale at `:1401` — reset force-kills the relay, so local handles are stale "even if the reset command failed after SIGTERM." That rationale is sound for its stated case but does not cover the case where the command never ran at all (transport failure), where the client records a termination that never happened.
-- **Windows relay-install GC** treats 200 ms of pipe silence as proof the relay `exited` and authorizes deleting its directory (`relayLivenessProbeCommand` in `src/main/ssh/ssh-remote-commands.ts` and `hasLiveRelaySocket` in `src/main/ssh/ssh-relay-versioned-install.ts`). The sibling exception path already fails closed correctly.
-- **Shared symlinks, `orca.yaml` shared directories, and `.worktreeinclude` are silently skipped** for SSH worktree creation (`src/main/ipc/worktree-remote.ts:1885`).
+A listing is only evidence about the hosts it actually covered. When a result does not name its scope, an empty answer is not evidence that nothing is running elsewhere. A clean **local** worktree says nothing at all about the remote one.
 
 ## One host, one model
 
