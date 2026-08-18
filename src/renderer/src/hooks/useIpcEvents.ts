@@ -3416,9 +3416,15 @@ export function useIpcEvents(): void {
           : statusPayloadWithTurnBoundary
       // Why: same whitelist trap — envelope-level background-work evidence the payload
       // rebuild drops, and pane hibernation reads it to avoid killing a live dev server.
+      // Carry `false` as well as `true`: "positively no background work" is what makes the pane
+      // eligible at all, so collapsing it to absent would read as "never observed" and, on the
+      // snapshot replay, silently erase a live `true`.
       const statusPayloadWithBackgroundWork =
-        data.providerBackgroundWorkActive === true
-          ? { ...statusPayloadWithProvenance, providerBackgroundWorkActive: true }
+        typeof data.providerBackgroundWorkActive === 'boolean'
+          ? {
+              ...statusPayloadWithProvenance,
+              providerBackgroundWorkActive: data.providerBackgroundWorkActive
+            }
           : statusPayloadWithProvenance
       const identity = resolveAgentStatusIdentity({
         existing: existingStatus

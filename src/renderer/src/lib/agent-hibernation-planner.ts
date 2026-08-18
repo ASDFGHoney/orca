@@ -6,6 +6,7 @@ import {
 } from '../../../shared/agent-session-resume'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { lastInputBlocksHibernation } from './agent-hibernation-input-guard'
+import { providerBackgroundWorkBlocksHibernation } from './agent-pane-provider-background-work'
 import { isCompletedPiCompatibleAgentWithLiveRecoveryRecord } from './pi-compatible-live-recovery-record'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../shared/terminal-tab-types'
@@ -152,7 +153,8 @@ function getEligiblePane(args: {
     // background shell or session cron is still running under this PTY, and hibernation kills
     // it — that is the user's dev server. Idle and safe-to-tear-down are different questions
     // and STA-4119 is exactly what pulled them apart.
-    entry.providerBackgroundWorkActive === true ||
+    // Tri-state: never-observed holds the pane too. See agent-pane-provider-background-work.ts.
+    providerBackgroundWorkBlocksHibernation(entry) ||
     hasUnsettledOrUnknownDispatch(entry) ||
     (sleepingRecord && !hasOnlyLivePiCompatibleRecoveryIdentity)
   ) {

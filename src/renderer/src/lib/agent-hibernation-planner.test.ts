@@ -50,6 +50,10 @@ function entry(overrides: Partial<AgentStatusEntry> = {}): AgentStatusEntry {
     agentType: 'claude',
     providerSession: { key: 'session_id', id: 'session-1' },
     stateHistory: [],
+    // Why: the default fixture is a pane whose provider POSITIVELY reported no background work.
+    // Omitting it would mean "never observed", which is deliberately not hibernatable — so a
+    // test that means "eligible" has to say so, and one that means "unknown" overrides to undefined.
+    providerBackgroundWorkActive: false,
     ...overrides
   }
 }
@@ -120,6 +124,47 @@ describe('agent sleep planner', () => {
     expect(
       plannedWorktrees(snapshot({ agentStatusByPaneKey: { [unknown.paneKey]: unknown } }))
     ).toEqual(['wt-bg'])
+  })
+
+  // Why: STA-4119's guard was a boolean, so "the provider never told us" was indistinguishable
+  // from "the provider told us nothing is running" — and the second is permission to destroy the
+  // PTY. After a restart the listener's inventory is empty, which is the first case, not the second.
+  describe('provider background-work tri-state', () => {
+    it('does not hibernate a Claude pane whose background work was never observed this runtime', () => {
+      const neverObserved = entry({ providerBackgroundWorkActive: undefined })
+      expect(
+        plannedPaneKeys(
+          snapshot({ agentStatusByPaneKey: { [neverObserved.paneKey]: neverObserved } })
+        )
+      ).toEqual([])
+    })
+
+    it('does not hibernate a Claude pane with live provider background work', () => {
+      const active = entry({ providerBackgroundWorkActive: true })
+      expect(
+        plannedPaneKeys(snapshot({ agentStatusByPaneKey: { [active.paneKey]: active } }))
+      ).toEqual([])
+    })
+
+    it('hibernates a Claude pane positively reported as having no background work', () => {
+      const none = entry({ providerBackgroundWorkActive: false })
+      expect(plannedPaneKeys(snapshot({ agentStatusByPaneKey: { [none.paneKey]: none } }))).toEqual(
+        [`tab-1:${LEAF}`]
+      )
+    })
+
+    // Why: Orca collects no background-work inventory for these providers, so requiring one would
+    // disable hibernation for all of them on the basis of evidence that never exists.
+    it('still hibernates a non-reporting provider that carries no background-work evidence', () => {
+      const codex = entry({
+        agentType: 'codex',
+        providerBackgroundWorkActive: undefined,
+        providerSession: { key: 'session_id', id: 'codex-session-1' }
+      })
+      expect(
+        plannedPaneKeys(snapshot({ agentStatusByPaneKey: { [codex.paneKey]: codex } }))
+      ).toEqual([`tab-1:${LEAF}`])
+    })
   })
 
   it('requires done resumable provider-session entries', () => {

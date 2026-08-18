@@ -2195,8 +2195,12 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           ...(providerSession ? { providerSession } : {}),
           ...(promptInteractionKey ? { promptInteractionKey } : {}),
           ...(payload.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
-          // Why: write through rather than carrying the previous row's value — every accepted
-          // Claude status restates it, so a stale `true` would pin the pane awake forever.
+          // Why: write through rather than carrying the previous row's value — a stale `true`
+          // would pin the pane awake forever. This is only safe because main restates the field on
+          // EVERY accepted Claude row, live push and getSnapshot replay alike (server.ts
+          // withProviderBackgroundWork). It did not on the replay path once, and the write-through
+          // then erased a live `true` and left the hibernation guard inert with no app restart.
+          // If you add a new status ingress, it must restate this or the guard silently dies.
           providerBackgroundWorkActive: payload.providerBackgroundWorkActive,
           // Why: `interrupted` is done-only; parseAgentStatusPayload already clamps it for non-done states, so write it through directly.
           interrupted: payload.interrupted,

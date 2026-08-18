@@ -161,4 +161,76 @@ describe('useIpcEvents agent status turn completion', () => {
 
     expect(setAgentStatus).toHaveBeenCalledTimes(1)
   })
+  // Why: `false` must survive the same whitelist. It is the only value that makes a Claude pane
+  // ELIGIBLE — the planner requires positively-observed "no background work" — so a forwarder that
+  // keeps only `true` reads as "never observed" and silently DISABLES hibernation rather than
+  // killing a dev server. Both directions of this field are load-bearing.
+  it('forwards a false providerBackgroundWorkActive, not just true', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      settings: { terminalFontSize: 13, notifications: { enabled: true, agentTaskComplete: true } },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-future', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Claude' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    vi.doMock('./agent-hook-completion-notifications', () => ({
+      observeAgentHookCompletionForNotification: vi.fn(),
+      resetAgentHookCompletionNotificationCoordinators: vi.fn(),
+      syncAgentHookCompletionNotificationSettings: vi.fn(),
+      syncAgentHookCompletionNotificationsForStoreUpdate: vi.fn()
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+    const base = {
+      paneKey: FUTURE_PANE_KEY,
+      tabId: 'tab-future',
+      worktreeId: 'wt-1',
+      state: 'done',
+      prompt: 'start the dev server',
+      agentType: 'claude',
+      receivedAt: 1_700_000_005_000,
+      stateStartedAt: 1_700_000_000_000
+    } as const
+
+    onSetListenerRef.current({ ...base, providerBackgroundWorkActive: false })
+    expect(setAgentStatus).toHaveBeenLastCalledWith(
+      FUTURE_PANE_KEY,
+      expect.objectContaining({ state: 'done', providerBackgroundWorkActive: false }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined
+    )
+
+    expect(setAgentStatus).toHaveBeenCalledTimes(1)
+  })
 })

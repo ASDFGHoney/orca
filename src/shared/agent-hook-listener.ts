@@ -147,6 +147,11 @@ export type HookListenerState = {
   claudeUnclassifiedBackgroundTaskPaneKeys: Set<string>
   /** Panes whose latest authoritative Claude cron inventory still has a scheduled job. */
   claudeActiveSessionCronPaneKeys: Set<string>
+  /** Panes for which a Claude background-task inventory has been observed IN THIS RUNTIME.
+   *  Why: absence of running work and never having been told are different facts. Consumers that
+   *  destroy live provider work must block on the second, and a restarted listener starts empty —
+   *  so this can never be rehydrated into a false "nothing is running" (STA-4119). */
+  claudeBackgroundInventoryObservedPaneKeys: Set<string>
   /** Live thread-spawn children per Codex pane. */
   codexSubagentRosterByPaneKey: Map<string, CodexSubagentRoster>
   /** Incremental parent/child rollout cursors for Codex collaboration v2. */
@@ -188,6 +193,7 @@ export function createHookListenerState(): HookListenerState {
     claudeRunningNonAgentTaskPaneKeys: new Set(),
     claudeUnclassifiedBackgroundTaskPaneKeys: new Set(),
     claudeActiveSessionCronPaneKeys: new Set(),
+    claudeBackgroundInventoryObservedPaneKeys: new Set(),
     codexSubagentRosterByPaneKey: new Map(),
     codexSubagentTranscriptByPaneKey: new Map(),
     codexLeadStateByPaneKey: new Map()
@@ -206,6 +212,7 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
   state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
   state.codexSubagentRosterByPaneKey.delete(paneKey)
   state.codexSubagentTranscriptByPaneKey.delete(paneKey)
   state.codexLeadStateByPaneKey.delete(paneKey)
@@ -254,6 +261,7 @@ export function movePaneCacheState(
   movePaneScopedSetEntries(state.claudeRunningNonAgentTaskPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeUnclassifiedBackgroundTaskPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeActiveSessionCronPaneKeys, fromPaneKey, toPaneKey)
+  movePaneScopedSetEntries(state.claudeBackgroundInventoryObservedPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentTranscriptByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexLeadStateByPaneKey, fromPaneKey, toPaneKey)
@@ -300,6 +308,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.claudeRunningNonAgentTaskPaneKeys.clear()
   state.claudeUnclassifiedBackgroundTaskPaneKeys.clear()
   state.claudeActiveSessionCronPaneKeys.clear()
+  state.claudeBackgroundInventoryObservedPaneKeys.clear()
   state.codexSubagentRosterByPaneKey.clear()
   state.codexSubagentTranscriptByPaneKey.clear()
   state.codexLeadStateByPaneKey.clear()
@@ -2651,6 +2660,9 @@ function updateClaudeRunningNonAgentTask(
   } else {
     state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   }
+  // Why: reached only when the payload actually carried background_tasks, so this is the one
+  // point where "Claude told us what is running" becomes true for the pane.
+  state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
 }
 
 function resolveClaudePaneState(
@@ -2970,6 +2982,9 @@ function normalizeClaudeEvent(
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
     state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+    // Why: a fresh session has told us nothing yet. Dropping the observation returns the pane to
+    // "unknown" rather than leaving a stale "nothing is running" behind.
+    state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
     state.claudeLeadStateByPaneKey.set(paneKey, { state: 'done' })
     return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
       stateName: 'done',

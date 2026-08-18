@@ -71,7 +71,10 @@ function entry(): AgentStatusEntry {
     worktreeId: 'wt-bg',
     agentType: 'claude',
     providerSession: { key: 'session_id', id: 'session-1' },
-    stateHistory: []
+    stateHistory: [],
+    // Why: a pane whose provider positively reported no background work. Absent would mean
+    // "never observed this runtime", which is deliberately not hibernatable (STA-4119).
+    providerBackgroundWorkActive: false
   }
 }
 

@@ -109,6 +109,10 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   retainedForLiveness?: true
   /** Persisted proof that a lead boundary was held working only by child agents. */
   claudeLeadBoundaryChildOnly?: true
+  /** Resolved provider background-work evidence for this pane, stamped on every emitted and
+   *  snapshotted row so live push and replay agree. `true` = live work, `false` = positively
+   *  none, absent = never observed this runtime. Never persisted — see PersistedAgentHookEventPayload. */
+  providerBackgroundWorkActive?: boolean
 }
 
 type ClaudeBackgroundEvidence = {
@@ -126,6 +130,9 @@ type PersistedAgentHookEventPayload = Omit<
   EnrichedAgentHookEventPayload,
   | 'claudeRunningNonAgentTask'
   | 'claudeUnclassifiedBackgroundTask'
+  // Why: it is derived from in-memory runtime observation; a stored copy would rehydrate as a
+  // false "nothing is running" and re-open exactly the teardown it exists to prevent.
+  | 'providerBackgroundWorkActive'
   | 'launchToken'
   | 'promptInteractionKey'
   | 'restoredUnconfirmed'
@@ -443,6 +450,12 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
+    // Why: `false` is meaningful evidence ("positively no background work"), so test the type
+    // rather than truthiness — truthiness would drop it and leave the consumer unable to tell
+    // "none" from "never observed".
+    ...(typeof entry.providerBackgroundWorkActive === 'boolean'
+      ? { providerBackgroundWorkActive: entry.providerBackgroundWorkActive }
+      : {}),
     ...entry.payload
   }
 }
@@ -834,7 +847,9 @@ export class AgentHookServer {
    *  dashboard catches up on hook events that fired during startup. */
   getStatusSnapshot(): AgentStatusIpcPayload[] {
     return Array.from(this.state.lastStatusByPaneKey.values(), (entry) =>
-      toAgentStatusIpcPayload(entry as EnrichedAgentHookEventPayload)
+      toAgentStatusIpcPayload(
+        this.withProviderBackgroundWork(entry as EnrichedAgentHookEventPayload)
+      )
     )
   }
 
@@ -845,7 +860,13 @@ export class AgentHookServer {
 
   getStatusSnapshotForPane(paneKey: string): AgentStatusIpcPayload[] {
     const entry = this.state.lastStatusByPaneKey.get(paneKey)
-    return entry ? [toAgentStatusIpcPayload(entry as EnrichedAgentHookEventPayload)] : []
+    return entry
+      ? [
+          toAgentStatusIpcPayload(
+            this.withProviderBackgroundWork(entry as EnrichedAgentHookEventPayload)
+          )
+        ]
+      : []
   }
 
   getHydratedAuthorityCommitments(): readonly AgentHookAuthorityEvidence[] {
@@ -1471,7 +1492,40 @@ export class AgentHookServer {
 
   // Why: every status emit must reach plugins too, so a new early-return path
   // upstream cannot silently leave the plugin tap behind the main-window fanout.
-  private emitEnrichedStatus(enriched: EnrichedAgentHookEventPayload): void {
+  /** Provider background-work evidence for one pane, as of now.
+   *  `true` live work, `false` positively none, `undefined` never observed this runtime.
+   *  Why undefined is not "none": a restarted listener, or a pane whose provider has not yet
+   *  reported an inventory, knows nothing — and a consumer that destroys the PTY must treat
+   *  "not told" as "do not touch" (STA-4119). */
+  private resolveProviderBackgroundWorkActive(
+    paneKey: string,
+    agentType: string | undefined
+  ): boolean | undefined {
+    if (agentType !== 'claude') {
+      return undefined
+    }
+    return this.state.claudeBackgroundInventoryObservedPaneKeys.has(paneKey)
+      ? this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
+      : undefined
+  }
+
+  /** Stamps the resolved evidence so every accepted row restates it, on the live push and on the
+   *  snapshot replay alike. Without this the snapshot path silently erases a live `true` in the
+   *  renderer's write-through and the hibernation guard goes inert with no restart. */
+  private withProviderBackgroundWork(
+    enriched: EnrichedAgentHookEventPayload
+  ): EnrichedAgentHookEventPayload {
+    const providerBackgroundWorkActive = this.resolveProviderBackgroundWorkActive(
+      enriched.paneKey,
+      enriched.payload.agentType
+    )
+    return providerBackgroundWorkActive === undefined
+      ? enriched
+      : { ...enriched, providerBackgroundWorkActive }
+  }
+
+  private emitEnrichedStatus(rawEnriched: EnrichedAgentHookEventPayload): void {
+    const enriched = this.withProviderBackgroundWork(rawEnriched)
     this.onAgentStatus?.(enriched)
     for (const listener of this.enrichedStatusListeners) {
       try {
@@ -3173,6 +3227,8 @@ export class AgentHookServer {
       const {
         claudeRunningNonAgentTask: _claudeRunningNonAgentTask,
         claudeUnclassifiedBackgroundTask: _claudeUnclassifiedBackgroundTask,
+        // Why: same — runtime observation, never disk state.
+        providerBackgroundWorkActive: _providerBackgroundWorkActive,
         promptInteractionKey: _promptInteractionKey,
         // Why: never persisted — hydrate re-stamps it, so a stored copy could only drift.
         restoredUnconfirmed: _restoredUnconfirmed,

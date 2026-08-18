@@ -1583,7 +1583,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       providerSessionOnly,
       promptInteractionKey,
       restoredUnconfirmed,
-      claudeRunningNonAgentTask,
+      providerBackgroundWorkActive,
       isReplay
     }) => {
       if (mainWindow?.isDestroyed()) {
@@ -1632,9 +1632,14 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         ...(providerSession ? { providerSession } : {}),
         ...(promptInteractionKey ? { promptInteractionKey } : {}),
         ...(restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
-        // Why: the hibernation planner needs "is provider background work still live", which
-        // is not derivable from `state` once a leftover shell stops gating it (STA-4119).
-        ...(claudeRunningNonAgentTask ? { providerBackgroundWorkActive: true } : {}),
+        // Why: the hibernation planner needs "is provider background work still live", which is
+        // not derivable from `state` once a leftover shell stops gating it (STA-4119). Forward the
+        // server's RESOLVED evidence, not this one event's: `false` (positively none) must travel
+        // too, because the renderer writes the field through on every accepted status and anything
+        // that cannot restate it erases it.
+        ...(typeof providerBackgroundWorkActive === 'boolean'
+          ? { providerBackgroundWorkActive }
+          : {}),
         ...(orchestration ? { orchestration } : {})
       }
       mainWindow?.webContents.send('agentStatus:set', statusEvent)
