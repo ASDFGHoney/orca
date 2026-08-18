@@ -96,15 +96,12 @@ export function normalizeCookieImportDomain(domain: string): string | null {
 // session, so an import must never write these cookies and never remove them either — the
 // live session is always more valuable than anything an import could put in its place.
 // Entries must be canonical lowercase ASCII (punycode) registrable domains, never subdomains or
-// public suffixes, because clearData derives one excluded origin and matches at that boundary.
-// Adding a site is one entry here.
+// public suffixes: isNonTransplantableCookieDomain exempts an entry and everything under it, and
+// the staged image's clear matches the same way. Adding a site is one entry here.
 // youtube.com is deliberately NOT listed: YouTube accepts a transplanted session and re-issues
 // its cookies via the accounts.youtube.com relay, so excluding it would silently drop imports
 // users actually asked for.
 const NON_TRANSPLANTABLE_DOMAINS = ['google.com'] as const
-export const NON_TRANSPLANTABLE_CLEAR_EXCLUDED_ORIGINS = NON_TRANSPLANTABLE_DOMAINS.map(
-  (root) => `https://${root}`
-)
 
 export function isNonTransplantableCookieDomain(domain: string): boolean {
   const normalized = normalizeCookieDomain(domain)
@@ -115,12 +112,6 @@ export function isNonTransplantableCookieDomain(domain: string): boolean {
     (root) => normalized === root || normalized.endsWith(`.${root}`)
   )
 }
-
-// Why: Chromium stores host_key lowercase as 'google.com', '.google.com' or 'sub.google.com';
-// the LIKE pattern covers the leading-dot row and cannot match lookalikes ('withgoogle.com').
-export const NON_TRANSPLANTABLE_HOST_KEY_SQL = NON_TRANSPLANTABLE_DOMAINS.map(
-  (root) => `host_key = '${root}' OR host_key LIKE '%.${root}'`
-).join(' OR ')
 
 // Why: subsumed by the domain exclusion above for google.com — kept because it is the general
 // rule for rotation-only cookies and applies to any family added without a full exclusion.
@@ -150,11 +141,17 @@ function importDomainAncestors(domain: string): string[] {
   return ancestors
 }
 
-function importedDomainScopes(domains: readonly string[]): {
+// Why (STA-4797): one scope object, shared by every clear that precedes an import — path B's
+// replacement, the native path's live-jar clear, and the staged image's delete. Each one used to
+// name its own scope (or, on the native path, none at all), which is how the two import paths came
+// to disagree about what an import is allowed to destroy.
+export type ImportedDomainScope = {
   exact: Set<string>
   ancestors: Set<string>
   descendantRoots: Set<string>
-} {
+}
+
+export function importedDomainScope(domains: readonly string[]): ImportedDomainScope {
   const exact = new Set<string>()
   const ancestors = new Set<string>()
   const descendantRoots = new Set<string>()
@@ -180,18 +177,20 @@ function importedDomainScopes(domains: readonly string[]): {
   return { exact, ancestors, descendantRoots }
 }
 
-function overlapsImportedDomain(
-  cookie: Cookie,
+// Why: hostOnly is passed rather than read off a Cookie because the staged image scopes the same
+// way from a raw Chromium host_key, where the leading dot is the only host-only marker there is.
+export function domainIsInImportedScope(
+  scope: ImportedDomainScope,
   domain: string,
-  scopes: ReturnType<typeof importedDomainScopes>
+  hostOnly: boolean
 ): boolean {
-  if (scopes.exact.has(domain)) {
+  if (scope.exact.has(domain)) {
     return true
   }
-  if (cookie.hostOnly !== true && scopes.ancestors.has(domain)) {
+  if (!hostOnly && scope.ancestors.has(domain)) {
     return true
   }
-  return domainSuffixes(domain).some((suffix) => scopes.descendantRoots.has(suffix))
+  return domainSuffixes(domain).some((suffix) => scope.descendantRoots.has(suffix))
 }
 
 export function cookieRemovalUrl(cookie: Cookie, domain: string): string | null {
@@ -240,8 +239,8 @@ export async function replaceCookiesForImportedDomains(
   store: ImportedDomainReplaceStore,
   importedDomains: readonly string[]
 ): Promise<ReplacedImportedDomainCookies> {
-  const scopes = importedDomainScopes(importedDomains)
-  if (scopes.exact.size === 0) {
+  const scope = importedDomainScope(importedDomains)
+  if (scope.exact.size === 0) {
     return { removed: [], identities: [] }
   }
 
@@ -252,7 +251,7 @@ export async function replaceCookiesForImportedDomains(
   const removable: { cookie: Cookie; url: string }[] = []
   for (const cookie of existingCookies) {
     const domain = cookie.domain ? normalizeCookieDomain(cookie.domain) : null
-    if (!domain || !overlapsImportedDomain(cookie, domain, scopes)) {
+    if (!domain || !domainIsInImportedScope(scope, domain, cookie.hostOnly === true)) {
       continue
     }
     const url = cookieRemovalUrl(cookie, domain)

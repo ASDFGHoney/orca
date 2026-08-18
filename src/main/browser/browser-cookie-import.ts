@@ -77,9 +77,9 @@ import { browserSessionRegistry } from './browser-session-registry'
 import {
   isGoogleSourceBoundCookie,
   isNonTransplantableCookieDomain,
-  NON_TRANSPLANTABLE_HOST_KEY_SQL,
   normalizeCookieDomain,
   normalizeCookieImportDomain,
+  importedDomainScope,
   replaceCookiesForImportedDomains,
   type CookieImportMode,
   type ReplacedImportedDomainCookies
@@ -111,6 +111,7 @@ import {
   type ChromiumCookieSnapshot
 } from './chromium-cookie-snapshot'
 import { resolveChromiumCookiesPath } from './chromium-cookie-path'
+import { deleteStagedCookiesInImportScope } from './browser-cookie-staged-image-clear'
 import { copyFileWithWindowsRetry } from '../codex-accounts/fs-utils'
 
 // ---------------------------------------------------------------------------
@@ -1711,10 +1712,6 @@ export async function importCookiesFromBrowser(
           const targetCols: string[] = targetColumnInfo.map((r) => r.name)
           colList = targetCols.join(', ')
           placeholders = targetCols.map(() => '?').join(', ')
-          // Why: the staged DB replaces the whole live DB at cold start, so it is a clear step
-          // like any other — keep the live non-transplantable rows in it rather than replaying
-          // a wipe the in-memory path was not allowed to perform.
-          stagingDb.exec(`DELETE FROM cookies WHERE NOT (${NON_TRANSPLANTABLE_HOST_KEY_SQL})`)
         } catch (err) {
           diag(`  staging database unusable, restart fallback disabled: ${String(err)}`)
           stagingAvailable = false
@@ -1955,12 +1952,31 @@ export async function importCookiesFromBrowser(
         })
       }
 
+      for (const { entry } of scanned) {
+        domainSet.add(entry.domain.startsWith('.') ? entry.domain.slice(1) : entry.domain)
+      }
+      // Why (STA-4797): the import may only destroy what it is replacing. Naming the scope from the
+      // plan — the same rows the writes come from — is what keeps the removal set from drifting past
+      // the write set, and it is derived here rather than at the clear because the staged image below
+      // has to be cleared to the identical scope.
+      const importScope = importedDomainScope([...domainSet])
+
+      // Why (STA-4797): the staged image is a copy of the live jar that replaces it wholesale on the
+      // next cold start, so its clear IS a second clear of the user's session. Deleting everything
+      // but google here would put back, one restart later, exactly the whole-partition wipe the live
+      // clear no longer performs — narrowing one without the other leaves the defect reachable.
+      if (stagingDb && insertStmt) {
+        try {
+          deleteStagedCookiesInImportScope(stagingDb, importScope)
+        } catch (err) {
+          disableStaging(String(err))
+        }
+      }
+
       // EMIT: everything downstream derives from the plan, so there is no second place a row can
       // leak in.
       for (const { entry, sourceRow } of scanned) {
         decryptedCookies.push(entry)
-        const cleanDomain = entry.domain.startsWith('.') ? entry.domain.slice(1) : entry.domain
-        domainSet.add(cleanDomain)
         if (insertStmt && targetColumnInfo) {
           try {
             const params = buildChromiumCookieInsertParams(
@@ -2036,9 +2052,12 @@ export async function importCookiesFromBrowser(
         diag(`  staging skipped: ${imported} cookies will load in-memory only`)
       }
 
-      // Why: clear stale cookies first; mixing them with the imported set makes sites reject the
-      // session. Non-transplantable families are exempt — nothing was imported for them, and their
-      // live session is the only one that works.
+      // Why: clear stale cookies for the domains being imported first; mixing them with the imported
+      // set makes sites reject the session. Non-transplantable families are exempt — nothing was
+      // imported for them, and their live session is the only one that works.
+      // Why (STA-4797): every other site in the partition is exempt too. The rationale above reaches
+      // only as far as the domains this import writes; beyond them a clear has nothing to reconcile
+      // and only signs the user out of sessions the import was never about.
       // Why (STA-4300): one store spans the clear and the writes, so both halves of the import speak
       // the same CDP identities — cookies.set() cannot express the partition either one reads.
       const cookieClearStore = openCookieClearStore(targetSession)
@@ -2048,7 +2067,6 @@ export async function importCookiesFromBrowser(
         await removeTransplantableCookies(
           {
             cookies: cookieClearStore,
-            clearData: (options) => targetSession.clearData(options),
             snapshotClearIdentities: (cookies) => cookieClearStore.snapshotClearIdentities(cookies),
             restoreClearIdentities: (identities) =>
               cookieClearStore.restoreClearIdentities(identities)
@@ -2056,10 +2074,11 @@ export async function importCookiesFromBrowser(
           // Why (STA-4300): the families this import declined to write must not be removed either.
           // Passing them here keeps their coordinates out of the removal plan AND out of the CDP
           // snapshot taken from it, so they are never submitted to any mutation.
-          nativePlan.skippedFamilies
+          nativePlan.skippedFamilies,
+          importScope
         )
         diag(
-          `  cleared existing session cookies before loading ${decryptedCookies.length} imported cookies`
+          `  cleared existing cookies for ${domainSet.size} imported domains before loading ${decryptedCookies.length} imported cookies`
         )
 
         const writable: SourceCookieToWrite[] = []
