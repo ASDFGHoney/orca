@@ -1,3 +1,4 @@
+import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { Tab, TabGroup } from '../../../shared/tab-types'
 import type { Worktree } from '../../../shared/worktree/types'
@@ -184,7 +185,10 @@ export function buildSearchableSimulatorTabs({
   const entries: SearchableSimulatorTab[] = []
   for (const worktree of worktrees) {
     const repoName = repoMap.get(worktree.repoId)?.displayName ?? ''
-    const worktreeSortIndex = worktreeOrder.get(worktree.id) ?? Number.MAX_SAFE_INTEGER
+    const worktreeSortIndex =
+      worktreeOrder.get(getWorktreeHostIdentity(worktree)) ??
+      worktreeOrder.get(worktree.id) ??
+      Number.MAX_SAFE_INTEGER
     const activeUnifiedTabId = getActiveUnifiedTabId({
       worktreeId: worktree.id,
       activeWorktreeId,

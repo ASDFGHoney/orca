@@ -1,3 +1,4 @@
+import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import { matchPaletteDocument } from './palette-match/match-document'
 import { preparePaletteQuery } from './palette-match/palette-query'
 import type { MatchRange } from './palette-match/normalized-text'
@@ -187,7 +188,7 @@ export function searchWorktreeDocuments(args: WorktreePaletteSearchArgs): Palett
       continue
     }
 
-    const document = args.documents.get(worktree.id)
+    const document = args.documents.get(getWorktreeHostIdentity(worktree))
     if (!document) {
       continue
     }

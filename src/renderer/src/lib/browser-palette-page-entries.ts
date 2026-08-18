@@ -1,3 +1,4 @@
+import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import type { BrowserPage, BrowserWorkspace } from '../../../shared/browser-workspace-types'
 import type { Worktree } from '../../../shared/worktree/types'
 import {
@@ -31,7 +32,10 @@ export function buildSearchableBrowserPages({
   const entries: SearchableBrowserPage[] = []
   for (const worktree of worktrees) {
     const repoName = repoMap.get(worktree.repoId)?.displayName ?? ''
-    const worktreeSortIndex = worktreeOrder.get(worktree.id) ?? Number.MAX_SAFE_INTEGER
+    const worktreeSortIndex =
+      worktreeOrder.get(getWorktreeHostIdentity(worktree)) ??
+      worktreeOrder.get(worktree.id) ??
+      Number.MAX_SAFE_INTEGER
     for (const workspace of browserTabsByWorktree[worktree.id] ?? []) {
       for (const page of browserPagesByWorkspace[workspace.id] ?? []) {
         entries.push({

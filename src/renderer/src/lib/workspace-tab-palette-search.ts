@@ -1,3 +1,4 @@
+import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
 import type { OpenFile } from '@/store/slices/editor'
 import { buildPaletteTabDocument } from './palette-match/tab-document'
@@ -182,6 +183,9 @@ export function buildSearchableWorkspaceTabs({
   paneForegroundAgentByPaneKey
 }: BuildSearchableWorkspaceTabsOptions): SearchableWorkspaceTab[] {
   const entries: SearchableWorkspaceTab[] = []
+  // Why global, not per worktree: the palette keys rows by tab id alone, so a
+  // repeated id anywhere in the session would render the same row twice.
+  const seenTabIds = new Set<string>()
   const openFilesById = new Map(openFiles.map((file) => [file.id, file]))
   const agentIndex = buildAgentMetadataTabIndex({
     agentStatusByPaneKey,
@@ -193,7 +197,10 @@ export function buildSearchableWorkspaceTabs({
     const repoName = repoMap.get(worktree.repoId)?.displayName ?? ''
     const worktreeName = resolveWorktreeDisplayName(worktree)
     const branch = resolveWorktreeBranchLabel(worktree)
-    const worktreeSortIndex = worktreeOrder.get(worktree.id) ?? Number.MAX_SAFE_INTEGER
+    const worktreeSortIndex =
+      worktreeOrder.get(getWorktreeHostIdentity(worktree)) ??
+      worktreeOrder.get(worktree.id) ??
+      Number.MAX_SAFE_INTEGER
     const activeUnifiedTabId = getActiveUnifiedTabId({
       worktreeId: worktree.id,
       activeWorktreeId,
@@ -211,6 +218,11 @@ export function buildSearchableWorkspaceTabs({
 
     for (const rawTab of unifiedTabsByWorktree[worktree.id] ?? []) {
       if (!isWorkspaceTabContentType(rawTab.contentType)) {
+        continue
+      }
+      // Why claim the id only at the push below: a duplicate whose twin never
+      // resolves an open file must still get its chance to produce the row.
+      if (seenTabIds.has(rawTab.id)) {
         continue
       }
       const tab = rawTab as Tab & { contentType: WorkspaceTabContentType }
@@ -254,6 +266,7 @@ export function buildSearchableWorkspaceTabs({
           generatedTitlesEnabled,
           terminalTitle
         )
+        seenTabIds.add(tab.id)
         entries.push({
           ...baseEntry,
           title,
@@ -294,6 +307,7 @@ export function buildSearchableWorkspaceTabs({
         continue
       }
       const title = getEditorDisplayLabel(file)
+      seenTabIds.add(tab.id)
       entries.push({
         ...baseEntry,
         title,

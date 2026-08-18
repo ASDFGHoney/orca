@@ -1,3 +1,4 @@
+import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import { issueCacheKey as getIssueCacheKey } from '@/store/slices/github'
 import { buildPaletteDocument, type PaletteDocument } from './palette-match/palette-document'
 import type { PaletteComposedEvidence } from './palette-match/evidence-composer'
@@ -146,7 +147,12 @@ export function buildWorktreePaletteDocument(
         profile: 'structured-label',
         // Why conditional: the host chip only renders for active remote hosts, and
         // an unrendered match would be unexplainable on the row.
-        text: sources.hostLabelByWorktreeId?.get(worktree.id) ?? ''
+        // Why both keys: the palette keys this map by host identity so two same-id
+        // workspaces keep distinct chips, but a bare-id map is still a valid input.
+        text:
+          sources.hostLabelByWorktreeId?.get(getWorktreeHostIdentity(worktree)) ??
+          sources.hostLabelByWorktreeId?.get(worktree.id) ??
+          ''
       }
     ],
     compositePairs: [
@@ -166,7 +172,13 @@ export function buildWorktreePaletteDocuments(
 ): Map<string, PaletteDocument> {
   const documents = new Map<string, PaletteDocument>()
   for (const worktree of worktrees) {
-    documents.set(worktree.id, buildWorktreePaletteDocument(worktree, sources))
+    // Why the host identity (STA-4343): `repoId::path` repeats across hosts, so keying on
+    // the bare id lets the second host overwrite the first and one workspace becomes
+    // unsearchable by its own name.
+    documents.set(
+      getWorktreeHostIdentity(worktree),
+      buildWorktreePaletteDocument(worktree, sources)
+    )
   }
   return documents
 }
