@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ const {
   sessionFromPartitionMock,
   snapshotClearIdentitiesMock,
   writeCookieIdentityMock,
+  copyFileWithWindowsRetryMock,
   setPendingCookieImportMock,
   clearPendingCookieImportMock
 } = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const {
   sessionFromPartitionMock: vi.fn(),
   snapshotClearIdentitiesMock: vi.fn(),
   writeCookieIdentityMock: vi.fn(),
+  copyFileWithWindowsRetryMock: vi.fn(),
   setPendingCookieImportMock: vi.fn(),
   clearPendingCookieImportMock: vi.fn()
 }))
@@ -48,6 +50,9 @@ vi.mock('./browser-session-registry', () => ({
     setPendingCookieImport: setPendingCookieImportMock,
     clearPendingCookieImport: clearPendingCookieImportMock
   }
+}))
+vi.mock('../codex-accounts/fs-utils', () => ({
+  copyFileWithWindowsRetry: copyFileWithWindowsRetryMock
 }))
 
 import { importCookiesFromBrowser, importCookiesFromFile } from './browser-cookie-import'
@@ -173,6 +178,11 @@ describe('two concurrent imports into one partition', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'orca-cookie-concurrency-'))
     appGetPathMock.mockReturnValue(join(tmpDir, 'userData'))
     events = []
+    copyFileWithWindowsRetryMock
+      .mockReset()
+      .mockImplementation((source: string, destination: string) => {
+        copyFileSync(source, destination)
+      })
     // Why: the clear asserts its snapshot covers the removal plan, so a stub returning [] fails
     // the import before it ever reaches a write — and the ordering assertion would pass vacuously.
     snapshotClearIdentitiesMock
@@ -268,6 +278,7 @@ describe('two concurrent NATIVE imports into one partition', () => {
   let cookiesSetMock: ReturnType<typeof vi.fn>
   let releaseFirstWrite: () => void
   let platformSpy: { mockRestore: () => void }
+  let stagingCopyCount: number
 
   function chromeBrowser(cookiesPath: string) {
     return {
@@ -285,6 +296,16 @@ describe('two concurrent NATIVE imports into one partition', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'orca-cookie-native-concurrency-'))
     appGetPathMock.mockReturnValue(join(tmpDir, 'userData'))
     events = []
+    stagingCopyCount = 0
+    copyFileWithWindowsRetryMock
+      .mockReset()
+      .mockImplementation((source: string, destination: string) => {
+        if (destination.includes('cookie-import-staging')) {
+          stagingCopyCount += 1
+          events.push(`copy:${stagingCopyCount === 1 ? 'first' : 'second'}`)
+        }
+        copyFileSync(source, destination)
+      })
     // Why: an EMPTY jar makes removeTransplantableCookies return before it clears, so the clear
     // would never run and a clearData assertion would pass vacuously. Seed it.
     snapshotClearIdentitiesMock
@@ -350,12 +371,19 @@ describe('two concurrent NATIVE imports into one partition', () => {
     ).close()
 
     const first = importCookiesFromBrowser(chromeBrowser(sourceA), 'persist:native-conc')
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    // Wait until A is parked in its write. This makes the detector independent of scheduler luck:
+    // B's staging copy must be blocked by the transaction lock, not merely happen to run later.
+    for (let i = 0; i < 100 && !events.includes('set:first'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    expect(events).toContain('set:first')
     const second = importCookiesFromBrowser(chromeBrowser(sourceB), 'persist:native-conc')
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await new Promise((resolve) => setTimeout(resolve, 10))
 
-    // The first import is parked inside its write. The second must not flush or clear the live jar
-    // while that transaction is active — either assertion fails if the whole-function lock narrows.
+    // The first import is parked inside its write. The second must not stage a stale image while
+    // that transaction is active — this assertion fails if the staging copy sits outside the lock.
+    expect(events).not.toContain('copy:second')
+    // Nor may it flush, clear, or write the live jar while that transaction is active.
     expect(events.filter((e) => e === 'flushStore')).toHaveLength(1)
     expect(events.filter((e) => e === 'clearData')).toHaveLength(1)
     expect(events).not.toContain('set:second')
@@ -371,6 +399,7 @@ describe('two concurrent NATIVE imports into one partition', () => {
     expect(writeCookieIdentityMock).toHaveBeenCalledTimes(2)
     expect(cookiesSetMock).not.toHaveBeenCalled()
     expect(events.indexOf('set:first')).toBeLessThan(events.lastIndexOf('clearData'))
+    expect(events.indexOf('copy:second')).toBeGreaterThan(events.indexOf('set:first'))
   })
 })
 
