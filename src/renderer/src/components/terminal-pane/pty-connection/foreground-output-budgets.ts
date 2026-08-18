@@ -27,7 +27,7 @@ export function consumeForegroundImmediateBudget(
   capChars: number
 ): boolean {
   const now = performance.now()
-  if (now - budget.windowStart > FOREGROUND_BUDGET_WINDOW_MS) {
+  if (now - budget.windowStart >= FOREGROUND_BUDGET_WINDOW_MS) {
     budget.chars = 0
     budget.windowStart = now
   }
