@@ -263,6 +263,8 @@ describe('two concurrent imports into one partition', () => {
     expect(cookiesSetMock).not.toHaveBeenCalled()
 
     // And the full ordering is serial, not interleaved.
+    expect(events).toContain('set:new-a')
+    expect(events).toContain('remove:old-b')
     expect(events.indexOf('set:new-a')).toBeLessThan(events.indexOf('remove:old-b'))
   })
 })
