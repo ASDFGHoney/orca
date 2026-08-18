@@ -61,8 +61,10 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
   })
 
   async function startRelayHoldingAPty(): Promise<{ fixture: LiveRelayFixture; pid: number }> {
-    root = mkdtempSync(join(tmpdir(), 'orca-relay-ownership-'))
-    const live = new LiveRelayFixture(join(root, 'relay'), BUNDLE_DIR!, REPO_ROOT)
+    // Why the short prefix and no nested dir: sun_path caps a Unix socket at 104 bytes on
+    // macOS, and this machine's tmpdir already spends 62 of them.
+    root = mkdtempSync(join(tmpdir(), 'orca-rel-'))
+    const live = new LiveRelayFixture(root, BUNDLE_DIR!, REPO_ROOT)
     fixture = live
     live.launchDaemon('incumbent')
     expect(await live.waitForSocket()).toBe(true)
@@ -74,8 +76,9 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
     expect(status.ptys.active).toBe(1)
     // Why: the app walking away is what starts the incumbent's grace window; with
     // --grace-time 0 and a live PTY that window arms no timer, so nothing reaps it.
+    const mark = live.logMark('incumbent')
     bridge.close()
-    await live.waitForClientDisconnect('incumbent')
+    await live.waitForClientDisconnect('incumbent', mark)
     return { fixture: live, pid: status.pid }
   }
 

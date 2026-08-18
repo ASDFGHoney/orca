@@ -31,15 +31,21 @@ export async function forceStopRelayForTarget(
       'awk -v self="$$" -v parent="$PPID" \'$1 != self && $1 != parent\' | tr "\\n" " ")',
     '  fi',
     '}',
+    // Why an inventory rather than "no pid found": a lookup that returned nothing may
+    // simply have been unable to look, and reset must not read that silence as absence.
+    // 0 = a process holds the socket, 1 = an inventory ran and none does, 2 = none ran.
+    'socket_listed() {',
+    '  if [ -r /proc/net/unix ]; then',
+    '    grep -q " $1$" /proc/net/unix && return 0 || return 1',
+    '  fi',
+    '  if command -v lsof >/dev/null 2>&1; then',
+    '    [ -n "$(lsof -t -a -U "$1" 2>/dev/null)" ] && return 0 || return 1',
+    '  fi',
+    '  return 2',
+    '}',
     'if [ -d "$base" ]; then',
     '  for sock in "$base"/relay-*/"$sock_name" "$base"/"$sock_name"; do',
     '    [ -S "$sock" ] || continue',
-    // Why: with neither tool the host offers no way to see an owner, and an unlink here
-    // would strand a live relay rather than stop it.
-    '    if ! command -v lsof >/dev/null 2>&1 && ! command -v pgrep >/dev/null 2>&1; then',
-    `      echo ${RESET_NO_OWNER_PROOF_MARKER}`,
-    '      continue',
-    '    fi',
     '    find_holder "$sock"',
     '    if [ -n "$holder" ]; then',
     '      kill -TERM $holder 2>/dev/null || true',
@@ -47,10 +53,16 @@ export async function forceStopRelayForTarget(
     '      kill -KILL $holder 2>/dev/null || true',
     '      sleep 0.2',
     '    fi',
-    // Why re-check: a refused kill (permissions, a wedged process) leaves the owner
+    // Why re-check both: a refused kill (permissions, a wedged process) leaves the owner
     // listening, and removing its socket then hides it instead of stopping it.
+    '    socket_listed "$sock"',
+    '    listed=$?',
     '    find_holder "$sock"',
-    '    if [ -n "$holder" ]; then',
+    '    if [ "$listed" = 2 ]; then',
+    `      echo ${RESET_NO_OWNER_PROOF_MARKER}`,
+    '      continue',
+    '    fi',
+    '    if [ "$listed" = 0 ] || [ -n "$holder" ]; then',
     `      echo ${RESET_OWNER_SURVIVED_MARKER}`,
     '      continue',
     '    fi',
@@ -68,8 +80,8 @@ export async function forceStopRelayForTarget(
   }
   if (output.includes(RESET_NO_OWNER_PROOF_MARKER)) {
     throw new Error(
-      'This host has neither lsof nor pgrep, so the relay owning the socket could not be ' +
-        'identified. The socket was left in place; stop the relay process on the host, then retry.'
+      'This host offers no way to see which process owns the relay socket (no /proc/net/unix ' +
+        'and no lsof), so it was left in place. Stop the relay process on the host, then retry.'
     )
   }
 }

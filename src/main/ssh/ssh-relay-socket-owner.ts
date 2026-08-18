@@ -17,15 +17,29 @@ const PROBE_RETRY_MS = 250
 
 // Why one host-side script rather than probe-then-remove from here: an SSH round-trip
 // between the two is wide enough for another client to bind the path, and the removal
-// would then unlink a live owner's socket. The unlink is guarded by the same dev/ino
-// recheck the relay uses for its own stale-socket cleanup (relay.ts unlinkIfStillStale).
+// would then unlink a live owner's socket. The unlink is guarded by the same
+// dev+ino+ctime identity the relay uses for its own stale-socket cleanup (relay.ts
+// unlinkIfStillStale).
 //
-// Why retry ECONNREFUSED: a live Unix listener whose accept backlog is momentarily full
-// also refuses connections. A stale inode refuses every time; saturation drains.
+// Why refusals alone never authorize the unlink: a live Unix listener whose accept
+// backlog is full also answers ECONNREFUSED, so N refusals are an inference, not the
+// positive evidence of absence this whole change is about. The unlink additionally
+// requires an owner inventory that ran and did not list the path — /proc/net/unix where
+// it exists, otherwise an lsof that ran and matched nothing. With neither, the answer is
+// unverifiable and the socket stays.
 const RELAY_SOCKET_RELEASE_SCRIPT =
-  'var net=require("net"),fs=require("fs"),p=process.argv[1],' +
+  'var net=require("net"),fs=require("fs"),p=process.argv[1],lsofProof=process.argv[2]==="lsof",' +
   `left=${PROBE_ATTEMPTS},mark=null,done=false,sock=null,timer=null;` +
-  'function ident(){try{var st=fs.statSync(p);return st.dev+":"+st.ino}catch(e){return null}}' +
+  // "live" if an inventory lists the path, "absent" if one ran without it, null if none ran.
+  'function inventory(){var data;try{data=fs.readFileSync("/proc/net/unix","utf8")}' +
+  'catch(e){return lsofProof?"absent":null}' +
+  'var lines=data.split(String.fromCharCode(10)),tail=" "+p;' +
+  'for(var i=0;i<lines.length;i++){if(lines[i].slice(-tail.length)===tail){return "live"}}' +
+  'return "absent"}' +
+  // Why ctime too: inode numbers are recycled, so dev+ino alone can match a socket that
+  // was unlinked and recreated inside the probe window. Same identity as relay.ts.
+  'function ident(){try{var st=fs.statSync(p,{bigint:true});' +
+  'return st.dev+":"+st.ino+":"+st.ctimeNs}catch(e){return null}}' +
   'function say(v){if(done)return;done=true;if(timer)clearTimeout(timer);' +
   'if(sock)sock.destroy();process.stdout.write(v)}' +
   'function release(){if(mark===null){say("RELEASED");return}' +
@@ -37,18 +51,24 @@ const RELAY_SOCKET_RELEASE_SCRIPT =
   'sock.on("error",function(e){clearTimeout(timer);' +
   'if(e.code==="ENOENT"){say("RELEASED");return}' +
   'if(e.code!=="ECONNREFUSED"){say("UNVERIFIABLE");return}' +
-  `if(--left>0){setTimeout(attempt,${PROBE_RETRY_MS});return}release()})}attempt()`
+  `if(--left>0){setTimeout(attempt,${PROBE_RETRY_MS});return}` +
+  'var inv=inventory();' +
+  'if(inv==="live"){say("LIVE");return}' +
+  'if(inv===null){say("UNVERIFIABLE");return}' +
+  'release()})}attempt()'
 
 export function relaySocketReleaseCommand(nodePath: string, sockPath: string): string {
-  // Why lsof first: it is the one portable way to prove an owner is *there*. Its silence is
-  // never read as absence — a denied or absent lsof just falls through to the probe.
+  // Why lsof first: on hosts without /proc it is the only owner inventory available, and it
+  // answers both ways — a match proves an owner is there, and a clean run that matches
+  // nothing is the absence evidence the unlink needs. A missing lsof proves neither.
   // Why -a: lsof ORs selectors by default, which would match every Unix-socket holder (#8762).
   return (
-    `sock=${shellEscape(sockPath)}; ` +
-    'if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -t -a -U "$sock" 2>/dev/null)" ]; ' +
-    'then echo LIVE; ' +
-    // Why argv[1]: passing the path as an argument dodges quoting issues inside -e.
-    `else ${shellEscape(nodePath)} -e ${shellEscape(RELAY_SOCKET_RELEASE_SCRIPT)} "$sock"; fi`
+    `sock=${shellEscape(sockPath)}; holders=; proof=none; ` +
+    'if command -v lsof >/dev/null 2>&1; then ' +
+    'holders=$(lsof -t -a -U "$sock" 2>/dev/null); [ -n "$holders" ] || proof=lsof; fi; ' +
+    'if [ -n "$holders" ]; then echo LIVE; ' +
+    // Why argv: passing the path and proof as arguments dodges quoting issues inside -e.
+    `else ${shellEscape(nodePath)} -e ${shellEscape(RELAY_SOCKET_RELEASE_SCRIPT)} "$sock" "$proof"; fi`
   )
 }
 

@@ -7,10 +7,12 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { RelayBridge } from './ssh-relay-bridge-client'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import type { Writable } from 'node:stream'
 import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import type { SshConnection } from './ssh-connection'
+import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
 
 export function relayBundleDirForHost(repoRoot: string): string | null {
   const dir = join(repoRoot, 'out', 'relay', `${process.platform}-${process.arch}`)
@@ -62,6 +64,22 @@ export function killProcessTree(pid: number): void {
   }
 }
 
+/** Pids whose argv names this socket path — the fixture's own daemons and any launched for it. */
+function pidsHoldingSockPath(sockPath: string): number[] {
+  const listing = spawnSync('ps', ['-eo', 'pid=,command=']).stdout?.toString() ?? ''
+  const pids: number[] = []
+  for (const line of listing.split('\n')) {
+    if (!line.includes(sockPath) || !line.includes('relay.js')) {
+      continue
+    }
+    const pid = Number(line.trim().split(/\s+/)[0])
+    if (Number.isInteger(pid) && pid !== process.pid) {
+      pids.push(pid)
+    }
+  }
+  return pids
+}
+
 export function waitForExit(child: ChildProcess, timeoutMs = 20_000): Promise<number | null> {
   if (child.exitCode !== null) {
     return Promise.resolve(child.exitCode)
@@ -84,14 +102,17 @@ export class LiveRelayFixture {
   constructor(
     readonly relayDir: string,
     bundleDir: string,
-    repoRoot: string
+    repoRoot: string,
+    readonly relayInstanceId = 'relay-ownership-target'
   ) {
     mkdirSync(relayDir, { recursive: true })
     cpSync(bundleDir, relayDir, { recursive: true })
     // Why: node-pty is external to the relay bundle and must resolve beside relay.js.
     symlinkSync(join(repoRoot, 'node_modules'), join(relayDir, 'node_modules'))
-    this.sockPath = join(relayDir, 'relay-ownership.sock')
-    this.credentialFile = join(relayDir, 'relay-ownership.credential')
+    // Why derived: the live journey drives the production launchRelay, which computes this
+    // name from the target id — a fixture with its own name would test a path nothing uses.
+    this.sockPath = join(relayDir, relaySocketNameForInstanceId(relayInstanceId))
+    this.credentialFile = `${this.sockPath}.credential`
     writeFileSync(this.credentialFile, randomBytes(32).toString('base64url'), { mode: 0o600 })
   }
 
@@ -180,15 +201,37 @@ export class LiveRelayFixture {
     for (const pid of this.daemonPids) {
       killProcessTree(pid)
     }
+    // Why sweep by socket path too: a test that drives the production launch path (or runs
+    // against a reverted guard) gets a daemon this fixture never spawned, and leaving it
+    // behind would leak exactly what these tests are about.
+    for (const pid of pidsHoldingSockPath(this.sockPath)) {
+      killProcessTree(pid)
+    }
   }
 
-  /** Resolve once the daemon's log records that its last client went away. */
-  async waitForClientDisconnect(label: string, timeoutMs = 20_000): Promise<void> {
+  /** Replace the endpoint credential the daemon already read, so its next --connect is refused. */
+  rotateCredential(): void {
+    writeFileSync(this.credentialFile, randomBytes(32).toString('base64url'), { mode: 0o600 })
+  }
+
+  /** Byte length of a daemon's log right now, to anchor a later wait to what follows it. */
+  logMark(label: string): number {
+    const logPath = join(this.relayDir, `relay-${label}.log`)
+    return existsSync(logPath) ? readFileSync(logPath, 'utf-8').length : 0
+  }
+
+  /**
+   * Resolve once the daemon logs that its last client went away, after `mark`.
+   *
+   * Why the mark: every readiness probe is itself a socket that opens and closes, so the
+   * log already holds that line and an unanchored search would return immediately.
+   */
+  async waitForClientDisconnect(label: string, mark: number, timeoutMs = 20_000): Promise<void> {
     const logPath = join(this.relayDir, `relay-${label}.log`)
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
       const log = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : ''
-      if (log.includes('Socket client closed (clients=0)')) {
+      if (log.slice(mark).includes('Socket client closed (clients=0)')) {
         return
       }
       await delay(50)
@@ -215,11 +258,13 @@ function createLocalShellChannel(
   path?: string
 ): EventEmitter & {
   stderr: EventEmitter
+  stdin: Writable
   close: () => void
   resume: () => void
 } {
   const channel = new EventEmitter() as EventEmitter & {
     stderr: EventEmitter & { resume: () => void }
+    stdin: Writable
     close: () => void
     resume: () => void
   }
@@ -233,9 +278,13 @@ function createLocalShellChannel(
   channel.close = (): void => {
     child.kill('SIGKILL')
   }
+  channel.stdin = child.stdin
   child.stdout.on('data', (chunk: Buffer) => channel.emit('data', chunk))
   child.stderr.on('data', (chunk: Buffer) => stderr.emit('data', chunk))
   child.on('error', (error: Error) => channel.emit('error', error))
+  // Why both: waitForSentinel reads the exit code on 'exit' to type a handshake mismatch,
+  // and settles on the later 'close', the same order ssh2 emits them in.
+  child.on('exit', (code: number | null) => channel.emit('exit', code))
   child.on('close', (code: number | null) => channel.emit('close', code ?? 0))
   return channel
 }

@@ -1353,7 +1353,13 @@ export function getLocalRelayCandidates(platform: RelayPlatform): string[] {
   return [...new Set(candidates)]
 }
 
-async function launchRelay(
+/**
+ * Reconnect to the relay owning this target's socket, or launch a fresh detached one.
+ *
+ * Exported for the live-daemon ownership oracle, which drives this decision against real
+ * relay processes rather than asserting on the commands a mocked connection recorded.
+ */
+export async function launchRelay(
   conn: SshConnection,
   remoteDir: string,
   hostPlatform: RemoteHostPlatform,

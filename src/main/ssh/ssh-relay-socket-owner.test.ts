@@ -15,6 +15,10 @@ import {
   relaySocketReleaseCommand,
   releaseUnownedRelaySocket
 } from './ssh-relay-socket-owner'
+import {
+  isRelayVersionMismatchError,
+  RelayVersionMismatchError
+} from './ssh-relay-version-mismatch-error'
 
 const SOCK = '/home/u/.orca-remote/relay-0.1.0+abc/relay-deadbeef.sock'
 const NODE = '/usr/bin/node'
@@ -38,7 +42,8 @@ describe('relay socket release command', () => {
     // another client can bind the path, and the removal would then strand it.
     expect(command).toContain('unlinkSync')
     expect(command).toContain('statSync')
-    expect(command).toContain('st.dev+":"+st.ino')
+    // Why ctime: inode numbers are recycled, so dev+ino alone can match a recreated socket.
+    expect(command).toContain('st.dev+":"+st.ino+":"+st.ctimeNs')
   })
 
   it('retries a refused connect before concluding the path is unowned', () => {
@@ -129,5 +134,30 @@ describe('releaseUnownedRelaySocket', () => {
     expect(error.cause).toBe(cause)
     expect(error.message).toContain('handshake refused')
     expect(error.message).toContain('Reset remote relay')
+  })
+})
+
+describe('terminal causes carried by the owner error', () => {
+  it('keeps a wrapped version mismatch classified as terminal', async () => {
+    vi.mocked(execCommand).mockReset().mockResolvedValueOnce('LIVE')
+    const mismatch = new RelayVersionMismatchError('0.1.0+new', '0.1.0+old')
+
+    const error = await releaseUnownedRelaySocket(conn, NODE, SOCK, { cause: mismatch }).catch(
+      (err) => err
+    )
+
+    // Why: without this the bounded relay-lost backoff would spend six attempts on a
+    // version the daemon cannot change, then blame a dropping channel.
+    expect(isRelayVersionMismatchError(error)).toBe(true)
+  })
+
+  it('does not classify an ordinary reconnect failure as terminal', async () => {
+    vi.mocked(execCommand).mockReset().mockResolvedValueOnce('LIVE')
+
+    const error = await releaseUnownedRelaySocket(conn, NODE, SOCK, {
+      cause: new Error('relay sentinel timeout')
+    }).catch((err) => err)
+
+    expect(isRelayVersionMismatchError(error)).toBe(false)
   })
 })

@@ -1,6 +1,5 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,8 +13,20 @@ import { execCommand } from './ssh-relay-deploy-helpers'
 import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
 import type { SshConnection } from './ssh-connection'
 
-const TARGET_PID = '11111'
 const UNRELATED_PID = '22222'
+
+// Why not plain `kill -0`: the owner is a child of this process, so between the signal and
+// the event-loop turn that reaps it there is a zombie that `kill -0` still calls alive.
+// Why the ladder rather than `ps`: a slim Linux image can ship without procps, and a stub
+// that silently answered "gone" there would make these tests assert the wrong branch.
+const OWNER_ALIVE_GUARD = `if [ -r /proc/"$OWNER_PID"/status ]; then
+  grep -q '^State:.*Z' /proc/"$OWNER_PID"/status && exit 1
+elif command -v ps >/dev/null 2>&1; then
+  st=$(ps -p "$OWNER_PID" -o stat= 2>/dev/null | tr -d ' ')
+  case "$st" in ""|Z*) exit 1 ;; esac
+elif ! kill -0 "$OWNER_PID" 2>/dev/null; then
+  exit 1
+fi`
 
 /** How the sandboxed host behaves while the reset script runs. */
 type HostMode = 'lsof-finds-owner' | 'only-pgrep-finds-owner' | 'kill-refused' | 'no-process-tools'
@@ -24,37 +35,58 @@ function writeExecutable(filePath: string, body: string): void {
   writeFileSync(filePath, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
 }
 
-async function listenOnSocket(server: Server, socketPath: string): Promise<void> {
+/** A real process holding a real Unix socket, so kill and the host's inventories agree. */
+async function startSocketOwner(socketPath: string): Promise<ChildProcess> {
+  const owner = spawn(
+    process.execPath,
+    [
+      '-e',
+      'require("net").createServer(()=>{}).listen(process.argv[1],()=>console.log("up"));' +
+        'setInterval(()=>{},1000)',
+      socketPath
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'] }
+  )
   await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error): void => reject(error)
-    server.once('error', onError)
-    server.listen(socketPath, () => {
-      server.off('error', onError)
-      resolve()
-    })
+    owner.stdout?.once('data', () => resolve())
+    owner.once('exit', () => reject(new Error('socket owner exited before listening')))
   })
+  return owner
 }
 
-async function closeServer(server: Server): Promise<void> {
-  if (!server.listening) {
-    return
+/** Wait on the child's own exit: the kill lands in a nested shell, so the parent needs a
+ *  turn to reap it, and process.kill(pid, 0) answers true for the zombie in between. */
+async function settleOwnerLiveness(owner: ChildProcess, timeoutMs = 3_000): Promise<boolean> {
+  if (owner.exitCode !== null || owner.signalCode !== null) {
+    return false
   }
-  await new Promise<void>((resolve) => server.close(() => resolve()))
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      owner.off('exit', onExit)
+      resolve(true)
+    }, timeoutMs)
+    const onExit = (): void => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    owner.once('exit', onExit)
+  })
 }
 
 type ResetRun = {
   killCalls: string[]
   pgrepCalls: string[]
   socketExists: boolean
+  ownerAlive: boolean
   error: Error | null
 }
 
 /**
  * Run the real reset script against a sandboxed host.
  *
- * Why a live socket and stubbed tools: the script's whole job is deciding whether the
- * owner is gone, so the stubs model an owner that stops answering only once `kill`
- * reaches it — a stub that always reports the pid would hide the post-kill re-check.
+ * Why a real owner process and a real kill: the script's job is deciding whether the owner
+ * is gone, and on Linux it reads /proc/net/unix for that. Stubs answering from a flag file
+ * would disagree with the kernel and make this test say different things on macOS and CI.
  */
 async function runReset(mode: HostMode): Promise<ResetRun> {
   const home = mkdtempSync(join(tmpdir(), 'orca-'))
@@ -63,12 +95,13 @@ async function runReset(mode: HostMode): Promise<ResetRun> {
   const socketPath = join(socketDir, relaySocketNameForInstanceId('ssh-1'))
   const killLog = join(home, 'kill.log')
   const pgrepLog = join(home, 'pgrep.log')
-  const holderFile = join(home, 'holder')
   mkdirSync(binDir)
   mkdirSync(socketDir, { recursive: true })
   writeFileSync(killLog, '')
   writeFileSync(pgrepLog, '')
-  writeFileSync(holderFile, TARGET_PID)
+
+  const owner = await startSocketOwner(socketPath)
+  const ownerPid = String(owner.pid)
 
   if (mode !== 'no-process-tools') {
     // Why the -a split: without it lsof would also return an unrelated Unix-socket holder,
@@ -76,45 +109,46 @@ async function runReset(mode: HostMode): Promise<ResetRun> {
     const lsofBody =
       mode === 'only-pgrep-finds-owner'
         ? 'exit 1'
-        : `[ -s "$HOLDER_FILE" ] || exit 1
+        : `${OWNER_ALIVE_GUARD}
 case " $* " in
-  *" -a "*) printf '%s\\n' "$TARGET_PID" ;;
-  *) printf '%s\\n' "$TARGET_PID" "$UNRELATED_PID" ;;
+  *" -a "*) printf '%s\\n' "$OWNER_PID" ;;
+  *) printf '%s\\n' "$OWNER_PID" "$UNRELATED_PID" ;;
 esac`
     writeExecutable(join(binDir, 'lsof'), lsofBody)
     writeExecutable(
       join(binDir, 'pgrep'),
       `printf 'called\\n' >> "$PGREP_LOG"
-[ -s "$HOLDER_FILE" ] || exit 1
-printf '%s\\n' "$TARGET_PID"`
+${OWNER_ALIVE_GUARD}
+printf '%s\\n' "$OWNER_PID"`
     )
   }
-  writeExecutable(join(binDir, 'sleep'), 'exit 0')
+  // Why a real sleep: the script's post-kill re-check is only meaningful once the owner has
+  // actually gone, and a no-op stub made it observe a process that was still dying.
+  writeExecutable(join(binDir, 'sleep'), 'exec /bin/sleep "$@"')
 
+  // Why a shell function: it records what reset asked for, and in the refused mode it lets
+  // the owner survive the signal the way a permission error would.
   const killBody =
     mode === 'kill-refused'
       ? `kill() { printf '%s\\n' "$*" >> "$KILL_LOG"; }`
-      : `kill() { printf '%s\\n' "$*" >> "$KILL_LOG"; : > "$HOLDER_FILE"; }`
+      : `kill() { printf '%s\\n' "$*" >> "$KILL_LOG"; command kill "$@" 2>/dev/null || true; }`
 
-  const server = createServer()
   let error: Error | null = null
   try {
-    await listenOnSocket(server, socketPath)
     vi.mocked(execCommand).mockImplementation((_conn, script) =>
       Promise.resolve(
         execFileSync('/bin/sh', ['-c', `${killBody}\neval "$RESET_SCRIPT"`], {
           env: {
             ...process.env,
             HOME: home,
-            HOLDER_FILE: holderFile,
             KILL_LOG: killLog,
+            OWNER_PID: ownerPid,
             PATH:
               mode === 'no-process-tools'
                 ? binDir
                 : `${binDir}${delimiter}${process.env.PATH ?? ''}`,
             PGREP_LOG: pgrepLog,
             RESET_SCRIPT: script,
-            TARGET_PID,
             UNRELATED_PID
           }
         }).toString()
@@ -127,10 +161,11 @@ printf '%s\\n' "$TARGET_PID"`
       killCalls: readFileSync(killLog, 'utf8').split('\n').filter(Boolean),
       pgrepCalls: readFileSync(pgrepLog, 'utf8').split('\n').filter(Boolean),
       socketExists: existsSync(socketPath),
+      ownerAlive: await settleOwnerLiveness(owner),
       error
     }
   } finally {
-    await closeServer(server)
+    owner.kill('SIGKILL')
     rmSync(home, { recursive: true, force: true })
   }
 }
@@ -151,6 +186,7 @@ describe('forceStopRelayForTarget', () => {
     expect(command).toContain(`sock_name='${relaySocketNameForInstanceId('ssh-1')}'`)
     expect(command).toContain('lsof -t -a -U "$1"')
     expect(command).toContain('pgrep -f "$sock_name"')
+    expect(command).toContain('/proc/net/unix')
     expect(command).toContain('rm -f "$sock"')
   })
 
@@ -159,10 +195,9 @@ describe('forceStopRelayForTarget', () => {
     async () => {
       const result = await runReset('lsof-finds-owner')
 
-      expect(result.killCalls).toEqual([`-TERM ${TARGET_PID}`, `-KILL ${TARGET_PID}`])
+      expect(result.killCalls.join(' ')).toContain('-TERM')
       expect(result.killCalls.join(' ')).not.toContain(UNRELATED_PID)
-      // Why one call: the post-kill re-check finds lsof silent and falls through to pgrep.
-      expect(result.pgrepCalls).toEqual(['called'])
+      expect(result.ownerAlive).toBe(false)
       expect(result.socketExists).toBe(false)
       expect(result.error).toBeNull()
     }
@@ -173,9 +208,8 @@ describe('forceStopRelayForTarget', () => {
     async () => {
       const result = await runReset('only-pgrep-finds-owner')
 
-      expect(result.killCalls).toEqual([`-TERM ${TARGET_PID}`, `-KILL ${TARGET_PID}`])
-      // Why two calls: once to find the owner, once to prove it stopped answering.
-      expect(result.pgrepCalls).toEqual(['called', 'called'])
+      expect(result.pgrepCalls.length).toBeGreaterThan(0)
+      expect(result.ownerAlive).toBe(false)
       expect(result.socketExists).toBe(false)
       expect(result.error).toBeNull()
     }
@@ -188,20 +222,25 @@ describe('forceStopRelayForTarget', () => {
     async () => {
       const result = await runReset('kill-refused')
 
-      expect(result.killCalls).toEqual([`-TERM ${TARGET_PID}`, `-KILL ${TARGET_PID}`])
+      expect(result.killCalls.join(' ')).toContain('-TERM')
+      expect(result.ownerAlive).toBe(true)
       expect(result.socketExists).toBe(true)
       expect(result.error?.message).toContain('still running')
     }
   )
 
   it.skipIf(process.platform === 'win32')(
-    'keeps the socket and reports failure when the host cannot identify the owner',
+    'keeps the socket when it cannot identify the owner it failed to stop',
     async () => {
       const result = await runReset('no-process-tools')
 
+      // Why no kill: with no way to name the owner there is nothing to signal. On Linux
+      // /proc/net/unix still shows the socket is held; on hosts without it nothing does —
+      // either way the only safe answer is to leave it alone and say so.
       expect(result.killCalls).toEqual([])
+      expect(result.ownerAlive).toBe(true)
       expect(result.socketExists).toBe(true)
-      expect(result.error?.message).toContain('neither lsof nor pgrep')
+      expect(result.error?.message).toMatch(/still running|no way to see/)
     }
   )
 })

@@ -24,8 +24,29 @@ export class RelayVersionMismatchError extends Error {
   }
 }
 
-export function isRelayVersionMismatchError(err: unknown): err is RelayVersionMismatchError {
-  return err instanceof RelayVersionMismatchError
+// Why bounded: causes are attacker-free but not cycle-free, and a plain recursion over a
+// self-referential chain would hang the connect path instead of failing it.
+const MAX_CAUSE_DEPTH = 8
+
+/**
+ * True for a mismatch reported directly, or carried as the cause of a wrapper.
+ *
+ * Why unwrap: a reconnect refused by a live daemon surfaces as a socket-owner error whose
+ * cause is this one, and a version the daemon cannot change is no more reconcilable by
+ * backoff there than it is here (STA-1756).
+ */
+export function isRelayVersionMismatchError(err: unknown): err is Error {
+  let current = err
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (current instanceof RelayVersionMismatchError) {
+      return true
+    }
+    if (!(current instanceof Error) || current.cause === undefined) {
+      return false
+    }
+    current = current.cause
+  }
+  return false
 }
 
 // Why: the remote --connect process uses this exit code to signal the wire
