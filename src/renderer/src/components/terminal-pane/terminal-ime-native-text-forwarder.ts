@@ -47,7 +47,15 @@ type PendingCommit = {
    * here instead and the key sends what it produced.
    *
    * The discriminator is structural, not a character table: a
-   * one-key-one-character substitution never deletes first.
+   * one-key-one-character substitution never deletes first. That holds on this
+   * code path because a composing keystroke is never claimed, and because touch
+   * iOS - whose Korean source does rewrite in place with no composition event -
+   * does not install this forwarder at all. It is a property of where this runs,
+   * not a universal law about input methods.
+   *
+   * If it were ever wrong the failure is a wrong character rather than a missing
+   * one, since what goes out is the physical key: a CJK source would emit the
+   * Latin letter underneath it, which is harder to notice than a dropped key.
    */
   rewritten: boolean
 }

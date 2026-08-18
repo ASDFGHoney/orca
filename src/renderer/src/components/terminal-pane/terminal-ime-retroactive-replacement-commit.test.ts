@@ -151,8 +151,8 @@ describe('a text substitution decided after the terminal already sent the text',
     document.body.replaceChildren()
   })
 
-  // Guards the two expectations below from passing vacuously: if this harness stopped reaching the
-  // forwarder's listeners at all, `it.fails` would still be satisfied and report nothing.
+  // Guards the cases below from passing vacuously: if this harness stopped reaching the
+  // forwarder's listeners at all, a decline and a silent drop would look identical.
   it('delivers a non-replacing commit through the same harness', () => {
     const pane = open()
     try {
@@ -164,10 +164,6 @@ describe('a text substitution decided after the terminal already sent the text',
     }
   })
 
-  // The retraction machinery itself, exercised where the textarea still holds the text being
-  // rewritten. It does not in the two cases below, which is the whole reason they still fail: the
-  // forwarder blanks the textarea after every commit, so by the time a rewrite arrives the diff
-  // has no left side to measure against.
   // The declining rule itself. Two spaces in, two spaces out, and no period invented — which is
   // what every reference terminal does with these keystrokes.
   it('declines a rewrite and sends what the key produced', () => {
@@ -222,8 +218,11 @@ describe('a text substitution decided after the terminal already sent the text',
   // Bit 3 asks for every printable key as a CSI-u report. The declining rule has to hold there
   // too: the report identity is the physical key, and the substituted character must not ride
   // along as associated text.
-  it('declines a rewrite on a pane that negotiated kitty bit 3', () => {
-    const pane = open(8)
+  // Why flags 24 and not 8: bit 3 alone emits no associated text, so asserting the
+  // substitution is absent there passes whatever the code does. Bit 4 is what carries
+  // the text, so it is the only place the decline is observable.
+  it('declines a rewrite on a pane that negotiated kitty associated text', () => {
+    const pane = open(24)
     try {
       pressReplacing(
         pane.textarea,
@@ -232,6 +231,9 @@ describe('a text substitution decided after the terminal already sent the text',
       )
       const sent = pane.sent()
       expect(sent).not.toBe('')
+      // The associated text must be the space the key produced (U+0020 = 32), not the
+      // substituted '. ' the text system offered.
+      expect(sent).toContain(';32u')
       expect(sent).not.toContain('.')
     } finally {
       pane.dispose()
