@@ -168,6 +168,40 @@ describe('runtime file client', () => {
     expect(fsListFiles).not.toHaveBeenCalled()
   })
 
+  it('routes bounded quick-open queries through an SSH-owned workspace', async () => {
+    fsListFiles.mockResolvedValue(['src/target.ts', 'lib/target.ts', 'extra/target.ts'])
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: null },
+          worktreeId: 'wt-1',
+          worktreePath: '/remote/repo',
+          connectionId: 'ssh-1'
+        },
+        {
+          query: 'target',
+          limit: 2,
+          excludePaths: ['/remote/repo/nested'],
+          requestToken: 'quick-open-ssh-1'
+        }
+      )
+    ).resolves.toEqual({
+      files: ['src/target.ts', 'lib/target.ts'],
+      truncated: true
+    })
+
+    expect(fsListFiles).toHaveBeenCalledWith({
+      rootPath: '/remote/repo',
+      connectionId: 'ssh-1',
+      excludePaths: ['/remote/repo/nested'],
+      requestToken: 'quick-open-ssh-1',
+      maxResults: 3,
+      searchQuery: 'target'
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
   it('fails closed with update guidance when a paired host lacks path search', async () => {
     runtimeEnvironmentCall.mockResolvedValue({
       id: 'rpc-legacy',

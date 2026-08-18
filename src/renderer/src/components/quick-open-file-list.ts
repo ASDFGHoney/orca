@@ -184,7 +184,8 @@ export function useRuntimeFileListForWorktree({
     activeTargetStatus === 'connecting' ||
     activeTargetStatus === 'deploying-relay' ||
     activeTargetStatus === 'reconnecting'
-  const usesRuntimePathSearch = runtimeEnvironmentId !== null && query !== undefined
+  const usesRuntimePathSearch =
+    (runtimeEnvironmentId !== null || connectionId !== undefined) && query !== undefined
   const remoteQuery = usesRuntimePathSearch ? query.trim() : ''
   const remoteQueryTooLarge = usesRuntimePathSearch && isQuickOpenRemoteQueryTooLarge(remoteQuery)
   const requestKey = useMemo(
@@ -252,6 +253,7 @@ export function useRuntimeFileListForWorktree({
             query: remoteQuery,
             limit: 32,
             excludePaths,
+            ...(connectionId ? { requestToken } : {}),
             signal: requestAbortController.signal
           })
         )
@@ -290,9 +292,7 @@ export function useRuntimeFileListForWorktree({
       // the previous full-tree scan host- and relay-side. Over SSH, abandoned
       // scans otherwise stack up and starve fs.readDir/fs.stat past their
       // 30s timeout ("Could not load files for this workspace").
-      if (!usesRuntimePathSearch) {
-        cancelRuntimeFileList(requestContext, requestToken)
-      }
+      cancelRuntimeFileList(requestContext, requestToken)
     }
   }, [
     enabled,

@@ -988,10 +988,31 @@ export async function listRuntimeFiles(
 
 export async function searchRuntimeFilePaths(
   context: RuntimeFileOperationArgs,
-  args: { query: string; limit?: number; excludePaths?: string[]; signal?: AbortSignal }
+  args: {
+    query: string
+    limit?: number
+    excludePaths?: string[]
+    requestToken?: string
+    signal?: AbortSignal
+  }
 ): Promise<{ files: string[]; truncated: boolean }> {
   const target = getActiveRuntimeTarget(context.settings)
-  if (target.kind !== 'environment' || !context.worktreeId) {
+  if (target.kind !== 'environment') {
+    if (!context.connectionId || !context.worktreePath) {
+      return { files: [], truncated: false }
+    }
+    const limit = args.limit ?? 32
+    const files = await window.api.fs.listFiles({
+      rootPath: context.worktreePath,
+      connectionId: context.connectionId,
+      excludePaths: args.excludePaths,
+      requestToken: args.requestToken,
+      maxResults: limit + 1,
+      searchQuery: args.query
+    })
+    return { files: files.slice(0, limit), truncated: files.length > limit }
+  }
+  if (!context.worktreeId) {
     return { files: [], truncated: false }
   }
   let result: RuntimeFileListResult
