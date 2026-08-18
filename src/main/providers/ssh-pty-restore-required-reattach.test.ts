@@ -303,6 +303,56 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(2)
   })
 
+  it('does not install a second activation when the first cancellation is unverifiable', async () => {
+    const mux = createMockMux()
+    const activation = {
+      status: 'pending',
+      clientGeneration: 2,
+      ownerGeneration: 3,
+      ptyIncarnation: 'incarnation-reattached',
+      deliveryToken: 'token-first',
+      checkpointSourceEndSu: 0,
+      recoveryEndSu: 0
+    }
+    mux.request.mockImplementation(async (method: string) => {
+      if (method === 'pty.cancelDelivery') {
+        return { canceled: false, sentEndSu: 0, creditedEndSu: 0 }
+      }
+      if (method === 'pty.attach') {
+        const attachCount = mux.request.mock.calls.filter((call) => call[0] === method).length
+        if (attachCount === 1) {
+          return { ...restoreRequiredAnswer, sourceActivation: activation }
+        }
+        return {
+          incarnationId: 'incarnation-reattached',
+          sourceActivation: {
+            ...activation,
+            clientGeneration: 4,
+            ownerGeneration: 5,
+            deliveryToken: 'token-second'
+          }
+        }
+      }
+      return undefined
+    })
+    const provider = new SshPtyProvider('conn-1', mux as never)
+
+    const message = await spawnError(provider)
+
+    expect(message).toContain(SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR)
+    expect(message).not.toContain(SSH_SESSION_EXPIRED_ERROR)
+    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBeNull()
+    expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(1)
+    expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.spawn')).toHaveLength(0)
+    expect(mux.request).toHaveBeenCalledWith('pty.cancelDelivery', {
+      id: 'pty-old',
+      clientGeneration: 2,
+      ownerGeneration: 3,
+      deliveryToken: 'token-first'
+    })
+  })
+
   it('never reports a delivery failure as session expiry when restoration keeps failing', async () => {
     const mux = createMockMux()
     mux.request.mockResolvedValue(restoreRequiredAnswer)

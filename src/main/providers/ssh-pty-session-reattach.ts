@@ -244,7 +244,12 @@ export async function reattachSshPtySessionForSpawn(
       const unresumable = result
       result = undefined
       if (unresumable.sourceActivationLease) {
-        await unresumable.sourceActivationLease.rollback()
+        const canceled = await unresumable.sourceActivationLease.rollback()
+        if (!canceled) {
+          throw new Error(
+            `${SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
+          )
+        }
       }
       result = await reattachSshPtySessionWithExitFence(args)
       if (result.sourceRecovery?.status === 'restoreRequired') {
