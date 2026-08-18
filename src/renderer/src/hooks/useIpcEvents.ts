@@ -3426,6 +3426,11 @@ export function useIpcEvents(): void {
               providerBackgroundWorkActive: data.providerBackgroundWorkActive
             }
           : statusPayloadWithProvenance
+      // Why: main sequenced this row as the pane authority; carry its stamp rather than
+      // minting a renderer one, which would claim a second authority for the same observation.
+      const statusPayloadWithObservation = data.observation
+        ? { ...statusPayloadWithBackgroundWork, observation: data.observation }
+        : statusPayloadWithBackgroundWork
       const identity = resolveAgentStatusIdentity({
         existing: existingStatus
           ? {
@@ -3465,7 +3470,7 @@ export function useIpcEvents(): void {
       const statusWorktreeId = data.worktreeId ?? owningWorktreeId
       const update: AgentStatusUpdate = {
         paneKey,
-        payload: statusPayloadWithBackgroundWork,
+        payload: statusPayloadWithObservation,
         terminalTitle,
         timing: {
           updatedAt: data.receivedAt,

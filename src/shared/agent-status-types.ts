@@ -3,6 +3,7 @@
 // a narrow interrupt fallback synthesizes a final `done` when an agent misses its cancellation hook.
 
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
+import type { WithAgentStatusObservation } from './agent-status-observation'
 import {
   normalizeInteractivePromptField,
   normalizeOptionalField,
@@ -151,13 +152,14 @@ export type AgentStatusEntry = {
    *  the transition may have been missed while no receiver was up, so freshness gates
    *  treat the row as stale immediately. Cleared by any accepted live event. */
   restoredUnconfirmed?: boolean
-  /** True while the provider still owns live background work on this pane — a running
-   *  shell it launched, or a scheduled session cron — even though the turn itself is done.
-   *  Why: `done` answers "is the agent idle", not "is this pane safe to tear down". Anything
-   *  that kills the PTY (agent hibernation) must consult this or it silently kills the
-   *  user's dev server. Live-only: a restarted listener cannot re-derive it. */
+  /** Tri-state provider background-work evidence for this pane: `true` live work, `false`
+   *  positively none, ABSENT never observed in this runtime.
+   *  Why: `done` answers "is the agent idle", not "is this pane safe to tear down". Anything that
+   *  kills the PTY (agent hibernation) must consult this or it silently kills the user's dev
+   *  server — and must treat absent as "do not touch", because a restarted listener cannot
+   *  re-derive it and "not told" is not an all-clear. Never persisted. */
   providerBackgroundWorkActive?: boolean
-}
+} & WithAgentStatusObservation
 
 export type MigrationUnsupportedPtyEntry = {
   ptyId: string
@@ -260,7 +262,7 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   restoredUnconfirmed?: boolean
   /** See AgentStatusEntry.providerBackgroundWorkActive. */
   providerBackgroundWorkActive?: boolean
-}
+} & WithAgentStatusObservation
 
 /** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */
 export type AgentStatusClearIpcPayload =
