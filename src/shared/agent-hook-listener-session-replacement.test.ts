@@ -75,6 +75,14 @@ describe('Claude session replacement voids the replaced session claims', () => {
     const state = createHookListenerState()
     const paneKey = makePaneKey('teammate-kept', LEAF_ID)
 
+    // Anchor the owning session on a LEAD event first. Subagent/teammate events branch out of
+    // normalizeClaudeEvent before the void ever runs, so without this the replacement below finds
+    // no previous owner, returns early, and the assertion certifies a guard it never exercised.
+    claudeEvent(state, paneKey, {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION_A,
+      prompt: 'spin up the team'
+    })
     claudeEvent(state, paneKey, {
       hook_event_name: 'SubagentStart',
       session_id: SESSION_A,
@@ -95,8 +103,12 @@ describe('Claude session replacement voids the replaced session claims', () => {
     const tracked = state.claudeSubagentRosterByPaneKey.get(paneKey)?.get('arev-0000000000000001')
     expect(tracked?.confirmedTeammate).toBe(true)
     expect(tracked?.state).toBe('working')
+    expect(state.claudeSessionOwnerByPaneKey.get(paneKey)).toBe(SESSION_A)
 
     stop(state, paneKey, SESSION_B)
+
+    // The replacement really happened, so the surviving row below is the guard's doing.
+    expect(state.claudeSessionOwnerByPaneKey.get(paneKey)).toBe(SESSION_B)
 
     expect(
       state.claudeSubagentRosterByPaneKey.get(paneKey)?.get('arev-0000000000000001')?.state

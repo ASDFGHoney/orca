@@ -34,6 +34,22 @@ function claudeRow(server: AgentHookServer, state: 'working' | 'waiting' | 'done
   })
 }
 
+/** A row carrying a resumable provider session — the only shape `dropStatusEntry` retains. */
+function resumableClaudeRow(server: AgentHookServer): void {
+  server.ingestRemote(
+    {
+      paneKey: PANE,
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      source: 'claude',
+      hookEventName: 'UserPromptSubmit',
+      providerSession: { key: 'session_id', id: 'resume-me' },
+      payload: { state: 'working', prompt: 'review the PR', agentType: 'claude' }
+    },
+    'conn-a'
+  )
+}
+
 function paneState(server: AgentHookServer): string {
   return server.getStatusSnapshotForPane(PANE)[0]?.state ?? 'missing'
 }
@@ -91,6 +107,47 @@ describe('reconcileEndedProcessForPaneKeys', () => {
     const server = await startServer()
     try {
       expect(server.reconcileEndedProcessForPaneKeys([PANE])).toBe(0)
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('keeps the resume identity a paired dismissal minted when the shell outlived the agent', async () => {
+    // The renderer's confirmed-shell route calls agentStatus:drop FIRST, which deliberately mints a
+    // providerSessionOnly remnant, then this. That remnant carries no state claim — it cannot gate a
+    // pane `working` — and the pane's PTY is still there to resume into, so retiring the pane's live
+    // claims must not take it. Without the option it goes with everything else.
+    const server = await startServer()
+    try {
+      resumableClaudeRow(server)
+      server.dropStatusEntry(PANE)
+      const afterDrop = server.getStatusSnapshotForPane(PANE)[0]
+      expect(afterDrop?.providerSessionOnly).toBe(true)
+      expect(afterDrop?.providerSession?.id).toBe('resume-me')
+
+      expect(
+        server.reconcileEndedProcessForPaneKeys([PANE], { preserveResumeIdentity: true })
+      ).toBe(1)
+
+      const kept = server.getStatusSnapshotForPane(PANE)[0]
+      expect(kept?.providerSessionOnly).toBe(true)
+      expect(kept?.providerSession?.id).toBe('resume-me')
+      // The live claims still went: a latch left behind would re-gate the pane on its next event.
+      expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(false)
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('takes the resume identity too on a certified PTY exit, where no pane is left to resume into', async () => {
+    const server = await startServer()
+    try {
+      resumableClaudeRow(server)
+      server.dropStatusEntry(PANE)
+
+      expect(server.reconcileEndedProcessForPaneKeys([PANE])).toBe(1)
+
+      expect(paneState(server)).toBe('missing')
     } finally {
       server.stop()
     }

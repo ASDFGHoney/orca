@@ -210,6 +210,26 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   state.codexLeadStateByPaneKey.delete(paneKey)
 }
 
+/** Does this pane still hold anything that can ASSERT a state — a stored row, or a Claude latch that
+ *  `resolveClaudePaneState` would re-gate `working` from on the pane's next event?
+ *
+ *  Deliberately lives next to `clearPaneCacheState` above and enumerates the claim-bearing subset of
+ *  what that function deletes: the two must be edited together, and keeping them three lines apart in
+ *  one file is what makes that obvious. Prompt/tool/transcript caches are excluded — they render a
+ *  row, they never create one. */
+export function paneHasStateClaims(state: HookListenerState, paneKey: string): boolean {
+  return (
+    state.lastStatusByPaneKey.has(paneKey) ||
+    state.claudeSubagentRosterByPaneKey.has(paneKey) ||
+    state.claudeLeadStateByPaneKey.has(paneKey) ||
+    state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+    state.claudeActiveSessionCronPaneKeys.has(paneKey) ||
+    state.claudeSessionOwnerByPaneKey.has(paneKey) ||
+    state.codexSubagentRosterByPaneKey.has(paneKey) ||
+    state.codexLeadStateByPaneKey.has(paneKey)
+  )
+}
+
 function movePaneScopedMapEntries<T>(
   map: Map<string, T>,
   fromPaneKey: string,
@@ -2968,12 +2988,10 @@ function voidClaimsOfReplacedClaudeSession(
     return
   }
   // Why: a compact restart mints a SessionStart mid-turn under the same conversation; the existing
-  // handler already fails closed on non-idle sources, and this must not undercut it.
-  if (
-    eventName === 'SessionStart' ||
-    hookPayload.trigger === 'manual' ||
-    hookPayload.trigger === 'auto'
-  ) {
+  // handler already fails closed on non-idle sources, and this must not undercut it. No other
+  // allow-listed event carries a compact `trigger`, so SessionStart is the whole guard — if a
+  // compact event is ever added to CLAUDE_SESSION_OWNER_EVENTS, re-derive one for it deliberately.
+  if (eventName === 'SessionStart') {
     return
   }
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)

@@ -62,6 +62,26 @@ describe('onPtyExit agent-status reconciliation', () => {
     expect(reconciledPaneKeys(reconcile.mock.calls.map(([keys]) => keys))).toContain(PANE)
   })
 
+  it('reconciles a provider-observed -1 on a pane bound to a transport, where the SSH surface is preserved', () => {
+    // A WSL pane carries a `wsl:*` connectionId, so a negative exit keeps the abnormal-SSH surface
+    // (liveness unverifiable, launch authority not retired) — but the daemon provider's own exit
+    // callback still witnessed the process die. The two decisions are deliberately independent;
+    // without this the connectionId arm of the certificate is never exercised.
+    const reconcile = vi.fn()
+    runtimeWithBoundPane(reconcile, { connectionId: 'wsl:Ubuntu' }).onPtyExit(PTY, -1, undefined, {
+      providerExitObserved: true
+    })
+
+    expect(reconciledPaneKeys(reconcile.mock.calls.map(([keys]) => keys))).toContain(PANE)
+  })
+
+  it('does NOT reconcile a transport-bound synthetic -1, whose remote PTY is designed to survive it', () => {
+    const reconcile = vi.fn()
+    runtimeWithBoundPane(reconcile, { connectionId: 'ssh-conn-1' }).onPtyExit(PTY, -1)
+
+    expect(reconcile).not.toHaveBeenCalled()
+  })
+
   it('does NOT reconcile a synthetic -1 from a failed stop, whose PTY may have survived', () => {
     const reconcile = vi.fn()
     runtimeWithBoundPane(reconcile).onPtyExit(PTY, -1)

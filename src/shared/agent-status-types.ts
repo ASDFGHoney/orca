@@ -151,6 +151,13 @@ export type AgentStatusEntry = {
    *  the transition may have been missed while no receiver was up, so freshness gates
    *  treat the row as stale immediately. Cleared by any accepted live event. */
   restoredUnconfirmed?: boolean
+  /** Renderer-local count of ACCEPTED status writes this pane's row has taken. Incremented only by
+   *  the store's accept branch, off the row it replaces, and carried through by every field-level
+   *  rewrite — so it answers "did the pane report again?", which `updatedAt` cannot, because the
+   *  accept rule admits equal timestamps. Lives on the row rather than in a side table so no
+   *  teardown path can reset it out from under a reader (STA-4612). Never sent over IPC or
+   *  persisted to last-status.json. */
+  acceptedStatusSeq?: number
 }
 
 export type MigrationUnsupportedPtyEntry = {

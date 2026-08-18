@@ -6,7 +6,6 @@ import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anc
 import { installTerminalImeCompositionRoute } from './terminal-ime-composition-route'
 import { detectAgentStatusFromTitle, agentTypeToIconAgent, isClaudeAgent } from '@/lib/agent-status'
 import { reportWorkerTerminalUserInput } from '@/lib/worker-terminal-takeover-report'
-import { getAcceptedAgentStatusGeneration } from '@/store/slices/agent-status'
 import { resolvePaneTitleDecision } from './terminal-title-evidence'
 import { blocksCodexPaneInput } from '../codex-restart-notice-state'
 import { resolveLiveAgentStatusConnectionRouting } from '@/lib/agent-status-connection-ownership'
@@ -1935,13 +1934,19 @@ export function connectPanePty(
    *  this must also retire the main-side per-pane caches — a surviving Claude latch resolves the
    *  next event straight back to `working`.
    *
-   *  Ordered by the pane's accepted-status generation rather than by row identity: the confirming
-   *  process read can take seconds, and an unrelated field moving in that window is not evidence the
-   *  agent is alive — while a genuinely newer row can share the anchor's millisecond, so a timestamp
-   *  cannot separate the two. A relaunch inside the window is already handled by onCommandStarted,
-   *  which discards the armed drop. */
-  const reconcileEndedProcessIfPaneQuiet = (armedGeneration: number): void => {
-    if (getAcceptedAgentStatusGeneration(cacheKey) !== armedGeneration) {
+   *  Ordered by the row's `acceptedStatusSeq`, not by row identity or `updatedAt`: the confirming
+   *  process read can take seconds, an unrelated field moving in that window is not evidence the
+   *  agent is alive, and a genuinely newer row can share the anchor's millisecond. Reading the token
+   *  off the row is what makes the ordering safe — the paired drop below runs FIRST and removes the
+   *  row, and a removed row means nothing reported, not "the anchor is gone".
+   *
+   *  Residual: a row deleted by some OTHER path mid-window and then rebuilt restarts its count, so a
+   *  pane armed at 1 that reports exactly once more compares equal. It needs a foreign drop inside
+   *  the confirm window; the relaunch case that would otherwise hit it is already discarded by
+   *  onCommandStarted, and the cost is retiring a pane the process table just proved is a shell. */
+  const reconcileEndedProcessIfPaneQuiet = (armedAcceptedStatusSeq: number | undefined): void => {
+    const current = useAppStore.getState().agentStatusByPaneKey[cacheKey]
+    if (current && current.acceptedStatusSeq !== armedAcceptedStatusSeq) {
       return
     }
     // Why: main-side only. The renderer row and launch config are already owned by the deferred
@@ -2232,11 +2237,12 @@ export function connectPanePty(
     if (shouldDeferStatusDrop) {
       // Why: keep the concrete pane identity routable while the local process
       // check distinguishes a leaked nested-shell D from a genuine agent exit.
-      // Anchor the generation once, here — not per rung of the confirm ladder, which can span
-      // seconds — so the gate tolerates churn across the whole window.
-      const armedGeneration = getAcceptedAgentStatusGeneration(cacheKey)
+      // Anchor the accepted-status ordinal once, here — not per rung of the confirm ladder, which
+      // can span seconds — so the gate tolerates churn across the whole window.
+      const armedAcceptedStatusSeq = entry?.acceptedStatusSeq
       deferredCommandFinishedStatusDrop = dropStatus
-      deferredConfirmedShellReconcile = () => reconcileEndedProcessIfPaneQuiet(armedGeneration)
+      deferredConfirmedShellReconcile = () =>
+        reconcileEndedProcessIfPaneQuiet(armedAcceptedStatusSeq)
       return
     }
     deferredConfirmedShellReconcile = null

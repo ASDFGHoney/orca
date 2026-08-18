@@ -334,6 +334,60 @@ describe('connectPanePty', () => {
     expect(window.api.agentStatus.reconcileEndedProcess).toHaveBeenCalledWith(paneKey)
   })
 
+  it('reconciles a pane that HAS a status row, whose own drop removes it first', async () => {
+    // Why this shape: the sibling test above covers a pane with no row, where the deferred drop
+    // early-returns and never touches the pane's accepted-status bookkeeping. That is not the
+    // production case. A pane worth reconciling always HAS a row — and settling runs the drop
+    // BEFORE the reconcile, so the reconcile must survive its own drop having already fired.
+    vi.useFakeTimers()
+    const { connectPanePty } = await import('./pty-connection')
+    // Both imported after vi.resetModules() so they share pty-connection's module registry; a
+    // static top-level import here is a DIFFERENT instance and the assertion goes vacuous.
+    const { createTestStore } = await import('@/store/slices/store-test-helpers')
+    vi.mocked(window.api.pty.confirmForegroundProcess).mockResolvedValue('powershell.exe')
+    vi.mocked(window.api.agentStatus.reconcileEndedProcess).mockClear()
+    const dataCallbackRef: { current: ((data: string) => void) | null } = { current: null }
+    const ptyId = 'pty-claude-row-confirmed-shell'
+    const transport = createMockTransport(ptyId)
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      dataCallbackRef.current = callbacks.onData ?? null
+      return { id: ptyId }
+    })
+    transportFactoryQueue.push(transport)
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+
+    connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps({ isVisibleRef: { current: false } }) as never
+    )
+    await vi.advanceTimersByTimeAsync(20)
+    await flushAsyncTicks()
+
+    // A real accepted status write, through the real slice, so the row carries whatever
+    // bookkeeping the store stamps on an accepted write. `working` is the shape STA-4612 is about:
+    // a latch is holding the pane open and the agent is about to exit out from under it.
+    const realStore = createTestStore()
+    realStore
+      .getState()
+      .setAgentStatus(paneKey, { state: 'working', prompt: 'ship it', agentType: 'claude' })
+    const row = realStore.getState().agentStatusByPaneKey[paneKey]
+    expect(row).toBeDefined()
+    mockStoreState.agentStatusByPaneKey[paneKey] = row
+    // The real dismissal removes the row and runs the slice's own teardown; mirror both, or the
+    // ordering this test exists to pin is never exercised.
+    mockStoreState.dropAgentStatus.mockImplementation((key: string) => {
+      delete mockStoreState.agentStatusByPaneKey[key]
+      realStore.getState().dropAgentStatus(key)
+    })
+
+    dataCallbackRef.current?.('\x1b]133;D;0\x07')
+    await vi.advanceTimersByTimeAsync(350)
+
+    expect(mockStoreState.dropAgentStatus).toHaveBeenCalledWith(paneKey)
+    expect(window.api.agentStatus.reconcileEndedProcess).toHaveBeenCalledWith(paneKey)
+  })
+
   it('does NOT reconcile when the process check could not confirm a shell', async () => {
     vi.useFakeTimers()
     const { connectPanePty } = await import('./pty-connection')
@@ -362,8 +416,17 @@ describe('connectPanePty', () => {
     }
 
     dataCallbackRef.current?.('\x1b]133;D;0\x07')
-    await vi.advanceTimersByTimeAsync(350)
+    // Run the whole confirm ladder. At 350ms the unavailable branch has not settled yet, so
+    // asserting there proves nothing — it would pass just as happily if this path DID tear the
+    // pane down a moment later.
+    await vi.advanceTimersByTimeAsync(350 + 1200 + 6000)
+    await flushAsyncTicks()
 
+    // The unavailable branch really ran: it publishes an unproven foreground before settling.
+    expect(mockStoreState.paneForegroundAgentByPaneKey[paneKey]).toEqual({
+      agent: null,
+      shellForeground: false
+    })
     expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalled()
   })
 
