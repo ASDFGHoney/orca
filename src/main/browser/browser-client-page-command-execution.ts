@@ -1,6 +1,10 @@
 import type { BrowserClientAutomationMethod } from '../../shared/browser-client-automation-protocol'
 import type { BrowserClientHostCommandEvent } from '../../shared/browser-client-host-protocol'
+import { requiresBrowserClientFileChannel } from '../../shared/browser-client-file-channel-methods'
 import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
+import { executeBrowserClientUploadCommand } from './browser-client-upload-command'
+import type { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import type { BrowserClientUploadStaging } from './browser-client-upload-staging'
 import {
   assertBrowserClientPageCommandNotAborted,
   assertCurrentBrowserClientPageRenderer
@@ -50,7 +54,11 @@ export async function executeBrowserClientPageAutomationCommand(
     signal: AbortSignal
   ) => Promise<unknown>,
   event: BrowserClientHostCommandEvent,
-  signal: AbortSignal
+  signal: AbortSignal,
+  fileChannel?: {
+    transport: BrowserClientFileChannelTransport | undefined
+    staging: BrowserClientUploadStaging | undefined
+  }
 ): Promise<unknown> {
   if (event.command.type !== 'automation') {
     throw new BrowserClientPageCommandError('browser_client_page_command_invalid')
@@ -58,17 +66,34 @@ export async function executeBrowserClientPageAutomationCommand(
   const page = requireCommandPage(pages, event)
   assertBrowserClientPageCommandNotAborted(signal)
   assertCurrentBrowserClientPageRenderer(page.renderer)
-  return execute(
-    {
-      browserPageId: event.browserPageId,
-      pageHostGeneration: event.pageHostGeneration,
-      browserProfileId: page.inventory.browserProfileId,
-      method: event.command.method,
-      params: event.command.params,
-      registration: page.registration
-    },
-    signal
-  )
+  const method = event.command.method
+  const run = (params: Record<string, unknown>): Promise<unknown> =>
+    execute(
+      {
+        browserPageId: event.browserPageId,
+        pageHostGeneration: event.pageHostGeneration,
+        browserProfileId: page.inventory.browserProfileId,
+        method,
+        params,
+        registration: page.registration
+      },
+      signal
+    )
+  if (!requiresBrowserClientFileChannel(method)) {
+    return run(event.command.params)
+  }
+  if (method !== 'browser.upload') {
+    // Why: v1 has no way to honor an agent-supplied download path on the remote workspace, and
+    // resolving it on the desktop is the defect this channel exists to remove.
+    throw new BrowserClientPageCommandError('browser_client_download_path_unsupported')
+  }
+  return executeBrowserClientUploadCommand({
+    event,
+    params: event.command.params,
+    fileChannel: fileChannel?.transport,
+    staging: fileChannel?.staging,
+    run
+  })
 }
 
 function requireCommandPage(

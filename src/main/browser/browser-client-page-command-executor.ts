@@ -85,7 +85,11 @@ export class BrowserClientPageCommandExecutor {
           this.pages,
           this.dependencies.executeAutomation,
           event,
-          signal
+          signal,
+          {
+            transport: this.dependencies.fileChannel,
+            staging: this.dependencies.uploadStaging
+          }
         )
       case 'reclaimPage':
       case 'closePage':
@@ -247,12 +251,28 @@ export class BrowserClientPageCommandExecutor {
     )
   }
 
+  // Why: the download relay only knows the guest WebContents, and staging is keyed by page identity.
+  findPageByWebContentsId(webContentsId: number): BrowserClientHostedPageInventory | undefined {
+    for (const page of this.pages.values()) {
+      if (
+        page.registration.webContentsId === webContentsId &&
+        !page.retiring &&
+        !page.reconciling
+      ) {
+        return page.inventory
+      }
+    }
+    return undefined
+  }
+
   private async cleanupPage(
     page: BrowserClientRetainedPage,
     previousRendererPage?: BrowserClientPageRendererIdentity
   ): Promise<void> {
     page.releaseAvailabilityWatch?.()
     page.releaseAvailabilityWatch = undefined
+    // Why: staged upload copies of remote files must not outlive the page that asked for them.
+    await this.dependencies.uploadStaging?.releasePage(page.inventory.browserPageId)
     return cleanupRetainedBrowserClientPage(
       page,
       {
@@ -281,6 +301,9 @@ export class BrowserClientPageCommandExecutor {
         failures.push(error)
       }
     }
+    await this.dependencies.uploadStaging?.releaseAll().catch((error: unknown) => {
+      failures.push(error)
+    })
     if (failures.length > 0) {
       throw new AggregateError(failures, 'Browser client page executor cleanup failed')
     }

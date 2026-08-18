@@ -1,4 +1,6 @@
 import type { BrowserClientAutomationMethod } from '../../shared/browser-client-automation-protocol'
+import type { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import type { BrowserClientUploadStaging } from './browser-client-upload-staging'
 import type {
   BrowserClientPageNetworkRoute,
   BrowserClientPageRenderer
@@ -38,5 +40,8 @@ export type BrowserClientPageCommandExecutorDependencies = {
     registration: BrowserClientRetainedPage['registration']
   }): Promise<void>
   onPageUnavailable?(browserPageId: string, pageHostGeneration: number): void
+  // Why: remote-path uploads need the negotiated file channel; without both the command fails closed.
+  fileChannel?: BrowserClientFileChannelTransport
+  uploadStaging?: BrowserClientUploadStaging
   maxPages?: number
 }

@@ -1,0 +1,142 @@
+import { randomUUID } from 'node:crypto'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+
+import {
+  BROWSER_CLIENT_FILE_CHANNEL_MAX_FILES_PER_COMMAND,
+  BROWSER_CLIENT_FILE_CHANNEL_TRANSFER_MAX_BYTES
+} from '../../shared/browser-client-file-channel-protocol'
+import { normalizeBrowserDownloadFilename } from '../../shared/browser-download-filename'
+
+export type BrowserClientStagedUpload = {
+  stagingId: string
+  localFilePaths: readonly string[]
+}
+
+type StagedDirectory = {
+  stagingId: string
+  browserPageId: string
+  pageHostGeneration: number
+  directory: string
+}
+
+type StagingFilesystem = {
+  mkdir(directory: string): Promise<void>
+  writeFile(filePath: string, contents: Buffer): Promise<void>
+  removeDirectory(directory: string): Promise<void>
+}
+
+const nodeStagingFilesystem: StagingFilesystem = {
+  mkdir: async (directory) => {
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+  },
+  writeFile: async (filePath, contents) => {
+    await writeFile(filePath, contents, { mode: 0o600 })
+  },
+  removeDirectory: async (directory) => {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Owns the desktop-side scratch copies of remote workspace files that a client-placed page uploads.
+ * Remote-supplied paths are never resolved against the desktop filesystem; only bytes handed to
+ * `stage` reach disk, under a main-owned directory that is removed when the page is fenced.
+ */
+export class BrowserClientUploadStaging {
+  private readonly staged = new Map<string, StagedDirectory>()
+  private readonly filesystem: StagingFilesystem
+
+  constructor(
+    private readonly stagingRoot: string,
+    filesystem: StagingFilesystem = nodeStagingFilesystem
+  ) {
+    this.filesystem = filesystem
+  }
+
+  async stage(input: {
+    browserPageId: string
+    pageHostGeneration: number
+    files: readonly { remotePath: string; contents: Buffer }[]
+  }): Promise<BrowserClientStagedUpload> {
+    if (input.files.length === 0) {
+      throw new Error('browser_client_upload_files_required')
+    }
+    if (input.files.length > BROWSER_CLIENT_FILE_CHANNEL_MAX_FILES_PER_COMMAND) {
+      throw new Error('browser_client_upload_file_count_exceeded')
+    }
+    const totalBytes = input.files.reduce((sum, file) => sum + file.contents.byteLength, 0)
+    if (totalBytes > BROWSER_CLIENT_FILE_CHANNEL_TRANSFER_MAX_BYTES) {
+      throw new Error('browser_client_upload_too_large')
+    }
+    const stagingId = randomUUID()
+    const directory = path.join(this.stagingRoot, stagingId)
+    const record: StagedDirectory = {
+      stagingId,
+      browserPageId: input.browserPageId,
+      pageHostGeneration: input.pageHostGeneration,
+      directory
+    }
+    this.staged.set(stagingId, record)
+    try {
+      await this.filesystem.mkdir(directory)
+      const localFilePaths: string[] = []
+      for (const [index, file] of input.files.entries()) {
+        // Why: one subdirectory per file keeps the exact basename the site receives, with no collisions.
+        const fileDirectory = path.join(directory, String(index))
+        await this.filesystem.mkdir(fileDirectory)
+        const localFilePath = path.join(fileDirectory, stagedFilename(file.remotePath))
+        await this.filesystem.writeFile(localFilePath, file.contents)
+        localFilePaths.push(localFilePath)
+      }
+      return { stagingId, localFilePaths }
+    } catch (error) {
+      await this.release(stagingId)
+      throw error
+    }
+  }
+
+  async release(stagingId: string): Promise<boolean> {
+    const record = this.staged.get(stagingId)
+    if (!record) {
+      return false
+    }
+    this.staged.delete(stagingId)
+    await this.filesystem.removeDirectory(record.directory)
+    return true
+  }
+
+  async releasePage(browserPageId: string, pageHostGeneration?: number): Promise<number> {
+    const owned = [...this.staged.values()].filter(
+      (record) =>
+        record.browserPageId === browserPageId &&
+        (pageHostGeneration === undefined || record.pageHostGeneration === pageHostGeneration)
+    )
+    for (const record of owned) {
+      await this.release(record.stagingId)
+    }
+    return owned.length
+  }
+
+  async releaseAll(): Promise<void> {
+    for (const stagingId of Array.from(this.staged.keys())) {
+      await this.release(stagingId)
+    }
+  }
+
+  stagedDirectory(stagingId: string): string | undefined {
+    return this.staged.get(stagingId)?.directory
+  }
+
+  activeStagingCount(): number {
+    return this.staged.size
+  }
+}
+
+// Why: the guest sees this name in the file input, so keep the remote basename but strip every
+// separator and reserved form first — the remote controls this string. Windows rules are applied on
+// every platform so a staged name never depends on where the desktop runs.
+function stagedFilename(remotePath: string): string {
+  const basename = remotePath.replace(/\\/g, '/').split('/').at(-1) ?? ''
+  return normalizeBrowserDownloadFilename(basename, 'win32')
+}
