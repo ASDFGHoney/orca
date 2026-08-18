@@ -1,8 +1,5 @@
-// STA-4513 / STA-3714: a worker parked on an interactive prompt must be distinguishable
-// from one that is thinking or inside a long tool call. Before this, `terminal show` and
-// `orchestration worker-show` carried no such field, and cursor-agent's approval menu was
-// not detected at all — its hook set has no approval event, so control and case reported
-// byte-identical `working` on every coordinator surface.
+// A worker parked on an interactive prompt must be distinguishable from one that is thinking
+// or inside a long tool call (STA-4513, STA-3714).
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'

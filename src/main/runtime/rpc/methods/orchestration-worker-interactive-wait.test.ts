@@ -1,7 +1,5 @@
-// STA-3714 / STA-4513: `worker-show` is the per-lane call a coordinator makes, and it
-// reported a worker parked on a human prompt exactly the same as one mid tool call.
-// Deliberately unmocked below the RPC: the runtime, its PTY tail, and the detector all run,
-// so this fails if the prompt scan, the observation plumbing, or the RPC shape regresses.
+// `worker-show` must distinguish a worker parked on a human prompt (STA-3714, STA-4513).
+// Deliberately unmocked below the RPC so detector, plumbing, and RPC shape are all covered.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +39,7 @@ describe('worker-show interactive wait (STA-3714, STA-4513)', () => {
 
   afterEach(() => db?.close())
 
-  async function showWorkerPaneServing(paneOutput: string) {
+  async function showWorkerPaneServing(paneOutput: string, opts?: { breakIdentity?: boolean }) {
     const runtime = new OrcaRuntimeService(null)
     const internals = runtime as unknown as {
       resolveTerminalWorkspaceLaunchScope: (selector: string) => Promise<unknown>
@@ -107,9 +105,14 @@ describe('worker-show interactive wait (STA-3714, STA-4513)', () => {
       terminal.handle,
       paneKey,
       'launch-hash',
-      incarnation
+      // A dispatch recorded against a process that has since been replaced.
+      opts?.breakIdentity === true ? `${incarnation}:replaced` : incarnation
     )
-    db.mintDispatchCapability({ dispatchId: dispatch.id, paneKey, processIncarnation: incarnation })
+    db.mintDispatchCapability({
+      dispatchId: dispatch.id,
+      paneKey,
+      processIncarnation: opts?.breakIdentity === true ? `${incarnation}:replaced` : incarnation
+    })
 
     const method = workerShowMethod()
     return method.handler(method.params?.parse({ dispatch: dispatch.id }), { runtime })
@@ -136,6 +139,17 @@ describe('worker-show interactive wait (STA-3714, STA-4513)', () => {
     const result = await showWorkerPaneServing(fixture('cursor-agent-long-tool-call'))
 
     expect(result).toMatchObject({ observation: { exactWorker: true, agentWait: null } })
+  })
+
+  it('omits the field entirely for a worker it could not verify', async () => {
+    // Why not null: null is a claim that Orca looked. A replaced process is never looked at,
+    // and reporting "no wait" there is the false negative this field exists to remove.
+    const result = (await showWorkerPaneServing(fixture('cursor-agent-approval-prompt'), {
+      breakIdentity: true
+    })) as { observation: Record<string, unknown> }
+
+    expect(result.observation.exactWorker).toBe(false)
+    expect('agentWait' in result.observation).toBe(false)
   })
 
   it('agrees with the terminal payload it is derived from', async () => {

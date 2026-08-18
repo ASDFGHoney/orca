@@ -122,7 +122,7 @@ export function formatTerminalShow(result: { terminal: RuntimeTerminalShow }): s
 
 function formatAgentWait(agentWait: RuntimeTerminalShow['agentWait']): string {
   if (agentWait === undefined) {
-    return 'unknown (host predates the field)'
+    return 'unknown (not evaluated)'
   }
   if (!agentWait) {
     return 'none'

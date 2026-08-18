@@ -45,7 +45,7 @@ export const ORCHESTRATION_WORKER_COMMAND_SPECS: CommandSpec[] = [
     allowedFlags: [...GLOBAL_FLAGS, 'dispatch'],
     notes: [
       'A Dispatch created by orchestration dispatch is shown as unsupervised and reports the exact adopted terminal when its identity is still provable.',
-      'observation.agentWait names a worker parked on a prompt only a human can answer, with the evidence that proved it (hook, prompt-text, or title). Null means no proof of a wait; a missing field means the host predates it. A waiting worker is healthy, not failed.'
+      'observation.agentWait names a worker parked on a prompt only a human can answer, with the evidence that proved it (hook, prompt-text, or title). Null means Orca looked and found no wait; an absent field means it never looked, because the host predates the field or the worker identity was unverifiable. A waiting worker is healthy, not failed.'
     ]
   },
   {

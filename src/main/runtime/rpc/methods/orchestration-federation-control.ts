@@ -42,7 +42,7 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
           status: observation.status,
           exactWorker: observation.exact,
           ...(observation.reason ? { reason: observation.reason } : {}),
-          agentWait: observation.agentWait ?? null
+          ...(observation.agentWait !== undefined ? { agentWait: observation.agentWait } : {})
         }
       }
     }
@@ -242,7 +242,7 @@ async function inspectRemoteAttachment(
   // iterates registered providers, so a dropped relay clears `connected` for
   // every remote PTY at once. Lost contact is not a death certificate.
   // Why reused: showTerminal above already scanned this pane's tail for the same verdict.
-  const agentWait = terminal.agentWait ?? null
+  const agentWait = terminal.agentWait
   const verdict = runtime.getTerminalLivenessVerdict?.(attachment.terminal_handle) ?? null
   if (verdict?.status === 'unverifiable') {
     return { terminal, exact, status: 'unverifiable', reason: verdict.reason, agentWait }

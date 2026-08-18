@@ -46,7 +46,7 @@ export async function inspectWorkerTerminal(
   // tail for the same verdict, and a second scan could also disagree with the one it published.
   // Exact-gated by the early return above: a replaced process's prompt would attribute another
   // lane's blocker to this worker.
-  const agentWait = terminal.agentWait ?? null
+  const agentWait = terminal.agentWait
   const verdict = runtime.getTerminalLivenessVerdict?.(terminalHandle) ?? null
   if (verdict?.status === 'unverifiable') {
     return { terminal, exact, status: 'unverifiable', reason: verdict.reason, agentWait }
@@ -94,7 +94,7 @@ export async function showContextOnlyWorker(
       status: observation.status,
       exactWorker: observation.exact,
       ...(observation.reason ? { reason: observation.reason } : {}),
-      agentWait: observation.agentWait ?? null
+      ...(observation.agentWait !== undefined ? { agentWait: observation.agentWait } : {})
     },
     terminalResource: null
   }
