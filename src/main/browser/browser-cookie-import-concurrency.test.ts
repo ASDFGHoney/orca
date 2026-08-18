@@ -304,7 +304,9 @@ describe('two concurrent NATIVE imports into one partition', () => {
           ]),
         remove: vi.fn().mockResolvedValue(undefined),
         set: cookiesSetMock,
-        flushStore: vi.fn().mockResolvedValue(undefined)
+        flushStore: vi.fn(async () => {
+          events.push('flushStore')
+        })
       },
       clearData: vi.fn(async () => {
         events.push('clearData')
@@ -342,8 +344,9 @@ describe('two concurrent NATIVE imports into one partition', () => {
     const second = importCookiesFromBrowser(chromeBrowser(sourceB), 'persist:native-conc')
     await new Promise((resolve) => setTimeout(resolve, 25))
 
-    // The first import is parked inside its write. The second must not have cleared yet — this is
-    // the assertion that fails if path B stops taking the lock.
+    // The first import is parked inside its write. The second must not flush or clear the live jar
+    // while that transaction is active — either assertion fails if the whole-function lock narrows.
+    expect(events.filter((e) => e === 'flushStore')).toHaveLength(1)
     expect(events.filter((e) => e === 'clearData')).toHaveLength(1)
     expect(events).not.toContain('set:second')
 
