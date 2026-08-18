@@ -122,6 +122,40 @@ describe('probeWindowsInstallDirAcl', () => {
     expect(data.matchesPoisonSignature).toBe(true)
   })
 
+  it('does not let a grant on one target mask its absence on another', async () => {
+    const data = await probe({
+      spawnFn: fakeSpawn((target) =>
+        target.endsWith('ffmpeg.dll')
+          ? dacl(target, ORPHAN)
+          : dacl(target, RESTRICTED_GRANT, ORPHAN)
+      ).spawnFn
+    })
+    expect(data.hasWellKnownPackageGrant).toBe(true)
+    expect(data.matchesPoisonSignature).toBe(true)
+  })
+
+  it('reports whether the well-known name check could be trusted', async () => {
+    const english = await probeWith(ORPHAN)
+    expect(english.wellKnownNameCheckReliable).toBe(true)
+    const localized = await new Promise<Record<string, unknown>>((resolve) => {
+      resetWindowsInstallDirAclProbeForTest()
+      probeWindowsInstallDirAcl({
+        platform: 'win32',
+        installDir: INSTALL_DIR,
+        fileExists: () => false,
+        spawnFn: fakeSpawn(
+          (target) => `${target} ${ORPHAN}\r\n                    AUTORITE NT\\Systeme:(I)(F)`
+        ).spawnFn,
+        recordBreadcrumb: (_name, d) => {
+          resolve(d as Record<string, unknown>)
+          return undefined
+        }
+      })
+    })
+    expect(localized.matchesPoisonSignature).toBe(true)
+    expect(localized.wellKnownNameCheckReliable).toBe(false)
+  })
+
   it('matches the well-known SIDs exactly, not by prefix', async () => {
     const data = await probeWith('S-1-15-2-1234567890:(OI)(CI)(RX)')
     expect(data.orphanPackageSidCount).toBe(1)
@@ -159,7 +193,7 @@ describe('probeWindowsInstallDirAcl', () => {
 
   it.each([
     ['darwin', { platform: 'darwin' as NodeJS.Platform }],
-    ['serve mode', { isServeMode: true }]
+    ['serve mode', { platform: 'win32' as NodeJS.Platform, isServeMode: true }]
   ])('does no work on %s', async (_label, options) => {
     const fake = fakeSpawn((target) => dacl(target, ORPHAN))
     const record = vi.fn()

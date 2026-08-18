@@ -5,7 +5,7 @@ import {
   sanitizeCrashReportString,
   type CrashReportBreadcrumbData
 } from '../../shared/crash-reporting'
-import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
+import { recordDurableCrashBreadcrumb } from '../crash-reporting/durable-crash-breadcrumb'
 import { getIcaclsExePath } from '../win32-utils'
 
 /**
@@ -33,8 +33,12 @@ const PROBE_BUDGET_MS = 5_000
 /** Raw S-1-15-2-* means icacls could not resolve it — locale-independent. */
 const RAW_PACKAGE_SID = /\bS-1-15-2-[0-9-]+\b/i
 const WELL_KNOWN_PACKAGE_SIDS = new Set(['s-1-15-2-1', 's-1-15-2-2'])
-// icacls localizes these; the raw SID form is never printed for them.
+// icacls localizes these; the raw SID form is never printed for them. Orphan
+// detection stays SID-form and locale-independent, but this check is not — so we
+// report whether the output looked English at all, making a locale-induced
+// false positive recognizable instead of silent.
 const WELL_KNOWN_PACKAGE_NAMES = /ALL (RESTRICTED )?APPLICATION PACKAGES/i
+const ENGLISH_PRINCIPAL = /\b(NT AUTHORITY|BUILTIN|APPLICATION PACKAGE AUTHORITY)\b/i
 // Why: an ACE that denies, or only propagates to children, grants nothing on this
 // object — so it cannot satisfy an orphan the way the reproduced fix did.
 const NON_GRANTING_FLAGS = /\((?:DENY|IO)\)/i
@@ -46,13 +50,14 @@ export type WindowsInstallDirAclProbeOptions = {
   /** Test seams. */
   spawnFn?: typeof spawn
   fileExists?: (path: string) => boolean
-  recordBreadcrumb?: typeof recordCrashBreadcrumb
+  recordBreadcrumb?: typeof recordDurableCrashBreadcrumb
   onDone?: (data: CrashReportBreadcrumbData) => void
 }
 
 type AclFacts = {
   orphanPackageSids: string[]
   hasWellKnownPackageGrant: boolean
+  sawEnglishPrincipal: boolean
 }
 
 function readDacl(spawnFn: typeof spawn, target: string, deadlineMs: number): Promise<string> {
@@ -91,7 +96,11 @@ function readDacl(spawnFn: typeof spawn, target: string, deadlineMs: number): Pr
 function collectAclFacts(daclOutput: string): AclFacts {
   const orphanPackageSids: string[] = []
   let hasWellKnownPackageGrant = false
+  let sawEnglishPrincipal = false
   for (const line of daclOutput.split(/\r?\n/)) {
+    if (ENGLISH_PRINCIPAL.test(line)) {
+      sawEnglishPrincipal = true
+    }
     // icacls glues the echoed path onto the first principal with no separator, so
     // match the principal:(flags) tail rather than trying to split the line.
     const ace = /([^\s:][^:]*):(\([^\s]*\))\s*$/.exec(line.trim())
@@ -109,7 +118,7 @@ function collectAclFacts(daclOutput: string): AclFacts {
       hasWellKnownPackageGrant = true
     }
   }
-  return { orphanPackageSids, hasWellKnownPackageGrant }
+  return { orphanPackageSids, hasWellKnownPackageGrant, sawEnglishPrincipal }
 }
 
 function resolveTargets(installDir: string, fileExists: (path: string) => boolean): string[] {
@@ -118,7 +127,7 @@ function resolveTargets(installDir: string, fileExists: (path: string) => boolea
 }
 
 async function runProbe(options: WindowsInstallDirAclProbeOptions): Promise<void> {
-  const record = options.recordBreadcrumb ?? recordCrashBreadcrumb
+  const record = options.recordBreadcrumb ?? recordDurableCrashBreadcrumb
   let data: CrashReportBreadcrumbData
   try {
     const installDir = options.installDir ?? dirname(process.execPath)
@@ -134,6 +143,12 @@ async function runProbe(options: WindowsInstallDirAclProbeOptions): Promise<void
     const facts = outputs.map(collectAclFacts)
     const orphans = [...new Set(facts.flatMap((f) => f.orphanPackageSids))]
     const hasWellKnownPackageGrant = facts.some((f) => f.hasWellKnownPackageGrant)
+    // Why per target: a grant on the directory does not grant on the module file,
+    // and the reproduced failure is a per-file content read. Merging would let a
+    // grant on one target mask its absence on the other.
+    const poisoned = facts.some(
+      (f) => f.orphanPackageSids.length > 0 && !f.hasWellKnownPackageGrant
+    )
     data = outputs.every((out) => out === '')
       ? { status: 'failed', reason: 'all-targets-unreadable' }
       : {
@@ -144,7 +159,10 @@ async function runProbe(options: WindowsInstallDirAclProbeOptions): Promise<void
           // identify the tool that left it, which is the point of recording it.
           orphanPackageSids: sanitizeCrashReportString(orphans.slice(0, 3).join(','), 200),
           hasWellKnownPackageGrant,
-          matchesPoisonSignature: orphans.length > 0 && !hasWellKnownPackageGrant
+          // False positives are possible on a non-English Windows, where the
+          // well-known ACE resolves to a localized name this cannot match.
+          wellKnownNameCheckReliable: facts.some((f) => f.sawEnglishPrincipal),
+          matchesPoisonSignature: poisoned
         }
   } catch (error) {
     data = { status: 'failed', reason: sanitizeCrashReportString(`probe: ${String(error)}`, 200) }
@@ -163,8 +181,8 @@ export function resetWindowsInstallDirAclProbeForTest(): void {
 
 /**
  * Fire-and-forget; returns before any spawn. win32 only — no spawn and no fs I/O
- * anywhere else. Records into the retained breadcrumb ring, which is what
- * process-gone-recorder snapshots into every crash report.
+ * anywhere else. Called from openMainWindow, which runs after initObservability,
+ * so the durable record also emits a span into the diagnostics bundle.
  */
 export function probeWindowsInstallDirAcl(options: WindowsInstallDirAclProbeOptions = {}): void {
   if ((options.platform ?? process.platform) !== 'win32' || options.isServeMode === true) {
@@ -174,9 +192,8 @@ export function probeWindowsInstallDirAcl(options: WindowsInstallDirAclProbeOpti
     return
   }
   probeStarted = true
-  // Why the try: this runs at the caller's module scope before app.whenReady, so
-  // anything thrown here would abort main-process init and no window would ever
-  // be created. A diagnostic must never be able to do that.
+  // Why the try: this runs inline in openMainWindow, so anything thrown here
+  // propagates into window creation. A diagnostic must never be able to do that.
   try {
     setImmediate(() => {
       void runProbe(options).catch(() => undefined)
