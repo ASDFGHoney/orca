@@ -173,3 +173,51 @@ export async function dispatchResumedCompositionUpdate(page: Page, data: string)
     )
   }, data)
 }
+
+/**
+ * Rewrites text the terminal has already committed, the way a text system that decides *after the
+ * fact* does: the previous characters are removed and replaced, with no key event of their own.
+ *
+ * Two producers share this shape. macOS automatic period substitution rewrites a trailing `" "`
+ * into `". "` on the second space, and a touch-iOS Korean source rewrites the syllable in place on
+ * every jamo (`ㅎ` -> `하` -> `한`) while firing no composition event at all. In both the deletion
+ * carries no `keydown`, so nothing that decides on key events can see it coming.
+ *
+ * SYNTHESISED rather than driven through CDP, and the reason is structural: `Input.insertText`
+ * only inserts at the caret and there is no CDP command that produces a keyless
+ * `deleteContentBackward`. Dispatching a real Backspace would work, but it would also produce a
+ * Backspace *keydown* the real substitution never sends — which is the whole difficulty. Same
+ * escape hatch, and same justification, as `dispatchResumedCompositionUpdate` above.
+ *
+ * The textarea value is mutated before each event because the deferred textarea diff reads it, so
+ * a spec that dispatched the events alone would exercise only half the path.
+ */
+export async function dispatchRetroactiveTextReplacement(
+  page: Page,
+  replacement: { deleteCount: number | 'all'; insertedText: string }
+): Promise<void> {
+  await page.evaluate((step: { deleteCount: number | 'all'; insertedText: string }) => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea:focus')
+    if (!textarea) {
+      throw new Error('xterm helper textarea is not focused')
+    }
+    const fire = (type: string, inputType: string, data: string | null): void => {
+      textarea.dispatchEvent(
+        new InputEvent(type, { bubbles: true, composed: true, data, inputType })
+      )
+    }
+    // 'all' is for a source that replaces its whole in-progress region rather than a fixed count,
+    // which is what an in-place syllable rewrite does and what keeps this robust to whether the
+    // keystroke's own character was inserted before the rewrite ran.
+    const retained = Array.from(textarea.value)
+    const deleteCount = step.deleteCount === 'all' ? retained.length : step.deleteCount
+    retained.splice(retained.length - deleteCount, deleteCount)
+    textarea.value = retained.join('')
+    fire('beforeinput', 'deleteContentBackward', null)
+    fire('input', 'deleteContentBackward', null)
+    textarea.value += step.insertedText
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    fire('beforeinput', 'insertText', step.insertedText)
+    fire('input', 'insertText', step.insertedText)
+  }, replacement)
+}

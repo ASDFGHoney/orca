@@ -31,6 +31,25 @@ type PendingCommit = {
   press: ClaimedKeyPress
   /** Non-null when `keyup` preceded `insertText` — an order some macOS IMEs use. */
   keyup: ImeReleaseKeyEvent | null
+  /**
+   * Set when the text system deleted text it had already committed before
+   * delivering this keystroke's own — the shape of a text-*editing* convenience
+   * like macOS automatic period substitution rewriting `" "` into `". "`, or the
+   * dash, quote and text-replacement rules in the same family.
+   *
+   * That is a different thing from an input source mapping one physical key to
+   * one different character, which is what this forwarder exists to carry.
+   * Nothing here honours the editing kind: no reference terminal does, because
+   * none of them is a text view, so the substitution never reaches them and two
+   * spaces stay two spaces. A browser-based terminal cannot opt out that way —
+   * `autocorrect` and `spellcheck` on the helper textarea govern the browser's
+   * own correction, not the system text service — so the rewrite is declined
+   * here instead and the key sends what it produced.
+   *
+   * The discriminator is structural, not a character table: a
+   * one-key-one-character substitution never deletes first.
+   */
+  rewritten: boolean
 }
 
 /**
@@ -265,7 +284,8 @@ export function installTerminalImeNativeTextForwarder(args: {
           capsLock: event.getModifierState?.('CapsLock') === true,
           numLock: event.getModifierState?.('NumLock') === true
         },
-        keyup: null
+        keyup: null,
+        rewritten: false
       }
       return true
     }
@@ -328,6 +348,15 @@ export function installTerminalImeNativeTextForwarder(args: {
     if (!commit) {
       return
     }
+    if (event.inputType.startsWith('delete')) {
+      // Why the claim stays pending: this deletion is the text system rewriting
+      // what it already committed, and the `insertText` carrying the rewrite is
+      // still inbound. Retiring here sent nothing and left that insert with no
+      // claim to attach to, so the whole keystroke produced no bytes at all.
+      commit.rewritten = true
+      event.stopImmediatePropagation()
+      return
+    }
     pendingCommit = null
     if (event.inputType !== 'insertText') {
       // A non-text input takes the press over; it delivered nothing, so only the
@@ -336,14 +365,17 @@ export function installTerminalImeNativeTextForwarder(args: {
       return
     }
     if (event.data) {
+      // A rewrite is declined, so what goes out is what the key produced rather
+      // than what the text system substituted for it.
+      const deliveredText = commit.rewritten ? commit.press.key : event.data
       // Read the mutable flags EXACTLY once, here: kitty state can change
       // between keydown and commit, and the release must describe the same
       // negotiation the press was encoded under.
       const encoding = encodeImeCommitForKitty(commit.press, args.getKittyKeyboardFlags?.() ?? 0, {
-        committedText: event.data,
+        committedText: deliveredText,
         layoutCharacterForCode: getLayoutCharacterForCode
       })
-      args.sendInput(encoding.report ?? event.data)
+      args.sendInput(encoding.report ?? deliveredText)
       settleCommit(commit, encoding.release)
     } else {
       settleCommit(commit, null)
