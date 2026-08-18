@@ -544,8 +544,9 @@ describe('matchWorktreePaletteTaskUrl', () => {
     ).toMatchObject({ matchedFields: ['mr'] })
   })
 
-  it('stays permissive for a fork whose identity resolved to the upstream remote', () => {
-    // `deriveGitRemoteIdentity` prefers `upstream`, so the fork's own `origin` is not visible here.
+  it('declines a different GitLab project even when the identity came from upstream', () => {
+    // `deriveGitRemoteIdentity` prefers `upstream`, so the fork's own `origin` is not visible here;
+    // an MR URL from the fork itself is the accepted false negative of gating on the known project.
     const forkRepo: Repo = {
       ...gitLabRepo('gitlab.com/acme/orca'),
       gitRemoteIdentity: {
@@ -560,6 +561,14 @@ describe('matchWorktreePaletteTaskUrl', () => {
         intent: parseCmdJTaskSourceUrl('https://gitlab.com/me/orca/-/merge_requests/17')!,
         repo: forkRepo
       })
+    ).toBeNull()
+    // The project the identity does name still matches.
+    expect(
+      matchWorktreePaletteTaskUrl({
+        worktree: makeWorktree({ linkedGitLabMR: 17 }),
+        intent: parseCmdJTaskSourceUrl('https://gitlab.com/acme/orca/-/merge_requests/17')!,
+        repo: forkRepo
+      })
     ).toMatchObject({ matchedFields: ['mr'] })
     // An `origin`-derived identity is authoritative, so a different project still loses.
     expect(
@@ -569,6 +578,33 @@ describe('matchWorktreePaletteTaskUrl', () => {
         repo: gitLabRepo('gitlab.com/acme/orca')
       })
     ).toBeNull()
+  })
+
+  it('does not surface an upstream-identified repo for an unrelated project iid', () => {
+    // STA-4450: iids are per-project, so a bare `linkedGitLabMR` must not span projects.
+    const upstreamRepo: Repo = {
+      ...gitLabRepo('gitlab.com/acme/orca'),
+      gitRemoteIdentity: {
+        canonicalKey: 'gitlab.com/acme/orca',
+        remoteName: 'upstream',
+        remoteUrl: 'git@gitlab.com:acme/orca.git'
+      }
+    }
+    const worktree = makeWorktree({ linkedGitLabMR: 17 })
+    expect(
+      matchWorktreePaletteTaskUrl({
+        worktree,
+        intent: parseCmdJTaskSourceUrl('https://gitlab.com/totally/unrelated/-/merge_requests/17')!,
+        repo: upstreamRepo
+      })
+    ).toBeNull()
+    expect(
+      matchWorktreePaletteTaskUrl({
+        worktree,
+        intent: parseCmdJTaskSourceUrl('https://gitlab.com/acme/orca/-/merge_requests/17')!,
+        repo: upstreamRepo
+      })
+    ).toMatchObject({ matchedFields: ['mr'] })
   })
 
   it('matches both GitLab issue URL forms and rejects other projects', () => {
