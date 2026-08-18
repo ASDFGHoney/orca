@@ -142,8 +142,8 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     if (flight?.enterTimer != null) {
       clearTimeout(flight.enterTimer)
     }
-    if (flight?.stagedMessageIds.length) {
-      this.deps.getDb()?.markAsUndelivered(flight.stagedMessageIds)
+    if (flight?.stagedMessageIds.length && flight.stagedMailboxHandle) {
+      this.deps.getDb()?.markAsUndelivered(flight.stagedMessageIds, flight.stagedMailboxHandle)
     }
     for (const mailboxHandle of releasedMailboxes) {
       this.redrive(mailboxHandle, true)
@@ -237,6 +237,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         return
       }
       flight.stagedMessageIds = unread.map((message) => message.id)
+      flight.stagedMailboxHandle = mailboxHandle
       db.markAsDelivered(flight.stagedMessageIds)
       this.state.setWatermark(mailboxHandle, newestSequence, ptyId, this.leafKey(leaf))
       if (

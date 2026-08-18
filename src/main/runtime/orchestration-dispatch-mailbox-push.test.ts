@@ -71,6 +71,12 @@ describe('dispatch mailbox push-on-idle', () => {
     await vi.advanceTimersByTimeAsync(600)
 
     expect(pointerCount(harness.write)).toBe(1)
+    // A Dispatch pointer carries no --run flag: the bare command is what resolves
+    // the caller's own Dispatch mailbox, so pinning it to a Run would misdirect the worker.
+    expect(harness.write).toHaveBeenCalledWith(
+      PTY_ID,
+      '\nYou have 1 orchestration message. Run `orca orchestration check`.\n'
+    )
     // The pointer must be backed by mail the worker's own check then returns.
     await expect(
       checkBoundMailbox(harness.runtime, {
@@ -130,6 +136,26 @@ describe('dispatch mailbox push-on-idle', () => {
     await vi.advanceTimersByTimeAsync(3_000)
 
     expect(pointerCount(harness.write)).toBe(1)
+    db.close()
+  })
+
+  it('releases only the push stamp of the mailbox that staged it', () => {
+    const db = createDatabase('orca-dispatch-push-release-')
+    const { run, dispatch } = dispatchToWorker(db)
+    const message = sendToDispatch(db, run.id, dispatch.id, 'push authorization')
+    db.markAsDelivered([message.id])
+
+    // The mail moves to the Run mailbox and the coordinator is pointed at it.
+    db.routeUnreadDispatchMailboxToRunMailbox(dispatch.id, run.id)
+    db.markAsDelivered([message.id])
+    // Only now does the worker's abandoned Dispatch pointer flight clean up.
+    db.markAsUndelivered([message.id], `dispatch:${dispatch.id}`)
+
+    // Releasing the stale Dispatch stamp must not re-arm a push the coordinator already had.
+    expect(db.getMessageById(message.id)).toMatchObject({
+      to_handle: `run:${run.id}`,
+      delivered_at: expect.any(String)
+    })
     db.close()
   })
 
