@@ -31,7 +31,9 @@ function getShellReadyWrapperBaseDir(): string {
   // keeps this build's content-addressed trees out of their reach.
   // Why the tmpdir fallback: older/test launchers may not seed
   // ORCA_USER_DATA_PATH, and daemon startup must not fail before the parent can
-  // be fixed.
+  // be fixed. It is dev/test-only -- daemon-init always passes the real path --
+  // which matters because the presence check is size-only, so a complete tree
+  // pre-planted under a shared /tmp would be trusted rather than overwritten.
   return join(userDataPath || tmpdir(), userDataPath ? 'shell-wrappers' : 'orca-shell-wrappers')
 }
 

@@ -20,8 +20,12 @@ function getShellReadyWrapperBaseDir(): string {
   // Why not the legacy `shell-ready/`: daemons of older builds still write that
   // path unconditionally, so this build's trees live out of their reach. Why the
   // fallback is namespaced: os.tmpdir() is a shared world-writable /tmp on
-  // Linux, where a generic name is one any local user can pre-create and own --
-  // and then swap the .zshrc that ZDOTDIR points at.
+  // Linux, where a generic name is one any local user can pre-create and own.
+  // Note the presence check is size-only, so a complete tree pre-planted under
+  // that fallback would be trusted rather than overwritten. Production never
+  // reaches it -- ORCA_USER_DATA_PATH is seeded before anything spawns and the
+  // daemon fork inherits it -- so this stays a documented trust boundary rather
+  // than an ownership check on the spawn path.
   return userDataPath ? join(userDataPath, 'shell-wrappers') : join(tmpdir(), 'orca-shell-wrappers')
 }
 
