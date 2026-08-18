@@ -1509,6 +1509,7 @@ export class SshRelaySession {
         providerSessionOnly?: unknown
         shedFields?: unknown
         claudeRunningNonAgentTask?: unknown
+        claudeUnclassifiedBackgroundTask?: unknown
         payload?: unknown
       }
       if (typeof envelope.paneKey !== 'string') {
@@ -1547,6 +1548,10 @@ export class SshRelaySession {
           claudeRunningNonAgentTask:
             typeof envelope.claudeRunningNonAgentTask === 'boolean'
               ? envelope.claudeRunningNonAgentTask
+              : undefined,
+          claudeUnclassifiedBackgroundTask:
+            typeof envelope.claudeUnclassifiedBackgroundTask === 'boolean'
+              ? envelope.claudeUnclassifiedBackgroundTask
               : undefined,
           payload: envelope.payload
         },

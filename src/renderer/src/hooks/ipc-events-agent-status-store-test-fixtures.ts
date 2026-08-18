@@ -32,6 +32,7 @@ export type AgentStatusSetData = {
   interrupted?: boolean
   sessionBoundary?: boolean
   turnCompletedAt?: number
+  providerBackgroundWorkActive?: boolean
   terminalHandle?: string
   launchToken?: string
   providerSession?: { key: 'session_id'; id: string }

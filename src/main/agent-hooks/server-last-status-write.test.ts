@@ -84,7 +84,11 @@ describe('Last-status persistence', () => {
         createHash('sha256').update('launch-bearer-must-not-persist').digest('hex')
       )
       expect(file.entries[PANE].claudeRunningNonAgentTask).toBeUndefined()
+      expect(file.entries[PANE].claudeUnclassifiedBackgroundTask).toBeUndefined()
       expect(readFileSync(lastStatusPath(), 'utf8')).not.toContain('claudeRunningNonAgentTask')
+      expect(readFileSync(lastStatusPath(), 'utf8')).not.toContain(
+        'claudeUnclassifiedBackgroundTask'
+      )
       expect(readFileSync(lastStatusPath(), 'utf8')).not.toContain('launch-bearer-must-not-persist')
     } finally {
       server.stop()

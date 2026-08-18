@@ -198,3 +198,33 @@ describe('agent status stateStartedAt', () => {
     expect(entry.updatedAt).toBe(2_000)
   })
 })
+
+describe('provider background-work evidence', () => {
+  // Why: the pane's own hook stream restates this on every accepted status, so the entry must
+  // track it exactly — a value carried over from the previous row would keep a settled pane
+  // permanently ineligible for hibernation, and a dropped one would let hibernation kill a
+  // live dev server (STA-4119).
+  it('writes through on every accepted status instead of carrying the previous value', () => {
+    const store = createTestStore()
+
+    store.getState().setAgentStatus('tab-1:1', {
+      state: 'done',
+      prompt: 'start the dev server',
+      agentType: 'claude',
+      providerBackgroundWorkActive: true
+    })
+    expect(store.getState().agentStatusByPaneKey['tab-1:1']).toMatchObject({
+      state: 'done',
+      providerBackgroundWorkActive: true
+    })
+
+    store.getState().setAgentStatus('tab-1:1', {
+      state: 'done',
+      prompt: 'dev server stopped',
+      agentType: 'claude'
+    })
+    expect(
+      store.getState().agentStatusByPaneKey['tab-1:1']?.providerBackgroundWorkActive
+    ).toBeUndefined()
+  })
+})

@@ -41,6 +41,17 @@ describe('Claude background task status', () => {
     expect(result).toMatchObject({ truncated: true, hasRunningNonAgentTask: true })
     expect(result.tasks).toHaveLength(AGENT_STATUS_MAX_SUBAGENTS)
 
+    // Why: with a full roster present, `working` is carried by the child rows, so this
+    // asserts the monitor ALONE — otherwise the monitor half of the gate is untested.
+    const monitorOnly = createHookListenerState()
+    claudeEvent(monitorOnly, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'watch' })
+    expect(
+      claudeEvent(monitorOnly, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        background_tasks: [{ id: 'monitor-1', type: 'monitor', status: 'pending' }]
+      })
+    ).toMatchObject({ state: 'working', subagents: undefined })
+
     const state = createHookListenerState()
     expect(
       claudeEvent(state, SOURCE_PANE, {
@@ -146,6 +157,79 @@ describe('Claude background task status', () => {
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',
         background_tasks: [RUNNING_SHELL, { id: 'child-1', type: 'subagent', status: 'running' }]
+      })?.state
+    ).toBe('working')
+  })
+
+  // Why: the whole point of STA-4119's narrowing. Only a POSITIVELY identified non-agent
+  // shell may stop gating; anything Orca cannot classify may still be agent work, and
+  // retiring live agent work is the worse failure. Guards the fail-active property in
+  // readClaudeBackgroundAgentTasks, which had no end-to-end coverage before.
+  it.each([
+    { label: 'a future agent type', task: { id: 't', type: 'agent', status: 'running' } },
+    { label: 'an unrecognised type', task: { id: 't', type: 'workflow', status: 'running' } },
+    { label: 'a monitor', task: { id: 't', type: 'monitor', status: 'running' } },
+    { label: 'a blank type', task: { id: 't', type: '  ', status: 'running' } },
+    { label: 'an absent type', task: { id: 't', status: 'running' } }
+  ])('holds a finished lead at working for $label', ({ task }) => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, { hook_event_name: 'Stop', background_tasks: [task] })
+    ).toMatchObject({ state: 'working', subagents: undefined })
+    expect(state.claudeUnclassifiedBackgroundTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
+
+    // Why: it must still clear once the same inventory reports the entry finished —
+    // failing active may not become a second one-way latch.
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        background_tasks: [{ ...task, status: 'completed' }]
+      })?.state
+    ).toBe('done')
+    expect(state.claudeUnclassifiedBackgroundTaskPaneKeys.has(SOURCE_PANE)).toBe(false)
+  })
+
+  it('holds a finished lead at working for a malformed inventory entry', () => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, { hook_event_name: 'Stop', background_tasks: ['garbled'] })
+        ?.state
+    ).toBe('working')
+    expect(state.claudeUnclassifiedBackgroundTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
+  })
+
+  it.each([
+    { label: 'shell', type: 'shell' },
+    { label: 'background_shell', type: 'background_shell' },
+    { label: 'SHELL cased and padded', type: ' Shell ' }
+  ])('does not hold a finished lead at working for a recognised $label', ({ type }) => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        background_tasks: [{ id: 'sh-1', type, status: 'running' }]
+      })?.state
+    ).toBe('done')
+    // Why: it stops gating pane state, but stays visible as live provider work so pane
+    // teardown (hibernation) can still refuse to kill it.
+    expect(state.claudeUnclassifiedBackgroundTaskPaneKeys.has(SOURCE_PANE)).toBe(false)
+    expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
+  })
+
+  it('keeps a recognised shell from masking an unclassified sibling', () => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        background_tasks: [RUNNING_SHELL, { id: 'x-1', type: 'agent', status: 'running' }]
       })?.state
     ).toBe('working')
   })

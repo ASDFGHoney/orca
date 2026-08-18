@@ -106,6 +106,12 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   claudeLeadBoundaryChildOnly?: true
 }
 
+type ClaudeBackgroundEvidence = {
+  hasRunningTask: boolean
+  hasUnclassifiedTask: boolean
+  hasActiveCron: boolean
+}
+
 type NormalizedLocalHook = {
   event: AgentHookEventPayload | null
   onAccepted?: () => void
@@ -113,7 +119,11 @@ type NormalizedLocalHook = {
 
 type PersistedAgentHookEventPayload = Omit<
   EnrichedAgentHookEventPayload,
-  'claudeRunningNonAgentTask' | 'launchToken' | 'promptInteractionKey' | 'restoredUnconfirmed'
+  | 'claudeRunningNonAgentTask'
+  | 'claudeUnclassifiedBackgroundTask'
+  | 'launchToken'
+  | 'promptInteractionKey'
+  | 'restoredUnconfirmed'
 > & {
   launchTokenHash?: string
 }
@@ -934,10 +944,13 @@ export class AgentHookServer {
     if (payload.subagents?.some((subagent) => subagent.state !== 'idle')) {
       return false
     }
-    // Why: Escape/Ctrl+C at Claude's idle prompt does not stop provider-owned shells or session crons.
+    // Why: Escape/Ctrl+C does not stop unclassified background work or session crons, and
+    // those are the only inventory that can still hold an idle pane at 'working'. A recognised
+    // shell no longer gates, so keeping it here would only block inference on a REAL turn the
+    // user just cancelled — the set survives into the next turn (STA-4119).
     if (
       agentType === 'claude' &&
-      (this.state.claudeRunningNonAgentTaskPaneKeys.has(existing.paneKey) ||
+      (this.state.claudeUnclassifiedBackgroundTaskPaneKeys.has(existing.paneKey) ||
         this.state.claudeActiveSessionCronPaneKeys.has(existing.paneKey))
     ) {
       return false
@@ -1982,31 +1995,41 @@ export class AgentHookServer {
     if (!paneKey) {
       return { event: normalizeHookPayload(this.state, source, body, this.env) }
     }
-    const previousRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
-    const previousActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
+    const previous = this.readClaudeBackgroundEvidence(paneKey)
     const event = normalizeHookPayload(this.state, source, body, this.env)
-    const nextRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
-    const nextActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
-    this.setClaudeBackgroundEvidence(paneKey, previousRunningTask, previousActiveCron)
+    const next = this.readClaudeBackgroundEvidence(paneKey)
+    this.setClaudeBackgroundEvidence(paneKey, previous)
     if (!event || event.paneKey !== paneKey) {
       return { event }
     }
     // Why: nested CLIs may inherit the pane key; only accepted statuses may mutate its background-work gate.
     return {
       event,
-      onAccepted: () => this.setClaudeBackgroundEvidence(paneKey, nextRunningTask, nextActiveCron)
+      onAccepted: () => this.setClaudeBackgroundEvidence(paneKey, next)
+    }
+  }
+
+  private readClaudeBackgroundEvidence(paneKey: string): ClaudeBackgroundEvidence {
+    return {
+      hasRunningTask: this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey),
+      hasUnclassifiedTask: this.state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey),
+      hasActiveCron: this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
     }
   }
 
   private setClaudeBackgroundEvidence(
     paneKey: string,
-    hasRunningTask: boolean,
-    hasActiveCron: boolean
+    { hasRunningTask, hasUnclassifiedTask, hasActiveCron }: ClaudeBackgroundEvidence
   ): void {
     if (hasRunningTask) {
       this.state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
     } else {
       this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+    }
+    if (hasUnclassifiedTask) {
+      this.state.claudeUnclassifiedBackgroundTaskPaneKeys.add(paneKey)
+    } else {
+      this.state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
     }
     if (hasActiveCron) {
       this.state.claudeActiveSessionCronPaneKeys.add(paneKey)
@@ -2130,6 +2153,7 @@ export class AgentHookServer {
       /** Payload fields the relay dropped to fit an oversized frame; validated below. */
       shedFields?: unknown
       claudeRunningNonAgentTask?: unknown
+      claudeUnclassifiedBackgroundTask?: unknown
       payload: unknown
     },
     connectionId: string
@@ -2279,6 +2303,12 @@ export class AgentHookServer {
     ) {
       return
     }
+    // Why: a pre-STA-4119 host sends only the broad field. It gated pane state there, so
+    // reading it as the fail-active signal reproduces that host's behaviour exactly.
+    const unclassifiedBackgroundTask =
+      typeof envelope.claudeUnclassifiedBackgroundTask === 'boolean'
+        ? envelope.claudeUnclassifiedBackgroundTask
+        : envelope.claudeRunningNonAgentTask
     const applyClaudeBackgroundWork =
       normalizedPayload.agentType === 'claude' &&
       typeof envelope.claudeRunningNonAgentTask === 'boolean' &&
@@ -2313,6 +2343,8 @@ export class AgentHookServer {
         typeof envelope.claudeRunningNonAgentTask === 'boolean'
           ? envelope.claudeRunningNonAgentTask
           : undefined,
+      claudeUnclassifiedBackgroundTask:
+        typeof unclassifiedBackgroundTask === 'boolean' ? unclassifiedBackgroundTask : undefined,
       payload: normalizedPayload
     }
     this.recordCurrentAuthorityObservation(event)
@@ -2324,6 +2356,11 @@ export class AgentHookServer {
               this.state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
             } else {
               this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+            }
+            if (unclassifiedBackgroundTask) {
+              this.state.claudeUnclassifiedBackgroundTaskPaneKeys.add(paneKey)
+            } else {
+              this.state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
             }
           }
         : undefined
@@ -2551,6 +2588,7 @@ export class AgentHookServer {
           this.state.claudeSubagentRosterByPaneKey.delete(paneKey)
           this.state.claudeLeadStateByPaneKey.delete(paneKey)
           this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+          this.state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
           this.state.claudeActiveSessionCronPaneKeys.delete(paneKey)
         }
       }
@@ -3050,6 +3088,7 @@ export class AgentHookServer {
       const childOnlyBoundary = enrichedPayload.claudeLeadBoundaryChildOnly === true
       const {
         claudeRunningNonAgentTask: _claudeRunningNonAgentTask,
+        claudeUnclassifiedBackgroundTask: _claudeUnclassifiedBackgroundTask,
         promptInteractionKey: _promptInteractionKey,
         // Why: never persisted — hydrate re-stamps it, so a stored copy could only drift.
         restoredUnconfirmed: _restoredUnconfirmed,

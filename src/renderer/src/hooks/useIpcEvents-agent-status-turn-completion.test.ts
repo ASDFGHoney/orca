@@ -89,4 +89,76 @@ describe('useIpcEvents agent status turn completion', () => {
       })
     )
   })
+
+  // Why: envelope-level fields are dropped by the payload rebuild in applyAgentStatus, and
+  // this one is what stops hibernation from killing a live dev server (STA-4119). The
+  // whitelist has silently eaten fields before, so pin it here rather than in the slice.
+  it('forwards providerBackgroundWorkActive through the agent-status IPC whitelist', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      settings: { terminalFontSize: 13, notifications: { enabled: true, agentTaskComplete: true } },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-future', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Claude' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    vi.doMock('./agent-hook-completion-notifications', () => ({
+      observeAgentHookCompletionForNotification: vi.fn(),
+      resetAgentHookCompletionNotificationCoordinators: vi.fn(),
+      syncAgentHookCompletionNotificationSettings: vi.fn(),
+      syncAgentHookCompletionNotificationsForStoreUpdate: vi.fn()
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+    const base = {
+      paneKey: FUTURE_PANE_KEY,
+      tabId: 'tab-future',
+      worktreeId: 'wt-1',
+      state: 'done',
+      prompt: 'start the dev server',
+      agentType: 'claude',
+      receivedAt: 1_700_000_005_000,
+      stateStartedAt: 1_700_000_000_000
+    } as const
+
+    onSetListenerRef.current({ ...base, providerBackgroundWorkActive: true })
+    expect(setAgentStatus).toHaveBeenLastCalledWith(
+      FUTURE_PANE_KEY,
+      expect.objectContaining({ state: 'done', providerBackgroundWorkActive: true }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined
+    )
+
+    expect(setAgentStatus).toHaveBeenCalledTimes(1)
+  })
 })

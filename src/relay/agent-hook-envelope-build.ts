@@ -31,6 +31,7 @@ export function buildRelayHookEnvelope(
     teammateName: event.teammateName,
     toolAgentType: event.toolAgentType,
     claudeRunningNonAgentTask: event.claudeRunningNonAgentTask,
+    claudeUnclassifiedBackgroundTask: event.claudeUnclassifiedBackgroundTask,
     ...(event.providerSession ? { providerSession: event.providerSession } : {}),
     ...(event.providerSessionOnly ? { providerSessionOnly: true } : {}),
     isReplay: options.isReplay === true ? true : undefined,

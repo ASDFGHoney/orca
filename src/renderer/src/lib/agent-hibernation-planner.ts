@@ -148,6 +148,11 @@ function getEligiblePane(args: {
     entry.state !== 'done' ||
     entry.interrupted === true ||
     Boolean(entry.subagents?.length) ||
+    // Why: `done` means the agent is idle, not that the pane is disposable. A provider-owned
+    // background shell or session cron is still running under this PTY, and hibernation kills
+    // it — that is the user's dev server. Idle and safe-to-tear-down are different questions
+    // and STA-4119 is exactly what pulled them apart.
+    entry.providerBackgroundWorkActive === true ||
     hasUnsettledOrUnknownDispatch(entry) ||
     (sleepingRecord && !hasOnlyLivePiCompatibleRecoveryIdentity)
   ) {

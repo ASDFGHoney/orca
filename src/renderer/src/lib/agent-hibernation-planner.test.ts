@@ -102,6 +102,26 @@ describe('agent sleep planner', () => {
     expect(plannedWorktrees(snapshot({ foregroundTerminalTabIds: ['tab-1'] }))).toEqual([])
   })
 
+  // Why: STA-4119 let a pane reach `done` while a provider-owned shell keeps running, so
+  // `done` alone stopped implying "safe to kill this PTY". Hibernation tears the PTY down,
+  // which would take the user's dev server with it.
+  it('refuses a done pane whose provider still has live background work', () => {
+    const busy = entry({ providerBackgroundWorkActive: true })
+    expect(plannedWorktrees(snapshot({ agentStatusByPaneKey: { [busy.paneKey]: busy } }))).toEqual(
+      []
+    )
+
+    const settled = entry({ providerBackgroundWorkActive: false })
+    expect(
+      plannedWorktrees(snapshot({ agentStatusByPaneKey: { [settled.paneKey]: settled } }))
+    ).toEqual(['wt-bg'])
+
+    const unknown = entry()
+    expect(
+      plannedWorktrees(snapshot({ agentStatusByPaneKey: { [unknown.paneKey]: unknown } }))
+    ).toEqual(['wt-bg'])
+  })
+
   it('requires done resumable provider-session entries', () => {
     for (const state of ['working', 'waiting', 'blocked'] as const) {
       const e = entry({ state })

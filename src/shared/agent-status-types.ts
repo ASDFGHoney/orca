@@ -151,6 +151,12 @@ export type AgentStatusEntry = {
    *  the transition may have been missed while no receiver was up, so freshness gates
    *  treat the row as stale immediately. Cleared by any accepted live event. */
   restoredUnconfirmed?: boolean
+  /** True while the provider still owns live background work on this pane — a running
+   *  shell it launched, or a scheduled session cron — even though the turn itself is done.
+   *  Why: `done` answers "is the agent idle", not "is this pane safe to tear down". Anything
+   *  that kills the PTY (agent hibernation) must consult this or it silently kills the
+   *  user's dev server. Live-only: a restarted listener cannot re-derive it. */
+  providerBackgroundWorkActive?: boolean
 }
 
 export type MigrationUnsupportedPtyEntry = {
@@ -252,16 +258,14 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   promptInteractionKey?: string
   /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */
   restoredUnconfirmed?: boolean
+  /** See AgentStatusEntry.providerBackgroundWorkActive. */
+  providerBackgroundWorkActive?: boolean
 }
 
 /** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */
 export type AgentStatusClearIpcPayload =
   | { paneKey: string }
-  | {
-      transient: true
-      connectionId: string
-      clearedAt: number
-    }
+  | { transient: true; connectionId: string; clearedAt: number }
 
 /** Maximum character length for the toolName field. */
 export const AGENT_STATUS_TOOL_NAME_MAX_LENGTH = 60

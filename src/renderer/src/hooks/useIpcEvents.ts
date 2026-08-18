@@ -3357,6 +3357,12 @@ export function useIpcEvents(): void {
         data.restoredUnconfirmed === true
           ? { ...statusPayloadWithTurnBoundary, restoredUnconfirmed: true }
           : statusPayloadWithTurnBoundary
+      // Why: same whitelist trap — envelope-level background-work evidence the payload
+      // rebuild drops, and pane hibernation reads it to avoid killing a live dev server.
+      const statusPayloadWithBackgroundWork =
+        data.providerBackgroundWorkActive === true
+          ? { ...statusPayloadWithProvenance, providerBackgroundWorkActive: true }
+          : statusPayloadWithProvenance
       const identity = resolveAgentStatusIdentity({
         existing: existingStatus
           ? {
@@ -3396,7 +3402,7 @@ export function useIpcEvents(): void {
       const statusWorktreeId = data.worktreeId ?? owningWorktreeId
       const update: AgentStatusUpdate = {
         paneKey,
-        payload: statusPayloadWithProvenance,
+        payload: statusPayloadWithBackgroundWork,
         terminalTitle,
         timing: {
           updatedAt: data.receivedAt,

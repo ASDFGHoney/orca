@@ -97,9 +97,33 @@ describe('RelayAgentHookServer', () => {
         })
       })
 
+      // Why: the host still reports live provider work (hibernation reads it) while the
+      // fail-active gate stays clear, so the pane is free to settle to 'done'.
       expect(forward.mock.calls[0][0]).toMatchObject({
         claudeRunningNonAgentTask: true,
+        claudeUnclassifiedBackgroundTask: false,
         payload: { state: 'done', agentType: 'claude' }
+      })
+
+      await fetch(`http://127.0.0.1:${port}/hook/claude`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': token
+        },
+        body: JSON.stringify({
+          paneKey: PANE_KEY,
+          payload: {
+            hook_event_name: 'Stop',
+            background_tasks: [{ id: 'task-1', type: 'agent', status: 'running' }]
+          }
+        })
+      })
+
+      expect(forward.mock.calls[1][0]).toMatchObject({
+        claudeRunningNonAgentTask: true,
+        claudeUnclassifiedBackgroundTask: true,
+        payload: { state: 'working', agentType: 'claude' }
       })
     } finally {
       server.stop()

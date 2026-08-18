@@ -1582,6 +1582,7 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
       providerSessionOnly,
       promptInteractionKey,
       restoredUnconfirmed,
+      claudeRunningNonAgentTask,
       isReplay
     }) => {
       if (mainWindow?.isDestroyed()) {
@@ -1630,6 +1631,9 @@ function openMainWindow(options: { revealOnDidFinishLoad?: boolean } = {}): Brow
         ...(providerSession ? { providerSession } : {}),
         ...(promptInteractionKey ? { promptInteractionKey } : {}),
         ...(restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
+        // Why: the hibernation planner needs "is provider background work still live", which
+        // is not derivable from `state` once a leftover shell stops gating it (STA-4119).
+        ...(claudeRunningNonAgentTask ? { providerBackgroundWorkActive: true } : {}),
         ...(orchestration ? { orchestration } : {})
       }
       mainWindow?.webContents.send('agentStatus:set', statusEvent)

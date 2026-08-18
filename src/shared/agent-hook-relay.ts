@@ -103,8 +103,13 @@ export type AgentHookRelayEnvelope = {
   providerSessionOnly?: boolean
   /** True when the relay is replaying its cache after Orca reconnects. */
   isReplay?: boolean
-  /** Claude background-work evidence for input-interrupt inference on the receiving host. */
+  /** Claude background-work evidence for input-interrupt inference on the receiving host.
+   *  Broad: any live provider-owned background work, recognised shells included. */
   claudeRunningNonAgentTask?: boolean
+  /** The fail-active subset that still gates pane state: running background work the host
+   *  could not positively classify as a non-agent shell. Optional — hosts older than
+   *  STA-4119 omit it and the receiver falls back to `claudeRunningNonAgentTask`. */
+  claudeUnclassifiedBackgroundTask?: boolean
   /** Forwarded from the agent CLI POST body. The relay default is `remote`,
    *  which marks transport location rather than dev/prod build env. */
   env?: string

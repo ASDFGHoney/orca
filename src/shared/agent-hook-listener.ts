@@ -138,8 +138,13 @@ export type HookListenerState = {
   claudeLeadStateByPaneKey: Map<string, ClaudeLeadTurnState>
   /** One-normalization provenance marker for a status backed only by restored child state. */
   claudeUnconfirmedRestoredStatusPaneKeys: Set<string>
-  /** Panes whose latest authoritative Claude task inventory still has running non-agent work. */
+  /** Panes whose latest authoritative Claude task inventory still has running non-agent work.
+   *  Broad on purpose: it includes a recognised background shell, so consumers that must not
+   *  destroy live provider work (pane hibernation) can see it. It does NOT gate pane state. */
   claudeRunningNonAgentTaskPaneKeys: Set<string>
+  /** Panes whose latest authoritative Claude task inventory still has running work Orca could
+   *  not positively classify as a non-agent shell. Fail-active: this DOES gate pane state. */
+  claudeUnclassifiedBackgroundTaskPaneKeys: Set<string>
   /** Panes whose latest authoritative Claude cron inventory still has a scheduled job. */
   claudeActiveSessionCronPaneKeys: Set<string>
   /** Live thread-spawn children per Codex pane. */
@@ -181,6 +186,7 @@ export function createHookListenerState(): HookListenerState {
     claudeLeadStateByPaneKey: new Map(),
     claudeUnconfirmedRestoredStatusPaneKeys: new Set(),
     claudeRunningNonAgentTaskPaneKeys: new Set(),
+    claudeUnclassifiedBackgroundTaskPaneKeys: new Set(),
     claudeActiveSessionCronPaneKeys: new Set(),
     codexSubagentRosterByPaneKey: new Map(),
     codexSubagentTranscriptByPaneKey: new Map(),
@@ -198,6 +204,7 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   state.claudeLeadStateByPaneKey.delete(paneKey)
   state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+  state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
   state.codexSubagentRosterByPaneKey.delete(paneKey)
   state.codexSubagentTranscriptByPaneKey.delete(paneKey)
@@ -245,6 +252,7 @@ export function movePaneCacheState(
   movePaneScopedMapEntries(state.claudeLeadStateByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeUnconfirmedRestoredStatusPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeRunningNonAgentTaskPaneKeys, fromPaneKey, toPaneKey)
+  movePaneScopedSetEntries(state.claudeUnclassifiedBackgroundTaskPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeActiveSessionCronPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentTranscriptByPaneKey, fromPaneKey, toPaneKey)
@@ -290,6 +298,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.claudeLeadStateByPaneKey.clear()
   state.claudeUnconfirmedRestoredStatusPaneKeys.clear()
   state.claudeRunningNonAgentTaskPaneKeys.clear()
+  state.claudeUnclassifiedBackgroundTaskPaneKeys.clear()
   state.claudeActiveSessionCronPaneKeys.clear()
   state.codexSubagentRosterByPaneKey.clear()
   state.codexSubagentTranscriptByPaneKey.clear()
@@ -365,6 +374,8 @@ export type AgentHookEventPayload = {
   isReplay?: boolean
   /** Transport-only Claude background-work evidence used to reject false input-based interrupts. */
   claudeRunningNonAgentTask?: boolean
+  /** See claudeUnclassifiedBackgroundTaskPaneKeys. Absent from pre-STA-4119 hosts. */
+  claudeUnclassifiedBackgroundTask?: boolean
   payload: ParsedAgentStatusPayload
 }
 
@@ -2584,12 +2595,18 @@ function updateClaudeRunningNonAgentTask(
   state: HookListenerState,
   paneKey: string,
   hasRunningNonAgentTask: boolean,
+  hasRunningUnclassifiedTask: boolean,
   interrupted: boolean
 ): void {
   if (hasRunningNonAgentTask && !interrupted) {
     state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
   } else {
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+  }
+  if (hasRunningUnclassifiedTask && !interrupted) {
+    state.claudeUnclassifiedBackgroundTaskPaneKeys.add(paneKey)
+  } else {
+    state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   }
 }
 
@@ -2602,11 +2619,14 @@ function resolveClaudePaneState(
     return lead.state
   }
   const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
-  // Why: leftover provider shells/monitors are session inventory, not lead-turn
-  // work. Gating done→working on them latches the pane forever because an idle
-  // parent never emits another background_tasks list (STA-4119).
+  // Why: a recognised leftover shell is session inventory, not lead-turn work. Gating
+  // done→working on it latches the pane forever, because an idle parent never emits
+  // another background_tasks list (STA-4119). Work Orca could NOT classify still gates:
+  // it may be a child agent, and silently retiring live agent work is the worse failure.
   return claudeRosterHasWorkingSubagent(roster) ||
-    (!lead.interrupted && state.claudeActiveSessionCronPaneKeys.has(paneKey))
+    (!lead.interrupted &&
+      (state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey) ||
+        state.claudeActiveSessionCronPaneKeys.has(paneKey)))
     ? 'working'
     : 'done'
 }
@@ -2680,7 +2700,8 @@ function normalizeClaudeSubagentLifecycleEvent(
   const hasConfirmedDoneGate =
     cachedLead?.state === 'done' &&
     cachedLead.interrupted !== true &&
-    state.claudeActiveSessionCronPaneKeys.has(paneKey)
+    (state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey) ||
+      state.claudeActiveSessionCronPaneKeys.has(paneKey))
   const restoredOnlyDoneGate =
     cachedLead?.state === 'done' && !hasConfirmedDoneGate && hasUnconfirmedChild
   if (roster?.size === 0) {
@@ -2705,6 +2726,7 @@ function normalizeClaudeSubagentLifecycleEvent(
 export function markClaudeLeadTurnInterrupted(state: HookListenerState, paneKey: string): void {
   state.claudeLeadStateByPaneKey.set(paneKey, { state: 'done', interrupted: true })
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+  state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
 }
 
@@ -2903,6 +2925,7 @@ function normalizeClaudeEvent(
     // fresh session's idle row back up to 'working' (same reset Codex does on SessionStart).
     state.claudeSubagentRosterByPaneKey.delete(paneKey)
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+    state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
     state.claudeLeadStateByPaneKey.set(paneKey, { state: 'done' })
     return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
@@ -2960,6 +2983,7 @@ function normalizeClaudeEvent(
       state,
       paneKey,
       backgroundTasks.hasRunningNonAgentTask,
+      backgroundTasks.hasRunningUnclassifiedTask,
       interrupted === true
     )
   }
@@ -3074,6 +3098,7 @@ function normalizeClaudeEvent(
 
   if (interrupted && eventAgentId === undefined) {
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+    state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
   }
 
@@ -3107,6 +3132,7 @@ function normalizeClaudeEvent(
     effectiveState === 'working' &&
     claudeRosterHasRestoredSnapshotSubagent(effectiveRoster) &&
     !claudeRosterHasRuntimeWorkingSubagent(effectiveRoster) &&
+    !state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey) &&
     !state.claudeActiveSessionCronPaneKeys.has(paneKey)
   ) {
     // Why: a legacy or partial Stop confirms the lead boundary, not a child restored from disk; keep the child-only gate eligible for reconciliation.
@@ -4585,8 +4611,15 @@ export function normalizeHookPayload(
         toolAgentType: readString(hookPayloadRecord, 'agent_type'),
         ...(source === 'claude'
           ? {
+              // Why: unchanged meaning — ANY live provider-owned background work, shell
+              // included. Consumers that must not tear the pane down read this one.
               claudeRunningNonAgentTask:
                 state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+                state.claudeActiveSessionCronPaneKeys.has(paneKey),
+              // Why: the narrower fail-active signal that gates pane state. Optional on the
+              // wire: an older host omits it and the client falls back to the broad field.
+              claudeUnclassifiedBackgroundTask:
+                state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey) ||
                 state.claudeActiveSessionCronPaneKeys.has(paneKey)
             }
           : {}),

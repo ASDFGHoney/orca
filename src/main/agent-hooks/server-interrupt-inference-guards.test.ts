@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from './server'
-import { buildBody, PANE, RUNNING_SHELL } from './server.test-fixtures'
+import { buildBody, PANE } from './server.test-fixtures'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -222,12 +222,20 @@ describe('AgentHookServer listener replay', () => {
       await expect(
         postHook({ hook_event_name: 'UserPromptSubmit', prompt: 'run in background' })
       ).resolves.toMatchObject({ status: 204 })
+      // Why: a recognised shell now retires the pane to 'done', which short-circuits
+      // inference before this guard runs — so it must be unclassifiable work that keeps
+      // the pane 'working' here, or the assertion below proves nothing (STA-4119).
       await expect(
-        postHook({ hook_event_name: 'Stop', background_tasks: [RUNNING_SHELL] })
+        postHook({
+          hook_event_name: 'Stop',
+          background_tasks: [{ id: 'task-1', type: 'workflow', status: 'running' }]
+        })
       ).resolves.toMatchObject({ status: 204 })
       const baseline = server.getStatusSnapshot()[0]
 
+      expect(baseline).toMatchObject({ state: 'working' })
       expect(baseline).not.toHaveProperty('claudeRunningNonAgentTask')
+      expect(baseline).not.toHaveProperty('claudeUnclassifiedBackgroundTask')
       expect(
         server.inferInterrupt({
           paneKey: PANE,
@@ -260,6 +268,88 @@ describe('AgentHookServer listener replay', () => {
       ).toBe(false)
     } finally {
       server.stop()
+    }
+  })
+
+  // Why: STA-4119. The set survives into the NEXT turn, so while a recognised shell was
+  // still in it this guard could only fire on a genuinely active turn the user just
+  // cancelled — the opposite of what its comment promises. Only unclassifiable work
+  // (which can still hold an idle pane at 'working') may block inference now.
+  it('lets a recognised background shell be interrupted but not unclassifiable work', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      const ingest = (envelope: Record<string, unknown>): void => {
+        server.ingestRemote(
+          {
+            paneKey: PANE,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            ...envelope,
+            payload: { state: 'working', prompt: 'second turn', agentType: 'claude' }
+          } as Parameters<AgentHookServer['ingestRemote']>[0],
+          'conn-1'
+        )
+      }
+      const infer = (): boolean => {
+        const baseline = server.getStatusSnapshot()[0]
+        vi.setSystemTime(Number(baseline.receivedAt) + 500)
+        return server.inferInterrupt({
+          paneKey: PANE,
+          baselineUpdatedAt: baseline.receivedAt,
+          baselineStateStartedAt: baseline.stateStartedAt,
+          baselinePrompt: 'second turn',
+          baselineAgentType: 'claude',
+          intent: 'plain-escape'
+        })
+      }
+
+      ingest({ claudeRunningNonAgentTask: true, claudeUnclassifiedBackgroundTask: true })
+      expect(infer()).toBe(false)
+
+      vi.setSystemTime(3_000)
+      ingest({ claudeRunningNonAgentTask: true, claudeUnclassifiedBackgroundTask: false })
+      expect(infer()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Why: a host older than STA-4119 sends only the broad field, and there it gated pane
+  // state. Reading it as the fail-active signal reproduces that host exactly.
+  it('falls back to the legacy field when an older host omits the unclassified flag', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          claudeRunningNonAgentTask: true,
+          payload: { state: 'working', prompt: 'legacy host', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+      expect(server._getStateForTests().claudeUnclassifiedBackgroundTaskPaneKeys.has(PANE)).toBe(
+        true
+      )
+      const baseline = server.getStatusSnapshot()[0]
+      vi.setSystemTime(1_500)
+      expect(
+        server.inferInterrupt({
+          paneKey: PANE,
+          baselineUpdatedAt: baseline.receivedAt,
+          baselineStateStartedAt: baseline.stateStartedAt,
+          baselinePrompt: 'legacy host',
+          baselineAgentType: 'claude',
+          intent: 'plain-escape'
+        })
+      ).toBe(false)
+    } finally {
+      vi.useRealTimers()
     }
   })
 
