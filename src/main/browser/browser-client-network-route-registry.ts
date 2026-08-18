@@ -4,6 +4,7 @@ import type {
 } from '../../shared/browser-client-host-protocol'
 import type { BrowserClientPageNetworkRoute } from './browser-client-page-cleanup'
 import { reconnectBrowserClientNetworkRoutes } from './browser-client-network-route-recovery'
+import { browserNetworkExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
 import { resolveBrowserHostReconnectDelay } from './browser-host-lease-reconnect-delay'
 import { parseBrowserNetworkExecutionHostKey } from './browser-network-execution-route'
 
@@ -82,7 +83,8 @@ export class BrowserClientNetworkRouteRegistry {
       let released = false
       return {
         key,
-        executionHostIdentity: key,
+        // Why: the route key fences per-boot generations; storage must outlive them.
+        executionHostIdentity: browserNetworkExecutionHostStorageIdentity(executionHost),
         proxyEndpoint: { host: '127.0.0.1', port: address.port },
         release: async () => {
           if (released) {

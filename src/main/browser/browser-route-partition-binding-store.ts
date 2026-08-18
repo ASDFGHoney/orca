@@ -38,6 +38,31 @@ export class BrowserRoutePartitionBindingStore {
     return state.bindings[partition] ?? null
   }
 
+  listBindings(): ReadonlyMap<string, string> {
+    return new Map(Object.entries(this.load().bindings))
+  }
+
+  /** Drops binding metadata for partitions whose Chromium storage was destroyed. */
+  remove(partitions: readonly string[]): number {
+    const state = this.load()
+    const remaining = { ...state.bindings }
+    let removed = 0
+    for (const partition of partitions) {
+      if (remaining[partition] !== undefined) {
+        delete remaining[partition]
+        removed += 1
+      }
+    }
+    if (removed === 0) {
+      return 0
+    }
+    mkdirSync(dirname(this.options.filePath), { recursive: true })
+    this.writeDurably(
+      `${JSON.stringify({ version: BINDING_STORE_VERSION, bindings: remaining })}\n`
+    )
+    return removed
+  }
+
   set(partition: string, fingerprint: string): void {
     assertBinding(partition, fingerprint)
     const state = this.load()
