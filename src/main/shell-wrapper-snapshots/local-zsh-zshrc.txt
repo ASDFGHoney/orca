@@ -1,4 +1,11 @@
 # Orca zsh shell-ready wrapper
+__orca_resolve_user_config_dir() {
+  REPLY="${1:-}"
+  while [[ "$REPLY" == */ ]]; do REPLY="${REPLY%/}"; done
+  if [[ -z "$REPLY" || -f "$REPLY/.orca-shell-wrapper" || "$REPLY" == */shell-ready/zsh ]]; then
+    REPLY="$HOME"
+  fi
+}
 __orca_resolve_user_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"
 _orca_home="$REPLY"
 if [[ "$_orca_home" != "$ZDOTDIR" && -o interactive && -f "$_orca_home/.zshrc" ]]; then

@@ -371,8 +371,7 @@ describePosix('history-only pane in a real zsh', () => {
       env: { PATH: '/usr/bin:/bin', HOME: home }
     })
 
-    // eslint-disable-next-line no-control-regex
-    expect(wrapped).not.toMatch(/]133;/)
+    expect(wrapped).not.toContain('\x1b]133;')
     expect(wrapped).toContain('PRECMD=\n')
     expect(wrapped).toContain('LINEINIT=none')
     // Startup files run in the same order with the same hooks, so the pane is

@@ -15,14 +15,27 @@
  * the desktop (Electron userData), the daemon subprocess (no Electron), and the
  * relay on a remote host. Desktop and relay drop each other's shapes on purpose
  * — neither owns the other's worktree ids.
+ *
+ * Why the shape is enough without an Orca-specific token: two of the three
+ * shapes carry one already (`.orca-remote`, `terminal-history-wsl`), and the
+ * third needs an absolute path whose LAST TWO segments are a 16-char lowercase
+ * hex directory directly under `terminal-history`, holding a file named exactly
+ * `zsh_history`/`bash_history`. That is a machine-minted layout, not one a
+ * person types. The blast radius if it were ever hit is also bounded: the value
+ * is dropped from ONE spawn's env, so the pane gets Orca's own worktree history
+ * (isolation on) or the shell's default (isolation off). Nothing on disk is
+ * read, written, moved, or deleted.
  */
 
 /** 16 hex chars: `hashWorktreeId`. */
 const WORKTREE_HASH = '[0-9a-f]{16}'
 const HISTORY_FILE = '(?:zsh|bash)_history'
 
+// Why a leading `/` rather than `(?:^|/)`: every minted value is absolute (or a
+// Windows path normalized to forward slashes), so a relative path of the same
+// shape is the user's, not Orca's.
 const ORCA_MINTED_HISTFILE = new RegExp(
-  '(?:^|/)(?:' +
+  '/(?:' +
     // Desktop: <userData>/terminal-history/<hash>/<file>
     `terminal-history/${WORKTREE_HASH}/${HISTORY_FILE}` +
     '|' +

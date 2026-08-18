@@ -45,6 +45,12 @@ export const SHELL_STARTUP_IDENTITY_MARKER_BLOCK = `__orca_has_feature identity 
  * its own. A stamped marker file (or Orca's own wrapper path shape, for
  * wrappers written by older builds) is that proof. Guessing at other
  * terminals' wrapper dirs by name never can be, so this never tries.
+ *
+ * Why every generated file redefines it instead of relying on .zshenv: one
+ * wrapper dir can be rewritten by two concurrently installed builds, so a shell
+ * can read one build's .zshenv and another's .zshrc. A .zshrc that called a
+ * function only the newer .zshenv defines printed `command not found` AND left
+ * $REPLY empty, which skipped sourcing the user's own startup file entirely.
  */
 export const ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK = `__orca_resolve_user_config_dir() {
   REPLY="\${1:-}"
@@ -52,8 +58,15 @@ export const ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK = `__orca_resolve_user_config_di
   if [[ -z "$REPLY" || -f "$REPLY/${ZSH_WRAPPER_DIR_MARKER_FILE}" || "$REPLY" == */shell-ready/zsh ]]; then
     REPLY="$HOME"
   fi
-}
-# Why stricter for an inherited value: Orca can be launched from a terminal that
+}`
+
+/**
+ * The stricter resolver .zshenv uses for a ZDOTDIR this shell INHERITED.
+ *
+ * Why only .zshenv needs it: nothing after .zshenv re-reads an inherited value —
+ * the later files resolve ORCA_ORIG_ZDOTDIR, which .zshenv already vetted.
+ */
+export const ZSH_INHERITED_CONFIG_DIR_RESOLVER_BLOCK = `# Why stricter for an inherited value: Orca can be launched from a terminal that
 # already pointed ZDOTDIR at its own wrapper dir, and a directory holding no zsh
 # startup file at all is not the user's config root whoever wrote it.
 __orca_resolve_inherited_config_dir() {

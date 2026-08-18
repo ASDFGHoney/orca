@@ -402,13 +402,21 @@ describe('terminal-history', () => {
       expect(env.HISTFILE).not.toContain(OTHER_WORKTREE_HASH)
     })
 
-    it('preserves a HISTFILE the user set themselves', () => {
+    it.each([
+      ['an ordinary path', ['', 'home', 'me', '.zsh_history'].join(sep)],
+      // Orca only ever mints absolute paths, so the same shape relative to the
+      // user's cwd is theirs.
+      [
+        'a relative path of Orca’s shape',
+        ['terminal-history', OTHER_WORKTREE_HASH, 'zsh_history'].join(sep)
+      ]
+    ])('preserves %s the user set as HISTFILE', (_kind, histFile) => {
       // Only a path Orca minted is droppable; everything else is the user's.
-      const env: Record<string, string> = { HISTFILE: ['', 'home', 'me', '.zsh_history'].join(sep) }
+      const env: Record<string, string> = { HISTFILE: histFile }
 
       const result = injectHistoryEnv(env, 'repo-1::/path/wt', '/bin/zsh', '/path/wt')
 
-      expect(env.HISTFILE).toBe(['', 'home', 'me', '.zsh_history'].join(sep))
+      expect(env.HISTFILE).toBe(histFile)
       expect(result.histFile).toBeNull()
     })
 

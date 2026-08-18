@@ -7,6 +7,9 @@
  * disagree on is a field on ZshStartupWrapperSpec, so the disagreements are
  * visible in one place instead of spread across three template literals.
  *
+ * Every generated file redefines the helpers it calls, so the epilogue is the
+ * only thing one file needs another to have defined — see EPILOGUE_CALL.
+ *
  * All order-sensitive Orca work lives in ONE `__orca_shell_epilogue` defined in
  * .zshenv and invoked exactly once — from .zshrc for a non-login shell, from
  * .zlogin for a login shell. Each feature inside it is an independent guard on
@@ -26,6 +29,7 @@ import {
   SHELL_STARTUP_IDENTITY_MARKER_BLOCK,
   ZSH_FEATURE_CHANNEL_BLOCK,
   ZSH_HISTFILE_RESTORE_BLOCK,
+  ZSH_INHERITED_CONFIG_DIR_RESOLVER_BLOCK,
   ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK
 } from './shell-templates'
 
@@ -180,6 +184,7 @@ function buildZshenv(spec: ZshStartupWrapperSpec): string {
     ZSH_FEATURE_CHANNEL_BLOCK,
     SHELL_STARTUP_IDENTITY_MARKER_BLOCK,
     ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK,
+    ZSH_INHERITED_CONFIG_DIR_RESOLVER_BLOCK,
     spec.zshenvStrategy === 'discover-user-zdotdir'
       ? getZshEnvDiscoveryBody(spec.zshDir)
       : getZshOverlayEnvBody(spec.zshDir),
@@ -188,12 +193,13 @@ function buildZshenv(spec: ZshStartupWrapperSpec): string {
 }
 
 /**
- * Why guarded: the generated files are inter-dependent (this call, the function
- * in .zshenv), and one wrapper dir can be shared by two concurrently installed
- * Orca builds. Pairing this file with an older .zshenv then loses the features
- * either way; degrade silently instead of printing "command not found" into the
- * user's pane. Braced subscript because sh/ksh emulation (KSH_ARRAYS) rejects
- * the unbraced `$+functions[...]` form outright.
+ * Why guarded: one wrapper dir can be shared by two concurrently installed Orca
+ * builds, so a shell can read one build's .zshenv and another's .zshrc/.zlogin.
+ * The epilogue is the only cross-file dependency left — every other function
+ * these files call is redefined at the top of each of them — so an older .zshenv
+ * costs this shell the epilogue's features and nothing else, without printing
+ * "command not found" into the user's pane. Braced subscript because sh/ksh
+ * emulation (KSH_ARRAYS) rejects the unbraced `$+functions[...]` form outright.
  */
 const EPILOGUE_CALL = '(( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue'
 
@@ -217,6 +223,7 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
     zshenv: buildZshenv(spec),
     zprofile: `${joinBlocks([
       `# ${spec.headerLabel}`,
+      ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK,
       getZshStartupFileSourceBlock({
         fileName: '.zprofile',
         homeExpression: spec.homeExpression
@@ -224,6 +231,7 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
     ])}\n`,
     zshrc: `${joinBlocks([
       `# ${spec.headerLabel}`,
+      ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK,
       getZshStartupFileSourceBlock({
         fileName: '.zshrc',
         homeExpression: spec.homeExpression,
@@ -234,6 +242,7 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
     ])}\n`,
     zlogin: `${joinBlocks([
       `# ${spec.headerLabel}`,
+      ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK,
       getZshStartupFileSourceBlock({
         fileName: '.zlogin',
         homeExpression: spec.homeExpression,
