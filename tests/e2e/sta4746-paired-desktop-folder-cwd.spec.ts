@@ -8,21 +8,25 @@ import {
   createRuntimeDesktopPairingOffer,
   launchPairedElectronClient
 } from './helpers/paired-electron-client'
+import {
+  readSta4746Probe,
+  sta4746ProbeCommand,
+  STA4746_PROBE,
+  type Sta4746Probe
+} from './helpers/sta4746-cwd-probe'
 import { ensureTerminalVisible } from './helpers/store'
 import {
   focusActiveTerminalInput,
-  getTerminalContent,
   waitForActivePanePtyId,
   waitForActiveTerminalManager
 } from './helpers/terminal'
 
-const PROBE = 'STA4746PAIRED'
-
 async function probeWorkspaceTerminal(
   page: Page,
   workspaceKey: string,
-  phase: string
-): Promise<string> {
+  phase: string,
+  expectedPtyOwner: RegExp
+): Promise<Sta4746Probe> {
   await page.evaluate((key) => {
     const store = window.__store
     if (!store) {
@@ -35,32 +39,17 @@ async function probeWorkspaceTerminal(
   }, workspaceKey)
   await ensureTerminalVisible(page, 45_000)
   await waitForActiveTerminalManager(page, 60_000)
-  await waitForActivePanePtyId(page, 60_000)
+  const ptyId = await waitForActivePanePtyId(page, 60_000)
+  // Why: host and client share one filesystem in this harness, so a
+  // client-local fallback would satisfy every path assertion. Pin the owner so
+  // the run proves the HOST spawned the PTY.
+  expect(ptyId, `phase ${phase} did not get the expected PTY owner`).toMatch(expectedPtyOwner)
   await focusActiveTerminalInput(page)
   await page.keyboard.type(
-    `printf '${PROBE} phase=${phase} pwd=%s wt=%s root=%s\\n' "$PWD" "$ORCA_WORKTREE_ID" "$ORCA_WORKSPACE_ROOT"; touch ./${PROBE}-${phase}.marker`
+    `${sta4746ProbeCommand(phase)}; touch ./${STA4746_PROBE}-${phase}.marker`
   )
   await page.keyboard.press('Enter')
-  let observed = ''
-  await expect
-    .poll(
-      async () => {
-        const content = await getTerminalContent(page, 12_000)
-        observed =
-          content
-            .split('\n')
-            .toReversed()
-            .find(
-              (line) => line.includes(`${PROBE} phase=${phase} pwd=`) && !line.includes('printf')
-            )
-            ?.trim() ?? ''
-        return observed
-      },
-      { timeout: 60_000, message: `probe line for phase ${phase} never rendered` }
-    )
-    .not.toBe('')
-  console.log(`[sta4746-paired] ${phase}:`, observed)
-  return observed
+  return readSta4746Probe(page, phase)
 }
 
 test('STA-4746: paired desktop client lands a folder-workspace PTY on the host folder path @headful', async ({
@@ -72,14 +61,14 @@ test('STA-4746: paired desktop client lands a folder-workspace PTY on the host f
   const folderPath = path.join(parent, 'workspace')
   mkdirSync(folderPath, { recursive: true })
 
-  const hostWorktreeId = await orcaPage.evaluate(() => {
+  const hostWorktree = await orcaPage.evaluate(() => {
     const state = window.__store?.getState()
     const id = state?.activeWorktreeId
     const active = state?.allWorktrees().find((candidate) => candidate.id === id)
     if (!active) {
       throw new Error('Headed host did not select its seeded worktree')
     }
-    return active.id
+    return { id: active.id, path: active.path }
   })
 
   const folderWorkspaceId = await orcaPage.evaluate(
@@ -118,13 +107,18 @@ test('STA-4746: paired desktop client lands a folder-workspace PTY on the host f
       .toBe(true)
 
     // Primary: the paired CLIENT drives the terminal; the HOST owns the PTY.
-    const folderProbe = await probeWorkspaceTerminal(client.page, workspaceKey, 'client-folder')
-    expect(folderProbe).toContain(`pwd=${folderPath}`)
-    expect(folderProbe).toContain(`root=${folderPath}`)
-    expect(folderProbe).toContain(`wt=${workspaceKey}`)
+    const folderProbe = await probeWorkspaceTerminal(
+      client.page,
+      workspaceKey,
+      'client-folder',
+      /^remote:[^@]+@@/
+    )
+    expect(folderProbe.pwd).toBe(folderPath)
+    expect(folderProbe.root).toBe(folderPath)
+    expect(folderProbe.wt).toBe(workspaceKey)
     // Independent filesystem signal: the marker landed in the folder path itself.
     await expect
-      .poll(() => existsSync(path.join(folderPath, `${PROBE}-client-folder.marker`)), {
+      .poll(() => existsSync(path.join(folderPath, `${STA4746_PROBE}-client-folder.marker`)), {
         timeout: 30_000,
         message: 'client folder-workspace PTY never wrote its marker into the folder path'
       })
@@ -133,16 +127,23 @@ test('STA-4746: paired desktop client lands a folder-workspace PTY on the host f
     // Control: a normal git worktree over the same paired transport.
     const worktreeProbe = await probeWorkspaceTerminal(
       client.page,
-      hostWorktreeId,
-      'client-worktree'
+      hostWorktree.id,
+      'client-worktree',
+      /^remote:[^@]+@@/
     )
-    expect(worktreeProbe).toContain(`wt=${hostWorktreeId}`)
-    expect(worktreeProbe).not.toContain(`pwd=${os.homedir()}\n`)
+    expect(worktreeProbe.wt).toBe(hostWorktree.id)
+    expect(worktreeProbe.pwd).toBe(hostWorktree.path)
+    expect(worktreeProbe.root).toBe('')
 
     // Control: local-only on the host itself, same folder workspace.
-    const localProbe = await probeWorkspaceTerminal(orcaPage, workspaceKey, 'host-local-folder')
-    expect(localProbe).toContain(`pwd=${folderPath}`)
-    expect(localProbe).toContain(`root=${folderPath}`)
+    const localProbe = await probeWorkspaceTerminal(
+      orcaPage,
+      workspaceKey,
+      'host-local-folder',
+      /^folder:[^@]+@@/
+    )
+    expect(localProbe.pwd).toBe(folderPath)
+    expect(localProbe.root).toBe(folderPath)
   } finally {
     await client.dispose()
     rmSync(parent, { recursive: true, force: true })

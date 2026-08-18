@@ -1,3 +1,5 @@
+import type { Page } from '@stablyai/playwright-test'
+
 import { connectDockerSshRelayTarget } from './helpers/docker-ssh-relay-connection'
 import {
   cleanupDockerSshRelayTarget,
@@ -7,26 +9,31 @@ import {
   type DockerSshRelayTarget
 } from './helpers/docker-ssh-relay-target'
 import { test, expect } from './helpers/orca-app'
+import {
+  readSta4746Probe,
+  sta4746ProbeCommand,
+  type Sta4746Probe
+} from './helpers/sta4746-cwd-probe'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import {
   focusActiveTerminalInput,
-  getTerminalContent,
   waitForActivePanePtyId,
   waitForActiveTerminalManager
 } from './helpers/terminal'
-import type { Page } from '@stablyai/playwright-test'
 
 const RUN_DOCKER_SSH = process.env.ORCA_E2E_SSH_DOCKER === '1'
 const REMOTE_FOLDER_PARENT = '/srv/sta4746'
 const REMOTE_FOLDER_PATH = `${REMOTE_FOLDER_PARENT}/workspace`
 const REMOTE_PROFILE_CD_PATH = `${REMOTE_FOLDER_PARENT}/container-init`
-const PROBE = 'STA4746SSH'
+// Why: the profile script records where each login shell *started*, before it
+// cd's. That is independent of OLDPWD, which a test could otherwise inherit.
+const REMOTE_PRE_CD_LOG = `${REMOTE_FOLDER_PARENT}/pre-cd.log`
 
 async function probeWorkspaceTerminal(
   page: Page,
   workspaceKey: string,
   phase: string
-): Promise<string> {
+): Promise<Sta4746Probe> {
   await page.evaluate((key) => {
     const store = window.__store
     if (!store) {
@@ -39,38 +46,22 @@ async function probeWorkspaceTerminal(
   }, workspaceKey)
   await ensureTerminalVisible(page, 45_000)
   await waitForActiveTerminalManager(page, 60_000)
-  await waitForActivePanePtyId(page, 60_000)
+  const ptyId = await waitForActivePanePtyId(page, 60_000)
+  // Why: a local-provider fallback would satisfy every path assertion below,
+  // because the container paths do not exist on the client. Pin the owner.
+  expect(ptyId, `phase ${phase} did not get an SSH-owned PTY`).toMatch(/^ssh:[^@]+@@/)
   await focusActiveTerminalInput(page)
-  await page.keyboard.type(
-    `printf '${PROBE} phase=${phase} pwd=%s oldpwd=%s wt=%s root=%s\\n' "$PWD" "$OLDPWD" "$ORCA_WORKTREE_ID" "$ORCA_WORKSPACE_ROOT"`
-  )
+  // `readlink /proc/$$/cwd` is the kernel's answer for this exact shell, so it
+  // is a second signal that cannot agree with $PWD by construction.
+  await page.keyboard.type(sta4746ProbeCommand(phase, { selfcwd: '"$(readlink /proc/$$/cwd)"' }))
   await page.keyboard.press('Enter')
-  let observed = ''
-  await expect
-    .poll(
-      async () => {
-        const content = await getTerminalContent(page, 12_000)
-        observed =
-          content
-            .split('\n')
-            .toReversed()
-            .find(
-              (line) => line.includes(`${PROBE} phase=${phase} pwd=`) && !line.includes('printf')
-            )
-            ?.trim() ?? ''
-        return observed
-      },
-      { timeout: 90_000, message: `probe line for phase ${phase} never rendered` }
-    )
-    .not.toBe('')
-  console.log(`[sta4746-ssh] ${phase}:`, observed)
-  return observed
+  return readSta4746Probe(page, phase)
 }
 
 test.describe('STA-4746 SSH relay folder workspace cwd', () => {
   test.skip(!RUN_DOCKER_SSH, 'Set ORCA_E2E_SSH_DOCKER=1 to run the Docker SSH relay repro')
 
-  test('relay honours the folder-workspace path; a login-profile cd is the only thing that moves it', async ({
+  test('relay honours the folder-workspace path; a login-profile cd is what moves it', async ({
     orcaPage: page
   }, testInfo) => {
     test.setTimeout(420_000)
@@ -122,39 +113,44 @@ test.describe('STA-4746 SSH relay folder workspace cwd', () => {
 
       // Phase A — clean remote login profile. The relay must land in the folder path.
       const clean = await probeWorkspaceTerminal(page, workspaceKey, 'clean-folder')
-      expect(clean).toContain(`pwd=${REMOTE_FOLDER_PATH}`)
-      expect(clean).toContain(`root=${REMOTE_FOLDER_PATH}`)
-      expect(clean).toContain(`wt=${workspaceKey}`)
+      expect(clean.pwd).toBe(REMOTE_FOLDER_PATH)
+      expect(clean.selfcwd).toBe(REMOTE_FOLDER_PATH)
+      expect(clean.root).toBe(REMOTE_FOLDER_PATH)
+      expect(clean.wt).toBe(workspaceKey)
 
-      // Independent signal: the real process cwd on the remote host.
-      const cleanRemoteCwds = execDockerSshRelayTargetControlCommand(
-        target,
-        `for p in $(pgrep -x bash 2>/dev/null); do d=$(readlink /proc/$p/cwd 2>/dev/null); [ -n "$d" ] && echo "$d"; done | sort -u`
-      )
-      console.log(`[sta4746-ssh] remote bash cwds (clean):\n${cleanRemoteCwds}`)
-      expect(cleanRemoteCwds).toContain(REMOTE_FOLDER_PATH)
-
-      // Phase B — the relay spawns POSIX *login* shells, so a remote /etc/profile.d
-      // entry that cd's wins over the spawn cwd. This is the STA-4746 reporter's
-      // exact signature (PWD=<other>, OLDPWD=<workspace>), with no Orca defect.
+      // Phase B — the relay spawns POSIX *login* shells, so a remote
+      // /etc/profile.d entry that cd's wins over the spawn cwd. This is the
+      // STA-4746 reporter's exact signature, with no Orca defect involved.
       execDockerSshRelayTargetControlCommand(
         target,
-        `printf 'cd ${REMOTE_PROFILE_CD_PATH}\\n' > /etc/profile.d/99-sta4746-cd.sh`
+        `printf 'printf "%%s\\\\n" "$PWD" >> ${REMOTE_PRE_CD_LOG}\\ncd ${REMOTE_PROFILE_CD_PATH}\\n' > /etc/profile.d/99-sta4746-cd.sh`
       )
       const profiled = await probeWorkspaceTerminal(page, workspaceKey, 'profile-cd-folder')
-      expect(profiled).toContain(`pwd=${REMOTE_PROFILE_CD_PATH}`)
-      expect(profiled).toContain(`oldpwd=${REMOTE_FOLDER_PATH}`)
-      expect(profiled).toContain(`root=${REMOTE_FOLDER_PATH}`)
+      expect(profiled.pwd).toBe(REMOTE_PROFILE_CD_PATH)
+      expect(profiled.selfcwd).toBe(REMOTE_PROFILE_CD_PATH)
+      expect(profiled.oldpwd).toBe(REMOTE_FOLDER_PATH)
+      expect(profiled.root).toBe(REMOTE_FOLDER_PATH)
+      const folderPreCd = execDockerSshRelayTargetControlCommand(
+        target,
+        `tail -n 1 ${REMOTE_PRE_CD_LOG}`
+      )
+      expect(folderPreCd.trim()).toBe(REMOTE_FOLDER_PATH)
 
-      // Phase C — the same login-profile cd moves a plain git worktree too, so the
-      // symptom is not specific to `folder:<uuid>` workspace ids.
+      // Phase C — the same login-profile cd moves a plain git worktree too, so
+      // the symptom is not specific to `folder:<uuid>` workspace ids.
       const profiledWorktree = await probeWorkspaceTerminal(
         page,
         gitWorktreeKey,
         'profile-cd-worktree'
       )
-      expect(profiledWorktree).toContain(`pwd=${REMOTE_PROFILE_CD_PATH}`)
-      expect(profiledWorktree).toContain(`oldpwd=${DOCKER_SSH_RELAY_REMOTE_REPO_PATH}`)
+      expect(profiledWorktree.pwd).toBe(REMOTE_PROFILE_CD_PATH)
+      expect(profiledWorktree.oldpwd).toBe(DOCKER_SSH_RELAY_REMOTE_REPO_PATH)
+      expect(profiledWorktree.root).toBe('')
+      const worktreePreCd = execDockerSshRelayTargetControlCommand(
+        target,
+        `tail -n 1 ${REMOTE_PRE_CD_LOG}`
+      )
+      expect(worktreePreCd.trim()).toBe(DOCKER_SSH_RELAY_REMOTE_REPO_PATH)
     } finally {
       cleanupDockerSshRelayTarget(target)
     }

@@ -39,7 +39,8 @@ const WORKTREE_ID = 'repo-1::/srv/repo'
 // Why (STA-4746): the report claimed the relay derives a PTY's cwd by splitting
 // ORCA_WORKTREE_ID on `::`, so a `folder:<uuid>` workspace fell back to $HOME.
 // The relay has always taken cwd from the request instead; these pin that
-// contract so a future refactor cannot introduce the reported bug.
+// contract so a future refactor cannot introduce the reported bug. Production
+// request construction is covered end to end by tests/e2e/sta4746-*.spec.ts.
 describe('relay PTY spawn cwd for folder workspaces', () => {
   let dispatcher: MockDispatcher
   let handler: PtyHandler
