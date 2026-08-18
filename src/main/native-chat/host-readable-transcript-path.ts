@@ -52,6 +52,10 @@ async function pathExistsAsync(path: string, signal?: AbortSignal): Promise<bool
     if (error instanceof WslTranscriptFsError) {
       throw error
     }
+    // A caller abort stays authoritative — it must never read as "missing".
+    if (signal?.aborted) {
+      throw error
+    }
     return false
   }
 }

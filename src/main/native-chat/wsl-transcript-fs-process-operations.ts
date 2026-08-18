@@ -1,8 +1,9 @@
 import { access, lstat, open, readdir, readFile, stat, type FileHandle } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
-import type {
-  WslTranscriptFsDirent,
-  WslTranscriptFsProcessRequest
+import {
+  invalidTranscriptHandleError,
+  type WslTranscriptFsDirent,
+  type WslTranscriptFsProcessRequest
 } from './wsl-transcript-fs-process-protocol'
 
 function serializeDirent(entry: Dirent): WslTranscriptFsDirent {
@@ -45,9 +46,7 @@ export class WslTranscriptFsProcessOperations {
       case 'read': {
         const handle = this.handles.get(request.handleId)
         if (!handle) {
-          throw Object.assign(new Error('WSL transcript file handle is no longer available'), {
-            code: 'EBADF'
-          })
+          throw invalidTranscriptHandleError()
         }
         const buffer = Buffer.allocUnsafe(request.length)
         const { bytesRead } = await handle.read(buffer, 0, request.length, request.position)

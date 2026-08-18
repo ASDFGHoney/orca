@@ -258,7 +258,7 @@ describe('transcript filesystem accessor on WSL UNC', () => {
     }
   )
 
-  it('does not expose a late open result after its isolated process is aborted', async () => {
+  it('disposes a late open result after the deadline already settled the task', async () => {
     vi.useFakeTimers()
     let release: ((handle: unknown) => void) | undefined
     mocks.open.mockReturnValue(
@@ -275,7 +275,8 @@ describe('transcript filesystem accessor on WSL UNC', () => {
       release?.(handle)
       await vi.advanceTimersByTimeAsync(0)
 
-      expect(handle.close).not.toHaveBeenCalled()
+      // Nobody was left to own the descriptor, so the gate's disposer closed it.
+      expect(handle.close).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

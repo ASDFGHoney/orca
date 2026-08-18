@@ -1,44 +1,20 @@
 import { fork, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { pickAllowedEnv, RUNTIME_ENV_ALLOWLIST } from '../ai-vault/session-scanner-service-env'
 
 const PROCESS_ENTRY_FILENAME = 'wsl-transcript-fs-process-entry.js'
 
 // Why: never `...process.env` into a forked transcript reader — an ambient
 // NODE_OPTIONS would halt (--inspect-brk) or --require code into every child,
-// and shell-exported secrets have no business in one. Mirrors the AI Vault
-// service allowlist: only what Node/libuv need to start.
-const FORK_ENV_ALLOWLIST = [
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'TZ',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'SYSTEMROOT',
-  'SYSTEMDRIVE',
-  'WINDIR',
-  'COMSPEC',
-  'PATHEXT',
-  'PROCESSOR_ARCHITECTURE',
-  'NUMBER_OF_PROCESSORS'
-] as const
-
+// and shell-exported secrets have no business in one. Shares the AI Vault
+// runtime allowlist: only what Node/libuv need to start.
 export function wslTranscriptFsProcessForkEnv(
-  baseEnv: NodeJS.ProcessEnv = process.env
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' }
-  for (const key of FORK_ENV_ALLOWLIST) {
-    // Node folds Windows env-name case on access, so this also picks up `path`.
-    const value = baseEnv[key]
-    if (value !== undefined) {
-      env[key] = value
-    }
-  }
+  const env = pickAllowedEnv(RUNTIME_ENV_ALLOWLIST, baseEnv, platform)
+  env.ELECTRON_RUN_AS_NODE = '1'
   return env
 }
 

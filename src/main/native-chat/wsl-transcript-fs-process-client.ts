@@ -1,46 +1,29 @@
-import type { ChildProcess } from 'node:child_process'
-import type {
-  WslTranscriptFsProcessCall,
-  WslTranscriptFsProcessResponse,
-  WslTranscriptFsProcessRequest,
-  WslTranscriptFsReusableProcessCall
+import {
+  invalidTranscriptHandleError,
+  type WslTranscriptFsProcessCall,
+  type WslTranscriptFsProcessResponse,
+  type WslTranscriptFsReusableProcessCall
 } from './wsl-transcript-fs-process-protocol'
 import {
   decodeWslTranscriptFsProcessError,
   decodeWslTranscriptFsProcessValue
 } from './wsl-transcript-fs-process-decode'
-import { WslTranscriptFsError } from './wsl-transcript-fs-gate'
+// Transport faults (spawn failure, child death) mean nothing was consulted —
+// surfacing them as plain errors would read as "path missing"/"empty tree" to
+// the discovery layers, which only rethrow WslTranscriptFsError.
+import { wslTranscriptFsProcessFailureError } from './wsl-transcript-fs-error'
+import {
+  attachSlotChild,
+  WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS,
+  WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS,
+  type HandleState,
+  type ProcessSlot,
+  type SlotDisposition,
+  type WslTranscriptFsProcessFactory,
+  type WslTranscriptFsProcessHandle
+} from './wsl-transcript-fs-process-slot'
 
-type SlotDisposition = 'idle' | 'pin' | 'pinned' | 'close'
-type ActiveCall = {
-  id: number
-  resolve: (value: unknown) => void
-  reject: (error: unknown) => void
-  signal: AbortSignal
-  onAbort: () => void
-  operation: WslTranscriptFsProcessRequest['operation']
-  disposition: SlotDisposition
-}
-export type WslTranscriptFsProcessHandle = {
-  readonly wslTranscriptFsProcessHandle: true
-}
-type ProcessSlot = {
-  child: ChildProcess
-  active: ActiveCall | null
-  handle: WslTranscriptFsProcessHandle | null
-  idleTimer?: ReturnType<typeof setTimeout>
-}
-type HandleState = {
-  slot: ProcessSlot
-  handleId: number
-  closePromise?: Promise<void>
-}
-export type WslTranscriptFsProcessFactory = () => ChildProcess
-export const WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS = 30_000
-// Why: idle Electron-as-Node children are tens of MB each and a vault-scan
-// burst can pool several; reap them instead of holding RSS for the app session.
-// Longer than the close deadline so a pending close never outlives its slot.
-export const WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS = 60_000
+export type { WslTranscriptFsProcessHandle } from './wsl-transcript-fs-process-slot'
 
 /** Routes cross-module handle calls back to the owning client. */
 export const wslTranscriptFsHandleOwners = new WeakMap<
@@ -48,47 +31,28 @@ export const wslTranscriptFsHandleOwners = new WeakMap<
   WslTranscriptFsProcessClient
 >()
 
-// Transport faults (spawn failure, child death) mean nothing was consulted —
-// surfacing them as plain errors would read as "path missing"/"empty tree" to
-// the discovery layers, which only rethrow WslTranscriptFsError.
-function processUnavailableError(error: unknown): WslTranscriptFsError {
-  const detail = error instanceof Error ? error.message : String(error)
-  return new WslTranscriptFsError(
-    'unavailable',
-    `WSL transcript files are temporarily unavailable because the filesystem helper process failed (${detail}). Try again shortly or restart Orca if the issue continues.`
-  )
-}
-
 export class WslTranscriptFsProcessClient {
   private readonly idle: ProcessSlot[] = []
   private readonly slots = new Set<ProcessSlot>()
   private readonly handles = new WeakMap<WslTranscriptFsProcessHandle, HandleState>()
+  /** Handles retired by a slot fault/kill, not by a clean close: reads on them
+   *  are a transport condition, never a caller bug. */
+  private readonly faultedHandles = new WeakSet<WslTranscriptFsProcessHandle>()
   private nextId = 1
 
   constructor(private readonly processFactory: WslTranscriptFsProcessFactory) {}
 
-  run<T>(request: WslTranscriptFsReusableProcessCall, signal: AbortSignal): Promise<T> {
+  async run<T>(request: WslTranscriptFsReusableProcessCall, signal: AbortSignal): Promise<T> {
     signal.throwIfAborted()
-    let slot: ProcessSlot
-    try {
-      slot = this.takeSlot()
-    } catch (error) {
-      return Promise.reject(processUnavailableError(error))
-    }
-    return this.send<T>(slot, request, signal, 'idle')
+    return this.send<T>(this.takeSlotOrThrow(), request, signal, 'idle')
   }
 
   async open(path: string, signal: AbortSignal): Promise<WslTranscriptFsProcessHandle> {
     signal.throwIfAborted()
-    let slot: ProcessSlot
-    try {
-      slot = this.takeSlot()
-    } catch (error) {
-      throw processUnavailableError(error)
-    }
+    const slot = this.takeSlotOrThrow()
     const handleId = await this.send<number>(slot, { operation: 'open', path }, signal, 'pin')
     if (!this.slots.has(slot)) {
-      throw processUnavailableError(new Error('WSL filesystem process exited while opening a file'))
+      throw wslTranscriptFsProcessFailureError('the process exited while opening a file')
     }
     const handle = Object.freeze({
       wslTranscriptFsProcessHandle: true as const
@@ -108,7 +72,11 @@ export class WslTranscriptFsProcessClient {
     signal.throwIfAborted()
     const state = this.handles.get(handle)
     if (!state) {
-      return Promise.reject(this.invalidHandleError())
+      return Promise.reject(
+        this.faultedHandles.has(handle)
+          ? wslTranscriptFsProcessFailureError('the process owning this file handle exited')
+          : invalidTranscriptHandleError()
+      )
     }
     if (state.slot.active) {
       return Promise.reject(new Error('WSL transcript file handle is already in use'))
@@ -126,26 +94,62 @@ export class WslTranscriptFsProcessClient {
     if (!state) {
       return Promise.resolve()
     }
-    if (state.closePromise) {
-      return state.closePromise
+    if (!state.closePromise) {
+      state.closePromise = this.performClose(handle, state)
+      // The stored promise may reject before any caller chains onto it.
+      void state.closePromise.catch(() => {})
     }
-    if (state.slot.active) {
-      return Promise.reject(new Error('WSL transcript file handle is already in use'))
-    }
-    const controller = new AbortController()
-    const timer = setTimeout(
-      () => controller.abort(new Error('WSL transcript file handle close timed out')),
-      WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS
-    )
-    timer.unref?.()
-    state.closePromise = this.send<boolean>(
-      state.slot,
-      { operation: 'close', handleId: state.handleId },
-      controller.signal,
-      'close'
-    ).then(() => undefined)
-    void state.closePromise.finally(() => clearTimeout(timer)).catch(() => {})
     return state.closePromise
+  }
+
+  // Why: a close can arrive while the handle's read is still in flight (the
+  // gate waiter gave up but the child is mid-syscall). Refusing would strand
+  // the pinned slot forever once that read settles — pinned slots have no idle
+  // reap — so defer under the close deadline instead, and retire the slot if
+  // even the wait times out.
+  private async performClose(
+    handle: WslTranscriptFsProcessHandle,
+    state: HandleState
+  ): Promise<void> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort(new Error('WSL transcript file handle close timed out'))
+      if (this.slots.has(state.slot) && state.slot.active) {
+        this.rejectActive(
+          state.slot,
+          wslTranscriptFsProcessFailureError('the process was retired by a stuck close')
+        )
+        this.destroySlot(state.slot)
+      }
+    }, WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS)
+    timer.unref?.()
+    try {
+      while (state.slot.active) {
+        const settled = state.slot.activeSettled
+        if (!settled) {
+          break
+        }
+        await settled
+        if (controller.signal.aborted) {
+          throw controller.signal.reason
+        }
+        if (this.handles.get(handle) !== state) {
+          // The slot died while waiting; the fd died with the child.
+          return
+        }
+      }
+      if (this.handles.get(handle) !== state) {
+        return
+      }
+      await this.send<boolean>(
+        state.slot,
+        { operation: 'close', handleId: state.handleId },
+        controller.signal,
+        'close'
+      )
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private send<T>(
@@ -163,6 +167,9 @@ export class WslTranscriptFsProcessClient {
         this.rejectActive(slot, signal.reason ?? new Error('WSL filesystem process aborted'))
         this.destroySlot(slot)
       }
+      slot.activeSettled = new Promise((resolveSettled) => {
+        slot.notifyActiveSettled = resolveSettled
+      })
       slot.active = {
         id,
         resolve: resolve as (value: unknown) => void,
@@ -174,14 +181,14 @@ export class WslTranscriptFsProcessClient {
       }
       signal.addEventListener('abort', onAbort, { once: true })
       try {
-        slot.child.send({ ...request, id } as WslTranscriptFsProcessRequest, (error) => {
+        slot.child.send({ ...request, id }, (error) => {
           if (error && slot.active?.id === id) {
-            this.rejectActive(slot, processUnavailableError(error))
+            this.rejectActive(slot, wslTranscriptFsProcessFailureError(error))
             this.destroySlot(slot)
           }
         })
       } catch (error) {
-        this.rejectActive(slot, processUnavailableError(error))
+        this.rejectActive(slot, wslTranscriptFsProcessFailureError(error))
         this.destroySlot(slot)
       }
     })
@@ -189,21 +196,22 @@ export class WslTranscriptFsProcessClient {
 
   dispose(): void {
     for (const slot of this.slots) {
-      this.rejectActive(
-        slot,
-        processUnavailableError(new Error('WSL filesystem process client disposed'))
-      )
+      this.rejectActive(slot, wslTranscriptFsProcessFailureError('the client was disposed'))
       this.destroySlot(slot)
     }
   }
 
-  private takeSlot(): ProcessSlot {
-    const slot = this.idle.pop()
-    if (!slot) {
-      return this.createSlot()
+  private takeSlotOrThrow(): ProcessSlot {
+    try {
+      const slot = this.idle.pop()
+      if (!slot) {
+        return this.createSlot()
+      }
+      clearTimeout(slot.idleTimer)
+      return slot
+    } catch (error) {
+      throw wslTranscriptFsProcessFailureError(error)
     }
-    clearTimeout(slot.idleTimer)
-    return slot
   }
 
   private parkIdle(slot: ProcessSlot): void {
@@ -217,20 +225,11 @@ export class WslTranscriptFsProcessClient {
 
   private createSlot(): ProcessSlot {
     const child = this.processFactory()
-    const slot: ProcessSlot = { child, active: null, handle: null }
+    const slot = attachSlotChild(child, {
+      onResponse: (response) => this.onResponse(slot, response),
+      onFault: (error) => this.onFault(slot, error)
+    })
     this.slots.add(slot)
-    child.on('message', (response: WslTranscriptFsProcessResponse) =>
-      this.onResponse(slot, response)
-    )
-    child.on('error', (error) => this.onFault(slot, error))
-    child.on('disconnect', () =>
-      this.onFault(slot, new Error('WSL filesystem process disconnected'))
-    )
-    child.on('exit', (code) =>
-      this.onFault(slot, new Error(`WSL filesystem process exited (${code})`))
-    )
-    child.unref()
-    child.channel?.unref?.()
     return slot
   }
 
@@ -239,22 +238,40 @@ export class WslTranscriptFsProcessClient {
     if (!call || call.id !== response.id) {
       return
     }
-    slot.active = null
+    this.clearActive(slot)
     call.signal.removeEventListener('abort', call.onAbort)
     if (!response.ok) {
       call.reject(decodeWslTranscriptFsProcessError(response.error))
     } else {
-      call.resolve(decodeWslTranscriptFsProcessValue(call.operation, response.value))
-    }
-    if (!response.ok && call.disposition === 'close') {
-      this.destroySlot(slot)
-    } else if (call.disposition === 'idle' || call.disposition === 'close') {
-      if (call.disposition === 'close') {
-        this.releaseHandle(slot)
+      try {
+        call.resolve(decodeWslTranscriptFsProcessValue(call.operation, response.value))
+      } catch (error) {
+        // An undecodable ok-response means the protocol is corrupt: fail the
+        // call and retire the slot rather than leave the promise unsettled.
+        call.reject(error)
+        this.destroySlot(slot)
+        return
       }
-      this.parkIdle(slot)
-    } else if (!response.ok && call.disposition === 'pin') {
-      this.parkIdle(slot)
+    }
+    switch (call.disposition) {
+      case 'idle':
+        this.parkIdle(slot)
+        break
+      case 'pin':
+        if (!response.ok) {
+          this.parkIdle(slot)
+        }
+        break
+      case 'pinned':
+        break
+      case 'close':
+        if (!response.ok) {
+          this.destroySlot(slot)
+        } else {
+          this.releaseHandle(slot)
+          this.parkIdle(slot)
+        }
+        break
     }
   }
 
@@ -262,13 +279,20 @@ export class WslTranscriptFsProcessClient {
     if (!this.slots.has(slot)) {
       return
     }
-    this.rejectActive(slot, processUnavailableError(error))
+    this.rejectActive(slot, wslTranscriptFsProcessFailureError(error))
     this.destroySlot(slot)
+  }
+
+  private clearActive(slot: ProcessSlot): void {
+    slot.active = null
+    slot.notifyActiveSettled?.()
+    slot.notifyActiveSettled = undefined
+    slot.activeSettled = undefined
   }
 
   private rejectActive(slot: ProcessSlot, error: unknown): void {
     const call = slot.active
-    slot.active = null
+    this.clearActive(slot)
     if (!call) {
       return
     }
@@ -284,6 +308,9 @@ export class WslTranscriptFsProcessClient {
     const idleIndex = this.idle.indexOf(slot)
     if (idleIndex !== -1) {
       this.idle.splice(idleIndex, 1)
+    }
+    if (slot.handle) {
+      this.faultedHandles.add(slot.handle)
     }
     this.releaseHandle(slot)
     slot.child.removeAllListeners()
@@ -302,12 +329,7 @@ export class WslTranscriptFsProcessClient {
       return
     }
     this.handles.delete(handle)
-    wslTranscriptFsHandleOwners.delete(handle)
-  }
-
-  private invalidHandleError(): NodeJS.ErrnoException {
-    return Object.assign(new Error('WSL transcript file handle is no longer available'), {
-      code: 'EBADF'
-    })
+    // The owners entry stays (WeakMap, collected with the handle) so late
+    // cross-module reads still reach this client for a classified rejection.
   }
 }

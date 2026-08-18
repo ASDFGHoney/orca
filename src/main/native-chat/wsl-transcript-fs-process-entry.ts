@@ -20,16 +20,20 @@ function serializeError(error: unknown): WslTranscriptFsProcessError {
   }
 }
 
+function respond(response: WslTranscriptFsProcessResponse): void {
+  try {
+    // The callback absorbs an async send failure (channel torn mid-write) that
+    // would otherwise surface as an unhandled 'error' event and crash the child.
+    process.send?.(response, () => {})
+  } catch {
+    // Channel closed while the op settled (parent teardown); disconnect exits.
+  }
+}
+
 process.on('message', (request: WslTranscriptFsProcessRequest) => {
   void operations.execute(request).then(
-    (value) =>
-      process.send?.({ id: request.id, ok: true, value } satisfies WslTranscriptFsProcessResponse),
-    (error: unknown) =>
-      process.send?.({
-        id: request.id,
-        ok: false,
-        error: serializeError(error)
-      } satisfies WslTranscriptFsProcessResponse)
+    (value) => respond({ id: request.id, ok: true, value }),
+    (error: unknown) => respond({ id: request.id, ok: false, error: serializeError(error) })
   )
 })
 

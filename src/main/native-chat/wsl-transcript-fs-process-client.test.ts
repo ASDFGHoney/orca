@@ -3,11 +3,11 @@ import type { ChildProcess } from 'node:child_process'
 import type { Dirent, Stats } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { WslTranscriptFsProcessClient } from './wsl-transcript-fs-process-client'
 import {
   WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS,
-  WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS,
-  WslTranscriptFsProcessClient
-} from './wsl-transcript-fs-process-client'
+  WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS
+} from './wsl-transcript-fs-process-slot'
 import {
   resolveWslTranscriptFsProcessEntryPath,
   wslTranscriptFsProcessForkEnv
@@ -138,6 +138,43 @@ describe('WSL transcript filesystem process client', () => {
     client.dispose()
   })
 
+  // Why: the gate waiter can give up mid-read and the caller's finally closes
+  // right away; a refused close would strand the pinned slot (and its child)
+  // forever once that read settles.
+  it('defers a close issued while a read is in flight instead of stranding the slot', async () => {
+    const owner = new FakeProcess()
+    const factory = vi.fn(() => fakeChild(owner))
+    const client = new WslTranscriptFsProcessClient(factory)
+    const signal = new AbortController().signal
+
+    const opening = client.open('\\\\wsl.localhost\\Ubuntu\\transcript', signal)
+    owner.respond({ id: owner.sent[0].id, ok: true, value: 5 })
+    const handle = await opening
+
+    const reading = client.read(handle, 0, 4, signal)
+    const closing = client.close(handle)
+    // The close waits for the in-flight read; nothing extra was sent yet.
+    expect(owner.sent).toHaveLength(2)
+
+    owner.respond({ id: owner.sent[1].id, ok: true, value: Buffer.from('data') })
+    await expect(reading).resolves.toEqual(Buffer.from('data'))
+    await vi.waitFor(() => expect(owner.sent).toHaveLength(3))
+    expect(owner.sent[2]).toMatchObject({ operation: 'close', handleId: 5 })
+    owner.respond({ id: owner.sent[2].id, ok: true, value: true })
+    await expect(closing).resolves.toBeUndefined()
+
+    // The slot returned to the pool instead of leaking pinned.
+    const later = client.run<boolean>(
+      { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\after-close' },
+      signal
+    )
+    owner.respond({ id: owner.sent[3].id, ok: true, value: true })
+    await expect(later).resolves.toBe(true)
+    expect(factory).toHaveBeenCalledOnce()
+    expect(owner.kill).not.toHaveBeenCalled()
+    client.dispose()
+  })
+
   it('invalidates only the handle whose read process is aborted', async () => {
     const owner = new FakeProcess()
     const healthy = new FakeProcess()
@@ -165,8 +202,11 @@ describe('WSL transcript filesystem process client', () => {
     controller.abort(reason)
 
     await expect(stalled).rejects.toBe(reason)
+    // The handle died with its killed process — a transport condition, so later
+    // reads surface as a retryable refusal rather than a caller EBADF bug.
     await expect(client.read(handle, 0, 1, new AbortController().signal)).rejects.toMatchObject({
-      code: 'EBADF'
+      name: 'WslTranscriptFsError',
+      code: 'unavailable'
     })
     expect(owner.kill).toHaveBeenCalledWith('SIGKILL')
     expect(healthy.kill).not.toHaveBeenCalled()
@@ -264,6 +304,23 @@ describe('WSL transcript filesystem process client', () => {
     client.dispose()
   })
 
+  it('names the killing signal instead of a null exit code', async () => {
+    const child = new FakeProcess()
+    const client = new WslTranscriptFsProcessClient(() => fakeChild(child))
+    const pending = client.run(
+      { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\killed' },
+      new AbortController().signal
+    )
+    // A signal-terminated child reports code null; the message must carry the signal.
+    child.emit('exit', null, 'SIGKILL')
+    await expect(pending).rejects.toMatchObject({
+      name: 'WslTranscriptFsError',
+      code: 'unavailable',
+      message: expect.stringContaining('exited (SIGKILL)')
+    })
+    client.dispose()
+  })
+
   it('reconstructs filesystem errors with their Node error code', async () => {
     const child = new FakeProcess()
     const client = new WslTranscriptFsProcessClient(() => fakeChild(child))
@@ -357,17 +414,21 @@ describe('WSL transcript filesystem process entry resolution', () => {
   })
 
   it('excludes ambient NODE_OPTIONS and secrets from the fork env', () => {
-    const env = wslTranscriptFsProcessForkEnv({
-      PATH: 'C:\\bin',
-      SYSTEMROOT: 'C:\\WINDOWS',
-      NODE_OPTIONS: '--inspect-brk',
-      SECRET_TOKEN: 'shh'
-    })
+    const env = wslTranscriptFsProcessForkEnv(
+      {
+        PATH: 'C:\\bin',
+        SYSTEMROOT: 'C:\\WINDOWS',
+        NODE_OPTIONS: '--inspect-brk',
+        SECRET_TOKEN: 'shh'
+      },
+      'win32'
+    )
 
     expect(env).toMatchObject({
       ELECTRON_RUN_AS_NODE: '1',
       PATH: 'C:\\bin',
-      SYSTEMROOT: 'C:\\WINDOWS'
+      // The shared allowlist emits the canonical Windows casing.
+      SystemRoot: 'C:\\WINDOWS'
     })
     expect(env).not.toHaveProperty('NODE_OPTIONS')
     expect(env).not.toHaveProperty('SECRET_TOKEN')

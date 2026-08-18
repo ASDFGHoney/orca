@@ -484,6 +484,40 @@ describe('WSL transcript filesystem task scheduling', () => {
     }
   })
 
+  // Why: a helper transport fault (child died, fork failed) consulted nothing
+  // about the mount, so it must not erase a live quarantine or its strikes.
+  it('keeps the quarantine when a same-route transport fault settles', async () => {
+    vi.useFakeTimers()
+    const stalledExact = deferred<string>()
+    const scanWork = deferred<string>()
+    try {
+      const stalled = run('\\\\wsl.localhost\\Ubuntu\\quarantine-me', 'exact', () => {
+        return stalledExact.promise
+      })
+      const stalledRejected = expect(stalled).rejects.toMatchObject({ code: 'timeout' })
+      const scan = run('\\\\wsl.localhost\\Ubuntu\\scan-tree', 'scan', () => scanWork.promise)
+      const scanRejected = expect(scan).rejects.toMatchObject({ code: 'unavailable' })
+
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS)
+      await stalledRejected
+
+      // The still-running scan's helper dies: a transport fault, not an answer.
+      scanWork.reject(new WslTranscriptFsError('unavailable', 'helper process died'))
+      await vi.advanceTimersByTimeAsync(0)
+      await scanRejected
+
+      const retryTask = vi.fn(async () => 'retry')
+      await expect(
+        run('\\\\wsl.localhost\\Ubuntu\\retry', 'exact', retryTask)
+      ).rejects.toMatchObject({ code: 'unavailable' })
+      expect(retryTask).not.toHaveBeenCalled()
+    } finally {
+      stalledExact.resolve('late')
+      await vi.advanceTimersByTimeAsync(0)
+      vi.useRealTimers()
+    }
+  })
+
   it('lets abandoned running work finish instead of aborting its process', async () => {
     const work = deferred<string>()
     const controller = new AbortController()

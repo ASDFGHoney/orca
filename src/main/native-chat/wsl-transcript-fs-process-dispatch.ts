@@ -1,7 +1,7 @@
 import { open, type FileHandle } from 'node:fs/promises'
-import type {
-  WslTranscriptFsProcessRequest,
-  WslTranscriptFsReusableProcessCall
+import {
+  invalidTranscriptHandleError,
+  type WslTranscriptFsReusableProcessCall
 } from './wsl-transcript-fs-process-protocol'
 import { decodeWslTranscriptFsProcessValue } from './wsl-transcript-fs-process-decode'
 import {
@@ -29,11 +29,16 @@ let inProcessOperations: WslTranscriptFsProcessOperations | null = null
 function runInProcess<T>(request: WslTranscriptFsReusableProcessCall): Promise<T> {
   inProcessOperations ??= new WslTranscriptFsProcessOperations()
   return inProcessOperations
-    .execute({ ...request, id: 0 } as WslTranscriptFsProcessRequest)
+    .execute({ ...request, id: 0 })
     .then((value) => decodeWslTranscriptFsProcessValue(request.operation, value)) as Promise<T>
 }
 
 let sharedClient: WslTranscriptFsProcessClient | null = null
+
+function getSharedClient(): WslTranscriptFsProcessClient {
+  sharedClient ??= new WslTranscriptFsProcessClient(forkWslTranscriptFsProcess)
+  return sharedClient
+}
 
 export function runWslTranscriptFsProcess<T>(
   request: WslTranscriptFsReusableProcessCall,
@@ -42,8 +47,7 @@ export function runWslTranscriptFsProcess<T>(
   if (inVitestWorker()) {
     return runInProcess<T>(request)
   }
-  sharedClient ??= new WslTranscriptFsProcessClient(forkWslTranscriptFsProcess)
-  return sharedClient.run<T>(request, signal)
+  return getSharedClient().run<T>(request, signal)
 }
 
 export function openWslTranscriptFsProcess(
@@ -55,8 +59,7 @@ export function openWslTranscriptFsProcess(
     // handle branch, mirroring non-UNC ownership.
     return open(path, 'r')
   }
-  sharedClient ??= new WslTranscriptFsProcessClient(forkWslTranscriptFsProcess)
-  return sharedClient.open(path, signal)
+  return getSharedClient().open(path, signal)
 }
 
 export function readWslTranscriptFsProcess(
@@ -68,11 +71,7 @@ export function readWslTranscriptFsProcess(
   const owner = wslTranscriptFsHandleOwners.get(handle)
   return owner
     ? owner.read(handle, position, length, signal)
-    : Promise.reject(
-        Object.assign(new Error('WSL transcript file handle is no longer available'), {
-          code: 'EBADF'
-        })
-      )
+    : Promise.reject(invalidTranscriptHandleError())
 }
 
 export function closeWslTranscriptFsProcess(handle: WslTranscriptFsProcessHandle): Promise<void> {

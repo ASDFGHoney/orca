@@ -29,6 +29,7 @@ import {
   resetSessionParseCacheForTests
 } from './session-scanner-parse-cache'
 import {
+  resetWslTranscriptFsGateForTests,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
   WslTranscriptFsError
 } from '../native-chat/wsl-transcript-fs-gate'
@@ -150,6 +151,9 @@ async function releaseAndSettle(): Promise<void> {
 }
 
 beforeEach(() => {
+  // blockedRoutes is persistent gate state: a prior stall must not quarantine
+  // this test's route.
+  resetWslTranscriptFsGateForTests()
   resetSessionParseCacheForTests()
   mocks.open.mockReset()
   mocks.readFile.mockReset()

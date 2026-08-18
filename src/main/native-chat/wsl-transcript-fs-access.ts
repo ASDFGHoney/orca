@@ -12,28 +12,30 @@ import {
   runWslTranscriptFsProcess,
   type WslTranscriptFsProcessHandle
 } from './wsl-transcript-fs-process-dispatch'
+import type { WslTranscriptFsReusableProcessCall } from './wsl-transcript-fs-process-protocol'
 
 /** Never nest a gated call inside another — that deadlocks the scan slot. */
 
 // Why: one deadline per chunk instead of one for the whole file, so a large
 // healthy-but-slow transcript is not false-failed by a whole-file timeout.
 export const WSL_TRANSCRIPT_READ_CHUNK_BYTES = 1024 * 1024
-type Operation = Parameters<typeof runWslTranscriptFsTask>[0]['operation']
 
 export type TranscriptFileHandle = FileHandle | WslTranscriptFsProcessHandle
 
-function runPathOperation<T>(
-  operation: Operation,
-  path: string,
+// One request object drives both the gate's dedupe/route key and the child
+// call, so the two can never disagree on the operation or path.
+function runReusableFsOperation<T>(
+  request: WslTranscriptFsReusableProcessCall,
   priority: WslTranscriptFsTaskPriority,
   signal: AbortSignal | undefined,
-  task: () => Promise<T>,
-  isolatedTask: (signal: AbortSignal) => Promise<T>,
-  options?: { dedupe?: boolean; onAbandonedResult?: (value: T) => void }
+  localTask: () => Promise<T>
 ): Promise<T> {
-  return isWslUncPath(path)
-    ? runWslTranscriptFsTask({ operation, path, priority, signal, ...options }, isolatedTask)
-    : task()
+  return isWslUncPath(request.path)
+    ? runWslTranscriptFsTask(
+        { operation: request.operation, path: request.path, priority, signal },
+        (taskSignal) => runWslTranscriptFsProcess<T>(request, taskSignal)
+      )
+    : localTask()
 }
 
 export function wslGatedAccess(
@@ -41,17 +43,10 @@ export function wslGatedAccess(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<boolean> {
-  return runPathOperation(
-    'access',
-    path,
-    priority,
-    signal,
-    async () => {
-      await access(path)
-      return true
-    },
-    (taskSignal) => runWslTranscriptFsProcess({ operation: 'access', path }, taskSignal)
-  )
+  return runReusableFsOperation({ operation: 'access', path }, priority, signal, async () => {
+    await access(path)
+    return true
+  })
 }
 
 export function wslGatedStat(
@@ -59,14 +54,7 @@ export function wslGatedStat(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<Stats> {
-  return runPathOperation(
-    'stat',
-    path,
-    priority,
-    signal,
-    () => stat(path),
-    (taskSignal) => runWslTranscriptFsProcess({ operation: 'stat', path }, taskSignal)
-  )
+  return runReusableFsOperation({ operation: 'stat', path }, priority, signal, () => stat(path))
 }
 
 export function wslGatedLstat(
@@ -74,14 +62,7 @@ export function wslGatedLstat(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<Stats> {
-  return runPathOperation(
-    'lstat',
-    path,
-    priority,
-    signal,
-    () => lstat(path),
-    (taskSignal) => runWslTranscriptFsProcess({ operation: 'lstat', path }, taskSignal)
-  )
+  return runReusableFsOperation({ operation: 'lstat', path }, priority, signal, () => lstat(path))
 }
 
 export function wslGatedReaddir(
@@ -89,13 +70,8 @@ export function wslGatedReaddir(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<Dirent[]> {
-  return runPathOperation(
-    'readdir',
-    path,
-    priority,
-    signal,
-    () => readdir(path, { withFileTypes: true }),
-    (taskSignal) => runWslTranscriptFsProcess({ operation: 'readdir', path }, taskSignal)
+  return runReusableFsOperation({ operation: 'readdir', path }, priority, signal, () =>
+    readdir(path, { withFileTypes: true })
   )
 }
 
@@ -105,13 +81,8 @@ export function wslGatedReadFile(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<string> {
-  return runPathOperation(
-    'readfile',
-    path,
-    priority,
-    signal,
-    () => readFile(path, encoding),
-    (taskSignal) => runWslTranscriptFsProcess({ operation: 'readfile', path, encoding }, taskSignal)
+  return runReusableFsOperation({ operation: 'readfile', path, encoding }, priority, signal, () =>
+    readFile(path, encoding)
   )
 }
 
@@ -121,17 +92,19 @@ export function wslGatedOpen(
   priority: WslTranscriptFsTaskPriority,
   signal?: AbortSignal
 ): Promise<TranscriptFileHandle> {
-  return runPathOperation<TranscriptFileHandle>(
-    'open',
-    path,
-    priority,
-    signal,
-    () => open(path, 'r'),
-    (taskSignal) => openWslTranscriptFsProcess(path, taskSignal),
+  if (!isWslUncPath(path)) {
+    return open(path, 'r')
+  }
+  return runWslTranscriptFsTask<TranscriptFileHandle>(
     {
+      operation: 'open',
+      path,
+      priority,
+      signal,
       dedupe: false,
       onAbandonedResult: (handle) => void closeTranscriptHandle(handle, path)
-    }
+    },
+    (taskSignal) => openWslTranscriptFsProcess(path, taskSignal)
   )
 }
 
@@ -159,11 +132,11 @@ export function wslGatedRead(
   return runWslTranscriptFsTask(
     { operation: 'read', path, priority, signal, dedupe: false },
     async (taskSignal) => {
-      const body = isWslTranscriptFsProcessHandle(handle)
-        ? await readWslTranscriptFsProcess(handle, position, length, taskSignal)
-        : await (handle as FileHandle)
-            .read(buffer, offset, length, position)
-            .then((result) => result.buffer.subarray(offset, offset + result.bytesRead))
+      if (!isWslTranscriptFsProcessHandle(handle)) {
+        // The vitest fallback: a FileHandle read fills the caller's buffer itself.
+        return (handle as FileHandle).read(buffer, offset, length, position)
+      }
+      const body = await readWslTranscriptFsProcess(handle, position, length, taskSignal)
       buffer.set(body, offset)
       return { bytesRead: body.byteLength, buffer }
     }

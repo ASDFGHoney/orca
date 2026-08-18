@@ -32,7 +32,9 @@ export function decodeWslTranscriptFsProcessValue(
   value: unknown
 ): unknown {
   if (operation === 'stat' || operation === 'lstat') {
-    return Object.setPrototypeOf(value as object, Stats.prototype)
+    // Copy instead of setPrototypeOf: the in-process vitest arm passes the
+    // suite's own fixture here, which may be shared or frozen.
+    return Object.assign(Object.create(Stats.prototype) as Stats, value)
   }
   if (operation === 'readdir') {
     return (value as WslTranscriptFsDirent[]).map(decodeDirent)

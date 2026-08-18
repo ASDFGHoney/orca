@@ -22,6 +22,7 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
 
 import { listOpenCodeDatabases } from './opencode-database-discovery'
 import {
+  resetWslTranscriptFsGateForTests,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
   WslTranscriptFsError
 } from '../native-chat/wsl-transcript-fs-gate'
@@ -68,6 +69,9 @@ async function settlesOnlyAtTheScanDeadline(pending: Promise<string[]>): Promise
 let originalDatabaseOverride: string | undefined
 
 beforeEach(() => {
+  // blockedRoutes is persistent gate state: a prior stall must not quarantine
+  // this test's route.
+  resetWslTranscriptFsGateForTests()
   originalDatabaseOverride = process.env.OPENCODE_DB
   delete process.env.OPENCODE_DB
   mocks.resolveDataDirectory.mockReset()

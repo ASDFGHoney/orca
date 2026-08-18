@@ -1,18 +1,16 @@
-export type WslTranscriptFsProcessRequest =
-  | { id: number; operation: 'access'; path: string }
-  | { id: number; operation: 'stat' | 'lstat' | 'readdir'; path: string }
+export type WslTranscriptFsProcessCall =
+  | { operation: 'access'; path: string }
+  | { operation: 'stat' | 'lstat' | 'readdir'; path: string }
   // Kept as its own member so the reusable-call Exclude below can strip it:
   // Exclude compares whole union members, not individual operation literals.
-  | { id: number; operation: 'open'; path: string }
-  | { id: number; operation: 'readfile'; path: string; encoding: BufferEncoding }
-  | { id: number; operation: 'read'; handleId: number; position: number; length: number }
-  | { id: number; operation: 'close'; handleId: number }
+  | { operation: 'open'; path: string }
+  | { operation: 'readfile'; path: string; encoding: BufferEncoding }
+  | { operation: 'read'; handleId: number; position: number; length: number }
+  | { operation: 'close'; handleId: number }
 
-export type WslTranscriptFsProcessCall = WslTranscriptFsProcessRequest extends infer Request
-  ? Request extends WslTranscriptFsProcessRequest
-    ? Omit<Request, 'id'>
-    : never
-  : never
+// The intersection distributes over the union, so `{ ...call, id }` composes
+// a request without casts at the IPC boundary.
+export type WslTranscriptFsProcessRequest = WslTranscriptFsProcessCall & { id: number }
 
 /** Calls a pooled process may serve; open/read/close manage a pinned handle. */
 export type WslTranscriptFsReusableProcessCall = Exclude<
@@ -44,3 +42,10 @@ export type WslTranscriptFsProcessError = {
 export type WslTranscriptFsProcessResponse =
   | { id: number; ok: true; value: unknown }
   | { id: number; ok: false; error: WslTranscriptFsProcessError }
+
+/** The owning process, client, or entry no longer knows this handle. */
+export function invalidTranscriptHandleError(): NodeJS.ErrnoException {
+  return Object.assign(new Error('WSL transcript file handle is no longer available'), {
+    code: 'EBADF'
+  })
+}
