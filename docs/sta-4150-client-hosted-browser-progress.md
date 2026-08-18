@@ -1504,6 +1504,25 @@ topology, versions, and explicit gaps at every later checkpoint.
   traced with independent ownership signals to a late remote-frame paint under contention: the host
   owned `/server`, the client owned zero `/server` WebContents, and the remaining client `<webview>`
   was the intentionally retained inactive client page. No production workaround was added.
+- Closed the client-placed file-channel gap for `browser.upload` and `will-download`. Uploads on a
+  client-placed page now mean REMOTE workspace paths: the runtime reads them through the existing
+  containment-checked file-explorer transfer path, main stages the bytes under its own scoped temp
+  directory, rewrites `files`, runs the upload against the local guest, and removes the staging
+  directory on success, failure, page retirement, and executor close. Downloads on a client-hosted
+  route no longer land in the desktop Downloads folder: Chromium writes into a main-owned temp file
+  that is streamed to `.orca/browser-downloads/` in the remote workspace and then deleted, with a
+  completion toast naming the remote path and the execution-host label. Both directions ride three
+  new lease-authenticated RPCs (`browser.clientHost.fileChannel.read|write|abort`) negotiated by a
+  new optional `fileChannelProtocolVersion` on `browser.clientHost.attach`/`ready` plus a
+  `file-channel-v1` host capability. Mixed versions fail closed in both skew directions: an old host
+  never echoes the version, so the client refuses the upload; an old client never requests it, so
+  the runtime refuses to issue the command with `browser_client_file_channel_unsupported` instead of
+  resolving remote paths against the desktop filesystem. A host with no client-hosted router keeps
+  the current local-Downloads behavior. `browser.download`'s agent-supplied destination path is
+  rejected on client-placed pages in this version rather than being resolved locally. Bounds: 128
+  KiB chunks, 64 MiB per transfer, 16 files per command, 8 concurrent remote download transfers.
+  38 new focused tests plus the full Node/CLI/web typecheck pass; the one failing suite in the
+  sweep (`remote-runtime-shared-control-connection`) fails identically on the untouched baseline.
 
 ## Completion rule
 
