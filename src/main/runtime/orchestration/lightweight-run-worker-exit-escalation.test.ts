@@ -417,4 +417,31 @@ describe('STA-4604 worker PTY exit escalation reaches the coordinator', () => {
       db.close()
     }
   })
+
+  it('still finishes PTY exit when the mailbox insert fails', () => {
+    const { runtime, workerHandle, coordinatorHandle } = makeRuntimeWithTwoPanes()
+    const failDispatch = vi.fn()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    runtime.setOrchestrationDb({
+      getActiveDispatchForTerminal: (handle: string) =>
+        handle === workerHandle ? { id: 'ctx-1', run_id: 'run-1', task_id: 'task-1' } : undefined,
+      failDispatch,
+      getRun: () => ({ id: 'run-1', legacy: 0, coordinator_handle: coordinatorHandle }),
+      insertMessage: () => {
+        throw new Error('Run not found: run-1')
+      }
+    } as never)
+
+    // Why: onPtyExit walks leaves synchronously — a throwing mailbox would abandon the
+    // rest of the exit, so the worker death must stay durable and the exit must complete.
+    expect(() => runtime.onPtyExit(WORKER_PTY_ID, 137)).not.toThrow()
+    expect(failDispatch).toHaveBeenCalledWith('ctx-1', 'Agent exited with code 137', {
+      workerProcessExited: true
+    })
+    expect(warn).toHaveBeenCalledWith(
+      '[orchestration] failed to escalate worker exit',
+      expect.objectContaining({ dispatchId: 'ctx-1' })
+    )
+    warn.mockRestore()
+  })
 })

@@ -16838,26 +16838,38 @@ export class OrcaRuntimeService {
     if (!recipient) {
       return
     }
-    const escalation = this._orchestrationDb.insertMessage({
-      from: handle,
-      to: recipient.to,
-      subject: `Agent exited unexpectedly (code ${exitCode})`,
-      type: 'escalation',
-      priority: 'high',
-      // Why: applyEscalationToDispatch rejects an escalation without an exact Dispatch
-      // binding, and a coordinator reading this needs to know which Dispatch died.
-      payload: JSON.stringify({
-        taskId: dispatch.task_id,
+    // Why: failDispatch above is the authoritative state transition and has already
+    // committed. Mail is best-effort on top of it: onPtyExit runs this synchronously per
+    // leaf, so letting a mailbox error escape would abandon the remaining leaves and the
+    // pty record pruning that close out this exit.
+    try {
+      const escalation = this._orchestrationDb.insertMessage({
+        from: handle,
+        to: recipient.to,
+        subject: `Agent exited unexpectedly (code ${exitCode})`,
+        type: 'escalation',
+        priority: 'high',
+        // Why: applyEscalationToDispatch rejects an escalation without an exact Dispatch
+        // binding, and a coordinator reading this needs to know which Dispatch died.
+        payload: JSON.stringify({
+          taskId: dispatch.task_id,
+          dispatchId: dispatch.id,
+          exitCode,
+          handle
+        }),
+        ...(recipient.runId ? { runId: recipient.runId } : {})
+      })
+      // Why: worker death is the one escalation nobody will poll for — the dead pane
+      // can't nudge the coordinator, so wake its check --wait the way every other
+      // message producer does.
+      this.notifyMessageArrived(escalation.to_handle, escalation.type)
+    } catch (error) {
+      console.warn('[orchestration] failed to escalate worker exit', {
         dispatchId: dispatch.id,
-        exitCode,
-        handle
-      }),
-      ...(recipient.runId ? { runId: recipient.runId } : {})
-    })
-    // Why: worker death is the one escalation nobody will poll for — the dead pane
-    // can't nudge the coordinator, so wake its check --wait the way every other
-    // message producer does.
-    this.notifyMessageArrived(escalation.to_handle, escalation.type)
+        recipient: recipient.to,
+        error
+      })
+    }
   }
 
   // Why: a lightweight Run keeps its coordinator in runs/run_coordinator_handles and
