@@ -201,6 +201,7 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   deletePaneScopedCacheEntry(state.lastStatusByPaneKey, paneKey)
   deletePaneScopedCacheEntry(state.antigravityCompletedTranscriptByPaneKey, paneKey)
   deletePaneScopedSetEntry(state.ampCompletedCacheKeys, paneKey)
+  deletePaneScopedCacheEntry(state.claudeConsumedCompactPromptIdByPaneKey, paneKey)
   state.claudeSubagentRosterByPaneKey.delete(paneKey)
   state.claudeLeadStateByPaneKey.delete(paneKey)
   state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
@@ -248,6 +249,7 @@ export function movePaneCacheState(
   movePaneScopedMapEntries(state.lastStatusByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.antigravityCompletedTranscriptByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.ampCompletedCacheKeys, fromPaneKey, toPaneKey)
+  movePaneScopedMapEntries(state.claudeConsumedCompactPromptIdByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.claudeSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.claudeLeadStateByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeUnconfirmedRestoredStatusPaneKeys, fromPaneKey, toPaneKey)
@@ -291,6 +293,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.lastStatusByPaneKey.clear()
   state.antigravityCompletedTranscriptByPaneKey.clear()
   state.ampCompletedCacheKeys.clear()
+  state.claudeConsumedCompactPromptIdByPaneKey.clear()
   state.warnedVersions.clear()
   state.warnedEnvs.clear()
   state.claudeSubagentRosterByPaneKey.clear()
@@ -3043,6 +3046,22 @@ function normalizeClaudeEvent(
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
   }
 
+  if (isManualCompactCompletion) {
+    // Why: a manual /compact only ever completes at an idle prompt, so a child that exists ONLY as
+    // a disk snapshot has nothing live behind it and must not keep the pane spinning — that
+    // restored child is what holds the stuck row STA-2915 actually reports. Everything else the
+    // done-gate consults is live evidence (a child observed in this runtime, an unclassifiable
+    // running background task, a registered session cron) and still holds the pane.
+    const restoredRoster = state.claudeSubagentRosterByPaneKey.get(paneKey)
+    if (
+      restoredRoster &&
+      reapUnconfirmedRestoredClaudeSubagents(restoredRoster) &&
+      restoredRoster.size === 0
+    ) {
+      state.claudeSubagentRosterByPaneKey.delete(paneKey)
+    }
+  }
+
   const effectiveState = resolveClaudePaneState(state, paneKey, {
     state: reportedStateName,
     interrupted
@@ -3078,6 +3097,15 @@ function normalizeClaudeEvent(
   ) {
     // Why: a legacy or partial Stop confirms the lead boundary, not a child restored from disk; keep the child-only gate eligible for reconciliation.
     state.claudeUnconfirmedRestoredStatusPaneKeys.add(paneKey)
+  }
+
+  if (isManualCompactCompletion && effectiveState !== 'done') {
+    // Why: a compact completion CLEARS a row or says nothing at all. Live evidence still holds this
+    // pane, so restating it would only strip `restoredUnconfirmed` off a hydrated row and restart
+    // the staleness clock for work the compact never observed — strictly worse than the silence
+    // this event replaced. The lead record above still marks the turn ended, so whichever event
+    // retires that evidence can clear the pane.
+    return null
   }
 
   return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
@@ -4318,7 +4346,8 @@ export function normalizeHookPayload(
   state: HookListenerState,
   source: AgentHookSource,
   body: unknown,
-  expectedEnv: string
+  expectedEnv: string,
+  options: { deferCompactOwnershipToClient?: boolean } = {}
 ): AgentHookEventPayload | null {
   if (typeof body !== 'object' || body === null) {
     return null
@@ -4393,28 +4422,39 @@ export function normalizeHookPayload(
     return null
   }
   const previousStatus = state.lastStatusByPaneKey.get(paneKey)
-  const isCompactCompletion = source === 'claude' && eventName === 'PostCompact'
+  // Why: only a MANUAL completion claims anything, so only it may write compact-scoped state. An
+  // auto compact runs inside a turn that resumes and emits its own Stop; running the ownership
+  // guard for it would burn the pane's consumed-compact slot on an event that maps to nothing.
+  const isCompactCompletion =
+    source === 'claude' && eventName === 'PostCompact' && compactTrigger === 'manual'
   if (isCompactCompletion) {
-    if (
-      isClaudeCompactCompletionConsumed(
+    // Why: a relay is a forwarder, not the authority on pane identity — pane retirement, tab
+    // closure and hydrated rows all live on the client, and the client re-runs this exact guard on
+    // ingest. Enforcing it on the relay too only adds a way to LOSE the event: the relay's cache is
+    // per-process and capped, so a relay restart or an eviction silently drops the one signal that
+    // can clear a remote pane. Ownership is deferred there, never skipped.
+    if (options.deferCompactOwnershipToClient !== true) {
+      if (
+        isClaudeCompactCompletionConsumed(
+          state.claudeConsumedCompactPromptIdByPaneKey,
+          paneKey,
+          providerPromptId
+        ) ||
+        !canAcceptClaudeCompactCompletion(previousStatus, {
+          source,
+          connectionId: null,
+          providerPromptId,
+          providerSession: providerSession ?? undefined
+        })
+      ) {
+        return null
+      }
+      markClaudeCompactCompletionConsumed(
         state.claudeConsumedCompactPromptIdByPaneKey,
         paneKey,
         providerPromptId
-      ) ||
-      !canAcceptClaudeCompactCompletion(previousStatus, {
-        source,
-        connectionId: null,
-        providerPromptId,
-        providerSession: providerSession ?? undefined
-      })
-    ) {
-      return null
+      )
     }
-    markClaudeCompactCompletionConsumed(
-      state.claudeConsumedCompactPromptIdByPaneKey,
-      paneKey,
-      providerPromptId
-    )
     // Why: the compact's own event carries no prompt; keep the pane's label from the turn it
     // summarized rather than blanking the row as it clears.
     if (previousStatus?.payload.prompt && !state.lastPromptByPaneKey.has(paneKey)) {

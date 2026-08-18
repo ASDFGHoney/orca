@@ -2319,6 +2319,7 @@ export class AgentHookServer {
       this.state.lastStatusByPaneKey.get(paneKey)?.payload
     )
     const previousStatus = this.state.lastStatusByPaneKey.get(paneKey)
+    let acceptedCompactCompletion = false
     if (hookEventName === 'PreCompact' || hookEventName === 'PostCompact') {
       // Why: PreCompact is never registered and proves nothing (an aborted compact emits it alone);
       // reject it here too so a host on any version cannot drive pane state from it.
@@ -2363,10 +2364,14 @@ export class AgentHookServer {
       if (normalizedPayload.sessionBoundary !== true) {
         normalizedPayload = { ...normalizedPayload, sessionBoundary: true }
       }
+      acceptedCompactCompletion = true
     }
+    // Why: keyed on "did we accept a completion", not on the trigger surviving the wire — the
+    // trigger-stripped replay is exactly the shape that arrives without one, and it is still the
+    // compact's own promptless event, so it still needs the summarized turn's label.
     if (
       source === 'claude' &&
-      compactTrigger !== undefined &&
+      (compactTrigger !== undefined || acceptedCompactCompletion) &&
       normalizedPayload.prompt.length === 0 &&
       previousStatus?.payload.prompt
     ) {

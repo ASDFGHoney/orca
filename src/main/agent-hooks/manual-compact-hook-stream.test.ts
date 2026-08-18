@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { RelayAgentHookServer } from '../../relay/agent-hook-server'
+import { seedClaudeSubagentRosterFromSnapshots } from '../../shared/agent-hook-listener'
 import type { AgentHookRelayEnvelope } from '../../shared/agent-hook-relay'
 import { makePaneKey } from '../../shared/stable-pane-id'
 import { AgentHookServer } from './server'
@@ -65,6 +66,26 @@ function legacyRelayCompactEnvelope(
   } as AgentHookRelayEnvelope
 }
 
+/** What AgentHookServer.hydrate() rebuilds for a pane that was stuck `working` across a restart:
+ *  the previous session's connectionId, the unconfirmed flag, an older receivedAt, and the child
+ *  the turn had spawned — restored from disk, so proof of nothing. */
+function seedHydratedStuckPane(server: AgentHookServer, receivedAt: number) {
+  const state = server._getStateForTests()
+  const subagents = [{ id: 'child-1', state: 'working', startedAt: 0, agentType: 'general' }]
+  state.lastStatusByPaneKey.set(PANE_KEY, {
+    paneKey: PANE_KEY,
+    source: 'claude',
+    connectionId: null,
+    hookEventName: 'UserPromptSubmit',
+    providerPromptId: TURN_PROMPT_ID,
+    providerSession: SESSION,
+    restoredUnconfirmed: true,
+    receivedAt,
+    payload: { state: 'working', prompt: 'work before the restart', agentType: 'claude', subagents }
+  } as never)
+  seedClaudeSubagentRosterFromSnapshots(state, PANE_KEY, subagents as never)
+}
+
 describe('manual Claude compact hook stream', () => {
   const servers: { stop: () => void }[] = []
   const temporaryPaths: string[] = []
@@ -119,6 +140,56 @@ describe('manual Claude compact hook stream', () => {
     unsubscribe()
   })
 
+  it('clears the restart-stuck pane STA-2915 reports, without resurrecting anything', async () => {
+    const server = new AgentHookServer()
+    servers.push(server)
+    await server.start({ env: 'production' })
+    const env = server.buildPtyEnv()
+    const port = Number(env.ORCA_AGENT_HOOK_PORT)
+    const token = env.ORCA_AGENT_HOOK_TOKEN!
+    seedHydratedStuckPane(server, Date.now() - 60_000)
+    expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+
+    await postHook(port, token, claudeHook('PreCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
+    await postHook(
+      port,
+      token,
+      claudeHook('SubagentStop', COMPACT_PROMPT_ID, { agent_id: 'a75b38b59774e1f31', agent_type: '' })
+    )
+    await postHook(port, token, claudeHook('SessionStart', COMPACT_PROMPT_ID, { source: 'compact' }))
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
+
+    const row = server.getStatusSnapshot()[0]
+    expect(row).toMatchObject({ state: 'done', prompt: 'work before the restart' })
+    expect(row?.subagents ?? []).toEqual([])
+  })
+
+  it('does not restate a pane a live child still owns, so the staleness clock keeps running', async () => {
+    const server = new AgentHookServer()
+    servers.push(server)
+    await server.start({ env: 'production' })
+    const env = server.buildPtyEnv()
+    const port = Number(env.ORCA_AGENT_HOOK_PORT)
+    const token = env.ORCA_AGENT_HOOK_TOKEN!
+    seedHydratedStuckPane(server, Date.now() - 60_000)
+    // A child THIS runtime observed: real agent work in flight, which a compact may not retire.
+    await postHook(port, token, claudeHook('SubagentStart', TURN_PROMPT_ID, { agent_id: 'child-live' }))
+    const before = server.getStatusSnapshot()[0]
+    expect(before).toMatchObject({ state: 'working' })
+
+    const emitted: string[] = []
+    const unsubscribe = server.subscribeEnrichedStatus((event) => {
+      emitted.push(`${event.hookEventName}:${event.payload.state}`)
+    })
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
+
+    // Why: restating the row here is the regression, not the fix — it would refresh receivedAt and
+    // hand the stale sweep a brand-new clock for work the compact never observed.
+    expect(emitted).toEqual([])
+    expect(server.getStatusSnapshot()[0]).toEqual(before)
+    unsubscribe()
+  })
+
   it('forwards the completion over the relay and neutralizes its cached compact identity', async () => {
     const main = new AgentHookServer()
     const forwarded: AgentHookRelayEnvelope[] = []
@@ -161,6 +232,36 @@ describe('manual Claude compact hook stream', () => {
     expect(forwarded.at(-1)?.hookEventName).toBeUndefined()
     expect(forwarded.at(-1)?.compactTrigger).toBeUndefined()
     unsubscribe()
+  })
+
+  it('forwards the completion from a relay whose cache is cold, and the client still guards it', async () => {
+    const main = new AgentHookServer()
+    const forwarded: AgentHookRelayEnvelope[] = []
+    const endpointDir = mkdtempSync(join(tmpdir(), 'orca-compact-cold-'))
+    temporaryPaths.push(endpointDir)
+    // A relay that restarted while the agent session kept running: hooks resolve the endpoint file
+    // per invocation, so they reconnect — but the relay's per-process cache is empty, and the
+    // compact completion may be the first event it ever sees for this pane.
+    const relay = new RelayAgentHookServer({
+      endpointDir,
+      token: 'cold-cache-token',
+      forward: (envelope) => {
+        forwarded.push(envelope)
+        main.ingestRemote(envelope, 'conn-a')
+      }
+    })
+    servers.push(main, relay)
+    await relay.start({ publishEndpoint: false })
+    const { port, token } = relay.getCoordinates()
+
+    await postHook(port, token, claudeHook('PostCompact', COMPACT_PROMPT_ID, { trigger: 'manual' }))
+
+    // Why: the relay is a forwarder, not the authority on pane identity. Dropping the event here
+    // is how the one signal that can clear a remote pane goes missing after a restart.
+    expect(forwarded.map((envelope) => envelope.hookEventName)).toEqual(['PostCompact'])
+    expect(forwarded[0]).toMatchObject({ compactTrigger: 'manual', providerPromptId: COMPACT_PROMPT_ID })
+    // ...and the client, which DOES own pane identity, still refuses to mint a row it never had.
+    expect(main.getStatusSnapshot()).toEqual([])
   })
 
   it('stamps the silent boundary on a manual completion from a relay that predates it', () => {
@@ -228,14 +329,26 @@ describe('manual Claude compact hook stream', () => {
     )
     expect(done.getStatusSnapshot()[0]).toMatchObject({ state: 'done', sessionBoundary: true })
 
+    // Why: assert this arm from a pane that already FINISHED. Asserting `working` on a pane that
+    // was already `working` cannot fail — it holds whether the replay was dropped or applied, which
+    // is exactly how a trigger-stripped auto compact could start re-arming the stuck row again.
     const working = new AgentHookServer()
     servers.push(working)
     working.ingestRemote(turnEnvelope(), 'conn-a')
     working.ingestRemote(
+      {
+        ...turnEnvelope(),
+        hookEventName: 'Stop',
+        payload: { state: 'done', prompt: 'work before compact', agentType: 'claude' }
+      } as AgentHookRelayEnvelope,
+      'conn-a'
+    )
+    expect(working.getStatusSnapshot()[0]).toMatchObject({ state: 'done' })
+    working.ingestRemote(
       legacyRelayCompactEnvelope('working', { compactTrigger: undefined, isReplay: true }),
       'conn-a'
     )
-    expect(working.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+    expect(working.getStatusSnapshot()[0]).toMatchObject({ state: 'done' })
 
     const foreign = new AgentHookServer()
     servers.push(foreign)
@@ -250,6 +363,38 @@ describe('manual Claude compact hook stream', () => {
       'conn-a'
     )
     expect(foreign.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+  })
+
+  it('keeps the summarized turn as the label, with or without a trigger on the envelope', () => {
+    // The compact's own event carries no prompt of its own, so the row's label can only come from
+    // the turn it summarized. The trigger-stripped replay is the one shape that arrives with no
+    // trigger at all, so the carry-forward must not be keyed on the trigger being present.
+    const blank = { state: 'done' as const, prompt: '', agentType: 'claude' }
+
+    const tagged = new AgentHookServer()
+    servers.push(tagged)
+    tagged.ingestRemote(turnEnvelope(), 'conn-a')
+    tagged.ingestRemote(legacyRelayCompactEnvelope('done', { payload: blank }), 'conn-a')
+    expect(tagged.getStatusSnapshot()[0]).toMatchObject({
+      state: 'done',
+      prompt: 'work before compact'
+    })
+
+    const stripped = new AgentHookServer()
+    servers.push(stripped)
+    stripped.ingestRemote(turnEnvelope(), 'conn-a')
+    stripped.ingestRemote(
+      legacyRelayCompactEnvelope('done', {
+        compactTrigger: undefined,
+        isReplay: true,
+        payload: blank
+      }),
+      'conn-a'
+    )
+    expect(stripped.getStatusSnapshot()[0]).toMatchObject({
+      state: 'done',
+      prompt: 'work before compact'
+    })
   })
 
   it('rejects a completion with no provider prompt id', () => {
