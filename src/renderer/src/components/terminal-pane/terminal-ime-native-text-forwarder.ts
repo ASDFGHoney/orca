@@ -381,7 +381,9 @@ export function installTerminalImeNativeTextForwarder(args: {
       settleCommit(commit, null)
     }
     event.stopImmediatePropagation()
-    // Clear the helper textarea so the committed text doesn't accumulate.
+    // Clear the helper textarea so the committed text doesn't accumulate. Load-bearing beyond
+    // that: macOS decides a period substitution from the characters already in the field, so
+    // blanking it is why #11504 no longer reproduces. Removing this reintroduces that bug.
     if (event.target instanceof HTMLTextAreaElement) {
       event.target.value = ''
     }
