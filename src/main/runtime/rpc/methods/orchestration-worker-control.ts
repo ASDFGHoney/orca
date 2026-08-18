@@ -141,7 +141,10 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
           status: observation.status,
           exactWorker: observation.exact,
           // Why: a bare `unverifiable` is not actionable without naming what we lost.
-          ...(observation.reason ? { reason: observation.reason } : {})
+          ...(observation.reason ? { reason: observation.reason } : {}),
+          // Why always present: a coordinator polling this field must be able to tell
+          // "no wait" from "this host is too old to know", and absence is the old host.
+          agentWait: observation.agentWait ?? null
         },
         terminalResource: resource ? exposeWorkerTerminalResource(resource) : null
       }

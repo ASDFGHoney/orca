@@ -603,10 +603,27 @@ export type RuntimeWorktreeTerminalSleepResult = {
     }
 )
 
+/** Evidence class that proved a pane is parked on a prompt only a human can answer.
+ *  Never inferred from silence: `hook` is an agent-reported blocked/waiting state,
+ *  `prompt-text` is a matched prompt in the retained tail, `title` is a live OSC title. */
+export type RuntimeTerminalInteractiveWaitSource = 'hook' | 'prompt-text' | 'title'
+
+/** Present only while the wait is live. Absence means "no proof of a wait", not "not waiting" —
+ *  an unreadable or hookless pane reports nothing rather than a false negative dressed as fact. */
+export type RuntimeTerminalInteractiveWait = {
+  source: RuntimeTerminalInteractiveWaitSource
+  /** Named prompt when the tail identified one. Absent for hook and title evidence. */
+  reason?: RuntimeTerminalWaitBlockedReason
+  /** ms epoch the wait was first observed, when the evidence carries a timestamp. */
+  since?: number
+}
+
 export type RuntimeTerminalShow = RuntimeTerminalSummary & {
   paneRuntimeId: number
   ptyId: string | null
   rendererGraphEpoch: number
+  /** Null when nothing proves an interactive wait. Absent on hosts that predate the field. */
+  agentWait?: RuntimeTerminalInteractiveWait | null
 }
 
 export type RuntimeTerminalState = 'running' | 'exited' | 'unknown'
@@ -745,6 +762,8 @@ export type RuntimeTerminalClose = {
 }
 
 export type RuntimeTerminalWaitCondition = 'exit' | 'tui-idle'
+/** The `codex-` prefixes are historical: these startup prompts are matched by shape, not by
+ *  vendor, so they also fire for Claude and Cursor. Renaming them would break paired hosts. */
 export type RuntimeTerminalWaitBlockedReason =
   | 'codex-update-prompt'
   | 'codex-trust-workspace'
@@ -752,6 +771,7 @@ export type RuntimeTerminalWaitBlockedReason =
   | 'codex-model-migration-prompt'
   | 'codex-hooks-review-prompt'
   | 'codex-interactive-prompt'
+  | 'agent-approval-prompt'
 
 export type RuntimeTerminalWait = {
   handle: string

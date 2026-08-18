@@ -445,6 +445,7 @@ import {
   type RuntimeWorktreeStatus,
   type RuntimeSpeechModelSummary,
   type RuntimeSpeechSetupState,
+  type RuntimeTerminalInteractiveWait,
   type RuntimeTerminalShow,
   type RuntimeTerminalSummary,
   type RuntimeTerminalVisualGroupNode,
@@ -18144,7 +18145,8 @@ export class OrcaRuntimeService {
         leafId: parsePaneKey(pty.pty.paneKey ?? '')?.leafId ?? pty.record.leafId,
         paneRuntimeId: -1,
         ptyId: pty.pty.ptyId,
-        rendererGraphEpoch: this.rendererGraphEpoch
+        rendererGraphEpoch: this.rendererGraphEpoch,
+        agentWait: this.getTerminalInteractiveWait(handle)
       }
     }
     const graphEpoch = this.captureReadyGraphEpoch()
@@ -18164,7 +18166,8 @@ export class OrcaRuntimeService {
       preview,
       paneRuntimeId: leaf.paneRuntimeId,
       ptyId: leaf.ptyId,
-      rendererGraphEpoch: this.rendererGraphEpoch
+      rendererGraphEpoch: this.rendererGraphEpoch,
+      agentWait: this.getTerminalInteractiveWait(handle)
     }
   }
 
@@ -18512,17 +18515,33 @@ export class OrcaRuntimeService {
     explicitStatus: { status: AgentStatus; updatedAt: number } | null,
     lifecycle: { status: AgentStatus | null; updatedAt: number } | null | undefined
   ): boolean {
+    return (
+      this.resolveAuthoritativeTerminalWaitPermission(terminal, explicitStatus, lifecycle) !== null
+    )
+  }
+
+  /** The matched prompt when the tail authoritatively proves a human wait, else null. */
+  private resolveAuthoritativeTerminalWaitPermission(
+    terminal: TerminalAgentStatusSnapshot,
+    explicitStatus: { status: AgentStatus; updatedAt: number } | null,
+    lifecycle: { status: AgentStatus | null; updatedAt: number } | null | undefined
+  ): RuntimeTerminalWaitBlockedReason | null {
     const blockedByWaitText = detectTerminalWaitBlockedReason(terminal.waitText)
     if (!blockedByWaitText) {
-      return false
+      return null
     }
     const liveTitleClearsBlockedText =
       terminal.titleStatusIsLive &&
       terminal.titleStatus !== null &&
       terminal.titleStatus !== 'permission' &&
-      !isOpenCodeNativeTitle(terminal.title)
+      !isOpenCodeNativeTitle(terminal.title) &&
+      // Why exempt: cursor-agent keeps its braille spinner in the title while an approval
+      // waits, so a "working" title there is not evidence of progress. The approval menu
+      // proves its own dismissal (the follow-up input line returning), so unlike the
+      // startup modals it needs no title-based staleness proxy.
+      blockedByWaitText !== 'agent-approval-prompt'
     if (liveTitleClearsBlockedText && lifecycle?.status !== terminal.titleStatus) {
-      return false
+      return null
     }
     const newestPermissionAt = Math.max(
       explicitStatus?.status === 'permission' ? explicitStatus.updatedAt : -1,
@@ -18534,7 +18553,51 @@ export class OrcaRuntimeService {
       lifecycle?.status && lifecycle.status !== 'permission' ? lifecycle.updatedAt : -1
     )
     // Equal wall-clock observations fail closed because their raw intra-chunk order is unknown.
-    return newestPermissionAt >= 0 && newestPermissionAt >= newestClearAt
+    return newestPermissionAt >= 0 && newestPermissionAt >= newestClearAt ? blockedByWaitText : null
+  }
+
+  /** Why: "blocked on a human" is the one worker state a coordinator cannot infer — silence
+   *  covers it, a long tool call, and a wedged process alike. Same evidence fusion
+   *  getTerminalAgentStatus uses for its `permission` verdict, minus the async foreground
+   *  probe, so a per-lane read stays a synchronous map lookup plus one tail scan.
+   *  Null means "nothing proves a wait", never "proven not waiting". */
+  getTerminalInteractiveWait(handle: string): RuntimeTerminalInteractiveWait | null {
+    let ptyId: string
+    let terminal: TerminalAgentStatusSnapshot
+    try {
+      ptyId = this.getTerminalAgentStatusPtyId(handle)
+      terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
+    } catch {
+      // Why: an unreadable pane is unknown. Reporting "not waiting" would be the exact
+      // false negative this field exists to remove.
+      return null
+    }
+    const explicitStatus = this.getFreshExplicitAgentStatusForHandle(handle)
+    const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
+    const promptReason = this.resolveAuthoritativeTerminalWaitPermission(
+      terminal,
+      explicitStatus,
+      lifecycle
+    )
+    if (promptReason) {
+      return {
+        source: 'prompt-text',
+        reason: promptReason,
+        ...(terminal.waitBlockedAt !== null ? { since: terminal.waitBlockedAt } : {})
+      }
+    }
+    if (terminal.titleStatus === 'permission' && terminal.titleStatusIsLive) {
+      return { source: 'title' }
+    }
+    // Why the title check: a shell prompt title proves the agent no longer owns the pane,
+    // so a retained hook row must not keep reporting its last permission state.
+    if (
+      explicitStatus?.status === 'permission' &&
+      !terminalTitleBlocksExplicitAgentStatus(terminal.title)
+    ) {
+      return { source: 'hook', since: explicitStatus.updatedAt }
+    }
+    return null
   }
 
   private async terminalHasShellForegroundProcess(handle: string, ptyId: string): Promise<boolean> {
@@ -39487,7 +39550,35 @@ function isTerminalWaitWhitespace(value: string, index: number): boolean {
 }
 
 const TERMINAL_WAIT_BLOCKED_SENTINEL_RE =
-  /update available|choose working directory to|codex just got an upgrade|hooks need review|do you trust|trust this|trusted workspace|press enter to (?:confirm|continue|view|insert)|press t to trust|permission required|requires permission|allow once|allow always/i
+  /update available|choose working directory to|codex just got an upgrade|hooks need review|do you trust|trust this|trusted workspace|press enter to (?:confirm|continue|view|insert)|press t to trust|permission required|requires permission|allow once|allow always|run this command\?/i
+
+// Why cursor-agent needs a text match at all: its hook set (beforeSubmitPrompt, preToolUse,
+// beforeShellExecution, beforeMCPExecution, postToolUse, afterAgentResponse, stop) has no
+// approval event, and beforeShellExecution fires identically for auto-allowed commands, so
+// the rendered menu is the only authority that separates "awaiting a human" from "running".
+// Match the key-bound choices, not the prose above them, so wording changes don't matter.
+const CURSOR_APPROVAL_CHOICE_MARKERS = [
+  'run (once)',
+  'to allowlist?',
+  'run everything',
+  'skip & tell the agent'
+]
+// cursor-agent redraws this input line once the menu is answered.
+const CURSOR_FOLLOW_UP_PROMPT = 'add a follow-up'
+
+function findCursorApprovalPromptIndex(normalized: string): number | null {
+  const promptIndex = normalized.lastIndexOf('run this command?')
+  if (promptIndex === -1) {
+    return null
+  }
+  const menu = normalized.slice(promptIndex)
+  const choices = CURSOR_APPROVAL_CHOICE_MARKERS.filter((marker) => menu.includes(marker)).length
+  if (choices < 2) {
+    return null
+  }
+  // Why: a follow-up prompt after the menu proves it was answered and is now scrollback.
+  return menu.includes(CURSOR_FOLLOW_UP_PROMPT) ? null : promptIndex
+}
 
 function findTerminalWaitBlockedSignal(
   normalized: string
@@ -39556,6 +39647,10 @@ function findTerminalWaitBlockedSignal(
     if (!hasSpecificPromptInContext) {
       candidates.push({ reason: 'codex-interactive-prompt', index: interactivePromptIndex })
     }
+  }
+  const cursorApprovalIndex = findCursorApprovalPromptIndex(normalized)
+  if (cursorApprovalIndex !== null) {
+    candidates.push({ reason: 'agent-approval-prompt', index: cursorApprovalIndex })
   }
   const permissionPromptIndex = Math.max(
     normalized.lastIndexOf('permission required'),
