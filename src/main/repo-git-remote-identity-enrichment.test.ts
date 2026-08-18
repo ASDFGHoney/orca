@@ -505,17 +505,22 @@ describe('retiring probes for removed repos', () => {
       .mockResolvedValue(resolvedProbe)
     const live: Repo[] = [makeRepo(), makeRepo({ id: 'repo-2', path: '/workspace/other-app' })]
     const store = makeMutableStore(live)
-    const onChanged = vi.fn()
+    // The three list handlers share one broadcast reference (ipc/repos.ts) while the runtime RPC
+    // passes its own, so the shared one catches stacked passes and the distinct one catches a
+    // coalesced caller being dropped.
+    const listHandlersChanged = vi.fn()
+    const runtimeChanged = vi.fn()
 
-    enrichMissingRepoGitRemoteIdentities(store, { onChanged })
-    enrichMissingRepoGitRemoteIdentities(store, { onChanged })
-    enrichMissingRepoGitRemoteIdentities(store, { onChanged })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: listHandlersChanged })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: listHandlersChanged })
+    enrichMissingRepoGitRemoteIdentities(store, { onChanged: runtimeChanged })
 
     first.resolve(resolvedProbe)
     await drainEnrichmentSweep()
 
     // Each stacked sweep would otherwise re-run the whole candidate loop and re-broadcast.
-    expect(onChanged).toHaveBeenCalledTimes(1)
+    expect(listHandlersChanged).toHaveBeenCalledTimes(1)
+    expect(runtimeChanged).toHaveBeenCalledTimes(1)
   })
 
   it('still notifies a caller whose sweep was coalesced into one already running', async () => {

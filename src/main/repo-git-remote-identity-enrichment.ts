@@ -32,7 +32,9 @@ const inFlightProbesByLocation = new Map<string, InFlightProbe>()
 const probeRetryAfterByLocation = new Map<string, number>()
 // Why a set rather than the current caller's callback: coalesced sweeps come from different call
 // sites (the list IPC handlers and the runtime RPC, which also drops a resolved-worktree cache), so
-// the pass that lands a change has to notify every caller still waiting on it.
+// the pass that lands a change has to notify every caller still waiting on it. Callers MUST pass a
+// stable callback reference — the set dedupes by function identity, so a fresh closure per call
+// would grow it (and multiply the broadcast) for the length of a sweep chain that never quiesces.
 const pendingChangeListeners = new Set<() => void>()
 let sweepInFlight: Promise<void> | null = null
 let rerunRequested = false
@@ -97,20 +99,15 @@ async function enrichRepoGitRemoteIdentity(store: RepoIdentityStore, repo: Repo)
   const missTtlMs = repo.gitRemoteIdentity
     ? RESOLVED_IDENTITY_REFRESH_TTL_MS
     : NO_IDENTITY_RETRY_TTL_MS
-  // Why the entry before its promise: the `.finally` below must compare the exact entry it belongs
-  // to, so it cannot depend on when the promise expression finishes being assigned.
-  const entry: InFlightProbe = {
-    controller: new AbortController(),
-    promise: Promise.resolve(false)
-  }
-  entry.promise = (async () => {
+  const controller = new AbortController()
+  const promise = (async () => {
     const result = await probeGitRemoteIdentity(repo.path, repo.connectionId, {
-      signal: entry.controller.signal
+      signal: controller.signal
     })
     // Why the signal and not a catch: probeGitRemoteIdentity swallows the AbortError and RESOLVES
     // `unavailable`, so a retired probe would otherwise re-seed a deadline for a location that no
     // longer has a repo. Do not simplify this into a rejection path.
-    if (entry.controller.signal.aborted) {
+    if (controller.signal.aborted) {
       return false
     }
     if (result.status !== 'resolved') {
@@ -126,12 +123,14 @@ async function enrichRepoGitRemoteIdentity(store: RepoIdentityStore, repo: Repo)
     probeRetryAfterByLocation.set(locationKey, Date.now() + RESOLVED_IDENTITY_REFRESH_TTL_MS)
     return writeIdentity(store, repo, result.identity)
   })().finally(() => {
-    if (inFlightProbesByLocation.get(locationKey) === entry) {
+    // Why compare the controller: retirement may already have replaced this location's entry, and
+    // only the probe that owns the current one may clear it.
+    if (inFlightProbesByLocation.get(locationKey)?.controller === controller) {
       inFlightProbesByLocation.delete(locationKey)
     }
   })
-  inFlightProbesByLocation.set(locationKey, entry)
-  return entry.promise
+  inFlightProbesByLocation.set(locationKey, { controller, promise })
+  return promise
 }
 
 function isIdentityRefreshDue(repo: Repo, now: number): boolean {
@@ -217,8 +216,13 @@ export function enrichMissingRepoGitRemoteIdentities(
 ): void {
   // Why outside the in-flight guard: retirement is exactly what a stuck sweep needs, and
   // `getRepos()` builds its list synchronously from in-memory state, so a repo is never
-  // transiently absent and cannot lose its startup delay or backoff.
-  retireRemovedLocations(store.getRepos())
+  // transiently absent and cannot lose its startup delay or backoff. The try/catch keeps the
+  // no-throw contract this fire-and-forget entry point had when retirement ran inside the pass.
+  try {
+    retireRemovedLocations(store.getRepos())
+  } catch (error: unknown) {
+    console.error('[repo-identity] Failed to retire removed repo locations:', error)
+  }
   if (options.onChanged) {
     pendingChangeListeners.add(options.onChanged)
   }
@@ -238,9 +242,8 @@ export function enrichMissingRepoGitRemoteIdentities(
         rerunRequested = false
         enrichMissingRepoGitRemoteIdentities(store)
       } else {
-        // Why clear only once the chain quiesces: listeners are per-call closures, so keeping them
-        // forever would grow without bound, but dropping them earlier would leave a coalesced
-        // caller unnotified by the follow-up pass its own call queued.
+        // Why clear only once the chain quiesces: dropping listeners earlier would leave a
+        // coalesced caller unnotified by the follow-up pass its own call queued.
         pendingChangeListeners.clear()
       }
     })
