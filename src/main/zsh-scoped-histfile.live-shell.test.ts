@@ -48,6 +48,16 @@ function runZsh(
   })
 }
 
+/** Both streams, because a wrapper that breaks does it on stderr. */
+function runZshCapturingStderr(args: string[], env: Record<string, string>, probe: string): string {
+  const result = spawnSync(ZSH_PATH, [...args, '-i', '-c', probe], {
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: { PATH: '/usr/bin:/bin', ...env }
+  })
+  return `${result.stdout ?? ''}${result.stderr ?? ''}`
+}
+
 /**
  * True when this host's system zshrc is the thing that destroys HISTFILE.
  *
@@ -264,6 +274,72 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
 
       expect(histfileOf(wrapped)).toBe(histfileOf(unwrapped))
       expect(wrapped).not.toContain('ORCA_HISTFILE')
+    })
+  })
+})
+
+describe('the wrapper survives a hostile user zsh config', () => {
+  const PROBE =
+    'echo "RESULT=$HISTFILE"; print -r -- "ZDOTDIR=[$ZDOTDIR]"; ' +
+    'print -r -- "ORCA_HISTFILE=[${ORCA_HISTFILE:-unset}]"'
+
+  // Why both forms: `REPLY` is zsh's shared scratch global, and the two ways a
+  // user config constrains it fail differently. `typeset -r` makes the
+  // wrapper's first assignment fatal and prints into the pane; `typeset -i`
+  // turns every resolved path into 0 with no error text at all. Both aborted
+  // the wrapper before the epilogue, leaving history inside Orca's own wrapper
+  // dir — on 100% of zsh panes, not the few percent wrapped before.
+  it.each(['typeset -r REPLY', 'typeset -i REPLY'])(
+    'resolves the user config dir when the user .zshrc runs `%s`',
+    (declaration) => {
+      if (!hasZsh) {
+        return
+      }
+      withTempHome((home) => {
+        const scoped = join(home, 'orca-history', 'zsh_history')
+        const { launch, env } = launchPlainHistoryPane(home, scoped)
+        writeFileSync(join(home, '.zshrc'), `${declaration}\n`)
+
+        const output = runZshCapturingStderr(launch.args ?? ['-l'], env, PROBE)
+
+        expect(histfileOf(output)).toBe(scoped)
+        expect(output).toContain(`ZDOTDIR=[${home}]`)
+        expect(output).toContain('ORCA_HISTFILE=[unset]')
+        expect(output).not.toContain('__orca_resolve_user_config_dir:')
+      })
+    }
+  )
+
+  // Why these two files and not .zshrc: zsh's sourcehome() ignores ZDOTDIR once
+  // the shell is in sh/ksh emulation, so emulation entered from .zshenv or
+  // .zprofile hides EVERY later wrapper file — the epilogue runs zero times and
+  // can repair nothing. A .zshrc that does it is already covered by running the
+  // epilogue from the wrapper .zshrc, which /etc/zshrc has run before.
+  it.each([
+    ['.zshenv', 'emulate sh'],
+    ['.zshenv', 'emulate ksh'],
+    ['.zprofile', 'emulate sh']
+  ])('degrades to an unwrapped pane when the user %s runs `%s`', (file, statement) => {
+    if (!hasZsh) {
+      return
+    }
+    withTempHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const { launch, env } = launchPlainHistoryPane(home, scoped)
+      writeFileSync(join(home, file), `${statement}\n`)
+
+      const wrapped = runZshCapturingStderr(launch.args ?? ['-l'], env, PROBE)
+      const unwrapped = runZsh(['-l'], { HOME: home, HISTFILE: scoped })
+
+      // The bar: never worse off than the pane Orca did not wrap. What that is
+      // differs per host (macOS /etc/zshrc clobbers HISTFILE, stock Ubuntu does
+      // not), so it is read from an unwrapped run rather than hardcoded.
+      expect(histfileOf(wrapped)).toBe(histfileOf(unwrapped))
+      expect(histfileOf(wrapped)).not.toContain(launch.env.ZDOTDIR)
+      expect(wrapped).toContain(`ZDOTDIR=[${home}]`)
+      // Nothing this pane spawns may inherit a history path no wrapper file
+      // will ever consume.
+      expect(wrapped).toContain('ORCA_HISTFILE=[unset]')
     })
   })
 })

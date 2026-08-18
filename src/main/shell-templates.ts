@@ -50,13 +50,24 @@ export const SHELL_STARTUP_IDENTITY_MARKER_BLOCK = `__orca_has_feature identity 
  * wrapper dir can be rewritten by two concurrently installed builds, so a shell
  * can read one build's .zshenv and another's .zshrc. A .zshrc that called a
  * function only the newer .zshenv defines printed `command not found` AND left
- * $REPLY empty, which skipped sourcing the user's own startup file entirely.
+ * the out-parameter empty, which skipped sourcing the user's own startup file.
+ *
+ * Why an Orca-private out-parameter and not `REPLY`: `REPLY` is zsh's shared
+ * scratch global, so a user config is entitled to constrain it. `typeset -r
+ * REPLY` made the very first assignment a fatal error and aborted the wrapper
+ * file; `typeset -i REPLY` silently turned every resolved path into `0`. Both
+ * left HISTFILE inside Orca's wrapper dir. Harmless while Orca wrapped a few
+ * percent of panes; not harmless now that it wraps every zsh pane.
+ *
+ * Why `typeset -g`: .zshrc/.zlogin call this AFTER the user's own config, so
+ * creating a plain global inside a function would print a warning per call
+ * under `setopt warn_create_global`.
  */
 export const ZSH_USER_CONFIG_DIR_RESOLVER_BLOCK = `__orca_resolve_user_config_dir() {
-  REPLY="\${1:-}"
-  while [[ "$REPLY" == */ ]]; do REPLY="\${REPLY%/}"; done
-  if [[ -z "$REPLY" || -f "$REPLY/${ZSH_WRAPPER_DIR_MARKER_FILE}" || "$REPLY" == */shell-ready/zsh ]]; then
-    REPLY="$HOME"
+  typeset -g _orca_resolved_config_dir="\${1:-}"
+  while [[ "$_orca_resolved_config_dir" == */ ]]; do _orca_resolved_config_dir="\${_orca_resolved_config_dir%/}"; done
+  if [[ -z "$_orca_resolved_config_dir" || -f "$_orca_resolved_config_dir/${ZSH_WRAPPER_DIR_MARKER_FILE}" || "$_orca_resolved_config_dir" == */shell-ready/zsh ]]; then
+    _orca_resolved_config_dir="$HOME"
   fi
 }`
 
@@ -71,16 +82,60 @@ export const ZSH_INHERITED_CONFIG_DIR_RESOLVER_BLOCK = `# Why stricter for an in
 # startup file at all is not the user's config root whoever wrote it.
 __orca_resolve_inherited_config_dir() {
   __orca_resolve_user_config_dir "\${1:-}"
-  [[ "$REPLY" == "$HOME" ]] && return 0
+  [[ "$_orca_resolved_config_dir" == "$HOME" ]] && return 0
   local _orca_startup_file
   for _orca_startup_file in .zshenv .zshrc .zprofile .zlogin; do
-    [[ -r "$REPLY/$_orca_startup_file" ]] && return 0
+    [[ -r "$_orca_resolved_config_dir/$_orca_startup_file" ]] && return 0
   done
-  REPLY="$HOME"
+  _orca_resolved_config_dir="$HOME"
 }`
 
 // Why: daemon, local, and relay wrappers must preserve one Bash prompt-hook contract.
 export { BASH_PROMPT_COMMAND_COMPOSITION_BLOCK } from './bash-prompt-command-composition'
+
+/**
+ * Hands the pane back to the user unwrapped when zsh has entered sh/ksh
+ * emulation, and stops reading the rest of the current wrapper file.
+ *
+ * Why: zsh's `sourcehome()` ignores ZDOTDIR entirely once the shell is in sh or
+ * ksh emulation, so a user .zshenv (or .zprofile) ending in `emulate sh` means
+ * NO later wrapper file is ever read — the epilogue runs zero times, while the
+ * user's own $HOME startup files load normally. The pane looks fine and writes
+ * its history inside Orca's wrapper dir, where the user will never find it.
+ *
+ * Nothing can repair that from here (`/etc/zshrc` assigns HISTFILE after
+ * .zshenv and .zprofile both), so the wrapper does the next best thing: it
+ * restores the user's own ZDOTDIR and consumes Orca's variables, leaving
+ * exactly the shell an unwrapped pane would have produced. Degrading to the
+ * pre-wrapping behaviour is the bar; degrading to something worse is not.
+ *
+ * Why a positive `sh|ksh` match rather than `!= zsh`: a zsh too old for the
+ * query form of `emulate` prints nothing, and must not unwrap every pane.
+ *
+ * Why `sourcedUserFileTest` gates the probe rather than it running
+ * unconditionally: `$(emulate)` forks, and every zsh pane now pays for it. The
+ * gate loses no coverage — this wrapper file is itself read through ZDOTDIR, so
+ * anything that had already entered emulation (a system /etc/zshenv or
+ * /etc/zprofile) would have hidden this very file too. The only thing that can
+ * have entered emulation by this line is the user file this file just sourced.
+ */
+export function getZshEmulationDegradeBlock(options: {
+  userZdotdirExpression: string
+  sourcedUserFileTest: string
+}): string {
+  return `if [[ ${options.sourcedUserFileTest} ]]; then
+  case "$(emulate 2>/dev/null)" in
+    sh|ksh)
+      export ZDOTDIR=${options.userZdotdirExpression}
+      # Why unset: an ORCA_HISTFILE no wrapper file will ever consume is
+      # inherited by everything this pane spawns, including a nested Orca.
+      builtin unset ORCA_HISTFILE _orca_shell_features _orca_home _orca_resolved_config_dir _orca_wrapper_zdotdir_self
+      unfunction __orca_shell_epilogue __orca_has_feature __orca_resolve_user_config_dir __orca_resolve_inherited_config_dir 2>/dev/null
+      return 0
+      ;;
+  esac
+fi`
+}
 
 /** The ZDOTDIR-discovery body of the wrapper .zshenv (no header, no epilogue). */
 export function getZshEnvDiscoveryBody(zshDir: string): string {
@@ -106,9 +161,9 @@ _orca_zshenv_path=""
 # Normalize fallback and source roots before reading user .zshenv so nested
 # Orca PTYs never source another Orca wrapper recursively.
 __orca_resolve_inherited_config_dir "\${ORCA_ORIG_ZDOTDIR:-$HOME}"
-_orca_user_zdotdir="$REPLY"
+_orca_user_zdotdir="$_orca_resolved_config_dir"
 __orca_resolve_inherited_config_dir "\${ORCA_ZSHENV_SOURCE_DIR:-$HOME}"
-_orca_zshenv_source_dir="$REPLY"
+_orca_zshenv_source_dir="$_orca_resolved_config_dir"
 unset ORCA_ZSHENV_SOURCE_DIR
 
 # Why: source at wrapper top level, not in a function/subshell, so .zshenv
@@ -140,7 +195,14 @@ fi
 # Why only the ownership check here: a ZDOTDIR the user's own .zshenv just
 # exported is the user's by construction, whatever it happens to contain.
 __orca_resolve_user_config_dir "\${_orca_discovered_zdotdir:-\${_orca_user_zdotdir:-$HOME}}"
-export ORCA_ORIG_ZDOTDIR="$REPLY"
+export ORCA_ORIG_ZDOTDIR="$_orca_resolved_config_dir"
+unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_discovered_zdotdir
+
+${getZshEmulationDegradeBlock({
+  userZdotdirExpression: '"$ORCA_ORIG_ZDOTDIR"',
+  sourcedUserFileTest: '-n "${_orca_zshenv_path:-}"'
+})}
+unset _orca_zshenv_path
 
 # Why: use :- after user .zshenv — a pathological unset under set -u must not
 # abort the wrapper; empty falls through to the baked-literal branch.
@@ -149,7 +211,7 @@ if [[ -n "\${_orca_wrapper_zdotdir_self:-}" && -f "\${_orca_wrapper_zdotdir_self
 else
   export ZDOTDIR=${quotePosixSingle(zshDir)}
 fi
-unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_zshenv_path _orca_discovered_zdotdir _orca_wrapper_zdotdir_self
+unset _orca_wrapper_zdotdir_self
 `
 }
 
@@ -163,10 +225,16 @@ unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_zshenv_path _orca_discove
  */
 export function getZshOverlayEnvBody(zshDir: string): string {
   return `__orca_resolve_inherited_config_dir "\${ORCA_ORIG_ZDOTDIR:-$HOME}"
-export ORCA_ORIG_ZDOTDIR="$REPLY"
+export ORCA_ORIG_ZDOTDIR="$_orca_resolved_config_dir"
 [[ -f "$ORCA_ORIG_ZDOTDIR/.zshenv" ]] && source "$ORCA_ORIG_ZDOTDIR/.zshenv"
 __orca_resolve_user_config_dir "\${ZDOTDIR:-\${ORCA_ORIG_ZDOTDIR:-$HOME}}"
-export ORCA_USER_ZDOTDIR="$REPLY"
+export ORCA_USER_ZDOTDIR="$_orca_resolved_config_dir"
+
+${getZshEmulationDegradeBlock({
+  userZdotdirExpression: '"$ORCA_USER_ZDOTDIR"',
+  sourcedUserFileTest: '-f "$ORCA_ORIG_ZDOTDIR/.zshenv"'
+})}
+
 export ZDOTDIR=${quotePosixSingle(zshDir)}
 `
 }
@@ -210,7 +278,7 @@ export function getZshStartupFileSourceBlock(options: {
   ].filter(Boolean)
 
   return `__orca_resolve_user_config_dir ${homeExpression}
-_orca_home="$REPLY"
+_orca_home="$_orca_resolved_config_dir"
 if [[ ${checks.join(' && ')} ]]; then
   _orca_wrapper_zdotdir="$ZDOTDIR"
   # Why: user startup files resolve plugin/config paths from their own ZDOTDIR;
@@ -277,7 +345,7 @@ export function getZshFinalZdotdirRestoreBlock(homeExpression = '"${ORCA_ORIG_ZD
   return `__orca_resolve_user_config_dir ${homeExpression}
 # Why: after Orca's last wrapper file has loaded, the interactive shell should
 # expose the same ZDOTDIR a normal zsh startup would expose.
-export ZDOTDIR="$REPLY"
-unset _orca_home REPLY
+export ZDOTDIR="$_orca_resolved_config_dir"
+unset _orca_home _orca_resolved_config_dir
 `
 }

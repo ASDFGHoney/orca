@@ -52,6 +52,49 @@ async function expectWrapperFiles(transport: string, root: string): Promise<void
   }
 }
 
+/**
+ * Every shell name the wrapper is allowed to write that is not Orca-namespaced.
+ *
+ * Each is a deliberate contract with the shell or with Orca's own features, not
+ * scratch space: the history path, the config dir, the two PATH-shaped exports
+ * agent overlays need, and the prompt-hook arrays the readiness and OSC 133
+ * markers register through.
+ */
+const CONTRACT_GLOBALS = new Set([
+  'CODEX_HOME',
+  'HISTFILE',
+  'MIMOCODE_HOME',
+  'OPENCODE_CONFIG_DIR',
+  'PATH',
+  'PROMPT_COMMAND',
+  'ZDOTDIR',
+  'precmd_functions',
+  'preexec_functions'
+])
+
+// `local`/`local -a` declarations are function-scoped and cannot collide.
+const LINE_START_ASSIGNMENT =
+  /^[ \t]*(?:builtin[ \t]+)?(?:export[ \t]+|typeset[ \t]+-[a-zA-Z]+[ \t]+|declare[ \t]+-[a-zA-Z]+[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)\+?=/
+const INLINE_EXPORT = /\bexport[ \t]+([A-Za-z_][A-Za-z0-9_]*)\+?=/g
+
+function foreignGlobalsWritten(content: string): string[] {
+  const names = new Set<string>()
+  for (const line of content.split('\n')) {
+    if (/^[ \t]*#/.test(line) || /^[ \t]*local\b/.test(line)) {
+      continue
+    }
+    for (const name of [
+      LINE_START_ASSIGNMENT.exec(line)?.[1],
+      ...[...line.matchAll(INLINE_EXPORT)].map((match) => match[1])
+    ]) {
+      if (name && !/^_{0,2}orca_/i.test(name) && !CONTRACT_GLOBALS.has(name)) {
+        names.add(name)
+      }
+    }
+  }
+  return [...names].sort()
+}
+
 // Why: all three generators are POSIX-only (the launch configs skip wrapping on
 // win32), and native Windows path separators would make the fixtures unstable.
 const describePosix = process.platform === 'win32' ? describe.skip : describe
@@ -88,6 +131,31 @@ describePosix('generated shell wrapper files', () => {
   it('relay overlay wrappers', async () => {
     ensureOverlayRestoreWrappers(root)
     await expectWrapperFiles('relay', root)
+  })
+
+  // Why a rule and not another fixture: `REPLY`, zsh's shared scratch global,
+  // was the wrapper's resolver out-parameter. A user config that constrained it
+  // (`typeset -r REPLY`) aborted the wrapper at its first executable line — on
+  // every zsh pane, once wrapping widened past overlay/startup panes. The
+  // fixtures above would have shown that only to a reader who knew to look.
+  it.each([
+    ['local', (): void => void ensureShellReadyWrappersAt(root), (): string => root],
+    [
+      'daemon',
+      (): void => {
+        process.env.ORCA_USER_DATA_PATH = root
+        getDaemonShellLaunchConfig('/bin/zsh', STARTUP_COMMAND_FEATURES)
+      },
+      (): string => join(root, 'shell-ready')
+    ],
+    ['relay', (): void => void ensureOverlayRestoreWrappers(root), (): string => root]
+  ])('%s wrappers write no shell global outside Orca’s namespace', (_transport, generate, dir) => {
+    generate()
+
+    for (const [, relativePath] of WRAPPER_FILES) {
+      const content = readFileSync(join(dir(), relativePath), 'utf8')
+      expect({ [relativePath]: foreignGlobalsWritten(content) }).toEqual({ [relativePath]: [] })
+    }
   })
 
   it('fish shell-ready init commands', async () => {

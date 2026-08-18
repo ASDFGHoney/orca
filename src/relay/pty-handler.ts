@@ -641,6 +641,13 @@ export class PtyHandler {
     // on, yet an inherited Orca HISTFILE must not scope a pane to someone else's
     // worktree on the disabled and revive paths either.
     dropInheritedOrcaHistFile(result)
+    // Why unconditionally: ORCA_HISTFILE is Orca-owned and minted below by
+    // injectRelayHistoryEnv, which also runs only with isolation on. An
+    // inherited one (the relay can be launched from an Orca pane) would
+    // otherwise reach the wrapper on the disabled and revive paths, scoping the
+    // pane to another worktree's history file — and wrapping a zsh pane that
+    // nothing asked to wrap, since `history` is selected on its presence.
+    delete result.ORCA_HISTFILE
     // Why: match local/daemon precedence so defaults/augmenters can't resurrect explicitly-removed values.
     for (const key of envToDelete) {
       delete result[key]

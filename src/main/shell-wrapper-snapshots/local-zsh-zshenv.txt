@@ -5,10 +5,10 @@ builtin unset ORCA_SHELL_FEATURES
 __orca_has_feature() { (( ${_orca_shell_features[(Ie)$1]} )) }
 __orca_has_feature identity && printf "\033]777;orca-shell-start:%s\007" "$$"
 __orca_resolve_user_config_dir() {
-  REPLY="${1:-}"
-  while [[ "$REPLY" == */ ]]; do REPLY="${REPLY%/}"; done
-  if [[ -z "$REPLY" || -f "$REPLY/.orca-shell-wrapper" || "$REPLY" == */shell-ready/zsh ]]; then
-    REPLY="$HOME"
+  typeset -g _orca_resolved_config_dir="${1:-}"
+  while [[ "$_orca_resolved_config_dir" == */ ]]; do _orca_resolved_config_dir="${_orca_resolved_config_dir%/}"; done
+  if [[ -z "$_orca_resolved_config_dir" || -f "$_orca_resolved_config_dir/.orca-shell-wrapper" || "$_orca_resolved_config_dir" == */shell-ready/zsh ]]; then
+    _orca_resolved_config_dir="$HOME"
   fi
 }
 # Why stricter for an inherited value: Orca can be launched from a terminal that
@@ -16,12 +16,12 @@ __orca_resolve_user_config_dir() {
 # startup file at all is not the user's config root whoever wrote it.
 __orca_resolve_inherited_config_dir() {
   __orca_resolve_user_config_dir "${1:-}"
-  [[ "$REPLY" == "$HOME" ]] && return 0
+  [[ "$_orca_resolved_config_dir" == "$HOME" ]] && return 0
   local _orca_startup_file
   for _orca_startup_file in .zshenv .zshrc .zprofile .zlogin; do
-    [[ -r "$REPLY/$_orca_startup_file" ]] && return 0
+    [[ -r "$_orca_resolved_config_dir/$_orca_startup_file" ]] && return 0
   done
-  REPLY="$HOME"
+  _orca_resolved_config_dir="$HOME"
 }
 # Why: capture the runtime wrapper dir before it is unset below. On WSL this
 # file is generated with a Windows path but sourced via /mnt/c, so the baked
@@ -45,9 +45,9 @@ _orca_zshenv_path=""
 # Normalize fallback and source roots before reading user .zshenv so nested
 # Orca PTYs never source another Orca wrapper recursively.
 __orca_resolve_inherited_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"
-_orca_user_zdotdir="$REPLY"
+_orca_user_zdotdir="$_orca_resolved_config_dir"
 __orca_resolve_inherited_config_dir "${ORCA_ZSHENV_SOURCE_DIR:-$HOME}"
-_orca_zshenv_source_dir="$REPLY"
+_orca_zshenv_source_dir="$_orca_resolved_config_dir"
 unset ORCA_ZSHENV_SOURCE_DIR
 
 # Why: source at wrapper top level, not in a function/subshell, so .zshenv
@@ -79,7 +79,22 @@ fi
 # Why only the ownership check here: a ZDOTDIR the user's own .zshenv just
 # exported is the user's by construction, whatever it happens to contain.
 __orca_resolve_user_config_dir "${_orca_discovered_zdotdir:-${_orca_user_zdotdir:-$HOME}}"
-export ORCA_ORIG_ZDOTDIR="$REPLY"
+export ORCA_ORIG_ZDOTDIR="$_orca_resolved_config_dir"
+unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_discovered_zdotdir
+
+if [[ -n "${_orca_zshenv_path:-}" ]]; then
+  case "$(emulate 2>/dev/null)" in
+    sh|ksh)
+      export ZDOTDIR="$ORCA_ORIG_ZDOTDIR"
+      # Why unset: an ORCA_HISTFILE no wrapper file will ever consume is
+      # inherited by everything this pane spawns, including a nested Orca.
+      builtin unset ORCA_HISTFILE _orca_shell_features _orca_home _orca_resolved_config_dir _orca_wrapper_zdotdir_self
+      unfunction __orca_shell_epilogue __orca_has_feature __orca_resolve_user_config_dir __orca_resolve_inherited_config_dir 2>/dev/null
+      return 0
+      ;;
+  esac
+fi
+unset _orca_zshenv_path
 
 # Why: use :- after user .zshenv — a pathological unset under set -u must not
 # abort the wrapper; empty falls through to the baked-literal branch.
@@ -88,7 +103,7 @@ if [[ -n "${_orca_wrapper_zdotdir_self:-}" && -f "${_orca_wrapper_zdotdir_self:-
 else
   export ZDOTDIR='<WRAPPER_ROOT>/zsh'
 fi
-unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_zshenv_path _orca_discovered_zdotdir _orca_wrapper_zdotdir_self
+unset _orca_wrapper_zdotdir_self
 
 __orca_shell_epilogue() {
   # Why first: this body runs after the user's own config, so it would otherwise
@@ -173,7 +188,9 @@ __orca_shell_epilogue() {
     }
     __orca_osc133_preexec() {
       printf "\033]133;C\007"
-      __orca_in_command=1
+      # Why typeset -g: a plain assignment here creates a global inside a function,
+      # which prints a warning above every command under warn_create_global.
+      typeset -g __orca_in_command=1
     }
     # Why: prepend so Orca captures $? before user prompt hooks can overwrite it.
     precmd_functions=(__orca_osc133_precmd ${precmd_functions[@]})
@@ -206,8 +223,8 @@ __orca_shell_epilogue() {
   __orca_resolve_user_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"
   # Why: after Orca's last wrapper file has loaded, the interactive shell should
   # expose the same ZDOTDIR a normal zsh startup would expose.
-  export ZDOTDIR="$REPLY"
-  unset _orca_home REPLY
+  export ZDOTDIR="$_orca_resolved_config_dir"
+  unset _orca_home _orca_resolved_config_dir
   unset _orca_shell_features
   unfunction __orca_shell_epilogue __orca_has_feature __orca_resolve_user_config_dir __orca_resolve_inherited_config_dir
 }

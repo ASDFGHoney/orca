@@ -22,6 +22,7 @@ import { getPosixOmpShellWrapper } from './pty/omp-shell-wrapper'
 import { getPosixCodexShellLaunchPreflight } from './pty/codex-shell-launch-preflight'
 import {
   getZshEnvDiscoveryBody,
+  getZshEmulationDegradeBlock,
   getZshFinalZdotdirRestoreBlock,
   getZshOverlayEnvBody,
   getZshShellReadyMarkerRegistrationBlock,
@@ -100,7 +101,9 @@ const ZSH_OSC133_COMMAND_MARKER_BLOCK = `__orca_osc133_precmd() {
 }
 __orca_osc133_preexec() {
   printf "\\033]133;C\\007"
-  __orca_in_command=1
+  # Why typeset -g: a plain assignment here creates a global inside a function,
+  # which prints a warning above every command under warn_create_global.
+  typeset -g __orca_in_command=1
 }
 # Why: prepend so Orca captures $? before user prompt hooks can overwrite it.
 precmd_functions=(__orca_osc133_precmd \${precmd_functions[@]})
@@ -227,6 +230,14 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
       getZshStartupFileSourceBlock({
         fileName: '.zprofile',
         homeExpression: spec.homeExpression
+      }),
+      // Why here too: a user .zprofile ending in `emulate sh` hides .zshrc and
+      // .zlogin from the wrapper exactly as a user .zshenv does, and .zprofile
+      // is the last wrapper file that still runs before /etc/zshrc clobbers
+      // HISTFILE — so this is the last point where degrading cleanly is possible.
+      getZshEmulationDegradeBlock({
+        userZdotdirExpression: '"$_orca_home"',
+        sourcedUserFileTest: '-f "$_orca_home/.zprofile"'
       })
     ])}\n`,
     zshrc: `${joinBlocks([

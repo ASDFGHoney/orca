@@ -665,6 +665,14 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
   if (opts.env?.HISTFILE === undefined) {
     dropInheritedOrcaHistFile(env)
   }
+  // Why ORCA_HISTFILE too: the desktop drops an inherited one on both of its
+  // branches, and the daemon inherits one from the pane that launched it just
+  // as readily. Left in place it now both WRAPS a pane the client scoped
+  // nothing for (shell-startup-features selects `history` on its presence) and
+  // makes the wrapper re-export another worktree's history path (#11146).
+  if (opts.env?.ORCA_HISTFILE === undefined) {
+    delete env.ORCA_HISTFILE
+  }
   removeInheritedDevAgentHookEndpoint(env, opts.env)
   removeInheritedElectronRunAsNode(env)
   removeAppImageRuntimeEnv(env)

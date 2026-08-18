@@ -67,7 +67,7 @@ function expectZdotdirSourceContext(content: string, fileName: '.zprofile' | '.z
 
 function expectFinalZdotdirRestoreContext(content: string) {
   expect(content).toContain("after Orca's last wrapper file has loaded")
-  expect(content).toContain('export ZDOTDIR="$REPLY"')
+  expect(content).toContain('export ZDOTDIR="$_orca_resolved_config_dir"')
 }
 
 describe('isRelayWslShell', () => {
@@ -113,7 +113,7 @@ describe('getRelayShellLaunchConfig', () => {
       const zshenv = readFileSync(join(zshRoot, '.zshenv'), 'utf8')
       const userZdotdirResolution =
         '__orca_resolve_user_config_dir "${ORCA_USER_ZDOTDIR:-${ORCA_ORIG_ZDOTDIR:-$HOME}}"'
-      expect(zshenv).toContain('export ORCA_USER_ZDOTDIR="$REPLY"')
+      expect(zshenv).toContain('export ORCA_USER_ZDOTDIR="$_orca_resolved_config_dir"')
       const zprofile = readFileSync(join(zshRoot, '.zprofile'), 'utf8')
       const zshrc = readFileSync(join(zshRoot, '.zshrc'), 'utf8')
       const zlogin = readFileSync(join(zshRoot, '.zlogin'), 'utf8')
@@ -222,7 +222,7 @@ describe('getRelayShellLaunchConfig', () => {
     })
 
     expect(readFileSync(join(zshRoot, '.zshenv'), 'utf8')).toContain(
-      'export ORCA_USER_ZDOTDIR="$REPLY"'
+      'export ORCA_USER_ZDOTDIR="$_orca_resolved_config_dir"'
     )
   })
 

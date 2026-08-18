@@ -186,7 +186,7 @@ function expectZdotdirSourceContext(content: string, fileName: '.zprofile' | '.z
 
 function expectFinalZdotdirRestoreContext(content: string) {
   expect(content).toContain("after Orca's last wrapper file has loaded")
-  expect(content).toContain('export ZDOTDIR="$REPLY"')
+  expect(content).toContain('export ZDOTDIR="$_orca_resolved_config_dir"')
 }
 
 describePosix('daemon shell-ready launch config', () => {
@@ -498,8 +498,8 @@ describePosix('daemon shell-ready launch config', () => {
     const zlogin = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zlogin'), 'utf8')
     expect(zshenv).toContain('__orca_resolve_inherited_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"')
     expect(zshenv).toContain('printf "\\033]777;orca-shell-start:%s\\007" "$$"')
-    expect(zshenv).toContain('"$REPLY" == */shell-ready/zsh ]]; then')
-    expect(zshenv).toContain('export ORCA_ORIG_ZDOTDIR="$REPLY"')
+    expect(zshenv).toContain('"$_orca_resolved_config_dir" == */shell-ready/zsh ]]; then')
+    expect(zshenv).toContain('export ORCA_ORIG_ZDOTDIR="$_orca_resolved_config_dir"')
     expectZdotdirSourceContext(zprofile, '.zprofile')
     expectZdotdirSourceContext(zshrc, '.zshrc')
     expectZdotdirSourceContext(zlogin, '.zlogin')
@@ -931,7 +931,7 @@ describePosix('daemon shell-ready launch config', () => {
     const zshenv = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
 
     // Save spawn-env value before sourcing user .zshenv
-    expect(zshenv).toContain('_orca_user_zdotdir="$REPLY"')
+    expect(zshenv).toContain('_orca_user_zdotdir="$_orca_resolved_config_dir"')
 
     // Fallback chain: discovered → normalized spawn-env path → HOME
     expect(zshenv).toContain('${_orca_discovered_zdotdir:-${_orca_user_zdotdir:-$HOME}}')

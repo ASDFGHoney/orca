@@ -5,10 +5,10 @@ builtin unset ORCA_SHELL_FEATURES
 __orca_has_feature() { (( ${_orca_shell_features[(Ie)$1]} )) }
 __orca_has_feature identity && printf "\033]777;orca-shell-start:%s\007" "$$"
 __orca_resolve_user_config_dir() {
-  REPLY="${1:-}"
-  while [[ "$REPLY" == */ ]]; do REPLY="${REPLY%/}"; done
-  if [[ -z "$REPLY" || -f "$REPLY/.orca-shell-wrapper" || "$REPLY" == */shell-ready/zsh ]]; then
-    REPLY="$HOME"
+  typeset -g _orca_resolved_config_dir="${1:-}"
+  while [[ "$_orca_resolved_config_dir" == */ ]]; do _orca_resolved_config_dir="${_orca_resolved_config_dir%/}"; done
+  if [[ -z "$_orca_resolved_config_dir" || -f "$_orca_resolved_config_dir/.orca-shell-wrapper" || "$_orca_resolved_config_dir" == */shell-ready/zsh ]]; then
+    _orca_resolved_config_dir="$HOME"
   fi
 }
 # Why stricter for an inherited value: Orca can be launched from a terminal that
@@ -16,18 +16,32 @@ __orca_resolve_user_config_dir() {
 # startup file at all is not the user's config root whoever wrote it.
 __orca_resolve_inherited_config_dir() {
   __orca_resolve_user_config_dir "${1:-}"
-  [[ "$REPLY" == "$HOME" ]] && return 0
+  [[ "$_orca_resolved_config_dir" == "$HOME" ]] && return 0
   local _orca_startup_file
   for _orca_startup_file in .zshenv .zshrc .zprofile .zlogin; do
-    [[ -r "$REPLY/$_orca_startup_file" ]] && return 0
+    [[ -r "$_orca_resolved_config_dir/$_orca_startup_file" ]] && return 0
   done
-  REPLY="$HOME"
+  _orca_resolved_config_dir="$HOME"
 }
 __orca_resolve_inherited_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"
-export ORCA_ORIG_ZDOTDIR="$REPLY"
+export ORCA_ORIG_ZDOTDIR="$_orca_resolved_config_dir"
 [[ -f "$ORCA_ORIG_ZDOTDIR/.zshenv" ]] && source "$ORCA_ORIG_ZDOTDIR/.zshenv"
 __orca_resolve_user_config_dir "${ZDOTDIR:-${ORCA_ORIG_ZDOTDIR:-$HOME}}"
-export ORCA_USER_ZDOTDIR="$REPLY"
+export ORCA_USER_ZDOTDIR="$_orca_resolved_config_dir"
+
+if [[ -f "$ORCA_ORIG_ZDOTDIR/.zshenv" ]]; then
+  case "$(emulate 2>/dev/null)" in
+    sh|ksh)
+      export ZDOTDIR="$ORCA_USER_ZDOTDIR"
+      # Why unset: an ORCA_HISTFILE no wrapper file will ever consume is
+      # inherited by everything this pane spawns, including a nested Orca.
+      builtin unset ORCA_HISTFILE _orca_shell_features _orca_home _orca_resolved_config_dir _orca_wrapper_zdotdir_self
+      unfunction __orca_shell_epilogue __orca_has_feature __orca_resolve_user_config_dir __orca_resolve_inherited_config_dir 2>/dev/null
+      return 0
+      ;;
+  esac
+fi
+
 export ZDOTDIR='<WRAPPER_ROOT>/zsh'
 
 __orca_shell_epilogue() {
@@ -110,8 +124,8 @@ __orca_shell_epilogue() {
   __orca_resolve_user_config_dir "${ORCA_USER_ZDOTDIR:-${ORCA_ORIG_ZDOTDIR:-$HOME}}"
   # Why: after Orca's last wrapper file has loaded, the interactive shell should
   # expose the same ZDOTDIR a normal zsh startup would expose.
-  export ZDOTDIR="$REPLY"
-  unset _orca_home REPLY
+  export ZDOTDIR="$_orca_resolved_config_dir"
+  unset _orca_home _orca_resolved_config_dir
   unset _orca_shell_features
   unfunction __orca_shell_epilogue __orca_has_feature __orca_resolve_user_config_dir __orca_resolve_inherited_config_dir
 }
