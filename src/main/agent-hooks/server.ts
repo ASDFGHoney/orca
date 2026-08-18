@@ -2606,6 +2606,40 @@ export class AgentHookServer {
     this.notifyStatusChangeListeners()
   }
 
+  /** Retire panes whose owning process is certifiably dead.
+   *
+   *  The ordinary teardown already does this: every attributable PTY exit reaches
+   *  `clearProviderPtyState`, which resolves the pane key and calls `clearPaneState`. But that
+   *  resolution depends on the spawn-time `ptyPaneKey` mapping, which a restored/reattached PTY may
+   *  never rebuild — so those panes keep a `working` row and its latches for good, with no hook left
+   *  to retire them. This is the same operation reached from the runtime's own pane-key knowledge,
+   *  so a dead pane is cleaned up identically however its keys were resolved. */
+  reconcileEndedProcessForPaneKeys(paneKeys: Iterable<string>): number {
+    let cleared = 0
+    for (const paneKey of paneKeys) {
+      const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
+      if (!this.hasLiveClaimsForPaneKey(resolvedPaneKey)) {
+        continue
+      }
+      this.clearPaneState(resolvedPaneKey)
+      cleared += 1
+    }
+    return cleared
+  }
+
+  /** Anything a dead pane could still be asserting: a row, or a Claude latch that would re-gate one
+   *  through `resolveClaudePaneState` on the pane's next event even after the row reads `done`. */
+  private hasLiveClaimsForPaneKey(paneKey: string): boolean {
+    return (
+      this.state.lastStatusByPaneKey.has(paneKey) ||
+      this.state.claudeSubagentRosterByPaneKey.has(paneKey) ||
+      this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+      this.state.claudeActiveSessionCronPaneKeys.has(paneKey) ||
+      this.state.claudeLeadStateByPaneKey.has(paneKey) ||
+      this.state.claudeSessionOwnerByPaneKey.has(paneKey)
+    )
+  }
+
   /** Clear statuses proven to belong to one lost SSH transport. */
   clearStatusEntriesForConnection(connectionId: string): void {
     const normalizedConnectionId = connectionId.trim()
@@ -2636,6 +2670,7 @@ export class AgentHookServer {
           this.state.claudeLeadStateByPaneKey.delete(paneKey)
           this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
           this.state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+          this.state.claudeSessionOwnerByPaneKey.delete(paneKey)
         }
       }
     }
@@ -2823,9 +2858,15 @@ export class AgentHookServer {
         enriched.payload.agentType === 'claude' &&
         enriched.connectionId === null &&
         isLocalExecutionHost(enriched.worktreeId) &&
-        claudeRosterHasRestoredSnapshotSubagent(
+        // Why: a restored roster is only one shape of stranded claim. A lead row left non-terminal,
+        // or a background-task/cron latch nothing will refresh, strands the pane just as
+        // permanently — and unlike the roster case there is no child event left to reap it.
+        (claudeRosterHasRestoredSnapshotSubagent(
           this.state.claudeSubagentRosterByPaneKey.get(paneKey)
-        ) &&
+        ) ||
+          enriched.payload.state !== 'done' ||
+          this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+          this.state.claudeActiveSessionCronPaneKeys.has(paneKey)) &&
         !this.runtimeObservedStatusPaneKeys.has(paneKey)
       ) {
         candidates.push({ paneKey, entry: enriched })
@@ -2853,6 +2894,13 @@ export class AgentHookServer {
         continue
       }
       if (!reapRestoredClaudeSubagentsForDeadPane(this.state, paneKey)) {
+        // Why: the roster reap only speaks for restored child rows. A pane whose PTY is provably
+        // gone and whose claim is a lead row or a latch has nothing for it to reap, so retire the
+        // pane the same way an observed exit would — otherwise the widened candidate set is inert.
+        if (this.hasLiveClaimsForPaneKey(paneKey)) {
+          this.clearPaneState(paneKey)
+          changedPanes += 1
+        }
         continue
       }
       changedPanes += 1

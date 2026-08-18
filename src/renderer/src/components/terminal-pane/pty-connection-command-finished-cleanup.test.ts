@@ -328,6 +328,43 @@ describe('connectPanePty', () => {
       shellForeground: true
     })
     expect(resolveMockPaneWindowsShiftEnterEncoding(mockStoreState, paneKey)).toBe('alt-enter')
+    // Why: `agentStatus:drop` deliberately preserves a live pane's per-pane caches, so a
+    // process-confirmed agent exit must go through the reconcile route instead — otherwise a
+    // surviving Claude latch resolves the pane's next event straight back to 'working' (STA-4612).
+    expect(window.api.agentStatus.reconcileEndedProcess).toHaveBeenCalledWith(paneKey)
+  })
+
+  it('does NOT reconcile when the process check could not confirm a shell', async () => {
+    vi.useFakeTimers()
+    const { connectPanePty } = await import('./pty-connection')
+    vi.mocked(window.api.pty.confirmForegroundProcess).mockResolvedValue(null)
+    vi.mocked(window.api.agentStatus.reconcileEndedProcess).mockClear()
+    const dataCallbackRef: { current: ((data: string) => void) | null } = { current: null }
+    const ptyId = 'pty-unconfirmed-shell'
+    const transport = createMockTransport(ptyId)
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      dataCallbackRef.current = callbacks.onData ?? null
+      return { id: ptyId }
+    })
+    transportFactoryQueue.push(transport)
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+
+    connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps({ isVisibleRef: { current: false } }) as never
+    )
+    await vi.advanceTimersByTimeAsync(20)
+    await flushAsyncTicks()
+    mockStoreState.agentLaunchConfigByPaneKey[paneKey] = {
+      launchConfig: { agentArgs: '', agentEnv: {} },
+      identity: { agentType: 'droid' }
+    }
+
+    dataCallbackRef.current?.('\x1b]133;D;0\x07')
+    await vi.advanceTimersByTimeAsync(350)
+
+    expect(window.api.agentStatus.reconcileEndedProcess).not.toHaveBeenCalled()
   })
 
   it('disarms stale TUI modes in the emulator after a confirmed return to shell', async () => {

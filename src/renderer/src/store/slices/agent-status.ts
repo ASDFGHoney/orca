@@ -1290,6 +1290,28 @@ function buildAgentStatusBatchPatch(
   return patch as Partial<AppState>
 }
 
+/** Per-pane counter of ACCEPTED status writes. Deliberately module-local, not store state: nothing
+ *  renders from it, and it exists only so a deferred drop can ask "did this pane report again while
+ *  I was confirming?" — a question `updatedAt` cannot answer, since the accept rule admits equal
+ *  timestamps and a real event can share the anchor's millisecond. */
+const acceptedAgentStatusGenerationByPaneKey = new Map<string, number>()
+
+function bumpAcceptedAgentStatusGeneration(paneKey: string): void {
+  acceptedAgentStatusGenerationByPaneKey.set(
+    paneKey,
+    (acceptedAgentStatusGenerationByPaneKey.get(paneKey) ?? 0) + 1
+  )
+}
+
+/** Reads 0 for a pane that has never reported, so an armed drop compares equal rather than undefined. */
+export function getAcceptedAgentStatusGeneration(paneKey: string): number {
+  return acceptedAgentStatusGenerationByPaneKey.get(paneKey) ?? 0
+}
+
+export function forgetAcceptedAgentStatusGeneration(paneKey: string): void {
+  acceptedAgentStatusGenerationByPaneKey.delete(paneKey)
+}
+
 export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusSlice> = (
   storeSet,
   storeGet
@@ -1974,6 +1996,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         if (existing && updatedAt < existing.updatedAt) {
           return s
         }
+        // Why: `updatedAt` cannot order two writes inside one millisecond — and this very check
+        // admits equal timestamps — so a deferred process-exit drop needs a token that is ordered by
+        // construction to tell "the pane reported again" from "an unrelated field moved".
+        bumpAcceptedAgentStatusGeneration(paneKey)
         // Why: terminalTitle labels the pane itself, not the turn, so a missing title means "no update" —
         // preserve the prior value to avoid flicker (unlike tool/prompt fields, which clear on a fresh turn).
         const effectiveTitle = terminalTitle ?? existing?.terminalTitle
@@ -2704,6 +2730,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       if (typeof window !== 'undefined') {
         window.api?.agentStatus?.drop?.(paneKey)
       }
+      forgetAcceptedAgentStatusGeneration(paneKey)
     },
 
     dropAgentStatusByTabPrefix: (tabIdPrefix, opts) => {

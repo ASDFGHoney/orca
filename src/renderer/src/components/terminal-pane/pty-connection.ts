@@ -6,6 +6,7 @@ import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anc
 import { installTerminalImeCompositionRoute } from './terminal-ime-composition-route'
 import { detectAgentStatusFromTitle, agentTypeToIconAgent, isClaudeAgent } from '@/lib/agent-status'
 import { reportWorkerTerminalUserInput } from '@/lib/worker-terminal-takeover-report'
+import { getAcceptedAgentStatusGeneration } from '@/store/slices/agent-status'
 import { resolvePaneTitleDecision } from './terminal-title-evidence'
 import { blocksCodexPaneInput } from '../codex-restart-notice-state'
 import { resolveLiveAgentStatusConnectionRouting } from '@/lib/agent-status-connection-ownership'
@@ -1930,6 +1931,25 @@ export function connectPanePty(
         return false
       })
   })
+  /** The pane's foreground was proven to be a shell, so its agent exited. Unlike a user dismissal,
+   *  this must also retire the main-side per-pane caches — a surviving Claude latch resolves the
+   *  next event straight back to `working`.
+   *
+   *  Ordered by the pane's accepted-status generation rather than by row identity: the confirming
+   *  process read can take seconds, and an unrelated field moving in that window is not evidence the
+   *  agent is alive — while a genuinely newer row can share the anchor's millisecond, so a timestamp
+   *  cannot separate the two. A relaunch inside the window is already handled by onCommandStarted,
+   *  which discards the armed drop. */
+  const reconcileEndedProcessIfPaneQuiet = (armedGeneration: number): void => {
+    if (getAcceptedAgentStatusGeneration(cacheKey) !== armedGeneration) {
+      return
+    }
+    // Why: main-side only. The renderer row and launch config are already owned by the deferred
+    // drop above; what that path cannot reach is the hook server's per-pane Claude latches, which
+    // `agentStatus:drop` deliberately preserves for a still-live pane. Main echoes its own clear
+    // back through the pane-status-cleared channel, so both sides stay consistent.
+    window.api?.agentStatus?.reconcileEndedProcess?.(cacheKey)
+  }
   const dropCommandFinishedStatusIfSameTurn = (
     entry: AgentStatusEntry | undefined,
     options?: { allowInferredInterrupt?: boolean }
@@ -2107,12 +2127,23 @@ export function connectPanePty(
     }
   }
   let deferredCommandFinishedStatusDrop: (() => void) | null = null
+  /** Armed alongside the deferred drop; runs only on a CONFIRMED shell foreground, where the
+   *  process table proved the agent gone. The unavailable-inspection path deliberately does not
+   *  reconcile — no proof, no teardown. */
+  let deferredConfirmedShellReconcile: (() => void) | null = null
   let visibleForegroundSamplePending = false
   let visibleForegroundSampleSettled = false
-  const settleDeferredCommandFinishedStatusDrop = (): void => {
+  const settleDeferredCommandFinishedStatusDrop = (
+    options: { confirmedShell?: boolean } = {}
+  ): void => {
     const dropStatus = deferredCommandFinishedStatusDrop
+    const reconcile = deferredConfirmedShellReconcile
     deferredCommandFinishedStatusDrop = null
+    deferredConfirmedShellReconcile = null
     dropStatus?.()
+    if (options.confirmedShell) {
+      reconcile?.()
+    }
   }
   const isForegroundTrackingAllowed = (id: string): boolean => {
     if (isRemoteRuntimePtyId(id) || parseAppSshPtyId(id) !== null) {
@@ -2159,9 +2190,11 @@ export function connectPanePty(
         useAppStore.getState().clearAgentLaunchConfig(cacheKey)
         return
       }
-      settleDeferredCommandFinishedStatusDrop()
+      settleDeferredCommandFinishedStatusDrop({ confirmedShell: true })
     },
-    onCommandFinishedUnavailable: settleDeferredCommandFinishedStatusDrop,
+    // Why: inspection that could not answer is not shell proof — settle the drop the pane already
+    // armed, but never tear the pane's caches down on it.
+    onCommandFinishedUnavailable: () => settleDeferredCommandFinishedStatusDrop(),
     onVisibleForegroundSettled: (outcome) => {
       visibleForegroundSamplePending = false
       visibleForegroundSampleSettled = outcome !== 'inconclusive'
@@ -2199,9 +2232,14 @@ export function connectPanePty(
     if (shouldDeferStatusDrop) {
       // Why: keep the concrete pane identity routable while the local process
       // check distinguishes a leaked nested-shell D from a genuine agent exit.
+      // Anchor the generation once, here — not per rung of the confirm ladder, which can span
+      // seconds — so the gate tolerates churn across the whole window.
+      const armedGeneration = getAcceptedAgentStatusGeneration(cacheKey)
       deferredCommandFinishedStatusDrop = dropStatus
+      deferredConfirmedShellReconcile = () => reconcileEndedProcessIfPaneQuiet(armedGeneration)
       return
     }
+    deferredConfirmedShellReconcile = null
     deferredCommandFinishedStatusDrop = null
     dropStatus()
   }
@@ -2266,6 +2304,7 @@ export function connectPanePty(
       // Why: a new command invalidates cleanup waiting on the previous D; only
       // a later confirmed shell boundary may retire this pane's live identity.
       deferredCommandFinishedStatusDrop = null
+      deferredConfirmedShellReconcile = null
       visibleForegroundSamplePending = false
       visibleForegroundSampleSettled = false
       // Why: typed commands can be aliases, so they only widen the bounded
@@ -9551,6 +9590,7 @@ export function connectPanePty(
       }
       commandLifecycle.dispose()
       deferredCommandFinishedStatusDrop = null
+      deferredConfirmedShellReconcile = null
       visibleForegroundSamplePending = false
       visibleForegroundSampleSettled = false
       paneForegroundAgentTracker.dispose()

@@ -2599,7 +2599,9 @@ export function registerPtyHandlers(
         clearProviderPtyState(id)
         ptyOwnership.delete(id)
         markClaudePtyExited(id)
-        runtime?.onPtyExit(id, code, incarnationId)
+        // Why: the provider's physical exit callback is a death certificate even when node-pty
+        // reports the code as -1; only the synthesized failed/unverified stop calls omit this.
+        runtime?.onPtyExit(id, code, incarnationId, { providerExitObserved: true })
       },
       onData: (id, data, timestamp, sequenceChars, transformed) =>
         runtime?.onPtyData(id, data, timestamp, sequenceChars ?? data.length, transformed)
@@ -4144,7 +4146,11 @@ export function registerPtyHandlers(
         clearProviderPtyState(payload.id)
         ptyOwnership.delete(payload.id)
         markClaudePtyExited(payload.id)
-        runtime?.onPtyExit(payload.id, payload.code, payload.incarnationId)
+        // Why: same physical-exit certificate as the LocalPtyProvider branch above — this is the
+        // daemon/WSL callback, and on macOS it is the branch that actually runs.
+        runtime?.onPtyExit(payload.id, payload.code, payload.incarnationId, {
+          providerExitObserved: true
+        })
       }
       sendPtyExitToRenderer(payload)
     })
