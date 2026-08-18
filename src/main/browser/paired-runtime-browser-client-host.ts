@@ -6,6 +6,7 @@ import type {
 } from '../../shared/browser-client-host-protocol'
 import type { PairingOffer } from '../../shared/pairing'
 import type { RemoteRuntimeSubscriptionOptions } from '../../shared/remote-runtime-client'
+import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import { BrowserClientHostCommandDispatcher } from './browser-client-host-command-dispatcher'
 import type { CommandHandler, DispatcherOptions } from './browser-client-host-command-state'
 import { PairedRuntimeBrowserHostLease } from './paired-runtime-browser-host-lease'
@@ -20,6 +21,7 @@ export type PairedRuntimeBrowserClientHostOptions = {
   handler: CommandHandler
   getPageInventory?: () => readonly BrowserClientHostedPageInventory[]
   pageReconciliationProtocolVersion?: 1
+  fileChannelProtocolVersion?: 1
   dispatcher?: DispatcherLimits
   timeoutMs?: number
   reconnectRetryDelayMs?: number
@@ -46,6 +48,9 @@ export class PairedRuntimeBrowserClientHost {
       browserHostClientId: options.browserHostClientId,
       hostCapabilities: options.hostCapabilities,
       pageCommandProtocolVersion: 1,
+      ...(options.fileChannelProtocolVersion
+        ? { fileChannelProtocolVersion: options.fileChannelProtocolVersion }
+        : {}),
       ...(options.getPageInventory
         ? {
             pageInventoryProtocolVersion: 1,
@@ -86,6 +91,18 @@ export class PairedRuntimeBrowserClientHost {
       return Promise.reject(new Error('Browser client host dispatcher is unavailable'))
     }
     return this.dispatcher.retirePage(browserPageId, pageHostGeneration)
+  }
+
+  get fileChannelNegotiated(): boolean {
+    return !this.closed && this.lease.fileChannelNegotiated
+  }
+
+  sendFileChannelRequest(
+    method: string,
+    params: unknown,
+    timeoutMs: number
+  ): Promise<RuntimeRpcResponse<unknown>> {
+    return this.lease.sendFileChannelRequest(method, params, timeoutMs)
   }
 
   refreshPageInventory(): Promise<void> {

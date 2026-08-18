@@ -3,6 +3,7 @@ import {
   BrowserClientAutomationCommand,
   BrowserClientAutomationResult
 } from './browser-client-automation-protocol'
+import { BROWSER_CLIENT_FILE_CHANNEL_PROTOCOL_VERSION } from './browser-client-file-channel-protocol'
 
 const Generation = z.number().int().min(1).max(0xffff_ffff)
 const Identity = z.string().min(1).max(256)
@@ -30,6 +31,7 @@ export const BROWSER_CLIENT_HOST_PAGE_RECONCILIATION_PROTOCOL_VERSION = 1 as con
 const PageReconciliationProtocolVersion = z.literal(
   BROWSER_CLIENT_HOST_PAGE_RECONCILIATION_PROTOCOL_VERSION
 )
+const FileChannelProtocolVersion = z.literal(BROWSER_CLIENT_FILE_CHANNEL_PROTOCOL_VERSION)
 
 export const BrowserHostLeaseAuthority = z.object({
   authorityRuntimeId: Identity,
@@ -104,9 +106,19 @@ export const BrowserClientHostAttachParams = z
     pageInventoryProtocolVersion: PageInventoryProtocolVersion.optional(),
     pageInventory: BrowserClientHostedPageInventoryList.optional(),
     leaseReconnectProtocolVersion: LeaseReconnectProtocolVersion.optional(),
-    pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional()
+    pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional(),
+    fileChannelProtocolVersion: FileChannelProtocolVersion.optional()
   })
   .superRefine((params, context) => {
+    if (
+      params.fileChannelProtocolVersion !== undefined &&
+      params.pageCommandProtocolVersion !== 1
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Browser file channel requires command negotiation'
+      })
+    }
     if (
       (params.pageInventoryProtocolVersion === undefined) !==
       (params.pageInventory === undefined)
@@ -152,7 +164,8 @@ export const BrowserClientHostReady = z.object({
   pageCommandProtocolVersion: PageCommandProtocolVersion.optional(),
   pageInventoryProtocolVersion: PageInventoryProtocolVersion.optional(),
   leaseReconnectProtocolVersion: LeaseReconnectProtocolVersion.optional(),
-  pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional()
+  pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional(),
+  fileChannelProtocolVersion: FileChannelProtocolVersion.optional()
 })
 
 const BrowserClientHostRevoked = z.object({
@@ -166,7 +179,8 @@ export const BrowserClientHostLeaseAuthority = BrowserHostLeaseAuthority.extend(
   pageCommandProtocolVersion: PageCommandProtocolVersion.optional(),
   pageInventoryProtocolVersion: PageInventoryProtocolVersion.optional(),
   leaseReconnectProtocolVersion: LeaseReconnectProtocolVersion.optional(),
-  pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional()
+  pageReconciliationProtocolVersion: PageReconciliationProtocolVersion.optional(),
+  fileChannelProtocolVersion: FileChannelProtocolVersion.optional()
 })
 
 export type BrowserClientHostLeaseAuthority = z.infer<typeof BrowserClientHostLeaseAuthority>

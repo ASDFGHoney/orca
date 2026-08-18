@@ -14,6 +14,7 @@ export type BrowserHostLeaseAttachInput = {
   pageInventory?: readonly BrowserClientHostedPageInventory[]
   pageReconciliationProtocolVersion?: 1
   leaseReconnectProtocolVersion?: 1
+  fileChannelProtocolVersion?: 1
 }
 
 export function assertBrowserHostReconnectNegotiation(input: BrowserHostLeaseAttachInput): void {
@@ -37,6 +38,12 @@ export function assertBrowserHostReconnectNegotiation(input: BrowserHostLeaseAtt
     (input.pageCommandProtocolVersion !== 1 || input.pageInventoryProtocolVersion !== 1)
   ) {
     throw new Error('browser_host_reconciliation_protocol_dependencies_required')
+  }
+  if (input.fileChannelProtocolVersion !== undefined && input.fileChannelProtocolVersion !== 1) {
+    throw new Error('browser_host_file_channel_protocol_unsupported')
+  }
+  if (input.fileChannelProtocolVersion === 1 && input.pageCommandProtocolVersion !== 1) {
+    throw new Error('browser_host_file_channel_command_protocol_required')
   }
 }
 
@@ -70,7 +77,8 @@ export function createBrowserHostLeaseState(options: {
       ...(input.leaseReconnectProtocolVersion ? { leaseReconnectProtocolVersion: 1 as const } : {}),
       ...(input.pageReconciliationProtocolVersion
         ? { pageReconciliationProtocolVersion: 1 as const }
-        : {})
+        : {}),
+      ...(input.fileChannelProtocolVersion ? { fileChannelProtocolVersion: 1 as const } : {})
     }),
     status: 'active',
     fence: createBrowserHostFence(),

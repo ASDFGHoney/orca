@@ -47,7 +47,8 @@ export function sameBrowserClientHostLeaseAuthority(
     left.pageCommandProtocolVersion === right.pageCommandProtocolVersion &&
     left.pageInventoryProtocolVersion === right.pageInventoryProtocolVersion &&
     left.leaseReconnectProtocolVersion === right.leaseReconnectProtocolVersion &&
-    left.pageReconciliationProtocolVersion === right.pageReconciliationProtocolVersion
+    left.pageReconciliationProtocolVersion === right.pageReconciliationProtocolVersion &&
+    left.fileChannelProtocolVersion === right.fileChannelProtocolVersion
   )
 }
 

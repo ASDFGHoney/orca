@@ -16,6 +16,7 @@ import {
   BrowserHostCommandResultSettler,
   type BrowserHostCommandResultAdmission
 } from './browser-host-command-result-settler'
+import { requestBrowserHostLeaseInventoryRefresh } from './browser-host-lease-inventory-refresh'
 import { PairedRuntimeBrowserHostLeaseConnection } from './paired-runtime-browser-host-lease-connection'
 import type { PairedRuntimeBrowserHostLeaseOptions } from './paired-runtime-browser-host-lease-options'
 import {
@@ -68,29 +69,31 @@ export class PairedRuntimeBrowserHostLease {
     return this.closePromise
   }
 
-  refreshPageInventory(): Promise<void> {
-    if (this.closed) {
-      return Promise.reject(new Error('Browser host lease is closed'))
-    }
-    if (this.reconnectPromise) {
-      return this.reconnectPromise
-    }
-    if (this.authority?.leaseReconnectProtocolVersion !== 1 || !this.options.getPageInventory) {
-      return Promise.reject(new Error('Browser host inventory refresh is unavailable'))
-    }
-    const connection = this.connection
-    if (!connection?.active) {
-      return Promise.reject(new Error('Browser host lease connection is unavailable'))
-    }
-    connection.fail(
-      new RemoteRuntimeClientError(
+  get fileChannelNegotiated(): boolean {
+    return !this.closed && this.authority?.fileChannelProtocolVersion === 1
+  }
+
+  sendFileChannelRequest(method: string, params: unknown, timeoutMs: number) {
+    const sendRequest = this.fileChannelNegotiated ? this.connection?.sendRequest : undefined
+    if (!sendRequest) {
+      throw new RemoteRuntimeClientError(
         'remote_runtime_unavailable',
-        'Browser host page inventory refresh requested.'
+        'Remote runtime browser file channel is unavailable.'
       )
-    )
-    return (
-      this.reconnectPromise ??
-      Promise.reject(new Error('Browser host inventory refresh did not start'))
+    }
+    return sendRequest(method, params, timeoutMs)
+  }
+
+  refreshPageInventory(): Promise<void> {
+    return requestBrowserHostLeaseInventoryRefresh(
+      {
+        closed: this.closed,
+        reconnectPromise: this.reconnectPromise,
+        supportsInventoryRefresh:
+          this.authority?.leaseReconnectProtocolVersion === 1 && !!this.options.getPageInventory,
+        connection: this.connection
+      },
+      () => this.reconnectPromise
     )
   }
 

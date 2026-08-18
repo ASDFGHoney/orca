@@ -41,7 +41,8 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
         pageInventoryProtocolVersion: params.pageInventoryProtocolVersion,
         pageInventory: params.pageInventory,
         pageReconciliationProtocolVersion: params.pageReconciliationProtocolVersion,
-        leaseReconnectProtocolVersion: params.leaseReconnectProtocolVersion
+        leaseReconnectProtocolVersion: params.leaseReconnectProtocolVersion,
+        fileChannelProtocolVersion: params.fileChannelProtocolVersion
       })
       let releaseCommandDelivery = (): void => {}
       let resolveDisconnected = (): void => {}
@@ -81,6 +82,9 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
             : {}),
           ...(params.pageReconciliationProtocolVersion
             ? { pageReconciliationProtocolVersion: params.pageReconciliationProtocolVersion }
+            : {}),
+          ...(handle.lease.fileChannelProtocolVersion
+            ? { fileChannelProtocolVersion: handle.lease.fileChannelProtocolVersion }
             : {})
         })
         if (params.pageCommandProtocolVersion) {

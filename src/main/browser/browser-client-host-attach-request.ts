@@ -47,6 +47,9 @@ export function createBrowserClientHostAttachRequest(
     pageCommandProtocolVersion && pageInventoryProtocolVersion
       ? options.pageReconciliationProtocolVersion
       : undefined
+  const fileChannelProtocolVersion = pageCommandProtocolVersion
+    ? options.fileChannelProtocolVersion
+    : undefined
   const params = BrowserClientHostAttachParams.parse({
     authorityRuntimeId: options.authorityRuntimeId,
     browserHostClientId: options.browserHostClientId,
@@ -59,13 +62,15 @@ export function createBrowserClientHostAttachRequest(
         }
       : {}),
     ...(leaseReconnectProtocolVersion ? { leaseReconnectProtocolVersion } : {}),
-    ...(pageReconciliationProtocolVersion ? { pageReconciliationProtocolVersion } : {})
+    ...(pageReconciliationProtocolVersion ? { pageReconciliationProtocolVersion } : {}),
+    ...(fileChannelProtocolVersion ? { fileChannelProtocolVersion } : {})
   })
   return {
     pageCommandProtocolVersion,
     pageInventoryProtocolVersion,
     leaseReconnectProtocolVersion,
     pageReconciliationProtocolVersion,
+    fileChannelProtocolVersion,
     params
   }
 }

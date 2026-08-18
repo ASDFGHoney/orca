@@ -195,6 +195,11 @@ export class PairedRuntimeBrowserHostLeaseConnection {
         ready.pageReconciliationProtocolVersion,
         request.pageReconciliationProtocolVersion
       ) ||
+      !matchesOptionalProtocol(
+        ready.fileChannelProtocolVersion,
+        request.fileChannelProtocolVersion
+      ) ||
+      (ready.fileChannelProtocolVersion === 1 && ready.pageCommandProtocolVersion !== 1) ||
       (ready.leaseReconnectProtocolVersion === 1 && ready.pageInventoryProtocolVersion !== 1) ||
       (ready.pageReconciliationProtocolVersion === 1 &&
         (ready.pageCommandProtocolVersion !== 1 || ready.pageInventoryProtocolVersion !== 1)) ||
@@ -270,6 +275,9 @@ function browserHostLeaseAuthority(
       : {}),
     ...(ready.pageReconciliationProtocolVersion
       ? { pageReconciliationProtocolVersion: ready.pageReconciliationProtocolVersion }
+      : {}),
+    ...(ready.fileChannelProtocolVersion
+      ? { fileChannelProtocolVersion: ready.fileChannelProtocolVersion }
       : {})
   })
 }
