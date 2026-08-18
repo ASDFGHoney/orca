@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { stripAnsiEscapeSequences } from '../../src/shared/ansi-escape-sequences'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 
@@ -44,7 +45,9 @@ test('STA-4746: folder-workspace terminal on a headless paired host', async () =
     const marker = 'STA4746HEADLESS'
     await host.client.call('terminal.send', {
       terminal: terminal.handle,
-      text: `printf '${marker};;pwd=%s;;wt=%s;;root=%s\\n' "$PWD" "$ORCA_WORKTREE_ID" "$ORCA_WORKSPACE_ROOT"`,
+      // `end=1` last: a wrapped row can be read half-rendered, and asserting a
+      // truncated path as the real cwd would be a false pass.
+      text: `printf '${marker};;pwd=%s;;wt=%s;;root=%s;;end=1\\n' "$PWD" "$ORCA_WORKTREE_ID" "$ORCA_WORKSPACE_ROOT"`,
       enter: true
     })
 
@@ -62,13 +65,13 @@ test('STA-4746: folder-workspace terminal on a headless paired host', async () =
               (candidate) => candidate.includes(`${marker};;pwd=`) && !candidate.includes('printf')
             )
           fields = Object.fromEntries(
-            (line ?? '')
+            stripAnsiEscapeSequences(line ?? '')
               .split(';;')
               .map((chunk) => chunk.split('='))
               .filter((parts) => parts.length === 2)
               .map(([key, value]) => [key.trim(), value.trim()])
           )
-          return fields.pwd ?? ''
+          return fields.end === '1' ? (fields.pwd ?? '') : ''
         },
         { timeout: 60_000 }
       )
