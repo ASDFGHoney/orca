@@ -18146,7 +18146,7 @@ export class OrcaRuntimeService {
         paneRuntimeId: -1,
         ptyId: pty.pty.ptyId,
         rendererGraphEpoch: this.rendererGraphEpoch,
-        agentWait: this.getTerminalInteractiveWait(handle)
+        agentWait: await this.getTerminalInteractiveWait(handle)
       }
     }
     const graphEpoch = this.captureReadyGraphEpoch()
@@ -18167,7 +18167,7 @@ export class OrcaRuntimeService {
       paneRuntimeId: leaf.paneRuntimeId,
       ptyId: leaf.ptyId,
       rendererGraphEpoch: this.rendererGraphEpoch,
-      agentWait: this.getTerminalInteractiveWait(handle)
+      agentWait: await this.getTerminalInteractiveWait(handle)
     }
   }
 
@@ -18535,19 +18535,15 @@ export class OrcaRuntimeService {
       terminal.titleStatus !== null &&
       terminal.titleStatus !== 'permission' &&
       !isOpenCodeNativeTitle(terminal.title) &&
-      // Why exempt: cursor-agent keeps its braille spinner in the title while an approval
-      // waits, so a "working" title there is not evidence of progress. The approval menu
-      // proves its own dismissal (the follow-up input line returning), so unlike the
-      // startup modals it needs no title-based staleness proxy.
+      // Why exempt: cursor-agent keeps spinning in its title while an approval waits, so a
+      // "working" title there is not evidence of progress.
       blockedByWaitText !== 'agent-approval-prompt'
     if (liveTitleClearsBlockedText && lifecycle?.status !== terminal.titleStatus) {
       return null
     }
-    // Why this reason skips the timestamps below: they exist to date a prompt whose text
-    // survives in scrollback forever, and the approval menu is only matched while it still
-    // owns the bottom of the screen — that is the dating. Without the exemption a tail
-    // restored from history, which carries no waitBlockedAt, would report a live dialog as
-    // nothing at all, exactly across the app restart an unattended run has to survive.
+    // Why no timestamp: the menu is only matched while it still owns the bottom of the screen,
+    // which is the dating. Requiring one would lose a dialog restored from history, across the
+    // app restart an unattended run has to survive.
     if (blockedByWaitText === 'agent-approval-prompt') {
       return blockedByWaitText
     }
@@ -18565,35 +18561,26 @@ export class OrcaRuntimeService {
   }
 
   /** Why: "blocked on a human" is the one worker state a coordinator cannot infer — silence
-   *  covers it, a long tool call, and a wedged process alike. Same evidence fusion
-   *  getTerminalAgentStatus uses for its `permission` verdict, minus the async foreground
-   *  probe, so a per-lane read stays a synchronous map lookup plus one tail scan.
-   *  Null means "nothing proves a wait", never "proven not waiting".
-   *
-   *  Known blind spot, inherited from that shared verdict rather than added here: a tail
-   *  restored from terminal history carries no waitBlockedAt (see applyRestoredTerminalTailSeed),
-   *  so a prompt that only ever appeared in restored bytes reports nothing until the next live
-   *  chunk. Reversing that would resurrect long-answered prompts on every restore, which costs
-   *  more than the miss — a blocked pane that receives any byte recovers on its own. */
-  getTerminalInteractiveWait(handle: string): RuntimeTerminalInteractiveWait | null {
+   *  covers it, a long tool call, and a wedged process alike. Null means "nothing proves a
+   *  wait", never "proven not waiting". */
+  async getTerminalInteractiveWait(handle: string): Promise<RuntimeTerminalInteractiveWait | null> {
     let ptyId: string
     let terminal: TerminalAgentStatusSnapshot
     try {
       ptyId = this.getTerminalAgentStatusPtyId(handle)
       terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
     } catch {
-      // Why: an unreadable pane is unknown. Reporting "not waiting" would be the exact
-      // false negative this field exists to remove.
+      // An unreadable pane is unknown; "not waiting" would be the false negative this removes.
       return null
     }
     const explicitStatus = this.getFreshExplicitAgentStatusForHandle(handle)
-    const lifecycle = this.agentPromptLifecycleByPtyId.get(ptyId)
     const promptReason = this.resolveAuthoritativeTerminalWaitPermission(
       terminal,
       explicitStatus,
-      lifecycle
+      this.agentPromptLifecycleByPtyId.get(ptyId)
     )
     if (promptReason) {
+      // A matched prompt is self-proving: it is on this pane's screen now.
       return {
         source: 'prompt-text',
         reason: promptReason,
@@ -18603,15 +18590,16 @@ export class OrcaRuntimeService {
     if (terminal.titleStatus === 'permission' && terminal.titleStatusIsLive) {
       return { source: 'title' }
     }
-    // Why the title check: a shell prompt title proves the agent no longer owns the pane,
-    // so a retained hook row must not keep reporting its last permission state.
-    if (
-      explicitStatus?.status === 'permission' &&
-      !terminalTitleBlocksExplicitAgentStatus(terminal.title)
-    ) {
-      return { source: 'hook', since: explicitStatus.updatedAt }
+    if (explicitStatus?.status !== 'permission') {
+      return null
     }
-    return null
+    // Why the extra round trip for hook evidence only: a hook row outlives its agent by up to
+    // AGENT_STATUS_STALE_AFTER_MS, and only the shared verdict proves an agent still owns this
+    // PTY — a shell that took the pane back rarely leaves a title we can recognize as one.
+    const status = await this.getTerminalAgentStatus(handle).catch(() => null)
+    return status?.isRunningAgent === true && status.status === 'permission'
+      ? { source: 'hook', since: explicitStatus.updatedAt }
+      : null
   }
 
   private async terminalHasShellForegroundProcess(handle: string, ptyId: string): Promise<boolean> {
@@ -39566,21 +39554,17 @@ function isTerminalWaitWhitespace(value: string, index: number): boolean {
 const TERMINAL_WAIT_BLOCKED_SENTINEL_RE =
   /update available|choose working directory to|codex just got an upgrade|hooks need review|do you trust|trust this|trusted workspace|press enter to (?:confirm|continue|view|insert)|press t to trust|permission required|requires permission|allow once|allow always|run this command\?/i
 
-// Why cursor-agent needs a text match at all: its hook set (beforeSubmitPrompt, preToolUse,
-// beforeShellExecution, beforeMCPExecution, postToolUse, afterAgentResponse, stop) has no
-// approval event, and beforeShellExecution fires identically for auto-allowed commands, so
-// the rendered menu is the only authority that separates "awaiting a human" from "running".
-// Match the key-bound choices, not the prose above them, so wording changes don't matter.
+// Why text at all: cursor-agent's hook set has no approval event and beforeShellExecution
+// fires for auto-allowed commands too, so the menu is the only authority. Match the key-bound
+// choices rather than the prose above them.
 const CURSOR_APPROVAL_CHOICE_MARKERS = [
   'run (once)',
   'to allowlist?',
   'run everything',
   'skip & tell the agent'
 ]
-// Why the tail must end on the menu: an answered menu keeps sitting in scrollback, and a
-// stale hit here is not merely noisy — it fails tui-idle and refuses prompt injection. A live
-// dialog owns the bottom of the screen, so the last choice may sit at most one line above the
-// end, which tolerates a trailing partial line mid-redraw without admitting scrollback.
+// Why bounded: an answered menu stays in scrollback, and a stale hit fails tui-idle and
+// refuses prompt injection. One line of slack covers a partial line mid-redraw.
 const CURSOR_APPROVAL_MAX_TRAILING_LINES = 1
 
 function findCursorApprovalPromptIndex(normalized: string): number | null {

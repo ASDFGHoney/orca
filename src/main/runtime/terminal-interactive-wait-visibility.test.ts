@@ -117,7 +117,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
       await expect(runtime.showTerminal(handle)).resolves.toMatchObject({
         agentWait: { source: 'prompt-text', reason: 'agent-approval-prompt' }
       })
-      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
         source: 'prompt-text',
         reason: 'agent-approval-prompt',
         since: expect.any(Number)
@@ -178,7 +178,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: CURSOR_LONG_TOOL_CALL
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
       await expect(runtime.showTerminal(handle)).resolves.toMatchObject({ agentWait: null })
     })
 
@@ -189,7 +189,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: CURSOR_IDLE
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
     it('treats an answered menu still in scrollback as scrollback', async () => {
@@ -201,7 +201,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: `${CURSOR_APPROVAL}\n${CURSOR_IDLE}`
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
     it('treats an answered menu followed by any later output as scrollback', async () => {
@@ -212,7 +212,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         foregroundProcess: 'cursor-agent',
         data: CURSOR_APPROVAL
       })
-      expect(runtime.getTerminalInteractiveWait(handle)).not.toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.not.toBeNull()
 
       runtime.onPtyData(
         PTY_ID,
@@ -220,7 +220,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         Date.now()
       )
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
     it('tolerates one trailing line below a live dialog', async () => {
@@ -231,7 +231,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: `${CURSOR_APPROVAL}\n  Auto · 6.1%\n`
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
         reason: 'agent-approval-prompt'
       })
     })
@@ -246,7 +246,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         connectionId: 'ssh:build-host'
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
         source: 'prompt-text',
         reason: 'agent-approval-prompt'
       })
@@ -259,7 +259,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: 'The agent asked: Run this command? I said yes and it worked.\n'
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
   })
 
@@ -287,7 +287,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: CLAUDE_TRUST
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
   })
 
@@ -299,7 +299,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: agentStatusOsc('waiting')
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
         source: 'hook',
         since: expect.any(Number)
       })
@@ -315,7 +315,20 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: agentStatusOsc('working')
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
+    })
+
+    it('drops a retained permission row once the agent stops owning the pane', async () => {
+      // Why not the title alone: a shell that takes the pane back usually sets something like
+      // `user@host: ~/repo`, which no title rule recognizes, and a hook row stays fresh for
+      // AGENT_STATUS_STALE_AFTER_MS — half an hour of reporting a dead agent as waiting.
+      const { runtime, handle } = await createPane({
+        paneTitle: 'jinwoo@host: ~/repo',
+        foregroundProcess: 'zsh',
+        data: agentStatusOsc('waiting')
+      })
+
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
     it('drops a retained permission row once a shell owns the pane', async () => {
@@ -325,7 +338,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         data: agentStatusOsc('blocked')
       })
 
-      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
   })
 
@@ -341,7 +354,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
     })
     runtime.seedTerminalRestoreTail(PTY_ID, { text: CURSOR_APPROVAL, lastTitle: CURSOR_TITLE })
 
-    expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
       source: 'prompt-text',
       reason: 'agent-approval-prompt'
     })
@@ -357,7 +370,7 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
     })
     runtime.seedTerminalRestoreTail(PTY_ID, { text: CLAUDE_TRUST })
 
-    expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
   })
 
   it('answers null rather than "not waiting" for a pane it cannot read', async () => {
@@ -367,6 +380,6 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
       data: CURSOR_APPROVAL
     })
 
-    expect(runtime.getTerminalInteractiveWait('term_does_not_exist')).toBeNull()
+    await expect(runtime.getTerminalInteractiveWait('term_does_not_exist')).resolves.toBeNull()
   })
 })
