@@ -246,6 +246,7 @@ import {
 } from './orchestration/federation-ack-checkpoints'
 import { syncFederatedDispatch } from './orchestration/federation-sync'
 import { MailPointerRepointScheduler } from './orchestration/mail-pointer-repoint-scheduler'
+import { isOrchestrationMailboxAddress } from './orchestration/mailbox-address'
 import { OrchestrationMailboxOwner } from './orchestration/mailbox-owner'
 import { OrchestrationMailboxNotificationCoordinator } from './orchestration/mailbox-notification-coordinator'
 import { OrchestrationMailboxDeliveryTarget } from './orchestration/mailbox-delivery-target'
@@ -34345,10 +34346,7 @@ export class OrcaRuntimeService {
     }
     for (const handle of handles) {
       try {
-        if (handle.startsWith('dispatch:')) {
-          continue
-        }
-        if (handle.startsWith('run:')) {
+        if (isOrchestrationMailboxAddress(handle)) {
           this.mailPointerRepointScheduler.schedule(handle)
           continue
         }

@@ -3,6 +3,7 @@ import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
 import { formatMessagePointer } from './formatter'
 import type { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
 import {
+  canPointAtMailbox,
   hasUnfilteredOrchestrationWaiter,
   messageTypeHasOrchestrationWaiter,
   shouldReleaseOrchestrationPointer,
@@ -65,13 +66,10 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
   ): void {
     const db = this.deps.getDb()
     const mailboxHandle = options.mailboxHandle
-    if (!db || !mailboxHandle.startsWith('run:')) {
+    if (!db || !canPointAtMailbox(db, mailboxHandle)) {
       return
     }
     if (!this.deps.getTerminalHandleForLeafKey(this.leafKey(leaf))) {
-      return
-    }
-    if (db.hasOutstandingRunDelivery?.(mailboxHandle.slice('run:'.length))) {
       return
     }
     if (leaf.ptyId && this.state.hasFlight(leaf.ptyId)) {
