@@ -130,3 +130,19 @@ export function getShellReadyLaunchConfig(shellPath: string): ShellReadyLaunchCo
 export function getMarkerlessShellLaunchConfig(shellPath: string): ShellReadyLaunchConfig {
   return getWrappedShellLaunchConfig(shellPath, { emitReadyMarker: false })
 }
+
+/**
+ * Wrapper for a pane whose ONLY reason to wrap is restoring its worktree-scoped
+ * HISTFILE: no ready marker and no OSC 133 hooks, so the pane keeps the
+ * command-lifecycle behavior it had while it launched unwrapped.
+ *
+ * Non-zsh shells stay unwrapped — only zsh's `/etc/zshrc` clobbers HISTFILE, so
+ * a bash fallback has nothing to restore.
+ */
+export function getHistoryRestoreShellLaunchConfig(shellPath: string): ShellReadyLaunchConfig {
+  if (pathWin32.basename(basename(shellPath)).toLowerCase() !== 'zsh') {
+    return { args: null, env: {}, supportsReadyMarker: false }
+  }
+  const config = getMarkerlessShellLaunchConfig(shellPath)
+  return { ...config, env: { ...config.env, ORCA_SHELL_COMMAND_MARKERS: '0' } }
+}

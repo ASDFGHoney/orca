@@ -261,3 +261,13 @@ export function getShellReadyLaunchConfig(shellPath: string): ShellLaunchConfig 
 export function getMarkerlessShellLaunchConfig(shellPath: string): ShellLaunchConfig {
   return getWrappedShellLaunchConfig(shellPath, { emitReadyMarker: false })
 }
+
+/** Mirrors local-pty-shell-ready.ts: history-restore-only wrapping keeps the pane's
+ *  pre-wrapper command lifecycle (no OSC 133), and never wraps a non-zsh shell. */
+export function getHistoryRestoreShellLaunchConfig(shellPath: string): ShellLaunchConfig {
+  if (pathWin32.basename(basename(shellPath)).toLowerCase() !== 'zsh') {
+    return { args: null, env: {}, supportsReadyMarker: false }
+  }
+  const config = getMarkerlessShellLaunchConfig(shellPath)
+  return { ...config, env: { ...config.env, ORCA_SHELL_COMMAND_MARKERS: '0' } }
+}

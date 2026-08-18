@@ -2,6 +2,7 @@ import { getPosixOmpShellWrapper } from '../pty/omp-shell-wrapper'
 import { getPosixCodexShellLaunchPreflight } from '../pty/codex-shell-launch-preflight'
 import {
   getZshFinalZdotdirRestoreBlock,
+  getZshOsc133RegistrationBlock,
   getZshStartupFileSourceBlock,
   ZSH_HISTFILE_RESTORE_BLOCK
 } from '../shell-templates'
@@ -30,21 +31,7 @@ if [[ ! -o login ]]; then
 ${ZSH_HISTFILE_RESTORE_BLOCK}
   ${getPosixCodexShellLaunchPreflight()}
 fi
-__orca_osc133_precmd() {
-  local exit_code=$?
-  if [[ -n "\${__orca_in_command:-}" ]]; then
-    printf "\\033]133;D;%s\\007" "$exit_code"
-    unset __orca_in_command
-  fi
-  printf "\\033]133;A\\007"
-}
-__orca_osc133_preexec() {
-  printf "\\033]133;C\\007"
-  __orca_in_command=1
-}
-# Why: prepend so Orca captures $? before user prompt hooks can overwrite it.
-precmd_functions=(__orca_osc133_precmd \${precmd_functions[@]})
-preexec_functions=(__orca_osc133_preexec \${preexec_functions[@]})
+${getZshOsc133RegistrationBlock()}
 if [[ ! -o login ]]; then
 ${getZshFinalZdotdirRestoreBlock()}
 fi

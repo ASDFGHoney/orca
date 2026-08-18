@@ -638,6 +638,11 @@ export class PtyHandler {
     if (!result.TERM) {
       result.TERM = 'xterm-256color'
     }
+    // Why: only injectRelayHistoryEnv (which runs after this) may set ORCA_HISTFILE.
+    // A relay server started from inside an Orca pane inherits that pane's value, and
+    // a client-sent one names a path on the client — either would make the remote zsh
+    // wrapper restore a foreign history file into a pane with scoping off (#11146).
+    delete result.ORCA_HISTFILE
     expandWindowsPathEnvironmentVariables(result)
     return result
   }

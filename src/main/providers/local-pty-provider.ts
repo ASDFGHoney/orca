@@ -31,7 +31,11 @@ import {
   spawnShellWithFallback
 } from './local-pty-utils'
 import { prepareMacosTccLoginShell } from './macos-tcc-login-shell'
-import { getMarkerlessShellLaunchConfig, getShellReadyLaunchConfig } from './local-pty-shell-ready'
+import {
+  getHistoryRestoreShellLaunchConfig,
+  getMarkerlessShellLaunchConfig,
+  getShellReadyLaunchConfig
+} from './local-pty-shell-ready'
 import { requiresZshHistoryRestoreWrapper } from '../pty/zsh-history-restore-wrapper'
 import {
   writeStartupCommandWhenShellReady,
@@ -896,10 +900,10 @@ export class LocalPtyProvider implements IPtyProvider {
       // Why here and not in the block above: ORCA_HISTFILE only exists after
       // injection. /etc/zshrc reassigns HISTFILE with no check-before-set, so a
       // scoped history survives startup only if the wrapper restores it (#11044).
-      const historyRestoreLaunch = getMarkerlessShellLaunchConfig(shellPath)
+      const historyRestoreLaunch = getHistoryRestoreShellLaunchConfig(shellPath)
       Object.assign(finalEnv, historyRestoreLaunch.env)
       shellArgs = historyRestoreLaunch.args ?? shellArgs
-      getFallbackShellReadyConfig = (shell) => getMarkerlessShellLaunchConfig(shell)
+      getFallbackShellReadyConfig = (shell) => getHistoryRestoreShellLaunchConfig(shell)
     }
 
     await prepareLocalPtySpawn(id)

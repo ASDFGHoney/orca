@@ -6,6 +6,7 @@ import { delimiter, win32 as pathWin32 } from 'node:path'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import { DaemonProtocolError } from './types'
 import {
+  getHistoryRestoreShellLaunchConfig,
   getMarkerlessShellLaunchConfig,
   getShellReadyLaunchConfig,
   resolvePtyShellPath
@@ -38,7 +39,10 @@ import { isPwshAvailable } from '../pwsh'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { removeAppImageRuntimeEnv } from '../pty/appimage-terminal-env'
-import { requiresZshHistoryRestoreWrapper } from '../pty/zsh-history-restore-wrapper'
+import {
+  removeInheritedOrcaHistFile,
+  requiresZshHistoryRestoreWrapper
+} from '../pty/zsh-history-restore-wrapper'
 import { stripInheritedBuildModeEnv } from '../pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../pty/legacy-terminal-shim-dir'
 import { resolvePathEnvKey } from '../pty/windows-environment-path'
@@ -655,6 +659,9 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
   }
   // Why: the daemon can inherit the pane identity of the terminal that launched `pn dev`; each PTY must opt into its own.
   removeUnspecifiedPaneIdentityEnv(env, opts.env)
+  // Why: only history isolation may set ORCA_HISTFILE; an inherited one would send
+  // a pane with scoping off into the launching worktree's history file (#11146).
+  removeInheritedOrcaHistFile(env, opts.env)
   removeInheritedDevAgentHookEndpoint(env, opts.env)
   removeInheritedElectronRunAsNode(env)
   removeAppImageRuntimeEnv(env)
@@ -832,14 +839,18 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
     } else if (opts.command) {
       shellLaunch = getShellReadyLaunchConfig(shellPath)
     } else {
-      shellLaunch =
-        requiresZshHistoryRestoreWrapper(shellPath, env) ||
+      const needsOverlayWrapper =
         env.ORCA_OPENCODE_CONFIG_DIR ||
         env.ORCA_MIMOCODE_HOME ||
         env.ORCA_OMP_STATUS_EXTENSION ||
         env.ORCA_CODEX_HOME ||
         env.ORCA_AGENT_TEAMS_SHIM_DIR
-          ? getMarkerlessShellLaunchConfig(shellPath)
+      // Why the third arm: a pane wrapped only to restore its scoped HISTFILE keeps
+      // the command lifecycle it had unwrapped — see getHistoryRestoreShellLaunchConfig.
+      shellLaunch = needsOverlayWrapper
+        ? getMarkerlessShellLaunchConfig(shellPath)
+        : requiresZshHistoryRestoreWrapper(shellPath, env)
+          ? getHistoryRestoreShellLaunchConfig(shellPath)
           : null
     }
     if (shellLaunch) {

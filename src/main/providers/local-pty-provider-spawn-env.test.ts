@@ -410,10 +410,30 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.ORCA_HISTFILE).toMatch(/zsh_history$/)
       expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
       expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
+      // History is the only reason to wrap, so the pane keeps the OSC 133 silence
+      // it had while it launched unwrapped.
+      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('0')
+    })
+
+    it('still registers OSC 133 when an overlay is what asks for the wrapper', async () => {
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        worktreeId: '/repo/worktree-a',
+        env: { ORCA_CODEX_HOME: '/tmp/orca-codex-home' }
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
+      expect(spawnCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBeUndefined()
     })
 
     it('keeps a plain pane unwrapped when history scoping is off', async () => {
       provider.configure({ isHistoryEnabled: () => false })
+      // Why set it here: Orca launched from an Orca pane inherits that pane's
+      // export, and honoring it would wrap this pane and point it at the other
+      // worktree's history (#11146). The sandbox clears it for every other test.
+      process.env.ORCA_HISTFILE = '/tmp/orca-history/other-worktree/zsh_history'
 
       await provider.spawn({ cols: 80, rows: 24, worktreeId: '/repo/worktree-a' })
 

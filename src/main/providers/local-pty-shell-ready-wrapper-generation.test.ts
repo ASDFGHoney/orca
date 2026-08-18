@@ -328,6 +328,9 @@ describePosix('local PTY shell-ready launch config', () => {
     // Sanity: zsh wrapper emits the same markers — both branches must stay in sync.
     expect(zshRc).toContain('printf "\\033]133;D;%s\\007"')
     expect(zshRc).toContain('printf "\\033]133;C\\007"')
+    // Why gated: a pane wrapped only to restore its scoped HISTFILE launched
+    // unwrapped before, so it must not start driving command-finished consumers.
+    expect(zshRc).toContain('if [[ "${ORCA_SHELL_COMMAND_MARKERS:-1}" != "0" ]]; then')
   })
 
   itWithBash('runs the bash wrapper without fake C/D markers before the first prompt', async () => {

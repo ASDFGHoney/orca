@@ -6,12 +6,26 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+// Why cleared: the daemon merges process.env into every spawn env, and the test
+// runner is often itself a child of a wrapped Orca pane. Left alone, a developer
+// machine takes the wrapper branch — wrapper assertions pass vacuously and
+// unwrapped ones fail — where CI, with a clean env, does the opposite.
 const ORCA_SHELL_WRAPPER_ENV = [
   'ORCA_OPENCODE_CONFIG_DIR',
   'ORCA_MIMOCODE_HOME',
   'ORCA_PI_CODING_AGENT_DIR',
   'ORCA_OMP_CODING_AGENT_DIR',
-  'ORCA_CODEX_HOME'
+  'ORCA_CODEX_HOME',
+  'ORCA_OMP_STATUS_EXTENSION',
+  'ORCA_AGENT_TEAMS_SHIM_DIR',
+  'HISTFILE',
+  'ORCA_HISTFILE',
+  'ZDOTDIR',
+  'ORCA_ORIG_ZDOTDIR',
+  'ORCA_ZSHENV_SOURCE_DIR',
+  'ORCA_SHELL_READY_MARKER',
+  'ORCA_SHELL_STARTUP_IDENTITY',
+  'ORCA_SHELL_COMMAND_MARKERS'
 ] as const
 export const POWERLEVEL10K_WIZARD_DISABLE_ENV = 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
 

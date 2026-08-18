@@ -493,4 +493,58 @@ describe('PtyHandler', () => {
       rmSync(homeDir, { recursive: true, force: true })
     }
   )
+
+  it.skipIf(process.platform === 'win32')(
+    'drops an inherited ORCA_HISTFILE when the pane has history scoping off',
+    async () => {
+      // Why: a relay server started from inside an Orca pane exports that pane's
+      // history path. Honoring it would wrap this zsh and point a pane whose
+      // owner turned scoping OFF at another worktree's history file (#11146).
+      const homeDir = mkdtempSync(join(tmpdir(), 'orca-relay-inherited-histfile-'))
+      // Why the scrub: the relay spreads process.env, and a runner sitting inside
+      // an Orca pane exports overlay vars that would wrap zsh for their own reasons.
+      const overlayKeys = [
+        'ORCA_OPENCODE_CONFIG_DIR',
+        'ORCA_MIMOCODE_HOME',
+        'ORCA_REMOTE_CLI_BIN_DIR',
+        'ORCA_OMP_STATUS_EXTENSION'
+      ] as const
+      const saved = Object.fromEntries(overlayKeys.map((key) => [key, process.env[key]]))
+      for (const key of overlayKeys) {
+        delete process.env[key]
+      }
+      const oldHistFile = process.env.ORCA_HISTFILE
+      process.env.ORCA_HISTFILE = '/tmp/orca-remote-history/other-worktree-zsh_history'
+
+      try {
+        await dispatcher.callRequest('pty.spawn', {
+          cols: 80,
+          rows: 24,
+          worktreeId: '/repo/worktree-a',
+          env: { SHELL: '/bin/zsh', HOME: homeDir }
+        })
+
+        const spawnOptions = mockPtySpawn.mock.calls.at(-1)?.[2] as {
+          env: Record<string, string>
+        }
+        expect(spawnOptions.env.ORCA_HISTFILE).toBeUndefined()
+        expect(spawnOptions.env.ZDOTDIR).toBeUndefined()
+        expect(existsSync(join(homeDir, '.orca-relay'))).toBe(false)
+      } finally {
+        if (oldHistFile === undefined) {
+          delete process.env.ORCA_HISTFILE
+        } else {
+          process.env.ORCA_HISTFILE = oldHistFile
+        }
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) {
+            delete process.env[key]
+          } else {
+            process.env[key] = value
+          }
+        }
+        rmSync(homeDir, { recursive: true, force: true })
+      }
+    }
+  )
 })

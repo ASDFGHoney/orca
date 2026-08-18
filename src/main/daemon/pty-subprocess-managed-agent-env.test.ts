@@ -142,6 +142,66 @@ describe('createPtySubprocess', () => {
     expect(lastCall[1]).toEqual(['-l'])
     expect(lastCall[2].env.ZDOTDIR).toMatch(ZSH_SHELL_READY_DIR)
     expect(lastCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
+    // History is the only reason to wrap, so the pane keeps the OSC 133 silence
+    // it had while it launched unwrapped.
+    expect(lastCall[2].env.ORCA_SHELL_COMMAND_MARKERS).toBe('0')
+  })
+
+  it('drops an ORCA_HISTFILE the daemon inherited from the pane that launched it', async () => {
+    // Why: `pn dev`/Orca started inside an Orca pane forks a daemon holding that
+    // pane's exported ORCA_HISTFILE. Honoring it would wrap a pane whose owner
+    // turned scoping OFF and send its history to the launching worktree (#11146).
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    process.env.ORCA_HISTFILE = '/tmp/orca-history/other-worktree/zsh_history'
+
+    try {
+      await createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        env: { SHELL: '/bin/zsh' }
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const lastCall = spawnMock.mock.calls.at(-1)!
+    expect(lastCall[2].env.ORCA_HISTFILE).toBeUndefined()
+    expect(lastCall[2].env.ZDOTDIR).toBeUndefined()
+  })
+
+  it('keeps a caller-injected ORCA_HISTFILE that arrived with this spawn', async () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    process.env.ORCA_HISTFILE = '/tmp/orca-history/other-worktree/zsh_history'
+
+    try {
+      await createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        env: {
+          SHELL: '/bin/zsh',
+          HISTFILE: '/tmp/orca-history/abc/zsh_history',
+          ORCA_HISTFILE: '/tmp/orca-history/abc/zsh_history'
+        }
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const lastCall = spawnMock.mock.calls.at(-1)!
+    expect(lastCall[2].env.ORCA_HISTFILE).toBe('/tmp/orca-history/abc/zsh_history')
+    expect(lastCall[2].env.ZDOTDIR).toMatch(ZSH_SHELL_READY_DIR)
   })
 
   it('keeps a plain zsh session unwrapped when Orca injects no scoped history', async () => {

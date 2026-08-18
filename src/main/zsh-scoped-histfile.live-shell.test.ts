@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getRelayShellLaunchConfig } from '../relay/pty-shell-launch'
-import { getMarkerlessShellLaunchConfig } from './providers/local-pty-shell-ready'
+import { getHistoryRestoreShellLaunchConfig } from './providers/local-pty-shell-ready'
 import { getZshShellReadyRcfileContent } from './providers/local-pty-shell-ready-wrapper-generation'
 import { requiresZshHistoryRestoreWrapper } from './pty/zsh-history-restore-wrapper'
 import { getZshEnvTemplate, ZSH_HISTFILE_RESTORE_BLOCK } from './shell-templates'
@@ -109,13 +109,20 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
 })
 
 /**
- * The case above pre-writes the wrapper ZDOTDIR, so it can only prove the wrapper
- * CONTENT is right. These run the launch decision itself for a plain pane — no
- * startup command, no Codex/OpenCode overlay, nothing but a scoped history — and
- * spawn zsh exactly as Orca would. Before the fix the decision returned the
- * unwrapped fast path here and /etc/zshrc silently took the history back.
+ * The cases above pre-write the wrapper ZDOTDIR by hand, so they can only prove
+ * the wrapper CONTENT is right. These build the launch config through the real
+ * config functions the desktop and relay call for a plain pane — no startup
+ * command, no Codex/OpenCode overlay, nothing but a scoped history — and hand
+ * exactly that args/env pair to a real zsh.
+ *
+ * What they deliberately do NOT do is run LocalPtyProvider.spawn: which panes
+ * reach these functions is unit-covered in local-pty-provider-spawn-env.test.ts
+ * (and pty-subprocess-managed-agent-env.test.ts for the daemon). Only a live
+ * shell can show the other half — that the config those gates apply survives
+ * /etc/zshrc, and that a history-only wrapper stays out of the command
+ * lifecycle the pane had while it launched unwrapped.
  */
-describe('a plain pane reaches zsh with the wrapper its launch decision picked', () => {
+describe('a plain pane reaches zsh with the wrapper its launch config describes', () => {
   const withSandboxedHome = (run: (home: string) => void): void => {
     const home = mkdtempSync(join(tmpdir(), 'orca-plain-pane-histfile-'))
     const saved = {
@@ -144,12 +151,22 @@ describe('a plain pane reaches zsh with the wrapper its launch decision picked',
     }
   }
 
-  function runLaunchedZsh(home: string, env: Record<string, string>): string {
-    return execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
-      encoding: 'utf8',
-      timeout: 20_000,
-      env: { PATH: '/usr/bin:/bin', HOME: home, ...env }
-    })
+  // Why `-i` on top of the config's args: a pane is interactive, and zsh only
+  // sources .zshrc (where the restore lives) for interactive shells.
+  function runLaunchedZsh(
+    home: string,
+    launchArgs: string[],
+    env: Record<string, string>
+  ): string {
+    return execFileSync(
+      ZSH_PATH,
+      [...launchArgs, '-i', '-c', 'echo "RESULT=$HISTFILE"; echo "PRECMD=$precmd_functions"'],
+      {
+        encoding: 'utf8',
+        timeout: 20_000,
+        env: { PATH: '/usr/bin:/bin', HOME: home, ...env }
+      }
+    )
   }
 
   itWithZsh('keeps the scoped HISTFILE for a local plain pane', () => {
@@ -157,14 +174,18 @@ describe('a plain pane reaches zsh with the wrapper its launch decision picked',
       const scoped = join(home, 'orca-history', 'zsh_history')
       const spawnEnv = { HISTFILE: scoped, ORCA_HISTFILE: scoped }
 
-      // The desktop gate, spelled out: no overlay env, no startup command, so
-      // only the scoped history can ask for a wrapper — else the plain login shell.
+      // No overlay env and no startup command, so the scoped history is the only
+      // thing that can ask for a wrapper — otherwise the plain login shell.
       const launch = requiresZshHistoryRestoreWrapper(ZSH_PATH, spawnEnv)
-        ? getMarkerlessShellLaunchConfig(ZSH_PATH)
+        ? getHistoryRestoreShellLaunchConfig(ZSH_PATH)
         : { args: ['-l'], env: {} }
-      const output = runLaunchedZsh(home, { ...spawnEnv, ...launch.env })
+      const output = runLaunchedZsh(home, launch.args ?? ['-l'], { ...spawnEnv, ...launch.env })
 
       expect(output).toContain(`RESULT=${scoped}`)
+      // Wrapping for history alone must not enroll the pane in OSC 133: it emitted
+      // no command markers while it launched unwrapped, and every consumer of them
+      // (agent-status drops, git-status refresh) would start firing per command.
+      expect(output).not.toContain('__orca_osc133_precmd')
     })
   })
 
@@ -174,7 +195,7 @@ describe('a plain pane reaches zsh with the wrapper its launch decision picked',
       const spawnEnv = { HOME: home, HISTFILE: scoped, ORCA_HISTFILE: scoped }
 
       const launch = getRelayShellLaunchConfig(ZSH_PATH, spawnEnv, process.platform)
-      const output = runLaunchedZsh(home, { ...spawnEnv, ...launch.env })
+      const output = runLaunchedZsh(home, launch.args, { ...spawnEnv, ...launch.env })
 
       expect(launch.args).toEqual(['-l'])
       expect(output).toContain(`RESULT=${scoped}`)

@@ -155,6 +155,36 @@ fi
 `
 }
 
+/**
+ * OSC 133 command-lifecycle hooks (prompt start, command start, exit code) for
+ * the zsh wrappers.
+ *
+ * Gated on ORCA_SHELL_COMMAND_MARKERS because a pane wrapped ONLY to restore its
+ * worktree-scoped HISTFILE was launched unwrapped before that fix, so it emitted
+ * no markers at all. Keeping them off there leaves the command-finished
+ * consumers — pane agent-status drops and the git-status refresh signal —
+ * exactly as they were for plain panes.
+ */
+export function getZshOsc133RegistrationBlock(): string {
+  return `if [[ "\${ORCA_SHELL_COMMAND_MARKERS:-1}" != "0" ]]; then
+__orca_osc133_precmd() {
+  local exit_code=$?
+  if [[ -n "\${__orca_in_command:-}" ]]; then
+    printf "\\033]133;D;%s\\007" "$exit_code"
+    unset __orca_in_command
+  fi
+  printf "\\033]133;A\\007"
+}
+__orca_osc133_preexec() {
+  printf "\\033]133;C\\007"
+  __orca_in_command=1
+}
+# Why: prepend so Orca captures $? before user prompt hooks can overwrite it.
+precmd_functions=(__orca_osc133_precmd \${precmd_functions[@]})
+preexec_functions=(__orca_osc133_preexec \${preexec_functions[@]})
+fi`
+}
+
 // Why: zsh precmd fires before zle switches the PTY into line-editing mode,
 // so the marker must be emitted from zle-line-init. Registering it through
 // add-zle-hook-widget is unsafe: the azhw dispatcher aborts its hook chain
