@@ -231,11 +231,11 @@ export function AutomationListFilterMenu({
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
                 placeholder={translate(
-                  'auto.components.agent.AgentCombobox.48c6a5a9b4',
+                  'auto.components.automations.AutomationListFilterMenu.926e785e4d',
                   'Search agents...'
                 )}
                 aria-label={translate(
-                  'auto.components.agent.AgentCombobox.48c6a5a9b4',
+                  'auto.components.automations.AutomationListFilterMenu.926e785e4d',
                   'Search agents...'
                 )}
                 className="h-7 px-2 text-xs"
@@ -264,7 +264,7 @@ export function AutomationListFilterMenu({
             {filteredAgents.length === 0 ? (
               <div className="px-2 py-1.5 text-xs text-muted-foreground">
                 {translate(
-                  'auto.components.agent.AgentCombobox.579c768bde',
+                  'auto.components.automations.AutomationListFilterMenu.491043ee45',
                   'No agents match your search.'
                 )}
               </div>

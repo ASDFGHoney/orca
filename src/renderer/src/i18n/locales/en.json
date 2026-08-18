@@ -15324,6 +15324,8 @@
           "c92c9463c6": "Automation actions"
         },
         "AutomationListFilterMenu": {
+          "926e785e4d": "Search agents...",
+          "491043ee45": "No agents match your search.",
           "removeFilter": "Remove {{value0}} filter",
           "failed": "Failed",
           "succeeded": "Succeeded",
