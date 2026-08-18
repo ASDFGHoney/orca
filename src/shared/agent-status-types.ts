@@ -3,6 +3,7 @@
 // a narrow interrupt fallback synthesizes a final `done` when an agent misses its cancellation hook.
 
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
+import type { WithAgentStatusObservation } from './agent-status-observation'
 import {
   normalizeInteractivePromptField,
   normalizeOptionalField,
@@ -158,7 +159,7 @@ export type AgentStatusEntry = {
    *  teardown path can reset it out from under a reader (STA-4612). Never sent over IPC or
    *  persisted to last-status.json. */
   acceptedStatusSeq?: number
-}
+} & WithAgentStatusObservation
 
 export type MigrationUnsupportedPtyEntry = {
   ptyId: string
@@ -259,7 +260,7 @@ export type AgentStatusIpcPayload = ParsedAgentStatusPayload & {
   promptInteractionKey?: string
   /** See AgentStatusEntry.restoredUnconfirmed — hydrated nonterminal provenance. */
   restoredUnconfirmed?: boolean
-}
+} & WithAgentStatusObservation
 
 /** Wire shape for ordinary pane teardown or a stamped SSH disconnect batch. */
 export type AgentStatusClearIpcPayload =

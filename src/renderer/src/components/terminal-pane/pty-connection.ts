@@ -3,6 +3,7 @@ import type { PaneManager, ManagedPane } from '@/lib/pane-manager/pane-manager'
 import type { ManagedPaneInternal } from '@/lib/pane-manager/pane-manager-types'
 import type { IBuffer, IDisposable } from '@xterm/xterm'
 import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anchor'
+import { rendererAgentStatusObservations } from '@/lib/renderer-agent-status-observations'
 import { installTerminalImeCompositionRoute } from './terminal-ime-composition-route'
 import { detectAgentStatusFromTitle, agentTypeToIconAgent, isClaudeAgent } from '@/lib/agent-status'
 import { reportWorkerTerminalUserInput } from '@/lib/worker-terminal-takeover-report'
@@ -2919,7 +2920,13 @@ export function connectPanePty(
       agentType: resolveCompatibleAgentTypeForOwner(
         initialStatus.agent,
         getAuthoritativePaneAgent()
-      )
+      ),
+      // Why: Orca launched this agent, so this row predates any provider signal for the pane.
+      observation: rendererAgentStatusObservations.observe(cacheKey, {
+        origin: 'launch',
+        observedAt: Date.now(),
+        kind: 'transition'
+      })
     }
     if (paneStartup.launchConfig) {
       useAppStore
@@ -2971,7 +2978,13 @@ export function connectPanePty(
       {
         state: 'working',
         prompt: normalizedPrompt || (currentEntry?.state === 'working' ? currentEntry.prompt : ''),
-        agentType: 'command-code'
+        agentType: 'command-code',
+        // Why: Command Code has no prompt-start hook; this row is read off the pane's own output.
+        observation: rendererAgentStatusObservations.observe(cacheKey, {
+          origin: 'process',
+          observedAt: Date.now(),
+          kind: 'transition'
+        })
       },
       currentTitle,
       undefined,
@@ -3006,7 +3019,12 @@ export function connectPanePty(
         {
           state: 'done',
           prompt: currentPrompt || normalizedPrompt,
-          agentType: 'command-code'
+          agentType: 'command-code',
+          observation: rendererAgentStatusObservations.observe(cacheKey, {
+            origin: 'process',
+            observedAt: Date.now(),
+            kind: 'transition'
+          })
         },
         currentTitle,
         undefined,
@@ -3755,6 +3773,18 @@ export function connectPanePty(
     const authoritativePaneAgent = getAuthoritativePaneAgent()
     const agentType = resolveCompatibleAgentTypeForOwner(payload.agentType, authoritativePaneAgent)
     const statusPayload = agentType === payload.agentType ? payload : { ...payload, agentType }
+    // Why: this is the remote-runtime path where the renderer, not main, parses OSC 9999 out of
+    // PTY bytes — so the renderer is the sequencing authority for these rows and says so. Kept
+    // beside statusPayload, not merged into it, so the notification/title consumers below see
+    // byte-for-byte what they see today.
+    const observedStatusPayload = {
+      ...statusPayload,
+      observation: rendererAgentStatusObservations.observe(cacheKey, {
+        origin: 'osc',
+        observedAt: Date.now(),
+        kind: 'snapshot'
+      })
+    }
     const resolvedStatusTitle = resolveAgentStatusTerminalTitle(statusPayload, title)
     const statusTitle = resolvedStatusTitle
       ? normalizeCompatibleAgentTitleForOwner(
@@ -3766,11 +3796,18 @@ export function connectPanePty(
     // status may fence the host mirror out of its store key.
     markRendererOwnedAgentStatusWrite(cacheKey)
     if (launchToken) {
-      currentState.setAgentStatus(cacheKey, statusPayload, statusTitle, undefined, routing, {
-        launchToken
-      })
+      currentState.setAgentStatus(
+        cacheKey,
+        observedStatusPayload,
+        statusTitle,
+        undefined,
+        routing,
+        {
+          launchToken
+        }
+      )
     } else {
-      currentState.setAgentStatus(cacheKey, statusPayload, statusTitle, undefined, routing)
+      currentState.setAgentStatus(cacheKey, observedStatusPayload, statusTitle, undefined, routing)
     }
     if (payload.state === 'working' && syncAgentTaskCompleteTrackingEnabled()) {
       requiresFreshWorkingForAgentTaskCompleteNotification = false
