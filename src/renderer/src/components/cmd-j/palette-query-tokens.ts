@@ -71,6 +71,16 @@ export function tokenizeCmdJPaletteQuery(value: string): string[] {
     .filter(Boolean)
 }
 
+// Why gate the reverse-containment tier on script: a space-delimited language already
+// tokenizes its own compounds, so a contained Latin keyword is a coincidence (`database`
+// vs `base`), while Han/Kana/Hangul text arrives as one run that must be matched inside.
+const UNSEGMENTED_SCRIPT_TOKEN_RE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+
+function isUnsegmentedScriptToken(token: string): boolean {
+  return UNSEGMENTED_SCRIPT_TOKEN_RE.test(token)
+}
+
 // Why: navigation filler carries no intent ("open ssh settings" means "ssh settings"), so an
 // unmatched filler word must not count against a candidate's coverage.
 const CMD_J_QUERY_FILLER_TOKENS = new Set([
@@ -123,11 +133,15 @@ export function cmdJPaletteTokenScore(
         best = Math.max(best, 2)
       } else if (candidateToken.includes(queryToken)) {
         best = Math.max(best, 1)
-      } else if (candidateToken.length >= 2 && queryToken.includes(candidateToken)) {
+      } else if (
+        candidateToken.length >= 2 &&
+        queryToken.includes(candidateToken) &&
+        isUnsegmentedScriptToken(candidateToken)
+      ) {
         // Why the reverse direction: CJK is written without spaces, so the natural query for
         // the terminal settings pane is the single token `终端设置` — one token that CONTAINS
-        // the keyword rather than being contained by it. Weakest tier, and the length guard
-        // keeps one-character keywords from matching every long token.
+        // the keyword rather than being contained by it. Weakest tier, gated on the script
+        // that needs it: in Latin text the query `database` does not mean the keyword `base`.
         best = Math.max(best, 1)
       }
     }

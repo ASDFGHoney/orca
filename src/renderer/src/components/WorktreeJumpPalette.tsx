@@ -1016,9 +1016,15 @@ function WorktreeJumpPaletteContent({
       orderEmptyQueryWorktrees({
         visibleWorktrees: emptyQueryVisibleWorktrees,
         activeWorktreeId,
+        activeWorkspaceExecutionHostId,
         lastVisitedAtByWorktreeId
       }),
-    [emptyQueryVisibleWorktrees, activeWorktreeId, lastVisitedAtByWorktreeId]
+    [
+      emptyQueryVisibleWorktrees,
+      activeWorktreeId,
+      activeWorkspaceExecutionHostId,
+      lastVisitedAtByWorktreeId
+    ]
   )
 
   const searchScopeWorktrees = useMemo(() => {

@@ -45,6 +45,13 @@ describe('Cmd+J palette token scoring', () => {
     expect(cmdJPaletteTokenScore(['terminal'], ['a'])).toBe(0)
   })
 
+  it('does not score a Latin keyword merely contained in the query token', () => {
+    // Why: `database` does not mean the keyword `base`. Reverse containment exists for
+    // scripts that carry no spaces, so it must not fire on space-delimited text.
+    expect(cmdJPaletteTokenScore(['database'], ['base'])).toBe(0)
+    expect(cmdJPaletteTokenScore(['worktree'], ['tree'])).toBe(0)
+  })
+
   it('scores a repeated query token once', () => {
     const once = cmdJPaletteTokenScore(uniqueCmdJPaletteQueryTokens('terminal'), ['terminal'])
     const twice = cmdJPaletteTokenScore(uniqueCmdJPaletteQueryTokens('terminal terminal'), [

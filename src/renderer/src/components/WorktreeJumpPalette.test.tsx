@@ -181,7 +181,7 @@ async function renderPalette(overrides: Partial<AppState>): Promise<void> {
 }
 
 function getWorktreeRows(): string[] {
-  return [...testContainer.querySelectorAll<HTMLElement>('[data-command-item^="worktree:"]')].map(
+  return [...testContainer.querySelectorAll<HTMLElement>('[data-command-item*="worktree:"]')].map(
     (node) => node.textContent ?? ''
   )
 }
@@ -377,12 +377,12 @@ describe('WorktreeJumpPalette', () => {
     // Both rows render; the second carries a disambiguated command value so the two never
     // share a React key.
     const rows = testContainer.querySelectorAll<HTMLButtonElement>(
-      '[data-command-item^="worktree:shared"]'
+      '[data-command-item$="worktree:shared"]'
     )
     expect(rows).toHaveLength(2)
     expect([...rows].map((candidate) => candidate.getAttribute('data-command-item'))).toEqual([
       'worktree:shared',
-      'worktree:shared#dup1'
+      'palette-dup:1:worktree:shared'
     ])
 
     // The first row names ITS OWN host — the wrong-host open is gone.
@@ -404,7 +404,7 @@ describe('WorktreeJumpPalette', () => {
     })
 
     const rows = testContainer.querySelectorAll<HTMLButtonElement>(
-      '[data-command-item^="worktree:shared"]'
+      '[data-command-item$="worktree:shared"]'
     )
     expect(rows).toHaveLength(2)
 

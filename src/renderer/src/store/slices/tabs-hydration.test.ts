@@ -383,6 +383,9 @@ describe('buildHydratedTabState – legacy format', () => {
     const result = buildHydratedTabState(session, new Set(['w1']))
     const hydratedIds = result.unifiedTabsByWorktree.w1.map((tab) => tab.id)
     expect(hydratedIds).toEqual(['t-unique', duplicateId])
+    // Why sortOrder: the two duplicate records differ only there, so an id-only
+    // assertion passes just as well for an implementation that keeps the LAST one.
+    expect(result.unifiedTabsByWorktree.w1.map((tab) => tab.sortOrder)).toEqual([0, 1])
     expect(new Set(hydratedIds).size).toBe(hydratedIds.length)
     expect(result.groupsByWorktree.w1[0].tabOrder).toEqual(['t-unique', duplicateId])
   })
