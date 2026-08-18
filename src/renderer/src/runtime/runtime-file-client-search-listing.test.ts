@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   cancelRuntimeFileList,
   listRuntimeFiles,
@@ -15,6 +15,7 @@ import {
   fsListFiles,
   fsCancelListFiles,
   runtimeEnvironmentCall,
+  runtimeEnvironmentSubscribe,
   installRuntimeFileClientEnvironment
 } from './runtime-file-client-test-harness'
 import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
@@ -361,6 +362,68 @@ describe('runtime file client', () => {
       'files.searchPaths',
       'files.list'
     ])
+  })
+
+  it('cancels a legacy paired inventory scan when its only search is superseded', async () => {
+    const controller = new AbortController()
+    const unsubscribeSearch = vi.fn()
+    const unsubscribeList = vi.fn()
+    runtimeEnvironmentSubscribe.mockImplementation((request, callbacks) => {
+      if (request.method === 'files.searchPaths') {
+        callbacks.onResponse({
+          id: 'rpc-legacy-search',
+          ok: true,
+          result: {
+            worktree: 'wt-1',
+            rootPath: '/remote/repo',
+            files: [],
+            totalCount: 0,
+            truncated: false
+          },
+          _meta: { runtimeId: 'legacy-runtime' }
+        })
+        return Promise.resolve({ unsubscribe: unsubscribeSearch })
+      }
+      expect(request.method).toBe('files.list')
+      return Promise.resolve({ unsubscribe: unsubscribeList })
+    })
+
+    const pending = searchRuntimeFilePaths(
+      {
+        settings: { activeRuntimeEnvironmentId: 'env-1' },
+        worktreeId: 'wt-1',
+        worktreePath: '/remote/repo'
+      },
+      {
+        query: 'target',
+        limit: 32,
+        excludePaths: ['/remote/repo/nested'],
+        signal: controller.signal
+      }
+    )
+    await vi.waitFor(() => expect(runtimeEnvironmentSubscribe).toHaveBeenCalledTimes(2))
+
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(unsubscribeList).toHaveBeenCalledTimes(1)
+
+    const retryController = new AbortController()
+    const retry = searchRuntimeFilePaths(
+      {
+        settings: { activeRuntimeEnvironmentId: 'env-1' },
+        worktreeId: 'wt-1',
+        worktreePath: '/remote/repo'
+      },
+      {
+        query: 'target',
+        limit: 32,
+        excludePaths: ['/remote/repo/nested'],
+        signal: retryController.signal
+      }
+    )
+    await vi.waitFor(() => expect(runtimeEnvironmentSubscribe).toHaveBeenCalledTimes(4))
+    retryController.abort()
+    await expect(retry).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('does not reuse a legacy inventory after a folder workspace root changes', async () => {

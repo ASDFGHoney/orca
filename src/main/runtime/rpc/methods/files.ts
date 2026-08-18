@@ -102,7 +102,10 @@ export const FILE_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'files.list',
     params: WorktreeSelector,
-    handler: async (params, { runtime }) => runtime.listMobileFiles(params.worktree)
+    handler: async (params, { runtime, signal }) =>
+      signal === undefined
+        ? runtime.listMobileFiles(params.worktree)
+        : runtime.listMobileFiles(params.worktree, { signal })
   }),
   defineMethod({
     name: 'files.searchPaths',

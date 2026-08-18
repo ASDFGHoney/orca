@@ -5,6 +5,7 @@ import {
 } from '../../../shared/quick-open-filter'
 import { QuickOpenPathRanker } from '../../../shared/quick-open-path-search'
 import { callRuntimeRpc, type RuntimeClientTarget } from './runtime-rpc-client'
+import { createRuntimeRpcAbortError } from './abortable-runtime-environment-call'
 import { getRuntimeEnvironmentRevision } from './runtime-environment-revision'
 
 const CACHE_LIMIT = 8
@@ -14,6 +15,9 @@ type EnvironmentTarget = Extract<RuntimeClientTarget, { kind: 'environment' }>
 type CacheEntry = {
   expiresAt: number
   load: Promise<RuntimeFileListResult>
+  controller: AbortController
+  activeConsumers: number
+  settled: boolean
 }
 
 const inventoryCache = new Map<string, CacheEntry>()
@@ -47,7 +51,8 @@ export function hasCachedLegacyQuickOpenInventory(
 async function loadLegacyQuickOpenInventory(
   target: EnvironmentTarget,
   worktreeSelector: string,
-  worktreePath: string | null | undefined
+  worktreePath: string | null | undefined,
+  signal?: AbortSignal
 ): Promise<RuntimeFileListResult> {
   const key = cacheKey(target, worktreeSelector, worktreePath)
   const now = Date.now()
@@ -56,30 +61,45 @@ async function loadLegacyQuickOpenInventory(
   if (cached && cached.expiresAt > now) {
     inventoryCache.delete(key)
     inventoryCache.set(key, cached)
-    return cached.load
+    return awaitLegacyInventoryLoad(cached, signal)
   }
   inventoryCache.delete(key)
 
   let entry: CacheEntry
-  // Old hosts cannot stop listMobileFiles mid-scan; share one request instead of aborting and
-  // restarting the same scan for every debounced query.
+  const controller = new AbortController()
+  if (signal?.aborted) {
+    controller.abort()
+  }
+  // Share one inventory request; abort it only after every caller detaches.
   const load = callRuntimeRpc<RuntimeFileListResult>(
     target,
     'files.list',
     { worktree: worktreeSelector },
-    { timeoutMs: 15_000, expectedEnvironmentPairingRevision }
+    {
+      timeoutMs: 15_000,
+      ...(signal === undefined ? {} : { signal: controller.signal }),
+      expectedEnvironmentPairingRevision
+    }
   )
     .then((result) => {
+      entry.settled = true
       entry.expiresAt = Date.now() + CACHE_TTL_MS
       return result
     })
     .catch((error) => {
+      entry.settled = true
       if (inventoryCache.get(key) === entry) {
         inventoryCache.delete(key)
       }
       throw error
     })
-  entry = { expiresAt: now + CACHE_TTL_MS, load }
+  entry = {
+    expiresAt: now + CACHE_TTL_MS,
+    load,
+    controller,
+    activeConsumers: 0,
+    settled: false
+  }
   inventoryCache.set(key, entry)
   while (inventoryCache.size > CACHE_LIMIT) {
     const oldest = inventoryCache.keys().next().value as string | undefined
@@ -88,7 +108,57 @@ async function loadLegacyQuickOpenInventory(
     }
     inventoryCache.delete(oldest)
   }
-  return load
+  return awaitLegacyInventoryLoad(entry, signal)
+}
+
+async function awaitLegacyInventoryLoad(
+  entry: CacheEntry,
+  signal?: AbortSignal
+): Promise<RuntimeFileListResult> {
+  if (signal?.aborted) {
+    throw createRuntimeRpcAbortError()
+  }
+  entry.activeConsumers += 1
+  let released = false
+  const release = (): void => {
+    if (released) {
+      return
+    }
+    released = true
+    entry.activeConsumers -= 1
+    if (entry.activeConsumers === 0 && !entry.settled) {
+      entry.expiresAt = 0
+      for (const [key, cached] of inventoryCache) {
+        if (cached === entry) {
+          inventoryCache.delete(key)
+          break
+        }
+      }
+      entry.controller.abort()
+    }
+  }
+  if (!signal) {
+    return entry.load.finally(release)
+  }
+  return new Promise<RuntimeFileListResult>((resolve, reject) => {
+    const onAbort = (): void => {
+      release()
+      reject(createRuntimeRpcAbortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    entry.load.then(
+      (result) => {
+        signal.removeEventListener('abort', onAbort)
+        release()
+        resolve(result)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        release()
+        reject(error)
+      }
+    )
+  })
 }
 
 export async function searchLegacyQuickOpenInventory(args: {
@@ -98,11 +168,13 @@ export async function searchLegacyQuickOpenInventory(args: {
   limit: number
   worktreePath: string | null | undefined
   excludePaths: string[] | undefined
+  signal?: AbortSignal
 }): Promise<{ files: string[]; truncated: boolean }> {
   const result = await loadLegacyQuickOpenInventory(
     args.target,
     args.worktreeSelector,
-    args.worktreePath
+    args.worktreePath,
+    args.signal
   )
   const excludePrefixes = buildExcludePathPrefixes(
     args.worktreePath ?? result.rootPath,

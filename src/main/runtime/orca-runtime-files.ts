@@ -621,13 +621,16 @@ export class RuntimeFileCommands {
 
   constructor(private readonly host: RuntimeFileCommandHost) {}
 
-  async listMobileFiles(worktreeSelector: string): Promise<RuntimeFileListResult> {
+  async listMobileFiles(
+    worktreeSelector: string,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<RuntimeFileListResult> {
     const store = this.host.requireStore()
     const target = await this.host.resolveRuntimeFileTarget(worktreeSelector)
     const { worktree, connectionId } = target
     const files = connectionId
-      ? await this.listRemoteMobileFiles(worktree.path, connectionId)
-      : await listQuickOpenFiles(worktree.path, store)
+      ? await this.listRemoteMobileFiles(worktree.path, connectionId, undefined, options.signal)
+      : await listQuickOpenFiles(worktree.path, store, undefined, options.signal)
     const entries = files
       .filter((relativePath) => isSafeMobileRelativePath(relativePath))
       .sort((a, b) => a.localeCompare(b))
@@ -2332,13 +2335,14 @@ export class RuntimeFileCommands {
   private async listRemoteMobileFiles(
     rootPath: string,
     connectionId: string,
-    maxResults?: number
+    maxResults?: number,
+    signal?: AbortSignal
   ): Promise<string[]> {
     const provider = getSshFilesystemProvider(connectionId)
     if (!provider) {
       return []
     }
-    return provider.listFiles(rootPath, { maxResults })
+    return provider.listFiles(rootPath, { maxResults, signal })
   }
 
   private async searchRemoteQuickOpenFilePaths(

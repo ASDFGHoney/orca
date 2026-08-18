@@ -22,10 +22,13 @@ describe('file RPC methods', () => {
       })
     } as unknown as OrcaRuntimeService
     const dispatcher = new RpcDispatcher({ runtime, methods: FILE_METHODS })
+    const controller = new AbortController()
 
-    const response = await dispatcher.dispatch(makeRequest('files.list', { worktree: 'id:wt-1' }))
+    const response = await dispatcher.dispatch(makeRequest('files.list', { worktree: 'id:wt-1' }), {
+      signal: controller.signal
+    })
 
-    expect(runtime.listMobileFiles).toHaveBeenCalledWith('id:wt-1')
+    expect(runtime.listMobileFiles).toHaveBeenCalledWith('id:wt-1', { signal: controller.signal })
     expect(response).toMatchObject({
       ok: true,
       result: { worktree: 'wt-1', files: [] }

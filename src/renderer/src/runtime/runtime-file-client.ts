@@ -1028,7 +1028,8 @@ export async function searchRuntimeFilePaths(
       query: args.query,
       limit,
       worktreePath: context.worktreePath,
-      excludePaths: args.excludePaths
+      excludePaths: args.excludePaths,
+      signal: args.signal
     })
   }
   let result: RuntimeFileListResult
@@ -1054,7 +1055,8 @@ export async function searchRuntimeFilePaths(
           query: args.query,
           limit,
           worktreePath: context.worktreePath,
-          excludePaths: args.excludePaths
+          excludePaths: args.excludePaths,
+          signal: args.signal
         })
       } catch (legacyError) {
         if (legacyError instanceof RuntimeRpcCallError && legacyError.code === 'method_not_found') {
@@ -1076,7 +1078,8 @@ export async function searchRuntimeFilePaths(
         query: args.query,
         limit,
         worktreePath: context.worktreePath,
-        excludePaths: args.excludePaths
+        excludePaths: args.excludePaths,
+        signal: args.signal
       })
     } catch (legacyError) {
       if (legacyError instanceof RuntimeRpcCallError && legacyError.code === 'method_not_found') {
