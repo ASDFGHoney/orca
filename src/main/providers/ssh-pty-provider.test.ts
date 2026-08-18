@@ -4,32 +4,12 @@ import { POWERLEVEL10K_WIZARD_DISABLE_ENV } from '../pty/powerlevel10k-wizard-en
 import { PTY_STARTUP_INGRESS_VERSION } from '../../shared/pty-startup-ingress'
 import { AGENT_SESSION_EXECUTION_OWNER_PROTOCOL_VERSION } from '../../shared/agent-session-host-authority'
 import { SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR } from './ssh-pty-errors'
-
-type MockMultiplexer = {
-  request: ReturnType<typeof vi.fn>
-  notify: ReturnType<typeof vi.fn>
-  onNotification: ReturnType<typeof vi.fn>
-  dispose: ReturnType<typeof vi.fn>
-  isDisposed: ReturnType<typeof vi.fn>
-}
-
-function createMockMux(): MockMultiplexer {
-  return {
-    request: vi.fn().mockResolvedValue(undefined),
-    notify: vi.fn(),
-    onNotification: vi.fn(),
-    dispose: vi.fn(),
-    isDisposed: vi.fn().mockReturnValue(false)
-  }
-}
-
-const sourceActivationRequestOptions = expect.objectContaining({
-  beforeResolve: expect.any(Function)
-})
-
-function expectRequest(request: ReturnType<typeof vi.fn>, ...expected: unknown[]): void {
-  expect(request.mock.calls.map((call) => call.slice(0, expected.length))).toContainEqual(expected)
-}
+import {
+  createMockMux,
+  expectRequest,
+  sourceActivationRequestOptions,
+  type MockMultiplexer
+} from './ssh-pty-provider-mock-multiplexer'
 
 describe('SshPtyProvider', () => {
   let mux: MockMultiplexer
@@ -589,6 +569,7 @@ describe('SshPtyProvider', () => {
           id: 'pty-old',
           cols: 80,
           rows: 24,
+          requireReplay: true,
           suppressReplayNotification: true
         },
         sourceActivationRequestOptions
@@ -635,6 +616,7 @@ describe('SshPtyProvider', () => {
         id: 'pty-old',
         cols: 80,
         rows: 24,
+        requireReplay: true,
         suppressReplayNotification: true
       })
       expect(result).toEqual({
@@ -659,6 +641,7 @@ describe('SshPtyProvider', () => {
         id: 'pty-old',
         cols: 80,
         rows: 24,
+        requireReplay: true,
         suppressReplayNotification: true,
         expectedPaneKey: 'tab-a:leaf-a',
         expectedTabId: 'tab-a'
@@ -679,6 +662,7 @@ describe('SshPtyProvider', () => {
           id: 'pty-old',
           cols: 80,
           rows: 24,
+          requireReplay: true,
           suppressReplayNotification: true
         },
         sourceActivationRequestOptions

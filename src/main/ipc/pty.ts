@@ -214,6 +214,7 @@ import {
   isCodexHomeAuthReadyForLaunch,
   waitForManagedCodexAuthReady
 } from '../codex-accounts/managed-codex-auth-readiness'
+import { ManagedCodexHomeTemporarilyUnavailableError } from '../codex-accounts/host-codex-managed-home-ownership'
 import {
   forgetCodexPaneAccount,
   getCodexPaneAccount,
@@ -267,8 +268,15 @@ function registeredPtyProviders(): RegisteredPtyProvider[] {
   ]
 }
 
+// Why: settling each provider separately only bounds a relay that *rejects*. An
+// unanswered relay list runs to the mux's own 30s default — far past the caller's
+// budget — so the aggregate still expired and the runtime lost the inventory it
+// needs to retire exited PTYs, freezing every retained pane as "active" (STA-517).
+// Forward the caller's deadline so a silent relay fails fast and lands in the
+// unavailable branch below: unknown, not empty.
 async function listRegisteredPtyProcessesWithHostScope(
-  onSshInventoryUnavailable?: (connectionId: string, error: unknown) => void
+  onSshInventoryUnavailable?: (connectionId: string, error: unknown) => void,
+  opts?: { deadlineMs?: number }
 ): Promise<{
   processes: PtyProcessInfo[]
   hostIds: ExecutionHostId[]
@@ -281,7 +289,8 @@ async function listRegisteredPtyProcessesWithHostScope(
           ? toSshExecutionHostId(connectionId)
           : LOCAL_EXECUTION_HOST_ID
         return {
-          processes: await provider.listProcesses(),
+          // Why: the deadline only applies to relay round-trips; the local provider answers in-process.
+          processes: await (connectionId ? provider.listProcesses(opts) : provider.listProcesses()),
           hostId
         }
       } catch (error) {
@@ -1346,6 +1355,26 @@ const MANAGED_CODEX_AUTH_UNAVAILABLE_MESSAGE =
   'The selected Codex account credentials are temporarily unavailable. Try opening the terminal again.'
 const CODEX_RESUME_AUTH_UNAVAILABLE_MESSAGE =
   'The Codex account credentials for this session are temporarily unavailable. Try opening the terminal again.'
+const MANAGED_CODEX_HOME_UNAVAILABLE_MESSAGE =
+  'Codex account files are temporarily locked. Retry in a moment.'
+
+/**
+ * Why: launch prep refuses an unreadable managed home by throwing instead of
+ * returning `null`, because `null` already means "launch the system default".
+ * Turn that refusal into the same shape as the auth-unavailable refusal above —
+ * a user-facing spawn rejection — so the pane never starts on another account's
+ * credentials (#STA-4422).
+ */
+function resolveSelectedCodexHomeOrRefuseSpawn(resolve: () => string | null): string | null {
+  try {
+    return resolve()
+  } catch (error) {
+    if (error instanceof ManagedCodexHomeTemporarilyUnavailableError) {
+      throw new Error(MANAGED_CODEX_HOME_UNAVAILABLE_MESSAGE, { cause: error })
+    }
+    throw error
+  }
+}
 
 type ManagedCodexAuthResolutionArgs = {
   selectedCodexHomePath: string | null
@@ -2542,14 +2571,14 @@ export function registerPtyHandlers(
         return env
       },
       onSpawned: (id, incarnationId) => runtime?.onPtySpawned(id, incarnationId),
-      onExit: (id, code, incarnationId) => {
+      onExit: (id, code, incarnationId, cause) => {
         if (!isCurrentPtyExit({ id, incarnationId })) {
           return
         }
         clearProviderPtyState(id)
         ptyOwnership.delete(id)
         markClaudePtyExited(id)
-        runtime?.onPtyExit(id, code, incarnationId)
+        runtime?.onPtyExit(id, code, incarnationId, cause ? { cause } : undefined)
       },
       onData: (id, data, timestamp, sequenceChars, transformed) =>
         runtime?.onPtyData(id, data, timestamp, sequenceChars ?? data.length, transformed)
@@ -4094,9 +4123,20 @@ export function registerPtyHandlers(
         clearProviderPtyState(payload.id)
         ptyOwnership.delete(payload.id)
         markClaudePtyExited(payload.id)
-        runtime?.onPtyExit(payload.id, payload.code, payload.incarnationId)
+        runtime?.onPtyExit(
+          payload.id,
+          payload.code,
+          payload.incarnationId,
+          payload.cause ? { cause: payload.cause } : undefined
+        )
       }
-      sendPtyExitToRenderer(payload)
+      // Why not the whole payload: the exit cause is a main-process fact for the
+      // runtime's records; the renderer's pty:exit contract stays as it was.
+      sendPtyExitToRenderer({
+        id: payload.id,
+        code: payload.code,
+        ...(payload.incarnationId ? { incarnationId: payload.incarnationId } : {})
+      })
     })
   }
 
@@ -4688,7 +4728,7 @@ export function registerPtyHandlers(
       if (args.preAllocatedHandle) {
         env = { ...env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
       }
-      let selectedCodexHomePath =
+      let selectedCodexHomePath = resolveSelectedCodexHomeOrRefuseSpawn(() =>
         !preAdoptedStablePane && !args.connectionId
           ? getCompatibleSelectedCodexHomePath(
               codexSelectionTarget,
@@ -4708,6 +4748,7 @@ export function registerPtyHandlers(
                   }) ?? null)
             )
           : null
+      )
       if (
         !preAdoptedStablePane &&
         args.launchAgent === 'codex' &&
@@ -4719,21 +4760,25 @@ export function registerPtyHandlers(
           requiredCodexHomePath: codexResumeHome?.codexHomePath,
           target: codexSelectionTarget,
           resolveCurrent: () =>
-            getCompatibleSelectedCodexHomePath(
-              codexSelectionTarget,
-              getSelectedCodexHomePath?.(codexSelectionTarget, env, {
-                workspacePath: cwd,
-                launchAgent: 'codex'
-              }) ?? null
+            resolveSelectedCodexHomeOrRefuseSpawn(() =>
+              getCompatibleSelectedCodexHomePath(
+                codexSelectionTarget,
+                getSelectedCodexHomePath?.(codexSelectionTarget, env, {
+                  workspacePath: cwd,
+                  launchAgent: 'codex'
+                }) ?? null
+              )
             ),
           resolveAfterUnavailable: (unavailableManagedHomePath) =>
-            getCompatibleSelectedCodexHomePath(
-              codexSelectionTarget,
-              getSelectedCodexHomePath?.(codexSelectionTarget, env, {
-                workspacePath: cwd,
-                launchAgent: 'codex',
-                unavailableManagedHomePath
-              }) ?? null
+            resolveSelectedCodexHomeOrRefuseSpawn(() =>
+              getCompatibleSelectedCodexHomePath(
+                codexSelectionTarget,
+                getSelectedCodexHomePath?.(codexSelectionTarget, env, {
+                  workspacePath: cwd,
+                  launchAgent: 'codex',
+                  unavailableManagedHomePath
+                }) ?? null
+              )
             )
         })
         selectedCodexHomePath = resolution instanceof Promise ? await resolution : resolution
@@ -5571,6 +5616,7 @@ export function registerPtyHandlers(
       }
     },
     kill: (ptyId) => {
+      runtime?.markPtyStopRequested?.(ptyId)
       let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
       const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
       connectionId ??= parsedSshId?.connectionId
@@ -5704,6 +5750,7 @@ export function registerPtyHandlers(
       }
     },
     stopAndWait: async (ptyId, opts) => {
+      runtime?.markPtyStopRequested?.(ptyId)
       let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
       const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
       connectionId ??= parsedSshId?.connectionId
@@ -5848,22 +5895,23 @@ export function registerPtyHandlers(
         return null
       }
     },
-    listProcesses: async (connectionId) => {
+    listProcesses: async (connectionId, opts) => {
       if (connectionId === null) {
         return localProvider.listProcesses()
       }
       if (connectionId !== undefined) {
         try {
-          return await getProvider(connectionId).listProcesses()
+          return await getProvider(connectionId).listProcesses(opts)
         } catch (error) {
           markSshInventoryUnverifiable(connectionId, error)
           throw error
         }
       }
-      return (await listRegisteredPtyProcessesWithHostScope(markSshInventoryUnverifiable)).processes
+      return (await listRegisteredPtyProcessesWithHostScope(markSshInventoryUnverifiable, opts))
+        .processes
     },
-    listProcessesWithHostScope: () =>
-      listRegisteredPtyProcessesWithHostScope(markSshInventoryUnverifiable),
+    listProcessesWithHostScope: (opts) =>
+      listRegisteredPtyProcessesWithHostScope(markSshInventoryUnverifiable, opts),
     serializeBuffer: (ptyId, opts) => {
       // Why: mobile xterm must start from the desktop's exact screen state/dimensions before live TUI chunks render correctly.
       return requestSerializedBuffer(ptyId, opts)
@@ -6431,7 +6479,7 @@ export function registerPtyHandlers(
         // Why: declared after the strip so a local-provider spawn cannot capture the
         // pre-strip env — only the daemon branch below re-derives this from baseEnv.
         let env: Record<string, string> | undefined = baseEnv
-        let selectedCodexHomePath =
+        let selectedCodexHomePath = resolveSelectedCodexHomeOrRefuseSpawn(() =>
           !preAdoptedStablePane && !args.connectionId
             ? getCompatibleSelectedCodexHomePath(
                 codexSelectionTarget,
@@ -6451,6 +6499,7 @@ export function registerPtyHandlers(
                     }) ?? null)
               )
             : null
+        )
         if (!preAdoptedStablePane && args.launchAgent === 'codex' && args.sessionId === undefined) {
           const resolution = resolveCodexHomeAfterManagedAuthReadiness({
             selectedCodexHomePath,
@@ -6458,21 +6507,25 @@ export function registerPtyHandlers(
             requiredCodexHomePath: codexResumeHome?.codexHomePath,
             target: codexSelectionTarget,
             resolveCurrent: () =>
-              getCompatibleSelectedCodexHomePath(
-                codexSelectionTarget,
-                getSelectedCodexHomePath?.(codexSelectionTarget, baseEnv, {
-                  workspacePath: cwd,
-                  launchAgent: 'codex'
-                }) ?? null
+              resolveSelectedCodexHomeOrRefuseSpawn(() =>
+                getCompatibleSelectedCodexHomePath(
+                  codexSelectionTarget,
+                  getSelectedCodexHomePath?.(codexSelectionTarget, baseEnv, {
+                    workspacePath: cwd,
+                    launchAgent: 'codex'
+                  }) ?? null
+                )
               ),
             resolveAfterUnavailable: (unavailableManagedHomePath) =>
-              getCompatibleSelectedCodexHomePath(
-                codexSelectionTarget,
-                getSelectedCodexHomePath?.(codexSelectionTarget, baseEnv, {
-                  workspacePath: cwd,
-                  launchAgent: 'codex',
-                  unavailableManagedHomePath
-                }) ?? null
+              resolveSelectedCodexHomeOrRefuseSpawn(() =>
+                getCompatibleSelectedCodexHomePath(
+                  codexSelectionTarget,
+                  getSelectedCodexHomePath?.(codexSelectionTarget, baseEnv, {
+                    workspacePath: cwd,
+                    launchAgent: 'codex',
+                    unavailableManagedHomePath
+                  }) ?? null
+                )
               )
           })
           selectedCodexHomePath = resolution instanceof Promise ? await resolution : resolution
@@ -7694,6 +7747,7 @@ export function registerPtyHandlers(
       // Why: runtime terminal handles belong to terminal.close; unowned PTY routing could target the local provider.
       throw new Error('Invalid PTY provider id')
     }
+    runtime?.markPtyStopRequested?.(args.id)
     const ownedConnectionId = ptyOwnership.get(args.id)
     const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
     const connectionId = ownedConnectionId ?? parsedSshId?.connectionId
