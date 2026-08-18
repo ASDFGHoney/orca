@@ -25,8 +25,8 @@ type SurfaceSample = {
   left: Rgb
 }
 
-async function setGpuAcceleration(page: Page, mode: 'on' | 'off'): Promise<void> {
-  await page.evaluate((gpuMode) => {
+async function applyGpuAcceleration(page: Page, mode: 'on' | 'off'): Promise<string | null> {
+  return page.evaluate((gpuMode) => {
     const store = window.__store
     const state = store?.getState()
     if (!store || !state?.settings) {
@@ -36,33 +36,51 @@ async function setGpuAcceleration(page: Page, mode: 'on' | 'off'): Promise<void>
     const worktreeId = state.activeWorktreeId
     const tabId =
       state.activeTabType === 'terminal'
-        ? state.activeTabId
+        ? (state.activeTabId ?? null)
         : worktreeId
           ? (state.activeTabIdByWorktree?.[worktreeId] ?? null)
           : null
-    const manager = tabId ? window.__paneManagers?.get(tabId) : null
-    manager?.setTerminalGpuAcceleration(gpuMode)
+    if (tabId) {
+      window.__paneManagers?.get(tabId)?.setTerminalGpuAcceleration?.(gpuMode)
+    }
+    return tabId
   }, mode)
+}
 
+/** Returns false when the environment cannot provide WebGL at all, matching the
+ *  skip contract the other golden WebGL specs use for headless CI. */
+async function enableWebgl(page: Page): Promise<boolean> {
+  const tabId = await applyGpuAcceleration(page, 'on')
+  if (!tabId) {
+    return false
+  }
+  return page
+    .waitForFunction(
+      (id) =>
+        (window.__paneManagers?.get(id)?.getRenderingDiagnostics?.() ?? []).some(
+          (diagnostic) => diagnostic.hasWebgl
+        ),
+      tabId,
+      { timeout: 15_000 }
+    )
+    .then(() => true)
+    .catch(() => false)
+}
+
+/** Why "no diagnostic reports WebGL" rather than "a diagnostic reports false":
+ *  with acceleration off there may be no WebGL renderer to report at all, so an
+ *  empty diagnostics array is the expected settled state, not a pending one. */
+async function disableWebgl(page: Page): Promise<void> {
+  const tabId = await applyGpuAcceleration(page, 'off')
+  if (!tabId) {
+    throw new Error('no active terminal tab')
+  }
   await page.waitForFunction(
-    (expectWebgl) => {
-      const state = window.__store?.getState()
-      const worktreeId = state?.activeWorktreeId
-      const tabId =
-        state?.activeTabType === 'terminal'
-          ? state.activeTabId
-          : worktreeId
-            ? (state?.activeTabIdByWorktree?.[worktreeId] ?? null)
-            : null
-      const diagnostics = tabId
-        ? (window.__paneManagers?.get(tabId)?.getRenderingDiagnostics?.() ?? [])
-        : []
-      if (diagnostics.length === 0) {
-        return false
-      }
-      return diagnostics.some((diagnostic) => Boolean(diagnostic.hasWebgl) === expectWebgl)
-    },
-    mode === 'on',
+    (id) =>
+      !(window.__paneManagers?.get(id)?.getRenderingDiagnostics?.() ?? []).some(
+        (diagnostic) => diagnostic.hasWebgl
+      ),
+    tabId,
     { timeout: 15_000 }
   )
 }
@@ -140,11 +158,14 @@ test.describe('terminal renderer invariance', () => {
       store.setState({ settings: { ...state.settings, terminalBackgroundOpacity: opacity } })
     }, BACKGROUND_OPACITY)
 
-    await setGpuAcceleration(orcaPage, 'off')
-    const domRenderer = await sampleSurfaceEdges(orcaPage)
-
-    await setGpuAcceleration(orcaPage, 'on')
+    // Same skip contract as the other golden WebGL specs: a headless runner with
+    // no GPU cannot exercise a renderer difference at all, so there is nothing
+    // to compare. Enable first so the skip happens before any capture.
+    test.skip(!(await enableWebgl(orcaPage)), 'WebGL unavailable in this environment')
     const webglRenderer = await sampleSurfaceEdges(orcaPage)
+
+    await disableWebgl(orcaPage)
+    const domRenderer = await sampleSurfaceEdges(orcaPage)
 
     for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
       const dom = domRenderer[edge]
