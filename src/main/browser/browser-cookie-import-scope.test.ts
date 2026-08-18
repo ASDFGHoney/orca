@@ -49,7 +49,7 @@ vi.mock('./browser-cookie-clear-store', () => ({
 }))
 
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { importCookiesFromBrowser, type DetectedBrowser } from './browser-cookie-import'
@@ -222,9 +222,8 @@ describe('native cookie import clear scope', () => {
     expect(cookiesRemoveMock.mock.calls.map(([, name]) => name)).toEqual(['gist-session'])
   })
 
-  // Why: the staged image replaces the live DB wholesale on the next cold start, so a whole-jar
-  // DELETE there re-erases the partition one restart after a clear that spared it. An in-memory
-  // assertion cannot see that — this reads the staged file itself.
+  // Why: cold-start replay uses the staged image after the live import has returned. An in-memory
+  // assertion cannot prove its rows and recorded merge scope preserve unrelated sessions.
   it('keeps out-of-scope rows in the staged cold-start image', async () => {
     // Why: no unaddressable cookie in this jar — the staged image is what this case is about, so
     // the live clear must run to completion rather than aborting on something else.
@@ -245,19 +244,27 @@ describe('native cookie import clear scope', () => {
     createChromiumCookieTestDatabase(sourceCookiesPath, [
       { domain: '.github.com', name: 'user_session', value: 'imported-github' }
     ]).close()
-    createChromiumCookieTestDatabase(targetCookiesPath, [
-      { domain: 'the-internet.herokuapp.com', name: 'rack.session', value: 'live-login' },
-      { domain: '.google.com', name: 'SID', value: 'google-live' },
-      { domain: '.github.com', name: 'user_session', value: 'stale-github' }
-    ]).close()
+    createChromiumCookieTestDatabase(
+      targetCookiesPath,
+      [
+        { domain: 'the-internet.herokuapp.com', name: 'rack.session', value: 'live-login' },
+        { domain: '.google.com', name: 'SID', value: 'google-live' },
+        { domain: '.github.com', name: 'user_session', value: 'stale-github' }
+      ],
+      { journalMode: 'wal' }
+    ).close()
 
     const result = await importCookiesFromBrowser(chromeBrowser(sourceCookiesPath), 'persist:test')
 
     expect(result.ok).toBe(true)
     expect(setPendingCookieImportMock).toHaveBeenCalledTimes(1)
     const stagedPath = setPendingCookieImportMock.mock.calls[0][1] as string
+    expect(existsSync(`${stagedPath}-wal`)).toBe(false)
     const staged = new DatabaseSync(stagedPath, { readOnly: true })
     try {
+      expect(
+        staged.prepare('SELECT domain, format_version FROM orca_cookie_import_scope').all()
+      ).toEqual([{ domain: 'github.com', format_version: 1 }])
       const rows = (
         staged
           .prepare('SELECT host_key, name, value FROM cookies ORDER BY host_key, name')

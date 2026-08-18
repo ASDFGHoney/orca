@@ -111,7 +111,7 @@ import {
   type ChromiumCookieSnapshot
 } from './chromium-cookie-snapshot'
 import { resolveChromiumCookiesPath } from './chromium-cookie-path'
-import { deleteStagedCookiesInImportScope } from './browser-cookie-staged-image-clear'
+import { prepareStagedCookiesForImport } from './browser-cookie-staged-import'
 import { copyFileWithWindowsRetry } from '../codex-accounts/fs-utils'
 
 // ---------------------------------------------------------------------------
@@ -1588,7 +1588,8 @@ export async function importCookiesFromBrowser(
 
   // Why: cookies.set() rejects many valid values (bytes > 0x7F); instead write plaintext to the `value` column, which CookieMonster reads raw when `encrypted_value` is empty and re-encrypts on flush in packaged builds.
 
-  // Why: CookieMonster overwrites the live DB on flush, so stage a populated copy and swap it in at next cold start.
+  // Why: CookieMonster can reject otherwise valid imported bytes, so stage a populated copy whose
+  // imported-domain rows can be merged into the live DB on the next cold start.
   const targetSession = session.fromPartition(targetPartition)
   // Why (STA-4601): native imports mutate the live jar and their staged image before the old
   // clear/write lock was reached. Hold the per-partition lock from the first flush through staging,
@@ -1706,6 +1707,10 @@ export async function importCookiesFromBrowser(
         // transient AV handle can make opening it throw — degrade instead of killing the import.
         try {
           stagingDb = new DatabaseSync(stagingCookiesPath)
+          // Why (STA-4797): a new-format stage must be one self-contained file. Otherwise a lost WAL
+          // can erase its scope marker and make cold-start replay mistake it for a legacy whole-image
+          // import, restoring the unrelated-cookie data loss this format is meant to prevent.
+          stagingDb.exec('PRAGMA journal_mode = DELETE')
           targetColumnInfo = stagingDb
             .prepare('PRAGMA table_info(cookies)')
             .all() as ChromiumCookieColumnInfo[]
@@ -1843,8 +1848,8 @@ export async function importCookiesFromBrowser(
         disableStaging('staged database exposed no cookies columns')
       }
 
-      // Why (§4.3b): a staged image is a whole-DB replacement on next start, so it cannot represent
-      // "preserve this family". When anything is preserved, this import gets no cold-start fallback.
+      // Why: keep the existing conservative fallback boundary for family-level omissions. Expanding
+      // partial-import restart behavior is separate from narrowing what a staged replay may replace.
       if (nativePlan.skippedFamilies.size > 0) {
         disableStaging(
           `${nativePlan.skippedFamilies.size} preserved cookie families cannot be represented in a staged image`
@@ -1961,13 +1966,11 @@ export async function importCookiesFromBrowser(
       // has to be cleared to the identical scope.
       const importScope = importedDomainScope([...domainSet])
 
-      // Why (STA-4797): the staged image is a copy of the live jar that replaces it wholesale on the
-      // next cold start, so its clear IS a second clear of the user's session. Deleting everything
-      // but google here would put back, one restart later, exactly the whole-partition wipe the live
-      // clear no longer performs — narrowing one without the other leaves the defect reachable.
+      // Why (STA-4797): the staged image must carry the same imported-domain scope as the live clear.
+      // Cold-start replay uses it to replace only those rows and preserve newer unrelated sessions.
       if (stagingDb && insertStmt) {
         try {
-          deleteStagedCookiesInImportScope(stagingDb, importScope)
+          prepareStagedCookiesForImport(stagingDb, importScope)
         } catch (err) {
           disableStaging(String(err))
         }
