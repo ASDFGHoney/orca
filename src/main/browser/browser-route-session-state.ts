@@ -1,3 +1,4 @@
+import type { BrowserRoutePartitionIdentity } from './browser-route-identity'
 import type { BrowserRoutePreparedPageLedger } from './browser-route-prepared-page-ledger'
 import type { BrowserRoutePageAuthority } from './browser-route-page-authority'
 import type {
@@ -8,6 +9,15 @@ import type {
 export type BrowserRouteSessionHandle = Readonly<{
   partition: string
   release: () => void
+}>
+
+export type BrowserRoutePreparePageInput = Readonly<{
+  identity: BrowserRoutePartitionIdentity
+  storageScope: string
+  browserPageId: string
+  pageHostGeneration: number
+  rendererWebContentsId: number
+  proxyEndpoint: BrowserRouteProxyEndpoint
 }>
 
 export type BrowserRouteSessionRekey = Readonly<{

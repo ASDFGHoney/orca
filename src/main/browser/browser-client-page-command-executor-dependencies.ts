@@ -12,6 +12,8 @@ import type {
 export type BrowserClientPageCommandExecutorDependencies = {
   orcaProfileId: string
   authorityConnectionIdentity: string
+  /** Environment record that owns this host's partitions for storage lifecycle. */
+  storageScope: string
   retainNetworkRoute(
     executionHostKey: string,
     signal: AbortSignal

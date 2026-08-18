@@ -73,7 +73,7 @@ async function bindPartition(host: BrowserNetworkExecutionHost, filePath: string
   })
   const store = new BrowserRoutePartitionBindingStore({ filePath })
   if (store.get(derived.partition) === null) {
-    store.set(derived.partition, derived.bindingFingerprint)
+    store.set(derived.partition, derived.bindingFingerprint, 'e'.repeat(64))
   }
   await route.release()
   await registry.close()

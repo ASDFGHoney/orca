@@ -1,6 +1,5 @@
 import {
   deriveBrowserRoutePartition,
-  type BrowserRoutePartitionIdentity,
   type DerivedBrowserRoutePartition
 } from './browser-route-identity'
 import type {
@@ -30,6 +29,7 @@ import {
 import { retireBrowserRouteSessionRendererPages } from './browser-route-session-renderer-retirement'
 import { retireBrowserRouteSessionPage } from './browser-route-session-retirement'
 import type {
+  BrowserRoutePreparePageInput,
   BrowserRouteSessionHandle,
   BrowserRouteSessionRekey,
   PendingBrowserRoutePartition as PendingPartition,
@@ -100,13 +100,7 @@ export class BrowserRouteSessionRegistry {
     })
   }
 
-  async preparePage(input: {
-    identity: BrowserRoutePartitionIdentity
-    browserPageId: string
-    pageHostGeneration: number
-    rendererWebContentsId: number
-    proxyEndpoint: ProxyEndpoint
-  }): Promise<BrowserRouteSessionHandle> {
+  async preparePage(input: BrowserRoutePreparePageInput): Promise<BrowserRouteSessionHandle> {
     assertBrowserRouteProxyEndpoint(input.proxyEndpoint)
     assertBrowserRoutePreparedPageOwner(
       input.browserPageId,
@@ -124,13 +118,7 @@ export class BrowserRouteSessionRegistry {
   }
 
   private async preparePageForCurrentRenderer(
-    input: {
-      identity: BrowserRoutePartitionIdentity
-      browserPageId: string
-      pageHostGeneration: number
-      rendererWebContentsId: number
-      proxyEndpoint: ProxyEndpoint
-    },
+    input: BrowserRoutePreparePageInput,
     rendererFence: BrowserRouteRendererPrepareFence
   ): Promise<BrowserRouteSessionHandle> {
     const derived = this.derivePartition(input.identity)
@@ -158,7 +146,11 @@ export class BrowserRouteSessionRegistry {
       throw new Error('browser_route_partition_capacity')
     }
     if (this.dependencies.bindingStore.get(derived.partition) === null) {
-      this.dependencies.bindingStore.set(derived.partition, derived.bindingFingerprint)
+      this.dependencies.bindingStore.set(
+        derived.partition,
+        derived.bindingFingerprint,
+        input.storageScope
+      )
     }
     const promise = this.preparePartition(
       derived,

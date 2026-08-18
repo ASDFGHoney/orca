@@ -25,6 +25,7 @@ import type { BrowserRouteSessionHandle } from './browser-route-session-state'
 type BrowserClientPageCreationDependencies = {
   orcaProfileId: string
   authorityConnectionIdentity: string
+  storageScope: string
   retainNetworkRoute(executionHostKey: string, signal: AbortSignal): Promise<RetainedNetworkRoute>
   selectRenderer(): BrowserClientPageRenderer
   routeSessions: Pick<BrowserRouteSessionRegistry, 'preparePage'>
@@ -64,6 +65,7 @@ export async function createReservedBrowserClientPage(
         authorityConnectionIdentity: dependencies.authorityConnectionIdentity,
         executionHostIdentity: route.executionHostIdentity
       },
+      storageScope: dependencies.storageScope,
       browserPageId: event.browserPageId,
       pageHostGeneration: event.pageHostGeneration,
       rendererWebContentsId: renderer.rendererWebContentsId,

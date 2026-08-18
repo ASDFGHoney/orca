@@ -7,7 +7,7 @@ import type { BrowserRouteElectronSession } from './browser-route-session-policy
 
 export type BrowserRoutePartitionBindingStore = {
   get(partition: string): string | null
-  set(partition: string, fingerprint: string): void
+  set(partition: string, fingerprint: string, storageScope: string): void
 }
 
 export type BrowserRouteSessionRegistryDependencies = {

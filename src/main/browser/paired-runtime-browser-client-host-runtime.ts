@@ -7,6 +7,7 @@ import {
   type KnownRuntimeEnvironment
 } from '../../shared/runtime-environments'
 import { BrowserClientNetworkRouteRegistry } from './browser-client-network-route-registry'
+import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
 import {
   executeBrowserClientPageAutomation,
@@ -29,6 +30,7 @@ type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
   pairing: PairingOffer
   orcaProfileId: string
   authorityConnectionIdentity: string
+  storageScope: string
 }
 
 const browserHostClientId = randomUUID()
@@ -44,6 +46,7 @@ const browserClientHosts =
           new BrowserClientPageCommandExecutor({
             orcaProfileId: next.orcaProfileId,
             authorityConnectionIdentity: next.authorityConnectionIdentity,
+            storageScope: next.storageScope,
             retainNetworkRoute,
             selectRenderer: selectBrowserClientPageRenderer,
             routeSessions: browserRouteSessionRegistry,
@@ -98,6 +101,10 @@ export async function startPairedRuntimeBrowserClientHost(options: {
     authorityRuntimeId: options.authorityRuntimeId,
     pairing,
     orcaProfileId,
+    storageScope: deriveBrowserRoutePartitionStorageScope({
+      orcaProfileId,
+      environmentId: options.environment.id
+    }),
     authorityConnectionIdentity: authorityConnectionIdentity(
       orcaProfileId,
       options.environment.id,

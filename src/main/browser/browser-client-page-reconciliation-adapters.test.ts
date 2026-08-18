@@ -114,6 +114,7 @@ function createHarness() {
   const dependencies = {
     orcaProfileId: 'orca-profile-a',
     authorityConnectionIdentity: 'authority-record-a',
+    storageScope: 'a'.repeat(64),
     retainNetworkRoute: vi.fn(async () => route),
     selectRenderer: vi.fn(() => renderer),
     routeSessions: { preparePage: vi.fn(async () => routeSession) },

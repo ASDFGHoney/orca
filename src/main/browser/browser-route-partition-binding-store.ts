@@ -4,15 +4,29 @@ import { grantDirAcl, isPermissionError } from '../win32-utils'
 import { durableWriteTempPath, writeFileDurableSync } from '../durable-file-write'
 import { isBrowserRoutePartition } from './browser-route-identity'
 
-const BINDING_STORE_VERSION = 1
+const BINDING_STORE_VERSION = 2
+const LEGACY_BINDING_STORE_VERSION = 1
 const DEFAULT_MAX_BINDINGS = 512
-const DEFAULT_MAX_FILE_BYTES = 128 * 1024
+const DEFAULT_MAX_FILE_BYTES = 256 * 1024
 const FINGERPRINT_RE = /^[a-f0-9]{64}$/
 const PERSIST_PARTITION_PREFIX = 'persist:'
 
+/**
+ * Persisted binding for one route partition.
+ *
+ * `storageScope` names the environment record that owns the partition so
+ * explicit lifecycle events (environment removal) and orphan collection can
+ * find it without re-deriving an identity that needs a live connection.
+ * `null` marks a pre-scope entry from the per-boot partition scheme, whose
+ * partition name can no longer be derived and is therefore always an orphan.
+ */
+export type BrowserRoutePartitionBinding = {
+  fingerprint: string
+  storageScope: string | null
+}
+
 type BindingState = {
-  version: typeof BINDING_STORE_VERSION
-  bindings: Record<string, string>
+  bindings: Record<string, BrowserRoutePartitionBinding>
 }
 
 export class BrowserRoutePartitionBindingStore {
@@ -35,10 +49,10 @@ export class BrowserRoutePartitionBindingStore {
     assertBinding(partition, 'a'.repeat(64))
     const state = this.load()
     this.assertMetadataPrecedesPartitionData(partition, state)
-    return state.bindings[partition] ?? null
+    return state.bindings[partition]?.fingerprint ?? null
   }
 
-  listBindings(): ReadonlyMap<string, string> {
+  listBindings(): ReadonlyMap<string, BrowserRoutePartitionBinding> {
     return new Map(Object.entries(this.load().bindings))
   }
 
@@ -56,47 +70,50 @@ export class BrowserRoutePartitionBindingStore {
     if (removed === 0) {
       return 0
     }
-    mkdirSync(dirname(this.options.filePath), { recursive: true })
-    this.writeDurably(
-      `${JSON.stringify({ version: BINDING_STORE_VERSION, bindings: remaining })}\n`
-    )
+    this.persist({ bindings: remaining })
     return removed
   }
 
-  set(partition: string, fingerprint: string): void {
+  set(partition: string, fingerprint: string, storageScope: string): void {
     assertBinding(partition, fingerprint)
+    assertStorageScope(storageScope)
     const state = this.load()
     this.assertMetadataPrecedesPartitionData(partition, state)
     const existing = state.bindings[partition]
-    if (existing === fingerprint) {
+    if (existing?.fingerprint === fingerprint && existing.storageScope === storageScope) {
       return
     }
-    if (existing !== undefined) {
+    if (existing !== undefined && existing.fingerprint !== fingerprint) {
       throw new Error('browser_route_partition_binding_conflict')
     }
-    if (Object.keys(state.bindings).length >= this.maxBindings) {
+    if (existing === undefined && Object.keys(state.bindings).length >= this.maxBindings) {
       throw new Error('browser_route_partition_binding_capacity')
     }
-    const next: BindingState = {
-      version: BINDING_STORE_VERSION,
-      bindings: { ...state.bindings, [partition]: fingerprint }
-    }
+    this.persist({
+      bindings: { ...state.bindings, [partition]: { fingerprint, storageScope } }
+    })
+  }
+
+  private persist(state: BindingState): void {
     mkdirSync(dirname(this.options.filePath), { recursive: true })
-    this.writeDurably(`${JSON.stringify(next)}\n`)
+    this.writeDurably(
+      `${JSON.stringify({ version: BINDING_STORE_VERSION, bindings: state.bindings })}\n`
+    )
   }
 
   private load(): BindingState {
     if (!existsSync(this.options.filePath)) {
-      return { version: BINDING_STORE_VERSION, bindings: {} }
+      return { bindings: {} }
     }
     try {
       const parsed: unknown = JSON.parse(
         readBoundedUtf8File(this.options.filePath, this.maxFileBytes)
       )
-      if (!isBindingState(parsed, this.maxBindings)) {
+      const bindings = parseBindings(parsed, this.maxBindings)
+      if (!bindings) {
         throw new Error('invalid binding state')
       }
-      return parsed
+      return { bindings }
     } catch {
       throw new Error('browser_route_partition_binding_store_invalid')
     }
@@ -172,35 +189,71 @@ function hasErrorCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === code)
 }
 
-function isBindingState(value: unknown, maxBindings: number): value is BindingState {
-  if (!value || typeof value !== 'object') {
-    return false
+function parseBindings(
+  value: unknown,
+  maxBindings: number
+): Record<string, BrowserRoutePartitionBinding> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
   }
-  const candidate = value as Partial<BindingState>
+  const candidate = value as { version?: unknown; bindings?: unknown }
+  const version = candidate.version
   if (
-    candidate.version !== BINDING_STORE_VERSION ||
+    (version !== BINDING_STORE_VERSION && version !== LEGACY_BINDING_STORE_VERSION) ||
     !candidate.bindings ||
     typeof candidate.bindings !== 'object' ||
     Array.isArray(candidate.bindings)
   ) {
-    return false
+    return null
   }
-  const entries = Object.entries(candidate.bindings)
-  return (
-    entries.length <= maxBindings &&
-    entries.every(([partition, fingerprint]) => {
-      try {
-        assertBinding(partition, fingerprint)
-        return true
-      } catch {
-        return false
-      }
-    })
-  )
+  const entries = Object.entries(candidate.bindings as Record<string, unknown>)
+  if (entries.length > maxBindings) {
+    return null
+  }
+  const bindings: Record<string, BrowserRoutePartitionBinding> = {}
+  for (const [partition, entry] of entries) {
+    const binding = parseBinding(version === LEGACY_BINDING_STORE_VERSION, entry)
+    if (!binding) {
+      return null
+    }
+    try {
+      assertBinding(partition, binding.fingerprint)
+    } catch {
+      return null
+    }
+    bindings[partition] = binding
+  }
+  return bindings
+}
+
+function parseBinding(legacy: boolean, entry: unknown): BrowserRoutePartitionBinding | null {
+  if (legacy) {
+    return typeof entry === 'string' ? { fingerprint: entry, storageScope: null } : null
+  }
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return null
+  }
+  const candidate = entry as { fingerprint?: unknown; storageScope?: unknown }
+  if (typeof candidate.fingerprint !== 'string') {
+    return null
+  }
+  if (candidate.storageScope === null) {
+    return { fingerprint: candidate.fingerprint, storageScope: null }
+  }
+  if (typeof candidate.storageScope !== 'string' || !FINGERPRINT_RE.test(candidate.storageScope)) {
+    return null
+  }
+  return { fingerprint: candidate.fingerprint, storageScope: candidate.storageScope }
 }
 
 function assertBinding(partition: string, fingerprint: string): void {
   if (!isBrowserRoutePartition(partition) || !FINGERPRINT_RE.test(fingerprint)) {
+    throw new Error('browser_route_partition_binding_invalid')
+  }
+}
+
+function assertStorageScope(storageScope: string): void {
+  if (!FINGERPRINT_RE.test(storageScope)) {
     throw new Error('browser_route_partition_binding_invalid')
   }
 }

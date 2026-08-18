@@ -49,6 +49,23 @@ export function deriveBrowserRoutePartition(
   }
 }
 
+/**
+ * Opaque owner of a partition's storage lifecycle: the local environment record
+ * whose explicit removal clears it. Derived without a live connection so
+ * lifecycle events can find partitions the client cannot currently re-derive.
+ */
+export function deriveBrowserRoutePartitionStorageScope(scope: {
+  orcaProfileId: string
+  environmentId: string
+}): string {
+  return digest([
+    'orca-browser-route-partition-scope',
+    PARTITION_IDENTITY_VERSION,
+    ['orca-profile', scope.orcaProfileId],
+    ['environment', scope.environmentId]
+  ])
+}
+
 export function isBrowserRoutePartition(value: string): boolean {
   return BROWSER_ROUTE_PARTITION_RE.test(value)
 }

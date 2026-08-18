@@ -16,8 +16,8 @@ const bindingStore = {
   get(partition: string): string | null {
     return currentBindingStore().get(partition)
   },
-  set(partition: string, fingerprint: string): void {
-    currentBindingStore().set(partition, fingerprint)
+  set(partition: string, fingerprint: string, storageScope: string): void {
+    currentBindingStore().set(partition, fingerprint, storageScope)
   }
 }
 

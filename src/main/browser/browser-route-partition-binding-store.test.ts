@@ -24,25 +24,52 @@ describe('BrowserRoutePartitionBindingStore', () => {
   it('persists an opaque binding for restart-time collision checks', () => {
     const filePath = createPath()
     const first = new BrowserRoutePartitionBindingStore({ filePath })
-    first.set(partition, fingerprint)
+    first.set(partition, fingerprint, 'e'.repeat(64))
 
     expect(new BrowserRoutePartitionBindingStore({ filePath }).get(partition)).toBe(fingerprint)
     const serialized = readFileSync(filePath, 'utf8')
     expect(serialized).not.toContain('authority-a')
-    expect(JSON.parse(serialized)).toEqual({ version: 1, bindings: { [partition]: fingerprint } })
+    expect(JSON.parse(serialized)).toEqual({
+      version: 2,
+      bindings: { [partition]: { fingerprint, storageScope: 'e'.repeat(64) } }
+    })
+  })
+
+  it('reads pre-scope v1 metadata as unscoped bindings', () => {
+    const filePath = createPath()
+    writeFileSync(filePath, JSON.stringify({ version: 1, bindings: { [partition]: fingerprint } }))
+    const store = new BrowserRoutePartitionBindingStore({ filePath })
+
+    expect(store.get(partition)).toBe(fingerprint)
+    expect(store.listBindings().get(partition)).toEqual({ fingerprint, storageScope: null })
+  })
+
+  it('removes bindings and rejects a non-hex storage scope', () => {
+    const filePath = createPath()
+    const store = new BrowserRoutePartitionBindingStore({ filePath })
+    store.set(partition, fingerprint, 'e'.repeat(64))
+
+    expect(() =>
+      store.set(partition.replace(/1{16}/, '6666666666666666'), fingerprint, 'z')
+    ).toThrow('browser_route_partition_binding_invalid')
+    expect(store.remove([partition])).toBe(1)
+    expect(store.remove([partition])).toBe(0)
+    expect(new BrowserRoutePartitionBindingStore({ filePath }).get(partition)).toBeNull()
   })
 
   it('rejects replacement and invalid binding shapes', () => {
     const store = new BrowserRoutePartitionBindingStore({ filePath: createPath() })
-    store.set(partition, fingerprint)
+    store.set(partition, fingerprint, 'e'.repeat(64))
 
-    expect(() => store.set(partition, 'b'.repeat(64))).toThrow(
+    expect(() => store.set(partition, 'b'.repeat(64), 'e'.repeat(64))).toThrow(
       'browser_route_partition_binding_conflict'
     )
-    expect(() => store.set('persist:unowned', fingerprint)).toThrow(
+    expect(() => store.set('persist:unowned', fingerprint, 'e'.repeat(64))).toThrow(
       'browser_route_partition_binding_invalid'
     )
-    expect(() => store.set(partition, 'short')).toThrow('browser_route_partition_binding_invalid')
+    expect(() => store.set(partition, 'short', 'e'.repeat(64))).toThrow(
+      'browser_route_partition_binding_invalid'
+    )
   })
 
   it('fails closed on corrupt or malformed persisted metadata', () => {
@@ -52,7 +79,7 @@ describe('BrowserRoutePartitionBindingStore', () => {
       'browser_route_partition_binding_store_invalid'
     )
 
-    writeFileSync(filePath, JSON.stringify({ version: 2, bindings: {} }))
+    writeFileSync(filePath, JSON.stringify({ version: 3, bindings: {} }))
     expect(() => new BrowserRoutePartitionBindingStore({ filePath }).get(partition)).toThrow(
       'browser_route_partition_binding_store_invalid'
     )
@@ -75,7 +102,7 @@ describe('BrowserRoutePartitionBindingStore', () => {
     const store = new BrowserRoutePartitionBindingStore(paths)
 
     expect(() => store.get(partition)).toThrow('browser_route_partition_binding_store_invalid')
-    expect(() => store.set(partition, fingerprint)).toThrow(
+    expect(() => store.set(partition, fingerprint, 'e'.repeat(64))).toThrow(
       'browser_route_partition_binding_store_invalid'
     )
   })
@@ -83,7 +110,7 @@ describe('BrowserRoutePartitionBindingStore', () => {
   it('accepts existing Chromium data only with matching durable metadata', () => {
     const paths = createStorePaths()
     const store = new BrowserRoutePartitionBindingStore(paths)
-    store.set(partition, fingerprint)
+    store.set(partition, fingerprint, 'e'.repeat(64))
     mkdirSync(join(paths.partitionDataRoot, partition.slice('persist:'.length)), {
       recursive: true
     })
@@ -93,10 +120,10 @@ describe('BrowserRoutePartitionBindingStore', () => {
 
   it('bounds distinct persisted bindings', () => {
     const store = new BrowserRoutePartitionBindingStore({ filePath: createPath(), maxBindings: 1 })
-    store.set(partition, fingerprint)
+    store.set(partition, fingerprint, 'e'.repeat(64))
     const secondPartition = partition.replace(/1{16}/, '5555555555555555')
 
-    expect(() => store.set(secondPartition, 'b'.repeat(64))).toThrow(
+    expect(() => store.set(secondPartition, 'b'.repeat(64), 'e'.repeat(64))).toThrow(
       'browser_route_partition_binding_capacity'
     )
   })

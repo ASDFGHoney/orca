@@ -79,6 +79,7 @@ function createHarness(options: { maxPages?: number } = {}) {
   const dependencies = {
     orcaProfileId: 'orca-profile-a',
     authorityConnectionIdentity: 'authority-record-a',
+    storageScope: 'a'.repeat(64),
     maxPages: options.maxPages,
     retainNetworkRoute: vi.fn(async () => {
       order.push('retain-route')
@@ -163,6 +164,7 @@ describe('BrowserClientPageCommandExecutor', () => {
         authorityConnectionIdentity: 'authority-record-a',
         executionHostIdentity: 'execution-host-record-a'
       },
+      storageScope: 'a'.repeat(64),
       browserPageId: 'page-a',
       pageHostGeneration: 7,
       rendererWebContentsId: 11,
