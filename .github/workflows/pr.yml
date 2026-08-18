@@ -642,13 +642,14 @@ jobs:
 
   golden_e2e:
     name: golden e2e
-    runs-on: ubuntu-latest
+    # Why macOS and not the cheaper Linux runner: the e2e harness passes
+    # --disable-gpu on Linux (see tests/e2e/helpers/electron-launch-args.ts,
+    # needed for Xvfb stability), so WebGL is unavailable there and every
+    # WebGL-dependent spec skips itself. On Linux this gate would report green
+    # while executing none of the rendering coverage it exists for. macOS runs
+    # them for real.
+    runs-on: macos-15
     timeout-minutes: 30
-    # Why a job here rather than calling golden-e2e-experiment.yml: that workflow
-    # pins a static linux/mac/windows matrix that the release contract asserts on,
-    # and the PR gate wants Linux only to stay cheap. Keeping them separate leaves
-    # the manual/release lane untouched.
-    #
     # Why this is blocking while the full e2e suite is not: it is a handful of
     # core-flow and terminal-rendering specs that run green on main, it always
     # runs, and it is built with `electron-vite build --mode e2e` — a
@@ -664,9 +665,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install native build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential python3 xvfb
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -677,13 +675,6 @@ jobs:
         with:
           run_install: false
 
-      # Why: mirrors the golden and release lanes, which need pnpm to bypass its
-      # non-executable bundled gyp_main.py.
-      - name: Use external node-gyp to avoid pnpm's bundled copy
-        run: |
-          npm install -g node-gyp@11.5.0
-          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -692,8 +683,8 @@ jobs:
 
       - name: Run golden E2E
         run: |
-          xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e -- tests/e2e/golden-core-flows.spec.ts
-          xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e:terminal-rendering-golden
+          env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e -- tests/e2e/golden-core-flows.spec.ts
+          env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e:terminal-rendering-golden
 
       - name: Upload Playwright traces
         if: failure()

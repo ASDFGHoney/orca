@@ -74,17 +74,8 @@ describe('PR workflow parallelism', () => {
         .split(/\s+/)
         .filter((token) => !['apt-get', 'install', 'sudo', ''].includes(token))
         .filter((token) => !token.startsWith('-'))
-    // Why scoped to the shell packages rather than any apt install: other lanes
-    // legitimately install unrelated build tooling (golden_e2e needs xvfb). The
-    // hazard this guards is a second lane installing a SHELL, which would make
-    // the live shell tests run twice instead of once.
-    const shellPackageNames = ['zsh', 'fish']
-    const jobsInstallingShells = Object.entries(workflow.jobs)
-      .filter(([, job]) =>
-        (job.steps ?? []).some((step) =>
-          aptPackages(step).some((pkg) => shellPackageNames.includes(pkg))
-        )
-      )
+    const jobsInstallingPackages = Object.entries(workflow.jobs)
+      .filter(([, job]) => (job.steps ?? []).some((step) => aptPackages(step).length > 0))
       .map(([name]) => name)
 
     expect(shellStep).toBeDefined()
@@ -92,11 +83,11 @@ describe('PR workflow parallelism', () => {
     expect(shellStep.run.split(/\s+/)).toContain('--maxWorkers=1')
     // Why the whole workflow, not just the general shards: any other lane installing
     // these shells would silently start running the real-shell tests twice.
-    expect(jobsInstallingShells).toEqual(['shell_contracts'])
+    expect(jobsInstallingPackages).toEqual(['shell_contracts'])
     // Why each shell is asserted: the live tests skip themselves when the binary is
     // missing, so a dropped package silently empties this lane instead of failing it.
     const shellPackages = workflow.jobs.shell_contracts.steps.flatMap(aptPackages)
-    for (const shell of shellPackageNames) {
+    for (const shell of ['zsh', 'fish']) {
       expect(shellPackages).toContain(shell)
     }
     expect(shellInstall.with['native-runtime']).toBe('node')
