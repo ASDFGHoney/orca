@@ -9,10 +9,7 @@ import {
   resetPendingSubscribeAttempt
 } from './parcel-watcher-pending-subscribe'
 import { WatcherProcessFailure } from './parcel-watcher-process-failure'
-import {
-  applyWatcherEventRootPathRewrite,
-  resolveWatcherRootPaths
-} from './watcher-event-root-path-rewrite'
+import { rewriteWatcherEvents, resolveWatcherRootPaths } from './watcher-event-root-path-rewrite'
 import type {
   HostToWatcherMessage,
   WatcherProcessSubscribeOptions
@@ -106,7 +103,7 @@ export function subscribeThroughWatcherSupervisor({
   // this is the one boundary every desktop, runtime, and relay watch passes.
   const { watchRoot, rewriteEventPath } = resolveWatcherRootPaths(dir)
   const callback: WatcherProcessCallback = (error, events) =>
-    rawCallback(error, applyWatcherEventRootPathRewrite(events, rewriteEventPath))
+    rawCallback(error, rewriteWatcherEvents(events, rewriteEventPath))
   // Why: under Vitest we cannot fork a real watcher child, so exercise the
   // subscription path in-process (against mocked @parcel/watcher) instead.
   if (process.env.VITEST && useInProcessVitestFallback) {

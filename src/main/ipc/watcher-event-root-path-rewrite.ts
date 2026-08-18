@@ -24,14 +24,18 @@
  */
 import { realpathSync } from 'node:fs'
 
-export type WatcherEventRootPathRewrite = (eventPath: string) => string
+export type WatcherEventPathRewriter = (eventPath: string) => string
 
 const CASE_INSENSITIVE_PLATFORMS = new Set<NodeJS.Platform>(['darwin', 'win32'])
 
-const identityWatcherEventRootPathRewrite: WatcherEventRootPathRewrite = (eventPath) => eventPath
+const identityWatcherEventPathRewriter: WatcherEventPathRewriter = (eventPath) => eventPath
 
-function isWindowsStyleRoot(rootPath: string): boolean {
-  return /^[A-Za-z]:/.test(rootPath) || rootPath.startsWith('\\\\')
+function isWindowsStyleRoot(rootPath: string, platform: NodeJS.Platform): boolean {
+  return (
+    /^[A-Za-z]:/.test(rootPath) ||
+    rootPath.startsWith('\\\\') ||
+    (platform === 'win32' && rootPath.startsWith('//'))
+  )
 }
 
 // Why: backslash is a legal POSIX filename character, so only Windows roots may
@@ -41,62 +45,77 @@ function splitRootSegments(value: string, windowsStyle: boolean): string[] {
   return parts.filter((part) => part.length > 0)
 }
 
-export function createWatcherEventRootPathRewrite(
+type RootPath = {
+  value: string
+  prefix: string
+  separator: '/' | '\\'
+}
+
+function describeRootPath(value: string, windowsStyle: boolean): RootPath {
+  const separator: '/' | '\\' = windowsStyle && !value.includes('/') ? '\\' : '/'
+  return {
+    value,
+    prefix: value.endsWith(separator) ? value : `${value}${separator}`,
+    separator
+  }
+}
+
+function matchingSuffix(
+  rootSegments: readonly string[],
+  candidate: string,
+  windowsStyle: boolean,
+  foldSegment: (segment: string) => string
+): string[] | null {
+  const candidateSegments = splitRootSegments(candidate, windowsStyle)
+  if (candidateSegments.length < rootSegments.length) {
+    return null
+  }
+  const matches = rootSegments.every((rootSegment, index) => {
+    const candidateSegment = candidateSegments[index]
+    return candidateSegment !== undefined && foldSegment(candidateSegment) === rootSegment
+  })
+  return matches ? candidateSegments.slice(rootSegments.length) : null
+}
+
+export function createRootPathRewriter(
   requestedRoot: string,
   canonicalRoot: string,
   platform: NodeJS.Platform = process.platform
-): WatcherEventRootPathRewrite {
-  const windowsStyle = isWindowsStyleRoot(requestedRoot)
-  // Why: Windows accepts either separator, so follow the root's own spelling
-  // rather than forcing backslashes into a path the caller wrote with slashes.
-  const separator = windowsStyle && !requestedRoot.includes('/') ? '\\' : '/'
-  const rootSegments = splitRootSegments(canonicalRoot, windowsStyle)
-  if (rootSegments.length === 0) {
-    return identityWatcherEventRootPathRewrite
+): WatcherEventPathRewriter {
+  const windowsStyle = isWindowsStyleRoot(requestedRoot, platform)
+  const requested = describeRootPath(requestedRoot, windowsStyle)
+  const canonical = describeRootPath(canonicalRoot, windowsStyle)
+  const canonicalSegments = splitRootSegments(canonicalRoot, windowsStyle)
+  if (canonicalSegments.length === 0) {
+    return identityWatcherEventPathRewriter
   }
   const caseInsensitive = CASE_INSENSITIVE_PLATFORMS.has(platform)
   // Why: fold per segment rather than over the whole path — NFC and case
   // folding both change length, so a folded-prefix length would slice the raw
   // event path mid-character and fabricate a path. Segment counts survive both.
-  const fold = (segment: string): string => {
+  const foldSegment = (segment: string): string => {
     const normalized = segment.normalize('NFC')
     return caseInsensitive ? normalized.toLowerCase() : normalized
   }
-  const foldedRootSegments = rootSegments.map(fold)
-  const requestedPrefix = requestedRoot.endsWith(separator)
-    ? requestedRoot
-    : `${requestedRoot}${separator}`
-  // Why: the canonical root carries the OS's own separator, which need not match
-  // the spelling the caller subscribed with.
-  const canonicalSeparator = windowsStyle && !canonicalRoot.includes('/') ? '\\' : '/'
-  const canonicalPrefix = canonicalRoot.endsWith(canonicalSeparator)
-    ? canonicalRoot
-    : `${canonicalRoot}${canonicalSeparator}`
+  const foldedCanonicalSegments = canonicalSegments.map(foldSegment)
 
   return (eventPath) => {
     // Already spelled the way the renderer subscribed — the whole non-macOS world.
-    if (eventPath === requestedRoot || eventPath.startsWith(requestedPrefix)) {
+    if (eventPath === requested.value || eventPath.startsWith(requested.prefix)) {
       return eventPath
     }
     // A plain symlinked root differs only by prefix; splice it byte-exact so the
     // per-segment fold below is reached only for casing/Unicode differences.
-    if (eventPath.startsWith(canonicalPrefix)) {
-      return `${requestedPrefix}${eventPath.slice(canonicalPrefix.length)}`
+    if (eventPath.startsWith(canonical.prefix)) {
+      return `${requested.prefix}${eventPath.slice(canonical.prefix.length)}`
     }
-    if (eventPath === canonicalRoot) {
-      return requestedRoot
-    }
-    const segments = splitRootSegments(eventPath, windowsStyle)
-    if (segments.length < foldedRootSegments.length) {
+    const suffix = matchingSuffix(foldedCanonicalSegments, eventPath, windowsStyle, foldSegment)
+    if (suffix === null) {
       return eventPath
     }
-    for (const [index, foldedRootSegment] of foldedRootSegments.entries()) {
-      if (fold(segments[index]!) !== foldedRootSegment) {
-        return eventPath
-      }
-    }
-    const suffix = segments.slice(foldedRootSegments.length)
-    return suffix.length === 0 ? requestedRoot : `${requestedPrefix}${suffix.join(separator)}`
+    return suffix.length === 0
+      ? requested.value
+      : `${requested.prefix}${suffix.join(requested.separator)}`
   }
 }
 
@@ -104,7 +123,7 @@ export type WatcherRootPaths = {
   /** Directory to hand the watcher backend — symlinks resolved. */
   watchRoot: string
   /** Maps a delivered event path back onto the caller's spelling. */
-  rewriteEventPath: WatcherEventRootPathRewrite
+  rewriteEventPath: WatcherEventPathRewriter
 }
 
 /**
@@ -133,7 +152,7 @@ export function resolveWatcherRootPaths(
   }
   return {
     watchRoot,
-    rewriteEventPath: createWatcherEventRootPathRewrite(requestedRoot, watchRoot, deps.platform)
+    rewriteEventPath: createRootPathRewriter(requestedRoot, watchRoot, deps.platform)
   }
 }
 
@@ -141,9 +160,9 @@ export function resolveWatcherRootPaths(
  * Returns the original array when nothing needed rewriting so the common
  * per-batch hot path stays allocation-free.
  */
-export function applyWatcherEventRootPathRewrite<T extends { path: string }>(
+export function rewriteWatcherEvents<T extends { path: string }>(
   events: T[],
-  rewrite: WatcherEventRootPathRewrite
+  rewrite: WatcherEventPathRewriter
 ): T[] {
   let rewritten: T[] | null = null
   for (const [index, event] of events.entries()) {
