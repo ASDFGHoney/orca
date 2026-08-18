@@ -16844,8 +16844,11 @@ export class OrcaRuntimeService {
       subject: `Agent exited unexpectedly (code ${exitCode})`,
       type: 'escalation',
       priority: 'high',
+      // Why: applyEscalationToDispatch rejects an escalation without an exact Dispatch
+      // binding, and a coordinator reading this needs to know which Dispatch died.
       payload: JSON.stringify({
         taskId: dispatch.task_id,
+        dispatchId: dispatch.id,
         exitCode,
         handle
       }),
