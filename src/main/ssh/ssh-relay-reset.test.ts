@@ -212,6 +212,12 @@ describe('forceStopRelayForTarget', () => {
     expect(command).toContain('lsof -t -a -U "$1"')
     expect(command).toContain('pgrep -f "$sock_name"')
     expect(command).toContain('/proc/net/unix')
+    // Why ENVIRON: awk expands escape sequences in a -v value, so a socket path holding a
+    // backslash would never equal its own /proc/net/unix entry and a live owner would read
+    // as absent. (The branch itself needs /proc, so it is exercised on Linux.)
+    expect(command).toContain('ORCA_SOCKET_TARGET="$1" awk')
+    expect(command).toContain('ENVIRON["ORCA_SOCKET_TARGET"]')
+    expect(command).not.toContain('awk -v target')
     // Why not: a stopped relay unlinks its own socket, and one that was killed leaves an
     // inode the next deploy releases under its identity guard (STA-1756).
     expect(command).not.toContain('rm -f')

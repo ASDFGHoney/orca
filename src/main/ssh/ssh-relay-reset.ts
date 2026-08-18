@@ -51,9 +51,12 @@ export async function forceStopRelayForTarget(
     // fail on a legal path. Why the exit-code split: a missing or failing tool answers
     // nothing, and reading that as "no owner" is the inference this change removes.
     '  if [ -r /proc/net/unix ] && command -v awk >/dev/null 2>&1; then',
-    '    awk -v target="$1" \'NR>1{line=$0;' +
+    // Why ENVIRON rather than -v: awk expands escape sequences in a -v value, so a path
+    // holding a backslash would never equal its own /proc/net/unix entry.
+    '    ORCA_SOCKET_TARGET="$1" awk \'NR>1{line=$0;' +
       'sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/,"",line);' +
-      "if(line==target){found=1}}END{exit(found?0:1)}' /proc/net/unix",
+      'if(line==ENVIRON["ORCA_SOCKET_TARGET"]){found=1}}' +
+      "END{exit(found?0:1)}' /proc/net/unix",
     '    case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac',
     '  fi',
     '  if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -t -p $$ 2>/dev/null)" ]; then',
