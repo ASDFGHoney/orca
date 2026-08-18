@@ -1,4 +1,4 @@
-import { wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
+import { wslTranscriptFsLaneKey, wslTranscriptFsRouteKey } from './wsl-transcript-fs-route'
 import {
   WslTranscriptFsError,
   wslTranscriptFsCapacityError as capacityError,
@@ -164,17 +164,10 @@ function attachWaiter<T>(task: ScheduledTask<T>, signal?: AbortSignal): Promise<
 }
 
 function settleTask<T>(task: ScheduledTask<T>, result: { value: T } | { error: unknown }): void {
-  // Only a settle the deadline did not force proves the mount answered; a
-  // transport fault (WslTranscriptFsError from a dead helper) proves nothing.
-  if (
-    'value' in result ||
-    (result.error !== task.controller.signal.reason &&
-      !(result.error instanceof WslTranscriptFsError))
-  ) {
-    liftRouteQuarantine(task.route)
-  }
   if (task.state !== 'running') {
-    // A late value after a deadline-forced settle has no owner: dispose it.
+    // A result that only lands past the deadline is the stall the quarantine
+    // was set for, so it never lifts the back-off. A late value also has no
+    // owner: dispose it.
     if ('value' in result) {
       try {
         task.onAbandonedResult?.(result.value)
@@ -183,6 +176,15 @@ function settleTask<T>(task: ScheduledTask<T>, result: { value: T } | { error: u
       }
     }
     return
+  }
+  // Only a settle the deadline did not force proves the mount answered; a
+  // transport fault (WslTranscriptFsError from a dead helper) proves nothing.
+  if (
+    'value' in result ||
+    (result.error !== task.controller.signal.reason &&
+      !(result.error instanceof WslTranscriptFsError))
+  ) {
+    liftRouteQuarantine(task.route)
   }
   task.state = 'settled'
   if (task.priority === 'scan') {
@@ -341,7 +343,7 @@ export function runWslTranscriptFsTask<T>(
 
   const scheduled: ScheduledTask<T> = {
     key,
-    laneKey: `${route}:${options.priority}`,
+    laneKey: wslTranscriptFsLaneKey(options.path, options.priority),
     route,
     priority: options.priority,
     operation: task,

@@ -6,7 +6,7 @@ import type {
 
 /**
  * The data model one pooled helper child is tracked by: at most one in-flight
- * call, optionally pinned to the file handle it opened.
+ * call, with any opened handles owned by that child.
  */
 
 export type SlotDisposition = 'idle' | 'pin' | 'pinned' | 'close'
@@ -19,6 +19,7 @@ export type ActiveCall = {
   onAbort: () => void
   operation: WslTranscriptFsProcessRequest['operation']
   disposition: SlotDisposition
+  handle?: WslTranscriptFsProcessHandle
 }
 
 export type WslTranscriptFsProcessHandle = {
@@ -28,10 +29,7 @@ export type WslTranscriptFsProcessHandle = {
 export type ProcessSlot = {
   child: ChildProcess
   active: ActiveCall | null
-  /** Resolves when the current active call settles; deferred closes wait on it. */
-  activeSettled?: Promise<void>
-  notifyActiveSettled?: () => void
-  handle: WslTranscriptFsProcessHandle | null
+  handles: Set<WslTranscriptFsProcessHandle>
   idleTimer?: ReturnType<typeof setTimeout>
 }
 
@@ -44,8 +42,8 @@ export type HandleState = {
 export type WslTranscriptFsProcessFactory = () => ChildProcess
 
 export const WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS = 30_000
-// Why: idle Electron-as-Node children are tens of MB each and a vault-scan
-// burst can pool several; reap them instead of holding RSS for the app session.
+// Why: idle Electron-as-Node children are tens of MB; reap them instead of
+// holding RSS for the app session.
 // Longer than the close deadline so a pending close never outlives its slot.
 export const WSL_TRANSCRIPT_FS_PROCESS_IDLE_REAP_MS = 60_000
 
@@ -56,7 +54,7 @@ export function attachSlotChild(
     onFault: (error: Error) => void
   }
 ): ProcessSlot {
-  const slot: ProcessSlot = { child, active: null, handle: null }
+  const slot: ProcessSlot = { child, active: null, handles: new Set() }
   child.on('message', (response: WslTranscriptFsProcessResponse) => handlers.onResponse(response))
   child.on('error', (error) => handlers.onFault(error))
   child.on('disconnect', () => handlers.onFault(new Error('WSL filesystem process disconnected')))

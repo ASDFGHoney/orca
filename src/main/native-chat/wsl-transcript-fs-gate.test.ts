@@ -622,7 +622,8 @@ describe('WSL transcript filesystem task scheduling', () => {
   })
 
   it('ignores a late result after admitting replacement work', async () => {
-    vi.useFakeTimers()
+    // performance.now drives the quarantine clock, so it must be faked too.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
     const stalled = deferred<string>()
     try {
       const stuck = run('\\\\wsl.localhost\\Ubuntu\\recovering', 'exact', () => stalled.promise)
@@ -633,8 +634,15 @@ describe('WSL transcript filesystem task scheduling', () => {
         run('\\\\wsl.localhost\\Ubuntu\\recovering-next', 'exact', async () => 'blocked')
       ).rejects.toMatchObject({ code: 'unavailable' })
 
+      // A value that only lands past the deadline is the stall itself, not
+      // proof of health: it must not cut the back-off short.
       stalled.resolve('late')
       await vi.advanceTimersByTimeAsync(0)
+      await expect(
+        run('\\\\wsl.localhost\\Ubuntu\\recovering-next', 'exact', async () => 'still-blocked')
+      ).rejects.toMatchObject({ code: 'unavailable' })
+
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
       await expect(
         run('\\\\wsl.localhost\\Ubuntu\\recovering-next', 'exact', async () => 'recovered')
       ).resolves.toBe('recovered')
@@ -647,7 +655,8 @@ describe('WSL transcript filesystem task scheduling', () => {
   })
 
   it('starts a new generation after shared work reaches its deadline', async () => {
-    vi.useFakeTimers()
+    // performance.now drives the quarantine clock, so it must be faked too.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
     const work = deferred<string>()
     const task = vi.fn(() => work.promise)
     try {
@@ -661,7 +670,8 @@ describe('WSL transcript filesystem task scheduling', () => {
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_EXACT_TIMEOUT_MS - 10_000)
       await Promise.all([firstRejected, secondRejected])
       work.resolve('late')
-      await vi.advanceTimersByTimeAsync(0)
+      // The late value settles nothing, so the deadline's back-off still runs.
+      await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
       const joinTask = vi.fn(async () => 'join')
       await expect(run(path, 'exact', joinTask)).resolves.toBe('join')
       expect(joinTask).toHaveBeenCalledOnce()

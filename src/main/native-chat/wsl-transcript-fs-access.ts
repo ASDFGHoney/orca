@@ -13,6 +13,7 @@ import {
   type WslTranscriptFsProcessHandle
 } from './wsl-transcript-fs-process-dispatch'
 import type { WslTranscriptFsReusableProcessCall } from './wsl-transcript-fs-process-protocol'
+import { wslTranscriptFsLaneKey } from './wsl-transcript-fs-route'
 
 /** Never nest a gated call inside another — that deadlocks the scan slot. */
 
@@ -33,7 +34,12 @@ function runReusableFsOperation<T>(
   return isWslUncPath(request.path)
     ? runWslTranscriptFsTask(
         { operation: request.operation, path: request.path, priority, signal },
-        (taskSignal) => runWslTranscriptFsProcess<T>(request, taskSignal)
+        (taskSignal) =>
+          runWslTranscriptFsProcess<T>(
+            request,
+            taskSignal,
+            wslTranscriptFsLaneKey(request.path, priority)
+          )
       )
     : localTask()
 }
@@ -104,7 +110,8 @@ export function wslGatedOpen(
       dedupe: false,
       onAbandonedResult: (handle) => void closeTranscriptHandle(handle, path)
     },
-    (taskSignal) => openWslTranscriptFsProcess(path, taskSignal)
+    (taskSignal) =>
+      openWslTranscriptFsProcess(path, taskSignal, wslTranscriptFsLaneKey(path, priority))
   )
 }
 

@@ -97,13 +97,9 @@ describe('WSL transcript filesystem process client', () => {
     client.dispose()
   })
 
-  it('pins reads to the process that owns the opened handle until close', async () => {
+  it('multiplexes sequential opened handles through one process until close', async () => {
     const owner = new FakeProcess()
-    const reusable = new FakeProcess()
-    const factory = vi
-      .fn<() => ChildProcess>()
-      .mockReturnValueOnce(fakeChild(owner))
-      .mockReturnValueOnce(fakeChild(reusable))
+    const factory = vi.fn(() => fakeChild(owner))
     const client = new WslTranscriptFsProcessClient(factory)
     const signal = new AbortController().signal
 
@@ -111,30 +107,106 @@ describe('WSL transcript filesystem process client', () => {
     owner.respond({ id: owner.sent[0].id, ok: true, value: 41 })
     const handle = await opening
 
-    const unrelated = client.run<boolean>(
-      { operation: 'access', path: '\\\\wsl.localhost\\Fedora\\healthy' },
-      signal
-    )
-    reusable.respond({ id: reusable.sent[0].id, ok: true, value: true })
-    await expect(unrelated).resolves.toBe(true)
+    const secondOpening = client.open('\\\\wsl.localhost\\Ubuntu\\second', signal)
+    owner.respond({ id: owner.sent[1].id, ok: true, value: 42 })
+    const secondHandle = await secondOpening
 
     const reading = client.read(handle, 8, 4, signal)
-    expect(owner.sent[1]).toMatchObject({ operation: 'read', handleId: 41, position: 8 })
-    owner.respond({ id: owner.sent[1].id, ok: true, value: Buffer.from('old!') })
+    expect(owner.sent[2]).toMatchObject({ operation: 'read', handleId: 41, position: 8 })
+    owner.respond({ id: owner.sent[2].id, ok: true, value: Buffer.from('old!') })
     await expect(reading).resolves.toEqual(Buffer.from('old!'))
 
+    const secondReading = client.read(secondHandle, 0, 3, signal)
+    expect(owner.sent[3]).toMatchObject({ operation: 'read', handleId: 42, position: 0 })
+    owner.respond({ id: owner.sent[3].id, ok: true, value: Buffer.from('new') })
+    await expect(secondReading).resolves.toEqual(Buffer.from('new'))
+
     const closing = client.close(handle)
-    expect(owner.sent[2]).toMatchObject({ operation: 'close', handleId: 41 })
-    owner.respond({ id: owner.sent[2].id, ok: true, value: true })
+    expect(owner.sent[4]).toMatchObject({ operation: 'close', handleId: 41 })
+    owner.respond({ id: owner.sent[4].id, ok: true, value: true })
     await expect(closing).resolves.toBeUndefined()
+
+    const secondClosing = client.close(secondHandle)
+    expect(owner.sent[5]).toMatchObject({ operation: 'close', handleId: 42 })
+    owner.respond({ id: owner.sent[5].id, ok: true, value: true })
+    await expect(secondClosing).resolves.toBeUndefined()
 
     const later = client.run<boolean>(
       { operation: 'access', path: '\\\\wsl.localhost\\Ubuntu\\later' },
       signal
     )
-    owner.respond({ id: owner.sent[3].id, ok: true, value: true })
+    owner.respond({ id: owner.sent[6].id, ok: true, value: true })
     await expect(later).resolves.toBe(true)
-    expect(factory).toHaveBeenCalledTimes(2)
+    expect(factory).toHaveBeenCalledOnce()
+    client.dispose()
+  })
+
+  it('queues concurrent opens instead of creating another helper', async () => {
+    const child = new FakeProcess()
+    const factory = vi.fn(() => fakeChild(child))
+    const client = new WslTranscriptFsProcessClient(factory)
+    const signal = new AbortController().signal
+
+    const firstOpening = client.open('\\\\wsl.localhost\\Ubuntu\\first', signal)
+    const secondOpening = client.open('\\\\wsl.localhost\\Ubuntu\\second', signal)
+    expect(factory).toHaveBeenCalledOnce()
+    expect(child.sent).toHaveLength(1)
+
+    child.respond({ id: child.sent[0].id, ok: true, value: 1 })
+    const firstHandle = await firstOpening
+    await vi.waitFor(() => expect(child.sent).toHaveLength(2))
+    child.respond({ id: child.sent[1].id, ok: true, value: 2 })
+    const secondHandle = await secondOpening
+
+    const firstClose = client.close(firstHandle)
+    child.respond({ id: child.sent[2].id, ok: true, value: true })
+    await firstClose
+    const secondClose = client.close(secondHandle)
+    child.respond({ id: child.sent[3].id, ok: true, value: true })
+    await secondClose
+
+    expect(factory).toHaveBeenCalledOnce()
+    client.dispose()
+  })
+
+  it('returns a granted slot when its queued caller aborts before sending', async () => {
+    const child = new FakeProcess()
+    const client = new WslTranscriptFsProcessClient(() => fakeChild(child))
+    const controller = new AbortController()
+    const signal = new AbortController().signal
+
+    const first = client.run<boolean>({ operation: 'access', path: 'first' }, signal)
+    const aborted = client.run<boolean>({ operation: 'access', path: 'aborted' }, controller.signal)
+    child.respond({ id: child.sent[0].id, ok: true, value: true })
+    controller.abort(new Error('cancelled after grant'))
+
+    await expect(first).resolves.toBe(true)
+    await expect(aborted).rejects.toThrow('cancelled after grant')
+    const later = client.run<boolean>({ operation: 'access', path: 'later' }, signal)
+    expect(child.sent).toHaveLength(2)
+    child.respond({ id: child.sent[1].id, ok: true, value: true })
+    await expect(later).resolves.toBe(true)
+    client.dispose()
+  })
+
+  it('rejects a granted request if the helper exits before it sends', async () => {
+    const child = new FakeProcess()
+    const replacement = new FakeProcess()
+    const factory = vi
+      .fn<() => ChildProcess>()
+      .mockReturnValueOnce(fakeChild(child))
+      .mockReturnValueOnce(fakeChild(replacement))
+    const client = new WslTranscriptFsProcessClient(factory)
+    const signal = new AbortController().signal
+
+    const first = client.run<boolean>({ operation: 'access', path: 'first' }, signal)
+    const stranded = client.run<boolean>({ operation: 'access', path: 'stranded' }, signal)
+    child.respond({ id: child.sent[0].id, ok: true, value: true })
+    child.emit('disconnect')
+
+    await expect(first).resolves.toBe(true)
+    await expect(stranded).rejects.toMatchObject({ code: 'unavailable' })
+    expect(replacement.sent).toHaveLength(0)
     client.dispose()
   })
 
@@ -175,7 +247,7 @@ describe('WSL transcript filesystem process client', () => {
     client.dispose()
   })
 
-  it('invalidates only the handle whose read process is aborted', async () => {
+  it('invalidates lane handles and serves queued work from a replacement', async () => {
     const owner = new FakeProcess()
     const healthy = new FakeProcess()
     const factory = vi
@@ -197,11 +269,12 @@ describe('WSL transcript filesystem process client', () => {
       { operation: 'access', path: '\\\\wsl.localhost\\Fedora\\healthy' },
       new AbortController().signal
     )
-    healthy.respond({ id: healthy.sent[0].id, ok: true, value: true })
-    await expect(other).resolves.toBe(true)
     controller.abort(reason)
 
     await expect(stalled).rejects.toBe(reason)
+    await vi.waitFor(() => expect(healthy.sent).toHaveLength(1))
+    healthy.respond({ id: healthy.sent[0].id, ok: true, value: true })
+    await expect(other).resolves.toBe(true)
     // The handle died with its killed process — a transport condition, so later
     // reads surface as a retryable refusal rather than a caller EBADF bug.
     await expect(client.read(handle, 0, 1, new AbortController().signal)).rejects.toMatchObject({
@@ -243,11 +316,12 @@ describe('WSL transcript filesystem process client', () => {
         { operation: 'access', path: '\\\\wsl.localhost\\Fedora\\healthy' },
         new AbortController().signal
       )
-      healthy.respond({ id: healthy.sent[0].id, ok: true, value: true })
-      await expect(unrelated).resolves.toBe(true)
 
       await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_PROCESS_CLOSE_TIMEOUT_MS)
       await closeFailure
+      await vi.waitFor(() => expect(healthy.sent).toHaveLength(1))
+      healthy.respond({ id: healthy.sent[0].id, ok: true, value: true })
+      await expect(unrelated).resolves.toBe(true)
       expect(owner.kill).toHaveBeenCalledWith('SIGKILL')
       expect(healthy.kill).not.toHaveBeenCalled()
     } finally {

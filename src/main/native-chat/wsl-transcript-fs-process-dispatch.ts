@@ -5,10 +5,10 @@ import {
 } from './wsl-transcript-fs-process-protocol'
 import { decodeWslTranscriptFsProcessValue } from './wsl-transcript-fs-process-decode'
 import {
-  wslTranscriptFsHandleOwners,
   WslTranscriptFsProcessClient,
   type WslTranscriptFsProcessHandle
 } from './wsl-transcript-fs-process-client'
+import { wslTranscriptFsHandleOwners } from './wsl-transcript-fs-process-handle-owner'
 import { WslTranscriptFsProcessOperations } from './wsl-transcript-fs-process-operations'
 import { forkWslTranscriptFsProcess } from './wsl-transcript-fs-process-spawn'
 
@@ -33,33 +33,40 @@ function runInProcess<T>(request: WslTranscriptFsReusableProcessCall): Promise<T
     .then((value) => decodeWslTranscriptFsProcessValue(request.operation, value)) as Promise<T>
 }
 
-let sharedClient: WslTranscriptFsProcessClient | null = null
+const clientsByLane = new Map<string, WslTranscriptFsProcessClient>()
 
-function getSharedClient(): WslTranscriptFsProcessClient {
-  sharedClient ??= new WslTranscriptFsProcessClient(forkWslTranscriptFsProcess)
-  return sharedClient
+function getLaneClient(laneKey: string): WslTranscriptFsProcessClient {
+  const existing = clientsByLane.get(laneKey)
+  if (existing) {
+    return existing
+  }
+  const client = new WslTranscriptFsProcessClient(forkWslTranscriptFsProcess)
+  clientsByLane.set(laneKey, client)
+  return client
 }
 
 export function runWslTranscriptFsProcess<T>(
   request: WslTranscriptFsReusableProcessCall,
-  signal: AbortSignal
+  signal: AbortSignal,
+  laneKey: string
 ): Promise<T> {
   if (inVitestWorker()) {
     return runInProcess<T>(request)
   }
-  return getSharedClient().run<T>(request, signal)
+  return getLaneClient(laneKey).run<T>(request, signal)
 }
 
 export function openWslTranscriptFsProcess(
   path: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  laneKey: string
 ): Promise<WslTranscriptFsProcessHandle | FileHandle> {
   if (inVitestWorker()) {
     // A real FileHandle: suites drive reads and closes through the plain
     // handle branch, mirroring non-UNC ownership.
     return open(path, 'r')
   }
-  return getSharedClient().open(path, signal)
+  return getLaneClient(laneKey).open(path, signal)
 }
 
 export function readWslTranscriptFsProcess(
@@ -85,6 +92,8 @@ export function isWslTranscriptFsProcessHandle(
 }
 
 export function resetWslTranscriptFsProcessClientForTests(): void {
-  sharedClient?.dispose()
-  sharedClient = null
+  for (const client of clientsByLane.values()) {
+    client.dispose()
+  }
+  clientsByLane.clear()
 }
