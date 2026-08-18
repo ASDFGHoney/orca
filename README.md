@@ -232,7 +232,7 @@ Pair with your desktop app to monitor and steer your agents from your phone.
 - **iOS:** [Download on the App Store](https://apps.apple.com/us/app/orca-ide/id6766130217) or [join TestFlight](https://testflight.apple.com/join/YjeGMQBA)
 - **Android:** [Download APK 0.0.43](https://github.com/stablyai/orca/releases/download/mobile-android-v0.0.43/app-release.apk)
 
-If the APK download stalls or the installer does not open, open the link in Chrome or another full browser and follow the [Android APK install guide](https://www.onorca.dev/docs/android-apk).
+To install Orca Mobile on Android, open the APK link in Chrome or another full browser and follow the [Android install guide](https://www.onorca.dev/docs/android-apk).
 
 ---
 
