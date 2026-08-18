@@ -13923,6 +13923,17 @@
         },
         "AutomationListLocalRows": {
           "c92c9463c6": "Acciones de automatización"
+        },
+        "AutomationListFilterMenu": {
+          "agent": "Agente",
+          "lastRun": "Última ejecución",
+          "all": "Todas",
+          "failed": "Fallida",
+          "succeeded": "Correcta",
+          "neverRan": "Nunca se ejecutó",
+          "filters": "Filtros",
+          "clear": "Limpiar filtros",
+          "removeFilter": "Eliminar filtro de {{value0}}"
         }
       },
       "agent": {

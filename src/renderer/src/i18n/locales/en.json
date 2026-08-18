@@ -15330,7 +15330,9 @@
           "neverRan": "Never ran",
           "filters": "Filters",
           "all": "All",
-          "clear": "Clear filters"
+          "clear": "Clear filters",
+          "agent": "Agent",
+          "lastRun": "Last run"
         },
         "AutomationListSortHeader": {
           "sortedAscending": "{{value0}}, sorted ascending",
