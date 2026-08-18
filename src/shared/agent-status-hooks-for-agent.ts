@@ -5,11 +5,15 @@
 import { normalizeDisabledTuiAgents } from './tui-agent-selection'
 import type { TuiAgent } from './tui-agent'
 
+/** The settings a launch surface must hand a plan builder so the builder can
+ *  decide hooks itself. Structural, so callers pass `GlobalSettings` directly. */
+export type AgentStatusHookSettings = {
+  agentStatusHooksEnabled?: boolean
+  disabledTuiAgents?: readonly string[]
+}
+
 export function areAgentStatusHooksEnabledForAgent(
-  settings:
-    | { agentStatusHooksEnabled?: boolean; disabledTuiAgents?: readonly string[] }
-    | null
-    | undefined,
+  settings: AgentStatusHookSettings | null | undefined,
   agent: TuiAgent
 ): boolean {
   if (settings?.agentStatusHooksEnabled === false) {

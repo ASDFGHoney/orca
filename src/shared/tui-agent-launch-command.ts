@@ -12,6 +12,10 @@ import {
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
 import { planCodexRemoteHookLaunchArgs } from './codex-remote-hook-launch'
+import {
+  areAgentStatusHooksEnabledForAgent,
+  type AgentStatusHookSettings
+} from './agent-status-hooks-for-agent'
 
 export type ResolvedAgentLaunchCommand =
   | {
@@ -31,10 +35,11 @@ export function resolveAgentLaunchCommand(args: {
   sessionOptions?: Record<string, SessionOptionValue>
   sessionOptionsOverrideAgentArgs?: boolean
   isRemote?: boolean
-  /** Orca's managed status hooks are enabled for this agent. Remote Codex
-   *  launches carry a launch-scoped hooks override so the TUI does not attach
-   *  to a pre-existing app-server that never saw the pane's hook env (#11941). */
-  agentStatusHooksEnabled?: boolean
+  /** Settings deciding Orca's managed status hooks. Resolved here rather than by
+   *  each caller: a remote Codex launch carries a launch-scoped hooks override so
+   *  the TUI does not attach to an app-server that never saw the pane's hook env,
+   *  and every launch surface used to have to remember that for itself (#11941). */
+  agentStatusHookSettings: AgentStatusHookSettings | null
 }): ResolvedAgentLaunchCommand {
   const override = args.cmdOverrides[args.agent]
   const baseLaunchCommand =
@@ -85,7 +90,7 @@ export function resolveAgentLaunchCommand(args: {
     agent: args.agent,
     platform: args.platform,
     isRemote: args.isRemote,
-    hooksEnabled: args.agentStatusHooksEnabled,
+    hooksEnabled: areAgentStatusHooksEnabledForAgent(args.agentStatusHookSettings, args.agent),
     launchTokens: [...tokenizeCommandOverride(override, args.shell), ...trailingTokens.tokens]
   })
   const command = hookArgs.length

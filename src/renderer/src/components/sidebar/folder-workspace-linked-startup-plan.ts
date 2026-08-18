@@ -10,6 +10,7 @@ import {
 import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import type { TuiAgent } from '../../../../shared/tui-agent'
+import type { AgentStatusHookSettings } from '../../../../shared/agent-status-hooks-for-agent'
 import type { AgentStartupShell } from '../../../../shared/tui-agent-startup-shell'
 import { resolveQuickCreateLinkedWorkItemPrompt } from '@/lib/linked-work-item-context'
 
@@ -37,8 +38,9 @@ export function buildFolderWorkspaceLinkedStartupPlan(args: {
   platform: NodeJS.Platform
   shell?: AgentStartupShell
   isRemote: boolean
-  /** Orca's managed status hooks are on for this agent (#11941). */
-  agentStatusHooksEnabled?: boolean
+  /** Settings that decide Orca's managed status hooks; the builder derives
+   *  the per-agent answer itself (#11941). */
+  agentStatusHookSettings: AgentStatusHookSettings | null
 }): AgentStartupPlan | null {
   const linkedDraftPrompt = resolveFolderWorkspaceLaunchDraft(args.linkedWorkItem, args.note)
   const draftLaunchPlan = linkedDraftPrompt
@@ -52,7 +54,7 @@ export function buildFolderWorkspaceLinkedStartupPlan(args: {
         platform: args.platform,
         shell: args.shell,
         isRemote: args.isRemote,
-        agentStatusHooksEnabled: args.agentStatusHooksEnabled
+        agentStatusHookSettings: args.agentStatusHookSettings
       })
     : null
   if (draftLaunchPlan) {
@@ -82,7 +84,7 @@ export function buildFolderWorkspaceLinkedStartupPlan(args: {
     platform: args.platform,
     shell: args.shell,
     isRemote: args.isRemote,
-    agentStatusHooksEnabled: args.agentStatusHooksEnabled,
+    agentStatusHookSettings: args.agentStatusHookSettings,
     allowEmptyPromptLaunch: true
   })
   if (startupPlan && linkedDraftPrompt) {

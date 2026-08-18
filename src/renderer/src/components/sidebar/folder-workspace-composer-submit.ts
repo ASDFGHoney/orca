@@ -1,3 +1,4 @@
+import type { AgentStatusHookSettings } from '../../../../shared/agent-status-hooks-for-agent'
 import {
   CLIENT_PLATFORM,
   ensureAgentStartupInTerminal,
@@ -57,8 +58,9 @@ type SubmitFolderWorkspaceCreateParams = {
   agentEnv?: Record<string, string>
   sessionOptions?: Record<string, SessionOptionValue>
   terminalWindowsShell?: string | null
-  /** Orca's managed status hooks are on for the launched agent (#11941). */
-  agentStatusHooksEnabled?: boolean
+  /** Settings that decide Orca's managed status hooks for the launched agent.
+   *  Passed whole so the plan builder applies the per-agent opt-out too (#11941). */
+  agentStatusHookSettings: AgentStatusHookSettings | null
   isRemote?: boolean
   launchSource?: LaunchSource
   runtimeEnvironmentId?: string | null
@@ -113,7 +115,7 @@ export async function submitFolderWorkspaceCreate({
   agentEnv,
   sessionOptions,
   terminalWindowsShell,
-  agentStatusHooksEnabled,
+  agentStatusHookSettings,
   launchSource = 'sidebar',
   runtimeEnvironmentId = null,
   createFolderWorkspace,
@@ -147,7 +149,7 @@ export async function submitFolderWorkspaceCreate({
           platform: launchPlatform,
           shell: launchShell,
           isRemote: launchIsRemote,
-          agentStatusHooksEnabled: agentStatusHooksEnabled ?? true
+          agentStatusHookSettings
         })
       : quickAgent
         ? buildAgentStartupPlan({
@@ -160,7 +162,7 @@ export async function submitFolderWorkspaceCreate({
             platform: launchPlatform,
             shell: launchShell,
             isRemote: launchIsRemote,
-            agentStatusHooksEnabled: agentStatusHooksEnabled ?? true,
+            agentStatusHookSettings,
             allowEmptyPromptLaunch: true
           })
         : null
