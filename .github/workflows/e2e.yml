@@ -73,11 +73,15 @@ jobs:
 
       # Why: building here avoids parallel builds inside Playwright globalSetup;
       # paired-browser specs also need the standalone web bundle.
+      # Why build:relay: every SSH spec deploys the client's own relay build to the host, and
+      # without out/relay the connect fails at "local relay build is missing its version
+      # marker" — reaching those specs only when a change selects them.
       - name: Build Electron app for E2E
         env:
           VITE_EXPOSE_STORE: 'true'
         run: |
           npx electron-vite build --mode e2e
+          pnpm run build:relay
           pnpm run build:web-from-renderer
 
       - name: Upload E2E build output
