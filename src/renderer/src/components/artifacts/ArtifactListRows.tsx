@@ -1,4 +1,6 @@
+import { Fragment } from 'react'
 import { Copy, ExternalLink, MoreHorizontal, Trash2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { ArtifactListItem } from '../../../../shared/artifacts'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,6 +31,46 @@ import { copyArtifactLink, openArtifactInBrowser } from './artifact-link-actions
 import { ARTIFACTS_TABLE_GRID_CLASS } from './artifacts-table-layout'
 import { LIST_TABLE_ROW_CLASS, LIST_TABLE_ROW_SELECTED_CLASS } from '@/lib/list-table-layout'
 
+type ArtifactRowAction = {
+  key: string
+  label: string
+  icon: LucideIcon
+  onSelect: () => void
+  /** Rendered after a separator, styled as destructive. */
+  destructive?: boolean
+  disabled?: boolean
+}
+
+// Why: the row dropdown and the row context menu must offer the same actions; one source keeps them from drifting.
+function artifactRowActions(
+  item: ArtifactListItem,
+  deleting: boolean,
+  deleteArtifact: (item: ArtifactListItem) => void
+): readonly ArtifactRowAction[] {
+  return [
+    {
+      key: 'copy',
+      label: translate('auto.components.artifacts.copyLink', 'Copy link'),
+      icon: Copy,
+      onSelect: () => void copyArtifactLink(item.shareUrl)
+    },
+    {
+      key: 'open',
+      label: translate('auto.components.artifacts.openInBrowser', 'Open in browser'),
+      icon: ExternalLink,
+      onSelect: () => openArtifactInBrowser(item.shareUrl)
+    },
+    {
+      key: 'delete',
+      label: translate('auto.components.artifacts.ArtifactsPage.deleteArtifact', 'Delete artifact'),
+      icon: Trash2,
+      onSelect: () => deleteArtifact(item),
+      destructive: true,
+      disabled: deleting
+    }
+  ]
+}
+
 export function ArtifactListRows({
   artifacts,
   deletingId,
@@ -52,6 +94,7 @@ export function ArtifactListRows({
         const sizeLabel = formatByteSize(item.artifact.byteSize)
         const isSelected = selectedSlug === item.artifact.slug
         const deleting = deletingId === item.artifact.slug
+        const rowActions = artifactRowActions(item, deleting, deleteArtifact)
 
         return (
           <ContextMenu key={item.artifact.slug}>
@@ -111,51 +154,39 @@ export function ArtifactListRows({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem onSelect={() => void copyArtifactLink(item.shareUrl)}>
-                      <Copy className="size-3.5" />
-                      {translate('auto.components.artifacts.copyLink', 'Copy link')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openArtifactInBrowser(item.shareUrl)}>
-                      <ExternalLink className="size-3.5" />
-                      {translate('auto.components.artifacts.openInBrowser', 'Open in browser')}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      disabled={deleting}
-                      onSelect={() => deleteArtifact(item)}
-                    >
-                      <Trash2 className="size-3.5" />
-                      {translate(
-                        'auto.components.artifacts.ArtifactsPage.deleteArtifact',
-                        'Delete artifact'
-                      )}
-                    </DropdownMenuItem>
+                    {rowActions.map(
+                      ({ key, label, icon: Icon, onSelect, destructive, disabled }) => (
+                        <Fragment key={key}>
+                          {destructive ? <DropdownMenuSeparator /> : null}
+                          <DropdownMenuItem
+                            variant={destructive ? 'destructive' : 'default'}
+                            disabled={disabled}
+                            onSelect={onSelect}
+                          >
+                            <Icon className="size-3.5" />
+                            {label}
+                          </DropdownMenuItem>
+                        </Fragment>
+                      )
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent className="w-48">
-              <ContextMenuItem onSelect={() => void copyArtifactLink(item.shareUrl)}>
-                <Copy className="size-3.5" />
-                {translate('auto.components.artifacts.copyLink', 'Copy link')}
-              </ContextMenuItem>
-              <ContextMenuItem onSelect={() => openArtifactInBrowser(item.shareUrl)}>
-                <ExternalLink className="size-3.5" />
-                {translate('auto.components.artifacts.openInBrowser', 'Open in browser')}
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem
-                variant="destructive"
-                disabled={deleting}
-                onSelect={() => deleteArtifact(item)}
-              >
-                <Trash2 className="size-3.5" />
-                {translate(
-                  'auto.components.artifacts.ArtifactsPage.deleteArtifact',
-                  'Delete artifact'
-                )}
-              </ContextMenuItem>
+              {rowActions.map(({ key, label, icon: Icon, onSelect, destructive, disabled }) => (
+                <Fragment key={key}>
+                  {destructive ? <ContextMenuSeparator /> : null}
+                  <ContextMenuItem
+                    variant={destructive ? 'destructive' : 'default'}
+                    disabled={disabled}
+                    onSelect={onSelect}
+                  >
+                    <Icon className="size-3.5" />
+                    {label}
+                  </ContextMenuItem>
+                </Fragment>
+              ))}
             </ContextMenuContent>
           </ContextMenu>
         )

@@ -14,6 +14,7 @@ import { AppRootSurfaces } from './app-shell/AppRootSurfaces'
 import { AppWorkspaceShell } from './app-shell/AppWorkspaceShell'
 import { WindowControls } from './app-shell/WindowControls'
 import {
+  MAC_TRAFFIC_LIGHTS_WIDTH,
   WINDOW_CONTROLS_HEIGHT,
   WINDOW_CONTROLS_WIDTH,
   hasCustomTitleBar
@@ -52,6 +53,7 @@ function App(): React.JSX.Element {
     const root = document.documentElement.style
     root.setProperty('--window-controls-width', WINDOW_CONTROLS_WIDTH)
     root.setProperty('--window-controls-height', WINDOW_CONTROLS_HEIGHT)
+    root.setProperty('--mac-traffic-lights-width', MAC_TRAFFIC_LIGHTS_WIDTH)
   }, [])
 
   const { cancelReturnFocusFrame } = floatingWorkspace
@@ -76,7 +78,9 @@ function App(): React.JSX.Element {
           // Shared so surfaces can avoid the Windows/Linux window-controls overlay without hardcoding 138px everywhere.
           '--window-controls-width': WINDOW_CONTROLS_WIDTH,
           // Side-position activity bar uses this to push icons below the Windows/Linux window-controls overlay.
-          '--window-controls-height': WINDOW_CONTROLS_HEIGHT
+          '--window-controls-height': WINDOW_CONTROLS_HEIGHT,
+          // Full-bleed surfaces use this to keep the macOS traffic lights uncovered.
+          '--mac-traffic-lights-width': MAC_TRAFFIC_LIGHTS_WIDTH
         } as React.CSSProperties
       }
     >

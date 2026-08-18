@@ -149,7 +149,7 @@ describe('ArtifactsPage', () => {
       await screen.findByRole('heading', { level: 2, name: 'Quarterly report' })
     ).toBeInTheDocument()
     expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass(
-      'w-[min(96rem,calc(100vw-80px))]'
+      'w-[min(96rem,calc(100vw-var(--mac-traffic-lights-width,0px)))]'
     )
     // Why: the drawer is right-anchored under the fixed Windows/Linux window-controls
     // overlay, so its actions must sit inside an element inset past that overlay.
@@ -461,7 +461,7 @@ describe('ArtifactsPage', () => {
     const view = render(<ArtifactsPage />)
 
     await screen.findAllByText('Shared slug A')
-    await deleteSelectedArtifactFromRow()
+    await deleteFirstArtifactFromDrawerMenu()
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(2))
 
     mocks.authStatus = {
@@ -498,7 +498,7 @@ describe('ArtifactsPage', () => {
 
     await screen.findAllByText('Delete me')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    await deleteSelectedArtifactFromRow()
+    await deleteFirstArtifactFromDrawerMenu()
     await waitFor(() => expect(screen.queryByText('Delete me')).not.toBeInTheDocument())
     resolveRefresh({
       status: 'ok',
@@ -518,7 +518,7 @@ describe('ArtifactsPage', () => {
     await screen.findByRole('button', { name: /Skip me/ })
 
     mocks.rpc.mockResolvedValueOnce({ status: 'ok', value: undefined })
-    await deleteSelectedArtifactFromRow()
+    await deleteFirstArtifactFromDrawerMenu()
 
     await waitFor(() => expect(screen.queryByRole('button', { name: /Skip me/ })).toBeNull())
     expect(mocks.confirm).not.toHaveBeenCalled()
@@ -534,7 +534,7 @@ describe('ArtifactsPage', () => {
     await screen.findByRole('button', { name: /Ask me/ })
 
     mocks.rpc.mockResolvedValueOnce({ status: 'ok', value: undefined })
-    await deleteSelectedArtifactFromRow()
+    await deleteFirstArtifactFromDrawerMenu()
     await waitFor(() => expect(mocks.confirm).toHaveBeenCalledOnce())
 
     // Why: the dialog owns the checkbox; the page only supplies what to persist when it is checked.
@@ -567,7 +567,8 @@ describe('ArtifactsPage', () => {
   })
 })
 
-async function deleteSelectedArtifactFromRow(): Promise<void> {
+/** Opens the drawer from the first rendered row, then deletes through the drawer's action menu. */
+async function deleteFirstArtifactFromDrawerMenu(): Promise<void> {
   const row = document.querySelector('[data-slot="context-menu-trigger"]')
   if (!(row instanceof HTMLElement)) {
     throw new Error('Expected an artifact row')

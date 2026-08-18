@@ -40,6 +40,7 @@ describe('artifact display labels', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
     expect(formatArtifactUpdatedCompact('2026-08-08T12:00:00.000Z')).toBe('2 days ago')
+    expect(formatArtifactUpdatedCompact('not-a-date')).toBe('recently')
     expect(formatArtifactExpiryCompact('2026-08-20T12:00:00.000Z')).toBe('in 10 days')
     expect(formatArtifactExpiryCompact('2026-08-01T12:00:00.000Z')).toBe('Expired')
     expect(formatArtifactExpiryCompact('not-a-date')).toBe('Expiry unknown')

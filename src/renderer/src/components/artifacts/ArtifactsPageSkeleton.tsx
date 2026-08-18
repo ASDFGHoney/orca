@@ -20,6 +20,8 @@ export function ArtifactsPageSkeleton(): React.JSX.Element {
   return (
     <div
       className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-3 pb-4 md:px-5"
+      // Why: aria-label on a roleless div is not exposed to screen readers.
+      role="status"
       aria-busy="true"
       aria-label={translate(
         'auto.components.artifacts.ArtifactsPageSkeleton.loading',
