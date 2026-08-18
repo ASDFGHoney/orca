@@ -61,6 +61,11 @@ export class BrowserRouteSessionRegistry {
     this.maxPagesPerPartition = dependencies.maxPagesPerPartition ?? DEFAULT_MAX_PAGES_PER_PARTITION
   }
 
+  /** True while a partition is prepared or preparing; its storage must not be destroyed. */
+  isPartitionRetained(partition: string): boolean {
+    return this.live.has(partition) || this.pending.has(partition)
+  }
+
   isAllowedPartition(partition: string): boolean {
     return this.live.get(partition)?.pages.hasActivePages() ?? false
   }

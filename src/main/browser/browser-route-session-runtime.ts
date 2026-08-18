@@ -1,23 +1,22 @@
-import { app, session } from 'electron'
-import { join } from 'node:path'
-import { BrowserRoutePartitionBindingStore } from './browser-route-partition-binding-store'
+import { session } from 'electron'
+import {
+  configureBrowserRoutePartitionBindingsForOrcaProfile,
+  currentBrowserRoutePartitionBindingStore
+} from './browser-route-partition-binding-runtime'
 import { BrowserRouteSessionRegistry } from './browser-route-session-registry'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 import { browserSessionRegistry } from './browser-session-registry'
 
-const BINDING_FILE_NAME = 'browser-route-partition-bindings.json'
-const PARTITION_DATA_DIRECTORY_NAME = 'Partitions'
-let bindingFilePathOverride: string | null = null
 const routeWebContentsRegistryRef: {
   current: BrowserRouteWebContentsRegistry | null
 } = { current: null }
 
 const bindingStore = {
   get(partition: string): string | null {
-    return currentBindingStore().get(partition)
+    return currentBrowserRoutePartitionBindingStore().get(partition)
   },
   set(partition: string, fingerprint: string, storageScope: string): void {
-    currentBindingStore().set(partition, fingerprint, storageScope)
+    currentBrowserRoutePartitionBindingStore().set(partition, fingerprint, storageScope)
   }
 }
 
@@ -49,13 +48,9 @@ export const browserRouteWebContentsRegistry = new BrowserRouteWebContentsRegist
 })
 routeWebContentsRegistryRef.current = browserRouteWebContentsRegistry
 
-export function configureRouteSessionsForOrcaProfile(options: { profileDirectory: string }): void {
-  bindingFilePathOverride = join(options.profileDirectory, BINDING_FILE_NAME)
-}
-
-function currentBindingStore(): BrowserRoutePartitionBindingStore {
-  return new BrowserRoutePartitionBindingStore({
-    filePath: bindingFilePathOverride ?? join(app.getPath('userData'), BINDING_FILE_NAME),
-    partitionDataRoot: join(app.getPath('userData'), PARTITION_DATA_DIRECTORY_NAME)
-  })
+export function configureRouteSessionsForOrcaProfile(options: {
+  orcaProfileId: string
+  profileDirectory: string
+}): void {
+  configureBrowserRoutePartitionBindingsForOrcaProfile(options)
 }

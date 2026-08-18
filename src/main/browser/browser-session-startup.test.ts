@@ -23,6 +23,9 @@ function installRegistryMock(): {
   vi.doMock('./browser-route-session-runtime', () => ({
     configureRouteSessionsForOrcaProfile: configureRouteSessionsForOrcaProfileMock
   }))
+  vi.doMock('./browser-route-partition-storage-runtime', () => ({
+    collectOrphanedBrowserRoutePartitionStorage: vi.fn(async () => [])
+  }))
   vi.doMock('./paired-runtime-browser-client-host-runtime', () => ({
     configurePairedRuntimeBrowserClientHostsForOrcaProfile:
       configurePairedRuntimeBrowserClientHostsForOrcaProfileMock
@@ -77,6 +80,7 @@ describe('initializeBrowserSessionsForApp', () => {
       profileDirectory: '/profiles/local-work'
     })
     expect(configureRouteSessionsForOrcaProfileMock).toHaveBeenCalledWith({
+      orcaProfileId: 'local-work',
       profileDirectory: '/profiles/local-work'
     })
     expect(configurePairedRuntimeBrowserClientHostsForOrcaProfileMock).toHaveBeenCalledWith({

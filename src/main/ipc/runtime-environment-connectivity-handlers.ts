@@ -14,6 +14,7 @@ import { RuntimeRpcCallQueueOverloadError } from '../../shared/runtime-rpc-call-
 import type { RuntimeRpcFailure, RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { RuntimeStatus } from '../../shared/runtime-types'
 import type { Store } from '../persistence'
+import { clearBrowserRoutePartitionStorageForEnvironment } from '../browser/browser-route-partition-storage-runtime'
 import { verifyAndAddRuntimeEnvironmentFromPairingCode } from './runtime-environment-pairing-verification'
 import { closeRemoteRuntimeRequestConnection } from './runtime-environment-request-connections'
 import {
@@ -91,6 +92,10 @@ export function registerRuntimeEnvironmentConnectivityHandlers({
       manuallyDisconnectedEnvironmentIds.delete(removed.id)
       invalidateTransport(removed.id)
       closeLegacySelectorTransport(args.selector, removed.id)
+      // Why: removal is an explicit lifecycle decision, so its client-hosted browser storage goes too.
+      void clearBrowserRoutePartitionStorageForEnvironment(removed.id).catch((error) => {
+        console.warn('[runtime-environments] browser partition storage clear failed:', error)
+      })
       return { removed: redactRuntimeEnvironment(removed) }
     }
   )
