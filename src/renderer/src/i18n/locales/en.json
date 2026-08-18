@@ -40,6 +40,11 @@
       "preparationFailed": "Couldn't start the remote browser on this desktop. Check the paired connection and try again.",
       "unavailableTitle": "Client-hosted browser unavailable",
       "unavailableDescription": "This page is attached to a different desktop or is no longer available."
+    },
+    "reopenOnServer": {
+      "action": "Reopen on server",
+      "caveat": "This opens a new page on the remote host at this page’s last address. Signed-in and other transient page state may differ, and a page that came from a form submission opens blank.",
+      "failed": "Couldn't open this page on the remote host. Check the connection and try again."
     }
   },
   "githubChecks": {
@@ -73,6 +78,12 @@
       "menuBarIcon": {
         "title": "Show Menu Bar Icon",
         "description": "Keep an Orca shortcut and activity indicator in the macOS menu bar."
+      }
+    },
+    "browser": {
+      "clientHostedRemote": {
+        "title": "Host remote browser pages on this device",
+        "description": "Render remote workspace pages in a browser window on this desktop while their network traffic still goes through the remote host. Applies to new pages only — pages that are already open keep running where they are until you close or reopen them, and Orca never moves a live page."
       }
     }
   },

@@ -27,6 +27,8 @@ export function releaseBrowserRouteGuest(
   try {
     state.guest.off('destroyed', state.onDestroyed)
   } catch {}
+  state.popups?.dispose()
+  state.popups = null
   const callback = state.retirementCallback
   state.retirementCallback = null
   state.resolveDestroyed()

@@ -7,6 +7,10 @@ import {
   type BrowserRoutePageGuestIdentity
 } from './browser-route-page-authority'
 import { isRouteGuestDestroyed, isValidRoutePageRegistration } from './browser-route-guest-guard'
+import {
+  createBrowserRouteGuestPopupController,
+  type BrowserRouteGuestPopupDependencies
+} from './browser-route-guest-popups'
 import type { BrowserRouteGuestState } from './browser-route-webcontents-state'
 
 export function createBrowserRouteGuestState(
@@ -27,6 +31,8 @@ export function createBrowserRouteGuestState(
     guestAuthority: Symbol('browser-route-guest'),
     partition,
     registration: null,
+    popups: null,
+    isNavigationAllowed: (url) => callbacks.navigationAllowed(state, url),
     pageAuthority: null,
     navigationGranted: false,
     retirementRequested: false,
@@ -35,7 +41,7 @@ export function createBrowserRouteGuestState(
     whenDestroyed,
     resolveDestroyed,
     onNavigate: (event, url) => {
-      if (!callbacks.navigationAllowed(state, url)) {
+      if (!state.isNavigationAllowed(url)) {
         event.preventDefault()
       }
     },
@@ -48,8 +54,20 @@ export function createBrowserRouteGuestState(
   return state
 }
 
-export function installBrowserRouteGuestQuarantine(state: BrowserRouteGuestState): void {
-  state.guest.setWindowOpenHandler(() => ({ action: 'deny' }))
+export function installBrowserRouteGuestQuarantine(
+  state: BrowserRouteGuestState,
+  dependencies: BrowserRouteGuestPopupDependencies
+): void {
+  // Gesture-gated, same-partition popups: OAuth needs a real child window, and denying every
+  // window.open is what stranded those flows. Everything else about the envelope still applies.
+  const popups = createBrowserRouteGuestPopupController({
+    opener: state.guest,
+    partition: state.partition,
+    isNavigationAllowed: (url) => state.isNavigationAllowed(url),
+    dependencies
+  })
+  state.popups = popups
+  state.guest.setWindowOpenHandler(popups.windowOpenHandler)
   state.guest.on('will-navigate', state.onNavigate)
   state.guest.on('will-redirect', state.onNavigate)
   state.guest.on('render-process-gone', state.onRenderProcessGone)

@@ -988,6 +988,35 @@ Validation and review:
 | Old/mobile/web/ineligible and explicit-server behavior  | Preserved   | Omitted placement stays server-hosted; compatibility and fallback tests are green |
 | Cross-platform and packaged rolling releases            | Partial     | Released-schema skew and native package CI are green; physical gaps are accepted  |
 
+## Published stage: desktop placement UX and client-local OAuth popups
+
+- Settings → Browser now shows `Host remote browser pages on this device`, backed by the existing
+  global `browserClientHostedRemoteEnabled` flag (absent still reads as on). The row's help copy
+  states new-pages-only semantics explicitly: placement is fixed per page generation, so already
+  open pages keep running where they are until closed or reopened and Orca never migrates a live
+  page. The main-process placement handler reads the flag per call, so the toggle only ever affects
+  the next page creation.
+- `Reopen on server` is the one-tap escape hatch when a viewer cannot render a client-hosted page.
+  It appears in the client-hosted pane's unavailable state and, for a client-placed page a viewer
+  reached through the screencast pane, beside `Reconnect`. It calls the existing
+  `browser.tabCreate` path with `placementPreference: 'server'` (omitted placement is what the wire
+  reads as server) at the page's last committed URL. It creates a NEW page and never mutates,
+  closes, or migrates the client-hosted one; a blank, `file:`, or otherwise non-restorable last URL
+  opens blank rather than replaying something the new engine cannot reproduce. The copy states that
+  signed-in and other transient state may differ. No wire change.
+- Route guests no longer hard-deny every `window.open`. A popup is allowed only when the browser
+  process itself observed a recent activating input event on that WebContents (single-use, 1s
+  window, tracked from Electron's `input-event` rather than anything the page can synthesize), and
+  only for a destination the guest's own navigation policy already permits — so popups stay shut
+  before registration, before the navigation grant, after a fence, and for `file:`/blank targets.
+  Allowed popups open through the shared origin-bar child window, pinned to the opener's route
+  partition (its cookie jar and therefore its fixed SOCKS proxy), with `enforceBrowserRouteWebRtcPolicy`
+  applied before the popup's first load and fail-closed if it cannot be applied. Popups are
+  client-local transients: no runtime logical page, no wire surface, no agent targeting. They are
+  closed when their opener is fenced, retired, revoked, released, or destroyed, and descendants get
+  the same handler. Route popups never fall back to `shell.openExternal`, because the desktop's OS
+  browser would bypass the remote egress the route exists to enforce.
+
 ## Remaining implementation order
 
 1. Finish replacement-stack CI and fix only reproducible, actionable failures.

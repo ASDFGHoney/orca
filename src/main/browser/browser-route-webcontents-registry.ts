@@ -69,12 +69,17 @@ export class BrowserRouteWebContentsRegistry {
     }
     const state = this.createGuestState(guest, partition)
     try {
-      installBrowserRouteGuestQuarantine(state)
+      installBrowserRouteGuestQuarantine(state, {
+        getPartitionForSession: (routeSession) =>
+          this.dependencies.getPartitionForSession(routeSession)
+      })
     } catch {
+      state.popups?.dispose()
       closeRouteGuest(guest)
       return false
     }
     if (!enforceBrowserRouteWebRtcPolicy(guest, () => this.releaseGuest(state))) {
+      state.popups?.dispose()
       return false
     }
     let isValid = false
@@ -82,6 +87,7 @@ export class BrowserRouteWebContentsRegistry {
       isValid = isValidBlankRouteGuest(guest)
     } catch {}
     if (existing || this.guests.size >= this.maxGuests || !isValid) {
+      state.popups?.dispose()
       closeRouteGuest(guest)
       if (isRouteGuestDestroyed(guest)) {
         this.releaseGuest(state)
@@ -273,6 +279,8 @@ export class BrowserRouteWebContentsRegistry {
 
   private revokeGuest(state: GuestState): void {
     state.navigationGranted = false
+    // Popups are client-local transients of this page: revoking the page fences them too.
+    state.popups?.closeAll()
     closeRouteGuest(state.guest)
     if (isRouteGuestDestroyed(state.guest)) {
       this.releaseGuest(state)
@@ -285,6 +293,8 @@ export class BrowserRouteWebContentsRegistry {
     }
     state.retirementRequested = true
     state.navigationGranted = false
+    // Fence before the logical retirement round trip; a retiring page must not keep a live popup.
+    state.popups?.closeAll()
     const registration = state.registration
     const pageAuthority = state.pageAuthority
     if (!registration || pageAuthority === null) {
