@@ -5,11 +5,8 @@ import { release } from 'node:os'
 import { delimiter, win32 as pathWin32 } from 'node:path'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import { DaemonProtocolError } from './types'
-import {
-  getMarkerlessShellLaunchConfig,
-  getShellReadyLaunchConfig,
-  resolvePtyShellPath
-} from './shell-ready'
+import { getShellLaunchConfig, resolvePtyShellPath } from './shell-ready'
+import { selectShellStartupFeatures } from '../shell-startup-features'
 import { isValidPtySize, normalizePtySize } from './daemon-pty-size'
 import {
   ensureNodePtySpawnHelperExecutable,
@@ -824,33 +821,34 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
         `[daemon/pty] Preferred shell "${preferredShellPath}" is unavailable, fell back to "${shellPath}"`
       )
     }
-    // Why: OpenCode/Codex path restoration and OMP's typed-command status wrapper need shell-ready code after user startup files run.
-    let shellLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
-    if (opts.command && isCodexStartupCommand) {
-      const shouldWaitForShellReady = shouldUseShellReadyStartupDelivery({
-        command: opts.command,
-        startupCommandDelivery: opts.startupCommandDelivery
+    // Why: OpenCode/Codex path restoration, OMP's typed-command status wrapper,
+    // and the worktree HISTFILE repair all need shell-ready code that runs after
+    // the user's own startup files.
+    // Why: payload-bearing Codex startup text can be dropped by rc-file noise; plain Codex stays markerless for the startup-speed path.
+    const waitsForShellReady =
+      Boolean(opts.command) &&
+      (!isCodexStartupCommand ||
+        shouldUseShellReadyStartupDelivery({
+          command: opts.command as string,
+          startupCommandDelivery: opts.startupCommandDelivery
+        }))
+    // Why delete: ORCA_SHELL_FEATURES is Orca-owned, and only the launch config
+    // below may name features for this shell.
+    delete env.ORCA_SHELL_FEATURES
+    const shellLaunch = getShellLaunchConfig(
+      shellPath,
+      selectShellStartupFeatures({
+        shellPath,
+        env,
+        hasStartupCommand: Boolean(opts.command),
+        waitsForShellReady,
+        // Why identical: the identity marker exists so the readiness handshake
+        // can bind output to the right shell PID.
+        emitsStartupIdentity: waitsForShellReady
       })
-      // Why: payload-bearing Codex startup text can be dropped by rc-file noise; plain Codex stays markerless for the startup-speed path.
-      shellLaunch = shouldWaitForShellReady
-        ? getShellReadyLaunchConfig(shellPath)
-        : getMarkerlessShellLaunchConfig(shellPath)
-    } else if (opts.command) {
-      shellLaunch = getShellReadyLaunchConfig(shellPath)
-    } else {
-      shellLaunch =
-        env.ORCA_OPENCODE_CONFIG_DIR ||
-        env.ORCA_MIMOCODE_HOME ||
-        env.ORCA_OMP_STATUS_EXTENSION ||
-        env.ORCA_CODEX_HOME ||
-        env.ORCA_AGENT_TEAMS_SHIM_DIR
-          ? getMarkerlessShellLaunchConfig(shellPath)
-          : null
-    }
-    if (shellLaunch) {
-      Object.assign(env, shellLaunch.env)
-    }
-    shellArgs = shellLaunch?.args ?? ['-l']
+    )
+    Object.assign(env, shellLaunch.env)
+    shellArgs = shellLaunch.args ?? ['-l']
   }
   seedPowerlevel10kWizardEnv(env, { envToDelete: opts.envToDelete })
   if (

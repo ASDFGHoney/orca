@@ -11,14 +11,18 @@
  * Only a real zsh can show this: the string the wrapper emits looks correct
  * either way, and the whole bug lives in what /etc/zshrc does between the spawn
  * env and the first prompt.
+ *
+ * These tests drive the REAL launch decision (`selectShellStartupFeatures` +
+ * `getShellLaunchConfig`) rather than an inline copy of the gate, so a pane that
+ * Orca would not wrap cannot pass here by construction.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { getZshShellReadyRcfileContent } from './providers/local-pty-shell-ready-wrapper-generation'
-import { getZshEnvTemplate, ZSH_HISTFILE_RESTORE_BLOCK } from './shell-templates'
+import { getShellLaunchConfig } from './providers/local-pty-shell-ready'
+import { selectShellStartupFeatures } from './shell-startup-features'
 
 // Why probe and execute the same binary: guarding on `zsh` from PATH but then
 // running a hardcoded `/bin/zsh` lets the guard pass on a host that installs zsh
@@ -31,55 +35,142 @@ const ZSH_PATH = hasZsh
   : ''
 const itWithZsh = hasZsh ? it : it.skip
 
-function runLoginZsh(home: string, zdotdir: string, env: Record<string, string>): string {
+function runZsh(args: string[], env: Record<string, string>): string {
   // -o noglobalrcs is deliberately NOT passed: /etc/zshrc is the thing under test.
-  return execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
+  return execFileSync(ZSH_PATH, [...args, '-i', '-c', 'echo "RESULT=$HISTFILE"'], {
     encoding: 'utf8',
     timeout: 20_000,
-    env: {
-      PATH: '/usr/bin:/bin',
-      HOME: home,
-      ZDOTDIR: zdotdir,
-      ORCA_ORIG_ZDOTDIR: home,
-      ORCA_ZSHENV_SOURCE_DIR: home,
-      ...env
-    }
+    env: { PATH: '/usr/bin:/bin', ...env }
   })
 }
 
-describe('worktree-scoped HISTFILE survives zsh startup', () => {
-  const withWrapper = (run: (home: string, zdotdir: string) => void): void => {
-    const home = mkdtempSync(join(tmpdir(), 'orca-scoped-histfile-'))
-    const zdotdir = join(home, 'shell-ready', 'zsh')
-    mkdirSync(zdotdir, { recursive: true })
-    writeFileSync(join(zdotdir, '.zshenv'), getZshEnvTemplate(zdotdir))
-    writeFileSync(join(zdotdir, '.zshrc'), getZshShellReadyRcfileContent())
-    writeFileSync(join(zdotdir, '.zlogin'), `${ZSH_HISTFILE_RESTORE_BLOCK}\n`)
-    try {
-      run(home, zdotdir)
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
+/**
+ * True when this host's system zshrc is the thing that destroys HISTFILE.
+ *
+ * Why probed and not keyed off `process.platform`: macOS ships the clobber in
+ * /etc/zshrc, stock Ubuntu ships no such assignment, and a hardened corporate
+ * image can go either way. Assertions that only mean something under a clobber
+ * are skipped where there is none rather than asserting a tautology.
+ */
+const systemZshrcClobbersHistfile = (() => {
+  if (!hasZsh) {
+    return false
   }
+  const home = mkdtempSync(join(tmpdir(), 'orca-histfile-probe-'))
+  try {
+    const output = execFileSync(ZSH_PATH, ['-l', '-i', '-c', 'echo "RESULT=$HISTFILE"'], {
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: {
+        PATH: '/usr/bin:/bin',
+        HOME: home,
+        HISTFILE: join(home, 'injected-history')
+      }
+    })
+    return !output.includes(join(home, 'injected-history'))
+  } catch {
+    return false
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})()
 
-  itWithZsh('keeps the injected path that a system zshrc would otherwise clobber', () => {
-    withWrapper((home, zdotdir) => {
-      const scoped = join(home, 'orca-history', 'zsh_history')
+const itWithClobber = systemZshrcClobbersHistfile ? itWithZsh : it.skip
 
-      const output = runLoginZsh(home, zdotdir, { HISTFILE: scoped, ORCA_HISTFILE: scoped })
+/** The launch config Orca produces for a plain pane whose only Orca-owned
+ *  concern is a worktree-scoped HISTFILE. */
+function launchPlainHistoryPane(home: string, scopedHistfile: string) {
+  const env: Record<string, string> = {
+    HOME: home,
+    HISTFILE: scopedHistfile,
+    ORCA_HISTFILE: scopedHistfile
+  }
+  const features = selectShellStartupFeatures({
+    shellPath: ZSH_PATH,
+    env,
+    hasStartupCommand: false,
+    waitsForShellReady: false,
+    emitsStartupIdentity: false
+  })
+  const launch = getShellLaunchConfig(ZSH_PATH, features)
+  return {
+    features,
+    launch,
+    env: { ...env, ...launch.env, ...sandboxConfigDir(home) }
+  }
+}
 
-      expect(output).toContain(`RESULT=${scoped}`)
+// Why override: the launch config resolves the user's config dir from the real
+// process env, and these runs must resolve against the sandbox home instead.
+function sandboxConfigDir(home: string): Record<string, string> {
+  return { ORCA_ORIG_ZDOTDIR: home, ORCA_ZSHENV_SOURCE_DIR: home }
+}
+
+function withTempHome(run: (home: string) => void): void {
+  const home = mkdtempSync(join(tmpdir(), 'orca-scoped-histfile-'))
+  try {
+    run(home)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+}
+
+const histfileOf = (output: string): string =>
+  /^RESULT=(.*)$/m.exec(output)?.[1]?.trim() ?? '<unmatched>'
+
+describe('worktree-scoped HISTFILE survives zsh startup', () => {
+  itWithZsh('wraps a plain pane once Orca injected a worktree HISTFILE', () => {
+    withTempHome((home) => {
+      const { features, launch } = launchPlainHistoryPane(home, join(home, 'zsh_history'))
+
+      // The whole bug: this pane has no overlay env and no startup command, so
+      // before this change nothing pointed it at a wrapper at all.
+      expect(features).toEqual(['history'])
+      expect(launch.env.ZDOTDIR).toBeTruthy()
+      expect(launch.env.ORCA_SHELL_FEATURES).toBe('history')
     })
   })
 
-  itWithZsh('never leaves history inside Orca’s own wrapper directory', () => {
-    withWrapper((home, zdotdir) => {
+  itWithClobber('keeps the injected path that the system zshrc would otherwise clobber', () => {
+    withTempHome((home) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
+      const { launch, env } = launchPlainHistoryPane(home, scoped)
 
-      const output = runLoginZsh(home, zdotdir, { HISTFILE: scoped, ORCA_HISTFILE: scoped })
+      const output = runZsh(launch.args ?? ['-l'], env)
+
+      expect(histfileOf(output)).toBe(scoped)
+    })
+  })
+
+  itWithClobber('never leaves history inside Orca’s own wrapper directory', () => {
+    withTempHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const { launch, env } = launchPlainHistoryPane(home, scoped)
+
+      const output = runZsh(launch.args ?? ['-l'], env)
 
       // The exact failure mode of #11044: history written into shell-ready/zsh.
-      expect(output).not.toContain(zdotdir)
+      expect(output).not.toContain(launch.env.ZDOTDIR)
+    })
+  })
+
+  itWithZsh('consumes ORCA_HISTFILE so nothing the shell spawns can inherit it', () => {
+    withTempHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const { launch, env } = launchPlainHistoryPane(home, scoped)
+
+      const output = execFileSync(
+        ZSH_PATH,
+        [...(launch.args ?? ['-l']), '-i', '-c', 'echo "LEAK=[${ORCA_HISTFILE:-}]"'],
+        {
+          encoding: 'utf8',
+          timeout: 20_000,
+          env: { PATH: '/usr/bin:/bin', ...env }
+        }
+      )
+
+      // Root-cause fix for #11146: the variable no longer exists after use.
+      expect(output).toContain('LEAK=[]')
     })
   })
 
@@ -89,16 +180,23 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
     // so it is always set there; a stock Ubuntu zsh has no such file and leaves
     // it EMPTY. The contract is that Orca's wrapper does not change it either
     // way, which is the same assertion on both.
-    withWrapper((home, zdotdir) => {
-      const wrapped = runLoginZsh(home, zdotdir, {})
-      const unwrapped = execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
-        encoding: 'utf8',
-        timeout: 20_000,
-        env: { PATH: '/usr/bin:/bin', HOME: home }
+    withTempHome((home) => {
+      const features = selectShellStartupFeatures({
+        shellPath: ZSH_PATH,
+        env: { HOME: home, ORCA_CODEX_HOME: join(home, 'codex') },
+        hasStartupCommand: false,
+        waitsForShellReady: false,
+        emitsStartupIdentity: false
       })
+      const launch = getShellLaunchConfig(ZSH_PATH, features)
+      const wrapped = runZsh(launch.args ?? ['-l'], {
+        HOME: home,
+        ORCA_CODEX_HOME: join(home, 'codex'),
+        ...launch.env,
+        ...sandboxConfigDir(home)
+      })
+      const unwrapped = runZsh(['-l'], { HOME: home })
 
-      const histfileOf = (output: string): string =>
-        /^RESULT=(.*)$/m.exec(output)?.[1]?.trim() ?? '<unmatched>'
       expect(histfileOf(wrapped)).toBe(histfileOf(unwrapped))
       expect(wrapped).not.toContain('ORCA_HISTFILE')
     })

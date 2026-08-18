@@ -18,6 +18,7 @@ import {
 } from './pty-shell-utils'
 import { getRelayShellLaunchConfig, isRelayWslShell } from './pty-shell-launch'
 import { addWslEnvKeys } from '../shared/wsl-env'
+import { SHELL_STARTUP_FEATURE_ENV } from '../main/shell-startup-features'
 import { DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS } from '../shared/ssh-types'
 import { shouldUseShellReadyStartupDelivery } from '../shared/codex-startup-delivery'
 import { buildStartupCommandSubmission } from '../shared/startup-command-submission'
@@ -1590,7 +1591,7 @@ export class PtyHandler {
       emitStartupIdentity: shouldEmitShellReadyMarker
     })
     const rendererShellReadySupported =
-      !shouldProviderDeliverCommand && shellLaunch.env.ORCA_SHELL_READY_MARKER === '1'
+      !shouldProviderDeliverCommand && shellLaunch.supportsReadyMarker
 
     if (context?.signal?.aborted || context?.isStale()) {
       // Why: cancellation remains side-effect-free until the exact native spawn seam.
@@ -1610,11 +1611,11 @@ export class PtyHandler {
         cols,
         rows,
         cwd,
-        // Why: relay shells inherit process.env; don't let an ambient Orca marker enable shell-ready unless requested.
+        // Why the empty default: relay shells inherit process.env, and the launch
+        // config is the only thing allowed to name features for this shell.
         env: {
           ...spawnEnv,
-          ORCA_SHELL_READY_MARKER: '0',
-          ORCA_SHELL_STARTUP_IDENTITY: '0',
+          [SHELL_STARTUP_FEATURE_ENV]: '',
           ...shellLaunch.env
         }
       })
@@ -1671,11 +1672,10 @@ export class PtyHandler {
               command: shouldProviderDeliverCommand ? managedStartupCommand : null,
               providerDelivery: shouldProviderDeliverCommand,
               delivered: false,
-              waitForShellReady: shellLaunch.env.ORCA_SHELL_READY_MARKER === '1',
-              outputScanState:
-                shellLaunch.env.ORCA_SHELL_READY_MARKER === '1'
-                  ? createShellStartupOutputScanState()
-                  : null,
+              waitForShellReady: shellLaunch.supportsReadyMarker,
+              outputScanState: shellLaunch.supportsReadyMarker
+                ? createShellStartupOutputScanState()
+                : null,
               shellPid: null,
               promptProbe: null,
               timer: null
@@ -2189,8 +2189,7 @@ export class PtyHandler {
       // Why: no provider-delivered command is waiting for a ready marker.
       env: {
         ...spawnEnv,
-        ORCA_SHELL_READY_MARKER: '0',
-        ORCA_SHELL_STARTUP_IDENTITY: '0',
+        [SHELL_STARTUP_FEATURE_ENV]: '',
         ...shellLaunch.env
       }
     })

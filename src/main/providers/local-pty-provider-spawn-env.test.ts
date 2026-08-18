@@ -40,6 +40,8 @@ vi.mock('fs', () => ({
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
   chmodSync: vi.fn(),
+  renameSync: vi.fn(),
+  rmSync: vi.fn(),
   constants: { X_OK: 1 }
 }))
 
@@ -421,7 +423,7 @@ describe('LocalPtyProvider', () => {
       const spawnCall = spawnMock.mock.calls.at(-1)!
       expect(spawnCall[1]).toEqual(['-l'])
       expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
-      expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
+      expect(spawnCall[2].env.ORCA_SHELL_FEATURES).not.toContain('ready')
     })
 
     it('promotes the agent-teams shim onto the Windows `Path` spelling', async () => {

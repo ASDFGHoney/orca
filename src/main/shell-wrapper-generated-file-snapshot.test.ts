@@ -10,9 +10,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureShellReadyWrappersAt } from './providers/local-pty-shell-ready-wrapper-generation'
-import { getShellReadyLaunchConfig as getDaemonShellReadyLaunchConfig } from './daemon/shell-ready'
+import { getShellLaunchConfig as getDaemonShellLaunchConfig } from './daemon/shell-ready'
 import { ensureOverlayRestoreWrappers } from '../relay/pty-shell-overlay-wrappers'
-import { getShellReadyLaunchConfig as getLocalShellReadyLaunchConfig } from './providers/local-pty-shell-ready'
+import { getShellLaunchConfig as getLocalShellLaunchConfig } from './providers/local-pty-shell-ready'
+import { selectShellStartupFeatures } from './shell-startup-features'
+
+// Why the real selector: the snapshots then pin what a startup-command pane
+// actually launches with, not a hand-written feature list.
+const STARTUP_COMMAND_FEATURES = selectShellStartupFeatures({
+  shellPath: 'zsh',
+  env: {},
+  hasStartupCommand: true,
+  waitsForShellReady: true,
+  emitsStartupIdentity: true
+})
 
 const WRAPPER_FILES = [
   ['zsh-zshenv', join('zsh', '.zshenv')],
@@ -70,7 +81,7 @@ describePosix('generated shell wrapper files', () => {
 
   it('daemon wrappers', async () => {
     process.env.ORCA_USER_DATA_PATH = root
-    getDaemonShellReadyLaunchConfig('/bin/zsh')
+    getDaemonShellLaunchConfig('/bin/zsh', STARTUP_COMMAND_FEATURES)
     await expectWrapperFiles('daemon', join(root, 'shell-ready'))
   })
 
@@ -81,8 +92,8 @@ describePosix('generated shell wrapper files', () => {
 
   it('fish shell-ready init commands', async () => {
     process.env.ORCA_USER_DATA_PATH = root
-    const local = getLocalShellReadyLaunchConfig('/usr/bin/fish')
-    const daemon = getDaemonShellReadyLaunchConfig('/usr/bin/fish')
+    const local = getLocalShellLaunchConfig('/usr/bin/fish', STARTUP_COMMAND_FEATURES)
+    const daemon = getDaemonShellLaunchConfig('/usr/bin/fish', STARTUP_COMMAND_FEATURES)
     await expect(local.args?.[2]).toMatchFileSnapshot(snapshotPath('local', 'fish-init'))
     await expect(daemon.args?.[2]).toMatchFileSnapshot(snapshotPath('daemon', 'fish-init'))
   })
