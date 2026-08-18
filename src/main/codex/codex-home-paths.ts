@@ -1,6 +1,5 @@
 import {
   cpSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -18,6 +17,7 @@ import {
   markCopiedResource,
   targetIsOwnedFallbackCopy
 } from './codex-managed-home-resource-copy-marker'
+import { observeResolvedPathEntry } from './codex-path-observation'
 
 const CODEX_GLOBAL_INSTRUCTIONS_ENTRY = 'AGENTS.md'
 
@@ -103,11 +103,20 @@ function linkSystemCodexResource(
 ): void {
   const sourcePath = join(systemHomePath, entryName)
   const targetPath = join(managedHomePath, entryName)
-  if (!existsSync(sourcePath)) {
+  // Why: both branches below DELETE Orca's mirrored copy because the system
+  // resource "is not there". `existsSync` and the old `catch { return false }`
+  // both reported that for a source we merely could not read, so one denied
+  // read on ~/.codex/AGENTS.md removed the managed copy on the next launch.
+  // One resolved stat now answers reachability and regular-file-ness together.
+  const sourceObservation = observeResolvedPathEntry(sourcePath)
+  if (sourceObservation.kind === 'indeterminate') {
+    return
+  }
+  if (sourceObservation.kind === 'absent') {
     removeCopiedResourceIfOwned(targetPath, managedHomePath, entryName, sourcePath)
     return
   }
-  if (entryName === CODEX_GLOBAL_INSTRUCTIONS_ENTRY && !systemResourceIsRegularFile(sourcePath)) {
+  if (entryName === CODEX_GLOBAL_INSTRUCTIONS_ENTRY && !sourceObservation.value.isFile()) {
     removeCopiedResourceIfOwned(targetPath, managedHomePath, entryName, sourcePath)
     console.warn('[codex-home] Ignoring non-file system Codex resource:', entryName)
     return
@@ -202,14 +211,6 @@ function copySystemCodexResourceAsOwnedFallback(
       entryName,
       symlinkError ?? copyError
     )
-  }
-}
-
-function systemResourceIsRegularFile(sourcePath: string): boolean {
-  try {
-    return statSync(sourcePath).isFile()
-  } catch {
-    return false
   }
 }
 
