@@ -48,9 +48,10 @@ function repoMatchesGitLabSlug(repo: Repo | undefined, slug: ProjectSlug): boole
   if (!identityParts) {
     return 'unknown'
   }
-  // Why trust a project-path mismatch regardless of which remote it came from: resolved identities
-  // are re-probed on a 6h TTL, so a remote naming a different project is current evidence rather
-  // than a stale guess. `'unknown'` is left to mean no identity or an unexpanded SSH host alias.
+  // Why trust a project-path mismatch whichever remote it came from: a resolved identity is
+  // re-probed once a repo/project list sweep finds it past its ~6h TTL, so it is not frozen at the
+  // moment the repo was added. Accepted cost: only one remote is stored, so a fork whose `upstream`
+  // outranks its own `origin` loses bare-iid matches for MR URLs on the fork.
   return matchGitRemoteKeyParts(identityParts, gitLabProjectKeyParts(slug))
 }
 

@@ -545,6 +545,7 @@ describe('matchWorktreePaletteTaskUrl', () => {
   })
 
   it('declines a different GitLab project even when the identity came from upstream', () => {
+    // STA-4450: iids are per-project, so a bare `linkedGitLabMR` must not span projects.
     // `deriveGitRemoteIdentity` prefers `upstream`, so the fork's own `origin` is not visible here;
     // an MR URL from the fork itself is the accepted false negative of gating on the known project.
     const forkRepo: Repo = {
@@ -578,33 +579,6 @@ describe('matchWorktreePaletteTaskUrl', () => {
         repo: gitLabRepo('gitlab.com/acme/orca')
       })
     ).toBeNull()
-  })
-
-  it('does not surface an upstream-identified repo for an unrelated project iid', () => {
-    // STA-4450: iids are per-project, so a bare `linkedGitLabMR` must not span projects.
-    const upstreamRepo: Repo = {
-      ...gitLabRepo('gitlab.com/acme/orca'),
-      gitRemoteIdentity: {
-        canonicalKey: 'gitlab.com/acme/orca',
-        remoteName: 'upstream',
-        remoteUrl: 'git@gitlab.com:acme/orca.git'
-      }
-    }
-    const worktree = makeWorktree({ linkedGitLabMR: 17 })
-    expect(
-      matchWorktreePaletteTaskUrl({
-        worktree,
-        intent: parseCmdJTaskSourceUrl('https://gitlab.com/totally/unrelated/-/merge_requests/17')!,
-        repo: upstreamRepo
-      })
-    ).toBeNull()
-    expect(
-      matchWorktreePaletteTaskUrl({
-        worktree,
-        intent: parseCmdJTaskSourceUrl('https://gitlab.com/acme/orca/-/merge_requests/17')!,
-        repo: upstreamRepo
-      })
-    ).toMatchObject({ matchedFields: ['mr'] })
   })
 
   it('matches both GitLab issue URL forms and rejects other projects', () => {
