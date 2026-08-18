@@ -79,4 +79,87 @@ describe('status snapshot carries provider background-work evidence', () => {
       server.stop()
     }
   })
+
+  // Why: an interrupt CLEARS the inventory sets to stop gating the pane. That is not the provider
+  // reporting an all-clear, so it must leave the pane "never observed" (unknown) rather than
+  // manufacturing a positive `false` over a process that may still be running.
+  it('reports unknown, not a false all-clear, after an interrupt', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'UserPromptSubmit', prompt: 'start the dev server' })
+      )
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'Stop', background_tasks: [RUNNING_SHELL] })
+      )
+      expect(
+        server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)
+          ?.providerBackgroundWorkActive
+      ).toBe(true)
+
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'Stop', is_interrupt: true, background_tasks: [] })
+      )
+
+      expect(
+        server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)
+          ?.providerBackgroundWorkActive
+      ).toBeUndefined()
+    } finally {
+      server.stop()
+    }
+  })
+
+  // Why: a scheduled session cron is provider-owned work under this PTY just as a background shell
+  // is. A cron-only inventory must both COUNT as an observation and resolve to live work.
+  it('treats a cron-only inventory as observed live background work', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'UserPromptSubmit', prompt: 'schedule a job' })
+      )
+      await postHookEvent(
+        server,
+        buildBody({ hook_event_name: 'Stop', session_crons: [{ id: 'cron-1' }] })
+      )
+
+      const row = server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)
+      expect(row?.providerBackgroundWorkActive).toBe(true)
+    } finally {
+      server.stop()
+    }
+  })
+
+  // Why: a relayed host reports the inventory as a wire boolean. If the receiving runtime does not
+  // record that an observation happened, every remote pane stays "never observed" forever and a
+  // relayed all-clear can never make one eligible.
+  it('records remote/relayed background-work evidence as an observation', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          claudeRunningNonAgentTask: false,
+          payload: { state: 'done', prompt: 'remote turn', agentType: 'claude' }
+        },
+        'conn-remote-1'
+      )
+
+      const row = server.getStatusSnapshot().find((entry) => entry.paneKey === PANE)
+      expect(row?.state).toBe('done')
+      expect(row?.providerBackgroundWorkActive).toBe(false)
+    } finally {
+      server.stop()
+    }
+  })
 })

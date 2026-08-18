@@ -128,6 +128,10 @@ type ClaudeBackgroundEvidence = {
   hasRunningTask: boolean
   hasUnclassifiedTask: boolean
   hasActiveCron: boolean
+  /** Why: the rollback below must restore this too. A nested/duplicate/rejected local payload that
+   *  carried an inventory would otherwise leave the pane marked "observed" with the running sets
+   *  rolled back, and the tri-state would resolve to a positive `false` nobody reported. */
+  hasObservedInventory: boolean
 }
 
 type NormalizedLocalHook = {
@@ -1554,9 +1558,16 @@ export class AgentHookServer {
     if (agentType !== 'claude') {
       return undefined
     }
-    return this.state.claudeBackgroundInventoryObservedPaneKeys.has(paneKey)
-      ? this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
-      : undefined
+    if (!this.state.claudeBackgroundInventoryObservedPaneKeys.has(paneKey)) {
+      return undefined
+    }
+    // Why: a scheduled session cron is provider-owned work under this PTY exactly as a background
+    // shell is, and the wire definition already treats both as the broad signal. Omitting cron
+    // here would report an all-clear over a pane that still has work queued.
+    return (
+      this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+      this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
+    )
   }
 
   /** Stamps the resolved evidence so every accepted row restates it, on the live push and on the
@@ -2186,13 +2197,19 @@ export class AgentHookServer {
     return {
       hasRunningTask: this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey),
       hasUnclassifiedTask: this.state.claudeUnclassifiedBackgroundTaskPaneKeys.has(paneKey),
-      hasActiveCron: this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
+      hasActiveCron: this.state.claudeActiveSessionCronPaneKeys.has(paneKey),
+      hasObservedInventory: this.state.claudeBackgroundInventoryObservedPaneKeys.has(paneKey)
     }
   }
 
   private setClaudeBackgroundEvidence(
     paneKey: string,
-    { hasRunningTask, hasUnclassifiedTask, hasActiveCron }: ClaudeBackgroundEvidence
+    {
+      hasRunningTask,
+      hasUnclassifiedTask,
+      hasActiveCron,
+      hasObservedInventory
+    }: ClaudeBackgroundEvidence
   ): void {
     if (hasRunningTask) {
       this.state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
@@ -2208,6 +2225,11 @@ export class AgentHookServer {
       this.state.claudeActiveSessionCronPaneKeys.add(paneKey)
     } else {
       this.state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+    }
+    if (hasObservedInventory) {
+      this.state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
+    } else {
+      this.state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
     }
   }
 
@@ -2558,6 +2580,10 @@ export class AgentHookServer {
             } else {
               this.state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
             }
+            // Why: the host DID report an inventory — that is what put the boolean on the wire.
+            // Without recording it the tri-state stays "never observed" for every remote pane and
+            // a relayed `false` can never make one eligible.
+            this.state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
           }
         : undefined
     )

@@ -2663,8 +2663,14 @@ function updateClaudeRunningNonAgentTask(
     state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   }
   // Why: reached only when the payload actually carried background_tasks, so this is the one
-  // point where "Claude told us what is running" becomes true for the pane.
-  state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
+  // point where "Claude told us what is running" becomes true for the pane. An interrupt is
+  // excluded for the same reason the sets above are cleared: it ungates the pane rather than
+  // reporting an all-clear.
+  if (interrupted) {
+    state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
+  } else {
+    state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
+  }
 }
 
 function resolveClaudePaneState(
@@ -2785,6 +2791,10 @@ export function markClaudeLeadTurnInterrupted(state: HookListenerState, paneKey:
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
   state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  // Why: clearing the inventory sets here means "stop gating the pane", NOT "the provider reported
+  // an all-clear". Leaving the observation behind would let the tri-state resolve to a positive
+  // `false` from evidence nobody reported, over a process that may still be running.
+  state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
 }
 
 /** Rebuild a pane's working roster from a persisted snapshot; live activity confirms a seed, a complete task inventory may reap an unconfirmed one whose finish hook arrived while Orca was offline. */
@@ -3053,6 +3063,11 @@ function normalizeClaudeEvent(
     } else {
       state.claudeActiveSessionCronPaneKeys.delete(paneKey)
     }
+    // Why: a cron inventory is background-work evidence too. Without this a cron-only pane stays
+    // "never observed" forever and can never become hibernatable.
+    if (interrupted !== true) {
+      state.claudeBackgroundInventoryObservedPaneKeys.add(paneKey)
+    }
   } else if (eventAgentId === undefined && isTurnBoundary && backgroundTasks.present) {
     // Why: current Claude may omit an empty cron inventory while still emitting background_tasks.
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
@@ -3160,6 +3175,9 @@ function normalizeClaudeEvent(
     state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
     state.claudeUnclassifiedBackgroundTaskPaneKeys.delete(paneKey)
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+    // Why: an interrupt ungates the pane; it is not a reported all-clear. See
+    // markClaudeLeadTurnInterrupted.
+    state.claudeBackgroundInventoryObservedPaneKeys.delete(paneKey)
   }
 
   const effectiveState = resolveClaudePaneState(state, paneKey, {

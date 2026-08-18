@@ -125,6 +125,12 @@ describe('AgentHookServer listener replay', () => {
       expect(server.getStatusSnapshot()[0]).toEqual(waiting)
       expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(true)
       expect(server._getStateForTests().claudeActiveSessionCronPaneKeys.has(PANE)).toBe(true)
+      // Why: the observation marker rides the same snapshot/restore as the sets above. A rejected
+      // payload must not be able to move it either, or the tri-state could resolve from evidence
+      // that was never accepted.
+      expect(server._getStateForTests().claudeBackgroundInventoryObservedPaneKeys.has(PANE)).toBe(
+        true
+      )
     } finally {
       server.stop()
     }
