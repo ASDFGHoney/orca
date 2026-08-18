@@ -56,7 +56,6 @@ import { isENOENT } from '../ipc/filesystem-path-containment'
 import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import { searchQuickOpenFilePaths as searchHostQuickOpenFilePaths } from '../ipc/filesystem-search-file-paths'
 import { isQuickOpenQueryTooLarge, QuickOpenPathRanker } from '../../shared/quick-open-path-search'
-import { QUICK_OPEN_LISTING_MAX_RESULTS } from '../../shared/quick-open-listing-limits'
 import { limitQuickOpenFilesBySerializedBytes } from '../../shared/quick-open-transport-budget'
 import { searchWithGitGrep } from '../ipc/filesystem-search-git'
 import { getLocalGitOptionsForRegisteredWorktree } from '../ipc/local-worktree-runtime-options'
@@ -105,6 +104,8 @@ import {
 } from '../../shared/node-bounded-file-reader'
 
 const MOBILE_FILE_LIST_LIMIT = 5000
+// Legacy SSH relays cannot enforce a byte budget; 32 max-length paths stay under one 4 MiB frame.
+const QUICK_OPEN_LEGACY_REMOTE_RESULT_LIMIT = 32
 const MOBILE_FILE_PATH_SEARCH_CACHE_LIMIT = 20_000
 const MOBILE_FILE_PATH_SEARCH_CACHE_ENTRIES = 8
 const MOBILE_FILE_PATH_SEARCH_CACHE_TTL_MS = 30_000
@@ -2349,11 +2350,11 @@ export class RuntimeFileCommands {
       return { paths: [], totalCount: 0, truncated: false }
     }
     if (!(await provider.supportsQuickOpenSearch?.({ signal }))) {
-      // Old relays ignore searchQuery. Preserve their legacy bounded listing
-      // semantics and rank locally instead of presenting arbitrary paths as matches.
+      // Old relays ignore searchQuery. Keep the compatibility request below the
+      // 4 MiB frame ceiling even when legacy paths are near the 64 KiB path cap.
       const legacyFiles = await provider.listFiles(rootPath, {
         excludePaths,
-        maxResults: QUICK_OPEN_LISTING_MAX_RESULTS,
+        maxResults: QUICK_OPEN_LEGACY_REMOTE_RESULT_LIMIT,
         signal
       })
       const ranker = new QuickOpenPathRanker(query, limit)
@@ -2363,7 +2364,8 @@ export class RuntimeFileCommands {
       const result = ranker.result()
       return {
         ...result,
-        truncated: legacyFiles.length >= QUICK_OPEN_LISTING_MAX_RESULTS || result.totalCount > limit
+        truncated:
+          legacyFiles.length >= QUICK_OPEN_LEGACY_REMOTE_RESULT_LIMIT || result.totalCount > limit
       }
     }
     const files = await provider.listFiles(rootPath, {

@@ -168,6 +168,28 @@ describe('runtime file client', () => {
     expect(fsListFiles).not.toHaveBeenCalled()
   })
 
+  it('fails closed with update guidance when a paired host lacks path search', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-legacy',
+      ok: false,
+      error: { code: 'method_not_found', message: 'Unknown method: files.searchPaths' },
+      _meta: { runtimeId: 'legacy-runtime' }
+    })
+
+    await expect(
+      searchRuntimeFilePaths(
+        {
+          settings: { activeRuntimeEnvironmentId: 'env-1' },
+          worktreeId: 'wt-1',
+          worktreePath: '/remote/repo'
+        },
+        { query: 'target', limit: 32 }
+      )
+    ).rejects.toThrow(
+      'Quick Open search requires a newer paired Orca host. Update the remote host and reconnect.'
+    )
+  })
+
   it('re-applies exclusions for legacy runtimes that ignore quick-open fields', async () => {
     runtimeEnvironmentCall.mockResolvedValue({
       id: 'rpc-legacy',

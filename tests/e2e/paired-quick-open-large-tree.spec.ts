@@ -59,6 +59,22 @@ async function expectQuickOpenAndRuntimeHealthy(
   const input = dialog.getByPlaceholder('Go to file...')
   for (const targetPath of [fixture.gitIgnoredTargetPath, fixture.orcaIgnoredTargetPath]) {
     const filename = targetPath.split('/').at(-1)!
+    const stat = await client.page.evaluate(
+      async ({ environmentId, worktreeId, targetPath }) => {
+        const response = await window.api.runtimeEnvironments.call({
+          selector: environmentId,
+          method: 'files.stat',
+          params: { worktree: `id:${worktreeId}`, relativePath: targetPath }
+        })
+        if (!response.ok) {
+          throw new Error(`files.stat oracle failed: ${JSON.stringify(response)}`)
+        }
+        return response.result
+      },
+      { environmentId: client.environmentId, worktreeId, targetPath }
+    )
+    expect(stat.isDirectory).toBe(false)
+    expect(stat.size).toBeGreaterThanOrEqual(0)
     await input.fill(filename.slice(0, 8))
     await input.fill(filename.slice(0, 18))
     await input.fill(filename)

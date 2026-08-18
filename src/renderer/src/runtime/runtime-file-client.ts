@@ -71,6 +71,9 @@ export type RuntimeFileOperationArgs = {
   expectedExternalSshTargetId?: string
 }
 
+const QUICK_OPEN_REMOTE_UPDATE_REQUIRED_MESSAGE =
+  'Quick Open search requires a newer paired Orca host. Update the remote host and reconnect.'
+
 function assertExternalSshReadOwnership(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   connectionId: string | undefined,
@@ -991,18 +994,26 @@ export async function searchRuntimeFilePaths(
   if (target.kind !== 'environment' || !context.worktreeId) {
     return { files: [], truncated: false }
   }
-  const result = await callRuntimeRpc<RuntimeFileListResult>(
-    target,
-    'files.searchPaths',
-    {
-      worktree: toRuntimeWorktreeSelector(context.worktreeId),
-      query: args.query,
-      limit: args.limit,
-      excludePaths: args.excludePaths,
-      mode: 'quick-open'
-    },
-    { timeoutMs: 15_000, ...(args.signal === undefined ? {} : { signal: args.signal }) }
-  )
+  let result: RuntimeFileListResult
+  try {
+    result = await callRuntimeRpc<RuntimeFileListResult>(
+      target,
+      'files.searchPaths',
+      {
+        worktree: toRuntimeWorktreeSelector(context.worktreeId),
+        query: args.query,
+        limit: args.limit,
+        excludePaths: args.excludePaths,
+        mode: 'quick-open'
+      },
+      { timeoutMs: 15_000, ...(args.signal === undefined ? {} : { signal: args.signal }) }
+    )
+  } catch (error) {
+    if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
+      throw new Error(QUICK_OPEN_REMOTE_UPDATE_REQUIRED_MESSAGE)
+    }
+    throw error
+  }
   const excludePrefixes = buildExcludePathPrefixes(
     context.worktreePath ?? result.rootPath,
     args.excludePaths

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import {
   checkRgAvailableMock,
   getLocalGitOptionsForRegisteredWorktreeMock,
+  getSshFilesystemProviderMock,
   resolveAuthorizedPathMock,
   searchWithGitGrepMock,
   wslAwareSpawnMock
@@ -224,5 +225,31 @@ describe('RuntimeFileCommands', () => {
     ).resolves.toBe(fallback)
     expect(checkRgAvailableMock).toHaveBeenCalledWith('C:\\repo', 'Ubuntu')
     expect(wslAwareSpawnMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps legacy SSH Quick Open replies within the frame-sized result bound', async () => {
+    const resolveRuntimeFileTarget = vi.fn(async () => ({
+      worktree: { id: 'wt-1', repoId: 'repo-1', path: '/repo' },
+      connectionId: 'ssh-1'
+    }))
+    const { commands } = createRuntimeFileCommands({ resolveRuntimeFileTarget })
+    const listFiles = vi.fn(async () => ['src/target.ts'])
+    getSshFilesystemProviderMock.mockReturnValue({
+      supportsQuickOpenSearch: vi.fn(async () => false),
+      listFiles
+    })
+
+    await expect(commands.searchQuickOpenFilePaths('id:wt-1', 'target', 32)).resolves.toMatchObject(
+      {
+        files: [{ relativePath: 'src/target.ts' }],
+        totalCount: 1,
+        truncated: false
+      }
+    )
+    expect(listFiles).toHaveBeenCalledWith('/repo', {
+      excludePaths: undefined,
+      maxResults: 32,
+      signal: undefined
+    })
   })
 })
