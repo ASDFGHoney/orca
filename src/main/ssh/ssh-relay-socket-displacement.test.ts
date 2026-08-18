@@ -105,7 +105,7 @@ function execChannelCommands(conn: SshConnection): string[] {
 describe('deployAndLaunchRelay socket displacement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Why: an ordered queue drives the probes below; the default only absorbs the
+    // Why: an ordered queue drives the decision below; the default only absorbs the
     // best-effort teardown commands deploy issues after the decision under test.
     vi.mocked(execCommand).mockReset().mockResolvedValue('')
     vi.mocked(waitForSentinel)
@@ -113,71 +113,65 @@ describe('deployAndLaunchRelay socket displacement', () => {
       .mockResolvedValue({ write: vi.fn(), onData: vi.fn(), onClose: vi.fn() } as never)
   })
 
-  it('never removes or replaces a socket a live relay still owns', async () => {
+  it('never replaces a socket a live relay still owns', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand).mockResolvedValueOnce('LIVE') // owner probe
+    vi.mocked(execCommand).mockResolvedValueOnce('LIVE') // socket release: a live owner
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
-    expect(execCommands().some((command) => command.startsWith('rm -f'))).toBe(false)
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(false)
     // Why: the credential is rotated per fresh launch, so writing one would lock the
-    // surviving relay out of every later --connect even if the socket were left alone.
+    // surviving relay out of every later --connect even with its socket left alone.
     expect(writeRelayEndpointCredential).not.toHaveBeenCalled()
   })
 
-  it('never removes or replaces a socket whose owner it could not probe', async () => {
+  it('never replaces a socket whose owner it could not prove gone', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand).mockResolvedValueOnce('') // owner probe produced no verdict
+    vi.mocked(execCommand).mockResolvedValueOnce('') // release produced no verdict
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
-    expect(execCommands().some((command) => command.startsWith('rm -f'))).toBe(false)
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(false)
+    expect(writeRelayEndpointCredential).not.toHaveBeenCalled()
   })
 
-  it('still clears a stale socket whose owner is proven gone', async () => {
+  it('still launches fresh once the host reports the stale socket released', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel)
       .mockRejectedValueOnce(new Error('relay reconnect refused'))
       .mockResolvedValue({ write: vi.fn(), onData: vi.fn(), onClose: vi.fn() } as never)
     queueDeployUpToOccupiedSocket()
     vi.mocked(execCommand)
-      .mockResolvedValueOnce('EXITED') // owner probe: connect refused
-      .mockResolvedValueOnce('') // rm -f
+      .mockResolvedValueOnce('RELEASED') // socket release: nothing owned the path
       .mockResolvedValueOnce('READY') // socket readiness poll
 
     await expect(deployAndLaunchRelay(conn)).resolves.toMatchObject({ nodePath: '/usr/bin/node' })
 
-    const removals = execCommands().filter((command) => command.startsWith('rm -f'))
-    expect(removals).toHaveLength(1)
-    expect(removals[0]).toContain('.sock')
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(true)
   })
 
-  // Moved here from ssh-relay-deploy.test.ts: the removal it guards now lives behind the owner probe.
-  it('does not launch fresh after unconfirmed stale-socket cleanup', async () => {
+  // Moved here from ssh-relay-deploy.test.ts: the removal it guards now lives inside the
+  // release command, so an unconfirmed close of that command must still stop the launch.
+  it('does not launch fresh after an unconfirmed socket release', async () => {
     const conn = makeMockConnection()
-    const unconfirmedCleanup = Object.assign(new Error('socket cleanup still running'), {
+    const unconfirmedRelease = Object.assign(new Error('socket release still running'), {
       sshChannelCloseConfirmed: false
     })
-    vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('stale relay reconnect failed'))
+    vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand)
-      .mockResolvedValueOnce('EXITED') // owner probe
-      .mockRejectedValueOnce(unconfirmedCleanup)
+    vi.mocked(execCommand).mockRejectedValueOnce(unconfirmedRelease)
 
-    await expect(deployAndLaunchRelay(conn)).rejects.toBe(unconfirmedCleanup)
+    await expect(deployAndLaunchRelay(conn)).rejects.toBe(unconfirmedRelease)
 
     expect(execChannelCommands(conn)).toHaveLength(1)
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(false)
   })
 
-  it('probes the socket by connecting to it, not by testing the inode again', async () => {
+  it('decides with one host command that probes and unlinks together', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
@@ -185,9 +179,13 @@ describe('deployAndLaunchRelay socket displacement', () => {
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
-    const ownerProbe = execCommands().at(-1) ?? ''
-    expect(ownerProbe).toContain('/usr/bin/node')
-    expect(ownerProbe).toContain('connect')
-    expect(ownerProbe).not.toContain('test -S')
+    // Why one command: probing here and unlinking in a second round-trip leaves a window
+    // in which another client can bind the path, and the removal would then strand it.
+    const release = execCommands().at(-1) ?? ''
+    expect(release).toContain('/usr/bin/node')
+    expect(release).toContain('connect')
+    expect(release).toContain('unlinkSync')
+    expect(release).not.toContain('test -S')
+    expect(execCommands().some((command) => command.startsWith('rm -f'))).toBe(false)
   })
 })

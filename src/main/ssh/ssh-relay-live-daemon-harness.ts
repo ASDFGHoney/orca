@@ -4,15 +4,13 @@
 // Needs `pnpm build:relay` — callers skip when relayBundleDirForHost() is null.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { RelayBridge } from './ssh-relay-bridge-client'
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { cpSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import type { SshConnection } from './ssh-connection'
-
-const FRAME_HEADER_BYTES = 13
-const MESSAGE_TYPE_REGULAR = 1
 
 export function relayBundleDirForHost(repoRoot: string): string | null {
   const dir = join(repoRoot, 'out', 'relay', `${process.platform}-${process.arch}`)
@@ -80,7 +78,7 @@ export function waitForExit(child: ChildProcess, timeoutMs = 20_000): Promise<nu
 export class LiveRelayFixture {
   readonly sockPath: string
   readonly credentialFile: string
-  private readonly children = new Set<ChildProcess>()
+  private readonly bridges = new Set<ChildProcess>()
   private readonly daemonPids = new Set<number>()
 
   constructor(
@@ -124,7 +122,8 @@ export class LiveRelayFixture {
     if (child.pid) {
       this.daemonPids.add(child.pid)
     }
-    this.children.add(child)
+    // Why not tracked as a bridge child: bridges are SIGKILLed on teardown, and a daemon
+    // killed that way never runs the SIGTERM shutdown that disposes its PTYs.
     return child
   }
 
@@ -153,15 +152,15 @@ export class LiveRelayFixture {
 
   openBridge(): RelayBridge {
     const bridge = new RelayBridge(this.relayDir, this.sockPath, this.credentialFile)
-    this.children.add(bridge.process)
+    this.bridges.add(bridge.process)
     return bridge
   }
 
   /** Ask each daemon to shut down (which disposes its PTYs), then kill whatever is left. */
   async dispose(): Promise<void> {
-    for (const child of this.children) {
+    for (const bridge of this.bridges) {
       try {
-        child.kill('SIGKILL')
+        bridge.kill('SIGKILL')
       } catch {
         /* already gone */
       }
@@ -173,126 +172,28 @@ export class LiveRelayFixture {
         /* already gone */
       }
     }
-    for (let attempt = 0; attempt < 30 && [...this.daemonPids].some(isProcessAlive); attempt++) {
+    for (let attempt = 0; attempt < 50 && [...this.daemonPids].some(isProcessAlive); attempt++) {
       await delay(100)
     }
+    // Why a tree kill as the fallback: a daemon that ignored SIGTERM still owns PTY shells,
+    // and killing it alone would reparent them to init — the leak these tests are about.
     for (const pid of this.daemonPids) {
       killProcessTree(pid)
     }
   }
-}
 
-/** A `relay.js --connect` bridge, driven over its stdio like the SSH exec channel does. */
-export class RelayBridge {
-  readonly process: ChildProcess
-  private buffer = Buffer.alloc(0)
-  private sentinelSeen = false
-  private nextId = 1
-  private readonly pending = new Map<
-    number,
-    { resolve: (value: never) => void; reject: (error: Error) => void }
-  >()
-
-  constructor(relayDir: string, sockPath: string, credentialFile: string) {
-    this.process = spawn(
-      process.execPath,
-      [
-        join(relayDir, 'relay.js'),
-        '--connect',
-        '--sock-path',
-        sockPath,
-        '--credential-file',
-        credentialFile
-      ],
-      { cwd: relayDir, stdio: ['pipe', 'pipe', 'pipe'] }
-    )
-    this.process.stderr?.resume()
-    this.process.stdout?.on('data', (chunk: Buffer) => this.ingest(chunk))
-  }
-
-  private ingest(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk])
-    while (!this.sentinelSeen) {
-      const newline = this.buffer.indexOf('\n')
-      if (newline === -1) {
-        return
-      }
-      // Why: consume whole lines until the sentinel; a stray pre-sentinel line would
-      // otherwise be mistaken for it and desynchronise every frame after it.
-      const line = this.buffer.subarray(0, newline).toString('utf-8')
-      this.buffer = this.buffer.subarray(newline + 1)
-      this.sentinelSeen = line.includes('ORCA-RELAY')
-    }
-    while (this.buffer.length >= FRAME_HEADER_BYTES) {
-      const length = this.buffer.readUInt32BE(9)
-      if (this.buffer.length < FRAME_HEADER_BYTES + length) {
-        return
-      }
-      const type = this.buffer[0]
-      const payload = this.buffer.subarray(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + length)
-      this.buffer = this.buffer.subarray(FRAME_HEADER_BYTES + length)
-      if (type !== MESSAGE_TYPE_REGULAR) {
-        continue
-      }
-      let message: { id?: number; result?: unknown; error?: unknown }
-      try {
-        message = JSON.parse(payload.toString('utf-8'))
-      } catch {
-        continue
-      }
-      const waiter = message.id === undefined ? undefined : this.pending.get(message.id)
-      if (!waiter || message.id === undefined) {
-        continue
-      }
-      this.pending.delete(message.id)
-      if (message.error) {
-        waiter.reject(new Error(JSON.stringify(message.error)))
-      } else {
-        waiter.resolve(message.result as never)
-      }
-    }
-  }
-
-  async waitForSentinel(timeoutMs = 20_000): Promise<void> {
+  /** Resolve once the daemon's log records that its last client went away. */
+  async waitForClientDisconnect(label: string, timeoutMs = 20_000): Promise<void> {
+    const logPath = join(this.relayDir, `relay-${label}.log`)
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
-      if (this.sentinelSeen) {
+      const log = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : ''
+      if (log.includes('Socket client closed (clients=0)')) {
         return
       }
       await delay(50)
     }
-    throw new Error('relay --connect never emitted its sentinel')
-  }
-
-  request<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 20_000): Promise<T> {
-    const id = this.nextId++
-    const payload = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, method, params }), 'utf-8')
-    const header = Buffer.alloc(FRAME_HEADER_BYTES)
-    header[0] = MESSAGE_TYPE_REGULAR
-    header.writeUInt32BE(0, 1)
-    header.writeUInt32BE(0, 5)
-    header.writeUInt32BE(payload.length, 9)
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`${method} timed out`))
-      }, timeoutMs)
-      this.pending.set(id, {
-        resolve: ((value: T) => {
-          clearTimeout(timer)
-          resolve(value)
-        }) as (value: never) => void,
-        reject: (error: Error) => {
-          clearTimeout(timer)
-          reject(error)
-        }
-      })
-      this.process.stdin?.write(Buffer.concat([header, payload]))
-    })
-  }
-
-  close(): void {
-    this.process.kill('SIGKILL')
+    throw new Error(`relay ${label} never reported its last client closing`)
   }
 }
 
@@ -300,15 +201,19 @@ export class RelayBridge {
  * An SshConnection whose exec runs on this machine, so production command
  * strings and production execCommand parsing are both exercised for real.
  */
-export function createLocalShellConnection(): SshConnection {
+export function createLocalShellConnection(options?: { path?: string }): SshConnection {
   return {
     usesSystemSshTransport: () => false,
     canRunConcurrentExecCommands: () => true,
-    exec: (command: string) => Promise.resolve(createLocalShellChannel(command))
+    exec: (command: string) => Promise.resolve(createLocalShellChannel(command, options?.path))
   } as unknown as SshConnection
 }
 
-function createLocalShellChannel(command: string): EventEmitter & {
+/** `path` overrides PATH, so a caller can model a host without lsof or pgrep. */
+function createLocalShellChannel(
+  command: string,
+  path?: string
+): EventEmitter & {
   stderr: EventEmitter
   close: () => void
   resume: () => void
@@ -322,7 +227,9 @@ function createLocalShellChannel(command: string): EventEmitter & {
   stderr.resume = (): void => {}
   channel.stderr = stderr
   channel.resume = (): void => {}
-  const child = spawn('/bin/sh', ['-c', command])
+  const child = spawn('/bin/sh', ['-c', command], {
+    env: path === undefined ? process.env : { ...process.env, PATH: path }
+  })
   channel.close = (): void => {
     child.kill('SIGKILL')
   }

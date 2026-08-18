@@ -384,6 +384,7 @@ jobs:
             --exclude=src/shared/startup-shell-portability.live-shell.test.ts \
             --exclude=src/shared/posix-command-path-lookup.test.ts \
             --exclude=tests/e2e/cross-version-wire/** \
+            --exclude=src/main/ssh/ssh-relay-socket-owner.integration.test.ts \
             --shard=${{ matrix.shard }}/${{ matrix.shard_total }}
 
   cross-version-wire:
@@ -412,6 +413,33 @@ jobs:
       # lane cannot report success while running zero tests.
       - name: Old/new client and server terminal journey
         run: pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts
+
+  relay_socket_ownership:
+    name: relay socket ownership
+    runs-on: ubuntu-latest
+    env:
+      # Why: the oracle skips itself when out/relay is absent, which is right on a
+      # developer machine and wrong here — this job exists to run it, so a skip would
+      # report green with no daemon ever started. Turns that skip into a failure.
+      ORCA_REQUIRE_RELAY_BUNDLE: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-node-dependencies
+
+      # Why: the oracle runs real relay daemons, which need the bundled relay.js the
+      # sharded test lane never builds.
+      - name: Build relay companions
+        run: pnpm run build:relay
+
+      - name: Test relay socket ownership against live daemons
+        run: |
+          pnpm exec vitest run --config config/vitest.config.ts \
+            src/main/ssh/ssh-relay-socket-owner.integration.test.ts
 
   managed_hook_node18:
     name: managed hooks on Node 18
