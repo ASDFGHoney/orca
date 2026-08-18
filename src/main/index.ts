@@ -4,6 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, type Tray } from 'electron'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
+import { disableMacAutomaticPeriodSubstitution } from './macos-automatic-period-substitution'
 import { electronApp, is } from '@electron-toolkit/utils'
 import {
   Store,
@@ -2182,6 +2183,8 @@ function shouldSuppressCodexAutoApprovalSyntheticTitleFromHook(args: {
 
 void app.whenReady().then(async () => {
   logStartupMilestone('app-ready')
+  // Why: before any window exists, so the first terminal never inherits the substitution (#11504).
+  disableMacAutomaticPeriodSubstitution()
   installMainThreadHangWatchdog({ userDataPath: getCanonicalUserDataPath() })
   const hangDetection = consumeHangDetectionMarker(
     hangDetectionMarkerPath(getCanonicalUserDataPath())
