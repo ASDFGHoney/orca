@@ -18,11 +18,16 @@ import { join } from 'node:path'
 const denials = vi.hoisted(() => {
   const state = {
     paths: new Set<string>(),
+    readOnlyPaths: new Set<string>(),
     deny(path: string): void {
       state.paths.add(path)
     },
     reset(): void {
       state.paths.clear()
+      state.readOnlyPaths.clear()
+    },
+    denyReads(path: string): void {
+      state.readOnlyPaths.add(path)
     },
     has(target: unknown): boolean {
       return typeof target === 'string' && state.paths.has(target)
@@ -46,7 +51,12 @@ vi.mock('node:fs', async (importOriginal) => {
   const guard = (fn: unknown, syscall: string): unknown => {
     const original = fn as (...args: unknown[]) => unknown
     const wrapped = (...args: unknown[]): unknown => {
-      if (denials.has(args[0])) {
+      if (
+        denials.has(args[0]) ||
+        ((syscall === 'read' || syscall === 'copy') &&
+          typeof args[0] === 'string' &&
+          denials.readOnlyPaths.has(args[0]))
+      ) {
         denials.fail(args[0] as string, syscall)
       }
       return original(...args)
@@ -56,6 +66,7 @@ vi.mock('node:fs', async (importOriginal) => {
   const patched: Record<string, unknown> = {
     ...actual,
     readFileSync: guard(actual.readFileSync, 'read'),
+    cpSync: guard(actual.cpSync, 'copy'),
     statSync: guard(actual.statSync, 'stat'),
     lstatSync: guard(actual.lstatSync, 'lstat'),
     openSync: guard(actual.openSync, 'open'),
@@ -82,7 +93,8 @@ vi.mock('node:os', async () => {
 
 const realFs = await vi.importActual<typeof NodeFs>('node:fs')
 
-const { syncSystemConfigIntoManagedCodexHome } = await import('./codex-config-mirror')
+const { syncSystemConfigIntoLegacySharedCodexHome, syncSystemConfigIntoManagedCodexHome } =
+  await import('./codex-config-mirror')
 const { promoteCodexRuntimeSettingsToSystem, snapshotCodexRuntimeSettingsBaseline } =
   await import('./config-settings-promotion')
 const { syncCodexGlobalInstructionsIntoManagedHome } = await import('./codex-home-paths')
@@ -187,6 +199,20 @@ describe('STA-4737 the config mirror must not overwrite a runtime config it coul
     // that refused here would break first launch for everyone.
     expect(realFs.readFileSync(runtimeConfigPath(), 'utf-8')).toContain('model = "system-model"')
   })
+
+  it('refuses the retained-pane mirror when its runtime config is denied', () => {
+    realFs.writeFileSync(systemConfigPath(), SYSTEM_CONFIG, 'utf-8')
+    realFs.writeFileSync(runtimeConfigPath(), RUNTIME_CONFIG, 'utf-8')
+    denials.deny(runtimeConfigPath())
+
+    expect(() =>
+      syncSystemConfigIntoLegacySharedCodexHome({
+        runtimeHomePath: runtimeHome(),
+        systemHomePath: systemHome()
+      })
+    ).toThrow('EPERM')
+    expect(realFs.readFileSync(runtimeConfigPath(), 'utf-8')).toBe(RUNTIME_CONFIG)
+  })
 })
 
 describe('STA-4737 promotion must not rebuild a system config it could not read', () => {
@@ -258,6 +284,33 @@ describe('STA-4737 the resource sync must not delete a mirror whose source it co
     // Before the fix, `existsSync` reported the denied source as gone and the
     // managed copy was deleted on the next launch.
     expect(realFs.existsSync(targetPath)).toBe(true)
+    expect(realFs.readFileSync(targetPath, 'utf-8')).toBe(MIRRORED)
+  })
+
+  it('keeps the mirrored copy when the source becomes unreadable after stat', () => {
+    const { sourcePath, targetPath } = seedOwnedMirrorCopy()
+    // A Windows sharing violation can leave metadata readable while content
+    // reads fail; stat success must not authorize deleting the fallback copy.
+    denials.denyReads(sourcePath)
+
+    syncCodexGlobalInstructionsIntoManagedHome({
+      systemHomePath: systemHome(),
+      managedHomePath: runtimeHome()
+    })
+
+    expect(realFs.readFileSync(targetPath, 'utf-8')).toBe(MIRRORED)
+  })
+
+  it('keeps an unreadable owned target instead of refreshing it', () => {
+    const { sourcePath, targetPath } = seedOwnedMirrorCopy()
+    realFs.writeFileSync(sourcePath, '# updated system instructions\n', 'utf-8')
+    denials.deny(targetPath)
+
+    syncCodexGlobalInstructionsIntoManagedHome({
+      systemHomePath: systemHome(),
+      managedHomePath: runtimeHome()
+    })
+
     expect(realFs.readFileSync(targetPath, 'utf-8')).toBe(MIRRORED)
   })
 

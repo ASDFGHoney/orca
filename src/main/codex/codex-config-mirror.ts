@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { readAgentStateFileSync } from '../agent-state-file-reader'
 import { observeAgentStateFile } from './codex-path-observation'
 import {
   recoverInterruptedGuardedFileOperation,
@@ -118,18 +116,24 @@ export function syncSystemConfigIntoLegacySharedCodexHome(
   const systemConfigPath = join(homes.systemHomePath, 'config.toml')
   const runtimeConfigPath = join(homes.runtimeHomePath, 'config.toml')
   recoverInterruptedGuardedFileOperation(runtimeConfigPath)
-  const rawSystemConfig = existsSync(systemConfigPath)
-    ? readAgentStateFileSync(systemConfigPath)
-    : ''
+  const systemConfigObservation = observeAgentStateFile(systemConfigPath)
+  if (systemConfigObservation.kind === 'indeterminate') {
+    throw systemConfigObservation.error
+  }
+  const rawSystemConfig =
+    systemConfigObservation.kind === 'present' ? systemConfigObservation.value : ''
   // Why: a missing cloud-synced source is not proof the user cleared config.
   if (rawSystemConfig.trim() === '') {
     return
   }
 
   const sourceConfigDir = resolveCodexConfigMirrorSourceDirectory(homes.systemHomePath)
-  const runtimeConfigBeforeMirror = existsSync(runtimeConfigPath)
-    ? readAgentStateFileSync(runtimeConfigPath)
-    : null
+  const runtimeConfigObservation = observeAgentStateFile(runtimeConfigPath)
+  if (runtimeConfigObservation.kind === 'indeterminate') {
+    throw runtimeConfigObservation.error
+  }
+  const runtimeConfigBeforeMirror =
+    runtimeConfigObservation.kind === 'present' ? runtimeConfigObservation.value : null
   const nextRuntimeConfig =
     runtimeConfigBeforeMirror !== null
       ? mergeSystemCodexConfigIntoRuntime(
