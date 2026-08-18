@@ -444,6 +444,44 @@ describe('backgrounded-session pane guard (#9236)', () => {
     expect(script.indexOf('printf "{}\\n"')).toBeLessThan(script.indexOf('CLAUDE_JOB_DIR'))
   })
 
+  // Why not skipped as unreachable: a backgrounded session's statusline IS invoked, inside the
+  // worker (ancestry terminates at the daemon, never at a pane), carrying the same stale key.
+  it('guards the statusline too, on both branches', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    for (const target of ['darwin', 'win32'] as const) {
+      const tmpHome = mkdtempSync(join(tmpdir(), `orca-claude-sl-${target}-`))
+      Object.defineProperty(process, 'platform', { value: target, configurable: true })
+      vi.stubEnv('HOME', tmpHome)
+      vi.stubEnv('USERPROFILE', tmpHome)
+      try {
+        expect(new ClaudeHookService().install().state).toBe('installed')
+        const script = readFileSync(
+          join(
+            tmpHome,
+            '.orca',
+            'agent-hooks',
+            target === 'win32' ? 'claude-statusline.cmd' : 'claude-statusline.sh'
+          ),
+          'utf-8'
+        )
+        const guard = script
+          .split(target === 'win32' ? '\r\n' : '\n')
+          .find((line) => line.includes('CLAUDE_JOB_DIR'))
+        expect(guard).toBeDefined()
+        // Why: the guard is worthless if it runs after the post it is meant to prevent.
+        expect(script.indexOf('CLAUDE_JOB_DIR')).toBeLessThan(script.indexOf('curl'))
+        if (target === 'win32') {
+          // Why: a worker is outside an Orca pane, where reading stdin to EOF never returns (#11549).
+          expect(guard).not.toContain(WINDOWS_HOOK_STDIN_DRAIN_LABEL)
+        }
+      } finally {
+        Object.defineProperty(process, 'platform', platform)
+        vi.unstubAllEnvs()
+        rmSync(tmpHome, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('exits rather than draining stdin on Windows, where a worker has no Orca pane', () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
     const tmpHome = mkdtempSync(join(tmpdir(), 'orca-claude-bg-'))
