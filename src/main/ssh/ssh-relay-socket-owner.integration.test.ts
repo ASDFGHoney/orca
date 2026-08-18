@@ -24,22 +24,13 @@ import {
   delay,
   isProcessAlive,
   killProcessTree,
-  relayBundleDirForHost,
+  relayBundleDirOrFailWhenRequired,
   waitForExit
 } from './ssh-relay-live-daemon-harness'
 import { isRelaySocketOwnerLiveError, requireUnownedRelaySocket } from './ssh-relay-socket-owner'
 
 const REPO_ROOT = process.cwd()
-const BUNDLE_DIR = relayBundleDirForHost(REPO_ROOT)
-
-// Why: skipping is right on a developer machine that never ran `pnpm build:relay`, and
-// wrong in the CI job that exists to run this file — there a skip is green with no daemon
-// ever started. The job sets this so the missing bundle fails instead.
-if (process.env.ORCA_REQUIRE_RELAY_BUNDLE === '1' && !BUNDLE_DIR) {
-  throw new Error(
-    `No relay bundle at out/relay/${process.platform}-${process.arch}; run pnpm build:relay first.`
-  )
-}
+const BUNDLE_DIR = relayBundleDirOrFailWhenRequired(REPO_ROOT)
 
 type RelayStatus = {
   pid: number

@@ -27,6 +27,24 @@ export function relayBundleDirForHost(repoRoot: string): string | null {
   return existsSync(join(dir, 'relay.js')) ? dir : null
 }
 
+/**
+ * The bundle these oracles need, or null so the caller can skip.
+ *
+ * Why the env guard: skipping is right on a developer machine that never ran
+ * `pnpm build:relay`, and wrong in the CI job that exists to run these files — there a skip
+ * is green with no daemon ever started. The job sets ORCA_REQUIRE_RELAY_BUNDLE so the
+ * missing bundle fails instead.
+ */
+export function relayBundleDirOrFailWhenRequired(repoRoot: string): string | null {
+  const dir = relayBundleDirForHost(repoRoot)
+  if (!dir && process.env.ORCA_REQUIRE_RELAY_BUNDLE === '1') {
+    throw new Error(
+      `No relay bundle at out/relay/${process.platform}-${process.arch}; run pnpm build:relay first.`
+    )
+  }
+  return dir
+}
+
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

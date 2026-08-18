@@ -24,20 +24,14 @@ import {
   delay,
   isProcessAlive,
   killProcessTree,
-  relayBundleDirForHost
+  relayBundleDirOrFailWhenRequired
 } from './ssh-relay-live-daemon-harness'
 import { isRelaySocketOwnerLiveError } from './ssh-relay-socket-owner'
 import { getRemoteHostPlatform } from './ssh-remote-platform'
 
 const REPO_ROOT = process.cwd()
-const BUNDLE_DIR = relayBundleDirForHost(REPO_ROOT)
+const BUNDLE_DIR = relayBundleDirOrFailWhenRequired(REPO_ROOT)
 const TARGET_ID = 'sta-1756-live-journey'
-
-if (process.env.ORCA_REQUIRE_RELAY_BUNDLE === '1' && !BUNDLE_DIR) {
-  throw new Error(
-    `No relay bundle at out/relay/${process.platform}-${process.arch}; run pnpm build:relay first.`
-  )
-}
 
 type RelayStatus = { pid: number; ptys: { active: number } }
 
