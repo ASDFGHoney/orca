@@ -16833,23 +16833,44 @@ export class OrcaRuntimeService {
     this._orchestrationDb.failDispatch(dispatch.id, errorContext, { workerProcessExited: true })
 
     // Why: create an escalation message so the coordinator is notified about
-    // the unexpected exit on its next check cycle, even if the circuit breaker
-    // hasn't tripped yet.
-    const run = this._orchestrationDb.getActiveCoordinatorRun()
-    if (run) {
-      this._orchestrationDb.insertMessage({
-        from: handle,
-        to: run.coordinator_handle,
-        subject: `Agent exited unexpectedly (code ${exitCode})`,
-        type: 'escalation',
-        priority: 'high',
-        payload: JSON.stringify({
-          taskId: dispatch.task_id,
-          exitCode,
-          handle
-        })
-      })
+    // the unexpected exit, even if the circuit breaker hasn't tripped yet.
+    const recipient = this.resolveExitEscalationRecipient(dispatch.run_id)
+    if (!recipient) {
+      return
     }
+    const escalation = this._orchestrationDb.insertMessage({
+      from: handle,
+      to: recipient.to,
+      subject: `Agent exited unexpectedly (code ${exitCode})`,
+      type: 'escalation',
+      priority: 'high',
+      payload: JSON.stringify({
+        taskId: dispatch.task_id,
+        exitCode,
+        handle
+      }),
+      ...(recipient.runId ? { runId: recipient.runId } : {})
+    })
+    // Why: worker death is the one escalation nobody will poll for — the dead pane
+    // can't nudge the coordinator, so wake its check --wait the way every other
+    // message producer does.
+    this.notifyMessageArrived(escalation.to_handle, escalation.type)
+  }
+
+  // Why: a lightweight Run keeps its coordinator in runs/run_coordinator_handles and
+  // never writes the legacy coordinator_runs table, so gating solely on that table
+  // dropped every worker-death escalation (STA-4604). Address the Run mailbox the
+  // coordinator's `orchestration check` actually reads, and leave legacy Runs on the
+  // legacy gate.
+  private resolveExitEscalationRecipient(
+    runId: string
+  ): { to: string; runId?: string } | undefined {
+    const owningRun = this._orchestrationDb?.getRun?.(runId)
+    if (owningRun && owningRun.legacy !== 1) {
+      return { to: `run:${owningRun.id}`, runId: owningRun.id }
+    }
+    const legacyRun = this._orchestrationDb?.getActiveCoordinatorRun?.()
+    return legacyRun ? { to: legacyRun.coordinator_handle } : undefined
   }
 
   async listTerminals(
