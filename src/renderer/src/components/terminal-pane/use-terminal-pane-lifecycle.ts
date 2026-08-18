@@ -451,9 +451,11 @@ export function resolvePaneSeedCwd(splitPaneCwd: string | undefined, fallbackCwd
   return splitPaneCwd ?? fallbackCwd
 }
 
-/** iPadOS reports a desktop "Macintosh" UA and iOS reports "like Mac OS X" — maxTouchPoints is the only signal a real Mac never sets. */
+// Why > 1, matching isIOSWebView in mobile/src/terminal/terminal-webview-html.ts: a Mac with a
+// touch peripheral can report exactly 1, and it must keep the forwarder. Real iPads report 5.
+// Why UA rather than that helper's platform check: an iPhone reports platform "iPhone", not "MacIntel".
 export function isTouchIOSUserAgent(userAgent: string, maxTouchPoints: number): boolean {
-  return userAgent.includes('Mac') && maxTouchPoints > 0
+  return userAgent.includes('Mac') && maxTouchPoints > 1
 }
 
 type SplitStartupPayload = { command: string; env?: Record<string, string> }

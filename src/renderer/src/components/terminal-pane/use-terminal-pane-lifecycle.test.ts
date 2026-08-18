@@ -579,4 +579,10 @@ describe('isTouchIOSUserAgent', () => {
       isTouchIOSUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 5)
     ).toBe(false)
   })
+
+  it('keeps the forwarder on a Mac whose touch peripheral reports a single point', () => {
+    expect(
+      isTouchIOSUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', 1)
+    ).toBe(false)
+  })
 })
