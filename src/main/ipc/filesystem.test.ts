@@ -579,6 +579,32 @@ describe('registerFilesystemHandlers', () => {
     })
   })
 
+  it('ranks a bounded legacy SSH listing when the relay lacks Quick Open search', async () => {
+    const listFilesMock = vi.fn().mockResolvedValue(['src/target.ts', 'src/index.ts'])
+    const supportsQuickOpenSearchMock = vi.fn().mockResolvedValue(false)
+    getSshFilesystemProviderMock.mockReturnValue({
+      listFiles: listFilesMock,
+      supportsQuickOpenSearch: supportsQuickOpenSearchMock
+    })
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:listFiles')!(null, {
+        rootPath: '/home/user/repo',
+        connectionId: 'conn-1',
+        maxResults: 2,
+        searchQuery: 'target'
+      })
+    ).resolves.toEqual(['src/target.ts'])
+
+    expect(supportsQuickOpenSearchMock).toHaveBeenCalled()
+    expect(listFilesMock).toHaveBeenCalledWith('/home/user/repo', {
+      excludePaths: undefined,
+      maxResults: 32
+    })
+  })
+
   // Why #7721: without a cancel path, every workspace switch left the previous
   // workspace's full-tree SSH scan running, stacking scans on the relay until
   // interactive fs.readDir/fs.stat starved past their 30s timeout.
