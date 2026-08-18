@@ -5,15 +5,19 @@ import { githubRepoIdentityKey } from '../../../../shared/github/repository-iden
 import { getRestPRByNumber } from './pr-number-lookup'
 export const PR_STACK_SUMMARY_CACHE_TTL_MS = 60_000
 
+// Why: a failed probe must not masquerade as "no stack" for a full minute; retry it sooner.
+export const PR_STACK_SUMMARY_FAILURE_CACHE_TTL_MS = 5_000
+
 export const PR_STACK_SUMMARY_CACHE_MAX_ENTRIES = 512
 
 export const STACK_METADATA_UNAVAILABLE_ERROR =
   'Could not verify GitHub pull request stack metadata. Refresh and try again.'
 
-export const prStackSummaryCache = new Map<
-  string,
-  { value: GitHubPRStack | undefined; expiresAt: number }
->()
+type PRStackSummaryCacheEntry =
+  | { ok: true; value: GitHubPRStack | undefined; expiresAt: number }
+  | { ok: false; error: unknown; expiresAt: number }
+
+export const prStackSummaryCache = new Map<string, PRStackSummaryCacheEntry>()
 
 export const prStackSummaryInFlight = new Map<string, Promise<GitHubPRStack | undefined>>()
 
@@ -43,6 +47,10 @@ export async function getCachedGitHubPRStackSummary(
   prunePRStackSummaryCache(now)
   const cached = prStackSummaryCache.get(key)
   if (cached && cached.expiresAt > now) {
+    // Why: a cached failure must stay a failure — returning undefined would read as "this PR has no stack".
+    if (!cached.ok) {
+      throw cached.error
+    }
     return cached.value
   }
   const existing = prStackSummaryInFlight.get(key)
@@ -55,17 +63,19 @@ export async function getCachedGitHubPRStackSummary(
     const value = await request
     prStackSummaryCache.delete(key)
     prStackSummaryCache.set(key, {
+      ok: true,
       value,
       expiresAt: Date.now() + PR_STACK_SUMMARY_CACHE_TTL_MS
     })
     prunePRStackSummaryCache()
     return value
   } catch (err) {
-    // Why: avoid repeating a failed REST probe on every review poll.
+    // Why: avoid repeating a failed REST probe on every review poll, on a short cooldown.
     prStackSummaryCache.delete(key)
     prStackSummaryCache.set(key, {
-      value: undefined,
-      expiresAt: Date.now() + PR_STACK_SUMMARY_CACHE_TTL_MS
+      ok: false,
+      error: err,
+      expiresAt: Date.now() + PR_STACK_SUMMARY_FAILURE_CACHE_TTL_MS
     })
     prunePRStackSummaryCache()
     throw err

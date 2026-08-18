@@ -56,6 +56,24 @@ export function classifyListIssuesError(stderr: string): ClassifiedError {
   return { type: c.type, message: readMessages[c.type] }
 }
 
+// Why: classifyGhError's copy names an "issue"; PR mutations reuse the same
+// classification but must not tell the user their pull request is an issue.
+export function classifyPullRequestUpdateError(stderr: string): ClassifiedError {
+  const c = classifyGhError(stderr)
+  const trimmed = stderr.trim()
+  const pullRequestMessages: Record<ClassifiedError['type'], string> = {
+    permission_denied:
+      "You don't have permission to edit this pull request. Check your GitHub token scopes.",
+    not_found: 'Pull request not found — it may have been deleted.',
+    issues_disabled: c.message,
+    validation_error: `Invalid update — ${trimmed}`,
+    rate_limited: c.message,
+    network_error: c.message,
+    unknown: `Failed to update pull request: ${trimmed}`
+  }
+  return { type: c.type, message: pullRequestMessages[c.type] }
+}
+
 // Why: PR-side list failures need the same read-op classification — pagination
 // decisions key on the type, and swallowing them made failures look like
 // end-of-data (#11485).

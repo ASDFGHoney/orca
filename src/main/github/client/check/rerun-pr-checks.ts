@@ -94,7 +94,15 @@ export async function rerunPRChecks(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error'
-    return { ok: false, error: classifyGhError(message).message }
+    const classified = classifyGhError(message).message
+    // Why: these POSTs are not idempotent — say how many reruns already started so a retry isn't blind.
+    return {
+      ok: false,
+      error:
+        count > 0
+          ? `${classified} (${count} rerun${count === 1 ? '' : 's'} already started)`
+          : classified
+    }
   } finally {
     release()
   }

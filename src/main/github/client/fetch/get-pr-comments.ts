@@ -133,18 +133,23 @@ export async function getPRComments(
       const reviewComments: PRComment[] = []
       if (threadsResult.status === 'fulfilled' && threadsResult.value) {
         const threadsData = JSON.parse(threadsResult.value.stdout) as {
-          data: {
-            repository: {
-              pullRequest: {
-                reviewThreads: { nodes: GQLThread[] }
-                comments?: { nodes: GQLIssueComment[] }
-                reviews?: { nodes: GQLIssueComment[] }
-              }
-            }
-          }
+          data?: {
+            repository?: {
+              pullRequest?: {
+                reviewThreads?: { nodes?: GQLThread[] | null } | null
+                comments?: { nodes?: GQLIssueComment[] | null } | null
+                reviews?: { nodes?: GQLIssueComment[] | null } | null
+              } | null
+            } | null
+          } | null
         }
-        const pullRequest = threadsData.data.repository.pullRequest
-        const graphQLIssueComments = (pullRequest.comments?.nodes ?? []).map(
+        // Why: graphql can exit 0 with data.repository null plus an errors array (scopes, field-level denial);
+        // dereferencing it would throw and drop the REST halves fetched alongside it.
+        const pullRequest = threadsData.data?.repository?.pullRequest
+        if (!pullRequest) {
+          console.warn('Review threads response missing pullRequest; keeping REST results')
+        }
+        const graphQLIssueComments = (pullRequest?.comments?.nodes ?? []).map(
           (c): PRComment => ({
             id: c.databaseId,
             author: c.author?.login ?? 'ghost',
@@ -160,23 +165,26 @@ export async function getPRComments(
         if (graphQLIssueComments.length > 0) {
           issueComments = graphQLIssueComments
         }
-        graphQLReviewSummaries = (pullRequest.reviews?.nodes ?? [])
-          .filter((review) => review.body?.trim())
-          .map(
-            (review): PRComment => ({
-              id: review.databaseId,
-              author: review.author?.login ?? 'ghost',
-              authorAvatarUrl: review.author?.avatarUrl ?? '',
-              body: review.body,
-              createdAt: review.createdAt,
-              url: review.url,
-              isBot: review.author?.__typename === 'Bot',
-              reactionSubjectId: review.id,
-              reactions: mapGraphQLReactionGroups(review.reactionGroups)
-            })
-          )
+        // Why: leave undefined when the payload is incomplete so the REST review summaries stay in use.
+        graphQLReviewSummaries = pullRequest
+          ? (pullRequest.reviews?.nodes ?? [])
+              .filter((review) => review.body?.trim())
+              .map(
+                (review): PRComment => ({
+                  id: review.databaseId,
+                  author: review.author?.login ?? 'ghost',
+                  authorAvatarUrl: review.author?.avatarUrl ?? '',
+                  body: review.body,
+                  createdAt: review.createdAt,
+                  url: review.url,
+                  isBot: review.author?.__typename === 'Bot',
+                  reactionSubjectId: review.id,
+                  reactions: mapGraphQLReactionGroups(review.reactionGroups)
+                })
+              )
+          : undefined
 
-        const threads = pullRequest.reviewThreads.nodes
+        const threads = pullRequest?.reviewThreads?.nodes ?? []
         for (const thread of threads) {
           for (const c of thread.comments.nodes) {
             reviewComments.push({

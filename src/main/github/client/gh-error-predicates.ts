@@ -12,14 +12,12 @@ export function isNoPullRequestError(err: unknown): boolean {
 }
 
 export function isNotFoundGhError(err: unknown): boolean {
-  const stderr = err instanceof Error ? err.message : String(err)
-  return classifyGhError(stderr).type === 'not_found'
+  // Why: execFile keeps the API diagnostic in stderr; err.message is only "Command failed".
+  return classifyGhError(extractExecError(err).stderr).type === 'not_found'
 }
 
 export function shouldStopAfterExactLookupError(err: unknown): boolean {
-  const stderr = err instanceof Error ? err.message : String(err)
-  const type = classifyGhError(stderr).type
-  return type !== 'not_found'
+  return classifyGhError(extractExecError(err).stderr).type !== 'not_found'
 }
 
 export function prRefreshUpstreamError(

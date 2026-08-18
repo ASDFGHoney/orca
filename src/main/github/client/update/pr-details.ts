@@ -2,7 +2,7 @@ import {
   ghExecFileAsync,
   acquire,
   release,
-  classifyGhError,
+  classifyPullRequestUpdateError,
   type LocalGitExecOptions
 } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
@@ -93,7 +93,7 @@ export async function updatePRDetails(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error'
-    return { ok: false, error: classifyGhError(message).message }
+    return { ok: false, error: classifyPullRequestUpdateError(message).message }
   } finally {
     release()
   }

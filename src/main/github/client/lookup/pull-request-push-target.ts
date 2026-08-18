@@ -23,7 +23,8 @@ export function pickPushRemoteUrl(args: {
   sshUrl: string
 }): string {
   const { originUrl, cloneUrl, sshUrl } = args
-  if (originUrl && (/^(git@|ssh:)/.test(originUrl) || originUrl.includes('ssh.github.com'))) {
+  // Why: GHES port-443 SSH uses `ssh.<enterprise-host>`, not just ssh.github.com.
+  if (originUrl && (/^(git@|ssh:)/.test(originUrl) || /:\/\/(?:[^@/]+@)?ssh\./.test(originUrl))) {
     return sshUrl
   }
   return cloneUrl

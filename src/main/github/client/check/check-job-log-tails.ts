@@ -7,6 +7,10 @@ import type { GhExecOptions } from './../github-exec-scope'
 import { rethrowCheckDetailsAbort } from './check-details-abort'
 export const PR_CHECK_LOG_TAIL_JOB_LIMIT = 5
 
+// Why: only the tail is kept, but the whole log buffers first — the default 10MiB cap drops long CI logs.
+// Still far below the V8 string ceiling that DEFAULT_GIT_MAX_BUFFER guards against.
+export const PR_CHECK_LOG_MAX_BUFFER = 64 * 1024 * 1024
+
 // Why: each entry holds up to 16KB of log text; bound the cache so a long session can't grow it unbounded.
 export const PR_CHECK_LOG_TAIL_CACHE_MAX_ENTRIES = 128
 
@@ -68,7 +72,7 @@ export async function attachFailedJobLogTails(
     try {
       const { stdout } = await ghExecFileAsync(
         ['api', `repos/${ownerRepo.owner}/${ownerRepo.repo}/actions/jobs/${job.id}/logs`],
-        ghOptions
+        { ...ghOptions, maxBuffer: PR_CHECK_LOG_MAX_BUFFER }
       )
       job.logTail = sliceCheckLogTail(stdout)
     } catch (err) {

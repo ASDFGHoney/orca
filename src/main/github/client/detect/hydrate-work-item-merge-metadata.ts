@@ -5,14 +5,20 @@ import type { MainWorkItem } from './../map/work-item-field-coercion'
 export async function hydrateWorkItemRepositoryMergeMetadata(
   items: MainWorkItem[],
   ownerRepo: OwnerRepo | null,
-  ghOptions: GhExecOptions
+  ghOptions: GhExecOptions,
+  executionScope?: string
 ): Promise<MainWorkItem[]> {
   const hasPullRequest = items.some((item) => item.type === 'pr')
   if (!ownerRepo || !hasPullRequest) {
     return items
   }
   // Why: merge settings are repo-level, so one cached probe keeps Tasks rows accurate without per-PR GraphQL fan-out.
-  const mergeMetadata = await detectRepositoryMergeMetadata(ownerRepo, undefined, ghOptions)
+  const mergeMetadata = await detectRepositoryMergeMetadata(
+    ownerRepo,
+    undefined,
+    ghOptions,
+    executionScope
+  )
   if (!mergeMetadata.mergeMethodSettings && mergeMetadata.autoMergeAllowed === null) {
     return items
   }

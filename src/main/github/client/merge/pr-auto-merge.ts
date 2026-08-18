@@ -7,7 +7,7 @@ import {
   type LocalGitExecOptions
 } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
-import type { GhExecOptions } from './../github-exec-scope'
+import { githubPRStackExecutionScope, type GhExecOptions } from './../github-exec-scope'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'
 import { getRestPRByNumber } from './../lookup/pr-number-lookup'
 export const PR_AUTO_MERGE_IDENTITY_JSON_FIELDS = 'id,headRefOid,baseRefName'
@@ -70,12 +70,18 @@ export async function runPRAutoMergeCommand(
 export async function shouldUseMergeQueueAutoMerge(
   pr: PRAutoMergeIdentity,
   ownerRepo: GitHubApiRepository | null,
-  ghOptions: GhExecOptions
+  ghOptions: GhExecOptions,
+  executionScope?: string
 ): Promise<boolean> {
   if (!ownerRepo || !pr.baseRefName) {
     return false
   }
-  const mergeMetadata = await detectRepositoryMergeMetadata(ownerRepo, pr.baseRefName, ghOptions)
+  const mergeMetadata = await detectRepositoryMergeMetadata(
+    ownerRepo,
+    pr.baseRefName,
+    ghOptions,
+    executionScope
+  )
   return mergeMetadata.mergeQueueRequired === true
 }
 
@@ -83,7 +89,8 @@ export async function enablePRAutoMerge(
   prNumber: number,
   method: GitHubPRMergeMethod,
   ownerRepo: GitHubApiRepository | null,
-  ghOptions: GhExecOptions
+  ghOptions: GhExecOptions,
+  executionScope?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (ownerRepo) {
     try {
@@ -102,7 +109,7 @@ export async function enablePRAutoMerge(
   if (!pr?.id) {
     return { ok: false, error: 'Could not resolve GitHub pull request ID' }
   }
-  const useMergeQueue = await shouldUseMergeQueueAutoMerge(pr, ownerRepo, ghOptions)
+  const useMergeQueue = await shouldUseMergeQueueAutoMerge(pr, ownerRepo, ghOptions, executionScope)
   if (useMergeQueue) {
     await runPRAutoMergeCommand(prNumber, method, ownerRepo, ghOptions)
     return { ok: true }
@@ -158,7 +165,13 @@ export async function setPRAutoMerge(
   await acquire()
   try {
     if (enabled) {
-      return await enablePRAutoMerge(prNumber, method, ownerRepo, ghOptions)
+      return await enablePRAutoMerge(
+        prNumber,
+        method,
+        ownerRepo,
+        ghOptions,
+        githubPRStackExecutionScope(connectionId, localGitOptions)
+      )
     }
     const args = ['pr', 'merge', String(prNumber), '--disable-auto']
     if (ownerRepo) {

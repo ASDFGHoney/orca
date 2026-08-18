@@ -12,6 +12,7 @@ import {
   type OwnerRepo
 } from '../../gh-utils'
 import { githubHostExecOptions } from '../../github-api-repository'
+import { githubPRStackExecutionScope } from './../github-exec-scope'
 import { hydrateWorkItemRepositoryMergeMetadata } from './../detect/hydrate-work-item-merge-metadata'
 import type { MainWorkItem } from './../map/work-item-field-coercion'
 import { mapIssueWorkItem, mapPullRequestWorkItem } from './../map/work-item'
@@ -74,10 +75,15 @@ export async function listRecentWorkItems(
   let issues: MainWorkItem[] = []
   let issuesError: ClassifiedError | undefined
   if (issuesSettled.status === 'fulfilled') {
-    issues = (JSON.parse(issuesSettled.value.stdout) as Record<string, unknown>[])
-      // Why: search/issues can still return PRs (pull_request marker) even with is:issue; filter them out.
-      .filter((item) => !('pull_request' in item))
-      .map(mapIssueWorkItem)
+    try {
+      issues = (JSON.parse(issuesSettled.value.stdout) as Record<string, unknown>[])
+        // Why: search/issues can still return PRs (pull_request marker) even with is:issue; filter them out.
+        .filter((item) => !('pull_request' in item))
+        .map(mapIssueWorkItem)
+    } catch (err) {
+      // Why: a malformed issue payload must not discard the successfully fetched PR half.
+      issuesError = classifyListIssuesError(err instanceof Error ? err.message : String(err))
+    }
   } else {
     const stderr =
       issuesSettled.reason instanceof Error
@@ -91,10 +97,12 @@ export async function listRecentWorkItems(
     prs = (JSON.parse(prsSettled.value.stdout) as Record<string, unknown>[])
       .slice(prRequest?.offset ?? 0, (prRequest?.offset ?? 0) + limit)
       .map((item) => mapPullRequestWorkItem(item, prOwnerRepo))
-    prs = await hydrateWorkItemRepositoryMergeMetadata(prs, prOwnerRepo, {
-      ...ghOptions,
-      ...githubHostExecOptions(prOwnerRepo)
-    })
+    prs = await hydrateWorkItemRepositoryMergeMetadata(
+      prs,
+      prOwnerRepo,
+      { ...ghOptions, ...githubHostExecOptions(prOwnerRepo) },
+      githubPRStackExecutionScope(connectionId, localGitOptions)
+    )
   } else {
     // Why: re-throw PR errors so the cross-repo aggregator counts the repo failed; this feature only fixes issue-side swallowing (#1076).
     // Why: log issuesError first so a both-sides-failed case isn't blind to the classification we're about to drop.
@@ -196,10 +204,12 @@ export async function listQueriedWorkItems(
       const mapped = (JSON.parse(stdout) as Record<string, unknown>[])
         .slice(request.offset, request.offset + limit)
         .map((item) => mapPullRequestWorkItem(item, prOwnerRepo))
-      const hydrated = await hydrateWorkItemRepositoryMergeMetadata(mapped, prOwnerRepo, {
-        ...ghOptions,
-        ...githubHostExecOptions(prOwnerRepo)
-      })
+      const hydrated = await hydrateWorkItemRepositoryMergeMetadata(
+        mapped,
+        prOwnerRepo,
+        { ...ghOptions, ...githubHostExecOptions(prOwnerRepo) },
+        githubPRStackExecutionScope(connectionId, localGitOptions)
+      )
       successfulRequestCount += 1
       if (query.state === 'closed') {
         return hydrated.filter((item) => item.state !== 'merged')

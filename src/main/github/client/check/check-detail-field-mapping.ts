@@ -74,7 +74,7 @@ export function parseActionsRunId(url: string | null | undefined): number | unde
   if (!url) {
     return undefined
   }
-  const match = /\/actions\/runs\/(\d+)(?:\/|$)/.exec(url)
+  const match = /\/actions\/runs\/(\d+)(?:[/?#]|$)/.exec(url)
   if (!match) {
     return undefined
   }

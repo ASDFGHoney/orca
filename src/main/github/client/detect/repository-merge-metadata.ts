@@ -16,9 +16,9 @@ export async function detectRepositoryMergeMetadata(
   ownerRepo: GitHubApiRepository,
   branchName: string | undefined,
   ghOptions: GhExecOptions,
-  executionScope = 'default'
+  executionScope: string | undefined = 'default'
 ): Promise<GitHubRepositoryMergeMetadata> {
-  const cacheKey = `${executionScope}\0${githubRepoIdentityKey(ownerRepo)}:${branchName ?? '__repo__'}`
+  const cacheKey = `${executionScope ?? 'default'}\0${githubRepoIdentityKey(ownerRepo)}:${branchName ?? '__repo__'}`
   pruneRepositoryMergeMetadataCache()
   const cached = repositoryMergeMetadataCache.get(cacheKey)
   if (cached) {
@@ -102,7 +102,12 @@ export async function detectRepositoryMergeMetadata(
         typeof repository?.autoMergeAllowed === 'boolean' ? repository.autoMergeAllowed : null,
       ...(mergeMethodSettings ? { mergeMethodSettings } : {})
     }
-    cacheRepositoryMergeMetadata(cacheKey, value, MERGE_QUEUE_CACHE_TTL_MS)
+    // Why: a payload without `repository` is all-unknown; keep it on the short TTL so it retries once the condition clears.
+    cacheRepositoryMergeMetadata(
+      cacheKey,
+      value,
+      repository ? MERGE_QUEUE_CACHE_TTL_MS : MERGE_QUEUE_UNKNOWN_CACHE_TTL_MS
+    )
     return value
   } catch {
     // Why: cache a conservative result for failed merge-queue probes so we don't retry GraphQL on every poll while GitHub/network is unhappy.

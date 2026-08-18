@@ -152,7 +152,14 @@ export function latestReviewsFromUnknown(
 }
 
 export function numberFromUnknown(value: unknown): number | undefined {
-  const number = typeof value === 'number' ? value : Number(value)
+  // Why: Number(null) is 0 — an explicit null must stay "unknown", not become a real count or user id.
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return undefined
+  }
+  const number = Number(value)
   return Number.isFinite(number) ? number : undefined
 }
 
