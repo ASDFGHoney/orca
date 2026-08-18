@@ -1040,6 +1040,11 @@ Validation and review:
   fallback is allowed.
 - The open draft stack is intentionally large. Review/landing order and rebasing are delivery
   risks even when each stage is narrow.
+- Popup gesture recognition reads Electron's `input-event`, which does not distinguish real local
+  input from `sendInputEvent`. Agent- or mobile-driven input on a client-hosted page therefore
+  satisfies the gate. That matches the input authority the page already has, and popups remain
+  untargetable transients, but a runtime-granted popup reservation (the design doc's bounded
+  single-use pool) is the stronger control if agent-initiated popups become a concern.
 
 ## Validation ledger
 
