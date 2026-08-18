@@ -1,6 +1,6 @@
 # STA-4150 Client-Hosted Browser Progress
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 This is the durable ownership ledger for
 [STA-4150](https://linear.app/stably/issue/STA-4150/refactor-remote-browser-to-client-hosted-electron-webviews).
@@ -49,9 +49,11 @@ Old clients and callers that omit placement must retain current server-hosted be
   ambiguous multi-runtime ownership as unknown instead of destructively falling back locally. All
   three reviewer tabs were closed.
 - The implementation scope is complete for draft review. Release sign-off still requires explicit
-  acceptance of three residuals: local-process access to the ephemeral SOCKS listener,
-  non-WebRTC UDP/DoH and network-service-restart behavior without narrow Electron controls, and
-  physical Windows/Linux/mobile evidence beyond CI and simulator coverage.
+  acceptance of four residuals: local-process access to the ephemeral SOCKS listener,
+  non-WebRTC UDP/DoH and network-service-restart behavior without narrow Electron controls, the
+  remote-drives-client automation boundary (desktop clipboard access and remote-chosen content in
+  a sandboxed local renderer), and physical Windows/Linux/mobile evidence beyond CI and simulator
+  coverage.
 - The SOCKS listener remains ephemeral `127.0.0.1` with `NO_AUTH`. Chromium's standard SOCKS path
   does not expose credential configuration; replacing it with a custom authenticated HTTP/CONNECT
   proxy or OS-specific IPC transport would duplicate routing behavior and materially expand this
@@ -64,13 +66,37 @@ Old clients and callers that omit placement must retain current server-hosted be
   suite, and native Linux/Windows package CI now runs it. WebRTC direct UDP remains denied by the
   exact per-WebContents policy. QUIC/HTTP3, WebTransport, browser-managed DoH, other UDP, and
   network-service restart remain explicit residuals because Electron has no narrow per-Session
-  controls; global Chromium switches and bespoke transport workarounds were rejected.
+  controls; global Chromium switches and bespoke transport workarounds were rejected. This is a
+  recorded narrowing of the design document, not an oversight: the design requires QUIC/HTTP3,
+  DoH, WebTransport, and non-WebRTC UDP to be disabled or denied, and only WebRTC direct UDP is
+  actually denied. The narrowed scope was accepted at adjudication with the residual carried to
+  release sign-off.
 - Security decision: STA-4150 adopts the same trusted-desktop policy as default SSH dynamic
   forwarding. The client-hosted SOCKS endpoint is loopback-only, ephemeral, bounded, and
   page/lease-scoped, but intentionally has no local-process authentication. This is an accepted
   residual for a trusted single-user desktop; it is not claimed to defend against local malware or
   untrusted same-host processes. Stronger authenticated local transport is a separate follow-up,
-  not a prerequisite for this stack.
+  not a prerequisite for this stack. Two caveats are recorded with that acceptance. First, riding
+  the live listener is quieter than stealing credentials: it raises no new authentication event on
+  the remote host, and the tunnel path currently emits no log line at all, so per-lease attribution
+  of tunnel opens does not exist today and is the follow-up to build if auditability is ever
+  required. Second, shared multi-user desktops stay exposed because a loopback TCP port carries no
+  UID check; the answer there is documentation plus the option to disable client hosting, not an
+  engineering control in this stack.
+- Security decision: the remote-drives-client automation boundary is accepted for this stack. A
+  paired remote runtime holds automation authority over a client desktop's webview through the
+  client-automation allowlist `BROWSER_CLIENT_AUTOMATION_METHODS` (65 entries when recorded,
+  including `browser.eval`). The hardening
+  stack narrows the reachable client surface: `browser.upload` interprets paths as remote files
+  through a staged transfer, closing client-file reads; `browser.download` is remote-only in v1,
+  closing unprompted client file drops; and a visible Settings → Browser placement toggle gives
+  each user an explicit opt-out. Two residuals are accepted. First, `browser.clipboardRead` and
+  `browser.clipboardWrite` remain allowlisted and the `clipboard-read` page permission remains
+  auto-granted, so a paired remote can silently read and write the client desktop clipboard,
+  directly or through `browser.eval` plus `navigator.clipboard.readText`; user-gesture copy/paste
+  is unaffected, and this is revisited only if the pairing trust stance tightens. Second, a paired
+  remote can steer a sandboxed local Chromium renderer at content of its choosing. That is
+  inherent to client hosting; the Chromium sandbox and the scoped partition are the mitigation.
 - Stage 0 compatibility hardening: PR
   [#14402](https://github.com/stablyai/orca/pull/14402) is merged. It is not the long-term
   architecture and is not part of this draft stack.
@@ -176,7 +202,8 @@ Old clients and callers that omit placement must retain current server-hosted be
   client-host command would duplicate the server engine. Use one separately negotiated, bounded
   automation command/result envelope that invokes the hosting desktop's existing
   `AgentBrowserBridge`; keep large binary results on a bounded secondary channel only when needed.
-- Design evidence: `remote-browser-client-hosting.md`, SHA-256
+- Design evidence: [`docs/remote-browser-client-hosting.md`](./remote-browser-client-hosting.md),
+  vendored byte-for-byte, SHA-256
   `d5f6a16df09286388e4d335a8bd896ce0260e9f626ddcc79d8043eff7159a4e0`.
 - OSS reference: T3Code commit `184d8ef33b8f42869fb84f66a33984185b81dc47` keeps shared
   logical preview state, registers the exact Electron `WebContents`, and queues navigation until
@@ -438,7 +465,8 @@ The remaining ownership work, in execution order, is:
 1. Finish fresh stack CI and review; fix only reproducible, actionable failures.
 2. Obtain human review for the six landing PRs.
 3. Before release, explicitly accept or separately schedule the documented local-process,
-   non-WebRTC UDP/DoH, network-service-restart, and physical-platform residuals.
+   non-WebRTC UDP/DoH, network-service-restart, remote-drives-client automation, and
+   physical-platform residuals.
 4. Close superseded development drafts only after reviewers accept the replacement stack; their
    complete mapping is already durable in #14957.
 
@@ -1035,7 +1063,12 @@ Validation and review:
 - A forced persisted-worker wake is contained after immediate proxy invocation. Real Electron
   capture proves the conventional TCP surfaces, including downloads and remote DNS. Speculative
   connections, QUIC/HTTP3, DoH, WebTransport, network-service restarts, and other non-WebRTC UDP
-  paths remain unproven. WebRTC direct UDP is denied on the exact routed guest.
+  paths remain unproven. WebRTC direct UDP is denied on the exact routed guest. The design requires
+  all of those paths to be disabled or denied; shipping only the WebRTC denial is the recorded,
+  adjudicated narrowing of that requirement.
+- A paired remote runtime drives the client desktop's webview, including `browser.eval` and
+  clipboard read/write. Placement must stay visible and user-disablable; the clipboard reach is an
+  accepted residual, not a defended boundary.
 - Renderer crash or last hosting-window close suspends/closes client page generations; no server
   fallback is allowed.
 - The open draft stack is intentionally large. Review/landing order and rebasing are delivery
@@ -1557,6 +1590,13 @@ topology, versions, and explicit gaps at every later checkpoint.
   KiB chunks, 64 MiB per transfer, 16 files per command, 8 concurrent remote download transfers.
   38 new focused tests plus the full Node/CLI/web typecheck pass; the one failing suite in the
   sweep (`remote-runtime-shared-control-connection`) fails identically on the untouched baseline.
+- Documentation checkpoint with no product change: recorded the remote-drives-client adjudication
+  and its clipboard/renderer-steering residuals, amended the SOCKS adjudication with the
+  quiet-listener and shared-desktop caveats, restated the QUIC/DoH gap as an adjudicated narrowing
+  of the design requirement, vendored the design document at
+  `docs/remote-browser-client-hosting.md` with its pinned SHA-256 verified after the copy, and
+  added the client-hosted interactive-session affinity note plus the `browser_host_unavailable`
+  recovery to the agent-facing CLI guide source (regenerating only its bundled artifact).
 
 ## Completion rule
 
