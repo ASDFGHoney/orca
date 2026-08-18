@@ -11,6 +11,10 @@ import {
 } from './git-host-probe-breaker'
 import { gitExecFileAsync } from './runner'
 import { isStableMissingGitRemoteError } from './stable-missing-git-remote-error'
+import {
+  isWslLinkedWorktreeGitRoutingCandidate,
+  prepareWslLinkedWorktreeGitRouting
+} from './wsl-linked-worktree-git-routing'
 
 /**
  * The `git remote get-url` probe every forge integration runs to decide whether
@@ -33,12 +37,28 @@ export type RemoteUrlProbeContext = {
 }
 
 /**
- * Which host executes this probe. A repo reached over a `\wsl$` UNC path names
- * its distro nowhere else, and keying it as the native host would let a dead
- * distro back off the probes of local repos that are answering fine.
+ * Which host executes this probe, resolved the way the runner resolves routing
+ * rather than from the caller's hint alone.
+ *
+ * Why it has to match: a Windows-drive worktree linked into a WSL repo carries a
+ * `wslDistro` but runs *host* git, and a `\wsl$` UNC cwd names its distro
+ * nowhere else. Key either one wrong and the budget is silently useless — the
+ * linked worktree's instant successes would reset the wedged distro's streak on
+ * every poll, so the breaker could never open.
  */
-function localProbeHostKey(context: RemoteUrlProbeContext): string {
-  const wslDistro = context.wslDistro ?? parseWslUncPath(context.repoPath)?.distro
+async function localProbeHostKey(context: RemoteUrlProbeContext): Promise<string> {
+  if (
+    isWslLinkedWorktreeGitRoutingCandidate(context.repoPath, context.wslDistro) &&
+    (await prepareWslLinkedWorktreeGitRouting(context.repoPath, context.wslDistro))
+  ) {
+    return gitProbeHostKey({})
+  }
+  // Why the cwd first: `resolveCommand` reads the cwd's distro before the hint,
+  // so identity follows execution. Why the platform gate: off Windows nothing is
+  // routed into WSL, and a literal `//wsl$/x` directory is an ordinary path.
+  const cwdDistro =
+    process.platform === 'win32' ? parseWslUncPath(context.repoPath)?.distro : undefined
+  const wslDistro = cwdDistro ?? context.wslDistro
   return gitProbeHostKey(wslDistro ? { wslDistro } : {})
 }
 
@@ -71,7 +91,7 @@ export async function readRemoteUrl(
     )
   }
   return runGuardedGitHostProbe(
-    localProbeHostKey(context),
+    await localProbeHostKey(context),
     async () => {
       const { stdout } = await gitExecFileAsync(['remote', 'get-url', remoteName], {
         cwd: context.repoPath,

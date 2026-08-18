@@ -9,10 +9,13 @@ import {
   GIT_HOST_PROBE_BASE_COOLDOWN_MS,
   GIT_HOST_PROBE_HEALTHY_CONCURRENCY,
   GIT_HOST_PROBE_MAX_COOLDOWN_MS,
+  GIT_HOST_PROBE_SLOT_STALE_MS,
+  GIT_HOST_PROBE_STREAK_DECAY_MS,
   gitProbeHostKey,
   isGitHostProbeBlockedError,
   runGuardedGitHostProbe
 } from './git-host-probe-breaker'
+import { MAX_TRACKED_GIT_PROBE_HOSTS } from './git-host-probe-state'
 
 const isUnavailable = (error: unknown): boolean =>
   error instanceof Error && /timed out/i.test(error.message)
@@ -48,6 +51,16 @@ async function probeOnce(
   }
 }
 
+/** The text a later triage reads out of a log; it must describe what happened. */
+async function blockedMessage(hostKey: string): Promise<string> {
+  try {
+    await runGuardedGitHostProbe(hostKey, async () => 'unused', isUnavailable)
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+  throw new Error('expected the probe to be blocked')
+}
+
 describe('git host probe breaker', () => {
   beforeEach(() => {
     _resetGitHostProbeBreaker()
@@ -63,7 +76,12 @@ describe('git host probe breaker', () => {
 
   it('scopes state to the runtime that executes git, never globally', () => {
     expect(gitProbeHostKey({})).toBe('native')
-    expect(gitProbeHostKey({ wslDistro: 'Ubuntu-24.04' })).toBe('wsl:Ubuntu-24.04')
+    // Case-folded: wsl.exe matches distro names case-insensitively, so one
+    // distro spelled two ways must not split into two half-blind budgets.
+    expect(gitProbeHostKey({ wslDistro: 'Ubuntu-24.04' })).toBe('wsl:ubuntu-24.04')
+    expect(gitProbeHostKey({ wslDistro: 'ubuntu-24.04' })).toBe(
+      gitProbeHostKey({ wslDistro: 'Ubuntu-24.04' })
+    )
     expect(gitProbeHostKey({ connectionId: 'ssh-1', connectionGeneration: 3 })).toBe('ssh:ssh-1:3')
     // A reconnect mints a new key, so a fresh transport never serves the old
     // one's cooldown.
@@ -144,7 +162,7 @@ describe('git host probe breaker', () => {
     expect(await trialProbe).toBe('answered')
   })
 
-  it('serializes and sheds once a host has failed twice, but never before', async () => {
+  it('serializes once a host has failed twice, and answers the overflow rather than failing it', async () => {
     const first = deferred<string>()
     const second = deferred<string>()
 
@@ -157,16 +175,160 @@ describe('git host probe breaker', () => {
     expect(await healthyA).toBe('unavailable')
     expect(await healthyB).toBe('unavailable')
 
-    // Degraded: a second concurrent probe is shed instead of queued.
+    // Degraded: the overflow waits for the outstanding probe instead of being
+    // told the host failed. Two timeouts are not yet proof that it is wedged,
+    // and the trial that is running may be about to disprove it.
     const held = deferred<string>()
     const outstanding = probeOnce('wsl:Ubuntu', () => held.promise)
     await Promise.resolve()
-    const shedRun = vi.fn(async () => 'unused')
-    expect(await probeOnce('wsl:Ubuntu', shedRun)).toBe('blocked')
-    expect(shedRun).not.toHaveBeenCalled()
+    const queuedRun = vi.fn(async () => 'git@github.com:acme/orca.git')
+    const queued = probeOnce('wsl:Ubuntu', queuedRun)
+    await Promise.resolve()
+    expect(queuedRun).not.toHaveBeenCalled()
+    expect(_getGitHostProbeState('wsl:Ubuntu')?.inFlight).toBe(1)
 
     held.resolve('git@github.com:acme/orca.git')
     expect(await outstanding).toBe('answered')
+    expect(await queued).toBe('answered')
+    expect(queuedRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('never turns a burst on a host with a clean budget into a failure', async () => {
+    // Every local repo shares the `native` key, and a cold multi-worktree start
+    // fires one hosted-review lookup per card at once.
+    const gates = Array.from({ length: 100 }, () => deferred<string>())
+    const probes = gates.map((gate) => probeOnce('native', () => gate.promise))
+    await Promise.resolve()
+    for (const gate of gates) {
+      gate.resolve('git@github.com:acme/orca.git')
+    }
+    expect(await Promise.all(probes)).toEqual(gates.map(() => 'answered'))
+    expect(_getGitHostProbeState('native')).toBeNull()
+  })
+
+  it('recovers after the system clock steps backwards mid-cooldown', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await probeOnce('wsl:Ubuntu', wedged)
+    }
+    expect(await probeOnce('wsl:Ubuntu', wedged)).toBe('blocked')
+
+    // NTP step, VM snapshot restore, dual-boot RTC fix: the cooldown deadline is
+    // absolute, so an unclamped one strands the host for the size of the jump —
+    // and no probe is left to earn the success that is the only way back.
+    vi.setSystemTime(Date.now() - 60 * 60_000)
+    const trial = vi.fn(async () => 'git@github.com:acme/orca.git')
+    expect(await probeOnce('wsl:Ubuntu', trial)).toBe('answered')
+    expect(trial).toHaveBeenCalledTimes(1)
+  })
+
+  it('reclaims the slot of a probe that never settles', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await probeOnce('wsl:Ubuntu', wedged)).toBe('unavailable')
+    }
+    // Degraded to a single slot, and this probe never gives it back.
+    void runGuardedGitHostProbe('wsl:Ubuntu', () => new Promise<string>(() => {}), isUnavailable)
+    await Promise.resolve()
+    expect(_getGitHostProbeState('wsl:Ubuntu')?.inFlight).toBe(1)
+
+    vi.setSystemTime(Date.now() + GIT_HOST_PROBE_SLOT_STALE_MS + 1)
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await probeOnce('wsl:Ubuntu', wedged)).toBe('unavailable')
+    }
+    // Back at the degraded ceiling: the abandoned slot must not still hold it.
+    expect(_getGitHostProbeState('wsl:Ubuntu')?.inFlight).toBe(0)
+    const trial = vi.fn(async () => 'git@github.com:acme/orca.git')
+    expect(await probeOnce('wsl:Ubuntu', trial)).toBe('answered')
+    expect(trial).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops counting failures a suspend apart as one consecutive streak', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await probeOnce('wsl:Ubuntu', wedged)).toBe('unavailable')
+    }
+    expect(_getGitHostProbeState('wsl:Ubuntu')?.consecutiveUnavailable).toBe(2)
+
+    // Two probes stranded across a laptop suspend both fire their deadline on
+    // resume; hours later they say nothing about the host as it is now.
+    vi.setSystemTime(Date.now() + GIT_HOST_PROBE_STREAK_DECAY_MS + 1)
+    const held = deferred<string>()
+    const outstanding = probeOnce('wsl:Ubuntu', () => held.promise)
+    await Promise.resolve()
+    let concurrentOutcome: string | null = null
+    const concurrent = probeOnce('wsl:Ubuntu', async () => 'git@github.com:acme/orca.git').then(
+      (outcome) => {
+        concurrentOutcome = outcome
+      }
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(concurrentOutcome).toBe('answered')
+
+    held.resolve('git@github.com:acme/orca.git')
+    expect(await outstanding).toBe('answered')
+    await concurrent
+  })
+
+  it('keeps an open breaker while reconnect churn mints new host keys', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await probeOnce('wsl:Ubuntu', wedged)
+    }
+    const blockedUntilMs = _getGitHostProbeState('wsl:Ubuntu')?.blockedUntilMs ?? 0
+    expect(blockedUntilMs).toBeGreaterThan(Date.now())
+
+    // A relay flap that strands one probe leaves an entry nothing can forget, so
+    // churn alone must not evict the state holding the storm back.
+    for (let flap = 0; flap < MAX_TRACKED_GIT_PROBE_HOSTS * 2; flap += 1) {
+      await probeOnce(`ssh:relay-${flap}:0`, wedged)
+    }
+    expect(_getGitHostProbeState('wsl:Ubuntu')?.blockedUntilMs).toBe(blockedUntilMs)
+    const spawn = vi.fn(async () => 'git@github.com:acme/orca.git')
+    expect(await probeOnce('wsl:Ubuntu', spawn)).toBe('blocked')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('retires the earlier generation of a reconnecting SSH host', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    await probeOnce('ssh:relay-1:0', wedged)
+    expect(_getGitHostProbeState('ssh:relay-1:0')?.consecutiveUnavailable).toBe(1)
+
+    await probeOnce('ssh:relay-1:1', async () => 'git@github.com:acme/orca.git')
+    expect(_getGitHostProbeState('ssh:relay-1:0')).toBeNull()
+  })
+
+  it('says why a probe was shed rather than asserting failures that did not happen', async () => {
+    const wedged = async (): Promise<string> => {
+      throw timeout()
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await probeOnce('wsl:Ubuntu', wedged)
+    }
+    expect(await blockedMessage('wsl:Ubuntu')).toBe(
+      'Git host wsl:Ubuntu did not answer 3 consecutive probes; suppressed for ~30s.'
+    )
+
+    vi.setSystemTime(Date.now() + GIT_HOST_PROBE_BASE_COOLDOWN_MS)
+    const trial = deferred<string>()
+    const trialProbe = probeOnce('wsl:Ubuntu', () => trial.promise)
+    await Promise.resolve()
+    expect(await blockedMessage('wsl:Ubuntu')).toBe(
+      'Git host wsl:Ubuntu did not answer 3 consecutive probes; shed while the trial probe deciding whether it is back is outstanding.'
+    )
+
+    trial.resolve('git@github.com:acme/orca.git')
+    expect(await trialProbe).toBe('answered')
   })
 
   it('caps healthy concurrency and queues the overflow rather than failing it', async () => {

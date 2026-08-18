@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { getSshGitProviderMock, gitExecFileAsyncMock } = vi.hoisted(() => ({
   getSshGitProviderMock: vi.fn(),
@@ -14,6 +14,7 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
 vi.mock('./runner', () => ({ gitExecFileAsync: gitExecFileAsyncMock }))
 
 import {
+  _getGitHostProbeState,
   _resetGitHostProbeBreaker,
   GIT_HOST_PROBE_HEALTHY_CONCURRENCY
 } from './git-host-probe-breaker'
@@ -23,6 +24,10 @@ import {
   readRemoteUrl,
   REMOTE_URL_PROBE_TIMEOUT_MS
 } from './remote-url-probe'
+import {
+  resetWslLinkedWorktreeGitRoutingForTests,
+  seedWslLinkedWorktreeGitRoutingForTests
+} from './wsl-linked-worktree-git-routing'
 
 /**
  * Crash f2521868: a wedged WSL distro answered nothing for two hours while every
@@ -32,6 +37,7 @@ import {
  * its deadline, so the in-flight coalescer drops it and the next poll re-issues.
  */
 const WEDGED_DISTRO = 'Ubuntu-24.04'
+const WEDGED_HOST_KEY = 'wsl:ubuntu-24.04'
 const WSL_REPO = `\\\\wsl$\\${WEDGED_DISTRO}\\home\\dev\\orca`
 const POLL_INTERVAL_MS = 10_000
 const INCIDENT_WINDOW_MS = 60 * 60_000
@@ -71,8 +77,14 @@ describe('remote URL probe against a wedged host (crash f2521868)', () => {
     getSshGitProviderMock.mockReset()
     gitExecFileAsyncMock.mockReset()
     _resetGitHostProbeBreaker()
+    resetWslLinkedWorktreeGitRoutingForTests()
     vi.useFakeTimers()
     advanceTo(1_700_000_000_000)
+  })
+
+  afterEach(() => {
+    resetWslLinkedWorktreeGitRoutingForTests()
+    vi.useRealTimers()
   })
 
   it('stops hammering a wedged distro, then fully restores it on one success', async () => {
@@ -187,5 +199,41 @@ describe('remote URL probe against a wedged host (crash f2521868)', () => {
     await expect(
       readRemoteUrl({ repoPath: WSL_REPO, wslDistro: WEDGED_DISTRO }, 'origin')
     ).rejects.toSatisfy(isTransientGitProbeError)
+  })
+  /**
+   * A Windows-drive worktree linked into a WSL repo carries the distro as a hint
+   * but runs *host* git, so keying the probe by the hint would let its instant
+   * successes reset the wedged distro's streak on every poll — the breaker would
+   * never open and the storm would be back at full width.
+   */
+  it('keys a Windows-drive linked worktree to the host git that actually runs it', async () => {
+    const linkedWorktree = 'C:\\worktrees\\orca'
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      seedWslLinkedWorktreeGitRoutingForTests(linkedWorktree)
+      const spawns: number[] = []
+      gitExecFileAsyncMock.mockImplementation(async (_args: string[], options: { cwd: string }) => {
+        if (options.cwd === linkedWorktree) {
+          return { stdout: 'git@github.com:acme/orca.git\n' }
+        }
+        spawns.push(virtualNowMs)
+        advanceTo(virtualNowMs + REMOTE_URL_PROBE_TIMEOUT_MS)
+        throw wslTimeout()
+      })
+
+      for (let cycle = 0; cycle < 20; cycle += 1) {
+        await expect(
+          readRemoteUrl({ repoPath: linkedWorktree, wslDistro: WEDGED_DISTRO }, 'origin')
+        ).resolves.toContain('github.com')
+        expect(await pollWslRepo()).toBe('unavailable')
+        advanceTo(virtualNowMs + POLL_INTERVAL_MS)
+      }
+
+      expect(_getGitHostProbeState(WEDGED_HOST_KEY)?.blockedUntilMs).toBeGreaterThan(virtualNowMs)
+      expect(spawns.length).toBeLessThanOrEqual(GIT_HOST_PROBE_HEALTHY_CONCURRENCY)
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
   })
 })

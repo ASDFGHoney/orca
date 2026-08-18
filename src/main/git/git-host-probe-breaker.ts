@@ -2,6 +2,14 @@ import {
   recordCoalescedDurableCrashBreadcrumb,
   recordDurableCrashBreadcrumb
 } from '../crash-reporting/durable-crash-breadcrumb'
+import {
+  evictIdleGitProbeHostStates,
+  forgetRetiredSshGitProbeGenerations,
+  gitProbeHostStates as hostStates,
+  isForgettableGitProbeHost,
+  type GitProbeHostState,
+  type GitProbeSlot
+} from './git-host-probe-state'
 
 /**
  * Per-host admission control for the git host probes behind forge detection
@@ -48,26 +56,38 @@ export const GIT_HOST_PROBE_HEALTHY_CONCURRENCY = 8
 export const GIT_HOST_PROBE_BASE_COOLDOWN_MS = 30_000
 export const GIT_HOST_PROBE_MAX_COOLDOWN_MS = 120_000
 
-/** Past this the fan-out is pathological; shed rather than buffer it. */
-const MAX_QUEUED_PER_HOST = 64
-/** Reconnect churn mints a key per SSH generation, so bound retained hosts. */
-const MAX_TRACKED_HOSTS = 64
+/**
+ * Every guarded probe carries its own deadline, but nothing here can prove it,
+ * and at the degraded ceiling of one slot a probe that never settled would
+ * block its host for the life of the process — the exact defect
+ * `coalesced-probe.ts` already had to fix once. Reclaim a slot past the longest
+ * a single guarded region can legitimately run: a 5s routing probe, a 30s
+ * deadline, and a 30s direct-WSL fallback retry, with room to spare.
+ */
+export const GIT_HOST_PROBE_SLOT_STALE_MS = 180_000
+
+/**
+ * "Consecutive" has to mean "within one episode". Two deadline kills either
+ * side of a laptop suspend say nothing about the host now, and with no decay
+ * they would pin it at the degraded ceiling until some probe ran alone. Sized
+ * like the cooldown cap: past one full backoff interval a stale blip has had
+ * every chance to repeat.
+ */
+export const GIT_HOST_PROBE_STREAK_DECAY_MS = 120_000
+
+/** Past this a *failing* host's backlog is pathological; shed rather than buffer it. */
+const MAX_QUEUED_PER_FAILING_HOST = 64
 /** A two-hour outage must still be legible in a 30-entry breadcrumb ring. */
 const STILL_OPEN_BREADCRUMB_INTERVAL_MS = 5 * 60_000
 /** Keeps `2 ** openCount` away from Infinity on a host down for days. */
 const MAX_COOLDOWN_DOUBLINGS = 20
 
-type HostProbeState = {
-  consecutiveUnavailable: number
-  openCount: number
-  blockedUntilMs: number
-  inFlight: number
-  queued: number
-  waiters: (() => void)[]
-  reportedOpen: boolean
-}
+type BlockReason = 'cooling-down' | 'trial-outstanding' | 'queue-full'
 
-type Admission = 'closed' | 'half-open' | 'blocked' | 'queue'
+type Admission =
+  | { kind: 'admitted'; slot: GitProbeSlot; halfOpen: boolean }
+  | { kind: 'blocked'; reason: BlockReason }
+  | { kind: 'queue' }
 
 export type GitHostProbeBlockedError = Error & { gitHostProbeBlocked: true }
 
@@ -77,8 +97,6 @@ export type GitProbeHostParts = {
   wslDistro?: string
 }
 
-const hostStates = new Map<string, HostProbeState>()
-
 /** Scopes probe state to the runtime that actually executes git. */
 export function gitProbeHostKey(parts: GitProbeHostParts): string {
   if (parts.connectionId) {
@@ -86,7 +104,10 @@ export function gitProbeHostKey(parts: GitProbeHostParts): string {
     // new key and starts trusted instead of serving out the old one's cooldown.
     return `ssh:${parts.connectionId}:${parts.connectionGeneration ?? 0}`
   }
-  return parts.wslDistro ? `wsl:${parts.wslDistro}` : 'native'
+  // Why lowercased: wsl.exe matches distro names case-insensitively, so a UNC
+  // path spelled `ubuntu` and a hint spelled `Ubuntu` are one host and must
+  // share one budget rather than splitting it into two half-blind ones.
+  return parts.wslDistro ? `wsl:${parts.wslDistro.toLowerCase()}` : 'native'
 }
 
 export function isGitHostProbeBlockedError(error: unknown): error is GitHostProbeBlockedError {
@@ -109,7 +130,7 @@ export async function runGuardedGitHostProbe<T>(
   isUnavailableError: (error: unknown) => boolean
 ): Promise<T> {
   const state = getHostState(hostKey)
-  const halfOpen = await admit(hostKey, state)
+  const { slot, halfOpen } = await admit(hostKey, state)
   try {
     const result = await probe()
     recordAnswered(hostKey, state)
@@ -122,22 +143,29 @@ export async function runGuardedGitHostProbe<T>(
     }
     throw error
   } finally {
-    release(hostKey, state)
+    release(hostKey, state, slot)
   }
 }
 
-/** Resolves to true when this probe is the trial that decides whether the host is back. */
-async function admit(hostKey: string, state: HostProbeState): Promise<boolean> {
+/** Waits for a slot, and reports whether this probe is the trial deciding if the host is back. */
+async function admit(
+  hostKey: string,
+  state: GitProbeHostState
+): Promise<{ slot: GitProbeSlot; halfOpen: boolean }> {
   for (;;) {
     const decision = tryAdmit(state)
-    if (decision === 'blocked') {
-      throw createBlockedError(hostKey, state)
+    if (decision.kind === 'admitted') {
+      return decision
     }
-    if (decision !== 'queue') {
-      return decision === 'half-open'
+    if (decision.kind === 'blocked') {
+      throw createBlockedError(hostKey, state, decision.reason)
     }
-    if (state.queued >= MAX_QUEUED_PER_HOST) {
-      throw createBlockedError(hostKey, state)
+    // Why: only a host that is already failing gets its backlog bounded. Shedding
+    // a caller on a host with a clean budget invents a failure that never
+    // happened, and waiters cost nothing but ordering while every slot ahead of
+    // them is deadline-bounded.
+    if (state.consecutiveUnavailable > 0 && state.queued >= MAX_QUEUED_PER_FAILING_HOST) {
+      throw createBlockedError(hostKey, state, 'queue-full')
     }
     state.queued += 1
     try {
@@ -148,33 +176,75 @@ async function admit(hostKey: string, state: HostProbeState): Promise<boolean> {
   }
 }
 
-function tryAdmit(state: HostProbeState): Admission {
+function tryAdmit(state: GitProbeHostState): Admission {
   const now = Date.now()
+  repairClockAnomalies(state, now)
+  reclaimStaleSlots(state, now)
   if (state.blockedUntilMs > now) {
-    return 'blocked'
+    return { kind: 'blocked', reason: 'cooling-down' }
   }
   if (state.blockedUntilMs > 0) {
     // Cooled down: exactly one trial probe gets to decide, alone.
-    if (state.inFlight > 0) {
-      return 'blocked'
+    if (state.inFlight.size > 0) {
+      return { kind: 'blocked', reason: 'trial-outstanding' }
     }
-    state.inFlight += 1
-    return 'half-open'
+    return { kind: 'admitted', slot: occupySlot(state, now), halfOpen: true }
+  }
+  if (
+    state.consecutiveUnavailable > 0 &&
+    now - state.lastUnavailableAtMs > GIT_HOST_PROBE_STREAK_DECAY_MS
+  ) {
+    state.consecutiveUnavailable = 0
   }
   const ceiling =
     state.consecutiveUnavailable >= GIT_HOST_PROBE_SERIALIZE_AFTER
       ? 1
       : GIT_HOST_PROBE_HEALTHY_CONCURRENCY
-  if (state.inFlight >= ceiling) {
-    // Why: a caller queued behind a probe that is already failing would wait a
-    // whole deadline to learn what shedding tells it now, and its poll returns.
-    return ceiling === 1 ? 'blocked' : 'queue'
+  if (state.inFlight.size >= ceiling) {
+    // Why queue rather than shed: the breaker has not concluded anything yet at
+    // this rung, so a synthetic failure here would report a host outage that the
+    // very next release may disprove. The wait is bounded — one deadline, after
+    // which the host has either answered or opened the breaker.
+    return { kind: 'queue' }
   }
-  state.inFlight += 1
-  return 'closed'
+  return { kind: 'admitted', slot: occupySlot(state, now), halfOpen: false }
 }
 
-function recordAnswered(hostKey: string, state: HostProbeState): void {
+/**
+ * Why: every deadline here is an absolute wall-clock stamp, so a backwards step
+ * — NTP correction, VM snapshot restore, a dual-boot RTC fix — would otherwise
+ * strand a host for the length of the jump, far past the documented cap, with
+ * no probe admitted to earn the success that is the only way back.
+ */
+function repairClockAnomalies(state: GitProbeHostState, now: number): void {
+  if (state.blockedUntilMs - now > GIT_HOST_PROBE_MAX_COOLDOWN_MS) {
+    state.blockedUntilMs = now
+  }
+  if (state.lastUnavailableAtMs > now) {
+    state.lastUnavailableAtMs = now
+  }
+  for (const slot of state.inFlight) {
+    if (slot.admittedAtMs > now) {
+      slot.admittedAtMs = now
+    }
+  }
+}
+
+function reclaimStaleSlots(state: GitProbeHostState, now: number): void {
+  for (const slot of state.inFlight) {
+    if (now - slot.admittedAtMs > GIT_HOST_PROBE_SLOT_STALE_MS) {
+      state.inFlight.delete(slot)
+    }
+  }
+}
+
+function occupySlot(state: GitProbeHostState, now: number): GitProbeSlot {
+  const slot: GitProbeSlot = { admittedAtMs: now }
+  state.inFlight.add(slot)
+  return slot
+}
+
+function recordAnswered(hostKey: string, state: GitProbeHostState): void {
   const unansweredProbes = state.consecutiveUnavailable
   const wasOpen = state.reportedOpen
   state.consecutiveUnavailable = 0
@@ -186,8 +256,9 @@ function recordAnswered(hostKey: string, state: HostProbeState): void {
   }
 }
 
-function recordUnavailable(hostKey: string, state: HostProbeState, halfOpen: boolean): void {
+function recordUnavailable(hostKey: string, state: GitProbeHostState, halfOpen: boolean): void {
   state.consecutiveUnavailable += 1
+  state.lastUnavailableAtMs = Date.now()
   if (halfOpen) {
     openBreaker(hostKey, state)
     return
@@ -200,7 +271,7 @@ function recordUnavailable(hostKey: string, state: HostProbeState, halfOpen: boo
   openBreaker(hostKey, state)
 }
 
-function openBreaker(hostKey: string, state: HostProbeState): void {
+function openBreaker(hostKey: string, state: GitProbeHostState): void {
   state.openCount += 1
   state.blockedUntilMs = Date.now() + cooldownMs(state.openCount)
   const data = {
@@ -226,68 +297,63 @@ function cooldownMs(openCount: number): number {
   return Math.min(GIT_HOST_PROBE_BASE_COOLDOWN_MS * 2 ** doublings, GIT_HOST_PROBE_MAX_COOLDOWN_MS)
 }
 
-function release(hostKey: string, state: HostProbeState): void {
-  state.inFlight -= 1
+function release(hostKey: string, state: GitProbeHostState, slot: GitProbeSlot): void {
+  // Why delete rather than decrement: a slot reclaimed as stale is already gone,
+  // and its late release must not hand the host a phantom free slot.
+  state.inFlight.delete(slot)
   const waiters = state.waiters.splice(0)
   for (const wake of waiters) {
     wake()
   }
   // Why: a host with nothing left to remember costs nothing to forget, which is
   // what keeps the healthy case from retaining an entry per repo host forever.
-  if (hostStates.get(hostKey) === state && isForgettable(state)) {
+  if (hostStates.get(hostKey) === state && isForgettableGitProbeHost(state)) {
     hostStates.delete(hostKey)
   }
 }
 
-function isForgettable(state: HostProbeState): boolean {
-  return isIdle(state) && state.consecutiveUnavailable === 0 && state.blockedUntilMs === 0
+function createBlockedError(
+  hostKey: string,
+  state: GitProbeHostState,
+  reason: BlockReason
+): GitHostProbeBlockedError {
+  return Object.assign(new Error(`Git host ${hostKey} ${describeBlock(state, reason)}`), {
+    gitHostProbeBlocked: true as const
+  })
 }
 
-function isIdle(state: HostProbeState): boolean {
-  return state.inFlight === 0 && state.queued === 0 && state.waiters.length === 0
+/** Why: this text is the breadcrumb a later triage reads, so it must not claim failures that did not happen. */
+function describeBlock(state: GitProbeHostState, reason: BlockReason): string {
+  const unanswered = `did not answer ${state.consecutiveUnavailable} consecutive probes`
+  if (reason === 'cooling-down') {
+    const remainingMs = Math.max(0, state.blockedUntilMs - Date.now())
+    return `${unanswered}; suppressed for ~${Math.ceil(remainingMs / 1000)}s.`
+  }
+  if (reason === 'trial-outstanding') {
+    return `${unanswered}; shed while the trial probe deciding whether it is back is outstanding.`
+  }
+  return `${unanswered} and has ${state.queued} more queued; shed to bound the backlog.`
 }
 
-function createBlockedError(hostKey: string, state: HostProbeState): GitHostProbeBlockedError {
-  const remainingMs = state.blockedUntilMs - Date.now()
-  const message =
-    remainingMs > 0
-      ? `Git host ${hostKey} did not answer ${state.consecutiveUnavailable} consecutive probes; suppressed for ~${Math.ceil(remainingMs / 1000)}s.`
-      : `Git host ${hostKey} did not answer ${state.consecutiveUnavailable} consecutive probes; shed while an earlier probe is still outstanding.`
-  return Object.assign(new Error(message), { gitHostProbeBlocked: true as const })
-}
-
-function getHostState(hostKey: string): HostProbeState {
+function getHostState(hostKey: string): GitProbeHostState {
   const existing = hostStates.get(hostKey)
   if (existing) {
     return existing
   }
-  const state: HostProbeState = {
+  const state: GitProbeHostState = {
     consecutiveUnavailable: 0,
+    lastUnavailableAtMs: 0,
     openCount: 0,
     blockedUntilMs: 0,
-    inFlight: 0,
+    inFlight: new Set(),
     queued: 0,
     waiters: [],
     reportedOpen: false
   }
+  forgetRetiredSshGitProbeGenerations(hostKey)
   hostStates.set(hostKey, state)
-  evictIdleHostStates()
+  evictIdleGitProbeHostStates()
   return state
-}
-
-function evictIdleHostStates(): void {
-  if (hostStates.size <= MAX_TRACKED_HOSTS) {
-    return
-  }
-  for (const [key, state] of hostStates) {
-    if (hostStates.size <= MAX_TRACKED_HOSTS) {
-      return
-    }
-    // Never drop a host with live slot accounting; its release would orphan.
-    if (isIdle(state)) {
-      hostStates.delete(key)
-    }
-  }
 }
 
 /** @internal — tests only. */
@@ -304,7 +370,7 @@ export function _getGitHostProbeState(
     ? {
         consecutiveUnavailable: state.consecutiveUnavailable,
         blockedUntilMs: state.blockedUntilMs,
-        inFlight: state.inFlight
+        inFlight: state.inFlight.size
       }
     : null
 }
