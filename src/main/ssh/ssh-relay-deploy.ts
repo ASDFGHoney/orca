@@ -77,6 +77,7 @@ import {
 import { detectRemoteHostPlatform } from './ssh-remote-platform-detection'
 import { powerShellCommand, powerShellLiteral, powerShellNativeArg } from './ssh-remote-powershell'
 import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
+import { isRelaySocketOwnerLiveError, removeUnownedRelaySocket } from './ssh-relay-socket-owner'
 import { isSshSessionLimitError } from './ssh-session-limit-error'
 import {
   isWindowsRelayPipePath,
@@ -1436,22 +1437,20 @@ async function launchRelay(
       } catch (err) {
         signal?.throwIfAborted()
         console.warn(
-          '[ssh-relay] Socket reconnect failed, launching fresh relay:',
+          '[ssh-relay] Socket reconnect failed:',
           err instanceof Error ? err.message : String(err)
         )
-        // Why: stale socket from a crashed relay — remove it so the fresh launch can bind at the same path.
-        await execCommand(conn, `rm -f ${shellEscape(sockFile)}`, { signal }).catch(
-          (cleanupErr) => {
-            if (isUnconfirmedSshCommandTermination(cleanupErr)) {
-              throw cleanupErr
-            }
-          }
-        )
-        signal?.throwIfAborted()
+        // Why: a refused --connect is loss of contact, never proof the relay died, so the socket is
+        // removed only once a probe shows nothing is listening. Unlinking a live owner's path cannot
+        // stop it — it just hides it from the fresh launch's EADDRINUSE check and orphans it and its
+        // PTYs forever (STA-1756). See docs/reference/ssh-execution-boundary.md.
+        await removeUnownedRelaySocket(conn, nodePath, sockFile, { signal, cause: err })
       }
     }
   } catch (err) {
-    if (isUnconfirmedSshCommandTermination(err)) {
+    if (isUnconfirmedSshCommandTermination(err) || isRelaySocketOwnerLiveError(err)) {
+      // Why rethrow: falling through would launch a fresh relay over a socket path whose
+      // owner is still listening, which is exactly the displacement this branch refused.
       throw err
     }
     signal?.throwIfAborted()

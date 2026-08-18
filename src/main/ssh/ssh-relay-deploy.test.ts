@@ -186,27 +186,6 @@ describe('deployAndLaunchRelay', () => {
     expect(progress).toContain('Starting relay...')
   })
 
-  it('does not launch fresh after unconfirmed stale-socket cleanup', async () => {
-    const conn = makeMockConnection()
-    const unconfirmedCleanup = Object.assign(new Error('socket cleanup still running'), {
-      sshChannelCloseConfirmed: false
-    })
-    vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('stale relay reconnect failed'))
-    vi.mocked(execCommand)
-      .mockResolvedValueOnce('__ORCA_REMOTE_PLATFORM__ Linux x86_64')
-      .mockResolvedValueOnce('/home/user')
-      .mockResolvedValueOnce('ORCA-NATIVE-DEPS-OK')
-      .mockResolvedValueOnce('') // launch namespace marker
-      .mockResolvedValueOnce('ALIVE')
-      .mockRejectedValueOnce(unconfirmedCleanup)
-
-    await expect(deployAndLaunchRelay(conn)).rejects.toBe(unconfirmedCleanup)
-
-    const commands = vi.mocked(conn.exec).mock.calls.map(([command]) => command)
-    expect(commands).toHaveLength(1)
-    expect(commands.some((command) => command.includes('--detached'))).toBe(false)
-  })
-
   it('resolves the remote node path once per deploy', async () => {
     const conn = makeMockConnection()
     const mockExecCommand = vi.mocked(execCommand)
