@@ -10,6 +10,7 @@ import { BROWSER_CORE_METHODS } from './browser-core'
 import { BROWSER_EXTRA_METHODS } from './browser-extras'
 import { BROWSER_SCREENCAST_METHODS } from './browser-screencast'
 import { BROWSER_CLIENT_HOST_METHODS } from './browser-client-host'
+import { BROWSER_CLIENT_FILE_CHANNEL_METHODS } from './browser-client-file-channel'
 import { BROWSER_NETWORK_TUNNEL_METHODS } from './browser-network-tunnel'
 import { ORCHESTRATION_METHODS } from './orchestration'
 import { NOTIFICATION_METHODS } from './notifications'
@@ -60,6 +61,7 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...BROWSER_SCREENCAST_METHODS,
   ...BROWSER_EXTRA_METHODS,
   ...BROWSER_CLIENT_HOST_METHODS,
+  ...BROWSER_CLIENT_FILE_CHANNEL_METHODS,
   ...BROWSER_NETWORK_TUNNEL_METHODS,
   ...ORCHESTRATION_METHODS,
   ...NOTIFICATION_METHODS,
