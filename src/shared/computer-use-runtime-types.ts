@@ -108,6 +108,7 @@ export type ComputerActionVerification =
         | 'clipboard_paste'
         | 'accessibility_action_unasserted'
         | 'provider_unavailable'
+        | 'readback_unsupported'
         | 'window_changed'
         | 'value_mismatch'
       expected?: string | null
