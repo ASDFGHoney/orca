@@ -68,6 +68,7 @@ import {
   shouldOpenTabsLeadPaletteSections,
   NO_PALETTE_QUALITY_RANK
 } from '@/lib/cmd-j-section-leadership'
+import { AgentIcon } from '@/lib/agent-catalog'
 import { cn } from '@/lib/utils'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { queueWorkspaceActivationTerminalFocus } from '@/lib/workspace-activation-terminal-focus'
@@ -743,6 +744,7 @@ function WorktreeJumpPaletteContent({
   const groupsByWorktree = useAppStore((s) => s.groupsByWorktree)
   const retainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
   const sleepingAgentSessionsByPaneKey = useAppStore((s) => s.sleepingAgentSessionsByPaneKey)
+  const paneForegroundAgentByPaneKey = useAppStore((s) => s.paneForegroundAgentByPaneKey)
   const settings = useAppStore((s) => s.settings)
   const worktreeVisibilityDefaultsByHost = useAppStore((s) => s.worktreeVisibilityDefaultsByHost)
   const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
@@ -848,7 +850,6 @@ function WorktreeJumpPaletteContent({
       hostLabelOverrides
     ]
   )
-  const canCreateWorktree = repos.length > 0
 
   // Why: host-less repos and worktrees inherit the focused runtime host, exactly
   // as the sidebar's host headers do — otherwise the two disagree on bucketing.
@@ -1208,7 +1209,9 @@ function WorktreeJumpPaletteContent({
       activeFileId,
       activeFileIdByWorktree,
       activeTabTypeByWorktree,
-      generatedTitlesEnabled: settings?.tabAutoGenerateTitle === true
+      generatedTitlesEnabled: settings?.tabAutoGenerateTitle === true,
+      terminalLayoutsByTabId,
+      paneForegroundAgentByPaneKey
     })
   }, [
     paletteStatusInputsActive,
@@ -1228,7 +1231,9 @@ function WorktreeJumpPaletteContent({
     retainedAgentsByPaneKey,
     settings?.tabAutoGenerateTitle,
     sleepingAgentSessionsByPaneKey,
+    paneForegroundAgentByPaneKey,
     tabsByWorktree,
+    terminalLayoutsByTabId,
     unifiedTabsByWorktree,
     worktreeOrder
   ])
@@ -1815,14 +1820,13 @@ function WorktreeJumpPaletteContent({
   } = useMemo(
     () =>
       getWorktreePaletteCreateActionState({
-        canCreateWorktree,
         query: deferredQuery
       }),
-    [canCreateWorktree, deferredQuery]
+    [deferredQuery]
   )
   const createWorktreeName = taskSourceUrl ? query.trim() : deferredCreateWorktreeName
-  // Why still gated: a task URL bypasses query deferral, not creation eligibility.
-  const showCreateAction = deferredShowCreateAction || (taskSourceUrl !== null && canCreateWorktree)
+  // Why: a task URL bypasses query deferral, so it arms create on its own.
+  const showCreateAction = deferredShowCreateAction || taskSourceUrl !== null
 
   // Why: arm the lookup before Enter can target the newly rendered Linear row.
   useLayoutEffect(() => {
@@ -3339,8 +3343,20 @@ function WorktreeJumpPaletteContent({
                   hostOptions,
                   hostFilterActive
                 )
-                const WorkspaceTabIcon =
-                  result.contentType === 'terminal' ? SquareTerminal : FileText
+                const workspaceTabFallback =
+                  result.contentType === 'terminal' && result.occupantAgent ? (
+                    <span
+                      className="inline-flex"
+                      data-agent-icon={result.occupantAgent}
+                      aria-hidden="true"
+                    >
+                      <AgentIcon agent={result.occupantAgent} size={14} />
+                    </span>
+                  ) : result.contentType === 'terminal' ? (
+                    <SquareTerminal className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <FileText className="size-3.5" aria-hidden="true" />
+                  )
                 // Why regardless of query: a searched-for tab is exactly when you need to know it's
                 // still working — the map covers every open tab, not just the recent section.
                 const recentRow = recentTabRowById.get(entry.id) ?? null
@@ -3353,10 +3369,7 @@ function WorktreeJumpPaletteContent({
                     className={cn(JUMP_PALETTE_ITEM_CLASSNAME, 'py-2.5')}
                   >
                     <div className="flex h-5 w-4 shrink-0 items-center justify-center self-start text-muted-foreground/85">
-                      <PaletteRecentTabStatusDot
-                        row={recentRow}
-                        fallback={<WorkspaceTabIcon className="size-3.5" aria-hidden="true" />}
-                      />
+                      <PaletteRecentTabStatusDot row={recentRow} fallback={workspaceTabFallback} />
                     </div>
                     <div className="min-w-0 flex-1 overflow-hidden">
                       <div className="flex items-center justify-between gap-2.5">
