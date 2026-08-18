@@ -54,6 +54,24 @@ function windowsShellArgs(
   return null
 }
 
+/**
+ * Overlay values the relay's own wrapper re-applies. Only these (or a startup
+ * command) may pull a remote zsh off the plain login fast path.
+ *
+ * Why the relay gates on its own list instead of `features.length`: its .zshenv
+ * uses the overlay strategy, which resolves the user's config dir from a ZDOTDIR
+ * Orca has already overwritten. A remote user whose zsh config lives in a
+ * relocated ZDOTDIR therefore loses that config the moment the pane is wrapped,
+ * so wrapping a pane just for `history` would trade a real config for a history
+ * repair. Reconciling the overlay and discovery strategies is a follow-up.
+ */
+const RELAY_RESTORED_OVERLAY_ENV_KEYS = [
+  'ORCA_OPENCODE_CONFIG_DIR',
+  'ORCA_MIMOCODE_HOME',
+  'ORCA_OMP_STATUS_EXTENSION',
+  'ORCA_REMOTE_CLI_BIN_DIR'
+] as const
+
 function getWrapperRoot(env: Record<string, string>): string {
   return join(env.HOME || process.env.HOME || homedir(), RELAY_SHELL_READY_DIR)
 }
@@ -105,7 +123,9 @@ export function getRelayShellLaunchConfig(
   // Why bash is always wrapped: its rcfile carries the OSC 133 command-lifecycle
   // hooks unconditionally today, and dropping them would strand agent rows on
   // "working". zsh keeps the plain startup fast path when nothing needs it.
-  if (features.length === 0 && shellName !== 'bash') {
+  const requiresZshWrapper =
+    startupCommandRequested || RELAY_RESTORED_OVERLAY_ENV_KEYS.some((key) => Boolean(env[key]))
+  if (shellName !== 'bash' && !requiresZshWrapper) {
     return unwrapped
   }
 

@@ -148,6 +148,22 @@ describe('getRelayShellLaunchConfig', () => {
     })
   })
 
+  it.skipIf(process.platform === 'win32')(
+    'keeps a remote zsh on the plain login path when only history would wrap it',
+    () => {
+      // Why: the relay .zshenv resolves the user's config dir from a ZDOTDIR
+      // Orca has already overwritten, so a remote user whose zsh config lives in
+      // a relocated ZDOTDIR loses that config the moment the pane is wrapped.
+      // A worktree HISTFILE is not worth trading a whole shell config for.
+      expect(
+        getRelayShellLaunchConfig('/bin/zsh', {
+          HOME: homeDir,
+          ORCA_HISTFILE: join(homeDir, 'orca-history', 'zsh_history')
+        })
+      ).toEqual({ args: ['-l'], env: {}, supportsReadyMarker: false })
+    }
+  )
+
   it('keeps PowerShell Core on POSIX remotes as a login shell', () => {
     expect(getRelayShellLaunchConfig('/usr/bin/pwsh', { HOME: homeDir }, 'linux')).toEqual({
       args: ['-l'],

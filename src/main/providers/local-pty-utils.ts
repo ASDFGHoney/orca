@@ -247,6 +247,11 @@ export function spawnShellWithFallback(params: ShellSpawnParams): ShellSpawnResu
   // Try fallback shells on Unix
   if (process.platform !== 'win32') {
     const fallbackShells = UNIX_SHELL_FALLBACKS.filter((candidate) => candidate !== shellPath)
+    // Why: the primary shell's launch keys (its wrapper ZDOTDIR and the feature
+    // channel) mean nothing to a different shell. An unwrapped fallback writes
+    // none of them back, so they would stay exported to the pane and to every
+    // child — including a nested zsh that would then load Orca's wrapper.
+    const primaryLaunchEnvKeys = Object.keys(getShellReadyConfig?.(shellPath)?.env ?? {})
     for (const fallback of fallbackShells) {
       if (getShellValidationError(fallback)) {
         continue
@@ -255,6 +260,9 @@ export function spawnShellWithFallback(params: ShellSpawnParams): ShellSpawnResu
         const fallbackReady = getShellReadyConfig?.(fallback)
         env.SHELL = fallback
         onBeforeFallbackSpawn?.(env, fallback)
+        for (const key of primaryLaunchEnvKeys) {
+          delete env[key]
+        }
         Object.assign(env, fallbackReady?.env ?? {})
         const wrapped = wrapShellSpawnForMacosTccAttribution(
           fallback,

@@ -11,7 +11,9 @@
  * .zshenv and invoked exactly once — from .zshrc for a non-login shell, from
  * .zlogin for a login shell. Each feature inside it is an independent guard on
  * the allowlist snapshotted (and destroyed) at the top of .zshenv, so a pane
- * wrapped only for one feature runs only that feature's code.
+ * wrapped only for one feature runs only that feature's code — except the
+ * HISTFILE repair, which undoes damage the wrapper's own ZDOTDIR caused and so
+ * must also run for a shell that re-entered the wrapper with no allowlist.
  */
 import { getPosixOmpShellWrapper } from './pty/omp-shell-wrapper'
 import { getPosixCodexShellLaunchPreflight } from './pty/codex-shell-launch-preflight'
@@ -149,11 +151,20 @@ function getOverlayRestoreBlocks(spec: ZshStartupWrapperSpec): (string | null)[]
  */
 function buildEpilogue(spec: ZshStartupWrapperSpec): string {
   return `__orca_shell_epilogue() {
+  # Why first: this body runs after the user's own config, so it would otherwise
+  # inherit whatever options that config left set. Under NO_UNSET an unset
+  # precmd_functions is a fatal error that returns from the whole epilogue
+  # (skipping the ready widget and the ZDOTDIR restore), and KSH_ARRAYS makes
+  # the 1-based feature lookup drop the first selected feature.
+  emulate -L zsh
   (( $+_orca_epilogue_done )) && return 0
   typeset -g _orca_epilogue_done=1
 ${joinBlocks([
   featureGuard('overlay', getOverlayRestoreBlocks(spec)),
-  featureGuard('history', [ZSH_HISTFILE_RESTORE_BLOCK]),
+  // Why ungated: this repairs damage Orca's own ZDOTDIR caused, so it must also
+  // run for a shell that re-enters the wrapper with no feature channel left
+  // (a nested zsh under an inherited wrapper ZDOTDIR) — the plain #11044 shape.
+  indentBlock(ZSH_HISTFILE_RESTORE_BLOCK, '  '),
   featureGuard('markers', [spec.osc133CommandMarkers ? ZSH_OSC133_COMMAND_MARKER_BLOCK : null]),
   featureGuard('ready', [getZshShellReadyMarkerRegistrationBlock(spec.readyMarkerEscaped)])
 ])}

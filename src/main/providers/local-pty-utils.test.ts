@@ -237,4 +237,39 @@ describe('spawnShellWithFallback macOS TCC login wrapping', () => {
     )
     expect(result.shellPath).toBe('/bin/bash')
   })
+
+  it('drops the primary shell’s launch env when an unwrapped fallback takes over', () => {
+    // Why: nothing in an unwrapped bash pane consumes the feature channel, so a
+    // leftover ZDOTDIR would point a nested zsh at Orca's wrapper and turn on
+    // features Orca never selected for it.
+    const zshLaunchEnv = {
+      ZDOTDIR: '/userdata/shell-ready/zsh',
+      ORCA_ORIG_ZDOTDIR: '/home/jin',
+      ORCA_SHELL_FEATURES: 'history'
+    }
+    const env: Record<string, string> = { HOME: '/home/jin', ...zshLaunchEnv }
+    const ptySpawn = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('primary boom')
+      })
+      .mockReturnValue({ pid: 3 })
+
+    spawnShellWithFallback({
+      shellPath: '/bin/zsh',
+      shellArgs: ['-l'],
+      cols: 80,
+      rows: 24,
+      cwd: '/work',
+      env,
+      ptySpawn: ptySpawn as never,
+      getShellReadyConfig: (shell) =>
+        shell === '/bin/zsh' ? { args: ['-l'], env: zshLaunchEnv } : { args: null, env: {} }
+    })
+
+    expect(env.ORCA_SHELL_FEATURES).toBeUndefined()
+    expect(env.ZDOTDIR).toBeUndefined()
+    expect(env.ORCA_ORIG_ZDOTDIR).toBeUndefined()
+    expect(env.HOME).toBe('/home/jin')
+  })
 })

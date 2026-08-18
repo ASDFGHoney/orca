@@ -192,6 +192,85 @@ describePosix('zsh launch config', () => {
   })
 })
 
+describePosix('epilogue under hostile user shell options', () => {
+  let userDataPath = ''
+  let home = ''
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), 'orca-feature-channel-options-'))
+    setTestUserDataPath(userDataPath)
+    home = mkdtempSync(join(tmpdir(), 'orca-feature-options-home-'))
+  })
+
+  afterEach(() => {
+    rmSync(userDataPath, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  // Why these two: the epilogue is one function that runs after the user's own
+  // config, so an option that config left set applies to all of it. NO_UNSET
+  // made the prompt-hook append a fatal error that returned from the epilogue
+  // before the ready widget and the ZDOTDIR restore; KSH_ARRAYS made the
+  // 1-based feature subscript miss whichever feature is listed first.
+  it.each(['no_unset', 'ksh_arrays'])(
+    'still runs every feature when the user set %s',
+    async (option) => {
+      if (!hasZsh) {
+        return
+      }
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const opencodeDir = join(home, 'opencode-overlay')
+      writeFileSync(join(home, '.zshrc'), `setopt ${option}\n`)
+      // Why an overlay pane: KSH_ARRAYS only drops whichever feature is listed
+      // first, and `overlay` is the first token the selector ever emits.
+      const spawnEnv: Record<string, string> = {
+        HOME: home,
+        ORCA_HISTFILE: scoped,
+        ORCA_OPENCODE_CONFIG_DIR: opencodeDir
+      }
+      const features = selectShellStartupFeatures({
+        shellPath: ZSH_PATH,
+        env: spawnEnv,
+        hasStartupCommand: true,
+        waitsForShellReady: true,
+        emitsStartupIdentity: true
+      })
+      const { getShellLaunchConfig } = await importFreshLocalPtyShellReady()
+      const launch = getShellLaunchConfig(ZSH_PATH, features)
+
+      const output = execFileSync(
+        ZSH_PATH,
+        [
+          ...(launch.args ?? ['-l']),
+          '-i',
+          '-c',
+          'print -r -- "LINEINIT=${widgets[zle-line-init]:-none}"; ' +
+            'print -r -- "PRECMD=${precmd_functions[*]:-none}"; ' +
+            'print -r -- "OPENCODE=${OPENCODE_CONFIG_DIR:-none}"; ' +
+            'print -r -- "ZDOTDIR=${ZDOTDIR:-}"; print -r -- "HISTFILE=${HISTFILE:-}"'
+        ],
+        {
+          encoding: 'utf8',
+          timeout: 20_000,
+          env: {
+            PATH: '/usr/bin:/bin',
+            ...spawnEnv,
+            ...launch.env,
+            ORCA_ORIG_ZDOTDIR: home,
+            ORCA_ZSHENV_SOURCE_DIR: home
+          }
+        }
+      )
+
+      expect(output).toContain('LINEINIT=user:__orca_prompt_mark')
+      expect(output).toContain('PRECMD=__orca_osc133_precmd')
+      expect(output).toContain(`OPENCODE=${opencodeDir}`)
+      expect(output).toContain(`ZDOTDIR=${home}`)
+      expect(output).toContain(`HISTFILE=${scoped}`)
+    }
+  )
+})
+
 /** A temp HOME whose four zsh startup files each announce that they ran. */
 function makeUserHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'orca-feature-home-'))

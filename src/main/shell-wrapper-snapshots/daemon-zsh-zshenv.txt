@@ -91,6 +91,12 @@ fi
 unset _orca_user_zdotdir _orca_zshenv_source_dir _orca_zshenv_path _orca_discovered_zdotdir _orca_wrapper_zdotdir_self
 
 __orca_shell_epilogue() {
+  # Why first: this body runs after the user's own config, so it would otherwise
+  # inherit whatever options that config left set. Under NO_UNSET an unset
+  # precmd_functions is a fatal error that returns from the whole epilogue
+  # (skipping the ready widget and the ZDOTDIR restore), and KSH_ARRAYS makes
+  # the 1-based feature lookup drop the first selected feature.
+  emulate -L zsh
   (( $+_orca_epilogue_done )) && return 0
   typeset -g _orca_epilogue_done=1
   if __orca_has_feature overlay; then
@@ -145,18 +151,16 @@ __orca_shell_epilogue() {
     fi
     unset __orca_codex_binary
   fi
-  if __orca_has_feature history; then
-    if [[ -n "${ORCA_HISTFILE:-}" ]]; then
-      HISTFILE="$ORCA_HISTFILE"
-      builtin unset ORCA_HISTFILE
-    elif [[ "${HISTFILE:-}" == "$ZDOTDIR/.zsh_history" ]]; then
-      # Why also when Orca injected nothing: /etc/zshrc derived this from Orca's
-      # wrapper ZDOTDIR, so history would accumulate INSIDE the wrapper dir and the
-      # user's real history would be invisible — the plain #11044 bug, with no
-      # per-worktree scoping involved. Matching the exact clobbered value means a
-      # HISTFILE the user set deliberately is never touched.
-      HISTFILE="${ORCA_ORIG_ZDOTDIR:-$HOME}/.zsh_history"
-    fi
+  if [[ -n "${ORCA_HISTFILE:-}" ]]; then
+    HISTFILE="$ORCA_HISTFILE"
+    builtin unset ORCA_HISTFILE
+  elif [[ "${HISTFILE:-}" == "$ZDOTDIR/.zsh_history" ]]; then
+    # Why also when Orca injected nothing: /etc/zshrc derived this from Orca's
+    # wrapper ZDOTDIR, so history would accumulate INSIDE the wrapper dir and the
+    # user's real history would be invisible — the plain #11044 bug, with no
+    # per-worktree scoping involved. Matching the exact clobbered value means a
+    # HISTFILE the user set deliberately is never touched.
+    HISTFILE="${ORCA_ORIG_ZDOTDIR:-$HOME}/.zsh_history"
   fi
   if __orca_has_feature markers; then
     __orca_osc133_precmd() {

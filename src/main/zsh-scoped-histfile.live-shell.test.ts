@@ -154,6 +154,26 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
     })
   })
 
+  itWithClobber('repairs the clobber for a shell that re-enters the wrapper with no features', () => {
+    // Why: a non-interactive zsh runs .zshenv (which exports Orca's wrapper
+    // ZDOTDIR) but never the epilogue that restores it, so an interactive zsh
+    // started from there re-enters the wrapper with the feature channel already
+    // consumed. /etc/zshrc still lands HISTFILE inside the wrapper dir — #11044
+    // with no per-worktree scoping involved — so the repair cannot be gated on
+    // a feature that no longer exists by then.
+    withTempHome((home) => {
+      const { launch } = launchPlainHistoryPane(home, join(home, 'orca-history', 'zsh_history'))
+
+      const output = runZsh(launch.args ?? ['-l'], {
+        HOME: home,
+        ZDOTDIR: launch.env.ZDOTDIR,
+        ORCA_ORIG_ZDOTDIR: home
+      })
+
+      expect(histfileOf(output)).toBe(join(home, '.zsh_history'))
+    })
+  })
+
   itWithZsh('consumes ORCA_HISTFILE so nothing the shell spawns can inherit it', () => {
     withTempHome((home) => {
       const scoped = join(home, 'orca-history', 'zsh_history')
