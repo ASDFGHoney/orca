@@ -642,16 +642,67 @@ jobs:
 
   golden_e2e:
     name: golden e2e
-    # Why blocking while the full e2e suite is not: this lane is a handful of
-    # core-flow and terminal-rendering specs that run green on main, and it runs
-    # against `electron-vite build --mode e2e` — a production-mode bundle. That
-    # is the only gate that sees the built CSS cascade, where #14583 shipped a
-    # black bar visible in packaged builds but not under `pn dev`.
-    permissions:
-      contents: read
-    uses: ./.github/workflows/golden-e2e-experiment.yml
-    with:
-      platforms: '[{"os":"ubuntu-latest","platform":"linux"}]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Why a job here rather than calling golden-e2e-experiment.yml: that workflow
+    # pins a static linux/mac/windows matrix that the release contract asserts on,
+    # and the PR gate wants Linux only to stay cheap. Keeping them separate leaves
+    # the manual/release lane untouched.
+    #
+    # Why this is blocking while the full e2e suite is not: it is a handful of
+    # core-flow and terminal-rendering specs that run green on main, it always
+    # runs, and it is built with `electron-vite build --mode e2e` — a
+    # production-mode bundle. That makes it the only required gate that sees the
+    # built CSS cascade, where #14583 shipped a black bar visible in packaged
+    # builds but not under `pn dev`.
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install native build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3 xvfb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      # Why: mirrors the golden and release lanes, which need pnpm to bypass its
+      # non-executable bundled gyp_main.py.
+      - name: Use external node-gyp to avoid pnpm's bundled copy
+        run: |
+          npm install -g node-gyp@11.5.0
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Electron app for E2E
+        run: npx electron-vite build --mode e2e
+
+      - name: Run golden E2E
+        run: |
+          xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e -- tests/e2e/golden-core-flows.spec.ts
+          xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 pnpm run test:e2e:terminal-rendering-golden
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-pr-playwright-traces
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   verify:
     if: always()

@@ -74,8 +74,17 @@ describe('PR workflow parallelism', () => {
         .split(/\s+/)
         .filter((token) => !['apt-get', 'install', 'sudo', ''].includes(token))
         .filter((token) => !token.startsWith('-'))
-    const jobsInstallingPackages = Object.entries(workflow.jobs)
-      .filter(([, job]) => (job.steps ?? []).some((step) => aptPackages(step).length > 0))
+    // Why scoped to the shell packages rather than any apt install: other lanes
+    // legitimately install unrelated build tooling (golden_e2e needs xvfb). The
+    // hazard this guards is a second lane installing a SHELL, which would make
+    // the live shell tests run twice instead of once.
+    const shellPackageNames = ['zsh', 'fish']
+    const jobsInstallingShells = Object.entries(workflow.jobs)
+      .filter(([, job]) =>
+        (job.steps ?? []).some((step) =>
+          aptPackages(step).some((pkg) => shellPackageNames.includes(pkg))
+        )
+      )
       .map(([name]) => name)
 
     expect(shellStep).toBeDefined()
@@ -83,11 +92,11 @@ describe('PR workflow parallelism', () => {
     expect(shellStep.run.split(/\s+/)).toContain('--maxWorkers=1')
     // Why the whole workflow, not just the general shards: any other lane installing
     // these shells would silently start running the real-shell tests twice.
-    expect(jobsInstallingPackages).toEqual(['shell_contracts'])
+    expect(jobsInstallingShells).toEqual(['shell_contracts'])
     // Why each shell is asserted: the live tests skip themselves when the binary is
     // missing, so a dropped package silently empties this lane instead of failing it.
     const shellPackages = workflow.jobs.shell_contracts.steps.flatMap(aptPackages)
-    for (const shell of ['zsh', 'fish']) {
+    for (const shell of shellPackageNames) {
       expect(shellPackages).toContain(shell)
     }
     expect(shellInstall.with['native-runtime']).toBe('node')
@@ -313,12 +322,26 @@ describe('PR workflow parallelism', () => {
       'test',
       'managed_hook_node18',
       'package',
-      'package_windows'
+      'package_windows',
+      'golden_e2e'
     ])
     const verifyStep = workflow.jobs.verify.steps.find(
       (step) => step.name === 'Require successful checks'
     )
     expect(verifyStep.env.MANAGED_HOOK_NODE18).toBe('${{ needs.managed_hook_node18.result }}')
     expect(verifyStep.run).toContain('"$MANAGED_HOOK_NODE18"')
+    // Why assert all three parts: listing a job in `needs` alone does not gate
+    // it. verify only fails when the result is also read into env and checked in
+    // the loop, so a partial wiring would leave the check advisory while looking
+    // required.
+    expect(verifyStep.env.GOLDEN_E2E).toBe('${{ needs.golden_e2e.result }}')
+    expect(verifyStep.run).toContain('"$GOLDEN_E2E"')
+  })
+
+  it('keeps the full e2e suite out of the required aggregate', () => {
+    // Why: the 238-spec suite is red on main, so gating on it would block every
+    // PR — including the ones repairing it. golden_e2e is the gating lane
+    // instead. If e2e is ever made required, do it deliberately and update this.
+    expect(workflow.jobs.verify.needs).not.toContain('e2e')
   })
 })

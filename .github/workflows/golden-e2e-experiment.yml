@@ -7,21 +7,6 @@ on:
         description: Ref to check out (defaults to the workflow ref)
         required: false
         type: string
-      platforms:
-        description: JSON array of {os, platform} to run (default linux + mac + windows)
-        required: false
-        type: string
-  # Why: pr.yml calls this as a blocking gate. The full e2e suite stays
-  # non-blocking because it is red on main; this lane is green, so it can gate.
-  workflow_call:
-    inputs:
-      ref:
-        required: false
-        type: string
-      platforms:
-        description: JSON array of {os, platform} to run
-        required: false
-        type: string
 
 jobs:
   golden-e2e:
@@ -32,11 +17,15 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=4096
     strategy:
       fail-fast: false
-      # Why: callers choose the platform set. PRs run linux only so the blocking
-      # gate stays cheap; scheduled and manual runs keep the full matrix, which
-      # matches the release gate (Windows runs a focused golden subset).
       matrix:
-        include: ${{ fromJSON(inputs.platforms || '[{"os":"ubuntu-latest","platform":"linux"},{"os":"macos-15","platform":"mac"},{"os":"windows-2022","platform":"windows"}]') }}
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-15
+            platform: mac
+          # Match the release gate: Windows runs a focused golden subset.
+          - os: windows-2022
+            platform: windows
 
     steps:
       - name: Checkout
