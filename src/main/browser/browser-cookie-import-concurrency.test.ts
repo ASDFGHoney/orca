@@ -7,12 +7,16 @@ const {
   appGetPathMock,
   sessionFromPartitionMock,
   snapshotClearIdentitiesMock,
-  writeCookieIdentityMock
+  writeCookieIdentityMock,
+  setPendingCookieImportMock,
+  clearPendingCookieImportMock
 } = vi.hoisted(() => ({
   appGetPathMock: vi.fn(),
   sessionFromPartitionMock: vi.fn(),
   snapshotClearIdentitiesMock: vi.fn(),
-  writeCookieIdentityMock: vi.fn()
+  writeCookieIdentityMock: vi.fn(),
+  setPendingCookieImportMock: vi.fn(),
+  clearPendingCookieImportMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -38,6 +42,12 @@ vi.mock('./browser-cookie-clear-store', () => ({
     writeCookieIdentity: writeCookieIdentityMock,
     dispose: () => undefined
   })
+}))
+vi.mock('./browser-session-registry', () => ({
+  browserSessionRegistry: {
+    setPendingCookieImport: setPendingCookieImportMock,
+    clearPendingCookieImport: clearPendingCookieImportMock
+  }
 }))
 
 import { importCookiesFromBrowser, importCookiesFromFile } from './browser-cookie-import'
@@ -361,6 +371,119 @@ describe('two concurrent NATIVE imports into one partition', () => {
     expect(writeCookieIdentityMock).toHaveBeenCalledTimes(2)
     expect(cookiesSetMock).not.toHaveBeenCalled()
     expect(events.indexOf('set:first')).toBeLessThan(events.lastIndexOf('clearData'))
+  })
+})
+
+/**
+ * A staged image is the cold-start fallback for a rejected live write. If import A registers its
+ * image after import B has already retired B's image, the next restart replays stale A over B.
+ * This starts B from A's write attempt so the assertion proves pending-image bookkeeping stays
+ * in the same transaction as the live-jar mutations.
+ */
+describe('staged-image bookkeeping is serialized with native imports', () => {
+  let tmpDir: string
+  let events: string[]
+  let platformSpy: { mockRestore: () => void }
+  let secondImport: Promise<unknown> | undefined
+  let secondWriteAttempted = false
+
+  function chromeBrowser(cookiesPath: string) {
+    return {
+      family: 'chrome' as const,
+      label: 'Google Chrome',
+      cookiesPath,
+      keychainService: 'Chrome Safe Storage',
+      keychainAccount: 'Chrome',
+      profiles: [{ name: 'Default', directory: 'Default' }],
+      selectedProfile: 'Default'
+    }
+  }
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'orca-cookie-staged-concurrency-'))
+    const userData = join(tmpDir, 'userData')
+    const partitionDir = join(userData, 'Partitions', 'staged-conc')
+    appGetPathMock.mockReturnValue(userData)
+    events = []
+    secondImport = undefined
+    secondWriteAttempted = false
+    platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    snapshotClearIdentitiesMock
+      .mockReset()
+      .mockImplementation(async (items: { cookie: Record<string, unknown>; url: string }[]) =>
+        items.map(({ cookie: entry, url }) => ({ url, ...entry }))
+      )
+    setPendingCookieImportMock.mockReset().mockImplementation(() => {
+      if (secondWriteAttempted) {
+        throw new Error('newer import wrote before older pending image was registered')
+      }
+      events.push('pending:set')
+    })
+    clearPendingCookieImportMock.mockReset().mockImplementation(() => {
+      events.push('pending:clear')
+    })
+
+    const sourceB = join(tmpDir, 'ChromeB', 'Default', 'Network', 'Cookies')
+    writeCookieIdentityMock.mockReset().mockImplementation(async (identity: { name: string }) => {
+      events.push(`set:${identity.name}`)
+      if (identity.name === 'first') {
+        // Start B before A reports its failed write. A's lock must keep B out until A registers
+        // the fallback image; without that scope B clears the pending record first.
+        secondImport = importCookiesFromBrowser(chromeBrowser(sourceB), 'persist:staged-conc')
+        throw new Error('force restart fallback')
+      }
+      secondWriteAttempted = true
+    })
+
+    const stableSession = {
+      cookies: {
+        get: vi
+          .fn()
+          .mockResolvedValue([
+            { domain: '.stale.example', name: 'stale', value: 'v', path: '/', secure: true }
+          ]),
+        remove: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn(),
+        flushStore: vi.fn().mockResolvedValue(undefined)
+      },
+      clearData: vi.fn().mockResolvedValue(undefined),
+      getStoragePath: () => partitionDir,
+      setUserAgent: vi.fn()
+    }
+    sessionFromPartitionMock.mockReset().mockReturnValue(stableSession)
+
+    const sourceA = join(tmpDir, 'ChromeA', 'Default', 'Network', 'Cookies')
+    createChromiumCookieTestDatabase(sourceA, [
+      { domain: '.a.example', name: 'first', value: 'v' }
+    ]).close()
+    createChromiumCookieTestDatabase(sourceB, [
+      { domain: '.b.example', name: 'second', value: 'v' }
+    ]).close()
+    createChromiumCookieTestDatabase(join(partitionDir, 'Network', 'Cookies'), []).close()
+  })
+
+  afterEach(() => {
+    platformSpy.mockRestore()
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('registers A before B retires the pending image', async () => {
+    const first = importCookiesFromBrowser(
+      chromeBrowser(join(tmpDir, 'ChromeA', 'Default', 'Network', 'Cookies')),
+      'persist:staged-conc'
+    )
+    const firstResult = await first
+    expect(firstResult.ok).toBe(true)
+    const queued = secondImport
+    if (!queued) {
+      throw new Error('second import was not started from the first write attempt')
+    }
+    await queued
+
+    expect(writeCookieIdentityMock).toHaveBeenCalledTimes(2)
+    expect(setPendingCookieImportMock).toHaveBeenCalledTimes(1)
+    expect(clearPendingCookieImportMock).toHaveBeenCalledTimes(1)
+    expect(events.indexOf('pending:set')).toBeLessThan(events.indexOf('pending:clear'))
   })
 })
 
