@@ -11,9 +11,9 @@ import type { SshConnection } from './ssh-connection'
 import { execCommand } from './ssh-relay-deploy-helpers'
 import {
   isRelaySocketOwnerLiveError,
-  parseRelaySocketReleaseOutcome,
-  relaySocketReleaseCommand,
-  releaseUnownedRelaySocket
+  parseRelaySocketOwnerVerdict,
+  relaySocketOwnerProbeCommand,
+  requireUnownedRelaySocket
 } from './ssh-relay-socket-owner'
 import {
   isRelayVersionMismatchError,
@@ -24,8 +24,8 @@ const SOCK = '/home/u/.orca-remote/relay-0.1.0+abc/relay-deadbeef.sock'
 const NODE = '/usr/bin/node'
 const conn = {} as SshConnection
 
-describe('relay socket release command', () => {
-  const command = relaySocketReleaseCommand(NODE, SOCK)
+describe('relay socket owner probe command', () => {
+  const command = relaySocketOwnerProbeCommand(NODE, SOCK)
 
   it('proves an owner is present with lsof before falling back to a connect probe', () => {
     expect(command).toContain('lsof -t -a -U "$sock"')
@@ -37,13 +37,12 @@ describe('relay socket release command', () => {
     expect(command).toContain(`'${SOCK}'`)
   })
 
-  it('unlinks inside the same host command, guarded by the inode it probed', () => {
-    // Why: probing here and removing in a second round-trip leaves a window in which
-    // another client can bind the path, and the removal would then strand it.
-    expect(command).toContain('unlinkSync')
-    expect(command).toContain('statSync')
-    // Why ctime: inode numbers are recycled, so dev+ino alone can match a recreated socket.
-    expect(command).toContain('st.dev+":"+st.ino+":"+st.ctimeNs')
+  it('only looks, and never removes anything itself', () => {
+    // Why: reclaiming the path is the fresh daemon's job, which checks the socket's identity
+    // and binds in one process. Unlinking here would put an SSH round-trip between that check
+    // and the launch, and a relay that bound the path in between would be the one displaced.
+    expect(command).not.toContain('unlinkSync')
+    expect(command).not.toContain('rm -f')
   })
 
   it('retries a refused connect before concluding the path is unowned', () => {
@@ -67,35 +66,35 @@ describe('relay socket release command', () => {
   })
 })
 
-describe('relay socket release outcome', () => {
+describe('relay socket owner verdict', () => {
   it('reads the host markers', () => {
-    expect(parseRelaySocketReleaseOutcome('LIVE')).toBe('live')
-    expect(parseRelaySocketReleaseOutcome('RELEASED\n')).toBe('released')
-    expect(parseRelaySocketReleaseOutcome('UNVERIFIABLE')).toBe('unverifiable')
+    expect(parseRelaySocketOwnerVerdict('LIVE')).toBe('live')
+    expect(parseRelaySocketOwnerVerdict('EXITED\n')).toBe('exited')
+    expect(parseRelaySocketOwnerVerdict('UNVERIFIABLE')).toBe('unverifiable')
   })
 
   it('refuses to guess from ambiguous or empty output', () => {
-    expect(parseRelaySocketReleaseOutcome('')).toBe('unverifiable')
-    expect(parseRelaySocketReleaseOutcome('LIVE\nRELEASED')).toBe('unverifiable')
-    expect(parseRelaySocketReleaseOutcome('command not found: node')).toBe('unverifiable')
+    expect(parseRelaySocketOwnerVerdict('')).toBe('unverifiable')
+    expect(parseRelaySocketOwnerVerdict('LIVE\nEXITED')).toBe('unverifiable')
+    expect(parseRelaySocketOwnerVerdict('command not found: node')).toBe('unverifiable')
   })
 })
 
-describe('releaseUnownedRelaySocket', () => {
+describe('requireUnownedRelaySocket', () => {
   beforeEach(() => {
     vi.mocked(execCommand).mockReset()
   })
 
-  it('succeeds once the host reports the path released', async () => {
-    vi.mocked(execCommand).mockResolvedValueOnce('RELEASED')
+  it('succeeds once the host proves nothing owns the path', async () => {
+    vi.mocked(execCommand).mockResolvedValueOnce('EXITED')
 
-    await expect(releaseUnownedRelaySocket(conn, NODE, SOCK)).resolves.toBeUndefined()
+    await expect(requireUnownedRelaySocket(conn, NODE, SOCK)).resolves.toBeUndefined()
   })
 
   it('refuses when a live owner still holds the socket', async () => {
     vi.mocked(execCommand).mockResolvedValueOnce('LIVE')
 
-    await expect(releaseUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
+    await expect(requireUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
       isRelaySocketOwnerLiveError
     )
   })
@@ -103,7 +102,7 @@ describe('releaseUnownedRelaySocket', () => {
   it('refuses when ownership is merely unverifiable', async () => {
     vi.mocked(execCommand).mockResolvedValueOnce('UNVERIFIABLE')
 
-    await expect(releaseUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
+    await expect(requireUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
       isRelaySocketOwnerLiveError
     )
   })
@@ -111,18 +110,9 @@ describe('releaseUnownedRelaySocket', () => {
   it('refuses when the command could not run at all', async () => {
     vi.mocked(execCommand).mockRejectedValueOnce(new Error('channel open failure'))
 
-    await expect(releaseUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
+    await expect(requireUnownedRelaySocket(conn, NODE, SOCK)).rejects.toSatisfy(
       isRelaySocketOwnerLiveError
     )
-  })
-
-  it('rethrows an unconfirmed termination so its in-flight state survives', async () => {
-    const unconfirmed = Object.assign(new Error('socket cleanup still running'), {
-      sshChannelCloseConfirmed: false
-    })
-    vi.mocked(execCommand).mockRejectedValueOnce(unconfirmed)
-
-    await expect(releaseUnownedRelaySocket(conn, NODE, SOCK)).rejects.toBe(unconfirmed)
   })
 
   it('propagates an abort instead of reporting an outcome', async () => {
@@ -133,7 +123,7 @@ describe('releaseUnownedRelaySocket', () => {
     })
 
     await expect(
-      releaseUnownedRelaySocket(conn, NODE, SOCK, { signal: controller.signal })
+      requireUnownedRelaySocket(conn, NODE, SOCK, { signal: controller.signal })
     ).rejects.not.toSatisfy(isRelaySocketOwnerLiveError)
   })
 
@@ -141,10 +131,10 @@ describe('releaseUnownedRelaySocket', () => {
     vi.mocked(execCommand).mockResolvedValueOnce('LIVE')
     const cause = new Error('handshake refused')
 
-    const error = await releaseUnownedRelaySocket(conn, NODE, SOCK, { cause }).catch((err) => err)
+    const error = await requireUnownedRelaySocket(conn, NODE, SOCK, { cause }).catch((err) => err)
 
     expect(error.sockPath).toBe(SOCK)
-    expect(error.outcome).toBe('live')
+    expect(error.verdict).toBe('live')
     expect(error.cause).toBe(cause)
     expect(error.message).toContain('handshake refused')
     expect(error.message).toContain('Reset remote relay')
@@ -156,7 +146,7 @@ describe('terminal causes carried by the owner error', () => {
     vi.mocked(execCommand).mockReset().mockResolvedValueOnce('LIVE')
     const mismatch = new RelayVersionMismatchError('0.1.0+new', '0.1.0+old')
 
-    const error = await releaseUnownedRelaySocket(conn, NODE, SOCK, { cause: mismatch }).catch(
+    const error = await requireUnownedRelaySocket(conn, NODE, SOCK, { cause: mismatch }).catch(
       (err) => err
     )
 
@@ -168,7 +158,7 @@ describe('terminal causes carried by the owner error', () => {
   it('does not classify an ordinary reconnect failure as terminal', async () => {
     vi.mocked(execCommand).mockReset().mockResolvedValueOnce('LIVE')
 
-    const error = await releaseUnownedRelaySocket(conn, NODE, SOCK, {
+    const error = await requireUnownedRelaySocket(conn, NODE, SOCK, {
       cause: new Error('relay sentinel timeout')
     }).catch((err) => err)
 

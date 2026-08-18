@@ -64,10 +64,8 @@ export async function forceStopRelayForTarget(
     'if [ -d "$base" ]; then',
     '  for sock in "$base"/relay-*/"$sock_name" "$base"/"$sock_name"; do',
     '    [ -S "$sock" ] || continue',
-    '    signalled=no',
     '    find_holder "$sock"',
     '    if [ -n "$holder" ]; then',
-    '      signalled=yes',
     '      kill -TERM $holder 2>/dev/null || true',
     '      sleep 0.2',
     '      kill -KILL $holder 2>/dev/null || true',
@@ -80,7 +78,9 @@ export async function forceStopRelayForTarget(
     '    find_holder "$sock"',
     '    if [ "$listed" = 0 ] || [ -n "$holder" ]; then',
     `      echo ${RESET_OWNER_SURVIVED_MARKER}`,
-    '    elif [ "$listed" = 2 ] && [ "$signalled" = no ]; then',
+    // Why regardless of whether we signalled: sending a signal is not evidence the process
+    // took it, so with no inventory to ask afterwards the stop stays unproven either way.
+    '    elif [ "$listed" = 2 ]; then',
     `      echo ${RESET_NO_OWNER_PROOF_MARKER}`,
     '    fi',
     '  done',

@@ -77,7 +77,7 @@ import {
 import { detectRemoteHostPlatform } from './ssh-remote-platform-detection'
 import { powerShellCommand, powerShellLiteral, powerShellNativeArg } from './ssh-remote-powershell'
 import { relaySocketNameForInstanceId } from './ssh-relay-instance-id'
-import { isRelaySocketOwnerLiveError, releaseUnownedRelaySocket } from './ssh-relay-socket-owner'
+import { isRelaySocketOwnerLiveError, requireUnownedRelaySocket } from './ssh-relay-socket-owner'
 import { isSshSessionLimitError } from './ssh-session-limit-error'
 import {
   isWindowsRelayPipePath,
@@ -1446,11 +1446,12 @@ export async function launchRelay(
           '[ssh-relay] Socket reconnect failed:',
           err instanceof Error ? err.message : String(err)
         )
-        // Why: a refused --connect is loss of contact, never proof the relay died, so the socket
-        // is released only once the host proves nothing owns it. Unlinking a live owner's path
-        // cannot stop it — it just hides it from the fresh launch's EADDRINUSE check and orphans
-        // it and its PTYs forever (STA-1756).
-        await releaseUnownedRelaySocket(conn, nodePath, sockFile, { signal, cause: err })
+        // Why: a refused --connect is loss of contact, never proof the relay died, so the path
+        // is only taken once the host proves nothing owns it. Launching over a live owner
+        // cannot stop it — it just hides it from the fresh daemon's EADDRINUSE check and
+        // orphans it and its PTYs forever (STA-1756). The daemon reclaims a proven-stale
+        // socket itself, under its own identity check.
+        await requireUnownedRelaySocket(conn, nodePath, sockFile, { signal, cause: err })
       }
     }
   } catch (err) {

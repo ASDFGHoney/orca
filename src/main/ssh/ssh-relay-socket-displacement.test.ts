@@ -117,7 +117,7 @@ describe('deployAndLaunchRelay socket displacement', () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand).mockResolvedValueOnce('LIVE') // socket release: a live owner
+    vi.mocked(execCommand).mockResolvedValueOnce('LIVE') // owner probe: a live owner
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
@@ -131,7 +131,7 @@ describe('deployAndLaunchRelay socket displacement', () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand).mockResolvedValueOnce('') // release produced no verdict
+    vi.mocked(execCommand).mockResolvedValueOnce('') // probe produced no verdict
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
@@ -139,14 +139,14 @@ describe('deployAndLaunchRelay socket displacement', () => {
     expect(writeRelayEndpointCredential).not.toHaveBeenCalled()
   })
 
-  it('still launches fresh once the host reports the stale socket released', async () => {
+  it('still launches fresh once the host proves the stale socket unowned', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel)
       .mockRejectedValueOnce(new Error('relay reconnect refused'))
       .mockResolvedValue({ write: vi.fn(), onData: vi.fn(), onClose: vi.fn() } as never)
     queueDeployUpToOccupiedSocket()
     vi.mocked(execCommand)
-      .mockResolvedValueOnce('RELEASED') // socket release: nothing owned the path
+      .mockResolvedValueOnce('EXITED') // owner probe: nothing owns the path
       .mockResolvedValueOnce('READY') // socket readiness poll
 
     await expect(deployAndLaunchRelay(conn)).resolves.toMatchObject({ nodePath: '/usr/bin/node' })
@@ -154,24 +154,21 @@ describe('deployAndLaunchRelay socket displacement', () => {
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(true)
   })
 
-  // Moved here from ssh-relay-deploy.test.ts: the removal it guards now lives inside the
-  // release command, so an unconfirmed close of that command must still stop the launch.
-  it('does not launch fresh after an unconfirmed socket release', async () => {
+  // Replaces the unconfirmed-cleanup case from ssh-relay-deploy.test.ts: deploy no longer
+  // removes anything, so a probe it could not run must stop the launch on its own.
+  it('does not launch fresh after a probe it could not run', async () => {
     const conn = makeMockConnection()
-    const unconfirmedRelease = Object.assign(new Error('socket release still running'), {
-      sshChannelCloseConfirmed: false
-    })
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
-    vi.mocked(execCommand).mockRejectedValueOnce(unconfirmedRelease)
+    vi.mocked(execCommand).mockRejectedValueOnce(new Error('channel open failure'))
 
-    await expect(deployAndLaunchRelay(conn)).rejects.toBe(unconfirmedRelease)
+    await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
     expect(execChannelCommands(conn)).toHaveLength(1)
     expect(execChannelCommands(conn).some((command) => command.includes('--detached'))).toBe(false)
   })
 
-  it('decides with one host command that probes and unlinks together', async () => {
+  it('decides by asking the host who owns the socket, and removes nothing', async () => {
     const conn = makeMockConnection()
     vi.mocked(waitForSentinel).mockRejectedValueOnce(new Error('relay reconnect refused'))
     queueDeployUpToOccupiedSocket()
@@ -179,13 +176,13 @@ describe('deployAndLaunchRelay socket displacement', () => {
 
     await expect(deployAndLaunchRelay(conn)).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
-    // Why one command: probing here and unlinking in a second round-trip leaves a window
-    // in which another client can bind the path, and the removal would then strand it.
-    const release = execCommands().at(-1) ?? ''
-    expect(release).toContain('/usr/bin/node')
-    expect(release).toContain('connect')
-    expect(release).toContain('unlinkSync')
-    expect(release).not.toContain('test -S')
-    expect(execCommands().some((command) => command.startsWith('rm -f'))).toBe(false)
+    // Why nothing removed: the daemon reclaims a stale path under its own identity check,
+    // and an unlink here would put an SSH round-trip between that check and the launch.
+    const probe = execCommands().at(-1) ?? ''
+    expect(probe).toContain('/usr/bin/node')
+    expect(probe).toContain('connect')
+    expect(probe).not.toContain('test -S')
+    expect(execCommands().some((command) => command.includes('rm -f'))).toBe(false)
+    expect(execCommands().some((command) => command.includes('unlinkSync'))).toBe(false)
   })
 })

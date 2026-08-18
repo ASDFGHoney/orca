@@ -116,7 +116,10 @@ async function runReset(mode: HostMode): Promise<ResetRun> {
   if (mode !== 'no-process-tools') {
     // Why the -a split: without it lsof would also return an unrelated Unix-socket holder,
     // which reset must never pass to kill (#8762).
-    const lsofBody =
+    // Why the -p arm answers unconditionally: the script asks lsof about its own process
+    // first to prove the tool works at all, and a stub that tied that to the socket's owner
+    // would make a working lsof look broken the moment the relay stopped.
+    const lsofSocketArm =
       mode === 'only-pgrep-finds-owner'
         ? 'exit 1'
         : `${OWNER_ALIVE_GUARD}
@@ -124,6 +127,10 @@ case " $* " in
   *" -a "*) printf '%s\\n' "$OWNER_PID" ;;
   *) printf '%s\\n' "$OWNER_PID" "$UNRELATED_PID" ;;
 esac`
+    const lsofBody = `case " $* " in
+  *" -p "*) printf '%s\\n' "$$" ; exit 0 ;;
+esac
+${lsofSocketArm}`
     writeExecutable(join(binDir, 'lsof'), lsofBody)
     writeExecutable(
       join(binDir, 'pgrep'),

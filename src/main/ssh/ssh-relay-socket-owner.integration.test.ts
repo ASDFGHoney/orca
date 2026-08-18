@@ -7,7 +7,7 @@
 // while a PTY is held).
 //
 // The control case below is latest-main's behaviour: it performs the raw unlink and
-// asserts the orphan appears. The guarded case asserts releaseUnownedRelaySocket refuses
+// asserts the orphan appears. The guarded case asserts requireUnownedRelaySocket refuses
 // the same displacement, which restores the relay's own EADDRINUSE interlock. Which
 // production call site issues that release is pinned separately, by the mocked deploy
 // wiring in ssh-relay-socket-displacement.test.ts.
@@ -27,7 +27,7 @@ import {
   relayBundleDirForHost,
   waitForExit
 } from './ssh-relay-live-daemon-harness'
-import { isRelaySocketOwnerLiveError, releaseUnownedRelaySocket } from './ssh-relay-socket-owner'
+import { isRelaySocketOwnerLiveError, requireUnownedRelaySocket } from './ssh-relay-socket-owner'
 
 const REPO_ROOT = process.cwd()
 const BUNDLE_DIR = relayBundleDirForHost(REPO_ROOT)
@@ -89,7 +89,7 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
     expect(isProcessAlive(pid)).toBe(false)
   }
 
-  it('releases the socket of a relay that is really gone', async () => {
+  it('clears a relay that is really gone, without touching its socket', async () => {
     const { fixture: live, pid } = await startRelayHoldingAPty()
     const conn = createLocalShellConnection()
 
@@ -99,18 +99,20 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
     expect(existsSync(live.sockPath)).toBe(true)
 
     await expect(
-      releaseUnownedRelaySocket(conn, process.execPath, live.sockPath)
+      requireUnownedRelaySocket(conn, process.execPath, live.sockPath)
     ).resolves.toBeUndefined()
 
-    expect(existsSync(live.sockPath)).toBe(false)
+    // Why still there: reclaiming the path belongs to the daemon that binds it, which does
+    // the identity check and the bind in one process.
+    expect(existsSync(live.sockPath)).toBe(true)
   })
 
-  it('refuses to release the socket of a relay that still holds a PTY', async () => {
+  it('refuses to hand the socket of a relay that still holds a PTY to a replacement', async () => {
     const { fixture: live, pid } = await startRelayHoldingAPty()
     const conn = createLocalShellConnection()
 
     await expect(
-      releaseUnownedRelaySocket(conn, process.execPath, live.sockPath)
+      requireUnownedRelaySocket(conn, process.execPath, live.sockPath)
     ).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
     expect(existsSync(live.sockPath)).toBe(true)
@@ -136,7 +138,7 @@ describe.skipIf(!BUNDLE_DIR || process.platform === 'win32')('relay socket owner
     const conn = createLocalShellConnection({ path: '' })
 
     await expect(
-      releaseUnownedRelaySocket(conn, process.execPath, live.sockPath)
+      requireUnownedRelaySocket(conn, process.execPath, live.sockPath)
     ).rejects.toSatisfy(isRelaySocketOwnerLiveError)
 
     expect(existsSync(live.sockPath)).toBe(true)
