@@ -601,6 +601,8 @@ describe('updater', () => {
       await vi.advanceTimersByTimeAsync(100)
       expect(revalidation.invocationCount()).toBe(1)
       updater.quitAndInstall()
+      // Advancing here proves the second request never scheduled its own quit timer.
+      await vi.advanceTimersByTimeAsync(100)
       expect(revalidation.invocationCount()).toBe(1)
       revalidation.settle({ ok: true })
       await settleQuitAndInstall()
