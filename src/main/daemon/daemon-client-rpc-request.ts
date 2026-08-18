@@ -1,6 +1,6 @@
 import type { Socket } from 'node:net'
 import { encodeNdjson } from './ndjson'
-import { DaemonProtocolError } from './types'
+import { DaemonConnectionLostError, DaemonProtocolError } from './types'
 import { isTerminalAttachCanceledMessage } from './daemon-errors'
 import type { DaemonPendingRequests } from './daemon-client-pending-requests'
 
@@ -18,6 +18,12 @@ type DaemonRpcRequestOptions = {
    * an attach-only request has nothing coming, so the wait must be bounded.
    */
   unmatchedCancelGraceMs: number
+  /**
+   * Escalation of last resort: called only when the cancel RPC could not be put on
+   * the wire at all. Never called for a cancel the daemon answered with an error,
+   * or one that timed out — those say nothing about the sibling sessions sharing
+   * this connection.
+   */
   onCreateCancellationFailure: () => void
   settleCreateCancellation: (sessionId: string, requestId: string) => Promise<{ canceled: boolean }>
 }
@@ -66,6 +72,16 @@ export function requestDaemonRpc<T>(opts: DaemonRpcRequestOptions): Promise<T> {
       clearTimers()
       reject(error)
     }
+    // Unmatched or unconfirmed cancel: a create that already published a result will
+    // still answer, so keep waiting — but only for a bounded window, or an
+    // attach-only request queued behind a hung create never settles at all.
+    const awaitLateResponseThenReject = (error: Error): void => {
+      if (settled || unmatchedCancelTimer) {
+        return
+      }
+      unmatchedCancelTimer = setTimeout(() => rejectAndDrop(error), opts.unmatchedCancelGraceMs)
+      unmatchedCancelTimer.unref?.()
+    }
     const cancelCreate = (error: Error): void => {
       if (cancellationStarted) {
         return
@@ -84,21 +100,23 @@ export function requestDaemonRpc<T>(opts: DaemonRpcRequestOptions): Promise<T> {
             rejectAndDrop(error)
             return
           }
-          // Unmatched cancel: a create that already published a result will
-          // still answer, so keep waiting — but only for a bounded window, or an
-          // attach-only request queued behind a hung create never settles at all.
-          if (!settled && !unmatchedCancelTimer) {
-            unmatchedCancelTimer = setTimeout(
-              () => rejectAndDrop(error),
-              opts.unmatchedCancelGraceMs
-            )
-            unmatchedCancelTimer.unref?.()
-          }
+          awaitLateResponseThenReject(error)
         })
-        .catch(() => {
-          if (!settled) {
-            opts.onCreateCancellationFailure()
+        .catch((cancelError: unknown) => {
+          if (settled) {
+            return
           }
+          // Why: a cancel the daemon refused (v1-v10 answer 'Unknown request type')
+          // or that blew its own 5s timeout (busy event loop, e.g. an unreachable UNC
+          // share) proves nothing about the other sessions on this connection, so it
+          // must not tear it down. Only an undeliverable cancel does. Unrecognized
+          // errors deliberately fall through to the bounded wait: the fail-safe
+          // direction is leaving siblings alone.
+          if (cancelError instanceof DaemonConnectionLostError) {
+            opts.onCreateCancellationFailure()
+            return
+          }
+          awaitLateResponseThenReject(error)
         })
     }
     const timer = setTimeout(() => {
@@ -139,7 +157,13 @@ export function requestDaemonRpc<T>(opts: DaemonRpcRequestOptions): Promise<T> {
       onAbort()
       return
     }
-    sent = true
-    opts.socket.write(encoded)
+    try {
+      opts.socket.write(encoded)
+      sent = true
+    } catch (err) {
+      // Why: an unwrapped throw here leaks the pending entry and its timer, and the
+      // raw error would be indistinguishable from a daemon refusal.
+      rejectAndDrop(new DaemonConnectionLostError(err instanceof Error ? err.message : String(err)))
+    }
   })
 }

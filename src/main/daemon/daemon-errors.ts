@@ -21,6 +21,21 @@ export class DaemonProtocolError extends Error {
   }
 }
 
+/**
+ * The control connection itself failed: nothing was delivered and no reply is
+ * coming. Distinct from a DaemonProtocolError the daemon actually answered with
+ * (or one we raised on our own timeout) — only this class proves the socket, and
+ * therefore every session sharing it, is already lost. Extends
+ * DaemonProtocolError and keeps the same messages so existing instanceof and
+ * message checks (isDaemonGoneError) still match.
+ */
+export class DaemonConnectionLostError extends DaemonProtocolError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DaemonConnectionLostError'
+  }
+}
+
 export class SessionNotFoundError extends Error {
   constructor(sessionId: string) {
     super(`Session not found: ${sessionId}`)

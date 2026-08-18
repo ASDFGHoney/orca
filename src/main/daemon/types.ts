@@ -400,6 +400,7 @@ export const NOTIFY_PREFIX = 'notify_'
 // live in daemon-errors.ts (this file is capped for wire-shape declarations).
 export {
   TerminalAttachCanceledError,
+  DaemonConnectionLostError,
   DaemonProtocolError,
   SessionNotFoundError
 } from './daemon-errors'

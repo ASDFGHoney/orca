@@ -2,6 +2,16 @@ import type { Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DaemonPendingRequests } from './daemon-client-pending-requests'
 import { requestDaemonRpc } from './daemon-client-rpc-request'
+import { DaemonConnectionLostError, DaemonProtocolError } from './types'
+
+/** Mirrors DaemonClient: a sibling session's in-flight request on the same connection. */
+function addSiblingRequest(pendingRequests: DaemonPendingRequests, reject: () => void): void {
+  pendingRequests.add('sibling-1', {
+    resolve: () => {},
+    reject,
+    timer: setTimeout(() => {}, 60_000)
+  })
+}
 
 describe('requestDaemonRpc', () => {
   afterEach(() => {
@@ -106,7 +116,7 @@ describe('requestDaemonRpc', () => {
     expect(pendingRequests.size).toBe(0)
   })
 
-  it('disconnects when spawn cancellation cannot be confirmed', async () => {
+  it('disconnects when the cancel could not be put on the wire', async () => {
     const pendingRequests = new DaemonPendingRequests()
     const abort = new AbortController()
     const onCreateCancellationFailure = vi.fn(() => {
@@ -123,7 +133,7 @@ describe('requestDaemonRpc', () => {
       unmatchedCancelGraceMs: 5_000,
       onCreateCancellationFailure,
       settleCreateCancellation: vi.fn(async () => {
-        throw new Error('settlement failed')
+        throw new DaemonConnectionLostError('Not connected')
       })
     })
     const rejected = expect(request).rejects.toThrow('Connection lost')
@@ -132,6 +142,102 @@ describe('requestDaemonRpc', () => {
 
     await rejected
     expect(onCreateCancellationFailure).toHaveBeenCalledOnce()
+    expect(pendingRequests.size).toBe(0)
+  })
+
+  describe('cancel failures the daemon itself produced', () => {
+    // A cancel the daemon answered — or one that blew its own timeout because the
+    // daemon's event loop is blocked — says nothing about the sibling sessions
+    // sharing this connection, so it must never tear the connection down.
+    async function abortWithFailingCancel(cancelError: Error): Promise<{
+      request: Promise<unknown>
+      pendingRequests: DaemonPendingRequests
+      onCreateCancellationFailure: ReturnType<typeof vi.fn>
+      rejectSibling: ReturnType<typeof vi.fn>
+    }> {
+      const pendingRequests = new DaemonPendingRequests()
+      const rejectSibling = vi.fn()
+      addSiblingRequest(pendingRequests, rejectSibling)
+      const onCreateCancellationFailure = vi.fn(() => {
+        pendingRequests.rejectAll('Connection lost')
+      })
+      const abort = new AbortController()
+      const request = requestDaemonRpc({
+        socket: { write: vi.fn() } as unknown as Socket,
+        pendingRequests,
+        id: 'req-1',
+        type: 'createOrAttach',
+        payload: { sessionId: 'blocked-spawn' },
+        timeoutMs: 30_000,
+        signal: abort.signal,
+        unmatchedCancelGraceMs: 5_000,
+        onCreateCancellationFailure,
+        settleCreateCancellation: vi.fn(async () => {
+          throw cancelError
+        })
+      })
+      abort.abort()
+      await vi.advanceTimersByTimeAsync(0)
+      return { request, pendingRequests, onCreateCancellationFailure, rejectSibling }
+    }
+
+    it('keeps the connection when the cancel RPC times out', async () => {
+      vi.useFakeTimers()
+      const { request, pendingRequests, onCreateCancellationFailure, rejectSibling } =
+        await abortWithFailingCancel(
+          new DaemonProtocolError('Request cancelCreateOrAttach timed out after 5000ms')
+        )
+      const rejected = expect(request).rejects.toThrow('client_disconnected')
+
+      expect(onCreateCancellationFailure).not.toHaveBeenCalled()
+      // Still pending: the bounded grace window, not an immediate teardown.
+      expect(pendingRequests.size).toBe(2)
+
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      await rejected
+      expect(onCreateCancellationFailure).not.toHaveBeenCalled()
+      expect(rejectSibling).not.toHaveBeenCalled()
+      expect(pendingRequests.size).toBe(1)
+    })
+
+    it('keeps the connection when the daemon answers the cancel with an error', async () => {
+      vi.useFakeTimers()
+      // v1-v10 daemons have no `cancelCreateOrAttach` case at all.
+      const { request, pendingRequests, onCreateCancellationFailure, rejectSibling } =
+        await abortWithFailingCancel(
+          new DaemonProtocolError('Unknown request type: cancelCreateOrAttach')
+        )
+      const rejected = expect(request).rejects.toThrow('client_disconnected')
+
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      await rejected
+      expect(onCreateCancellationFailure).not.toHaveBeenCalled()
+      expect(rejectSibling).not.toHaveBeenCalled()
+      expect(pendingRequests.size).toBe(1)
+    })
+  })
+
+  it('drops the pending entry when the control socket write throws', async () => {
+    const pendingRequests = new DaemonPendingRequests()
+    const request = requestDaemonRpc({
+      socket: {
+        write: vi.fn(() => {
+          throw new Error('This socket has been ended by the other party')
+        })
+      } as unknown as Socket,
+      pendingRequests,
+      id: 'req-1',
+      type: 'createOrAttach',
+      payload: { sessionId: 'unsendable-spawn' },
+      timeoutMs: 30_000,
+      unmatchedCancelGraceMs: 5_000,
+      onCreateCancellationFailure: vi.fn(),
+      settleCreateCancellation: vi.fn(async () => ({ canceled: true }))
+    })
+
+    await expect(request).rejects.toThrow('This socket has been ended by the other party')
     expect(pendingRequests.size).toBe(0)
   })
 })
