@@ -40,7 +40,11 @@ export class ManagedCodexHomeTemporarilyUnavailableError extends Error {
   }
 }
 
-function isDefinitiveAbsence(error: unknown): boolean {
+/**
+ * The one predicate both Codex credential lanes share. Exported so a second
+ * lane cannot drift by keeping its own copy of the errno allowlist.
+ */
+export function isDefinitiveAbsence(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | null)?.code
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
