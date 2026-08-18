@@ -1,0 +1,125 @@
+{
+  "total_count": 6,
+  "artifacts": [
+    {
+      "id": 9303584470,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAzNTg0NDcw",
+      "name": "playwright-traces-7-of-10",
+      "size_in_bytes": 2707920,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303584470",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303584470/zip",
+      "expired": false,
+      "digest": "sha256:d7d129bdad245d47d889e482de1ad44c64b11fede94ed00b713afce7ace7c895",
+      "created_at": "2026-08-17T22:32:10Z",
+      "updated_at": "2026-08-17T22:32:10Z",
+      "expires_at": "2026-08-24T22:32:09Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    },
+    {
+      "id": 9303583974,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAzNTgzOTc0",
+      "name": "playwright-traces-4-of-10",
+      "size_in_bytes": 1349411,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303583974",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303583974/zip",
+      "expired": false,
+      "digest": "sha256:b7a59688a3bbd788cbb52fb97bceff6923a6ce366ff4260d9b4d2520d3212782",
+      "created_at": "2026-08-17T22:32:09Z",
+      "updated_at": "2026-08-17T22:32:09Z",
+      "expires_at": "2026-08-24T22:32:08Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    },
+    {
+      "id": 9303512710,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAzNTEyNzEw",
+      "name": "playwright-traces-2-of-10",
+      "size_in_bytes": 457148,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303512710",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303512710/zip",
+      "expired": false,
+      "digest": "sha256:0dd0752a18609478d0eec69d5a70a26da06e36a313d4f959328b09431a872c96",
+      "created_at": "2026-08-17T22:29:26Z",
+      "updated_at": "2026-08-17T22:29:26Z",
+      "expires_at": "2026-08-24T22:29:25Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    },
+    {
+      "id": 9303441374,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAzNDQxMzc0",
+      "name": "playwright-traces-10-of-10",
+      "size_in_bytes": 1451539,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303441374",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303441374/zip",
+      "expired": false,
+      "digest": "sha256:83957038dd62dd109ba0685f036695e15738efc03cb04855859abe6575a2446d",
+      "created_at": "2026-08-17T22:26:42Z",
+      "updated_at": "2026-08-17T22:26:42Z",
+      "expires_at": "2026-08-24T22:26:41Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    },
+    {
+      "id": 9303033851,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAzMDMzODUx",
+      "name": "playwright-traces-ssh-docker-watcher-isolation",
+      "size_in_bytes": 184678,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303033851",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9303033851/zip",
+      "expired": false,
+      "digest": "sha256:9b29a8081fc11545f53c6effe6f2661edc6ab1f6e01722f1839de505523dae69",
+      "created_at": "2026-08-17T22:11:39Z",
+      "updated_at": "2026-08-17T22:11:39Z",
+      "expires_at": "2026-08-24T22:11:39Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    },
+    {
+      "id": 9302877861,
+      "node_id": "MDg6QXJ0aWZhY3Q5MzAyODc3ODYx",
+      "name": "e2e-build-out",
+      "size_in_bytes": 38959009,
+      "url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9302877861",
+      "archive_download_url": "https://api.github.com/repos/stablyai/orca/actions/artifacts/9302877861/zip",
+      "expired": false,
+      "digest": "sha256:125923a98173a247876cdbaeaf6c573d77b5a7223836cce8e2b6ffc16cbdfcb7",
+      "created_at": "2026-08-17T22:06:08Z",
+      "updated_at": "2026-08-17T22:06:08Z",
+      "expires_at": "2026-08-18T22:06:04Z",
+      "workflow_run": {
+        "id": 32074317808,
+        "repository_id": 1183888342,
+        "head_repository_id": 1183888342,
+        "head_branch": "main",
+        "head_sha": "a3a2c44edf463905ae3e515dab44bd62cd864c77"
+      }
+    }
+  ]
+}

@@ -15,6 +15,10 @@ const cliEntry = path.join(process.cwd(), 'out', 'cli', 'index.js')
 const fakeCodexSource = `
 const { appendFileSync } = require('node:fs')
 const { spawnSync } = require('node:child_process')
+if (process.argv.slice(2).includes('app-server')) {
+  process.stderr.write("error: unrecognized subcommand 'app-server'\\n")
+  process.exit(2)
+}
 let capability = null
 let acknowledged = false
 process.stdout.write('\\u001b]0;Codex Ready\\u0007OpenAI Codex\\nmodel: e2e\\ndirectory: e2e\\n')
@@ -23,7 +27,7 @@ process.stdin.on('data', (chunk) => {
   capability ||= input.match(/--dispatch-capability (dcap_[A-Za-z0-9_-]+)/)?.[1] || null
   if (!acknowledged && input.includes('\\r')) {
     acknowledged = true
-    process.stdout.write('ACK\\n')
+    process.stdout.write('\\x1b[?25hACK\\n')
   }
   const encoded = input.match(/ORCA_E2E_WORKER_DONE:([A-Za-z0-9+/=]+)/)?.[1]
   if (!encoded || !capability) return

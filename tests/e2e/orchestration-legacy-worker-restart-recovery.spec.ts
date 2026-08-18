@@ -90,7 +90,7 @@ process.stdin.on('data', (chunk) => {
   }
   if (!acknowledged && input.includes('\\r')) {
     acknowledged = true
-    process.stdout.write('ACK\\n')
+    process.stdout.write('\\x1b[?25hACK\\n')
   }
   const legacyCompletion = input.match(/ORCA_E2E_RUN_LEGACY_DONE:([A-Za-z0-9+/=]+)/)
   if (!lifecycleSent && legacyCompletion) {
