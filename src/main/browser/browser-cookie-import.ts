@@ -85,8 +85,9 @@ import {
   type ReplacedImportedDomainCookies
 } from './browser-cookie-import-policy'
 import {
+  acquireCookieMutationLock,
   removeTransplantableCookies,
-  withCookieClearLock,
+  withCookieMutationLock,
   type CookieClearStore,
   type CookieImportWriteStore
 } from './browser-cookie-import-clear'
@@ -583,6 +584,11 @@ type CookieImportSessionStore = CookieClearStore & CookieImportWriteStore & { di
 
 type CookieImportTarget = {
   partition: string
+  // Why (STA-4601): the live-jar lock is keyed on an object, and this path no longer holds the
+  // Session that STA-4300 moved behind openWriteStore. session.fromPartition returns the SAME
+  // instance for one partition string, so carrying that instance here is what keeps this path's
+  // lock and the native path's lock on ONE key — a fresh object per call would serialise nothing.
+  mutationLockOwner: object
   openWriteStore: () => CookieImportSessionStore
 }
 
@@ -594,6 +600,7 @@ function cookieImportTarget(targetPartition: string): CookieImportTarget {
   const targetSession = session.fromPartition(targetPartition)
   return {
     partition: targetPartition,
+    mutationLockOwner: targetSession,
     openWriteStore: () => openCookieClearStore(targetSession)
   }
 }
@@ -664,6 +671,12 @@ async function importValidatedCookies(
   const cookieClearStore = plan.writes.length > 0 ? target.openWriteStore() : null
 
   if (cookieClearStore) {
+    // Why (STA-4601): the replace, the writes, and the rollback are one live-jar transaction.
+    // Releasing after the replace lets a second import interleave, so this run's rollback could
+    // remove cookies the newer import already wrote and reported as imported. Taken AFTER the
+    // store is opened on purpose — openWriteStore only builds the adapter, it attaches no
+    // debugger, so holding it while queued cannot deadlock against the holder.
+    const releaseMutationLock = await acquireCookieMutationLock(target.mutationLockOwner)
     let replaced: ReplacedImportedDomainCookies | null = null
     try {
       if (mode === 'replace-imported-domains') {
@@ -724,7 +737,11 @@ async function importValidatedCookies(
         }
       }
     } finally {
-      cookieClearStore.dispose()
+      try {
+        cookieClearStore.dispose()
+      } finally {
+        releaseMutationLock()
+      }
     }
   }
 
@@ -1586,14 +1603,23 @@ export async function importCookiesFromBrowser(
   let liveCookiesPath = resolveChromiumCookiesPath(partitionDir)
 
   // Why: Electron creates the Cookies file only after a cookie is stored; a throwaway set/remove forces DB init for unused profiles.
+  // Why (STA-4601): this probe MUTATES the live jar, so it runs under the same per-partition lock as
+  // the import itself. An earlier revision left it outside on the argument that no import writes
+  // https://localhost/__init — that was wrong. normalizeCookieImportDomain accepts `localhost`,
+  // cookie names are unrestricted, and deriveUrl produces exactly this URL, so an import CAN write
+  // that coordinate. Unlocked, this probe's remove() would delete a cookie a concurrent import had
+  // just written and reported as imported. The cost is negligible: the probe only runs for a
+  // partition that has never stored a cookie, so it is at most a one-time wait per profile.
   if (!liveCookiesPath) {
-    try {
-      await targetSession.cookies.set({ url: 'https://localhost', name: '__init', value: '1' })
-      await targetSession.cookies.remove('https://localhost', '__init')
-      await targetSession.cookies.flushStore()
-    } catch {
-      // ignore — the set/remove may fail but flushStore should still create the file
-    }
+    await withCookieMutationLock(targetSession, async () => {
+      try {
+        await targetSession.cookies.set({ url: 'https://localhost', name: '__init', value: '1' })
+        await targetSession.cookies.remove('https://localhost', '__init')
+        await targetSession.cookies.flushStore()
+      } catch {
+        // ignore — the set/remove may fail but flushStore should still create the file
+      }
+    })
     liveCookiesPath = resolveChromiumCookiesPath(partitionDir)
   }
 
@@ -2014,10 +2040,12 @@ export async function importCookiesFromBrowser(
     // the same CDP identities — cookies.set() cannot express the partition either one reads.
     const cookieClearStore = openCookieClearStore(targetSession)
     try {
-      // Why: this lock covers only the live jar; staging and cold-start replay keep their existing
-      // semantics while clear and writes can no longer interleave with another import.
-      await withCookieClearLock(targetSession, () =>
-        removeTransplantableCookies(
+      // Why (STA-4601): the clear and the writes that repopulate the jar are one transaction. With
+      // the lock held for the clear alone, a second import could clear between them and this run
+      // would write its cookies on top of the newer import's jar. The lock covers the LIVE JAR
+      // only — staging and cold-start replay keep their existing semantics.
+      await withCookieMutationLock(targetSession, async () => {
+        await removeTransplantableCookies(
           {
             cookies: cookieClearStore,
             clearData: (options) => targetSession.clearData(options),
@@ -2030,28 +2058,28 @@ export async function importCookiesFromBrowser(
           // snapshot taken from it, so they are never submitted to any mutation.
           nativePlan.skippedFamilies
         )
-      )
-      diag(
-        `  cleared existing session cookies before loading ${decryptedCookies.length} imported cookies`
-      )
+        diag(
+          `  cleared existing session cookies before loading ${decryptedCookies.length} imported cookies`
+        )
 
-      const writable: SourceCookieToWrite[] = []
-      for (const cookie of decryptedCookies) {
-        const url = deriveUrl(cookie.domain, cookie.secure)
-        if (!url) {
-          memoryFailed++
-          continue
+        const writable: SourceCookieToWrite[] = []
+        for (const cookie of decryptedCookies) {
+          const url = deriveUrl(cookie.domain, cookie.secure)
+          if (!url) {
+            memoryFailed++
+            continue
+          }
+          writable.push({ ...cookie, url })
         }
-        writable.push({ ...cookie, url })
-      }
-      // Why: a rejected cookie here falls back to the staged cold-start replay rather than
-      // unwinding the import, so one failure must not stop the rest from loading.
-      const phase = await writeImportedCookies(cookieClearStore, writable, {
-        stopOnFailure: false,
-        log: diag
+        // Why: a rejected cookie here falls back to the staged cold-start replay rather than
+        // unwinding the import, so one failure must not stop the rest from loading.
+        const phase = await writeImportedCookies(cookieClearStore, writable, {
+          stopOnFailure: false,
+          log: diag
+        })
+        memoryLoaded = phase.importedCount
+        memoryFailed += phase.writeRejected
       })
-      memoryLoaded = phase.importedCount
-      memoryFailed += phase.writeRejected
     } finally {
       cookieClearStore.dispose()
     }
