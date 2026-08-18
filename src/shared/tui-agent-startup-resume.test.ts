@@ -3,6 +3,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { buildAgentResumeStartupPlan } from './tui-agent-startup'
+import { RESUMABLE_TUI_AGENTS } from './agent-session-resume'
+import { getTuiAgentLaunchCommand, TUI_AGENT_CONFIG } from './tui-agent-config'
 
 describe('tui agent resume startup plans', () => {
   it('builds Windows resume plans that PowerShell can invoke', () => {
@@ -101,4 +103,23 @@ describe('tui agent resume startup plans', () => {
       ompResumeFilePath: '/custom/root/project/session.jsonl'
     })
   })
+
+  // Why this is pinned: wiring `isRemote` into the resume paths (#11941) makes
+  // it reach two consumers — the Codex hooks override, which is the point, and
+  // `getTuiAgentLaunchCommand`, which drops the local-only `orca-ide` rename on
+  // Linux. The second is unreachable here: `launchCmdByPlatform` is declared by
+  // exactly one agent, `claude-agent-teams`, and that agent is not resumable.
+  // If someone adds `launchCmdByPlatform` to a resumable agent, or makes
+  // claude-agent-teams resumable, a remote resume would silently start emitting
+  // a different binary name and process recognition would be the thing that
+  // notices. This turns that into a failing test instead.
+  it.each(RESUMABLE_TUI_AGENTS)(
+    'resolves the same Linux launch binary remote or local for %s',
+    (agent) => {
+      const config = TUI_AGENT_CONFIG[agent]
+      expect(getTuiAgentLaunchCommand(config, 'linux', { isRemote: true })).toBe(
+        getTuiAgentLaunchCommand(config, 'linux', { isRemote: false })
+      )
+    }
+  )
 })
