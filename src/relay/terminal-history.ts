@@ -12,6 +12,7 @@ import { basename, join } from 'node:path'
 import { hashWorktreeId } from '../main/terminal-history-id'
 import {
   deleteFishHistoryFile,
+  dropInheritedOrcaFishHistory,
   relayFishHistorySessionName,
   resolveFishHistoryDir
 } from '../main/fish-history-session'
@@ -121,6 +122,10 @@ export function deleteRelayHistory(worktreeId: string): void {
  *  isolates it the same way the desktop app does and deletes by that name.
  *  No metadata file is needed: the name is a pure function of the worktree id. */
 export function injectRelayFishHistoryEnv(env: Record<string, string>, worktreeId: string): void {
+  // The relay process can itself be launched from a fish pane (or be handed one
+  // in the client env), and fish EXPORTS `fish_history`; drop any Orca-minted
+  // name so the check below only honours a genuine user value.
+  dropInheritedOrcaFishHistory(env)
   if (env.fish_history) {
     return
   }
