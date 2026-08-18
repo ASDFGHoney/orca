@@ -16835,17 +16835,18 @@ export class OrcaRuntimeService {
       workerProcessExited: true
     })
 
-    // Why: create an escalation message so the coordinator is notified about
-    // the unexpected exit, even if the circuit breaker hasn't tripped yet.
-    const recipient = this.resolveExitEscalationRecipient(dispatch.run_id)
-    if (!recipient) {
-      return
-    }
     // Why: failDispatch above is the authoritative state transition and has already
-    // committed. Mail is best-effort on top of it: onPtyExit runs this synchronously per
-    // leaf, so letting a mailbox error escape would abandon the remaining leaves and the
-    // pty record pruning that close out this exit.
+    // committed. Everything below is best-effort mail on top of it — resolving the
+    // recipient reads the database too — and onPtyExit runs this synchronously per leaf,
+    // so letting any of it escape would abandon the remaining leaves and the pty record
+    // pruning that close out this exit.
     try {
+      // Why: create an escalation message so the coordinator is notified about
+      // the unexpected exit, even if the circuit breaker hasn't tripped yet.
+      const recipient = this.resolveExitEscalationRecipient(dispatch.run_id)
+      if (!recipient) {
+        return
+      }
       const escalation = this._orchestrationDb.insertMessage({
         from: handle,
         to: recipient.to,
@@ -16868,9 +16869,10 @@ export class OrcaRuntimeService {
       // message producer does.
       this.notifyMessageArrived(escalation.to_handle, escalation.type)
     } catch (error) {
+      // Why: log the Run rather than the recipient — resolution itself can be what failed.
       console.warn('[orchestration] failed to escalate worker exit', {
         dispatchId: dispatch.id,
-        recipient: recipient.to,
+        runId: dispatch.run_id,
         error
       })
     }

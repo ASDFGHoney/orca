@@ -432,18 +432,36 @@ describe('STA-4604 worker PTY exit escalation reaches the coordinator', () => {
     }
   })
 
-  it('still finishes PTY exit when the mailbox insert fails', () => {
-    const { runtime, workerHandle, coordinatorHandle } = makeRuntimeWithTwoPanes()
+  // Resolving the recipient reads the DB too, so it needs the same protection as the insert.
+  it.each([
+    [
+      'the recipient lookup',
+      {
+        getRun: () => {
+          throw new Error('database is closed')
+        }
+      }
+    ],
+    [
+      'the mailbox insert',
+      {
+        getRun: () => ({ id: 'run-1', legacy: 0, coordinator_handle: 'term_coord' }),
+        insertMessage: () => {
+          throw new Error('Run not found: run-1')
+        }
+      }
+    ]
+  ])('still finishes PTY exit when %s fails', (_case, dbOverrides) => {
+    const { runtime, workerHandle } = makeRuntimeWithTwoPanes()
     const failDispatch = vi.fn()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     runtime.setOrchestrationDb({
       getActiveDispatchForTerminal: (handle: string) =>
         handle === workerHandle ? { id: 'ctx-1', run_id: 'run-1', task_id: 'task-1' } : undefined,
       failDispatch,
-      getRun: () => ({ id: 'run-1', legacy: 0, coordinator_handle: coordinatorHandle }),
-      insertMessage: () => {
-        throw new Error('Run not found: run-1')
-      }
+      getActiveCoordinatorRun: () => undefined,
+      insertMessage: () => ({ to_handle: 'run:run-1', type: 'escalation' }),
+      ...dbOverrides
     } as never)
 
     // Why: onPtyExit walks leaves synchronously — a throwing mailbox would abandon the
@@ -454,7 +472,7 @@ describe('STA-4604 worker PTY exit escalation reaches the coordinator', () => {
     })
     expect(warn).toHaveBeenCalledWith(
       '[orchestration] failed to escalate worker exit',
-      expect.objectContaining({ dispatchId: 'ctx-1' })
+      expect.objectContaining({ dispatchId: 'ctx-1', runId: 'run-1' })
     )
     warn.mockRestore()
   })
