@@ -128,6 +128,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import { OrchestrationDb } from './orchestration/db'
+import type { DispatchStatus } from './orchestration/types'
 import { reconcileRequestedWorkerTerminalReleases } from './orchestration/worker-terminal-release-reconciliation'
 import {
   classifyWorkerTerminalProcessIncarnation,
@@ -16830,7 +16831,9 @@ export class OrcaRuntimeService {
     }
 
     const errorContext = `Agent exited with code ${exitCode}`
-    this._orchestrationDb.failDispatch(dispatch.id, errorContext, { workerProcessExited: true })
+    const settled = this._orchestrationDb.failDispatch(dispatch.id, errorContext, {
+      workerProcessExited: true
+    })
 
     // Why: create an escalation message so the coordinator is notified about
     // the unexpected exit, even if the circuit breaker hasn't tripped yet.
@@ -16847,6 +16850,7 @@ export class OrcaRuntimeService {
         from: handle,
         to: recipient.to,
         subject: `Agent exited unexpectedly (code ${exitCode})`,
+        body: this.describeWorkerExit(dispatch, exitCode, handle, settled?.status),
         type: 'escalation',
         priority: 'high',
         // Why: applyEscalationToDispatch rejects an escalation without an exact Dispatch
@@ -16870,6 +16874,33 @@ export class OrcaRuntimeService {
         error
       })
     }
+  }
+
+  // Why: the banner shows the subject and a raw payload, so without prose the coordinator
+  // has to resolve ids by hand to learn what died and whether the task is still retryable.
+  private describeWorkerExit(
+    dispatch: { id: string; task_id: string; run_id: string },
+    exitCode: number,
+    handle: string,
+    settledStatus: DispatchStatus | undefined
+  ): string {
+    const task = this._orchestrationDb?.getTask?.(dispatch.task_id, dispatch.run_id)
+    const title =
+      typeof task?.spec === 'string'
+        ? buildOrchestrationTaskDisplayMetadata({
+            spec: task.spec,
+            taskTitle: task.task_title,
+            displayName: task.display_name
+          }).taskTitle
+        : ''
+    const named = title ? `"${title}" (${dispatch.task_id})` : dispatch.task_id
+    const outcome =
+      settledStatus === 'circuit_broken'
+        ? ' This task has now failed too many times, so it will not be retried automatically.'
+        : settledStatus === 'failed'
+          ? ' The task is ready to be dispatched again.'
+          : ''
+    return `Worker ${handle} exited with code ${exitCode} while running task ${named}.${outcome}`
   }
 
   // Why: a lightweight Run keeps its coordinator in runs/run_coordinator_handles and

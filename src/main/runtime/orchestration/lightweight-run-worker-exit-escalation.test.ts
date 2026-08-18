@@ -113,6 +113,7 @@ async function gradeWorkerExit(
   escalation: Record<string, unknown> | null
   workerHandle: string
   runId: string
+  taskId: string
 }> {
   const { runtime, workerHandle, coordinatorHandle } = makeRuntimeWithTwoPanes()
   const db = new OrchestrationDb(':memory:')
@@ -154,12 +155,14 @@ async function gradeWorkerExit(
             type: escalation.type,
             priority: escalation.priority,
             subject: escalation.subject,
+            body: escalation.body,
             deliveryContract: escalation.delivery_contract,
             payload: JSON.parse(escalation.payload ?? 'null')
           }
         : null,
       workerHandle,
-      runId
+      runId,
+      taskId: task.id
     }
   } finally {
     db.close()
@@ -183,6 +186,9 @@ describe('STA-4604 worker PTY exit escalation reaches the coordinator', () => {
       type: 'escalation',
       priority: 'high',
       subject: 'Agent exited unexpectedly (code 137)',
+      body:
+        `Worker ${graded.workerHandle} exited with code 137 while running task ` +
+        `"do the work" (${graded.taskId}). The task is ready to be dispatched again.`,
       deliveryContract: 'current_delivery',
       payload: {
         taskId: expect.any(String),
@@ -349,10 +355,18 @@ describe('STA-4604 worker PTY exit escalation reaches the coordinator', () => {
       runtime.onPtyExit(WORKER_PTY_ID, 137)
       await settle()
 
+      const escalations = db.getUnreadRunMailbox(run.id, 100, ['escalation'])
       expect({
         dispatch: db.getDispatchContextById(dispatch.id)?.status,
-        escalations: db.getUnreadRunMailbox(run.id, 100, ['escalation']).length
+        escalations: escalations.length
       }).toEqual({ dispatch: 'circuit_broken', escalations: 1 })
+      // Why: a tripped breaker means nobody will retry it, so the body must not
+      // tell the coordinator the task is ready to go again.
+      expect(escalations.at(-1)?.body).toBe(
+        `Worker ${workerHandle} exited with code 137 while running task ` +
+          `"repeatedly failing work" (${task.id}). This task has now failed too many ` +
+          `times, so it will not be retried automatically.`
+      )
     } finally {
       db.close()
     }
