@@ -18146,7 +18146,7 @@ export class OrcaRuntimeService {
         paneRuntimeId: -1,
         ptyId: pty.pty.ptyId,
         rendererGraphEpoch: this.rendererGraphEpoch,
-        agentWait: await this.getTerminalInteractiveWait(handle)
+        ...expandTerminalInteractiveWait(await this.getTerminalInteractiveWait(handle))
       }
     }
     const graphEpoch = this.captureReadyGraphEpoch()
@@ -18167,7 +18167,7 @@ export class OrcaRuntimeService {
       paneRuntimeId: leaf.paneRuntimeId,
       ptyId: leaf.ptyId,
       rendererGraphEpoch: this.rendererGraphEpoch,
-      agentWait: await this.getTerminalInteractiveWait(handle)
+      ...expandTerminalInteractiveWait(await this.getTerminalInteractiveWait(handle))
     }
   }
 
@@ -18561,17 +18561,19 @@ export class OrcaRuntimeService {
   }
 
   /** Why: "blocked on a human" is the one worker state a coordinator cannot infer — silence
-   *  covers it, a long tool call, and a wedged process alike. Null means "nothing proves a
-   *  wait", never "proven not waiting". */
-  async getTerminalInteractiveWait(handle: string): Promise<RuntimeTerminalInteractiveWait | null> {
+   *  covers it, a long tool call, and a wedged process alike. `null` means this pane was
+   *  evaluated and nothing proves a wait; `undefined` means it could not be evaluated, which
+   *  is never the same as "not waiting". */
+  async getTerminalInteractiveWait(
+    handle: string
+  ): Promise<RuntimeTerminalInteractiveWait | null | undefined> {
     let ptyId: string
     let terminal: TerminalAgentStatusSnapshot
     try {
       ptyId = this.getTerminalAgentStatusPtyId(handle)
       terminal = this.getTerminalAgentStatusSnapshot(handle, ptyId)
     } catch {
-      // An unreadable pane is unknown; "not waiting" would be the false negative this removes.
-      return null
+      return undefined
     }
     const explicitStatus = this.getFreshExplicitAgentStatusForHandle(handle)
     const promptReason = this.resolveAuthoritativeTerminalWaitPermission(
@@ -18596,8 +18598,17 @@ export class OrcaRuntimeService {
     // Why the extra round trip for hook evidence only: a hook row outlives its agent by up to
     // AGENT_STATUS_STALE_AFTER_MS, and only the shared verdict proves an agent still owns this
     // PTY — a shell that took the pane back rarely leaves a title we can recognize as one.
-    const status = await this.getTerminalAgentStatus(handle).catch(() => null)
-    return status?.isRunningAgent === true && status.status === 'permission'
+    // Bounded because it reaches a PTY controller that can be a remote host: a wedged probe
+    // must leave the wait unevaluated, never stall every caller of showTerminal.
+    const status = await withTimeout(
+      this.getTerminalAgentStatus(handle).catch(() => undefined),
+      TERMINAL_INTERACTIVE_WAIT_PROBE_TIMEOUT_MS,
+      undefined
+    )
+    if (!status) {
+      return undefined
+    }
+    return status.isRunningAgent && status.status === 'permission'
       ? { source: 'hook', since: explicitStatus.updatedAt }
       : null
   }
@@ -39563,41 +39574,78 @@ const CURSOR_APPROVAL_CHOICE_MARKERS = [
   'run everything',
   'skip & tell the agent'
 ]
-// Why bounded: an answered menu stays in scrollback, and a stale hit fails tui-idle and
-// refuses prompt injection. One line of slack covers a partial line mid-redraw.
-const CURSOR_APPROVAL_MAX_TRAILING_LINES = 1
+// Why bounded to the last lines: an answered menu stays in scrollback, and a stale hit fails
+// tui-idle and refuses prompt injection. Only a dialog that still owns the bottom of the
+// screen is live, and confining the whole match to that window also keeps prose above or
+// below — an agent narrating "I'll pick Run Everything" — from anchoring it.
+const CURSOR_APPROVAL_TAIL_LINES = 8
 
 function findCursorApprovalPromptIndex(normalized: string): number | null {
-  const promptIndex = normalized.lastIndexOf('run this command?')
-  if (promptIndex === -1) {
+  const windowStart = startOfLastLines(normalized, CURSOR_APPROVAL_TAIL_LINES)
+  const tail = normalized.slice(windowStart)
+  if (!tail.includes('run this command?')) {
     return null
   }
-  const menu = normalized.slice(promptIndex)
-  let matched = 0
-  let lastChoiceEnd = -1
-  for (const marker of CURSOR_APPROVAL_CHOICE_MARKERS) {
-    const index = menu.lastIndexOf(marker)
-    if (index === -1) {
+  const lines = tail.split('\n')
+  while (lines.length > 0 && lines.at(-1)?.trim() === '') {
+    lines.pop()
+  }
+  let matchedLines = 0
+  let lastChoiceLine = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isCursorApprovalChoiceLine(lines[index])) {
       continue
     }
-    matched += 1
-    lastChoiceEnd = Math.max(lastChoiceEnd, index + marker.length)
+    matchedLines += 1
+    lastChoiceLine = index
   }
-  if (matched < 2) {
+  if (matchedLines < 2) {
     return null
   }
-  let trailingLines = 0
-  for (let cursor = lastChoiceEnd; cursor < menu.length; cursor += 1) {
-    if (menu.charCodeAt(cursor) !== 10) {
-      continue
-    }
-    trailingLines += 1
-    if (trailingLines > CURSOR_APPROVAL_MAX_TRAILING_LINES) {
-      return null
-    }
-  }
-  return promptIndex
+  // Why no slack: every capture of a live dialog ends on its last choice, and one line of
+  // tolerance is enough for the agent's own narration of a choice to revive an answered menu.
+  // A redraw caught mid-flight reads as no wait until the next poll, which is the safe way
+  // to be wrong.
+  return lastChoiceLine === lines.length - 1
+    ? windowStart + tail.lastIndexOf('run this command?')
+    : null
 }
+
+// Why the trailing key and not the wording alone: an agent narrating "next time I'll suggest
+// Run Everything" writes the same words as the menu. A selectable row ends in the key that
+// picks it, and prose does not.
+const CURSOR_APPROVAL_CHOICE_KEY_RE = /\([a-z+ ]{1,12}\)\s*$/
+
+function isCursorApprovalChoiceLine(line: string): boolean {
+  return (
+    CURSOR_APPROVAL_CHOICE_KEY_RE.test(line) &&
+    CURSOR_APPROVAL_CHOICE_MARKERS.some((marker) => line.includes(marker))
+  )
+}
+
+/** Offset of the first character of the last `count` newline-separated lines. */
+function startOfLastLines(value: string, count: number): number {
+  let cursor = value.length
+  for (let seen = 0; seen < count; seen += 1) {
+    const previous = value.lastIndexOf('\n', cursor - 1)
+    if (previous === -1) {
+      return 0
+    }
+    cursor = previous
+  }
+  return cursor + 1
+}
+
+/** Why a spread and not `agentWait: value`: an absent key is the only way to say the pane was
+ *  never evaluated, which a reader must not confuse with an evaluated "no wait". */
+function expandTerminalInteractiveWait(
+  agentWait: RuntimeTerminalInteractiveWait | null | undefined
+): { agentWait?: RuntimeTerminalInteractiveWait | null } {
+  return agentWait === undefined ? {} : { agentWait }
+}
+
+/** A wedged PTY controller must not stall every reader of this pane. */
+const TERMINAL_INTERACTIVE_WAIT_PROBE_TIMEOUT_MS = 2_000
 
 function findTerminalWaitBlockedSignal(
   normalized: string

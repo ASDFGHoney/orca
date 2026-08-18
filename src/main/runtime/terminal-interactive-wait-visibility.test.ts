@@ -45,6 +45,8 @@ async function createPane(options: {
   data: string
   /** Set for a pane whose PTY lives on an SSH host or WSL distro rather than locally. */
   connectionId?: string
+  /** Simulates a PTY controller whose foreground probe never settles. */
+  foregroundProbeHangs?: boolean
 }): Promise<{ runtime: OrcaRuntimeService; handle: string }> {
   const runtime = new OrcaRuntimeService(null)
   const internals = runtime as unknown as {
@@ -61,7 +63,10 @@ async function createPane(options: {
     spawn: vi.fn().mockResolvedValue({ id: PTY_ID, incarnationId: 'inc-1' }),
     write: () => true,
     kill: () => true,
-    getForegroundProcess: async () => options.foregroundProcess
+    getForegroundProcess:
+      options.foregroundProbeHangs === true
+        ? () => new Promise<string | null>(() => {})
+        : async () => options.foregroundProcess
   })
   const terminal = await runtime.createTerminal(`id:${WORKTREE_ID}`, {
     tabId: TAB_ID,
@@ -220,17 +225,38 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
       await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
-    it('tolerates one trailing line below a live dialog', async () => {
-      // A status footer under the dialog must not read as scrollback.
+    it('is not anchored by the agent narrating a choice after the menu', async () => {
+      // Why: matching each marker independently let prose below the answered menu carry the
+      // anchor down to the bottom of the screen and revive it.
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: `${CURSOR_APPROVAL}\nApproved. Next time I will suggest Run Everything instead.\n`
+      })
+
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
+    })
+
+    it('is not anchored by the agent narrating a choice before the menu', async () => {
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: `You can pick Run Everything or Run (once) if you prefer.\nStill thinking.\n`
+      })
+
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
+    })
+
+    it('requires the dialog to be the last thing on the screen', async () => {
+      // Not a tolerance question: one line of slack is exactly enough for the agent's own
+      // narration to revive an answered menu, and every capture of a live dialog ends on it.
       const { runtime, handle } = await createPane({
         paneTitle: CURSOR_TITLE,
         foregroundProcess: 'cursor-agent',
         data: `${CURSOR_APPROVAL}\n  Auto · 6.1%\n`
       })
 
-      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toMatchObject({
-        reason: 'agent-approval-prompt'
-      })
+      await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
     })
 
     it('reports the same wait for a pane whose PTY is not local', async () => {
@@ -382,16 +408,31 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
 
     runtime.onPtyExit(PTY_ID, 0)
 
-    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeNull()
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeUndefined()
   })
 
-  it('answers null rather than "not waiting" for a pane it cannot read', async () => {
+  it('leaves the wait unevaluated when the foreground probe wedges', async () => {
+    // Why bounded: this probe reaches a PTY controller that can be a remote host. A wedged
+    // one must leave the wait unknown, not stall every caller of showTerminal.
+    const { runtime, handle } = await createPane({
+      paneTitle: '✻ Claude Code',
+      foregroundProcess: 'claude',
+      data: agentStatusOsc('waiting'),
+      foregroundProbeHangs: true
+    })
+
+    await expect(runtime.getTerminalInteractiveWait(handle)).resolves.toBeUndefined()
+    const show = (await runtime.showTerminal(handle)) as Record<string, unknown>
+    expect('agentWait' in show).toBe(false)
+  }, 15_000)
+
+  it('answers undefined rather than "not waiting" for a pane it cannot read', async () => {
     const { runtime } = await createPane({
       paneTitle: CURSOR_TITLE,
       foregroundProcess: 'cursor-agent',
       data: CURSOR_APPROVAL
     })
 
-    await expect(runtime.getTerminalInteractiveWait('term_does_not_exist')).resolves.toBeNull()
+    await expect(runtime.getTerminalInteractiveWait('term_does_not_exist')).resolves.toBeUndefined()
   })
 })
