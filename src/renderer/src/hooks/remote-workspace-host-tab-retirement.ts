@@ -19,9 +19,19 @@ import { closeTerminalTabInWorkspaceSession } from '../../../shared/workspace-se
  * pin wins. The cost is that the resurrection loop stays open for pinned tabs — they are preserved
  * and re-uploaded exactly as before this change, which is today's behaviour rather than a regression.
  */
+export type HostTabRetirementObserver = {
+  /**
+   * Fires once per tab the primitive REALLY removed, so the caller can run the same renderer-side
+   * sweep a local close runs. A pinned refusal and an id this session never held are both skipped:
+   * sweeping either would drop agent status for a tab that is still on screen.
+   */
+  onTabRetired?: (tabId: string, worktreeId: string) => void
+}
+
 export function retireHostClosedTabsFromSession(
   session: WorkspaceSessionState,
-  retiredTabIdsByWorktreeId: ReadonlyMap<string, ReadonlySet<string>>
+  retiredTabIdsByWorktreeId: ReadonlyMap<string, ReadonlySet<string>>,
+  observer?: HostTabRetirementObserver
 ): WorkspaceSessionState {
   if (retiredTabIdsByWorktreeId.size === 0) {
     return session
@@ -32,7 +42,11 @@ export function retireHostClosedTabsFromSession(
       // Why ptyIdsToKill is discarded: the client that closed the tab already killed the pty, and if
       // that kill failed the process is one another client may have rebound. Retirement removes a
       // tab from this client's model; it never kills anything on the host.
-      next = closeTerminalTabInWorkspaceSession(next, worktreeId, tabId).session
+      const closeResult = closeTerminalTabInWorkspaceSession(next, worktreeId, tabId)
+      next = closeResult.session
+      if (closeResult.closed) {
+        observer?.onTabRetired?.(tabId, worktreeId)
+      }
     }
   }
   // Why the workspace identity is restored: closing the last surface of the active worktree clears

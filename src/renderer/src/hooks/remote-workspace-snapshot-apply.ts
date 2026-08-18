@@ -18,6 +18,7 @@ import {
 } from './remote-workspace-session-merge'
 import { selectHostRetiredTabIdsByWorktree } from './remote-workspace-host-ack-ledger'
 import { retireHostClosedTabsFromSession } from './remote-workspace-host-tab-retirement'
+import { sweepRetiredTerminalTabState } from '../store/slices/retired-terminal-tab-state-sweep'
 
 const REMOTE_WORKSPACE_SNAPSHOT_WRITE_SUPPRESS_MS = 1_000
 const SNAPSHOT_TERMINAL_RECONNECT_TIMEOUT_MS = 30_000
@@ -135,6 +136,9 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
     localTabsByWorktree: state.tabsByWorktree,
     worktreeIds
   })
+  // Why collected: a peer's close owes the tab the same renderer-side sweep a local closeTab runs.
+  // Only ids the primitive really removed land here, so a pinned tab keeps its agent status.
+  const retiredWorktreeIdByTabId = new Map<string, string>()
   const merged = retireHostClosedTabsFromSession(
     mergeDirectSshRemoteWorkspaceSession(
       buildWorkspaceSessionPayload(state),
@@ -143,7 +147,8 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
       state.tabsByWorktree,
       currentRecoveryTabIds(state, authority, worktreeIds)
     ),
-    retiredTabIdsByWorktreeId
+    retiredTabIdsByWorktreeId,
+    { onTabRetired: (tabId, worktreeId) => retiredWorktreeIdByTabId.set(tabId, worktreeId) }
   )
   if (!isArrivalCurrent(authority.targetId, arrival) || !isPreparationTokenCurrent(token)) {
     return
@@ -157,6 +162,11 @@ export async function applyDirectSshRemoteWorkspaceSnapshot({
       replaceWorkspaceKeys
     })
     currentStore.hydrateTabsSession(merged, { replaceWorkspaceKeys })
+    // Why here: the retired tabs are out of tabsByWorktree now (the completed-orphan sweep is defined
+    // against that), and snapshotApplyDepth still suppresses the store writes from re-publishing.
+    for (const [tabId, worktreeId] of retiredWorktreeIdByTabId) {
+      sweepRetiredTerminalTabState(currentStore, tabId, worktreeId)
+    }
     // Why after hydrate: this listing is now what its publisher is known to hold, so a LATER listing
     // from the SAME publisher is what its omissions are judged against.
     currentStore.recordRemoteWorkspaceHostAck(authority.targetId, snapshot, publisherClientId)

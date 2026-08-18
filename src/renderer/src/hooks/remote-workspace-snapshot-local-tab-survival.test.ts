@@ -443,3 +443,71 @@ describe('direct-SSH snapshot apply keeps local state the host has not seen', ()
     expect(Object.keys(payload.remoteSessionIdsByTabId ?? {})).not.toContain('closed-elsewhere')
   })
 })
+
+/**
+ * Retirement removes the tab from the session model, which is only half of what a close owes it.
+ * The renderer keeps per-tab maps outside that model — agentStatusByPaneKey above all — and the
+ * sidebar's live index buckets a non-'done' entry whose tab id it cannot find under the entry's own
+ * worktree, so a survivor renders as a live agent row for a tab that no longer exists, and clicking
+ * it cannot clear it (WorktreeCardAgents bails when the row already sits on its own worktree).
+ *
+ * A BACKGROUND pane is the case that has no other cleanup: its status is written straight from the
+ * hook stream whether or not the pane is mounted, so no pty-exit or unmount handler ever clears it.
+ */
+describe('a peer-retired tab leaves no renderer state behind', () => {
+  const PANE_KEY = 'closed-elsewhere:leaf-1'
+
+  async function seedRetiredTabWithLiveAgent(store: TestStore): Promise<void> {
+    seedCatalog(store)
+    store.getState().setActiveWorktree(WORKTREE_ID)
+    await applySnapshot(store, snapshot(1, ['agent', 'closed-elsewhere']), PEER)
+    store
+      .getState()
+      .setAgentStatus(PANE_KEY, { state: 'working', prompt: 'pnpm install', agentType: 'claude' })
+    expect(store.getState().agentStatusByPaneKey[PANE_KEY]?.state).toBe('working')
+  }
+
+  it('drops the agent status of the tab the peer closed', async () => {
+    const store = createTestStore()
+    await seedRetiredTabWithLiveAgent(store)
+
+    await applySnapshot(store, snapshot(2, ['agent']), PEER)
+
+    expect(tabIdsOf(store)).toEqual(['agent'])
+    expect(
+      Object.keys(store.getState().agentStatusByPaneKey).filter((key) =>
+        key.startsWith('closed-elsewhere:')
+      ),
+      'a live agent row outlived the tab a peer closed, and the sidebar has no way to clear it'
+    ).toEqual([])
+  })
+
+  it('keeps the agent status of a pinned tab, which retirement refuses to close', async () => {
+    // The pin is the local user's explicit "do not take this away from me", so the primitive refuses
+    // the close and the tab stays on screen — sweeping its state would blank a live agent row.
+    const store = createTestStore()
+    seedCatalog(store)
+    store.getState().setActiveWorktree(WORKTREE_ID)
+    await applySnapshot(store, snapshot(1, ['agent']), PEER)
+    // Why created here rather than taken from the snapshot: pinning is a unified-tab gesture, and the
+    // create path is what mints the unified row (a host listing projects terminal rows only).
+    const setup = spawnLocalTab(store, 'setup')
+    store.getState().setAgentStatus(`${setup.id}:leaf-1`, {
+      state: 'working',
+      prompt: 'pnpm install',
+      agentType: 'claude'
+    })
+    store.getState().pinTab(setup.id)
+    // The peer listing it is what makes its next omission a retraction, so retirement is decided and
+    // only the pin stops it.
+    await applySnapshot(store, snapshot(2, ['agent', 'setup']), PEER)
+
+    await applySnapshot(store, snapshot(3, ['agent']), PEER)
+
+    expect(tabIdsOf(store)).toContain('setup')
+    expect(
+      store.getState().agentStatusByPaneKey[`${setup.id}:leaf-1`]?.state,
+      'a pinned tab that was never retired lost its agent status'
+    ).toBe('working')
+  })
+})
