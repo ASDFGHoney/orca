@@ -55,6 +55,7 @@ import {
 } from '../../shared/rich-markdown-context-menu'
 import { clearTrustedUIRendererWebContentsId, setTrustedUIRendererWebContentsId } from '../ipc/ui'
 import { resolveWindowCloseAction } from './window-close-decision'
+import { promptForUnresponsiveWindowClose } from './unresponsive-window-close-prompt'
 import { rectHasVisibleAreaOnAnyDisplay } from './window-bounds-validation'
 import { closeDashboardPopout } from './dashboard-popout-window'
 import { installPrivilegedWindowNavigationPolicy } from './privileged-window-navigation'
@@ -65,6 +66,8 @@ import { installWindowsPathRegistryChangeListener } from '../pty/windows-path-re
 // Why: show/restore/resume can overlap before the size nudge resets; never capture the temporary width as the next baseline.
 const activeRepaintJiggles = new WeakSet<BrowserWindow>()
 export const WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS = 10_000
+// Why: same bound for an ordinary close — a healthy renderer acks receipt in one tick, so overrunning it means the renderer's main thread is wedged.
+export const WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS = 10_000
 
 function forceRepaint(window: BrowserWindow): void {
   // Why: webContents can be destroyed a beat before the BrowserWindow during close, and this runs from timers/focus events in that gap.
@@ -968,37 +971,88 @@ export function createMainWindow(
   const confirmCloseChannel = 'window:confirm-close'
   const closeRequestReceivedChannel = 'window:close-request-received'
   let closeRequestSequence = 0
-  let quitRendererAckRequestId: number | null = null
-  let quitRendererAckTimer: ReturnType<typeof setTimeout> | null = null
-  const clearQuitRendererAckTimer = (): void => {
-    quitRendererAckRequestId = null
-    if (quitRendererAckTimer) {
-      clearTimeout(quitRendererAckTimer)
-      quitRendererAckTimer = null
+  let rendererAckRequestId: number | null = null
+  let rendererAckTimer: ReturnType<typeof setTimeout> | null = null
+  let rendererAckDeadlineIsQuitting = false
+  let unresponsiveClosePromptOpen = false
+  const clearRendererAckTimer = (): void => {
+    rendererAckRequestId = null
+    rendererAckDeadlineIsQuitting = false
+    if (rendererAckTimer) {
+      clearTimeout(rendererAckTimer)
+      rendererAckTimer = null
     }
   }
-  const armQuitRendererAckTimer = (requestId: number): void => {
-    quitRendererAckRequestId = requestId
-    if (quitRendererAckTimer) {
+  // Why: the renderer-drawn X is dead while the renderer is wedged, so re-arm after Wait instead of making the user rediscover Alt+F4.
+  const promptToCloseUnresponsiveWindow = async (): Promise<void> => {
+    if (unresponsiveClosePromptOpen || mainWindow.isDestroyed()) {
       return
     }
-    // Why: will-quit cannot run until the renderer-backed window closes; an
-    // already-frozen renderer otherwise makes Force Quit the only escape.
-    quitRendererAckTimer = setTimeout(() => {
-      quitRendererAckTimer = null
-      quitRendererAckRequestId = null
+    unresponsiveClosePromptOpen = true
+    console.warn(
+      '[window] Renderer did not acknowledge close; prompting to close unresponsive window'
+    )
+    try {
+      // Why: a sheet on a hidden/destroyed window would be invisible, which is worse than no parent.
+      const parent =
+        !mainWindow.isDestroyed() && mainWindow.isVisible?.() !== false ? mainWindow : undefined
+      const decision = await promptForUnresponsiveWindowClose(parent)
       if (mainWindow.isDestroyed()) {
         return
       }
+      if (decision === 'close') {
+        // Why: an explicit user choice is not the SILENT bypass #5787 forbids; close() would just re-enter the stuck handshake.
+        console.warn('[window] User chose to close unresponsive window; destroying it')
+        freezeBoundsOnQuit()
+        mainWindow.destroy()
+        return
+      }
+      armRendererAckTimer(closeRequestSequence, false)
+    } finally {
+      unresponsiveClosePromptOpen = false
+    }
+  }
+  const onRendererAckDeadline = (): void => {
+    const deadlineWasQuitting = rendererAckDeadlineIsQuitting
+    rendererAckTimer = null
+    rendererAckRequestId = null
+    rendererAckDeadlineIsQuitting = false
+    if (mainWindow.isDestroyed()) {
+      return
+    }
+    if (deadlineWasQuitting) {
+      // Why: will-quit cannot run until the renderer-backed window closes; an
+      // already-frozen renderer otherwise makes Force Quit the only escape.
       console.warn('[window] Renderer did not acknowledge quit; destroying unresponsive window')
       freezeBoundsOnQuit()
       mainWindow.destroy()
-    }, WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS)
-    quitRendererAckTimer.unref?.()
+      return
+    }
+    void promptToCloseUnresponsiveWindow()
+  }
+  const armRendererAckTimer = (requestId: number, isQuitting: boolean): void => {
+    rendererAckRequestId = requestId
+    // Why: an in-flight quit can't be downgraded by a later ordinary close — will-quit stays blocked, so the deadline must still destroy.
+    rendererAckDeadlineIsQuitting = rendererAckDeadlineIsQuitting || isQuitting
+    if (rendererAckTimer) {
+      return
+    }
+    rendererAckTimer = setTimeout(
+      onRendererAckDeadline,
+      isQuitting ? WINDOW_QUIT_RENDERER_ACK_TIMEOUT_MS : WINDOW_CLOSE_RENDERER_ACK_TIMEOUT_MS
+    )
+    rendererAckTimer.unref?.()
+  }
+  // Why: preload acks receipt before running any app logic, so every close path must carry a requestId — the renderer-drawn X sent none and could never be bounded.
+  const sendWindowCloseRequest = (isQuitting: boolean): void => {
+    const requestId = ++closeRequestSequence
+    armRendererAckTimer(requestId, isQuitting)
+    // Why: renderer owns the close decision; the always-mounted App root subscription lets even pre-workspace states reply (#5144).
+    mainWindow.webContents.send('window:close-requested', { isQuitting, requestId })
   }
   const onCloseRequestReceived = (event: Electron.IpcMainEvent, requestId: number): void => {
-    if (event.sender.id === rendererWebContentsId && requestId === quitRendererAckRequestId) {
-      clearQuitRendererAckTimer()
+    if (event.sender.id === rendererWebContentsId && requestId === rendererAckRequestId) {
+      clearRendererAckTimer()
     }
   }
 
@@ -1061,27 +1115,18 @@ export function createMainWindow(
       return
     }
     e.preventDefault()
-    const isQuitting = opts?.getIsQuitting?.() ?? false
-    const requestId = ++closeRequestSequence
-    if (isQuitting) {
-      armQuitRendererAckTimer(requestId)
-    }
-    // Why: renderer owns the close decision; the always-mounted App root subscription lets even pre-workspace states reply (#5144).
-    mainWindow.webContents.send('window:close-requested', {
-      isQuitting,
-      requestId
-    })
+    sendWindowCloseRequest(opts?.getIsQuitting?.() ?? false)
   })
   mainWindow.webContents.on('will-prevent-unload', () => {
     // Why: a prevented beforeunload cancels the quit; release the bounds-persistence freeze so later resizing still saves.
     windowClosing = false
-    clearQuitRendererAckTimer()
+    clearRendererAckTimer()
     opts?.onQuitAborted?.()
     mainWindow.webContents.send('window:unload-prevented')
   })
 
   const onConfirmClose = (): void => {
-    clearQuitRendererAckTimer()
+    clearRendererAckTimer()
     windowCloseConfirmed = true
     if (!mainWindow.isDestroyed()) {
       mainWindow.close()
@@ -1121,7 +1166,7 @@ export function createMainWindow(
     if (hideToTrayIfEnabled()) {
       return
     }
-    mainWindow.webContents.send('window:close-requested', { isQuitting: false })
+    sendWindowCloseRequest(false)
   }
   // Why: renderer-drawn title-bar ··· menu button replicates the Alt-key reveal autoHideMenuBar provides (Windows/Linux).
   const popupMenuChannel = 'menu:popup'
@@ -1147,7 +1192,7 @@ export function createMainWindow(
     // gone (e.g. on macOS where the app stays alive after the window closes).
     closeDashboardPopout()
     clearInitialRevealFallbackTimer()
-    clearQuitRendererAckTimer()
+    clearRendererAckTimer()
     // Why: default-deny the Cmd+B carve-out after the window is gone so a stale-true flag can't leak into later state.
     markdownEditorFocused = false
     terminalInputFocused = false

@@ -305,8 +305,10 @@ describe('createMainWindow', () => {
       ipcHandlers['window:request-close']?.()
 
       expect(instance.hide).not.toHaveBeenCalled()
+      // Why: the renderer-drawn X now carries a requestId so its ack can be matched and the wait bounded.
       expect(webContents.send).toHaveBeenCalledWith('window:close-requested', {
-        isQuitting: false
+        isQuitting: false,
+        requestId: expect.any(Number)
       })
     })
   })

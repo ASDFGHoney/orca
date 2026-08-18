@@ -20,6 +20,9 @@ export const notificationMock: Mock<(...args: unknown[]) => { show: MainWindowSp
     return { show: notificationShowMock }
   }
 )
+/** Defaults to the Wait button so suites that never touch it can't accidentally close a window. */
+export const showMessageBoxMock: Mock<(...args: unknown[]) => Promise<{ response: number }>> =
+  vi.fn(async () => ({ response: 0 }))
 export const powerMonitorOnMock: MainWindowSpy = vi.fn()
 export const powerMonitorRemoveListenerMock: MainWindowSpy = vi.fn()
 export const isMock = { dev: false }
@@ -42,6 +45,7 @@ const ipcMainMock: IpcMainMock = {
 export type ElectronModuleMock = {
   app: { on: MainWindowSpy; removeListener: MainWindowSpy }
   BrowserWindow: typeof browserWindowMock
+  dialog: { showMessageBox: typeof showMessageBoxMock }
   ipcMain: IpcMainMock
   Menu: { buildFromTemplate: typeof buildFromTemplateMock }
   Notification: typeof notificationMock
@@ -67,6 +71,7 @@ export function electronModuleMock(): ElectronModuleMock {
   return {
     app: { on: vi.fn(), removeListener: vi.fn() },
     BrowserWindow: browserWindowMock,
+    dialog: { showMessageBox: showMessageBoxMock },
     ipcMain: ipcMainMock,
     Menu: { buildFromTemplate: buildFromTemplateMock },
     Notification: notificationMock,
@@ -115,6 +120,8 @@ export function resetMainWindowMocks(): void {
   menuPopupMock.mockClear()
   notificationMock.mockClear()
   notificationShowMock.mockClear()
+  showMessageBoxMock.mockReset()
+  showMessageBoxMock.mockResolvedValue({ response: 0 })
   powerMonitorOnMock.mockReset()
   powerMonitorRemoveListenerMock.mockReset()
   isMock.dev = false
