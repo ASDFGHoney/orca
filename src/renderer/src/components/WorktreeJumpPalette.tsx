@@ -100,6 +100,10 @@ import {
   type SearchableBrowserPage
 } from '@/lib/browser-palette-search'
 import { buildSearchableBrowserPages } from '@/lib/browser-palette-page-entries'
+import {
+  isPaletteCurrentWorktree,
+  resolvePaletteRepoForWorktree
+} from '@/lib/palette-repo-resolution'
 import { activateBrowserPagePaletteResult } from '@/lib/browser-page-palette-activation'
 import { activateSimulatorTabPaletteResult } from '@/lib/simulator-tab-palette-activation'
 import {
@@ -139,9 +143,13 @@ import {
   composeWorktreeHostIdentity,
   getWorktreeHostIdentity
 } from '../../../shared/worktree/host-qualified-identity'
-import { findRepoForHost } from '@/store/slices/repo-host-identity'
+import { findRepoForHost, getRepoHostIdentity } from '@/store/slices/repo-host-identity'
 import type { Repo } from '../../../shared/repo-types'
-import type { ExecutionHostId } from '../../../shared/execution-host'
+import {
+  getSettingsFocusedExecutionHostId,
+  isRuntimeOwnedSshTargetId,
+  type ExecutionHostId
+} from '../../../shared/execution-host'
 import { buildPaletteListEntryRenderKeys } from '@/components/cmd-j/palette-list-entry-render-keys'
 import PaletteFilterMenu from '@/components/cmd-j/PaletteFilterMenu'
 import PaletteFilterChips from '@/components/cmd-j/PaletteFilterChips'
@@ -190,7 +198,6 @@ import {
 import { buildWorktreeChecksReviewIndex } from '@/components/cmd-j/worktree-checks-review-index'
 import { resolvePaletteFocusRestoreTarget } from '@/components/cmd-j/palette-focus-restore-target'
 import { selectWorktreePaletteCacheInputs } from '@/components/cmd-j/worktree-palette-cache-inputs'
-import { getRepoHostIdentity } from '@/store/slices/repo-host-identity'
 import { buildPluginQuickActions } from '@/components/cmd-j/plugin-quick-actions'
 import { PaletteCreateWorktreeRow } from '@/components/cmd-j/PaletteCreateWorktreeRow'
 import { WorkspaceEmojiSuggestionPopover } from '@/components/workspace-emoji/WorkspaceEmojiSuggestionPopover'
@@ -213,10 +220,6 @@ import {
 } from '@/lib/worktree-palette-task-url-match'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
-import {
-  getSettingsFocusedExecutionHostId,
-  isRuntimeOwnedSshTargetId
-} from '../../../shared/execution-host'
 import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
 import type { LinearIssue } from '../../../shared/linear/issue-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
@@ -718,6 +721,7 @@ function WorktreeJumpPaletteContent({
   const migrationUnsupportedByPtyId = useAppStore((s) => s.migrationUnsupportedByPtyId)
   const activeView = useAppStore((s) => s.activeView)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+  const activeWorkspaceExecutionHostId = useAppStore((s) => s.activeWorkspaceExecutionHostId)
   const activeTabType = useAppStore((s) => s.activeTabType)
   const activeTabId = useAppStore((s) => s.activeTabId)
   const activeTabIdByWorktree = useAppStore((s) => s.activeTabIdByWorktree)
@@ -840,11 +844,11 @@ function WorktreeJumpPaletteContent({
   // name, wrong badge, and a false SSH chip on a purely local workspace. Falls back to the
   // bare lookup so a worktree with no host, or no repo on its host, keeps its badge.
   const resolveRepoForWorktree = useCallback(
-    (worktree: Pick<Worktree, 'repoId' | 'hostId'>): Repo | undefined =>
+    (worktree: Pick<Worktree, 'id' | 'repoId' | 'hostId'>): Repo | undefined =>
       (worktree.hostId
         ? findRepoForHost(repos, worktree.repoId, { hostId: worktree.hostId, settings })
-        : null) ?? repoMap.get(worktree.repoId),
-    [repoMap, repos, settings]
+        : null) ?? resolvePaletteRepoForWorktree(worktree, repoMap, repoByHostIdentity),
+    [repoByHostIdentity, repoMap, repos, settings]
   )
 
   const hostLabelOverrides = useMemo(() => getHostDisplayLabelOverrides(settings), [settings])
@@ -1142,6 +1146,7 @@ function WorktreeJumpPaletteContent({
         allWorktrees.filter((worktree) => !worktree.isArchived),
         {
           repoMap,
+          repoMapByHostIdentity: repoByHostIdentity,
           prCache,
           issueCache,
           workspacePortsByWorktreeId: getWorkspacePortsByWorktreeId(workspacePortScan),
@@ -1151,6 +1156,7 @@ function WorktreeJumpPaletteContent({
       ),
     [
       allWorktrees,
+      repoByHostIdentity,
       repoMap,
       prCache,
       issueCache,
@@ -1167,9 +1173,17 @@ function WorktreeJumpPaletteContent({
         query: paletteSearchQuery,
         documents: worktreeDocuments,
         repoMap,
+        repoMapByHostIdentity: repoByHostIdentity,
         checksReviewByWorktree
       }),
-    [sortedWorktrees, paletteSearchQuery, worktreeDocuments, repoMap, checksReviewByWorktree]
+    [
+      sortedWorktrees,
+      paletteSearchQuery,
+      worktreeDocuments,
+      repoByHostIdentity,
+      repoMap,
+      checksReviewByWorktree
+    ]
   )
 
   const browserPageEntries = useMemo<SearchableBrowserPage[]>(() => {
@@ -1179,11 +1193,13 @@ function WorktreeJumpPaletteContent({
     return buildSearchableBrowserPages({
       worktrees: browserSortedWorktrees,
       repoMap,
+      repoMapByHostIdentity: repoByHostIdentity,
       worktreeOrder,
       browserTabsByWorktree,
       browserPagesByWorkspace,
       activeBrowserTabId,
       activeWorktreeId,
+      activeWorkspaceExecutionHostId,
       activeTabType
     })
   }, [
@@ -1191,9 +1207,11 @@ function WorktreeJumpPaletteContent({
     activeBrowserTabId,
     activeTabType,
     activeWorktreeId,
+    activeWorkspaceExecutionHostId,
     browserPagesByWorkspace,
     browserTabsByWorktree,
     browserSortedWorktrees,
+    repoByHostIdentity,
     repoMap,
     worktreeOrder
   ])
@@ -1210,11 +1228,13 @@ function WorktreeJumpPaletteContent({
     return buildSearchableSimulatorTabs({
       worktrees: browserSortedWorktrees,
       repoMap,
+      repoMapByHostIdentity: repoByHostIdentity,
       worktreeOrder,
       unifiedTabsByWorktree,
       activeGroupIdByWorktree,
       groupsByWorktree,
       activeWorktreeId,
+      activeWorkspaceExecutionHostId,
       activeTabType
     })
   }, [
@@ -1222,9 +1242,11 @@ function WorktreeJumpPaletteContent({
     activeGroupIdByWorktree,
     activeTabType,
     activeWorktreeId,
+    activeWorkspaceExecutionHostId,
     browserSortedWorktrees,
     groupsByWorktree,
     repoMap,
+    repoByHostIdentity,
     unifiedTabsByWorktree,
     worktreeOrder
   ])
@@ -1241,6 +1263,7 @@ function WorktreeJumpPaletteContent({
     return buildSearchableWorkspaceTabs({
       worktrees: browserSortedWorktrees,
       repoMap,
+      repoMapByHostIdentity: repoByHostIdentity,
       worktreeOrder,
       unifiedTabsByWorktree,
       tabsByWorktree,
@@ -1251,6 +1274,7 @@ function WorktreeJumpPaletteContent({
       activeGroupIdByWorktree,
       groupsByWorktree,
       activeWorktreeId,
+      activeWorkspaceExecutionHostId,
       activeTabType,
       activeTabId,
       activeTabIdByWorktree,
@@ -1271,10 +1295,12 @@ function WorktreeJumpPaletteContent({
     activeTabType,
     activeTabTypeByWorktree,
     activeWorktreeId,
+    activeWorkspaceExecutionHostId,
     agentStatusByPaneKey,
     browserSortedWorktrees,
     groupsByWorktree,
     openFiles,
+    repoByHostIdentity,
     repoMap,
     retainedAgentsByPaneKey,
     settings?.tabAutoGenerateTitle,
@@ -3185,7 +3211,11 @@ function WorktreeJumpPaletteContent({
                 // the wrong text — and a branch-less row would throw here before search ever ran.
                 const branch = resolveWorktreeBranchLabel(worktree)
                 const worktreeLabel = resolveWorktreeDisplayName(worktree)
-                const isCurrentWorktree = activeWorktreeId === worktree.id
+                const isCurrentWorktree = isPaletteCurrentWorktree(
+                  worktree,
+                  activeWorktreeId,
+                  activeWorkspaceExecutionHostId
+                )
                 // Why: runtime-owned SSH targets have relay health owned by the runtime layer — don't show a false disconnected.
                 const sshConnectionId =
                   repo?.connectionId && !isRuntimeOwnedSshTargetId(repo.connectionId)

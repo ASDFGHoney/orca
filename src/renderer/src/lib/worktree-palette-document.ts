@@ -18,6 +18,7 @@ import {
 import type { HostedReviewInfo } from '../../../shared/hosted-review'
 import type { Repo } from '../../../shared/repo-types'
 import type { Worktree } from '../../../shared/worktree/types'
+import { resolvePaletteRepoForWorktree } from './palette-repo-resolution'
 
 export const WORKTREE_PALETTE_NAME_FIELD_ID = 'name'
 export const WORKTREE_PALETTE_BRANCH_FIELD_ID = 'branch'
@@ -35,6 +36,7 @@ export type WorktreePaletteEvidencePolicy = 'palette' | 'board'
 
 export type WorktreePaletteDocumentSources = {
   repoMap: ReadonlyMap<string, Repo>
+  repoMapByHostIdentity?: ReadonlyMap<string, Repo>
   prCache?: Record<string, PRCacheEntry> | null
   issueCache?: Record<string, IssueCacheEntry> | null
   workspacePortsByWorktreeId?: ReadonlyMap<
@@ -123,7 +125,11 @@ export function buildWorktreePaletteDocument(
   worktree: Worktree,
   sources: WorktreePaletteDocumentSources
 ): PaletteDocument {
-  const repo = sources.repoMap.get(worktree.repoId)
+  const repo = resolvePaletteRepoForWorktree(
+    worktree,
+    sources.repoMap,
+    sources.repoMapByHostIdentity
+  )
   return buildPaletteDocument({
     id: worktree.id,
     visibleFields: [
