@@ -4,6 +4,7 @@ import { compareFileNames } from './file-name-sort'
 export const QUICK_OPEN_RESULT_LIMIT = 50
 export const QUICK_OPEN_QUERY_MAX_BYTES = 2 * 1024
 export const QUICK_OPEN_REMOTE_QUERY_MAX_CODE_UNITS = 256
+export const QUICK_OPEN_SEARCH_VERSION = 1
 
 export type QuickOpenIndexedFile = {
   path: string

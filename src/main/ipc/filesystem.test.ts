@@ -601,7 +601,7 @@ describe('registerFilesystemHandlers', () => {
     expect(supportsQuickOpenSearchMock).toHaveBeenCalled()
     expect(listFilesMock).toHaveBeenCalledWith('/home/user/repo', {
       excludePaths: undefined,
-      maxResults: 32
+      maxResults: 33
     })
   })
 

@@ -3,8 +3,10 @@ import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
 import { runFileWatchStream } from './file-watch-stream-lifecycle'
 import { FILE_MUTATION_METHODS } from './files-mutation-methods'
 import { remoteFileContentBudget } from './files-remote-content-budget'
-import { QUICK_OPEN_LISTING_MAX_RESULTS } from '../../../../shared/quick-open-listing-limits'
-import { QUICK_OPEN_REMOTE_QUERY_MAX_CODE_UNITS } from '../../../../shared/quick-open-path-search'
+import {
+  QUICK_OPEN_REMOTE_QUERY_MAX_CODE_UNITS,
+  QUICK_OPEN_SEARCH_VERSION
+} from '../../../../shared/quick-open-path-search'
 import { limitQuickOpenSearchReplyBySerializedBytes } from '../../../../shared/quick-open-transport-budget'
 import { FileOpen, WorktreeSelector } from './files-target-schemas'
 import { FILE_TERMINAL_ARTIFACT_METHODS } from './files-terminal-artifact-methods'
@@ -109,13 +111,16 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       if (params.mode !== 'quick-open') {
         return runtime.searchMobileFilePaths(params.worktree, params.query, params.limit)
       }
-      const result = await runtime.searchQuickOpenFilePaths(
-        params.worktree,
-        params.query,
-        params.limit,
-        params.excludePaths,
-        signal
-      )
+      const result = {
+        ...(await runtime.searchQuickOpenFilePaths(
+          params.worktree,
+          params.query,
+          params.limit,
+          params.excludePaths,
+          signal
+        )),
+        quickOpenSearchVersion: QUICK_OPEN_SEARCH_VERSION
+      }
       const maxContentBytes = remoteFileContentBudget(clientKind, requestId)
       return maxContentBytes === undefined
         ? result
@@ -209,7 +214,6 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       const maxContentBytes = remoteFileContentBudget(clientKind, requestId)
       return runtime.listRuntimeFiles(params.worktree, {
         excludePaths: params.excludePaths,
-        ...(maxContentBytes === undefined ? {} : { maxResults: QUICK_OPEN_LISTING_MAX_RESULTS }),
         ...(signal === undefined ? {} : { signal }),
         ...(maxContentBytes === undefined ? {} : { maxContentBytes })
       })

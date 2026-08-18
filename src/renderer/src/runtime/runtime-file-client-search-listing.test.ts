@@ -135,7 +135,8 @@ describe('runtime file client', () => {
           { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' }
         ],
         totalCount: 40,
-        truncated: true
+        truncated: true,
+        quickOpenSearchVersion: 1
       },
       _meta: { runtimeId: 'remote-runtime' }
     })
@@ -309,20 +310,40 @@ describe('runtime file client', () => {
   })
 
   it('re-applies exclusions for legacy runtimes that ignore quick-open fields', async () => {
-    runtimeEnvironmentCall.mockResolvedValue({
-      id: 'rpc-legacy',
-      ok: true,
-      result: {
-        worktree: 'wt-1',
-        rootPath: '/remote/repo',
-        files: [
-          { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' },
-          { relativePath: 'nested/target.ts', basename: 'target.ts', kind: 'text' }
-        ],
-        totalCount: 2,
-        truncated: false
-      },
-      _meta: { runtimeId: 'legacy-runtime' }
+    runtimeEnvironmentCall.mockImplementation(({ method }) => {
+      if (method === 'files.searchPaths') {
+        return Promise.resolve({
+          id: 'rpc-legacy-search',
+          ok: true,
+          result: {
+            worktree: 'wt-1',
+            rootPath: '/remote/repo',
+            files: Array.from({ length: 32 }, (_, index) => ({
+              relativePath: `nested/target-${index}.ts`,
+              basename: `target-${index}.ts`,
+              kind: 'text'
+            })),
+            totalCount: 33,
+            truncated: true
+          },
+          _meta: { runtimeId: 'legacy-runtime' }
+        })
+      }
+      return Promise.resolve({
+        id: 'rpc-legacy-list',
+        ok: true,
+        result: {
+          worktree: 'wt-1',
+          rootPath: '/remote/repo',
+          files: [
+            { relativePath: 'src/target.ts', basename: 'target.ts', kind: 'text' },
+            { relativePath: 'nested/target.ts', basename: 'target.ts', kind: 'text' }
+          ],
+          totalCount: 2,
+          truncated: false
+        },
+        _meta: { runtimeId: 'legacy-runtime' }
+      })
     })
 
     await expect(
@@ -335,6 +356,65 @@ describe('runtime file client', () => {
         { query: 'target', limit: 32, excludePaths: ['/remote/repo/nested'] }
       )
     ).resolves.toEqual({ files: ['src/target.ts'], truncated: false })
+
+    expect(runtimeEnvironmentCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'files.searchPaths',
+      'files.list'
+    ])
+  })
+
+  it('does not reuse a legacy inventory after a folder workspace root changes', async () => {
+    runtimeEnvironmentCall.mockImplementation(({ method, params }) => {
+      if (method === 'files.searchPaths') {
+        return Promise.resolve({
+          id: 'rpc-search-legacy',
+          ok: false,
+          error: { code: 'method_not_found', message: 'Unknown method: files.searchPaths' },
+          _meta: { runtimeId: 'legacy-runtime' }
+        })
+      }
+      const rootPath =
+        runtimeEnvironmentCall.mock.calls.filter(([request]) => request.method === 'files.list')
+          .length === 1
+          ? '/old/root'
+          : '/new/root'
+      return Promise.resolve({
+        id: `rpc-list-${rootPath}`,
+        ok: true,
+        result: {
+          worktree: String((params as { worktree: string }).worktree),
+          rootPath,
+          files: [
+            {
+              relativePath: rootPath === '/old/root' ? 'old-target.ts' : 'new-target.ts',
+              basename: rootPath === '/old/root' ? 'old-target.ts' : 'new-target.ts',
+              kind: 'text'
+            }
+          ],
+          totalCount: 1,
+          truncated: false
+        },
+        _meta: { runtimeId: 'legacy-runtime' }
+      })
+    })
+
+    const context = {
+      settings: { activeRuntimeEnvironmentId: 'env-1' },
+      worktreeId: 'folder-1'
+    }
+    await expect(
+      searchRuntimeFilePaths({ ...context, worktreePath: '/old/root' }, { query: 'target' })
+    ).resolves.toEqual({ files: ['old-target.ts'], truncated: false })
+    await expect(
+      searchRuntimeFilePaths({ ...context, worktreePath: '/new/root' }, { query: 'target' })
+    ).resolves.toEqual({ files: ['new-target.ts'], truncated: false })
+
+    expect(runtimeEnvironmentCall.mock.calls.map(([request]) => request.method)).toEqual([
+      'files.searchPaths',
+      'files.list',
+      'files.searchPaths',
+      'files.list'
+    ])
   })
 
   it('passes the cancellation token through the IPC file listing path (#7721)', async () => {

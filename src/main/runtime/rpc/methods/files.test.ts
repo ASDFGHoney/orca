@@ -850,7 +850,6 @@ describe('file RPC methods', () => {
 
     expect(runtime.listRuntimeFiles).toHaveBeenCalledWith('id:wt-1', {
       excludePaths: undefined,
-      maxResults: 20_001,
       maxContentBytes: remoteRpcContentBudget(id)
     })
   })

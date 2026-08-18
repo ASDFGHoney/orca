@@ -18,8 +18,17 @@ type CacheEntry = {
 
 const inventoryCache = new Map<string, CacheEntry>()
 
-function cacheKey(target: EnvironmentTarget, worktreeSelector: string): string {
-  return `${target.environmentId}:${getRuntimeEnvironmentRevision(target.environmentId) ?? 'unknown'}:${worktreeSelector}`
+function cacheKey(
+  target: EnvironmentTarget,
+  worktreeSelector: string,
+  worktreePath: string | null | undefined
+): string {
+  return JSON.stringify([
+    target.environmentId,
+    getRuntimeEnvironmentRevision(target.environmentId) ?? 'unknown',
+    worktreeSelector,
+    worktreePath ?? null
+  ])
 }
 
 export function clearLegacyQuickOpenInventoryCacheForTests(): void {
@@ -28,17 +37,19 @@ export function clearLegacyQuickOpenInventoryCacheForTests(): void {
 
 export function hasCachedLegacyQuickOpenInventory(
   target: EnvironmentTarget,
-  worktreeSelector: string
+  worktreeSelector: string,
+  worktreePath: string | null | undefined
 ): boolean {
-  const entry = inventoryCache.get(cacheKey(target, worktreeSelector))
+  const entry = inventoryCache.get(cacheKey(target, worktreeSelector, worktreePath))
   return entry !== undefined && entry.expiresAt > Date.now()
 }
 
 async function loadLegacyQuickOpenInventory(
   target: EnvironmentTarget,
-  worktreeSelector: string
+  worktreeSelector: string,
+  worktreePath: string | null | undefined
 ): Promise<RuntimeFileListResult> {
-  const key = cacheKey(target, worktreeSelector)
+  const key = cacheKey(target, worktreeSelector, worktreePath)
   const now = Date.now()
   const expectedEnvironmentPairingRevision = getRuntimeEnvironmentRevision(target.environmentId)
   const cached = inventoryCache.get(key)
@@ -88,7 +99,11 @@ export async function searchLegacyQuickOpenInventory(args: {
   worktreePath: string | null | undefined
   excludePaths: string[] | undefined
 }): Promise<{ files: string[]; truncated: boolean }> {
-  const result = await loadLegacyQuickOpenInventory(args.target, args.worktreeSelector)
+  const result = await loadLegacyQuickOpenInventory(
+    args.target,
+    args.worktreeSelector,
+    args.worktreePath
+  )
   const excludePrefixes = buildExcludePathPrefixes(
     args.worktreePath ?? result.rootPath,
     args.excludePaths

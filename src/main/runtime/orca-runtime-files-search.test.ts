@@ -69,6 +69,26 @@ async function flushRuntimeSearchMicrotasks(): Promise<void> {
 describe('RuntimeFileCommands', () => {
   useRuntimeFileCommandsLifecycle()
 
+  it('keeps byte-budgeted legacy listings count-bounded across an SSH hop', async () => {
+    const listFiles = vi.fn().mockResolvedValue(['src/index.ts'])
+    getSshFilesystemProviderMock.mockReturnValue({ listFiles })
+    const { commands } = createRuntimeFileCommands({
+      resolveRuntimeFileTarget: vi.fn(async () => ({
+        worktree: { id: 'wt-1', repoId: 'repo-1', path: '/repo' },
+        connectionId: 'ssh-1'
+      }))
+    })
+
+    await expect(commands.listRuntimeFiles('id:wt-1', { maxContentBytes: 1024 })).resolves.toEqual([
+      'src/index.ts'
+    ])
+    expect(listFiles).toHaveBeenCalledWith('/repo', {
+      excludePaths: undefined,
+      maxResults: 20_001,
+      signal: undefined
+    })
+  })
+
   it('settles and detaches runtime rg searches when timeout kill is ignored', async () => {
     const resolveRuntimeFileTarget = vi.fn(async () => ({
       worktree: {

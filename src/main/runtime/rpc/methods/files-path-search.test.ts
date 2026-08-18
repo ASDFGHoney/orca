@@ -49,7 +49,7 @@ describe('file path search RPC method', () => {
     const dispatcher = new RpcDispatcher({ runtime, methods: FILE_METHODS })
     const controller = new AbortController()
 
-    await dispatcher.dispatch(
+    const response = await dispatcher.dispatch(
       {
         id: 'req-quick-open',
         authToken: 'tok',
@@ -72,6 +72,7 @@ describe('file path search RPC method', () => {
       ['/repo/nested'],
       controller.signal
     )
+    expect(response).toMatchObject({ ok: true, result: { quickOpenSearchVersion: 1 } })
   })
 
   it('keeps the complete paired Quick Open reply within its content budget', async () => {

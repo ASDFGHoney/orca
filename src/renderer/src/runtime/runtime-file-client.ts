@@ -1021,7 +1021,7 @@ export async function searchRuntimeFilePaths(
   }
   const worktreeSelector = toRuntimeWorktreeSelector(context.worktreeId)
   const limit = args.limit ?? 32
-  if (hasCachedLegacyQuickOpenInventory(target, worktreeSelector)) {
+  if (hasCachedLegacyQuickOpenInventory(target, worktreeSelector, context.worktreePath)) {
     return searchLegacyQuickOpenInventory({
       target,
       worktreeSelector,
@@ -1064,6 +1064,26 @@ export async function searchRuntimeFilePaths(
       }
     }
     throw error
+  }
+  if (
+    args.excludePaths?.length &&
+    !(typeof result.quickOpenSearchVersion === 'number' && result.quickOpenSearchVersion >= 1)
+  ) {
+    try {
+      return await searchLegacyQuickOpenInventory({
+        target,
+        worktreeSelector,
+        query: args.query,
+        limit,
+        worktreePath: context.worktreePath,
+        excludePaths: args.excludePaths
+      })
+    } catch (legacyError) {
+      if (legacyError instanceof RuntimeRpcCallError && legacyError.code === 'method_not_found') {
+        throw new Error(QUICK_OPEN_REMOTE_UPDATE_REQUIRED_MESSAGE)
+      }
+      throw legacyError
+    }
   }
   const excludePrefixes = buildExcludePathPrefixes(
     context.worktreePath ?? result.rootPath,
