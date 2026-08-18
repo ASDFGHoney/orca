@@ -92,7 +92,9 @@ describe('browser-palette-search', () => {
           workspace: makeWorkspace({ id: 'ws-1' }),
           worktree: makeWorktree({ id: 'shared', hostId: 'ssh:box' }),
           repoName: 'repo/one',
-          worktreeSortIndex: 0
+          worktreeSortIndex: 0,
+          isCurrentPage: false,
+          isCurrentWorktree: false
         })
       ],
       ''
