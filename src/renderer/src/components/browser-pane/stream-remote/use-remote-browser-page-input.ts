@@ -6,6 +6,7 @@ import {
   getRemoteBrowserKeypressKey
 } from './remote-browser-keyboard'
 import { isRemoteBrowserPageMissingError } from './remote-browser-stream-errors'
+import { sendRemoteBrowserClick } from './remote-browser-click-dispatch'
 import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifecycle'
 import type {
   RemoteBrowserOperationToken,
@@ -15,8 +16,11 @@ import type { BrowserScreencastFrameMetadata } from '../../../../../shared/brows
 import {
   getPositiveFiniteNumber,
   getRemoteBrowserMouseButton,
+  hasRemoteBrowserClickModifier,
+  isSimpleRemoteBrowserClick,
   type PendingRemoteBrowserWheel,
   type RemoteBrowserPaneNotice,
+  type RemoteBrowserPressState,
   type RemoteBrowserRuntimeTarget
 } from './remote-browser-page-input-model'
 
@@ -101,8 +105,14 @@ export function useRemoteBrowserPageInput({
   }) => { x: number; y: number } | null
   handleRemotePointerDown: (event: React.PointerEvent<HTMLImageElement>) => void
   handleRemotePointerUp: (event: React.PointerEvent<HTMLImageElement>) => void
+  handleRemotePointerCancel: () => void
   handleRemoteScreenshotKeyDown: (event: React.KeyboardEvent<HTMLImageElement>) => void
 } {
+  const pendingPressRef = useRef<RemoteBrowserPressState | null>(null)
+  // Hosts predating browser.mouseClick answer method_not_found; remember per environment so the
+  // legacy chain is not re-probed on every click.
+  const mouseClickUnsupportedEnvironmentRef = useRef<string | null>(null)
+
   const getRemoteImagePoint = useCallback(
     (event: { clientX: number; clientY: number }): { x: number; y: number } | null => {
       const image = imageRef.current
@@ -132,6 +142,8 @@ export function useRemoteBrowserPageInput({
     [frameMetadata, imageRef, remoteCssViewportSizeRef, remoteViewportRef, remoteViewportSizeRef]
   )
 
+  // Why the press is held until release: a plain click then costs one atomic browser.mouseClick
+  // instead of four serialized round trips, and only the release proves it was not a drag.
   const handleRemotePointerDown = (event: React.PointerEvent<HTMLImageElement>): void => {
     if (busy) {
       return
@@ -139,52 +151,33 @@ export function useRemoteBrowserPageInput({
     const target = runtimeTarget()
     const pageId = lifecycle.tokens.remotePage
     const image = imageRef.current
-    const operationToken = pageId ? createRemoteOperationToken(pageId) : null
     const point = getRemoteImagePoint(event)
     const button = getRemoteBrowserMouseButton(event.button)
     if (button === 'right') {
       return
     }
-    if (!target || !pageId || !image || !operationToken || !point || !button) {
+    if (!target || !pageId || !image || !point || !button) {
       return
     }
     event.preventDefault()
     image.focus()
     setPaneNotice(null)
-    enqueueRemoteInput(async () => {
-      if (!isCurrentRemoteOperationToken(operationToken)) {
-        return
-      }
-      try {
-        const params = { worktree: runtimeWorktree, page: pageId }
-        await callRuntimeRpc(
-          target,
-          'browser.mouseMove',
-          { ...params, x: point.x, y: point.y },
-          { timeoutMs: 15_000, suppressFeatureInteraction: true }
-        )
-        await callRuntimeRpc(
-          target,
-          'browser.mouseDown',
-          { ...params, button },
-          { timeoutMs: 15_000, suppressFeatureInteraction: true }
-        )
-      } catch (error) {
-        if (isCurrentRemoteOperationToken(operationToken)) {
-          if (isRemoteBrowserPageMissingError(error)) {
-            closeMissingRemotePage(pageId)
-            return
-          }
-          setPaneNotice({
-            kind: 'consequence',
-            text: error instanceof Error ? error.message : 'Remote mouse input failed.'
-          })
-        }
-      }
-    })
+    pendingPressRef.current = {
+      environmentId: target.environmentId,
+      pageId,
+      button,
+      point,
+      modified: hasRemoteBrowserClickModifier(event)
+    }
+  }
+
+  const handleRemotePointerCancel = (): void => {
+    pendingPressRef.current = null
   }
 
   const handleRemotePointerUp = (event: React.PointerEvent<HTMLImageElement>): void => {
+    const press = pendingPressRef.current
+    pendingPressRef.current = null
     if (busy) {
       return
     }
@@ -196,29 +189,38 @@ export function useRemoteBrowserPageInput({
     if (button === 'right') {
       return
     }
-    if (!target || !pageId || !operationToken || !point || !button) {
+    if (!press || !target || !pageId || !operationToken || !point || !button) {
+      return
+    }
+    const release: RemoteBrowserPressState = {
+      environmentId: target.environmentId,
+      pageId,
+      button,
+      point,
+      modified: hasRemoteBrowserClickModifier(event)
+    }
+    if (press.environmentId !== release.environmentId || press.pageId !== release.pageId) {
       return
     }
     event.preventDefault()
     setPaneNotice(null)
+    const atomic = isSimpleRemoteBrowserClick(press, release)
     enqueueRemoteInput(async () => {
       if (!isCurrentRemoteOperationToken(operationToken)) {
         return
       }
       try {
-        const params = { worktree: runtimeWorktree, page: pageId }
-        await callRuntimeRpc(
+        await sendRemoteBrowserClick({
           target,
-          'browser.mouseMove',
-          { ...params, x: point.x, y: point.y },
-          { timeoutMs: 15_000, suppressFeatureInteraction: true }
-        )
-        await callRuntimeRpc(
-          target,
-          'browser.mouseUp',
-          { ...params, button },
-          { timeoutMs: 15_000, suppressFeatureInteraction: true }
-        )
+          params: { worktree: runtimeWorktree, page: pageId },
+          press,
+          release,
+          preferAtomicClick:
+            atomic && mouseClickUnsupportedEnvironmentRef.current !== target.environmentId,
+          onAtomicClickUnsupported: () => {
+            mouseClickUnsupportedEnvironmentRef.current = target.environmentId
+          }
+        })
         scheduleRemoteTabInfoRefresh(operationToken, 250)
       } catch (error) {
         if (isCurrentRemoteOperationToken(operationToken)) {
@@ -291,6 +293,7 @@ export function useRemoteBrowserPageInput({
     getRemoteImagePoint,
     handleRemotePointerDown,
     handleRemotePointerUp,
+    handleRemotePointerCancel,
     handleRemoteScreenshotKeyDown
   }
 }

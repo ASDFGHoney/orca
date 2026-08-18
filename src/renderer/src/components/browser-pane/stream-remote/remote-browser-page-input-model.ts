@@ -84,6 +84,47 @@ export function getRemoteBrowserMouseButton(button: number): 'left' | 'middle' |
   return null
 }
 
+export type RemoteBrowserPressState = {
+  environmentId: string
+  pageId: string
+  button: 'left' | 'middle'
+  point: RemoteBrowserImagePoint
+  modified: boolean
+}
+
+// Mouse jitter inside a press; wider slop would swallow short intentional drags.
+const REMOTE_BROWSER_CLICK_SLOP_PX = 3
+
+export function hasRemoteBrowserClickModifier(event: {
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+}): boolean {
+  return event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+}
+
+// Why: only a same-target, unmodified, non-drag pair is reproducible as one atomic browser.mouseClick;
+// modifiers change activation semantics and the move/down/up chain carries none of them.
+export function isSimpleRemoteBrowserClick(
+  press: RemoteBrowserPressState,
+  release: RemoteBrowserPressState
+): boolean {
+  if (
+    press.environmentId !== release.environmentId ||
+    press.pageId !== release.pageId ||
+    press.button !== release.button ||
+    press.modified ||
+    release.modified
+  ) {
+    return false
+  }
+  return (
+    Math.hypot(release.point.x - press.point.x, release.point.y - press.point.y) <=
+    REMOTE_BROWSER_CLICK_SLOP_PX
+  )
+}
+
 export function buildRemoteContextMenuExpression(x: number, y: number): string {
   return `(() => {
     const target = document.elementFromPoint(${JSON.stringify(x)}, ${JSON.stringify(y)});
