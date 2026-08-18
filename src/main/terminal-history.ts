@@ -263,6 +263,10 @@ export function injectWslFishHistoryEnv(
   worktreeId: string,
   wslDistro: string
 ): string | null {
+  // Same precondition as `injectHistoryEnv`'s: the early return below may only honour
+  // a genuine user value. Redundant with today's two callers, which both run
+  // `injectHistoryEnv` on this same env first — kept so the contract holds per call,
+  // since nothing but ordering enforces it.
   dropInheritedOrcaFishHistory(spawnEnv)
   if (spawnEnv.fish_history) {
     return null

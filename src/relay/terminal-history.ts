@@ -122,9 +122,10 @@ export function deleteRelayHistory(worktreeId: string): void {
  *  isolates it the same way the desktop app does and deletes by that name.
  *  No metadata file is needed: the name is a pure function of the worktree id. */
 export function injectRelayFishHistoryEnv(env: Record<string, string>, worktreeId: string): void {
-  // The relay process can itself be launched from a fish pane (or be handed one
-  // in the client env), and fish EXPORTS `fish_history`; drop any Orca-minted
-  // name so the check below only honours a genuine user value.
+  // Own precondition, not the caller's: the check below may only honour a genuine
+  // user value, and fish EXPORTS `fish_history` so an Orca-minted name arrives from
+  // the relay's own env or the client's. `PtyHandler.buildSpawnEnv` already scrubs
+  // every spawn path, so this is belt-and-braces for any other caller.
   dropInheritedOrcaFishHistory(env)
   if (env.fish_history) {
     return
