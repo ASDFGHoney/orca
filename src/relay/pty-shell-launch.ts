@@ -38,7 +38,10 @@ function hasOverlayRestoreEnv(env: Record<string, string>): boolean {
     env.ORCA_OPENCODE_CONFIG_DIR ||
     env.ORCA_MIMOCODE_HOME ||
     env.ORCA_REMOTE_CLI_BIN_DIR ||
-    env.ORCA_OMP_STATUS_EXTENSION
+    env.ORCA_OMP_STATUS_EXTENSION ||
+    // Why: a remote /etc/zshrc reassigns HISTFILE with no check-before-set, so
+    // scoped history survives only if the wrapper restores it (#11044).
+    env.ORCA_HISTFILE
   )
 }
 

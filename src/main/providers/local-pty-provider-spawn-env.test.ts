@@ -402,6 +402,26 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
     })
 
+    it('uses shell wrapper when worktree-scoped history must survive shell startup', async () => {
+      await provider.spawn({ cols: 80, rows: 24, worktreeId: '/repo/worktree-a' })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[1]).toEqual(['-l'])
+      expect(spawnCall[2].env.ORCA_HISTFILE).toMatch(/zsh_history$/)
+      expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
+      expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
+    })
+
+    it('keeps a plain pane unwrapped when history scoping is off', async () => {
+      provider.configure({ isHistoryEnabled: () => false })
+
+      await provider.spawn({ cols: 80, rows: 24, worktreeId: '/repo/worktree-a' })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.ORCA_HISTFILE).toBeUndefined()
+      expect(spawnCall[2].env.ZDOTDIR).toBeUndefined()
+    })
+
     it('promotes the agent-teams shim onto the Windows `Path` spelling', async () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       provider.configure({

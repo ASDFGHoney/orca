@@ -17,7 +17,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { getRelayShellLaunchConfig } from '../relay/pty-shell-launch'
+import { getMarkerlessShellLaunchConfig } from './providers/local-pty-shell-ready'
 import { getZshShellReadyRcfileContent } from './providers/local-pty-shell-ready-wrapper-generation'
+import { requiresZshHistoryRestoreWrapper } from './pty/zsh-history-restore-wrapper'
 import { getZshEnvTemplate, ZSH_HISTFILE_RESTORE_BLOCK } from './shell-templates'
 
 // Why probe and execute the same binary: guarding on `zsh` from PATH but then
@@ -101,6 +104,80 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
         /^RESULT=(.*)$/m.exec(output)?.[1]?.trim() ?? '<unmatched>'
       expect(histfileOf(wrapped)).toBe(histfileOf(unwrapped))
       expect(wrapped).not.toContain('ORCA_HISTFILE')
+    })
+  })
+})
+
+/**
+ * The case above pre-writes the wrapper ZDOTDIR, so it can only prove the wrapper
+ * CONTENT is right. These run the launch decision itself for a plain pane — no
+ * startup command, no Codex/OpenCode overlay, nothing but a scoped history — and
+ * spawn zsh exactly as Orca would. Before the fix the decision returned the
+ * unwrapped fast path here and /etc/zshrc silently took the history back.
+ */
+describe('a plain pane reaches zsh with the wrapper its launch decision picked', () => {
+  const withSandboxedHome = (run: (home: string) => void): void => {
+    const home = mkdtempSync(join(tmpdir(), 'orca-plain-pane-histfile-'))
+    const saved = {
+      HOME: process.env.HOME,
+      ZDOTDIR: process.env.ZDOTDIR,
+      ORCA_ORIG_ZDOTDIR: process.env.ORCA_ORIG_ZDOTDIR,
+      ORCA_USER_DATA_PATH: process.env.ORCA_USER_DATA_PATH
+    }
+    // Why: the desktop launch config resolves the user's real ZDOTDIR/HOME from
+    // this process, and would otherwise source the developer's own zsh config.
+    process.env.HOME = home
+    delete process.env.ZDOTDIR
+    delete process.env.ORCA_ORIG_ZDOTDIR
+    process.env.ORCA_USER_DATA_PATH = home
+    try {
+      run(home)
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+      rmSync(home, { recursive: true, force: true })
+    }
+  }
+
+  function runLaunchedZsh(home: string, env: Record<string, string>): string {
+    return execFileSync(ZSH_PATH, ['-li', '-c', 'echo "RESULT=$HISTFILE"'], {
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: { PATH: '/usr/bin:/bin', HOME: home, ...env }
+    })
+  }
+
+  itWithZsh('keeps the scoped HISTFILE for a local plain pane', () => {
+    withSandboxedHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const spawnEnv = { HISTFILE: scoped, ORCA_HISTFILE: scoped }
+
+      // The desktop gate, spelled out: no overlay env, no startup command, so
+      // only the scoped history can ask for a wrapper — else the plain login shell.
+      const launch = requiresZshHistoryRestoreWrapper(ZSH_PATH, spawnEnv)
+        ? getMarkerlessShellLaunchConfig(ZSH_PATH)
+        : { args: ['-l'], env: {} }
+      const output = runLaunchedZsh(home, { ...spawnEnv, ...launch.env })
+
+      expect(output).toContain(`RESULT=${scoped}`)
+    })
+  })
+
+  itWithZsh('keeps the scoped HISTFILE for a relay plain pane', () => {
+    withSandboxedHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const spawnEnv = { HOME: home, HISTFILE: scoped, ORCA_HISTFILE: scoped }
+
+      const launch = getRelayShellLaunchConfig(ZSH_PATH, spawnEnv, process.platform)
+      const output = runLaunchedZsh(home, { ...spawnEnv, ...launch.env })
+
+      expect(launch.args).toEqual(['-l'])
+      expect(output).toContain(`RESULT=${scoped}`)
     })
   })
 })

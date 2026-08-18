@@ -170,6 +170,32 @@ describe('getRelayShellLaunchConfig', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
+    'wraps zsh when a worktree-scoped history must survive shell startup',
+    () => {
+      const config = getRelayShellLaunchConfig('/bin/zsh', {
+        HOME: homeDir,
+        HISTFILE: '/tmp/orca-relay-history/abc-zsh_history',
+        ORCA_HISTFILE: '/tmp/orca-relay-history/abc-zsh_history'
+      })
+      const zshRoot = join(homeDir, '.orca-relay', 'shell-ready', 'zsh')
+
+      expect(config.args).toEqual(['-l'])
+      expect(config.env.ZDOTDIR).toBe(zshRoot)
+      expect(readFileSync(join(zshRoot, '.zlogin'), 'utf8')).toContain('HISTFILE="$ORCA_HISTFILE"')
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps zsh unwrapped when Orca injects nothing the wrapper must restore',
+    () => {
+      expect(getRelayShellLaunchConfig('/bin/zsh', { HOME: homeDir }, 'linux')).toEqual({
+        args: ['-l'],
+        env: {}
+      })
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
     'wraps bash even without overlay env for OSC 133 lifecycle markers',
     () => {
       const config = getRelayShellLaunchConfig('/bin/bash', { HOME: homeDir })

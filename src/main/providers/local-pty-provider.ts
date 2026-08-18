@@ -32,6 +32,7 @@ import {
 } from './local-pty-utils'
 import { prepareMacosTccLoginShell } from './macos-tcc-login-shell'
 import { getMarkerlessShellLaunchConfig, getShellReadyLaunchConfig } from './local-pty-shell-ready'
+import { requiresZshHistoryRestoreWrapper } from '../pty/zsh-history-restore-wrapper'
 import {
   writeStartupCommandWhenShellReady,
   STARTUP_COMMAND_READY_MAX_WAIT_MS
@@ -596,6 +597,7 @@ export class LocalPtyProvider implements IPtyProvider {
     let startupCommandDeliveredInShellArgs = false
     let windowsFallbackAttempts: ReturnType<typeof buildWindowsPowerShellSpawnAttempts> = []
     let shellReadyLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
+    let posixShellLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
     let getFallbackShellReadyConfig:
       | ((shell: string) => ReturnType<typeof getShellReadyLaunchConfig>)
       | undefined
@@ -851,6 +853,7 @@ export class LocalPtyProvider implements IPtyProvider {
         shellArgs = shellLaunch.args ?? shellArgs
         shellReadyLaunch = args.command ? shellLaunch : null
       }
+      posixShellLaunch = shellLaunch
     }
     const requestedEnv = args.env
     expandWindowsPathEnvironmentVariables(finalEnv)
@@ -883,6 +886,20 @@ export class LocalPtyProvider implements IPtyProvider {
       // Why: injectHistoryEnv is what normally clears it, so when history is off
       // an inherited ORCA_HISTFILE would still reach the wrapper. Credit: #11146.
       delete finalEnv.ORCA_HISTFILE
+    }
+    if (
+      !posixShellLaunch &&
+      !wslInfo &&
+      process.platform !== 'win32' &&
+      requiresZshHistoryRestoreWrapper(shellPath, finalEnv)
+    ) {
+      // Why here and not in the block above: ORCA_HISTFILE only exists after
+      // injection. /etc/zshrc reassigns HISTFILE with no check-before-set, so a
+      // scoped history survives startup only if the wrapper restores it (#11044).
+      const historyRestoreLaunch = getMarkerlessShellLaunchConfig(shellPath)
+      Object.assign(finalEnv, historyRestoreLaunch.env)
+      shellArgs = historyRestoreLaunch.args ?? shellArgs
+      getFallbackShellReadyConfig = (shell) => getMarkerlessShellLaunchConfig(shell)
     }
 
     await prepareLocalPtySpawn(id)

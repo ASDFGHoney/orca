@@ -30,23 +30,42 @@ export type LocalPtyProviderMocks = {
   createShellPromptReadinessProbeMock: Mock
 }
 
+// Why cleared: the runner is usually itself a child of an Orca zsh pane, so these
+// already sit in process.env and every spawn env inherits them. Left alone, a
+// developer machine takes the wrapper branch and passes ZDOTDIR assertions that CI
+// would fail — and injectHistoryEnv deliberately preserves an inherited HISTFILE.
+const INHERITED_SHELL_ENV_KEYS = [
+  'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD',
+  'HISTFILE',
+  'ORCA_HISTFILE',
+  'ZDOTDIR',
+  'ORCA_ORIG_ZDOTDIR',
+  'ORCA_ZSHENV_SOURCE_DIR',
+  'ORCA_SHELL_READY_MARKER',
+  'ORCA_SHELL_STARTUP_IDENTITY',
+  'ORCA_OPENCODE_CONFIG_DIR',
+  'ORCA_MIMOCODE_HOME',
+  'ORCA_OMP_STATUS_EXTENSION',
+  'ORCA_CODEX_HOME',
+  'ORCA_AGENT_TEAMS_SHIM_DIR'
+] as const
+
 /** Pins platform/shell env for every test and restores it plus provider module state after. */
 export function installLocalPtyProviderEnvSandbox(): void {
   let origShell: string | undefined
-  let origPowerlevelWizardDisable: string | undefined
-  let origHistFile: string | undefined
+  let origInheritedShellEnv: Record<string, string | undefined> = {}
   let origPlatform: PropertyDescriptor | undefined
 
   beforeEach(() => {
     origPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     origShell = process.env.SHELL
-    origPowerlevelWizardDisable = process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
-    origHistFile = process.env.HISTFILE
     process.env.SHELL = '/bin/zsh'
-    delete process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
-    // injectHistoryEnv preserves an inherited HISTFILE, so clear it for hermetic history assertions.
-    delete process.env.HISTFILE
+    origInheritedShellEnv = {}
+    for (const key of INHERITED_SHELL_ENV_KEYS) {
+      origInheritedShellEnv[key] = process.env[key]
+      delete process.env[key]
+    }
   })
 
   afterEach(() => {
@@ -59,15 +78,12 @@ export function installLocalPtyProviderEnvSandbox(): void {
     } else {
       process.env.SHELL = origShell
     }
-    if (origPowerlevelWizardDisable === undefined) {
-      delete process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
-    } else {
-      process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD = origPowerlevelWizardDisable
-    }
-    if (origHistFile === undefined) {
-      delete process.env.HISTFILE
-    } else {
-      process.env.HISTFILE = origHistFile
+    for (const [key, value] of Object.entries(origInheritedShellEnv)) {
+      if (value === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = value
+      }
     }
   })
 }

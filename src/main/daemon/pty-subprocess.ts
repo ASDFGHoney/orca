@@ -38,6 +38,7 @@ import { isPwshAvailable } from '../pwsh'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { removeAppImageRuntimeEnv } from '../pty/appimage-terminal-env'
+import { requiresZshHistoryRestoreWrapper } from '../pty/zsh-history-restore-wrapper'
 import { stripInheritedBuildModeEnv } from '../pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../pty/legacy-terminal-shim-dir'
 import { resolvePathEnvKey } from '../pty/windows-environment-path'
@@ -832,6 +833,7 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
       shellLaunch = getShellReadyLaunchConfig(shellPath)
     } else {
       shellLaunch =
+        requiresZshHistoryRestoreWrapper(shellPath, env) ||
         env.ORCA_OPENCODE_CONFIG_DIR ||
         env.ORCA_MIMOCODE_HOME ||
         env.ORCA_OMP_STATUS_EXTENSION ||
