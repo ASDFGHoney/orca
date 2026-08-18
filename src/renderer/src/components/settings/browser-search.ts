@@ -7,6 +7,10 @@ import {
   getLinkRoutingModifierDescription,
   getLinkRoutingModifierTitle
 } from './browser-link-routing-copy'
+import {
+  getBrowserClientHostedRemoteDescription,
+  getBrowserClientHostedRemoteTitle
+} from './browser-client-hosted-remote-copy'
 
 export type BrowserShortcutPlatform = {
   isMac: boolean
@@ -218,6 +222,35 @@ export function getBrowserPaneSearchEntries(
         ...translateSearchKeyword('auto.components.settings.browser.search.533a253deb', 'edge'),
         ...translateSearchKeyword('auto.components.settings.browser.search.1c1e097985', 'arc'),
         ...translateSearchKeyword('auto.components.settings.browser.search.7539f6336c', 'profile')
+      ]
+    },
+    // Appended, not inserted: BrowserPane selects these entries by index.
+    {
+      title: getBrowserClientHostedRemoteTitle(),
+      description: getBrowserClientHostedRemoteDescription(),
+      keywords: [
+        ...translateSearchKeyword('auto.components.settings.browser.search.2d2d995c58', 'browser'),
+        ...translateSearchKeyword(
+          'auto.components.settings.browser.search.clientHostedRemote.remote',
+          'remote'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.browser.search.clientHostedRemote.client',
+          'client'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.browser.search.clientHostedRemote.host',
+          'host'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.browser.search.clientHostedRemote.desktop',
+          'desktop'
+        ),
+        ...translateSearchKeyword('auto.components.settings.browser.search.72c58f7792', 'webview'),
+        ...translateSearchKeyword(
+          'auto.components.settings.browser.search.clientHostedRemote.placement',
+          'placement'
+        )
       ]
     }
   ]

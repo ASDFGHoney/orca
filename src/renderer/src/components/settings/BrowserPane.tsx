@@ -14,6 +14,7 @@ import { BrowserLinkRoutingSetting } from './BrowserLinkRoutingSetting'
 import { BrowserLinkRoutingModifierSetting } from './BrowserLinkRoutingModifierSetting'
 import { BrowserTerminalLinkActionsSetting } from './BrowserTerminalLinkActionsSetting'
 import { BrowserLocalhostWorktreeLabelsSetting } from './BrowserLocalhostWorktreeLabelsSetting'
+import { BrowserClientHostedRemoteSetting } from './BrowserClientHostedRemoteSetting'
 import { BrowserSessionCookiesSection } from './BrowserSessionCookiesSection'
 import { BrowserNewProfileDialog } from './BrowserNewProfileDialog'
 import {
@@ -110,6 +111,9 @@ export function BrowserPane({
   ])
   const showLocalhostLabels = matchesSettingsSearch(searchQuery, [getBrowserPaneSearchEntries()[6]])
   const showCookies = matchesSettingsSearch(searchQuery, [getBrowserPaneSearchEntries()[7]])
+  const showClientHostedRemote = matchesSettingsSearch(searchQuery, [
+    getBrowserPaneSearchEntries()[8]
+  ])
   const showBrowserUse = matchesSettingsSearch(searchQuery, getBrowserUsePaneSearchEntries())
   const isMac = isMacUserAgent()
   const linkRoutingDescription = getBrowserLinkRoutingDescription(
@@ -271,6 +275,10 @@ export function BrowserPane({
           settings={settings}
           updateSettings={updateSettings}
         />
+      ) : null}
+
+      {showClientHostedRemote ? (
+        <BrowserClientHostedRemoteSetting settings={settings} updateSettings={updateSettings} />
       ) : null}
 
       {showCookies ? (

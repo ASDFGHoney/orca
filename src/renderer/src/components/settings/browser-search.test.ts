@@ -92,7 +92,8 @@ describe('browser link routing modifier copy', () => {
       'Hold Shift to open in Orca',
       'Show terminal link actions',
       'Localhost Worktree Labels',
-      'Session & Cookies'
+      'Session & Cookies',
+      'Host remote browser pages on this device'
     ])
   })
 
