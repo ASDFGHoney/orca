@@ -13087,11 +13087,7 @@
           "directAddressDisclosure": "Also use a faster local path",
           "directAddressHint": "Optional. Pick the Wi‑Fi or Tailscale address your phone should use when nearby — usually faster than Relay. Relay still works when you’re away.",
           "androidHelp": {
-            "title": "APK trouble?",
-            "fullBrowser": "Open the link in a full browser, not an in-app browser.",
-            "downloads": "Open app-release.apk from Downloads and allow only the app opening it to install unknown apps.",
-            "samsung": "On Samsung, temporarily turn off Auto Blocker, then turn it back on after installing.",
-            "guide": "Full Android install guide"
+            "guide": "Install guide"
           }
         },
         "MobilePage": {

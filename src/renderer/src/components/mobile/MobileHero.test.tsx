@@ -155,7 +155,7 @@ describe('HeroFlow height', () => {
     expect(screen.getByText('Step 1 of 2').closest('.mp-flow-screen')).toHaveAttribute('inert')
   })
 
-  it('shows focused APK help on Android and opens the full guide', async () => {
+  it('opens the APK install guide without duplicating its troubleshooting steps', async () => {
     const user = userEvent.setup()
     const onOpenAndroidInstallGuide = vi.fn()
     renderFlow(0, {
@@ -164,9 +164,8 @@ describe('HeroFlow height', () => {
       onOpenAndroidInstallGuide
     })
 
-    expect(screen.getByText('APK trouble?')).toBeInTheDocument()
-    expect(screen.getByText(/full browser, not an in-app browser/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Full Android install guide' }))
+    expect(screen.queryByText(/full browser, not an in-app browser/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Install guide' }))
     expect(onOpenAndroidInstallGuide).toHaveBeenCalledOnce()
   })
 
