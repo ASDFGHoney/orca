@@ -3003,6 +3003,10 @@ export class OrcaRuntimeService {
   private readonly rendererPublicationThrottle = new RendererPublicationThrottle()
   private tabs = new Map<string, RuntimeSyncedTab>()
   private mobileSessionTabsByWorktree = new Map<string, RuntimeMobileSessionTabsSnapshot>()
+  // Why: a `pending-handle` tab is a promise that we will say something else later. Mobile
+  // clients bound their recovery polling (STA-4407), so if we never push the materialized
+  // handle the pane is stranded on the spinner with no composer (STA-4256).
+  private worktreesAwaitingMobileTerminalHandle = new Set<string>()
   // Why: renderer publication ordering must be judged against the renderer's
   // own last-accepted (epoch, version) — never against the stored snapshot's
   // version, which main-local touches bump independently and can push
@@ -7851,6 +7855,27 @@ export class OrcaRuntimeService {
         continue
       }
       this.touchMobileSessionTabsForWorktree(worktreeId, options)
+    }
+  }
+
+  /** Push every worktree we last published with a `pending-handle` terminal tab.
+   *
+   *  Why unconditional rather than "did THIS pty resolve THAT tab": the tab we owe is
+   *  identified by pane key, and the caller is mid-registration, so the record is not yet
+   *  complete enough to match against. Re-projecting is what decides it, and a spurious
+   *  version bump is a snapshot a client already accepts — far cheaper than a stranded pane.
+   *  The set is self-limiting: the next projection drops any worktree that resolved.
+   */
+  private republishMobileSessionTabsAwaitingTerminalHandle(): void {
+    if (this.worktreesAwaitingMobileTerminalHandle.size === 0) {
+      return
+    }
+    // Why copy: touching re-projects, which mutates the set we are iterating.
+    for (const worktreeId of [...this.worktreesAwaitingMobileTerminalHandle]) {
+      // Why coalesced, not immediate: registration can run inside a projection, and an
+      // immediate emit would re-enter it. The coalescing window is orders of magnitude
+      // under the client's ~10s recovery budget.
+      this.touchMobileSessionTabsForWorktree(worktreeId)
     }
   }
 
@@ -31914,6 +31939,12 @@ export class OrcaRuntimeService {
       }
       // Why: restored/controller-discovered PTYs learn their worktree here without registerPty(), so URL enrichment must bind at this source.
       advertisedUrlWatcher.bindPty(ptyId, worktreeId)
+      // Why: this registration is the moment a `pending-handle` tab can become addressable,
+      // and it is the only one for a tab the renderer published before its PTY existed —
+      // `touchMobileSessionSnapshotsForPty` cannot see it, because the snapshot does not
+      // name this ptyId yet. Clients stopped polling long before now (STA-4407), so without
+      // this push the pane never learns (STA-4256).
+      this.republishMobileSessionTabsAwaitingTerminalHandle()
       return pty
     }
 
@@ -33359,6 +33390,14 @@ export class OrcaRuntimeService {
           ? { status: 'ready' as const, terminal: terminalHandle }
           : { status: 'pending-handle' as const, terminal: null })
       })
+    }
+    // Why: remember that we published an unaddressable terminal, so PTY registration knows it
+    // owes this worktree a push. Recorded from the projection rather than the publish path
+    // because this is the only place that decides `pending-handle` (STA-4256).
+    if (tabs.some((tab) => tab.type === 'terminal' && tab.status === 'pending-handle')) {
+      this.worktreesAwaitingMobileTerminalHandle.add(snapshot.worktree)
+    } else {
+      this.worktreesAwaitingMobileTerminalHandle.delete(snapshot.worktree)
     }
     const active =
       tabs.find((tab) => tab.isActive && tab.id === snapshot.activeTabId) ??
