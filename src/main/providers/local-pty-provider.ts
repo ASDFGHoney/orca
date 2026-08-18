@@ -25,6 +25,7 @@ import {
   type HistoryInjectionResult
 } from '../terminal-history'
 import { dropInheritedOrcaFishHistory } from '../fish-history-session'
+import { dropInheritedOrcaHistFile } from '../worktree-history-file-path'
 import type { IPtyProvider, PtyProcessInfo, PtySpawnOptions, PtySpawnResult } from './types'
 import {
   ensureNodePtySpawnHelperExecutable,
@@ -601,6 +602,9 @@ export class LocalPtyProvider implements IPtyProvider {
     let getFallbackShellReadyConfig:
       | ((shell: string) => ReturnType<typeof getShellLaunchConfig>)
       | undefined
+    // Why hoisted: a fallback shell must drop the primary's launch env, and
+    // re-deriving the key names would re-run wrapper generation.
+    let primaryLaunchEnvKeys: string[] = []
     if (wslInfo) {
       shellPath = 'wsl.exe'
       const resolved = resolveWindowsShellLaunchArgs(shellPath, cwd, defaultCwd)
@@ -850,6 +854,9 @@ export class LocalPtyProvider implements IPtyProvider {
       // Same for an exported `fish_history` from the fish pane that launched this
       // Orca: history off means fish's own default, not another worktree's file.
       dropInheritedOrcaFishHistory(finalEnv)
+      // And for an exported HISTFILE: history off means the shell's own default,
+      // not the history file of the worktree this Orca was launched from.
+      dropInheritedOrcaHistFile(finalEnv)
     }
 
     if (!wslInfo && process.platform !== 'win32') {
@@ -885,6 +892,7 @@ export class LocalPtyProvider implements IPtyProvider {
       Object.assign(finalEnv, shellLaunch.env)
       shellArgs = shellLaunch.args ?? shellArgs
       shellReadyLaunch = args.command ? shellLaunch : null
+      primaryLaunchEnvKeys = Object.keys(shellLaunch.env)
     }
 
     await prepareLocalPtySpawn(id)
@@ -906,6 +914,7 @@ export class LocalPtyProvider implements IPtyProvider {
       termName: finalEnv.TERM,
       ptySpawn: pty.spawn,
       getShellReadyConfig: getFallbackShellReadyConfig,
+      launchEnvKeys: primaryLaunchEnvKeys,
       // Why: on zsh→bash fallback HISTFILE still points to zsh_history; update before spawn so the child inherits it (design doc §8).
       onBeforeFallbackSpawn: historyResult?.historyDir
         ? (env, fallbackShell) =>

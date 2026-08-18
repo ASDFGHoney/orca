@@ -212,6 +212,32 @@ describe('LocalPtyProvider', () => {
       expect(spawnMock.mock.calls.at(-1)![2].env.fish_history).toBe(expected)
     })
 
+    it.each([
+      // HISTFILE is exported, so an Orca launched from a pane in another worktree
+      // hands every pane that worktree's history file — isolation off included.
+      [
+        'an inherited Orca path',
+        '/fake/userData/terminal-history/aabbccddeeff0011/zsh_history',
+        undefined
+      ],
+      ['a user value', '/home/me/.zsh_history', '/home/me/.zsh_history']
+    ])('history isolation off: %s HISTFILE', async (_kind, inherited, expected) => {
+      const previous = process.env.HISTFILE
+      process.env.HISTFILE = inherited
+      try {
+        // No worktreeId: the history-disabled branch of spawn.
+        await provider.spawn({ cols: 80, rows: 24 })
+      } finally {
+        if (previous === undefined) {
+          delete process.env.HISTFILE
+        } else {
+          process.env.HISTFILE = previous
+        }
+      }
+
+      expect(spawnMock.mock.calls.at(-1)![2].env.HISTFILE).toBe(expected)
+    })
+
     it('does not inherit NODE_ENV from the Orca process env', async () => {
       // Why: NODE_ENV in Orca's process is Orca's build mode (electron-vite sets
       // `development` in dev runs); leaking it breaks `next build` and Vitest.

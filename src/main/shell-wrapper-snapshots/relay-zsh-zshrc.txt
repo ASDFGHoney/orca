@@ -11,5 +11,6 @@ if [[ -o interactive && -f "$_orca_home/.zshrc" ]]; then
   unset _orca_wrapper_zdotdir
 fi
 
-# Why: a login shell still has .zlogin to load; it runs the epilogue instead.
-[[ -o login ]] || __orca_shell_epilogue
+if [[ ! -o login || "$(emulate 2>/dev/null)" != zsh ]]; then
+  (( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue
+fi

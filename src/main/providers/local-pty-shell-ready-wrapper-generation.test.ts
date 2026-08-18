@@ -254,8 +254,11 @@ describePosix('local PTY shell-ready launch config', () => {
     // Why .zshenv: the final restore is the last step of the single epilogue,
     // which .zshrc (non-login) and .zlogin (login) each invoke once.
     expectFinalZdotdirRestoreContext(zshenv)
-    expect(zshrc).toContain('[[ -o login ]] || __orca_shell_epilogue')
-    expect(zlogin).toContain('__orca_shell_epilogue')
+    // Why the emulation probe: sh/ksh emulation makes zsh read $HOME/.zlogin
+    // rather than the wrapper's, so the epilogue has to run from here instead.
+    expect(zshrc).toContain('if [[ ! -o login || "$(emulate 2>/dev/null)" != zsh ]]; then')
+    expect(zshrc).toContain('(( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue')
+    expect(zlogin).toContain('(( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue')
   })
 
   it('owns zle-line-init for the shell-ready marker instead of an azhw hook', async () => {

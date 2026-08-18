@@ -51,6 +51,7 @@ import { forceKillPosixPtyProcessGroups } from '../main/pty/posix-pty-process-gr
 import { stripInheritedBuildModeEnv } from '../main/pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../main/pty/legacy-terminal-shim-dir'
 import { dropInheritedOrcaFishHistory } from '../main/fish-history-session'
+import { dropInheritedOrcaHistFile } from '../main/worktree-history-file-path'
 import {
   PTY_STARTUP_INGRESS_VERSION,
   PtyStartupIngress,
@@ -636,6 +637,10 @@ export class PtyHandler {
     // any pane to someone else's worktree. Matches the desktop, which drops it on both
     // branches (STA-4682).
     dropInheritedOrcaFishHistory(result)
+    // Why here as well as in injectRelayHistoryEnv: that runs only with isolation
+    // on, yet an inherited Orca HISTFILE must not scope a pane to someone else's
+    // worktree on the disabled and revive paths either.
+    dropInheritedOrcaHistFile(result)
     // Why: match local/daemon precedence so defaults/augmenters can't resurrect explicitly-removed values.
     for (const key of envToDelete) {
       delete result[key]

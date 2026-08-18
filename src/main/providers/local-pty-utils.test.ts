@@ -263,6 +263,7 @@ describe('spawnShellWithFallback macOS TCC login wrapping', () => {
       cwd: '/work',
       env,
       ptySpawn: ptySpawn as never,
+      launchEnvKeys: Object.keys(zshLaunchEnv),
       getShellReadyConfig: (shell) =>
         shell === '/bin/zsh' ? { args: ['-l'], env: zshLaunchEnv } : { args: null, env: {} }
     })
@@ -270,6 +271,41 @@ describe('spawnShellWithFallback macOS TCC login wrapping', () => {
     expect(env.ORCA_SHELL_FEATURES).toBeUndefined()
     expect(env.ZDOTDIR).toBeUndefined()
     expect(env.ORCA_ORIG_ZDOTDIR).toBeUndefined()
+    expect(env.HOME).toBe('/home/jin')
+  })
+
+  it('drops the first fallback’s launch env when a second fallback takes over', () => {
+    // Why: the keys to scrub are the ones the LAST attempt wrote. Computed once
+    // from the primary, a wrapped first fallback leaks its own ZDOTDIR and
+    // feature channel into the shell that finally starts.
+    const bashLaunchEnv = { ORCA_SHELL_FEATURES: 'markers', BASH_ENV: '/userdata/bash/rcfile' }
+    const env: Record<string, string> = { HOME: '/home/jin', ZDOTDIR: '/userdata/shell-ready/zsh' }
+    const ptySpawn = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('primary boom')
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('first fallback boom')
+      })
+      .mockReturnValue({ pid: 4 })
+
+    spawnShellWithFallback({
+      shellPath: '/bin/zsh',
+      shellArgs: ['-l'],
+      cols: 80,
+      rows: 24,
+      cwd: '/work',
+      env,
+      ptySpawn: ptySpawn as never,
+      launchEnvKeys: ['ZDOTDIR'],
+      getShellReadyConfig: (shell) =>
+        shell === '/bin/bash' ? { args: ['--rcfile', '/rc'], env: bashLaunchEnv } : null
+    })
+
+    expect(env.ORCA_SHELL_FEATURES).toBeUndefined()
+    expect(env.BASH_ENV).toBeUndefined()
+    expect(env.ZDOTDIR).toBeUndefined()
     expect(env.HOME).toBe('/home/jin')
   })
 })

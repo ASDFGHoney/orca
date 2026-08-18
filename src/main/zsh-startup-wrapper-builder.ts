@@ -187,6 +187,31 @@ function buildZshenv(spec: ZshStartupWrapperSpec): string {
   ])}\n`
 }
 
+/**
+ * Why guarded: the generated files are inter-dependent (this call, the function
+ * in .zshenv), and one wrapper dir can be shared by two concurrently installed
+ * Orca builds. Pairing this file with an older .zshenv then loses the features
+ * either way; degrade silently instead of printing "command not found" into the
+ * user's pane. Braced subscript because sh/ksh emulation (KSH_ARRAYS) rejects
+ * the unbraced `$+functions[...]` form outright.
+ */
+const EPILOGUE_CALL = '(( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue'
+
+/**
+ * A login shell normally runs the epilogue from .zlogin, after the user's own
+ * .zlogin. The exception: zsh's `sourcehome()` ignores ZDOTDIR once the shell is
+ * in sh/ksh emulation, so a user .zshrc ending in `emulate sh` makes zsh read
+ * $HOME/.zlogin and never the wrapper's — no OSC 133 hooks, no ready widget, and
+ * HISTFILE left pointing inside the wrapper dir. Running the epilogue here
+ * instead means the user's own .zlogin can undo its overlay restores, which
+ * beats not running it at all. An older zsh whose `emulate` has no query form
+ * prints nothing, fails the comparison, and runs it here too; the epilogue's
+ * once-flag makes the later .zlogin call a no-op.
+ */
+const ZSHRC_EPILOGUE_INVOCATION = `if [[ ! -o login || "$(emulate 2>/dev/null)" != zsh ]]; then
+  ${EPILOGUE_CALL}
+fi`
+
 export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshStartupWrapperFiles {
   return {
     zshenv: buildZshenv(spec),
@@ -205,8 +230,7 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
         interactiveOnly: true,
         skipWhenHomeIsCurrentZdotdir: spec.skipUserZshrcWhenHomeIsWrapperDir
       }),
-      '# Why: a login shell still has .zlogin to load; it runs the epilogue instead.',
-      '[[ -o login ]] || __orca_shell_epilogue'
+      ZSHRC_EPILOGUE_INVOCATION
     ])}\n`,
     zlogin: `${joinBlocks([
       `# ${spec.headerLabel}`,
@@ -215,7 +239,7 @@ export function buildZshStartupWrapperFiles(spec: ZshStartupWrapperSpec): ZshSta
         homeExpression: spec.homeExpression,
         interactiveOnly: true
       }),
-      '__orca_shell_epilogue'
+      EPILOGUE_CALL
     ])}\n`
   }
 }

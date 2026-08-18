@@ -11,4 +11,4 @@ if [[ -o interactive && -f "$_orca_home/.zlogin" ]]; then
   unset _orca_wrapper_zdotdir
 fi
 
-__orca_shell_epilogue
+(( ${+functions[__orca_shell_epilogue]} )) && __orca_shell_epilogue

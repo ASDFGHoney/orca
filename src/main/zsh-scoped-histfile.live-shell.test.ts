@@ -17,7 +17,7 @@
  * Orca would not wrap cannot pass here by construction.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -35,9 +35,13 @@ const ZSH_PATH = hasZsh
   : ''
 const itWithZsh = hasZsh ? it : it.skip
 
-function runZsh(args: string[], env: Record<string, string>): string {
+function runZsh(
+  args: string[],
+  env: Record<string, string>,
+  probe = 'echo "RESULT=$HISTFILE"'
+): string {
   // -o noglobalrcs is deliberately NOT passed: /etc/zshrc is the thing under test.
-  return execFileSync(ZSH_PATH, [...args, '-i', '-c', 'echo "RESULT=$HISTFILE"'], {
+  return execFileSync(ZSH_PATH, [...args, '-i', '-c', probe], {
     encoding: 'utf8',
     timeout: 20_000,
     env: { PATH: '/usr/bin:/bin', ...env }
@@ -154,23 +158,64 @@ describe('worktree-scoped HISTFILE survives zsh startup', () => {
     })
   })
 
-  itWithClobber('repairs the clobber for a shell that re-enters the wrapper with no features', () => {
-    // Why: a non-interactive zsh runs .zshenv (which exports Orca's wrapper
-    // ZDOTDIR) but never the epilogue that restores it, so an interactive zsh
-    // started from there re-enters the wrapper with the feature channel already
-    // consumed. /etc/zshrc still lands HISTFILE inside the wrapper dir — #11044
-    // with no per-worktree scoping involved — so the repair cannot be gated on
-    // a feature that no longer exists by then.
-    withTempHome((home) => {
-      const { launch } = launchPlainHistoryPane(home, join(home, 'orca-history', 'zsh_history'))
+  itWithClobber(
+    'repairs the clobber for a shell that re-enters the wrapper with no features',
+    () => {
+      // Why: a non-interactive zsh runs .zshenv (which exports Orca's wrapper
+      // ZDOTDIR) but never the epilogue that restores it, so an interactive zsh
+      // started from there re-enters the wrapper with the feature channel already
+      // consumed. /etc/zshrc still lands HISTFILE inside the wrapper dir — #11044
+      // with no per-worktree scoping involved — so the repair cannot be gated on
+      // a feature that no longer exists by then.
+      withTempHome((home) => {
+        const { launch } = launchPlainHistoryPane(home, join(home, 'orca-history', 'zsh_history'))
 
-      const output = runZsh(launch.args ?? ['-l'], {
-        HOME: home,
-        ZDOTDIR: launch.env.ZDOTDIR,
-        ORCA_ORIG_ZDOTDIR: home
+        const output = runZsh(launch.args ?? ['-l'], {
+          HOME: home,
+          ZDOTDIR: launch.env.ZDOTDIR,
+          ORCA_ORIG_ZDOTDIR: home
+        })
+
+        expect(histfileOf(output)).toBe(join(home, '.zsh_history'))
       })
+    }
+  )
 
-      expect(histfileOf(output)).toBe(join(home, '.zsh_history'))
+  itWithZsh('runs the epilogue for a login shell whose .zshrc ends in `emulate sh`', () => {
+    // Why: zsh's sourcehome() ignores ZDOTDIR once the shell is in sh/ksh
+    // emulation, so such a login shell reads $HOME/.zlogin instead of the
+    // wrapper's. Everything the epilogue owns — the HISTFILE repair, the OSC 133
+    // hooks, the readiness widget every startup command waits on — would be
+    // skipped entirely.
+    withTempHome((home) => {
+      const scoped = join(home, 'orca-history', 'zsh_history')
+      const env: Record<string, string> = {
+        HOME: home,
+        HISTFILE: scoped,
+        ORCA_HISTFILE: scoped
+      }
+      const launch = getShellLaunchConfig(
+        ZSH_PATH,
+        selectShellStartupFeatures({
+          shellPath: ZSH_PATH,
+          env,
+          hasStartupCommand: true,
+          waitsForShellReady: true,
+          // Why off: the identity marker is printed with no trailing newline, so
+          // it would prefix the first probe line and defeat the parser.
+          emitsStartupIdentity: false
+        })
+      )
+      writeFileSync(join(home, '.zshrc'), 'emulate sh\n')
+
+      const output = runZsh(
+        launch.args ?? ['-l'],
+        { ...env, ...launch.env, ...sandboxConfigDir(home) },
+        'echo "RESULT=$HISTFILE"; echo "WIDGET=[${widgets[zle-line-init]:-none}]"'
+      )
+
+      expect(histfileOf(output)).toBe(scoped)
+      expect(output).toContain('WIDGET=[user:__orca_prompt_mark]')
     })
   })
 

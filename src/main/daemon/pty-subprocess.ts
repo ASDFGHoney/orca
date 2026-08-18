@@ -35,6 +35,7 @@ import { isPwshAvailable } from '../pwsh'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { dropInheritedOrcaFishHistory } from '../fish-history-session'
+import { dropInheritedOrcaHistFile } from '../worktree-history-file-path'
 import { removeAppImageRuntimeEnv } from '../pty/appimage-terminal-env'
 import { stripInheritedBuildModeEnv } from '../pty/build-mode-env'
 import { stripLegacyTerminalShimEnv } from '../pty/legacy-terminal-shim-dir'
@@ -657,6 +658,12 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
   // panes write into the launching worktree's history file (STA-4682).
   if (opts.env?.fish_history === undefined) {
     dropInheritedOrcaFishHistory(env)
+  }
+  // Why the same for HISTFILE: it is exported too, so a daemon started from an
+  // Orca pane hands that worktree's history file to every pane this spawn did
+  // not scope itself — including panes of other worktrees.
+  if (opts.env?.HISTFILE === undefined) {
+    dropInheritedOrcaHistFile(env)
   }
   removeInheritedDevAgentHookEndpoint(env, opts.env)
   removeInheritedElectronRunAsNode(env)

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { buildSshPtySpawnEnv } from '../main/providers/ssh-pty-spawn-env'
 import { getRelayShellLaunchConfig, isRelayWslShell } from './pty-shell-launch'
 
 const hasBash = process.platform !== 'win32' && spawnSync('bash', ['--version']).status === 0
@@ -149,18 +150,56 @@ describe('getRelayShellLaunchConfig', () => {
   })
 
   it.skipIf(process.platform === 'win32')(
-    'keeps a remote zsh on the plain login path when only history would wrap it',
+    'wraps an ordinary SSH pane, as every remote pane with a CLI bridge already was',
     () => {
-      // Why: the relay .zshenv resolves the user's config dir from a ZDOTDIR
-      // Orca has already overwritten, so a remote user whose zsh config lives in
-      // a relocated ZDOTDIR loses that config the moment the pane is wrapped.
-      // A worktree HISTFILE is not worth trading a whole shell config for.
-      expect(
-        getRelayShellLaunchConfig('/bin/zsh', {
-          HOME: homeDir,
-          ORCA_HISTFILE: join(homeDir, 'orca-history', 'zsh_history')
-        })
-      ).toEqual({ args: ['-l'], env: {}, supportsReadyMarker: false })
+      // Why the real builder: the relay's wrapping rule is only meaningful
+      // against the env main actually sends. Every relay session with a CLI
+      // bridge sets ORCA_REMOTE_CLI_BIN_DIR, which was already enough to wrap.
+      const env = buildSshPtySpawnEnv({
+        env: { HOME: homeDir, PATH: '/usr/bin:/bin' },
+        remoteCliBridgeEnv: {
+          binDir: '/home/remote/.orca-relay/bin',
+          relayDir: '/home/remote/.orca-relay',
+          nodePath: '/home/remote/.orca-relay/node',
+          sockPath: '/home/remote/.orca-relay/relay.sock'
+        }
+      })
+      env.ORCA_HISTFILE = join(homeDir, 'orca-history', 'zsh_history')
+
+      const config = getRelayShellLaunchConfig('/bin/zsh', env)
+
+      expect(config.env.ZDOTDIR).toBe(join(homeDir, '.orca-relay', 'shell-ready', 'zsh'))
+      expect(config.env.ORCA_SHELL_FEATURES).toBe('overlay,history,markers')
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'repairs worktree history on a remote pane whose host reports no CLI bridge',
+    () => {
+      // Why this env shape: a host too old to report its platform leaves
+      // remoteCliBridgeEnv null, so the pane carries no overlay key at all.
+      // It is the one pane class the relay was NOT already wrapping, and
+      // leaving it unwrapped silently loses its worktree history.
+      const env = buildSshPtySpawnEnv({ env: { HOME: homeDir, PATH: '/usr/bin:/bin' } })
+      env.ORCA_HISTFILE = join(homeDir, 'orca-history', 'zsh_history')
+
+      const config = getRelayShellLaunchConfig('/bin/zsh', env)
+
+      expect(config.env.ZDOTDIR).toBe(join(homeDir, '.orca-relay', 'shell-ready', 'zsh'))
+      expect(config.env.ORCA_SHELL_FEATURES).toBe('history')
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps a remote zsh with nothing Orca-owned on the plain login path',
+    () => {
+      const env = buildSshPtySpawnEnv({ env: { HOME: homeDir, PATH: '/usr/bin:/bin' } })
+
+      expect(getRelayShellLaunchConfig('/bin/zsh', env)).toEqual({
+        args: ['-l'],
+        env: {},
+        supportsReadyMarker: false
+      })
     }
   )
 
@@ -270,6 +309,11 @@ describe('getRelayShellLaunchConfig', () => {
 
       expect(config.env.ZDOTDIR).toBe(join(homeDir, '.orca-relay', 'shell-ready', 'zsh'))
       expect(config.env.ORCA_SHELL_FEATURES).toContain('identity')
+      // Why the negative half: identity emission alone must not arm the
+      // readiness handshake, or the delivering side waits for a marker that
+      // this shell was never told to print.
+      expect(config.env.ORCA_SHELL_FEATURES).not.toContain('ready')
+      expect(config.supportsReadyMarker).toBe(false)
     }
   )
 

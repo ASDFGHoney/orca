@@ -188,6 +188,38 @@ describe('PtyHandler', () => {
       expect(spawnEnv.fish_history).toBe(expected)
     })
 
+    it.each([
+      [
+        'a relay-minted path',
+        `${process.env.HOME ?? ''}/.orca-remote/terminal-history/aabbccddeeff0011-zsh_history`,
+        undefined
+      ],
+      [
+        'a desktop-minted path',
+        '/fake/userData/terminal-history/aabbccddeeff0011/zsh_history',
+        undefined
+      ],
+      ['a user value', '/home/me/.zsh_history', '/home/me/.zsh_history']
+    ])(
+      '%s inherited as HISTFILE from the relay process env',
+      async (_kind, inherited, expected) => {
+        const previous = process.env.HISTFILE
+        process.env.HISTFILE = inherited
+        try {
+          await dispatcher.callRequest('pty.spawn', { cols: 80, rows: 24 })
+        } finally {
+          if (previous === undefined) {
+            delete process.env.HISTFILE
+          } else {
+            process.env.HISTFILE = previous
+          }
+        }
+
+        const spawnEnv = mockPtySpawn.mock.calls.at(-1)?.[2]?.env as Record<string, string>
+        expect(spawnEnv.HISTFILE).toBe(expected)
+      }
+    )
+
     it('drops a desktop-minted session handed over in the client env', async () => {
       await dispatcher.callRequest('pty.spawn', {
         cols: 80,
