@@ -206,6 +206,7 @@ import {
   createBrowserPageGuestRecovery
 } from './browser-page-guest-recovery'
 import { subscribeBrowserSystemResume } from './browser-system-resume'
+import { emitBrowserRemoteDownloadToast } from './browser-download-destination-toast'
 import {
   canReconnectRemoteBrowserStream,
   isRemoteBrowserStreamBusy,
@@ -3044,6 +3045,7 @@ function BrowserPagePane({
       if (!current.some((download) => download.downloadId === event.downloadId)) {
         return
       }
+      emitBrowserRemoteDownloadToast(event)
       setDownloadStates((current) =>
         current.map((download) =>
           download.downloadId === event.downloadId

@@ -28,6 +28,8 @@ import { clampGrabPayload } from './browser-grab-payload'
 import { captureSelectionScreenshot as captureGrabSelectionScreenshot } from './browser-grab-screenshot'
 import { BrowserGrabSessionController } from './browser-grab-session-controller'
 import { browserDownloadDestinationReservations } from './browser-download-destination'
+import type { BrowserClientDownloadRoute } from './browser-client-download-relay'
+import { routeBrowserClientDownload } from './browser-client-download-routing'
 import { resolveRendererWebContents } from './browser-guest-renderer-target'
 import { setupGrabShortcutForwarding } from './browser-guest-grab-shortcuts'
 import { setupGuestContextMenu } from './browser-guest-context-menu'
@@ -191,6 +193,8 @@ type ActiveDownload = {
   item: Electron.DownloadItem
   savePath: string
   reservationKey: string | null
+  clientRoute: BrowserClientDownloadRoute | null
+  remoteDestination: BrowserDownloadFinishedEvent['remoteDestination']
   receivedBytes: number
   transientState: BrowserDownloadProgressEvent['state']
   terminalEvent: BrowserDownloadFinishedEvent | null
@@ -1477,7 +1481,17 @@ export class BrowserManager {
       }
     })()
 
+    // Why: a client-hosted page's bytes belong on the remote workspace, so main stages them itself
+    // instead of reserving a name in the desktop Downloads folder.
+    const clientRoute = routeBrowserClientDownload({ guestWebContentsId })
     const destination = (() => {
+      if (clientRoute) {
+        return {
+          filename: requestedFilename,
+          savePath: clientRoute.stagingPath,
+          reservationKey: null
+        }
+      }
       try {
         return browserDownloadDestinationReservations.reserve(requestedFilename)
       } catch (error) {
@@ -1500,6 +1514,8 @@ export class BrowserManager {
       item,
       savePath: fallbackSavePath,
       reservationKey: destination?.reservationKey ?? null,
+      clientRoute,
+      remoteDestination: undefined,
       receivedBytes: 0,
       transientState: null,
       terminalEvent: null,
@@ -1554,15 +1570,17 @@ export class BrowserManager {
     const doneHandler = (_event: Electron.Event, state: BrowserDownloadDoneState): void => {
       const status: BrowserDownloadFinishedEvent['status'] =
         state === 'completed' ? 'completed' : state === 'cancelled' ? 'canceled' : 'failed'
-      this.finishDownloadInternal(
-        download.downloadId,
-        status,
+      const failure =
         status === 'failed'
           ? state === 'interrupted'
             ? 'Download was interrupted.'
             : 'Download failed.'
           : null
-      )
+      if (download.clientRoute) {
+        void this.settleClientHostedDownload(download, status, failure)
+        return
+      }
+      this.finishDownloadInternal(download.downloadId, status, failure)
     }
     download.cleanup = (): void => {
       try {
@@ -2106,6 +2124,36 @@ export class BrowserManager {
     renderer.send('browser:download-finished', payload)
   }
 
+  private async settleClientHostedDownload(
+    download: ActiveDownload,
+    status: BrowserDownloadFinishedEvent['status'],
+    failure: string | null
+  ): Promise<void> {
+    const route = download.clientRoute
+    if (!route) {
+      return
+    }
+    download.clientRoute = null
+    if (status !== 'completed') {
+      await route.abort().catch(() => undefined)
+      this.finishDownloadInternal(download.downloadId, status, failure)
+      return
+    }
+    try {
+      download.remoteDestination = await route.complete(download.filename)
+      // Why: the staged copy is deleted, so a client save path would name a file that no longer exists.
+      download.savePath = ''
+      this.finishDownloadInternal(download.downloadId, 'completed', null)
+    } catch (error) {
+      console.error('[browser-download] Failed to save download to the remote workspace:', error)
+      this.finishDownloadInternal(
+        download.downloadId,
+        'failed',
+        'Could not save the download to the remote workspace.'
+      )
+    }
+  }
+
   private cancelDownloadInternal(downloadId: string, reason: string): void {
     const download = this.downloadsById.get(downloadId)
     if (!download) {
@@ -2148,11 +2196,17 @@ export class BrowserManager {
     }
     browserDownloadDestinationReservations.release(download.reservationKey)
     download.reservationKey = null
+    if (download.clientRoute) {
+      // Why: a cancel path can reach here before the relay settled; the staged copy must not survive.
+      void download.clientRoute.abort().catch(() => undefined)
+      download.clientRoute = null
+    }
     const event: BrowserDownloadFinishedEvent = {
       browserPageId: download.browserTabId ?? undefined,
       downloadId: download.downloadId,
       status,
       savePath: download.savePath || null,
+      ...(download.remoteDestination ? { remoteDestination: download.remoteDestination } : {}),
       error
     }
     download.terminalEvent = event

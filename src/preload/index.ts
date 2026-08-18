@@ -2853,6 +2853,7 @@ const api = {
         downloadId: string
         status: 'completed' | 'canceled' | 'failed'
         savePath: string | null
+        remoteDestination?: { workspaceRelativePath: string; hostLabel: string }
         error: string | null
       }) => void
     ): (() => void) => {
@@ -2863,6 +2864,7 @@ const api = {
           downloadId: string
           status: 'completed' | 'canceled' | 'failed'
           savePath: string | null
+          remoteDestination?: { workspaceRelativePath: string; hostLabel: string }
           error: string | null
         }
       ) => callback(data)
