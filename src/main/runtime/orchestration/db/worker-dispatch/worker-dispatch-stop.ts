@@ -6,6 +6,7 @@ import {
 } from '../../context-only-dispatch-release'
 import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
+import { reconcileTaskAfterDispatchInterruption } from '../dispatch-context/task-dispatch-reconciliation'
 
 export function isDispatchProcessCurrent(
   this: OrchestrationDb,
@@ -27,7 +28,8 @@ export function isDispatchProcessCurrent(
 
 export function beginWorkerStop(
   this: OrchestrationDb,
-  dispatchId: string
+  dispatchId: string,
+  runtimeEpoch: string
 ):
   | { disposition: 'stopping'; worker: WorkerDispatchRow; dispatch: DispatchContextRow }
   | { disposition: 'already_settled'; worker: WorkerDispatchRow; dispatch: DispatchContextRow }
@@ -40,12 +42,7 @@ export function beginWorkerStop(
       throw new OrchestrationError('dispatch_not_found', `Dispatch ${dispatchId} was not found.`)
     }
     if (!worker) {
-      const released = releaseContextOnlyDispatch(
-        this.db,
-        dispatch,
-        this.getDispatchContext(dispatch.task_id)?.id,
-        'stopped'
-      )
+      const released = releaseContextOnlyDispatch(this.db, dispatch, 'stopped')
       if (!released.alreadySettled) {
         this.closeQuestionsForDispatch(dispatchId)
       }
@@ -65,10 +62,11 @@ export function beginWorkerStop(
     this.db
       .prepare(
         `UPDATE worker_dispatches
-         SET state = 'stopping', stage = 'stop_requested', updated_at = datetime('now')
+         SET state = 'stopping', stage = 'stop_requested',
+             runtime_epoch = COALESCE(?, runtime_epoch), updated_at = datetime('now')
          WHERE dispatch_id = ? AND state IN ('ready', 'start_unknown')`
       )
-      .run(dispatchId)
+      .run(runtimeEpoch, dispatchId)
     this.db
       .prepare(
         `UPDATE dispatch_contexts
@@ -76,7 +74,7 @@ export function beginWorkerStop(
          WHERE id = ?`
       )
       .run(dispatchId)
-    this.db.prepare("UPDATE tasks SET status = 'blocked' WHERE id = ?").run(dispatch.task_id)
+    reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
     this.closeQuestionsForDispatch(dispatchId)
     this.db.exec('COMMIT')
     return {
@@ -112,6 +110,7 @@ export function settleWorkerStop(this: OrchestrationDb, dispatchId: string): Wor
          WHERE id = ? AND status IN ('pending', 'dispatched')`
       )
       .run(dispatchId)
+    reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
   } catch (error) {
@@ -160,6 +159,7 @@ export function reconcileFederatedWorkerStop(
          WHERE id = ? AND status IN ('pending', 'dispatched')`
       )
       .run(dispatchId)
+    reconcileTaskAfterDispatchInterruption(this, dispatch.task_id, dispatchId)
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
   } catch (error) {
