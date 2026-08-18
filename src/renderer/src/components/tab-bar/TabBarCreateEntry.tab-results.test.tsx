@@ -78,6 +78,7 @@ const tabSearchMock = vi.hoisted(() => {
               branch: 'main',
               repoName: 'octo/rocket'
             }),
+            occupantAgent: null,
             agentMetadata: [],
             isCurrentTab: false,
             isCurrentWorktree: true
