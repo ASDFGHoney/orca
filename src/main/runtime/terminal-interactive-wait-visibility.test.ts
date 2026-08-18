@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
+import { assertTerminalAgentSendable } from './rpc/terminal-agent-send-guard'
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromId: vi.fn(() => null) },
@@ -45,6 +46,8 @@ async function createPane(options: {
   paneTitle: string
   foregroundProcess: string | null
   data: string
+  /** Set for a pane whose PTY lives on an SSH host or WSL distro rather than locally. */
+  connectionId?: string
 }): Promise<{ runtime: OrcaRuntimeService; handle: string }> {
   const runtime = new OrcaRuntimeService(null)
   const internals = runtime as unknown as {
@@ -53,7 +56,7 @@ async function createPane(options: {
   vi.spyOn(internals, 'resolveTerminalWorkspaceLaunchScope').mockResolvedValue({
     id: WORKTREE_ID,
     path: '/repo/app',
-    connectionId: null,
+    connectionId: options.connectionId ?? null,
     repo: null,
     folderWorkspace: null
   })
@@ -90,7 +93,11 @@ async function createPane(options: {
       }
     ]
   })
-  runtime.onPtyData(PTY_ID, options.data, Date.now())
+  // Why the guard: a restore seed is only applied to a never-written record, so the restore
+  // cases must not write an empty chunk first.
+  if (options.data.length > 0) {
+    runtime.onPtyData(PTY_ID, options.data, Date.now())
+  }
   return { runtime, handle: terminal.handle }
 }
 
@@ -117,10 +124,10 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
       })
     })
 
-    it('feeds the same permission verdict the agent-prompt guard reads', async () => {
-      // Why this matters beyond reporting: `dispatch --inject` and guarded sends refuse on a
-      // `permission` verdict, so before this the coordinator's preamble was typed straight
-      // into the approval dialog instead of being refused (the STA-2631 shape).
+    it('refuses a guarded send and a dispatch preamble while the approval is up', async () => {
+      // Why this matters beyond reporting: the coordinator's preamble was typed straight into
+      // the approval dialog instead of being refused (the STA-2631 shape). Both refusal paths
+      // are asserted here, not just the `permission` verdict they read.
       const { runtime, handle } = await createPane({
         paneTitle: CURSOR_TITLE,
         foregroundProcess: 'cursor-agent',
@@ -131,6 +138,24 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
         isRunningAgent: true,
         status: 'permission'
       })
+      await expect(
+        assertTerminalAgentSendable({ runtime, handle, assertWritable: () => {} })
+      ).rejects.toThrow('terminal_guard_permission')
+      await expect(runtime.sendTerminalAgentPrompt(handle, 'coordinator preamble')).rejects.toThrow(
+        'agent_prompt_blocked'
+      )
+    })
+
+    it('lets a dispatch preamble through once the same lane is working', async () => {
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: CURSOR_LONG_TOOL_CALL
+      })
+
+      await expect(
+        assertTerminalAgentSendable({ runtime, handle, assertWritable: () => {} })
+      ).resolves.toBeUndefined()
     })
 
     it('refuses to call the lane idle while the approval is unanswered', async () => {
@@ -168,8 +193,8 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
     })
 
     it('treats an answered menu still in scrollback as scrollback', async () => {
-      // Why: the menu is not erased on every terminal; cursor-agent's follow-up input line
-      // reappearing after it is the proof that a human already answered.
+      // Why: the menu is not erased on every terminal, so a live dialog is one that still owns
+      // the bottom of the screen rather than one that merely appears somewhere in the tail.
       const { runtime, handle } = await createPane({
         paneTitle: CURSOR_TITLE,
         foregroundProcess: 'cursor-agent',
@@ -177,6 +202,54 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
       })
 
       expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+    })
+
+    it('treats an answered menu followed by any later output as scrollback', async () => {
+      // Why not keyed on cursor's own follow-up line: output after the menu can be anything,
+      // and a stale hit here fails tui-idle and refuses prompt injection on a healthy lane.
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: CURSOR_APPROVAL
+      })
+      expect(runtime.getTerminalInteractiveWait(handle)).not.toBeNull()
+
+      runtime.onPtyData(
+        PTY_ID,
+        '\nCommand completed successfully.\nContinuing automatically.\n',
+        Date.now()
+      )
+
+      expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
+    })
+
+    it('tolerates one trailing line below a live dialog', async () => {
+      // A status footer under the dialog must not read as scrollback.
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: `${CURSOR_APPROVAL}\n  Auto · 6.1%\n`
+      })
+
+      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+        reason: 'agent-approval-prompt'
+      })
+    })
+
+    it('reports the same wait for a pane whose PTY is not local', async () => {
+      // The verdict is derived from retained tail and title state, so an SSH or WSL pane
+      // reaches it the same way a local one does.
+      const { runtime, handle } = await createPane({
+        paneTitle: CURSOR_TITLE,
+        foregroundProcess: 'cursor-agent',
+        data: CURSOR_APPROVAL,
+        connectionId: 'ssh:build-host'
+      })
+
+      expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+        source: 'prompt-text',
+        reason: 'agent-approval-prompt'
+      })
     })
 
     it('ignores a partial menu that names no decision keys', async () => {
@@ -254,6 +327,37 @@ describe('terminal interactive-wait visibility (STA-4513, STA-3714)', () => {
 
       expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
     })
+  })
+
+  it('still reports a live dialog restored from terminal history', async () => {
+    // Why this case exists: a lane parked on a prompt emits no bytes, so an Orca restart is
+    // exactly when it would go quiet forever. A restored tail carries no waitBlockedAt, and
+    // the approval menu does not need one — being at the bottom of the restored screen is
+    // itself the proof that this is where the pane stopped.
+    const { runtime, handle } = await createPane({
+      paneTitle: CURSOR_TITLE,
+      foregroundProcess: 'cursor-agent',
+      data: ''
+    })
+    runtime.seedTerminalRestoreTail(PTY_ID, { text: CURSOR_APPROVAL, lastTitle: CURSOR_TITLE })
+
+    expect(runtime.getTerminalInteractiveWait(handle)).toMatchObject({
+      source: 'prompt-text',
+      reason: 'agent-approval-prompt'
+    })
+  })
+
+  it('does not resurrect a startup modal from a restored tail', async () => {
+    // The startup prompts keep the timestamp rule: their text lingers in scrollback with no
+    // marker for whether it was answered, so restored bytes alone must not mint a wait.
+    const { runtime, handle } = await createPane({
+      paneTitle: 'sta4513-claude',
+      foregroundProcess: 'claude',
+      data: ''
+    })
+    runtime.seedTerminalRestoreTail(PTY_ID, { text: CLAUDE_TRUST })
+
+    expect(runtime.getTerminalInteractiveWait(handle)).toBeNull()
   })
 
   it('answers null rather than "not waiting" for a pane it cannot read', async () => {

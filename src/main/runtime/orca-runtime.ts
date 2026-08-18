@@ -18543,6 +18543,14 @@ export class OrcaRuntimeService {
     if (liveTitleClearsBlockedText && lifecycle?.status !== terminal.titleStatus) {
       return null
     }
+    // Why this reason skips the timestamps below: they exist to date a prompt whose text
+    // survives in scrollback forever, and the approval menu is only matched while it still
+    // owns the bottom of the screen — that is the dating. Without the exemption a tail
+    // restored from history, which carries no waitBlockedAt, would report a live dialog as
+    // nothing at all, exactly across the app restart an unattended run has to survive.
+    if (blockedByWaitText === 'agent-approval-prompt') {
+      return blockedByWaitText
+    }
     const newestPermissionAt = Math.max(
       explicitStatus?.status === 'permission' ? explicitStatus.updatedAt : -1,
       lifecycle?.status === 'permission' ? lifecycle.updatedAt : -1,
@@ -18560,7 +18568,13 @@ export class OrcaRuntimeService {
    *  covers it, a long tool call, and a wedged process alike. Same evidence fusion
    *  getTerminalAgentStatus uses for its `permission` verdict, minus the async foreground
    *  probe, so a per-lane read stays a synchronous map lookup plus one tail scan.
-   *  Null means "nothing proves a wait", never "proven not waiting". */
+   *  Null means "nothing proves a wait", never "proven not waiting".
+   *
+   *  Known blind spot, inherited from that shared verdict rather than added here: a tail
+   *  restored from terminal history carries no waitBlockedAt (see applyRestoredTerminalTailSeed),
+   *  so a prompt that only ever appeared in restored bytes reports nothing until the next live
+   *  chunk. Reversing that would resurrect long-answered prompts on every restore, which costs
+   *  more than the miss — a blocked pane that receives any byte recovers on its own. */
   getTerminalInteractiveWait(handle: string): RuntimeTerminalInteractiveWait | null {
     let ptyId: string
     let terminal: TerminalAgentStatusSnapshot
@@ -39563,8 +39577,11 @@ const CURSOR_APPROVAL_CHOICE_MARKERS = [
   'run everything',
   'skip & tell the agent'
 ]
-// cursor-agent redraws this input line once the menu is answered.
-const CURSOR_FOLLOW_UP_PROMPT = 'add a follow-up'
+// Why the tail must end on the menu: an answered menu keeps sitting in scrollback, and a
+// stale hit here is not merely noisy — it fails tui-idle and refuses prompt injection. A live
+// dialog owns the bottom of the screen, so the last choice may sit at most one line above the
+// end, which tolerates a trailing partial line mid-redraw without admitting scrollback.
+const CURSOR_APPROVAL_MAX_TRAILING_LINES = 1
 
 function findCursorApprovalPromptIndex(normalized: string): number | null {
   const promptIndex = normalized.lastIndexOf('run this command?')
@@ -39572,12 +39589,30 @@ function findCursorApprovalPromptIndex(normalized: string): number | null {
     return null
   }
   const menu = normalized.slice(promptIndex)
-  const choices = CURSOR_APPROVAL_CHOICE_MARKERS.filter((marker) => menu.includes(marker)).length
-  if (choices < 2) {
+  let matched = 0
+  let lastChoiceEnd = -1
+  for (const marker of CURSOR_APPROVAL_CHOICE_MARKERS) {
+    const index = menu.lastIndexOf(marker)
+    if (index === -1) {
+      continue
+    }
+    matched += 1
+    lastChoiceEnd = Math.max(lastChoiceEnd, index + marker.length)
+  }
+  if (matched < 2) {
     return null
   }
-  // Why: a follow-up prompt after the menu proves it was answered and is now scrollback.
-  return menu.includes(CURSOR_FOLLOW_UP_PROMPT) ? null : promptIndex
+  let trailingLines = 0
+  for (let cursor = lastChoiceEnd; cursor < menu.length; cursor += 1) {
+    if (menu.charCodeAt(cursor) !== 10) {
+      continue
+    }
+    trailingLines += 1
+    if (trailingLines > CURSOR_APPROVAL_MAX_TRAILING_LINES) {
+      return null
+    }
+  }
+  return promptIndex
 }
 
 function findTerminalWaitBlockedSignal(

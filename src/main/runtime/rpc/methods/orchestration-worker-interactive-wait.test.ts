@@ -1,13 +1,30 @@
 // STA-3714 / STA-4513: `worker-show` is the per-lane call a coordinator makes, and it
 // reported a worker parked on a human prompt exactly the same as one mid tool call.
+// Deliberately unmocked below the RPC: the runtime, its PTY tail, and the detector all run,
+// so this fails if the prompt scan, the observation plumbing, or the RPC shape regresses.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { ORCHESTRATION_METHODS } from './orchestration'
 
-const WORKER_HANDLE = 'term_worker'
-const WORKER_PANE_KEY = 'tab_worker:leaf_worker'
-const WORKER_INCARNATION = 'runtime_test:term_worker:1'
+vi.mock('electron', () => ({
+  BrowserWindow: { fromId: vi.fn(() => null) },
+  webContents: { fromId: vi.fn(() => null) },
+  ipcMain: { on: vi.fn(), removeListener: vi.fn() },
+  app: { getPath: vi.fn(() => '/tmp') }
+}))
+
+const LEAF_ID = '22222222-2222-4222-8222-222222222222'
+const TAB_ID = 'tab-worker'
+const WORKTREE_ID = 'wt-worker'
+const PTY_ID = 'pty-worker'
+
+// Captured verbatim from cursor-agent 2026.08.11-e8db854 driven through Orca.
+function fixture(name: string): string {
+  return readFileSync(join(__dirname, '../../__fixtures__', `${name}.txt`), 'utf8')
+}
 
 function workerShowMethod() {
   const method = ORCHESTRATION_METHODS.find(
@@ -24,78 +41,109 @@ describe('worker-show interactive wait (STA-3714, STA-4513)', () => {
 
   afterEach(() => db?.close())
 
-  async function showInjectedWorker(
-    agentWait: ReturnType<OrcaRuntimeService['getTerminalInteractiveWait']>
-  ) {
-    db = new OrchestrationDb(':memory:')
-    const runtime = new OrcaRuntimeService()
-    runtime.setOrchestrationDb(db)
-    vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
-      handle: WORKER_HANDLE,
-      connected: true,
-      status: 'running'
-    } as never)
-    vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(WORKER_PANE_KEY)
-    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue(WORKER_INCARNATION)
-    vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({
-      status: 'live',
-      ptyIds: [WORKER_INCARNATION]
+  async function showWorkerPaneServing(paneOutput: string) {
+    const runtime = new OrcaRuntimeService(null)
+    const internals = runtime as unknown as {
+      resolveTerminalWorkspaceLaunchScope: (selector: string) => Promise<unknown>
+    }
+    vi.spyOn(internals, 'resolveTerminalWorkspaceLaunchScope').mockResolvedValue({
+      id: WORKTREE_ID,
+      path: '/repo/app',
+      connectionId: null,
+      repo: null,
+      folderWorkspace: null
     })
-    const interactiveWait = vi
-      .spyOn(runtime, 'getTerminalInteractiveWait')
-      .mockReturnValue(agentWait)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: PTY_ID, incarnationId: 'inc-1' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'cursor-agent'
+    })
+    const terminal = await runtime.createTerminal(`id:${WORKTREE_ID}`, {
+      tabId: TAB_ID,
+      leafId: LEAF_ID,
+      title: 'worker'
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: TAB_ID,
+          worktreeId: WORKTREE_ID,
+          title: 'worker',
+          activeLeafId: LEAF_ID,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: TAB_ID,
+          worktreeId: WORKTREE_ID,
+          leafId: LEAF_ID,
+          paneRuntimeId: 1,
+          ptyId: PTY_ID,
+          // cursor-agent's spinner title, identical whether it runs or waits.
+          paneTitle: '⠇ Cursor Agent'
+        }
+      ]
+    })
+    runtime.onPtyData(PTY_ID, paneOutput, Date.now())
 
+    db = new OrchestrationDb(':memory:')
+    runtime.setOrchestrationDb(db)
     const run = db.createRun({
       objective: 'supervise lanes',
       coordinatorHandle: 'term_coord',
       coordinatorPaneKey: 'tab_coord:leaf_coord'
     })
     const task = db.createTask({ spec: 'run the suite', runId: run.id })
+    const paneKey = runtime.getTerminalPaneKey(terminal.handle)
+    const incarnation = runtime.getTerminalProcessIncarnation(terminal.handle)
+    if (!paneKey || !incarnation) {
+      throw new Error('Runtime did not expose the worker pane identity.')
+    }
     const dispatch = db.createDispatchContext(
       task.id,
-      WORKER_HANDLE,
-      WORKER_PANE_KEY,
+      terminal.handle,
+      paneKey,
       'launch-hash',
-      WORKER_INCARNATION
+      incarnation
     )
-    db.mintDispatchCapability({
-      dispatchId: dispatch.id,
-      paneKey: WORKER_PANE_KEY,
-      processIncarnation: WORKER_INCARNATION
-    })
+    db.mintDispatchCapability({ dispatchId: dispatch.id, paneKey, processIncarnation: incarnation })
+
     const method = workerShowMethod()
-    const result = await method.handler(method.params?.parse({ dispatch: dispatch.id }), {
-      runtime
-    })
-    return { result, interactiveWait }
+    return method.handler(method.params?.parse({ dispatch: dispatch.id }), { runtime })
   }
 
   it('names the pending prompt on the observation a coordinator polls', async () => {
-    const { result, interactiveWait } = await showInjectedWorker({
-      source: 'prompt-text',
-      reason: 'agent-approval-prompt',
-      since: 1_700_000_000_000
-    })
+    const result = await showWorkerPaneServing(fixture('cursor-agent-approval-prompt'))
 
     expect(result).toMatchObject({
       observation: {
-        status: 'live',
         exactWorker: true,
         agentWait: {
           source: 'prompt-text',
           reason: 'agent-approval-prompt',
-          since: 1_700_000_000_000
+          since: expect.any(Number)
         }
       }
     })
-    expect(interactiveWait).toHaveBeenCalledWith(WORKER_HANDLE)
   })
 
-  it('reports an explicit null for a lane that is merely working', async () => {
+  it('reports an explicit null for the same lane inside a long tool call', async () => {
     // Why an explicit null and not an omitted key: a coordinator has to tell "not waiting"
     // from "this host is too old to know", and only absence may mean the latter.
-    const { result } = await showInjectedWorker(null)
+    const result = await showWorkerPaneServing(fixture('cursor-agent-long-tool-call'))
 
-    expect(result).toMatchObject({ observation: { status: 'live', agentWait: null } })
+    expect(result).toMatchObject({ observation: { exactWorker: true, agentWait: null } })
+  })
+
+  it('agrees with the terminal payload it is derived from', async () => {
+    const result = (await showWorkerPaneServing(fixture('cursor-agent-approval-prompt'))) as {
+      terminal: { agentWait: unknown } | null
+      observation: { agentWait: unknown }
+    }
+
+    expect(result.observation.agentWait).toEqual(result.terminal?.agentWait)
   })
 })

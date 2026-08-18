@@ -241,7 +241,8 @@ async function inspectRemoteAttachment(
   // Why: the same rule as the local worker observation — the inventory only
   // iterates registered providers, so a dropped relay clears `connected` for
   // every remote PTY at once. Lost contact is not a death certificate.
-  const agentWait = runtime.getTerminalInteractiveWait?.(attachment.terminal_handle) ?? null
+  // Why reused: showTerminal above already scanned this pane's tail for the same verdict.
+  const agentWait = terminal.agentWait ?? null
   const verdict = runtime.getTerminalLivenessVerdict?.(attachment.terminal_handle) ?? null
   if (verdict?.status === 'unverifiable') {
     return { terminal, exact, status: 'unverifiable', reason: verdict.reason, agentWait }

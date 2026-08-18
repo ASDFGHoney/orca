@@ -42,9 +42,11 @@ export async function inspectWorkerTerminal(
   // Why: the aggregate inventory only iterates registered providers, so a dropped
   // relay clears `connected` for every remote PTY at once. Lost contact is not a
   // death certificate, and the verdict is the only field that can tell them apart.
-  // Why exact-gated: an interactive wait is a claim about this Dispatch's own agent, and a
-  // replaced process's prompt would attribute another lane's blocker to this worker.
-  const agentWait = runtime.getTerminalInteractiveWait?.(terminalHandle) ?? null
+  // Why reused rather than re-derived: showTerminal already scanned this pane's retained
+  // tail for the same verdict, and a second scan could also disagree with the one it published.
+  // Exact-gated by the early return above: a replaced process's prompt would attribute another
+  // lane's blocker to this worker.
+  const agentWait = terminal.agentWait ?? null
   const verdict = runtime.getTerminalLivenessVerdict?.(terminalHandle) ?? null
   if (verdict?.status === 'unverifiable') {
     return { terminal, exact, status: 'unverifiable', reason: verdict.reason, agentWait }
