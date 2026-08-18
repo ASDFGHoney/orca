@@ -90,7 +90,7 @@ export function classifyRerunChecksError(stderr: string): ClassifiedError {
   const rerunMessages: Record<ClassifiedError['type'], string> = {
     permission_denied:
       "You don't have permission to rerun checks on this repository. Check your GitHub token scopes.",
-    not_found: 'Check run not found — it may have expired or been deleted.',
+    not_found: 'GitHub resource to rerun was not found — it may have expired or been deleted.',
     issues_disabled: `Failed to rerun checks: ${trimmed}`,
     validation_error: `Could not rerun checks — ${trimmed}`,
     rate_limited: c.message,
