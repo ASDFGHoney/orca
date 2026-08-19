@@ -366,6 +366,92 @@ describe('web UI preload API', () => {
     })
   })
 
+  // Why cover a host that still sends the field: clients and hosts update independently, so a new
+  // web client meets hosts predating the response omission. On a profile an old web client
+  // poisoned, those echoed runtime:web-* entries match this browser's own repos and would beat
+  // every drag it has made since.
+  it.each([
+    [
+      'this browser own stale runtime:web-* entries',
+      [
+        { hostId: 'runtime:web-env-1', repoId: 'repo-c' },
+        { hostId: 'runtime:web-env-1', repoId: 'repo-a' }
+      ]
+    ],
+    [
+      'the desktop local/ssh-keyed order',
+      [
+        { hostId: 'local', repoId: 'repo-a' },
+        { hostId: 'ssh:box', repoId: 'repo-b' }
+      ]
+    ],
+    ['an empty overlay from a desktop that never dragged', []]
+  ])('keeps the browser-local manual repo order when ui.get returns %s', async (_label, hosted) => {
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        call(method: string): Promise<RuntimeRpcResponse<unknown>> {
+          return Promise.resolve({
+            id: method,
+            ok: true,
+            result: { ui: { manualRepoOrder: hosted } },
+            _meta: { runtimeId: 'runtime-1' }
+          })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const webOwnOrder: ManualRepoOrderEntry[] = [
+      { hostId: 'runtime:web-env-1', repoId: 'repo-b' },
+      { hostId: 'runtime:web-env-1', repoId: 'repo-a' }
+    ]
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    globals.storage.setItem('orca.web.ui.v1', JSON.stringify({ manualRepoOrder: webOwnOrder }))
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    await expect(globals.window.api.ui.get()).resolves.toMatchObject({
+      manualRepoOrder: webOwnOrder
+    })
+    expect(JSON.parse(globals.storage.getItem('orca.web.ui.v1') ?? '{}')).toMatchObject({
+      manualRepoOrder: webOwnOrder
+    })
+  })
+
+  it('keeps the browser-local manual repo order when a new host omits it entirely', async () => {
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        call(method: string): Promise<RuntimeRpcResponse<unknown>> {
+          return Promise.resolve({
+            id: method,
+            ok: true,
+            result: { ui: { sidebarWidth: 320 } },
+            _meta: { runtimeId: 'runtime-1' }
+          })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const webOwnOrder: ManualRepoOrderEntry[] = [
+      { hostId: 'runtime:web-env-1', repoId: 'repo-b' },
+      { hostId: 'runtime:web-env-1', repoId: 'repo-a' }
+    ]
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    globals.storage.setItem('orca.web.ui.v1', JSON.stringify({ manualRepoOrder: webOwnOrder }))
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    await expect(globals.window.api.ui.get()).resolves.toMatchObject({
+      manualRepoOrder: webOwnOrder,
+      sidebarWidth: 320
+    })
+  })
+
   it('union-merges local contextual tour seen ids when ui.get returns stale host state', async () => {
     vi.doMock('./web-runtime-client', () => ({
       WebRuntimeClient: class {

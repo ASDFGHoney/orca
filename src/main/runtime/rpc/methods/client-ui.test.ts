@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getDefaultUIState } from '../../../../shared/constants'
+import { omitPairingLocalUiFields } from '../../../../shared/pairing-local-ui-fields'
 import {
   MAX_QUICK_COMMAND_AGENT_PROMPT_LENGTH,
   MAX_QUICK_COMMAND_ID_LENGTH,
@@ -375,7 +376,7 @@ describe('client UI RPC methods', () => {
     const response = await dispatcher.dispatch(makeRequest('ui.get'))
 
     expect(runtime.getUIState).toHaveBeenCalledTimes(1)
-    expect(response).toMatchObject({ ok: true, result: { ui } })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(ui) } })
   })
 
   it('persists UI updates on the runtime host and returns the updated state', async () => {
@@ -415,7 +416,7 @@ describe('client UI RPC methods', () => {
       hideAutomationGeneratedWorkspaces: true,
       filterRepoIds: ['repo-1']
     })
-    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(updated) } })
   })
 
   it('lets a paired client clear the OSC 52 default-on notice', async () => {
@@ -565,30 +566,7 @@ describe('client UI RPC methods', () => {
       ...forwarded,
       worktreeCardProperties: ['status', 'unread', 'branch', 'automation', 'inline-agents']
     })
-    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
-  })
-
-  it('drops a paired client manualRepoOrder while forwarding the rest of the payload', async () => {
-    const runtime = {
-      getRuntimeId: () => 'test-runtime',
-      updateUIState: vi.fn(() => getDefaultUIState())
-    } as unknown as OrcaRuntimeService
-    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
-
-    // A paired web client restamps every repo onto its own runtime:web-* pseudo-host, so its
-    // overlay names hosts this profile will never own; persisting it erases the desktop order.
-    const response = await dispatcher.dispatch(
-      makeRequest('ui.set', {
-        sidebarWidth: 280,
-        manualRepoOrder: [
-          { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-a' },
-          { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-b' }
-        ]
-      })
-    )
-
-    expect(response).toMatchObject({ ok: true })
-    expect(runtime.updateUIState).toHaveBeenCalledWith({ sidebarWidth: 280 })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(updated) } })
   })
 
   // Why one case per field: the schema is strict, so a single unlisted key makes
@@ -683,7 +661,7 @@ describe('client UI RPC methods', () => {
     const response = await dispatcher.dispatch(makeRequest('ui.recordFeatureInteraction', 'tasks'))
 
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('tasks')
-    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(updated) } })
   })
 
   it('rejects unknown and malformed UI update fields', async () => {
@@ -745,7 +723,7 @@ describe('client UI RPC methods', () => {
     expect(runtime.updateUIState).toHaveBeenCalledWith({
       worktreeCardProperties: ['status', 'unread', 'jira-issue']
     })
-    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(updated) } })
   })
 
   it('accepts every worktree card property the shared union defines', async () => {
@@ -825,7 +803,7 @@ describe('client UI RPC methods', () => {
     expect(runtime.updateUIState).toHaveBeenCalledWith({
       worktreeCardProperties: ['status', 'unread', 'ci', 'issue', 'pr']
     })
-    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+    expect(response).toMatchObject({ ok: true, result: { ui: omitPairingLocalUiFields(updated) } })
   })
 
   it('rejects each star-nag persisted state mutation field from remote clients', async () => {

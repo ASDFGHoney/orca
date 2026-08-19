@@ -1,3 +1,4 @@
+import { omitPairingLocalUiFields } from '../../../../shared/pairing-local-ui-fields'
 import type { PersistedUIState } from '../../../../shared/persisted-ui-state-types'
 import { defineMethod, type RpcMethod } from '../core'
 import {
@@ -50,30 +51,24 @@ export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'ui.get',
     params: null,
-    handler: (_params, { runtime }) => ({ ui: runtime.getUIState() })
+    handler: (_params, { runtime }) => ({ ui: omitPairingLocalUiFields(runtime.getUIState()) })
   }),
   defineMethod({
     name: 'ui.set',
     params: UiUpdate,
-    // Why manualRepoOrder is dropped rather than removed from the schema: a paired client keys
-    // its overlay to its own execution hosts, so forwarding it blind-replaces the desktop's
-    // order. The strict schema still has to accept the field or old clients' whole payload fails.
-    handler: (params, { runtime }) => {
-      const {
-        hideWorkspacesFromOtherDevices: _clientLocalFilter,
-        manualRepoOrder: _desktopOwnedOrder,
-        ...hostUpdates
-      } = params
-      void _clientLocalFilter
-      void _desktopOwnedOrder
-      return { ui: runtime.updateUIState(hostUpdates as Partial<PersistedUIState>) }
-    }
+    // Why the fields are dropped here rather than removed from the schema: UiUpdate is strict, so
+    // an unlisted key would make the dispatcher reject an old client's ENTIRE payload.
+    handler: (params, { runtime }) => ({
+      ui: omitPairingLocalUiFields(
+        runtime.updateUIState(omitPairingLocalUiFields(params) as Partial<PersistedUIState>)
+      )
+    })
   }),
   defineMethod({
     name: 'ui.recordFeatureInteraction',
     params: FeatureInteractionIdParam,
     handler: (params, { runtime }) => ({
-      ui: runtime.recordFeatureInteraction(params)
+      ui: omitPairingLocalUiFields(runtime.recordFeatureInteraction(params))
     })
   })
 ]
