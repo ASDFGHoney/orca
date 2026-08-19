@@ -69,6 +69,16 @@ describe('worktree visibility sources', () => {
     expect(classify('/repo/.gsd-workspaces/phase-1')).toEqual({ kind: 'built-in', id: 'gsd' })
   })
 
+  it('preserves WSL path casing when a configured base supersedes a built-in root', () => {
+    const classify = createWorktreeVisibilitySourceMatcher(
+      ['//wsl$/Ubuntu/home/Dev/repo'],
+      [],
+      ['//wsl.localhost/Ubuntu/home/Dev/repo/.claude/worktrees']
+    )
+
+    expect(classify('//wsl.localhost/Ubuntu/home/Dev/repo/.claude/worktrees/review')).toBeNull()
+  })
+
   it('keeps a built-in root a base merely contains', () => {
     for (const configuredBase of ['/repo', '/']) {
       const classify = createWorktreeVisibilitySourceMatcher(['/repo'], [], [configuredBase])

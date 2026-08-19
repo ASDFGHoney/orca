@@ -1,6 +1,5 @@
 import {
   createNormalizedPathInsideOrEqualMatcher,
-  isPathInsideOrEqual,
   isRuntimePathAbsolute,
   normalizeRuntimePathForComparison
 } from '../cross-platform-path'
@@ -145,14 +144,16 @@ export function createWorktreeVisibilitySourceMatcher(
     matches: createDescendantMatcher(rootPath)
   }))
   const configuredBases = configuredWorktreeBasePaths.map((basePath) => ({
-    path: basePath,
+    key: normalizeRuntimePathForComparison(basePath),
     contains: createNormalizedPathInsideOrEqualMatcher(basePath)
   }))
   // Why: only a base pointing at or inside the matched root counts. A base of
   // `.` or `..` merely contains the root and must not exempt it (#9388).
   const isSupersededByConfiguredBase = (sourceRootKey: string, candidateKey: string): boolean =>
     configuredBases.some(
-      (base) => base.contains(candidateKey) && isPathInsideOrEqual(sourceRootKey, base.path)
+      (base) =>
+        base.contains(candidateKey) &&
+        (base.key === sourceRootKey || base.key.startsWith(`${sourceRootKey}/`))
     )
   return (worktreePath) => {
     const normalizedCandidate = normalizeRuntimePathForComparison(worktreePath)
