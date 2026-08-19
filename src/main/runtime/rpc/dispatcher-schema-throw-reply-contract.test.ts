@@ -238,7 +238,13 @@ describe('RpcDispatcher reply contract when a param schema throws', () => {
       { key: null, app: null, text: null, value: null },
       { key: 42, app: 42, text: 42, value: 42 },
       { key: [], app: [], text: [], value: [] },
-      { key: {}, app: {}, text: {}, value: {} }
+      { key: {}, app: {}, text: {}, value: {} },
+      // Why: a refinement that derefs one field only when a SIBLING is valid — the shape of
+      // validateComputerTarget — is invisible to all-absent and all-invalid payloads alike. One
+      // field present and the rest absent is the payload that trips it.
+      ...['app', 'key', 'text', 'value', 'id', 'worktree', 'session'].map((field) => ({
+        [field]: 'x'
+      }))
     ]
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const nonTotal = new Set<string>()

@@ -126,4 +126,34 @@ describe('RPC reply contract when a param schema throws', () => {
       error: { code: 'internal_error', message: 'pre-dispatch failure' }
     })
   })
+  // Why: admitLongPoll reserves a capacity slot and registerWebSocketDispatchAbort registers a
+  // controller, both BEFORE the try whose finally releases them. A throw in that window used to
+  // strand the caller AND leak the slot forever, so repeated failures would eventually make every
+  // terminal.wait / orchestration.ask return runtime_busy against a cap that never drains.
+  it('releases the long-poll slot when the acquire window throws', async () => {
+    const { server, deviceToken } = makeServer()
+    const ws = {
+      get readyState(): number {
+        throw new Error('socket went away')
+      },
+      on: () => {},
+      off: () => {}
+    } as unknown as Parameters<(typeof server)['handleWebSocketMessage']>[4]
+    const before = server['activeLongPolls']
+    const replies: string[] = []
+
+    void server['handleWebSocketMessage'](
+      // terminal.wait is a long-poll class, so a slot is reserved before the throw.
+      JSON.stringify({ id: 'ws-1', method: 'terminal.wait', deviceToken, params: {} }),
+      (response) => replies.push(response),
+      () => {},
+      undefined,
+      ws
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(unhandled).toEqual([])
+    expect(replies).toHaveLength(1)
+    expect(server['activeLongPolls']).toBe(before)
+  })
 })
