@@ -8,8 +8,10 @@ import { createSubscriptionRegistryDouble } from './subscription-registry-test-d
 // Why: the presence map has no accessor — the runtime exposes only the driver it derives.
 type PresenceInternals = {
   mobileSubscribers: Map<string, Map<string, { viewport: { cols: number; rows: number } | null }>>
-  pendingSoftLeavers: Map<string, unknown>
+  pendingSoftLeavers: Map<string, { clientId: string }>
 }
+
+type Observed = { presenceAtUnsubscribe: string[] | null; tookGraceBranch: boolean }
 
 const internalsOf = (runtime: OrcaRuntimeService): PresenceInternals =>
   runtime as unknown as PresenceInternals
@@ -46,14 +48,20 @@ const subscribeRequest: RpcRequest = {
  */
 const createViewStreamRuntime = (
   real: OrcaRuntimeService,
-  observed: { presenceAtUnsubscribe: string[] | null }
+  observed: Observed
 ): OrcaRuntimeService => {
   const registry = createSubscriptionRegistryDouble()
   return {
     getRuntimeId: () => 'test-runtime',
     resolveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
-    handleMobileSubscribe: (ptyId: string, clientId: string, viewport?: typeof VIEWPORT) =>
-      real.handleMobileSubscribe(ptyId, clientId, viewport),
+    handleMobileSubscribe: (ptyId: string, clientId: string, viewport?: typeof VIEWPORT) => {
+      // Why read it here and not before dispatch: the soft-leave timer is real and
+      // unfaked, so a slow dispatch would expire it and silently downgrade the
+      // resubscribe-grace case into a duplicate of the fresh-subscribe one.
+      observed.tookGraceBranch =
+        internalsOf(real).pendingSoftLeavers.get(ptyId)?.clientId === clientId
+      return real.handleMobileSubscribe(ptyId, clientId, viewport)
+    },
     handleMobileUnsubscribe: (ptyId: string, clientId: string) => {
       // The whole invariant in one reading: what the teardown sees when it runs.
       observed.presenceAtUnsubscribe = presenceOf(real, ptyId)
@@ -86,10 +94,8 @@ const createViewStreamRuntime = (
   } as unknown as OrcaRuntimeService
 }
 
-const dispatchTornDownSubscribe = async (
-  real: OrcaRuntimeService
-): Promise<{ presenceAtUnsubscribe: string[] | null }> => {
-  const observed: { presenceAtUnsubscribe: string[] | null } = { presenceAtUnsubscribe: null }
+const dispatchTornDownSubscribe = async (real: OrcaRuntimeService): Promise<Observed> => {
+  const observed: Observed = { presenceAtUnsubscribe: null, tookGraceBranch: false }
   const dispatcher = new RpcDispatcher({
     runtime: createViewStreamRuntime(real, observed),
     methods: TERMINAL_METHODS
@@ -102,12 +108,17 @@ const dispatchTornDownSubscribe = async (
   return observed
 }
 
+// Division of labour: the two handler cases pin the end-to-end outcome for the graph-churn
+// trigger, whose teardown is delivered a fixed two microtasks deep — so they only fire once a
+// presence write slips past that. The direct case below is the minimal-delta guard: it catches
+// a single-tick yield, which other teardown triggers can deliver arbitrarily early.
 describe('mobile view stream presence release', () => {
   it('leaves no presence when cleanup wins a fresh awaited subscribe', async () => {
     const real = new OrcaRuntimeService()
 
     const observed = await dispatchTornDownSubscribe(real)
 
+    expect(observed.tookGraceBranch).toBe(false)
     // The teardown lands after the presence write, so its release is the one that survives.
     expect(observed.presenceAtUnsubscribe).toEqual(['phone-1'])
     expect(presenceOf(real, 'pty-1')).toEqual([])
@@ -127,6 +138,7 @@ describe('mobile view stream presence release', () => {
 
     const observed = await dispatchTornDownSubscribe(real)
 
+    expect(observed.tookGraceBranch).toBe(true)
     expect(observed.presenceAtUnsubscribe).toEqual(['phone-1'])
     expect(presenceOf(real, 'pty-1')).toEqual([])
     await vi.waitFor(() => expect(real.getDriver('pty-1')).toEqual({ kind: 'idle' }), {

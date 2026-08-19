@@ -16341,6 +16341,12 @@ export class OrcaRuntimeService {
     }
   }
 
+  // Ordering rule for every `inner.set` below: write mobileSubscribers before this
+  // method's first await. The mobile view streams await this call and cannot release
+  // presence afterwards — a (ptyId, clientId) release there would delete a reconnect
+  // replacement's record — so they rely on their teardown landing after the write.
+  // Yield before any of these writes and a torn-down subscribe strands a phantom
+  // subscriber. Pinned by rpc/terminal-subscribe-mobile-presence-release.test.ts.
   private async handleMobileSubscribeInternal(
     ptyId: string,
     clientId: string,

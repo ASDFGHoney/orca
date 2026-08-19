@@ -3361,11 +3361,13 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       try {
         if (isMobile && clientId) {
           // Why no presence release on the `closed` path below, unlike the lease-only
-          // sibling: both of handleMobileSubscribeInternal's presence writes (fresh
-          // subscribe and resubscribe-grace) land before its first await, so a cleanup
-          // that wins this race always runs after the write and removes it. Releasing
-          // here would instead delete a reconnect replacement's (ptyId, clientId)
-          // record — the hazard the lease-only note describes.
+          // sibling: every presence write in handleMobileSubscribeInternal lands before
+          // its first await (see the ordering rule on that method), so a cleanup that
+          // wins this race always runs after the write and removes it. Releasing here
+          // would instead delete a reconnect replacement's (ptyId, clientId) record —
+          // the hazard the lease-only note describes. Presence only: the in-flight
+          // phone-fit still settles after teardown, and under an indefinite
+          // mobileAutoRestoreFitMs its override is held for the desktop Restore button.
           // Pinned by terminal-subscribe-mobile-presence-release.test.ts.
           await runtime.handleMobileSubscribe(ptyId, clientId, params.viewport)
         } else if (clientId && params.viewport) {
