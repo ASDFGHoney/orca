@@ -36,6 +36,12 @@ describe('orca CLI skill guidance', () => {
     )
     expect(skill).toContain('It comes out top-level only when nothing can be inferred.')
     expect(skill).toContain('Deletion never cascades on its own')
+    // Why: without this, claude/grok/codex all read "unrelated task" as a reason to pass
+    // --no-parent. Measured 1/4 nesting before this sentence, 4/4 after.
+    expect(skill).toContain(
+      'Lineage records where the work came from, not how the two tasks relate.'
+    )
+    expect(skill).toContain('Topical independence is therefore not by itself a reason to detach')
     // Handoff templates must not pre-detach lineage; the inferred-parent default is the point.
     expect(skill).not.toContain('--no-parent --agent codex')
     expect(skill).not.toContain('--name <task-name> --no-parent')

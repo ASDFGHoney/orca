@@ -302,7 +302,7 @@ New worktree handoff:
 orca worktree create --name <task-name> --agent codex --prompt "<task brief>" --setup run --json
 ```
 
-With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child; `--no-parent` detaches it to the top level. A child nests under its parent in the sidebar and travels with it when the user reviews, sleeps, or deletes that line of work, so a detached worktree is one the user has to track on its own. Lineage affects only how the worktree is filed — not the branch, the base, or the PR — and `worktree set` can change it later.
+With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child; `--no-parent` detaches it to the top level. A child nests under its parent in the sidebar and travels with it when the user reviews, sleeps, or deletes that line of work, so a detached worktree is one the user has to track on its own. Lineage affects only how the worktree is filed — not the branch, the base, or the PR — and `worktree set` can change it later. It records where the work came from, not how the two tasks relate: an unrelated follow-up spawned from this worktree still started here, so topical independence is not by itself a reason to detach. Keep the Git history independent with `--base-branch` instead.
 
 Existing terminal handoff:
 

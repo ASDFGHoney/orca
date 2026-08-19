@@ -130,6 +130,8 @@ Lineage:
 
 Lineage is how the worktree is filed in Orca's sidebar. A child nests under its parent and travels with it when the user reviews, sleeps, or deletes that line of work; a top-level worktree is a separate root the user tracks on its own. Lineage does not affect the branch, the base commit, or how the PR relates to any other PR, and it can be changed later with `worktree set`.
 
+Lineage records where the work came from, not how the two tasks relate. An unrelated errand spawned from this worktree still started here, and filing it under the worktree it came from is what lets the user find it again. Topical independence is therefore not by itself a reason to detach — `--base-branch` already covers keeping the Git history independent.
+
 - With no lineage flag, Orca infers a parent from the calling context (Orca terminal, orchestration context, or cwd) and records the new worktree as its child. It comes out top-level only when nothing can be inferred.
 - `--parent-worktree active`, `--parent-worktree folder:<folderId>`, or `--parent-worktree worktree:<repoId>::<worktreePath>` names a parent explicitly.
 - `--no-parent` detaches the new worktree to the top level. Deletion never cascades on its own, so a child left behind is still discoverable under its parent while a detached one is not.

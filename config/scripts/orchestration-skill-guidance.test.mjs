@@ -128,6 +128,10 @@ describe('orchestration skill guidance', () => {
     expect(fullHandoffs).toContain(
       'travels with it when the user reviews, sleeps, or deletes that line of work'
     )
+    expect(fullHandoffs).toContain(
+      'It records where the work came from, not how the two tasks relate'
+    )
+    expect(fullHandoffs).toContain('topical independence is not by itself a reason to detach')
     // No prescriptive child-vs-top-level rule: the agent decides.
     expect(fullHandoffs).not.toContain('Use child worktree lineage only when')
     expect(fullHandoffs).toContain('If the work should start from the repo default base')
