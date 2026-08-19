@@ -1,8 +1,31 @@
-import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+
+import '@testing-library/jest-dom/vitest'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { DeleteWorktreeTargetPreview } from './DeleteWorktreeTargetPreview'
-import { getExecutionHostLabel } from '../../../../shared/execution-host'
+import { buildSidebarHostOptions } from './sidebar-host-options'
 import type { Worktree } from '../../../../shared/worktree/types'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
+
+function buildHostLabels(
+  hostLabelOverrides?: ReadonlyMap<ExecutionHostId, string>
+): ReadonlyMap<ExecutionHostId, string> {
+  return new Map(
+    buildSidebarHostOptions({
+      repos: [
+        { connectionId: 'qa-linux-42' },
+        { connectionId: null, executionHostId: 'runtime:runtime-7' }
+      ],
+      sshTargetLabels: new Map([['qa-linux-42', 'QA Linux']]),
+      settings: { activeRuntimeEnvironmentId: null },
+      runtimeEnvironments: [{ id: 'runtime-7', name: 'Build Mac' }],
+      hostLabelOverrides
+    }).map((host) => [host.id, host.label])
+  )
+}
+
+const savedHostLabels = buildHostLabels()
 
 function makeWorktree(id: string, displayName: string, hostId?: Worktree['hostId']): Worktree {
   return {
@@ -18,38 +41,109 @@ function makeWorktree(id: string, displayName: string, hostId?: Worktree['hostId
   } as Worktree
 }
 
-function render(worktrees: readonly Worktree[]): string {
-  return renderToStaticMarkup(
+function renderPreview(args: {
+  worktrees: readonly Worktree[]
+  worktree?: Worktree | null
+  isBatchDelete?: boolean
+  hostLabelById?: ReadonlyMap<ExecutionHostId, string>
+}): void {
+  render(
     <DeleteWorktreeTargetPreview
-      isBatchDelete={true}
-      worktree={null}
-      worktrees={worktrees}
+      isBatchDelete={args.isBatchDelete ?? true}
+      worktree={args.worktree ?? null}
+      worktrees={args.worktrees}
+      hostLabelById={args.hostLabelById ?? savedHostLabels}
       deleteStateByWorktreeId={{}}
       dirtyChangeCountsByWorktreeId={new Map()}
     />
   )
 }
 
-describe('DeleteWorktreeTargetPreview host labels', () => {
-  // Two hosts publish the same worktreeId, so name and path are identical in the batch —
-  // without the host there is nothing on screen distinguishing what is about to be destroyed.
-  it('names each host when the batch contains a same-id collision', () => {
-    const markup = render([
-      makeWorktree('shared', 'collide', 'local'),
-      makeWorktree('shared', 'collide', 'ssh:qa-linux-42')
-    ])
+afterEach(cleanup)
 
-    expect(markup).toContain(getExecutionHostLabel('local'))
-    expect(markup).toContain(getExecutionHostLabel('ssh:qa-linux-42'))
+describe('DeleteWorktreeTargetPreview host labels', () => {
+  it('binds saved SSH and runtime host names to their colliding batch rows', () => {
+    renderPreview({
+      worktrees: [
+        makeWorktree('shared', 'collide', 'ssh:qa-linux-42'),
+        makeWorktree('shared', 'collide', 'runtime:runtime-7')
+      ]
+    })
+
+    const sshRow = screen.getByRole('listitem', { name: /QA Linux/ })
+    const runtimeRow = screen.getByRole('listitem', { name: /Build Mac/ })
+    expect(sshRow).toHaveAccessibleName('collide /work/collide QA Linux')
+    expect(within(sshRow).getByText('QA Linux')).toBeVisible()
+    expect(within(sshRow).queryByText('Build Mac')).not.toBeInTheDocument()
+    expect(runtimeRow).toHaveAccessibleName('collide /work/collide Build Mac')
+    expect(within(runtimeRow).getByText('Build Mac')).toBeVisible()
+    expect(within(runtimeRow).queryByText('QA Linux')).not.toBeInTheDocument()
   })
 
-  // Ordinary batches stay quiet: a host label on every row is noise, not information.
-  it('omits host labels when every row has a distinct id', () => {
-    const markup = render([
-      makeWorktree('one', 'alpha', 'local'),
-      makeWorktree('two', 'beta', 'ssh:qa-linux-42')
-    ])
+  it('uses configured display-label overrides for colliding hosts', () => {
+    const worktrees = [
+      makeWorktree('shared', 'collide', 'ssh:qa-linux-42'),
+      makeWorktree('shared', 'collide', 'runtime:runtime-7')
+    ]
+    renderPreview({
+      worktrees,
+      hostLabelById: buildHostLabels(
+        new Map([
+          ['ssh:qa-linux-42', 'SSH override'],
+          ['runtime:runtime-7', 'Runtime override']
+        ])
+      )
+    })
 
-    expect(markup).not.toContain(getExecutionHostLabel('ssh:qa-linux-42'))
+    expect(screen.getByRole('listitem', { name: /SSH override/ })).toHaveTextContent('SSH override')
+    expect(screen.getByRole('listitem', { name: /Runtime override/ })).toHaveTextContent(
+      'Runtime override'
+    )
+  })
+
+  it('keeps an unqualified colliding target distinct from local', () => {
+    renderPreview({
+      worktrees: [makeWorktree('shared', 'collide'), makeWorktree('shared', 'collide', 'local')]
+    })
+
+    const unknownRow = screen.getByRole('listitem', { name: /Unknown host/ })
+    expect(within(unknownRow).getByText('Unknown host')).toBeVisible()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+
+  it('omits host metadata from every ordinary batch row', () => {
+    renderPreview({
+      worktrees: [
+        makeWorktree('one', 'alpha', 'local'),
+        makeWorktree('two', 'beta', 'ssh:qa-linux-42')
+      ]
+    })
+
+    const alphaRow = screen.getByRole('listitem', { name: 'alpha /work/alpha' })
+    const betaRow = screen.getByRole('listitem', { name: 'beta /work/beta' })
+    expect(within(alphaRow).queryByText(savedHostLabels.get('local')!)).not.toBeInTheDocument()
+    expect(within(betaRow).queryByText('QA Linux')).not.toBeInTheDocument()
+  })
+
+  it('includes the host in a colliding single target region and its accessible name', () => {
+    const sshWorktree = makeWorktree('shared', 'collide', 'ssh:qa-linux-42')
+    renderPreview({
+      isBatchDelete: false,
+      worktree: sshWorktree,
+      worktrees: [sshWorktree, makeWorktree('shared', 'collide', 'runtime:runtime-7')]
+    })
+
+    const target = screen.getByRole('region', { name: /QA Linux/ })
+    expect(target).toHaveAccessibleName('collide /work/collide QA Linux')
+    expect(within(target).getByText('QA Linux')).toBeVisible()
+  })
+
+  it('omits the host from an ordinary single target region', () => {
+    const sshWorktree = makeWorktree('one', 'alpha', 'ssh:qa-linux-42')
+    renderPreview({ isBatchDelete: false, worktree: sshWorktree, worktrees: [sshWorktree] })
+
+    const target = screen.getByRole('region', { name: 'alpha /work/alpha' })
+    expect(target).toHaveAccessibleName('alpha /work/alpha')
+    expect(within(target).queryByText('QA Linux')).not.toBeInTheDocument()
   })
 })

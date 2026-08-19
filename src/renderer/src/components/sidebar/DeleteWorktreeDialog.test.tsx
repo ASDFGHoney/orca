@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => {
     openSettingsTarget: vi.fn(),
     openSettingsPage: vi.fn(),
     settings: null,
+    sshTargetLabels: new Map<string, string>(),
+    sshConnectionStates: new Map(),
+    runtimeEnvironments: [] as { id: string; name: string }[],
+    runtimeStatusByEnvironmentId: new Map(),
     gitStatusByWorktree: {} as Record<string, { path: string; status: 'modified' }[]>,
     setGitStatus: vi.fn(),
     deleteStateByWorktreeId: {} as Record<
@@ -162,6 +166,10 @@ describe('DeleteWorktreeDialog lineage copy', () => {
     mocks.state.modalData = {}
     mocks.state.allWorktrees.mockReturnValue([])
     mocks.state.repos = []
+    mocks.state.sshTargetLabels = new Map()
+    mocks.state.sshConnectionStates = new Map()
+    mocks.state.runtimeEnvironments = []
+    mocks.state.runtimeStatusByEnvironmentId = new Map()
     mocks.state.worktreeLineageById = {}
     mocks.state.gitStatusByWorktree = {}
     mocks.state.deleteStateByWorktreeId = {}
