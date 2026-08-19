@@ -79,27 +79,25 @@ function candidate(path: string, bytes: Buffer, mtimeMs: number): SessionFileCan
   }
 }
 
-// A timed-out stall quarantines the route, so the next read is refused until the
-// window lapses. Waiting it out is what a real caller does; resetting the gate here
-// would skip the very admission the recovery assertions depend on.
-async function lapseRouteQuarantine(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS + 1)
-}
-
+// A result that lands past the deadline never lifts the route quarantine, so
+// recovery waits out the back-off window the same way production does.
 async function releaseAndSettle(): Promise<void> {
   releaseStall?.()
   releaseStall = undefined
-  await vi.advanceTimersByTimeAsync(0)
+  await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS)
 }
 
 beforeEach(() => {
+  // blockedRoutes is persistent gate state: a prior stall must not quarantine
+  // this test's route.
   resetWslTranscriptFsGateForTests()
   resetSessionParseCacheForTests()
   mocks.open.mockReset()
   mocks.readdir.mockReset()
   mocks.readdir.mockResolvedValue([])
   releaseStall = undefined
-  vi.useFakeTimers()
+  // performance.now drives the route quarantine clock, so it must be faked too.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
 })
 
 afterEach(async () => {
@@ -153,7 +151,6 @@ describe('AI Vault session parse with a stalled WSL transcript body read', () =>
     await refused
 
     await releaseAndSettle()
-    await lapseRouteQuarantine()
     mocks.open.mockResolvedValue(servingHandle(grown))
     const recovered = await parseAgentSessionFileCached(candidate(STALLED_PATH, grown, 2), 'linux')
 
