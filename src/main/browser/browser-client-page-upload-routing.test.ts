@@ -109,6 +109,7 @@ function createHarness(options: { fileChannel?: BrowserClientFileChannelTranspor
     },
     executeAutomation,
     retireAutomation: async () => {},
+    guestBinding: { bind: () => {}, release: () => {} },
     fileChannel: options.fileChannel,
     uploadStaging
   } as never)

@@ -45,6 +45,7 @@ import {
   resetBrowserClientDownloadRouting,
   setBrowserClientRouteWebContentsProbe
 } from './browser-client-download-routing'
+import { createBrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
 import {
   registerBrowserRouteGuestPopup,
   resetBrowserRouteGuestPopupOwnership
@@ -87,10 +88,16 @@ describe('client-hosted downloads', () => {
       return null
     })
     browserManager.attachGuestPolicies(guest as never)
-    browserManager.registerGuest({
-      browserPageId: BROWSER_PAGE_ID,
-      webContentsId: GUEST_WEB_CONTENTS_ID,
-      rendererWebContentsId
+    // Exactly what client-hosted page creation does; the renderer never registers a client page.
+    createBrowserClientPageGuestBinding(browserManager).bind({
+      registration: {
+        partition: `persist:orca-browser-v1-${'a'.repeat(64)}`,
+        browserPageId: BROWSER_PAGE_ID,
+        pageHostGeneration: 7,
+        rendererWebContentsId,
+        webContentsId: GUEST_WEB_CONTENTS_ID
+      },
+      browserProfileId: 'profile-a'
     })
     browserManager.attachGuestPolicies(serverGuest as never)
     browserManager.registerGuest({
@@ -216,6 +223,34 @@ describe('client-hosted downloads', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('reports the whole lifecycle of a plain client-hosted download to its page renderer', async () => {
+    const { route, completed } = stubRoute()
+    registerBrowserClientDownloadRouter('env-a', { route: () => ({ kind: 'remote', route }) })
+    const item = createDownloadItem()
+
+    browserManager.handleGuestWillDownload({ guestWebContentsId: GUEST_WEB_CONTENTS_ID, item })
+
+    expect(rendererSendMock).toHaveBeenCalledWith(
+      'browser:download-requested',
+      expect.objectContaining({ browserPageId: BROWSER_PAGE_ID, status: 'downloading' })
+    )
+
+    getDownloadItemEventHandler(item, 'once', 'done')?.({} as Electron.Event, 'completed')
+    await completed
+
+    expect(rendererSendMock).toHaveBeenCalledWith(
+      'browser:download-finished',
+      expect.objectContaining({
+        browserPageId: BROWSER_PAGE_ID,
+        status: 'completed',
+        remoteDestination: {
+          workspaceRelativePath: '.orca/browser-downloads/report.csv',
+          hostLabel: 'build-box'
+        }
+      })
+    )
   })
 
   it('cancels a client-hosted download that no composition owns', () => {

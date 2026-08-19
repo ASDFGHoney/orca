@@ -120,6 +120,7 @@ function createHarness() {
     routeSessions: { preparePage: vi.fn(async () => routeSession) },
     executeAutomation: vi.fn(async () => undefined),
     retireAutomation: vi.fn(async () => {}),
+    guestBinding: { bind: vi.fn(), release: vi.fn() },
     routeWebContents
   }
   return {

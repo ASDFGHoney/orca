@@ -16,6 +16,8 @@ import { BrowserClientDownloadRelay } from './browser-client-download-relay'
 import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
+import { createBrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
+import { browserManager } from './browser-manager'
 import { BrowserClientUploadStaging } from './browser-client-upload-staging'
 import {
   executeBrowserClientPageAutomation,
@@ -88,6 +90,7 @@ const browserClientHosts =
             selectRenderer: selectBrowserClientPageRenderer,
             routeSessions: browserRouteSessionRegistry,
             routeWebContents: browserRouteWebContentsRegistry,
+            guestBinding: createBrowserClientPageGuestBinding(browserManager),
             executeAutomation: executeBrowserClientPageAutomation,
             retireAutomation: retireBrowserClientPageAutomation,
             fileChannel,

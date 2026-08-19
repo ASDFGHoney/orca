@@ -88,6 +88,7 @@ function harness() {
     },
     executeAutomation: vi.fn(async () => ({})),
     retireAutomation: vi.fn(async () => {}),
+    guestBinding: { bind: vi.fn(), release: vi.fn() },
     onPageUnavailable
   })
   return {

@@ -1,5 +1,6 @@
 import type { BrowserClientAutomationMethod } from '../../shared/browser-client-automation-protocol'
 import type { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import type { BrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
 import type { BrowserClientUploadStaging } from './browser-client-upload-staging'
 import type {
   BrowserClientPageNetworkRoute,
@@ -23,6 +24,7 @@ export type BrowserClientPageCommandExecutorDependencies = {
   selectRenderer(): BrowserClientPageRenderer
   routeSessions: Pick<BrowserRouteSessionRegistry, 'preparePage'>
   routeWebContents: BrowserClientPageLifecycleRegistry
+  guestBinding: BrowserClientPageGuestBinding
   executeAutomation(
     input: {
       browserPageId: string

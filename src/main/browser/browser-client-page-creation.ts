@@ -10,6 +10,7 @@ import {
   browserClientPageIdentity
 } from './browser-client-page-command-admission'
 import { BrowserClientPageCommandError } from './browser-client-page-command-failure'
+import type { BrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
 import { createBrowserClientPageInventory } from './browser-client-page-inventory'
 import type {
   BrowserClientPageLifecycleRegistry,
@@ -30,6 +31,7 @@ type BrowserClientPageCreationDependencies = {
   selectRenderer(): BrowserClientPageRenderer
   routeSessions: Pick<BrowserRouteSessionRegistry, 'preparePage'>
   routeWebContents: BrowserClientPageLifecycleRegistry
+  guestBinding: BrowserClientPageGuestBinding
 }
 
 export async function createReservedBrowserClientPage(
@@ -49,6 +51,7 @@ export async function createReservedBrowserClientPage(
   let registration: BrowserRoutePageGuestIdentity | null = null
   let lifecycleClaim: BrowserRouteGuestLifecycleClaim | null = null
   let mountAttempted = false
+  let guestBound = false
   try {
     route = await dependencies.retainNetworkRoute(event.command.executionHostKey, signal)
     if (route.key !== event.command.executionHostKey) {
@@ -95,6 +98,12 @@ export async function createReservedBrowserClientPage(
     if (!dependencies.routeWebContents.grantNavigation(registration)) {
       throw new BrowserClientPageCommandError('browser_client_page_navigation_grant_failed')
     }
+    // Before the first navigation: a download can start on it, and an unbound page cannot own one.
+    dependencies.guestBinding.bind({
+      registration,
+      browserProfileId: event.command.browserProfileId
+    })
+    guestBound = true
     assertAvailable()
     const retainedPage = {
       generation: event.pageHostGeneration,
@@ -110,6 +119,9 @@ export async function createReservedBrowserClientPage(
     commit(retainedPage)
     return retainedPage
   } catch (error) {
+    if (guestBound && registration) {
+      dependencies.guestBinding.release(registration)
+    }
     try {
       await cleanupBrowserClientPage(dependencies.routeWebContents, {
         guestMayExist: mountAttempted,

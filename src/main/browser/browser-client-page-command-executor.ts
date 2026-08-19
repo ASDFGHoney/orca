@@ -271,6 +271,7 @@ export class BrowserClientPageCommandExecutor {
   ): Promise<void> {
     page.releaseAvailabilityWatch?.()
     page.releaseAvailabilityWatch = undefined
+    this.dependencies.guestBinding.release(page.registration)
     // Why: staged upload copies of remote files must not outlive the page that asked for them.
     await this.dependencies.uploadStaging?.releasePage(page.inventory.browserPageId)
     return cleanupRetainedBrowserClientPage(

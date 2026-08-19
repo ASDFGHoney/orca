@@ -66,6 +66,7 @@ describe('BrowserClientPageCommandExecutor integration', () => {
       routeSessions: sessionRegistry,
       executeAutomation: vi.fn(async () => undefined),
       retireAutomation: vi.fn(async () => {}),
+      guestBinding: { bind: vi.fn(), release: vi.fn() },
       routeWebContents: webContentsRegistry
     })
 
