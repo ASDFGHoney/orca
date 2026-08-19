@@ -55,9 +55,17 @@ export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'ui.set',
     params: UiUpdate,
+    // Why manualRepoOrder is dropped rather than removed from the schema: a paired client keys
+    // its overlay to its own execution hosts, so forwarding it blind-replaces the desktop's
+    // order. The strict schema still has to accept the field or old clients' whole payload fails.
     handler: (params, { runtime }) => {
-      const { hideWorkspacesFromOtherDevices: _clientLocalFilter, ...hostUpdates } = params
+      const {
+        hideWorkspacesFromOtherDevices: _clientLocalFilter,
+        manualRepoOrder: _desktopOwnedOrder,
+        ...hostUpdates
+      } = params
       void _clientLocalFilter
+      void _desktopOwnedOrder
       return { ui: runtime.updateUIState(hostUpdates as Partial<PersistedUIState>) }
     }
   }),

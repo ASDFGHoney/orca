@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FeatureInteractionState } from '../../../shared/feature-interactions'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import type { ManualRepoOrderEntry } from '../../../shared/ui-chrome-types'
 import {
   installApi,
   installBrowserGlobals,
@@ -324,6 +325,44 @@ describe('web UI preload API', () => {
     })
     expect(JSON.parse(globals.storage.getItem('orca.web.ui.v1') ?? '{}')).toMatchObject({
       hideWorkspacesFromOtherDevices: true
+    })
+  })
+
+  it('keeps the manual repo order browser-local instead of overwriting the host order', async () => {
+    const runtimeCalls: { method: string; params: unknown }[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        call(method: string, params?: unknown): Promise<RuntimeRpcResponse<unknown>> {
+          runtimeCalls.push({ method, params })
+          return Promise.resolve({
+            id: method,
+            ok: true,
+            result: { ui: {} },
+            _meta: { runtimeId: 'runtime-1' }
+          })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    // The web client keys its order to its own runtime:web-* host, so a host that predates the
+    // RPC-side strip would persist it over the desktop's local/ssh-keyed order.
+    const manualRepoOrder: ManualRepoOrderEntry[] = [
+      { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-b' },
+      { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-a' }
+    ]
+    await globals.window.api.ui.set({ manualRepoOrder, sidebarWidth: 280 })
+
+    expect(runtimeCalls[0]).toEqual({ method: 'ui.set', params: { sidebarWidth: 280 } })
+    expect(JSON.parse(globals.storage.getItem('orca.web.ui.v1') ?? '{}')).toMatchObject({
+      manualRepoOrder,
+      sidebarWidth: 280
     })
   })
 

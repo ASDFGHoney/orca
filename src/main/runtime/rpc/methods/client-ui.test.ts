@@ -560,11 +560,35 @@ describe('client UI RPC methods', () => {
     }
     const response = await dispatcher.dispatch(makeRequest('ui.set', payload))
 
+    const { manualRepoOrder: _desktopOwnedOrder, ...forwarded } = payload
     expect(runtime.updateUIState).toHaveBeenCalledWith({
-      ...payload,
+      ...forwarded,
       worktreeCardProperties: ['status', 'unread', 'branch', 'automation', 'inline-agents']
     })
     expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+  })
+
+  it('drops a paired client manualRepoOrder while forwarding the rest of the payload', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateUIState: vi.fn(() => getDefaultUIState())
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    // A paired web client restamps every repo onto its own runtime:web-* pseudo-host, so its
+    // overlay names hosts this profile will never own; persisting it erases the desktop order.
+    const response = await dispatcher.dispatch(
+      makeRequest('ui.set', {
+        sidebarWidth: 280,
+        manualRepoOrder: [
+          { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-a' },
+          { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-b' }
+        ]
+      })
+    )
+
+    expect(response).toMatchObject({ ok: true })
+    expect(runtime.updateUIState).toHaveBeenCalledWith({ sidebarWidth: 280 })
   })
 
   // Why one case per field: the schema is strict, so a single unlisted key makes

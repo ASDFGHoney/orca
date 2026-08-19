@@ -2731,9 +2731,15 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
       const next = mergeWebUIState(readLocalWebUIState(), updates)
       writeJson(UI_STORAGE_KEY, next)
       zoomLevel = next.uiZoomLevel
-      const { hideWorkspacesFromOtherDevices: _clientLocalWorkspaceFilter, ...hostUpdates } =
-        updates
+      // Why manualRepoOrder stays local: it is keyed to this client's runtime:web-* hosts, so
+      // sending it would overwrite the desktop profile's order on hosts that predate the strip.
+      const {
+        hideWorkspacesFromOtherDevices: _clientLocalWorkspaceFilter,
+        manualRepoOrder: _desktopOwnedOrder,
+        ...hostUpdates
+      } = updates
       void _clientLocalWorkspaceFilter
+      void _desktopOwnedOrder
       try {
         await callRuntimeResult('ui.set', hostUpdates, 15_000)
       } catch {
