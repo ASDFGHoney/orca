@@ -38,7 +38,15 @@ describe('ClientHostedBrowserPagePane', () => {
     mocks.call.mockReset().mockResolvedValue({ ok: true, result: { accepted: true } })
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { runtimeEnvironments: { call: mocks.call } }
+      value: {
+        runtimeEnvironments: { call: mocks.call },
+        // Download and popup notices subscribe on mount; their behavior has its own suites.
+        browser: {
+          onDownloadRequested: () => () => {},
+          onDownloadFinished: () => () => {},
+          onPopup: () => () => {}
+        }
+      }
     })
   })
   afterEach(() => cleanup())
