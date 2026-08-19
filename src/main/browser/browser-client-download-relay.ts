@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { open, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -42,14 +42,19 @@ type RelayFilesystem = {
   // Why: Electron's will-download handler must call setSavePath synchronously, so the staging
   // directory has to exist before the handler returns.
   mkdirSync(directory: string): void
+  // Why: sync so the sweep cannot delete a transfer directory a download already staged into.
+  removeDirectorySync(directory: string): void
   readChunks(filePath: string, chunkBytes: number): AsyncIterable<Buffer>
   size(filePath: string): Promise<number>
-  remove(filePath: string): Promise<void>
+  removeDirectory(directory: string): Promise<void>
 }
 
 const nodeRelayFilesystem: RelayFilesystem = {
   mkdirSync: (directory) => {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
+  },
+  removeDirectorySync: (directory) => {
+    rmSync(directory, { recursive: true, force: true })
   },
   readChunks: async function* (filePath, chunkBytes) {
     const handle = await open(filePath, 'r')
@@ -67,8 +72,8 @@ const nodeRelayFilesystem: RelayFilesystem = {
     }
   },
   size: async (filePath) => (await stat(filePath)).size,
-  remove: async (filePath) => {
-    await rm(filePath, { force: true })
+  removeDirectory: async (directory) => {
+    await rm(directory, { recursive: true, force: true })
   }
 }
 
@@ -91,6 +96,12 @@ export class BrowserClientDownloadRelay {
     }
   ) {
     this.filesystem = options.filesystem ?? nodeRelayFilesystem
+    try {
+      // Why: an abnormal exit leaves staged bytes behind, and nothing else ever revisits this root.
+      this.filesystem.removeDirectorySync(options.stagingRoot)
+    } catch {
+      // A root that cannot be swept still accepts fresh per-transfer directories.
+    }
   }
 
   /**
@@ -108,9 +119,13 @@ export class BrowserClientDownloadRelay {
       return availability === 'unsupported' ? { kind: 'local-fallback' } : { kind: 'unavailable' }
     }
     const transferId = randomUUID()
-    const stagingPath = path.join(this.options.stagingRoot, transferId, 'download')
+    const transfer: StagedTransfer = {
+      transferId,
+      directory: path.join(this.options.stagingRoot, transferId),
+      stagingPath: path.join(this.options.stagingRoot, transferId, 'download')
+    }
     try {
-      this.filesystem.mkdirSync(path.dirname(stagingPath))
+      this.filesystem.mkdirSync(transfer.directory)
     } catch {
       return { kind: 'unavailable' }
     }
@@ -119,19 +134,19 @@ export class BrowserClientDownloadRelay {
       route: {
         transferId,
         browserPageId: page.browserPageId,
-        stagingPath,
-        complete: (filename) => this.complete(page, transferId, stagingPath, filename),
-        abort: () => this.abort(page, transferId, stagingPath)
+        stagingPath: transfer.stagingPath,
+        complete: (filename) => this.complete(page, transfer, filename),
+        abort: () => this.abort(page, transfer)
       }
     }
   }
 
   private async complete(
     page: BrowserClientHostedPageInventory,
-    transferId: string,
-    stagingPath: string,
+    transfer: StagedTransfer,
     filename: string
   ): Promise<BrowserClientDownloadDestination> {
+    const { transferId, stagingPath } = transfer
     try {
       if (
         (await this.filesystem.size(stagingPath)) > BROWSER_CLIENT_FILE_CHANNEL_TRANSFER_MAX_BYTES
@@ -166,10 +181,10 @@ export class BrowserClientDownloadRelay {
       }
       return { workspaceRelativePath, hostLabel: this.options.hostLabel }
     } catch (error) {
-      await this.abort(page, transferId, stagingPath)
+      await this.abort(page, transfer)
       throw error
     } finally {
-      await this.filesystem.remove(stagingPath).catch(() => undefined)
+      await this.filesystem.removeDirectory(transfer.directory).catch(() => undefined)
     }
   }
 
@@ -203,20 +218,26 @@ export class BrowserClientDownloadRelay {
 
   private async abort(
     page: BrowserClientHostedPageInventory,
-    transferId: string,
-    stagingPath: string
+    transfer: StagedTransfer
   ): Promise<void> {
-    await this.filesystem.remove(stagingPath).catch(() => undefined)
+    await this.filesystem.removeDirectory(transfer.directory).catch(() => undefined)
     if (!this.options.transport.available) {
       return
     }
     await this.options.transport
       .request(BROWSER_CLIENT_FILE_CHANNEL_ABORT_METHOD, {
         ...fileChannelAuthority(page),
-        transferId
+        transferId: transfer.transferId
       })
       .catch(() => undefined)
   }
+}
+
+type StagedTransfer = {
+  transferId: string
+  /** Owns the staged file: removing it is what keeps the staging root from growing per download. */
+  directory: string
+  stagingPath: string
 }
 
 function fileChannelAuthority(page: BrowserClientHostedPageInventory) {

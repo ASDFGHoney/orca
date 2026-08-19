@@ -68,9 +68,10 @@ function environment(input: {
     resolvePage: (webContentsId) => (webContentsId === input.guestWebContentsId ? page : undefined),
     filesystem: {
       mkdirSync: () => {},
+      removeDirectorySync: () => {},
       readChunks: async function* () {},
       size: async () => 0,
-      remove: async () => {}
+      removeDirectory: async () => {}
     }
   })
   registerBrowserClientDownloadRouter(input.environmentId, relay)
