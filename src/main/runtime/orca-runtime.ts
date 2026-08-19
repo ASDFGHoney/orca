@@ -11138,50 +11138,57 @@ export class OrcaRuntimeService {
     if (!listing?.rootProcessId) {
       throw new Error('Could not prove the Codex terminal process.')
     }
+    const rootProcessId = listing.rootProcessId
     const spawnToken = randomUUID()
-    const process = await readStructuredTuiProcessIdentity({
-      hostId: intent.location.executionHostId,
-      rootPid: listing.rootProcessId,
-      spawnToken,
-      agent: 'codex'
-    })
-    let threadId = input.threadId
-    let transcriptPath = threadId
-      ? await resolvePinnedCodexRolloutProof(intent.accountHome.path, threadId)
-      : null
-    if (!threadId) {
-      const readPty = (): RuntimePtyWorktreeRecord => {
-        const current = this.ptysById.get(input.ptyId)
-        if (!current?.connected || current.paneKey !== input.paneKey) {
-          throw new Error('The Codex terminal lost its pane identity.')
-        }
-        return current
+    const readPty = (): RuntimePtyWorktreeRecord => {
+      const current = this.ptysById.get(input.ptyId)
+      if (!current?.connected || current.paneKey !== input.paneKey) {
+        throw new Error('The Codex terminal lost its pane identity.')
       }
+      return current
+    }
+    const readProcess = () =>
+      readStructuredTuiProcessIdentity({
+        hostId: intent.location.executionHostId,
+        rootPid: rootProcessId,
+        spawnToken,
+        agent: 'codex'
+      })
+    const process = await readProcess()
+    let threadId = input.threadId
+    const proofInput = {
+      codexHome: intent.accountHome.path,
+      kittyKeyboardFlags: this.providerModeTrackersByPtyId.get(input.ptyId)?.flags ?? 0,
+      readOutput: () => {
+        const current = readPty()
+        return {
+          text: buildTerminalWaitText(current.tailBuffer, current.tailPartialLine, current.preview),
+          lastOutputAt: current.lastOutputAt
+        }
+      },
+      write: (data: string) =>
+        this.ptyController?.writeAgentSessionProof?.(readPty().ptyId, data, {
+          sessionId: input.envelope.sessionId,
+          spawnToken
+        }) ?? false
+    }
+    let transcriptPath: string
+    if (threadId) {
+      const proof = await proveCodexTuiRollout({ ...proofInput, threadId })
+      transcriptPath = proof.transcriptPath
+    } else {
       const proof = await resolveLiveCodexTuiRollout({
-        codexHome: intent.accountHome.path,
-        kittyKeyboardFlags: this.providerModeTrackersByPtyId.get(input.ptyId)?.flags ?? 0,
-        readOutput: () => {
-          const current = readPty()
-          return {
-            text: buildTerminalWaitText(
-              current.tailBuffer,
-              current.tailPartialLine,
-              current.preview
-            ),
-            lastOutputAt: current.lastOutputAt
-          }
-        },
-        write: (data) =>
-          this.ptyController?.writeAgentSessionProof?.(readPty().ptyId, data, {
-            sessionId: input.envelope.sessionId,
-            spawnToken
-          }) ?? false
+        ...proofInput
       })
       threadId = proof.threadId
       transcriptPath = proof.transcriptPath
     }
-    if (!transcriptPath) {
-      throw new Error('Could not find the rollout for this Codex conversation.')
+    const confirmedProcess = await readProcess()
+    if (
+      confirmedProcess.pid !== process.pid ||
+      confirmedProcess.processStartTimeMs !== process.processStartTimeMs
+    ) {
+      throw new Error('The Codex terminal process changed during conversation proof.')
     }
     const owner: StructuredTuiOwner = {
       terminal: {
