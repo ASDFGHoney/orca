@@ -20,8 +20,10 @@ import {
   resetSessionParseCacheForTests
 } from './session-scanner-parse-cache'
 import {
+  WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
-  WslTranscriptFsError
+  WslTranscriptFsError,
+  resetWslTranscriptFsGateForTests
 } from '../native-chat/wsl-transcript-fs-gate'
 
 type ReadResult = { bytesRead: number; buffer: Buffer }
@@ -77,6 +79,13 @@ function candidate(path: string, bytes: Buffer, mtimeMs: number): SessionFileCan
   }
 }
 
+// A timed-out stall quarantines the route, so the next read is refused until the
+// window lapses. Waiting it out is what a real caller does; resetting the gate here
+// would skip the very admission the recovery assertions depend on.
+async function lapseRouteQuarantine(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS + 1)
+}
+
 async function releaseAndSettle(): Promise<void> {
   releaseStall?.()
   releaseStall = undefined
@@ -84,6 +93,7 @@ async function releaseAndSettle(): Promise<void> {
 }
 
 beforeEach(() => {
+  resetWslTranscriptFsGateForTests()
   resetSessionParseCacheForTests()
   mocks.open.mockReset()
   mocks.readdir.mockReset()
@@ -143,6 +153,7 @@ describe('AI Vault session parse with a stalled WSL transcript body read', () =>
     await refused
 
     await releaseAndSettle()
+    await lapseRouteQuarantine()
     mocks.open.mockResolvedValue(servingHandle(grown))
     const recovered = await parseAgentSessionFileCached(candidate(STALLED_PATH, grown, 2), 'linux')
 

@@ -27,8 +27,10 @@ import {
 } from './session-scanner-kimi-paths'
 import { readJsonObjectIfExists } from './session-scanner-values'
 import {
+  WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS,
   WSL_TRANSCRIPT_FS_SCAN_TIMEOUT_MS,
-  WslTranscriptFsError
+  WslTranscriptFsError,
+  resetWslTranscriptFsGateForTests
 } from '../native-chat/wsl-transcript-fs-gate'
 
 // Identity must not change between the refused and the recovered read, or the
@@ -55,6 +57,13 @@ function servingHandle(body: string) {
   }
 }
 
+// A timed-out stall quarantines the route, so the next read is refused until the
+// window lapses. Waiting it out is what a real caller does; resetting the gate here
+// would skip the very admission the recovery assertions depend on.
+async function lapseRouteQuarantine(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(WSL_TRANSCRIPT_FS_ROUTE_QUARANTINE_BASE_MS + 1)
+}
+
 async function releaseAndSettle(): Promise<void> {
   releaseStall?.()
   releaseStall = undefined
@@ -62,6 +71,7 @@ async function releaseAndSettle(): Promise<void> {
 }
 
 beforeEach(() => {
+  resetWslTranscriptFsGateForTests()
   resetCodexSessionIndexTitleCacheForTests()
   clearKimiSessionIndexCache()
   mocks.stat.mockReset()
@@ -87,6 +97,7 @@ describe('memoized WSL session indexes under a stalled mount', () => {
     expect(_hasCodexSessionIndexTitleCacheEntryForTest(CODEX_HOME)).toBe(false)
 
     await releaseAndSettle()
+    await lapseRouteQuarantine()
     mocks.open.mockResolvedValue(
       servingHandle(`${JSON.stringify({ id: SESSION_ID, thread_name: 'Ship the gate' })}\n`)
     )
@@ -106,6 +117,7 @@ describe('memoized WSL session indexes under a stalled mount', () => {
     expect(hasKimiSessionIndexCacheEntryForTests(KIMI_INDEX)).toBe(false)
 
     await releaseAndSettle()
+    await lapseRouteQuarantine()
     mocks.open.mockResolvedValue(
       servingHandle(`${JSON.stringify({ sessionId: SESSION_ID, workDir: '/repo/app' })}\n`)
     )
