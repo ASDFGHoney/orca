@@ -113,23 +113,23 @@ describe('orchestration skill guidance', () => {
       'read the worker terminal after prompt delivery except to avoid losing the initial prompt'
     )
     expect(skill).toContain(
-      '`--no-parent` only controls Orca lineage; it does not choose the Git base.'
+      'Lineage and Git base are independent: `--no-parent` never changes the base, and `--base-branch` never changes lineage.'
     )
     expect(skill).toContain(
       'never base it on the current feature branch unless the user explicitly asks'
     )
-    expect(skill).toContain(
-      'orca worktree create --name <task-name> --no-parent --agent codex --prompt'
+    expect(skill).toContain('orca worktree create --name <task-name> --agent codex --prompt')
+    // Templates must not opt out of lineage; the inferred-parent default is the point.
+    expect(fullHandoffs).not.toContain('--no-parent --agent codex')
+    expect(fullHandoffs).not.toContain('--name <task-name> --no-parent')
+    expect(fullHandoffs).toContain(
+      'With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child'
     )
     expect(fullHandoffs).toContain(
-      'Before creating a new worktree from an active feature branch, decide and state whether the desired Orca lineage is child or top-level'
+      'travels with it when the user reviews, sleeps, or deletes that line of work'
     )
-    expect(fullHandoffs).toContain(
-      'Use child worktree lineage only when the new work is conceptually stacked under or dependent on the active worktree'
-    )
-    expect(fullHandoffs).toContain(
-      'For independent repo-wide fixes, standalone feature work, or unrelated follow-up tasks, create a top-level worktree with `--no-parent`'
-    )
+    // No prescriptive child-vs-top-level rule: the agent decides.
+    expect(fullHandoffs).not.toContain('Use child worktree lineage only when')
     expect(fullHandoffs).toContain('If the work should start from the repo default base')
     expect(fullHandoffs).toContain('omit `--base-branch`')
   })
@@ -199,10 +199,11 @@ describe('orchestration skill guidance', () => {
     expect(workerTerminals).toContain(
       'Independent tasks, parallel execution, convenience, or a preference for separate checkouts are not isolation requirements.'
     )
+    expect(workerTerminals).toContain('its lineage is a separate choice from its Git base')
     expect(workerTerminals).toContain(
-      'When a new worktree is allowed, use child lineage for isolated work that is stacked under or dependent on the active worktree'
+      'omitting the lineage flag files it under the inferred parent'
     )
-    expect(workerTerminals).toContain('use `--no-parent` when it is not stacked')
+    expect(workerTerminals).not.toContain('when it is not stacked')
   })
 
   it('keeps review-only completions and named next-owner fixes in their lanes', () => {

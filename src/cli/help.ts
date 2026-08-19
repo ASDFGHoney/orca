@@ -267,7 +267,7 @@ Selectors:
   --worktree <selector>     Worktree selector such as id:<repo-id>::<path>, name:<displayName>, branch:<branch>, issue:<number>, path:<path>, or active/current
   --terminal <handle>       Runtime-issued terminal handle returned by \`orca terminal list --json\`
   --parent-worktree <selector> Parent worktree selector such as id:<repo-id>::<path>, branch:<branch>, issue:<number>, path:<path>, or active/current
-  --no-parent               Force no parent lineage for unrelated worktree creation/update
+  --no-parent               File at the top level instead of under the inferred parent worktree
 
 Terminal Send Options:
   --text <text>             Text to send to the terminal
@@ -562,7 +562,8 @@ export function formatFlagHelp(flag: string): string {
     'mouse-button': '--mouse-button <btn>   Mouse button: left, right, or middle',
     modifiers: '--modifiers <chord>  Modifier keys held only for this click',
     name: '--name <name>          Name for the new worktree or automation',
-    'no-parent': '--no-parent            Force no parent lineage for unrelated work',
+    'no-parent':
+      '--no-parent            File at the top level instead of under the inferred parent',
     'no-screenshot': '--no-screenshot       Skip screenshot capture after the operation',
     pages: '--pages <n>           Number of scroll pages',
     'parent-worktree':
