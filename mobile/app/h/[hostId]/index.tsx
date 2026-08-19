@@ -30,6 +30,7 @@ import {
 } from '../../../src/transport/client-context'
 import { useWorktreeResync } from '../../../src/transport/use-worktree-resync'
 import { startHostWorktreeRefresh } from '../../../src/worktree/host-worktree-refresh'
+import { removeWorktreeRow } from '../../../src/worktree/worktree-host-row-identity'
 import {
   useLastConnectedAt,
   useRelayRecoveryStatus,
@@ -610,8 +611,7 @@ export function HostScreen({
         return
       }
 
-      const removeFromList = (list: Worktree[]) =>
-        list.filter((w) => w.worktreeId !== item.worktreeId)
+      const removeFromList = (list: Worktree[]) => removeWorktreeRow(list, item)
       setWorktrees(removeFromList)
       setLastKnownWorktrees(removeFromList)
 
