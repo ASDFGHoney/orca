@@ -121,7 +121,12 @@ export type PtyApi = {
   hasPty: (id: string) => Promise<boolean | null>
   getMainBufferSnapshot: (
     id: string,
-    opts?: { scrollbackRows?: number }
+    opts?: {
+      scrollbackRows?: number
+      /** Marks this fetch as hidden-output recovery, which retires main's
+       *  drop latch; sidecar readers must leave it unset. */
+      hiddenOutputRestore?: boolean
+    }
   ) => Promise<{
     data: string
     frameRestoreAnsi?: string

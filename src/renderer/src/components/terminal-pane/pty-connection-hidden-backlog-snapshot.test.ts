@@ -317,7 +317,10 @@ describe('connectPanePty', () => {
       await new Promise((resolve) => setTimeout(resolve, 30))
       await flushAsyncTicks(20)
 
-      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+        scrollbackRows: 5000,
+        hiddenOutputRestore: true
+      })
       expect(pane.terminal.write).not.toHaveBeenCalledWith(hidden)
       expect(pane.terminal.write).toHaveBeenCalledWith(
         expect.stringContaining('inactive snapshot'),
@@ -538,7 +541,10 @@ describe('connectPanePty', () => {
     })
     await flushAsyncTicks(20)
 
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+      scrollbackRows: 5000,
+      hiddenOutputRestore: true
+    })
     expect(pane.terminal.resize).toHaveBeenCalledWith(100, 30)
     expect(pane.terminal.write).toHaveBeenCalledWith(NORMAL_BUFFER_PROLOGUE, expect.any(Function))
     expect(pane.terminal.write).toHaveBeenCalledWith('snapshot-state\r\n', expect.any(Function))
@@ -589,7 +595,10 @@ describe('connectPanePty', () => {
     })
     await flushAsyncTicks(20)
 
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+      scrollbackRows: 5000,
+      hiddenOutputRestore: true
+    })
     expect(pane.terminal.write).toHaveBeenCalledWith(NORMAL_BUFFER_PROLOGUE, expect.any(Function))
     expect(pane.terminal.write).toHaveBeenCalledWith(
       'preserved-shell-history\r\n',

@@ -1147,7 +1147,7 @@ const api = {
 
     getMainBufferSnapshot: (
       id: string,
-      opts?: { scrollbackRows?: number }
+      opts?: { scrollbackRows?: number; hiddenOutputRestore?: boolean }
     ): Promise<{
       data: string
       frameRestoreAnsi?: string

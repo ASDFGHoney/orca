@@ -331,6 +331,55 @@ describe('hidden-output restore loss disclosure (STA-4869)', () => {
       ).toBeGreaterThanOrEqual(disclosure.bannerWrites > 0 ? 0 : 1)
       drive.disposable.dispose()
     })
+
+    async function exhaustBudgetWhileHidden(
+      serializeBufferOutcome: ReturnType<typeof vi.fn>
+    ): Promise<PaneDrive> {
+      const seventhAnswer = createDeferred<unknown>()
+      const drive = await driveToSeventhAnswer(serializeBufferOutcome)
+      serializeBufferOutcome.mockReturnValueOnce(seventhAnswer.promise)
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushAsyncTicks(20)
+      drive.setVisible(false)
+      seventhAnswer.resolve(retryWorthy)
+      await flushAsyncTicks(20)
+      return drive
+    }
+
+    it('[fix] heals exactly once on one fresh snapshot when the host recovered', async () => {
+      const serializeBufferOutcome = vi.fn().mockResolvedValue(retryWorthy)
+      const drive = await exhaustBudgetWhileHidden(serializeBufferOutcome)
+
+      serializeBufferOutcome.mockResolvedValue(hostAnswers(retainedSnapshot(R1_MARKER)))
+      const requestsBeforeReveal = serializeBufferOutcome.mock.calls.length
+      await revealPane(drive)
+      await allowRecoveryWindow()
+
+      expect(observeDisclosure(drive, R1_MARKER)).toMatchObject({
+        bannerWrites: 0,
+        markerWrites: 1
+      })
+      // Reveal is the bounded retry: one fresh snapshot, not a fresh budget.
+      expect(serializeBufferOutcome.mock.calls.length - requestsBeforeReveal).toBe(1)
+      drive.disposable.dispose()
+    })
+
+    it('[fix] banners once when the host is still broken at reveal', async () => {
+      const serializeBufferOutcome = vi.fn().mockResolvedValue(retryWorthy)
+      const drive = await exhaustBudgetWhileHidden(serializeBufferOutcome)
+      expect(drive.writtenChunks().join('')).not.toContain(BANNER_FRAGMENT)
+
+      await revealPane(drive)
+      await allowRecoveryWindow()
+
+      // The spent budget abandons on the first foreground answer, so the
+      // disclosure now lands where it can be read.
+      expect(observeDisclosure(drive, R1_MARKER)).toMatchObject({
+        bannerWrites: 1,
+        markerWrites: 0
+      })
+      drive.disposable.dispose()
+    })
   })
 
   // ── R2: permanently-unavailable ─────────────────────────────────────────

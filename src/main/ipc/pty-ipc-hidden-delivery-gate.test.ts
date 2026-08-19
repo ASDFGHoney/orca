@@ -170,6 +170,128 @@ describe('registerPtyHandlers', () => {
         vi.useRealTimers()
       }
     })
+    it('retires drop memory on the recovery snapshot, not on unhide (STA-4869)', async () => {
+      vi.useFakeTimers()
+      const runtime = {
+        setPtyController: vi.fn(),
+        registerPty: vi.fn(),
+        noteTerminalSpawnCommand: vi.fn(),
+        onPtySpawned: vi.fn(),
+        onPtyExit: vi.fn(),
+        onPtyData: vi.fn(() => 42),
+        getPtyOutputSequence: vi.fn(() => 42),
+        hasRemoteTerminalViewSubscriber: vi.fn(() => false),
+        createPreAllocatedTerminalHandle: vi.fn(() => 'terminal-handle-1'),
+        registerPreAllocatedHandleForPty: vi.fn(),
+        serializeHiddenOutputRecoveryBuffer: vi.fn(async () => ({
+          data: 'retained while hidden',
+          cols: 80,
+          rows: 24,
+          seq: 42
+        }))
+      }
+      const daemon = installObservableDaemonTestProvider()
+      const restoreMarkers = (): number =>
+        mainWindow.webContents.send.mock.calls.filter(
+          (call: unknown[]) => call[0] === 'pty:modelRestoreNeeded'
+        ).length
+      try {
+        registerPtyHandlers(mainWindow as never, runtime as never)
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          sessionId: 'daemon-session'
+        })) as { id: string }
+        const setHidden = getPtySetHiddenRendererPtyListener()
+        const getSnapshot = handlers.get('pty:getMainBufferSnapshot')!
+        mainWindow.webContents.send.mockClear()
+
+        setHidden(null, { id: result.id, hidden: true })
+        daemon.emitData(result.id, 'hidden output')
+        vi.advanceTimersByTime(50)
+        expect(restoreMarkers()).toBe(1)
+
+        // A pane retiring while hidden unhides after unregistering its marker
+        // handler, so the first unhide marker reaches nobody. The replacement's
+        // own unhide must still be able to ask for the restore.
+        setHidden(null, { id: result.id, hidden: false })
+        setHidden(null, { id: result.id, hidden: false })
+        expect(restoreMarkers()).toBe(3)
+        expect(mainWindow.webContents.send).toHaveBeenLastCalledWith('pty:modelRestoreNeeded', {
+          id: result.id,
+          reason: 'unhide',
+          markerSeq: 42
+        })
+
+        // Sidecar readers (native chat, the SSH reattach probe) fetch the same
+        // snapshot without claiming recovery, so they cannot spend the latch.
+        await getSnapshot(null, { id: result.id })
+        setHidden(null, { id: result.id, hidden: false })
+        expect(restoreMarkers()).toBe(4)
+
+        // Recovery's own fetch retires it: no marker storm afterwards.
+        await getSnapshot(null, { id: result.id, opts: { hiddenOutputRestore: true } })
+        setHidden(null, { id: result.id, hidden: false })
+        setHidden(null, { id: result.id, hidden: false })
+        expect(restoreMarkers()).toBe(4)
+
+        // A fresh hidden episode reports again.
+        setHidden(null, { id: result.id, hidden: true })
+        daemon.emitData(result.id, 'hidden again')
+        vi.advanceTimersByTime(50)
+        expect(restoreMarkers()).toBe(5)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+    it('keeps drop memory armed when the recovery snapshot is refused', async () => {
+      vi.useFakeTimers()
+      const runtime = {
+        setPtyController: vi.fn(),
+        registerPty: vi.fn(),
+        noteTerminalSpawnCommand: vi.fn(),
+        onPtySpawned: vi.fn(),
+        onPtyExit: vi.fn(),
+        onPtyData: vi.fn(() => 42),
+        getPtyOutputSequence: vi.fn(() => 42),
+        hasRemoteTerminalViewSubscriber: vi.fn(() => false),
+        createPreAllocatedTerminalHandle: vi.fn(() => 'terminal-handle-1'),
+        registerPreAllocatedHandleForPty: vi.fn(),
+        serializeHiddenOutputRecoveryBuffer: vi.fn(async () => null)
+      }
+      const daemon = installObservableDaemonTestProvider()
+      try {
+        registerPtyHandlers(mainWindow as never, runtime as never)
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          sessionId: 'daemon-session'
+        })) as { id: string }
+        const setHidden = getPtySetHiddenRendererPtyListener()
+        mainWindow.webContents.send.mockClear()
+
+        setHidden(null, { id: result.id, hidden: true })
+        daemon.emitData(result.id, 'hidden output')
+        vi.advanceTimersByTime(50)
+
+        // Why: a refused snapshot delivered nothing, so the next reveal still owes
+        // the renderer a restore signal.
+        expect(
+          await handlers.get('pty:getMainBufferSnapshot')!(null, {
+            id: result.id,
+            opts: { hiddenOutputRestore: true }
+          })
+        ).toBeNull()
+        setHidden(null, { id: result.id, hidden: false })
+        expect(mainWindow.webContents.send).toHaveBeenLastCalledWith('pty:modelRestoreNeeded', {
+          id: result.id,
+          reason: 'unhide',
+          markerSeq: 42
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
     it('surfaces the hidden-yet-visible contradiction in the snapshot and warns on drop', async () => {
       // Why: field snapshot v1.4.124-rc.2.perf — aggregates couldn't tell if the visible pane was hidden-gated; overlap counter + warn makes it decisive.
       vi.useFakeTimers()

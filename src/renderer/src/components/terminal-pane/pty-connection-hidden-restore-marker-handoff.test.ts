@@ -17,12 +17,13 @@ import {
   restoreTerminalTestGlobals
 } from './pty-connection-test-environment'
 
-// STA-4869 route R6 — the drop latch (pty-hidden-delivery-gate.ts:29) is
-// single-use: unmarkHiddenRendererPty consumes it and main re-emits one
-// 'unhide' marker (pty.ts:7675). The renderer channel has no latch of its own —
-// dispatchPtyModelRestoreNeeded (pty-model-restore-channel.ts:18) drops a marker
+// STA-4869 route R6 — the renderer channel has no latch of its own:
+// dispatchPtyModelRestoreNeeded (pty-model-restore-channel.ts) drops a marker
 // for which no handler is registered. A pane that releases the last hidden claim
-// while retiring therefore spends the latch on a marker nobody can receive.
+// while retiring unhides after unregistering its handler, so a drop latch
+// consumed by unmark would be spent on a marker nobody can receive. The fix
+// keeps the latch armed across unhide and retires it where recovery actually
+// takes delivery of the bytes — main serving a model snapshot.
 //
 // This suite drives the REAL renderer channel from behind the
 // setHiddenRendererPty IPC, delivering main's marker one turn later the way
@@ -135,9 +136,9 @@ type PaneDrive = {
   writtenChunks: () => string[]
 }
 
-/** Main's droppedSinceHiddenPtys latch (pty-hidden-delivery-gate.ts:29): the
- *  first gated drop arms it, only unmark consumes it, and re-marking hidden
- *  preserves it. */
+/** Main's droppedSinceHiddenPtys latch (pty-hidden-delivery-gate.ts): the first
+ *  gated drop arms it, neither re-marking hidden nor unmarking clears it, and
+ *  only a served model snapshot (or teardown) retires it. */
 const mainDropLatch = {
   hidden: false,
   dropped: false,
@@ -152,12 +153,14 @@ const mainDropLatch = {
     this.dropped = true
     return true
   },
-  /** @returns droppedWhileHidden — the latch, consumed. */
+  /** @returns droppedWhileHidden — read, not spent. */
   unmarkHidden(): boolean {
     this.hidden = false
-    const dropped = this.dropped
+    return this.dropped
+  },
+  /** consumeHiddenRendererPtyDropMemory: recovery has the bytes now. */
+  consumeDropMemory(): void {
     this.dropped = false
-    return dropped
   },
   reset(): void {
     this.hidden = false
@@ -260,12 +263,15 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
       terminalMainSideEffectAuthority: true
     } as StoreState['settings']
     installTerminalTestGlobals()
-    vi.mocked(window.api.pty.getMainBufferSnapshot).mockResolvedValue({
-      data: `${R6_MARKER}\r\n`,
-      cols: 120,
-      rows: 40,
-      seq: 4096
-    } as never)
+    vi.mocked(window.api.pty.getMainBufferSnapshot).mockImplementation(
+      async (_id: string, opts?: { hiddenOutputRestore?: boolean }) => {
+        // Main retires the drop latch when it actually serves recovery its bytes.
+        if (opts?.hiddenOutputRestore === true) {
+          mainDropLatch.consumeDropMemory()
+        }
+        return { data: `${R6_MARKER}\r\n`, cols: 120, rows: 40, seq: 4096 } as never
+      }
+    )
   })
 
   afterEach(async () => {
@@ -335,6 +341,38 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
       disclosure.disclosedOrRecovered,
       `hidden output was neither reconciled nor disclosed after remount: ${JSON.stringify(disclosure)}`
     ).toBe(true)
+    replacement.binding.dispose()
+  })
+
+  it('[fix] the remount re-emits the unhide marker and one snapshot retires the latch', async () => {
+    const gate = await wireMainGateToRendererChannel()
+    const retiring = await connectPane(false)
+    retiring.deliver(HIDDEN_CHUNK, HIDDEN_CHUNK.length)
+    await dropHiddenBytesInMain()
+    retiring.binding.dispose()
+    await flushAsyncTicks(20)
+    expect(gate.markersDelivered()).toBe(1)
+
+    const replacement = await connectPane(true)
+    replacement.binding.syncProcessTracking()
+    await flushAsyncTicks(20)
+
+    // The latch outlived the marker nobody received, so the remount's own unhide
+    // re-emits it; the snapshot that heals the gap is what finally spends it.
+    expect(gate.markersDelivered()).toBe(2)
+    expect(observeDisclosure(replacement)).toMatchObject({ markerWrites: 1 })
+    expect(mainDropLatch.dropped).toBe(false)
+
+    // No marker storm: hide/reveal cycles after consumption ask for nothing.
+    const snapshotRequests = vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls.length
+    replacement.setVisible(false)
+    replacement.binding.syncProcessTracking()
+    replacement.setVisible(true)
+    replacement.binding.syncProcessTracking()
+    await flushAsyncTicks(20)
+
+    expect(gate.markersDelivered()).toBe(2)
+    expect(vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls.length).toBe(snapshotRequests)
     replacement.binding.dispose()
   })
 })

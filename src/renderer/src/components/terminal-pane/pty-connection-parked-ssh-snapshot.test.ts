@@ -559,7 +559,10 @@ describe('connectPanePty', () => {
     }
 
     expect(getMainBufferSnapshot).toHaveBeenCalledOnce()
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith(localPtyId, { scrollbackRows: 5000 })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith(localPtyId, {
+      scrollbackRows: 5000,
+      hiddenOutputRestore: true
+    })
     expect(transport.connect).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: localPtyId })
     )

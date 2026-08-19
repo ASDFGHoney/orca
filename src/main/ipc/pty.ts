@@ -173,6 +173,7 @@ import { PtyProducerFlowController } from './pty-producer-flow-control'
 import { beginTerminalInstall } from './watcher-removal-gate'
 import {
   clearHiddenRendererPtyDeliveryState,
+  consumeHiddenRendererPtyDropMemory,
   getHiddenRendererPtyDeliveryDebug,
   getHiddenRendererPtyIds,
   isHiddenPtyDeliveryGateEnabled,
@@ -5941,66 +5942,88 @@ export function registerPtyHandlers(
     return Math.max(0, Math.min(50_000, Math.floor(value)))
   }
 
+  type MainBufferSnapshotReply = {
+    data: string
+    frameRestoreAnsi?: string
+    cols: number
+    rows: number
+    cwd?: string | null
+    lastTitle?: string
+    seq?: number
+    pendingDeliveryStartSeq?: number
+    source?: 'headless' | 'renderer'
+    alternateScreen?: boolean
+    scrollbackAnsi?: string
+    pendingEscapeTailAnsi?: string
+    kittyKeyboardFlags?: number
+  } | null
+
+  async function resolveMainBufferSnapshot(
+    id: string,
+    scrollbackRows: number | undefined
+  ): Promise<MainBufferSnapshotReply> {
+    if (!runtime) {
+      return null
+    }
+    try {
+      const runtimeSeqBeforeSnapshot = runtime.getPtyOutputSequence(id)
+      const providerSnapshotRequired = providerSnapshotRequiredPtys.has(id)
+      const providerSnapshot = providerSnapshotRequired
+        ? await tryGetProviderForPty(id)?.getBufferSnapshot?.(id, {
+            scrollbackRows
+          })
+        : null
+      // Why: after a data gap main holds only the retained tail; returning it as a full snapshot would erase older scrollback.
+      if (providerSnapshotRequired && !providerSnapshot) {
+        return null
+      }
+      const snapshot =
+        providerSnapshot ??
+        (await runtime.serializeHiddenOutputRecoveryBuffer(id, {
+          scrollbackRows
+        }))
+      if (!snapshot || typeof snapshot.seq !== 'number') {
+        return snapshot
+      }
+      // Why: the renderer's post-restore dedupe needs this pending-queue bound, or a stale baseline swallows new chunks whose seq sits below the snapshot counter.
+      const pending = pendingData.get(id)
+      if (pending && typeof pending.startSeq !== 'number') {
+        // Why: a seq-less backlog cannot be bounded — stay conservative.
+        return snapshot
+      }
+      return {
+        ...snapshot,
+        pendingDeliveryStartSeq: Math.min(
+          pending?.startSeq ?? (providerSnapshot ? runtimeSeqBeforeSnapshot : snapshot.seq),
+          snapshot.seq
+        )
+      }
+    } catch {
+      return null
+    }
+  }
+
   ipcMain.handle(
     'pty:getMainBufferSnapshot',
     async (
       _event,
-      args: { id?: unknown; opts?: { scrollbackRows?: unknown } }
-    ): Promise<{
-      data: string
-      frameRestoreAnsi?: string
-      cols: number
-      rows: number
-      cwd?: string | null
-      lastTitle?: string
-      seq?: number
-      pendingDeliveryStartSeq?: number
-      source?: 'headless' | 'renderer'
-      alternateScreen?: boolean
-      scrollbackAnsi?: string
-      pendingEscapeTailAnsi?: string
-      kittyKeyboardFlags?: number
-    } | null> => {
+      args: { id?: unknown; opts?: { scrollbackRows?: unknown; hiddenOutputRestore?: unknown } }
+    ): Promise<MainBufferSnapshotReply> => {
       if (!runtime || typeof args?.id !== 'string' || args.id.length === 0) {
         return null
       }
-      const scrollbackRows = normalizeSnapshotScrollbackRows(args.opts?.scrollbackRows)
-      try {
-        const runtimeSeqBeforeSnapshot = runtime.getPtyOutputSequence(args.id)
-        const providerSnapshotRequired = providerSnapshotRequiredPtys.has(args.id)
-        const providerSnapshot = providerSnapshotRequired
-          ? await tryGetProviderForPty(args.id)?.getBufferSnapshot?.(args.id, {
-              scrollbackRows
-            })
-          : null
-        // Why: after a data gap main holds only the retained tail; returning it as a full snapshot would erase older scrollback.
-        if (providerSnapshotRequired && !providerSnapshot) {
-          return null
-        }
-        const snapshot =
-          providerSnapshot ??
-          (await runtime.serializeHiddenOutputRecoveryBuffer(args.id, {
-            scrollbackRows
-          }))
-        if (!snapshot || typeof snapshot.seq !== 'number') {
-          return snapshot
-        }
-        // Why: the renderer's post-restore dedupe needs this pending-queue bound, or a stale baseline swallows new chunks whose seq sits below the snapshot counter.
-        const pending = pendingData.get(args.id)
-        if (pending && typeof pending.startSeq !== 'number') {
-          // Why: a seq-less backlog cannot be bounded — stay conservative.
-          return snapshot
-        }
-        return {
-          ...snapshot,
-          pendingDeliveryStartSeq: Math.min(
-            pending?.startSeq ?? (providerSnapshot ? runtimeSeqBeforeSnapshot : snapshot.seq),
-            snapshot.seq
-          )
-        }
-      } catch {
-        return null
+      const snapshot = await resolveMainBufferSnapshot(
+        args.id,
+        normalizeSnapshotScrollbackRows(args.opts?.scrollbackRows)
+      )
+      // Why here and not on unhide: this is where hidden-output recovery actually
+      // takes delivery of the retained bytes. A refused snapshot leaves the latch
+      // armed so the next unhide re-emits, and sidecar readers (native chat, the
+      // SSH reattach probe) never pass the flag, so they cannot spend it (STA-4869).
+      if (snapshot && args.opts?.hiddenOutputRestore === true) {
+        consumeHiddenRendererPtyDropMemory(args.id)
       }
+      return snapshot
     }
   )
 

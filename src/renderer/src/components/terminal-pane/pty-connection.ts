@@ -6029,7 +6029,10 @@ export function connectPanePty(
         return snapshot ? { kind: 'snapshot', snapshot } : { kind: 'unavailable' }
       }
       if (canUseMainBufferSnapshot(ptyId)) {
-        const snapshot = await window.api.pty.getMainBufferSnapshot(ptyId, opts)
+        const snapshot = await window.api.pty.getMainBufferSnapshot(ptyId, {
+          ...opts,
+          hiddenOutputRestore: true
+        })
         return snapshot ? { kind: 'snapshot', snapshot } : { kind: 'unavailable' }
       }
       if (transport.getPtyId() !== ptyId || typeof transport.serializeBuffer !== 'function') {
@@ -7103,6 +7106,19 @@ export function connectPanePty(
       return true
     }
 
+    // Why: a loss finalized while hidden discloses nothing — the banner is
+    // swallowed and the abandon zeroes recovery, so no reveal can reach the gap.
+    // Stay armed instead; reveal spends exactly one fresh snapshot, which heals a
+    // recovered source and otherwise abandons in the foreground where the banner
+    // lands. Mirrors the hidden-pause guard after the snapshot replay (STA-4869).
+    function deferHiddenOutputRestoreLossToReveal(): boolean {
+      if (shouldWritePtyOutputForeground(deps.isVisibleRef.current)) {
+        return false
+      }
+      hiddenOutputRestoreNeeded = true
+      return true
+    }
+
     function abandonHiddenOutputRestoreAndDrainPendingForeground(
       expectedPtyId: string,
       opts: { quiet?: boolean; rearmRemote?: boolean } = {}
@@ -7299,6 +7315,9 @@ export function connectPanePty(
       }
     }
 
+    // Precondition: every caller must already be foreground. A background pane
+    // swallows the banner, so declaring a loss there discloses it to nobody —
+    // deferHiddenOutputRestoreLossToReveal keeps the abandon out of that state.
     function writeRestoreUnavailableWarning(): void {
       // The reset must parse before both the warning and any foreground drain.
       writePtyOutputToXterm(RESET_AFTER_BYTE_GAP, true)
@@ -7633,9 +7652,11 @@ export function connectPanePty(
                 HIDDEN_OUTPUT_RESTORE_LOCAL_GATE_MAX_ATTEMPTS
             }
             if (budgetExhausted) {
-              abandonHiddenOutputRestoreAndDrainPendingForeground(currentPtyId, {
-                rearmRemote: false
-              })
+              if (!deferHiddenOutputRestoreLossToReveal()) {
+                abandonHiddenOutputRestoreAndDrainPendingForeground(currentPtyId, {
+                  rearmRemote: false
+                })
+              }
               return
             }
             hiddenOutputRestoreNeeded = true
@@ -7645,9 +7666,11 @@ export function connectPanePty(
             return
           }
           if (snapshotResult.kind === 'permanently-unavailable') {
-            abandonHiddenOutputRestoreAndDrainPendingForeground(currentPtyId, {
-              rearmRemote: false
-            })
+            if (!deferHiddenOutputRestoreLossToReveal()) {
+              abandonHiddenOutputRestoreAndDrainPendingForeground(currentPtyId, {
+                rearmRemote: false
+              })
+            }
             return
           }
           if (snapshotResult.kind === 'unknown-legacy-host') {

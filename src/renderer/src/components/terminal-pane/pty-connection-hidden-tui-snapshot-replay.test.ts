@@ -200,7 +200,10 @@ describe('connectPanePty', () => {
     })
     await flushAsyncTicks(20)
 
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+      scrollbackRows: 5000,
+      hiddenOutputRestore: true
+    })
     expect(pane.terminal.resize).toHaveBeenCalledWith(96, 18)
     expect(pane.terminal.write).toHaveBeenCalledWith(richSnapshot, expect.any(Function))
     expect(pane.terminal.write).not.toHaveBeenCalledWith(visibleTrigger, expect.any(Function))

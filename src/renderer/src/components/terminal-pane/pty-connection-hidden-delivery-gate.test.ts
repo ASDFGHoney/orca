@@ -243,7 +243,10 @@ describe('connectPanePty', () => {
       await flushAsyncTicks(20)
 
       expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', false)
-      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 50_000 })
+      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+        scrollbackRows: 50_000,
+        hiddenOutputRestore: true
+      })
       // The unhide IPC must precede the snapshot request (seq-guard contract).
       const unhideOrder = setHiddenRendererPty.mock.invocationCallOrder.at(-1)!
       const snapshotOrder = getMainBufferSnapshot.mock.invocationCallOrder[0]!
@@ -425,7 +428,10 @@ describe('connectPanePty', () => {
       requestTerminalBacklogRecovery(pane.terminal as never)
       await flushAsyncTicks(20)
 
-      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
+        scrollbackRows: 5000,
+        hiddenOutputRestore: true
+      })
       expect(pane.terminal.write).toHaveBeenCalledWith(
         expect.stringContaining('dropped bytes snapshot'),
         expect.any(Function)
