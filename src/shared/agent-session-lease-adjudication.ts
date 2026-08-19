@@ -46,6 +46,8 @@ export type AgentSessionAcquisitionDecision =
 
 export type AgentSessionRestartAdjudication =
   | { disposition: 'readopt' }
+  /** Nothing is outstanding — no owner, no reservation. Clear any latched stage; the fence stays. */
+  | { disposition: 'free'; reason: string }
   | { disposition: 'evicted'; nextFence: number; evidence: AgentSessionDeathEvidence }
   | { disposition: 'recovering'; stage: AgentSessionHandoffStage; reason: string }
   | { disposition: 'conflicted'; reason: string }
@@ -180,11 +182,27 @@ export function adjudicateAgentSessionRestart(args: {
 }): AgentSessionRestartAdjudication {
   const { lease, probe, observedAt } = args
   if (lease.claimStatus === 'conflicted') {
-    // Why: the conflict outlives the process that observed it; resolving to free would hand the
-    // provider session to whichever side restarted first.
+    const conflictedOwnerDeath =
+      lease.ownerProcess === null ? null : deathEvidenceFor(probe, observedAt)
+    if (conflictedOwnerDeath) {
+      // Why: the conflict names one specific process. Present-time proof that THAT process is gone
+      // leaves no claimant to protect, and a conflict with no exit is a session the user can never
+      // open again. Without such proof the conflict still outlives the process that observed it.
+      return {
+        disposition: 'evicted',
+        nextFence: nextAgentSessionFence(lease),
+        evidence: conflictedOwnerDeath
+      }
+    }
     return { disposition: 'conflicted', reason: 'claim conflicted before restart' }
   }
   if (lease.ownerProcess === null) {
+    if (lease.reservedSpawnToken === null && lease.claimStatus !== 'reserved') {
+      // Why: the spawn token is minted before the child and is the only thing a child could be
+      // carrying. With no owner and no token nothing can hold this lease, so it is already free —
+      // treating it as an unproven reservation is what re-latches every released record on restart.
+      return { disposition: 'free', reason: 'lease has no owner and no reservation' }
+    }
     if (probe.outcome === 'reservation-unused') {
       return {
         disposition: 'evicted',

@@ -33,14 +33,27 @@ const UNRESOLVED_REFUSALS: ReadonlySet<string> = new Set([
   'agent_session_identity_required'
 ])
 
-/** Only native records resolve here: a TUI owner has its own recovery transport, and a
- *  conflicted claim is a user decision, not missing evidence. */
+/** Which latched records this module may re-ask about. */
 export function structuredSessionRecoveryIsResolvable(record: AgentSessionRecord): boolean {
-  return (
-    record.lease.runtimeKind === 'native' &&
-    record.lease.claimStatus !== 'conflicted' &&
-    (record.lease.handoffStage === 'recovering' || record.lease.handoffStage === 'manual-recovery')
-  )
+  const { claimStatus, handoffStage, ownerProcess, runtimeKind } = record.lease
+  if (handoffStage !== 'recovering' && handoffStage !== 'manual-recovery') {
+    return false
+  }
+  if (claimStatus === 'conflicted') {
+    // A conflict names one process. Re-asking is only meaningful against that name; with none
+    // recorded there is nothing present-time evidence could settle, and the user decides.
+    return ownerProcess !== null
+  }
+  // A TUI owner has its own recovery transport — but that transport needs a process to talk to
+  // (`structuredManualRecoveryIsAdmissible` requires one). A TUI reservation that crashed before
+  // its identity was committed names nobody, so nothing else in the system can exit it.
+  return runtimeKind === 'native' || ownerProcess === null
+}
+
+/** Stopping a matched owner is only Orca's call when Orca owned its transport. A conflicted claim
+ *  means ownership was never settled, and a TUI child is the user's foreground agent. */
+function recoveryMayStopOwner(record: AgentSessionRecord): boolean {
+  return record.lease.runtimeKind === 'native' && record.lease.claimStatus !== 'conflicted'
 }
 
 export async function resolveStructuredSessionRecovery(
@@ -53,7 +66,12 @@ export async function resolveStructuredSessionRecovery(
   }
   let probe = await deps.probeRecord(record)
   const owner = record.lease.ownerProcess
-  if (owner && owner.hostId === deps.store.hostId && isProvenAliveProbe(probe)) {
+  if (
+    owner &&
+    owner.hostId === deps.store.hostId &&
+    isProvenAliveProbe(probe) &&
+    recoveryMayStopOwner(record)
+  ) {
     // The owner is a live child of a runtime that no longer exists; its transport cannot be
     // reconstructed, so the only way forward is to stop it and prove it gone.
     probe = await stopOwnerAndReprobe(deps, record, owner.pid)

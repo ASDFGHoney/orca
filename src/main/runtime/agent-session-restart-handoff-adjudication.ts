@@ -17,6 +17,16 @@ export function adjudicateRestartedAgentSessionHandoff(
   if (adjudication.disposition === 'readopt') {
     return updateLease(record, { ...record.lease, unreconciled: false, lastRenewedAt: now })
   }
+  if (adjudication.disposition === 'free') {
+    return updateLease(record, {
+      ...record.lease,
+      handoffStage: null,
+      handoffOperationId: null,
+      processlessAt: null,
+      unreconciled: false,
+      lastRenewedAt: now
+    })
+  }
   if (adjudication.disposition !== 'evicted') {
     return updateLease(record, {
       ...record.lease,
