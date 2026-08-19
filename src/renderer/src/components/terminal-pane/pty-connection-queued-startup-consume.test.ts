@@ -167,10 +167,25 @@ describe('connectPanePty queued startup consume', () => {
     expect(onQueuedStartupSpawned).not.toHaveBeenCalled()
   })
 
-  it('does not strand the pane without a pty when the consume throws', async () => {
+  it('keeps a throwing consume from escaping into the spawn', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()
-    spawnOnConnect(transport, 'fresh-pty')
+    // Mirror the transport contract: onPtySpawn is invoked from inside the connect promise, so
+    // anything it throws rejects that promise, strands the pane with no pty, and is far worse
+    // than the stale queued entry the callback exists to clear.
+    let escapedIntoSpawn = false
+    transport.connect.mockImplementation(async () => {
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+        | ((id: string) => void)
+        | undefined
+      try {
+        onPtySpawn?.('fresh-pty')
+      } catch {
+        escapedIntoSpawn = true
+        return undefined
+      }
+      return 'fresh-pty'
+    })
     transportFactoryQueue.push(transport)
 
     const updateTabPtyId = vi.fn()
@@ -185,8 +200,7 @@ describe('connectPanePty queued startup consume', () => {
     connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
     await flushAsyncTicks(20)
 
-    // onPtySpawn runs inside the connect promise: an unguarded throw would reject it and leave the
-    // pane with no pty at all, which is strictly worse than a stale queued entry.
+    expect(escapedIntoSpawn).toBe(false)
     expect(updateTabPtyId).toHaveBeenCalled()
   })
 })

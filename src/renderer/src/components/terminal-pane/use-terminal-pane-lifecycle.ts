@@ -492,6 +492,32 @@ export function paneOwnsQueuedStartup(
   return queuedStartup != null && paneStartup === queuedStartup
 }
 
+/**
+ * The callback that spends the tab's queued startup command, or `undefined` when this pane does
+ * not own it.
+ *
+ * Why one-shot: `onPtySpawn` fires on every fresh spawn a pane makes — hibernation wake, the
+ * respawn ladder — but only the first carried the queued command. A command queued onto the tab
+ * afterwards belongs to that later launch, and spending it here would drop it undelivered.
+ */
+export function createQueuedStartupConsumer(
+  paneStartup: object | null | undefined,
+  queuedStartup: object | null | undefined,
+  consume: () => void
+): (() => void) | undefined {
+  if (!paneOwnsQueuedStartup(paneStartup, queuedStartup)) {
+    return undefined
+  }
+  let spent = false
+  return () => {
+    if (spent) {
+      return
+    }
+    spent = true
+    consume()
+  }
+}
+
 /** Scopes `deps.startup` to a single call of `splitPane()`, clearing it in `finally` so later splits do not replay the payload. */
 export function splitPaneWithOneShotStartup<TPane>(
   deps: SplitWithStartupDeps,
@@ -1309,22 +1335,14 @@ export function useTerminalPaneLifecycle({
           }
         }
         applyAppearance(manager)
-        // Why one-shot: onPtySpawn fires on every fresh spawn this pane makes (hibernation wake,
-        // the respawn ladder), but only the first carried the queued command. A command queued onto
-        // the tab afterwards belongs to that later launch, and spending it here would drop it
-        // without ever delivering it.
-        let queuedStartupSpent = false
-        const consumeQueuedStartupOnce = (): void => {
-          if (queuedStartupSpent) {
-            return
-          }
-          queuedStartupSpent = true
-          useAppStore.getState().consumeTabStartupCommand(tabId)
-        }
-        const ownsQueuedStartup = paneOwnsQueuedStartup(ptyDeps.startup, startupWithSetupSplitWait)
+        const onQueuedStartupSpawned = createQueuedStartupConsumer(
+          ptyDeps.startup,
+          startupWithSetupSplitWait,
+          () => useAppStore.getState().consumeTabStartupCommand(tabId)
+        )
         const panePtyBinding = connectPanePty(pane, manager, {
           ...ptyDeps,
-          ...(ownsQueuedStartup ? { onQueuedStartupSpawned: consumeQueuedStartupOnce } : {}),
+          ...(onQueuedStartupSpawned ? { onQueuedStartupSpawned } : {}),
           // Why: spread order matters — spawnHints.cwd (source pane) must override ptyDeps.cwd (worktree root) so splits boot in the live cwd.
           ...(spawnHints?.cwd ? { cwd: spawnHints.cwd } : {}),
           restoredPtyIdByLeafId: spawnHints?.ptyId
