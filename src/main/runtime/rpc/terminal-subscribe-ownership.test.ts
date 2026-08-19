@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RuntimeTerminalWait } from '../../../shared/runtime-types'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import type { RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
@@ -8,7 +7,7 @@ import { createSubscriptionRegistryDouble } from './subscription-registry-test-d
 
 const SUBSCRIPTION_ID = 'terminal-1:phone-1'
 
-type Waiter = { resolve: (value: RuntimeTerminalWait) => void; reject: (reason: unknown) => void }
+type Waiter = { resolve: () => void }
 
 function stubRuntime(
   registry: ReturnType<typeof createSubscriptionRegistryDouble>,
@@ -37,16 +36,10 @@ function stubRuntime(
     registerOwnedSubscriptionCleanup: vi.fn(registry.registerOwnedSubscriptionCleanup),
     cleanupSubscription: vi.fn(registry.cleanupSubscription),
     cleanupSubscriptionIfOwnedByConnection: vi.fn(registry.cleanupSubscriptionIfOwnedByConnection),
-    // Mirrors bindTerminalWaiterAbort: abort rejects with request_aborted.
-    waitForTerminal: vi.fn(
-      (_handle: string, options?: { signal?: AbortSignal }) =>
-        new Promise<RuntimeTerminalWait>((resolve, reject) => {
-          waiters.push({ resolve, reject })
-          options?.signal?.addEventListener('abort', () => reject(new Error('request_aborted')), {
-            once: true
-          })
-        })
-    ),
+    subscribeToPtyExit: vi.fn((_ptyId: string, listener: () => void) => {
+      waiters.push({ resolve: listener })
+      return vi.fn()
+    }),
     ...overrides
   } as unknown as OrcaRuntimeService
 }
@@ -107,26 +100,43 @@ describe('terminal.subscribe teardown ownership', () => {
     expect(runtime.handleMobileUnsubscribe).toHaveBeenCalledWith('pty-1', 'phone-1')
   })
 
-  // T4(c): a genuine terminal-gone rejection still tears down.
-  // Behavior narrowed deliberately: a stale handle alone is NOT proof the PTY exited (a renderer
-  // graph-epoch bump produces it on a live pane), and retiring on it made the host emit `end`,
-  // which permanently locks a 0.0.44 composer. The ownership property this pins is unchanged —
-  // once absence is PROVEN, the owning registration is still the thing that retires.
-  it('tears down the current owner when the handle is stale and the PTY is proven absent', async () => {
+  // T4(c): a genuine terminal exit still tears down.
+  it('tears down the current owner when the PTY exits', async () => {
     const registry = createSubscriptionRegistryDouble()
     const waiters: Waiter[] = []
-    const runtime = stubRuntime(registry, waiters, {
-      isLeafPtyProvenAbsent: () => Promise.resolve(true)
-    })
+    const runtime = stubRuntime(registry, waiters)
     const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
 
     void dispatcher.dispatchStreaming(makeRequest(binaryParams), vi.fn(), streamOptions('conn-a'))
     await vi.waitFor(() => expect(waiters).toHaveLength(1))
 
-    waiters[0]!.reject(new Error('terminal_handle_stale'))
+    waiters[0]!.resolve()
     await flush()
 
     expect(registry.peekCleanup(SUBSCRIPTION_ID)).toBeUndefined()
+  })
+
+  it('disposes an already-exited PTY observer before binding socket abort', async () => {
+    const registry = createSubscriptionRegistryDouble()
+    const unsubscribeExit = vi.fn()
+    const runtime = stubRuntime(registry, [], {
+      subscribeToPtyExit: vi.fn((_ptyId: string, listener: () => void) => {
+        listener()
+        return unsubscribeExit
+      })
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const conn = new AbortController()
+    const addAbort = vi.spyOn(conn.signal, 'addEventListener')
+
+    await dispatcher.dispatchStreaming(
+      makeRequest(binaryParams),
+      vi.fn(),
+      streamOptions('conn-a', conn.signal)
+    )
+
+    expect(unsubscribeExit).toHaveBeenCalledOnce()
+    expect(addAbort).not.toHaveBeenCalled()
   })
 
   // T8: the exit-waiter is only half the story — stale async continuations must be owned too.

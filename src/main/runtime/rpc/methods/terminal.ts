@@ -321,35 +321,43 @@ function resolveMobileFloorClientId(
 
 type TerminalStreamInputOutcome = 'delivered' | 'rejected' | 'failed'
 
-/**
- * Retire a subscription after its exit-waiter REJECTED — but only when this socket is going away.
- *
- * Why not unconditionally: `waitForTerminal(..., 'exit')` rejects with `terminal_handle_stale`
- * whenever the handle cannot be resolved right now, and the loudest source of that is
- * `record.rendererGraphEpoch !== this.rendererGraphEpoch` — every renderer graph reload
- * invalidates handles issued before it. That is not evidence the PTY exited. Treating it as one
- * made the host retire a live lease and emit `end`, and mobile reads three of those as "PTY gone"
- * and then stops asking (`MAX_REARM_ATTEMPTS`), leaving the composer stuck on "Waiting for
- * terminal…" for as long as the handle stays the same — permanently, on a healthy pane.
- *
- * A real exit still resolves (not rejects) and retires through the `.then` leg, and a closing
- * socket still retires here, so nothing leaks past the connection that owns it.
- */
-async function releaseLeaseOnWaitFailure(
+function watchSubscriptionLifetime(
   runtime: OrcaRuntimeService,
-  registration: SubscriptionRegistration,
   ptyId: string,
-  signal: AbortSignal | undefined
-): Promise<void> {
-  if (signal?.aborted) {
-    registration.releaseIfCurrent()
-    return
+  signal: AbortSignal | undefined,
+  registration: SubscriptionRegistration
+): () => void {
+  let unsubscribeExit: (() => void) | null = null
+  let removeAbort: (() => void) | null = null
+  let stopped = false
+  const stop = (): void => {
+    stopped = true
+    unsubscribeExit?.()
+    removeAbort?.()
   }
-  // Why proof and not the rejection itself: absence must be proven, never inferred from a lookup
-  // that failed. `isLeafPtyProvenAbsent` is the same predicate the rest of the runtime uses.
-  if (await runtime.isLeafPtyProvenAbsent(ptyId)) {
+  const release = (): void => {
     registration.releaseIfCurrent()
+    stop()
   }
+  unsubscribeExit = runtime.subscribeToPtyExit(ptyId, release)
+  if (stopped) {
+    unsubscribeExit()
+    return stop
+  }
+  if (!signal) {
+    return stop
+  }
+  if (signal.aborted) {
+    release()
+    return stop
+  }
+  const onAbort = (): void => release()
+  removeAbort = () => signal.removeEventListener('abort', onAbort)
+  signal.addEventListener('abort', onAbort, { once: true })
+  if (stopped) {
+    removeAbort()
+  }
+  return stop
 }
 
 function isTerminalStreamInputRejection(error: unknown): boolean {
@@ -2989,6 +2997,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       const supportsWriteUnavailable = params.capabilities?.writeUnavailable === 1
       if (mobileInputLeaseOnly && clientId) {
         let closed = false
+        let stopWatchingLifetime = (): void => {}
         let resolveStream = (): void => {}
         const streamClosed = new Promise<void>((resolve) => {
           resolveStream = resolve
@@ -2998,6 +3007,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         const registration = runtime.registerOwnedSubscriptionCleanup(
           subscriptionId,
           () => {
+            stopWatchingLifetime()
             closed = true
             runtime.handleMobileUnsubscribe(ptyId, clientId)
             emit({ type: 'end' })
@@ -3005,10 +3015,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           },
           connectionId
         )
-        void runtime
-          .waitForTerminal(params.terminal, { condition: 'exit', signal })
-          .then(() => registration.releaseIfCurrent())
-          .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
+        stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
         try {
           // Why: a lease-only subscriber has no terminal view, so its cached viewport must never phone-fit the PTY.
           await runtime.handleMobileSubscribe(ptyId, clientId, undefined)
@@ -3043,6 +3050,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         let outputBatcher: ReturnType<typeof createTerminalOutputBatcher> | null = null
         let unsubscribeData = (): void => {}
         let unsubscribeFit = (): void => {}
+        let stopWatchingLifetime = (): void => {}
         let resolveStream = (): void => {}
         const streamClosed = new Promise<void>((resolve) => {
           resolveStream = resolve
@@ -3051,6 +3059,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         const registration = runtime.registerOwnedSubscriptionCleanup(
           subscriptionId,
           () => {
+            stopWatchingLifetime()
             closed = true
             outputBatcher?.flush()
             outputBatcher?.dispose()
@@ -3064,6 +3073,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           },
           connectionId
         )
+        stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
         try {
           if (clientId && params.client && params.viewport) {
             registeredRemoteDesktopDriver = true
@@ -3131,11 +3141,6 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
               rows: event.rows
             })
           })
-          // Why: bind the exit-waiter to the connection signal so socket close/error removes it instead of leaking until real exit.
-          void runtime
-            .waitForTerminal(params.terminal, { condition: 'exit', signal })
-            .then(() => registration.releaseIfCurrent())
-            .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
           await streamClosed
         } catch (error) {
           registration.releaseIfCurrent()
@@ -3166,6 +3171,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       let unsubscribeFit = (): void => {}
       let unregisterBinaryHandler = (): void => {}
       let abortRendererMountWait = (): void => {}
+      let stopWatchingLifetime = (): void => {}
       let lateRendererReadyPromise: Promise<boolean> | null = null
       let outputBatcher: ReturnType<typeof createTerminalOutputBatcher> | null = null
       let resolveStream = (): void => {}
@@ -3177,6 +3183,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       const registration = runtime.registerOwnedSubscriptionCleanup(
         subscriptionId,
         () => {
+          stopWatchingLifetime()
           outputBatcher?.flush()
           outputBatcher?.dispose()
           closed = true
@@ -3195,13 +3202,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         },
         connectionId
       )
-      // Why: bind the exit-waiter to the connection signal so socket close/error removes it instead of leaking until real exit.
-      // Why releaseIfCurrent: the signal aborts per socket, so after a reconnect rebinds
-      // this id a keyed teardown here would kill the replacement stream (STA-4510).
-      void runtime
-        .waitForTerminal(params.terminal, { condition: 'exit', signal })
-        .then(() => registration.releaseIfCurrent())
-        .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
+      stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
       const sendFrame = (
         opcode: TerminalStreamOpcode,
         payload: Uint8Array<ArrayBufferLike> = new Uint8Array(),
