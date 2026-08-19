@@ -18,6 +18,7 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import { agentJournalItemKey } from '../../../shared/agent-session-journal-item-key'
 import {
+  budgetPressurePolicy,
   compactJournal,
   DEFAULT_JOURNAL_COMPACTION_POLICY,
   journalTailCanShedRows,
@@ -339,7 +340,7 @@ export class AgentSessionJournal {
       const ts = this.now()
       const row = build(this.state.lastSequence + 1, ts)
       assertJournalFence(row.fence, this.state.highestFence)
-      const budgetCompaction = { ...this.compaction, minTailRows: 0 }
+      const budgetCompaction = budgetPressurePolicy(this.compaction)
       if (
         this.autoCompact &&
         this.budget.wouldExceedSize(row, this.sizeBytes) &&

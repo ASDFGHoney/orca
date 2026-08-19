@@ -201,28 +201,56 @@ describe('automatic compaction', () => {
     expect(journal.compactionBoundary).toBe(0)
   })
 
-  it('compacts an aged tail before the size bound can latch out every append', async () => {
+  it('sheds a tail shorter than the row floor before the size bound refuses the append', async () => {
     const journal = await open({
       limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
-      compaction: { minTailRows: 10, retainTailMs: 10_000 }
+      // The tail never reaches the floor, so honouring it would shed nothing.
+      compaction: { minTailRows: 512, retainTailMs: 10_000 }
     })
-    let blockedIndex = 0
-    for (; blockedIndex < 20; blockedIndex += 1) {
+    for (let index = 0; index < 20; index += 1) {
+      await expect(
+        journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+      ).resolves.toBeDefined()
+    }
+    expect(journal.compactionBoundary).toBeGreaterThan(0)
+    expect(journal.snapshot().items).toHaveLength(20)
+  })
+
+  it('sheds a tail that is entirely inside the retention window rather than refusing every append', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
+    })
+    let rejected = 0
+    for (let index = 0; index < 50; index += 1) {
       try {
-        await journal.appendItem(item(blockedIndex), body('x'.repeat(96)), { fence: 1 })
+        await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
       } catch (error) {
         expect(error).toMatchObject({ code: 'journal_bound_exceeded' })
-        break
+        rejected += 1
       }
     }
-    expect(blockedIndex).toBeLessThan(20)
 
-    clock += 10_001
-    await expect(
-      journal.appendItem(item(blockedIndex), body('after retention'), { fence: 1 })
-    ).resolves.toBeDefined()
+    expect(rejected).toBe(0)
+    // Shed rows are folded into the snapshot, so the conversation is intact.
+    expect(journal.snapshot().items).toHaveLength(50)
     expect(journal.compactionBoundary).toBeGreaterThan(0)
-    expect(journal.snapshot().items).toHaveLength(blockedIndex + 1)
+  })
+
+  it('keeps the newest rows resumable while shedding under budget pressure', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
+    })
+    for (let index = 0; index < 50; index += 1) {
+      await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+    }
+
+    // The window yields oldest-first, never wholesale: the latest append is
+    // still in the log, so a client resuming from it does not reload.
+    const log = (await readFile(join(root, JOURNAL_LOG_FILE), 'utf-8')).trim().split('\n')
+    expect(log.length).toBeGreaterThan(0)
+    expect(log.at(-1)).toContain('"seq"')
   })
 })
 
@@ -348,8 +376,19 @@ describe('bounds', () => {
     expect(boundInlineText('small', DEFAULT_JOURNAL_PAYLOAD_LIMITS).text).toBe('small')
   })
 
-  it('refuses an append past the per-session size bound', async () => {
+  it('refuses a single row larger than the per-session size bound', async () => {
     const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 400 }
+    })
+    // Shedding the whole tail still cannot make room, so the bound holds.
+    await expect(
+      journal.appendItem(item(0), body('x'.repeat(4_096)), { fence: 1 })
+    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+  })
+
+  it('refuses an append past the per-session size bound when compaction is off', async () => {
+    const journal = await open({
+      autoCompact: false,
       limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 400 }
     })
     await expect(
