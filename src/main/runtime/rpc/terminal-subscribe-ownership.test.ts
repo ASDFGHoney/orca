@@ -128,15 +128,60 @@ describe('terminal.subscribe teardown ownership', () => {
     const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
     const conn = new AbortController()
     const addAbort = vi.spyOn(conn.signal, 'addEventListener')
+    const options = streamOptions('conn-a', conn.signal)
 
-    await dispatcher.dispatchStreaming(
-      makeRequest(binaryParams),
-      vi.fn(),
-      streamOptions('conn-a', conn.signal)
-    )
+    await dispatcher.dispatchStreaming(makeRequest(binaryParams), vi.fn(), options)
 
     expect(unsubscribeExit).toHaveBeenCalledOnce()
     expect(addAbort).not.toHaveBeenCalled()
+  })
+
+  // Why: the synchronous release runs cleanup before setup, so anything registered after it never gets torn down.
+  it('registers nothing after an already-exited PTY releases the subscription', async () => {
+    const registry = createSubscriptionRegistryDouble()
+    const runtime = stubRuntime(registry, [], {
+      subscribeToPtyExit: vi.fn((_ptyId: string, listener: () => void) => {
+        listener()
+        return vi.fn()
+      })
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const options = streamOptions('conn-a')
+
+    await dispatcher.dispatchStreaming(makeRequest(binaryParams), vi.fn(), options)
+    await flush()
+
+    expect(options.registerBinaryStreamHandler).not.toHaveBeenCalled()
+    expect(runtime.subscribeToTerminalData).not.toHaveBeenCalled()
+    expect(runtime.subscribeToTerminalResize).not.toHaveBeenCalled()
+    expect(runtime.handleMobileSubscribe).not.toHaveBeenCalled()
+  })
+
+  it('registers no remote-desktop viewer when an already-exited PTY releases the legacy JSON stream', async () => {
+    const registry = createSubscriptionRegistryDouble()
+    const updateRemoteDesktopViewer = vi.fn().mockResolvedValue(true)
+    const runtime = stubRuntime(registry, [], {
+      updateRemoteDesktopViewer,
+      subscribeToPtyExit: vi.fn((_ptyId: string, listener: () => void) => {
+        listener()
+        return vi.fn()
+      })
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    await dispatcher.dispatchStreaming(
+      makeRequest({
+        terminal: 'terminal-1',
+        client: { id: 'desk-1', type: 'desktop' },
+        viewport: { cols: 80, rows: 24 }
+      }),
+      vi.fn(),
+      { connectionId: 'conn-a' }
+    )
+    await flush()
+
+    expect(updateRemoteDesktopViewer).not.toHaveBeenCalled()
+    expect(runtime.subscribeToTerminalData).not.toHaveBeenCalled()
   })
 
   // T8: the exit-waiter is only half the story — stale async continuations must be owned too.

@@ -3016,6 +3016,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           connectionId
         )
         stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
+        if (closed) {
+          // Why: an already-exited pty releases synchronously, so cleanup ran before this setup registers anything.
+          return
+        }
         try {
           // Why: a lease-only subscriber has no terminal view, so its cached viewport must never phone-fit the PTY.
           await runtime.handleMobileSubscribe(ptyId, clientId, undefined)
@@ -3074,6 +3078,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           connectionId
         )
         stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
+        if (closed) {
+          // Why: an already-exited pty releases synchronously, so cleanup ran before this setup registers anything.
+          return
+        }
         try {
           if (clientId && params.client && params.viewport) {
             registeredRemoteDesktopDriver = true
@@ -3203,6 +3211,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         connectionId
       )
       stopWatchingLifetime = watchSubscriptionLifetime(runtime, ptyId, signal, registration)
+      if (closed) {
+        // Why: an already-exited pty releases synchronously, so cleanup ran before this setup registers anything.
+        return
+      }
       const sendFrame = (
         opcode: TerminalStreamOpcode,
         payload: Uint8Array<ArrayBufferLike> = new Uint8Array(),
