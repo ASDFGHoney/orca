@@ -1,4 +1,4 @@
-import type { BrowserFocusTarget } from '../components/browser-pane/browser-focus'
+import type { BrowserFocusTarget } from '../components/browser-pane/host-guest/browser-focus'
 import type { WorkspaceVisibleTabType } from '../../../shared/tab-types'
 
 // The surface that held focus before a modal (QuickOpen, Cmd+J, ...) opened.

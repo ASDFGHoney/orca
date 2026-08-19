@@ -7,6 +7,7 @@ import {
   agentSessionRecordFixture
 } from '../../shared/agent-session-record.test-fixture'
 import { TERMINAL_INPUT_CHUNK_MAX_BYTES } from '../../shared/terminal-input'
+import { AGENT_PROMPT_SUBMIT } from '../../shared/agent-prompt-injection'
 import type { AgentSessionLease, AgentSessionRecord } from '../../shared/agent-session-record'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 
@@ -52,6 +53,11 @@ async function makeRuntime(options: { onWrite?: (ptyId: string, data: string) =>
   const runtime = new OrcaRuntimeService(makeStore() as never)
   const write = vi.fn((ptyId: string, data: string) => {
     options.onWrite?.(ptyId, data)
+    // A real agent starts working when it receives the submit, and the prompt path now waits for
+    // that transition before it reports success. Without it every happy path here reads as stalled.
+    if (data === AGENT_PROMPT_SUBMIT) {
+      runtime.onPtyData(ptyId, '\x1b]0;Codex working\x07', Date.now())
+    }
     return true
   })
   runtime.setPtyController({
