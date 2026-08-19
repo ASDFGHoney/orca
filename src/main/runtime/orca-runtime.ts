@@ -991,7 +991,11 @@ import type {
   UpdateProjectItemFieldArgs,
   UpdatePullRequestBySlugArgs
 } from '../../shared/github/project-request-types'
-import { formatBranchConflictMessage, type BranchConflictKind } from '../git/branch-ref-conflict'
+import {
+  formatBranchConflictMessage,
+  isUnsuffixableBranchConflict,
+  type BranchConflictKind
+} from '../git/branch-ref-conflict'
 import {
   getBaseRefDefault,
   getDefaultRemote,
@@ -24440,6 +24444,9 @@ export class OrcaRuntimeService {
           }
         }
         if (branchConflictKind) {
+          if (isUnsuffixableBranchConflict(branchConflictKind)) {
+            break
+          }
           continue
         }
       }

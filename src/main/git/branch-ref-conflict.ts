@@ -6,7 +6,27 @@
 
 const REFS_HEADS = 'refs/heads/'
 
-export type BranchConflictKind = 'local' | 'local-directory' | 'remote'
+export type BranchConflictKind = 'local' | 'local-directory' | 'local-ref-prefix' | 'remote'
+
+/**
+ * Conflict kinds no suffix can escape, so a create loop should stop retrying
+ * instead of burning every candidate.
+ *
+ * Suffixes are appended to the last segment of the branch name, which leaves
+ * every proper prefix intact: if `release` blocks `release/1.0`, it blocks
+ * `release/1.0-2` through `release/1.0-100` too. Retrying is provably futile,
+ * and over SSH each attempt costs several remote round trips.
+ */
+export function isUnsuffixableBranchConflict(kind: BranchConflictKind | null): boolean {
+  return kind === 'local-ref-prefix'
+}
+
+/** Map a detected directory/file collision onto the conflict kind callers switch on. */
+export function branchRefDirectoryConflictKind(
+  conflict: BranchRefDirectoryConflict
+): BranchConflictKind {
+  return conflict.direction === 'file' ? 'local-ref-prefix' : 'local-directory'
+}
 
 /**
  * Which side of the directory/file rule blocks the name.
@@ -42,6 +62,15 @@ function properBranchPrefixes(branchName: string): string[] {
  * invocation therefore covers both directions: the requested name's own pattern
  * finds refs nested under it, and each proper-prefix pattern finds a shorter ref
  * blocking it.
+ *
+ * Known limitation: `for-each-ref` matches ref names byte-for-byte, while the
+ * ref *store* on macOS/Windows is usually case-insensitive and may normalize
+ * unicode. So `Feature/x` blocking `feature`, or an NFC ref blocking an NFD
+ * name, is not detected here and still reaches git. `--ignore-case` is
+ * deliberately not used: on a case-sensitive volume git genuinely allows both
+ * `feature` and `Feature/x`, so it would block names git accepts — a false
+ * positive, which is worse than the raw error this misses. Those cases fail
+ * exactly as they do today.
  *
  * Safe for git 2.25 — multi-pattern `for-each-ref` long predates the baseline.
  * Every argument is `refs/heads/`-prefixed, so a branch name can never be read
@@ -105,6 +134,11 @@ export function formatBranchConflictMessage(
   subject?: string
 ): string {
   const advice = subject ? ` Pick a different ${subject}.` : ''
+  if (kind === 'local-ref-prefix') {
+    // Why: no suffix escapes this one, so "pick a different name" alone is a
+    // dead end — the user has to deal with the branch that is in the way.
+    return `Branch "${branchName}" conflicts with an existing branch that is a prefix of it. Git cannot store both, and no suffix avoids it. Rename or delete the existing branch, or pick a different branch name.`
+  }
   if (kind === 'local-directory') {
     // Why: "already exists" would be a lie. No ref has this exact name; the name
     // is unusable because git cannot nest it against a ref that does exist.

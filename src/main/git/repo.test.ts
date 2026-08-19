@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { isUnsuffixableBranchConflict } from './branch-ref-conflict'
 import {
   buildSearchBaseRefsArgv,
   getDefaultBaseRef,
@@ -629,7 +630,7 @@ describe('getBranchConflictKind — git directory/file ref conflicts (STA-4762)'
 
     expect(gitRefusesBranch('release/1.0')).toBe(true)
     expect(await getBranchConflictKind(tmpDir, 'release/1.0', 'origin/main')).toBe(
-      'local-directory'
+      'local-ref-prefix'
     )
   })
 
@@ -637,7 +638,9 @@ describe('getBranchConflictKind — git directory/file ref conflicts (STA-4762)'
     git(tmpDir, ['branch', 'team'])
 
     expect(gitRefusesBranch('team/a/b/c')).toBe(true)
-    expect(await getBranchConflictKind(tmpDir, 'team/a/b/c', 'origin/main')).toBe('local-directory')
+    expect(await getBranchConflictKind(tmpDir, 'team/a/b/c', 'origin/main')).toBe(
+      'local-ref-prefix'
+    )
   })
 
   it('detects conflicts against packed refs', async () => {
@@ -679,6 +682,27 @@ describe('getBranchConflictKind — git directory/file ref conflicts (STA-4762)'
 
     expect(candidate).toBe('feature-2')
     expect(gitRefusesBranch(candidate)).toBe(false)
+  })
+
+  it('reports a blocking prefix as unsuffixable, because git refuses every suffix', async () => {
+    git(tmpDir, ['branch', 'release'])
+
+    // Ground truth: no candidate the suffix loop can generate escapes `release`.
+    for (const candidate of ['release/1.0', 'release/1.0-2', 'release/1.0-100']) {
+      expect(gitRefusesBranch(candidate)).toBe(true)
+      expect(
+        isUnsuffixableBranchConflict(await getBranchConflictKind(tmpDir, candidate, 'origin/main'))
+      ).toBe(true)
+    }
+  })
+
+  it('reports a nested ref as suffixable, because a suffix does escape it', async () => {
+    git(tmpDir, ['branch', 'feature/tti_fix_1440'])
+
+    expect(
+      isUnsuffixableBranchConflict(await getBranchConflictKind(tmpDir, 'feature', 'origin/main'))
+    ).toBe(false)
+    expect(gitRefusesBranch('feature-2')).toBe(false)
   })
 
   it('does not report a conflict when the probe cannot run', async () => {

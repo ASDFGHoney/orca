@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  branchRefDirectoryConflictKind,
   buildBranchRefConflictArgv,
   classifyBranchRefDirectoryConflict,
-  formatBranchConflictMessage
+  formatBranchConflictMessage,
+  isUnsuffixableBranchConflict
 } from './branch-ref-conflict'
 
 function refs(...shortNames: string[]): string {
@@ -93,6 +95,29 @@ describe('classifyBranchRefDirectoryConflict', () => {
   })
 })
 
+describe('branchRefDirectoryConflictKind / isUnsuffixableBranchConflict', () => {
+  it('marks a blocking prefix unsuffixable and a nested ref suffixable', () => {
+    const blocked = branchRefDirectoryConflictKind({ direction: 'file', existingBranch: 'release' })
+    const nested = branchRefDirectoryConflictKind({
+      direction: 'directory',
+      existingBranch: 'feature/x'
+    })
+
+    expect(blocked).toBe('local-ref-prefix')
+    expect(nested).toBe('local-directory')
+    // `release` blocks `release/1.0-2` exactly as it blocks `release/1.0`, so retrying is futile.
+    expect(isUnsuffixableBranchConflict(blocked)).toBe(true)
+    // `feature/x` does not block `feature-2`, so the suffix loop should keep going.
+    expect(isUnsuffixableBranchConflict(nested)).toBe(false)
+  })
+
+  it('never stops the loop for exact, remote, or absent conflicts', () => {
+    expect(isUnsuffixableBranchConflict('local')).toBe(false)
+    expect(isUnsuffixableBranchConflict('remote')).toBe(false)
+    expect(isUnsuffixableBranchConflict(null)).toBe(false)
+  })
+})
+
 describe('formatBranchConflictMessage', () => {
   it('keeps the existing wording for exact local and remote conflicts', () => {
     expect(formatBranchConflictMessage('feature/foo', 'local', 'branch name')).toBe(
@@ -107,6 +132,14 @@ describe('formatBranchConflictMessage', () => {
     expect(formatBranchConflictMessage('feature/foo', 'local')).toBe(
       'Branch "feature/foo" already exists locally.'
     )
+  })
+
+  it('tells the user a blocking prefix cannot be suffixed away', () => {
+    const message = formatBranchConflictMessage('release/1.0', 'local-ref-prefix', 'worktree name')
+
+    expect(message).toContain('is a prefix of it')
+    expect(message).toContain('no suffix avoids it')
+    expect(message).not.toContain('already exists')
   })
 
   it('does not claim a directory conflict already exists', () => {

@@ -34,9 +34,11 @@ import {
   resolveDefaultBaseRefWithLocalGit
 } from '../git/repo'
 import {
+  branchRefDirectoryConflictKind,
   buildBranchRefConflictArgv,
   classifyBranchRefDirectoryConflict,
   formatBranchConflictMessage,
+  isUnsuffixableBranchConflict,
   type BranchConflictKind
 } from '../git/branch-ref-conflict'
 import { resolveLocalGitUsername, getSshGitUsername } from '../git/git-username'
@@ -850,16 +852,17 @@ async function hasSshLocalBranchConflict(
 }
 
 /** SSH counterpart of the local directory/file ref probe; see branch-ref-conflict.ts. */
-async function hasSshLocalRefDirectoryConflict(
+async function getSshLocalRefDirectoryConflictKind(
   provider: SshGitProvider,
   repoPath: string,
   branchName: string
-): Promise<boolean> {
+): Promise<BranchConflictKind | null> {
   try {
     const { stdout } = await provider.exec(buildBranchRefConflictArgv(branchName), repoPath)
-    return classifyBranchRefDirectoryConflict(branchName, stdout) !== null
+    const conflict = classifyBranchRefDirectoryConflict(branchName, stdout)
+    return conflict ? branchRefDirectoryConflictKind(conflict) : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -872,8 +875,13 @@ async function getSshBranchConflictKind(
   if (await hasSshLocalBranchConflict(provider, repoPath, branchName)) {
     return 'local'
   }
-  if (await hasSshLocalRefDirectoryConflict(provider, repoPath, branchName)) {
-    return 'local-directory'
+  const directoryConflictKind = await getSshLocalRefDirectoryConflictKind(
+    provider,
+    repoPath,
+    branchName
+  )
+  if (directoryConflictKind) {
+    return directoryConflictKind
   }
   return (await hasSshRemoteBranchConflict(provider, repoPath, branchName, allowedBaseRef))
     ? 'remote'
@@ -1637,6 +1645,9 @@ export async function createRemoteWorktree(
         ? await getSelectedHostedReviewForBranch(repo, branchName, args).catch(() => null)
         : null
       if (!selectedReview?.matchesSelected) {
+        if (isUnsuffixableBranchConflict(lastBranchConflictKind)) {
+          break
+        }
         continue
       }
       lastBranchConflictKind = null
@@ -2246,6 +2257,9 @@ export async function createLocalWorktree(
       }
     }
     if (lastBranchConflictKind) {
+      if (isUnsuffixableBranchConflict(lastBranchConflictKind)) {
+        break
+      }
       continue
     }
 

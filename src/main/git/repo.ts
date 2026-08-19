@@ -11,6 +11,7 @@ import { toWindowsWslPath } from '../wsl'
 import { buildHostedRemoteCommitUrl, buildHostedRemoteFileUrl } from './hosted-remote-url'
 import { getLocalGitCapabilityCache } from './git-capability-state'
 import {
+  branchRefDirectoryConflictKind,
   buildBranchRefConflictArgv,
   classifyBranchRefDirectoryConflict,
   type BranchConflictKind
@@ -1000,19 +1001,20 @@ export type { BranchConflictKind }
  * Failures are swallowed: a probe that cannot run must not block a create that
  * git may well accept.
  */
-async function hasLocalRefDirectoryConflict(
+async function getLocalRefDirectoryConflictKind(
   path: string,
   branchName: string,
   options: LocalGitExecOptions
-): Promise<boolean> {
+): Promise<BranchConflictKind | null> {
   try {
     const { stdout } = await gitExecFileAsync(
       buildBranchRefConflictArgv(branchName),
       gitExecOptions(path, options)
     )
-    return classifyBranchRefDirectoryConflict(branchName, stdout) !== null
+    const conflict = classifyBranchRefDirectoryConflict(branchName, stdout)
+    return conflict ? branchRefDirectoryConflictKind(conflict) : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -1025,8 +1027,9 @@ export async function getBranchConflictKind(
   if (await hasGitRefAsync(path, `refs/heads/${branchName}`, options)) {
     return 'local'
   }
-  if (await hasLocalRefDirectoryConflict(path, branchName, options)) {
-    return 'local-directory'
+  const directoryConflictKind = await getLocalRefDirectoryConflictKind(path, branchName, options)
+  if (directoryConflictKind) {
+    return directoryConflictKind
   }
 
   try {
