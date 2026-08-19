@@ -27,7 +27,15 @@ import type { DirEntry, FsChangeEvent } from '../../shared/filesystem-entry-type
 import { routeSshFilesystemWatchNotification } from './ssh-filesystem-watch-notifications'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
 import { isWindowsRemoteHost, type RemoteHostPlatform } from '../ssh/ssh-remote-platform'
-import { probeSshQuickOpenSearchCapability } from './ssh-filesystem-provider-capabilities'
+import {
+  probeSshQuickOpenSearchCapability,
+  probeSshRangedReadCapability
+} from './ssh-filesystem-provider-capabilities'
+import { readSshFileRange } from './ssh-filesystem-range-read'
+import {
+  readSshTerminalArtifact,
+  writeSshTerminalArtifact
+} from './ssh-filesystem-terminal-artifact'
 const WORKSPACE_SPACE_SCAN_TIMEOUT_MS = 130_000
 export class SshFilesystemProvider implements IFilesystemProvider {
   private connectionId: string
@@ -38,6 +46,9 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   private disposed = false
   private loggedStreamFallback = false
   readonly downloadFolder?: IFilesystemProvider['downloadFolder']
+  // Optional capabilities are wired in the constructor, matching downloadFolder.
+  readonly readFileRange: NonNullable<IFilesystemProvider['readFileRange']>
+  readonly supportsFileRangeRead: NonNullable<IFilesystemProvider['supportsFileRangeRead']>
 
   constructor(
     connectionId: string,
@@ -60,6 +71,11 @@ export class SshFilesystemProvider implements IFilesystemProvider {
           windowsRemotePaths
         })
     }
+
+    this.readFileRange = (filePath, position, length, options) =>
+      readSshFileRange(this.mux, filePath, position, length, options?.signal)
+    this.supportsFileRangeRead = (options) =>
+      probeSshRangedReadCapability(this.mux, options?.signal)
 
     this.unsubscribeNotifications = mux.onNotification((method, params) =>
       routeSshFilesystemWatchNotification(this.watchListeners, method, params)
@@ -111,25 +127,19 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     }
   }
 
-  async readTerminalArtifact(
+  readTerminalArtifact(
     filePath: string,
     options: TerminalArtifactAccessOptions
   ): Promise<FileReadResult> {
-    try {
-      return (await this.mux.request('fs.readTerminalArtifact', {
-        filePath,
-        expectedRealPath: options.expectedRealPath,
-        expectedStatIdentity: options.expectedStatIdentity,
-        maxBytes: options.maxBytes
-      })) as FileReadResult
-    } catch (err) {
-      if (isMethodNotFoundError(err)) {
-        throw new Error(
-          'Remote terminal artifact access is unavailable. Reconnect the SSH target before retrying.'
-        )
-      }
-      throw err
-    }
+    return readSshTerminalArtifact(this.mux, filePath, options)
+  }
+
+  writeTerminalArtifact(
+    filePath: string,
+    content: string,
+    options: TerminalArtifactAccessOptions
+  ): Promise<FileStat> {
+    return writeSshTerminalArtifact(this.mux, filePath, content, options)
   }
 
   async downloadFile(sourcePath: string, destinationPath: string): Promise<void> {
@@ -161,34 +171,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
 
   async writeFile(filePath: string, content: string): Promise<void> {
     await this.mux.request('fs.writeFile', { filePath, content })
-  }
-
-  async writeTerminalArtifact(
-    filePath: string,
-    content: string,
-    options: TerminalArtifactAccessOptions
-  ): Promise<FileStat> {
-    let result: { stat?: FileStat }
-    try {
-      result = (await this.mux.request('fs.writeTerminalArtifact', {
-        filePath,
-        content,
-        expectedRealPath: options.expectedRealPath,
-        expectedStatIdentity: options.expectedStatIdentity,
-        maxBytes: options.maxBytes
-      })) as { stat?: FileStat }
-    } catch (err) {
-      if (isMethodNotFoundError(err)) {
-        throw new Error(
-          'Remote terminal artifact access is unavailable. Reconnect the SSH target before retrying.'
-        )
-      }
-      throw err
-    }
-    if (!result.stat) {
-      throw new Error('terminal_file_grant_stale')
-    }
-    return result.stat
   }
 
   async writeFileBase64(filePath: string, contentBase64: string): Promise<void> {

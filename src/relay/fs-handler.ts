@@ -26,6 +26,7 @@ import {
 } from './fs-path-mutation-requests'
 import { buildExcludePathPrefixes } from '../shared/quick-open-filter'
 import { readRelayFileContent, readRelayFileStreamMetadata } from './fs-handler-file-read'
+import { readRelayFileRange } from './fs-handler-file-range'
 import {
   readVerifiedTerminalArtifact,
   writeVerifiedTerminalArtifact
@@ -66,6 +67,7 @@ export class FsHandler {
     this.dispatcher.onRequest('fs.readDir', (p) => readRelayDir(p))
     this.dispatcher.onRequest('fs.readFile', (p) => this.readFile(p))
     this.dispatcher.onRequest('fs.readFileStream', (p, c) => this.readFileStream(p, c))
+    this.dispatcher.onRequest('fs.readFileRange', (p) => this.readFileRange(p))
     this.dispatcher.onRequest('fs.readTerminalArtifact', (p) => this.readTerminalArtifact(p))
     this.dispatcher.onRequest('fs.tempDir', () => this.tempDir())
     this.dispatcher.onRequest('fs.writeFile', (p) => writeRelayFile(p))
@@ -82,7 +84,8 @@ export class FsHandler {
     this.dispatcher.onRequest('fs.realpath', (p) => realpathRelayPath(p))
     this.dispatcher.onRequest('fs.search', (p) => this.search(p))
     this.dispatcher.onRequest('fs.getCapabilities', async () => ({
-      quickOpenSearchVersion: 1
+      quickOpenSearchVersion: 1,
+      rangedReadVersion: 1
     }))
     this.dispatcher.onRequest('fs.listFiles', (p, c) => this.listFiles(p, c))
     this.dispatcher.onRequest('fs.workspaceSpaceScan', (p, c) => this.workspaceSpaceScan(p, c))
@@ -106,6 +109,20 @@ export class FsHandler {
   private async readFile(params: Record<string, unknown>) {
     const filePath = expandTilde(params.filePath as string)
     return readRelayFileContent(filePath)
+  }
+
+  // Why hand-validated: relay params arrive as raw casts with no schema, and
+  // both of these land directly in an fd read position.
+  private async readFileRange(params: Record<string, unknown>) {
+    const filePath = expandTilde(params.filePath as string)
+    const { position, length } = params
+    if (typeof position !== 'number' || !Number.isSafeInteger(position) || position < 0) {
+      throw new Error('fs.readFileRange requires a non-negative integer position')
+    }
+    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length <= 0) {
+      throw new Error('fs.readFileRange requires a positive integer length')
+    }
+    return readRelayFileRange(filePath, position, length)
   }
 
   private async readTerminalArtifact(params: Record<string, unknown>) {

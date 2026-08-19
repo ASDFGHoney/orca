@@ -37,3 +37,40 @@ export function probeSshQuickOpenSearchCapability(
     }
   )
 }
+
+const rangedReadSupport = new WeakMap<SshChannelMultiplexer, Promise<boolean>>()
+
+/** Mirrors the quick-open probe: one cached `fs.getCapabilities` per mux rather
+ *  than eating a guaranteed -32601 on every ranged read against an old relay. */
+export function probeSshRangedReadCapability(
+  mux: SshChannelMultiplexer,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const cached = rangedReadSupport.get(mux)
+  const probe =
+    cached ??
+    mux
+      .request('fs.getCapabilities', undefined, { timeoutMs: 5_000 })
+      .then((result) => {
+        const version = (result as { rangedReadVersion?: unknown } | null)?.rangedReadVersion
+        return version === 1
+      })
+      .catch((error) => {
+        if (isMethodNotFoundError(error)) {
+          return false
+        }
+        throw error
+      })
+  if (!cached) {
+    rangedReadSupport.set(mux, probe)
+  }
+  return waitForSshCapabilityProbe(probe, signal).then(
+    (supported) => supported,
+    (error) => {
+      if (!signal?.aborted && rangedReadSupport.get(mux) === probe) {
+        rangedReadSupport.delete(mux)
+      }
+      throw error
+    }
+  )
+}
