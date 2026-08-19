@@ -26,7 +26,7 @@ function repo(overrides: Partial<Repo> = {}): Repo {
 
 describe('worktree visibility sources', () => {
   it('classifies each built-in independently across linked checkouts', () => {
-    const classify = createWorktreeVisibilitySourceMatcher(['/repo', '/worktrees/feature'])
+    const classify = createWorktreeVisibilitySourceMatcher(['/repo', '/worktrees/feature'], [], [])
     expect(classify('/repo/.claude/worktrees/review')).toEqual({
       kind: 'built-in',
       id: 'claude'
@@ -41,7 +41,8 @@ describe('worktree visibility sources', () => {
   it('matches custom descendants with Windows and WSL comparison semantics', () => {
     const windows = createWorktreeVisibilitySourceMatcher(
       [],
-      [{ id: 'team', rootPath: 'C:\\Users\\Dev\\Team' }]
+      [{ id: 'team', rootPath: 'C:\\Users\\Dev\\Team' }],
+      []
     )
     expect(windows('c:\\users\\dev\\team\\feature')).toEqual({
       kind: 'custom',
@@ -50,7 +51,8 @@ describe('worktree visibility sources', () => {
 
     const wsl = createWorktreeVisibilitySourceMatcher(
       [],
-      [{ id: 'linux', rootPath: '//wsl$/Ubuntu/home/dev/team' }]
+      [{ id: 'linux', rootPath: '//wsl$/Ubuntu/home/dev/team' }],
+      []
     )
     expect(wsl('//wsl.localhost/Ubuntu/home/dev/team/feature')).toEqual({
       kind: 'custom',
@@ -114,7 +116,8 @@ describe('worktree visibility sources', () => {
   it('gives built-ins precedence over overlapping custom roots', () => {
     const classify = createWorktreeVisibilitySourceMatcher(
       ['/repo'],
-      [{ id: 'overlap', rootPath: '/repo/.claude/worktrees' }]
+      [{ id: 'overlap', rootPath: '/repo/.claude/worktrees' }],
+      []
     )
     expect(classify('/repo/.claude/worktrees/review')).toEqual({
       kind: 'built-in',
@@ -128,7 +131,8 @@ describe('worktree visibility sources', () => {
       Array.from({ length: 32 }, (_, index) => ({
         id: `custom-${index}`,
         rootPath: `/custom/${index}`
-      }))
+      })),
+      []
     )
     const normalize = vi.spyOn(String.prototype, 'normalize')
 
@@ -192,7 +196,8 @@ describe('worktree visibility sources', () => {
       const current = repo({ path: checkout })
       const classify = createWorktreeVisibilitySourceMatcher(
         [checkout],
-        resolveCustomWorktreeVisibilitySources(current, defaults)
+        resolveCustomWorktreeVisibilitySources(current, defaults),
+        []
       )
       expect(classify('/srv/global-worktrees/feature')).toEqual({
         kind: 'custom',

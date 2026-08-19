@@ -135,8 +135,8 @@ function createDescendantMatcher(rootPath: string): (normalizedCandidate: string
  */
 export function createWorktreeVisibilitySourceMatcher(
   checkoutPaths: readonly string[],
-  customSources: readonly CustomWorktreeVisibilitySource[] = [],
-  configuredWorktreeBasePaths: readonly string[] = []
+  customSources: readonly CustomWorktreeVisibilitySource[],
+  configuredWorktreeBasePaths: readonly string[]
 ): WorktreeVisibilitySourceMatcher {
   const checkoutPathKeys = new Set(checkoutPaths.map(normalizeRuntimePathForComparison))
   const customMatchers = customSources.map(({ id, rootPath }) => ({
