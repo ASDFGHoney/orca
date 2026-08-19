@@ -101,14 +101,21 @@ describe('remote browser pointer input', () => {
     mocks.callRuntimeRpc.mockResolvedValue({})
   })
 
-  it('sends one atomic mouseClick for a press and release at the same point', async () => {
+  it('hovers the click point, then sends one atomic mouseClick for a press and release at the same point', async () => {
     const { input, settle } = renderInput()
     input.handleRemotePointerDown(pointerEvent({ clientX: 120, clientY: 90 }))
     input.handleRemotePointerUp(pointerEvent({ clientX: 121, clientY: 91 }))
     await settle()
 
-    expect(calledMethods()).toEqual(['browser.mouseClick'])
+    // The move is what applies :hover before the press hit-test; the host's mouseClick sends none.
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
     expect(mocks.callRuntimeRpc.mock.calls[0][2]).toEqual({
+      worktree: 'wt-1',
+      page: 'page-1',
+      x: 121,
+      y: 91
+    })
+    expect(mocks.callRuntimeRpc.mock.calls[1][2]).toEqual({
       worktree: 'wt-1',
       page: 'page-1',
       x: 121,
@@ -155,6 +162,7 @@ describe('remote browser pointer input', () => {
     await settle()
 
     expect(calledMethods()).toEqual([
+      'browser.mouseMove',
       'browser.mouseClick',
       'browser.mouseMove',
       'browser.mouseDown',
@@ -194,8 +202,8 @@ describe('remote browser pointer input', () => {
     input.handleRemotePointerUp(pointerEvent({ button: 1 }))
     await settle()
 
-    expect(calledMethods()).toEqual(['browser.mouseClick'])
-    expect(mocks.callRuntimeRpc.mock.calls[0][2]).toMatchObject({ button: 'middle' })
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
+    expect(mocks.callRuntimeRpc.mock.calls[1][2]).toMatchObject({ button: 'middle' })
   })
 
   it('leaves right-button presses to the context-menu path', async () => {
