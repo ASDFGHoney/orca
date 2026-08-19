@@ -552,15 +552,21 @@ describe('BrowserSessionRegistry persistence', () => {
     // the access requestStorageAccess() would grant. Denying it protected nothing and only broke
     // sites taking the API's failure path. Red before the grant landed.
     requestHandler(guestWc, 'storage-access', permissionCallback)
-    await vi.waitFor(() => expect(permissionCallback.mock.calls.at(-1)).toEqual([true]))
+    expect(permissionCallback).toHaveBeenLastCalledWith(true)
     expect(checkHandler(null, 'storage-access', '')).toBe(true)
 
     // Why: requestStorageAccessFor() is a different platform decision — Chromium consults Related
     // Website Sets and has no third-party-cookie auto-grant, and Orca has no such data source. This
     // pins the deliberate denial so a future blanket widening of the allow-set fails loudly.
     requestHandler(guestWc, 'top-level-storage-access', permissionCallback)
-    await vi.waitFor(() => expect(permissionCallback.mock.calls.at(-1)).toEqual([false]))
+    expect(permissionCallback).toHaveBeenLastCalledWith(false)
     expect(checkHandler(null, 'top-level-storage-access', '')).toBe(false)
+
+    // Why: the reported symptom was a user-visible denial notice, so pin the notified list here —
+    // storage-access must no longer raise one, while the deliberate top-level denial still does.
+    expect(
+      browserManagerNotifyPermissionDeniedMock.mock.calls.map(([args]) => args.permission)
+    ).toEqual(['geolocation', 'top-level-storage-access'])
     expect(defaultSession.setDisplayMediaRequestHandler).toHaveBeenCalled()
     const displayMediaHandler = defaultSession.setDisplayMediaRequestHandler.mock.calls[0][0]
     const displayMediaCallback = vi.fn()
