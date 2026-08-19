@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -20,8 +20,11 @@ const KEY_PAYLOADS = [
   { label: 'a non-string key', params: { app: 'Finder', key: 42 } }
 ] as const
 
+const userDataPaths: string[] = []
+
 function makeServer(): { server: OrcaRuntimeRpcServer; deviceToken: string } {
   const userDataPath = mkdtempSync(join(tmpdir(), 'orca-rpc-schema-throw-'))
+  userDataPaths.push(userDataPath)
   const runtime = { getRuntimeId: () => 'test-runtime' } as OrcaRuntimeService
   const server = new OrcaRuntimeRpcServer({ runtime, userDataPath, enableWebSocket: false })
   server['deviceRegistry'] = new DeviceRegistry(userDataPath)
@@ -43,6 +46,9 @@ describe('RPC reply contract when a param schema throws', () => {
 
   afterEach(() => {
     process.off('unhandledRejection', onUnhandled)
+    while (userDataPaths.length > 0) {
+      rmSync(userDataPaths.pop()!, { recursive: true, force: true })
+    }
   })
 
   for (const method of THROWING_PARAM_METHODS) {
