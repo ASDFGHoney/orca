@@ -35,8 +35,10 @@ export type TerminalIosHangulPreedit = IDisposable & {
 
 export type TerminalIosHangulPreeditOptions = {
   terminalElement: HTMLElement | null | undefined
-  /** Composition sessions own the field outright — Chinese pinyin on the same
-   *  device does run one, and xterm's CompositionHelper already commits it. */
+  /** Whether a composition session is under way, which bars a hold from opening
+   *  over it — Chinese pinyin on the same device does run one, and xterm's
+   *  CompositionHelper already commits it. Must be derived and expiring, not
+   *  latched: a session that never ends would otherwise disable the pane. */
   isCompositionActive: () => boolean
   /** Screen reader mode writes the textarea itself, so a field diff would not
    *  be the IME's alone. */
@@ -217,7 +219,10 @@ export function installTerminalIosHangulPreedit(
     if (!textarea) {
       return
     }
-    if (isCompositionOwnedInput(event) || options.isCompositionActive()) {
+    if (isCompositionOwnedInput(event)) {
+      // A session took the field over; it owns the commit from here. Read off
+      // the event rather than the session state, so this cannot depend on which
+      // `input` listener on the pane element happens to run first.
       commit()
       return
     }

@@ -1004,9 +1004,10 @@ export function useTerminalPaneLifecycle({
           ? installTerminalImeLinuxCandidateState(pane.terminal.element)
           : null
         const imeCompositionTracker = installTerminalImeCompositionTracker(pane.terminal.element)
-        // Why after the tracker: both listen for `input` in capture on the same
-        // element, and the preedit stops propagation — the tracker has to see
-        // the event first to keep deriving its own composition state.
+        // Why after the tracker: the preedit stops propagation on `input` while
+        // a syllable is held, so anything on this element that needs those
+        // events has to be registered ahead of it. Nothing does today — the
+        // preedit reads composition ownership off the event itself.
         const iosHangulPreedit = isIosWeb
           ? installTerminalIosHangulPreedit({
               terminalElement: pane.terminal.element,

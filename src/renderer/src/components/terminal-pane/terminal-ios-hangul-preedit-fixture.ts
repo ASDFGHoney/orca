@@ -51,7 +51,12 @@ export function disposeOpenTerminals(): void {
 }
 
 export function openIosTerminal(
-  options: { isIosWeb?: boolean; screenReaderMode?: boolean } = {}
+  options: {
+    isIosWeb?: boolean
+    /** Overrides the tracker, to isolate what the controller reads it for. */
+    isCompositionActive?: () => boolean
+    screenReaderMode?: boolean
+  } = {}
 ): IosHangulRig {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -75,7 +80,7 @@ export function openIosTerminal(
   const preedit = isIosWeb
     ? installTerminalIosHangulPreedit({
         terminalElement: terminal.element,
-        isCompositionActive: () => tracker.isActive(),
+        isCompositionActive: options.isCompositionActive ?? (() => tracker.isActive()),
         isScreenReaderMode: () => terminal.options.screenReaderMode === true,
         sendInput: (data) => terminal.input(data),
         renderPreedit: createTerminalIosHangulPreeditRenderer(terminal)

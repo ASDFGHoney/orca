@@ -298,6 +298,20 @@ describe('iPadOS Hangul typed as bare keydowns', () => {
     expect(rig.preedit.heldText()).toBe('ㅎ')
   })
 
+  it('stands aside for composition-owned input without consulting session state', async () => {
+    // Standing aside is read off the event, not off the tracker, so it cannot
+    // depend on which `input` listener on the pane element runs first.
+    pretendIosWeb()
+    const rig = openIosTerminal({ isCompositionActive: () => false })
+    await typeJamo(rig, 'ㅎ', 'ㅎ', { replaces: false })
+    rig.textarea.value = 'ㅎ하'
+    dispatchInput(rig, 'insertCompositionText', '하')
+    await nextEventLoop()
+
+    expect(rig.emitted).toEqual(['ㅎ'])
+    expect(rig.preedit.heldText()).toBe('')
+  })
+
   it('stands aside for a composition that starts over an open syllable', async () => {
     pretendIosWeb()
     const rig = openIosTerminal()
