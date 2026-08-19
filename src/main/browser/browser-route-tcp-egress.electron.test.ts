@@ -14,6 +14,8 @@ describe('browser route TCP egress under Electron', () => {
     expect(protectedSession.resolvedProxy).toMatch(/^SOCKS5 127\.0\.0\.1:\d+$/)
     expect(protectedSession.directPaths).toEqual([])
     expect(protectedSession.routedPaths).toEqual(EXPECTED_PATHS)
-    expect(protectedSession.socksHosts).toEqual(['remote-browser.test'])
+    // Chromium may route an unrelated background request through the same proxy.
+    // The target-host observation is the causal DNS/routing oracle for this fixture.
+    expect(protectedSession.socksHosts).toContain('remote-browser.test')
   }, 60_000)
 })
