@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // Why: when the preferred WS port is taken (second Orca instance), the OS
@@ -41,5 +41,16 @@ export function writeWsFallbackPort(userDataPath: string, port: number): void {
   } catch {
     // Why: persistence is best-effort — failing to record the port must not
     // break transport startup; the cost is a re-pair after the next restart.
+  }
+}
+
+// Why: a fallback that failed to bind while the configured port recovered is obsolete — leaving it
+// re-arms a dead endpoint next launch, so the advertised port flip-flops (STA-4859, seen with
+// Windows Hyper-V reserved ranges that move across reboots).
+export function clearWsFallbackPort(userDataPath: string): void {
+  try {
+    rmSync(join(userDataPath, FALLBACK_PORT_FILE), { force: true })
+  } catch {
+    // Why: best-effort like the write — a stale file costs one more convergence pass, not a startup failure.
   }
 }

@@ -19,7 +19,11 @@ import { fingerprintAuthenticatedPairingCredential } from './rpc/orchestration-m
 import type { RpcMessageContext, RpcTransport } from './rpc/transport'
 import { UnixSocketTransport } from './rpc/unix-socket-transport'
 import { WebSocketTransport } from './rpc/ws-transport'
-import { readWsFallbackPort, writeWsFallbackPort } from './rpc/ws-fallback-port-store'
+import {
+  clearWsFallbackPort,
+  readWsFallbackPort,
+  writeWsFallbackPort
+} from './rpc/ws-fallback-port-store'
 import type { WebSocket } from 'ws'
 import { DeviceRegistry, type DeviceEntry, type DeviceScope } from './device-registry'
 import { loadOrCreateE2EEKeypair, type E2EEKeypair } from './e2ee-keypair'
@@ -1192,9 +1196,7 @@ export class OrcaRuntimeRpcServer {
             // Why: stable fallback port across restarts keeps paired devices' endpoints valid (STA-1511); wsPort 0 = random (E2E).
             ...(this.wsPort !== 0 ? { fallbackPort: readWsFallbackPort(this.userDataPath) } : {})
           })
-          if (this.wsPort !== 0 && transport.resolvedPort !== this.wsPort) {
-            writeWsFallbackPort(this.userDataPath, transport.resolvedPort)
-          }
+          this.syncPersistedWsFallback(transport.resolvedPort)
           activeTransports.push(transport)
           transportsMeta.push({ kind: 'websocket', endpoint })
         } catch (error) {
@@ -1237,6 +1239,23 @@ export class OrcaRuntimeRpcServer {
         )
       }
     })
+  }
+
+  // Why: after a successful bind the persisted fallback must describe what is actually served, or the
+  // advertised endpoint oscillates between the two across launches (STA-4859). A resolved port that
+  // differs from the configured one is the STA-1511 fallback to keep. Landing ON the configured port in
+  // default (fallback-first) mode means any persisted fallback was tried and failed, so it is obsolete;
+  // in pinned mode (`serve --port`, #9005) the pin binds first and the fallback was never tried — leave it.
+  // wsPort 0 (E2E) stays fully exempt.
+  private syncPersistedWsFallback(resolvedPort: number): void {
+    if (this.wsPort === 0) {
+      return
+    }
+    if (resolvedPort !== this.wsPort) {
+      writeWsFallbackPort(this.userDataPath, resolvedPort)
+    } else if (!this.preferPinnedWsPort) {
+      clearWsFallbackPort(this.userDataPath)
+    }
   }
 
   // Why: STA-2370 — a desktop with no previously-connected device stays on loopback until the user
@@ -1415,11 +1434,7 @@ export class OrcaRuntimeRpcServer {
       this.transports[metaIndex] = { kind: 'websocket', endpoint: widened.endpoint }
     }
     try {
-      // Why: a rebind that lands on a different port (same-port bind refused) must be persisted so a
-      // later reconnect from a device paired to this port matches on the next launch (STA-1511).
-      if (this.wsPort !== 0 && widened.transport.resolvedPort !== this.wsPort) {
-        writeWsFallbackPort(this.userDataPath, widened.transport.resolvedPort)
-      }
+      this.syncPersistedWsFallback(widened.transport.resolvedPort)
       this.writeMetadata()
     } catch (persistError) {
       // Why: the wide listener is live and tracked; a persistence failure must not tear it down. Keep
