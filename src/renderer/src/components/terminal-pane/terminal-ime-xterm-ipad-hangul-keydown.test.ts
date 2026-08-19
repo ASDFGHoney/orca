@@ -384,12 +384,37 @@ describe('iPadOS Hangul typed as bare keydowns', () => {
     expect(rig.compositionView.classList.contains('active')).toBe(false)
   })
 
-  it('sends the jamo itself if the IME leaves the textarea alone', async () => {
+  it('sends a jamo the IME never composed, once the next keydown settles it', async () => {
     pretendTouchIOS()
     const rig = openTerminal()
     dispatchKey(rig, 'keydown', { key: 'ㅎ', keyCode: 'ㅎ'.charCodeAt(0) })
     await nextEventLoop()
 
+    // Nothing is sent on a timer: the device delivers its write later than a macrotask, so a
+    // deferred read that concluded "nothing was composed" would fire first and send every jamo
+    // raw. The hold stays open instead.
+    expect(rig.emitted).toEqual([])
+
+    // The next keydown answers the question the timer could only guess at.
+    dispatchKey(rig, 'keydown', { key: 'ㅏ', keyCode: 'ㅏ'.charCodeAt(0) })
     expect(rig.emitted).toEqual(['ㅎ'])
+  })
+
+  it('holds the jamo when the write lands after the first deferred read', async () => {
+    pretendTouchIOS()
+    const rig = openTerminal()
+    dispatchKey(rig, 'keydown', { key: 'ㅎ', keyCode: 'ㅎ'.charCodeAt(0) })
+    await nextEventLoop()
+
+    // The shape the device actually produces: the field is written only after the first read.
+    rig.textarea.value = 'ㅎ'
+    rig.textarea.dispatchEvent(
+      new InputEvent('input', { data: 'ㅎ', inputType: 'insertText', bubbles: true })
+    )
+    await nextEventLoop()
+
+    expect(rig.emitted).toEqual([])
+    // The overlay wraps its text in directional marks, so compare on the content.
+    expect(rig.compositionView.textContent).toContain('ㅎ')
   })
 })
