@@ -1,3 +1,7 @@
+// @vitest-environment happy-dom
+
+import '@testing-library/jest-dom/vitest'
+import { screen } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -170,6 +174,7 @@ describe('DeleteWorktreeDialog lineage copy', () => {
     mocks.state.sshConnectionStates = new Map()
     mocks.state.runtimeEnvironments = []
     mocks.state.runtimeStatusByEnvironmentId = new Map()
+    document.body.innerHTML = ''
     mocks.state.worktreeLineageById = {}
     mocks.state.gitStatusByWorktree = {}
     mocks.state.deleteStateByWorktreeId = {}
@@ -177,7 +182,7 @@ describe('DeleteWorktreeDialog lineage copy', () => {
     vi.mocked(runWorktreeDeletesInParallel).mockResolvedValue([])
   })
 
-  it('previews the confirmed host row when workspace ids collide', async () => {
+  it('labels the confirmed single-host target when workspace ids collide', async () => {
     const local = {
       ...makeWorktree('shared', '/workspaces/local'),
       instanceId: 'local-instance',
@@ -194,13 +199,18 @@ describe('DeleteWorktreeDialog lineage copy', () => {
       worktreeId: ssh.id,
       worktreeDeleteIdentities: [{ id: ssh.id, instanceId: ssh.instanceId, hostId: ssh.hostId }]
     }
+    mocks.state.sshTargetLabels = new Map([['builder', 'Build server']])
     mocks.state.allWorktrees.mockReturnValue([local, ssh])
 
     const { default: DeleteWorktreeDialog } = await import('./DeleteWorktreeDialog')
     const markup = renderToStaticMarkup(<DeleteWorktreeDialog />)
+    document.body.innerHTML = markup
 
     expect(markup).toContain('SSH target')
     expect(markup).not.toContain('Local sibling')
+    expect(screen.getByRole('region')).toHaveAccessibleName(
+      'SSH target /workspaces/ssh Build server'
+    )
   })
 
   it('keeps Space safety-checked confirmation non-force', async () => {

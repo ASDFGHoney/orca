@@ -43,6 +43,7 @@ function makeWorktree(id: string, displayName: string, hostId?: Worktree['hostId
 
 function renderPreview(args: {
   worktrees: readonly Worktree[]
+  collisionWorktrees?: readonly Worktree[]
   worktree?: Worktree | null
   isBatchDelete?: boolean
   hostLabelById?: ReadonlyMap<ExecutionHostId, string>
@@ -52,6 +53,7 @@ function renderPreview(args: {
       isBatchDelete={args.isBatchDelete ?? true}
       worktree={args.worktree ?? null}
       worktrees={args.worktrees}
+      collisionWorktrees={args.collisionWorktrees ?? args.worktrees}
       hostLabelById={args.hostLabelById ?? savedHostLabels}
       deleteStateByWorktreeId={{}}
       dirtyChangeCountsByWorktreeId={new Map()}
@@ -127,15 +129,18 @@ describe('DeleteWorktreeTargetPreview host labels', () => {
 
   it('includes the host in a colliding single target region and its accessible name', () => {
     const sshWorktree = makeWorktree('shared', 'collide', 'ssh:qa-linux-42')
+    const runtimeWorktree = makeWorktree('shared', 'unselected', 'runtime:runtime-7')
     renderPreview({
       isBatchDelete: false,
       worktree: sshWorktree,
-      worktrees: [sshWorktree, makeWorktree('shared', 'collide', 'runtime:runtime-7')]
+      worktrees: [sshWorktree],
+      collisionWorktrees: [sshWorktree, runtimeWorktree]
     })
 
     const target = screen.getByRole('region', { name: /QA Linux/ })
     expect(target).toHaveAccessibleName('collide /work/collide QA Linux')
     expect(within(target).getByText('QA Linux')).toBeVisible()
+    expect(screen.queryByText('unselected')).not.toBeInTheDocument()
   })
 
   it('omits the host from an ordinary single target region', () => {

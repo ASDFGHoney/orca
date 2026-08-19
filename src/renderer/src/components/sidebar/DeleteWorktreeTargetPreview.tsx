@@ -40,6 +40,7 @@ export function DeleteWorktreeTargetPreview({
   isBatchDelete,
   worktree,
   worktrees,
+  collisionWorktrees,
   hostLabelById,
   deleteStateByWorktreeId,
   dirtyChangeCountsByWorktreeId
@@ -47,12 +48,13 @@ export function DeleteWorktreeTargetPreview({
   isBatchDelete: boolean
   worktree: Worktree | null
   worktrees: readonly Worktree[]
+  collisionWorktrees: readonly Worktree[]
   hostLabelById: ReadonlyMap<ExecutionHostId, string>
   deleteStateByWorktreeId: AppState['deleteStateByWorktreeId']
   dirtyChangeCountsByWorktreeId: ReadonlyMap<string, number>
 }): JSX.Element | null {
   const targetIdPrefix = useId()
-  const collisionIds = getCollisionIds(worktrees)
+  const collisionIds = getCollisionIds(collisionWorktrees)
   if (isBatchDelete) {
     return (
       <ScrollArea className="max-h-48 rounded-md border border-border/70 bg-muted/35 text-xs">

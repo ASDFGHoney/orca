@@ -378,6 +378,7 @@ const DeleteWorktreeDialog = React.memo(function DeleteWorktreeDialog() {
           isBatchDelete={isBatchDelete}
           worktree={worktree}
           worktrees={worktrees}
+          collisionWorktrees={allWorktrees}
           hostLabelById={hostLabelById}
           deleteStateByWorktreeId={deleteStateByWorktreeId}
           dirtyChangeCountsByWorktreeId={dirtyChangeCountsByWorktreeId}
