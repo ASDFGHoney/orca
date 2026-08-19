@@ -143,8 +143,13 @@ describe('PR workflow parallelism', () => {
     expect(installStep.run).toMatch(/Acquire::http::Timeout/)
     expect(installStep.run).toMatch(/Acquire::https::Timeout/)
     expect(installStep.run).toMatch(/Acquire::Retries/)
-    // unattended-upgrades can hold the dpkg lock on a fresh runner.
-    expect(installStep.run).toMatch(/DPkg::Lock::Timeout/)
+    // Retries multiply: a first attempt at 30s x 3 retries across every index file turned
+    // a dead mirror into a ~15 minute stall. One attempt, then move on.
+    expect(installStep.run).toMatch(/Acquire::Retries "1"/)
+    // Acquire timeouts are per-connection, so they cannot bound the command as a whole.
+    // Only a wall-clock bound can, and both apt invocations need one.
+    expect(installStep.run).toMatch(/timeout \d+ sudo apt-get update/)
+    expect(installStep.run).toMatch(/timeout \d+ sudo apt-get install/)
   })
 
   it('keeps every real-zsh test in the dedicated shell lane', () => {
