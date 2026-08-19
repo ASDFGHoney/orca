@@ -13,6 +13,7 @@ import {
 } from './browser-route-guest-popup-ownership'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 
+const GESTURE_CLICK_AT = 1_700_000_000_000
 const partition = `persist:orca-browser-v1-${'a'.repeat(64)}`
 const otherPartition = `persist:orca-browser-v1-${'b'.repeat(64)}`
 const page = {
@@ -25,6 +26,7 @@ const page = {
 
 afterEach(() => {
   resetBrowserRouteGuestPopupOwnership()
+  vi.useRealTimers()
 })
 
 describe('route guest OAuth popups', () => {
@@ -50,6 +52,50 @@ describe('route guest OAuth popups', () => {
     expect(popups()[0]?.loaded).toBe(true)
 
     expect(guest.openWindow('https://accounts.example.com/oauth')).toEqual({ action: 'deny' })
+  })
+
+  // Literal offsets, not the exported constant: deriving them from it would keep a widened
+  // gesture window green.
+  it('still honors a gesture 1s after the click', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(GESTURE_CLICK_AT)
+    const { guest } = attachRegisteredGuest()
+    guest.emitInput('mouseDown')
+
+    vi.setSystemTime(GESTURE_CLICK_AT + 1_000)
+
+    expect(guest.openWindow('https://accounts.example.com/oauth').action).toBe('allow')
+  })
+
+  it('denies a popup more than 1s after the click that would have authorized it', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(GESTURE_CLICK_AT)
+    const { guest } = attachRegisteredGuest()
+    guest.emitInput('mouseDown')
+
+    vi.setSystemTime(GESTURE_CLICK_AT + 1_001)
+
+    expect(guest.openWindow('https://accounts.example.com/oauth')).toEqual({ action: 'deny' })
+    expect(popupMocks.openPopupWithOriginBar).not.toHaveBeenCalled()
+  })
+
+  it('stops opening popups at the fourth one even while gestures keep arriving', () => {
+    const { guest, popups } = attachRegisteredGuest()
+
+    for (let index = 0; index < 4; index += 1) {
+      guest.emitInput('mouseDown')
+      const allowed = guest.openWindow(`https://accounts.example.com/oauth/${index}`)
+      expect(allowed.action).toBe('allow')
+      allowed.createWindow?.(popupOptions(createPopupContents()))
+    }
+    expect(popups()).toHaveLength(4)
+
+    guest.emitInput('mouseDown')
+
+    expect(guest.openWindow('https://accounts.example.com/oauth/overflow')).toEqual({
+      action: 'deny'
+    })
+    expect(popups()).toHaveLength(4)
   })
 
   it('applies the WebRTC policy before the popup can load and fails closed when it cannot', () => {
