@@ -256,7 +256,9 @@ describe.skipIf(process.platform !== 'win32')('Antigravity Windows hook payload 
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBe(0)
     expect(listener.posts).toHaveLength(1)
-    expect(listener.posts[0].payload).toBe('')
+    // Why: curl drops a `--data-urlencode name@-` field entirely when stdin is empty, so the
+    // event reaches the listener with no `payload` key — not an empty one.
+    expect(listener.posts[0].payload).toBeNull()
     expect(listener.posts[0].hookEventName).toBe('PreInvocation')
   }, 30_000)
 
