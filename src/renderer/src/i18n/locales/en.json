@@ -15832,6 +15832,7 @@
   },
   "components": {
     "native-chat": {
+      "structuredAdoptionFailed": "Could not switch this Codex session to structured chat",
       "composer": {
         "imageUnsupported": "Image paste is not supported for this agent.",
         "send": "Send",

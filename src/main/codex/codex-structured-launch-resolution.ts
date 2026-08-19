@@ -13,6 +13,7 @@ import { resolveCodexCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { getSpawnArgsForWindows } from '../win32-utils'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
+import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 
 const CODEX_APP_SERVER_ARGS = ['app-server']
 
@@ -23,6 +24,7 @@ export type CodexStructuredLaunchResolverDeps = {
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
   /** Overridden in tests; production scans PATH and version-manager dirs. */
   resolveCommand?: () => string
+  resolveRollout?: typeof resolvePinnedCodexRolloutProof
 }
 
 export function createCodexStructuredLaunchResolver(
@@ -51,6 +53,7 @@ export function createCodexStructuredLaunchResolver(
     const command = (deps.resolveCommand ?? resolveCodexCommand)()
     const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, CODEX_APP_SERVER_ARGS)
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
+    const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
     return {
       command: spawnCmd,
       args: spawnArgs,
@@ -59,7 +62,15 @@ export function createCodexStructuredLaunchResolver(
       ...(record.launchEnv ? { env: { ...record.launchEnv } } : {}),
       // An empty chain is a session that has never proved a thread, so it
       // starts one; anything else resumes the last link this session proved.
-      resumeThreadId: head?.handle.provider === 'codex' ? head.handle.threadId : null
+      resumeThreadId,
+      ...(resumeThreadId
+        ? {
+            resumePath: await (deps.resolveRollout ?? resolvePinnedCodexRolloutProof)(
+              accountHome.path,
+              resumeThreadId
+            )
+          }
+        : {})
     }
   }
 }

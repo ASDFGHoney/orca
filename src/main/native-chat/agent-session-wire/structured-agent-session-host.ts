@@ -56,6 +56,10 @@ import type {
   StructuredAgentSessionHostDeps,
   StructuredAgentSessionHostSession
 } from './structured-agent-session-host-types'
+import {
+  adoptStructuredTuiOwner,
+  type StructuredTuiAdoptionRequest
+} from './structured-agent-session-tui-adoption'
 import { readStructuredAgentSessionHistoryResult } from './structured-agent-session-history-result'
 export type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
 
@@ -116,21 +120,18 @@ export class StructuredAgentSessionHost {
 
   hasSession = (sessionId: string): boolean => this.sessions.has(sessionId)
 
-  supportsCreate(location: AgentSessionExecutionLocation, agent: string): boolean {
-    return providerSupport.adapterSupportsCreate(this.deps.adapter, location, agent)
-  }
+  supportsCreate = (location: AgentSessionExecutionLocation, agent: string): boolean =>
+    providerSupport.adapterSupportsCreate(this.deps.adapter, location, agent)
 
   listSessionTabs() {
     return listStructuredAgentSessionTabs(this.sessions)
   }
 
-  restoreReadableSessions(): Promise<void> {
-    return this.restartRestore.run(() => this.readableRestorer.restore())
-  }
+  restoreReadableSessions = (): Promise<void> =>
+    this.restartRestore.run(() => this.readableRestorer.restore())
 
-  private serialize<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
-    return this.tasks.serialize(sessionId, task)
-  }
+  private serialize = <T>(sessionId: string, task: () => Promise<T>): Promise<T> =>
+    this.tasks.serialize(sessionId, task)
 
   private restoreRenewedHandoff(sessionId: string): Promise<void> {
     return this.serialize(sessionId, async () => {
@@ -199,9 +200,11 @@ export class StructuredAgentSessionHost {
     return this.tasks.trackAttach(attaching)
   }
 
-  flushStreamedEvents(sessionId: string): Promise<void> {
-    return this.runtimeState.flushEventSink(sessionId)
-  }
+  // oxfmt-ignore
+  adoptTuiOwner = (input: StructuredTuiAdoptionRequest): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> => this.serialize(input.params.envelope.sessionId, () => adoptStructuredTuiOwner({ ...input, deps: this.deps, now: this.now, publish: (sessionId, session) => this.sessions.set(sessionId, session), retain: (sessionId, owner) => this.handoffs.adoptTuiOwner(sessionId, owner), snapshot: (sessionId, session) => this.subscribers.snapshot(sessionId, session.journal, session.fence) }))
+
+  flushStreamedEvents = (sessionId: string): Promise<void> =>
+    this.runtimeState.flushEventSink(sessionId)
 
   async flushAllStreamedEvents(): Promise<void> {
     this.runtimeState.stopLeaseRenewal()

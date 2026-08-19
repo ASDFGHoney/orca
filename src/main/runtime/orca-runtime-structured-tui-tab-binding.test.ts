@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
+import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { createEphemeralAgentSessionClaimSigner } from './agent-session-claim-identity'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { OrcaRuntimeService } from './orca-runtime'
@@ -9,17 +10,20 @@ const {
   probeAgentSessionProcessIdentity,
   proveCodexTuiRollout,
   readStructuredTuiProcessIdentity,
+  resolveLiveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
 } = vi.hoisted(() => ({
   probeAgentSessionProcessIdentity: vi.fn(),
   proveCodexTuiRollout: vi.fn(),
   readStructuredTuiProcessIdentity: vi.fn(),
+  resolveLiveCodexTuiRollout: vi.fn(),
   resolvePinnedCodexRolloutProof: vi.fn()
 }))
 
 vi.mock('./structured-tui-process-identity', () => ({ readStructuredTuiProcessIdentity }))
 vi.mock('../codex/codex-tui-rollout-proof', () => ({
   proveCodexTuiRollout,
+  resolveLiveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
 }))
 vi.mock('./agent-session-process-identity-probe', async (importOriginal) => ({
@@ -28,6 +32,50 @@ vi.mock('./agent-session-process-identity-probe', async (importOriginal) => ({
 }))
 
 const WORKTREE_ID = 'repo-1::/tmp/structured-handoff'
+
+function terminalAdoptionHarness() {
+  const runtime = new OrcaRuntimeService({ getSettings: () => ({ agentDefaultEnv: {} }) } as never)
+  runtime.setPtyController({
+    listProcesses: async () => [
+      { id: 'pty-adopt', incarnationId: 'inc-adopt', rootProcessId: 31337 }
+    ]
+  } as never)
+  const internal = runtime as unknown as {
+    ptysById: Map<string, unknown>
+    resolveRuntimeFileTarget(): Promise<unknown>
+    resolveStructuredAgentSessionCreateIntent(input: { envelope: unknown }): Promise<unknown>
+    issueStructuredTuiPtyHandle(): string
+  }
+  internal.ptysById.set('pty-adopt', {
+    ptyId: 'pty-adopt',
+    connected: true,
+    connectionId: null,
+    wslDistro: null,
+    tabId: 'tab-adopt',
+    paneKey: 'tab-adopt:leaf-adopt',
+    worktreeId: WORKTREE_ID,
+    incarnationId: 'inc-adopt'
+  })
+  internal.resolveRuntimeFileTarget = vi.fn(async () => ({
+    connectionId: null,
+    worktree: { id: WORKTREE_ID }
+  }))
+  internal.resolveStructuredAgentSessionCreateIntent = vi.fn(async ({ envelope }) => ({
+    envelope,
+    location: {
+      executionHostId: 'local',
+      wslDistro: null,
+      workspaceId: WORKTREE_ID,
+      workspaceKind: 'git-worktree'
+    },
+    provider: 'codex',
+    agent: 'codex',
+    accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex-home' },
+    runtimeKind: 'native'
+  }))
+  internal.issueStructuredTuiPtyHandle = vi.fn(() => 'term-adopt')
+  return runtime
+}
 
 function notifier(revealTerminalSession: ReturnType<typeof vi.fn>) {
   return {
@@ -54,6 +102,131 @@ function structuredTabNotifier() {
 }
 
 describe('structured TUI launch tab binding', () => {
+  it('adopts the proven local Codex pane as a durable TUI owner', async () => {
+    const runtime = terminalAdoptionHarness()
+    const adoptTuiOwner = vi.fn(async () => ({ ok: true, replayed: false, fence: 1 }))
+    setStructuredAgentSessionHost({ adoptTuiOwner } as never)
+    resolvePinnedCodexRolloutProof.mockResolvedValueOnce('/tmp/codex-home/rollout.jsonl')
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+      hostId: 'local',
+      pid: 4242,
+      processStartTimeMs: 1_700_000_000_000,
+      spawnToken: 'spawn-adopt'
+    })
+
+    try {
+      await expect(
+        runtime.adoptStructuredAgentSessionTerminal(
+          {
+            envelope: {
+              sessionId: 'session-adopt',
+              clientOperationId: 'operation-adopt',
+              expectedRuntimeFence: null,
+              payloadFingerprint: 'f'.repeat(64)
+            },
+            worktree: `id:${WORKTREE_ID}`,
+            tabId: 'tab-adopt',
+            paneKey: 'tab-adopt:leaf-adopt',
+            ptyId: 'pty-adopt',
+            threadId: 'thread-adopt'
+          },
+          { callerKey: 'renderer-1' }
+        )
+      ).resolves.toMatchObject({ ok: true })
+      expect(adoptTuiOwner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: expect.objectContaining({
+            adoptedTerminal: true,
+            historySource: 'provider-resume',
+            transcriptPath: '/tmp/codex-home/rollout.jsonl',
+            link: expect.objectContaining({
+              origin: 'adopted',
+              handle: { provider: 'codex', threadId: 'thread-adopt' }
+            })
+          })
+        })
+      )
+      expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBe('session-adopt')
+    } finally {
+      agentSessionPtyWriteGate.unbindPty('pty-adopt')
+      setStructuredAgentSessionHost(null)
+    }
+  })
+
+  it('refuses adoption when the provider rollout cannot be proved', async () => {
+    const runtime = terminalAdoptionHarness()
+    resolvePinnedCodexRolloutProof.mockResolvedValueOnce(null)
+
+    await expect(
+      runtime.adoptStructuredAgentSessionTerminal(
+        {
+          envelope: {
+            sessionId: 'session-adopt',
+            clientOperationId: 'operation-adopt',
+            expectedRuntimeFence: null,
+            payloadFingerprint: 'f'.repeat(64)
+          },
+          worktree: `id:${WORKTREE_ID}`,
+          tabId: 'tab-adopt',
+          paneKey: 'tab-adopt:leaf-adopt',
+          ptyId: 'pty-adopt',
+          threadId: 'thread-adopt'
+        },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('Could not find the rollout')
+    expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
+  })
+
+  it('discovers the provider thread when hook status has not published it yet', async () => {
+    const runtime = terminalAdoptionHarness()
+    const adoptTuiOwner = vi.fn(async () => ({ ok: true, replayed: false, fence: 1 }))
+    setStructuredAgentSessionHost({ adoptTuiOwner } as never)
+    resolveLiveCodexTuiRollout.mockResolvedValueOnce({
+      threadId: 'thread-discovered',
+      transcriptPath: '/tmp/codex-home/discovered.jsonl'
+    })
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+      hostId: 'local',
+      pid: 4242,
+      processStartTimeMs: 1_700_000_000_000,
+      spawnToken: 'spawn-adopt'
+    })
+
+    try {
+      await expect(
+        runtime.adoptStructuredAgentSessionTerminal(
+          {
+            envelope: {
+              sessionId: 'session-discovered',
+              clientOperationId: 'operation-discovered',
+              expectedRuntimeFence: null,
+              payloadFingerprint: 'f'.repeat(64)
+            },
+            worktree: `id:${WORKTREE_ID}`,
+            tabId: 'tab-adopt',
+            paneKey: 'tab-adopt:leaf-adopt',
+            ptyId: 'pty-adopt'
+          },
+          { callerKey: 'renderer-1' }
+        )
+      ).resolves.toMatchObject({ ok: true })
+      expect(adoptTuiOwner).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: expect.objectContaining({
+            transcriptPath: '/tmp/codex-home/discovered.jsonl',
+            link: expect.objectContaining({
+              handle: { provider: 'codex', threadId: 'thread-discovered' }
+            })
+          })
+        })
+      )
+    } finally {
+      agentSessionPtyWriteGate.unbindPty('pty-adopt')
+      setStructuredAgentSessionHost(null)
+    }
+  })
+
   it('reveals the structured chat tab when reverse handoff completes', () => {
     const runtime = new OrcaRuntimeService()
     const targetNotifier = structuredTabNotifier()

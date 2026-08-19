@@ -81,6 +81,12 @@ import {
 import { ensureStructuredAgentSessionHost as installStructuredAgentSessionHost } from './structured-agent-session-runtime'
 import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import type { AgentSessionAttachParams } from '../native-chat/agent-session-wire/structured-agent-session-attach'
+import type { StructuredAgentSessionCaller } from '../native-chat/agent-session-wire/structured-agent-session-host-types'
+import type {
+  AgentSessionAttachResult,
+  AgentSessionMutationResult
+} from '../../shared/agent-session-wire'
+import { computeAgentSessionPayloadFingerprint } from '../../shared/agent-session-mutation-envelope'
 import {
   StructuredTuiLaunchCleanupError,
   type StructuredAgentSessionHandoffTransport,
@@ -95,6 +101,7 @@ import {
 import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
 import {
   proveCodexTuiRollout,
+  resolveLiveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
 } from '../codex/codex-tui-rollout-proof'
 import {
@@ -102,6 +109,7 @@ import {
   probeAgentSessionProcessIdentity
 } from './agent-session-process-identity-probe'
 import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
+import { stopAdoptedCodexTui } from './adopted-codex-tui-stop'
 import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
 import { evaluateStructuredTuiRecoveryClaim } from './structured-tui-recovery-claim-match'
@@ -3023,6 +3031,7 @@ export class OrcaRuntimeService {
   private pendingMobileSessionPtyInventoryRefresh: Promise<Set<string> | null> | null = null
   private structuredAgentSessionTabRestorePromise: Promise<void> | null = null
   private structuredAgentSessionStartupRestorePromise: Promise<void> | null = null
+  private readonly adoptedStructuredTuiOwners = new Map<string, StructuredTuiOwner>()
   private leaves = new Map<string, RuntimeLeafRecord>()
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
@@ -10316,6 +10325,16 @@ export class OrcaRuntimeService {
     return {
       hostLabel: hostname(),
       launchTui: async ({ record, fence, spawnToken, onSpawned }) => {
+        const adoptedOwner = this.adoptedStructuredTuiOwners.get(record.sessionId)
+        if (adoptedOwner) {
+          return this.launchAdoptedStructuredTui({
+            record,
+            fence,
+            spawnToken,
+            owner: adoptedOwner,
+            onSpawned
+          })
+        }
         const head = record.providerHandleChain.at(-1)
         if (head?.handle.provider !== 'codex') {
           throw new Error('agent_session_identity_required')
@@ -10380,7 +10399,8 @@ export class OrcaRuntimeService {
               ptyId: terminal.ptyId
             },
             process: spawnedOwner.process,
-            ...(proof.transcriptPath ? { transcriptPath: proof.transcriptPath } : {})
+            ...(proof.transcriptPath ? { transcriptPath: proof.transcriptPath } : {}),
+            historySource: 'provider-resume'
           })
         } catch (error) {
           try {
@@ -10608,7 +10628,10 @@ export class OrcaRuntimeService {
       stopRecoveredOwner: (record) => this.stopStructuredSessionProcess(record),
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
-      revealNativeSession: ({ workspaceId, sessionId }) => {
+      revealNativeSession: ({ workspaceId, sessionId, adoptedTerminal }) => {
+        if (adoptedTerminal) {
+          return
+        }
         this.publishStructuredAgentSessionTab({
           workspaceId,
           sessionId,
@@ -10692,6 +10715,10 @@ export class OrcaRuntimeService {
   private async closeStructuredTuiOwner(
     owner: StructuredTuiOwner
   ): Promise<{ transcriptPath?: string }> {
+    if (owner.adoptedTerminal) {
+      await this.closeAdoptedStructuredTuiOwner(owner)
+      return owner.transcriptPath ? { transcriptPath: owner.transcriptPath } : {}
+    }
     if (this.ptysById.get(owner.terminal.ptyId)?.connected) {
       const current = this.refreshStructuredTuiOwnerBinding(owner)
       try {
@@ -10704,6 +10731,132 @@ export class OrcaRuntimeService {
     }
     await this.waitForStructuredTuiOwnerExit(owner)
     return owner.transcriptPath ? { transcriptPath: owner.transcriptPath } : {}
+  }
+
+  private async launchAdoptedStructuredTui(input: {
+    record: AgentSessionRecord
+    fence: number
+    spawnToken: string
+    owner: StructuredTuiOwner
+    onSpawned?: (owner: StructuredTuiOwner) => Promise<void>
+  }): Promise<StructuredTuiOwner> {
+    const head = input.record.providerHandleChain.at(-1)
+    const pty = this.ptysById.get(input.owner.terminal.ptyId)
+    if (
+      head?.handle.provider !== 'codex' ||
+      !pty?.connected ||
+      pty.paneKey !== input.owner.terminal.paneKey
+    ) {
+      throw new Error('The adopted terminal is no longer available.')
+    }
+    const workspace = await this.resolveTerminalWorkspaceLaunchScope(
+      `id:${input.record.location.workspaceId}`
+    )
+    const settings = this.requireStore().getSettings()
+    const platform = this.getAgentLaunchPlatformForWorkspace(workspace)
+    const shell = resolveLocalWindowsAgentStartupShell({
+      platform,
+      isRemote: false,
+      terminalWindowsShell: settings.terminalWindowsShell
+    })
+    const startup = buildAgentResumeStartupPlan({
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: head.handle.threadId },
+      cmdOverrides: settings.agentCmdOverrides ?? {},
+      agentArgs: resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
+      agentEnv: resolveTuiAgentLaunchEnv('codex', settings.agentDefaultEnv),
+      sessionOptions: this.toAgentSessionOptions(input.record.options),
+      sessionOptionsOverrideAgentArgs: Boolean(input.record.options),
+      platform,
+      shell,
+      isRemote: false
+    })
+    if (
+      !startup ||
+      !this.ptyController?.writeAgentSessionProof?.(pty.ptyId, `${startup.launchCommand}\r`, {
+        sessionId: input.record.sessionId,
+        spawnToken: input.spawnToken
+      })
+    ) {
+      throw new Error('The adopted terminal could not resume Codex.')
+    }
+    const listing = (await this.ptyController.listProcesses?.())?.find(
+      (candidate) =>
+        candidate.id === pty.ptyId &&
+        (!pty.incarnationId || candidate.incarnationId === pty.incarnationId)
+    )
+    if (!listing?.rootProcessId) {
+      throw new Error('The adopted terminal did not publish a process identity.')
+    }
+    const process = await readStructuredTuiProcessIdentity({
+      hostId: input.record.location.executionHostId,
+      rootPid: listing.rootProcessId,
+      spawnToken: input.spawnToken,
+      agent: 'codex'
+    })
+    const owner: StructuredTuiOwner = {
+      ...input.owner,
+      process,
+      link: codexProviderHandleLink({
+        threadId: head.handle.threadId,
+        resumed: true,
+        fence: input.fence,
+        observedAt: Date.now()
+      })
+    }
+    await input.onSpawned?.(owner)
+    const proof = await this.waitForAdoptedStructuredTuiProof({
+      owner,
+      threadId: head.handle.threadId,
+      codexHome: input.record.accountHome.path,
+      sessionId: input.record.sessionId,
+      spawnToken: input.spawnToken
+    })
+    const proved = { ...owner, transcriptPath: proof.transcriptPath }
+    this.adoptedStructuredTuiOwners.set(input.record.sessionId, proved)
+    return proved
+  }
+
+  private async waitForAdoptedStructuredTuiProof(input: {
+    owner: StructuredTuiOwner
+    threadId: string
+    codexHome: string
+    sessionId: string
+    spawnToken: string
+  }): Promise<{ transcriptPath: string }> {
+    const readPty = (): RuntimePtyWorktreeRecord => {
+      const pty = this.ptysById.get(input.owner.terminal.ptyId)
+      if (!pty?.connected || pty.paneKey !== input.owner.terminal.paneKey) {
+        throw new Error('The adopted terminal lost its pane identity.')
+      }
+      return pty
+    }
+    const pty = readPty()
+    return proveCodexTuiRollout({
+      codexHome: input.codexHome,
+      threadId: input.threadId,
+      kittyKeyboardFlags: this.providerModeTrackersByPtyId.get(pty.ptyId)?.flags ?? 0,
+      readOutput: () => {
+        const current = readPty()
+        return {
+          text: buildTerminalWaitText(current.tailBuffer, current.tailPartialLine, current.preview),
+          lastOutputAt: current.lastOutputAt
+        }
+      },
+      write: (data) =>
+        this.ptyController?.writeAgentSessionProof?.(readPty().ptyId, data, {
+          sessionId: input.sessionId,
+          spawnToken: input.spawnToken
+        }) ?? false
+    })
+  }
+
+  private async closeAdoptedStructuredTuiOwner(owner: StructuredTuiOwner): Promise<void> {
+    const pty = this.ptysById.get(owner.terminal.ptyId)
+    if (!pty?.connected || pty.paneKey !== owner.terminal.paneKey) {
+      throw new Error('The owning agent terminal lost its pane identity.')
+    }
+    await stopAdoptedCodexTui({ identity: owner.process })
   }
 
   private refreshStructuredTuiOwnerBinding(owner: StructuredTuiOwner): StructuredTuiOwner {
@@ -10940,6 +11093,156 @@ export class OrcaRuntimeService {
             ? 'wsl'
             : 'agent'
     }
+  }
+
+  async adoptStructuredAgentSessionTerminal(
+    input: {
+      envelope: {
+        sessionId: string
+        clientOperationId: string
+        expectedRuntimeFence: null
+        payloadFingerprint: string
+      }
+      worktree: string
+      tabId: string
+      paneKey: string
+      ptyId: string
+      threadId?: string
+    },
+    caller: StructuredAgentSessionCaller
+  ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
+    const pty = this.ptysById.get(input.ptyId)
+    if (
+      !pty?.connected ||
+      pty.connectionId !== null ||
+      pty.wslDistro !== null ||
+      pty.tabId !== input.tabId ||
+      pty.paneKey !== input.paneKey
+    ) {
+      throw new Error('Structured Codex chat can only adopt this local terminal pane.')
+    }
+    const target = await this.resolveRuntimeFileTarget(input.worktree)
+    if (target.connectionId || target.worktree.id !== pty.worktreeId) {
+      throw new Error('Structured Codex chat is unavailable for remote terminals.')
+    }
+    const intent = await this.resolveStructuredAgentSessionCreateIntent({
+      envelope: input.envelope,
+      worktree: input.worktree,
+      agent: 'codex'
+    })
+    const listing = (await this.ptyController?.listProcesses?.())?.find(
+      (candidate) =>
+        candidate.id === pty.ptyId &&
+        (!pty.incarnationId || candidate.incarnationId === pty.incarnationId)
+    )
+    if (!listing?.rootProcessId) {
+      throw new Error('Could not prove the Codex terminal process.')
+    }
+    const spawnToken = randomUUID()
+    const process = await readStructuredTuiProcessIdentity({
+      hostId: intent.location.executionHostId,
+      rootPid: listing.rootProcessId,
+      spawnToken,
+      agent: 'codex'
+    })
+    let threadId = input.threadId
+    let transcriptPath = threadId
+      ? await resolvePinnedCodexRolloutProof(intent.accountHome.path, threadId)
+      : null
+    if (!threadId) {
+      const readPty = (): RuntimePtyWorktreeRecord => {
+        const current = this.ptysById.get(input.ptyId)
+        if (!current?.connected || current.paneKey !== input.paneKey) {
+          throw new Error('The Codex terminal lost its pane identity.')
+        }
+        return current
+      }
+      const proof = await resolveLiveCodexTuiRollout({
+        codexHome: intent.accountHome.path,
+        kittyKeyboardFlags: this.providerModeTrackersByPtyId.get(input.ptyId)?.flags ?? 0,
+        readOutput: () => {
+          const current = readPty()
+          return {
+            text: buildTerminalWaitText(
+              current.tailBuffer,
+              current.tailPartialLine,
+              current.preview
+            ),
+            lastOutputAt: current.lastOutputAt
+          }
+        },
+        write: (data) =>
+          this.ptyController?.writeAgentSessionProof?.(readPty().ptyId, data, {
+            sessionId: input.envelope.sessionId,
+            spawnToken
+          }) ?? false
+      })
+      threadId = proof.threadId
+      transcriptPath = proof.transcriptPath
+    }
+    if (!transcriptPath) {
+      throw new Error('Could not find the rollout for this Codex conversation.')
+    }
+    const owner: StructuredTuiOwner = {
+      terminal: {
+        handle: this.issueStructuredTuiPtyHandle(pty),
+        tabId: input.tabId,
+        paneKey: input.paneKey,
+        ptyId: input.ptyId
+      },
+      process,
+      link: codexProviderHandleLink({
+        threadId,
+        resumed: false,
+        origin: 'adopted',
+        fence: 1,
+        observedAt: Date.now()
+      }),
+      transcriptPath,
+      historySource: 'provider-resume',
+      adoptedTerminal: true
+    }
+    const params: AgentSessionAttachParams = {
+      ...intent,
+      envelope: {
+        ...input.envelope,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.attach',
+          sessionId: input.envelope.sessionId,
+          fields: {
+            location: intent.location,
+            provider: 'codex',
+            agent: 'codex',
+            accountHome: intent.accountHome,
+            runtimeKind: 'tui',
+            providerHandle: { kind: 'codex', threadId },
+            expectedRuntimeFence: null
+          }
+        })
+      },
+      runtimeKind: 'tui',
+      providerHandle: { kind: 'codex', threadId }
+    }
+    const launchEnv = resolveTuiAgentLaunchEnv(
+      'codex',
+      this.requireStore().getSettings().agentDefaultEnv
+    )
+    const host = getStructuredAgentSessionHost()
+    if (!host) {
+      throw new Error('structured_agent_session_unsupported')
+    }
+    const adopted = await host.adoptTuiOwner({
+      caller,
+      params,
+      owner,
+      claimKeyId: this.agentSessionClaimSigner.keyId,
+      launchEnv
+    })
+    if (adopted.ok) {
+      this.adoptedStructuredTuiOwners.set(input.envelope.sessionId, owner)
+      agentSessionPtyWriteGate.bindPty(input.ptyId, input.envelope.sessionId)
+    }
+    return adopted
   }
 
   private async resolveStructuredAgentSessionLocation(worktreeSelector: string) {

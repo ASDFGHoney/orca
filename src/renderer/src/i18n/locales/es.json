@@ -14324,6 +14324,7 @@
   },
   "components": {
     "native-chat": {
+      "structuredAdoptionFailed": "No se pudo cambiar esta sesión de Codex al chat estructurado",
       "composer": {
         "imageUnsupported": "Este agente no admite pegar imágenes.",
         "send": "Enviar",
