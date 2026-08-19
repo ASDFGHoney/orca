@@ -250,8 +250,8 @@ describe('BrowserSessionRegistry', () => {
   })
 
   it('auto-grants storage-access for isolated partitions', () => {
-    // Why: the isolated twin every other entry in this set already has — dropping it would make
-    // storage-access the sole exception.
+    // Why: mirrors the pointerLock precedent directly above — the default-partition suite does not
+    // reach this install path.
     browserSessionRegistry.createProfile('isolated', 'Storage Access Test')
     const mockSession = sessionFromPartitionMock.mock.results[0]?.value
     const requestHandler = mockSession.setPermissionRequestHandler.mock.calls[0][0]
