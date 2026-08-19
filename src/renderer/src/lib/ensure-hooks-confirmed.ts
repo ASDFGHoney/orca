@@ -129,6 +129,14 @@ async function confirmScriptContent(
   const previouslyApproved = Boolean(existingHash)
 
   return new Promise<'run' | 'skip'>((resolve) => {
+    let settled = false
+    const settle = (decision: 'run' | 'skip'): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      resolve(decision)
+    }
     state.openModal('confirm-orca-yaml-hooks', {
       repoId,
       repoName,
@@ -136,10 +144,9 @@ async function confirmScriptContent(
       scriptContent,
       contentHash,
       previouslyApproved,
-      onResolve: (decision: 'run' | 'skip') => resolve(decision),
-      // Why: the modal slot holds one entry; losing it must not strand the
-      // caller awaiting this decision. Dismissal is the same as declining.
-      [MODAL_DISMISSED_KEY]: () => resolve('skip')
+      onResolve: settle,
+      // Why: eviction must fail closed without stranding the singleton trust queue.
+      [MODAL_DISMISSED_KEY]: () => settle('skip')
     })
   })
 }

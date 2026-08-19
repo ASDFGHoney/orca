@@ -13,8 +13,7 @@ const hooksCheckMock = vi.fn()
 const readIssueCommandMock = vi.fn()
 const runtimeEnvironmentTransportCallMock = vi.fn()
 
-// Why: the real UI slice owns the single modal slot, so the eviction under test
-// has to come from it — a hand-rolled openModal double would decide the outcome.
+// Why: a hand-rolled openModal double would decide the eviction outcome under test.
 function createStateBackedByRealModalSlot(): {
   store: StoreApi<AppState>
   state: AppState
@@ -59,13 +58,21 @@ describe('orca.yaml trust prompt evicted from the modal slot', () => {
 
   it('resolves the pending decision as skip when another modal takes the slot', async () => {
     const { store, state } = createStateBackedByRealModalSlot()
+    const runSetup = vi.fn()
 
     const decision = ensureHooksConfirmed(state, 'repo-1', 'setup')
     await vi.waitFor(() => expect(store.getState().activeModal).toBe('confirm-orca-yaml-hooks'))
 
     store.getState().openModal('worktree-palette')
 
-    await expect(settleOrReport(decision)).resolves.toBe('skip')
+    const result = await settleOrReport(decision)
+    if (result === 'run') {
+      runSetup()
+    }
+
+    expect(result).toBe('skip')
+    expect(runSetup).not.toHaveBeenCalled()
+    expect(store.getState().trustedOrcaHooks).toEqual({})
   })
 
   it('resolves the pending decision as skip when the slot is closed outright', async () => {
@@ -101,7 +108,7 @@ describe('orca.yaml trust prompt evicted from the modal slot', () => {
     const decision = ensureHooksConfirmed(state, 'repo-1', 'setup')
     await vi.waitFor(() => expect(store.getState().activeModal).toBe('confirm-orca-yaml-hooks'))
 
-    // Mirrors OrcaYamlTrustDialog: resolve first, then vacate the slot.
+    // Mirrors the trust dialog: resolve first, then vacate the slot.
     ;(store.getState().modalData.onResolve as (d: 'run' | 'skip') => void)('run')
     store.getState().closeModal()
 
