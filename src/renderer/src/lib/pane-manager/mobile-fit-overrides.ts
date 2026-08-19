@@ -34,6 +34,11 @@ type OverrideChangeEvent = {
   // the desktop pane while mobile was active).
   priorCols: number | null
   priorRows: number | null
+  // Why: the hold this event replaced. A listener that only cares about a
+  // phone hand-back cannot track that itself — it may have subscribed after
+  // the hold was already established (reload hydration, tab reopened mid-hold)
+  // and would then never see the opening mobile-fit event.
+  priorMode: 'mobile-fit' | 'remote-desktop-fit' | null
 }
 type OverrideChangeListener = (event: OverrideChangeEvent) => void
 const changeListeners = new Set<OverrideChangeListener>()
@@ -62,7 +67,8 @@ export function setFitOverride(ptyId: string, mode: FitHoldMode, cols: number, r
     cols,
     rows,
     priorCols: prior?.cols ?? null,
-    priorRows: prior?.rows ?? null
+    priorRows: prior?.rows ?? null,
+    priorMode: prior?.mode ?? null
   })
 }
 
@@ -149,7 +155,8 @@ export function hydrateOverrides(
       cols: override.cols,
       rows: override.rows,
       priorCols: prior?.cols ?? null,
-      priorRows: prior?.rows ?? null
+      priorRows: prior?.rows ?? null,
+      priorMode: prior?.mode ?? null
     })
     previous.delete(ptyId)
   }
@@ -161,7 +168,8 @@ export function hydrateOverrides(
       cols: 0,
       rows: 0,
       priorCols: prior.cols,
-      priorRows: prior.rows
+      priorRows: prior.rows,
+      priorMode: prior.mode
     })
   }
 }

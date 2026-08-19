@@ -228,7 +228,8 @@ describe('onOverrideChange', () => {
       cols: 49,
       rows: 20,
       priorCols: null,
-      priorRows: null
+      priorRows: null,
+      priorMode: null
     })
 
     unsub()
@@ -246,7 +247,8 @@ describe('onOverrideChange', () => {
       cols: 120,
       rows: 40,
       priorCols: null,
-      priorRows: null
+      priorRows: null,
+      priorMode: null
     })
 
     unsub()
@@ -265,7 +267,8 @@ describe('onOverrideChange', () => {
       cols: 120,
       rows: 40,
       priorCols: 49,
-      priorRows: 20
+      priorRows: 20,
+      priorMode: 'mobile-fit'
     })
 
     unsub()

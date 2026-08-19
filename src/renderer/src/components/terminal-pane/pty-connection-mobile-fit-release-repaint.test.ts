@@ -149,6 +149,34 @@ async function connectPaneHoldingMobileFit(ptyId: string = PTY_ID): Promise<{
   return { pane, signalPty, setFitOverride, dispose: () => disposable.dispose() }
 }
 
+/** The phone already holds the grid before this pane mounts — an app reload
+ *  hydrating overrides, or a tab reopened mid-hold. No mobile-fit event ever
+ *  reaches this pane's listener, only the later desktop-fit release. */
+async function connectPaneIntoExistingMobileFitHold(): Promise<{
+  signalPty: ReturnType<typeof vi.fn>
+  setFitOverride: typeof SetFitOverride
+  dispose: () => void
+}> {
+  const { connectPanePty } = await import('./pty-connection')
+  const { setFitOverride } = await import('@/lib/pane-manager/mobile-fit-overrides')
+  setFitOverride(PTY_ID, 'mobile-fit', PHONE.cols, PHONE.rows)
+
+  const transport = createMockTransport(PTY_ID)
+  transport.getPtyId.mockReturnValue(PTY_ID)
+  transportFactoryQueue.push(transport)
+  const pane = makeDesktopFittingPane(1)
+  pane.terminal.cols = PHONE.cols
+  pane.terminal.rows = PHONE.rows
+  const manager = createManager(1)
+  const deps = buildPaneConnectionDeps(() => mockStoreState, { isVisibleRef: { current: true } })
+  const disposable = connectPanePty(pane as never, manager as never, deps as never)
+  await flushAsyncTicks(6)
+
+  const signalPty = window.api.pty.signal as unknown as ReturnType<typeof vi.fn>
+  signalPty.mockClear()
+  return { signalPty, setFitOverride, dispose: () => disposable.dispose() }
+}
+
 describe('mobile-fit release repaint', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -212,6 +240,16 @@ describe('mobile-fit release repaint', () => {
     await flushAsyncTicks(6)
 
     expect(signalPty.mock.calls).toEqual([])
+    dispose()
+  })
+
+  it('repaints a pane that connected while the phone already held the grid', async () => {
+    const { signalPty, setFitOverride, dispose } = await connectPaneIntoExistingMobileFitHold()
+
+    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
+    await flushAsyncTicks(6)
+
+    expect(signalPty.mock.calls).toEqual([[PTY_ID, 'SIGWINCH']])
     dispose()
   })
 })

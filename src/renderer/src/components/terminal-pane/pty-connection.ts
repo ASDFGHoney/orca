@@ -4350,23 +4350,21 @@ export function connectPanePty(
   // that frame is stale until something makes the TUI redraw; the renderer's own
   // corrective pty:resize cannot, because the phone->desktop layout arms a 500ms
   // suppress window over it. Re-signal once the restored grid is in place.
-  let heldMobileFitPtyId: string | null = null
   let mobileFitReleaseRepaintFit: SafeFitContinuationHandle | null = null
   const unsubscribeMobileFitReleaseRepaint = onOverrideChange((event) => {
-    if (event.ptyId !== transport.getPtyId()) {
-      return
-    }
-    if (event.mode === 'mobile-fit') {
-      heldMobileFitPtyId = event.ptyId
-      return
-    }
-    // Why only mobile-fit: a remote-desktop-fit hand-off keeps another desktop
+    // Why event.priorMode and not a remembered hold: this pane may have
+    // connected while the phone already held the grid (reload hydration, tab
+    // reopened mid-hold), so the opening mobile-fit event never reached it.
+    // Why only mobile-fit: a remote-desktop-fit hand-back keeps another desktop
     // authoritative for the grid, and its own viewport claim owns the repaint.
-    if (event.mode !== 'desktop-fit' || heldMobileFitPtyId !== event.ptyId) {
+    if (
+      event.ptyId !== transport.getPtyId() ||
+      event.mode !== 'desktop-fit' ||
+      event.priorMode !== 'mobile-fit'
+    ) {
       return
     }
     const releasedPtyId = event.ptyId
-    heldMobileFitPtyId = null
     const isCurrentRelease = (): boolean =>
       !disposed && transport.getPtyId() === releasedPtyId && !getFitOverrideForPty(releasedPtyId)
     mobileFitReleaseRepaintFit?.cancel()
