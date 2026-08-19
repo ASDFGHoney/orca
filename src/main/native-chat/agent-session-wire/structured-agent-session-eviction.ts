@@ -5,11 +5,17 @@
 // (app quit, handoff to a TUI, and error cleanup). Closing a chat was never wired to any of them,
 // so a provider child outlived the chat that owned it for the whole app session.
 //
-// A list makes the next way a session can end cheap to support — add a caller, not a fourth
-// teardown — and makes a half-finished eviction say WHICH step failed instead of failing opaquely.
-// Order matters and is asserted by name in the tests: drain what the session already produced
-// before stopping its child, and stop the child before forgetting it. Draining after the child is
-// gone discards rows the provider already sent; forgetting first strands the process.
+// ORDER. The provider child stops FIRST. Closing it is not silent: the codex adapter emits its
+// `ended` event and flushes coalesced text as part of shutting down, and those are the rows that
+// clear the running-turn marker. Draining or closing the sink ahead of that drops them, which
+// leaves the durable journal claiming the agent is still working — a worse outcome than the leak
+// this teardown exists to fix. So: stop the child, drain what it emitted on its way out, then let
+// the sink go.
+//
+// FAILURE. A step that fails ABORTS the rest. `closeSession` returning false means the child's
+// exit was not proven and the adapter has deliberately kept the session indexed so a retry can
+// reach it; forgetting it anyway stranded the process forever and reported success. Leaving the
+// session in place is what makes the next close a real retry instead of a no-op.
 
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import type { DeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
@@ -19,6 +25,8 @@ export type StructuredAgentSessionEvictionContext = {
   eventSink: DeferredStructuredAgentSessionEventSink
   adapter: StructuredAgentSessionAdapter
   forget: () => void
+  /** Drops the cached sink so a later attach mints a fresh one. */
+  discardSink: () => void
 }
 
 export type StructuredAgentSessionEvictionStep = {
@@ -28,15 +36,24 @@ export type StructuredAgentSessionEvictionStep = {
 
 export const STRUCTURED_AGENT_SESSION_EVICTION_STEPS: readonly StructuredAgentSessionEvictionStep[] =
   [
-    { name: 'stop-publishing', run: (context) => context.eventSink.unbind() },
-    { name: 'drain-published', run: (context) => context.eventSink.drained() },
-    { name: 'close-sink', run: (context) => context.eventSink.close() },
     {
       name: 'stop-provider-child',
       run: async (context) => {
-        await context.adapter.closeSession?.(context.sessionId)
+        // An adapter with no close has nothing to stop; anything else must PROVE the exit.
+        const stopped = await context.adapter.closeSession?.(context.sessionId)
+        if (stopped === false) {
+          throw new Error('provider child exit was not proven')
+        }
       }
     },
+    { name: 'drain-published', run: (context) => context.eventSink.drained() },
+    { name: 'stop-publishing', run: (context) => context.eventSink.unbind() },
+    { name: 'close-sink', run: (context) => context.eventSink.close() },
+    // Why: the runtime caches one sink per session id and hands the SAME instance to the next
+    // attach. Closing without discarding leaves a reopened chat bound to a closed sink, which
+    // accepts every provider event and publishes none. Attach's own failure path already pairs
+    // these two; eviction has to as well.
+    { name: 'discard-sink', run: (context) => context.discardSink() },
     { name: 'forget-session', run: (context) => context.forget() }
   ]
 
@@ -52,22 +69,19 @@ export class StructuredAgentSessionEvictionError extends Error {
 }
 
 /**
- * Runs every eviction step in order. A failing step is reported with its name and does NOT skip the
- * rest: a child that refuses to stop must not also leave the session wired to a dead sink.
+ * Runs the eviction steps in order, stopping at the first failure. The step name travels with the
+ * error because the caller's only useful response is to retry, and a retry is only safe when the
+ * session is still indexed — which is exactly what aborting preserves.
  */
 export async function evictStructuredAgentSession(
   context: StructuredAgentSessionEvictionContext,
   steps: readonly StructuredAgentSessionEvictionStep[] = STRUCTURED_AGENT_SESSION_EVICTION_STEPS
 ): Promise<void> {
-  let failure: StructuredAgentSessionEvictionError | null = null
   for (const step of steps) {
     try {
       await step.run(context)
     } catch (error) {
-      failure ??= new StructuredAgentSessionEvictionError(step.name, context.sessionId, error)
+      throw new StructuredAgentSessionEvictionError(step.name, context.sessionId, error)
     }
-  }
-  if (failure) {
-    throw failure
   }
 }

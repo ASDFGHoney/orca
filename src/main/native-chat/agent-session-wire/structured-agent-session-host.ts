@@ -145,7 +145,8 @@ export class StructuredAgentSessionHost {
         sessionId,
         eventSink: this.runtimeState.eventSinkFor(sessionId),
         adapter: this.deps.adapter,
-        forget: () => this.sessions.delete(sessionId)
+        forget: () => this.sessions.delete(sessionId),
+        discardSink: () => this.runtimeState.discardEventSink(sessionId)
       }
       await evictStructuredAgentSession(context)
     })
