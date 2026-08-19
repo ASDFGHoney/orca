@@ -6,7 +6,10 @@
  * Centralized to stop local/relay listFiles from drifting on blocklist, ignores, exclusions,
  * timeouts, and buffering. See docs/design/share-quick-open-file-listing.md.
  */
-import { posix, win32 } from 'node:path'
+// Namespace, not named: this module is reachable from the renderer, where the bundler stubs
+// `node:path`. Named bindings resolve at module evaluation, so they threw before React mounted
+// (#15158 white screen). The namespace defers the read to the out-of-root `relative` fallback.
+import * as nodePath from 'node:path'
 
 // ─── Hidden-dir blocklist ────────────────────────────────────────────
 
@@ -76,16 +79,18 @@ export function shouldIncludeQuickOpenPath(path: string): boolean {
 // ─── Path flavor detection ───────────────────────────────────────────
 
 // Why: local-OS path.relative is wrong for remote roots (app OS vs relay OS); pick win32 vs posix by root shape.
-function pathFlavor(rootPath: string): typeof posix | typeof win32 {
+// Returns the flavor NAME, not the module: naming it keeps `node:path` untouched until the
+// out-of-root fallback actually needs `relative`.
+function pathFlavor(rootPath: string): 'posix' | 'win32' {
   // Drive letter like C:\ or C:/
   if (/^[a-zA-Z]:[\\/]/.test(rootPath)) {
-    return win32
+    return 'win32'
   }
   // UNC \\server\share or //server/share
   if (rootPath.startsWith('\\\\') || rootPath.startsWith('//')) {
-    return win32
+    return 'win32'
   }
-  return posix
+  return 'posix'
 }
 
 // ─── Exclude-path normalization ──────────────────────────────────────
@@ -118,7 +123,7 @@ export function buildExcludePathPrefixes(rootPath: string, excludePaths?: unknow
     rel = rawFwd.startsWith(normalizedRoot)
       ? rawFwd.slice(normalizedRoot.length)
       : // Fall back to path-flavor relative so remote paths don't get local-OS semantics.
-        flavor.relative(trimmedRoot, raw).replace(/\\/g, '/')
+        nodePath[flavor].relative(trimmedRoot, raw).replace(/\\/g, '/')
     if (!rel || isParentRelativePath(rel) || rel.startsWith('/')) {
       continue
     }
