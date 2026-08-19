@@ -478,6 +478,20 @@ function resolveTerminalHomePathFromEnv(env: Record<string, string> | undefined)
   return homeDrive && homePath ? `${homeDrive}${homePath}` : null
 }
 
+/**
+ * Whether this pane's startup is the tab's queued command rather than a payload a split borrowed.
+ *
+ * Why reference identity and not truthiness: setup/issue splits assign their own one-shot object to
+ * the same `deps.startup` field, so "has a startup" would let a split pane spend a command it never
+ * runs — and a split's payload can be structurally identical to the queued one (STA-4876).
+ */
+export function paneOwnsQueuedStartup(
+  paneStartup: object | null | undefined,
+  queuedStartup: object | null | undefined
+): boolean {
+  return queuedStartup != null && paneStartup === queuedStartup
+}
+
 /** Scopes `deps.startup` to a single call of `splitPane()`, clearing it in `finally` so later splits do not replay the payload. */
 export function splitPaneWithOneShotStartup<TPane>(
   deps: SplitWithStartupDeps,
@@ -1295,8 +1309,22 @@ export function useTerminalPaneLifecycle({
           }
         }
         applyAppearance(manager)
+        // Why one-shot: onPtySpawn fires on every fresh spawn this pane makes (hibernation wake,
+        // the respawn ladder), but only the first carried the queued command. A command queued onto
+        // the tab afterwards belongs to that later launch, and spending it here would drop it
+        // without ever delivering it.
+        let queuedStartupSpent = false
+        const consumeQueuedStartupOnce = (): void => {
+          if (queuedStartupSpent) {
+            return
+          }
+          queuedStartupSpent = true
+          useAppStore.getState().consumeTabStartupCommand(tabId)
+        }
+        const ownsQueuedStartup = paneOwnsQueuedStartup(ptyDeps.startup, startupWithSetupSplitWait)
         const panePtyBinding = connectPanePty(pane, manager, {
           ...ptyDeps,
+          ...(ownsQueuedStartup ? { onQueuedStartupSpawned: consumeQueuedStartupOnce } : {}),
           // Why: spread order matters — spawnHints.cwd (source pane) must override ptyDeps.cwd (worktree root) so splits boot in the live cwd.
           ...(spawnHints?.cwd ? { cwd: spawnHints.cwd } : {}),
           restoredPtyIdByLeafId: spawnHints?.ptyId

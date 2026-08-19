@@ -70,6 +70,9 @@ export type PtyConnectionDeps = {
     (paneId: number, state: PtyTransportRecoveryState | null) => void
   >
   clearTabPtyId: (tabId: string, ptyId: string) => void
+  /** Set only on the pane carrying the tab's queued startup command; called once its own fresh
+   *  spawn exists, which is the first moment the command is guaranteed to reach a shell. */
+  onQueuedStartupSpawned?: () => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   isPtyShutdownPending: (ptyId: string) => boolean
   updateTabTitle: (tabId: string, title: string) => void
