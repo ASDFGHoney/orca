@@ -4,7 +4,11 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readRelayFileRange } from './fs-handler-file-range'
 import { readFullStreamChunk } from './fs-handler-file-read'
-import { FileRangeReadRequestError, MAX_FILE_RANGE_READ_BYTES } from '../shared/file-range-read'
+import {
+  FileRangeReadRequestError,
+  MAX_FILE_RANGE_READ_BYTES,
+  validateFileRangeRequest
+} from '../shared/file-range-read'
 import { HEADER_LENGTH, prepareJsonRpcPayload } from './protocol'
 import { DISPATCHER_CONTROL_QUEUE_MAX_BYTES } from './dispatcher-writer-admission'
 
@@ -148,6 +152,7 @@ describe('readRelayFileRange', () => {
       ['a NaN position', Number.NaN, 4],
       ['an infinite position', Number.POSITIVE_INFINITY, 4],
       ['a position past the safe-integer range', Number.MAX_SAFE_INTEGER + 2, 4],
+      ['a window past the safe-integer range', Number.MAX_SAFE_INTEGER - 1, 3],
       ['a zero length', 0, 0],
       ['a negative length', 0, -4],
       ['a fractional length', 0, 4.5],
@@ -202,6 +207,22 @@ describe('readFullStreamChunk', () => {
       { offset: 0, length: 6, position: 2 },
       { offset: 3, length: 3, position: 5 }
     ])
+  })
+
+  it('keeps every partial-read offset safe at the upper boundary', async () => {
+    const { position: start, length } = validateFileRangeRequest(Number.MAX_SAFE_INTEGER - 2, 3)
+    const calls: number[] = []
+    const reader = {
+      read(buffer: Buffer, offset: number, _length: number, position: number) {
+        calls.push(position)
+        buffer[offset] = 1
+        return Promise.resolve({ bytesRead: 1 })
+      }
+    }
+    const bytesRead = await readFullStreamChunk(reader, Buffer.alloc(length), length, start)
+    expect(bytesRead).toBe(length)
+    expect(calls).toEqual([start, start + 1, Number.MAX_SAFE_INTEGER])
+    expect(calls.every(Number.isSafeInteger)).toBe(true)
   })
 
   // Without the zero check the loop would spin forever on a reader at EOF.

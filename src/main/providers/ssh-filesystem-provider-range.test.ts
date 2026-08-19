@@ -74,7 +74,8 @@ describe('SshFilesystemProvider.readFileRange', () => {
       ['a fractional position', 0.5, 4],
       ['a zero length', 0, 0],
       ['a negative length', 0, -1],
-      ['an over-cap length', 0, MAX_FILE_RANGE_READ_BYTES + 1]
+      ['an over-cap length', 0, MAX_FILE_RANGE_READ_BYTES + 1],
+      ['a window past safe-integer offsets', Number.MAX_SAFE_INTEGER, 2]
     ])('rejects %s without a round trip', async (_label, position, length) => {
       const request = vi.fn()
       await expect(

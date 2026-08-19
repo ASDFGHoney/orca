@@ -55,7 +55,8 @@ export type IFilesystemProvider = {
    *
    *  `position` must be a non-negative safe integer and `length` a positive one
    *  no larger than `MAX_FILE_RANGE_READ_BYTES`; anything else throws
-   *  `FileRangeReadRequestError` without reaching the host. */
+   *  `FileRangeReadRequestError` without reaching the host. The final byte
+   *  offset must also remain a safe integer. */
   readFileRange?(
     filePath: string,
     position: number,

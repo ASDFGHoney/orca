@@ -125,10 +125,7 @@ describe('fs.readFileRange over the real dispatcher', () => {
           0
         )
       )
-      for (let i = 0; i < 200 && frames.length === 0; i++) {
-        await new Promise((resolve) => setImmediate(resolve))
-      }
-      expect(frames).toHaveLength(1)
+      await vi.waitFor(() => expect(frames).toHaveLength(1), { timeout: 4_000 })
       const response = decodePayload(frames[0]) as {
         id: number
         error?: { code: number }

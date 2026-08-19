@@ -36,16 +36,13 @@ function readSshFsCapabilities(
       })
   if (!cached) {
     capabilitiesByMux.set(mux, probe)
-  }
-  return waitForSshCapabilityProbe(probe, signal).then(
-    (capabilities) => capabilities,
-    (error) => {
-      if (!signal?.aborted && capabilitiesByMux.get(mux) === probe) {
+    void probe.catch(() => {
+      if (capabilitiesByMux.get(mux) === probe) {
         capabilitiesByMux.delete(mux)
       }
-      throw error
-    }
-  )
+    })
+  }
+  return waitForSshCapabilityProbe(probe, signal)
 }
 
 export function probeSshQuickOpenSearchCapability(

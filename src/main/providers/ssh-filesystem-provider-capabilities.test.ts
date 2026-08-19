@@ -99,6 +99,31 @@ describe('SSH filesystem capability document', () => {
     expect(mux.request).toHaveBeenCalledTimes(1)
   })
 
+  it('retries when the fetch fails after its only waiter aborts', async () => {
+    let rejectFetch: (error: Error) => void = () => {}
+    const mux = {
+      request: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectFetch = reject
+            })
+        )
+        .mockResolvedValue({ rangedReadVersion: 1 })
+    }
+    const controller = new AbortController()
+    const abandoned = probeSshRangedReadCapability(mux as never, controller.signal)
+    controller.abort()
+    await expect(abandoned).rejects.toThrow('client_disconnected')
+
+    rejectFetch(new Error('connection closed'))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(true)
+    expect(mux.request).toHaveBeenCalledTimes(2)
+  })
+
   it('treats a non-object response as no capabilities', async () => {
     const mux = { request: vi.fn().mockResolvedValue('yes') }
     await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(false)

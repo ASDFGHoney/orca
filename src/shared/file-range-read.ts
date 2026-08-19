@@ -54,5 +54,8 @@ export function validateFileRangeRequest(
       `fs.readFileRange length ${length} exceeds the ${MAX_FILE_RANGE_READ_BYTES}-byte limit`
     )
   }
+  if (position > Number.MAX_SAFE_INTEGER - (length - 1)) {
+    throw new FileRangeReadRequestError('fs.readFileRange window exceeds safe-integer offsets')
+  }
   return { position, length }
 }
