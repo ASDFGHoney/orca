@@ -14911,6 +14911,9 @@
                 }
               }
             }
+          },
+          "download": {
+            "savedToRemote": "{{value0}} saved to {{value1}} on {{value2}}"
           }
         },
         "profile": {
