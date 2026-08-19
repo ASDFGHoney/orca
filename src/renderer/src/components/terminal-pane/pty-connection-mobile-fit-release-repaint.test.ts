@@ -16,6 +16,7 @@ import {
   restoreTerminalTestGlobals
 } from './pty-connection-test-environment'
 import type { setFitOverride as SetFitOverride } from '@/lib/pane-manager/mobile-fit-overrides'
+import type { setDriverForPty as SetDriverForPty } from '@/lib/pane-manager/mobile-driver-state'
 
 const {
   resetAndRefreshAllTerminalWebglAtlases,
@@ -123,6 +124,7 @@ async function connectPaneHoldingMobileFit(ptyId: string = PTY_ID): Promise<{
   pane: MockPane
   signalPty: ReturnType<typeof vi.fn>
   setFitOverride: typeof SetFitOverride
+  setDriverForPty: typeof SetDriverForPty
   dispose: () => void
 }> {
   const { connectPanePty } = await import('./pty-connection')
@@ -138,7 +140,10 @@ async function connectPaneHoldingMobileFit(ptyId: string = PTY_ID): Promise<{
   const disposable = connectPanePty(pane as never, manager as never, deps as never)
   await flushAsyncTicks(6)
 
-  // The phone takes the floor: the host parks the PTY and xterm at phone dims.
+  // The phone takes the floor. Production order (handleMobileSubscribe): the
+  // driver flips to mobile first, then the phone layout writes the hold.
+  const { setDriverForPty } = await import('@/lib/pane-manager/mobile-driver-state')
+  setDriverForPty(ptyId, { kind: 'mobile', clientId: 'phone-1' })
   setFitOverride(ptyId, 'mobile-fit', PHONE.cols, PHONE.rows)
   pane.terminal.cols = PHONE.cols
   pane.terminal.rows = PHONE.rows
@@ -146,7 +151,7 @@ async function connectPaneHoldingMobileFit(ptyId: string = PTY_ID): Promise<{
 
   const signalPty = window.api.pty.signal as unknown as ReturnType<typeof vi.fn>
   signalPty.mockClear()
-  return { pane, signalPty, setFitOverride, dispose: () => disposable.dispose() }
+  return { pane, signalPty, setFitOverride, setDriverForPty, dispose: () => disposable.dispose() }
 }
 
 /** The phone already holds the grid before this pane mounts — an app reload
@@ -155,10 +160,13 @@ async function connectPaneHoldingMobileFit(ptyId: string = PTY_ID): Promise<{
 async function connectPaneIntoExistingMobileFitHold(): Promise<{
   signalPty: ReturnType<typeof vi.fn>
   setFitOverride: typeof SetFitOverride
+  setDriverForPty: typeof SetDriverForPty
   dispose: () => void
 }> {
   const { connectPanePty } = await import('./pty-connection')
   const { setFitOverride } = await import('@/lib/pane-manager/mobile-fit-overrides')
+  const { setDriverForPty } = await import('@/lib/pane-manager/mobile-driver-state')
+  setDriverForPty(PTY_ID, { kind: 'mobile', clientId: 'phone-1' })
   setFitOverride(PTY_ID, 'mobile-fit', PHONE.cols, PHONE.rows)
 
   const transport = createMockTransport(PTY_ID)
@@ -174,7 +182,22 @@ async function connectPaneIntoExistingMobileFitHold(): Promise<{
 
   const signalPty = window.api.pty.signal as unknown as ReturnType<typeof vi.fn>
   signalPty.mockClear()
-  return { signalPty, setFitOverride, dispose: () => disposable.dispose() }
+  return { signalPty, setFitOverride, setDriverForPty, dispose: () => disposable.dispose() }
+}
+
+/** The desktop "Take back" gesture exactly as reclaimTerminalForDesktop's
+ *  active-subscriber branch emits it: applyMobileDisplayMode publishes the
+ *  desktop-fit release *while currentDriver is still mobile*, and only the
+ *  following releaseDesktopTakeBack flips the driver. The order is awaited,
+ *  not raced, and webContents.send preserves it across the two channels. */
+async function takeBackFromPhone(
+  setFitOverride: typeof SetFitOverride,
+  setDriverForPty: typeof SetDriverForPty,
+  ptyId: string = PTY_ID
+): Promise<void> {
+  setFitOverride(ptyId, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
+  setDriverForPty(ptyId, { kind: 'desktop' })
+  await flushAsyncTicks(6)
 }
 
 describe('mobile-fit release repaint', () => {
@@ -192,7 +215,8 @@ describe('mobile-fit release repaint', () => {
   })
 
   it('signals SIGWINCH once the restored desktop grid lands so the TUI repaints', async () => {
-    const { pane, signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
+    const { pane, signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneHoldingMobileFit()
     // Why record inside the mock: asserting the final grid plus the call count
     // passes just as well when the signal fires *before* the refit, which is
     // the bug. Only the grid at signal time distinguishes the two.
@@ -201,12 +225,32 @@ describe('mobile-fit release repaint', () => {
       gridAtSignal.push({ cols: pane.terminal.cols, rows: pane.terminal.rows })
     })
 
-    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
-    await flushAsyncTicks(6)
+    await takeBackFromPhone(setFitOverride, setDriverForPty)
 
     expect({ signals: signalPty.mock.calls, gridAtSignal }).toEqual({
       signals: [[PTY_ID, 'SIGWINCH']],
       gridAtSignal: [DESKTOP]
+    })
+    dispose()
+  })
+
+  it('repaints a take-back whose release lands before the driver flips to desktop', async () => {
+    const { signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneHoldingMobileFit()
+    // Pin the emission order the gesture actually produces: the release is
+    // observed while the presence lock still reads mobile. Gating the repaint
+    // on the lock (rather than on the hold it released) silently drops every
+    // desktop "Take back" — the exact gesture #14321 is about.
+    const signalsBeforeDriverFlip: unknown[][] = []
+    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
+    await flushAsyncTicks(6)
+    signalsBeforeDriverFlip.push(...signalPty.mock.calls)
+    setDriverForPty(PTY_ID, { kind: 'desktop' })
+    await flushAsyncTicks(6)
+
+    expect({ signalsBeforeDriverFlip, allSignals: signalPty.mock.calls }).toEqual({
+      signalsBeforeDriverFlip: [[PTY_ID, 'SIGWINCH']],
+      allSignals: [[PTY_ID, 'SIGWINCH']]
     })
     dispose()
   })
@@ -223,9 +267,10 @@ describe('mobile-fit release repaint', () => {
   })
 
   it('repaint-signals only the hold it released, not every desktop-fit', async () => {
-    const { signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
+    const { signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneHoldingMobileFit()
 
-    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
+    await takeBackFromPhone(setFitOverride, setDriverForPty)
     // A pty exit re-emits desktop-fit for an id that holds nothing (0x0).
     setFitOverride(PTY_ID, 'desktop-fit', 0, 0)
     await flushAsyncTicks(6)
@@ -246,10 +291,10 @@ describe('mobile-fit release repaint', () => {
   })
 
   it('repaints a pane that connected while the phone already held the grid', async () => {
-    const { signalPty, setFitOverride, dispose } = await connectPaneIntoExistingMobileFitHold()
+    const { signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneIntoExistingMobileFitHold()
 
-    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
-    await flushAsyncTicks(6)
+    await takeBackFromPhone(setFitOverride, setDriverForPty)
 
     expect(signalPty.mock.calls).toEqual([[PTY_ID, 'SIGWINCH']])
     dispose()
@@ -267,17 +312,51 @@ describe('mobile-fit release repaint', () => {
     dispose()
   })
 
-  it('does not repaint while the phone still drives the pty without a fit hold', async () => {
-    const { signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
-    const { setDriverForPty } = await import('@/lib/pane-manager/mobile-driver-state')
-    // A lock-only takeover keeps the phone authoritative with no fit override.
-    setDriverForPty(PTY_ID, { kind: 'mobile', clientId: 'phone-1' })
+  // Why not "the driver still reads mobile": that is true of every take-back at
+  // release time, so it cannot be the discriminator. The hold itself is — the
+  // phone owns the grid only while an override is held.
+  it('drops a parked repaint once the phone has retaken the grid', async () => {
+    const { pane, signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneHoldingMobileFit()
+    // The pane cannot measure yet (tab mid-layout), so the release parks the
+    // refit for retry instead of running it.
+    pane.fitAddon.proposeDimensions.mockReturnValue(undefined as never)
+    vi.useFakeTimers()
+    await takeBackFromPhone(setFitOverride, setDriverForPty)
+    const signalsWhileParked = [...signalPty.mock.calls]
 
-    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
-    await flushAsyncTicks(6)
+    // The phone takes the floor again before the pane measures, so the PTY is
+    // back at phone dims. Replaying the parked repaint would redraw there.
+    setDriverForPty(PTY_ID, { kind: 'mobile', clientId: 'phone-2' })
+    setFitOverride(PTY_ID, 'mobile-fit', PHONE.cols, PHONE.rows)
+    pane.fitAddon.proposeDimensions.mockReturnValue(DESKTOP)
+    await vi.advanceTimersByTimeAsync(200)
+    vi.useRealTimers()
 
-    expect(signalPty.mock.calls).toEqual([])
+    expect({ signalsWhileParked, allSignals: signalPty.mock.calls }).toEqual({
+      signalsWhileParked: [],
+      allSignals: []
+    })
     setDriverForPty(PTY_ID, { kind: 'desktop' })
+    dispose()
+  })
+
+  it('replays a parked repaint when the phone did not retake the grid', async () => {
+    const { pane, signalPty, setFitOverride, setDriverForPty, dispose } =
+      await connectPaneHoldingMobileFit()
+    pane.fitAddon.proposeDimensions.mockReturnValue(undefined as never)
+    vi.useFakeTimers()
+    await takeBackFromPhone(setFitOverride, setDriverForPty)
+    const signalsWhileParked = [...signalPty.mock.calls]
+
+    pane.fitAddon.proposeDimensions.mockReturnValue(DESKTOP)
+    await vi.advanceTimersByTimeAsync(200)
+    vi.useRealTimers()
+
+    expect({ signalsWhileParked, allSignals: signalPty.mock.calls }).toEqual({
+      signalsWhileParked: [],
+      allSignals: [[PTY_ID, 'SIGWINCH']]
+    })
     dispose()
   })
 })

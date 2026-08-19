@@ -4372,11 +4372,16 @@ export function connectPanePty(
       return
     }
     const releasedPtyId = event.ptyId
-    // Why the shared guard: a lock-only takeover holds the grid with no
-    // override, so testing the override alone would repaint a PTY the phone
-    // still drives.
+    // Why the hold and not shouldSuppressDesktopPtyResize: the presence lock is
+    // still mobile when this event arrives. reclaimTerminalForDesktop awaits
+    // applyMobileDisplayMode (which publishes this release) before
+    // releaseDesktopTakeBack flips the driver, so gating on the lock cancels
+    // every desktop "Take back" — the gesture this repaint exists for. The hold
+    // is the real question: once it is gone the PTY is at desktop dims, and if
+    // the phone retakes the grid before a parked refit lands, a fresh
+    // mobile-fit reinstates it and this goes false again.
     const isCurrentRelease = (): boolean =>
-      !disposed && transport.getPtyId() === releasedPtyId && !shouldSuppressDesktopPtyResize()
+      !disposed && transport.getPtyId() === releasedPtyId && !getFitOverrideForPty(releasedPtyId)
     mobileFitReleaseRepaintFit?.cancel()
     mobileFitReleaseRepaintFit = safeFitAndThen(
       pane,
