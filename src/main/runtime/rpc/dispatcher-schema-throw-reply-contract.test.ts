@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { RpcDispatcher } from './dispatcher'
-import { defineMethod, defineStreamingMethod, type RpcRequest } from './core'
+import { defineMethod, defineStreamingMethod, InvalidArgumentError, type RpcRequest } from './core'
 import { ALL_RPC_METHODS } from './methods'
 import type { OrcaRuntimeService } from '../orca-runtime'
 
@@ -32,6 +32,10 @@ const ThrowingParams = z.object({ key: z.string().optional() }).superRefine((val
   ;(value.key as string).trim()
 })
 
+// Why: a second, independent way a param schema throws — zod rejects an async refinement during a
+// synchronous safeParse, so this is not specific to a validator forgetting a type check.
+const AsyncParams = z.object({ key: z.string() }).refine(async () => true)
+
 const SYNTHETIC_METHODS = [
   defineMethod({
     name: 'orchestration.throwingSchema',
@@ -44,6 +48,27 @@ const SYNTHETIC_METHODS = [
     handler: async (_params, _ctx, emit) => {
       emit({ ok: true })
     }
+  }),
+  defineMethod({
+    name: 'orchestration.asyncSchema',
+    params: AsyncParams,
+    handler: () => ({ ok: true })
+  }),
+  defineMethod({
+    name: 'orchestration.zodThrowingSchema',
+    params: z
+      .object({})
+      .transform(() =>
+        z.object({ title: z.string().min(1, 'Title is required') }).parse({ title: '' })
+      ),
+    handler: () => ({ ok: true })
+  }),
+  defineMethod({
+    name: 'orchestration.invalidArgumentSchema',
+    params: z.object({}).transform(() => {
+      throw new InvalidArgumentError('Schema rejected the payload')
+    }),
+    handler: () => ({ ok: true })
   })
 ]
 
@@ -174,6 +199,34 @@ describe('RpcDispatcher reply contract when a param schema throws', () => {
     } finally {
       logged.mockRestore()
     }
+  })
+
+  it('emits exactly one invalid_argument reply when a schema needs async parsing', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const replies = await collectStreamingReplies(
+        new RpcDispatcher({ runtime: makeRuntime(), methods: SYNTHETIC_METHODS }),
+        makeRequest('orchestration.asyncSchema', { key: 'ok' })
+      )
+
+      expect(replies).toHaveLength(1)
+      expect(replies[0]).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    } finally {
+      logged.mockRestore()
+    }
+  })
+
+  // Why: a schema can throw an error that already carries the right message. Prefixing it with
+  // generic guard text would leave the caller worse off than a plain safeParse failure.
+  it.each([
+    ['orchestration.zodThrowingSchema', 'Title is required'],
+    ['orchestration.invalidArgumentSchema', 'Schema rejected the payload']
+  ])("reports %s's own validation message verbatim", async (method, message) => {
+    const dispatcher = new RpcDispatcher({ runtime: makeRuntime(), methods: SYNTHETIC_METHODS })
+
+    const response = await dispatcher.dispatch(makeRequest(method, {}))
+
+    expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument', message } })
   })
 
   it('still reports unknown methods as method_not_found with exactly one reply', async () => {

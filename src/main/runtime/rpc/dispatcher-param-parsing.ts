@@ -5,7 +5,7 @@ import {
   type RpcRequest,
   type RpcResponse
 } from './core'
-import { invalidArgumentResponse } from './dispatcher-error-response'
+import { invalidArgumentResponse, validationErrorMessage } from './dispatcher-error-response'
 
 export type ParsedRpcParams =
   | { value: unknown; error?: undefined }
@@ -29,6 +29,12 @@ export function parseRpcParams(
   try {
     result = method.params.safeParse(rawParams)
   } catch (error) {
+    // Why: a schema that throws a ZodError or InvalidArgumentError already said what is wrong —
+    // report that verbatim, or the caller loses the diagnostic it would have had via safeParse.
+    const validationMessage = validationErrorMessage(error)
+    if (validationMessage !== null) {
+      return { error: invalidArgumentResponse(request, meta, validationMessage) }
+    }
     const detail = error instanceof Error ? error.message : String(error)
     console.error(`[rpc] Param schema for ${request.method} threw during validation:`, error)
     return {
