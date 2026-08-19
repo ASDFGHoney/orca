@@ -65,7 +65,11 @@ async function reservePort(): Promise<ReservedPort> {
   return {
     port,
     release: async () => {
-      heldSockets.splice(heldSockets.indexOf(socket), 1)
+      // Why: a second release would splice(-1) and untrack someone else's socket.
+      const index = heldSockets.indexOf(socket)
+      if (index !== -1) {
+        heldSockets.splice(index, 1)
+      }
       await new Promise<void>((resolve) => socket.close(() => resolve()))
     }
   }
@@ -175,7 +179,9 @@ describe('OrcaRuntimeRpcServer persisted WS fallback convergence (STA-4859)', ()
     try {
       expect(servedPort(server)).toBe(configured.port)
       // Why: occupation is transient (an outbound ephemeral socket is enough) and a phone has no recovery
-      // for a dropped endpoint but re-pairing, so one bad launch must not discard a live pairing.
+      // for a dropped endpoint but re-pairing, so one bad launch must not discard a live pairing. The keep
+      // holds while the configured port serves; if it were taken too, the OS-assigned fall-through still
+      // overwrites the fallback, as it does on main.
       expect(readWsFallbackPort(userDataPath)).toBe(squatted.port)
     } finally {
       await server.stop()
