@@ -108,10 +108,16 @@ describe('terminal.subscribe teardown ownership', () => {
   })
 
   // T4(c): a genuine terminal-gone rejection still tears down.
-  it('tears down the current owner when the terminal handle goes stale', async () => {
+  // Behavior narrowed deliberately: a stale handle alone is NOT proof the PTY exited (a renderer
+  // graph-epoch bump produces it on a live pane), and retiring on it made the host emit `end`,
+  // which permanently locks a 0.0.44 composer. The ownership property this pins is unchanged —
+  // once absence is PROVEN, the owning registration is still the thing that retires.
+  it('tears down the current owner when the handle is stale and the PTY is proven absent', async () => {
     const registry = createSubscriptionRegistryDouble()
     const waiters: Waiter[] = []
-    const runtime = stubRuntime(registry, waiters)
+    const runtime = stubRuntime(registry, waiters, {
+      isLeafPtyProvenAbsent: () => Promise.resolve(true)
+    })
     const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
 
     void dispatcher.dispatchStreaming(makeRequest(binaryParams), vi.fn(), streamOptions('conn-a'))

@@ -18400,7 +18400,8 @@ export class OrcaRuntimeService {
   }
 
   /** True only on controller-proven absence; live, unknown, and probe errors all answer false. */
-  private isLeafPtyProvenAbsent(ptyId: string): Promise<boolean> {
+  /** Public so the terminal RPC lease guard can demand proof before retiring a subscription. */
+  isLeafPtyProvenAbsent(ptyId: string): Promise<boolean> {
     // Why hasPty and not ptysById: graph sync mirrors a connected record for
     // every leaf ptyId — including a prior process's — so runtime records can't
     // distinguish live from stale. The controller's exact-id hasPty is the

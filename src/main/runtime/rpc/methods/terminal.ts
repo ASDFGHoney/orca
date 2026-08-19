@@ -8,7 +8,7 @@ import {
   type RpcAnyMethod
 } from '../core'
 import { OptionalFiniteNumber, OptionalString, requiredString } from '../schemas'
-import type { DriverState, OrcaRuntimeService } from '../../orca-runtime'
+import type { DriverState, OrcaRuntimeService, SubscriptionRegistration } from '../../orca-runtime'
 import {
   TerminalStreamOpcode,
   decodeTerminalStreamJson,
@@ -320,6 +320,37 @@ function resolveMobileFloorClientId(
 }
 
 type TerminalStreamInputOutcome = 'delivered' | 'rejected' | 'failed'
+
+/**
+ * Retire a subscription after its exit-waiter REJECTED — but only when this socket is going away.
+ *
+ * Why not unconditionally: `waitForTerminal(..., 'exit')` rejects with `terminal_handle_stale`
+ * whenever the handle cannot be resolved right now, and the loudest source of that is
+ * `record.rendererGraphEpoch !== this.rendererGraphEpoch` — every renderer graph reload
+ * invalidates handles issued before it. That is not evidence the PTY exited. Treating it as one
+ * made the host retire a live lease and emit `end`, and mobile reads three of those as "PTY gone"
+ * and then stops asking (`MAX_REARM_ATTEMPTS`), leaving the composer stuck on "Waiting for
+ * terminal…" for as long as the handle stays the same — permanently, on a healthy pane.
+ *
+ * A real exit still resolves (not rejects) and retires through the `.then` leg, and a closing
+ * socket still retires here, so nothing leaks past the connection that owns it.
+ */
+async function releaseLeaseOnWaitFailure(
+  runtime: OrcaRuntimeService,
+  registration: SubscriptionRegistration,
+  ptyId: string,
+  signal: AbortSignal | undefined
+): Promise<void> {
+  if (signal?.aborted) {
+    registration.releaseIfCurrent()
+    return
+  }
+  // Why proof and not the rejection itself: absence must be proven, never inferred from a lookup
+  // that failed. `isLeafPtyProvenAbsent` is the same predicate the rest of the runtime uses.
+  if (await runtime.isLeafPtyProvenAbsent(ptyId)) {
+    registration.releaseIfCurrent()
+  }
+}
 
 function isTerminalStreamInputRejection(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
@@ -2977,7 +3008,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         void runtime
           .waitForTerminal(params.terminal, { condition: 'exit', signal })
           .then(() => registration.releaseIfCurrent())
-          .catch(() => registration.releaseIfCurrent())
+          .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
         try {
           // Why: a lease-only subscriber has no terminal view, so its cached viewport must never phone-fit the PTY.
           await runtime.handleMobileSubscribe(ptyId, clientId, undefined)
@@ -3104,7 +3135,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           void runtime
             .waitForTerminal(params.terminal, { condition: 'exit', signal })
             .then(() => registration.releaseIfCurrent())
-            .catch(() => registration.releaseIfCurrent())
+            .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
           await streamClosed
         } catch (error) {
           registration.releaseIfCurrent()
@@ -3170,7 +3201,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       void runtime
         .waitForTerminal(params.terminal, { condition: 'exit', signal })
         .then(() => registration.releaseIfCurrent())
-        .catch(() => registration.releaseIfCurrent())
+        .catch(() => releaseLeaseOnWaitFailure(runtime, registration, ptyId, signal))
       const sendFrame = (
         opcode: TerminalStreamOpcode,
         payload: Uint8Array<ArrayBufferLike> = new Uint8Array(),
