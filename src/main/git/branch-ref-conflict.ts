@@ -137,7 +137,7 @@ export function formatBranchConflictMessage(
   if (kind === 'local-ref-prefix') {
     // Why: no suffix escapes this one, so "pick a different name" alone is a
     // dead end — the user has to deal with the branch that is in the way.
-    return `Branch "${branchName}" conflicts with an existing branch that is a prefix of it. Git cannot store both, and no suffix avoids it. Rename or delete the existing branch, or pick a different branch name.`
+    return `Branch "${branchName}" conflicts with an existing branch that is a prefix of it. Git cannot store both, and no suffix avoids it. Rename or delete the existing branch, or pick a different ${subject ?? 'branch name'}.`
   }
   if (kind === 'local-directory') {
     // Why: "already exists" would be a lie. No ref has this exact name; the name

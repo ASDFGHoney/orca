@@ -139,7 +139,15 @@ describe('formatBranchConflictMessage', () => {
 
     expect(message).toContain('is a prefix of it')
     expect(message).toContain('no suffix avoids it')
+    expect(message).toContain('Rename or delete the existing branch')
+    expect(message).toContain('pick a different worktree name.')
     expect(message).not.toContain('already exists')
+  })
+
+  it('falls back to "branch name" for the runtime path that passes no subject', () => {
+    expect(formatBranchConflictMessage('release/1.0', 'local-ref-prefix')).toContain(
+      'pick a different branch name.'
+    )
   })
 
   it('does not claim a directory conflict already exists', () => {
