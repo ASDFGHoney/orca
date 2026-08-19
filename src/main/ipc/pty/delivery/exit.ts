@@ -46,7 +46,7 @@ export function consumeSyntheticKillExit(session: PtyIpcSession, id: string): bo
 
 export function preparePtyExitForRenderer(
   session: PtyIpcSession,
-  payload: { id: string; code: number }
+  payload: { id: string; code: number; incarnationId?: string }
 ): (() => void) | null {
   if (session.mainWindow.isDestroyed()) {
     session.sshOutputIntake?.transferPtyProjections(payload.id, 'renderer-destroyed')
@@ -112,7 +112,7 @@ export function preparePtyExitForRenderer(
 
 export function finalizePtyExitForRenderer(
   session: PtyIpcSession,
-  payload: { id: string; code: number }
+  payload: { id: string; code: number; incarnationId?: string }
 ): void {
   if (session.mainWindow.isDestroyed()) {
     session.rendererCreditBeforeExitByPty.delete(payload.id)
@@ -155,7 +155,7 @@ export function finalizePtyExitForRenderer(
 
 export function sendPtyExitToRenderer(
   session: PtyIpcSession,
-  payload: { id: string; code: number }
+  payload: { id: string; code: number; incarnationId?: string }
 ): void {
   session.options?.onPtyExit?.(payload.id, allocatePtyLifecycleSequence())
   const release = preparePtyExitForRenderer(session, payload)

@@ -20,6 +20,7 @@ export function killPtyFromRuntimeController(
     finishPtyShutdown,
     retiredRejectedPtyIds
   } = deps
+  runtime?.markPtyStopRequested?.(ptyId)
   let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
   const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
   connectionId ??= parsedSshId?.connectionId
@@ -35,7 +36,11 @@ export function killPtyFromRuntimeController(
         const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
         runtime?.onPtyExit(ptyId, -1, incarnationId)
         rememberSyntheticKillExit(ptyId)
-        sendPtyExitToRenderer({ id: ptyId, code: -1 })
+        sendPtyExitToRenderer({
+          id: ptyId,
+          code: -1,
+          ...(incarnationId ? { incarnationId } : {})
+        })
         runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
         return false
       }
@@ -49,7 +54,11 @@ export function killPtyFromRuntimeController(
         if (!providerExitObserved && !retired) {
           runtime?.onPtyExit(ptyId, -1, incarnationId)
           rememberSyntheticKillExit(ptyId)
-          sendPtyExitToRenderer({ id: ptyId, code: -1 })
+          sendPtyExitToRenderer({
+            id: ptyId,
+            code: -1,
+            ...(incarnationId ? { incarnationId } : {})
+          })
         }
       })
       .catch((err) => {
@@ -59,7 +68,11 @@ export function killPtyFromRuntimeController(
           if (!retired) {
             runtime?.onPtyExit(ptyId, -1, incarnationId)
             rememberSyntheticKillExit(ptyId)
-            sendPtyExitToRenderer({ id: ptyId, code: -1 })
+            sendPtyExitToRenderer({
+              id: ptyId,
+              code: -1,
+              ...(incarnationId ? { incarnationId } : {})
+            })
           }
           return
         }
@@ -88,6 +101,12 @@ export function killPtyFromRuntimeController(
         `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
       )
       if (!retiredRejectedPtyIds.has(ptyId)) {
+        if (connectionId) {
+          runtime?.markPtyLivenessUnverifiable?.(
+            ptyId,
+            err instanceof Error ? err.message : String(err)
+          )
+        }
         runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
       }
     })
@@ -120,7 +139,11 @@ export function retireRejectedPtyFromRuntimeController(
     }
     runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
     rememberSyntheticKillExit(ptyId)
-    sendPtyExitToRenderer({ id: ptyId, code: -1 })
+    sendPtyExitToRenderer({
+      id: ptyId,
+      code: -1,
+      ...(ptyIncarnationById.get(ptyId) ? { incarnationId: ptyIncarnationById.get(ptyId) } : {})
+    })
     return
   }
   // Why: a completed stop already cleared provider state, tombstoned the lease and told the
@@ -136,7 +159,11 @@ export function retireRejectedPtyFromRuntimeController(
   const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
   runtime?.onPtyExit(ptyId, 0, incarnationId)
   rememberSyntheticKillExit(ptyId)
-  sendPtyExitToRenderer({ id: ptyId, code: 0 })
+  sendPtyExitToRenderer({
+    id: ptyId,
+    code: 0,
+    ...(incarnationId ? { incarnationId } : {})
+  })
 }
 
 export function markReversibleStopsFromRuntimeController(
@@ -178,6 +205,7 @@ export async function stopAndWaitPtyFromRuntimeController(
     sendPtyExitToRenderer,
     finishPtyShutdown
   } = deps
+  runtime?.markPtyStopRequested?.(ptyId)
   let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
   const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
   connectionId ??= parsedSshId?.connectionId
@@ -218,7 +246,11 @@ export async function stopAndWaitPtyFromRuntimeController(
       const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
       runtime?.onPtyExit(ptyId, -1, incarnationId)
       rememberSyntheticKillExit(ptyId)
-      sendPtyExitToRenderer({ id: ptyId, code: -1 })
+      sendPtyExitToRenderer({
+        id: ptyId,
+        code: -1,
+        ...(incarnationId ? { incarnationId } : {})
+      })
       runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
     }
     return false
@@ -269,7 +301,11 @@ export async function stopAndWaitPtyFromRuntimeController(
     // death certificate even when its exit event was missed.
     runtime?.onPtyExit(ptyId, 0, incarnationId)
     rememberSyntheticKillExit(ptyId)
-    sendPtyExitToRenderer({ id: ptyId, code: 0 })
+    sendPtyExitToRenderer({
+      id: ptyId,
+      code: 0,
+      ...(incarnationId ? { incarnationId } : {})
+    })
   }
   return true
 }

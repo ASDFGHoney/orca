@@ -70,7 +70,7 @@ export type PtyRuntimeControllerDeps = {
   ) => Promise<boolean>
   rememberSyntheticKillExit: (id: string) => void
   rememberRetiredRejectedPty: (id: string) => void
-  sendPtyExitToRenderer: (payload: { id: string; code: number }) => void
+  sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void
   sendPtySpawnedToRenderer: (id: string) => void
   finishPtyShutdown: typeof finishPtyShutdown
   getSettings?: () => GlobalSettings | undefined

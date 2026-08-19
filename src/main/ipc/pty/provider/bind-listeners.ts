@@ -94,9 +94,20 @@ export function bindProviderListeners(session: PtyIpcSession): void {
         clearProviderPtyState(payload.id)
         ptyOwnership.delete(payload.id)
         markClaudePtyExited(payload.id)
-        session.runtime?.onPtyExit(payload.id, payload.code, payload.incarnationId)
+        session.runtime?.onPtyExit(
+          payload.id,
+          payload.code,
+          payload.incarnationId,
+          payload.cause ? { cause: payload.cause } : undefined
+        )
       }
-      session.sendPtyExitToRenderer(payload)
+      // Why not the whole payload: the exit cause is a main-process fact for the
+      // runtime's records; the renderer's pty:exit contract stays as it was.
+      session.sendPtyExitToRenderer({
+        id: payload.id,
+        code: payload.code,
+        ...(payload.incarnationId ? { incarnationId: payload.incarnationId } : {})
+      })
     })
   )
 }

@@ -135,9 +135,17 @@ export type PtyIpcSession = {
     outputSeq: number | undefined,
     projection?: LegacySshProjectionSemantics
   ) => void
-  preparePtyExitForRenderer: (payload: { id: string; code: number }) => (() => void) | null
-  finalizePtyExitForRenderer: (payload: { id: string; code: number }) => void
-  sendPtyExitToRenderer: (payload: { id: string; code: number }) => void
+  preparePtyExitForRenderer: (payload: {
+    id: string
+    code: number
+    incarnationId?: string
+  }) => (() => void) | null
+  finalizePtyExitForRenderer: (payload: {
+    id: string
+    code: number
+    incarnationId?: string
+  }) => void
+  sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void
   sendPtySpawnedToRenderer: (id: string) => void
   requestSerializedBuffer: (
     ptyId: string,

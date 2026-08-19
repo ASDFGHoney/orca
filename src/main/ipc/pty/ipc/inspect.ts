@@ -38,7 +38,7 @@ export function installPtyInspectIpcHandlers(deps: {
     opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
   ) => Promise<boolean>
   rememberSyntheticKillExit: (id: string) => void
-  sendPtyExitToRenderer: (payload: { id: string; code: number }) => void
+  sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void
 }): void {
   const {
     store,
@@ -54,6 +54,7 @@ export function installPtyInspectIpcHandlers(deps: {
       // Why: runtime terminal handles belong to terminal.close; unowned PTY routing could target the local provider.
       throw new Error('Invalid PTY provider id')
     }
+    runtime?.markPtyStopRequested?.(args.id)
     const ownedConnectionId = ptyOwnership.get(args.id)
     const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
     const connectionId = ownedConnectionId ?? parsedSshId?.connectionId
@@ -68,10 +69,14 @@ export function installPtyInspectIpcHandlers(deps: {
       // provider is unregistered; hydrated app-scoped ids can also arrive
       // before ownership is rebuilt. Tombstone instead of falling back local.
       const incarnationId = finishPtyShutdown(args.id, connectionId, store)
+      runtime?.markPtyLivenessUnverifiable?.(args.id, SSH_PROVIDER_UNREGISTERED_REASON)
       runtime?.onPtyExit(args.id, -1, incarnationId)
       rememberSyntheticKillExit(args.id)
-      sendPtyExitToRenderer({ id: args.id, code: -1 })
-      runtime?.markPtyLivenessUnverifiable?.(args.id, SSH_PROVIDER_UNREGISTERED_REASON)
+      sendPtyExitToRenderer({
+        id: args.id,
+        code: -1,
+        ...(incarnationId ? { incarnationId } : {})
+      })
       return
     }
     const shutdownProvider = provider ?? getProviderForPty(args.id)
@@ -94,7 +99,11 @@ export function installPtyInspectIpcHandlers(deps: {
     if (!providerExitObserved) {
       runtime?.onPtyExit(args.id, -1, incarnationId)
       rememberSyntheticKillExit(args.id)
-      sendPtyExitToRenderer({ id: args.id, code: -1 })
+      sendPtyExitToRenderer({
+        id: args.id,
+        code: -1,
+        ...(incarnationId ? { incarnationId } : {})
+      })
     }
   })
 

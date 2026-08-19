@@ -166,7 +166,8 @@ function markSshInventoryUnverifiable(
 }
 
 export async function listProcessesWithHostScopeFromRuntimeController(
-  deps: PtyRuntimeControllerDeps
+  deps: PtyRuntimeControllerDeps,
+  opts?: { deadlineMs?: number }
 ): Promise<{ processes: PtyProcessInfo[]; hostIds: ExecutionHostId[] }> {
   const providerSessions = await Promise.all(
     registeredPtyProviders().map(async ({ provider, connectionId }) => {
@@ -174,7 +175,10 @@ export async function listProcessesWithHostScopeFromRuntimeController(
         ? toSshExecutionHostId(connectionId)
         : LOCAL_EXECUTION_HOST_ID
       try {
-        return { processes: await provider.listProcesses(), hostId }
+        return {
+          processes: await (connectionId ? provider.listProcesses(opts) : provider.listProcesses()),
+          hostId
+        }
       } catch (error) {
         if (!connectionId) {
           throw error
@@ -193,20 +197,21 @@ export async function listProcessesWithHostScopeFromRuntimeController(
 
 export async function listProcessesFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
-  connectionId?: string | null
+  connectionId?: string | null,
+  opts?: { deadlineMs?: number }
 ) {
   if (connectionId === null) {
     return localProvider.listProcesses()
   }
   if (connectionId !== undefined) {
     try {
-      return await getProvider(connectionId).listProcesses()
+      return await getProvider(connectionId).listProcesses(opts)
     } catch (error) {
       markSshInventoryUnverifiable(deps.runtime, connectionId, error)
       throw error
     }
   }
-  return (await listProcessesWithHostScopeFromRuntimeController(deps)).processes
+  return (await listProcessesWithHostScopeFromRuntimeController(deps, opts)).processes
 }
 
 export function resizePtyFromRuntimeController(ptyId: string, cols: number, rows: number): boolean {

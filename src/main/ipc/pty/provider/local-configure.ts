@@ -97,14 +97,14 @@ export function configureLocalPtyProvider(args: {
       return env
     },
     onSpawned: (id, incarnationId) => runtime?.onPtySpawned(id, incarnationId),
-    onExit: (id, code, incarnationId) => {
+    onExit: (id, code, incarnationId, cause) => {
       if (!isCurrentPtyExit({ id, incarnationId })) {
         return
       }
       clearProviderPtyState(id)
       ptyOwnership.delete(id)
       markClaudePtyExited(id)
-      runtime?.onPtyExit(id, code, incarnationId)
+      runtime?.onPtyExit(id, code, incarnationId, cause ? { cause } : undefined)
     },
     onData: (id, data, timestamp, sequenceChars, transformed) =>
       runtime?.onPtyData(id, data, timestamp, sequenceChars ?? data.length, transformed)

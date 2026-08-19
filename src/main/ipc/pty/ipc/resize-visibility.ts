@@ -23,12 +23,14 @@ import {
   rendererVisibilityKnownPtys,
   visibleRendererPtys
 } from '../delivery/visibility-state'
-import { mainDeliveryBreadcrumbs } from '../delivery/debug'
+import {
+  mainDeliveryBreadcrumbs,
+  resetRendererDeliveryAccountingForLifecycleReset
+} from '../delivery/debug'
 import { PTY_DELIVERY_HEAL_MIN_ACK_SILENCE_MS } from '../delivery/constants'
 import { applyCumulativeAck } from '../delivery/accounting'
 import { sendModelRestoreNeededMarker } from '../delivery/payload'
 import { isMainWindowPtyIpcEvent } from './write-input'
-import { resetRendererDeliveryAccountingForLifecycleReset } from '../delivery/debug'
 import type { PtyIpcSession } from '../session'
 
 export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {

@@ -59,8 +59,10 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
     hasChildProcesses: (ptyId) => hasChildProcessesFromRuntimeController(ptyId),
     clearBuffer: (ptyId) => clearBufferFromRuntimeController(deps, ptyId),
     hasPty: (ptyId) => hasPtyFromRuntimeController(ptyId),
-    listProcesses: (connectionId) => listProcessesFromRuntimeController(deps, connectionId),
-    listProcessesWithHostScope: () => listProcessesWithHostScopeFromRuntimeController(deps),
+    listProcesses: (connectionId, opts) =>
+      listProcessesFromRuntimeController(deps, connectionId, opts),
+    listProcessesWithHostScope: (opts) =>
+      listProcessesWithHostScopeFromRuntimeController(deps, opts),
     serializeBuffer: (ptyId, opts) => {
       // Why: mobile xterm must start from the desktop's exact screen state/dimensions before live TUI chunks render correctly.
       return requestSerializedBuffer(ptyId, opts)

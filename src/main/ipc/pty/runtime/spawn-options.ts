@@ -1,8 +1,7 @@
 import type { IPtyProvider, PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
-import { makePaneKey } from '../../../../shared/stable-pane-id'
+import { makePaneKey, isTerminalLeafId } from '../../../../shared/stable-pane-id'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
-import { isTerminalLeafId } from '../../../../shared/stable-pane-id'
 import { ptySizes } from '../delivery/visibility-state'
 import { CODEX_HOME_ENV_KEYS } from '../host-env/codex-home'
 import {
