@@ -1521,7 +1521,7 @@ export class RuntimeBrowserCommands {
     userAgentMode?: BrowserSessionUserAgentMode
   }): Promise<BrowserProfileCreateResult> {
     return {
-      profile: browserSessionRegistry.createProfile(params.scope, params.label, {
+      profile: await browserSessionRegistry.createProfile(params.scope, params.label, {
         userAgentMode: params.userAgentMode
       })
     }

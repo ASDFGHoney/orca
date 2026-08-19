@@ -111,7 +111,7 @@ class BrowserSessionRegistry {
     }
 
     // Why: nothing else installs policies on the default partition (hydrate skips it), so without this its guest permissions would be denied.
-    installBrowserSessionPartitionPolicies(this.getDefaultProfile())
+    void installBrowserSessionPartitionPolicies(this.getDefaultProfile()).catch(() => {})
 
     applyBrowserSessionUserAgentModes(this.listProfiles())
   }
@@ -177,11 +177,11 @@ class BrowserSessionRegistry {
     return this.profiles.get(profileId)?.partition ?? null
   }
 
-  createProfile(
+  async createProfile(
     scope: BrowserSessionProfileScope,
     label: string,
     options: BrowserSessionProfileCreateOptions = {}
-  ): BrowserSessionProfile | null {
+  ): Promise<BrowserSessionProfile | null> {
     // Why: the registry is also an IPC boundary, so runtime types alone cannot keep invalid values out of persisted metadata.
     if (
       (scope !== 'isolated' && scope !== 'imported') ||
@@ -202,8 +202,15 @@ class BrowserSessionRegistry {
       source: null,
       ...(options.userAgentMode ? { userAgentMode: options.userAgentMode } : {})
     }
+    try {
+      await installBrowserSessionPartitionPolicies(profile)
+    } catch (error) {
+      const sess = session.fromPartition(partition)
+      clearBrowserSessionUserAgentMode(sess)
+      clearBrowserSessionPartitionPolicies(partition, sess)
+      throw error
+    }
     this.profiles.set(id, profile)
-    installBrowserSessionPartitionPolicies(profile)
     this.persistProfiles()
     return profile
   }
@@ -287,7 +294,7 @@ class BrowserSessionRegistry {
       }
       this.profiles.set(profile.id, profile)
       if (profile.partition !== this.defaultPartition) {
-        installBrowserSessionPartitionPolicies(profile)
+        void installBrowserSessionPartitionPolicies(profile).catch(() => {})
       }
     }
   }
