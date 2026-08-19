@@ -33,7 +33,6 @@ const ANIMATED_PAGE = `<!doctype html><meta charset="utf-8"><title>anim</title>
 const FAST_RECLAIM_ENV = {
   ORCA_HEADLESS_BROWSER_PARK_IDLE_MS: '1500',
   ORCA_HEADLESS_BROWSER_PARK_GRACE_MS: '400',
-  ORCA_HEADLESS_BROWSER_PARK_SWEEP_MS: '250',
   ORCA_HEADLESS_BROWSER_RESIDENT_LIMIT: '2'
 }
 
@@ -67,7 +66,10 @@ async function resolveSeededWorktreeId(host: HeadlessHost, testRepoPath: string)
   return worktreeId
 }
 
-async function startAnimatedPageServer(): Promise<{ url: string; close: () => void }> {
+async function startAnimatedPageServer(): Promise<{
+  url: string
+  close: () => void
+}> {
   const server: Server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     res.end(ANIMATED_PAGE)
@@ -108,7 +110,9 @@ test('reclaims idle agent browser tab renderers without losing the tabs', async 
   testRepoPath
 }) => {
   test.setTimeout(240_000)
-  const host = await launchHeadlessPairedRuntimeHost({ extraEnv: FAST_RECLAIM_ENV })
+  const host = await launchHeadlessPairedRuntimeHost({
+    extraEnv: FAST_RECLAIM_ENV
+  })
   const pageServer = await startAnimatedPageServer()
   try {
     const worktreeId = await resolveSeededWorktreeId(host, testRepoPath)
@@ -135,18 +139,19 @@ test('reclaims idle agent browser tab renderers without losing the tabs', async 
 
 test('wakes a parked browser tab on the next command that targets it', async ({ testRepoPath }) => {
   test.setTimeout(240_000)
-  const host = await launchHeadlessPairedRuntimeHost({ extraEnv: FAST_RECLAIM_ENV })
+  const host = await launchHeadlessPairedRuntimeHost({
+    extraEnv: FAST_RECLAIM_ENV
+  })
   const pageServer = await startAnimatedPageServer()
   try {
     const worktreeId = await resolveSeededWorktreeId(host, testRepoPath)
     const [pageId] = await createTabs(host, worktreeId, pageServer.url, 1)
     await expect.poll(() => countOffscreenRenderers(host), { timeout: 30_000 }).toBe(0)
 
-    const evaluated = await host.client.call<{ result: string; origin: string }>(
-      'browser.eval',
-      { expression: 'document.title', page: pageId },
-      { timeoutMs: 60_000 }
-    )
+    const evaluated = await host.client.call<{
+      result: string
+      origin: string
+    }>('browser.eval', { expression: 'document.title', page: pageId }, { timeoutMs: 60_000 })
     expect(evaluated.result.result).toBe('anim')
     expect(evaluated.result.origin).toBe(pageServer.url)
     expect(await countOffscreenRenderers(host)).toBe(1)
@@ -173,7 +178,10 @@ test('bounds resident renderers by the cap while tabs are still in use', async (
   const host = await launchHeadlessPairedRuntimeHost({
     // Why: a long idle window isolates the cap as the evictor — nothing here
     // parks because of the clock.
-    extraEnv: { ...FAST_RECLAIM_ENV, ORCA_HEADLESS_BROWSER_PARK_IDLE_MS: '600000' }
+    extraEnv: {
+      ...FAST_RECLAIM_ENV,
+      ORCA_HEADLESS_BROWSER_PARK_IDLE_MS: '600000'
+    }
   })
   const pageServer = await startAnimatedPageServer()
   try {
@@ -217,7 +225,10 @@ test('resolves --index against the listing that includes parked tabs', async ({ 
   const host = await launchHeadlessPairedRuntimeHost({
     // Why: a tight cap with no idle clock leaves a mixed listing — some tabs
     // resident, some parked — which is where an index can address the wrong tab.
-    extraEnv: { ...FAST_RECLAIM_ENV, ORCA_HEADLESS_BROWSER_PARK_IDLE_MS: '600000' }
+    extraEnv: {
+      ...FAST_RECLAIM_ENV,
+      ORCA_HEADLESS_BROWSER_PARK_IDLE_MS: '600000'
+    }
   })
   const pageServer = await startAnimatedPageServer()
   try {
@@ -249,7 +260,9 @@ test('resolves --index against the listing that includes parked tabs', async ({ 
 
 test('keeps a parked tab closable without waking its renderer', async ({ testRepoPath }) => {
   test.setTimeout(240_000)
-  const host = await launchHeadlessPairedRuntimeHost({ extraEnv: FAST_RECLAIM_ENV })
+  const host = await launchHeadlessPairedRuntimeHost({
+    extraEnv: FAST_RECLAIM_ENV
+  })
   const pageServer = await startAnimatedPageServer()
   try {
     const worktreeId = await resolveSeededWorktreeId(host, testRepoPath)

@@ -5,7 +5,7 @@ import type { AgentBrowserBridge } from './agent-browser-bridge'
 import type { BrowserBackend, BrowserBackendCreateTab, ParkedBrowserPage } from './browser-backend'
 import type { BrowserManager } from './browser-manager'
 import { browserSessionRegistry } from './browser-session-registry'
-import { readOffscreenBrowserReclaimPolicy } from './offscreen-browser-page-reclaim'
+import { readOffscreenBrowserRetentionBudget } from './offscreen-browser-page-reclaim'
 import { OffscreenBrowserPageReclaimer } from './offscreen-browser-page-reclaimer'
 import {
   OffscreenBrowserOpenPages,
@@ -47,7 +47,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
   ) {
     this.reclaimer = new OffscreenBrowserPageReclaimer({
       pages: this.pages,
-      policy: readOffscreenBrowserReclaimPolicy(),
+      budget: readOffscreenBrowserRetentionBudget(),
       isReleasing: (browserPageId) => this.releasing.has(browserPageId),
       isWaking: (browserPageId) => this.waking.has(browserPageId),
       hasCertificateChallenge: (browserPageId) =>
@@ -109,7 +109,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
         error instanceof Error ? error.message : String(error)
       )
     })
-    this.reclaimer.ensureScheduled()
+    this.reclaimer.reschedule()
     return { browserPageId }
   }
 
@@ -117,9 +117,9 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     const page = this.pages.delete(browserPageId) ?? null
     this.waking.delete(browserPageId)
     await this.releaseRenderer(page, browserPageId)
-    if (this.pages.size === 0) {
-      this.reclaimer.stop()
-    }
+    // Why: closing changes both residency and rank, and with the last page gone
+    // this arms nothing at all.
+    this.reclaimer.reschedule()
     // Why: closing a parked page has no WebContents teardown to piggyback on,
     // so nothing else tells paired clients the tab is gone — they would keep
     // showing a ghost until an operation against it failed.
@@ -139,7 +139,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     if (!page) {
       return false
     }
-    page.lastActivityAt = this.now()
+    this.touch(page)
     // Why: a wake materializes the window before it swaps the helper session
     // and reloads the address, so the page looks resident well before it is
     // usable. Join an in-flight wake first or a second command runs against a
@@ -184,10 +184,9 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       if (!stillOwned()) {
         return false
       }
-      page.lastActivityAt = this.now()
-      // Why: the sweep stops once nothing is resident, so a wake has to bring
-      // it back or this page would never be reclaimed again.
-      this.reclaimer.ensureScheduled()
+      // Why: waking makes this page resident again, so the budget has to be
+      // re-armed or the page it just displaced would never be reclaimed.
+      this.touch(page)
       return true
     })()
     this.waking.set(browserPageId, wake)
@@ -360,9 +359,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
         ?.onTabClosed(webContentsId)
         .catch(() => {})
       this.browserManager.unregisterGuest(page.browserPageId)
-      if (this.pages.size === 0) {
-        this.reclaimer.stop()
-      }
+      this.reclaimer.reschedule()
     })
     const profile = page.profileId ? browserSessionRegistry.getProfile(page.profileId) : null
     this.browserManager.registerOffscreenGuest({
@@ -393,8 +390,15 @@ export class OffscreenBrowserBackend implements BrowserBackend {
       page.title = win.webContents.getTitle() ?? page.title
       // Why: the reclaim clock must start when the page is ready, not when the
       // create call returned, or a slow load can be parked mid-flight.
-      page.lastActivityAt = this.now()
+      this.touch(page)
     }
+  }
+
+  // Why: every activity stamp moves the next reclaim deadline, so pairing the
+  // two here makes it impossible to record use without re-arming the budget.
+  private touch(page: OffscreenBrowserPage): void {
+    page.lastActivityAt = this.now()
+    this.reclaimer.reschedule()
   }
 
   private now(): number {

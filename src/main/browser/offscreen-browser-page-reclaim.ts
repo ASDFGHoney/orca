@@ -1,35 +1,30 @@
+import {
+  BROWSER_RETENTION_LIMIT,
+  type BrowserRetentionBudget,
+  type BrowserRetentionCandidate
+} from '../../shared/browser-retention-budget'
+
 // Why (STA-4341): on a headless `orca serve` host every agent-opened browser
 // page is backed by its own hidden BrowserWindow, i.e. its own renderer
 // process. Nothing owned those renderers, so a long agent session accumulated
-// them until the host saturated. This module is the policy half of that owner:
-// given the resident pages it decides which ones to park (drop the renderer,
-// keep the page). It mirrors terminal hidden-view parking — the cap is the
-// primary evictor, the idle clock is the tail — and is pure so the decision is
-// testable without Electron.
+// them until the host saturated. This module configures the shared browser
+// retention budget for that host and answers when the decision could next
+// change — a headless host has no visibility event to react to, so it has to
+// know its own deadlines.
 
-/** Resident renderers kept warm. Matches TERMINAL_WORKTREE_HOT_RETAIN_LIMIT. */
-export const OFFSCREEN_BROWSER_RESIDENT_LIMIT = 4
-/** An untouched page parks once idle this long, even under the cap. */
+/** Resident renderers kept warm. The desktop guest budget uses the same 4. */
+export const OFFSCREEN_BROWSER_RESIDENT_LIMIT = BROWSER_RETENTION_LIMIT
+/** An untouched page parks once idle this long, even under the limit. */
 export const OFFSCREEN_BROWSER_IDLE_PARK_MS = 5 * 60_000
 /** A page is never parked before this much time without a command. */
 export const OFFSCREEN_BROWSER_PARK_GRACE_MS = 30_000
 
-/** How often the backend re-evaluates which pages should be resident. */
-export const OFFSCREEN_BROWSER_SWEEP_INTERVAL_MS = 15_000
-
-export type OffscreenBrowserReclaimPolicy = {
-  residentLimit: number
-  idleParkMs: number
-  parkGraceMs: number
-  sweepIntervalMs: number
-}
-
-export type OffscreenBrowserReclaimCandidate = {
-  browserPageId: string
-  lastActivityAt: number
-  /** Never parked: a client is streaming it, or a command is in flight. */
-  pinned: boolean
-}
+// Why a re-check at all: a page pinned by a download, a streamed client or a
+// certificate prompt releases that pin with no event this backend observes, so
+// its deadline is unknowable. Re-asking on the grace cadence is bounded, runs
+// only while something is genuinely in flight, and stops with the last pin —
+// unlike a fixed sweep, which ran forever on a host doing nothing.
+export const OFFSCREEN_BROWSER_PINNED_RECHECK_MS = OFFSCREEN_BROWSER_PARK_GRACE_MS
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -40,69 +35,60 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
 
-export function readOffscreenBrowserReclaimPolicy(): OffscreenBrowserReclaimPolicy {
+export function readOffscreenBrowserRetentionBudget(): BrowserRetentionBudget {
   return {
-    residentLimit: readPositiveIntEnv(
+    limit: readPositiveIntEnv(
       'ORCA_HEADLESS_BROWSER_RESIDENT_LIMIT',
       OFFSCREEN_BROWSER_RESIDENT_LIMIT
     ),
-    idleParkMs: readPositiveIntEnv(
+    idleMs: readPositiveIntEnv(
       'ORCA_HEADLESS_BROWSER_PARK_IDLE_MS',
       OFFSCREEN_BROWSER_IDLE_PARK_MS
     ),
-    parkGraceMs: readPositiveIntEnv(
+    graceMs: readPositiveIntEnv(
       'ORCA_HEADLESS_BROWSER_PARK_GRACE_MS',
       OFFSCREEN_BROWSER_PARK_GRACE_MS
-    ),
-    sweepIntervalMs: Math.max(
-      100,
-      readPositiveIntEnv('ORCA_HEADLESS_BROWSER_PARK_SWEEP_MS', OFFSCREEN_BROWSER_SWEEP_INTERVAL_MS)
     )
   }
 }
 
 /**
- * Pick the resident pages to park, least-recently-used first.
+ * The earliest time selectBrowserRetentionEvictions could return something new
+ * if nothing else happens, or null if only an event can change the answer.
  *
- * Pinned pages are never returned, so the resident cap can be exceeded by
- * pages a client is actively watching — bounding those would break the
- * legitimate browser work the cap exists to protect.
+ * Rank changes only when a page is created, woken or closed, and every one of
+ * those already re-arms the timer — so the clock only has to cover the idle and
+ * grace windows.
  */
-export function selectOffscreenBrowserPagesToPark(
-  residentPages: readonly OffscreenBrowserReclaimCandidate[],
-  now: number,
-  policy: OffscreenBrowserReclaimPolicy
-): string[] {
-  // Why: a page used moments ago is the one an agent is mid-workflow on; the
-  // grace floor applies to eviction by cap as well as by clock.
-  const parkable = residentPages
-    .filter((page) => !page.pinned && now - page.lastActivityAt >= policy.parkGraceMs)
-    .sort(
-      (left, right) =>
-        left.lastActivityAt - right.lastActivityAt ||
-        left.browserPageId.localeCompare(right.browserPageId)
-    )
-
-  const parked = new Set<string>()
-  for (const page of parkable) {
-    if (now - page.lastActivityAt >= policy.idleParkMs) {
-      parked.add(page.browserPageId)
+export function nextOffscreenBrowserReclaimCheckAt(args: {
+  /** Most-recently-used first, matching the selector's ranking. */
+  candidates: readonly BrowserRetentionCandidate[]
+  isPinned: (id: string) => boolean
+  now: number
+  budget: BrowserRetentionBudget
+}): number | null {
+  let next: number | null = null
+  const consider = (at: number): void => {
+    if (!Number.isFinite(at)) {
+      return
     }
+    next = next === null ? at : Math.min(next, at)
   }
-
-  // Why: the cap counts every resident page, pinned ones included — the budget
-  // is renderer processes on the host, not just the evictable ones.
-  let resident = residentPages.length - parked.size
-  for (const page of parkable) {
-    if (resident <= policy.residentLimit) {
-      break
+  args.candidates.forEach((candidate, rank) => {
+    if (args.isPinned(candidate.id)) {
+      consider(args.now + OFFSCREEN_BROWSER_PINNED_RECHECK_MS)
+      return
     }
-    if (parked.has(page.browserPageId)) {
-      continue
+    if (candidate.lastActivityAt === undefined) {
+      return
     }
-    parked.add(page.browserPageId)
-    resident--
-  }
-
-  return parkable.map((page) => page.browserPageId).filter((id) => parked.has(id))
+    if (rank >= args.budget.limit) {
+      // Grace is the only thing still holding it resident.
+      consider(candidate.lastActivityAt + args.budget.graceMs)
+      return
+    }
+    // Within the limit only the idle window can evict it, and grace still applies.
+    consider(candidate.lastActivityAt + Math.max(args.budget.graceMs, args.budget.idleMs))
+  })
+  return next
 }

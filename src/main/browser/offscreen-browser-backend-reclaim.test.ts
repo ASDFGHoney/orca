@@ -195,7 +195,6 @@ beforeEach(() => {
   process.env.ORCA_HEADLESS_BROWSER_RESIDENT_LIMIT = '2'
   process.env.ORCA_HEADLESS_BROWSER_PARK_IDLE_MS = '60000'
   process.env.ORCA_HEADLESS_BROWSER_PARK_GRACE_MS = '5000'
-  process.env.ORCA_HEADLESS_BROWSER_PARK_SWEEP_MS = '100000'
 })
 
 describe('OffscreenBrowserBackend reclamation', () => {
@@ -489,10 +488,9 @@ describe('OffscreenBrowserBackend reclamation', () => {
     expect(createTimeout).toBeUndefined()
   })
 
-  it('stops sweeping once nothing is resident, and resumes on wake', async () => {
-    // Why: an idle headless host should not keep waking every interval to find
-    // nothing to reclaim. Waking has to bring the sweep back or the woken page
-    // would never be reclaimed again.
+  it('arms no timer once nothing is resident, and re-arms on wake', async () => {
+    // Why: an idle headless host should hold no reclaim timer at all. Waking has
+    // to re-arm it or the woken page would never be reclaimed again.
     const h = createHarness()
     await h.backend.createTab({ url: 'https://a', browserPageId: 'a' })
     const reclaimer = (h.backend as unknown as { reclaimer: { isScheduled: boolean } }).reclaimer

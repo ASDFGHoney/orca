@@ -1,23 +1,25 @@
+import {
+  selectBrowserRetentionEvictions,
+  isBrowserRetentionCandidateInGrace,
+  type BrowserRetentionBudget,
+  type BrowserRetentionCandidate
+} from '../../shared/browser-retention-budget'
 import type {
   OffscreenBrowserOpenPages,
   OffscreenBrowserPage
 } from './offscreen-browser-open-pages'
-import {
-  selectOffscreenBrowserPagesToPark,
-  type OffscreenBrowserReclaimPolicy
-} from './offscreen-browser-page-reclaim'
+import { nextOffscreenBrowserReclaimCheckAt } from './offscreen-browser-page-reclaim'
 
-// Why (STA-4341): the sweep that decides which headless pages keep a renderer,
-// separated from the backend that owns the renderers themselves. It is the
-// headless counterpart of the desktop guest budget in
-// browser-guest-worktree-retention.ts — same intent, different unit: desktop
-// evicts a hidden worktree's guests on UI visibility, headless evicts an
-// individual page on command activity, because a headless host has no UI and an
-// agent lives in one worktree.
+// Why (STA-4341): the trigger half of the headless page budget — it decides
+// *when* to ask, while the shared browser retention budget decides *what* to
+// evict. The desktop guest budget gets its trigger for free from a UI
+// visibility change; a headless host has no such event, so this arms a one-shot
+// timer for the moment its own answer could next change. There is deliberately
+// no recurring sweep: a host doing nothing holds no timer at all.
 
 export type OffscreenBrowserReclaimerDeps = {
   pages: OffscreenBrowserOpenPages
-  policy: OffscreenBrowserReclaimPolicy
+  budget: BrowserRetentionBudget
   /** A teardown this backend already started for the page. */
   isReleasing: (browserPageId: string) => boolean
   /** A wake still rebuilding the page's renderer. */
@@ -33,23 +35,102 @@ export type OffscreenBrowserReclaimerDeps = {
 }
 
 export class OffscreenBrowserPageReclaimer {
-  private sweepTimer: NodeJS.Timeout | null = null
+  private timer: NodeJS.Timeout | null = null
   private sweepInFlight: Promise<unknown> | null = null
+  /** Set when a sweep parked nothing — see reschedule(). */
+  private backoffUntil = 0
 
   constructor(private readonly deps: OffscreenBrowserReclaimerDeps) {}
 
-  /** Park every page the policy no longer wants resident. */
+  /** Park every page the budget no longer wants resident, then re-arm. */
   async sweep(): Promise<string[]> {
-    const resident = this.deps.pages
-      .resident()
-      .filter((page) => !this.deps.isReleasing(page.browserPageId))
-    const doomed = selectOffscreenBrowserPagesToPark(
-      resident.map((page) => this.toCandidate(page)),
-      this.deps.now(),
-      this.deps.policy
-    )
+    const parked = await this.parkOverBudgetPages()
+    this.reschedule()
+    return parked
+  }
+
+  /**
+   * Re-arm the timer for the next moment the answer could change.
+   *
+   * Call after anything that moves a page's activity, residency or pin state.
+   * Recomputing from live state means a missed call can only delay a park,
+   * never schedule a wrong one, and an all-parked host arms nothing.
+   */
+  reschedule(): void {
+    this.clearTimer()
+    // Why: a sweep re-arms itself when it settles. Arming now would race it
+    // against state the in-flight parks are still changing.
+    if (this.sweepInFlight) {
+      return
+    }
+    const now = this.deps.now()
+    const at = nextOffscreenBrowserReclaimCheckAt({
+      candidates: this.candidates(),
+      isPinned: (browserPageId) => this.isPinnedById(browserPageId),
+      now,
+      budget: this.deps.budget
+    })
+    if (at === null) {
+      return
+    }
+    // Why the floor: a deadline in the past that the last sweep could not act on
+    // would re-arm at 0ms, and a timer that re-arms itself instantly is a pegged
+    // CPU on an otherwise idle server.
+    const delay = Math.max(0, at - now, this.backoffUntil - now)
+    this.timer = setTimeout(() => {
+      this.timer = null
+      this.runSweep()
+    }, delay)
+    // Why: reclamation must never be the reason the process stays alive.
+    this.timer.unref?.()
+  }
+
+  /** Whether a check is currently armed. Exposed so the owner can assert it. */
+  get isScheduled(): boolean {
+    return this.timer !== null
+  }
+
+  stop(): void {
+    this.clearTimer()
+    this.sweepInFlight = null
+    this.backoffUntil = 0
+  }
+
+  private clearTimer(): void {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  private runSweep(): void {
+    if (this.sweepInFlight) {
+      return
+    }
+    const sweep = this.sweep().catch(() => {
+      // A failed park is retried on the next check.
+    })
+    this.sweepInFlight = sweep
+    void sweep.finally(() => {
+      if (this.sweepInFlight === sweep) {
+        this.sweepInFlight = null
+        this.reschedule()
+      }
+    })
+  }
+
+  private async parkOverBudgetPages(): Promise<string[]> {
+    const residentBefore = this.deps.pages.resident().length
+    const doomed = selectBrowserRetentionEvictions({
+      candidates: this.candidates(),
+      isPinned: (browserPageId) => this.isPinnedById(browserPageId),
+      now: this.deps.now(),
+      budget: this.deps.budget
+    })
     const parked: string[] = []
-    for (const browserPageId of doomed) {
+    // Why reversed: the selector ranks most-recently-used first, so this parks
+    // the coldest page first — the one least likely to be woken mid-teardown.
+    for (const browserPageId of doomed.toReversed()) {
       // Why: parking awaits the helper session's teardown, so a page later in
       // this list can be woken and driven while an earlier one is still being
       // torn down. The selection is a proposal, not a licence — re-check each
@@ -60,51 +141,29 @@ export class OffscreenBrowserPageReclaimer {
       await this.deps.park(browserPageId)
       parked.push(browserPageId)
     }
-    // Why: with nothing resident there is nothing left to reclaim, so the sweep
-    // has no work until a page is created or woken — both of which reschedule
-    // it. Otherwise an idle host keeps waking up forever to find nothing.
-    if (this.deps.pages.resident().length === 0) {
-      this.stop()
-    }
+    // Why measured rather than reported: a sweep that frees nothing leaves the
+    // deadline in the past, and re-arming at 0ms would spin the timer flat out.
+    // park() cannot be trusted to say so — it no-ops for a window that is
+    // already gone — so residency is the only honest signal of progress.
+    const madeProgress = this.deps.pages.resident().length < residentBefore
+    this.backoffUntil = madeProgress ? 0 : this.deps.now() + this.deps.budget.graceMs
     return parked
   }
 
-  /** Whether a sweep is currently scheduled. Exposed so the owner can assert it. */
-  get isScheduled(): boolean {
-    return this.sweepTimer !== null
-  }
-
-  ensureScheduled(): void {
-    if (this.sweepTimer) {
-      return
-    }
-    this.sweepTimer = setInterval(() => {
-      // Why: a park waits on the helper session's own bounded teardown, which
-      // can outlast the interval. Without this guard slow teardowns would stack
-      // sweeps on top of each other for as long as they lag.
-      if (this.sweepInFlight) {
-        return
-      }
-      const sweep = this.sweep().catch(() => {
-        // A failed park is retried on the next sweep.
-      })
-      this.sweepInFlight = sweep
-      void sweep.finally(() => {
-        if (this.sweepInFlight === sweep) {
-          this.sweepInFlight = null
-        }
-      })
-    }, this.deps.policy.sweepIntervalMs)
-    // Why: reclamation must never be the reason the process stays alive.
-    this.sweepTimer.unref?.()
-  }
-
-  stop(): void {
-    if (this.sweepTimer) {
-      clearInterval(this.sweepTimer)
-      this.sweepTimer = null
-    }
-    this.sweepInFlight = null
+  /** Resident pages the budget can rank, most recently used first. */
+  private candidates(): BrowserRetentionCandidate[] {
+    return this.deps.pages
+      .resident()
+      .filter((page) => !this.deps.isReleasing(page.browserPageId))
+      .sort(
+        (left, right) =>
+          right.lastActivityAt - left.lastActivityAt ||
+          left.browserPageId.localeCompare(right.browserPageId)
+      )
+      .map((page) => ({
+        id: page.browserPageId,
+        lastActivityAt: page.lastActivityAt
+      }))
   }
 
   // Why: a page is off limits while anything depends on its renderer — a client
@@ -128,16 +187,9 @@ export class OffscreenBrowserPageReclaimer {
     )
   }
 
-  private toCandidate(page: OffscreenBrowserPage): {
-    browserPageId: string
-    lastActivityAt: number
-    pinned: boolean
-  } {
-    return {
-      browserPageId: page.browserPageId,
-      lastActivityAt: page.lastActivityAt,
-      pinned: this.isPinned(page)
-    }
+  private isPinnedById(browserPageId: string): boolean {
+    const page = this.deps.pages.get(browserPageId)
+    return page ? this.isPinned(page) : false
   }
 
   private isSafeToReclaim(browserPageId: string): boolean {
@@ -145,8 +197,13 @@ export class OffscreenBrowserPageReclaimer {
     if (!page || this.deps.isReleasing(browserPageId)) {
       return false
     }
-    return (
-      !this.isPinned(page) && this.deps.now() - page.lastActivityAt >= this.deps.policy.parkGraceMs
+    if (this.isPinned(page)) {
+      return false
+    }
+    return !isBrowserRetentionCandidateInGrace(
+      { id: browserPageId, lastActivityAt: page.lastActivityAt },
+      this.deps.now(),
+      this.deps.budget
     )
   }
 }

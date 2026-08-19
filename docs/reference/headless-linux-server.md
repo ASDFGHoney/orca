@@ -299,15 +299,19 @@ renderer forever, which is the failure this exists to prevent; waking it simply
 retries the address. Parking never closes a page: the page stays open until
 something closes it, exactly as on the desktop.
 
-Two evictors decide what stays resident, mirroring terminal pane parking. The
-cap is the primary one:
+What stays resident is the same budget the desktop app applies to its own
+browser guests (`src/shared/browser-retention-budget.ts`): keep the most
+recently used, never evict something in use. The desktop learns a working set
+went cold when you switch worktrees; a headless host has no such event, so it
+configures the same budget with an idle window and schedules itself a one-shot
+check for the moment its answer could next change. A server with nothing
+resident holds no timer at all.
 
 | Variable                               | Default  | Meaning                                                            |
 | -------------------------------------- | -------- | ------------------------------------------------------------------ |
 | `ORCA_HEADLESS_BROWSER_RESIDENT_LIMIT` | `4`      | Renderers kept resident. Least-recently-used pages park past this. |
 | `ORCA_HEADLESS_BROWSER_PARK_IDLE_MS`   | `300000` | A page parks after this long untouched, even under the cap.        |
 | `ORCA_HEADLESS_BROWSER_PARK_GRACE_MS`  | `30000`  | A page is never parked this soon after its last command.           |
-| `ORCA_HEADLESS_BROWSER_PARK_SWEEP_MS`  | `15000`  | How often the server re-evaluates residency.                       |
 
 Raise the limit on a host with memory to spare, or set both the limit and the
 idle window very high to keep every page resident — at the cost this
