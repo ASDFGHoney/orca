@@ -10,14 +10,20 @@ import type { OrcaRuntimeService } from './orca-runtime'
 // reply on every transport, not a silent hang plus an unhandled rejection.
 const THROWING_PARAM_METHODS = ['computer.pressKey', 'computer.hotkey'] as const
 
+// Only an *absent* `key` reaches the refinement as undefined: when the property is present but
+// invalid, `requiredString`'s transform still puts '' in the parsed object. The present-but-invalid
+// rows guard that boundary, so a change to `requiredString` that starts dropping the key is caught.
+const KEY_PAYLOADS = [
+  { label: 'no params', params: {} },
+  { label: 'an absent key', params: { app: 'Finder' } },
+  { label: 'an empty key', params: { app: 'Finder', key: '' } },
+  { label: 'a non-string key', params: { app: 'Finder', key: 42 } }
+] as const
+
 function makeServer(): { server: OrcaRuntimeRpcServer; deviceToken: string } {
   const userDataPath = mkdtempSync(join(tmpdir(), 'orca-rpc-schema-throw-'))
   const runtime = { getRuntimeId: () => 'test-runtime' } as OrcaRuntimeService
-  const server = new OrcaRuntimeRpcServer({
-    runtime,
-    userDataPath,
-    enableWebSocket: false
-  })
+  const server = new OrcaRuntimeRpcServer({ runtime, userDataPath, enableWebSocket: false })
   server['deviceRegistry'] = new DeviceRegistry(userDataPath)
   // Why: computer.* is off the mobile allowlist; runtime-scope pairings reach it.
   const device = server['deviceRegistry']!.addDevice('desktop', 'runtime')
@@ -40,50 +46,47 @@ describe('RPC reply contract when a param schema throws', () => {
   })
 
   for (const method of THROWING_PARAM_METHODS) {
-    it(`replies once with invalid_argument over WebSocket for ${method} with a missing key`, async () => {
-      const { server, deviceToken } = makeServer()
-      const replies: string[] = []
+    for (const { label, params } of KEY_PAYLOADS) {
+      it(`replies once with invalid_argument over WebSocket for ${method} with ${label}`, async () => {
+        const { server, deviceToken } = makeServer()
+        const replies: string[] = []
 
-      // Why: mirrors the production call site, which fires this off with `void`.
-      await server['handleWebSocketMessage'](
-        JSON.stringify({ id: 'ws-1', method, deviceToken, params: {} }),
-        (response) => replies.push(response),
-        () => {}
-      )
-      await new Promise((resolve) => setImmediate(resolve))
+        // Why: production fires this with `void` and never awaits it, so a rejection here is an
+        // unhandled rejection and the caller waits for its own timeout. Reproduce that exactly.
+        void server['handleWebSocketMessage'](
+          JSON.stringify({ id: 'ws-1', method, deviceToken, params }),
+          (response) => replies.push(response),
+          () => {}
+        )
+        await new Promise((resolve) => setTimeout(resolve, 0))
 
-      expect(replies).toHaveLength(1)
-      expect(JSON.parse(replies[0])).toMatchObject({
-        id: 'ws-1',
-        ok: false,
-        error: { code: 'invalid_argument' }
-      })
-      expect(unhandled).toEqual([])
-    })
-
-    it(`matches the unix-socket reply for ${method} with a missing key`, async () => {
-      const { server, deviceToken } = makeServer()
-      const wsReplies: string[] = []
-      await server['handleWebSocketMessage'](
-        JSON.stringify({ id: 'req-1', method, deviceToken, params: {} }),
-        (response) => wsReplies.push(response),
-        () => {}
-      )
-
-      const socketResponse = await server['handleMessage'](
-        JSON.stringify({
-          id: 'req-1',
-          method,
-          authToken: server['authToken'],
-          params: {}
+        expect(unhandled).toEqual([])
+        expect(replies).toHaveLength(1)
+        expect(JSON.parse(replies[0])).toMatchObject({
+          id: 'ws-1',
+          ok: false,
+          error: { code: 'invalid_argument' }
         })
-      )
-
-      expect(socketResponse).toMatchObject({
-        ok: false,
-        error: { code: 'invalid_argument' }
       })
-      expect(socketResponse).toEqual(JSON.parse(wsReplies[0]))
-    })
+
+      it(`matches the unix-socket reply for ${method} with ${label}`, async () => {
+        const { server, deviceToken } = makeServer()
+        const wsReplies: string[] = []
+        await server['handleWebSocketMessage'](
+          JSON.stringify({ id: 'req-1', method, deviceToken, params }),
+          (response) => wsReplies.push(response),
+          () => {}
+        )
+
+        // Why: main answered this one `internal_error` via the socket transport's `.catch`,
+        // so parity is the assertion that matters, not just "some error came back".
+        const socketResponse = await server['handleMessage'](
+          JSON.stringify({ id: 'req-1', method, authToken: server['authToken'], params })
+        )
+
+        expect(socketResponse).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+        expect(socketResponse).toEqual(JSON.parse(wsReplies[0]))
+      })
+    }
   }
 })
