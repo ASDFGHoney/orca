@@ -6007,23 +6007,15 @@ export function registerPtyHandlers(
     'pty:getMainBufferSnapshot',
     async (
       _event,
-      args: { id?: unknown; opts?: { scrollbackRows?: unknown; hiddenOutputRestore?: unknown } }
+      args: { id?: unknown; opts?: { scrollbackRows?: unknown } }
     ): Promise<MainBufferSnapshotReply> => {
       if (!runtime || typeof args?.id !== 'string' || args.id.length === 0) {
         return null
       }
-      const snapshot = await resolveMainBufferSnapshot(
+      return resolveMainBufferSnapshot(
         args.id,
         normalizeSnapshotScrollbackRows(args.opts?.scrollbackRows)
       )
-      // Why here and not on unhide: this is where hidden-output recovery actually
-      // takes delivery of the retained bytes. A refused snapshot leaves the latch
-      // armed so the next unhide re-emits, and sidecar readers (native chat, the
-      // SSH reattach probe) never pass the flag, so they cannot spend it (STA-4869).
-      if (snapshot && args.opts?.hiddenOutputRestore === true) {
-        consumeHiddenRendererPtyDropMemory(args.id)
-      }
-      return snapshot
     }
   )
 
@@ -7698,6 +7690,18 @@ export function registerPtyHandlers(
     if (transition.droppedWhileHidden) {
       sendModelRestoreNeededMarker(args.id, 'unhide', runtime?.getPtyOutputSequence(args.id))
     }
+  })
+
+  ipcMain.removeAllListeners('pty:hiddenOutputRestoreApplied')
+  ipcMain.on('pty:hiddenOutputRestoreApplied', (_event, args: { id?: unknown }) => {
+    if (typeof args?.id !== 'string' || !args.id) {
+      return
+    }
+    // Why the ack and not the serve: the pane can dispose across the multi-MB
+    // serialize + IPC round trip, and a snapshot nobody painted heals nothing.
+    // Retiring here keeps the latch armed until the bytes are on screen, so the
+    // replacement pane's unhide still re-emits the marker (STA-4869).
+    consumeHiddenRendererPtyDropMemory(args.id)
   })
 
   ipcMain.removeAllListeners('pty:terminalViewAttributes')

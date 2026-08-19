@@ -187,10 +187,7 @@ describe('connectPanePty', () => {
       rawLength: secondLive.length
     })
 
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', {
-      scrollbackRows: 5000,
-      hiddenOutputRestore: true
-    })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
     expect(pane.terminal.write).not.toHaveBeenCalledWith(firstLive, expect.any(Function))
     expect(pane.terminal.write).not.toHaveBeenCalledWith(secondLive, expect.any(Function))
 
@@ -751,10 +748,7 @@ describe('connectPanePty', () => {
     })
     await flushAsyncTicks(20)
 
-    expect(getMainBufferSnapshot).toHaveBeenCalledWith('old-pty-id', {
-      scrollbackRows: 5000,
-      hiddenOutputRestore: true
-    })
+    expect(getMainBufferSnapshot).toHaveBeenCalledWith('old-pty-id', { scrollbackRows: 5000 })
     expect(pane.terminal.write).not.toHaveBeenCalledWith(
       'old-snapshot-state\r\n',
       expect.any(Function)

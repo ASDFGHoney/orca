@@ -761,8 +761,7 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
 
     expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-large-live', {
-      scrollbackRows: 5000,
-      hiddenOutputRestore: true
+      scrollbackRows: 5000
     })
     expect(writes.some((write) => write.startsWith('L'))).toBe(false)
     expect(acknowledgeDroppedFrame).toHaveBeenCalledOnce()

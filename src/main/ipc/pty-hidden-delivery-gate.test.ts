@@ -42,7 +42,7 @@ describe('pty hidden delivery gate', () => {
     expect(shouldDropHiddenRendererPtyData(PTY_ID, {})).toBe(true)
   })
 
-  it('requests the restore marker exactly once per drop episode, re-armed by recovery', () => {
+  it('requests the restore marker exactly once per drop episode, re-armed by the applied ack', () => {
     markHiddenRendererPty(PTY_ID)
     expect(recordHiddenRendererPtyDataDrop(PTY_ID, 10).shouldEmitRestoreMarker).toBe(true)
     expect(recordHiddenRendererPtyDataDrop(PTY_ID, 10).shouldEmitRestoreMarker).toBe(false)
@@ -53,12 +53,12 @@ describe('pty hidden delivery gate', () => {
     markHiddenRendererPty(PTY_ID)
     expect(recordHiddenRendererPtyDataDrop(PTY_ID, 10).shouldEmitRestoreMarker).toBe(false)
 
-    // Recovery took delivery of the retained bytes: the next episode reports again.
+    // The renderer painted the snapshot: the next episode reports again.
     consumeHiddenRendererPtyDropMemory(PTY_ID)
     expect(recordHiddenRendererPtyDataDrop(PTY_ID, 10).shouldEmitRestoreMarker).toBe(true)
   })
 
-  it('keeps drop memory across unhide until recovery takes the bytes (STA-4869)', () => {
+  it('keeps drop memory across unhide until the renderer acks the paint (STA-4869)', () => {
     markHiddenRendererPty(PTY_ID)
     recordHiddenRendererPtyDataDrop(PTY_ID, 10)
 

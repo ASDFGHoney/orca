@@ -1,6 +1,6 @@
 import type * as React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushAsyncTicks } from './pty-connection-test-async'
+import { createDeferred, flushAsyncTicks } from './pty-connection-test-async'
 import {
   createMockTransport,
   createPane,
@@ -23,7 +23,7 @@ import {
 // while retiring unhides after unregistering its handler, so a drop latch
 // consumed by unmark would be spent on a marker nobody can receive. The fix
 // keeps the latch armed across unhide and retires it where recovery actually
-// takes delivery of the bytes — main serving a model snapshot.
+// paints the bytes — the renderer's post-apply ack.
 //
 // This suite drives the REAL renderer channel from behind the
 // setHiddenRendererPty IPC, delivering main's marker one turn later the way
@@ -138,7 +138,7 @@ type PaneDrive = {
 
 /** Main's droppedSinceHiddenPtys latch (pty-hidden-delivery-gate.ts): the first
  *  gated drop arms it, neither re-marking hidden nor unmarking clears it, and
- *  only a served model snapshot (or teardown) retires it. */
+ *  only the renderer's applied-ack (or teardown) retires it. */
 const mainDropLatch = {
   hidden: false,
   dropped: false,
@@ -158,7 +158,7 @@ const mainDropLatch = {
     this.hidden = false
     return this.dropped
   },
-  /** consumeHiddenRendererPtyDropMemory: recovery has the bytes now. */
+  /** consumeHiddenRendererPtyDropMemory: the renderer painted the snapshot. */
   consumeDropMemory(): void {
     this.dropped = false
   },
@@ -168,8 +168,8 @@ const mainDropLatch = {
   }
 }
 
-/** Routes the renderer's hidden-state IPC into main's real gate and delivers
- *  main's marker back one turn later, as the IPC round trip does. */
+/** Routes the renderer's hidden-state IPC and its applied-ack into main's gate,
+ *  delivering main's marker back one turn later as the IPC round trip does. */
 async function wireMainGateToRendererChannel(): Promise<{ markersDelivered: () => number }> {
   const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
   let markersDelivered = 0
@@ -188,6 +188,9 @@ async function wireMainGateToRendererChannel(): Promise<{ markersDelivered: () =
       })
     }
   )
+  vi.mocked(window.api.pty.ackHiddenOutputRestoreApplied).mockImplementation(() => {
+    mainDropLatch.consumeDropMemory()
+  })
   return { markersDelivered: () => markersDelivered }
 }
 
@@ -263,15 +266,12 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
       terminalMainSideEffectAuthority: true
     } as StoreState['settings']
     installTerminalTestGlobals()
-    vi.mocked(window.api.pty.getMainBufferSnapshot).mockImplementation(
-      async (_id: string, opts?: { hiddenOutputRestore?: boolean }) => {
-        // Main retires the drop latch when it actually serves recovery its bytes.
-        if (opts?.hiddenOutputRestore === true) {
-          mainDropLatch.consumeDropMemory()
-        }
-        return { data: `${R6_MARKER}\r\n`, cols: 120, rows: 40, seq: 4096 } as never
-      }
-    )
+    vi.mocked(window.api.pty.getMainBufferSnapshot).mockResolvedValue({
+      data: `${R6_MARKER}\r\n`,
+      cols: 120,
+      rows: 40,
+      seq: 4096
+    } as never)
   })
 
   afterEach(async () => {
@@ -337,6 +337,7 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
       ...observeDisclosure(replacement),
       modelSnapshotRequests: vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls.length
     }
+    expect(disclosure.markerWrites).toBeLessThanOrEqual(1)
     expect(
       disclosure.disclosedOrRecovered,
       `hidden output was neither reconciled nor disclosed after remount: ${JSON.stringify(disclosure)}`
@@ -344,7 +345,7 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
     replacement.binding.dispose()
   })
 
-  it('[fix] the remount re-emits the unhide marker and one snapshot retires the latch', async () => {
+  it('[fix] the remount re-emits the unhide marker and the applied ack retires the latch', async () => {
     const gate = await wireMainGateToRendererChannel()
     const retiring = await connectPane(false)
     retiring.deliver(HIDDEN_CHUNK, HIDDEN_CHUNK.length)
@@ -358,8 +359,9 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
     await flushAsyncTicks(20)
 
     // The latch outlived the marker nobody received, so the remount's own unhide
-    // re-emits it; the snapshot that heals the gap is what finally spends it.
+    // re-emits it; the paint that heals the gap is what finally spends it.
     expect(gate.markersDelivered()).toBe(2)
+    expect(window.api.pty.ackHiddenOutputRestoreApplied).toHaveBeenCalledWith(PTY_ID)
     expect(observeDisclosure(replacement)).toMatchObject({ markerWrites: 1 })
     expect(mainDropLatch.dropped).toBe(false)
 
@@ -374,5 +376,84 @@ describe('hidden-output restore marker handoff (STA-4869 R6)', () => {
     expect(gate.markersDelivered()).toBe(2)
     expect(vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls.length).toBe(snapshotRequests)
     replacement.binding.dispose()
+  })
+
+  it('[fix] a snapshot served into a disposing pane leaves the latch armed for the remount', async () => {
+    // Main serializes multi-MB buffers across an IPC round trip; a tab/split
+    // switch or renderer reload inside that window disposes the pane that asked.
+    const served = createDeferred<unknown>()
+    const snapshot = { data: `${R6_MARKER}\r\n`, cols: 120, rows: 40, seq: 4096 }
+    let servedCalls = 0
+    vi.mocked(window.api.pty.getMainBufferSnapshot).mockImplementation(async () => {
+      servedCalls += 1
+      return (servedCalls === 1 ? await served.promise : snapshot) as never
+    })
+    const gate = await wireMainGateToRendererChannel()
+    const retiring = await connectPane(false)
+    retiring.deliver(HIDDEN_CHUNK, HIDDEN_CHUNK.length)
+    await dropHiddenBytesInMain()
+    retiring.setVisible(true)
+    retiring.binding.syncProcessTracking()
+    await flushAsyncTicks(10)
+    expect(servedCalls).toBe(1)
+
+    retiring.binding.dispose()
+    served.resolve(snapshot)
+    await flushAsyncTicks(20)
+
+    // Nobody painted those bytes, so main still owes the next view a marker.
+    expect(window.api.pty.ackHiddenOutputRestoreApplied).not.toHaveBeenCalled()
+    expect(mainDropLatch.dropped).toBe(true)
+
+    const replacement = await connectPane(true)
+    replacement.binding.syncProcessTracking()
+    await flushAsyncTicks(20)
+
+    expect(gate.markersDelivered()).toBeGreaterThanOrEqual(2)
+    expect(observeDisclosure(replacement)).toMatchObject({ bannerWrites: 0, markerWrites: 1 })
+    expect(mainDropLatch.dropped).toBe(false)
+    replacement.binding.dispose()
+  })
+
+  it('[fix] a permanently refused source discloses the gap once across repeated reveals', async () => {
+    // The longer-lived latch re-marks on every unhide, so without disclosed-gap
+    // dedupe each reveal re-banners and re-fetches the same historical gap.
+    vi.mocked(window.api.pty.getMainBufferSnapshot).mockResolvedValue(null as never)
+    const gate = await wireMainGateToRendererChannel()
+    const drive = await connectPane(false)
+    drive.deliver(HIDDEN_CHUNK, HIDDEN_CHUNK.length)
+    await dropHiddenBytesInMain()
+
+    vi.useFakeTimers()
+    try {
+      drive.setVisible(true)
+      drive.binding.syncProcessTracking()
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushAsyncTicks(20)
+      expect(observeDisclosure(drive)).toMatchObject({ bannerWrites: 1 })
+      const snapshotsAtDisclosure = vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls
+        .length
+
+      for (let cycle = 0; cycle < 4; cycle += 1) {
+        drive.setVisible(false)
+        drive.binding.syncProcessTracking()
+        await vi.advanceTimersByTimeAsync(1_000)
+        await flushAsyncTicks(20)
+        drive.setVisible(true)
+        drive.binding.syncProcessTracking()
+        await vi.advanceTimersByTimeAsync(5_000)
+        await flushAsyncTicks(20)
+      }
+
+      // Every reveal re-emits main's marker; none of them re-open the same gap.
+      expect(gate.markersDelivered()).toBeGreaterThan(1)
+      expect(observeDisclosure(drive)).toMatchObject({ bannerWrites: 1 })
+      expect(vi.mocked(window.api.pty.getMainBufferSnapshot).mock.calls.length).toBe(
+        snapshotsAtDisclosure
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+    drive.binding.dispose()
   })
 })

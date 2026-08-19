@@ -23,8 +23,8 @@ const hiddenRendererPtys = new Set<string>()
 const deliveryInterestRendererPtys = new Set<string>()
 // Why: reveal must restore from the model only when bytes were actually
 // dropped. Doubles as the marker latch: the first gated drop emits a restore
-// marker, every unhide re-emits one, and the latch retires only when recovery
-// actually has the bytes (a served model snapshot) or the PTY tears down.
+// marker, every unhide re-emits one, and the latch retires only when the
+// renderer reports the retained bytes painted, or the PTY tears down.
 // Neither re-marking hidden nor unmarking clears it — a marker only reaches a
 // pane that is listening when it lands, and a retiring hidden pane unhides into
 // a renderer with no handler registered (STA-4869).
@@ -62,9 +62,9 @@ export function unmarkHiddenRendererPty(id: string): { droppedWhileHidden: boole
   return { droppedWhileHidden: droppedSinceHiddenPtys.has(id) }
 }
 
-/** Retires drop memory once recovery holds the bytes — main served a model
- *  snapshot, which carries everything ingested before it. A refused snapshot
- *  must leave the latch armed so the next unhide re-emits. */
+/** Retires drop memory once the renderer reports the snapshot applied. Serving
+ *  the snapshot is not enough: the pane can dispose across the serialize+IPC
+ *  round trip, and a snapshot nobody painted heals nothing. */
 export function consumeHiddenRendererPtyDropMemory(id: string): void {
   droppedSinceHiddenPtys.delete(id)
 }

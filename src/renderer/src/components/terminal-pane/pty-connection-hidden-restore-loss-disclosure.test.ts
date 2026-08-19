@@ -1,5 +1,6 @@
 import type * as React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RESET_AFTER_BYTE_GAP } from '../../../../shared/terminal-mode-reset-profiles'
 import { flushAsyncTicks, createDeferred } from './pty-connection-test-async'
 import {
   createMockTransport,
@@ -369,6 +370,7 @@ describe('hidden-output restore loss disclosure (STA-4869)', () => {
       const drive = await exhaustBudgetWhileHidden(serializeBufferOutcome)
       expect(drive.writtenChunks().join('')).not.toContain(BANNER_FRAGMENT)
 
+      const requestsBeforeReveal = serializeBufferOutcome.mock.calls.length
       await revealPane(drive)
       await allowRecoveryWindow()
 
@@ -378,6 +380,10 @@ describe('hidden-output restore loss disclosure (STA-4869)', () => {
         bannerWrites: 1,
         markerWrites: 0
       })
+      // Reveal is a bounded retry, not a fresh budget: one host request, then
+      // the banner. Carrying the spent counters across the deferral is what
+      // makes this hold — a reset would re-run all seven against a dead host.
+      expect(serializeBufferOutcome.mock.calls.length - requestsBeforeReveal).toBe(1)
       drive.disposable.dispose()
     })
   })
@@ -514,6 +520,60 @@ describe('hidden-output restore loss disclosure (STA-4869)', () => {
       const disclosure = observeDisclosure(drive, R5_MARKER)
       expect(disclosure.markerWrites).toBeLessThanOrEqual(1)
       expectDisclosedOrRecovered(disclosure)
+      drive.disposable.dispose()
+    })
+  })
+
+  // ── The restore loop's PTY-swap arm (pty-connection.ts ~7660) ────────────
+  // The one writeRestoreUnavailableWarning caller the defer guard does not
+  // cover. It is reachable only from loop iteration 2+, which the hidden-pause
+  // guard after the replay makes foreground-only, and it is remote-only (a
+  // local ptyId always satisfies canUseHiddenOutputSnapshot) — so the re-arm
+  // budget clearHiddenOutputRestoreState() just reset always wins and the
+  // banner call is dead. Entering it with the budget already spent is not
+  // constructible: iteration 2 requires a successful snapshot first, and that
+  // zeroes hiddenOutputRestoreRemoteAbandonCycles on the way through.
+  describe('restore-loop PTY-swap arm', () => {
+    it('[fix] re-arms instead of declaring a loss when the host loses snapshot capability', async () => {
+      const swapMarker = 'R7-LOST-3e91'
+      const answer = createDeferred<unknown>()
+      const serializeBufferOutcome = vi.fn().mockReturnValue(answer.promise)
+      let paneTransport: MockTransport | null = null
+      const drive = await connectHiddenPane(REMOTE_PTY_ID, (transport) => {
+        paneTransport = transport
+        transport.serializeBuffer = vi.fn()
+        transport.serializeBufferOutcome = serializeBufferOutcome
+      })
+      const transport = paneTransport as unknown as MockTransport
+      const { resetTerminalFreezeBreadcrumbsForTesting, getTerminalFreezeBreadcrumbs } =
+        await import('./terminal-freeze-breadcrumbs')
+      vi.useFakeTimers()
+      floodWhileHiddenThenReveal(drive)
+      await flushAsyncTicks(20)
+      expect(serializeBufferOutcome).toHaveBeenCalledTimes(1)
+
+      // A chunk landing while the pane is momentarily background marks the
+      // in-flight snapshot stale, which is what sends the loop around again.
+      drive.setVisible(false)
+      drive.deliver('stale-during-restore\r\n', HIDDEN_FLOOD.length + LIVE_CHUNK.length + 32)
+      drive.setVisible(true)
+
+      // The host drops snapshot support underneath the in-flight request.
+      transport.serializeBuffer = undefined
+      resetTerminalFreezeBreadcrumbsForTesting()
+      answer.resolve(hostAnswers(retainedSnapshot(swapMarker)))
+      await flushAsyncTicks(20)
+
+      const disclosure = observeDisclosure(drive, swapMarker)
+      expect(disclosure.bannerWrites).toBe(0)
+      // Route proof: the re-arm reason names this arm, not the deadline abandon.
+      expect(
+        getTerminalFreezeBreadcrumbs()
+          .filter((crumb) => crumb.kind === 'restore-abandon-rearm')
+          .map((crumb) => crumb.detail?.reason)
+      ).toEqual(['restore-pty-swapped'])
+      // The gap is still grounded, and the deferred repaint keeps recovery armed.
+      expect(drive.writtenChunks()).toContain(RESET_AFTER_BYTE_GAP)
       drive.disposable.dispose()
     })
   })
