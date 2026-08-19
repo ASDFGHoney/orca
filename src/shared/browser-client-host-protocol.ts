@@ -312,11 +312,6 @@ export const BrowserClientHostCommandResultParams = BrowserClientPageCommandAuth
 
 export const BrowserClientHostCommandResultAck = z.object({ accepted: z.boolean() })
 
-export const BrowserClientHostLeaseEvent = z.discriminatedUnion('type', [
-  BrowserClientHostReady,
-  BrowserClientHostRevoked
-])
-
 export const BrowserClientHostEvent = z.union([
   BrowserClientHostReady,
   BrowserClientHostRevoked,

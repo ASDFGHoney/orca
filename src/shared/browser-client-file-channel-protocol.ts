@@ -39,8 +39,6 @@ const FileChannelPageAuthority = z.object({
   pageHostGeneration: Generation
 })
 
-export type BrowserClientFileChannelPageAuthority = z.infer<typeof FileChannelPageAuthority>
-
 export const BrowserClientFileChannelReadParams = FileChannelPageAuthority.extend({
   // Why: remote upload sources are workspace-relative so containment is enforced by the runtime file target resolver.
   workspaceRelativePath: z.string().min(1).max(4096),
@@ -84,5 +82,3 @@ export type BrowserClientFileChannelWriteResult = z.infer<
 export const BrowserClientFileChannelAbortParams = FileChannelPageAuthority.extend({
   transferId: Identity
 })
-
-export const BrowserClientFileChannelAbortResult = z.object({ released: z.boolean() })

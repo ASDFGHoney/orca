@@ -11,7 +11,6 @@ import {
   BrowserClientHostCommandResultAck,
   BrowserClientHostCommandResultParams,
   BrowserClientHostEvent,
-  BrowserClientHostLeaseEvent,
   BrowserClientHostReady,
   BrowserNetworkTunnelAttachParams,
   BrowserNetworkTunnelEvent
@@ -298,7 +297,6 @@ describe('browser client-host control protocol', () => {
 
     expect(BrowserClientHostCommandEvent.parse(command)).toEqual(command)
     expect(BrowserClientHostEvent.parse(command)).toEqual(command)
-    expect(() => BrowserClientHostLeaseEvent.parse(command)).toThrow()
     expect(
       BrowserClientHostCommandEvent.parse({
         ...command,

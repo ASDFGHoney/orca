@@ -178,14 +178,6 @@ export async function startPairedRuntimeBrowserClientHost(options: {
   return authority
 }
 
-export function retirePairedRuntimeBrowserClientPage(
-  environmentId: string,
-  browserPageId: string,
-  pageHostGeneration: number
-): Promise<boolean> {
-  return browserClientHosts.retirePage(environmentId, browserPageId, pageHostGeneration)
-}
-
 /**
  * Route identity of the client host serving `environmentId`, or null when the
  * desktop is not hosting that server's pages. Names the environment's own
