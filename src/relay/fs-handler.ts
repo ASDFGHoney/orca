@@ -27,6 +27,7 @@ import {
 import { buildExcludePathPrefixes } from '../shared/quick-open-filter'
 import { readRelayFileContent, readRelayFileStreamMetadata } from './fs-handler-file-read'
 import { readRelayFileRange } from './fs-handler-file-range'
+import { FileRangeReadRequestError } from '../shared/file-range-read'
 import {
   readVerifiedTerminalArtifact,
   writeVerifiedTerminalArtifact
@@ -111,18 +112,13 @@ export class FsHandler {
     return readRelayFileContent(filePath)
   }
 
-  // Why hand-validated: relay params arrive as raw casts with no schema, and
-  // both of these land directly in an fd read position.
+  // Why hand-checked: relay params arrive as raw casts with no schema. The
+  // offsets are validated inside readRelayFileRange, next to the read syscall.
   private async readFileRange(params: Record<string, unknown>) {
-    const filePath = expandTilde(params.filePath as string)
-    const { position, length } = params
-    if (typeof position !== 'number' || !Number.isSafeInteger(position) || position < 0) {
-      throw new Error('fs.readFileRange requires a non-negative integer position')
+    if (typeof params.filePath !== 'string' || params.filePath.length === 0) {
+      throw new FileRangeReadRequestError('fs.readFileRange requires a filePath')
     }
-    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length <= 0) {
-      throw new Error('fs.readFileRange requires a positive integer length')
-    }
-    return readRelayFileRange(filePath, position, length)
+    return readRelayFileRange(expandTilde(params.filePath), params.position, params.length)
   }
 
   private async readTerminalArtifact(params: Record<string, unknown>) {

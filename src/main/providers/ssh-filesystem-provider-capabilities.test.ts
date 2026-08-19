@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { probeSshQuickOpenSearchCapability } from './ssh-filesystem-provider-capabilities'
+import {
+  probeSshQuickOpenSearchCapability,
+  probeSshRangedReadCapability
+} from './ssh-filesystem-provider-capabilities'
 import { JsonRpcErrorCode } from '../ssh/relay-protocol'
 
 describe('SSH Quick Open capability probe', () => {
@@ -32,5 +35,44 @@ describe('SSH Quick Open capability probe', () => {
     await expect(probeSshQuickOpenSearchCapability(mux as never)).rejects.toThrow(
       'connection closed'
     )
+  })
+})
+
+describe('SSH filesystem capability document', () => {
+  // fs.getCapabilities answers every feature at once. Probing per feature would
+  // spend an extra round trip per connection for a document already in hand.
+  it('is fetched once for every feature probe on a connection', async () => {
+    const mux = {
+      request: vi.fn().mockResolvedValue({ quickOpenSearchVersion: 1, rangedReadVersion: 1 })
+    }
+    await expect(probeSshQuickOpenSearchCapability(mux as never)).resolves.toBe(true)
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(true)
+    expect(mux.request).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads each feature independently off the shared document', async () => {
+    const mux = { request: vi.fn().mockResolvedValue({ quickOpenSearchVersion: 1 }) }
+    await expect(probeSshQuickOpenSearchCapability(mux as never)).resolves.toBe(true)
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(false)
+  })
+
+  // A transport failure is not a verdict about the host, so it must not be the
+  // cached answer for the rest of the connection's life.
+  it('retries after a failed fetch instead of caching the failure', async () => {
+    const mux = {
+      request: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('connection closed'))
+        .mockResolvedValue({ rangedReadVersion: 1 })
+    }
+    await expect(probeSshRangedReadCapability(mux as never)).rejects.toThrow('connection closed')
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(true)
+    expect(mux.request).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a non-object response as no capabilities', async () => {
+    const mux = { request: vi.fn().mockResolvedValue('yes') }
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(false)
+    await expect(probeSshQuickOpenSearchCapability(mux as never)).resolves.toBe(false)
   })
 })

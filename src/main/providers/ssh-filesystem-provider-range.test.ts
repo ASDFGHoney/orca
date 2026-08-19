@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SshFilesystemProvider } from './ssh-filesystem-provider'
 import { FileRangeReadUnsupportedError } from './filesystem-provider-contract'
+import { FileRangeReadRequestError, MAX_FILE_RANGE_READ_BYTES } from '../../shared/file-range-read'
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 
 function methodNotFound(): Error {
@@ -31,6 +32,26 @@ describe('SshFilesystemProvider.readFileRange', () => {
     )
   })
 
+  it('reports a short window as read without complaint', async () => {
+    const payload = Buffer.from('tail')
+    const request = vi.fn().mockResolvedValue({
+      base64: payload.toString('base64'),
+      bytesRead: payload.length
+    })
+    const result = await providerWith(request).readFileRange('/x.jsonl', 0, 64)
+    expect(result.bytesRead).toBe(4)
+    expect(result.bytes).toEqual(payload)
+  })
+
+  it('forwards an abort signal to the multiplexer', async () => {
+    const controller = new AbortController()
+    const request = vi.fn().mockResolvedValue({ base64: '', bytesRead: 0 })
+    await providerWith(request).readFileRange('/x.jsonl', 0, 4, { signal: controller.signal })
+    expect(request).toHaveBeenCalledWith('fs.readFileRange', expect.anything(), {
+      signal: controller.signal
+    })
+  })
+
   // Throwing beats a whole-file fallback here: a tailing caller issues several
   // reads per snapshot, so falling back per call is quadratic on a growing file.
   it('throws a typed unsupported error against a relay without the method', async () => {
@@ -43,6 +64,24 @@ describe('SshFilesystemProvider.readFileRange', () => {
   it('propagates a non-capability error unchanged', async () => {
     const request = vi.fn().mockRejectedValue(new Error('EACCES: permission denied'))
     await expect(providerWith(request).readFileRange('/x.jsonl', 0, 4)).rejects.toThrow(/EACCES/)
+  })
+
+  // The client runs the host's own validator, so a request the host would
+  // refuse fails as a typed error instead of an opaque -32000 a round trip later.
+  describe('request validation', () => {
+    it.each([
+      ['a negative position', -1, 4],
+      ['a fractional position', 0.5, 4],
+      ['a zero length', 0, 0],
+      ['a negative length', 0, -1],
+      ['an over-cap length', 0, MAX_FILE_RANGE_READ_BYTES + 1]
+    ])('rejects %s without a round trip', async (_label, position, length) => {
+      const request = vi.fn()
+      await expect(
+        providerWith(request).readFileRange('/x.jsonl', position, length)
+      ).rejects.toBeInstanceOf(FileRangeReadRequestError)
+      expect(request).not.toHaveBeenCalled()
+    })
   })
 
   // The remote is untrusted for framing: a count disagreeing with the payload
@@ -98,5 +137,14 @@ describe('SshFilesystemProvider.supportsFileRangeRead', () => {
     await provider.supportsFileRangeRead()
     await provider.supportsFileRangeRead()
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  // The cache is keyed by the multiplexer, which is replaced on reconnect, so a
+  // second connection must not inherit the first host's answer.
+  it('does not share the answer across connections', async () => {
+    const legacy = vi.fn().mockResolvedValue({ quickOpenSearchVersion: 1 })
+    const current = vi.fn().mockResolvedValue({ rangedReadVersion: 1 })
+    await expect(providerWith(legacy).supportsFileRangeRead()).resolves.toBe(false)
+    await expect(providerWith(current).supportsFileRangeRead()).resolves.toBe(true)
   })
 })

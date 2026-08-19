@@ -16,6 +16,7 @@ import {
 } from './ssh-filesystem-provider-watch'
 import type {
   IFilesystemProvider,
+  FileRangeReadResult,
   FileReadLimits,
   FileStat,
   FileReadResult,
@@ -46,9 +47,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   private disposed = false
   private loggedStreamFallback = false
   readonly downloadFolder?: IFilesystemProvider['downloadFolder']
-  // Optional capabilities are wired in the constructor, matching downloadFolder.
-  readonly readFileRange: NonNullable<IFilesystemProvider['readFileRange']>
-  readonly supportsFileRangeRead: NonNullable<IFilesystemProvider['supportsFileRangeRead']>
 
   constructor(
     connectionId: string,
@@ -71,11 +69,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
           windowsRemotePaths
         })
     }
-
-    this.readFileRange = (filePath, position, length, options) =>
-      readSshFileRange(this.mux, filePath, position, length, options?.signal)
-    this.supportsFileRangeRead = (options) =>
-      probeSshRangedReadCapability(this.mux, options?.signal)
 
     this.unsubscribeNotifications = mux.onNotification((method, params) =>
       routeSshFilesystemWatchNotification(this.watchListeners, method, params)
@@ -125,6 +118,19 @@ export class SshFilesystemProvider implements IFilesystemProvider {
       }
       throw err
     }
+  }
+
+  readFileRange(
+    filePath: string,
+    position: number,
+    length: number,
+    options?: { signal?: AbortSignal }
+  ): Promise<FileRangeReadResult> {
+    return readSshFileRange(this.mux, filePath, position, length, options?.signal)
+  }
+
+  supportsFileRangeRead(options?: { signal?: AbortSignal }): Promise<boolean> {
+    return probeSshRangedReadCapability(this.mux, options?.signal)
   }
 
   readTerminalArtifact(

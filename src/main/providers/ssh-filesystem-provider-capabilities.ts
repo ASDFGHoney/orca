@@ -2,75 +2,66 @@ import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { isMethodNotFoundError } from '../ssh/ssh-filesystem-stream-reader'
 import { waitForSshCapabilityProbe } from './ssh-capability-probe-waiter'
 
-const quickOpenSearchSupport = new WeakMap<SshChannelMultiplexer, Promise<boolean>>()
+/** `null` means the host has no capability document at all: it predates
+ *  `fs.getCapabilities`, or answered with something that is not an object.
+ *  Either way every feature reads as unsupported. */
+type RelayFsCapabilities = Record<string, unknown> | null
 
-export function probeSshQuickOpenSearchCapability(
+const capabilitiesByMux = new WeakMap<SshChannelMultiplexer, Promise<RelayFsCapabilities>>()
+
+/** One `fs.getCapabilities` per multiplexer, shared by every feature probe --
+ *  the response is a single document, so fetching it once per feature would
+ *  spend a round trip for nothing. Keyed by the multiplexer, which is replaced
+ *  on reconnect, so a host upgraded behind a reconnect is re-probed.
+ *
+ *  A failed fetch is evicted so the next probe retries; a resolved one is not,
+ *  because a relay does not gain methods without a new connection. */
+function readSshFsCapabilities(
   mux: SshChannelMultiplexer,
   signal?: AbortSignal
-): Promise<boolean> {
-  const cached = quickOpenSearchSupport.get(mux)
+): Promise<RelayFsCapabilities> {
+  const cached = capabilitiesByMux.get(mux)
   const probe =
     cached ??
     mux
       .request('fs.getCapabilities', undefined, { timeoutMs: 5_000 })
-      .then((result) => {
-        const version = (result as { quickOpenSearchVersion?: unknown } | null)
-          ?.quickOpenSearchVersion
-        return version === 1
-      })
+      .then((result) =>
+        typeof result === 'object' && result !== null ? (result as Record<string, unknown>) : null
+      )
       .catch((error) => {
         if (isMethodNotFoundError(error)) {
-          return false
+          return null
         }
         throw error
       })
   if (!cached) {
-    quickOpenSearchSupport.set(mux, probe)
+    capabilitiesByMux.set(mux, probe)
   }
   return waitForSshCapabilityProbe(probe, signal).then(
-    (supported) => supported,
+    (capabilities) => capabilities,
     (error) => {
-      if (!signal?.aborted && quickOpenSearchSupport.get(mux) === probe) {
-        quickOpenSearchSupport.delete(mux)
+      if (!signal?.aborted && capabilitiesByMux.get(mux) === probe) {
+        capabilitiesByMux.delete(mux)
       }
       throw error
     }
   )
 }
 
-const rangedReadSupport = new WeakMap<SshChannelMultiplexer, Promise<boolean>>()
+export function probeSshQuickOpenSearchCapability(
+  mux: SshChannelMultiplexer,
+  signal?: AbortSignal
+): Promise<boolean> {
+  return readSshFsCapabilities(mux, signal).then(
+    (capabilities) => capabilities?.quickOpenSearchVersion === 1
+  )
+}
 
-/** Mirrors the quick-open probe: one cached `fs.getCapabilities` per mux rather
- *  than eating a guaranteed -32601 on every ranged read against an old relay. */
 export function probeSshRangedReadCapability(
   mux: SshChannelMultiplexer,
   signal?: AbortSignal
 ): Promise<boolean> {
-  const cached = rangedReadSupport.get(mux)
-  const probe =
-    cached ??
-    mux
-      .request('fs.getCapabilities', undefined, { timeoutMs: 5_000 })
-      .then((result) => {
-        const version = (result as { rangedReadVersion?: unknown } | null)?.rangedReadVersion
-        return version === 1
-      })
-      .catch((error) => {
-        if (isMethodNotFoundError(error)) {
-          return false
-        }
-        throw error
-      })
-  if (!cached) {
-    rangedReadSupport.set(mux, probe)
-  }
-  return waitForSshCapabilityProbe(probe, signal).then(
-    (supported) => supported,
-    (error) => {
-      if (!signal?.aborted && rangedReadSupport.get(mux) === probe) {
-        rangedReadSupport.delete(mux)
-      }
-      throw error
-    }
+  return readSshFsCapabilities(mux, signal).then(
+    (capabilities) => capabilities?.rangedReadVersion === 1
   )
 }

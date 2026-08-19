@@ -1,5 +1,6 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { isMethodNotFoundError } from '../ssh/ssh-filesystem-stream-reader'
+import { validateFileRangeRequest } from '../../shared/file-range-read'
 import {
   FileRangeReadUnsupportedError,
   type FileRangeReadResult
@@ -8,12 +9,19 @@ import {
 export async function readSshFileRange(
   mux: SshChannelMultiplexer,
   filePath: string,
-  position: number,
-  length: number,
+  rawPosition: number,
+  rawLength: number,
   signal?: AbortSignal
 ): Promise<FileRangeReadResult> {
+  // Same validator the host runs, so an out-of-contract request fails locally
+  // as a typed error instead of costing a round trip and coming back as an
+  // opaque -32000.
+  const { position, length } = validateFileRangeRequest(rawPosition, rawLength)
   let result: unknown
   try {
+    // No timeoutMs: the multiplexer's 30s default is right for a bounded
+    // MAX_FILE_RANGE_READ_BYTES window on a slow link. The capability probe
+    // pins a shorter one because it gates a UI decision, not a data read.
     result = await mux.request(
       'fs.readFileRange',
       { filePath, position, length },

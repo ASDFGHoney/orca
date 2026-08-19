@@ -1,43 +1,29 @@
 import { open } from 'node:fs/promises'
+import { validateFileRangeRequest } from '../shared/file-range-read'
+import { readFullStreamChunk } from './fs-handler-file-read'
 
-/** Largest range one JSON-RPC response may carry. Requests above this are
- *  REJECTED rather than clamped: a silently shortened read is indistinguishable
- *  from EOF or a truncation, and callers page by advancing `position`. */
-export const MAX_RELAY_RANGE_READ_BYTES = 4 * 1024 * 1024
-
-export class RelayRangeTooLargeError extends Error {
-  constructor(requested: number) {
-    super(
-      `Requested range of ${requested} bytes exceeds the ${MAX_RELAY_RANGE_READ_BYTES}-byte limit`
-    )
-    this.name = 'RelayRangeTooLargeError'
-  }
-}
-
-/** Positional read for tailing an append-only file. Loops until `length` is
- *  satisfied or the file genuinely ends, so a short result always means EOF and
- *  never a partial syscall. Base64 because the payload is arbitrary bytes and
- *  may split a UTF-8 sequence at either edge. */
+/** Positional read for tailing an append-only file. Fills the window until
+ *  `length` is satisfied or the file genuinely ends, so a short result always
+ *  means EOF and never a partial syscall. Base64 because the payload is
+ *  arbitrary bytes and may split a UTF-8 sequence at either edge.
+ *
+ *  Validates here rather than at the dispatcher: this is the function that puts
+ *  a caller-supplied offset into a read syscall, so it is the boundary that has
+ *  to hold even if a future call site forgets. */
 export async function readRelayFileRange(
   filePath: string,
-  position: number,
-  length: number
+  rawPosition: unknown,
+  rawLength: unknown
 ): Promise<{ base64: string; bytesRead: number }> {
-  if (length > MAX_RELAY_RANGE_READ_BYTES) {
-    throw new RelayRangeTooLargeError(length)
-  }
+  const { position, length } = validateFileRangeRequest(rawPosition, rawLength)
   const handle = await open(filePath, 'r')
   try {
-    const buffer = Buffer.alloc(length)
-    let total = 0
-    while (total < length) {
-      const { bytesRead } = await handle.read(buffer, total, length - total, position + total)
-      if (bytesRead <= 0) {
-        break
-      }
-      total += bytesRead
-    }
-    return { base64: buffer.subarray(0, total).toString('base64'), bytesRead: total }
+    // allocUnsafe over alloc: only `subarray(0, bytesRead)` is ever read back, so
+    // uninitialised bytes cannot escape, and a tailing poll with a generous
+    // `length` should not pay a memset over the whole window per call.
+    const buffer = Buffer.allocUnsafe(length)
+    const bytesRead = await readFullStreamChunk(handle, buffer, length, position)
+    return { base64: buffer.subarray(0, bytesRead).toString('base64'), bytesRead }
   } finally {
     await handle.close()
   }
