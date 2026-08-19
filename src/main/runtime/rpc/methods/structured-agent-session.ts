@@ -224,6 +224,16 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     handler: async (params, ctx) => requireHost(ctx).cancel(callerFor(ctx), params)
   }),
   defineMethod({
+    // Releasing a chat view, not ending a conversation: the record and journal stay on disk so the
+    // same session can be attached again. Only the provider child and the in-memory entry go.
+    name: 'agentSession.close',
+    params: OptionsParams,
+    handler: async (params, ctx) => {
+      await requireHost(ctx).close(params.sessionId)
+      return { ok: true as const }
+    }
+  }),
+  defineMethod({
     name: 'agentSession.respondToApproval',
     params: RespondParams,
     handler: async (params, ctx) =>

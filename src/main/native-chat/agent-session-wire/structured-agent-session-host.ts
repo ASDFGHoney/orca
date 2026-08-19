@@ -1,7 +1,6 @@
 // Structured agent-session host: where the lease, journal, and provider adapter meet.
 // Mutations share one durable admission path and serialize per session.
 
-import { randomUUID } from 'node:crypto'
 import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
 import type {
@@ -21,11 +20,9 @@ import type {
   AgentSessionWireRefusal
 } from '../../../shared/agent-session-wire'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
-import { performAttach } from './structured-agent-session-attach-flow'
 import {
   admitAndRunAgentSessionMutation,
-  AGENT_SESSION_NOT_ATTACHED,
-  refuseAgentSessionMutation
+  AGENT_SESSION_NOT_ATTACHED
 } from './structured-agent-session-mutation-admission'
 import { createRestartReconciler } from './structured-agent-session-restart-reconcile'
 import {
@@ -48,8 +45,13 @@ import {
   type StructuredAgentSessionHostHandoff
 } from './structured-agent-session-host-handoff'
 import { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
+import { attachStructuredAgentSession } from './structured-agent-session-attach-orchestration'
+import {
+  evictStructuredAgentSession,
+  type StructuredAgentSessionEvictionContext
+} from './structured-agent-session-eviction'
+import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
-import { pinnedAgentSessionLaunchEnv } from './structured-agent-session-launch-env'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
 import type {
   StructuredAgentSessionCaller,
@@ -120,6 +122,35 @@ export class StructuredAgentSessionHost {
 
   hasSession = (sessionId: string): boolean => this.sessions.has(sessionId)
 
+  /** The host's half of attaching, named so it cannot grow dependencies unnoticed. */
+  private attachContext(): StructuredAgentSessionAttachContext {
+    return {
+      deps: this.deps,
+      runtimeState: this.runtimeState,
+      sessions: this.sessions,
+      subscribers: this.subscribers,
+      reconcileLeases: (sessionId) => this.reconcileLeases(sessionId),
+      now: () => this.now()
+    }
+  }
+
+  /** Releases a session's resources without ending the conversation: the record and journal stay
+   *  on disk, so the same session can be attached again. */
+  close(sessionId: string): Promise<void> {
+    return this.serialize(sessionId, async () => {
+      if (!this.sessions.has(sessionId)) {
+        return
+      }
+      const context: StructuredAgentSessionEvictionContext = {
+        sessionId,
+        eventSink: this.runtimeState.eventSinkFor(sessionId),
+        adapter: this.deps.adapter,
+        forget: () => this.sessions.delete(sessionId)
+      }
+      await evictStructuredAgentSession(context)
+    })
+  }
+
   supportsCreate = (location: AgentSessionExecutionLocation, agent: string): boolean =>
     providerSupport.adapterSupportsCreate(this.deps.adapter, location, agent)
 
@@ -145,58 +176,9 @@ export class StructuredAgentSessionHost {
     caller: StructuredAgentSessionCaller,
     params: AgentSessionAttachParams
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
-    const attaching = this.serialize(params.envelope.sessionId, async () => {
-      const sessionId = params.envelope.sessionId
-      const unreconciled = await this.reconcileLeases(sessionId)
-      if (unreconciled) {
-        return refuseAgentSessionMutation(unreconciled)
-      }
-      await this.runtimeState.resolveRecovery(sessionId)
-      const eventSink = this.runtimeState.eventSinkFor(sessionId)
-      const attached = await performAttach({
-        store: this.deps.store,
-        adapter: this.deps.adapter,
-        journalRoot: this.deps.journalRoot,
-        eventSink: eventSink.sink,
-        onAcquiring: () => eventSink.unbind(),
-        beforeJournalOpen: async () => {
-          eventSink.unbind()
-          await eventSink.drained()
-        },
-        authority: {
-          spawnToken: this.deps.mintSpawnToken?.() ?? randomUUID(),
-          claimKeyId: this.deps.claimKeyId,
-          handoffOperationId: params.envelope.clientOperationId,
-          probe: await this.runtimeState.probeOwner(sessionId),
-          ...(await pinnedAgentSessionLaunchEnv(this.deps.resolveLaunchEnv, params))
-        },
-        callerKey: caller.callerKey,
-        params,
-        now: () => this.now(),
-        onAttached: (attached) => {
-          const fence = this.deps.store.getRecord(sessionId)?.lease.runtimeFence ?? 0
-          const previousFence = this.sessions.get(sessionId)?.fence
-          this.sessions.set(sessionId, { journal: attached.journal, params, fence })
-          if (attached.recovery) {
-            this.subscribers.reset(sessionId, attached.journal, attached.recovery.reset, fence)
-          } else if (previousFence !== undefined && previousFence !== fence) {
-            this.subscribers.snapshot(sessionId, attached.journal, fence)
-          } else {
-            this.subscribers.publish(sessionId, attached.journal)
-          }
-          eventSink.bind({
-            journal: attached.journal,
-            fence,
-            publish: () => this.subscribers.publish(sessionId, attached.journal)
-          })
-        }
-      })
-      if (!attached.ok && !this.sessions.has(sessionId)) {
-        eventSink.close()
-        this.runtimeState.discardEventSink(sessionId)
-      }
-      return attached
-    })
+    const attaching = this.serialize(params.envelope.sessionId, () =>
+      attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
+    )
     return this.tasks.trackAttach(attaching)
   }
 
