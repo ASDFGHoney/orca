@@ -97,6 +97,11 @@ export type RemoteBrowserPressState = {
 // waiting for a release that would compress the whole hold into one instantaneous click.
 export const REMOTE_BROWSER_PRESS_HOLD_MS = 350
 
+// Backstop for a press whose hold never armed the button (a suspended or throttled renderer can
+// stall the hold timer): past this it is stale, and replaying it would fabricate a press the user
+// never made at coordinates the page has since scrolled away from.
+export const REMOTE_BROWSER_PRESS_MAX_AGE_MS = 5_000
+
 export type PendingRemoteBrowserPress = {
   press: RemoteBrowserPressState
   target: RemoteBrowserRuntimeTarget

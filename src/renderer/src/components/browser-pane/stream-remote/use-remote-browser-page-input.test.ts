@@ -22,7 +22,10 @@ import {
   useRemoteBrowserPageInputQueue
 } from './use-remote-browser-page-input'
 import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifecycle'
-import { REMOTE_BROWSER_PRESS_HOLD_MS } from './remote-browser-page-input-model'
+import {
+  REMOTE_BROWSER_PRESS_HOLD_MS,
+  REMOTE_BROWSER_PRESS_MAX_AGE_MS
+} from './remote-browser-page-input-model'
 
 const VIEWPORT = { width: 800, height: 600 }
 
@@ -54,7 +57,9 @@ function pointerEvent(
 
 function renderInput(): {
   input: ReturnType<typeof useRemoteBrowserPageInput>
+  image: HTMLImageElement
   clearPendingRemotePress: () => void
+  paintNextFrame: () => void
   unmount: () => void
   settle: () => Promise<void>
 } {
@@ -63,8 +68,11 @@ function renderInput(): {
   viewport.getBoundingClientRect = () =>
     ({ left: 0, top: 0, width: VIEWPORT.width, height: VIEWPORT.height }) as DOMRect
   const pending: Promise<void>[] = []
+  // The screencast mints one blob URL per painted frame.
+  let frameUrl = 'blob:remote-frame-1'
+  let paintedFrames = 1
   // The pane's own composition: the queue hook owns the pending-press ref the input hook fills.
-  const { result, unmount } = renderHook(() => {
+  const { result, rerender, unmount } = renderHook(() => {
     const queue = useRemoteBrowserPageInputQueue()
     const input = useRemoteBrowserPageInput({
       busy: false,
@@ -73,6 +81,7 @@ function renderInput(): {
       remoteCssViewportSizeRef: { current: VIEWPORT },
       remoteViewportSizeRef: { current: null },
       frameMetadata: null,
+      frameUrl,
       runtimeTarget: () => ({ kind: 'environment', environmentId: 'env-1' }),
       lifecycle: { tokens: { remotePage: 'page-1' } } as unknown as RemoteBrowserStreamLifecycle,
       runtimeWorktree: 'wt-1',
@@ -97,7 +106,13 @@ function renderInput(): {
   })
   return {
     input: result.current.input,
+    image,
     clearPendingRemotePress: result.current.clearPendingRemotePress,
+    paintNextFrame: () => {
+      paintedFrames += 1
+      frameUrl = `blob:remote-frame-${paintedFrames}`
+      rerender()
+    },
     unmount,
     settle: async () => {
       await Promise.all(pending)
@@ -290,6 +305,73 @@ describe('remote browser pointer input', () => {
     await settle()
 
     expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseDown', 'browser.mouseUp'])
+  })
+
+  it('captures the pointer so a release outside the frame still reaches the press', () => {
+    const { input, image } = renderInput()
+    const setPointerCapture = vi.fn()
+    Object.assign(image, { setPointerCapture })
+    input.handleRemotePointerDown(pointerEvent({ pointerId: 7 }))
+
+    expect(setPointerCapture).toHaveBeenCalledWith(7)
+  })
+
+  it('drops a press whose pointer left the frame instead of replaying it later', async () => {
+    const { input, image, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ clientX: 100, clientY: 100 }))
+    // Capture is unavailable here (happy-dom), which is exactly when the gesture can end off-frame.
+    image.dispatchEvent(new Event('pointerleave'))
+    // A later unrelated gesture — begun outside the frame — releases over it.
+    input.handleRemotePointerUp(pointerEvent({ clientX: 300, clientY: 260 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([])
+  })
+
+  it('drops a press left behind by a frame that lost focus', async () => {
+    const { input, image, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ clientX: 100, clientY: 100 }))
+    image.dispatchEvent(new Event('blur'))
+    input.handleRemotePointerUp(pointerEvent({ clientX: 300, clientY: 260 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([])
+  })
+
+  it('ignores a release from a different pointer and keeps the press for its own', async () => {
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ pointerId: 4, clientX: 100, clientY: 100 }))
+    input.handleRemotePointerUp(pointerEvent({ pointerId: 9, clientX: 300, clientY: 260 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([])
+
+    input.handleRemotePointerUp(pointerEvent({ pointerId: 4, clientX: 101, clientY: 101 }))
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
+  })
+
+  it('does not replay a press older than the age cap', async () => {
+    vi.useFakeTimers()
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ clientX: 100, clientY: 100 }))
+    // Clock only: a stalled renderer is exactly the case where the hold timer never ran.
+    vi.setSystemTime(Date.now() + REMOTE_BROWSER_PRESS_MAX_AGE_MS + 1_000)
+    input.handleRemotePointerUp(pointerEvent({ clientX: 101, clientY: 101 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([])
+  })
+
+  it('keeps a press alive across painted frames', async () => {
+    const { input, paintNextFrame, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ clientX: 100, clientY: 100 }))
+    paintNextFrame()
+    input.handleRemotePointerUp(pointerEvent({ clientX: 101, clientY: 101 }))
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
   })
 
   it('leaves right-button presses to the context-menu path', async () => {

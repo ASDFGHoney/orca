@@ -211,6 +211,7 @@ export function RemoteBrowserPagePane({
     remoteCssViewportSizeRef,
     remoteViewportSizeRef,
     frameMetadata,
+    frameUrl,
     runtimeTarget,
     lifecycle,
     runtimeWorktree,

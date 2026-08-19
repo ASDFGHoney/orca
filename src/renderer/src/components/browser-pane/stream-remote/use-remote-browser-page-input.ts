@@ -81,6 +81,7 @@ export function useRemoteBrowserPageInput({
   remoteCssViewportSizeRef,
   remoteViewportSizeRef,
   frameMetadata,
+  frameUrl,
   runtimeTarget,
   lifecycle,
   runtimeWorktree,
@@ -98,6 +99,7 @@ export function useRemoteBrowserPageInput({
   remoteCssViewportSizeRef: React.MutableRefObject<RemoteBrowserViewportSize | null>
   remoteViewportSizeRef: React.MutableRefObject<RemoteBrowserViewportSize | null>
   frameMetadata: BrowserScreencastFrameMetadata | null
+  frameUrl: string | null
   runtimeTarget: () => RemoteBrowserRuntimeTarget | null
   lifecycle: RemoteBrowserStreamLifecycle
   runtimeWorktree: string
@@ -154,6 +156,7 @@ export function useRemoteBrowserPageInput({
     useRemoteBrowserPagePress({
       busy,
       imageRef,
+      frameUrl,
       getRemoteImagePoint,
       runtimeTarget,
       lifecycle,

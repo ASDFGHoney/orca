@@ -12,6 +12,7 @@ import {
   hasRemoteBrowserClickModifier,
   isSimpleRemoteBrowserClick,
   REMOTE_BROWSER_PRESS_HOLD_MS,
+  REMOTE_BROWSER_PRESS_MAX_AGE_MS,
   type PendingRemoteBrowserPress,
   type RemoteBrowserImagePoint,
   type RemoteBrowserPaneNotice,
@@ -25,6 +26,7 @@ import {
 export function useRemoteBrowserPagePress({
   busy,
   imageRef,
+  frameUrl,
   getRemoteImagePoint,
   runtimeTarget,
   lifecycle,
@@ -39,6 +41,7 @@ export function useRemoteBrowserPagePress({
 }: {
   busy: boolean
   imageRef: React.RefObject<HTMLImageElement | null>
+  frameUrl: string | null
   getRemoteImagePoint: (event: {
     clientX: number
     clientY: number
@@ -197,6 +200,14 @@ export function useRemoteBrowserPagePress({
         }
       }
     }
+    // Why capture: without it a release outside the <img> never arrives, so the press would sit
+    // here until some unrelated later pointerup replayed it as a press the user never made.
+    try {
+      image.setPointerCapture(event.pointerId)
+    } catch {
+      // Detached image or a runtime without capture: the leave/blur handlers bound below are the
+      // fallback that bounds the press instead.
+    }
     pendingPressRef.current = pending
     pending.holdTimer = window.setTimeout(() => {
       pending.holdTimer = null
@@ -211,6 +222,11 @@ export function useRemoteBrowserPagePress({
   const handleRemotePointerUp = (event: React.PointerEvent<HTMLImageElement>): void => {
     const pending = pendingPressRef.current
     if (!pending) {
+      return
+    }
+    // A second pointer (touch/pen) must not consume this press. Mice share one pointerId, so the
+    // stray-pointerup case is bounded by capture, the leave/blur handlers, and the age cap.
+    if (pending.pointerId !== event.pointerId) {
       return
     }
     takePendingPress(pending)
@@ -251,7 +267,7 @@ export function useRemoteBrowserPagePress({
       return
     }
     const operationToken = createRemoteOperationToken(pageId)
-    if (!operationToken) {
+    if (!operationToken || Date.now() - pending.pressedAt > REMOTE_BROWSER_PRESS_MAX_AGE_MS) {
       return
     }
     const press = pending.press
@@ -278,6 +294,27 @@ export function useRemoteBrowserPagePress({
       }
     })
   }
+
+  // A pointer that leaves the frame (when capture was refused) or a frame that loses focus ends the
+  // gesture as far as this pane can tell. Keyed on whether a frame exists, not on which one: the
+  // screencast mints a new frameUrl per frame, and re-running this per frame would tear down the
+  // press mid-gesture.
+  const hasRemoteFrame = frameUrl !== null
+  useEffect(() => {
+    const image = imageRef.current
+    if (!image || !hasRemoteFrame) {
+      return
+    }
+    const abandonPendingPress = (): void => {
+      pendingPressRef.current?.abandon()
+    }
+    image.addEventListener('pointerleave', abandonPendingPress)
+    image.addEventListener('blur', abandonPendingPress)
+    return () => {
+      image.removeEventListener('pointerleave', abandonPendingPress)
+      image.removeEventListener('blur', abandonPendingPress)
+    }
+  }, [hasRemoteFrame, imageRef, pendingPressRef])
 
   // A pane torn down mid-hold would otherwise leave the remote button down for good.
   useEffect(
