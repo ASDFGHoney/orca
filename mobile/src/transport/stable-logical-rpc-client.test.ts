@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ConnectionState, RpcResponse } from './types'
 import type { RpcClient } from './rpc-client'
 import { isRpcDeliveryUnknown, markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
-import { createStableLogicalRpcClient, type MobileConnectionPath } from './stable-logical-rpc-client'
+import {
+  createStableLogicalRpcClient,
+  type MobileConnectionPath
+} from './stable-logical-rpc-client'
 import { LogicalClientCutoverError } from './logical-client-cutover-error'
 
 class FakeSession implements RpcClient {
