@@ -3,6 +3,7 @@ import {
   applyTerminalPaneCloseRequest,
   applyTerminalScrollbackRowsToMountedPanes,
   clearQueuedInitialCwdAfterFirstPane,
+  createQueuedStartupConsumer,
   getPreviousVisibleForTerminalPane,
   isTerminalPaneVisibilityResume,
   isTouchIOSUserAgent,
@@ -222,6 +223,36 @@ describe('paneOwnsQueuedStartup', () => {
     expect(paneOwnsQueuedStartup(null, null)).toBe(false)
     expect(paneOwnsQueuedStartup(undefined, undefined)).toBe(false)
     expect(paneOwnsQueuedStartup({ command: 'orca setup' }, null)).toBe(false)
+  })
+})
+
+describe('createQueuedStartupConsumer', () => {
+  it('withholds the consumer from a pane that does not own the queued command', () => {
+    const queuedStartup = { command: 'echo queued' }
+    const consume = vi.fn()
+
+    // A setup split's borrowed payload, structurally identical to the queued command.
+    expect(
+      createQueuedStartupConsumer({ command: 'echo queued' }, queuedStartup, consume)
+    ).toBeUndefined()
+    expect(createQueuedStartupConsumer(null, queuedStartup, consume)).toBeUndefined()
+    expect(consume).not.toHaveBeenCalled()
+  })
+
+  // Why: onPtySpawn fires again on hibernation wake and the respawn ladder. Spending the slot on a
+  // later spawn would drop a command queued after the first launch, without ever delivering it.
+  it('spends the queued command at most once across repeated spawns', () => {
+    const queuedStartup = { command: 'echo queued' }
+    const consume = vi.fn()
+
+    const consumer = createQueuedStartupConsumer(queuedStartup, queuedStartup, consume)
+    expect(consumer).toBeTypeOf('function')
+
+    consumer?.()
+    consumer?.()
+    consumer?.()
+
+    expect(consume).toHaveBeenCalledTimes(1)
   })
 })
 
