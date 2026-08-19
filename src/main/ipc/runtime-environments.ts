@@ -57,18 +57,22 @@ function closeSubscriptionsForEnvironment(environmentId: string): void {
     }
   }
 }
-export function invalidateRuntimeEnvironmentTransport(environmentId: string): void {
+/** Returns once the environment's client-hosted browser composition has finished closing. */
+export function invalidateRuntimeEnvironmentTransport(environmentId: string): Promise<void> {
   // Why: a same-id re-pair must retire every transport that still authenticates as the old peer.
   advanceRuntimeEnvironmentTransportGeneration(environmentId)
   closeRemoteRuntimeRequestConnection(environmentId)
   clearSharedControlSupport(environmentId)
   closeSubscriptionsForEnvironment(environmentId)
-  void closePairedRuntimeBrowserClientHostEnvironment(
+  return closePairedRuntimeBrowserClientHostEnvironment(
     environmentId,
     new Error('Runtime environment transport was invalidated')
-  ).catch((error) => {
-    console.warn('[runtime-environments] browser client host retirement failed:', error)
-  })
+  ).then(
+    () => undefined,
+    (error) => {
+      console.warn('[runtime-environments] browser client host retirement failed:', error)
+    }
+  )
 }
 
 export function registerRuntimeEnvironmentHandlers(store: Store): void {

@@ -17,6 +17,8 @@ export type BrowserRoutePartitionStorageDependencies = {
 
 export type BrowserRoutePartitionStorageRelease = {
   clearedPartitions: string[]
+  /** Partitions skipped because they still had prepared pages; the caller may retry them later. */
+  livePartitions: string[]
   removedBindings: number
   failures: unknown[]
 }
@@ -32,10 +34,11 @@ export async function releaseBrowserRoutePartitionStorage(
   partitions: readonly string[]
 ): Promise<BrowserRoutePartitionStorageRelease> {
   const clearedPartitions: string[] = []
+  const livePartitions: string[] = []
   const failures: unknown[] = []
   for (const partition of partitions) {
     if (dependencies.isPartitionLive(partition)) {
-      failures.push(new Error(`Route partition ${partition} still has live pages`))
+      livePartitions.push(partition)
       continue
     }
     try {
@@ -49,6 +52,7 @@ export async function releaseBrowserRoutePartitionStorage(
   }
   return {
     clearedPartitions,
+    livePartitions,
     removedBindings:
       clearedPartitions.length > 0 ? dependencies.bindings.remove(clearedPartitions) : 0,
     failures

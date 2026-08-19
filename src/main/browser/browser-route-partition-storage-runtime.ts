@@ -16,6 +16,11 @@ import {
 import { browserRouteSessionRegistry } from './browser-route-session-runtime'
 import { browserSessionRegistry } from './browser-session-registry'
 
+export type BrowserRoutePartitionStorageClear = {
+  clearedPartitions: string[]
+  livePartitions: string[]
+}
+
 /**
  * Sweeps route partitions whose owning environment record is gone.
  *
@@ -42,13 +47,18 @@ export async function collectOrphanedBrowserRoutePartitionStorage(): Promise<str
   return released.clearedPartitions
 }
 
-/** Destroys the storage of every route partition owned by a removed environment. */
+/**
+ * Destroys the storage of every route partition owned by a removed environment.
+ *
+ * Reports the partitions that still had prepared pages separately: they were left intact on
+ * purpose, and the caller decides whether a retry after teardown can reach them.
+ */
 export async function clearBrowserRoutePartitionStorageForEnvironment(
   environmentId: string
-): Promise<string[]> {
+): Promise<BrowserRoutePartitionStorageClear> {
   const orcaProfileId = activeBrowserRoutePartitionOrcaProfileId()
   if (!orcaProfileId) {
-    return []
+    return { clearedPartitions: [], livePartitions: [] }
   }
   const dependencies = storageDependencies()
   const partitions = findBrowserRoutePartitionsForStorageScope(
@@ -56,11 +66,11 @@ export async function clearBrowserRoutePartitionStorageForEnvironment(
     deriveBrowserRoutePartitionStorageScope({ orcaProfileId, environmentId })
   )
   if (partitions.length === 0) {
-    return []
+    return { clearedPartitions: [], livePartitions: [] }
   }
   const released = await releaseBrowserRoutePartitionStorage(dependencies, partitions)
   reportStorageFailures('environment removal', released.failures)
-  return released.clearedPartitions
+  return { clearedPartitions: released.clearedPartitions, livePartitions: released.livePartitions }
 }
 
 function storageDependencies(): BrowserRoutePartitionStorageDependencies {
