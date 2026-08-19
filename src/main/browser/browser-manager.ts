@@ -30,6 +30,7 @@ import { BrowserGrabSessionController } from './browser-grab-session-controller'
 import { browserDownloadDestinationReservations } from './browser-download-destination'
 import type { BrowserClientDownloadRoute } from './browser-client-download-relay'
 import { routeBrowserClientDownload } from './browser-client-download-routing'
+import { resolveBrowserRouteGuestPopupOpener } from './browser-route-guest-popup-ownership'
 import { resolveRendererWebContents } from './browser-guest-renderer-target'
 import { setupGrabShortcutForwarding } from './browser-guest-grab-shortcuts'
 import { setupGuestContextMenu } from './browser-guest-context-menu'
@@ -356,6 +357,15 @@ export class BrowserManager {
     const browserTabId = this.tabIdByWebContentsId.get(guestWebContentsId)
     if (browserTabId) {
       return { browserTabId, rootGuestWebContentsId: guestWebContentsId }
+    }
+    // Route popups live in an Orca-built window, so they never pass through did-create-window and
+    // have no inherited context; their owning page comes from the route popup registry instead.
+    const routeOpenerWebContentsId = resolveBrowserRouteGuestPopupOpener(guestWebContentsId)
+    if (routeOpenerWebContentsId !== null) {
+      const openerTabId = this.tabIdByWebContentsId.get(routeOpenerWebContentsId)
+      return openerTabId
+        ? { browserTabId: openerTabId, rootGuestWebContentsId: routeOpenerWebContentsId }
+        : null
     }
     const inherited = this.popupOwnerContextByGuestId.get(guestWebContentsId)
     if (
@@ -1482,8 +1492,12 @@ export class BrowserManager {
     })()
 
     // Why: a client-hosted page's bytes belong on the remote workspace, so main stages them itself
-    // instead of reserving a name in the desktop Downloads folder.
-    const clientRoute = routeBrowserClientDownload({ guestWebContentsId })
+    // instead of reserving a name in the desktop Downloads folder. A popup downloads to its
+    // opener's page: the popup itself is a client-local transient with no logical page of its own.
+    const ownerContext = this.resolvePopupOwnerContext(guestWebContentsId)
+    const clientRoute = routeBrowserClientDownload({
+      guestWebContentsId: ownerContext?.rootGuestWebContentsId ?? guestWebContentsId
+    })
     const destination = (() => {
       if (clientRoute) {
         return {
@@ -1524,7 +1538,7 @@ export class BrowserManager {
     }
     this.downloadsById.set(downloadId, download)
 
-    const browserTabId = this.resolveBrowserTabIdForGuestWebContentsId(guestWebContentsId)
+    const browserTabId = ownerContext?.browserTabId ?? null
     if (browserTabId) {
       this.bindDownloadToTab(downloadId, browserTabId)
     } else {

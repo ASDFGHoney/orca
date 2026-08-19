@@ -7,6 +7,10 @@ import {
   type BrowserRouteGuestPopupGesture
 } from './browser-route-guest-popup-gesture'
 import {
+  registerBrowserRouteGuestPopup,
+  releaseBrowserRouteGuestPopup
+} from './browser-route-guest-popup-ownership'
+import {
   ROUTE_POPUP_WINDOW_OPTIONS,
   type BrowserRouteGuestPopupWindow
 } from './browser-route-guest-popup-window-options'
@@ -41,6 +45,7 @@ export function createBrowserRouteGuestPopupController(input: {
   const openPopupWindow = input.dependencies.openPopupWindow ?? openPopupWithOriginBar
   const popups = new Set<BrowserRouteGuestPopupWindow>()
   const gestures = new Set<BrowserRouteGuestPopupGesture>()
+  const popupWebContentsIds = new Set<number>()
   const openerGesture = trackBrowserRouteGuestPopupGesture(input.opener)
   gestures.add(openerGesture)
   // Why only dispose latches: fencing must be reversible, because a reconnected page regains
@@ -56,8 +61,10 @@ export function createBrowserRouteGuestPopupController(input: {
 
   const preparePopupContents = (contents: WebContents): boolean => {
     let contentsPartition: string | null = null
+    let popupWebContentsId = 0
     try {
       contentsPartition = input.dependencies.getPartitionForSession(contents.session)
+      popupWebContentsId = contents.id
     } catch {
       contentsPartition = null
     }
@@ -76,16 +83,38 @@ export function createBrowserRouteGuestPopupController(input: {
       contents.setWindowOpenHandler(buildWindowOpenHandler(gesture))
       contents.on('will-navigate', onPopupNavigate)
       contents.on('will-redirect', onPopupNavigate)
+      // Ownership before first load: a download can start on the popup's very first navigation, and
+      // an unowned route popup fails closed instead of routing to the opener's remote workspace.
+      // Descendants register against the root opener, so a chain never needs walking.
+      registerPopupOwnership(popupWebContentsId)
       contents.once('destroyed', () => {
+        releasePopupOwnership(popupWebContentsId)
         gestures.delete(gesture)
         gesture.dispose()
       })
     } catch {
+      releasePopupOwnership(popupWebContentsId)
       gestures.delete(gesture)
       gesture.dispose()
       return false
     }
     return true
+  }
+
+  const registerPopupOwnership = (popupWebContentsId: number): void => {
+    let openerWebContentsId = 0
+    try {
+      openerWebContentsId = input.opener.id
+    } catch {
+      return
+    }
+    popupWebContentsIds.add(popupWebContentsId)
+    registerBrowserRouteGuestPopup({ popupWebContentsId, openerWebContentsId })
+  }
+
+  const releasePopupOwnership = (popupWebContentsId: number): void => {
+    popupWebContentsIds.delete(popupWebContentsId)
+    releaseBrowserRouteGuestPopup(popupWebContentsId)
   }
 
   const openPopup = (options: PopupChildWindowOptions, targetUrl: string): WebContents => {
@@ -144,6 +173,11 @@ export function createBrowserRouteGuestPopupController(input: {
     dispose: () => {
       disposed = true
       closeAll()
+      // The opener is gone, so its popups own nothing: drop ownership now rather than waiting for
+      // each popup's `destroyed`, which would leave a window for a download to route to a dead page.
+      for (const popupWebContentsId of popupWebContentsIds) {
+        releasePopupOwnership(popupWebContentsId)
+      }
       for (const gesture of gestures) {
         gestures.delete(gesture)
         gesture.dispose()

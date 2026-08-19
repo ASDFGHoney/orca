@@ -1,5 +1,5 @@
 import type { Session, WebContents } from 'electron'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const popupMocks = vi.hoisted(() => ({ openPopupWithOriginBar: vi.fn() }))
 
@@ -7,6 +7,10 @@ vi.mock('./popup-origin-bar-window', () => ({
   openPopupWithOriginBar: popupMocks.openPopupWithOriginBar
 }))
 
+import {
+  resetBrowserRouteGuestPopupOwnership,
+  resolveBrowserRouteGuestPopupOpener
+} from './browser-route-guest-popup-ownership'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 
 const partition = `persist:orca-browser-v1-${'a'.repeat(64)}`
@@ -18,6 +22,10 @@ const page = {
   webContentsId: 41,
   rendererWebContentsId: 11
 }
+
+afterEach(() => {
+  resetBrowserRouteGuestPopupOwnership()
+})
 
 describe('route guest OAuth popups', () => {
   it('denies window.open without a recognized user gesture', () => {
@@ -130,6 +138,50 @@ describe('route guest OAuth popups', () => {
     expect(popups()[0]?.closed).toBe(true)
     guest.emitInput('mouseDown')
     expect(guest.openWindow('https://accounts.example.com/oauth')).toEqual({ action: 'deny' })
+  })
+
+  it('owns popups by their opener page and drops ownership when the popup is destroyed', () => {
+    const { guest } = attachRegisteredGuest()
+    guest.emitInput('mouseDown')
+    const contents = createPopupContents()
+    guest.openWindow('https://accounts.example.com/oauth').createWindow?.(popupOptions(contents))
+
+    expect(resolveBrowserRouteGuestPopupOpener(contents.id)).toBe(page.webContentsId)
+
+    contents.emitDestroyed()
+
+    expect(resolveBrowserRouteGuestPopupOpener(contents.id)).toBeNull()
+  })
+
+  it('claims no ownership for a popup that failed the partition fence', () => {
+    const { guest } = attachRegisteredGuest()
+    guest.emitInput('mouseDown')
+    const contents = createPopupContents({ partition: otherPartition })
+
+    guest.openWindow('https://accounts.example.com/oauth').createWindow?.(popupOptions(contents))
+
+    expect(resolveBrowserRouteGuestPopupOpener(contents.id)).toBeNull()
+  })
+
+  it('drops popup ownership when the opener guest goes away', () => {
+    const { guest } = attachRegisteredGuest()
+    guest.emitInput('mouseDown')
+    const contents = createPopupContents()
+    guest.openWindow('https://accounts.example.com/oauth').createWindow?.(popupOptions(contents))
+    guest.emitInput('mouseDown')
+    const descendant = createPopupContents()
+    contents.openWindow('https://accounts.example.com/step-2')
+    contents.emitInput('mouseDown')
+    contents
+      .openWindow('https://accounts.example.com/step-2')
+      .createWindow?.(popupOptions(descendant))
+    // Descendants belong to the root page, not to the popup that opened them.
+    expect(resolveBrowserRouteGuestPopupOpener(descendant.id)).toBe(page.webContentsId)
+
+    guest.destroy()
+
+    expect(resolveBrowserRouteGuestPopupOpener(contents.id)).toBeNull()
+    expect(resolveBrowserRouteGuestPopupOpener(descendant.id)).toBeNull()
   })
 
   it('gives popup descendants the same gesture-gated handler', () => {
@@ -267,11 +319,15 @@ function createRouteGuest(session: Session) {
   }
 }
 
+let nextPopupWebContentsId = 900
+
 function createPopupContents(options: { partition?: string; webRtcPolicyThrows?: boolean } = {}): {
+  id: number
   order: string[]
   session: Session
   setWebRTCIPHandlingPolicy: ReturnType<typeof vi.fn>
   emitInput: (type: string) => void
+  emitDestroyed: () => void
   openWindow: (url: string) => Electron.WindowOpenHandlerResponse
   isDestroyed: () => boolean
   close: () => void
@@ -293,6 +349,7 @@ function createPopupContents(options: { partition?: string; webRtcPolicyThrows?:
     listeners.set(event, bucket)
   }
   return {
+    id: ++nextPopupWebContentsId,
     order,
     session: { partition: options.partition ?? partition } as unknown as Session,
     setWebRTCIPHandlingPolicy: vi.fn(() => {
@@ -304,6 +361,12 @@ function createPopupContents(options: { partition?: string; webRtcPolicyThrows?:
     emitInput: (type: string) => {
       for (const listener of listeners.get('input-event') ?? []) {
         listener({}, { type })
+      }
+    },
+    emitDestroyed: () => {
+      destroyed = true
+      for (const listener of listeners.get('destroyed') ?? []) {
+        listener()
       }
     },
     openWindow: (url: string) =>
