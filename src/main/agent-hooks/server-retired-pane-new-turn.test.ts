@@ -43,7 +43,7 @@ const NEW_TURN_EVENT: Record<AgentHookSource, string | null> = {
   'command-code': null
 }
 
-function reviveRetiredPane(source: AgentHookSource | undefined, hookEventName: string): boolean {
+function reviveRetiredPane(source: unknown, hookEventName: string): boolean {
   const server = new AgentHookServer()
   // Why: retirement is what command completion leaves behind on a reusable shell pane.
   server.retirePaneAuthority(PANE)
@@ -54,7 +54,11 @@ function reviveRetiredPane(source: AgentHookSource | undefined, hookEventName: s
       worktreeId: 'wt-1',
       ...(source === undefined ? {} : { source }),
       hookEventName,
-      payload: { state: 'working', prompt: 'after reuse', agentType: source }
+      payload: {
+        state: 'working',
+        prompt: 'after reuse',
+        agentType: typeof source === 'string' ? source : 'claude'
+      }
     },
     'conn-1'
   )
@@ -96,6 +100,15 @@ describe("retired pane un-retires on each provider's own new-turn event", () => 
       true
     )
   })
+
+  it.each([null, '', 19, { provider: 'future-provider-19' }])(
+    'keeps malformed source value %j behind the retired-pane fence',
+    (source) => {
+      expect(
+        reviveRetiredPane(source, source === null ? 'SessionStart' : 'SomethingNewEntirely')
+      ).toBe(false)
+    }
+  )
 
   it('leaves the pane retired for a source with no turn boundary', () => {
     // Why mimo-code and command-code rather than opencode: these two have no boundary event in

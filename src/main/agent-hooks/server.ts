@@ -1147,20 +1147,23 @@ export class AgentHookServer {
     // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
     // Why the classifier, not literals: only 5 of 18 sources name their boundary
     // `UserPromptSubmit`/`SessionStart`; the rest stayed retired forever.
-    // Why three branches: `source` collapses to undefined BOTH when an older relay omits the
-    // field AND when a newer host relays a provider this build does not know, and those need
-    // opposite answers. Unreachable from the local path, which 404s an unresolvable source.
+    // Why four branches: `source` collapses to undefined when an older relay omits the field,
+    // when a newer host sends an unknown string, and when the wire value is malformed. Only an
+    // unknown string is valid future-provider evidence. Unreachable from the local path, which
+    // 404s an unresolvable source.
     const isNewTurn =
       event?.source !== undefined
         ? isNewTurnEvent(event.source, event.hookEventName)
-        : event?.rawSource !== undefined && event.rawSource !== null
+        : typeof event?.rawSource === 'string' && event.rawSource.trim().length > 0
           ? // Why fail OPEN for an unknown provider: its boundary event is unknowable here, and
             // the costs are asymmetric — a stranded pane is invisible and permanent with no user
             // recovery, while a spurious revive decays after AGENT_STATUS_STALE_AFTER_MS.
             true
-          : // Why literals here: an older relay omits `source` entirely. Legacy shim only — it
-            // cannot revive a provider whose boundary event is named anything else.
-            event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart'
+          : event?.rawSource === undefined
+            ? // Why literals here: an older relay omits `source` entirely. Legacy shim only — it
+              // cannot revive a provider whose boundary event is named anything else.
+              event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart'
+            : false
     if (isNewTurn && event?.isReplay !== true) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
