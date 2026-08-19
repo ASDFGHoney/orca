@@ -96,8 +96,10 @@ export function RemoteBrowserPagePane({
   const {
     enqueueRemoteInput,
     clearPendingRemoteWheel,
+    clearPendingRemotePress,
     resetRemoteInputQueue,
     pendingRemoteWheelRef,
+    pendingPressRef,
     remoteWheelFrameRef,
     remoteWheelInFlightRef
   } = useRemoteBrowserPageInputQueue()
@@ -131,6 +133,7 @@ export function RemoteBrowserPagePane({
     setPaneNotice,
     setPaneBusy,
     clearPendingRemoteWheel,
+    clearPendingRemotePress,
     resetRemoteInputQueue
   })
 
@@ -216,7 +219,8 @@ export function RemoteBrowserPagePane({
     isCurrentRemoteOperationToken,
     closeMissingRemotePage,
     scheduleRemoteTabInfoRefresh,
-    setPaneNotice
+    setPaneNotice,
+    pendingPressRef
   })
 
   useRemoteBrowserPageWheel({

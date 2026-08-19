@@ -92,6 +92,24 @@ export type RemoteBrowserPressState = {
   modified: boolean
 }
 
+// A press held this long is an interaction in its own right (long-press menu, hold-to-repeat,
+// drag-start affordance, :active feedback), so the button goes down on the page now instead of
+// waiting for a release that would compress the whole hold into one instantaneous click.
+export const REMOTE_BROWSER_PRESS_HOLD_MS = 350
+
+export type PendingRemoteBrowserPress = {
+  press: RemoteBrowserPressState
+  target: RemoteBrowserRuntimeTarget
+  operationToken: RemoteBrowserOperationToken
+  pointerId: number
+  pressedAt: number
+  holdTimer: number | null
+  // Set when the hold put the button down remotely; the release then only has to lift it.
+  holdDispatched: boolean
+  // Drops the press, releasing the remote button first when the hold already put it down.
+  abandon: () => void
+}
+
 // Mouse jitter inside a press; wider slop would swallow short intentional drags.
 const REMOTE_BROWSER_CLICK_SLOP_PX = 3
 

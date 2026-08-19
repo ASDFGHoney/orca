@@ -6,7 +6,7 @@ import {
   getRemoteBrowserKeypressKey
 } from './remote-browser-keyboard'
 import { isRemoteBrowserPageMissingError } from './remote-browser-stream-errors'
-import { sendRemoteBrowserClick } from './remote-browser-click-dispatch'
+import { useRemoteBrowserPagePress } from './use-remote-browser-page-press'
 import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifecycle'
 import type {
   RemoteBrowserOperationToken,
@@ -15,25 +15,25 @@ import type {
 import type { BrowserScreencastFrameMetadata } from '../../../../../shared/browser-screencast-protocol'
 import {
   getPositiveFiniteNumber,
-  getRemoteBrowserMouseButton,
-  hasRemoteBrowserClickModifier,
-  isSimpleRemoteBrowserClick,
+  type PendingRemoteBrowserPress,
   type PendingRemoteBrowserWheel,
   type RemoteBrowserPaneNotice,
-  type RemoteBrowserPressState,
   type RemoteBrowserRuntimeTarget
 } from './remote-browser-page-input-model'
 
 export function useRemoteBrowserPageInputQueue(): {
   enqueueRemoteInput: (operation: () => Promise<void>) => Promise<void>
   clearPendingRemoteWheel: () => void
+  clearPendingRemotePress: () => void
   resetRemoteInputQueue: () => void
   pendingRemoteWheelRef: React.MutableRefObject<PendingRemoteBrowserWheel | null>
+  pendingPressRef: React.MutableRefObject<PendingRemoteBrowserPress | null>
   remoteWheelFrameRef: React.MutableRefObject<number | null>
   remoteWheelInFlightRef: React.MutableRefObject<boolean>
 } {
   const remoteInputQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingRemoteWheelRef = useRef<PendingRemoteBrowserWheel | null>(null)
+  const pendingPressRef = useRef<PendingRemoteBrowserPress | null>(null)
   const remoteWheelFrameRef = useRef<number | null>(null)
   const remoteWheelInFlightRef = useRef(false)
 
@@ -56,11 +56,19 @@ export function useRemoteBrowserPageInputQueue(): {
     }
   }, [])
 
+  // The press owns how it ends (a hold that already put the remote button down must lift it), so
+  // this only asks it to; the pane's identity-change reset reaches it through here.
+  const clearPendingRemotePress = useCallback((): void => {
+    pendingPressRef.current?.abandon()
+  }, [])
+
   return {
     enqueueRemoteInput,
     clearPendingRemoteWheel,
+    clearPendingRemotePress,
     resetRemoteInputQueue,
     pendingRemoteWheelRef,
+    pendingPressRef,
     remoteWheelFrameRef,
     remoteWheelInFlightRef
   }
@@ -81,7 +89,8 @@ export function useRemoteBrowserPageInput({
   isCurrentRemoteOperationToken,
   closeMissingRemotePage,
   scheduleRemoteTabInfoRefresh,
-  setPaneNotice
+  setPaneNotice,
+  pendingPressRef
 }: {
   busy: boolean
   imageRef: React.RefObject<HTMLImageElement | null>
@@ -98,6 +107,7 @@ export function useRemoteBrowserPageInput({
   closeMissingRemotePage: (remotePageId?: string | null) => void
   scheduleRemoteTabInfoRefresh: (token: RemoteBrowserOperationToken, delayMs?: number) => void
   setPaneNotice: (notice: RemoteBrowserPaneNotice | null) => void
+  pendingPressRef: React.MutableRefObject<PendingRemoteBrowserPress | null>
 }): {
   getRemoteImagePoint: (event: {
     clientX: number
@@ -108,11 +118,6 @@ export function useRemoteBrowserPageInput({
   handleRemotePointerCancel: () => void
   handleRemoteScreenshotKeyDown: (event: React.KeyboardEvent<HTMLImageElement>) => void
 } {
-  const pendingPressRef = useRef<RemoteBrowserPressState | null>(null)
-  // Hosts predating browser.mouseClick answer method_not_found; remember per environment so the
-  // legacy chain is not re-probed on every click.
-  const mouseClickUnsupportedEnvironmentRef = useRef<string | null>(null)
-
   const getRemoteImagePoint = useCallback(
     (event: { clientX: number; clientY: number }): { x: number; y: number } | null => {
       const image = imageRef.current
@@ -143,105 +148,24 @@ export function useRemoteBrowserPageInput({
   )
 
   // Why the press is held until release: a plain click then costs one atomic browser.mouseClick
-  // instead of four serialized round trips, and only the release proves it was not a drag.
-  const handleRemotePointerDown = (event: React.PointerEvent<HTMLImageElement>): void => {
-    if (busy) {
-      return
-    }
-    const target = runtimeTarget()
-    const pageId = lifecycle.tokens.remotePage
-    const image = imageRef.current
-    const point = getRemoteImagePoint(event)
-    const button = getRemoteBrowserMouseButton(event.button)
-    if (button === 'right') {
-      return
-    }
-    if (!target || !pageId || !image || !point || !button) {
-      return
-    }
-    event.preventDefault()
-    image.focus()
-    setPaneNotice(null)
-    pendingPressRef.current = {
-      environmentId: target.environmentId,
-      pageId,
-      button,
-      point,
-      modified: hasRemoteBrowserClickModifier(event)
-    }
-  }
-
-  const handleRemotePointerCancel = (): void => {
-    pendingPressRef.current = null
-  }
-
-  const handleRemotePointerUp = (event: React.PointerEvent<HTMLImageElement>): void => {
-    const press = pendingPressRef.current
-    pendingPressRef.current = null
-    if (busy) {
-      return
-    }
-    const target = runtimeTarget()
-    const pageId = lifecycle.tokens.remotePage
-    const operationToken = pageId ? createRemoteOperationToken(pageId) : null
-    const point = getRemoteImagePoint(event)
-    const button = getRemoteBrowserMouseButton(event.button)
-    if (button === 'right') {
-      return
-    }
-    if (!press || !target || !pageId || !operationToken || !point || !button) {
-      return
-    }
-    const release: RemoteBrowserPressState = {
-      environmentId: target.environmentId,
-      pageId,
-      button,
-      point,
-      modified: hasRemoteBrowserClickModifier(event)
-    }
-    // Why drop instead of replay: an incoherent pair (page swapped, or a second button pressed
-    // before this release) would put a button down that nothing releases.
-    if (
-      press.environmentId !== release.environmentId ||
-      press.pageId !== release.pageId ||
-      press.button !== release.button
-    ) {
-      return
-    }
-    event.preventDefault()
-    setPaneNotice(null)
-    const atomic = isSimpleRemoteBrowserClick(press, release)
-    enqueueRemoteInput(async () => {
-      if (!isCurrentRemoteOperationToken(operationToken)) {
-        return
-      }
-      try {
-        await sendRemoteBrowserClick({
-          target,
-          params: { worktree: runtimeWorktree, page: pageId },
-          press,
-          release,
-          preferAtomicClick:
-            atomic && mouseClickUnsupportedEnvironmentRef.current !== target.environmentId,
-          onAtomicClickUnsupported: () => {
-            mouseClickUnsupportedEnvironmentRef.current = target.environmentId
-          }
-        })
-        scheduleRemoteTabInfoRefresh(operationToken, 250)
-      } catch (error) {
-        if (isCurrentRemoteOperationToken(operationToken)) {
-          if (isRemoteBrowserPageMissingError(error)) {
-            closeMissingRemotePage(pageId)
-            return
-          }
-          setPaneNotice({
-            kind: 'consequence',
-            text: error instanceof Error ? error.message : 'Remote mouse input failed.'
-          })
-        }
-      }
+  // instead of four serialized round trips, and only the release proves it was not a drag — while a
+  // press held past the threshold puts the button down without waiting for one.
+  const { handleRemotePointerDown, handleRemotePointerUp, handleRemotePointerCancel } =
+    useRemoteBrowserPagePress({
+      busy,
+      imageRef,
+      getRemoteImagePoint,
+      runtimeTarget,
+      lifecycle,
+      runtimeWorktree,
+      enqueueRemoteInput,
+      createRemoteOperationToken,
+      isCurrentRemoteOperationToken,
+      closeMissingRemotePage,
+      scheduleRemoteTabInfoRefresh,
+      setPaneNotice,
+      pendingPressRef
     })
-  }
 
   const handleRemoteScreenshotKeyDown = (event: React.KeyboardEvent<HTMLImageElement>): void => {
     if (isEditableKeyboardTarget(event.target)) {

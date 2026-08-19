@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 
 const mocks = vi.hoisted(() => ({
@@ -17,8 +17,12 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: mocks.callRuntimeRpc
 }))
 
-import { useRemoteBrowserPageInput } from './use-remote-browser-page-input'
+import {
+  useRemoteBrowserPageInput,
+  useRemoteBrowserPageInputQueue
+} from './use-remote-browser-page-input'
 import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifecycle'
+import { REMOTE_BROWSER_PRESS_HOLD_MS } from './remote-browser-page-input-model'
 
 const VIEWPORT = { width: 800, height: 600 }
 
@@ -27,6 +31,7 @@ function pointerEvent(
     clientX: number
     clientY: number
     button: number
+    pointerId: number
     altKey: boolean
     ctrlKey: boolean
     metaKey: boolean
@@ -37,6 +42,7 @@ function pointerEvent(
     clientX: 100,
     clientY: 100,
     button: 0,
+    pointerId: 1,
     altKey: false,
     ctrlKey: false,
     metaKey: false,
@@ -48,6 +54,8 @@ function pointerEvent(
 
 function renderInput(): {
   input: ReturnType<typeof useRemoteBrowserPageInput>
+  clearPendingRemotePress: () => void
+  unmount: () => void
   settle: () => Promise<void>
 } {
   const image = document.createElement('img')
@@ -55,8 +63,10 @@ function renderInput(): {
   viewport.getBoundingClientRect = () =>
     ({ left: 0, top: 0, width: VIEWPORT.width, height: VIEWPORT.height }) as DOMRect
   const pending: Promise<void>[] = []
-  const { result } = renderHook(() =>
-    useRemoteBrowserPageInput({
+  // The pane's own composition: the queue hook owns the pending-press ref the input hook fills.
+  const { result, unmount } = renderHook(() => {
+    const queue = useRemoteBrowserPageInputQueue()
+    const input = useRemoteBrowserPageInput({
       busy: false,
       imageRef: { current: image },
       remoteViewportRef: { current: viewport },
@@ -67,7 +77,7 @@ function renderInput(): {
       lifecycle: { tokens: { remotePage: 'page-1' } } as unknown as RemoteBrowserStreamLifecycle,
       runtimeWorktree: 'wt-1',
       enqueueRemoteInput: (operation) => {
-        const next = operation()
+        const next = queue.enqueueRemoteInput(operation)
         pending.push(next)
         return next
       },
@@ -80,11 +90,15 @@ function renderInput(): {
       isCurrentRemoteOperationToken: () => true,
       closeMissingRemotePage: vi.fn(),
       scheduleRemoteTabInfoRefresh: vi.fn(),
-      setPaneNotice: vi.fn()
+      setPaneNotice: vi.fn(),
+      pendingPressRef: queue.pendingPressRef
     })
-  )
+    return { input, clearPendingRemotePress: queue.clearPendingRemotePress }
+  })
   return {
-    input: result.current,
+    input: result.current.input,
+    clearPendingRemotePress: result.current.clearPendingRemotePress,
+    unmount,
     settle: async () => {
       await Promise.all(pending)
     }
@@ -99,6 +113,10 @@ describe('remote browser pointer input', () => {
   beforeEach(() => {
     mocks.callRuntimeRpc.mockReset()
     mocks.callRuntimeRpc.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('hovers the click point, then sends one atomic mouseClick for a press and release at the same point', async () => {
@@ -204,6 +222,74 @@ describe('remote browser pointer input', () => {
 
     expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
     expect(mocks.callRuntimeRpc.mock.calls[1][2]).toMatchObject({ button: 'middle' })
+  })
+
+  it('puts the button down while a press is still held, and the release only lifts it', async () => {
+    vi.useFakeTimers()
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent({ clientX: 100, clientY: 100 }))
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS + 10)
+
+    // The page must see the button go down during the hold, or long-press and hold-to-repeat
+    // affordances never fire and the pane shows no :active feedback.
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseDown'])
+    expect(mocks.callRuntimeRpc.mock.calls[0][2]).toMatchObject({ x: 100, y: 100 })
+
+    input.handleRemotePointerUp(pointerEvent({ clientX: 140, clientY: 130 }))
+    await settle()
+
+    expect(calledMethods()).toEqual([
+      'browser.mouseMove',
+      'browser.mouseDown',
+      'browser.mouseMove',
+      'browser.mouseUp'
+    ])
+    expect(mocks.callRuntimeRpc.mock.calls[2][2]).toMatchObject({ x: 140, y: 130 })
+  })
+
+  it('still sends the atomic click when the press releases before the hold threshold', async () => {
+    vi.useFakeTimers()
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent())
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS - 50)
+    input.handleRemotePointerUp(pointerEvent())
+    await settle()
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS)
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseClick'])
+  })
+
+  it('lifts a held button when the press is cancelled', async () => {
+    vi.useFakeTimers()
+    const { input, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent())
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS + 10)
+    input.handleRemotePointerCancel()
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseDown', 'browser.mouseUp'])
+  })
+
+  it('lifts a held button when the pane identity changes under it', async () => {
+    vi.useFakeTimers()
+    const { input, clearPendingRemotePress, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent())
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS + 10)
+    clearPendingRemotePress()
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseDown', 'browser.mouseUp'])
+  })
+
+  it('lifts a held button when the pane unmounts mid-hold', async () => {
+    vi.useFakeTimers()
+    const { input, unmount, settle } = renderInput()
+    input.handleRemotePointerDown(pointerEvent())
+    await vi.advanceTimersByTimeAsync(REMOTE_BROWSER_PRESS_HOLD_MS + 10)
+    unmount()
+    await settle()
+
+    expect(calledMethods()).toEqual(['browser.mouseMove', 'browser.mouseDown', 'browser.mouseUp'])
   })
 
   it('leaves right-button presses to the context-menu path', async () => {
