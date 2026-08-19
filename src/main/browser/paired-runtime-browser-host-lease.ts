@@ -34,6 +34,8 @@ export class PairedRuntimeBrowserHostLease {
   private readonly commandResultSettler: BrowserHostCommandResultSettler
   private readonly reconnectGraceMs: number
   private readonly reconnectRetryDelayMs: number
+  /** Tracks the live connection's negotiation, which a reconnect may drop or gain. */
+  private fileChannelActive = false
   private closed = false
 
   constructor(private readonly options: PairedRuntimeBrowserHostLeaseOptions) {
@@ -70,7 +72,7 @@ export class PairedRuntimeBrowserHostLease {
   }
 
   get fileChannelNegotiated(): boolean {
-    return !this.closed && this.authority?.fileChannelProtocolVersion === 1
+    return !this.closed && this.fileChannelActive
   }
 
   sendFileChannelRequest(method: string, params: unknown, timeoutMs: number) {
@@ -131,6 +133,7 @@ export class PairedRuntimeBrowserHostLease {
   }
 
   private acceptAuthority(authority: BrowserClientHostLeaseAuthority): void {
+    this.fileChannelActive = authority.fileChannelProtocolVersion === 1
     if (this.authority) {
       this.reconnectPromise = null
       this.options.onReconnected?.(authority)

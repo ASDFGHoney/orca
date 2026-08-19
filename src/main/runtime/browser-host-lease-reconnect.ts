@@ -13,6 +13,7 @@ type BrowserHostReconnectAttach = {
   pageCommandProtocolVersion?: 1
   pageReconciliationProtocolVersion?: 1
   leaseReconnectProtocolVersion?: 1
+  fileChannelProtocolVersion?: 1
 }
 
 type BrowserHostLeaseReconnectControllerOptions = {
@@ -66,12 +67,16 @@ export class BrowserHostLeaseReconnectController {
     state.connectionFence.resolve('replaced')
     state.connectionFence = createBrowserHostFence()
     state.connectionToken = Symbol(input.connectionId)
+    const { fileChannelProtocolVersion: _dropped, ...carried } = state.lease
     state.lease = Object.freeze({
-      ...state.lease,
+      ...carried,
       connectionId: input.connectionId,
       hostCapabilities: Object.freeze([...input.hostCapabilities]),
       pageInventoryProtocolVersion: 1,
-      pageInventory: pageInventory ?? Object.freeze([])
+      pageInventory: pageInventory ?? Object.freeze([]),
+      // Why: the file channel is renegotiated per connection, so a reconnect that drops it leaves the
+      // lease alive with transfers refused instead of fencing every page it still hosts.
+      ...(input.fileChannelProtocolVersion ? { fileChannelProtocolVersion: 1 as const } : {})
     })
     state.status = 'active'
     return this.createHandle(state)

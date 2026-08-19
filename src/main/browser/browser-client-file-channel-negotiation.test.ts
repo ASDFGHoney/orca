@@ -44,7 +44,7 @@ describe('browser file channel negotiation', () => {
     ).toBe(false)
   })
 
-  it('treats a reconnect that drops the file channel as a different authority', () => {
+  it('keeps the same authority when a reconnect renegotiates the file channel', () => {
     const negotiated = {
       authorityRuntimeId: 'runtime-1',
       authorityEpoch: 'epoch-1',
@@ -59,6 +59,18 @@ describe('browser file channel negotiation', () => {
       sameBrowserClientHostLeaseAuthority(negotiated, {
         ...negotiated,
         fileChannelProtocolVersion: undefined
+      })
+    ).toBe(true)
+    expect(
+      sameBrowserClientHostLeaseAuthority(negotiated, {
+        ...negotiated,
+        browserHostGeneration: 2
+      })
+    ).toBe(false)
+    expect(
+      sameBrowserClientHostLeaseAuthority(negotiated, {
+        ...negotiated,
+        pageCommandProtocolVersion: undefined
       })
     ).toBe(false)
   })

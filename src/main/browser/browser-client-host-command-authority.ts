@@ -35,6 +35,13 @@ export function snapshotBrowserClientHostLeaseAuthority(
   return Object.freeze({ ...authority })
 }
 
+/**
+ * Compares the authority facets a reconnect must preserve to keep the composition alive.
+ *
+ * Why: `fileChannelProtocolVersion` is deliberately excluded. It gates file transfers only, so a
+ * reconnect that renegotiates it degrades `browser.upload`/download per operation instead of
+ * fencing every hosted page.
+ */
 export function sameBrowserClientHostLeaseAuthority(
   left: BrowserClientHostLeaseAuthority,
   right: BrowserClientHostLeaseAuthority
@@ -47,8 +54,7 @@ export function sameBrowserClientHostLeaseAuthority(
     left.pageCommandProtocolVersion === right.pageCommandProtocolVersion &&
     left.pageInventoryProtocolVersion === right.pageInventoryProtocolVersion &&
     left.leaseReconnectProtocolVersion === right.leaseReconnectProtocolVersion &&
-    left.pageReconciliationProtocolVersion === right.pageReconciliationProtocolVersion &&
-    left.fileChannelProtocolVersion === right.fileChannelProtocolVersion
+    left.pageReconciliationProtocolVersion === right.pageReconciliationProtocolVersion
   )
 }
 

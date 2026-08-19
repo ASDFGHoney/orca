@@ -368,6 +368,34 @@ describe('BrowserHostLeaseRegistry', () => {
     expect(late.lease.browserHostGeneration).toBe(first.lease.browserHostGeneration + 1)
   })
 
+  it('restores a lease whose reconnect renegotiates the file channel', async () => {
+    const leases = registry()
+    const attach = (connectionId: string, fileChannel: boolean) =>
+      leases.attach({
+        browserHostClientId: 'host-a',
+        connectionId,
+        pairedDeviceId: 'device-a',
+        hostCapabilities: ['webview'],
+        pageCommandProtocolVersion: 1,
+        pageInventoryProtocolVersion: 1,
+        pageInventory: [],
+        leaseReconnectProtocolVersion: 1,
+        ...(fileChannel ? { fileChannelProtocolVersion: 1 as const } : {})
+      })
+    const first = attach('connection-a', true)
+    expect(first.lease.fileChannelProtocolVersion).toBe(1)
+    first.disconnect()
+
+    const downgraded = attach('connection-b', false)
+    expect(downgraded.lease.browserHostGeneration).toBe(first.lease.browserHostGeneration)
+    expect(downgraded.lease.fileChannelProtocolVersion).toBeUndefined()
+    downgraded.disconnect()
+
+    const restored = attach('connection-c', true)
+    expect(restored.lease.browserHostGeneration).toBe(first.lease.browserHostGeneration)
+    expect(restored.lease.fileChannelProtocolVersion).toBe(1)
+  })
+
   it('replaces reconnecting authority on a capability mismatch', async () => {
     const leases = registry()
     const first = leases.attach({
