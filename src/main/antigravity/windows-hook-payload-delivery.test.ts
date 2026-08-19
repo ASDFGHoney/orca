@@ -96,7 +96,11 @@ async function startHookListener(): Promise<{
 
 type HookRun = { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }
 
-function runWrapper(wrapperPath: string, env: NodeJS.ProcessEnv): Promise<HookRun> {
+function runWrapper(
+  wrapperPath: string,
+  env: NodeJS.ProcessEnv,
+  stdinPayload: string = PAYLOAD
+): Promise<HookRun> {
   return new Promise((resolve, reject) => {
     // Why: mirror how Antigravity spawns the hook — `cmd /c <bare .cmd path>`, the exact
     // chain in the bug report's process trace.
@@ -127,7 +131,7 @@ function runWrapper(wrapperPath: string, env: NodeJS.ProcessEnv): Promise<HookRu
       // Why: curl exits once the POST is written; give the listener a beat to finish reading it.
       setTimeout(() => resolve({ exitCode, stdout, stderr, timedOut }), 250)
     })
-    child.stdin.end(Buffer.from(PAYLOAD, 'utf8'))
+    child.stdin.end(Buffer.from(stdinPayload, 'utf8'))
   })
 }
 
@@ -226,6 +230,35 @@ describe.skipIf(process.platform !== 'win32')('Antigravity Windows hook payload 
     }
     // Why: five wrapper launches plus a real install can overrun the default under load.
   }, 60_000)
+
+  // Why (#15117): Antigravity fires some events with no stdin at all. PowerShell substituted
+  // `{}` before posting; curl forwards the empty body, so prove the post still happens — the
+  // listener's matching allowance is covered in agent-hook-listener-antigravity.test.ts.
+  it('still posts a status event when the agent supplies no payload', async () => {
+    home = mkdtempSync(join(tmpdir(), 'orca-antigravity-hook-'))
+    homedirMock.mockReturnValue(home)
+    expect(new AntigravityHookService().install().state).toBe('installed')
+
+    const listener = await startHookListener()
+    server = listener.server
+    const result = await runWrapper(
+      join(home, '.orca', 'agent-hooks', 'antigravity-pre-invocation.cmd'),
+      hookEnvironment({
+        USERPROFILE: home,
+        HOME: home,
+        ORCA_AGENT_HOOK_PORT: String(listener.port),
+        ORCA_AGENT_HOOK_TOKEN: HOOK_TOKEN,
+        ORCA_PANE_KEY: PANE_KEY
+      }),
+      ''
+    )
+
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode).toBe(0)
+    expect(listener.posts).toHaveLength(1)
+    expect(listener.posts[0].payload).toBe('')
+    expect(listener.posts[0].hookEventName).toBe('PreInvocation')
+  }, 30_000)
 
   it('exits without reading stdin when the pane env is missing', async () => {
     home = mkdtempSync(join(tmpdir(), 'orca-antigravity-hook-'))

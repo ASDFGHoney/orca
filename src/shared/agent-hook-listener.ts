@@ -4369,6 +4369,13 @@ export function normalizeHookPayload(
   const hookPayload =
     typeof rawPayload === 'string'
       ? (() => {
+          // Why (#15117): some Antigravity events fire with no stdin at all, yet still carry a
+          // status transition in `hook_event_name`. The POSIX script maps empty input to `{}`
+          // before posting; the Windows script pipes stdin straight into curl and cannot, so
+          // accept the empty body here instead of dropping the event.
+          if (source === 'antigravity' && rawPayload.trim() === '') {
+            return {}
+          }
           try {
             return parseAgentHookJson(rawPayload)
           } catch {
