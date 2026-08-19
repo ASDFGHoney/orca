@@ -127,3 +127,12 @@ export function journalTailIsReadyToCompact(
   }
   return (tailRows[0]?.ts ?? now) < now - policy.retainTailMs
 }
+
+/** Budget pressure may need to shed rows before the ordinary batching threshold. */
+export function journalTailCanShedRows(
+  tailRows: readonly JournalRow[],
+  policy: JournalCompactionPolicy,
+  now: number
+): boolean {
+  return retainTail(tailRows, policy, now).length < tailRows.length
+}
