@@ -138,6 +138,20 @@ describe('worktree visibility sources', () => {
     normalize.mockRestore()
   })
 
+  it('normalizes each candidate once when a configured base supersedes a built-in root', () => {
+    const classify = createWorktreeVisibilitySourceMatcher(
+      ['/repo'],
+      [],
+      ['/repo/.claude/worktrees']
+    )
+    const normalize = vi.spyOn(String.prototype, 'normalize')
+
+    classify('/repo/.claude/worktrees/review')
+
+    expect(normalize).toHaveBeenCalledTimes(1)
+    normalize.mockRestore()
+  })
+
   it('migrates the optional legacy agent policy lazily for both built-ins', () => {
     const legacy = repo({ agentWorktreeVisibility: 'show' })
     expect(effectiveBuiltInWorktreeSourceVisibility(legacy, 'claude')).toBe('show')
