@@ -189,6 +189,69 @@ describe('BrowserClientDownloadTransferStore', () => {
     ).rejects.toThrow('browser_client_download_transfer_capacity')
   })
 
+  it('does not recreate the partial file when an abort lands mid-write', async () => {
+    let releaseWrite = (): void => {}
+    const pendingWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    const written: string[] = []
+    const removed: string[] = []
+    const committed: string[] = []
+    const { store } = createStore({
+      writeChunk: async ({ relativePath }) => {
+        written.push(relativePath)
+        await pendingWrite
+      },
+      remove: async ({ relativePath }) => {
+        removed.push(relativePath)
+      },
+      commit: async ({ finalRelativePath }) => {
+        committed.push(finalRelativePath)
+      }
+    })
+
+    const accepting = store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: true })
+    void accepting.catch(() => undefined)
+    await vi.waitFor(() => expect(written).toHaveLength(1))
+    const aborting = store.abort({ transferId: base.transferId, browserPageId: base.browserPageId })
+    releaseWrite()
+
+    await expect(accepting).rejects.toThrow('browser_client_download_transfer_aborted')
+    expect(await aborting).toBe(true)
+    expect(committed).toEqual([])
+    expect(removed).toHaveLength(1)
+    expect(store.activeTransferCount()).toBe(0)
+    expect(written).toHaveLength(1)
+  })
+
+  it('rejects a chunk that arrives after the transfer was aborted', async () => {
+    const { store, written, removed } = createStore()
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+
+    expect(
+      await store.abort({ transferId: base.transferId, browserPageId: base.browserPageId })
+    ).toBe(true)
+    expect(removed).toHaveLength(1)
+
+    await expect(
+      store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+    ).rejects.toThrow('browser_client_download_transfer_settled')
+    expect(written).toHaveLength(1)
+    expect(store.activeTransferCount()).toBe(0)
+  })
+
+  it('rejects a chunk that arrives after the page released its transfers', async () => {
+    const { store, committed } = createStore()
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+
+    await store.releasePage(base.browserPageId)
+
+    await expect(
+      store.accept({ ...base, contentBase64: 'AAA=', offset: 3, final: true })
+    ).rejects.toThrow('browser_client_download_transfer_settled')
+    expect(committed).toEqual([])
+  })
+
   it('rejects malformed base64 instead of silently truncating the file', async () => {
     const { store } = createStore()
 
