@@ -12,6 +12,7 @@ export function completeBrowserHostPageRetirement(
     pagePlacements: BrowserHostPagePlacementRegistry
     leasesByClientId: Map<string, BrowserHostLeaseState>
     executionHostGrants: Map<string, BrowserClientPageExecutionHostGrant>
+    onClientPageReleased?: (browserPageId: string) => void
   }
 ): boolean {
   const completed = dependencies.pagePlacements.completePageRetirement(retirement, () =>
@@ -22,6 +23,9 @@ export function completeBrowserHostPageRetirement(
     if (grant?.placement === retirement.placement) {
       dependencies.executionHostGrants.delete(retirement.browserPageId)
       grant.release()
+    }
+    if (retirement.placement.kind === 'client') {
+      dependencies.onClientPageReleased?.(retirement.browserPageId)
     }
   }
   return completed

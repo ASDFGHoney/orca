@@ -23,6 +23,20 @@ type RuntimeFileChannelHost = {
 
 const stores = new WeakMap<object, BrowserClientDownloadTransferStore>()
 
+/**
+ * Drops every staged download a page still owns.
+ *
+ * Runs on the runtime side of page retirement and lease fencing, so cleanup happens even when the
+ * client transport that would have sent the abort is already gone. No-op for a runtime that never
+ * opened a file channel.
+ */
+export function releaseBrowserClientDownloadTransfersForPage(
+  runtime: object,
+  browserPageId: string
+): Promise<void> {
+  return stores.get(runtime)?.releasePage(browserPageId) ?? Promise.resolve()
+}
+
 export function getBrowserClientDownloadTransferStore(
   runtime: RuntimeFileChannelHost
 ): BrowserClientDownloadTransferStore {

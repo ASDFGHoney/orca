@@ -25,7 +25,7 @@ import {
 } from './browser-host-page-placement'
 import { requireLiveBrowserClientPage } from './browser-host-page-authority'
 import type { BrowserHostFenceReason } from './browser-host-lease-fence'
-import { fenceBrowserHostLease } from './browser-host-lease-fencing'
+import { dispatchBrowserHostLeaseFence } from './browser-host-lease-fence-dispatch'
 import {
   BROWSER_HOST_WEBVIEW_CAPABILITY,
   selectBrowserHostLease
@@ -63,11 +63,19 @@ export class BrowserHostLeaseRegistry {
   private readonly pageReconciliations: BrowserHostPageReconciliationOrchestrator
   private readonly reconnects: BrowserHostLeaseReconnectController
 
-  constructor(options: {
-    authorityRuntimeId: string
-    authorityEpoch?: string
-    reconnectGraceMs?: number
-  }) {
+  constructor(
+    private readonly options: {
+      authorityRuntimeId: string
+      authorityEpoch?: string
+      reconnectGraceMs?: number
+      /**
+       * Called when a client page stops being reachable -- retired, or fenced with its lease. Runs
+       * even when the client transport is already gone, so runtime-side per-page state (staged
+       * download transfers) is not stranded.
+       */
+      onClientPageReleased?: (browserPageId: string) => void
+    }
+  ) {
     this.authorityRuntimeId = options.authorityRuntimeId
     this.authorityEpoch = options.authorityEpoch ?? randomUUID()
     this.pagePlacements = new BrowserHostPagePlacementRegistry({
@@ -295,7 +303,8 @@ export class BrowserHostLeaseRegistry {
     return completeBrowserHostPageRetirement(retirement, {
       pagePlacements: this.pagePlacements,
       leasesByClientId: this.leasesByClientId,
-      executionHostGrants: this.clientPageExecutionHostGrants
+      executionHostGrants: this.clientPageExecutionHostGrants,
+      onClientPageReleased: this.options.onClientPageReleased
     })
   }
 
@@ -307,17 +316,13 @@ export class BrowserHostLeaseRegistry {
   }
 
   private fenceLease(state: BrowserHostLeaseState, reason: BrowserHostFenceReason): void {
-    this.reconnects.clear(state)
-    if (this.leasesByClientId.get(state.lease.browserHostClientId)?.token !== state.token) {
-      return
-    }
-    this.pageReconciliations.fence(state)
-    this.pagePlacements.fenceClientHostPlacements({
-      browserHostClientId: state.lease.browserHostClientId,
-      browserHostGeneration: state.lease.browserHostGeneration
+    dispatchBrowserHostLeaseFence(state, reason, {
+      leasesByClientId: this.leasesByClientId,
+      pagePlacements: this.pagePlacements,
+      clearReconnect: (fenced) => this.reconnects.clear(fenced),
+      fenceReconciliation: (fenced) => this.pageReconciliations.fence(fenced),
+      fenceRoute: (route, routeReason) => this.tunnels.fence(route, routeReason),
+      onClientPageReleased: this.options.onClientPageReleased
     })
-    fenceBrowserHostLease(state, reason, this.leasesByClientId, (route, routeReason) =>
-      this.tunnels.fence(route, routeReason)
-    )
   }
 }

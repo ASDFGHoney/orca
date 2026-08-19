@@ -194,8 +194,10 @@ export class BrowserHostPagePlacementRegistry {
     return retirement
   }
 
-  fenceClientHostPlacements(host: BrowserHostPlacementIdentity): void {
+  /** Returns the pages fenced by this host, so their runtime-side resources can be released. */
+  fenceClientHostPlacements(host: BrowserHostPlacementIdentity): string[] {
     assertBrowserHostPlacementIdentity(host)
+    const fenced: string[] = []
     for (const [browserPageId, state] of this.placementsByPageId) {
       const placement = state.placement
       if (
@@ -207,7 +209,9 @@ export class BrowserHostPagePlacementRegistry {
       }
       state.retirement ??= Object.freeze({ browserPageId, placement })
       state.retirementTerminal = true
+      fenced.push(browserPageId)
     }
+    return fenced
   }
 
   cancelPageRetirement(retirement: BrowserPageRetirement): boolean {
