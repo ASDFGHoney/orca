@@ -10,8 +10,11 @@ import {
 
 /**
  * Runs a client-placed `browser.upload` against remote workspace paths: the runtime reads the bytes,
- * main stages them under its own scoped directory, the guest uploads the staged copies, and the
- * staging directory is removed whether the upload succeeded or failed.
+ * main stages them under its own scoped directory, and the guest uploads the staged copies.
+ *
+ * A staged copy survives the command. `DOM.setFileInputFiles` only records the path on the input —
+ * Chromium opens it lazily at form submit / FileReader time — so the staged tree stays until the
+ * page is fenced (or the page's staged budget evicts it). Only a failed upload releases eagerly.
  */
 export async function executeBrowserClientUploadCommand(options: {
   event: BrowserClientHostCommandEvent
@@ -37,7 +40,8 @@ export async function executeBrowserClientUploadCommand(options: {
   })
   try {
     return await options.run({ ...options.params, files: [...staged.localFilePaths] })
-  } finally {
+  } catch (error) {
     await staging.release(staged.stagingId)
+    throw error
   }
 }

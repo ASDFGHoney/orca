@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -61,7 +61,7 @@ function transportReturning(
 }
 
 describe('executeBrowserClientUploadCommand', () => {
-  it('rewrites remote paths to staged local copies and cleans them up after the upload', async () => {
+  it('rewrites remote paths to staged copies that outlive the command until the page is released', async () => {
     const staging = new BrowserClientUploadStaging(stagingRoot)
     const { transport, calls } = transportReturning(
       new Map([
@@ -87,6 +87,11 @@ describe('executeBrowserClientUploadCommand', () => {
     expect(path.basename(rewritten.files[0])).toBe('report.pdf')
     expect(rewritten.files[0]).not.toBe('docs/report.pdf')
     expect(calls).toHaveLength(1)
+    // Why: Chromium opens the recorded path at submit time, long after browser.upload resolved.
+    expect(await readFile(rewritten.files[0], 'utf8')).toBe('hello')
+    expect(staging.activeStagingCount()).toBe(1)
+
+    expect(await staging.releasePage('page-1')).toBe(1)
     expect(await readdir(stagingRoot)).toHaveLength(0)
   })
 

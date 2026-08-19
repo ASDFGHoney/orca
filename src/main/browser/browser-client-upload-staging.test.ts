@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { BrowserClientUploadStaging } from './browser-client-upload-staging'
+import {
+  BROWSER_CLIENT_UPLOAD_STAGING_MAX_BYTES_PER_PAGE,
+  BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE,
+  BrowserClientUploadStaging
+} from './browser-client-upload-staging'
 
 let stagingRoot = ''
 
@@ -84,6 +88,60 @@ describe('BrowserClientUploadStaging', () => {
 
     expect(await staging.releasePage('page-1', 1)).toBe(1)
     expect(staging.activeStagingCount()).toBe(1)
+  })
+
+  it('evicts a page oldest-first once its staged bytes exceed the budget', async () => {
+    const removed: string[] = []
+    const staging = new BrowserClientUploadStaging(stagingRoot, {
+      mkdir: async () => {},
+      writeFile: async () => {},
+      removeDirectory: async (directory) => {
+        removed.push(directory)
+      }
+    })
+    const half = BROWSER_CLIENT_UPLOAD_STAGING_MAX_BYTES_PER_PAGE / 2
+    const first = await staging.stage({
+      browserPageId: 'page-1',
+      pageHostGeneration: 1,
+      files: [{ remotePath: 'a.bin', contents: Buffer.alloc(half) }]
+    })
+    const firstDirectory = staging.stagedDirectory(first.stagingId)
+    await staging.stage({
+      browserPageId: 'page-1',
+      pageHostGeneration: 1,
+      files: [{ remotePath: 'b.bin', contents: Buffer.alloc(half) }]
+    })
+    expect(staging.activeStagingCount()).toBe(2)
+
+    await staging.stage({
+      browserPageId: 'page-1',
+      pageHostGeneration: 1,
+      files: [{ remotePath: 'c.bin', contents: Buffer.alloc(1) }]
+    })
+
+    expect(staging.activeStagingCount()).toBe(2)
+    expect(removed).toEqual([firstDirectory])
+  })
+
+  it("leaves another page's staged copies alone when one page overflows", async () => {
+    const staging = new BrowserClientUploadStaging(stagingRoot)
+    await staging.stage({
+      browserPageId: 'page-2',
+      pageHostGeneration: 1,
+      files: [{ remotePath: 'keep.txt', contents: Buffer.from('keep') }]
+    })
+    for (let index = 0; index <= BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE; index += 1) {
+      await staging.stage({
+        browserPageId: 'page-1',
+        pageHostGeneration: 1,
+        files: [{ remotePath: `${index}.txt`, contents: Buffer.from('x') }]
+      })
+    }
+
+    expect(staging.activeStagingCount()).toBe(
+      BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE + 1
+    )
+    expect(await staging.releasePage('page-2')).toBe(1)
   })
 
   it('cleans up the partial directory when a write fails', async () => {

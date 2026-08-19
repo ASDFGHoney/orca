@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserClientHostCommandEvent } from '../../shared/browser-client-host-protocol'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
-import { BrowserClientUploadStaging } from './browser-client-upload-staging'
+import {
+  BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE,
+  BrowserClientUploadStaging
+} from './browser-client-upload-staging'
 import type { BrowserRoutePageGuestIdentity } from './browser-route-page-authority'
 
 const partition = `persist:orca-browser-v1-${'a'.repeat(64)}`
@@ -42,11 +45,29 @@ const createPage = command({
   command: { type: 'createPage', browserProfileId: 'profile-a', executionHostKey: 'execution-a' }
 } as never)
 
-function uploadCommand(files: string[]): BrowserClientHostCommandEvent {
+function uploadCommand(files: string[], commandSequence = 2): BrowserClientHostCommandEvent {
   return command({
-    commandSequence: 2,
-    commandId: 'upload-a',
+    commandSequence,
+    commandId: `upload-${commandSequence}`,
     command: { type: 'automation', method: 'browser.upload', params: { element: '#f', files } }
+  } as never)
+}
+
+function closePageCommand(): BrowserClientHostCommandEvent {
+  return command({
+    pageReconciliationProtocolVersion: 1,
+    commandSequence: 90,
+    commandId: 'close-a',
+    command: {
+      type: 'closePage',
+      targetAuthority: {
+        authorityRuntimeId: 'runtime-a',
+        authorityEpoch: 'epoch-a',
+        browserHostClientId: 'client-a',
+        browserHostGeneration: 3,
+        pageHostGeneration: 7
+      }
+    }
   } as never)
 }
 
@@ -146,6 +167,43 @@ describe('client-placed browser.upload routing', () => {
       errorCode: 'browser_client_file_channel_unsupported'
     })
     expect(executeAutomation).not.toHaveBeenCalled()
+  })
+
+  it('keeps the staged copy readable after the command resolves and drops it when the page closes', async () => {
+    const transport = negotiatedTransport('remote-bytes')
+    const { executor, automationCalls } = createHarness({ fileChannel: transport })
+    await executor.handle(createPage, new AbortController().signal)
+    await executor.handle(uploadCommand(['docs/report.pdf']), new AbortController().signal)
+
+    // Why: DOM.setFileInputFiles only records the path — Chromium reads it at submit time, so the
+    // bytes must still be on disk once browser.upload has already reported success.
+    const staged = (automationCalls[0].params.files as string[])[0]
+    expect(await readFile(staged, 'utf8')).toBe('remote-bytes')
+
+    expect(await executor.handle(closePageCommand(), new AbortController().signal)).toEqual({
+      status: 'completed'
+    })
+    expect(await readdir(stagingRoot)).toHaveLength(0)
+  })
+
+  it('evicts a page oldest-first once it exceeds the staged-command budget', async () => {
+    const transport = negotiatedTransport('remote-bytes')
+    const { executor, uploadStaging } = createHarness({ fileChannel: transport })
+    await executor.handle(createPage, new AbortController().signal)
+
+    for (let sequence = 2; sequence <= 8; sequence += 1) {
+      await executor.handle(
+        uploadCommand(['docs/report.pdf'], sequence),
+        new AbortController().signal
+      )
+    }
+
+    expect(uploadStaging.activeStagingCount()).toBe(
+      BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE
+    )
+    expect(await readdir(stagingRoot)).toHaveLength(
+      BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE
+    )
   })
 
   it('removes every staged copy when the executor closes', async () => {

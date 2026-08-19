@@ -13,11 +13,19 @@ export type BrowserClientStagedUpload = {
   localFilePaths: readonly string[]
 }
 
+// Why: staged copies outlive the command (Chromium opens them lazily), so a long-lived page needs a
+// ceiling. Both bounds admit at least one maximum-sized command so a legal upload is never evicted
+// before the guest reads it.
+export const BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE = 4
+export const BROWSER_CLIENT_UPLOAD_STAGING_MAX_BYTES_PER_PAGE =
+  2 * BROWSER_CLIENT_FILE_CHANNEL_TRANSFER_MAX_BYTES
+
 type StagedDirectory = {
   stagingId: string
   browserPageId: string
   pageHostGeneration: number
   directory: string
+  totalBytes: number
 }
 
 type StagingFilesystem = {
@@ -41,7 +49,8 @@ const nodeStagingFilesystem: StagingFilesystem = {
 /**
  * Owns the desktop-side scratch copies of remote workspace files that a client-placed page uploads.
  * Remote-supplied paths are never resolved against the desktop filesystem; only bytes handed to
- * `stage` reach disk, under a main-owned directory that is removed when the page is fenced.
+ * `stage` reach disk, under a main-owned directory that is removed when the page is fenced or when
+ * the page's staged budget evicts it.
  */
 export class BrowserClientUploadStaging {
   private readonly staged = new Map<string, StagedDirectory>()
@@ -75,7 +84,8 @@ export class BrowserClientUploadStaging {
       stagingId,
       browserPageId: input.browserPageId,
       pageHostGeneration: input.pageHostGeneration,
-      directory
+      directory,
+      totalBytes
     }
     this.staged.set(stagingId, record)
     try {
@@ -89,10 +99,33 @@ export class BrowserClientUploadStaging {
         await this.filesystem.writeFile(localFilePath, file.contents)
         localFilePaths.push(localFilePath)
       }
+      await this.evictPageOverflow(record)
       return { stagingId, localFilePaths }
     } catch (error) {
       await this.release(stagingId)
       throw error
+    }
+  }
+
+  /** Drops the page's oldest staged commands until the newest one fits the per-page budget. */
+  private async evictPageOverflow(current: StagedDirectory): Promise<void> {
+    // Why: Map preserves insertion order, so the page's entries are already oldest-first.
+    const owned = [...this.staged.values()].filter(
+      (record) => record.browserPageId === current.browserPageId
+    )
+    let commands = owned.length
+    let bytes = owned.reduce((sum, record) => sum + record.totalBytes, 0)
+    for (const record of owned) {
+      if (
+        record.stagingId === current.stagingId ||
+        (commands <= BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE &&
+          bytes <= BROWSER_CLIENT_UPLOAD_STAGING_MAX_BYTES_PER_PAGE)
+      ) {
+        break
+      }
+      commands -= 1
+      bytes -= record.totalBytes
+      await this.release(record.stagingId)
     }
   }
 
