@@ -8,6 +8,7 @@ import {
   type IssueCommandReadResult
 } from '@/runtime/runtime-hooks-client'
 import { getRuntimeEnvironmentIdForRepo } from './repo-runtime-owner'
+import { MODAL_DISMISSED_KEY } from '@/store/slices/modal-slot-dismissal'
 import {
   getRepoExecutionHostId,
   parseExecutionHostId,
@@ -135,7 +136,10 @@ async function confirmScriptContent(
       scriptContent,
       contentHash,
       previouslyApproved,
-      onResolve: (decision: 'run' | 'skip') => resolve(decision)
+      onResolve: (decision: 'run' | 'skip') => resolve(decision),
+      // Why: the modal slot holds one entry; losing it must not strand the
+      // caller awaiting this decision. Dismissal is the same as declining.
+      [MODAL_DISMISSED_KEY]: () => resolve('skip')
     })
   })
 }
