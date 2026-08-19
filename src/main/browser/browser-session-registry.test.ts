@@ -250,8 +250,8 @@ describe('BrowserSessionRegistry', () => {
   })
 
   it('auto-grants storage-access for isolated partitions', () => {
-    // Why: verify the parallel fix to the default partition — isolated and imported profiles
-    // install policies through a different call site and must answer storage-access identically.
+    // Why: the isolated twin every other entry in this set already has — dropping it would make
+    // storage-access the sole exception.
     browserSessionRegistry.createProfile('isolated', 'Storage Access Test')
     const mockSession = sessionFromPartitionMock.mock.results[0]?.value
     const requestHandler = mockSession.setPermissionRequestHandler.mock.calls[0][0]
