@@ -14,8 +14,8 @@ export type ParsedRpcParams =
 // Why: STA-4818 — both dispatch entry points call this *outside* their own try, so a validator that
 // throws instead of adding an issue used to escape as a rejected dispatch promise; the streaming
 // transports then emitted zero reply frames and hung the caller. Every param schema funnels through
-// here, so guarding the throw once answers the request on every transport. The throw is still logged
-// because a non-total validator is a programmer error, not an expected outcome.
+// here, so guarding the throw once answers the request on every transport. An unexpected throw is
+// still logged, because a non-total validator is a programmer error, not an expected outcome.
 export function parseRpcParams(
   request: RpcRequest,
   method: RpcAnyMethod,
