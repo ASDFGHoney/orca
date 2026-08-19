@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { RpcDispatcher } from './dispatcher'
 import { defineMethod, defineStreamingMethod, InvalidArgumentError, type RpcRequest } from './core'
 import { ALL_RPC_METHODS } from './methods'
+import { parseRpcParams } from './dispatcher-param-parsing'
 import type { OrcaRuntimeService } from '../orca-runtime'
 
 function makeRuntime(): OrcaRuntimeService {
@@ -141,12 +142,6 @@ describe('RpcDispatcher reply contract when a param schema throws', () => {
     })
   }
 
-  it('exercises the computer methods through the real registry', () => {
-    const names = new Set(ALL_RPC_METHODS.map((method) => method.name))
-    expect(names.has('computer.pressKey')).toBe(true)
-    expect(names.has('computer.hotkey')).toBe(true)
-  })
-
   for (const method of [
     'orchestration.throwingSchema',
     'orchestration.throwingStreamingSchema'
@@ -227,6 +222,43 @@ describe('RpcDispatcher reply contract when a param schema throws', () => {
     const response = await dispatcher.dispatch(makeRequest(method, {}))
 
     expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument', message } })
+  })
+
+  // Why: the guard answers the caller, but it cannot tell anyone a schema went non-total — it just
+  // logs. This is the gate: every registered param schema must reach a verdict on hostile input
+  // without throwing. It is what would have caught STA-4818 the day pressKey was written.
+  it('has no param schema that throws on hostile input', () => {
+    const payloads: unknown[] = [
+      {},
+      undefined,
+      null,
+      [],
+      42,
+      'x',
+      { key: null, app: null, text: null, value: null },
+      { key: 42, app: 42, text: 42, value: 42 },
+      { key: [], app: [], text: [], value: [] },
+      { key: {}, app: {}, text: {}, value: {} }
+    ]
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const nonTotal = new Set<string>()
+    try {
+      for (const method of ALL_RPC_METHODS) {
+        for (const params of payloads) {
+          logged.mockClear()
+          parseRpcParams({ id: 'sweep', authToken: 'tok', method: method.name, params }, method, {
+            runtimeId: 'test-runtime'
+          })
+          if (logged.mock.calls.length > 0) {
+            nonTotal.add(method.name)
+          }
+        }
+      }
+    } finally {
+      logged.mockRestore()
+    }
+
+    expect([...nonTotal].sort()).toEqual([])
   })
 
   it('still reports unknown methods as method_not_found with exactly one reply', async () => {
