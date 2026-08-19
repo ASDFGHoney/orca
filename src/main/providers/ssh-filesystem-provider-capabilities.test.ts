@@ -70,6 +70,35 @@ describe('SSH filesystem capability document', () => {
     expect(mux.request).toHaveBeenCalledTimes(2)
   })
 
+  // One document now backs every feature, so a caller walking away from its own
+  // probe must not evict the fetch a second feature is still waiting on --
+  // otherwise an aborted quick-open probe costs the ranged-read probe a round
+  // trip, and a caller that keeps aborting re-fetches forever.
+  it('keeps the in-flight document when one caller aborts its own probe', async () => {
+    let settle: (value: Record<string, unknown>) => void = () => {}
+    const mux = {
+      request: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Record<string, unknown>>((resolve) => {
+              settle = resolve
+            })
+        )
+        .mockResolvedValue({ rangedReadVersion: 1 })
+    }
+    const controller = new AbortController()
+    const abandoned = probeSshQuickOpenSearchCapability(mux as never, controller.signal)
+    const patient = probeSshRangedReadCapability(mux as never)
+    controller.abort()
+    await expect(abandoned).rejects.toThrow('client_disconnected')
+
+    settle({ rangedReadVersion: 1 })
+    await expect(patient).resolves.toBe(true)
+    await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(true)
+    expect(mux.request).toHaveBeenCalledTimes(1)
+  })
+
   it('treats a non-object response as no capabilities', async () => {
     const mux = { request: vi.fn().mockResolvedValue('yes') }
     await expect(probeSshRangedReadCapability(mux as never)).resolves.toBe(false)

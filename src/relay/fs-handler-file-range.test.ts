@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readRelayFileRange } from './fs-handler-file-range'
+import { readFullStreamChunk } from './fs-handler-file-read'
 import { FileRangeReadRequestError, MAX_FILE_RANGE_READ_BYTES } from '../shared/file-range-read'
 import { HEADER_LENGTH, prepareJsonRpcPayload } from './protocol'
 import { DISPATCHER_CONTROL_QUEUE_MAX_BYTES } from './dispatcher-writer-admission'
@@ -62,8 +63,9 @@ describe('readRelayFileRange', () => {
     expect(result.bytesRead).toBe(0)
   })
 
-  // The window is one fixed allocation filled across however many syscalls the
-  // kernel takes, so every partial read has to land at the right offset in it.
+  // A regular file answers a full-cap read in one syscall, so this pins offset
+  // arithmetic over a many-page window, not the fill loop -- that is covered
+  // against a stub reader in `readFullStreamChunk` below.
   it('assembles a many-page window without misplacing any byte', async () => {
     const size = MAX_FILE_RANGE_READ_BYTES
     const contents = Buffer.allocUnsafe(size)
@@ -97,9 +99,13 @@ describe('readRelayFileRange', () => {
   // The cap is a TRANSPORT budget, not just a memory one. A response frame over
   // DISPATCHER_CONTROL_QUEUE_MAX_BYTES is demoted to the `legacy-response` lane,
   // which the writer refuses once the producer queue is busy -- so an over-wide
-  // cap fails with ResponseOverCapacity depending on unrelated load. A full-cap
-  // window of incompressible bytes must stay inside the control lane.
-  it('encodes a full-cap window into a frame the control lane always admits', async () => {
+  // cap fails with ResponseOverCapacity depending on unrelated load.
+  //
+  // Fitting the lane once is not enough: the control queue is a SHARED budget
+  // and overflowing it closes the client, so a full-cap frame has to leave room
+  // for a second one. Anything wider lets two pipelined tail reads -- or one
+  // read racing an unrelated response -- kill the connection.
+  it('leaves control-queue headroom for a second full-cap window', async () => {
     const contents = Buffer.allocUnsafe(MAX_FILE_RANGE_READ_BYTES)
     for (let i = 0; i < contents.length; i++) {
       contents[i] = (i * 37) % 256
@@ -110,6 +116,7 @@ describe('readRelayFileRange', () => {
     const frameBytes =
       HEADER_LENGTH + prepareJsonRpcPayload({ jsonrpc: '2.0', id: 4294967295, result }).byteLength
     expect(frameBytes).toBeLessThanOrEqual(DISPATCHER_CONTROL_QUEUE_MAX_BYTES)
+    expect(frameBytes * 2).toBeLessThanOrEqual(DISPATCHER_CONTROL_QUEUE_MAX_BYTES)
   })
 
   it('rejects a missing file', async () => {
@@ -163,5 +170,47 @@ describe('readRelayFileRange', () => {
         FileRangeReadRequestError
       )
     })
+  })
+})
+
+// The fill loop is what makes "short result == EOF" true. A regular file hands
+// back a whole window in one syscall, so the loop only shows up against a
+// reader that answers partially -- a pipe, a network filesystem, a large read
+// interrupted by a signal.
+describe('readFullStreamChunk', () => {
+  function partialReader(source: Buffer, perCall: number) {
+    const calls: { offset: number; length: number; position: number }[] = []
+    return {
+      calls,
+      read(buffer: Buffer, offset: number, length: number, position: number) {
+        calls.push({ offset, length, position })
+        const slice = source.subarray(position, position + Math.min(length, perCall))
+        slice.copy(buffer, offset)
+        return Promise.resolve({ bytesRead: slice.length })
+      }
+    }
+  }
+
+  it('fills the window across partial reads, each landing at its own offset', async () => {
+    const source = Buffer.from('abcdefghij')
+    const reader = partialReader(source, 3)
+    const buffer = Buffer.alloc(6)
+    const bytesRead = await readFullStreamChunk(reader, buffer, 6, 2)
+    expect(bytesRead).toBe(6)
+    expect(buffer.toString('utf8')).toBe('cdefgh')
+    expect(reader.calls).toEqual([
+      { offset: 0, length: 6, position: 2 },
+      { offset: 3, length: 3, position: 5 }
+    ])
+  })
+
+  // Without the zero check the loop would spin forever on a reader at EOF.
+  it('stops at the first empty read and reports only what it filled', async () => {
+    const source = Buffer.from('abcd')
+    const reader = partialReader(source, 3)
+    const buffer = Buffer.alloc(16)
+    const bytesRead = await readFullStreamChunk(reader, buffer, 16, 0)
+    expect(bytesRead).toBe(4)
+    expect(buffer.subarray(0, bytesRead).toString('utf8')).toBe('abcd')
   })
 })
