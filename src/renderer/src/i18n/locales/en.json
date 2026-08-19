@@ -43,6 +43,7 @@
     },
     "reopenOnServer": {
       "action": "Reopen on server",
+      "pending": "Reopening…",
       "caveat": "This opens a new page on the remote host at this page’s last address. Signed-in and other transient page state may differ, and a page that came from a form submission opens blank.",
       "failed": "Couldn't open this page on the remote host. Check the connection and try again."
     }
