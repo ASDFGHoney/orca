@@ -11,6 +11,7 @@ import {
 describe('agy titles carrying a Gemini model name', () => {
   const AGY_TITLES = [
     '⠋ agy · Gemini 3.7 Flash · high',
+    'agy.cmd · Gemini 3.7 Flash · high',
     'Antigravity · Gemini 3.7 Flash',
     'agy · Gemini 3.5 Flash (High)'
   ]
