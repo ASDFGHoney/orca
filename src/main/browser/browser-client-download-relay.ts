@@ -122,7 +122,9 @@ export class BrowserClientDownloadRelay {
     const transfer: StagedTransfer = {
       transferId,
       directory: path.join(this.options.stagingRoot, transferId),
-      stagingPath: path.join(this.options.stagingRoot, transferId, 'download')
+      stagingPath: path.join(this.options.stagingRoot, transferId, 'download'),
+      canceled: false,
+      aborting: null
     }
     try {
       this.filesystem.mkdirSync(transfer.directory)
@@ -148,6 +150,7 @@ export class BrowserClientDownloadRelay {
   ): Promise<BrowserClientDownloadDestination> {
     const { transferId, stagingPath } = transfer
     try {
+      assertNotCanceled(transfer)
       if (
         (await this.filesystem.size(stagingPath)) > BROWSER_CLIENT_FILE_CHANNEL_TRANSFER_MAX_BYTES
       ) {
@@ -159,6 +162,9 @@ export class BrowserClientDownloadRelay {
         stagingPath,
         BROWSER_CLIENT_FILE_CHANNEL_CHUNK_MAX_BYTES
       )) {
+        // Why: the commit spans hundreds of round trips, so every resumption re-reads the cancel --
+        // otherwise a canceled download keeps streaming and still lands in the remote workspace.
+        assertNotCanceled(transfer)
         await this.write(authority, {
           transferId,
           filename,
@@ -168,6 +174,7 @@ export class BrowserClientDownloadRelay {
         })
         offset += chunk.byteLength
       }
+      assertNotCanceled(transfer)
       // Why: an empty download still needs one final chunk so the remote commits a zero-byte file.
       const workspaceRelativePath = await this.write(authority, {
         transferId,
@@ -216,7 +223,14 @@ export class BrowserClientDownloadRelay {
     return parsed.data.workspaceRelativePath
   }
 
-  private async abort(
+  private abort(page: BrowserClientHostedPageInventory, transfer: StagedTransfer): Promise<void> {
+    transfer.canceled = true
+    // Why: a cancel and the streaming loop's own failure handler both abort the same transfer.
+    transfer.aborting ??= this.dispatchAbort(page, transfer)
+    return transfer.aborting
+  }
+
+  private async dispatchAbort(
     page: BrowserClientHostedPageInventory,
     transfer: StagedTransfer
   ): Promise<void> {
@@ -238,6 +252,14 @@ type StagedTransfer = {
   /** Owns the staged file: removing it is what keeps the staging root from growing per download. */
   directory: string
   stagingPath: string
+  canceled: boolean
+  aborting: Promise<void> | null
+}
+
+function assertNotCanceled(transfer: StagedTransfer): void {
+  if (transfer.canceled) {
+    throw new Error('browser_client_download_canceled')
+  }
 }
 
 function fileChannelAuthority(page: BrowserClientHostedPageInventory) {

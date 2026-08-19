@@ -2159,18 +2159,27 @@ export class BrowserManager {
     if (!route) {
       return
     }
-    download.clientRoute = null
     if (status !== 'completed') {
+      download.clientRoute = null
       await route.abort().catch(() => undefined)
       this.finishDownloadInternal(download.downloadId, status, failure)
       return
     }
     try {
-      download.remoteDestination = await route.complete(download.filename)
+      // Why: the route stays on the record for the whole commit, which spans many round trips -- a
+      // cancel arriving mid-stream has to find something to abort or the bytes land anyway.
+      const remoteDestination = await route.complete(download.filename)
+      download.clientRoute = null
+      download.remoteDestination = remoteDestination
       // Why: the staged copy is deleted, so a client save path would name a file that no longer exists.
       download.savePath = ''
       this.finishDownloadInternal(download.downloadId, 'completed', null)
     } catch (error) {
+      download.clientRoute = null
+      if (download.terminalEvent) {
+        // A cancel already reported the outcome; this rejection is that cancel taking effect.
+        return
+      }
       console.error('[browser-download] Failed to save download to the remote workspace:', error)
       this.finishDownloadInternal(
         download.downloadId,

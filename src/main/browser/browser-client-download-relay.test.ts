@@ -215,6 +215,37 @@ describe('BrowserClientDownloadRelay', () => {
     expect(relay.route({ guestWebContentsId: 7 })).toEqual({ kind: 'unowned' })
   })
 
+  it('stops the commit and never sends the final chunk once the transfer is aborted', async () => {
+    const writes: { final: boolean }[] = []
+    const aborts: unknown[] = []
+    let route: BrowserClientDownloadRoute | null = null
+    const transport = negotiatedTransport((method, params) => {
+      if (method.endsWith('abort')) {
+        aborts.push(params)
+        return { released: true }
+      }
+      writes.push(params as { final: boolean })
+      // The user cancels while this chunk is in flight.
+      void route?.abort()
+      return { accepted: true }
+    })
+    const { filesystem, removed } = memoryFilesystem(Buffer.from('abc'))
+    const relay = new BrowserClientDownloadRelay({
+      stagingRoot: '/tmp/staging',
+      hostLabel: 'build-box',
+      transport,
+      resolvePage: () => page,
+      filesystem
+    })
+
+    route = remoteRoute(relay.route({ guestWebContentsId: 7 }))
+    await expect(route.complete('report.pdf')).rejects.toThrow('browser_client_download_canceled')
+
+    expect(writes.map((write) => write.final)).toEqual([false])
+    expect(aborts).toHaveLength(1)
+    expect(removed).toContain(path.dirname(route.stagingPath))
+  })
+
   it('aborts the remote transfer and removes the staged copy when a chunk is rejected', async () => {
     const aborted: unknown[] = []
     const transport = negotiatedTransport((method, params) => {

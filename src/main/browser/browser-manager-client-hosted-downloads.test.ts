@@ -29,11 +29,17 @@ vi.mock('./popup-origin-bar-window', () => ({
   openPopupWithOriginBar: browserMocks.openPopupWithOriginBarMock
 }))
 
+import { mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { browserManager } from './browser-manager'
-import type {
-  BrowserClientDownloadRoute,
-  BrowserClientDownloadRouteOutcome
+import {
+  BrowserClientDownloadRelay,
+  type BrowserClientDownloadRoute,
+  type BrowserClientDownloadRouteOutcome
 } from './browser-client-download-relay'
+import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import type { BrowserClientHostedPageInventory } from '../../shared/browser-client-host-protocol'
 import {
   registerBrowserClientDownloadRouter,
   resetBrowserClientDownloadRouting,
@@ -142,6 +148,76 @@ describe('client-hosted downloads', () => {
     )
   })
 
+  it('aborts a download canceled while its commit is still streaming', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'orca-client-download-')))
+    const stagingRoot = path.join(root, 'downloads')
+    const writes: { transferId: string; final: boolean }[] = []
+    const aborts: { transferId: string }[] = []
+    let releaseFirstWrite = (): void => {}
+    const firstWrite = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve
+    })
+    const transport = new BrowserClientFileChannelTransport()
+    transport.bind({
+      fileChannelNegotiated: true,
+      fileChannelAvailability: 'negotiated',
+      sendFileChannelRequest: async (method, params) => {
+        if (method.endsWith('abort')) {
+          aborts.push(params as { transferId: string })
+          return { ok: true, result: { released: true }, _meta: {} } as never
+        }
+        const chunk = params as { transferId: string; final: boolean }
+        writes.push(chunk)
+        if (writes.length === 1) {
+          await firstWrite
+        }
+        return {
+          ok: true,
+          result: chunk.final
+            ? { accepted: true, workspaceRelativePath: '.orca/browser-downloads/report.csv' }
+            : { accepted: true },
+          _meta: {}
+        } as never
+      }
+    })
+    registerBrowserClientDownloadRouter(
+      'env-a',
+      new BrowserClientDownloadRelay({
+        stagingRoot,
+        hostLabel: 'build-box',
+        transport,
+        resolvePage: () => clientHostedPage
+      })
+    )
+    const item = createDownloadItem()
+
+    try {
+      browserManager.handleGuestWillDownload({ guestWebContentsId: GUEST_WEB_CONTENTS_ID, item })
+      await writeFile(savedTo(item), 'hello world')
+      getDownloadItemEventHandler(item, 'once', 'done')?.({} as Electron.Event, 'completed')
+      await vi.waitFor(() => expect(writes).toHaveLength(1))
+
+      expect(
+        browserManager.cancelDownload({
+          downloadId: requestedDownloadId(rendererSendMock),
+          senderWebContentsId: rendererWebContentsId
+        })
+      ).toBe(true)
+      releaseFirstWrite()
+      await vi.waitFor(() => expect(aborts).toHaveLength(1))
+
+      // The commit never reaches its final chunk, so nothing is committed on the remote.
+      expect(writes.map((write) => write.final)).toEqual([false])
+      expect(aborts[0].transferId).toBe(writes[0].transferId)
+      const finished = sentPayload(rendererSendMock, 'browser:download-finished')
+      expect(finished).toMatchObject({ browserPageId: BROWSER_PAGE_ID, status: 'canceled' })
+      expect(finished).not.toHaveProperty('remoteDestination')
+      await vi.waitFor(async () => expect(await readdir(stagingRoot)).toEqual([]))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('cancels a client-hosted download that no composition owns', () => {
     registerBrowserClientDownloadRouter('env-a', { route: () => ({ kind: 'unowned' }) })
     const item = createDownloadItem()
@@ -216,6 +292,28 @@ function createGuest(id: number) {
     off: browserMocks.guestOffMock,
     openDevTools: browserMocks.guestOpenDevToolsMock
   }
+}
+
+const clientHostedPage: BrowserClientHostedPageInventory = Object.freeze({
+  authorityRuntimeId: 'runtime-1',
+  authorityEpoch: 'epoch-1',
+  browserHostClientId: 'host-1',
+  browserHostGeneration: 2,
+  browserPageId: BROWSER_PAGE_ID,
+  pageHostGeneration: 3,
+  browserProfileId: 'profile-1',
+  executionHostKey: 'host-key',
+  state: 'active'
+})
+
+function sentPayload(send: ReturnType<typeof vi.fn>, channel: string): Record<string, unknown> {
+  const call = send.mock.calls.findLast((sent: unknown[]) => sent[0] === channel)
+  expect(call).toBeDefined()
+  return call?.[1] as Record<string, unknown>
+}
+
+function requestedDownloadId(send: ReturnType<typeof vi.fn>): string {
+  return sentPayload(send, 'browser:download-requested').downloadId as string
 }
 
 function savedTo(item: Electron.DownloadItem): string {
