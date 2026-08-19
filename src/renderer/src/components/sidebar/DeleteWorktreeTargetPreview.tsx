@@ -6,6 +6,7 @@ import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualif
 import { DeleteWorktreeDirtyChangeHint } from './DeleteWorktreeDirtyChangeHint'
 import type { AppState } from '@/store/types'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
+import { getExecutionHostLabel, LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
 
 export function DeleteWorktreeTargetPreview({
   isBatchDelete,
@@ -20,6 +21,9 @@ export function DeleteWorktreeTargetPreview({
   deleteStateByWorktreeId: AppState['deleteStateByWorktreeId']
   dirtyChangeCountsByWorktreeId: ReadonlyMap<string, number>
 }): JSX.Element | null {
+  const collisionIds = new Set(
+    worktrees.map((item) => item.id).filter((id, index, ids) => ids.indexOf(id) !== index)
+  )
   if (isBatchDelete) {
     return (
       <ScrollArea className="max-h-48 rounded-md border border-border/70 bg-muted/35 text-xs">
@@ -35,6 +39,11 @@ export function DeleteWorktreeTargetPreview({
                   <div className="min-w-0 flex-1">
                     <div className="break-all font-medium text-foreground">{item.displayName}</div>
                     <div className="mt-0.5 break-all text-muted-foreground">{item.path}</div>
+                    {collisionIds.has(item.id) ? (
+                      <div className="mt-0.5 text-muted-foreground">
+                        {getExecutionHostLabel(item.hostId ?? LOCAL_EXECUTION_HOST_ID)}
+                      </div>
+                    ) : null}
                     <DeleteWorktreeDirtyChangeHint
                       changeCount={dirtyChangeCountsByWorktreeId.get(
                         item.hostId ? getWorktreeHostIdentity(item) : item.id
@@ -62,6 +71,11 @@ export function DeleteWorktreeTargetPreview({
     <div className="rounded-md border border-border/70 bg-muted/35 px-3 py-2 text-xs">
       <div className="break-all font-medium text-foreground">{worktree.displayName}</div>
       <div className="mt-1 break-all text-muted-foreground">{worktree.path}</div>
+      {worktrees.filter((item) => item.id === worktree.id).length > 1 ? (
+        <div className="mt-0.5 text-muted-foreground">
+          {getExecutionHostLabel(worktree.hostId ?? LOCAL_EXECUTION_HOST_ID)}
+        </div>
+      ) : null}
       <DeleteWorktreeDirtyChangeHint
         changeCount={dirtyChangeCountsByWorktreeId.get(
           worktree.hostId ? getWorktreeHostIdentity(worktree) : worktree.id
