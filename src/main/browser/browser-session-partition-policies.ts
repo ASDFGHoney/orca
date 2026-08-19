@@ -2,6 +2,7 @@ import { session } from 'electron'
 import type { Session } from 'electron'
 import type { BrowserSessionProfile } from '../../shared/browser-workspace-types'
 import { browserManager } from './browser-manager'
+import { applyProxyToBrowserSession } from './browser-session-proxy'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from './browser-media-access'
 import { isAutoGrantedBrowserSessionPermission } from './browser-session-permission-policy'
 import { cleanElectronUserAgent, setupClientHintsOverride } from './browser-session-ua'
@@ -44,6 +45,12 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
   if (configuredPartitions.has(partition)) {
     return
   }
+
+  // Why: guests live on their own partition, so the app-wide proxy must be pinned per session
+  // rather than inherited from defaultSession (STA-4779). Startup and settings changes re-sweep.
+  void applyProxyToBrowserSession(sess).catch(() => {
+    /* proxy stays direct when the session rejects the write */
+  })
 
   browserManager.installCertificateRequestGuard(sess)
   if (profile.userAgentMode !== 'native' && typeof sess.getUserAgent === 'function') {
