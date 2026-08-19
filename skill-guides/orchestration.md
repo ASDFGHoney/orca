@@ -204,7 +204,7 @@ For a new worktree, setup runs by default and agent-first creation reuses the re
 
 ```bash
 orca orchestration worker-start --task <task_id> --worktree new-child --name <name> --agent codex --setup run --json
-# Independent/top-level:
+# Explicit top-level:
 orca orchestration worker-start --task <task_id> --worktree new-top-level --name <name> --agent codex --setup run --json
 ```
 
@@ -302,7 +302,7 @@ New worktree handoff:
 orca worktree create --name <task-name> --agent codex --prompt "<task brief>" --setup run --json
 ```
 
-With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child; `--no-parent` detaches it to the top level. A child nests under its parent in the sidebar and travels with it when the user reviews, sleeps, or deletes that line of work, so a detached worktree is one the user has to track on its own. Lineage affects only how the worktree is filed — not the branch, the base, or the PR — and `worktree set` can change it later. It records where the work came from, not how the two tasks relate: an unrelated follow-up spawned from this worktree still started here, so topical independence is not by itself a reason to detach. Keep the Git history independent with `--base-branch` instead.
+Lineage controls sidebar grouping, not Git history. With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child; `--no-parent` makes it its own root, tracked separately from the work it came from. Orca keys that default on where the work was started, not on what the work is about, so an unrelated follow-up started here is still a child by default and the topic alone does not decide this. Deleting a parent never deletes its children on its own, and `worktree set` can change lineage later. Choose the Git base separately.
 
 Existing terminal handoff:
 
@@ -312,7 +312,7 @@ orca terminal send --terminal <handle> --text "<task brief>" --enter --json
 
 Custom Codex model/effort handoff:
 
-`orca worktree create --agent codex --prompt ...` launches the known Codex agent but does not accept Codex-specific `--model` or `-c model_reasoning_effort=...` arguments. When the user asks for a specific Codex model or effort, create the independent worktree first, launch Codex with the requested command in that worktree, wait only for TUI readiness if prompt delivery would otherwise race startup, send the prompt, and stop.
+`orca worktree create --agent codex --prompt ...` launches the known Codex agent but does not accept Codex-specific `--model` or `-c model_reasoning_effort=...` arguments. When the user asks for a specific Codex model or effort, create the new worktree first, launch Codex with the requested command in that worktree, wait only for TUI readiness if prompt delivery would otherwise race startup, send the prompt, and stop.
 
 The two-step custom-argv path cannot enforce a repository's explicit `wait-for-setup` startup policy because the later `terminal create` is not the startup owned by `worktree create`. Use it only when the repository starts agents immediately. If the repository requires `wait-for-setup`, use an agent-first configured launcher that can preserve sequencing, or stop and ask rather than silently bypassing the policy.
 

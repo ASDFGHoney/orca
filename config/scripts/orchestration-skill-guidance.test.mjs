@@ -112,9 +112,7 @@ describe('orchestration skill guidance', () => {
     expect(fullHandoffs).toContain(
       'read the worker terminal after prompt delivery except to avoid losing the initial prompt'
     )
-    expect(skill).toContain(
-      'Lineage and Git base are independent: `--no-parent` never changes the base, and `--base-branch` never changes lineage.'
-    )
+    expect(skill).toContain('Lineage controls sidebar grouping, not Git history.')
     expect(skill).toContain(
       'never base it on the current feature branch unless the user explicitly asks'
     )
@@ -126,13 +124,13 @@ describe('orchestration skill guidance', () => {
       'With no lineage flag, Orca infers a parent from the calling context and files the new worktree as its child'
     )
     expect(fullHandoffs).toContain(
-      'travels with it when the user reviews, sleeps, or deletes that line of work'
+      'keys that default on where the work was started, not on what the work is about'
     )
     expect(fullHandoffs).toContain(
-      'It records where the work came from, not how the two tasks relate'
+      '`--no-parent` makes it its own root, tracked separately from the work it came from'
     )
-    expect(fullHandoffs).toContain('topical independence is not by itself a reason to detach')
-    // No prescriptive child-vs-top-level rule: the agent decides.
+    expect(fullHandoffs).toContain('Deleting a parent never deletes its children on its own')
+    // No rule tying lineage to whether the work is "stacked".
     expect(fullHandoffs).not.toContain('Use child worktree lineage only when')
     expect(fullHandoffs).toContain('If the work should start from the repo default base')
     expect(fullHandoffs).toContain('omit `--base-branch`')

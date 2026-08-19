@@ -112,7 +112,7 @@ ORCA worktree create --repo id:<repoId> --name related-task --json
 ORCA worktree create --repo id:<repoId> --name related-task --parent-worktree active --json
 ORCA worktree create --repo id:<repoId> --name folder-child --parent-worktree folder:<folderId> --json
 ORCA worktree create --name child-task --agent codex --prompt "hi" --json
-ORCA worktree create --name independent-task --no-parent --json
+ORCA worktree create --name top-level-task --no-parent --json
 ORCA worktree set --worktree id:<repoId>::<worktreePath> --display-name "My Task" --json
 ORCA worktree set --worktree active --comment "reproduced bug; testing fix" --json
 ORCA worktree set --worktree active --workspace-status in-review --json
@@ -128,13 +128,13 @@ Selectors:
 
 Lineage:
 
-Lineage is how the worktree is filed in Orca's sidebar. A child nests under its parent and travels with it when the user reviews, sleeps, or deletes that line of work; a top-level worktree is a separate root the user tracks on its own. Lineage does not affect the branch, the base commit, or how the PR relates to any other PR, and it can be changed later with `worktree set`.
+Lineage controls how the worktree is grouped in Orca's sidebar: a child appears under its parent and stays with it through the user's review and sleep flows, while a top-level worktree is its own root. Both stay visible either way, and deleting a parent never deletes its children on its own. Lineage does not affect the branch, the base commit, or the PR, and `worktree set` can change it later.
 
-Lineage records where the work came from, not how the two tasks relate. An unrelated errand spawned from this worktree still started here, and filing it under the worktree it came from is what lets the user find it again. Topical independence is therefore not by itself a reason to detach — `--base-branch` already covers keeping the Git history independent.
+Orca keys the default on where the work was started, not on what the work is about. A follow-up on an unrelated topic still started here, so the topic alone does not decide this; `--base-branch` is what keeps the Git history separate.
 
 - With no lineage flag, Orca infers a parent from the calling context (Orca terminal, orchestration context, or cwd) and records the new worktree as its child. It comes out top-level only when nothing can be inferred.
 - `--parent-worktree active`, `--parent-worktree folder:<folderId>`, or `--parent-worktree worktree:<repoId>::<worktreePath>` names a parent explicitly.
-- `--no-parent` detaches the new worktree to the top level. Deletion never cascades on its own, so a child left behind is still discoverable under its parent while a detached one is not.
+- `--no-parent` makes the new worktree its own root, tracked separately from the work it came from rather than alongside it.
 - Lineage and Git base are independent. `--no-parent` never changes the base; `--base-branch` never changes lineage. Omit `--base-branch` to use the repo default base, or pass it explicitly. Never base on the current feature branch unless the user asks for stacked work or "branch from current".
 - If `--repo` is omitted, Orca infers the repo from the current Orca worktree when possible.
 

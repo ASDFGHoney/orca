@@ -28,24 +28,26 @@ describe('orca CLI skill guidance', () => {
     expect(skill).toContain('Never base on the current feature branch')
   })
 
-  it('explains lineage consequences without prescribing child or top-level', () => {
+  it('documents both lineage outcomes and what decides between them', () => {
     const skill = readSkill()
 
+    // Default: inferred parent, and what the inference is actually keyed on.
     expect(skill).toContain(
-      'Orca infers a parent from the calling context (Orca terminal, orchestration context, or cwd) and records the new worktree as its child'
+      'Orca infers a parent from the calling context (Orca terminal, orchestration context, or cwd)'
     )
-    expect(skill).toContain('It comes out top-level only when nothing can be inferred.')
-    expect(skill).toContain('Deletion never cascades on its own')
-    // Why: without this, claude/grok/codex all read "unrelated task" as a reason to pass
-    // --no-parent. Measured 1/4 nesting before this sentence, 4/4 after.
+    // An affirmative reason to choose top-level, so the choice stays reachable.
     expect(skill).toContain(
-      'Lineage records where the work came from, not how the two tasks relate.'
+      '`--no-parent` makes the new worktree its own root, tracked separately from the work it came from'
     )
-    expect(skill).toContain('Topical independence is therefore not by itself a reason to detach')
-    // Handoff templates must not pre-detach lineage; the inferred-parent default is the point.
+    // Factual guards: no cascade implication, no "detached is hidden" claim.
+    expect(skill).toContain('deleting a parent never deletes its children on its own')
+    expect(skill).toContain('Both stay visible either way')
+    // Handoff templates must not pre-detach lineage.
     expect(skill).not.toContain('--no-parent --agent codex')
     expect(skill).not.toContain('--name <task-name> --no-parent')
+    // No rule that ties lineage to whether the work is "stacked" or "independent".
     expect(skill).not.toContain('Use `--no-parent` only when the new work is independent.')
+    expect(skill).not.toContain('--name independent-task')
   })
 
   it('documents non-lifecycle full handoffs and custom Codex model fallback', () => {

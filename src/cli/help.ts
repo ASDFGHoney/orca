@@ -267,7 +267,7 @@ Selectors:
   --worktree <selector>     Worktree selector such as id:<repo-id>::<path>, name:<displayName>, branch:<branch>, issue:<number>, path:<path>, or active/current
   --terminal <handle>       Runtime-issued terminal handle returned by \`orca terminal list --json\`
   --parent-worktree <selector> Parent worktree selector such as id:<repo-id>::<path>, branch:<branch>, issue:<number>, path:<path>, or active/current
-  --no-parent               File at the top level instead of under the inferred parent worktree
+  --no-parent               Make the worktree its own root instead of a child of the inferred parent
 
 Terminal Send Options:
   --text <text>             Text to send to the terminal
