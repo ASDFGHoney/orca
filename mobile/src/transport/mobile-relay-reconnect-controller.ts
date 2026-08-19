@@ -207,7 +207,9 @@ export class RelayReconnectController {
       return
     }
     const failure = this.activeSession?.getFailure()
-    this.consecutiveFailures = relayStructuredFailures(this.consecutiveFailures, this.activeSession)
+    this.failureCount.recomputeTo(
+      relayStructuredFailures(this.failureCount.current(), this.activeSession)
+    )
     this.activeSession = null
     if (failure) {
       // Why: active relay closes need the same cooldown as failed replacement dials.

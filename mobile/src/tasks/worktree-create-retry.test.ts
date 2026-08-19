@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
-import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
+import { LogicalClientCutoverError } from '../transport/logical-client-cutover-error'
 import { createWorktreeWithNameRetry } from './worktree-create-retry'
 
 type Attempt = { method: string; params: Record<string, unknown> }

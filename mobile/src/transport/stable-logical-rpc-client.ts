@@ -7,22 +7,9 @@ import {
 import { waitForAuthenticated } from './replacement-session-authentication'
 import { projectMobileRpcRequestParams } from './mobile-rpc-request-projection'
 import { LogicalClientConnectionPath } from './logical-client-connection-path'
+import { LogicalClientCutoverError } from './logical-client-cutover-error'
 
 export type MobileConnectionPath = 'lan' | 'tailscale' | 'relay'
-
-export class LogicalClientCutoverError extends Error {
-  constructor() {
-    super('RPC interrupted by connection migration')
-  }
-}
-
-// Why: instanceof can miss across bundle copies, so also match by message.
-export function isLogicalClientCutoverError(error: unknown): boolean {
-  return (
-    error instanceof LogicalClientCutoverError ||
-    (error instanceof Error && error.message === 'RPC interrupted by connection migration')
-  )
-}
 
 type SubscriptionRecord = {
   method: string

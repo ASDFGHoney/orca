@@ -17,7 +17,7 @@ import {
 } from '../../../src/shared/structured-agent-session-mutation'
 import type { RpcClient } from '../transport/rpc-client'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
-import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
+import { isLogicalClientCutoverError } from '../transport/logical-client-cutover-error'
 
 export type MobileStructuredPromptItem = AgentJournalRenderItem & {
   body: AgentJournalApprovalItem | AgentJournalQuestionItem
