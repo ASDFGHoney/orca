@@ -281,6 +281,8 @@ describe('SkillInstallDialog', () => {
     const description = screen.getByText(sharedVersion.description)
     expect(description.className).toContain('line-clamp-1')
     expect(description.className).toContain('group-data-[state=open]/row:line-clamp-none')
+    expect(description.className).toContain('group-data-[state=open]/row:max-h-none')
+    expect(description.className).not.toContain('group-data-[state=open]/row:max-h-40')
   })
 
   // Why: "view the full skill contents" is the point of the row — the file list

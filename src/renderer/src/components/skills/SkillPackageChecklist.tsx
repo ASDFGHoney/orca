@@ -72,7 +72,8 @@ function ChecklistRow({
           >
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{item.name}</span>
-              <span className="block line-clamp-1 max-h-5 overflow-hidden text-xs leading-5 text-muted-foreground transition-[max-height] duration-200 ease-out group-data-[state=open]/row:line-clamp-none group-data-[state=open]/row:max-h-40 motion-reduce:transition-none">
+              {/* Why: unclamped text must contribute its full height to avoid painting over the file list. */}
+              <span className="block line-clamp-1 max-h-5 overflow-hidden text-xs leading-5 break-words text-muted-foreground group-data-[state=open]/row:line-clamp-none group-data-[state=open]/row:max-h-none">
                 {description}
               </span>
             </span>
