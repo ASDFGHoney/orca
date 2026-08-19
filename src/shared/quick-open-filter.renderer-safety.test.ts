@@ -29,7 +29,15 @@ describe('quick-open-filter renderer safety', () => {
   })
 
   it('builds nested-worktree exclude prefixes on a windows root', () => {
-    expect(buildExcludePathPrefixes('C:\\repo', ['C:\\repo\\nested'])).toEqual(['nested'])
+    expect(buildExcludePathPrefixes('C:\\Repo', ['c:\\repo\\nested'])).toEqual(['nested'])
+    expect(
+      buildExcludePathPrefixes('\\\\Server\\Share\\Repo', ['//server/share/repo/nested'])
+    ).toEqual(['nested'])
+  })
+
+  it('drops stale exclude paths outside the root', () => {
+    expect(buildExcludePathPrefixes('/tmp/repo', ['/tmp/old-worktree'])).toEqual([])
+    expect(buildExcludePathPrefixes('C:\\repo', ['D:\\old-worktree'])).toEqual([])
   })
 
   it('filters listed paths against those prefixes', () => {
