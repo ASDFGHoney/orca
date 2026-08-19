@@ -94,6 +94,12 @@ export function reportCodexConfigSyncOutcome(
     return
   }
   stalledHomes.set(runtimeHomePath, status.reason)
+  if (status.reason === 'managed-home-unavailable') {
+    console.warn(
+      `[codex-config] Config sync stalled (${status.reason}): ${join(runtimeHomePath, 'config.toml')} is unusable, so ${runtimeHomePath} keeps its last synced settings. The managed config must be readable before settings can sync.`
+    )
+    return
+  }
   console.warn(
     `[codex-config] Config sync stalled (${status.reason}): ${status.systemConfigPath} is unusable, so ${runtimeHomePath} keeps its last synced settings. Edits to the source will not apply until it is readable.`
   )

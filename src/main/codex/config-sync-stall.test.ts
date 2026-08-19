@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   getCodexConfigSyncStatus,
+  reportCodexConfigSyncOutcome,
   resetCodexConfigSyncStallLatchForTests
 } from './config-sync-stall'
 import { syncSystemConfigIntoManagedCodexHome } from './codex-config-mirror'
@@ -161,6 +162,19 @@ describe('reportCodexConfigSyncOutcome', () => {
     const stallLogs = warn.mock.calls.filter((call) => String(call[0]).includes('stalled'))
     expect(stallLogs).toHaveLength(1)
     expect(String(stallLogs[0]?.[0])).toContain('unreadable-source')
+  })
+
+  it('names the managed config when that is the unreadable file', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    writeFileSync(systemConfigPath(), 'model = "gpt-5"\n', 'utf-8')
+    mkdirSync(runtimeConfigPath())
+
+    reportCodexConfigSyncOutcome(homes.runtimeHomePath, getCodexConfigSyncStatus(homes))
+
+    const message = String(warn.mock.calls[0]?.[0])
+    expect(message).toContain(runtimeConfigPath())
+    expect(message).not.toContain(systemConfigPath())
+    expect(message).toContain('The managed config must be readable before settings can sync.')
   })
 
   it('clears a stall without claiming the source became readable', () => {
