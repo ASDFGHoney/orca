@@ -95,4 +95,35 @@ describe('RPC reply contract when a param schema throws', () => {
       })
     }
   }
+  // Why: the WebSocket handler is fired with `void`, so anything throwing BEFORE the dispatcher's
+  // own try — not just a param schema — would strand the caller with zero frames. STA-4818 removed
+  // one such trigger; this pins the transport guarantee that outlives any single trigger.
+  // Limit worth knowing: the error frame is built from the runtime's id, so a runtime service that
+  // is itself broken cannot be answered. Every step on this path reads an already-resolved field.
+  it('still replies once when dispatch throws before its own try block', async () => {
+    const { server, deviceToken } = makeServer()
+    Object.defineProperty(server, 'dispatcher', {
+      value: {
+        dispatchStreaming: () => {
+          throw new Error('pre-dispatch failure')
+        }
+      }
+    })
+    const replies: string[] = []
+
+    void server['handleWebSocketMessage'](
+      JSON.stringify({ id: 'ws-1', method: 'status.get', deviceToken, params: {} }),
+      (response) => replies.push(response),
+      () => {}
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(unhandled).toEqual([])
+    expect(replies).toHaveLength(1)
+    expect(JSON.parse(replies[0])).toMatchObject({
+      id: 'ws-1',
+      ok: false,
+      error: { code: 'internal_error', message: 'pre-dispatch failure' }
+    })
+  })
 })

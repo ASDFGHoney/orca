@@ -1727,6 +1727,20 @@ export class OrcaRuntimeRpcServer {
         registerBinaryStreamHandler: (streamId, handler) =>
           this.registerBinaryStreamHandler(connectionId, streamId, handler)
       })
+    } catch (error) {
+      // Why: this handler is fired with `void` (see onText), so without this catch a throw before
+      // the dispatcher's own try becomes an unhandled rejection and the client gets zero frames and
+      // hangs until its own timeout (STA-4818). Mirrors the unix socket's `.catch`, which has to
+      // re-parse the raw message to recover an id; here request.id is already in scope.
+      reply(
+        JSON.stringify(
+          this.buildError(
+            request.id,
+            'internal_error',
+            error instanceof Error ? error.message : String(error)
+          )
+        )
+      )
     } finally {
       abortRegistration?.dispose()
       this.releaseLongPoll(longPoll)
