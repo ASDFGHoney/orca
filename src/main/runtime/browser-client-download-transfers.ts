@@ -41,6 +41,8 @@ type TransferSession = {
   canceled: boolean
   /** Serializes this transfer's writes, commits, and cleanup against each other. */
   operations: Promise<void>
+  /** Armed only while the transfer is idle, so a slow chunk is never mistaken for a stranded one. */
+  idleTimer: ReturnType<typeof setTimeout> | null
 }
 
 export type BrowserClientDownloadCommit = {
@@ -63,6 +65,10 @@ export type BrowserClientDownloadChunk = {
 // bounded trail of them stops a late chunk from resurrecting a transfer the runtime already cleaned.
 const MIN_SETTLED_TRANSFER_TRAIL = 64
 
+// Why: the client's abort is lost exactly when it matters -- a transport blip rejects it silently --
+// so a transfer nobody is feeding has to retire itself or stranded ones exhaust the shared slots.
+export const BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS = 3 * 60_000
+
 export class BrowserClientDownloadTransferStore {
   private readonly sessions = new Map<string, TransferSession>()
   private readonly settled = new Set<string>()
@@ -70,7 +76,8 @@ export class BrowserClientDownloadTransferStore {
 
   constructor(
     private readonly dependencies: BrowserClientDownloadTransferDependencies,
-    private readonly maxActiveTransfers = BROWSER_CLIENT_FILE_CHANNEL_MAX_ACTIVE_DOWNLOADS
+    private readonly maxActiveTransfers = BROWSER_CLIENT_FILE_CHANNEL_MAX_ACTIVE_DOWNLOADS,
+    private readonly idleTimeoutMs = BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS
   ) {
     this.maxSettledTrail = Math.max(this.maxActiveTransfers * 4, MIN_SETTLED_TRANSFER_TRAIL)
   }
@@ -78,7 +85,12 @@ export class BrowserClientDownloadTransferStore {
   async accept(input: BrowserClientDownloadChunk): Promise<BrowserClientDownloadCommit | null> {
     const chunk = decodeBrowserClientFileChannelChunk(input.contentBase64)
     const session = this.requireSession(input)
-    return this.serialize(session, () => this.write(session, input, chunk.byteLength))
+    this.clearIdleTimer(session)
+    try {
+      return await this.serialize(session, () => this.write(session, input, chunk.byteLength))
+    } finally {
+      this.armIdleTimer(session)
+    }
   }
 
   abort(input: { transferId: string; browserPageId: string }): Promise<boolean> {
@@ -103,6 +115,33 @@ export class BrowserClientDownloadTransferStore {
 
   activeTransferCount(): number {
     return this.sessions.size
+  }
+
+  private armIdleTimer(session: TransferSession): void {
+    if (session.idleTimer || this.sessions.get(session.key) !== session) {
+      return
+    }
+    const timer = setTimeout(() => {
+      void this.expire(session)
+    }, this.idleTimeoutMs)
+    timer.unref?.()
+    session.idleTimer = timer
+  }
+
+  private clearIdleTimer(session: TransferSession): void {
+    if (session.idleTimer) {
+      clearTimeout(session.idleTimer)
+      session.idleTimer = null
+    }
+  }
+
+  private async expire(session: TransferSession): Promise<void> {
+    session.idleTimer = null
+    if (this.sessions.get(session.key) !== session) {
+      return
+    }
+    session.canceled = true
+    await this.serialize(session, () => this.release(session)).catch(() => undefined)
   }
 
   /** Runs `operation` after every earlier operation on the same transfer has settled. */
@@ -201,7 +240,8 @@ export class BrowserClientDownloadTransferStore {
       tempRelativePath: `${BROWSER_CLIENT_DOWNLOAD_WORKSPACE_DIRECTORY}/.incoming-${input.transferId}`,
       bytesWritten: 0,
       canceled: false,
-      operations: Promise.resolve()
+      operations: Promise.resolve(),
+      idleTimer: null
     }
     this.sessions.set(key, session)
     return session
@@ -253,6 +293,7 @@ export class BrowserClientDownloadTransferStore {
   }
 
   private settle(session: TransferSession): void {
+    this.clearIdleTimer(session)
     if (this.sessions.get(session.key) === session) {
       this.sessions.delete(session.key)
     }

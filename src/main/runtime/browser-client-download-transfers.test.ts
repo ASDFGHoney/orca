@@ -1,12 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS,
   BROWSER_CLIENT_DOWNLOAD_WORKSPACE_DIRECTORY,
   BrowserClientDownloadTransferStore,
   type BrowserClientDownloadTransferDependencies
 } from './browser-client-download-transfers'
 
-function createStore(overrides: Partial<BrowserClientDownloadTransferDependencies> = {}) {
+function createStore(
+  overrides: Partial<BrowserClientDownloadTransferDependencies> = {},
+  maxActiveTransfers?: number
+) {
   const written: { relativePath: string; contentBase64: string; append: boolean }[] = []
   const removed: string[] = []
   const committed: { tempRelativePath: string; finalRelativePath: string }[] = []
@@ -26,7 +30,7 @@ function createStore(overrides: Partial<BrowserClientDownloadTransferDependencie
     ...overrides
   }
   return {
-    store: new BrowserClientDownloadTransferStore(dependencies),
+    store: new BrowserClientDownloadTransferStore(dependencies, maxActiveTransfers),
     written,
     removed,
     committed,
@@ -42,6 +46,10 @@ const base = {
   filename: 'report.pdf',
   platform: 'linux' as NodeJS.Platform
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('BrowserClientDownloadTransferStore', () => {
   it('appends sequential chunks and commits into the workspace downloads directory', async () => {
@@ -250,6 +258,88 @@ describe('BrowserClientDownloadTransferStore', () => {
       store.accept({ ...base, contentBase64: 'AAA=', offset: 3, final: true })
     ).rejects.toThrow('browser_client_download_transfer_settled')
     expect(committed).toEqual([])
+  })
+
+  it('retires an idle transfer and hands its slot to the next download', async () => {
+    vi.useFakeTimers()
+    const { store, removed } = createStore({}, 1)
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+    expect(store.activeTransferCount()).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS)
+
+    expect(removed).toEqual([`${BROWSER_CLIENT_DOWNLOAD_WORKSPACE_DIRECTORY}/.incoming-transfer-1`])
+    expect(store.activeTransferCount()).toBe(0)
+    expect(
+      await store.accept({
+        ...base,
+        transferId: 'transfer-2',
+        contentBase64: '',
+        offset: 0,
+        final: true
+      })
+    ).toEqual({
+      workspaceRelativePath: `${BROWSER_CLIENT_DOWNLOAD_WORKSPACE_DIRECTORY}/report.pdf`
+    })
+  })
+
+  it('never expires a transfer whose chunk is still in flight', async () => {
+    vi.useFakeTimers()
+    let releaseWrite = (): void => {}
+    const stalledWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    let writes = 0
+    const { store, removed } = createStore({
+      writeChunk: async () => {
+        writes += 1
+        if (writes > 1) {
+          await stalledWrite
+        }
+      }
+    })
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+
+    const accepting = store.accept({ ...base, contentBase64: 'AAA=', offset: 2, final: false })
+    await vi.advanceTimersByTimeAsync(BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS * 2)
+    releaseWrite()
+
+    expect(await accepting).toBeNull()
+    expect(removed).toEqual([])
+    expect(store.activeTransferCount()).toBe(1)
+  })
+
+  it('restarts the idle deadline on every chunk', async () => {
+    vi.useFakeTimers()
+    const { store, removed } = createStore()
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+
+    await vi.advanceTimersByTimeAsync(BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS - 1)
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 2, final: false })
+    await vi.advanceTimersByTimeAsync(BROWSER_CLIENT_DOWNLOAD_TRANSFER_IDLE_TIMEOUT_MS - 1)
+
+    expect(removed).toEqual([])
+    expect(store.activeTransferCount()).toBe(1)
+  })
+
+  it('frees the slot a released page was holding', async () => {
+    const { store } = createStore({}, 1)
+    await store.accept({ ...base, contentBase64: 'AAA=', offset: 0, final: false })
+
+    await store.releasePage(base.browserPageId)
+
+    expect(store.activeTransferCount()).toBe(0)
+    expect(
+      await store.accept({
+        ...base,
+        transferId: 'transfer-2',
+        contentBase64: '',
+        offset: 0,
+        final: true
+      })
+    ).toEqual({
+      workspaceRelativePath: `${BROWSER_CLIENT_DOWNLOAD_WORKSPACE_DIRECTORY}/report.pdf`
+    })
   })
 
   it('rejects malformed base64 instead of silently truncating the file', async () => {
