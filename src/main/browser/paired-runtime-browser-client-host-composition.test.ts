@@ -247,6 +247,7 @@ describe('PairedRuntimeBrowserClientHostComposition', () => {
 
     expect(rig.order).toEqual([
       'activate-routes',
+      'closing',
       'suspend-routes',
       'fence-navigation',
       'close-host',
@@ -265,8 +266,9 @@ describe('PairedRuntimeBrowserClientHostComposition', () => {
 
     expect(rig.routes.suspend).toHaveBeenCalledWith(error)
     expect(rig.executor.fenceNavigation).toHaveBeenCalledOnce()
-    expect(rig.order.slice(0, 4)).toEqual([
+    expect(rig.order.slice(0, 5)).toEqual([
       'activate-routes',
+      'closing',
       'suspend-routes',
       'fence-navigation',
       'close-host'
@@ -283,6 +285,7 @@ describe('PairedRuntimeBrowserClientHostComposition', () => {
 
     expect(rig.order).toEqual([
       'activate-routes',
+      'closing',
       'suspend-routes',
       'fence-navigation',
       'close-host',
@@ -295,6 +298,7 @@ describe('PairedRuntimeBrowserClientHostComposition', () => {
 
     expect(rig.order).toEqual([
       'activate-routes',
+      'closing',
       'suspend-routes',
       'fence-navigation',
       'close-host',
@@ -492,6 +496,9 @@ function createRig(
           const host = makeHost(callbacks, replacement)
           hosts.push(host)
           return host
+        },
+        onClosing: () => {
+          order.push('closing')
         },
         onError
       })

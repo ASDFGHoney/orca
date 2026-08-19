@@ -13,7 +13,7 @@ import { BrowserClientNetworkRouteRegistry } from './browser-client-network-rout
 import { browserNativeExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientDownloadRelay } from './browser-client-download-relay'
-import { setBrowserClientDownloadRouter } from './browser-client-download-routing'
+import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
 import { BrowserClientUploadStaging } from './browser-client-upload-staging'
@@ -69,8 +69,14 @@ const browserClientHosts =
         transport: fileChannel,
         resolvePage: (webContentsId) => executor?.findPageByWebContentsId(webContentsId)
       })
-      setBrowserClientDownloadRouter(downloadRelay)
+      // Keyed by environment so a download resolves the composition that owns its page, never
+      // whichever one composed last.
+      const releaseDownloadRouting = registerBrowserClientDownloadRouter(
+        input.environmentId,
+        downloadRelay
+      )
       return new PairedRuntimeBrowserClientHostComposition({
+        onClosing: releaseDownloadRouting,
         initialInput: input,
         createRoutes: (next, authority) => createNetworkRoutes(next.pairing, authority),
         createExecutor: (next, { retainNetworkRoute, onPageUnavailable }) => {

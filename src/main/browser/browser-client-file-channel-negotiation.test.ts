@@ -4,6 +4,7 @@ import { BrowserClientHostAttachParams } from '../../shared/browser-client-host-
 import { createBrowserClientHostAttachRequest } from './browser-client-host-attach-request'
 import { sameBrowserClientHostLeaseAuthority } from './browser-client-host-command-authority'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import { PairedRuntimeBrowserClientHost } from './paired-runtime-browser-client-host'
 
 const leaseOptions = {
   pairing: {} as never,
@@ -65,29 +66,65 @@ describe('browser file channel negotiation', () => {
   it('reports the channel unavailable until a negotiated lease binds it', async () => {
     const transport = new BrowserClientFileChannelTransport()
     expect(transport.available).toBe(false)
+    expect(transport.availability).toBe('unavailable')
     await expect(transport.request('browser.clientHost.fileChannel.read', {})).rejects.toThrow(
       'browser_client_file_channel_unsupported'
     )
 
     const sender = {
       fileChannelNegotiated: false,
+      fileChannelAvailability: 'unsupported' as const,
       sendFileChannelRequest: async () => ({ ok: true, result: {}, _meta: {} }) as never
     }
     transport.bind(sender)
     expect(transport.available).toBe(false)
+    // Old host: the caller may keep its local fallback, unlike a lost or unbound channel.
+    expect(transport.availability).toBe('unsupported')
 
     const negotiatedSender = {
       fileChannelNegotiated: true,
+      fileChannelAvailability: 'negotiated' as const,
       sendFileChannelRequest: async () =>
         ({ ok: true, result: { released: true }, _meta: {} }) as never
     }
     transport.bind(negotiatedSender)
     expect(transport.available).toBe(true)
+    expect(transport.availability).toBe('negotiated')
     expect(await transport.request('browser.clientHost.fileChannel.abort', {})).toEqual({
       released: true
     })
 
     transport.unbind(negotiatedSender)
     expect(transport.available).toBe(false)
+    expect(transport.availability).toBe('unavailable')
+  })
+
+  it('separates a host that never offered the channel from one whose lease is gone', () => {
+    const host = new PairedRuntimeBrowserClientHost({
+      pairing: {} as never,
+      authorityRuntimeId: 'runtime-1',
+      browserHostClientId: 'host-1',
+      hostCapabilities: ['webview'],
+      fileChannelProtocolVersion: 1,
+      handler: () => Promise.reject(new Error('unused'))
+    }) as unknown as {
+      closed: boolean
+      authority: { fileChannelProtocolVersion?: 1 } | null
+      lease: { authority: { fileChannelProtocolVersion?: 1 } | null }
+      fileChannelAvailability: string
+    }
+
+    expect(host.fileChannelAvailability).toBe('unavailable')
+
+    // Old host: it attached, and its authority never named a file channel version.
+    host.authority = { fileChannelProtocolVersion: undefined }
+    expect(host.fileChannelAvailability).toBe('unsupported')
+
+    host.authority = { fileChannelProtocolVersion: 1 }
+    host.lease.authority = { fileChannelProtocolVersion: 1 }
+    expect(host.fileChannelAvailability).toBe('negotiated')
+
+    host.closed = true
+    expect(host.fileChannelAvailability).toBe('unavailable')
   })
 })

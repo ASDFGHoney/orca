@@ -1495,9 +1495,10 @@ export class BrowserManager {
     // instead of reserving a name in the desktop Downloads folder. A popup downloads to its
     // opener's page: the popup itself is a client-local transient with no logical page of its own.
     const ownerContext = this.resolvePopupOwnerContext(guestWebContentsId)
-    const clientRoute = routeBrowserClientDownload({
+    const decision = routeBrowserClientDownload({
       guestWebContentsId: ownerContext?.rootGuestWebContentsId ?? guestWebContentsId
     })
+    const clientRoute = decision.kind === 'remote' ? decision.route : null
     const destination = (() => {
       if (clientRoute) {
         return {
@@ -1505,6 +1506,11 @@ export class BrowserManager {
           savePath: clientRoute.stagingPath,
           reservationKey: null
         }
+      }
+      // Why: a client-hosted download with no resolvable remote destination is canceled rather than
+      // written to this desktop's Downloads folder.
+      if (decision.kind === 'blocked') {
+        return null
       }
       try {
         return browserDownloadDestinationReservations.reserve(requestedFilename)
@@ -1548,7 +1554,13 @@ export class BrowserManager {
     }
 
     if (!destination) {
-      this.finishDownloadInternal(downloadId, 'failed', 'Could not choose a Downloads file name.')
+      this.finishDownloadInternal(
+        downloadId,
+        'failed',
+        decision.kind === 'blocked'
+          ? 'Could not save the download to the remote workspace.'
+          : 'Could not choose a Downloads file name.'
+      )
       try {
         item.cancel()
       } catch {

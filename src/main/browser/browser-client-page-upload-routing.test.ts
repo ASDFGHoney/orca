@@ -98,6 +98,7 @@ function negotiatedTransport(contents: string): BrowserClientFileChannelTranspor
   const transport = new BrowserClientFileChannelTransport()
   transport.bind({
     fileChannelNegotiated: true,
+    fileChannelAvailability: 'negotiated' as const,
     sendFileChannelRequest: async () =>
       ({
         ok: true,

@@ -2,8 +2,17 @@ import { BROWSER_CLIENT_FILE_CHANNEL_REQUIRED_ERROR } from '../../shared/browser
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 
+/**
+ * `unsupported` is the mixed-version case — the lease attached to a host that never offered the file
+ * channel — and is the only one that may fall back to the desktop Downloads folder. `unavailable`
+ * (no lease yet, transport lost, host closed) must fail closed instead: the host may well support
+ * the channel, so a local save would be a silent downgrade of where the bytes land.
+ */
+export type BrowserClientFileChannelAvailability = 'negotiated' | 'unsupported' | 'unavailable'
+
 export type BrowserClientFileChannelSender = {
   readonly fileChannelNegotiated: boolean
+  readonly fileChannelAvailability: BrowserClientFileChannelAvailability
   sendFileChannelRequest(
     method: string,
     params: unknown,
@@ -32,6 +41,13 @@ export class BrowserClientFileChannelTransport {
 
   get available(): boolean {
     return this.sender?.fileChannelNegotiated === true
+  }
+
+  get availability(): BrowserClientFileChannelAvailability {
+    if (this.available) {
+      return 'negotiated'
+    }
+    return this.sender?.fileChannelAvailability ?? 'unavailable'
   }
 
   async request(

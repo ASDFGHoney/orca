@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { BrowserClientHostedPageInventory } from '../../shared/browser-client-host-protocol'
-import { BrowserClientDownloadRelay } from './browser-client-download-relay'
 import {
-  routeBrowserClientDownload,
-  setBrowserClientDownloadRouter
-} from './browser-client-download-routing'
+  BrowserClientDownloadRelay,
+  type BrowserClientDownloadRoute
+} from './browser-client-download-relay'
+import { resetBrowserClientDownloadRouting } from './browser-client-download-routing'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
 
 const page: BrowserClientHostedPageInventory = Object.freeze({
@@ -26,10 +26,28 @@ function negotiatedTransport(
   const transport = new BrowserClientFileChannelTransport()
   transport.bind({
     fileChannelNegotiated: true,
+    fileChannelAvailability: 'negotiated',
     sendFileChannelRequest: async (method, params) =>
       ({ ok: true, result: handler(method, params), _meta: {} }) as never
   })
   return transport
+}
+
+function boundTransport(
+  availability: 'unsupported' | 'unavailable'
+): BrowserClientFileChannelTransport {
+  const transport = new BrowserClientFileChannelTransport()
+  transport.bind({
+    fileChannelNegotiated: false,
+    fileChannelAvailability: availability,
+    sendFileChannelRequest: async () => ({ ok: true, result: {}, _meta: {} }) as never
+  })
+  return transport
+}
+
+function remoteRoute(outcome: ReturnType<BrowserClientDownloadRelay['route']>) {
+  expect(outcome.kind).toBe('remote')
+  return (outcome as { kind: 'remote'; route: BrowserClientDownloadRoute }).route
 }
 
 function memoryFilesystem(contents: Buffer) {
@@ -56,7 +74,7 @@ function memoryFilesystem(contents: Buffer) {
 }
 
 afterEach(() => {
-  setBrowserClientDownloadRouter(null)
+  resetBrowserClientDownloadRouting()
 })
 
 describe('BrowserClientDownloadRelay', () => {
@@ -78,10 +96,9 @@ describe('BrowserClientDownloadRelay', () => {
       filesystem
     })
 
-    const route = relay.route({ guestWebContentsId: 7 })
-    expect(route).not.toBeNull()
+    const route = remoteRoute(relay.route({ guestWebContentsId: 7 }))
 
-    const destination = await route?.complete('report.pdf')
+    const destination = await route.complete('report.pdf')
 
     expect(destination).toEqual({
       workspaceRelativePath: '.orca/browser-downloads/report.pdf',
@@ -89,22 +106,34 @@ describe('BrowserClientDownloadRelay', () => {
     })
     expect(writes.at(0)?.offset).toBe(0)
     expect(writes.at(-1)).toMatchObject({ final: true, contentBase64: '', offset: 11 })
-    expect(removed).toContain(route?.stagingPath)
+    expect(removed).toContain(route.stagingPath)
   })
 
-  it('does not route a download when the file channel was never negotiated', () => {
+  it('keeps the local fallback when the host never offered the file channel', () => {
     const relay = new BrowserClientDownloadRelay({
       stagingRoot: '/tmp/staging',
       hostLabel: 'build-box',
-      transport: new BrowserClientFileChannelTransport(),
+      transport: boundTransport('unsupported'),
       resolvePage: () => page,
       filesystem: memoryFilesystem(Buffer.alloc(0)).filesystem
     })
 
-    expect(relay.route({ guestWebContentsId: 7 })).toBeNull()
+    expect(relay.route({ guestWebContentsId: 7 })).toEqual({ kind: 'local-fallback' })
   })
 
-  it('does not route a download for a WebContents that is not a client-hosted page', () => {
+  it('reports an owned page whose channel is momentarily gone as unavailable', () => {
+    const relay = new BrowserClientDownloadRelay({
+      stagingRoot: '/tmp/staging',
+      hostLabel: 'build-box',
+      transport: boundTransport('unavailable'),
+      resolvePage: () => page,
+      filesystem: memoryFilesystem(Buffer.alloc(0)).filesystem
+    })
+
+    expect(relay.route({ guestWebContentsId: 7 })).toEqual({ kind: 'unavailable' })
+  })
+
+  it('claims no ownership of a WebContents that is not one of its pages', () => {
     const relay = new BrowserClientDownloadRelay({
       stagingRoot: '/tmp/staging',
       hostLabel: 'build-box',
@@ -113,7 +142,7 @@ describe('BrowserClientDownloadRelay', () => {
       filesystem: memoryFilesystem(Buffer.alloc(0)).filesystem
     })
 
-    expect(relay.route({ guestWebContentsId: 7 })).toBeNull()
+    expect(relay.route({ guestWebContentsId: 7 })).toEqual({ kind: 'unowned' })
   })
 
   it('aborts the remote transfer and removes the staged copy when a chunk is rejected', async () => {
@@ -134,38 +163,11 @@ describe('BrowserClientDownloadRelay', () => {
       filesystem
     })
 
-    const route = relay.route({ guestWebContentsId: 7 })
-    await expect(route?.complete('report.pdf')).rejects.toThrow(
+    const route = remoteRoute(relay.route({ guestWebContentsId: 7 }))
+    await expect(route.complete('report.pdf')).rejects.toThrow(
       'browser_client_download_chunk_rejected'
     )
     expect(aborted).toHaveLength(1)
     expect(removed.length).toBeGreaterThan(0)
-  })
-
-  it('falls back to the desktop Downloads folder when no client router is registered', () => {
-    expect(routeBrowserClientDownload({ guestWebContentsId: 7 })).toBeNull()
-  })
-
-  it('routes through the registered client router once one is installed', () => {
-    const relay = new BrowserClientDownloadRelay({
-      stagingRoot: '/tmp/staging',
-      hostLabel: 'build-box',
-      transport: negotiatedTransport(() => ({ accepted: true })),
-      resolvePage: () => page,
-      filesystem: memoryFilesystem(Buffer.alloc(0)).filesystem
-    })
-    setBrowserClientDownloadRouter(relay)
-
-    expect(routeBrowserClientDownload({ guestWebContentsId: 7 })?.browserPageId).toBe('page-1')
-  })
-
-  it('keeps the local fallback when the router throws', () => {
-    setBrowserClientDownloadRouter({
-      route: () => {
-        throw new Error('router exploded')
-      }
-    })
-
-    expect(routeBrowserClientDownload({ guestWebContentsId: 7 })).toBeNull()
   })
 })

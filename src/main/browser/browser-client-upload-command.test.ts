@@ -41,6 +41,7 @@ function transportReturning(
   const transport = new BrowserClientFileChannelTransport()
   transport.bind({
     fileChannelNegotiated: true,
+    fileChannelAvailability: 'negotiated' as const,
     sendFileChannelRequest: async (_method, params) => {
       calls.push(params)
       const requested = (params as { workspaceRelativePath: string }).workspaceRelativePath

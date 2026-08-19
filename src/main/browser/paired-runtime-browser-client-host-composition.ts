@@ -69,6 +69,8 @@ type PairedRuntimeBrowserClientHostCompositionOptions<
   ): ComposedPageExecutor
   createHost(input: Start, callbacks: ClientHostCallbacks): ComposedClientHost
   onError?: (error: Error) => void
+  /** Runs as closing begins, before teardown: the point after which this composition owns nothing. */
+  onClosing?: () => void
 }
 
 export class PairedRuntimeBrowserClientHostComposition<
@@ -145,6 +147,11 @@ export class PairedRuntimeBrowserClientHostComposition<
     if (!this.closed) {
       this.closed = true
       this.hostGeneration += 1
+      try {
+        this.options.onClosing?.()
+      } catch (closingError) {
+        this.reportCleanupError(asError(closingError))
+      }
       this.fenceTerminalAuthority(error)
     }
     this.closePromise ??= this.closeComposition(error)

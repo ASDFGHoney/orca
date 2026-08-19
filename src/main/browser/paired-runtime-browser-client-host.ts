@@ -7,6 +7,7 @@ import type {
 import type { PairingOffer } from '../../shared/pairing'
 import type { RemoteRuntimeSubscriptionOptions } from '../../shared/remote-runtime-client'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import type { BrowserClientFileChannelAvailability } from './browser-client-file-channel-transport'
 import { BrowserClientHostCommandDispatcher } from './browser-client-host-command-dispatcher'
 import type { CommandHandler, DispatcherOptions } from './browser-client-host-command-state'
 import { PairedRuntimeBrowserHostLease } from './paired-runtime-browser-host-lease'
@@ -37,6 +38,7 @@ export type PairedRuntimeBrowserClientHostOptions = {
 export class PairedRuntimeBrowserClientHost {
   private readonly lease: PairedRuntimeBrowserHostLease
   private dispatcher: BrowserClientHostCommandDispatcher | null = null
+  private authority: BrowserClientHostLeaseAuthority | null = null
   private closePromise: Promise<boolean> | null = null
   private closed = false
   private errorReported = false
@@ -97,6 +99,18 @@ export class PairedRuntimeBrowserClientHost {
     return !this.closed && this.lease.fileChannelNegotiated
   }
 
+  // An attached authority that never named the file channel is an older host, the one case a
+  // download may keep its desktop destination. Anything else — no lease yet, transport lost, host
+  // closed — is merely unavailable, and guessing "local" there would silently move the bytes.
+  get fileChannelAvailability(): BrowserClientFileChannelAvailability {
+    if (this.fileChannelNegotiated) {
+      return 'negotiated'
+    }
+    return this.authority && this.authority.fileChannelProtocolVersion !== 1
+      ? 'unsupported'
+      : 'unavailable'
+  }
+
   sendFileChannelRequest(
     method: string,
     params: unknown,
@@ -124,6 +138,7 @@ export class PairedRuntimeBrowserClientHost {
     if (this.closed || this.dispatcher) {
       throw new Error('Browser client host authority is unavailable')
     }
+    this.authority = authority
     this.options.onAuthority?.(authority)
     this.dispatcher = new BrowserClientHostCommandDispatcher({
       authority,

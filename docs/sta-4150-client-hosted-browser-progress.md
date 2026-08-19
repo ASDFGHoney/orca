@@ -1597,6 +1597,20 @@ topology, versions, and explicit gaps at every later checkpoint.
   `docs/remote-browser-client-hosting.md` with its pinned SHA-256 verified after the copy, and
   added the client-hosted interactive-session affinity note plus the `browser_host_unavailable`
   recovery to the agent-facing CLI guide source (regenerating only its bundled artifact).
+- Closed two download-routing holes found in security review, both of which wrote remote-controlled
+  bytes to the client's Downloads folder. Route-guest popups are opened into an Orca-built window,
+  so Electron never fires `did-create-window` for them and no owning page could be resolved: popups
+  now register their opener for their whole lifetime (creation, destroy, opener fence, controller
+  dispose) and download exactly like their opener, terminal event included. The process-global
+  download router — overwritten by each environment composition, with every miss reading as
+  "not client-hosted" — is now a per-composition registry resolved by actual page ownership, so a
+  page from one environment is never looked up in another's executor. Policy for a WebContents in a
+  client route partition: owner plus negotiated channel routes remotely; an owner whose lease never
+  negotiated the channel keeps the deliberate desktop-Downloads carve-out for old hosts; an
+  unresolvable owner or a negotiated-but-unusable channel now cancels the download and surfaces the
+  existing remote-failure path instead of saving locally. Ordinary server-hosted guests are
+  untouched. This narrows the earlier "a host with no client-hosted router keeps the current
+  local-Downloads behavior" note above to hosts that provably never offered the file channel.
 
 ## Completion rule
 

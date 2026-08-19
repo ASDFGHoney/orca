@@ -1,8 +1,10 @@
-import { session } from 'electron'
+import { session, webContents } from 'electron'
+import { setBrowserClientRouteWebContentsProbe } from './browser-client-download-routing'
 import {
   configureBrowserRoutePartitionBindingsForOrcaProfile,
   currentBrowserRoutePartitionBindingStore
 } from './browser-route-partition-binding-runtime'
+import { isBrowserRouteGuestPopup } from './browser-route-guest-popup-ownership'
 import { BrowserRouteSessionRegistry } from './browser-route-session-registry'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 import { browserSessionRegistry } from './browser-session-registry'
@@ -47,6 +49,20 @@ export const browserRouteWebContentsRegistry = new BrowserRouteWebContentsRegist
     browserRouteSessionRegistry.retirePreparedPagesOwnedByRenderer(rendererWebContentsId)
 })
 routeWebContentsRegistryRef.current = browserRouteWebContentsRegistry
+
+// Why: downloads must fail closed for client-hosted content, so the router needs to tell a route
+// guest (or one of its popups) from an ordinary browser guest before it decides where bytes land.
+setBrowserClientRouteWebContentsProbe((webContentsId) => {
+  if (isBrowserRouteGuestPopup(webContentsId)) {
+    return true
+  }
+  const contents = webContents.fromId(webContentsId)
+  return Boolean(
+    contents &&
+    !contents.isDestroyed() &&
+    browserRouteSessionRegistry.getPartitionForSession(contents.session) !== null
+  )
+})
 
 export function configureRouteSessionsForOrcaProfile(options: {
   orcaProfileId: string

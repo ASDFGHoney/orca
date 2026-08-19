@@ -29,6 +29,15 @@ export type BrowserClientDownloadRoute = {
   abort(): Promise<void>
 }
 
+export type BrowserClientDownloadRouteOutcome =
+  /** This composition hosts no page behind the WebContents; another one may. */
+  | { kind: 'unowned' }
+  | { kind: 'remote'; route: BrowserClientDownloadRoute }
+  /** Mixed-version host with no file channel: the deliberate desktop Downloads carve-out. */
+  | { kind: 'local-fallback' }
+  /** The owning page's channel is negotiated but not usable right now: fail closed. */
+  | { kind: 'unavailable' }
+
 type RelayFilesystem = {
   // Why: Electron's will-download handler must call setSavePath synchronously, so the staging
   // directory has to exist before the handler returns.
@@ -84,23 +93,36 @@ export class BrowserClientDownloadRelay {
     this.filesystem = options.filesystem ?? nodeRelayFilesystem
   }
 
-  route(input: { guestWebContentsId: number }): BrowserClientDownloadRoute | null {
-    if (!this.options.transport.available) {
-      return null
-    }
+  /**
+   * Ownership first: a WebContents this composition does not own is `unowned` so the caller can keep
+   * asking the composition that does, instead of reading one composition's miss as permission to
+   * write the bytes to the client's Downloads folder.
+   */
+  route(input: { guestWebContentsId: number }): BrowserClientDownloadRouteOutcome {
     const page = this.options.resolvePage(input.guestWebContentsId)
     if (!page) {
-      return null
+      return { kind: 'unowned' }
+    }
+    const availability = this.options.transport.availability
+    if (availability !== 'negotiated') {
+      return availability === 'unsupported' ? { kind: 'local-fallback' } : { kind: 'unavailable' }
     }
     const transferId = randomUUID()
     const stagingPath = path.join(this.options.stagingRoot, transferId, 'download')
-    this.filesystem.mkdirSync(path.dirname(stagingPath))
+    try {
+      this.filesystem.mkdirSync(path.dirname(stagingPath))
+    } catch {
+      return { kind: 'unavailable' }
+    }
     return {
-      transferId,
-      browserPageId: page.browserPageId,
-      stagingPath,
-      complete: (filename) => this.complete(page, transferId, stagingPath, filename),
-      abort: () => this.abort(page, transferId, stagingPath)
+      kind: 'remote',
+      route: {
+        transferId,
+        browserPageId: page.browserPageId,
+        stagingPath,
+        complete: (filename) => this.complete(page, transferId, stagingPath, filename),
+        abort: () => this.abort(page, transferId, stagingPath)
+      }
     }
   }
 
