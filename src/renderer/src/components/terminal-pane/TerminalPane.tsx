@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { IDisposable } from '@xterm/xterm'
 import { useAppStore } from '../../store'
+import { logQuickCommandStartupDiagnostic } from '@/lib/quick-command-startup-diagnostics'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
 import { DaemonActionDialog, useDaemonActions } from '@/components/shared/useDaemonActions'
 import {
@@ -724,7 +725,14 @@ function TerminalPane(
   const rightClickToPaste = settings?.terminalRightClickToPaste ?? isWindowsUserAgent()
   // Why: Windows ConPTY doesn't forward DECSET 2004 from TUIs, so xterm may not know multi-line paste needs bracketed protection.
   const forceBracketedMultilineTextPaste = isWindowsUserAgent()
-  const [startup] = useState(() => useAppStore.getState().pendingStartupByTabId[tabId])
+  const [startup] = useState(() => {
+    const queued = useAppStore.getState().pendingStartupByTabId[tabId]
+    logQuickCommandStartupDiagnostic('paneMount', {
+      tabId,
+      queuedStartup: queued ? 'found' : 'MISSING'
+    })
+    return queued
+  })
   const [shouldMeasureHiddenStartup, setShouldMeasureHiddenStartup] = useState(
     () => startup !== undefined && !isVisible
   )

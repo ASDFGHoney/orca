@@ -25,6 +25,7 @@ import { buildWindowsPtyCompatibilityOptions } from '@/lib/pane-manager/windows-
 import { buildTerminalKeyboardProtocolOptions } from '@/lib/pane-manager/terminal-keyboard-protocol'
 import { resolvePaneKeyboardProtocolAgent } from './terminal-keyboard-protocol-pane-agent'
 import { useAppStore } from '@/store'
+import { logQuickCommandStartupDiagnostic } from '@/lib/quick-command-startup-diagnostics'
 import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
 import {
   createFilePathLinkProvider,
@@ -515,6 +516,7 @@ export function createQueuedStartupConsumer(
     }
     spent = true
     consume()
+    logQuickCommandStartupDiagnostic('consumed', {})
   }
 }
 
