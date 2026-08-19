@@ -5,11 +5,6 @@ import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-clien
 import type { ConnectionState } from '../transport/types'
 import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../../src/shared/new-workspace/worktree-create-retry-policy'
 import {
-  LIVENESS_IDLE_MS,
-  LIVENESS_PROBE_TIMEOUT_MS,
-  MISSED_PROBE_LIMIT
-} from '../transport/rpc-session-liveness-watchdog'
-import {
   createWorktreeWithNameRetry,
   WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS,
   WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS
@@ -60,11 +55,17 @@ function scriptedClient(
     | { throws: unknown; dropsConnection?: boolean; takesMs?: number; reconnectsAfterMs?: number }
   >,
   attempts: Attempt[],
-  connection?: ReturnType<typeof connectionController>
+  connection?: ReturnType<typeof connectionController>,
+  // Wall-clock stamp of the last frame that really arrived. Absent = a transport that
+  // can't vouch for one, which must fall back to the send; a function models a live
+  // socket whose stamp keeps advancing.
+  lastInboundAt?: number | (() => number)
 ): RpcClient {
   let call = 0
   return {
     getState: () => connection?.getState() ?? 'connected',
+    getLastInboundAt: () =>
+      (typeof lastInboundAt === 'function' ? lastInboundAt() : lastInboundAt) ?? null,
     onStateChange: (listener: (state: ConnectionState) => void) =>
       connection?.onStateChange(listener) ?? (() => {}),
     sendRequest: async (method: string, params?: unknown) => {
@@ -404,7 +405,10 @@ describe('createWorktreeWithNameRetry', () => {
           { id: 'wt-duplicate' }
         ],
         attempts,
-        connection
+        connection,
+        // Watchdog probes keep answering throughout, so the replay window looks wide
+        // open on arrival: only the still-connected guard can stop this replay.
+        () => Date.now()
       )
 
       const pending = createWorktreeWithNameRetry({
@@ -434,13 +438,15 @@ describe('createWorktreeWithNameRetry', () => {
     try {
       const attempts: Attempt[] = []
       const connection = connectionController()
-      const spent = 5_000
       const client = scriptedClient(
         [
           {
+            // Most of the window is already gone by the time the drop is reported, so the
+            // remainder — not the full wait — is what the second wait gets.
             throws: markRpcDeliveryUnknown(new Error('Connection interrupted')),
             dropsConnection: true,
-            reconnectsAfterMs: spent
+            takesMs: 30_000,
+            reconnectsAfterMs: 1_000
           },
           {
             // Second drop, and this time the phone never comes back.
@@ -478,15 +484,176 @@ describe('createWorktreeWithNameRetry', () => {
     // so vitest's default 5s real-time budget is reachable on a loaded runner.
   }, 30_000)
 
-  it('leaves room for watchdog detection inside the host dedupe TTL', () => {
-    // Restates the budget from the watchdog's side: a half-open socket is only reported
-    // after a full idle period plus the missed-probe budget, and the wait runs *after*
-    // that. Raising the wait without re-deriving it against the TTL would let a replay
-    // land on a dropped record.
-    const worstCaseDetectionMs = LIVENESS_IDLE_MS + MISSED_PROBE_LIMIT * LIVENESS_PROBE_TIMEOUT_MS
-    expect(worstCaseDetectionMs + WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS).toBeLessThanOrEqual(
-      WORKTREE_CREATE_DEDUPE_TTL_MS
+  it('refuses a replay when the ambiguity surfaced long after the last inbound frame', async () => {
+    vi.useFakeTimers()
+    try {
+      const attempts: Attempt[] = []
+      const connection = connectionController()
+      const startedAt = Date.now()
+      const client = scriptedClient(
+        [
+          {
+            throws: markRpcDeliveryUnknown(new Error('Connection interrupted')),
+            dropsConnection: true,
+            reconnectsAfterMs: 1_000,
+            // The phone was backgrounded: the OS suspended JS and killed the socket, and
+            // nothing observed the drop until the app came back ten minutes later.
+            takesMs: 600_000
+          }
+        ],
+        attempts,
+        connection,
+        startedAt + 2_000
+      )
+      const pending = createWorktreeWithNameRetry({
+        client,
+        baseName: 'limpet',
+        buildParams: (name) => ({ repo: 'id:r', name }),
+        supportsIdempotentCutoverRetry: true,
+        mintMutationId: () => 'key-stale'
+      })
+      const settled = expect(pending).rejects.toThrow('Connection interrupted')
+      await vi.advanceTimersByTimeAsync(700_000)
+      await settled
+      // The host forgot this create ~9 minutes ago. A replay would not reconcile — it
+      // would build a second worktree — so the create fails instead.
+      expect(attempts).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+    // Generous: advanceTimersByTimeAsync yields through REAL macrotasks between ticks,
+    // so vitest's default 5s real-time budget is reachable on a loaded runner.
+  }, 30_000)
+
+  it('still replays a long-running create whose socket stayed live until it dropped', async () => {
+    vi.useFakeTimers()
+    try {
+      const attempts: Attempt[] = []
+      const connection = connectionController()
+      const startedAt = Date.now()
+      const client = scriptedClient(
+        [
+          {
+            // Three minutes of clone/fetch with the socket answering probes throughout,
+            // then it drops and the watchdog reports it four seconds later.
+            throws: markRpcDeliveryUnknown(new Error('Connection interrupted')),
+            dropsConnection: true,
+            reconnectsAfterMs: 1_000,
+            takesMs: 184_000
+          },
+          { id: 'wt-long' }
+        ],
+        attempts,
+        connection,
+        startedAt + 180_000
+      )
+      const pending = createWorktreeWithNameRetry({
+        client,
+        baseName: 'kelp',
+        buildParams: (name) => ({ repo: 'id:r', name }),
+        supportsIdempotentCutoverRetry: true,
+        mintMutationId: () => 'key-long'
+      })
+      await vi.advanceTimersByTimeAsync(250_000)
+      // Anchoring at the send would refuse this — the create outran the TTL long before it
+      // went ambiguous — but the record only starts ticking when the host RESOLVES, and the
+      // live socket proves our knowledge was current.
+      expect(await pending).toEqual({ worktreeId: 'wt-long', name: 'kelp' })
+      expect(attempts).toHaveLength(2)
+      expect(attempts[0]!.params.clientMutationId).toBe('key-long')
+      expect(attempts[1]!.params.clientMutationId).toBe('key-long')
+    } finally {
+      vi.useRealTimers()
+    }
+    // Generous: advanceTimersByTimeAsync yields through REAL macrotasks between ticks,
+    // so vitest's default 5s real-time budget is reachable on a loaded runner.
+  }, 30_000)
+
+  it('does not extend the replay window when the replacement session reports fresher inbound activity', async () => {
+    vi.useFakeTimers()
+    try {
+      const attempts: Attempt[] = []
+      const connection = connectionController()
+      const startedAt = Date.now()
+      // The replacement session starts answering probes, so its inbound stamp is far
+      // newer than anything that bears on when the ORIGINAL create resolved host-side.
+      let lastInboundAt = startedAt + 1_000
+      setTimeout(() => {
+        lastInboundAt = startedAt + 45_000
+      }, 45_000)
+      const client = scriptedClient(
+        [
+          {
+            throws: markRpcDeliveryUnknown(new Error('Connection lost')),
+            dropsConnection: true,
+            takesMs: 40_000,
+            reconnectsAfterMs: 1_000
+          },
+          {
+            throws: markRpcDeliveryUnknown(new Error('Connection lost')),
+            dropsConnection: true,
+            takesMs: 20_000,
+            reconnectsAfterMs: 1_000
+          },
+          { id: 'wt-third' }
+        ],
+        attempts,
+        connection,
+        () => lastInboundAt
+      )
+
+      const pending = createWorktreeWithNameRetry({
+        client,
+        baseName: 'urchin',
+        buildParams: (name) => ({ repo: 'id:r', name }),
+        supportsIdempotentCutoverRetry: true,
+        mintMutationId: () => 'key-anchored'
+      })
+      const settled = expect(pending).rejects.toThrow('Connection lost')
+      await vi.advanceTimersByTimeAsync(120_000)
+      await settled
+      // The deadline is fixed at the FIRST ambiguity. Re-reading it here would buy another
+      // 50s of window off a stamp that says nothing about the original request.
+      expect(attempts).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+    // Generous: advanceTimersByTimeAsync yields through REAL macrotasks between ticks,
+    // so vitest's default 5s real-time budget is reachable on a loaded runner.
+  }, 30_000)
+
+  it('does not replay a dropped transport error that was never marked delivery-unknown', async () => {
+    const attempts: Attempt[] = []
+    const connection = connectionController()
+    const client = scriptedClient(
+      // Unmarked: the frame is known NOT to have reached the wire, so the host never saw
+      // it and a replay would be a second create, not a reconciliation. The transport
+      // still leaves 'connected', so only the delivery-unknown check stops this.
+      [{ throws: new Error('Socket closed before send'), dropsConnection: true }],
+      attempts,
+      connection
     )
+    await expect(
+      createWorktreeWithNameRetry({
+        client,
+        baseName: 'urchin',
+        buildParams: (name) => ({ repo: 'id:r', name }),
+        supportsIdempotentCutoverRetry: true,
+        mintMutationId: () => 'key-unmarked'
+      })
+    ).rejects.toThrow('Socket closed before send')
+    expect(attempts).toHaveLength(1)
+  })
+
+  it('keeps the replay window strictly inside the host dedupe TTL', () => {
+    // The window is measured from a lower bound on when the host could have resolved, so
+    // it has to leave the record room for the replay to still be in flight. Widening it
+    // to the whole TTL would let the last replay land on a record that just expired.
     expect(WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS).toBeGreaterThan(0)
+    expect(WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS).toBeLessThan(WORKTREE_CREATE_DEDUPE_TTL_MS)
+    // A single wait must not be able to consume the window on its own.
+    expect(WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS).toBeLessThan(
+      WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS
+    )
   })
 })

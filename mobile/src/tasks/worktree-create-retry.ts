@@ -10,11 +10,6 @@ import {
   isRetryableWorktreeCreateConflict,
   WORKTREE_CREATE_DEDUPE_TTL_MS
 } from '../../../src/shared/new-workspace/worktree-create-retry-policy'
-import {
-  LIVENESS_IDLE_MS,
-  LIVENESS_PROBE_TIMEOUT_MS,
-  MISSED_PROBE_LIMIT
-} from '../transport/rpc-session-liveness-watchdog'
 import { WORKTREE_CREATE_TIMEOUT_MS } from './workspace-create-timeout'
 
 // Why: server-side collision checks (branch already exists locally / on a remote
@@ -44,19 +39,16 @@ const WORKTREE_CREATE_AMBIGUOUS_MAX_RETRIES = 2
 // Why: the host keeps a settled create's dedupe record for WORKTREE_CREATE_DEDUPE_TTL_MS
 // after it resolves; a replay that lands later misses it and the host's suffix loop
 // builds a SECOND worktree — and for folder workspaces a second one with the SAME name
-// and no collision check at all. So what bounds a safe replay is not how long the create
-// ran, but how STALE the client's knowledge is: the worst case between the host losing a
-// response and the client noticing. A dead socket is detected by the liveness watchdog
-// within one idle period plus its missed-probe budget, so that is the staleness ceiling
-// for any drop the transport actually reports.
-const WORKTREE_CREATE_AMBIGUITY_DETECTION_CEILING_MS =
-  LIVENESS_IDLE_MS + MISSED_PROBE_LIMIT * LIVENESS_PROBE_TIMEOUT_MS
-// What is left of the host's record once that detection latency is spent. The reconnect
-// wait plus any further replay has to fit inside it.
+// and no collision check at all. So a replay is bounded by how stale our knowledge of the
+// host is, and that has to be measured in WALL CLOCK: iOS/Android suspend JS timers while
+// the app is backgrounded, so any ceiling derived from timer intervals — a watchdog probe
+// budget, a request timeout — can be arbitrarily wrong across a background cycle, which is
+// exactly when a create sits ambiguous for minutes.
+const WORKTREE_CREATE_REPLAY_FLIGHT_MARGIN_MS = 10_000
 export const WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS =
-  WORKTREE_CREATE_DEDUPE_TTL_MS - WORKTREE_CREATE_AMBIGUITY_DETECTION_CEILING_MS
-export const WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS =
-  WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS
+  WORKTREE_CREATE_DEDUPE_TTL_MS - WORKTREE_CREATE_REPLAY_FLIGHT_MARGIN_MS
+// Bounded so the Create spinner doesn't sit for the whole window; the deadline still caps it.
+export const WORKTREE_CREATE_AMBIGUOUS_RECONNECT_WAIT_MS = 20_000
 
 export type CreateWorktreeWithNameRetryArgs = {
   client: RpcClient
@@ -124,8 +116,7 @@ async function sendWorktreeCreateResilient(
 ): Promise<RpcResponse> {
   let migrationRetry = 0
   let ambiguousRetry = 0
-  // Anchored at the FIRST ambiguity, not at the send: a create legitimately runs for
-  // minutes, and the host's record only starts ticking once it resolves.
+  const firstSentAt = Date.now()
   let replayDeadlineAt: number | null = null
   for (;;) {
     try {
@@ -159,7 +150,9 @@ async function sendWorktreeCreateResilient(
       if (client.getState() === 'connected') {
         throw error
       }
-      replayDeadlineAt ??= Date.now() + WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS
+      // Computed once: a later ambiguity reads a fresher lastInboundAt from the
+      // replacement session, which would push the deadline past the record it respects.
+      replayDeadlineAt ??= resolveReplayDeadline(client, firstSentAt)
       const remainingWindowMs = replayDeadlineAt - Date.now()
       if (remainingWindowMs <= 0) {
         throw error
@@ -179,6 +172,17 @@ async function sendWorktreeCreateResilient(
       }
     }
   }
+}
+
+// Latest instant the host's dedupe record is still guaranteed to exist, from the earliest
+// point the create could have resolved. lastInboundAt stamps a frame that really arrived,
+// so it stays honest across a suspension in a way a timer budget cannot; the send is the
+// fallback, and a sound floor either way, because the host cannot resolve a create it has
+// not yet received.
+function resolveReplayDeadline(client: RpcClient, firstSentAt: number): number {
+  const lastInboundAt = client.getLastInboundAt?.() ?? null
+  const anchor = lastInboundAt !== null && lastInboundAt > firstSentAt ? lastInboundAt : firstSentAt
+  return anchor + WORKTREE_CREATE_AMBIGUOUS_REPLAY_WINDOW_MS
 }
 
 function defaultWorktreeCreateMutationId(): string {
