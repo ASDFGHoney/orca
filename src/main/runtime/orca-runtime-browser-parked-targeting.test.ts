@@ -233,6 +233,36 @@ describe('headless parked-page targeting', () => {
     expect(fake.wakeCalls).toEqual([])
   })
 
+  it('counts a stream ending as page use so the idle clock restarts then', async () => {
+    // Why: streaming pins the page but frames are not activity, so a client
+    // that only watched for longer than the idle window would otherwise have
+    // the page parked ~one recheck after closing the pane.
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const { startBrowserScreencast } = await import('../browser/browser-screencast-stream')
+    let resolveDone!: () => void
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve
+    })
+    vi.mocked(startBrowserScreencast).mockResolvedValue({
+      stop: vi.fn(() => resolveDone()),
+      done
+    } as never)
+    const fake = createFakeHeadlessHost(['live-a'], [])
+    const commands = new RuntimeBrowserCommands(fake.host)
+
+    const started = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'live-a', format: 'jpeg' },
+      { sendBinary: vi.fn() }
+    )
+    const wakesBeforeStop = fake.wakeCalls.length
+
+    started.session.stop()
+    await started.session.done
+
+    await vi.waitFor(() => expect(fake.wakeCalls.length).toBeGreaterThan(wakesBeforeStop))
+    expect(fake.wakeCalls.at(-1)).toBe('live-a')
+  })
+
   it('reports a listed-index overrun against the merged listing', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     const fake = createFakeHeadlessHost(['live-a'], ['parked-b'])

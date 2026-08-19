@@ -578,6 +578,12 @@ export class RuntimeBrowserCommands {
     let stoppingPromise: Promise<void> | null = null
     const clearPageGate = (): void => {
       this.activeScreencastPageIds.delete(browserPageId)
+      // Why (STA-4341): the stream pin kept this page resident while a client
+      // watched without issuing commands, so its activity stamp can be
+      // arbitrarily stale the instant the pin lifts — stale enough to park it
+      // on the next 30s recheck. Viewing counts as use: restamp so the idle
+      // window runs from when the viewer left, not from their last command.
+      void this.markHeadlessBrowserPageUsed(browserPageId).catch(() => {})
       if (this.activeScreencastsByPageId.get(browserPageId) === activeRecord) {
         this.activeScreencastsByPageId.delete(browserPageId)
       }

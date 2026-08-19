@@ -293,7 +293,8 @@ storage live in the profile partition and survive, but an unsubmitted form or
 an SPA's in-memory state does not. A page is never parked while a paired
 client is streaming it, while a command against it is in flight, while its
 initial load is still running, or while it is waiting on a certificate
-decision. A navigation that has still not finished by the load timeout is
+decision. A stream ending counts as use, so a viewer who closes the pane gets
+the full idle window before the page parks, even if they only watched. A navigation that has still not finished by the load timeout is
 deliberately reclaimable — otherwise one stalled page per create could hold a
 renderer forever, which is the failure this exists to prevent; waking it simply
 retries the address. Parking never closes a page: the page stays open until
