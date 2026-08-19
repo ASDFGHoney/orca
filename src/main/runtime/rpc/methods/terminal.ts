@@ -3357,6 +3357,12 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       // Server-side auto-fit: resize PTY to phone dims before serializing scrollback
       try {
         if (isMobile && clientId) {
+          // Why no presence release on the `closed` path below, unlike the lease-only
+          // sibling: handleMobileSubscribe writes mobileSubscribers before its first
+          // await, so a cleanup that wins this race always runs after the write and
+          // removes it. Releasing here would instead delete a reconnect replacement's
+          // (ptyId, clientId) record — the hazard the lease-only note describes.
+          // Pinned by terminal-subscribe-mobile-presence-release.test.ts.
           await runtime.handleMobileSubscribe(ptyId, clientId, params.viewport)
         } else if (clientId && params.viewport) {
           // Why: legacy subscribe records geometry without taking ownership; only an explicit activity/claim frame may suppress the host.
