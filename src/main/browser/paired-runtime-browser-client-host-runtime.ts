@@ -202,6 +202,18 @@ export function closePairedRuntimeBrowserClientHostEnvironment(
   return browserClientHosts.closeEnvironment(environmentId, error)
 }
 
+/**
+ * Closes an environment's client host and waits for its pages to be released, so a caller that
+ * clears the environment's partition storage runs after the partitions are actually free.
+ */
+export function retirePairedRuntimeBrowserClientHostEnvironment(
+  environmentId: string,
+  error?: Error
+): Promise<boolean> {
+  clientHostRouteIdentities.delete(environmentId)
+  return browserClientHosts.retireEnvironment(environmentId, error)
+}
+
 export function shutdownPairedRuntimeBrowserClientHosts(): Promise<void> {
   clientHostRouteIdentities.clear()
   return browserClientHosts.close()

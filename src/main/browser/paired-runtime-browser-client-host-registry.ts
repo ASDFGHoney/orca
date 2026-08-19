@@ -117,25 +117,55 @@ export class PairedRuntimeBrowserClientHostRegistry<
   }
 
   closeEnvironment(environmentId: string, error?: Error): Promise<boolean> {
-    return this.enqueue(environmentId, async () => {
-      const record = this.hosts.get(environmentId)
-      if (!record) {
-        return false
-      }
-      let settled = false
-      try {
-        settled = await record.composition.close(error)
-      } catch (closeError) {
-        this.retainCleanupTombstone(environmentId, record)
-        throw closeError
-      }
-      if (settled && this.hosts.get(environmentId) === record) {
-        this.hosts.delete(environmentId)
-      } else if (!settled) {
-        this.retainCleanupTombstone(environmentId, record)
-      }
-      return settled
-    })
+    return this.enqueue(environmentId, () => this.closeEnvironmentRecord(environmentId, error))
+  }
+
+  /**
+   * Closes an environment and waits for its pages, including a close that deferred executor
+   * teardown behind unsettled handlers. Removal-time storage clearing needs partitions actually
+   * released; `closeEnvironment` alone can resolve while the pages are still prepared.
+   */
+  async retireEnvironment(environmentId: string, error?: Error): Promise<boolean> {
+    const pendingCleanup: Promise<void>[] = []
+    try {
+      return await this.enqueue(environmentId, async () => {
+        const record = this.hosts.get(environmentId)
+        try {
+          const settled = await this.closeEnvironmentRecord(environmentId, error)
+          if (!settled && record) {
+            pendingCleanup.push(record.composition.whenClosed())
+          }
+          return settled
+        } catch (closeError) {
+          if (record) {
+            pendingCleanup.push(record.composition.whenClosed())
+          }
+          throw closeError
+        }
+      })
+    } finally {
+      await Promise.all(pendingCleanup.map((cleanup) => cleanup.catch(() => undefined)))
+    }
+  }
+
+  private async closeEnvironmentRecord(environmentId: string, error?: Error): Promise<boolean> {
+    const record = this.hosts.get(environmentId)
+    if (!record) {
+      return false
+    }
+    let settled = false
+    try {
+      settled = await record.composition.close(error)
+    } catch (closeError) {
+      this.retainCleanupTombstone(environmentId, record)
+      throw closeError
+    }
+    if (settled && this.hosts.get(environmentId) === record) {
+      this.hosts.delete(environmentId)
+    } else if (!settled) {
+      this.retainCleanupTombstone(environmentId, record)
+    }
+    return settled
   }
 
   close(): Promise<void> {

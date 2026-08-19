@@ -18,7 +18,7 @@ const {
   reconnectRemoteRuntimeSharedControlConnectionMock,
   retryRemoteRuntimeSharedControlConnectionsNowMock,
   closeRemoteRuntimeRequestConnectionMock,
-  closePairedRuntimeBrowserClientHostEnvironmentMock
+  retirePairedRuntimeBrowserClientHostEnvironmentMock
 } = vi.hoisted(() => ({
   handleMock: vi.fn(),
   onMock: vi.fn(),
@@ -34,7 +34,7 @@ const {
   reconnectRemoteRuntimeSharedControlConnectionMock: vi.fn(),
   retryRemoteRuntimeSharedControlConnectionsNowMock: vi.fn(),
   closeRemoteRuntimeRequestConnectionMock: vi.fn(),
-  closePairedRuntimeBrowserClientHostEnvironmentMock: vi.fn()
+  retirePairedRuntimeBrowserClientHostEnvironmentMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -62,7 +62,8 @@ vi.mock('./runtime-environment-request-connections', () => ({
   closeRemoteRuntimeRequestConnection: closeRemoteRuntimeRequestConnectionMock
 }))
 vi.mock('../browser/paired-runtime-browser-client-host-runtime', () => ({
-  closePairedRuntimeBrowserClientHostEnvironment: closePairedRuntimeBrowserClientHostEnvironmentMock
+  retirePairedRuntimeBrowserClientHostEnvironment:
+    retirePairedRuntimeBrowserClientHostEnvironmentMock
 }))
 
 import {
@@ -106,8 +107,8 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     reconnectRemoteRuntimeSharedControlConnectionMock.mockReset()
     retryRemoteRuntimeSharedControlConnectionsNowMock.mockReset()
     closeRemoteRuntimeRequestConnectionMock.mockReset()
-    closePairedRuntimeBrowserClientHostEnvironmentMock.mockReset()
-    closePairedRuntimeBrowserClientHostEnvironmentMock.mockResolvedValue(false)
+    retirePairedRuntimeBrowserClientHostEnvironmentMock.mockReset()
+    retirePairedRuntimeBrowserClientHostEnvironmentMock.mockResolvedValue(false)
   })
 
   afterEach(() => {
@@ -522,7 +523,7 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     )
 
     invalidateRuntimeEnvironmentTransport(added.environment.id)
-    expect(closePairedRuntimeBrowserClientHostEnvironmentMock).toHaveBeenCalledWith(
+    expect(retirePairedRuntimeBrowserClientHostEnvironmentMock).toHaveBeenCalledWith(
       added.environment.id,
       expect.objectContaining({ message: 'Runtime environment transport was invalidated' })
     )
