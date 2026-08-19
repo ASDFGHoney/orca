@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import { importCookiesIntoClientRoutePartition } from '../browser/browser-client-route-cookie-import'
+import { getPairedRuntimeBrowserClientRouteIdentity } from '../browser/paired-runtime-browser-client-host-runtime'
 import { isTrustedBrowserRenderer } from './browser-renderer-trust'
 import {
   pickCookieFile,
@@ -107,6 +108,7 @@ export function registerBrowserSessionProfileHandlers(): void {
   })
 
   ipcMain.removeHandler('browser:session:detectBrowsers')
+  ipcMain.removeHandler('browser:session:detectBrowsersForClientHost')
   ipcMain.removeHandler('browser:session:importFromBrowser')
   ipcMain.removeHandler('browser:session:importFromBrowserForClientHost')
 
@@ -135,28 +137,25 @@ export function registerBrowserSessionProfileHandlers(): void {
     }
   )
 
+  ipcMain.handle('browser:session:detectBrowsers', (event): DetectedBrowserPickerEntry[] => {
+    if (!isTrustedBrowserRenderer(event.sender)) {
+      return []
+    }
+    return detectedBrowserPickerEntries()
+  })
+
+  // Why: the picker must list the machine the import will actually read from, and for a
+  // client-hosted environment that is this desktop — never the (usually headless) remote.
   ipcMain.handle(
-    'browser:session:detectBrowsers',
-    (
-      event
-    ): {
-      family: string
-      label: string
-      profiles: { name: string; directory: string }[]
-      selectedProfile: string
-    }[] => {
+    'browser:session:detectBrowsersForClientHost',
+    (event, args: { environmentId: string }): DetectedBrowserPickerEntry[] | null => {
       if (!isTrustedBrowserRenderer(event.sender)) {
         return []
       }
-      // Why: the renderer only needs family/label/profiles for the UI picker.
-      // Strip cookiesPath, keychainService, and keychainAccount to avoid
-      // exposing filesystem paths and credential store identifiers to the renderer.
-      return detectInstalledBrowsers().map((b) => ({
-        family: b.family,
-        label: b.label,
-        profiles: b.profiles,
-        selectedProfile: b.selectedProfile
-      }))
+      if (!getPairedRuntimeBrowserClientRouteIdentity(args.environmentId)) {
+        return null
+      }
+      return detectedBrowserPickerEntries()
     }
   )
 
@@ -218,4 +217,23 @@ export function registerBrowserSessionProfileHandlers(): void {
       return result
     }
   )
+}
+
+type DetectedBrowserPickerEntry = {
+  family: string
+  label: string
+  profiles: { name: string; directory: string }[]
+  selectedProfile: string
+}
+
+// Why: the renderer only needs family/label/profiles for the UI picker. Strip cookiesPath,
+// keychainService, and keychainAccount to avoid exposing filesystem paths and credential store
+// identifiers to the renderer.
+function detectedBrowserPickerEntries(): DetectedBrowserPickerEntry[] {
+  return detectInstalledBrowsers().map((browser) => ({
+    family: browser.family,
+    label: browser.label,
+    profiles: browser.profiles,
+    selectedProfile: browser.selectedProfile
+  }))
 }

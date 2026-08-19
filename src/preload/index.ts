@@ -3026,6 +3026,11 @@ const api = {
     sessionDetectBrowsers: (): Promise<unknown[]> =>
       ipcRenderer.invoke('browser:session:detectBrowsers'),
 
+    sessionDetectBrowsersForClientHost: (args: {
+      environmentId: string
+    }): Promise<unknown[] | null> =>
+      ipcRenderer.invoke('browser:session:detectBrowsersForClientHost', args),
+
     sessionImportFromBrowser: (args: {
       profileId: string
       browserFamily: string

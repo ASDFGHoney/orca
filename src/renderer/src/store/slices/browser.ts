@@ -2144,15 +2144,23 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     const runtimeEnvironmentId = getBrowserSettingsRuntimeEnvironmentId(get())
     if (runtimeEnvironmentId) {
       try {
-        const result = await callRuntimeRpc<BrowserDetectProfilesResult>(
-          { kind: 'environment', environmentId: runtimeEnvironmentId },
-          'browser.profileDetectBrowsers',
-          undefined,
-          { timeoutMs: 15_000 }
-        )
+        // Why: the import runs on whichever machine hosts the pages, so the picker must offer that
+        // machine's browsers -- client-hosted means this desktop, not the (usually headless) remote.
+        const browsers =
+          (await window.api.browser.sessionDetectBrowsersForClientHost({
+            environmentId: runtimeEnvironmentId
+          })) ??
+          (
+            await callRuntimeRpc<BrowserDetectProfilesResult>(
+              { kind: 'environment', environmentId: runtimeEnvironmentId },
+              'browser.profileDetectBrowsers',
+              undefined,
+              { timeoutMs: 15_000 }
+            )
+          ).browsers
         set((s) =>
           getBrowserSettingsHostId(s) === hostId
-            ? { detectedBrowsers: result.browsers, detectedBrowsersLoaded: true }
+            ? { detectedBrowsers: browsers, detectedBrowsersLoaded: true }
             : {}
         )
       } catch {

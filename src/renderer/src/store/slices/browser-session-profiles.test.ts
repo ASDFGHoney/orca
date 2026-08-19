@@ -211,6 +211,50 @@ describe('createBrowserSlice runtime guard', () => {
     })
   })
 
+  // Why: the picker must offer the machine the import will read from, or a headless remote leaves
+  // it empty (feature unreachable) or offers profile names that only exist on the remote.
+  it('lists this desktop’s browsers when the environment’s pages are client-hosted', async () => {
+    const store = createTestStore()
+    store.setState({ settings: settingsWithRuntime('env-1') })
+    mockApi.browser.sessionDetectBrowsersForClientHost.mockResolvedValueOnce([
+      { family: 'chrome', label: 'Google Chrome', profiles: [], selectedProfile: 'Default' }
+    ])
+
+    await store.getState().fetchDetectedBrowsers()
+
+    expect(mockApi.browser.sessionDetectBrowsersForClientHost).toHaveBeenCalledWith({
+      environmentId: 'env-1'
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'browser.profileDetectBrowsers' })
+    )
+    expect(store.getState().detectedBrowsers).toEqual([
+      { family: 'chrome', label: 'Google Chrome', profiles: [], selectedProfile: 'Default' }
+    ])
+  })
+
+  it('falls back to the server-side detection when the desktop hosts no pages', async () => {
+    const store = createTestStore()
+    store.setState({ settings: settingsWithRuntime('env-1') })
+    runtimeEnvironmentCall.mockResolvedValueOnce({
+      id: 'rpc-detect',
+      ok: true,
+      result: {
+        browsers: [
+          { family: 'chrome', label: 'Google Chrome', profiles: [], selectedProfile: 'Profile 3' }
+        ]
+      },
+      _meta: { runtimeId: 'runtime-1' }
+    })
+
+    await store.getState().fetchDetectedBrowsers()
+
+    expect(mockApi.browser.sessionDetectBrowsersForClientHost).toHaveBeenCalled()
+    expect(store.getState().detectedBrowsers).toEqual([
+      { family: 'chrome', label: 'Google Chrome', profiles: [], selectedProfile: 'Profile 3' }
+    ])
+  })
+
   it('imports client-hosted logins on this desktop instead of the headless server', async () => {
     const store = createTestStore()
     store.setState({ settings: settingsWithRuntime('env-1') })

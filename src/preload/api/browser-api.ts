@@ -128,6 +128,10 @@ export type BrowserApi = {
   sessionImportCookies: (args: { profileId: string }) => Promise<BrowserCookieImportResult>
   sessionResolvePartition: (args: { profileId: string | null }) => Promise<string | null>
   sessionDetectBrowsers: () => Promise<DetectedBrowserInfo[]>
+  /** Null when the environment's pages are not client-hosted on this desktop. */
+  sessionDetectBrowsersForClientHost: (args: {
+    environmentId: string
+  }) => Promise<DetectedBrowserInfo[] | null>
   sessionImportFromBrowser: (args: {
     profileId: string
     browserFamily: string
