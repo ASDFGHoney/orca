@@ -84,7 +84,7 @@ describe('mobile structured session reducer', () => {
       { owner: 'native', direction: null, phase: 'idle', stage: null, operationId: null }
     ]
     let state = EMPTY_MOBILE_STRUCTURED_AGENT_SESSION
-    const projected: Array<Pick<AgentSessionHandoffStatus, 'owner' | 'phase' | 'stage'>> = []
+    const projected: Pick<AgentSessionHandoffStatus, 'owner' | 'phase' | 'stage'>[] = []
 
     for (const [index, handoff] of handoffs.entries()) {
       state = reduceMobileStructuredAgentSession(state, {

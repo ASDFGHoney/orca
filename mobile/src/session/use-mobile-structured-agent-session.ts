@@ -11,7 +11,6 @@ import {
   EMPTY_STRUCTURED_AGENT_SESSION,
   oldestStructuredAgentSessionCursor,
   reduceStructuredAgentSession,
-  shouldAdvanceStructuredResumeCursor,
   type StructuredAgentSessionState
 } from '../../../src/shared/structured-agent-session-reducer'
 import type { RpcClient } from '../transport/rpc-client'
@@ -61,12 +60,15 @@ export function useMobileStructuredAgentSession(args: {
   const { client, sessionId } = args
   const [state, dispatch] = useReducer(reduceStructuredAgentSession, EMPTY_STRUCTURED_AGENT_SESSION)
   const stateRef = useRef(state)
-  stateRef.current = state
-  const resumeCursorRef = useRef<AgentJournalCursor | null>(state.cursor)
-  resumeCursorRef.current = state.cursor
   const [loadingOlder, setLoadingOlder] = useState(false)
   const reconnectRef = useRef(createMobileStructuredReconnectState())
   const cancelLongevityRef = useRef<() => void>(() => {})
+
+  // The reducer owns the resume cursor, not the stream handlers: mirroring it
+  // post-commit means a reconnect can only replay, never skip undelivered items.
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   useEffect(() => {
     dispatch({ type: 'loading' })
@@ -107,7 +109,7 @@ export function useMobileStructuredAgentSession(args: {
         client,
         sessionId,
         cursor,
-        resumeCursor: () => resumeCursorRef.current,
+        resumeCursor: () => stateRef.current.cursor,
         onEvent: (raw) => {
           if (closed) {
             return
@@ -123,12 +125,6 @@ export function useMobileStructuredAgentSession(args: {
           }
           if (event.type === 'snapshot' || event.type === 'reset') {
             setLoadingOlder(false)
-            resumeCursorRef.current = event.snapshot.cursor
-          } else if (event.type === 'batch') {
-            const current = resumeCursorRef.current
-            if (shouldAdvanceStructuredResumeCursor(current, event.batch.cursor)) {
-              resumeCursorRef.current = event.batch.cursor
-            }
           }
           coalescer.push(event)
         }
@@ -146,7 +142,6 @@ export function useMobileStructuredAgentSession(args: {
         const result = response.result as AgentSessionHistoryResult
         if (result.ok) {
           dispatch({ type: 'tail-page', page: result.page })
-          resumeCursorRef.current = result.page.liveCursor ?? null
           openSubscription(result.page.liveCursor ?? null)
           return
         }
@@ -160,7 +155,6 @@ export function useMobileStructuredAgentSession(args: {
             fence: result.fence ?? 0
           }
         })
-        resumeCursorRef.current = result.snapshot.cursor
         openSubscription(result.snapshot.cursor)
       })
       .catch((error: unknown) => {
