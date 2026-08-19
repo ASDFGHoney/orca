@@ -18,6 +18,7 @@ export function buildRelayHookEnvelope(
     source,
     paneKey: event.paneKey,
     ...(event.launchToken ? { launchToken: event.launchToken } : {}),
+    ...(event.hookProcessId ? { hookProcessId: event.hookProcessId } : {}),
     tabId: event.tabId,
     worktreeId: event.worktreeId,
     connectionId: null,

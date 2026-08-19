@@ -106,6 +106,31 @@ describe('RelayAgentHookServer', () => {
     }
   })
 
+  it('forwards a validated hook process id', async () => {
+    const forward = vi.fn<(envelope: AgentHookRelayEnvelope) => void>()
+    const server = new RelayAgentHookServer({ endpointDir: dir, forward })
+    await server.start()
+    try {
+      const { port, token } = server.getCoordinates()
+      await fetch(`http://127.0.0.1:${port}/hook/opencode`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': token
+        },
+        body: JSON.stringify({
+          paneKey: PANE_KEY,
+          hookProcessId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          payload: { hook_event_name: 'SessionBusy', sessionID: 'session-1' }
+        })
+      })
+
+      expect(forward.mock.calls[0][0].hookProcessId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    } finally {
+      server.stop()
+    }
+  })
+
   it('rejects requests with the wrong bearer token (403)', async () => {
     const forward = vi.fn()
     const server = new RelayAgentHookServer({ endpointDir: dir, forward })

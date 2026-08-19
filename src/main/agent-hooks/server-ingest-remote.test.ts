@@ -609,6 +609,40 @@ describe('AgentHookServer ingestRemote', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('rejects non-string launchToken', () => {
+    const server = new AgentHookServer()
+    const listener = vi.fn()
+    server.setListener(listener)
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        launchToken: 123 as unknown as string,
+        payload: { state: 'working', prompt: 'p', agentType: 'opencode' }
+      },
+      'conn-1'
+    )
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed hookProcessId', () => {
+    const server = new AgentHookServer()
+    const listener = vi.fn()
+    server.setListener(listener)
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        hookProcessId: 'not-a-process-id',
+        payload: { state: 'working', prompt: 'p', agentType: 'opencode' }
+      },
+      'conn-1'
+    )
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('rejects empty paneKey after trim', () => {
     const server = new AgentHookServer()
     const payload = parseAgentStatusPayload(

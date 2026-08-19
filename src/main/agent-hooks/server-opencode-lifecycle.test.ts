@@ -4,6 +4,8 @@ import { AgentHookServer } from './server'
 
 const PANE = makePaneKey('tab-opencode', '11111111-1111-4111-8111-111111111111')
 const TARGET_PANE = makePaneKey('tab-opencode', '22222222-2222-4222-8222-222222222222')
+const OLD_HOOK_PROCESS_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const FRESH_HOOK_PROCESS_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
 describe('AgentHookServer OpenCode lifecycle', () => {
   const servers: AgentHookServer[] = []
@@ -21,7 +23,8 @@ describe('AgentHookServer OpenCode lifecycle', () => {
       payload: Record<string, unknown>,
       launchToken: string,
       paneKey?: string,
-      source?: 'opencode' | 'mimo-code'
+      source?: 'opencode' | 'mimo-code',
+      hookProcessId?: string
     ) => Promise<Response>
   }> {
     const server = new AgentHookServer()
@@ -30,7 +33,7 @@ describe('AgentHookServer OpenCode lifecycle', () => {
     const env = server.buildPtyEnv()
     return {
       server,
-      post: (payload, launchToken, paneKey = PANE, source = 'opencode') =>
+      post: (payload, launchToken, paneKey = PANE, source = 'opencode', hookProcessId) =>
         fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/${source}`, {
           method: 'POST',
           headers: {
@@ -40,6 +43,7 @@ describe('AgentHookServer OpenCode lifecycle', () => {
           body: JSON.stringify({
             paneKey,
             launchToken,
+            hookProcessId,
             tabId: 'tab-opencode',
             worktreeId: 'wt-opencode',
             env: 'production',
@@ -125,6 +129,59 @@ describe('AgentHookServer OpenCode lifecycle', () => {
 
     expect(server.getStatusSnapshot()).toEqual([
       expect.objectContaining({ state: 'working', prompt: '' })
+    ])
+  })
+
+  it('fences a stale process without blocking an existing-session resume', async () => {
+    const { server, post } = await setup()
+    await post(
+      { hook_event_name: 'SessionBusy', sessionID: 'old', prompt: 'stale process' },
+      'shared-token',
+      PANE,
+      'opencode',
+      OLD_HOOK_PROCESS_ID
+    )
+    server.retirePaneAuthority(PANE)
+    await post(
+      { hook_event_name: 'SessionStart', sessionID: 'fresh' },
+      'shared-token',
+      PANE,
+      'opencode',
+      FRESH_HOOK_PROCESS_ID
+    )
+    await post(
+      { hook_event_name: 'SessionBusy', sessionID: 'fresh' },
+      'shared-token',
+      PANE,
+      'opencode',
+      FRESH_HOOK_PROCESS_ID
+    )
+    await post(
+      {
+        hook_event_name: 'MessagePart',
+        role: 'user',
+        text: 'resume old',
+        messageID: 'resume',
+        sessionID: 'old'
+      },
+      'shared-token',
+      PANE,
+      'opencode',
+      FRESH_HOOK_PROCESS_ID
+    )
+    await post(
+      { hook_event_name: 'SessionBusy', sessionID: 'old', prompt: 'stale process' },
+      'shared-token',
+      PANE,
+      'opencode',
+      OLD_HOOK_PROCESS_ID
+    )
+
+    expect(server.getStatusSnapshot()).toEqual([
+      expect.objectContaining({
+        prompt: 'resume old',
+        providerSession: { key: 'session_id', id: 'old' }
+      })
     ])
   })
 

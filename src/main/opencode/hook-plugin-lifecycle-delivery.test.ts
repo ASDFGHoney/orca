@@ -147,6 +147,31 @@ describe('OpenCode plugin lifecycle delivery', () => {
     expect(posts).toEqual([{ hook_event_name: 'SessionStart', sessionID: 'root' }])
   })
 
+  it('uses one hook process id across lifecycle posts', async () => {
+    const hookProcessIds: string[] = []
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        hookProcessId: string
+        payload: RecordedPost
+      }
+      hookProcessIds.push(body.hookProcessId)
+      posts.push(body.payload)
+      return new Response(null, { status: 204 })
+    }) as typeof globalThis.fetch
+    const handler = await loadHandler()
+
+    await handler({
+      event: { type: 'session.created', properties: { info: { id: 'root' } } }
+    })
+    await handler({ event: status('busy') })
+
+    expect(hookProcessIds).toHaveLength(2)
+    expect(new Set(hookProcessIds).size).toBe(1)
+    expect(hookProcessIds[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    )
+  })
+
   it('preserves FIFO lifecycle order while the first session lookup is delayed', async () => {
     let releaseFirstLookup: (() => void) | undefined
     const firstLookup = new Promise<void>((resolve) => {
@@ -739,6 +764,56 @@ describe('OpenCode plugin lifecycle delivery', () => {
     await handler({ event: status('idle', 'root-b') })
     expect(names().filter((name) => name === 'SessionIdle')).toHaveLength(1)
     expect(names().at(-1)).toBe('SessionIdle')
+  })
+
+  it('keeps an active root busy when another root session is created', async () => {
+    const sessions = [{ id: 'root-a' }, { id: 'root-b' }]
+    let releaseLookup: (() => void) | undefined
+    const blockedLookup = new Promise<void>((resolve) => {
+      releaseLookup = resolve
+    })
+    const list = vi.fn(async () => {
+      await blockedLookup
+      return { data: sessions }
+    })
+    const handler = await loadHandler(list)
+
+    const busy = handler({ event: status('busy', 'root-a') })
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1))
+    const created = handler({
+      event: { type: 'session.created', properties: { info: { id: 'root-b' } } }
+    })
+    releaseLookup?.()
+    await Promise.all([busy, created])
+
+    expect(names()).toEqual(['SessionBusy'])
+  })
+
+  it('drops an old queued preview before a new root boundary', async () => {
+    vi.useFakeTimers()
+    const hooks = await loadHooks(async () => ({ data: [{ id: 'root-a' }, { id: 'root-b' }] }))
+    await hooks.event({
+      event: {
+        type: 'message.updated',
+        properties: { sessionID: 'root-a', info: { id: 'assistant-message', role: 'assistant' } }
+      }
+    })
+    const part = (text: string): PluginEvent => ({
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'root-a',
+        part: { type: 'text', text, messageID: 'assistant-message' }
+      }
+    })
+    await hooks.event({ event: part('first preview') })
+    await hooks.event({ event: part('queued preview') })
+
+    await hooks.event({
+      event: { type: 'session.created', properties: { info: { id: 'root-b' } } }
+    })
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(names()).toEqual(['MessagePart', 'SessionStart'])
   })
 
   it('reasserts Busy through the refreshed endpoint after a live text delta', async () => {
