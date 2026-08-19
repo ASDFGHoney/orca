@@ -13,10 +13,12 @@ const AUTO_GRANTED_BROWSER_PERMISSIONS = new Set([
   // Chromium still requires user activation, so this only removes Orca's
   // otherwise unactionable denial for immersive browser apps.
   'pointerLock',
-  // This session allows unpartitioned third-party cookies, so a cross-site frame already reads and
-  // writes them anyway; gating this protects nothing, and denying it consumed the caller's user
-  // gesture. Electron builds neither Chrome's activation gate nor its auto-grant, so the embedder
-  // must answer and check must agree with request. Revisit if Orca ever blocks third-party cookies.
+  // Orca allows unpartitioned third-party cookies, so cross-site frames already send them; denying
+  // this only rejected the API and consumed the caller's user gesture. Not cookies-only, though:
+  // the same permission also lifts third-party partitioning for localStorage/IndexedDB, which
+  // Chrome equally grants under this cookie policy. Electron has no auto-grant, so the embedder
+  // must answer, and check must agree with request. Revisit if Orca ever gains a cookie or
+  // storage-partitioning control.
   'storage-access'
 ])
 
