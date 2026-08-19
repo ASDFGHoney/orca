@@ -45,7 +45,8 @@
         "completed": "Downloaded {{filename}}",
         "canceled": "Download canceled.",
         "failed": "Couldn't finish the download."
-      }
+      },
+      "popupBlocked": "Popup blocked: {{origin}}"
     },
     "reopenOnServer": {
       "action": "Reopen on server",

@@ -98,6 +98,24 @@ describe('route guest OAuth popups', () => {
     expect(popups()).toHaveLength(4)
   })
 
+  it('tells the owning page every popup it refused, and stays quiet once the page is gone', () => {
+    const { guest, blockedPopups } = attachRegisteredGuest()
+
+    guest.openWindow('https://accounts.example.com/oauth')
+    guest.emitInput('mouseDown')
+    guest.openWindow('file:///etc/hosts')
+
+    expect(blockedPopups()).toEqual([
+      { openerWebContentsId: page.webContentsId, url: 'https://accounts.example.com/oauth' },
+      { openerWebContentsId: page.webContentsId, url: 'file:///etc/hosts' }
+    ])
+
+    guest.destroy()
+    guest.openWindow('https://accounts.example.com/oauth')
+
+    expect(blockedPopups()).toHaveLength(2)
+  })
+
   it('applies the WebRTC policy before the popup can load and fails closed when it cannot', () => {
     const { guest, popups } = attachRegisteredGuest()
     guest.emitInput('mouseDown')
@@ -290,8 +308,12 @@ function attachGuest() {
   )
   const routeSession = { marker: 'route-session' } as unknown as Session
   const pageAuthority = Symbol('page-authority')
+  const blocked: { openerWebContentsId: number; url: string }[] = []
   let prepared = true
   const registry = new BrowserRouteWebContentsRegistry({
+    reportBlockedPopup: (input) => {
+      blocked.push(input)
+    },
     getPartitionForSession: (session) =>
       session === routeSession
         ? partition
@@ -306,7 +328,7 @@ function attachGuest() {
   })
   const guest = createRouteGuest(routeSession)
   expect(registry.attachGuest(guest.guest)).toBe(true)
-  return { registry, guest, popups: () => opened }
+  return { registry, guest, popups: () => opened, blockedPopups: () => blocked }
 }
 
 function attachRegisteredGuest() {

@@ -5,6 +5,7 @@ import {
   currentBrowserRoutePartitionBindingStore
 } from './browser-route-partition-binding-runtime'
 import { isBrowserRouteGuestPopup } from './browser-route-guest-popup-ownership'
+import { browserManager } from './browser-manager'
 import { BrowserRouteSessionRegistry } from './browser-route-session-registry'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 import { browserSessionRegistry } from './browser-session-registry'
@@ -46,7 +47,8 @@ export const browserRouteWebContentsRegistry = new BrowserRouteWebContentsRegist
     browserRouteSessionRegistry.rekeyPreparedPage(previous, next),
   retirePreparedPage: (page) => browserRouteSessionRegistry.retirePreparedPage(page),
   retirePreparedPagesOwnedByRenderer: (rendererWebContentsId) =>
-    browserRouteSessionRegistry.retirePreparedPagesOwnedByRenderer(rendererWebContentsId)
+    browserRouteSessionRegistry.retirePreparedPagesOwnedByRenderer(rendererWebContentsId),
+  reportBlockedPopup: (blocked) => browserManager.reportRouteGuestPopupBlocked(blocked)
 })
 routeWebContentsRegistryRef.current = browserRouteWebContentsRegistry
 

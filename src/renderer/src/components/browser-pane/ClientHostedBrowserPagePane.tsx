@@ -15,6 +15,7 @@ import {
 } from './browser-client-page-metadata-publisher'
 import { attachBrowserClientPageToViewport } from './browser-client-page-renderer-installation'
 import { useBrowserClientHostedDownloadNotices } from './browser-client-hosted-download-notices'
+import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popup-notices'
 import {
   ReopenBrowserPageOnServerButton,
   reopenOnServerCaveat
@@ -61,6 +62,7 @@ export function ClientHostedBrowserPagePane({
   const { browserHostClientId, browserHostGeneration, pageHostGeneration } = placement
 
   useBrowserClientHostedDownloadNotices(browserTab.id)
+  useBrowserClientHostedPopupNotices(browserTab.id)
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current

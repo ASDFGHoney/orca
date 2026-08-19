@@ -1073,6 +1073,14 @@ export class BrowserManager {
     )
   }
 
+  /** Route guests own their own popup handler, so their denials arrive here instead. */
+  reportRouteGuestPopupBlocked(input: { openerWebContentsId: number; url: string }): void {
+    this.forwardOrQueuePopupEvent(input.openerWebContentsId, {
+      origin: safeOrigin(input.url),
+      action: 'blocked'
+    })
+  }
+
   private createPopupChildWindowWithOriginBar(
     openerGuest: Electron.WebContents,
     targetUrl: string,

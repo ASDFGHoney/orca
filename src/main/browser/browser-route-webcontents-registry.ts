@@ -71,7 +71,8 @@ export class BrowserRouteWebContentsRegistry {
     try {
       installBrowserRouteGuestQuarantine(state, {
         getPartitionForSession: (routeSession) =>
-          this.dependencies.getPartitionForSession(routeSession)
+          this.dependencies.getPartitionForSession(routeSession),
+        reportBlockedPopup: (blocked) => this.dependencies.reportBlockedPopup?.(blocked)
       })
     } catch {
       state.popups?.dispose()

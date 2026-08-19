@@ -21,6 +21,8 @@ export const MAX_BROWSER_ROUTE_GUEST_POPUPS = 4
 
 export type BrowserRouteGuestPopupDependencies = {
   getPartitionForSession: (session: Session) => string | null
+  /** Route guests replace the manager's popup handler, so a denial is otherwise entirely silent. */
+  reportBlockedPopup?: (input: { openerWebContentsId: number; url: string }) => void
   /** Seam for tests; production always opens the shared origin-bar window. */
   openPopupWindow?: (
     options: PopupChildWindowOptions,
@@ -112,6 +114,17 @@ export function createBrowserRouteGuestPopupController(input: {
     registerBrowserRouteGuestPopup({ popupWebContentsId, openerWebContentsId })
   }
 
+  const reportBlockedPopup = (rawUrl: unknown): void => {
+    try {
+      input.dependencies.reportBlockedPopup?.({
+        openerWebContentsId: input.opener.id,
+        url: typeof rawUrl === 'string' ? rawUrl : ''
+      })
+    } catch {
+      // A missing notice must never turn a denial into an exception the page can observe.
+    }
+  }
+
   const releasePopupOwnership = (popupWebContentsId: number): void => {
     popupWebContentsIds.delete(popupWebContentsId)
     releaseBrowserRouteGuestPopup(popupWebContentsId)
@@ -139,6 +152,10 @@ export function createBrowserRouteGuestPopupController(input: {
         !input.isNavigationAllowed(normalized) ||
         !gesture.consume()
       ) {
+        // Not when disposed: the opener is gone, so there is no pane left to tell.
+        if (!disposed) {
+          reportBlockedPopup(details?.url)
+        }
         return { action: 'deny' }
       }
       return {

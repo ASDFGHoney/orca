@@ -42,7 +42,8 @@ beforeEach(() => {
           return () => {
             listeners.finished = listeners.finished.filter((entry) => entry !== callback)
           }
-        }
+        },
+        onPopup: () => () => {}
       },
       runtimeEnvironments: { call: vi.fn(async () => ({})) }
     }
