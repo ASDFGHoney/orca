@@ -11,10 +11,9 @@ import {
 import type { ExecutionHostHealth } from '../../../../shared/execution-host-registry'
 import type { RuntimeCompatVerdict } from '../../../../shared/protocol-compat'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
-import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
-import type { ProjectGroup } from '../../../../shared/project-group-types'
 import type { Repo } from '../../../../shared/repo-types'
 import type { Row } from './worktree-list/grouping/row-types'
+import { getFolderWorkspaceHostId } from './folder-workspace-host-id'
 
 export type HostHeaderRow = {
   type: 'host-header'
@@ -54,19 +53,6 @@ function getRepoHostId(
     return getRepoExecutionHostId(repo)
   }
   return defaultHostId
-}
-
-function getSshHostId(connectionId: string): ExecutionHostId {
-  return `ssh:${encodeURIComponent(connectionId)}` as ExecutionHostId
-}
-
-function getFolderWorkspaceHostId(
-  folderWorkspace: Pick<FolderWorkspace, 'connectionId'>,
-  projectGroup: Pick<ProjectGroup, 'connectionId'>,
-  defaultHostId: ExecutionHostId
-): ExecutionHostId {
-  const connectionId = folderWorkspace.connectionId ?? projectGroup.connectionId
-  return connectionId ? getSshHostId(connectionId) : defaultHostId
 }
 
 function getRowHostId(row: Row, defaultHostId: ExecutionHostId): ExecutionHostId | null {
