@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   clearWsFallbackPort,
   readWsFallbackPort,
@@ -47,9 +47,14 @@ describe('ws-fallback-port-store', () => {
 
   it('clearing is a no-op when nothing is persisted and survives an unremovable path', () => {
     const userDataPath = makeUserDataPath()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(() => clearWsFallbackPort(userDataPath)).not.toThrow()
-    // Why: a directory at the file's path makes rmSync throw — clearing is best-effort like the write.
+    expect(warnSpy).not.toHaveBeenCalled()
+    // Why: a directory at the file's path makes rmSync throw — clearing is best-effort like the write, but
+    // must leave a trace, since a silently kept file re-arms the flip-flop it was meant to end.
     mkdirSync(join(userDataPath, 'mobile-ws-fallback-port.json'))
     expect(() => clearWsFallbackPort(userDataPath)).not.toThrow()
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })

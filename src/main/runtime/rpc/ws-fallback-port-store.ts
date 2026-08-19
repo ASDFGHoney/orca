@@ -44,13 +44,14 @@ export function writeWsFallbackPort(userDataPath: string, port: number): void {
   }
 }
 
-// Why: a fallback that failed to bind while the configured port recovered is obsolete — leaving it
-// re-arms a dead endpoint next launch, so the advertised port flip-flops (STA-4859, seen with
-// Windows Hyper-V reserved ranges that move across reboots).
+// Why: a fallback the OS refused to listen on is obsolete — leaving it re-arms a dead endpoint next
+// launch and flip-flops the advertised port (STA-4859, Windows reserved ranges that move across reboots).
 export function clearWsFallbackPort(userDataPath: string): void {
+  const target = join(userDataPath, FALLBACK_PORT_FILE)
   try {
-    rmSync(join(userDataPath, FALLBACK_PORT_FILE), { force: true })
-  } catch {
-    // Why: best-effort like the write — a stale file costs one more convergence pass, not a startup failure.
+    rmSync(target, { force: true })
+  } catch (error) {
+    // Why: best-effort like the write, but a silent failure re-arms the flip-flop — say so.
+    console.warn(`[ws-fallback-port-store] Failed to clear ${target}:`, error)
   }
 }
