@@ -323,7 +323,7 @@ describe('SkillInstallDialog', () => {
     expect(screen.queryByText(char.repeat(64))).toBeNull()
     expect(screen.queryByText('Immutable version')).toBeNull()
     expect(screen.queryByText('0 scripts')).toBeNull()
-    expect(screen.getAllByText(/Instructions only/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/^1 file$/).length).toBeGreaterThan(0)
   })
 
   it('warns about supporting files without blocking installation', async () => {
@@ -351,6 +351,8 @@ describe('SkillInstallDialog', () => {
     render(<SkillInstallDialog open onOpenChange={() => undefined} />)
 
     await inspectSkill()
+    expect(screen.getByText(/^2 files$/)).toBeTruthy()
+    expect(screen.queryByText(/supporting$/, { selector: 'span' })).toBeNull()
     expect(screen.getByText('Includes supporting files')).toBeTruthy()
     expect(screen.getByText(/include 1 file beyond SKILL.md/)).toBeTruthy()
     expect(screen.queryByRole('checkbox', { name: /I trust the sender/ })).toBeNull()

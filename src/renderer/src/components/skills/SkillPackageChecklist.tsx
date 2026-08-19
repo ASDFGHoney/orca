@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
@@ -80,15 +80,7 @@ function ChecklistRow({
             {note ? (
               <span className="shrink-0 text-[11px] text-muted-foreground">{note}</span>
             ) : null}
-            <span
-              className={cn(
-                'inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground',
-                summary.risky && 'text-foreground'
-              )}
-            >
-              {summary.risky ? <AlertTriangle className="size-3" /> : null}
-              {summary.label}
-            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">{summary.label}</span>
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/row:rotate-90" />
           </CollapsibleTrigger>
         </div>
