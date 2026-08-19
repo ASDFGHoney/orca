@@ -537,6 +537,33 @@ describe('BrowserSessionRegistry persistence', () => {
       permission: 'geolocation',
       rawUrl: 'https://example.com/account'
     })
+
+    // Why: a cross-origin sub-frame can request a permission, and getURL() reports the TOP-LEVEL
+    // document. Attributing the denial to the embedder tells the user the wrong site asked.
+    browserManagerNotifyPermissionDeniedMock.mockClear()
+    requestHandler(guestWc, 'geolocation', permissionCallback, {
+      requestingUrl: 'https://widget.example.net/embed',
+      isMainFrame: false
+    })
+    await vi.waitFor(() =>
+      expect(browserManagerNotifyPermissionDeniedMock).toHaveBeenCalledWith({
+        guestWebContentsId: 401,
+        permission: 'geolocation',
+        rawUrl: 'https://widget.example.net/embed'
+      })
+    )
+
+    // Why: requestingUrl is absent on some request shapes; the top-level document is the fallback,
+    // not a crash or an empty origin.
+    browserManagerNotifyPermissionDeniedMock.mockClear()
+    requestHandler(guestWc, 'geolocation', permissionCallback, { isMainFrame: true })
+    await vi.waitFor(() =>
+      expect(browserManagerNotifyPermissionDeniedMock).toHaveBeenCalledWith({
+        guestWebContentsId: 401,
+        permission: 'geolocation',
+        rawUrl: 'https://example.com/account'
+      })
+    )
     expect(
       browserManagerNotifyPermissionDeniedMock.mock.calls.map(([args]) => args.permission)
     ).toEqual(['geolocation'])

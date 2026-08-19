@@ -21,6 +21,32 @@ describe('browser notice formatting', () => {
     ).toBe('https://example.com asked for camera or microphone access, and Orca denied it.')
   })
 
+  // Why: with ordinary storage-access now granted, top-level-storage-access is the storage denial a
+  // user can still hit, and it was rendering as its raw Chromium token.
+  it('names the storage permission in words rather than its raw token', () => {
+    const notice = formatPermissionNotice({
+      browserPageId: 'browser-1',
+      permission: 'top-level-storage-access',
+      origin: 'https://example.com'
+    })
+    expect(notice).not.toContain('top-level-storage-access')
+    expect(notice).toBe(
+      'https://example.com asked for access to its own cookies and storage on this site, and Orca denied it.'
+    )
+  })
+
+  // Why: an unrecognised permission must still name itself rather than render as empty or as prose
+  // invented for it.
+  it('falls back to the raw permission name for anything unmapped', () => {
+    expect(
+      formatPermissionNotice({
+        browserPageId: 'browser-1',
+        permission: 'some-future-permission',
+        origin: 'https://example.com'
+      })
+    ).toBe('https://example.com asked for some-future-permission, and Orca denied it.')
+  })
+
   it('formats popup outcomes', () => {
     expect(
       formatPopupNotice({

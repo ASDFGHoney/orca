@@ -15,12 +15,44 @@ export type LoadFailureMeta = {
 
 type BrowserLoadErrorLike = BrowserLoadError | null
 
+// Why: the raw Chromium permission name is what the user sees in the denial notice, and most of
+// them do not read as English - "top-level-storage-access" is the one users hit most now that
+// ordinary storage-access is granted. The default still returns the raw token, because inventing
+// prose for a permission nobody has seen yet is worse than showing its real name.
 function humanizePermission(permission: string): string {
   switch (permission) {
     case 'media':
       return 'camera or microphone access'
     case 'pointerLock':
       return 'pointer lock'
+    case 'storage-access':
+    case 'top-level-storage-access':
+      return 'access to its own cookies and storage on this site'
+    case 'geolocation':
+      return 'your location'
+    case 'idle-detection':
+      return 'to detect when you are idle'
+    case 'display-capture':
+      return 'to capture your screen'
+    case 'window-management':
+      return 'to manage windows on your screen'
+    case 'keyboardLock':
+      return 'to capture all keyboard input'
+    case 'openExternal':
+      return 'to open an external app'
+    case 'fileSystem':
+      return 'access to your files'
+    case 'hid':
+      return 'access to a USB input device'
+    case 'usb':
+      return 'access to a USB device'
+    case 'serial':
+      return 'access to a serial device'
+    case 'midi':
+    case 'midiSysex':
+      return 'access to your MIDI devices'
+    case 'speaker-selection':
+      return 'to choose an audio output device'
     default:
       return permission
   }

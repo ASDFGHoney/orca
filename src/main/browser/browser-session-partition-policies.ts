@@ -37,6 +37,11 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
     setupClientHintsOverride(sess, cleanUA)
   }
   sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    // Why: a permission request can come from a cross-origin sub-frame, and getURL() reports the
+    // TOP-LEVEL document. Attributing a sub-frame's denial to the embedder tells the user the wrong
+    // site asked. Every PermissionRequest variant carries requestingUrl; fall back to the top-level
+    // document only when it is missing.
+    const requestingUrl = (details as Electron.PermissionRequest | undefined)?.requestingUrl
     // Why: defer media to macOS TCC; denying at the session layer throws NotAllowedError even after the user granted Camera/Mic to the OS.
     if (permission === 'media') {
       void requestSystemMediaAccess(
@@ -47,7 +52,7 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
             browserManager.notifyPermissionDenied({
               guestWebContentsId: webContents.id,
               permission,
-              rawUrl: webContents.getURL()
+              rawUrl: requestingUrl || webContents.getURL()
             })
           }
           callback(granted)
@@ -57,7 +62,7 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
           browserManager.notifyPermissionDenied({
             guestWebContentsId: webContents.id,
             permission,
-            rawUrl: webContents.getURL()
+            rawUrl: requestingUrl || webContents.getURL()
           })
           callback(false)
         }
@@ -69,7 +74,7 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
       browserManager.notifyPermissionDenied({
         guestWebContentsId: webContents.id,
         permission,
-        rawUrl: webContents.getURL()
+        rawUrl: requestingUrl || webContents.getURL()
       })
     }
     callback(allowed)
