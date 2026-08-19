@@ -122,7 +122,10 @@ describe('browser file channel negotiation', () => {
     }) as unknown as {
       closed: boolean
       authority: { fileChannelProtocolVersion?: 1 } | null
-      lease: { authority: { fileChannelProtocolVersion?: 1 } | null }
+      lease: {
+        authority: { fileChannelProtocolVersion?: 1 } | null
+        fileChannelActive: boolean
+      }
       fileChannelAvailability: string
     }
 
@@ -134,6 +137,8 @@ describe('browser file channel negotiation', () => {
 
     host.authority = { fileChannelProtocolVersion: 1 }
     host.lease.authority = { fileChannelProtocolVersion: 1 }
+    // Mirror acceptAuthority, the only production writer of lease.authority.
+    host.lease.fileChannelActive = true
     expect(host.fileChannelAvailability).toBe('negotiated')
 
     host.closed = true
