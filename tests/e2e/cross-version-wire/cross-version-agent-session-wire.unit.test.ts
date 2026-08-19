@@ -50,6 +50,8 @@ const STRUCTURED_CALLS: { method: string; hostMethod: string | null }[] = [
   { method: 'agentSession.handoffStatus', hostMethod: 'handoffStatus' },
   { method: 'agentSession.handoff', hostMethod: 'requestHandoff' },
   { method: 'agentSession.options', hostMethod: 'readOptions' },
+  { method: 'agentSession.hold', hostMethod: 'hold' },
+  { method: 'agentSession.release', hostMethod: 'release' },
   { method: 'agentSession.history', hostMethod: 'history' },
   { method: 'agentSession.subscribe', hostMethod: 'subscribe' },
   // Teardown runs through the runtime's subscription registry rather than the
@@ -163,6 +165,9 @@ function paramsFor(method: string): unknown {
     }
     case 'agentSession.history':
       return { sessionId: SESSION, direction: 'tail' }
+    case 'agentSession.hold':
+    case 'agentSession.release':
+      return { sessionId: SESSION, holderId: 'surface-1' }
     default:
       return { sessionId: SESSION }
   }
@@ -244,6 +249,8 @@ describe('cross-version structured agent sessions', () => {
         send: vi.fn(async () => ({ ok: true, replayed: false })),
         cancel: vi.fn(async () => ({ ok: true, replayed: false })),
         close: vi.fn(async () => undefined),
+        hold: vi.fn(async () => undefined),
+        release: vi.fn(() => undefined),
         respondToPrompt: vi.fn(async () => ({ ok: true, replayed: false })),
         setOption: vi.fn(async () => ({ ok: true, replayed: false })),
         requestHandoff: vi.fn(async () => ({ status: { owner: 'native' } })),
@@ -629,6 +636,9 @@ describe('cross-version structured agent sessions', () => {
 
       const restarted = await bootHost('b')
       await restarted.restoreReadableSessions()
+      // Restart restores the session for READING. The chat the client still has open takes its
+      // hold, and that is what gives the session a provider child again.
+      await answer('agentSession.hold', { sessionId: SESSION, holderId: 'surface-1' })
       const resumedFence = store.getRecord(SESSION)?.lease.runtimeFence ?? 0
       expect(resumedFence).toBeGreaterThan(created.fence)
       const second = await answer('agentSession.send', sendParams('after restart', resumedFence))

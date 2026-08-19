@@ -27,6 +27,9 @@ export type StructuredAgentSessionEvictionContext = {
   forget: () => void
   /** Drops the cached sink so a later attach mints a fresh one. */
   discardSink: () => void
+  /** Hands the lease back now that this host's child is proven gone. No-ops when the record is
+   *  not this host's to release. */
+  releaseLease: () => Promise<void>
 }
 
 export type StructuredAgentSessionEvictionStep = {
@@ -54,6 +57,11 @@ export const STRUCTURED_AGENT_SESSION_EVICTION_STEPS: readonly StructuredAgentSe
     // accepts every provider event and publishes none. Attach's own failure path already pairs
     // these two; eviction has to as well.
     { name: 'discard-sink', run: (context) => context.discardSink() },
+    // Why here and not last: the durable lease still names a process this host just stopped, and a
+    // record left claiming a live owner is one nothing can resume — the next surface to open the
+    // chat would find a session it may not acquire. Placed BEFORE forget so a release that cannot
+    // be written aborts while the session is still indexed, which is what makes the retry real.
+    { name: 'release-lease', run: (context) => context.releaseLease() },
     { name: 'forget-session', run: (context) => context.forget() }
   ]
 

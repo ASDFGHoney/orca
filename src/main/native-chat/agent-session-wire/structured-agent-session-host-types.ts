@@ -12,6 +12,10 @@ export type StructuredAgentSessionHostSession = {
   journal: AgentSessionJournal
   params: AgentSessionAttachParams
   fence: number
+  /** Whether THIS host generation is running the provider process behind the session. A journal
+   *  restored for reading has none, and neither has a session a TUI owns — so neither may be
+   *  evicted to free a child, and neither may have its lease released as an observed exit. */
+  hasProviderChild: boolean
 }
 
 export type StructuredAgentSessionHostDeps = {
@@ -27,6 +31,8 @@ export type StructuredAgentSessionHostDeps = {
     provider: AgentSessionRecord['provider']
   ) => Promise<Record<string, string> | undefined> | Record<string, string> | undefined
   now?: () => number
+  /** How long a session outlives its last surface. Tests drive this; production takes the default. */
+  releaseGraceMs?: number
   onEventSinkError?: (input: { sessionId: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
 }

@@ -25,7 +25,10 @@ function context(): StructuredAgentSessionEvictionContext & { order: string[] } 
       })
     } as unknown as StructuredAgentSessionEvictionContext['adapter'],
     forget: vi.fn(() => order.push('forget')),
-    discardSink: vi.fn(() => order.push('discardSink'))
+    discardSink: vi.fn(() => order.push('discardSink')),
+    releaseLease: vi.fn(async () => {
+      order.push('releaseLease')
+    })
   }
 }
 
@@ -46,6 +49,7 @@ describe('structured agent session eviction', () => {
       'unbind',
       'close',
       'discardSink',
+      'releaseLease',
       'forget'
     ])
   })
@@ -57,6 +61,7 @@ describe('structured agent session eviction', () => {
       'stop-publishing',
       'close-sink',
       'discard-sink',
+      'release-lease',
       'forget-session'
     ])
   })
@@ -83,7 +88,8 @@ describe('rows the provider emits while closing', () => {
         }
       } as never,
       forget: () => {},
-      discardSink: () => state.discardEventSink(sessionId)
+      discardSink: () => state.discardEventSink(sessionId),
+      releaseLease: async () => {}
     })
 
     expect(published).toEqual(['final-flush'])
@@ -131,7 +137,8 @@ describe('eviction against the real sink cache', () => {
       eventSink: state.eventSinkFor(sessionId),
       adapter: { closeSession: async () => {} } as never,
       forget: () => {},
-      discardSink: () => state.discardEventSink(sessionId)
+      discardSink: () => state.discardEventSink(sessionId),
+      releaseLease: async () => {}
     })
 
     const published: string[] = []

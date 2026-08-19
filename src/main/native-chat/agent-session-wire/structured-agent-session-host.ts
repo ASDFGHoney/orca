@@ -47,9 +47,15 @@ import {
 import { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
 import { attachStructuredAgentSession } from './structured-agent-session-attach-orchestration'
 import {
-  evictStructuredAgentSession,
-  type StructuredAgentSessionEvictionContext
-} from './structured-agent-session-eviction'
+  createStructuredAgentSessionHolds,
+  evictHeldStructuredAgentSession,
+  type StructuredAgentSessionLifetimeContext
+} from './structured-agent-session-host-lifetime'
+import type {
+  StructuredAgentSessionHolds,
+  StructuredAgentSessionHoldOptions
+} from './structured-agent-session-holds'
+import { resumeHeldStructuredAgentSession } from './structured-agent-session-hold-resume'
 import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
@@ -74,6 +80,7 @@ export class StructuredAgentSessionHost {
   private readonly handoffs: StructuredAgentSessionHostHandoff
   private readonly readableRestorer: StructuredAgentSessionReadableRestorer
   private readonly restartRestore = new StructuredAgentSessionRestartRestoreGate()
+  private readonly holds: StructuredAgentSessionHolds
 
   constructor(readonly deps: StructuredAgentSessionHostDeps) {
     this.runtimeState = new StructuredAgentSessionHostRuntimeState(
@@ -99,21 +106,20 @@ export class StructuredAgentSessionHost {
       subscribers: this.subscribers,
       now: this.now
     })
+    this.holds = createStructuredAgentSessionHolds(this.lifetimeContext(), {
+      resume: (sessionId) => this.resumeForHold(sessionId),
+      evict: (sessionId) => this.close(sessionId)
+    })
     this.readableRestorer = new StructuredAgentSessionReadableRestorer({
       store: deps.store,
       journalRoot: deps.journalRoot,
       supportsRecord: (record) => providerSupport.adapterSupportsRecord(deps.adapter, record),
       reconcile: this.reconcileLeases,
       resolveRecovery: (sessionId) => this.runtimeState.resolveRecovery(sessionId),
-      resume: (params) =>
-        this.attach({ callerKey: 'trusted-local:host-restart' }, params).then(
-          (result) => result.ok
-        ),
       serialize: (sessionId, task) => this.serialize(sessionId, task),
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
-      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
-      now: this.now
+      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId)
     })
     this.runtimeState.startLeaseRenewal()
   }
@@ -121,6 +127,37 @@ export class StructuredAgentSessionHost {
   private now = (): number => this.deps.now?.() ?? Date.now()
 
   hasSession = (sessionId: string): boolean => this.sessions.has(sessionId)
+
+  /** A surface bound to this session and wants it live. The FIRST hold on a session with no
+   *  provider child is what resumes one; a retained hold (a subscription) only keeps it. */
+  hold = (
+    sessionId: string,
+    holderId: string,
+    options?: StructuredAgentSessionHoldOptions
+  ): Promise<void> => this.holds.hold(sessionId, holderId, options)
+
+  /** That surface is gone. The child outlives it by the release grace, and by any running turn. */
+  release = (sessionId: string, holderId: string): void => this.holds.release(sessionId, holderId)
+
+  isHeld = (sessionId: string): boolean => this.holds.isHeld(sessionId)
+
+  private resumeForHold(sessionId: string): Promise<void> {
+    return resumeHeldStructuredAgentSession({
+      sessionId,
+      deps: this.deps,
+      now: () => this.now(),
+      attach: (params) => this.attach({ callerKey: 'trusted-local:surface-hold' }, params)
+    })
+  }
+
+  private lifetimeContext(): StructuredAgentSessionLifetimeContext {
+    return {
+      deps: this.deps,
+      runtimeState: this.runtimeState,
+      sessions: this.sessions,
+      now: () => this.now()
+    }
+  }
 
   /** The host's half of attaching, named so it cannot grow dependencies unnoticed. */
   private attachContext(): StructuredAgentSessionAttachContext {
@@ -138,17 +175,10 @@ export class StructuredAgentSessionHost {
    *  on disk, so the same session can be attached again. */
   close(sessionId: string): Promise<void> {
     return this.serialize(sessionId, async () => {
-      if (!this.sessions.has(sessionId)) {
-        return
-      }
-      const context: StructuredAgentSessionEvictionContext = {
-        sessionId,
-        eventSink: this.runtimeState.eventSinkFor(sessionId),
-        adapter: this.deps.adapter,
-        forget: () => this.sessions.delete(sessionId),
-        discardSink: () => this.runtimeState.discardEventSink(sessionId)
-      }
-      await evictStructuredAgentSession(context)
+      await evictHeldStructuredAgentSession(this.lifetimeContext(), sessionId)
+      // Whoever asked for the close, the surfaces that were holding this session are looking at a
+      // session that no longer exists. A failed eviction throws above and keeps them.
+      this.holds.forget(sessionId)
     })
   }
 
@@ -190,6 +220,7 @@ export class StructuredAgentSessionHost {
     this.runtimeState.flushEventSink(sessionId)
 
   async flushAllStreamedEvents(): Promise<void> {
+    this.holds.dispose()
     this.runtimeState.stopLeaseRenewal()
     this.handoffs.stopTuiHistoryCatchup()
     await this.tasks.drainAttaches()

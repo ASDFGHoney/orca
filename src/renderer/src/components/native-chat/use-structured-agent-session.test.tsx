@@ -146,8 +146,9 @@ describe('useStructuredAgentSession options', () => {
   it('mints a fresh operation when the same option is retried after a typed refusal', async () => {
     let attempts = 0
     mocks.call.mockImplementation((_target, method) => {
-      if (method === 'agentSession.options') {
-        return Promise.resolve(OPTIONS)
+      if (method !== 'agentSession.setOption') {
+        // The hook also holds the session while it is mounted; only option writes are attempts.
+        return Promise.resolve(method === 'agentSession.options' ? OPTIONS : null)
       }
       attempts += 1
       return Promise.resolve(
@@ -197,8 +198,9 @@ describe('useStructuredAgentSession options', () => {
   it('reuses an option operation after a pending admission refusal', async () => {
     let attempts = 0
     mocks.call.mockImplementation((_target, method) => {
-      if (method === 'agentSession.options') {
-        return Promise.resolve(OPTIONS)
+      if (method !== 'agentSession.setOption') {
+        // The hook also holds the session while it is mounted; only option writes are attempts.
+        return Promise.resolve(method === 'agentSession.options' ? OPTIONS : null)
       }
       attempts += 1
       return Promise.resolve(

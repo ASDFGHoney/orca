@@ -15,6 +15,7 @@ import {
   type StructuredAgentSessionState
 } from '../../../src/shared/structured-agent-session-reducer'
 import type { RpcClient } from '../transport/rpc-client'
+import { useMobileStructuredSessionHold } from './mobile-structured-session-hold'
 import {
   createMobileStructuredReconnectState,
   noteStructuredBackground,
@@ -59,6 +60,8 @@ export function useMobileStructuredAgentSession(args: {
   loadOlder: () => Promise<boolean>
 } {
   const { client, sessionId } = args
+  // Declared before the read: the hold is what gives a restored session its provider child back.
+  useMobileStructuredSessionHold({ client, sessionId })
   const [state, dispatch] = useReducer(reduceStructuredAgentSession, EMPTY_STRUCTURED_AGENT_SESSION)
   const stateRef = useRef(state)
   stateRef.current = state

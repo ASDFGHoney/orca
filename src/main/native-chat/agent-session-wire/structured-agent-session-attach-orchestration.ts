@@ -53,7 +53,12 @@ export async function attachStructuredAgentSession(
     onAttached: (attached) => {
       const fence = context.deps.store.getRecord(sessionId)?.lease.runtimeFence ?? 0
       const previousFence = context.sessions.get(sessionId)?.fence
-      context.sessions.set(sessionId, { journal: attached.journal, params, fence })
+      context.sessions.set(sessionId, {
+        journal: attached.journal,
+        params,
+        fence,
+        hasProviderChild: true
+      })
       if (attached.recovery) {
         context.subscribers.reset(sessionId, attached.journal, attached.recovery.reset, fence)
       } else if (previousFence !== undefined && previousFence !== fence) {

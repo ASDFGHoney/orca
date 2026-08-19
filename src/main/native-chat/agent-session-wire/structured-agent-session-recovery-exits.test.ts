@@ -140,7 +140,7 @@ describe('recovery exits', () => {
     })
   })
 
-  it('heals a stranded native owner during startup restore without waiting for a client', async () => {
+  it('heals a stranded native owner during startup restore, and spawns nothing until a surface asks', async () => {
     expect((await host.attach(CALLER, hostTestAttachParams(null))).ok).toBe(true)
     await reopenStore()
 
@@ -159,7 +159,18 @@ describe('recovery exits', () => {
 
     await host.restoreReadableSessions()
 
+    // Healing is startup's job; spawning is not. The orphan is stopped and the lease is free, but
+    // nothing has asked to look at this session, so no replacement child exists yet.
     expect(stopOwnerProcess).toHaveBeenCalledWith(4242, 'SIGTERM')
+    expect(acquire).toHaveBeenCalledTimes(1)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      ownerProcess: null
+    })
+
+    await host.hold(SESSION, 'surface-1')
+
     expect(acquire).toHaveBeenCalledTimes(2)
     expect(store.getRecord(SESSION)?.lease).toMatchObject({
       runtimeFence: 3,
