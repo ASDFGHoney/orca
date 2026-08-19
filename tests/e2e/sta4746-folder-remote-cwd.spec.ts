@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { stripAnsiEscapeSequences } from '../../src/shared/ansi-escape-sequences'
-import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
+import { expect, test } from './helpers/orca-app'
+import { parseSta4746Probe, sta4746ProbeCommand } from './helpers/sta4746-cwd-probe'
 
 type RuntimeTerminalRead = { tail: string[] }
 
@@ -13,9 +13,11 @@ type RuntimeTerminalRead = { tail: string[] }
 // tests/e2e/sta4746-paired-desktop-folder-cwd.spec.ts.
 test('STA-4746: folder-workspace terminal on a headless paired host', async () => {
   test.setTimeout(240_000)
+  test.skip(process.platform === 'win32', 'The shell probe is POSIX-only')
+
+  const parent = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'sta4746-')))
   const host = await launchHeadlessPairedRuntimeHost()
   try {
-    const parent = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'sta4746-')))
     const folderPath = path.join(parent, 'workspace')
     mkdirSync(folderPath, { recursive: true })
     // Why: a sibling that has folderPath as a prefix, so a substring match
@@ -42,45 +44,28 @@ test('STA-4746: folder-workspace terminal on a headless paired host', async () =
     // rather than a fallback owner satisfying the path assertion by luck.
     expect(terminal.ptyId).toMatch(new RegExp(`^folder:${folderWorkspaceId}@@`))
 
-    const marker = 'STA4746HEADLESS'
+    const phase = 'headless-folder'
     await host.client.call('terminal.send', {
       terminal: terminal.handle,
-      // `end=1` last: a wrapped row can be read half-rendered, and asserting a
-      // truncated path as the real cwd would be a false pass.
-      text: `printf '${marker};;pwd=%s;;wt=%s;;root=%s;;end=1\\n' "$PWD" "$ORCA_WORKTREE_ID" "$ORCA_WORKSPACE_ROOT"`,
+      text: sta4746ProbeCommand(phase),
       enter: true
     })
 
-    let fields: Record<string, string> = {}
-    await expect
-      .poll(
-        async () => {
-          const read = await host.client.call<{ terminal: RuntimeTerminalRead }>('terminal.read', {
-            terminal: terminal.handle,
-            limit: 200
-          })
-          const line = read.result.terminal.tail
-            .toReversed()
-            .find(
-              (candidate) => candidate.includes(`${marker};;pwd=`) && !candidate.includes('printf')
-            )
-          fields = Object.fromEntries(
-            stripAnsiEscapeSequences(line ?? '')
-              .split(';;')
-              .map((chunk) => chunk.split('='))
-              .filter((parts) => parts.length === 2)
-              .map(([key, value]) => [key.trim(), value.trim()])
-          )
-          return fields.end === '1' ? (fields.pwd ?? '') : ''
-        },
-        { timeout: 60_000 }
-      )
-      .not.toBe('')
+    const readProbe = async (): Promise<Record<string, string> | null> => {
+      const read = await host.client.call<{ terminal: RuntimeTerminalRead }>('terminal.read', {
+        terminal: terminal.handle,
+        limit: 200
+      })
+      return parseSta4746Probe(read.result.terminal.tail.join('\n'), phase)
+    }
+    await expect.poll(async () => (await readProbe())?.pwd ?? '', { timeout: 60_000 }).not.toBe('')
 
-    expect(fields.pwd).toBe(folderPath)
-    expect(fields.root).toBe(folderPath)
-    expect(fields.wt).toBe(`folder:${folderWorkspaceId}`)
+    const probe = await readProbe()
+    expect(probe?.pwd).toBe(folderPath)
+    expect(probe?.root).toBe(folderPath)
+    expect(probe?.wt).toBe(`folder:${folderWorkspaceId}`)
   } finally {
     await host.dispose()
+    rmSync(parent, { recursive: true, force: true })
   }
 })

@@ -25,6 +25,7 @@ vi.mock('../main/shell-prompt-readiness-probe', () => ({
 }))
 
 import type { PtyHandler } from './pty-handler'
+import { resolveDefaultCwd } from './pty-shell-utils'
 import {
   beginPtyHandlerTest,
   createPtyRequestHelpers,
@@ -36,11 +37,8 @@ const FOLDER_WORKSPACE_ID = 'folder:b1706d92-9d05-4932-8360-01e00b54305a'
 const FOLDER_PATH = '/opt/tiger/workspace'
 const WORKTREE_ID = 'repo-1::/srv/repo'
 
-// Why (STA-4746): the report claimed the relay derives a PTY's cwd by splitting
-// ORCA_WORKTREE_ID on `::`, so a `folder:<uuid>` workspace fell back to $HOME.
-// The relay has always taken cwd from the request instead; these pin that
-// contract so a future refactor cannot introduce the reported bug. Production
-// request construction is covered end to end by tests/e2e/sta4746-*.spec.ts.
+// Why (STA-4746): pins that the relay reads cwd from the request, never from
+// parsing ORCA_WORKTREE_ID. Request construction: tests/e2e/sta4746-*.spec.ts.
 describe('relay PTY spawn cwd for folder workspaces', () => {
   let dispatcher: MockDispatcher
   let handler: PtyHandler
@@ -119,6 +117,8 @@ describe('relay PTY spawn cwd for folder workspaces', () => {
       }
     })
     expect(spawnedCwd()).not.toBe(FOLDER_PATH)
-    expect(spawnedCwd()).toBe(process.env.HOME)
+    // Why computed: the harness pins platform to linux, but HOME is unset on
+    // some CI images, where the default falls through to homedir().
+    expect(spawnedCwd()).toBe(resolveDefaultCwd(process.env, 'linux'))
   })
 })
