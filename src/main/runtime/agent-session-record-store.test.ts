@@ -600,13 +600,16 @@ describe('restart reconciliation', () => {
     ).rejects.toThrow('agent_session_ownership_unknown')
   })
 
-  it('keeps a conflict conflicted across a restart', async () => {
+  it('keeps a conflict conflicted across a restart that proves nothing', async () => {
     const first = await open()
     await establishOwner(first)
     await first.markClaimConflicted('session-alpha', NOW)
 
     const reopened = await open()
-    await reopened.reconcileOnRestart({ probe: async () => ({ outcome: 'pid-absent' }), now: NOW })
+    await reopened.reconcileOnRestart({
+      probe: async () => ({ outcome: 'indeterminate', reason: 'no answer' }),
+      now: NOW
+    })
     expect(reopened.getRecord('session-alpha')?.lease).toMatchObject({
       claimStatus: 'conflicted',
       handoffStage: 'manual-recovery'
@@ -620,6 +623,32 @@ describe('restart reconciliation', () => {
         })
       )
     ).rejects.toThrow('agent_session_conflict')
+  })
+
+  it('releases a conflict whose named owner is proven gone at restart', async () => {
+    // A conflict with no exit is a session the user can never open again; present-time proof that
+    // the process the conflict names has exited leaves no claimant left to protect.
+    const first = await open()
+    await establishOwner(first)
+    await first.markClaimConflicted('session-alpha', NOW)
+
+    const reopened = await open()
+    await reopened.reconcileOnRestart({ probe: async () => ({ outcome: 'pid-absent' }), now: NOW })
+
+    const lease = reopened.getRecord('session-alpha')?.lease
+    expect(lease).toMatchObject({
+      claimStatus: 'released',
+      handoffStage: null,
+      deathEvidence: { kind: 'pid-absent' }
+    })
+    const reacquired = await reopened.reserveOwner(
+      reserveRequest({
+        expectedFence: lease?.runtimeFence ?? null,
+        probe: { outcome: 'pid-absent' },
+        operation: { callerKey: 'client-1', operationId: operationId(), fingerprint: 'fp-2' }
+      })
+    )
+    expect(reacquired.disposition).toBe('reserved')
   })
 
   it('frees a reservation that provably never spawned', async () => {

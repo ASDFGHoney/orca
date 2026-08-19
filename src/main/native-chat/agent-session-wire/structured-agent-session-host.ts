@@ -107,6 +107,7 @@ export class StructuredAgentSessionHost {
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
       restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
+      reapOrphanChildren: () => this.runtimeState.reapOrphanChildren(),
       now: this.now
     })
     this.runtimeState.startLeaseRenewal()
