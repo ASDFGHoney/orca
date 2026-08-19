@@ -23,13 +23,13 @@ function finished(overrides: Partial<BrowserDownloadFinishedEvent>): BrowserDown
 }
 
 describe('browser remote download toast', () => {
-  it('names the file, the remote path, and the execution host', () => {
+  it('names the remote path and the execution host without repeating the file name', () => {
     expect(
       formatBrowserRemoteDownloadMessage({
         workspaceRelativePath: '.orca/browser-downloads/report.pdf',
         hostLabel: 'build-box'
       })
-    ).toBe('report.pdf saved to .orca/browser-downloads/report.pdf on build-box')
+    ).toBe('Saved to .orca/browser-downloads/report.pdf on build-box')
   })
 
   it('stays silent for a download that saved on this device', () => {

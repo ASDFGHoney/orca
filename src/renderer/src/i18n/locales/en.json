@@ -39,7 +39,13 @@
       "reload": "Reload",
       "preparationFailed": "Couldn't start the remote browser on this desktop. Check the paired connection and try again.",
       "unavailableTitle": "Client-hosted browser unavailable",
-      "unavailableDescription": "This page is attached to a different desktop or is no longer available."
+      "unavailableDescription": "This page is attached to a different desktop or is no longer available.",
+      "download": {
+        "started": "Downloading {{filename}}…",
+        "completed": "Downloaded {{filename}}",
+        "canceled": "Download canceled.",
+        "failed": "Couldn't finish the download."
+      }
     },
     "reopenOnServer": {
       "action": "Reopen on server",
@@ -14925,7 +14931,7 @@
             }
           },
           "download": {
-            "savedToRemote": "{{value0}} saved to {{value1}} on {{value2}}"
+            "savedToRemote": "Saved to {{value1}} on {{value2}}"
           }
         },
         "profile": {

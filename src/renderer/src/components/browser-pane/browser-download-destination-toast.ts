@@ -6,12 +6,10 @@ export function formatBrowserRemoteDownloadMessage(destination: {
   workspaceRelativePath: string
   hostLabel: string
 }): string {
-  const filename = destination.workspaceRelativePath.split('/').at(-1) ?? ''
   return translate(
     'auto.components.browser.pane.download.savedToRemote',
-    '{{value0}} saved to {{value1}} on {{value2}}',
+    'Saved to {{value1}} on {{value2}}',
     {
-      value0: filename,
       value1: destination.workspaceRelativePath,
       value2: destination.hostLabel
     }
