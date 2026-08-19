@@ -7,12 +7,23 @@ import { createSubscriptionRegistryDouble } from './subscription-registry-test-d
 
 // Why: the presence map has no accessor — the runtime exposes only the driver it derives.
 type PresenceInternals = {
-  mobileSubscribers: Map<string, Map<string, unknown>>
+  mobileSubscribers: Map<string, Map<string, { viewport: { cols: number; rows: number } | null }>>
+  pendingSoftLeavers: Map<string, unknown>
 }
 
+const internalsOf = (runtime: OrcaRuntimeService): PresenceInternals =>
+  runtime as unknown as PresenceInternals
+
 const presenceOf = (runtime: OrcaRuntimeService, ptyId: string): string[] => [
-  ...((runtime as unknown as PresenceInternals).mobileSubscribers.get(ptyId)?.keys() ?? [])
+  ...(internalsOf(runtime).mobileSubscribers.get(ptyId)?.keys() ?? [])
 ]
+
+const viewportOf = (
+  runtime: OrcaRuntimeService,
+  ptyId: string,
+  clientId: string
+): { cols: number; rows: number } | null | undefined =>
+  internalsOf(runtime).mobileSubscribers.get(ptyId)?.get(clientId)?.viewport
 
 const VIEWPORT = { cols: 40, rows: 20 }
 
@@ -33,19 +44,19 @@ const subscribeRequest: RpcRequest = {
  * that touches `mobileSubscribers` is the production implementation; only the PTY,
  * scrollback and graph lookups are doubled.
  */
-const createViewStreamRuntime = (real: OrcaRuntimeService, calls: string[]): OrcaRuntimeService => {
+const createViewStreamRuntime = (
+  real: OrcaRuntimeService,
+  observed: { presenceAtUnsubscribe: string[] | null }
+): OrcaRuntimeService => {
   const registry = createSubscriptionRegistryDouble()
   return {
     getRuntimeId: () => 'test-runtime',
     resolveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
-    handleMobileSubscribe: async (ptyId: string, clientId: string, viewport?: typeof VIEWPORT) => {
-      calls.push('subscribe:enter')
-      const result = await real.handleMobileSubscribe(ptyId, clientId, viewport)
-      calls.push('subscribe:exit')
-      return result
-    },
+    handleMobileSubscribe: (ptyId: string, clientId: string, viewport?: typeof VIEWPORT) =>
+      real.handleMobileSubscribe(ptyId, clientId, viewport),
     handleMobileUnsubscribe: (ptyId: string, clientId: string) => {
-      calls.push('unsubscribe')
+      // The whole invariant in one reading: what the teardown sees when it runs.
+      observed.presenceAtUnsubscribe = presenceOf(real, ptyId)
       real.handleMobileUnsubscribe(ptyId, clientId)
     },
     getDriver: (ptyId: string) => real.getDriver(ptyId),
@@ -75,22 +86,30 @@ const createViewStreamRuntime = (real: OrcaRuntimeService, calls: string[]): Orc
   } as unknown as OrcaRuntimeService
 }
 
+const dispatchTornDownSubscribe = async (
+  real: OrcaRuntimeService
+): Promise<{ presenceAtUnsubscribe: string[] | null }> => {
+  const observed: { presenceAtUnsubscribe: string[] | null } = { presenceAtUnsubscribe: null }
+  const dispatcher = new RpcDispatcher({
+    runtime: createViewStreamRuntime(real, observed),
+    methods: TERMINAL_METHODS
+  })
+  await dispatcher.dispatchStreaming(subscribeRequest, vi.fn(), {
+    connectionId: 'conn-phone',
+    sendBinary: vi.fn(),
+    registerBinaryStreamHandler: vi.fn(() => vi.fn())
+  })
+  return observed
+}
+
 describe('mobile view stream presence release', () => {
-  it('leaves no mobile presence when subscription cleanup wins the awaited subscribe', async () => {
+  it('leaves no presence when cleanup wins a fresh awaited subscribe', async () => {
     const real = new OrcaRuntimeService()
-    const calls: string[] = []
-    const runtime = createViewStreamRuntime(real, calls)
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
 
-    await dispatcher.dispatchStreaming(subscribeRequest, vi.fn(), {
-      connectionId: 'conn-phone',
-      sendBinary: vi.fn(),
-      registerBinaryStreamHandler: vi.fn(() => vi.fn())
-    })
+    const observed = await dispatchTornDownSubscribe(real)
 
-    // The teardown lands inside the awaited subscribe, not before it — so the
-    // release it performs is the one that survives.
-    expect(calls).toEqual(['subscribe:enter', 'unsubscribe', 'subscribe:exit'])
+    // The teardown lands after the presence write, so its release is the one that survives.
+    expect(observed.presenceAtUnsubscribe).toEqual(['phone-1'])
     expect(presenceOf(real, 'pty-1')).toEqual([])
     // The soft-leave grace holds driver=mobile briefly, then releases the input lock.
     await vi.waitFor(() => expect(real.getDriver('pty-1')).toEqual({ kind: 'idle' }), {
@@ -98,31 +117,58 @@ describe('mobile view stream presence release', () => {
     })
   })
 
-  it('records mobile presence before its first await so a concurrent unsubscribe wins', async () => {
+  it('leaves no presence when cleanup wins a resubscribe-grace subscribe', async () => {
+    const real = new OrcaRuntimeService()
+    // Arm the soft-leaver so the subscribe takes the resubscribe-grace branch — the one a
+    // phone hits on background→foreground or a reconnect inside the 250ms window.
+    await real.handleMobileSubscribe('pty-1', 'phone-1', VIEWPORT)
+    real.handleMobileUnsubscribe('pty-1', 'phone-1')
+    expect(internalsOf(real).pendingSoftLeavers.has('pty-1')).toBe(true)
+
+    const observed = await dispatchTornDownSubscribe(real)
+
+    expect(observed.presenceAtUnsubscribe).toEqual(['phone-1'])
+    expect(presenceOf(real, 'pty-1')).toEqual([])
+    await vi.waitFor(() => expect(real.getDriver('pty-1')).toEqual({ kind: 'idle' }), {
+      timeout: 3000
+    })
+  })
+
+  it('records presence before the first await on both subscribe branches', async () => {
     const real = new OrcaRuntimeService()
 
-    const subscribing = real.handleMobileSubscribe('pty-1', 'phone-1', VIEWPORT)
+    // Fresh-subscribe branch.
+    const fresh = real.handleMobileSubscribe('pty-1', 'phone-1', VIEWPORT)
     // This is what makes the view branch's missing release harmless: the phone-fit
     // await happens after the map write, never before it.
     expect(presenceOf(real, 'pty-1')).toEqual(['phone-1'])
-
     real.handleMobileUnsubscribe('pty-1', 'phone-1')
     expect(presenceOf(real, 'pty-1')).toEqual([])
-
-    await subscribing
+    await fresh
     expect(presenceOf(real, 'pty-1')).toEqual([])
+
+    // Resubscribe-grace branch — same ordering, separate code path.
+    await real.handleMobileSubscribe('pty-2', 'phone-1', VIEWPORT)
+    real.handleMobileUnsubscribe('pty-2', 'phone-1')
+    const grace = real.handleMobileSubscribe('pty-2', 'phone-1', VIEWPORT)
+    expect(presenceOf(real, 'pty-2')).toEqual(['phone-1'])
+    real.handleMobileUnsubscribe('pty-2', 'phone-1')
+    expect(presenceOf(real, 'pty-2')).toEqual([])
+    await grace
+    expect(presenceOf(real, 'pty-2')).toEqual([])
   })
 
-  it('cannot distinguish a superseded handler from its replacement by (ptyId, clientId)', async () => {
+  it('cannot tell a late release apart from the record that replaced it', async () => {
     const real = new OrcaRuntimeService()
 
     await real.handleMobileSubscribe('pty-1', 'phone-1', VIEWPORT)
     real.handleMobileUnsubscribe('pty-1', 'phone-1')
     await real.handleMobileSubscribe('pty-1', 'phone-1', { cols: 41, rows: 21 })
-    expect(presenceOf(real, 'pty-1')).toEqual(['phone-1'])
+    // The record under (ptyId, clientId) is the later handler's, not a revival of the first.
+    expect(viewportOf(real, 'pty-1', 'phone-1')).toEqual({ cols: 41, rows: 21 })
 
-    // A superseded handler copying the lease-only guard would run exactly this and
-    // strand the replacement's live stream with no presence and a mobile driver.
+    // Presence is keyed only by (ptyId, clientId), so a superseded handler copying the
+    // lease-only guard runs exactly this and strands a live stream with no presence.
     real.handleMobileUnsubscribe('pty-1', 'phone-1')
     expect(presenceOf(real, 'pty-1')).toEqual([])
     expect(real.getDriver('pty-1')).toEqual({ kind: 'mobile', clientId: 'phone-1' })

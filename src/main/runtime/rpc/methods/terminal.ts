@@ -2602,6 +2602,9 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           }
 
           if (isMobile && request.client?.id) {
+            // Why detachStream's release suffices and no release belongs on the
+            // early-return below: same presence-write-before-first-await invariant as the
+            // single view stream — see the note on its handleMobileSubscribe call.
             await runtime.handleMobileSubscribe(ptyId, request.client.id, request.viewport)
           } else if (request.client?.id && request.viewport) {
             // Why: subscribe records this stream's geometry and cleanup key but doesn't claim ownership; activity frames claim later.
@@ -3358,10 +3361,11 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       try {
         if (isMobile && clientId) {
           // Why no presence release on the `closed` path below, unlike the lease-only
-          // sibling: handleMobileSubscribe writes mobileSubscribers before its first
-          // await, so a cleanup that wins this race always runs after the write and
-          // removes it. Releasing here would instead delete a reconnect replacement's
-          // (ptyId, clientId) record — the hazard the lease-only note describes.
+          // sibling: both of handleMobileSubscribeInternal's presence writes (fresh
+          // subscribe and resubscribe-grace) land before its first await, so a cleanup
+          // that wins this race always runs after the write and removes it. Releasing
+          // here would instead delete a reconnect replacement's (ptyId, clientId)
+          // record — the hazard the lease-only note describes.
           // Pinned by terminal-subscribe-mobile-presence-release.test.ts.
           await runtime.handleMobileSubscribe(ptyId, clientId, params.viewport)
         } else if (clientId && params.viewport) {
