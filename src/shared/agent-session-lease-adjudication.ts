@@ -8,6 +8,7 @@
  * refuses an adoption, a wrong answer here creates two writers on one provider session.
  */
 
+import { nextAgentSessionFence } from './agent-session-next-fence'
 import type {
   AgentSessionDeathEvidence,
   AgentSessionHandoffStage,
@@ -158,14 +159,14 @@ export function evaluateAgentSessionAcquisition(args: {
           : 'agent_session_ownership_unknown'
       }
     }
-    return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+    return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
   }
   if (lease.claimStatus === 'reserved' && probe.outcome !== 'reservation-unused') {
     // Why: a reservation with no proven process is not a free lease — the crash may have lost
     // the race with the spawn rather than beaten it.
     return { decision: 'refused', code: 'agent_session_ownership_unknown' }
   }
-  return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+  return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
 }
 
 /**
@@ -187,7 +188,7 @@ export function adjudicateAgentSessionRestart(args: {
     if (probe.outcome === 'reservation-unused') {
       return {
         disposition: 'evicted',
-        nextFence: lease.runtimeFence + 1,
+        nextFence: nextAgentSessionFence(lease),
         evidence: { kind: 'pid-absent', detail: 'reservation never spawned', observedAt }
       }
     }
@@ -198,7 +199,7 @@ export function adjudicateAgentSessionRestart(args: {
       // child outlives the runtime inside its terminal, so it stays latched below.
       return {
         disposition: 'evicted',
-        nextFence: lease.runtimeFence + 1,
+        nextFence: nextAgentSessionFence(lease),
         evidence: {
           kind: 'pid-absent',
           detail: 'native reservation abandoned before an owner was proven',
@@ -227,7 +228,7 @@ export function adjudicateAgentSessionRestart(args: {
   }
   const evidence = deathEvidenceFor(probe, observedAt)
   if (evidence) {
-    return { disposition: 'evicted', nextFence: lease.runtimeFence + 1, evidence }
+    return { disposition: 'evicted', nextFence: nextAgentSessionFence(lease), evidence }
   }
   return {
     disposition: 'recovering',
