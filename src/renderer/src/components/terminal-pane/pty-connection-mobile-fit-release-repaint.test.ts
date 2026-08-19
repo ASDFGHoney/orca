@@ -193,18 +193,20 @@ describe('mobile-fit release repaint', () => {
 
   it('signals SIGWINCH once the restored desktop grid lands so the TUI repaints', async () => {
     const { pane, signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
+    // Why record inside the mock: asserting the final grid plus the call count
+    // passes just as well when the signal fires *before* the refit, which is
+    // the bug. Only the grid at signal time distinguishes the two.
+    const gridAtSignal: { cols: number; rows: number }[] = []
+    signalPty.mockImplementation(() => {
+      gridAtSignal.push({ cols: pane.terminal.cols, rows: pane.terminal.rows })
+    })
 
     setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
     await flushAsyncTicks(6)
 
-    expect({
-      cols: pane.terminal.cols,
-      rows: pane.terminal.rows,
-      signals: signalPty.mock.calls
-    }).toEqual({
-      cols: DESKTOP.cols,
-      rows: DESKTOP.rows,
-      signals: [[PTY_ID, 'SIGWINCH']]
+    expect({ signals: signalPty.mock.calls, gridAtSignal }).toEqual({
+      signals: [[PTY_ID, 'SIGWINCH']],
+      gridAtSignal: [DESKTOP]
     })
     dispose()
   })
@@ -250,6 +252,32 @@ describe('mobile-fit release repaint', () => {
     await flushAsyncTicks(6)
 
     expect(signalPty.mock.calls).toEqual([[PTY_ID, 'SIGWINCH']])
+    dispose()
+  })
+
+  it('does not repaint when the hold is cleared without a paired resize', async () => {
+    const { signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
+
+    // A pty exit, or a take-back whose best-effort resize never converged,
+    // clears the hold with a 0x0 marker. The PTY may still be at phone dims.
+    setFitOverride(PTY_ID, 'desktop-fit', 0, 0)
+    await flushAsyncTicks(6)
+
+    expect(signalPty.mock.calls).toEqual([])
+    dispose()
+  })
+
+  it('does not repaint while the phone still drives the pty without a fit hold', async () => {
+    const { signalPty, setFitOverride, dispose } = await connectPaneHoldingMobileFit()
+    const { setDriverForPty } = await import('@/lib/pane-manager/mobile-driver-state')
+    // A lock-only takeover keeps the phone authoritative with no fit override.
+    setDriverForPty(PTY_ID, { kind: 'mobile', clientId: 'phone-1' })
+
+    setFitOverride(PTY_ID, 'desktop-fit', DESKTOP.cols, DESKTOP.rows)
+    await flushAsyncTicks(6)
+
+    expect(signalPty.mock.calls).toEqual([])
+    setDriverForPty(PTY_ID, { kind: 'desktop' })
     dispose()
   })
 })

@@ -4357,16 +4357,26 @@ export function connectPanePty(
     // reopened mid-hold), so the opening mobile-fit event never reached it.
     // Why only mobile-fit: a remote-desktop-fit hand-back keeps another desktop
     // authoritative for the grid, and its own viewport claim owns the repaint.
+    // Why 0x0: the runtime publishes real dims only when the release was paired
+    // with a PTY resize. onPtyExit and releaseDesktopTakeBack clear the hold
+    // with a 0x0 marker and no resize — after a take-back whose best-effort
+    // resize did not converge, the PTY is still at phone dims, so repainting
+    // there would redraw the TUI at the wrong width instead of fixing it.
     if (
       event.ptyId !== transport.getPtyId() ||
       event.mode !== 'desktop-fit' ||
-      event.priorMode !== 'mobile-fit'
+      event.priorMode !== 'mobile-fit' ||
+      event.cols === 0 ||
+      event.rows === 0
     ) {
       return
     }
     const releasedPtyId = event.ptyId
+    // Why the shared guard: a lock-only takeover holds the grid with no
+    // override, so testing the override alone would repaint a PTY the phone
+    // still drives.
     const isCurrentRelease = (): boolean =>
-      !disposed && transport.getPtyId() === releasedPtyId && !getFitOverrideForPty(releasedPtyId)
+      !disposed && transport.getPtyId() === releasedPtyId && !shouldSuppressDesktopPtyResize()
     mobileFitReleaseRepaintFit?.cancel()
     mobileFitReleaseRepaintFit = safeFitAndThen(
       pane,
