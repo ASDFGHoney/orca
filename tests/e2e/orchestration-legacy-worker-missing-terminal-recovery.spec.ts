@@ -271,7 +271,7 @@ test('a missing legacy worker cannot spawn a replacement during restart recovery
 
     const transcriptPath = session.seedCodexResumeRollout(PROVIDER_SESSION_ID, repoPath)
     await first.page.evaluate(
-      ({ paneKey, tabId, workerWorktreeId, terminalHandle, transcript }) => {
+      ({ paneKey, tabId, workerWorktreeId, terminalHandle, transcript, agentCommand }) => {
         window.__store?.getState().setAgentStatus(
           paneKey,
           { state: 'working', prompt: 'Respond ACK and remain idle', agentType: 'codex' },
@@ -285,7 +285,7 @@ test('a missing legacy worker cannot spawn a replacement during restart recovery
               transcriptPath: transcript
             },
             launchConfig: {
-              agentCommand: 'codex',
+              agentCommand,
               agentArgs: '--dangerously-bypass-approvals-and-sandbox',
               agentEnv: {}
             }
@@ -298,7 +298,8 @@ test('a missing legacy worker cannot spawn a replacement during restart recovery
         tabId: worker!.tabId,
         workerWorktreeId: worker!.worktreeId,
         terminalHandle: worker!.handle,
-        transcript: transcriptPath
+        transcript: transcriptPath,
+        agentCommand: fakeCodexCommand
       }
     )
     await expect.poll(() => hasPersistedResumeRecord(session.userDataDir, workerPaneKey)).toBe(true)

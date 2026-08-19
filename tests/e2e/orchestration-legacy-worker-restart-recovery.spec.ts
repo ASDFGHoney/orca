@@ -520,7 +520,14 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
         .toEqual([expect.objectContaining({ event: 'authority-hook', status: 204 })])
       const transcriptPath = session.seedCodexResumeRollout(PROVIDER_SESSION_ID, repoPath)
       await first.page.evaluate(
-        ({ paneKey, tabId, worktreeId: workerWorktreeId, terminalHandle, transcript }) => {
+        ({
+          paneKey,
+          tabId,
+          worktreeId: workerWorktreeId,
+          terminalHandle,
+          transcript,
+          agentCommand
+        }) => {
           window.__store?.getState().setAgentStatus(
             paneKey,
             { state: 'working', prompt: 'Respond ACK and remain idle', agentType: 'codex' },
@@ -534,7 +541,7 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
                 transcriptPath: transcript
               },
               launchConfig: {
-                agentCommand: 'codex',
+                agentCommand,
                 agentArgs: '--dangerously-bypass-approvals-and-sandbox',
                 agentEnv: {}
               }
@@ -547,7 +554,8 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
           tabId: worker!.tabId,
           worktreeId: worker!.worktreeId,
           terminalHandle: worker!.handle,
-          transcript: transcriptPath
+          transcript: transcriptPath,
+          agentCommand: fakeCodexCommand
         }
       )
       await expect
@@ -720,7 +728,8 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
                 }),
                 '--json'
               ],
-              status: 0,
+              status: 1,
+              stdout: expect.stringContaining('"code": "legacy_read_only"'),
               stderr: ''
             })
           ])
@@ -739,7 +748,7 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
               )?.status
             }
           })
-          .toEqual({ dispatch: 'completed', task: 'completed' })
+          .toEqual({ dispatch: 'dispatched', task: 'dispatched' })
         expect(readLedger(spawnLedgerPath)).toEqual([initialSpawn])
         expect(isProcessAlive(initialSpawn.pid)).toBe(true)
       } else {
