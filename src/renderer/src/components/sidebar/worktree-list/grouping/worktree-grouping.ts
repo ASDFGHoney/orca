@@ -120,7 +120,8 @@ export function buildOrderedGroups(args: {
         })
       }
       const group = grouped.get(key)!
-      group.folderWorkspaces = [...(group.folderWorkspaces ?? []), pair]
+      group.folderWorkspaces ??= []
+      group.folderWorkspaces.push(pair)
     }
     for (const group of grouped.values()) {
       group.folderWorkspaces?.sort((left, right) =>

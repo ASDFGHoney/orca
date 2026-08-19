@@ -81,29 +81,32 @@ function getFallbackHost(hostId: ExecutionHostId): HostSectionOption {
   }
 }
 
-function countWorktreeRows(rows: readonly Row[]): number {
+function countWorkspaceRows(rows: readonly Row[]): number {
   // Why: a collapsed repo group contributes a header row but no item rows;
   // fall back to the header's own count so the host badge doesn't read 0
   // while a visibly populated project sits right under it.
   let count = 0
   const seenWorktreeIds = new Set<string>()
   let pendingHeader: Extract<Row, { type: 'header' }> | null = null
-  let pendingHeaderHadItems = false
+  let pendingHeaderHadWorkspaces = false
   const flushHeader = (): void => {
-    if (pendingHeader && !pendingHeaderHadItems) {
+    if (pendingHeader && !pendingHeaderHadWorkspaces) {
       if (pendingHeader.worktreeIds) {
+        const headerWorktreeIds = new Set(pendingHeader.worktreeIds)
         for (const worktreeId of pendingHeader.worktreeIds) {
           if (!seenWorktreeIds.has(worktreeId)) {
             count += 1
             seenWorktreeIds.add(worktreeId)
           }
         }
+        // Folder workspaces contribute to the header count but have no worktree id.
+        count += Math.max(0, pendingHeader.count - headerWorktreeIds.size)
       } else {
         count += pendingHeader.count
       }
     }
     pendingHeader = null
-    pendingHeaderHadItems = false
+    pendingHeaderHadWorkspaces = false
   }
   for (const row of rows) {
     if (row.type === 'header') {
@@ -116,7 +119,12 @@ function countWorktreeRows(rows: readonly Row[]): number {
         count += 1
         seenWorktreeIds.add(row.worktree.id)
       }
-      pendingHeaderHadItems = pendingHeader !== null
+      pendingHeaderHadWorkspaces = pendingHeader !== null
+      continue
+    }
+    if (row.type === 'folder-workspace') {
+      count += 1
+      pendingHeaderHadWorkspaces = pendingHeader !== null
     }
   }
   flushHeader()
@@ -289,7 +297,7 @@ export function addHostSectionRows(args: {
       compatibility: host.compatibility,
       connectionStatus: host.connectionStatus,
       collapsed,
-      count: countWorktreeRows(hostRows)
+      count: countWorkspaceRows(hostRows)
     })
     if (!collapsed) {
       result.push(...hostRows)
