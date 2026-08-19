@@ -4,13 +4,27 @@ import {
   buildWindowsHookStdinDrainEpilogue,
   WINDOWS_HOOK_STDIN_DRAIN_COMMAND
 } from '../agent-hooks/hook-stdin-contract'
+import { buildWindowsAgentHookPostCommand } from '../agent-hooks/installer-utils'
 import { ANTIGRAVITY_PRE_TOOL_USE_DECISION } from './hook-events'
+
+// Why (#15117): Antigravity was the last agent posting hook status through Windows
+// PowerShell 5.1. Its ~300ms cold start per event is what made the console the agent
+// allocates for each hook visible; curl.exe (Win10 1803+) finishes in ~10ms and, unlike
+// PowerShell, does not recode the UTF-8 payload through the console code page.
+const WINDOWS_ANTIGRAVITY_HOOK_POST_COMMAND = buildWindowsAgentHookPostCommand('antigravity', [
+  // Why: the event name lives in the wrapper's env, not the payload, and the listener
+  // reads it as a top-level form field — same position as the POSIX branch below.
+  '  --data-urlencode "hook_event_name=%ORCA_ANTIGRAVITY_EVENT%" ^'
+])
 
 export function getManagedScript(target: 'local' | 'posix' = 'local'): string {
   if (target === 'local' && process.platform === 'win32') {
     return [
       '@echo off',
-      'setlocal',
+      // Why (#9358/#9941): a bare `setlocal` inherits delayed expansion from the caller, and
+      // every `!` in a percent-expanded value on the curl line is then eaten as a delayed
+      // reference — silently mangling paneKey and dropping worktreeId. `!` is legal in a path.
+      'setlocal DisableDelayedExpansion',
       'if /I "%ORCA_ANTIGRAVITY_EVENT%"=="Stop" (',
       '  echo {"decision":""}',
       ') else if /I "%ORCA_ANTIGRAVITY_EVENT%"=="PreToolUse" (',
@@ -20,7 +34,7 @@ export function getManagedScript(target: 'local' | 'posix' = 'local'): string {
       ')',
       'if defined ORCA_AGENT_HOOK_ENDPOINT if exist "%ORCA_AGENT_HOOK_ENDPOINT%" call "%ORCA_AGENT_HOOK_ENDPOINT%" 2>nul',
       ...buildWindowsHookEnvironmentGuardLines(),
-      buildWindowsAntigravityHookPostCommand(),
+      WINDOWS_ANTIGRAVITY_HOOK_POST_COMMAND,
       'exit /b 0',
       ...buildWindowsHookStdinDrainEpilogue(),
       ''
@@ -95,11 +109,4 @@ export function getWindowsWrapperScript(eventName: string): string {
     'exit /b 0',
     ''
   ].join('\r\n')
-}
-
-function buildWindowsAntigravityHookPostCommand(): string {
-  // Why: Antigravity hooks are best-effort status updates; do not let a stalled
-  // local listener hold the agent process open. Qualify PowerShell so a
-  // worktree-local powershell.exe cannot hijack hook payloads.
-  return `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$utf8=[System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding=$utf8; [Console]::OutputEncoding=$utf8; $inputData=[Console]::In.ReadToEnd(); try { $payload=if ([string]::IsNullOrWhiteSpace($inputData)) { @{} } else { $inputData | ConvertFrom-Json }; $body=@{ paneKey=$env:ORCA_PANE_KEY; launchToken=$env:ORCA_AGENT_LAUNCH_TOKEN; tabId=$env:ORCA_TAB_ID; worktreeId=$env:ORCA_WORKTREE_ID; env=$env:ORCA_AGENT_HOOK_ENV; version=$env:ORCA_AGENT_HOOK_VERSION; hook_event_name=$env:ORCA_ANTIGRAVITY_EVENT; payload=$payload } | ConvertTo-Json -Depth 100 -Compress; $bodyBytes=$utf8.GetBytes($body); Invoke-WebRequest -UseBasicParsing -Method Post -Uri ('http://127.0.0.1:' + $env:ORCA_AGENT_HOOK_PORT + '/hook/antigravity') -ContentType 'application/json; charset=utf-8' -Headers @{ 'X-Orca-Agent-Hook-Token'=$env:ORCA_AGENT_HOOK_TOKEN } -Body $bodyBytes -TimeoutSec 2 | Out-Null } catch {}"`
 }
