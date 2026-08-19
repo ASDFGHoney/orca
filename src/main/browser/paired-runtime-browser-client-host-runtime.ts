@@ -259,7 +259,9 @@ function reportBrowserClientHostError(error: Error): void {
 
 function retireFailedEnvironmentHost(environmentId: string, error: Error): void {
   reportBrowserClientHostError(error)
-  void browserClientHosts.closeEnvironment(environmentId, error).catch((closeError) => {
+  // Why: the identity's lifetime is the composition's — a retired host must not keep answering
+  // getPairedRuntimeBrowserClientRouteIdentity, or a cookie import writes into a dead partition.
+  void closePairedRuntimeBrowserClientHostEnvironment(environmentId, error).catch((closeError) => {
     console.warn(
       '[browser-client-host] Failed client host retirement:',
       closeError instanceof Error ? closeError.message : String(closeError)
