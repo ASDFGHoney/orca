@@ -15,8 +15,9 @@ const AUTO_GRANTED_BROWSER_PERMISSIONS = new Set([
   'pointerLock',
   // Orca allows unpartitioned third-party cookies, so cross-site frames already send them; denying
   // this only rejected the API and burned the caller's user gesture. Not cookies-only: the same
-  // permission also unpartitions localStorage/IndexedDB for requestStorageAccess({localStorage:
-  // true}), which Chrome equally grants under this cookie policy. Electron has no auto-grant, so
+  // permission also hands requestStorageAccess({localStorage: true}) a handle onto unpartitioned
+  // localStorage/IndexedDB, though ambient globals stay partitioned. Chrome grants the same
+  // permission under the same cookie policy, so this is parity. Electron has no auto-grant, so
   // the embedder must answer, and check must agree with request or compliant sites fall back to
   // the gesture path. Revisit if Orca ever gains a cookie or storage-partitioning control: Electron
   // never writes the STORAGE_ACCESS content setting, so the promise would resolve while access
