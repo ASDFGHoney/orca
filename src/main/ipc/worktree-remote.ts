@@ -199,7 +199,11 @@ function getSetupRunnerCommandPlatformForLaunch(
   return getSetupRunnerCommandPlatformForPath(setup?.runnerScriptPath ?? '', fallbackPlatform)
 }
 
-function validateWorkspaceLineageParentBeforeCreate(
+/** Why not throw on a missing parent: nesting is optional decoration, and the pick can go stale
+ *  between the composer and the create. A malformed or self-referential key is a bad request and
+ *  still fails; a parent that simply disappeared degrades to an unattached workspace, matching the
+ *  runtime path and `recordWorkspaceLineageForCreatedWorktree`. */
+export function assertAttachableParentWorkspace(
   store: Store,
   parentWorkspace: CreateWorktreeArgs['parentWorkspace'],
   childWorkspaceKey: ReturnType<typeof worktreeWorkspaceKey>
@@ -215,10 +219,11 @@ function validateWorkspaceLineageParentBeforeCreate(
     throw new Error(`Invalid parent workspace: ${parentWorkspace}`)
   }
   if (parentScope.type === 'folder' && !store.getFolderWorkspace(parentScope.folderWorkspaceId)) {
-    throw new Error(`Parent folder workspace not found: ${parentWorkspace}`)
+    console.warn(`[worktree-create] parent folder workspace not found: ${parentWorkspace}`)
+    return
   }
   if (parentScope.type === 'worktree' && !store.getWorktreeMeta(parentScope.worktreeId)) {
-    throw new Error(`Parent worktree workspace not found: ${parentWorkspace}`)
+    console.warn(`[worktree-create] parent worktree workspace not found: ${parentWorkspace}`)
   }
 }
 
@@ -1714,7 +1719,7 @@ export async function createRemoteWorktree(
     )
   }
 
-  validateWorkspaceLineageParentBeforeCreate(
+  assertAttachableParentWorkspace(
     store,
     args.parentWorkspace,
     worktreeWorkspaceKey(`${repo.id}::${remotePath}`)
@@ -2357,7 +2362,7 @@ export async function createLocalWorktree(
     )
   }
 
-  validateWorkspaceLineageParentBeforeCreate(
+  assertAttachableParentWorkspace(
     store,
     args.parentWorkspace,
     worktreeWorkspaceKey(`${repo.id}::${worktreePath}`)

@@ -1,3 +1,4 @@
+import type { CreateWorktreeCallOptions } from './worktrees/create/worktree-create-payload'
 import type { WorkspaceKey } from '../../../../shared/folder-workspace-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { WorkspaceSource as WorkspaceCreateTelemetrySource } from '../../../../shared/workspace-source'
@@ -7,7 +8,6 @@ import type {
 } from '../../../../shared/worktree/base-ref-drift-types'
 import type {
   CreateSparseCheckoutRequest,
-  CreateWorktreeArgs,
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult,
@@ -20,11 +20,9 @@ import type {
   DetectedWorktree,
   DetectedWorktreeListResult,
   GitPushTarget,
-  WorkspaceLinkedItem,
   WorkspaceStatus,
   Worktree
 } from '../../../../shared/worktree/types'
-import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { WorktreeForceDeleteReason } from '../../../../shared/worktree/removal'
 import type { TerminalGitHubPRLink } from '../../../../shared/terminal-github-pr-link-detector'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
@@ -207,22 +205,7 @@ export type WorktreeSlice = {
     linkedAzureDevOpsPR?: number | null,
     linkedGiteaPR?: number | null,
     compareBaseRef?: string,
-    options?: {
-      automationProvenanceRequest?: CreateWorktreeArgs['automationProvenanceRequest']
-      linkedWorkItem?: WorkspaceLinkedItem | null
-      linkedTaskSourceContext?: TaskSourceContext | null
-      /** Lets the owning runtime launch and prefill a task agent without first creating an idle shell. */
-      startupDraft?: string
-      /** True only when `name` came from the creature-name generator; gates host-side retirement. */
-      nameWasGenerated?: boolean
-      /** Parent picked in the composer. Sets sidebar nesting only; ignored if it no longer exists. */
-      parentWorktreeId?: string
-      provisionedRoot?: {
-        runtimeId: string
-        executionHostId: ExecutionHostId
-        expectedPath: string
-      }
-    }
+    options?: CreateWorktreeCallOptions
   ) => Promise<CreateWorktreeResult>
   /** Register an in-flight background creation and make it the active surface. */
   beginPendingWorktreeCreation: (entry: PendingWorktreeCreation) => void
@@ -383,7 +366,9 @@ export function findWorktreeById(
   return undefined
 }
 
-type RequiredKey<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T]
+type RequiredKey<T> = {
+  [K in keyof T]-?: undefined extends T[K] ? never : K
+}[keyof T]
 
 // Why: a present-but-undefined key in a spread ERASES the field. That is the
 // intended wire signal for clearing optional metadata (pushTarget), but on a

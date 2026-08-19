@@ -150,6 +150,9 @@ export const WorktreeCreate = z
     runHooks: OptionalBoolean,
     activate: OptionalBoolean,
     parentWorkspace: OptionalString,
+    // Why: an app-selected parent is a manual action, not the CLI's `--parent-workspace` flag.
+    // Absent keeps the CLI provenance older clients rely on.
+    parentWorkspaceOrigin: z.literal('manual').optional(),
     envParentWorkspace: OptionalString,
     parentWorktree: OptionalString,
     cwdParentWorktree: OptionalString,
