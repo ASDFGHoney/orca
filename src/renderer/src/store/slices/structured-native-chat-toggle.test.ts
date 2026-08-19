@@ -229,10 +229,36 @@ describe('native chat routing', () => {
     ).resolves.toBe('bridge')
 
     expect(callStructuredAgentSession).not.toHaveBeenCalled()
-    expect(patch).toHaveBeenCalledWith(tab.id, {
-      viewMode: 'chat',
-      structuredSessionId: undefined
+    expect(patch).toHaveBeenCalledTimes(1)
+    const [patchedTabId, bridgePatch] = patch.mock.calls[0] as [string, Record<string, unknown>]
+    expect(patchedTabId).toBe(tab.id)
+    expect(bridgePatch.viewMode).toBe('chat')
+    // Deep equality treats an absent key as undefined, so presence is the only proof it was cleared.
+    expect(Object.keys(bridgePatch)).toContain('structuredSessionId')
+    expect(bridgePatch.structuredSessionId).toBeUndefined()
+  })
+
+  it('keeps a Codex binding when the same agent falls back to the bridge', async () => {
+    const { tab, state } = terminalState({
+      agent: 'codex',
+      structuredSessionId: 'codex_thread-codex',
+      connectionId: 'ssh-1'
     })
+    const patch = vi.fn()
+
+    await expect(
+      setTerminalNativeChatMode({
+        getState: () => state as never,
+        patch,
+        tabId: tab.id,
+        mode: 'chat'
+      })
+    ).resolves.toBe('bridge')
+
+    expect(callStructuredAgentSession).not.toHaveBeenCalled()
+    expect(patch).toHaveBeenCalledTimes(1)
+    const [, codexBridgePatch] = patch.mock.calls[0] as [string, Record<string, unknown>]
+    expect(Object.keys(codexBridgePatch)).not.toContain('structuredSessionId')
   })
 
   it('names the terminal direction when returning ownership fails', async () => {
