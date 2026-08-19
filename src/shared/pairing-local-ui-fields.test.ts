@@ -7,7 +7,8 @@ describe('pairing-local UI fields', () => {
   it('census: the set is exactly the fields no pairing may exchange', () => {
     expect([...PAIRING_LOCAL_UI_FIELDS]).toEqual([
       'hideWorkspacesFromOtherDevices',
-      'manualRepoOrder'
+      'manualRepoOrder',
+      'workspaceHostOrder'
     ])
   })
 
@@ -15,6 +16,7 @@ describe('pairing-local UI fields', () => {
     const state = {
       hideWorkspacesFromOtherDevices: true,
       manualRepoOrder: [{ hostId: 'local' as const, repoId: 'repo-a' }],
+      workspaceHostOrder: ['local' as const],
       sidebarWidth: 280,
       activeView: 'tasks' as const
     }

@@ -34,6 +34,7 @@ import type { OnboardingState } from '../../../shared/onboarding-state-types'
 import type { PersistedUIState } from '../../../shared/persisted-ui-state-types'
 import {
   omitPairingLocalUiFields,
+  type PairedUiState,
   type PairingLocalUiField
 } from '../../../shared/pairing-local-ui-fields'
 import type { MemorySnapshot, StatsSummary } from '../../../shared/process-stats-types'
@@ -2706,11 +2707,7 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
   return {
     get: async () => {
       try {
-        const result = await callRuntimeResult<{ ui: PersistedUIState }>(
-          'ui.get',
-          undefined,
-          15_000
-        )
+        const result = await callRuntimeResult<{ ui: PairedUiState }>('ui.get', undefined, 15_000)
         const local = readLocalWebUIState()
         const next = {
           ...mergeHostWebUIState(local, result.ui),
@@ -2759,7 +2756,7 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
       })
       writeJson(UI_STORAGE_KEY, optimistic)
       try {
-        const result = await callRuntimeResult<{ ui: PersistedUIState }>(
+        const result = await callRuntimeResult<{ ui: PairedUiState }>(
           'ui.recordFeatureInteraction',
           id,
           15_000
@@ -4173,14 +4170,14 @@ function mergeWebUIState(
 // Why pin instead of trusting the host's strip: an old host still returns these fields, and for a
 // profile a pre-fix drag poisoned they echo back the same runtime:web-* keys this browser minted,
 // which then match its own repos and beat every newer drag.
-function mergeHostWebUIState(
-  local: PersistedUIState,
-  incoming: PersistedUIState
-): PersistedUIState {
-  const pinned: Pick<PersistedUIState, PairingLocalUiField> = {
+function mergeHostWebUIState(local: PersistedUIState, incoming: PairedUiState): PersistedUIState {
+  // Why `satisfies Record<...>` rather than a `Pick<...>` annotation: every member is optional in
+  // PersistedUIState, so Pick would accept a literal that silently skipped a newly added member.
+  const pinned = {
     hideWorkspacesFromOtherDevices: local.hideWorkspacesFromOtherDevices === true,
-    manualRepoOrder: local.manualRepoOrder
-  }
+    manualRepoOrder: local.manualRepoOrder,
+    workspaceHostOrder: local.workspaceHostOrder
+  } satisfies Record<PairingLocalUiField, unknown> & Partial<PersistedUIState>
   return { ...mergeWebUIState(local, incoming), ...pinned }
 }
 

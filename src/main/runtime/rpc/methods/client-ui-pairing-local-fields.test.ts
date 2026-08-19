@@ -42,7 +42,8 @@ describe('client UI RPC pairing-local field seams', () => {
     hideWorkspacesFromOtherDevices: true,
     manualRepoOrder: [
       { hostId: 'runtime:web-11111111-2222-3333-4444-555555555555', repoId: 'repo-a' }
-    ]
+    ],
+    workspaceHostOrder: ['runtime:web-11111111-2222-3333-4444-555555555555', 'local']
   }
 
   it.each(PAIRING_LOCAL_UI_FIELDS.map((field) => [field] as const))(
