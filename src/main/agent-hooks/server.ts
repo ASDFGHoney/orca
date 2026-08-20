@@ -40,7 +40,8 @@ import {
   writeEndpointFile,
   type AgentHookEventPayload,
   type ClaudeLeadTurnState,
-  type HookListenerState
+  type HookListenerState,
+  type ToolSnapshot
 } from '../../shared/agent-hook-listener'
 import {
   createHookTransportInterferenceTracker,
@@ -2055,6 +2056,9 @@ export class AgentHookServer {
       this.state.claudeSubagentRosterByPaneKey.get(paneKey)
     )
     const previousLeadState = this.cloneClaudeLeadState(paneKey)
+    const previousPrompt = this.state.lastPromptByPaneKey.get(paneKey)
+    const previousTool = this.cloneClaudeToolState(paneKey)
+    const previousUnconfirmed = this.state.claudeUnconfirmedRestoredStatusPaneKeys.has(paneKey)
     const event = normalizeHookPayload(this.state, source, body, this.env)
     const nextRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
     const nextTaskObservations = new Map(
@@ -2067,6 +2071,9 @@ export class AgentHookServer {
       this.state.claudeSubagentRosterByPaneKey.get(paneKey)
     )
     const nextLeadState = this.cloneClaudeLeadState(paneKey)
+    const nextPrompt = this.state.lastPromptByPaneKey.get(paneKey)
+    const nextTool = this.cloneClaudeToolState(paneKey)
+    const nextUnconfirmed = this.state.claudeUnconfirmedRestoredStatusPaneKeys.has(paneKey)
     this.setClaudeBackgroundEvidence(
       paneKey,
       previousRunningTask,
@@ -2076,6 +2083,7 @@ export class AgentHookServer {
     )
     this.setClaudeSubagentRoster(paneKey, previousSubagentRoster)
     this.setClaudeLeadState(paneKey, previousLeadState)
+    this.setClaudeNormalizationCache(paneKey, previousPrompt, previousTool, previousUnconfirmed)
     if (!event || event.paneKey !== paneKey) {
       return { event }
     }
@@ -2092,6 +2100,7 @@ export class AgentHookServer {
         )
         this.setClaudeSubagentRoster(paneKey, nextSubagentRoster)
         this.setClaudeLeadState(paneKey, nextLeadState)
+        this.setClaudeNormalizationCache(paneKey, nextPrompt, nextTool, nextUnconfirmed)
       }
     }
   }
@@ -2119,6 +2128,34 @@ export class AgentHookServer {
       this.state.claudeLeadStateByPaneKey.set(paneKey, lead)
     } else {
       this.state.claudeLeadStateByPaneKey.delete(paneKey)
+    }
+  }
+
+  private cloneClaudeToolState(paneKey: string): ToolSnapshot | undefined {
+    const tool = this.state.lastToolByPaneKey.get(paneKey)
+    return tool ? { ...tool } : undefined
+  }
+
+  private setClaudeNormalizationCache(
+    paneKey: string,
+    prompt: string | undefined,
+    tool: ToolSnapshot | undefined,
+    restoredUnconfirmed: boolean
+  ): void {
+    if (prompt === undefined) {
+      this.state.lastPromptByPaneKey.delete(paneKey)
+    } else {
+      this.state.lastPromptByPaneKey.set(paneKey, prompt)
+    }
+    if (tool === undefined) {
+      this.state.lastToolByPaneKey.delete(paneKey)
+    } else {
+      this.state.lastToolByPaneKey.set(paneKey, tool)
+    }
+    if (restoredUnconfirmed) {
+      this.state.claudeUnconfirmedRestoredStatusPaneKeys.add(paneKey)
+    } else {
+      this.state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
     }
   }
 

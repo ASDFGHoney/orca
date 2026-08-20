@@ -165,6 +165,8 @@ describe('AgentHookServer listener replay', () => {
       })
       const parent = server.getStatusSnapshot()[0]
       const state = server._getStateForTests()
+      const parentPrompt = state.lastPromptByPaneKey.get(PANE)
+      const parentTool = state.lastToolByPaneKey.get(PANE)
       state.claudeSubagentRosterByPaneKey.set(
         PANE,
         new Map([['agent-1', { state: 'working', startedAt: 1 }]])
@@ -197,6 +199,8 @@ describe('AgentHookServer listener replay', () => {
         server._getStateForTests().claudeSubagentRosterByPaneKey.get(PANE)?.has('agent-1')
       ).toBe(true)
       expect(server._getStateForTests().claudeLeadStateByPaneKey.has(PANE)).toBe(false)
+      expect(server._getStateForTests().lastPromptByPaneKey.get(PANE)).toBe(parentPrompt)
+      expect(server._getStateForTests().lastToolByPaneKey.get(PANE)).toEqual(parentTool)
     } finally {
       server.stop()
       rmSync(dir, { recursive: true, force: true })
