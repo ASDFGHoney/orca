@@ -51,7 +51,7 @@ vi.mock('../agent-hooks/remote-managed-hook-installers', () => ({
 }))
 vi.mock('../providers/ssh-pty-provider', () => ({
   SshPtyProvider: class MockSshPtyProvider {
-    private readonly pendingLiveEvidence = new Set<{ valid: boolean }>()
+    private readonly pendingLiveEvidence = new Map<string, Set<{ valid: boolean }>>()
     readonly providerGeneration: number
     onData = vi.fn().mockReturnValue(() => {})
     onReplay = vi.fn().mockReturnValue(() => {})
@@ -59,32 +59,34 @@ vi.mock('../providers/ssh-pty-provider', () => ({
     attach = vi.fn().mockResolvedValue(undefined)
     attachForReconnect = vi.fn().mockResolvedValue({})
     acceptLivePty = vi.fn()
-    beginLivePtyEvidence = vi.fn(() => {
+    beginLivePtyEvidence = vi.fn((id: string) => {
       const evidence = { valid: true }
-      this.pendingLiveEvidence.add(evidence)
+      const pending = this.pendingLiveEvidence.get(id) ?? new Set<{ valid: boolean }>()
+      pending.add(evidence)
+      this.pendingLiveEvidence.set(id, pending)
       return evidence
     })
     settleLivePtyEvidence = vi.fn(
       (id: string, evidence: { valid: boolean }, acceptLive: boolean) => {
-        this.pendingLiveEvidence.delete(evidence)
+        this.pendingLiveEvidence.get(id)?.delete(evidence)
         if (evidence.valid && acceptLive) {
           this.acceptLivePty(id)
         }
       }
     )
-    acceptUnverifiablePty = vi.fn((_id: string) => {
-      for (const evidence of this.pendingLiveEvidence) {
+    // Mirrors SshPtyLivenessState: only the named PTY's pending live evidence is invalidated.
+    acceptUnverifiablePty = vi.fn((id: string) => {
+      for (const evidence of this.pendingLiveEvidence.get(id) ?? []) {
         evidence.valid = false
       }
-      this.pendingLiveEvidence.clear()
+      this.pendingLiveEvidence.delete(id)
     })
     acceptAmbiguousExitPty = vi.fn((id: string) => this.acceptUnverifiablePty(id))
-    // Mirrors SshPtyLivenessState.acceptExited, which invalidates pending live evidence.
-    acceptExitedPtyLiveness = vi.fn((_id: string) => {
-      for (const evidence of this.pendingLiveEvidence) {
+    acceptExitedPtyLiveness = vi.fn((id: string) => {
+      for (const evidence of this.pendingLiveEvidence.get(id) ?? []) {
         evidence.valid = false
       }
-      this.pendingLiveEvidence.clear()
+      this.pendingLiveEvidence.delete(id)
     })
     acceptExitedPty = vi.fn()
     dispose = vi.fn()
