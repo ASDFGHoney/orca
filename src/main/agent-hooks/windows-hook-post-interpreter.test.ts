@@ -107,22 +107,40 @@ describe('Windows managed hook post interpreter', () => {
     // Why: a silent zero would make this suite pass while asserting nothing.
     expect(scripts.length).toBeGreaterThanOrEqual(BATCH_SCRIPT_INSTALLERS.length)
 
-    const posting = scripts.filter((script) => script.body.includes('/hook/'))
-    // Why: every agent in the matrix owns exactly one posting script; event wrappers that only
-    // set an env var and delegate are not expected to post themselves.
-    expect(posting.length).toBeGreaterThanOrEqual(BATCH_SCRIPT_INSTALLERS.length)
-
-    for (const script of posting) {
+    // Why: assert this across every .cmd before narrowing. Filtering to posting scripts first
+    // hides the failure that matters — a script that swapped its curl POST for an interpreter
+    // no longer matches the filter, so the suite fails on an opaque count instead.
+    for (const script of scripts) {
       // Why: PowerShell costs ~300ms of interpreter startup per event and recodes the UTF-8
       // payload through the console code page. curl.exe (Win10 1803+) does neither.
       expect(script.body, `${script.name} must not spawn an interpreter`).not.toMatch(
         /powershell(\.exe)?/i
       )
+    }
+
+    // Why: `%~dp0` marks an event wrapper that only sets env and delegates to the core script.
+    const isWrapper = (body: string): boolean => body.includes('%~dp0')
+    const posts = (body: string): boolean => body.includes('127.0.0.1:%ORCA_AGENT_HOOK_PORT%')
+
+    // Why: name the script that stopped posting rather than failing on a bare count.
+    expect(
+      scripts.filter((s) => !isWrapper(s.body) && !posts(s.body)).map((s) => s.name),
+      'every non-wrapper script must post to the hook port'
+    ).toEqual([])
+
+    const posting = scripts.filter((script) => posts(script.body))
+    expect(posting.length).toBeGreaterThanOrEqual(BATCH_SCRIPT_INSTALLERS.length)
+
+    for (const script of posting) {
       // Why: fully qualified so a repo-local curl.exe cannot intercept hook payloads.
       expect(script.body, `${script.name} must post through curl.exe`).toContain(
         '"%SystemRoot%\\System32\\curl.exe"'
       )
-      // Why: keeps multi-KB tool output off the command line (EDR oversized-command-line rules).
+    }
+
+    // Why: hook events pipe via stdin to keep multi-KB tool output off the command line (EDR
+    // oversized-command-line rules). The statusline script stages a temp file instead.
+    for (const script of posting.filter((s) => s.body.includes('/hook/'))) {
       expect(script.body, `${script.name} must pipe the payload via stdin`).toContain(
         '--data-urlencode "payload@-"'
       )
