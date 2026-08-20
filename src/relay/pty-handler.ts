@@ -58,6 +58,7 @@ import {
   parsePtyStartupIngressIntent,
   type PtyIngressEmission
 } from '../shared/pty-startup-ingress'
+import { PTY_INCARNATION_ADDRESSED_SHUTDOWN_VERSION } from '../shared/pty-incarnation'
 import { resolvePtyOwnerBackend, type PtyOwnerBackend } from '../shared/pty-owner-backend'
 import { RecentPtyOutputBuffer } from '../main/runtime/recent-pty-output-buffer'
 import { expandWindowsPathEnvironmentVariables } from '../shared/windows-environment-expansion'
@@ -917,7 +918,8 @@ export class PtyHandler {
     this.dispatcher.onRequest('pty.getCapabilities', async () => ({
       startupIngressVersion: PTY_STARTUP_INGRESS_VERSION,
       agentSessionClaimVersion: AGENT_SESSION_EXECUTION_OWNER_PROTOCOL_VERSION,
-      agentSessionCreateOperationVersion: AGENT_SESSION_CREATE_OPERATION_PROTOCOL_VERSION
+      agentSessionCreateOperationVersion: AGENT_SESSION_CREATE_OPERATION_PROTOCOL_VERSION,
+      incarnationAddressedShutdownVersion: PTY_INCARNATION_ADDRESSED_SHUTDOWN_VERSION
     }))
     this.dispatcher.onRequest('pty.listProcesses', () => this.listProcesses())
     this.dispatcher.onRequest('pty.getDefaultShell', async () => resolveDefaultShell())

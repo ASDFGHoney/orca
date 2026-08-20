@@ -542,6 +542,10 @@ export type LocalPtyProviderOptions = {
 }
 
 export class LocalPtyProvider implements IPtyProvider {
+  supportsIncarnationAddressedShutdown(): boolean {
+    return true
+  }
+
   private opts: LocalPtyProviderOptions
 
   constructor(opts: LocalPtyProviderOptions = {}) {

@@ -422,6 +422,10 @@ export class DaemonPtyAdapter implements IPtyProvider {
     return this.protocolVersion >= AGENT_SESSION_CLAIM_DAEMON_PROTOCOL_VERSION
   }
 
+  supportsIncarnationAddressedShutdown(): boolean {
+    return this.protocolVersion >= INCARNATION_ADDRESSED_SHUTDOWN_DAEMON_PROTOCOL_VERSION
+  }
+
   providesAgentSessionOwnerListings(_ptyId: string): boolean {
     return this.supportsAgentSessionClaims()
   }

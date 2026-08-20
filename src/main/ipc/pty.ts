@@ -5703,21 +5703,18 @@ export function registerPtyHandlers(
       }
       return killWithCurrentProvider()
     },
-    retireRejectedPty: (ptyId, stopConfirmed) => {
-      rememberRetiredRejectedPty(ptyId)
+    retireRejectedPty: (ptyId, stopConfirmed, expectedIncarnationId) => {
+      if (!expectedIncarnationId || ptyIncarnationById.get(ptyId) !== expectedIncarnationId) {
+        return
+      }
       if (!stopConfirmed) {
         runtime?.markPtyLivenessUnverifiable?.(
           ptyId,
           'a follow-up stop was issued but its outcome could not be verified'
         )
-        if (!ptyOwnership.has(ptyId)) {
-          return
-        }
-        runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
-        rememberSyntheticKillExit(ptyId)
-        sendPtyExitToRenderer({ id: ptyId, code: -1 })
         return
       }
+      rememberRetiredRejectedPty(ptyId)
       // Why: a completed stop already cleared provider state, tombstoned the lease and told the
       // renderer; repeating that double-fires the exit IPC.
       if (!ptyOwnership.has(ptyId)) {
@@ -5727,7 +5724,11 @@ export function registerPtyHandlers(
       let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
       const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
       connectionId ??= parsedSshId?.connectionId
-      const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
+      const finished = finishExpectedPtyShutdown(ptyId, connectionId, store, expectedIncarnationId)
+      if (!finished.finished) {
+        return
+      }
+      const { incarnationId } = finished
       runtime?.onPtyExit(ptyId, 0, incarnationId)
       rememberSyntheticKillExit(ptyId)
       sendPtyExitToRenderer({ id: ptyId, code: 0 })
@@ -5873,6 +5874,39 @@ export function registerPtyHandlers(
         sendPtyExitToRenderer({ id: ptyId, code: 0 })
       }
       return true
+    },
+    supportsIncarnationAddressedStop: async (ptyId, opts) => {
+      const connectionId = ptyOwnership.get(ptyId) ?? parseAppSshPtyId(ptyId)?.connectionId ?? null
+      const startupPromise = getLocalPtyProviderStartupPromise(connectionId)
+      if (startupPromise) {
+        const deadlineMs = opts?.deadlineMs
+        if (deadlineMs !== undefined) {
+          const ready = await Promise.race([
+            startupPromise.then(
+              () => true,
+              () => false
+            ),
+            delay(Math.max(1, deadlineMs - Date.now())).then(() => false)
+          ])
+          if (!ready) {
+            return false
+          }
+        } else {
+          try {
+            await startupPromise
+          } catch {
+            return false
+          }
+        }
+      }
+      const provider = connectionId ? sshProviders.get(connectionId) : tryGetProviderForPty(ptyId)
+      const supported =
+        (await provider?.supportsIncarnationAddressedShutdown?.(ptyId, opts)) === true
+      return (
+        supported &&
+        opts?.expectedIncarnationId !== undefined &&
+        ptyIncarnationById.get(ptyId) === opts.expectedIncarnationId
+      )
     },
     getForegroundProcess: async (ptyId) => {
       try {

@@ -265,12 +265,18 @@ describe('registerPtyHandlers', () => {
           onPtyExit: vi.fn(),
           registerPty: vi.fn(),
           onPtySpawned: vi.fn(),
-          markPtyStopRequested: vi.fn()
+          markPtyStopRequested: vi.fn(),
+          markPtyLivenessUnverifiable: vi.fn()
         }
         handlers.clear()
         registerPtyHandlers(mainWindow as never, runtime as never)
         const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
           spawn: (args: { cols: number; rows: number }) => Promise<{ id: string }>
+          retireRejectedPty: (
+            ptyId: string,
+            stopConfirmed: boolean,
+            expectedIncarnationId: string
+          ) => void
           stopAndWait: (ptyId: string, opts: { expectedIncarnationId: string }) => Promise<boolean>
         }
 
@@ -283,7 +289,9 @@ describe('registerPtyHandlers', () => {
         releaseShutdown()
 
         await expect(stopping).resolves.toBe(false)
+        controller.retireRejectedPty('reused-pty', false, 'incarnation-a')
         expect(liveIncarnation).toBe('incarnation-b')
+        expect(runtime.markPtyLivenessUnverifiable).not.toHaveBeenCalled()
         expect(runtime.onPtyExit).not.toHaveBeenCalledWith(
           'reused-pty',
           expect.anything(),
@@ -443,7 +451,7 @@ describe('registerPtyHandlers', () => {
         )
         expect(runtime.onPtyExit).toHaveBeenCalledWith('remote-pty', -1, undefined)
       })
-      it('keeps a rejected SSH PTY unverifiable after kill shutdown fails transiently', async () => {
+      it('does not overwrite a failed kill verdict with unproven rejected retirement', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
         const store = {
           markSshRemotePtyLease: vi.fn()
@@ -511,7 +519,7 @@ describe('registerPtyHandlers', () => {
         )
         expect(runtime.markPtyLivenessUnverifiable).toHaveBeenCalledWith(
           'remote-pty',
-          'a follow-up stop was issued but its outcome could not be verified'
+          'Multiplexer disposed'
         )
         expect(runtime.onPtyExit).toHaveBeenCalledWith('remote-pty', -1, undefined)
         expect(runtime.onPtyExit).not.toHaveBeenCalledWith('remote-pty', 0, undefined)

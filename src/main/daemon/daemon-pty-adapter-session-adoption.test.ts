@@ -653,6 +653,8 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
     it('fails closed before contacting a legacy daemon', async () => {
       const legacy = new DaemonPtyAdapter({ socketPath, tokenPath, protocolVersion: 35 })
       try {
+        expect(legacy.supportsIncarnationAddressedShutdown()).toBe(false)
+        expect(adapter.supportsIncarnationAddressedShutdown()).toBe(true)
         await expect(
           legacy.shutdown('legacy-session', {
             immediate: true,

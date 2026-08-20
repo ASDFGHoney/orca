@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { SshPtyProvider } from './ssh-pty-provider'
 import { AGENT_SESSION_EXECUTION_OWNER_PROTOCOL_VERSION } from '../../shared/agent-session-host-authority'
+import { PTY_INCARNATION_ADDRESSED_SHUTDOWN_VERSION } from '../../shared/pty-incarnation'
 import {
   createMockMux,
   expectRequest,
@@ -179,6 +180,33 @@ describe('SshPtyProvider', () => {
       },
       undefined
     )
+  })
+
+  it('proves incarnation-addressed shutdown before a close commit', async () => {
+    mux.request.mockResolvedValue({
+      incarnationAddressedShutdownVersion: PTY_INCARNATION_ADDRESSED_SHUTDOWN_VERSION
+    })
+
+    await expect(provider.supportsIncarnationAddressedShutdown(scopedPty1)).resolves.toBe(true)
+    expectRequest(mux.request, 'pty.getCapabilities', undefined, undefined)
+  })
+
+  it('fails closed when an old relay omits incarnation-addressed shutdown', async () => {
+    mux.request.mockResolvedValue({})
+
+    await expect(provider.supportsIncarnationAddressedShutdown(scopedPty1)).resolves.toBe(false)
+    await expect(provider.supportsIncarnationAddressedShutdown(scopedPty1)).resolves.toBe(false)
+    expect(mux.request).toHaveBeenCalledOnce()
+  })
+
+  it('retries incarnation capability after a transient relay failure', async () => {
+    mux.request.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({
+      incarnationAddressedShutdownVersion: PTY_INCARNATION_ADDRESSED_SHUTDOWN_VERSION
+    })
+
+    await expect(provider.supportsIncarnationAddressedShutdown(scopedPty1)).resolves.toBe(false)
+    await expect(provider.supportsIncarnationAddressedShutdown(scopedPty1)).resolves.toBe(true)
+    expect(mux.request).toHaveBeenCalledTimes(2)
   })
 
   it('does not fall back to an unsafe shutdown on an old relay', async () => {

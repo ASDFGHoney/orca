@@ -16,7 +16,10 @@ const SIBLING_PTY_ID = 'pty-close-continuity-sibling'
 const INCARNATION_ID = '22222222-2222-4222-8222-222222222222'
 const SIBLING_INCARNATION_ID = '44444444-4444-4444-8444-444444444444'
 
-function makeSession(ptyId = PTY_ID): WorkspaceSessionState {
+function makeSession(
+  ptyId = PTY_ID,
+  incarnationId: string | null = INCARNATION_ID
+): WorkspaceSessionState {
   return {
     ...getDefaultWorkspaceSession(),
     tabsByWorktree: {
@@ -41,9 +44,9 @@ function makeSession(ptyId = PTY_ID): WorkspaceSessionState {
         ptyIdsByLeafId: { [LEAF_ID]: ptyId }
       }
     },
-    terminalPtyIncarnationsByPaneKey: {
-      [makePaneKey(TAB_ID, LEAF_ID)]: INCARNATION_ID
-    }
+    terminalPtyIncarnationsByPaneKey: incarnationId
+      ? { [makePaneKey(TAB_ID, LEAF_ID)]: incarnationId }
+      : {}
   }
 }
 
@@ -56,12 +59,19 @@ function makeDeferred() {
 }
 
 function createHarness(
-  options: { ptyId?: string; publishMobileSurface?: boolean; registerPtyBacked?: boolean } = {}
+  options: {
+    ptyId?: string
+    incarnationId?: string | null
+    publishMobileSurface?: boolean
+    registerPtyBacked?: boolean
+  } = {}
 ) {
   const ptyId = options.ptyId ?? PTY_ID
-  let session = makeSession(ptyId)
+  const initialIncarnationId =
+    options.incarnationId === undefined ? INCARNATION_ID : options.incarnationId
+  let session = makeSession(ptyId, initialIncarnationId)
   let sessionAvailable = true
-  let incarnationId = INCARNATION_ID
+  let incarnationId = initialIncarnationId
   let includeSiblingPty = false
   const repo = {
     id: REPO_ID,
@@ -96,10 +106,12 @@ function createHarness(
     }
     return verifiedStopResult
   })
+  let exactStopSupported = true
+  const supportsIncarnationAddressedStop = vi.fn(async () => exactStopSupported)
   const listProcesses = vi.fn(async () => [
     {
       id: ptyId,
-      incarnationId,
+      ...(incarnationId ? { incarnationId } : {}),
       cwd: WORKTREE_PATH,
       title: 'Fixture shell'
     },
@@ -120,6 +132,7 @@ function createHarness(
     write: () => true,
     kill,
     stopAndWait,
+    supportsIncarnationAddressedStop,
     listProcesses,
     getForegroundProcess: async () => null
   })
@@ -243,7 +256,7 @@ function createHarness(
     runtime.registerPty(ptyId, WORKTREE_ID, null, {
       tabId: TAB_ID,
       leafId: LEAF_ID,
-      incarnationId: INCARNATION_ID
+      ...(initialIncarnationId ? { incarnationId: initialIncarnationId } : {})
     })
   }
   syncFixtureGraph()
@@ -254,6 +267,7 @@ function createHarness(
     closeTerminalTab,
     kill,
     stopAndWait,
+    supportsIncarnationAddressedStop,
     syncEmptyGraph,
     syncFixtureGraph,
     syncFixtureTabWithoutLeaf,
@@ -275,6 +289,9 @@ function createHarness(
     },
     setVerifiedStopResult: (result: boolean | Error) => {
       verifiedStopResult = result
+    },
+    setExactStopSupported: (supported: boolean) => {
+      exactStopSupported = supported
     },
     replaceIncarnation: (next: string) => {
       incarnationId = next
@@ -329,6 +346,33 @@ describe('terminal close and handle incarnation continuity', () => {
     expect(harness.getSession().tabsByWorktree[WORKTREE_ID]).toHaveLength(1)
   })
 
+  it('retains the tab when the addressed PTY has no incarnation proof', async () => {
+    const harness = createHarness({ incarnationId: null })
+    const [{ handle }] = (await harness.runtime.listTerminals(`id:${WORKTREE_ID}`)).terminals
+
+    await expect(harness.runtime.closeTerminal(handle)).rejects.toThrow(
+      'terminal_incarnation_fence_unavailable'
+    )
+
+    expect(harness.closeTerminalTab).not.toHaveBeenCalled()
+    expect(harness.stopAndWait).not.toHaveBeenCalled()
+    expect(harness.getSession().tabsByWorktree[WORKTREE_ID]).toHaveLength(1)
+  })
+
+  it('retains the tab when its process owner cannot stop by incarnation', async () => {
+    const harness = createHarness()
+    harness.setExactStopSupported(false)
+    const [{ handle }] = (await harness.runtime.listTerminals(`id:${WORKTREE_ID}`)).terminals
+
+    await expect(harness.runtime.closeTerminal(handle)).rejects.toThrow(
+      'terminal_incarnation_fence_unavailable'
+    )
+
+    expect(harness.closeTerminalTab).not.toHaveBeenCalled()
+    expect(harness.stopAndWait).not.toHaveBeenCalled()
+    expect(harness.getSession().tabsByWorktree[WORKTREE_ID]).toHaveLength(1)
+  })
+
   it('requests a stop for every live tab PTY after retirement when the renderer graph is stale', async () => {
     const harness = createHarness()
     harness.setVerifiedStopResult(true)
@@ -363,6 +407,10 @@ describe('terminal close and handle incarnation continuity', () => {
 
     const closing = harness.runtime.closeTerminal(handle)
     await vi.waitFor(() => expect(harness.closeTerminalTab).toHaveBeenCalled())
+    expect(harness.supportsIncarnationAddressedStop).toHaveBeenCalledWith(PTY_ID, {
+      deadlineMs: expect.any(Number),
+      expectedIncarnationId: INCARNATION_ID
+    })
     expect(harness.stopAndWait).not.toHaveBeenCalled()
 
     harness.retirePersistedTab()
@@ -413,6 +461,29 @@ describe('terminal close and handle incarnation continuity', () => {
       ptyStopVerdict: 'live'
     })
     expect(harness.kill).not.toHaveBeenCalled()
+  })
+
+  it('retains a split tab when exact leaf stop is unconfirmed', async () => {
+    const harness = createHarness()
+    harness.syncSplitFixtureGraph()
+    harness.setVerifiedStopResult(false)
+    const terminal = (await harness.runtime.listTerminals(`id:${WORKTREE_ID}`)).terminals.find(
+      (candidate) => candidate.ptyId === PTY_ID
+    )!
+
+    await expect(harness.runtime.closeTerminal(terminal.handle)).resolves.toMatchObject({
+      ptyKilled: false,
+      ptyStopVerdict: 'unverifiable'
+    })
+
+    expect(harness.stopAndWait).toHaveBeenCalledWith(PTY_ID, {
+      deadlineMs: expect.any(Number),
+      expectedIncarnationId: INCARNATION_ID
+    })
+    expect(harness.closeTerminal).not.toHaveBeenCalled()
+    expect(harness.closeTerminalTab).not.toHaveBeenCalled()
+    expect(harness.kill).not.toHaveBeenCalled()
+    expect(harness.getSession().tabsByWorktree[WORKTREE_ID]).toHaveLength(1)
   })
 
   it('leaves a confirmed kill receipt free of any stop verdict', async () => {
