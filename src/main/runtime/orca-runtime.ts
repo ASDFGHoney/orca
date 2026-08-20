@@ -3164,10 +3164,11 @@ export class OrcaRuntimeService {
   private ptyForegroundAgentRefreshes = new Map<string, PtyForegroundAgentRefresh>()
   private ptyForegroundProcessReads = new Map<string, PtyForegroundProcessReadEntry>()
   private ptyDelayedForegroundSnapshotTitleObservations = new Map<string, number>()
-  // Why a set and not a timer: the intent is retired by the exit it explains, or
+  // Why request IDs and not a timer: the intent is retired by the exit it explains, or
   // by the next lifecycle generation on that id (advancePtyLifecycleGeneration),
   // so a stop that never produced an exit cannot outlive its process.
-  private readonly stopRequestedPtyIds = new Set<string>()
+  private readonly stopRequestedPtyIds = new Map<string, Set<number>>()
+  private nextPtyStopRequestId = 1
   private _orchestrationDb: OrchestrationDb | null = null
   private messageWaitersByHandle = new Map<string, Set<MessageWaiter>>()
   private readonly orchestrationMailboxOwner = new OrchestrationMailboxOwner({
@@ -18227,8 +18228,23 @@ export class OrcaRuntimeService {
    * separates "the operator closed it" from "the agent died", so it is recorded
    * where it is known rather than reconstructed afterwards (STA-4603).
    */
-  markPtyStopRequested(ptyId: string): void {
-    this.stopRequestedPtyIds.add(ptyId)
+  markPtyStopRequested(ptyId: string): number {
+    const requestId = this.nextPtyStopRequestId++
+    const requests = this.stopRequestedPtyIds.get(ptyId) ?? new Set()
+    requests.add(requestId)
+    this.stopRequestedPtyIds.set(ptyId, requests)
+    return requestId
+  }
+
+  clearPtyStopRequested(ptyId: string, requestId: number): void {
+    const requests = this.stopRequestedPtyIds.get(ptyId)
+    if (!requests) {
+      return
+    }
+    requests.delete(requestId)
+    if (requests.size === 0) {
+      this.stopRequestedPtyIds.delete(ptyId)
+    }
   }
 
   markPtyHistoryPreservingStopRequested(ptyId: string): number {

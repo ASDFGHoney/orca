@@ -253,6 +253,13 @@ import type { PtyListedSession } from '../../shared/pty-listed-session'
 let localProvider: IPtyProvider = new LocalPtyProvider()
 const sshProviders = new Map<string, IPtyProvider>()
 const sshProvidersByGeneration = new Map<number, IPtyProvider>()
+// Why: legacy providers omit incarnation IDs, so delayed teardown needs a local replacement fence.
+const ptyAdmissionGenerationById = new Map<string, number>()
+let nextPtyAdmissionGeneration = 1
+
+function recordPtyAdmission(id: string): void {
+  ptyAdmissionGenerationById.set(id, nextPtyAdmissionGeneration++)
+}
 
 type RegisteredPtyProvider = {
   provider: IPtyProvider
@@ -2117,6 +2124,7 @@ export function clearProviderPtyState(
   id: string,
   opts: { preserveAgentSessionOwners?: boolean } = {}
 ): void {
+  ptyAdmissionGenerationById.delete(id)
   if (!opts.preserveAgentSessionOwners) {
     agentSessionOwners.release(id)
     // Why: the launch-account record outlives the app, so only a real teardown
@@ -2192,9 +2200,11 @@ export function clearProviderPtyState(
 
 export function deletePtyOwnership(id: string): void {
   ptyOwnership.delete(id)
+  ptyAdmissionGenerationById.delete(id)
 }
 
 export function setPtyOwnership(id: string, connectionId: string | null): void {
+  recordPtyAdmission(id)
   ptyOwnership.set(id, connectionId)
 }
 
@@ -5275,6 +5285,7 @@ export function registerPtyHandlers(
         }
         if (result.agentSessionEnsure?.disposition === 'adopted') {
           const owner = result.agentSessionEnsure.owner
+          recordPtyAdmission(result.id)
           ptyOwnership.set(result.id, args.connectionId ?? ptyOwnership.get(result.id) ?? null)
           runtime?.registerPreAllocatedHandleForPty(result.id, owner.surface.terminalHandle)
           if (result.incarnationId) {
@@ -5302,6 +5313,7 @@ export function registerPtyHandlers(
             agentSessionEnsure: result.agentSessionEnsure
           }
         }
+        recordPtyAdmission(result.id)
         ptyOwnership.set(result.id, args.connectionId ?? null)
         if (result.incarnationId) {
           ptyIncarnationById.set(result.id, result.incarnationId)
@@ -6915,6 +6927,7 @@ export function registerPtyHandlers(
           target: codexSelectionTarget,
           settings: getSettings?.()
         })
+        recordPtyAdmission(result.id)
         ptyOwnership.set(result.id, args.connectionId ?? null)
         if (result.incarnationId) {
           ptyIncarnationById.set(result.id, result.incarnationId)
@@ -7723,7 +7736,12 @@ export function registerPtyHandlers(
       // Why: runtime terminal handles belong to terminal.close; unowned PTY routing could target the local provider.
       throw new Error('Invalid PTY provider id')
     }
-    runtime?.markPtyStopRequested?.(args.id)
+    const expectedIncarnationId = ptyIncarnationById.get(args.id)
+    const expectedAdmissionGeneration = ptyAdmissionGenerationById.get(args.id)
+    const stopRequestId = runtime?.markPtyStopRequested?.(args.id)
+    const ptyIdentityChanged = (): boolean =>
+      ptyIncarnationById.get(args.id) !== expectedIncarnationId ||
+      ptyAdmissionGenerationById.get(args.id) !== expectedAdmissionGeneration
     let historyPreservingStopId = args.keepHistory
       ? runtime?.markPtyHistoryPreservingStopRequested(args.id)
       : undefined
@@ -7741,6 +7759,12 @@ export function registerPtyHandlers(
         // Why: detached SSH PTYs intentionally keep ownership after their
         // provider is unregistered; hydrated app-scoped ids can also arrive
         // before ownership is rebuilt. Tombstone instead of falling back local.
+        if (ptyIdentityChanged()) {
+          if (stopRequestId !== undefined) {
+            runtime?.clearPtyStopRequested(args.id, stopRequestId)
+          }
+          return
+        }
         const incarnationId = finishPtyShutdown(args.id, connectionId, store)
         runtime?.markPtyLivenessUnverifiable?.(args.id, SSH_PROVIDER_UNREGISTERED_REASON)
         runtime?.onPtyExit(args.id, -1, incarnationId)
@@ -7779,6 +7803,12 @@ export function registerPtyHandlers(
       }
       // Why: some shutdown paths do not emit onExit through the provider listener.
       // Explicit cleanup is idempotent and covers already-dead PTYs.
+      if (ptyIdentityChanged()) {
+        if (stopRequestId !== undefined) {
+          runtime?.clearPtyStopRequested(args.id, stopRequestId)
+        }
+        return
+      }
       const incarnationId = finishPtyShutdown(args.id, connectionId, store)
       if (!providerExitObserved) {
         runtime?.onPtyExit(args.id, -1, incarnationId)

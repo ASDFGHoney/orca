@@ -357,6 +357,71 @@ describe('registerPtyHandlers', () => {
       [['pty:exit', { id: 'local-pty', code: -1 }]]
     )
   })
+  it('does not let a delayed kill clear a same-id legacy replacement', async () => {
+    const shutdown = makeDeferred()
+    const daemon = installObservableDaemonTestProvider()
+    daemon.spawn.mockImplementation(async (options: { sessionId?: string }) => ({
+      id: options.sessionId ?? 'daemon-pty'
+    }))
+    daemon.shutdown.mockImplementation(() => shutdown.promise)
+    const runtime = {
+      setPtyController: vi.fn(),
+      markPtyStopRequested: vi.fn(() => 42),
+      clearPtyStopRequested: vi.fn()
+    }
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never)
+
+    const spawnArgs = { cols: 80, rows: 24, sessionId: 'reused-pty' }
+    await handlers.get('pty:spawn')!(null, spawnArgs)
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    const pendingKill = handlers.get('pty:kill')!(null, { id: 'reused-pty' }) as Promise<void>
+    await vi.waitFor(() => expect(daemon.shutdown).toHaveBeenCalledOnce())
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never)
+    await handlers.get('pty:spawn')!(null, spawnArgs)
+
+    shutdown.resolve()
+    await pendingKill
+
+    expect(
+      mainWindow.webContents.send.mock.calls.filter(
+        (call) => call[0] === 'pty:exit' && call[1]?.id === 'reused-pty'
+      )
+    ).toEqual([])
+    expect(runtime.clearPtyStopRequested).toHaveBeenCalledWith('reused-pty', 42)
+  })
+  it('fences a delayed kill from a same-id legacy SSH reattachment', async () => {
+    const shutdown = makeDeferred()
+    const runtime = {
+      setPtyController: vi.fn(),
+      markPtyStopRequested: vi.fn(() => 43),
+      clearPtyStopRequested: vi.fn(),
+      onPtyExit: vi.fn()
+    }
+    registerSshPtyProvider('ssh-legacy', {
+      shutdown: vi.fn(() => shutdown.promise),
+      onExit: vi.fn(() => () => {})
+    } as never)
+    setPtyOwnership('legacy-pty', 'ssh-legacy')
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, runtime as never)
+
+    const pendingKill = handlers.get('pty:kill')!(null, { id: 'legacy-pty' }) as Promise<void>
+    setPtyOwnership('legacy-pty', 'ssh-legacy')
+    shutdown.resolve()
+    await pendingKill
+
+    expect(runtime.onPtyExit).not.toHaveBeenCalled()
+    expect(runtime.clearPtyStopRequested).toHaveBeenCalledWith('legacy-pty', 43)
+    expect(
+      mainWindow.webContents.send.mock.calls.filter(
+        (call) => call[0] === 'pty:exit' && call[1]?.id === 'legacy-pty'
+      )
+    ).toEqual([])
+    deletePtyOwnership('legacy-pty')
+  })
   it('retains an SSH history lease after a synthetic exit until the host exit arrives', async () => {
     const runtime = {
       setPtyController: vi.fn(),
