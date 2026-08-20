@@ -34,6 +34,20 @@ export type WorkspaceVisibleTabType =
   | 'simulator'
 export type CtrlTabOrderMode = 'mru' | 'sequential'
 
+// Why: many-to-one — every editor-family kind collapses to 'editor'. Never invert it by equality;
+// resolve the concrete tab and project forward instead.
+export function toVisibleTabType(contentType: TabContentType): WorkspaceVisibleTabType {
+  if (
+    contentType === 'agent-session' ||
+    contentType === 'browser' ||
+    contentType === 'terminal' ||
+    contentType === 'simulator'
+  ) {
+    return contentType
+  }
+  return 'editor'
+}
+
 export type Tab = {
   id: string // UUID for terminals, filePath for editors (preserves current convention)
   entityId: string // ID of the backing content (terminal tab ID, file path, browser workspace ID)

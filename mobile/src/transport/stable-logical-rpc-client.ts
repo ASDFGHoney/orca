@@ -7,22 +7,9 @@ import {
 import { waitForAuthenticated } from './replacement-session-authentication'
 import { projectMobileRpcRequestParams } from './mobile-rpc-request-projection'
 import { LogicalClientConnectionPath } from './logical-client-connection-path'
+import { LogicalClientCutoverError } from './logical-client-cutover-error'
 
 export type MobileConnectionPath = 'lan' | 'tailscale' | 'relay'
-
-export class LogicalClientCutoverError extends Error {
-  constructor() {
-    super('RPC interrupted by connection migration')
-  }
-}
-
-// Why: instanceof can miss across bundle copies, so also match by message.
-export function isLogicalClientCutoverError(error: unknown): boolean {
-  return (
-    error instanceof LogicalClientCutoverError ||
-    (error instanceof Error && error.message === 'RPC interrupted by connection migration')
-  )
-}
 
 type SubscriptionRecord = {
   method: string
@@ -50,7 +37,12 @@ export type StableLogicalRpcClient = RpcClient & {
   getActivePath(): MobileConnectionPath
   // The path the user is waiting on while migration or scheduled recovery is active.
   getPendingPath(): MobileConnectionPath | null
-  setRecoveryPath(path: MobileConnectionPath | null): void
+  setRecoveryPath(path: MobileConnectionPath | null, attempt?: number): void
+  setRecoveryAttempt(attempt: number): void
+  // Latched when the desktop has repeatedly refused this device's relay credential.
+  setPairingRejected(rejected: boolean): void
+  isPairingRejected(): boolean
+  // Recovery attempts share this signal so status-only changes rerender.
   onConnectionPathChange(listener: () => void): () => void
   getGeneration(): number
 }
@@ -153,7 +145,7 @@ export function createStableLogicalRpcClient(
     },
 
     getState: () => state,
-    getReconnectAttempt: () => activeSession.getReconnectAttempt(),
+    getReconnectAttempt: () => connectionPath.reconnectAttempt(activeSession.getReconnectAttempt()),
     getLastConnectedAt: () => activeSession.getLastConnectedAt(),
     onStateChange(listener) {
       stateListeners.add(listener)
@@ -282,7 +274,10 @@ export function createStableLogicalRpcClient(
     // Why: a previous session that recovers mid-dial makes the pending path a lie —
     // once we're connected the user is no longer waiting on anything.
     getPendingPath: () => connectionPath.pending(),
-    setRecoveryPath: (path) => connectionPath.setRecovery(path),
+    setRecoveryPath: (path, attempt) => connectionPath.setRecovery(path, attempt),
+    setRecoveryAttempt: (attempt) => connectionPath.setRecoveryAttempt(attempt),
+    setPairingRejected: (rejected) => connectionPath.setPairingRejected(rejected),
+    isPairingRejected: () => connectionPath.isPairingRejected(),
     onConnectionPathChange: (listener) => connectionPath.subscribe(listener),
     getGeneration: () => generation
   }

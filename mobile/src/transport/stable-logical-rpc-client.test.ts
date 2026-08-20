@@ -4,9 +4,9 @@ import type { RpcClient } from './rpc-client'
 import { isRpcDeliveryUnknown, markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import {
   createStableLogicalRpcClient,
-  LogicalClientCutoverError,
   type MobileConnectionPath
 } from './stable-logical-rpc-client'
+import { LogicalClientCutoverError } from './logical-client-cutover-error'
 
 class FakeSession implements RpcClient {
   readonly sendRequest =
@@ -313,6 +313,38 @@ describe('stable logical RPC client', () => {
     client.setRecoveryPath(null)
     expect(client.getPendingPath()).toBeNull()
     expect(paths).toEqual(['relay', null])
+  })
+
+  it('publishes supervisor Relay attempts without replacing the physical retry count', () => {
+    const direct = new FakeSession('reconnecting')
+    direct.getReconnectAttempt = () => 5
+    const client = createStableLogicalRpcClient(direct, 'tailscale')
+    const attempts: number[] = []
+    client.onConnectionPathChange(() => attempts.push(client.getReconnectAttempt()))
+
+    client.setRecoveryPath('relay', 3)
+    expect(client.getReconnectAttempt()).toBe(5)
+
+    client.setRecoveryAttempt(7)
+    expect(client.getReconnectAttempt()).toBe(7)
+    expect(attempts).toEqual([5, 7])
+
+    client.setRecoveryPath(null)
+    expect(client.getReconnectAttempt()).toBe(5)
+    expect(attempts).toEqual([5, 7, 5])
+  })
+
+  it('notifies connection-path subscribers when the pairing-rejected latch flips', () => {
+    const direct = new FakeSession('reconnecting')
+    const client = createStableLogicalRpcClient(direct, 'tailscale')
+    const rejected: boolean[] = []
+    client.onConnectionPathChange(() => rejected.push(client.isPairingRejected()))
+
+    client.setPairingRejected(true)
+    client.setPairingRejected(true)
+    client.setPairingRejected(false)
+
+    expect(rejected).toEqual([true, false])
   })
 
   it('does not revive a stale recovery path after a connection later drops', () => {

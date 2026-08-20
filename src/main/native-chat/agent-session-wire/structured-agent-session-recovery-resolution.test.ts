@@ -223,21 +223,11 @@ describe('structured session recovery resolution', () => {
     })
   })
 
-  it('never touches a TUI record or a conflicted claim', async () => {
+  it('leaves a TUI record that still names an owner to its own recovery transport', async () => {
     const store = await openStore()
     await liveOwner(store, 'tui')
     await latch(store, 'recovering')
-    expect(
-      await resolveStructuredSessionRecovery(
-        deps(store, () => ({ outcome: 'pid-absent' })),
-        SESSION
-      )
-    ).toBe('not-applicable')
 
-    await store.transitionHandoff(SESSION, (record) => ({
-      ...record,
-      lease: { ...record.lease, runtimeKind: 'native', claimStatus: 'conflicted' }
-    }))
     expect(
       await resolveStructuredSessionRecovery(
         deps(store, () => ({ outcome: 'pid-absent' })),
@@ -245,5 +235,66 @@ describe('structured session recovery resolution', () => {
       )
     ).toBe('not-applicable')
     expect(store.getRecord(SESSION)?.lease.handoffStage).toBe('recovering')
+  })
+
+  it('resolves a TUI reservation that names nobody, because nothing else can', async () => {
+    // The TUI carve-out exists because a TUI owner has its own recovery transport, and that
+    // transport needs a process to talk to. A reservation that crashed before `commitProcessIdentity`
+    // names none, so skipping it here left the session with no exit at all.
+    const store = await openStore()
+    await reserve(store, 'tui')
+    await latch(store, 'recovering')
+
+    expect(
+      await resolveStructuredSessionRecovery(
+        deps(store, () => ({ outcome: 'reservation-unused' })),
+        SESSION
+      )
+    ).toBe('resolved')
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      handoffStage: null,
+      claimStatus: 'released'
+    })
+  })
+
+  it('frees a conflicted claim once its named owner is proven gone', async () => {
+    const store = await openStore()
+    await liveOwner(store)
+    await store.markClaimConflicted(SESSION, NOW)
+
+    expect(
+      await resolveStructuredSessionRecovery(
+        deps(store, () => ({ outcome: 'pid-absent' })),
+        SESSION
+      )
+    ).toBe('resolved')
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      handoffStage: null,
+      claimStatus: 'released',
+      deathEvidence: { kind: 'pid-absent' }
+    })
+  })
+
+  it('never stops the process a conflicted claim names, and keeps the conflict without proof', async () => {
+    const store = await openStore()
+    await liveOwner(store)
+    await store.markClaimConflicted(SESSION, NOW)
+    const stopOwnerProcess = vi.fn()
+
+    const result = await resolveStructuredSessionRecovery(
+      deps(store, () => ({ outcome: 'identity-matched', matchedOn: ['spawn-token'] }), {
+        stopOwnerProcess
+      }),
+      SESSION
+    )
+
+    // Ownership was never settled, so the process on the other side of the conflict is not
+    // Orca's to kill; only the user can decide which claimant wins.
+    expect(stopOwnerProcess).not.toHaveBeenCalled()
+    expect(result).toBe('unresolved')
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'conflicted',
+      handoffStage: 'manual-recovery'
+    })
   })
 })

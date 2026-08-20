@@ -10,6 +10,7 @@
 // snapshots, unlike a transient per-snapshot flag).
 
 import { webSessionIntentOwnerKey, type WebSessionIntentOwner } from './web-session-intent-owner'
+import { toVisibleTabType } from '../../../shared/tab-types'
 import type { AppState } from '../store/types'
 
 export type WebSessionFocusIntent = {
@@ -22,9 +23,9 @@ const pendingFocusByOwnerAndWorktree = new Map<string, WebSessionFocusIntent>()
 
 type WebSessionVisibleTabState = Pick<
   AppState,
-  | 'activeGroupIdByWorktree'
   | 'activeBrowserTabIdByWorktree'
   | 'activeFileIdByWorktree'
+  | 'activeGroupIdByWorktree'
   | 'activeTabIdByWorktree'
   | 'activeTabType'
   | 'activeTabTypeByWorktree'
@@ -38,16 +39,42 @@ export function resolveWebSessionVisibleTabId(
   worktreeId: string,
   tabs = state.unifiedTabsByWorktree?.[worktreeId] ?? []
 ): string | null {
-  const activeGroupId = state.activeGroupIdByWorktree?.[worktreeId]
-  const activeGroupTabId = state.groupsByWorktree?.[worktreeId]?.find(
-    (group) => group.id === activeGroupId
-  )?.activeTabId
-  if (
-    activeGroupTabId &&
-    tabs.some((tab) => tab.id === activeGroupTabId && tab.contentType === 'agent-session')
-  ) {
-    return activeGroupTabId
+  // Why: the coarse (activeTabType, entityId) address inverts a many-to-one projection and cannot
+  // tell editor-family kinds apart; group state is what is actually on screen.
+  const groups = state.groupsByWorktree?.[worktreeId] ?? []
+  if (groups.length > 0) {
+    const activeGroupId = state.activeGroupIdByWorktree?.[worktreeId] ?? null
+    const activeGroup =
+      (activeGroupId ? groups.find((group) => group.id === activeGroupId) : null) ?? groups[0]
+    // Why: authoritative that nothing is visible too — never resolve into an unfocused group.
+    if (activeGroup?.activeTabId == null) {
+      return null
+    }
+    const activeTabId = activeGroup.activeTabId
+    const direct = tabs.find((tab) => tab.id === activeTabId && tab.groupId === activeGroup.id)
+    if (direct) {
+      return direct.id
+    }
+    // Why: reconcile can rematerialize the visible tab under a new id (local -> mirrored), so
+    // follow its entity rather than dropping focus. Stays inside the group to avoid a pane jump.
+    const previous = (state.unifiedTabsByWorktree?.[worktreeId] ?? []).find(
+      (tab) => tab.id === activeTabId
+    )
+    if (!previous) {
+      return null
+    }
+    const previousType = toVisibleTabType(previous.contentType)
+    return (
+      tabs.find(
+        (tab) =>
+          tab.groupId === activeGroup.id &&
+          tab.entityId === previous.entityId &&
+          toVisibleTabType(tab.contentType) === previousType
+      )?.id ?? null
+    )
   }
+
+  // Why: no group records at all (fresh slice, or first remote reconcile before groups exist).
   const currentType =
     state.activeTabTypeByWorktree?.[worktreeId] ??
     (state.activeWorktreeId === worktreeId ? state.activeTabType : null)
@@ -55,6 +82,8 @@ export function resolveWebSessionVisibleTabId(
     const tabId = state.activeTabIdByWorktree?.[worktreeId]
     return tabId && tabs.some((tab) => tab.id === tabId) ? tabId : null
   }
+  // Why: a structured chat tab has no per-worktree active-entity map to address it by, so the
+  // entityId lookup below would always miss. There is at most one per worktree here.
   if (currentType === 'agent-session') {
     return tabs.find((tab) => tab.contentType === 'agent-session')?.id ?? null
   }
@@ -65,7 +94,9 @@ export function resolveWebSessionVisibleTabId(
         ? state.activeFileIdByWorktree?.[worktreeId]
         : null
   return (
-    tabs.find((tab) => tab.contentType === currentType && tab.entityId === entityId)?.id ?? null
+    tabs.find(
+      (tab) => toVisibleTabType(tab.contentType) === currentType && tab.entityId === entityId
+    )?.id ?? null
   )
 }
 
