@@ -87,6 +87,14 @@ describe('mergeParkedBrowserTabs', () => {
     ])
   })
 
+  it('ignores stale ids in the creation order', () => {
+    const merged = mergeParkedBrowserTabs([live('b', 0, true)], [parked('a')], ['closed', 'a', 'b'])
+    expect(merged.map((tab) => [tab.browserPageId, tab.index])).toEqual([
+      ['a', 0],
+      ['b', 1]
+    ])
+  })
+
   it('keeps ids missing from the creation order at their merged position', () => {
     const merged = mergeParkedBrowserTabs([live('x', 0, true)], [parked('a')], ['a'])
     expect(merged.map((tab) => [tab.browserPageId, tab.index])).toEqual([

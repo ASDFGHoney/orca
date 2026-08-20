@@ -233,11 +233,13 @@ test('resolves --index against the listing that includes parked tabs', async ({ 
   const pageServer = await startAnimatedPageServer()
   try {
     const worktreeId = await resolveSeededWorktreeId(host, testRepoPath)
-    await createTabs(host, worktreeId, pageServer.url, 5)
+    const pageIds = await createTabs(host, worktreeId, pageServer.url, 5)
     await expect.poll(() => countOffscreenRenderers(host), { timeout: 30_000 }).toBe(2)
 
     const before = await listTabs(host, worktreeId)
-    expect(before).toHaveLength(5)
+    // Why: the listing is creation-ordered end to end — parking must not move
+    // a tab's position, or the index a caller read goes stale on a timer.
+    expect(before.map((tab) => tab.browserPageId)).toEqual(pageIds)
     // Why: the listing is creation-ordered, so parked and resident tabs are
     // interleaved. Target a parked one — an index the bridge's live-only index
     // handling would either miss or resolve to a different (live) tab.

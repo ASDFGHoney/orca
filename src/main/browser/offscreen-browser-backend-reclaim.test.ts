@@ -730,6 +730,51 @@ describe('OffscreenBrowserBackend reclamation', () => {
     expect(claimed.map((page) => page.browserPageId)).toEqual(['b'])
   })
 
+  it('lists open page ids in creation order across parks and wakes', async () => {
+    // Why: the merged tab listing sorts by this order; if it drifted with
+    // residency, a background park would renumber indices callers already read.
+    const h = createHarness()
+    await h.backend.createTab({ url: 'https://a', browserPageId: 'a', worktreeId: 'wt-1' })
+    h.clock.value += 1_000
+    await h.backend.createTab({ url: 'https://b', browserPageId: 'b', worktreeId: 'wt-1' })
+    h.clock.value += 120_000
+    await h.backend.reclaimIdlePages()
+    await h.backend.wakeTab('a')
+
+    expect(h.backend.listOpenPageIds('wt-1')).toEqual(['a', 'b'])
+    expect(h.backend.listOpenPageIds()).toEqual(['a', 'b'])
+  })
+
+  it('does not promote a parked page while a live tab holds active', async () => {
+    // Why: promotion exists for the no-live-active gap only; a live active tab
+    // already gives the listing its selection, and a parked page claiming it
+    // too would put two stars on the worktree.
+    const h = createHarness({ activePageId: 'live' })
+    await h.backend.createTab({
+      url: 'https://parked',
+      browserPageId: 'parked',
+      worktreeId: 'wt-1'
+    })
+    h.clock.value += 1_000
+    await h.backend.createTab({ url: 'https://live', browserPageId: 'live', worktreeId: 'wt-1' })
+    h.clock.value += 1_000
+    await h.backend.createTab({
+      url: 'https://doomed',
+      browserPageId: 'doomed',
+      worktreeId: 'wt-1'
+    })
+    h.clock.value += 120_000
+    await h.backend.wakeTab('live')
+    await h.backend.wakeTab('doomed')
+    await h.backend.reclaimIdlePages()
+
+    await h.backend.closeTab('doomed')
+
+    expect(
+      h.backend.listParkedPages('wt-1').map((page) => [page.browserPageId, page.active === true])
+    ).toEqual([['parked', false]])
+  })
+
   it('hands the active flag to a survivor when the parked holder closes', async () => {
     // Why: closing a parked page has no bridge teardown to promote a successor,
     // so without this the worktree's every remaining tab reports inactive and a

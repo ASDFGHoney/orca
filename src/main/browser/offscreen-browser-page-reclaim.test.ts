@@ -85,6 +85,13 @@ describe('readOffscreenBrowserRetentionBudget', () => {
     process.env.ORCA_HEADLESS_BROWSER_PARK_IDLE_MS = '1234abc'
     expect(readOffscreenBrowserRetentionBudget().idleMs).toBe(OFFSCREEN_BROWSER_IDLE_PARK_MS)
   })
+
+  it('treats blank as unset, not as a zero window', () => {
+    // Why: Number('') and Number('   ') are 0 — a blank knob must not silently
+    // configure instant parking.
+    process.env.ORCA_HEADLESS_BROWSER_PARK_IDLE_MS = '   '
+    expect(readOffscreenBrowserRetentionBudget().idleMs).toBe(OFFSCREEN_BROWSER_IDLE_PARK_MS)
+  })
 })
 
 describe('nextOffscreenBrowserReclaimCheckAt', () => {
