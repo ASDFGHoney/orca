@@ -61,6 +61,39 @@ function createDeps(repos: Repo[]): RepoWorktreeRowDeps & {
   return { store, metaById, scanRepo, listFolderWorkspaces }
 }
 
+describe('path-equal worktree row collapse', () => {
+  it('keeps one row and prefers the git branch when the same path is listed twice', async () => {
+    const owner = repo('repo', '/home/me/repo')
+    const deps = createDeps([owner])
+    deps.scanRepo.mockResolvedValueOnce({
+      ok: true,
+      worktrees: [
+        {
+          path: '/home/me/repo',
+          head: '',
+          branch: '',
+          isBare: false,
+          isMainWorktree: true
+        },
+        {
+          path: '/home/me/./repo',
+          head: 'abc123',
+          branch: 'refs/heads/master',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ]
+    })
+
+    const rows = await resolveRepoWorktreeRows(deps, owner, deps.metaById, new Map())
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      branch: 'refs/heads/master',
+      path: '/home/me/./repo'
+    })
+  })
+})
+
 describe('host-qualified scoped worktree resolution', () => {
   it('scans only the selected local or SSH owner when repo ids and paths collide', async () => {
     const owners = [

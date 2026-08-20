@@ -10,6 +10,7 @@ import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import type { Store } from '../persistence'
 import { areWorktreePathsEqual, mergeWorktree } from '../ipc/worktree-logic'
+import { dedupeWorktreesByPath } from '../ipc/worktree-path-comparison'
 import { pruneLineageForMissingRepoWorktrees } from '../worktree-lineage-pruning'
 import { getRepoOwnedWorktreeMeta } from '../worktree-metadata-ownership'
 import { resolveLocalProjectRuntimesForRepos } from '../project-runtime-git-options'
@@ -121,7 +122,12 @@ export async function resolveRepoWorktreeRows(
     RESOLVED_WORKTREE_REPO_TIMEOUT_MS,
     null
   )) ?? { ok: false, worktrees: listStoredWorktreeRowsForRepo(store, repo, repoOwnerCount) }
-  const gitWorktrees = scan.worktrees
+  const gitWorktrees = dedupeWorktreesByPath(
+    // Why: keep the git-scanned branch over a stored empty-branch clone of the same path (#15526).
+    [...scan.worktrees].sort(
+      (left, right) => Number(Boolean(right.branch)) - Number(Boolean(left.branch))
+    )
+  )
   if (scan.ok) {
     pruneLineageForMissingRepoWorktrees(store, repo, gitWorktrees)
   }
