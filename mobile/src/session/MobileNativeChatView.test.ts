@@ -287,6 +287,23 @@ describe('MobileNativeChatView', () => {
     expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
   })
 
+  it('stops offering the drag if the observer goes quiet with the keyboard up', async () => {
+    // The dismiss mode and the padding must agree: latching "a frame was seen"
+    // once would keep offering an interactive drag into the very state the
+    // padding fallback exists for, stranding the composer all over again.
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+    await render({ keyboardInset: ROUTE_INSET })
+    expect(listProps().keyboardDismissMode).toBe('interactive')
+
+    mocks.keyboardState = KEYBOARD_CLOSED
+    mocks.keyboardHeight = 0
+    await update({ keyboardInset: ROUTE_INSET })
+
+    expect(listProps().keyboardDismissMode).toBe('on-drag')
+    expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
+  })
+
   it('holds the lift when a restored keyboard reports no frame to follow', async () => {
     // iOS can restore the keyboard with no animation for the observer to ride:
     // it stays CLOSED at height 0 while the route already reports full lift.
