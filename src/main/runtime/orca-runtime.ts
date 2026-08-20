@@ -30275,10 +30275,13 @@ export class OrcaRuntimeService {
     }
     const sourceIncarnationId =
       sourceAuthority.liveIncarnationId ?? sourceAuthority.persistedIncarnationId
+    if (!sourceIncarnationId) {
+      throw new Error('terminal_incarnation_fence_unavailable')
+    }
     if (
       (await this.ptyController.supportsIncarnationAddressedStop?.(pty.ptyId, {
         deadlineMs: Date.now() + REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS,
-        ...(sourceIncarnationId ? { expectedIncarnationId: sourceIncarnationId } : {})
+        expectedIncarnationId: sourceIncarnationId
       })) === false
     ) {
       throw new Error('terminal_incarnation_fence_unavailable')

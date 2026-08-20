@@ -3463,7 +3463,7 @@
           "assertions": [
             "rejected split cleanup passes the spawned incarnation through exact stop and final retirement",
             "a same-id replacement installed behind the stop barrier remains current and never reaches an ID-only kill",
-            "a legacy SSH owner is refused before split spawn, and missing spawn proof never reaches ID-only cleanup"
+            "missing source proof and a legacy SSH owner are refused before split spawn, while missing spawn proof never reaches ID-only cleanup"
           ]
         },
         {
@@ -3695,8 +3695,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime-terminal-close-incarnation-race.test.ts src/main/runtime/orca-runtime-terminal-close-continuity.test.ts src/main/runtime/orca-runtime-terminal-split-authority.test.ts src/main/ipc/pty-daemon-controller-teardown.test.ts src/main/ipc/pty-ssh-stop-verdict.test.ts src/main/providers/local-pty-provider-spawn-session.test.ts src/main/providers/local-pty-provider-shutdown.test.ts src/main/providers/ssh-pty-provider.test.ts src/main/daemon/daemon-pty-adapter-session-adoption.test.ts src/main/daemon/daemon-pty-router-incarnation-shutdown.test.ts src/main/daemon/daemon-protocol-version.test.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/relay/pty-handler-shutdown-signals.test.ts src/main/daemon/terminal-host.test.ts",
           "result": "passed",
-          "durationSeconds": 4.75,
-          "summary": "Fourteen files and 232 tests passed on the final candidate, including controlled headless and rejected-split same-ID barriers, legacy split-owner preflight refusal, missing-proof cleanup refusal, failed split-leaf retention, the runtime close transaction, local same-id admission, controller cleanup fencing, daemon protocol skew and owner routing, host duplicate teardown, SSH method skew, and relay process-owner rejection."
+          "durationSeconds": 4.72,
+          "summary": "Fourteen files and 233 tests passed on the final candidate, including controlled headless and rejected-split same-ID barriers, missing-source and legacy-owner pre-spawn refusal, missing-proof cleanup refusal, failed split-leaf retention, the runtime close transaction, local same-id admission, controller cleanup fencing, daemon protocol skew and owner routing, host duplicate teardown, SSH method skew, and relay process-owner rejection."
         },
         {
           "date": "2026-08-20",

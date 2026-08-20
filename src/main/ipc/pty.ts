@@ -5904,8 +5904,8 @@ export function registerPtyHandlers(
         (await provider?.supportsIncarnationAddressedShutdown?.(ptyId, opts)) === true
       return (
         supported &&
-        (opts?.expectedIncarnationId === undefined ||
-          ptyIncarnationById.get(ptyId) === opts.expectedIncarnationId)
+        opts?.expectedIncarnationId !== undefined &&
+        ptyIncarnationById.get(ptyId) === opts.expectedIncarnationId
       )
     },
     getForegroundProcess: async (ptyId) => {

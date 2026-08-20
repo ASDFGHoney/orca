@@ -12,6 +12,7 @@ const TAB_ID = 'tab-remote'
 const SOURCE_LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const SOURCE_PTY_ID = 'pty-source'
 const SPLIT_PTY_ID = 'pty-split'
+const SOURCE_INCARNATION_ID = '11111111-1111-4111-8111-111111111112'
 const SPLIT_INCARNATION_ID = '22222222-2222-4222-8222-222222222222'
 const REPLACEMENT_SPLIT_INCARNATION_ID = '33333333-3333-4333-8333-333333333333'
 
@@ -83,12 +84,14 @@ function createHarness(
     includePairedSnapshot?: boolean
     rendererMounted?: boolean
     spawnIncarnationId?: string | null
-    sourceIncarnationId?: string
+    sourceIncarnationId?: string | null
     stopAndWaitResult?: boolean
   } = {}
 ) {
   let session = persistedSession(includeSource)
   const connectionId = options.connectionId ?? null
+  const sourceIncarnationId =
+    options.sourceIncarnationId === undefined ? SOURCE_INCARNATION_ID : options.sourceIncarnationId
   const ownerHostId = connectionId ? `ssh:${connectionId}` : 'local'
   const requestedSessionHostIds: (string | undefined)[] = []
   const repo = {
@@ -196,7 +199,7 @@ function createHarness(
   runtime.registerPty(SOURCE_PTY_ID, WORKTREE_ID, connectionId, {
     tabId: TAB_ID,
     leafId: SOURCE_LEAF_ID,
-    ...(options.sourceIncarnationId ? { incarnationId: options.sourceIncarnationId } : {})
+    ...(sourceIncarnationId ? { incarnationId: sourceIncarnationId } : {})
   })
   const internals = runtime as unknown as {
     issuePtyHandle: (pty: unknown) => string
@@ -314,6 +317,19 @@ describe('remote runtime terminal split authority', () => {
     expect(harness.kill).not.toHaveBeenCalled()
   })
 
+  it('refuses a split source without incarnation proof before capability probing', async () => {
+    const harness = createHarness(true, { sourceIncarnationId: null })
+
+    await expect(
+      harness.runtime.splitTerminal(harness.handle, { direction: 'vertical' })
+    ).rejects.toThrow('terminal_incarnation_fence_unavailable')
+
+    expect(harness.supportsIncarnationAddressedStop).not.toHaveBeenCalled()
+    expect(harness.spawn).not.toHaveBeenCalled()
+    expect(harness.stopAndWait).not.toHaveBeenCalled()
+    expect(harness.kill).not.toHaveBeenCalled()
+  })
+
   it('never stops a rejected split by ID when spawn omits its incarnation', async () => {
     const harness = createHarness(false, {
       deferReveal: true,
@@ -404,6 +420,7 @@ describe('remote runtime terminal split authority', () => {
     const harness = createHarness(true, {
       deferSpawn: true,
       includePairedSnapshot: false,
+      sourceIncarnationId: null,
       stopAndWaitResult: true
     })
     harness.replacePersistedSourceIncarnation('persisted-before')
