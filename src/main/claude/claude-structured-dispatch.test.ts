@@ -25,6 +25,18 @@ function userMessage(blocks: AgentJournalMessageItem['blocks']): AgentJournalMes
   return { kind: 'message', role: 'user', blocks }
 }
 
+/** Claude's `--replay-user-messages` echo of a prompt Orca dispatched. */
+function userReplayFrame(uuid: string, text: string): Record<string, unknown> {
+  return {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+    session_id: 'provider-session',
+    parent_tool_use_id: null,
+    uuid,
+    isReplay: true
+  }
+}
+
 describe('Claude structured dispatch image limits', () => {
   it('accepts a slash command from its result receipt when Claude omits the user replay', async () => {
     const session = sessionFor()
@@ -67,12 +79,48 @@ describe('Claude structured dispatch image limits', () => {
       uuid: 'unrelated-result-uuid'
     })
     expect(session.dispatchWaiters).toHaveLength(1)
+    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'hello'))
+
+    await expect(dispatched).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'user-replay-uuid' }
+    })
+  })
+
+  // Both frames captured verbatim from `claude -p --input-format stream-json
+  // --output-format stream-json --replay-user-messages`: the replay of the sent
+  // prompt and the tool-result turn that follows it share `type: 'user'` and a
+  // null `parent_tool_use_id`.
+  it('does not adopt a tool-result turn as the user replay', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
     resolveClaudeReplayWaiter(session, {
       type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            tool_use_id: 'toolu_01TY2ETgHfpYVuq3ETuGYfDV',
+            type: 'tool_result',
+            content: 'probe-two',
+            is_error: false
+          }
+        ]
+      },
       parent_tool_use_id: null,
       session_id: 'provider-session',
-      uuid: 'user-replay-uuid'
+      uuid: 'tool-result-uuid',
+      tool_use_result: { stdout: 'probe-two', stderr: '', interrupted: false }
     })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
 
     await expect(dispatched).resolves.toMatchObject({
       state: 'accepted',

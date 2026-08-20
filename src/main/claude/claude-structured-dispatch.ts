@@ -5,6 +5,7 @@ import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
+import { claudeMessageBody, readClaudeMessageEnvelope } from './claude-structured-item-translation'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -50,11 +51,33 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.webp': 'image/webp'
 }
 
+/**
+ * The frame that carries the user's own message back.
+ *
+ * Claude publishes a top-level `user` turn for tool results too, with the same
+ * null `parent_tool_use_id`, so "any user turn" adopts whichever arrives first.
+ * A send issued mid-turn is dispatched while tools are running, and adopting a
+ * tool-result uuid leaves the real replay to land under an identity nothing
+ * claims — the user's message then renders twice, once from the submission row
+ * and once from the replay.
+ *
+ * Gate on the same body the journal translator builds, so the identity dispatch
+ * adopts is always the one the echo upserts into. A frame we cannot recognize
+ * leaves the send `unknown` ("delivery unconfirmed"), never duplicated.
+ */
+function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
+  if (message.type !== 'user' || message.parent_tool_use_id !== null) {
+    return false
+  }
+  const envelope = readClaudeMessageEnvelope(message)
+  return envelope?.role === 'user' && claudeMessageBody(envelope) !== null
+}
+
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const isUserReplay = message.type === 'user' && message.parent_tool_use_id === null
+  const isUserReplay = isClaudeUserMessageReplay(message)
   const isCompletedCommand = message.type === 'result'
   if (
     (!isUserReplay && !isCompletedCommand) ||
