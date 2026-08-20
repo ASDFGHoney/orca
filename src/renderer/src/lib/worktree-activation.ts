@@ -14,7 +14,10 @@ import {
   setWorktreeNavActivator,
   setWorktreeNavViewActivator
 } from '@/store/slices/worktree-nav-history'
-import { gateWorktreeAgentActivation } from '@/lib/worktree-agent-activation-gate'
+import {
+  gateWorktreeAgentActivation,
+  workspaceHasSleepingAgentSessions
+} from '@/lib/worktree-agent-activation-gate'
 import { resumeSleepingAgentSessionsForWorktree } from '@/lib/resume-sleeping-agent-session'
 import { shouldAutoCreateInitialTerminal } from '@/components/terminal/initial-terminal'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
@@ -130,15 +133,17 @@ export function activateAndRevealFolderWorkspace(
   if (!state.isNavigatingHistory) {
     state.recordWorktreeVisit(workspaceKey)
   }
-  // Why: same ordering as the worktree path — resume first so the seeding below sees the restored
-  // surface; the gate then covers only the structured inventory that is still hydrating.
-  resumeSleepingAgentSessionsForWorktree(workspaceKey)
+  // Why: same ordering as the worktree path — gate first, then resume only when not deferring.
   const shouldGateAgentActivation =
     !opts?.startup &&
-    canInspectAgentActivationInventory() &&
-    shouldAutoCreateInitialTerminal(
-      state.reconcileWorktreeTabModel(workspaceKey).renderableTabCount
-    )
+    (workspaceHasSleepingAgentSessions(state, workspaceKey) ||
+      (canInspectAgentActivationInventory() &&
+        shouldAutoCreateInitialTerminal(
+          state.reconcileWorktreeTabModel(workspaceKey).renderableTabCount
+        )))
+  if (!shouldGateAgentActivation) {
+    resumeSleepingAgentSessionsForWorktree(workspaceKey)
+  }
   if (shouldGateAgentActivation) {
     void gateWorktreeAgentActivation(workspaceKey).then((outcome) => {
       if (outcome === 'empty' && useAppStore.getState().activeWorktreeId === workspaceKey) {
@@ -232,20 +237,23 @@ export function activateAndRevealWorktree(
     state.recordWorktreeVisit(worktreeId)
   }
 
-  // Why: sleeping destroys the local PTY but preserves the provider session id, so waking should restore those CLI sessions automatically.
-  // Ordering is load-bearing: resuming synchronously creates the session's tab first, so the
-  // seeding below sees a renderable surface and doesn't add a bare shell next to it.
-  resumeSleepingAgentSessionsForWorktree(worktreeId)
-
-  // Why: the synchronous resume above covers sleeping CLI sessions. Structured agent inventory
-  // hydrates asynchronously and is still invisible here, so an empty tab model can authorize a
-  // fallback terminal beside a chat that is about to appear. Gate on that case only.
+  // Why: the gate is decided BEFORE resuming. A sleeping session must defer seeding until startup
+  // restoration is ready (STA-1111) — resuming first would leave nothing to gate on. Structured
+  // agent inventory hydrates asynchronously too, so an empty tab model can otherwise authorize a
+  // fallback terminal beside a chat that is about to appear.
   const shouldGateAgentActivation =
     !hasActivationWork &&
-    canInspectAgentActivationInventory() &&
-    shouldAutoCreateInitialTerminal(
-      postActivationState.reconcileWorktreeTabModel(worktreeId).renderableTabCount
-    )
+    (workspaceHasSleepingAgentSessions(postActivationState, worktreeId) ||
+      (canInspectAgentActivationInventory() &&
+        shouldAutoCreateInitialTerminal(
+          postActivationState.reconcileWorktreeTabModel(worktreeId).renderableTabCount
+        )))
+  if (!shouldGateAgentActivation) {
+    // Why: sleeping destroys the local PTY but preserves the provider session id, so waking should
+    // restore those CLI sessions. Ordering is load-bearing: resuming synchronously creates the
+    // session's tab first, so the seeding below doesn't add a bare shell next to it.
+    resumeSleepingAgentSessionsForWorktree(worktreeId)
+  }
   if (shouldGateAgentActivation) {
     void gateWorktreeAgentActivation(worktreeId).then((outcome) => {
       const currentState = useAppStore.getState()

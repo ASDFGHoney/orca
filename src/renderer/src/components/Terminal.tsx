@@ -1539,8 +1539,8 @@ function Terminal(): React.JSX.Element | null {
       cancelled = true
     }
   }, [
-    activeWorktreeHasTerminalState,
     activeWorktreeId,
+    activeWorktreeHasTerminalState,
     createTab,
     hydrationSucceeded,
     reconcileWorktreeTabModel,
