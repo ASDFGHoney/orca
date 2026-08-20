@@ -16,6 +16,13 @@ import { writeFileAtomically } from './codex-accounts/fs-utils'
  *
  * AppKit reads the preference while the process starts, so a fresh write lands for the *next*
  * launch, not the current one.
+ *
+ * If this is ever reverted, delete the key as well — AppKit reads the plist, not this file, so
+ * removing the code alone leaves press-and-hold disabled forever for everyone who ran an affected
+ * build, with nothing left in the tree to explain it.
+ *
+ * The `defaults`-binary behaviour this relies on is pinned by the sibling test file, which runs
+ * only on a developer Mac: CI has no macOS test runner, so those tests never execute there.
  */
 
 export const PRESS_AND_HOLD_KEY = 'ApplePressAndHoldEnabled'
