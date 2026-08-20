@@ -1,11 +1,17 @@
 import { isPtyIncarnationId, type PtyIncarnationId } from '../../shared/pty-incarnation'
 
+type QuarantinedSshPtyExit = {
+  holders: number
+  classified: boolean
+  publish: () => void
+}
+
 type PendingSshPtySpawn = {
   relayPtyId?: string
   exits: {
     relayPtyId: string
     incarnationId?: PtyIncarnationId
-    publish?: () => void
+    quarantine?: QuarantinedSshPtyExit
   }[]
 }
 
@@ -25,24 +31,29 @@ export class SshPtySpawnExitRaceTracker {
   }
 
   recordExit(relayPtyId: string, incarnationId: unknown, publish?: () => void): boolean {
-    let quarantined = false
     let published = false
-    const publishOnce = (): void => {
-      if (!published) {
-        published = true
-        publish?.()
+    const quarantine: QuarantinedSshPtyExit = {
+      holders: 0,
+      classified: false,
+      publish: () => {
+        if (!published) {
+          published = true
+          publish?.()
+        }
       }
     }
     for (const operation of this.pending) {
-      const quarantine = operation.relayPtyId === relayPtyId && publish !== undefined
+      const held = operation.relayPtyId === relayPtyId && publish !== undefined
+      if (held) {
+        quarantine.holders++
+      }
       operation.exits.push({
         relayPtyId,
         ...(isPtyIncarnationId(incarnationId) ? { incarnationId } : {}),
-        ...(quarantine ? { publish: publishOnce } : {})
+        ...(held ? { quarantine } : {})
       })
-      quarantined ||= quarantine
     }
-    return quarantined
+    return quarantine.holders > 0
   }
 
   classifyPendingExit(
@@ -50,12 +61,18 @@ export class SshPtySpawnExitRaceTracker {
     result: { id: string; incarnationId?: PtyIncarnationId }
   ): SshPtyPendingExitOutcome {
     const sameIdExits = operation.exits.filter((exit) => exit.relayPtyId === result.id)
+    for (const exit of sameIdExits) {
+      // Why: a reached verdict owns the exit, so finish() must not second-guess it and re-publish.
+      if (exit.quarantine) {
+        exit.quarantine.classified = true
+      }
+    }
     if (!result.incarnationId) {
       return sameIdExits.length > 0 ? 'unverifiable' : null
     }
     const matchingExit = sameIdExits.find((exit) => exit.incarnationId === result.incarnationId)
     if (matchingExit) {
-      matchingExit.publish?.()
+      matchingExit.quarantine?.publish()
       return 'exited'
     }
     return sameIdExits.some((exit) => !exit.incarnationId) ? 'unverifiable' : null
@@ -63,5 +80,17 @@ export class SshPtySpawnExitRaceTracker {
 
   finish(operation: PendingSshPtySpawn): void {
     this.pending.delete(operation)
+    for (const exit of operation.exits) {
+      const quarantine = exit.quarantine
+      if (!quarantine) {
+        continue
+      }
+      quarantine.holders--
+      // Why: a failed attach never classifies, and the host's exit is still positive death
+      // evidence — release it once no other operation can still claim it, or it is lost forever.
+      if (quarantine.holders === 0 && !quarantine.classified) {
+        quarantine.publish()
+      }
+    }
   }
 }
