@@ -1958,14 +1958,14 @@ export class SshRelaySession {
             attempt.attempts = 0
             return
           }
-          this.retryRejectedPtyDelivery(payload, source, appPtyId)
+          void this.retryRejectedPtyDelivery(payload, source, appPtyId)
         },
         (error: unknown) => {
           console.warn(`[ssh-relay-session] PTY ${relayPtyId} targeted delivery recovery failed`, {
             providerGeneration,
             error: error instanceof Error ? error.message : String(error)
           })
-          this.retryRejectedPtyDelivery(payload, source, appPtyId)
+          void this.retryRejectedPtyDelivery(payload, source, appPtyId)
         }
       )
   }
@@ -1973,14 +1973,35 @@ export class SshRelaySession {
   // Why liveness is checked before retrying: reattachKnownPty resolves without claiming the lease
   // when the PTY exited mid-attach, which is indistinguishable from a failed reattach at the call
   // site. Retrying that race twice would drop the relay channel over an ordinary PTY exit.
-  private retryRejectedPtyDelivery(
+  // Why the tri-state verdict and not hasPty: hasPty reads false for `unverifiable` too, and an
+  // unverifiable PTY is precisely the one this retry exists for — a reattach that could not reach
+  // the host is not evidence the pane died. Abandoning it there would drop the pane's output
+  // silently while the remote process keeps running.
+  private async retryRejectedPtyDelivery(
     payload: SshPtyDataPayload,
     source: SshPtyDataPayload['source'],
     appPtyId: string
-  ): void {
+  ): Promise<void> {
+    const mux = this.mux
+    const providerGeneration = this.activePtyProviderGeneration
     const ptyProvider = getSshPtyProvider(this.targetId) as SshPtyProvider | undefined
-    if (!ptyProvider || typeof ptyProvider.hasPty !== 'function' || !ptyProvider.hasPty(appPtyId)) {
+    if (!ptyProvider || typeof ptyProvider.probePtyLiveness !== 'function') {
       this.rejectedPtyRecoveryAttempts.delete(appPtyId)
+      return
+    }
+    const verdict = await ptyProvider.probePtyLiveness(appPtyId).catch(() => null)
+    if (verdict === false) {
+      this.rejectedPtyRecoveryAttempts.delete(appPtyId)
+      return
+    }
+    // Why re-checked after the probe: teardown clears this retry set, and a timer armed afterwards
+    // would outlive the channel it was recovering.
+    if (
+      !mux ||
+      this.mux !== mux ||
+      mux.isDisposed() ||
+      this.activePtyProviderGeneration !== providerGeneration
+    ) {
       return
     }
     const timer = setTimeout(() => {
