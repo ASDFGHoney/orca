@@ -173,3 +173,52 @@ describe('buildMobileNativeChatTransientData', () => {
     expect(data.some((message) => message.id === 'streaming')).toBe(false)
   })
 })
+
+describe('foldMobileNativeChatMessages', () => {
+  function toolCall(id: string): NativeChatMessage {
+    return {
+      id,
+      role: 'assistant',
+      blocks: [{ type: 'tool-call', name: 'Bash', input: { command: 'command -v orca-ide' } }],
+      timestamp: 0,
+      source: 'transcript'
+    }
+  }
+
+  function toolResult(id: string, output: string): NativeChatMessage {
+    return {
+      id,
+      role: 'tool',
+      blocks: [{ type: 'tool-result', output }],
+      timestamp: 0,
+      source: 'transcript'
+    }
+  }
+
+  // The chat reads a 40-message tail, so the window regularly opens on a result
+  // whose `tool_use` is older than the window. It used to render as its own
+  // bubble of raw shell output with no owning call.
+  it('drops a leading tool result whose call is older than the read window', () => {
+    const folded = foldMobileNativeChatMessages([
+      toolResult('orphan', 'Exit code 1\norca-ide not found'),
+      assistant('a1', 'Falling back to the installed binary.')
+    ])
+
+    expect(folded.map((message) => message.id)).toEqual(['a1'])
+  })
+
+  it('still folds a result whose call is inside the window', () => {
+    const folded = foldMobileNativeChatMessages([
+      assistant('a1', 'Checking which binary is on PATH.'),
+      toolCall('c1'),
+      toolResult('r1', 'orca-ide not found')
+    ])
+
+    expect(folded).toHaveLength(1)
+    expect(folded[0]?.blocks.map((block) => block.type)).toEqual([
+      'text',
+      'tool-call',
+      'tool-result'
+    ])
+  })
+})

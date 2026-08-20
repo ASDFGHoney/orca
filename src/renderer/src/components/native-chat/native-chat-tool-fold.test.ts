@@ -17,13 +17,21 @@ function msg(
 describe('foldToolMessages', () => {
   it('merges a tool-only message into the preceding assistant turn', () => {
     const folded = foldToolMessages([
-      msg({ id: 'a', role: 'assistant', blocks: [{ type: 'text', text: 'running it' }] }),
+      msg({
+        id: 'a',
+        role: 'assistant',
+        blocks: [
+          { type: 'text', text: 'running it' },
+          { type: 'tool-call', name: 'Bash', input: {} }
+        ]
+      }),
       msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'done' }] })
     ])
     expect(folded).toHaveLength(1)
     expect(folded[0]?.id).toBe('a')
     expect(folded[0]?.blocks).toEqual([
       { type: 'text', text: 'running it' },
+      { type: 'tool-call', name: 'Bash', input: {} },
       { type: 'tool-result', output: 'done' }
     ])
   })
@@ -38,12 +46,21 @@ describe('foldToolMessages', () => {
     expect(folded[0]?.blocks).toHaveLength(3)
   })
 
-  it('leaves an orphan tool message standalone when no assistant precedes it', () => {
+  it('drops a tool result no loaded call can own instead of leaving it standalone', () => {
     const folded = foldToolMessages([
       msg({ id: 'u', role: 'user', blocks: [{ type: 'text', text: 'hi' }] }),
       msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'x' }] })
     ])
-    expect(folded.map((m) => m.id)).toEqual(['u', 't'])
+    expect(folded.map((m) => m.id)).toEqual(['u'])
+  })
+
+  it('keeps a result answering a call that a user turn interrupted', () => {
+    const folded = foldToolMessages([
+      msg({ id: 'c', role: 'assistant', blocks: [{ type: 'tool-call', name: 'Bash', input: {} }] }),
+      msg({ id: 'u', role: 'user', blocks: [{ type: 'text', text: 'stop' }] }),
+      msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'x' }] })
+    ])
+    expect(folded.map((m) => m.id)).toEqual(['c', 'u', 't'])
   })
 
   it('does not fold a message carrying prose alongside a tool block', () => {
