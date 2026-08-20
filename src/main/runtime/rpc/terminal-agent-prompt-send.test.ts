@@ -26,7 +26,6 @@ describe('terminal agent prompt send RPC', () => {
     const runtime = makeRuntime({
       resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
       getDriver: vi.fn().mockReturnValue({ kind: 'idle' }),
-      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(true),
       sendTerminal,
       sendTerminalAgentPrompt
     })
@@ -43,9 +42,10 @@ describe('terminal agent prompt send RPC', () => {
     )
 
     expect(response.ok).toBe(true)
-    expect(runtime.isTerminalRunningSettledPromptAgent).toHaveBeenCalledWith('terminal-1')
     expect(sendTerminalAgentPrompt).toHaveBeenCalledWith('terminal-1', 'review this change', {
-      beforeWrite: expect.any(Function),
+      assertWriteAuthority: expect.any(Function),
+      beforeWrite: undefined,
+      requireSettledForeground: true,
       signal: undefined
     })
     expect(sendTerminal).not.toHaveBeenCalled()
@@ -57,11 +57,14 @@ describe('terminal agent prompt send RPC', () => {
       accepted: true,
       bytesWritten: 7
     })
-    const sendTerminalAgentPrompt = vi.fn()
+    const sendTerminalAgentPrompt = vi.fn().mockResolvedValue({
+      handle: 'terminal-1',
+      accepted: false,
+      bytesWritten: 0
+    })
     const runtime = makeRuntime({
       resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
       getDriver: vi.fn().mockReturnValue({ kind: 'idle' }),
-      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(false),
       sendTerminal,
       sendTerminalAgentPrompt
     })
@@ -81,9 +84,9 @@ describe('terminal agent prompt send RPC', () => {
     expect(sendTerminal).toHaveBeenCalledWith(
       'terminal-1',
       { text: 'echo x', enter: true, interrupt: false },
-      { beforeWrite: expect.any(Function) }
+      { assertWriteAuthority: expect.any(Function), beforeWrite: undefined }
     )
-    expect(sendTerminalAgentPrompt).not.toHaveBeenCalled()
+    expect(sendTerminalAgentPrompt).toHaveBeenCalledOnce()
   })
 
   it('does not send delayed Enter after a paired mobile client takes the floor', async () => {
@@ -103,14 +106,14 @@ describe('terminal agent prompt send RPC', () => {
       async (
         _handle: string,
         _prompt: string,
-        options: { beforeWrite?: (ptyId: string) => void }
+        options: { assertWriteAuthority?: (ptyId: string) => void }
       ) => {
-        await options.beforeWrite?.('pty-1')
+        options.assertWriteAuthority?.('pty-1')
         writes.push('prompt')
         ordering.push('request-4488:generation-1:desktop:paste')
         pasteWritten()
         await settlement
-        await options.beforeWrite?.('pty-1')
+        options.assertWriteAuthority?.('pty-1')
         writes.push('\r')
         ordering.push('request-4488:generation-1:mobile:enter')
         return { handle: 'terminal-1', accepted: true, bytesWritten: 7 }
@@ -123,7 +126,6 @@ describe('terminal agent prompt send RPC', () => {
           ? { kind: 'mobile' as const, clientId: 'mobile-1' }
           : { kind: 'desktop' as const }
       ),
-      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(true),
       sendTerminal,
       sendTerminalAgentPrompt
     })

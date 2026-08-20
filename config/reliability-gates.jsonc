@@ -9463,7 +9463,8 @@
             "every other configured TUI agent retains the legacy platform delay",
             "a speculative CLI prompt check does not poll wrapper foregrounds",
             "a known transient wrapper resolves to Codex within the bounded foreground retry",
-            "proven current Codex foreground identity controls settlement ahead of stale launch identity",
+            "current foreground proof stays request-local inside the PTY generation queue and outranks stale launch identity",
+            "identity transition, cancellation, and concurrent classification cannot write or fan out",
             "the PTY write boundary retains bracketed framing and one delayed submit"
           ]
         },
@@ -9473,7 +9474,7 @@
             "the public source-built CLI submits after a delayed composer render without rescue",
             "the fake agent receives the marker and zero premature Enter on macOS and Windows",
             "POSIX preserves one bracketed-paste frame while Windows validates the ConPTY-observable payload",
-            "a real paired mobile floor takeover blocks delayed desktop Enter with exact PTY input"
+            "a real paired mobile floor takeover blocks delayed desktop Enter with exact framed PTY input"
           ]
         },
         {
@@ -9481,7 +9482,8 @@
           "assertions": [
             "two half-open SSH relay wrapper inspections precede a bounded retry that identifies Codex",
             "the remote fake agent receives one post-render Enter and no premature Enter",
-            "execution stays on the SSH host and an unrelated remote PTY remains writable"
+            "process inspection stays within the asserted retry budget",
+            "execution stays on the SSH host, teardown is unconditional, and an unrelated remote PTY remains writable"
           ]
         }
       ],
@@ -9528,8 +9530,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
           "result": "passed",
-          "durationSeconds": 12.9,
-          "summary": "The 1,227-test candidate gate passed with one existing skip. Its three controlled oracles also failed on origin/main and with only the candidate production hunks disabled, then passed together on the candidate: node-to-Codex wrapper settlement, current foreground over stale launch identity, and paired-mobile floor takeover before delayed Enter."
+          "durationSeconds": 10.8,
+          "summary": "The 1,262-test candidate gate passed with one existing skip. Its three ticket oracles fail on origin/main and with only the candidate production hunks disabled, then pass together on the candidate. Follow-up adversarial contracts also prove request-local identity, cancellation after one wrapper read, serialized concurrent classification, and a non-yielding floor check beside each PTY write."
         },
         {
           "date": "2026-08-20",
@@ -9537,8 +9539,8 @@
           "platform": "macos",
           "command": "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 34.0,
-          "summary": "All four source-built Electron prompt journeys passed. The encrypted paired-mobile case recorded desktop then mobile authority, prompt and mobile bytes at fake-agent stdin, no carriage return, and an accepted=false desktop result after takeover."
+          "durationSeconds": 34.6,
+          "summary": "All four source-built Electron prompt journeys passed. The encrypted paired-mobile case recorded desktop then mobile authority, the exact bracketed prompt frame plus mobile bytes at fake-agent stdin, no carriage return, and an accepted=false desktop result after takeover."
         },
         {
           "date": "2026-08-20",
@@ -9546,8 +9548,8 @@
           "platform": "linux",
           "command": "pnpm run build:relay && ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ssh-docker-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 31.3,
-          "summary": "The candidate passed against an ephemeral Debian SSH target and real relay with two controlled half-open process reads, bounded wrapper retry, one post-render remote Enter, SSH execution-host proof, and an unrelated live remote PTY. The byte-identical oracle failed when only the settled-wrapper fix was disabled because the send settled through legacy delivery before the retry barrier."
+          "durationSeconds": 39.4,
+          "summary": "The candidate passed against an ephemeral Debian SSH target and real relay with two controlled half-open process reads, an asserted upper retry bound, one post-render remote Enter, SSH execution-host proof, unconditional target cleanup, and an unrelated live remote PTY. The byte-identical oracle fails when only settled-wrapper delivery is disabled because legacy delivery settles before the retry barrier."
         }
       ],
       "runtimeBudget": {
@@ -9560,11 +9562,11 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The same controlled unit oracles are red on origin/main and with each production fix disabled, then green together on the candidate. The paired-mobile Electron oracle is green on the candidate, while its byte-identical controlled floor-takeover oracle is red without the delayed authority recheck. The Docker SSH oracle is green on the candidate and red with only settled-wrapper retry disabled, where legacy delivery settles before the retry barrier. Existing macOS and Windows fake-composer evidence remains green with prematureEnters=0 and rescueSent=false."
+        "evidence": "The same controlled ticket oracles are red on origin/main and with each production fix disabled, then green together on the candidate. With only the reviewer-driven structural changes disabled, the byte-identical identity-transition, wrapper-cancellation, and synchronous-floor tests all fail; restored candidate passes all three. The paired-mobile Electron oracle is green on the candidate and red without the delayed authority recheck. The Docker SSH oracle is green on the candidate and red with only settled-wrapper delivery disabled, where legacy delivery settles before the retry barrier. Existing macOS and Windows fake-composer evidence remains green with prematureEnters=0 and rescueSent=false."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds foreground classification. Directly recognized targets keep the existing two-read bound; only known node/python wrappers reuse the existing 150 ms, 6.5 second bounded resolver, and the deterministic transition test records three provider reads for node-to-Codex settlement. Positively identified Claude and Codex reuse the O(prompt bytes) chunked prompt sender plus one PTY-local listener until post-marker quiescence or the bounded fallback. Floor checks are PTY-local map reads before existing writes; no session listing, subprocess, listener, timer, or provider fanout is added elsewhere."
+        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds foreground classification. The proof runs inside the existing PTY/generation submission queue, so concurrent sends cannot overlap provider scans. Direct targets use three identity/liveness reads; a node-to-Codex transition uses four, while only known node/python wrappers can enter the existing cancellable 150 ms, 6.5 second resolver. Positively identified Claude and Codex reuse the O(prompt bytes) chunked sender plus one PTY-local listener. Floor checks remain constant-time PTY-local map reads at each write yield; no session listing, global fanout, extra listener, or new timer is added."
       },
       "promotionCriteria": [
         "Collect live Codex and Claude CLI sends on representative slow systems.",

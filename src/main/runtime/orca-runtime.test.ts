@@ -17033,8 +17033,9 @@ describe('OrcaRuntimeService', () => {
       })
       const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
 
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+        requireSettledForeground: true
+      })
       await vi.advanceTimersByTimeAsync(1_199)
       expect(writes).not.toContain('\r')
       await vi.advanceTimersByTimeAsync(1_500)
@@ -17068,8 +17069,9 @@ describe('OrcaRuntimeService', () => {
         launchAgent: 'aider'
       })
 
-      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
-      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+        requireSettledForeground: true
+      })
       await vi.advanceTimersByTimeAsync(AGENT_PROMPT_SUBMIT_DELAY_MS)
       expect(writes).not.toContain('\r')
 
@@ -24205,7 +24207,112 @@ describe('OrcaRuntimeService', () => {
     await vi.advanceTimersByTimeAsync(150)
 
     await expect(settled).resolves.toBe(true)
-    expect(getForegroundProcess).toHaveBeenCalledTimes(3)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(4)
+  })
+
+  it('refuses settled delivery when foreground identity changes before the write', async () => {
+    const writes: string[] = []
+    const getForegroundProcess = vi
+      .fn()
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValue('zsh')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+
+    await expect(
+      runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+        requireSettledForeground: true
+      })
+    ).resolves.toMatchObject({ accepted: false, bytesWritten: 0 })
+    expect(writes).toEqual([])
+  })
+
+  it('cancels bounded wrapper recognition without writing or retrying', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const writes: string[] = []
+    const getForegroundProcess = vi.fn().mockResolvedValue('node')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+    const send = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+      requireSettledForeground: true,
+      signal: controller.signal
+    })
+    const rejected = expect(send).rejects.toThrow('request_aborted')
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+    controller.abort()
+    await vi.runAllTimersAsync()
+
+    await rejected
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+    expect(writes).toEqual([])
+  })
+
+  it('serializes concurrent settled foreground classification per PTY', async () => {
+    let releaseFirst!: () => void
+    const firstInspection = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const getForegroundProcess = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await firstInspection
+        return 'gemini'
+      })
+      .mockResolvedValue('gemini')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+
+    const first = runtime.sendTerminalAgentPrompt(handle, 'first', {
+      requireSettledForeground: true
+    })
+    const second = runtime.sendTerminalAgentPrompt(handle, 'second', {
+      requireSettledForeground: true
+    })
+    await vi.waitFor(() => expect(getForegroundProcess).toHaveBeenCalledTimes(1))
+
+    releaseFirst()
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { handle, accepted: false, bytesWritten: 0 },
+      { handle, accepted: false, bytesWritten: 0 }
+    ])
+    expect(getForegroundProcess).toHaveBeenCalledTimes(2)
   })
 
   it.each(['claude', 'codex'] as const)(

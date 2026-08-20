@@ -236,7 +236,9 @@ test.describe('Docker SSH settled prompt submission', () => {
         receivedEnters: 1,
         markerReceived: true
       })
-      expect(Number(remoteFile(target, PS_COUNT))).toBeGreaterThanOrEqual(2)
+      const psCalls = Number(remoteFile(target, PS_COUNT))
+      expect(psCalls).toBeGreaterThanOrEqual(2)
+      expect(psCalls).toBeLessThanOrEqual(8)
 
       const survivorMarker = `SSH_UNRELATED_SURVIVES_${Date.now()}`
       await callRuntime(orcaPage, 'terminal.send', {
@@ -267,12 +269,17 @@ test.describe('Docker SSH settled prompt submission', () => {
         )
       )
       if (target) {
-        execDockerSshRelayTargetControlCommand(
-          target,
-          `rm -f ${PS_OBSERVE} ${PS_FAIL} ${PS_RELEASE} ${PS_RETRY} ${PS_RETRY_RELEASE}`
-        )
+        try {
+          execDockerSshRelayTargetControlCommand(
+            target,
+            `rm -f ${PS_OBSERVE} ${PS_FAIL} ${PS_RELEASE} ${PS_RETRY} ${PS_RETRY_RELEASE}`
+          )
+        } finally {
+          cleanupDockerSshRelayTarget(target)
+        }
+      } else {
+        cleanupDockerSshRelayTarget(target)
       }
-      cleanupDockerSshRelayTarget(target)
     }
   })
 })
