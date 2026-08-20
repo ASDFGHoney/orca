@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { getAgentRowConversationName } from '../../../../shared/agent-row-conversation-name'
 import { GENERATED_TAB_TITLE_SOURCE_SCAN_LIMIT } from '../../../../shared/agent-tab-title'
 import { getDefaultSettings } from '../../../../shared/constants'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
@@ -19,6 +20,34 @@ function seedWorktree(store: ReturnType<typeof createTestStore>, enabled: boolea
     }
   })
   return store.getState().createTab(WORKTREE_ID).id
+}
+
+function persistStaleSessionName(
+  store: ReturnType<typeof createTestStore>,
+  tabId: string,
+  args: { sessionId: string; title: string; generatedTitle: string }
+): void {
+  const aiVaultTitle = {
+    agent: 'claude' as const,
+    sessionId: args.sessionId,
+    title: args.title
+  }
+  store.setState({
+    tabsByWorktree: {
+      ...store.getState().tabsByWorktree,
+      [WORKTREE_ID]: store
+        .getState()
+        .tabsByWorktree[WORKTREE_ID].map((tab) =>
+          tab.id === tabId ? { ...tab, generatedTitle: args.generatedTitle, aiVaultTitle } : tab
+        )
+    },
+    unifiedTabsByWorktree: {
+      ...store.getState().unifiedTabsByWorktree,
+      [WORKTREE_ID]: (store.getState().unifiedTabsByWorktree[WORKTREE_ID] ?? []).map((tab) =>
+        tab.entityId === tabId ? { ...tab, generatedLabel: args.generatedTitle, aiVaultTitle } : tab
+      )
+    }
+  })
 }
 
 describe('generated agent tab titles', () => {
@@ -339,5 +368,81 @@ Implement task B worker instructions for the next dispatch`,
     const tab = store.getState().tabsByWorktree[WORKTREE_ID][0]
     expect(tab.generatedTitle).toBeUndefined()
     expect(resolveTerminalTabTitle(tab, true)).toBe('Run tests')
+  })
+
+  it('drops the first-prompt generated title when the pane rebinds to a new session', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    const tabId = seedWorktree(store, true)
+    persistStaleSessionName(store, tabId, {
+      sessionId: 'claude-session-1',
+      title: 'pull again',
+      generatedTitle: 'Pull again'
+    })
+
+    store.getState().setAiVaultTabTitle(tabId, {
+      agent: 'claude',
+      sessionId: 'claude-session-2',
+      title: 'Housekeeping'
+    })
+
+    const tab = store.getState().tabsByWorktree[WORKTREE_ID][0]
+    const unified = store.getState().unifiedTabsByWorktree[WORKTREE_ID][0]
+    expect(tab.generatedTitle).toBeUndefined()
+    expect(unified.generatedLabel).toBeUndefined()
+    expect(tab.aiVaultTitle).toEqual({
+      agent: 'claude',
+      sessionId: 'claude-session-2',
+      title: 'Housekeeping'
+    })
+    expect(resolveTerminalTabTitle(tab, true)).toBe('Housekeeping')
+    expect(getAgentRowConversationName(tab, 'claude', true)).toBe('Housekeeping')
+  })
+
+  it('heals a persisted first-prompt name when a later live session title arrives', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    const tabId = seedWorktree(store, true)
+    persistStaleSessionName(store, tabId, {
+      sessionId: 'stale-session',
+      title: 'pull again',
+      generatedTitle: 'Pull again'
+    })
+
+    const stale = store.getState().tabsByWorktree[WORKTREE_ID][0]
+    expect(stale.generatedTitle).toBe('Pull again')
+    expect(getAgentRowConversationName(stale, 'claude', true)).toBe('pull again')
+
+    store.getState().setAiVaultTabTitle(tabId, {
+      agent: 'claude',
+      sessionId: 'live-session',
+      title: 'Housekeeping'
+    })
+
+    const healed = store.getState().tabsByWorktree[WORKTREE_ID][0]
+    expect(healed.generatedTitle).toBeUndefined()
+    expect(resolveTerminalTabTitle(healed, true)).toBe('Housekeeping')
+    expect(getAgentRowConversationName(healed, 'claude', true)).toBe('Housekeeping')
+  })
+
+  it('keeps a same-session AI Vault rename on the pane label', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    const tabId = seedWorktree(store, true)
+    persistStaleSessionName(store, tabId, {
+      sessionId: 'claude-session-1',
+      title: 'pull again',
+      generatedTitle: 'Pull again'
+    })
+
+    store.getState().setAiVaultTabTitle(tabId, {
+      agent: 'claude',
+      sessionId: 'claude-session-1',
+      title: 'Housekeeping'
+    })
+
+    const tab = store.getState().tabsByWorktree[WORKTREE_ID][0]
+    expect(resolveTerminalTabTitle(tab, true)).toBe('Housekeeping')
+    expect(getAgentRowConversationName(tab, 'claude', true)).toBe('Housekeeping')
   })
 })

@@ -1994,10 +1994,28 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       if (!current || sameTitle) {
         return s
       }
-      const ownerTabs = tabs.map((tab) => (tab.id === tabId ? { ...tab, aiVaultTitle } : tab))
+      // Why: first-prompt generated titles belong to the previous provider session.
+      const sessionChanged =
+        current.aiVaultTitle?.agent !== aiVaultTitle?.agent ||
+        current.aiVaultTitle?.sessionId !== aiVaultTitle?.sessionId
+      const ownerTabs = tabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              aiVaultTitle,
+              ...(sessionChanged ? { generatedTitle: undefined } : {})
+            }
+          : tab
+      )
       const unifiedTabs = s.unifiedTabsByWorktree[ownerWorktreeId] ?? []
       const nextUnifiedTabs = unifiedTabs.map((tab) =>
-        tab.contentType === 'terminal' && tab.entityId === tabId ? { ...tab, aiVaultTitle } : tab
+        tab.contentType === 'terminal' && tab.entityId === tabId
+          ? {
+              ...tab,
+              aiVaultTitle,
+              ...(sessionChanged ? { generatedLabel: undefined } : {})
+            }
+          : tab
       )
       scheduleRuntimeGraphSync()
       return {

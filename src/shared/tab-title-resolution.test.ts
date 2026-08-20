@@ -90,6 +90,24 @@ describe('tab title resolution', () => {
     ).toBe('Repair provider-native tab titles')
   })
 
+  it('keeps a Claude session name ahead of the first-prompt generated title', () => {
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          aiVaultTitle: {
+            agent: 'claude',
+            sessionId: 'claude-session-2',
+            title: 'Housekeeping'
+          },
+          generatedTitle: 'pull again',
+          title: '✳ pull again'
+        },
+        true
+      )
+    ).toBe('Housekeeping')
+  })
+
   it('keeps manual and quick-command labels ahead of AI Vault titles', () => {
     const aiVaultTitle = {
       agent: 'claude' as const,

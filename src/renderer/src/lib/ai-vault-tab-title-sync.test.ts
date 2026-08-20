@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AiVaultSessionTitlesResult } from '../../../shared/ai-vault-session-title'
+import type {
+  AiVaultSessionTitlesArgs,
+  AiVaultSessionTitlesResult
+} from '../../../shared/ai-vault-session-title'
 import { resolveTerminalTabTitle } from '../../../shared/tab-title-resolution'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import {
@@ -363,6 +366,38 @@ describe('AI Vault tab title sync', () => {
 
     await vi.waitFor(() => expect(resolveSessionTitles).toHaveBeenCalledTimes(2))
     expect(store.getState().tabsByWorktree['worktree-1'][0].aiVaultTitle).toBeNull()
+    stop()
+  })
+
+  it('binds the live hook session after /clear instead of keeping the previous title', async () => {
+    const store = makeState({
+      aiVaultTitle: { agent: 'codex', sessionId: 'codex-session', title: 'pull again' },
+      executionHostId: 'ssh:dev-box',
+      worktreeId: 'worktree-1',
+      path: '/workspace/albacore'
+    })
+    const resolveSessionTitles = vi.fn(async (args: AiVaultSessionTitlesArgs) => ({
+      titles: args.requests.map((request) => ({
+        agent: request.agent,
+        sessionId: request.sessionId,
+        title: request.sessionId === 'codex-session-2' ? 'Housekeeping' : 'pull again'
+      }))
+    }))
+    const stop = startAiVaultTabTitleSync({ ...store, resolveSessionTitles })
+
+    await vi.waitFor(() =>
+      expect(store.getState().tabsByWorktree['worktree-1'][0].aiVaultTitle?.title).toBe(
+        'pull again'
+      )
+    )
+    store.setProviderSessionId('codex-session-2')
+    await vi.waitFor(() =>
+      expect(store.getState().tabsByWorktree['worktree-1'][0].aiVaultTitle).toEqual({
+        agent: 'codex',
+        sessionId: 'codex-session-2',
+        title: 'Housekeeping'
+      })
+    )
     stop()
   })
 
