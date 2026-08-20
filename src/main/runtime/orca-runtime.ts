@@ -29820,10 +29820,17 @@ export class OrcaRuntimeService {
           try {
             await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId)
           } catch (error) {
-            if (!(error instanceof Error) || error.message !== 'workspace_session_unavailable') {
+            // The PTY exit may retire its headless tab before this late surface cleanup.
+            if (
+              !(error instanceof Error) ||
+              (error.message !== 'workspace_session_unavailable' &&
+                error.message !== 'tab_not_found')
+            ) {
               throw error
             }
-            this.notifier?.closeTerminal(tabId)
+            if (error.message === 'workspace_session_unavailable') {
+              this.notifier?.closeTerminal(tabId)
+            }
           }
         } else {
           this.notifier?.closeTerminal(tabId)
