@@ -62,7 +62,26 @@ describe('AgentHookServer listener replay', () => {
         intent: 'plain-escape'
       })
 
-      expect(applied).toBe(true)
+      expect(applied).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          providerSession: { key: 'session_id', id: 'codex-interrupt-session-1' },
+          payload: {
+            state: 'done',
+            prompt: 'long task',
+            agentType: 'codex',
+            model: 'gpt-5.6-sol'
+          }
+        },
+        'conn-1'
+      )
+
       expect(server.getStatusSnapshot()).toEqual([
         expect.objectContaining({
           paneKey: PANE,
@@ -71,8 +90,8 @@ describe('AgentHookServer listener replay', () => {
           agentType: 'codex',
           providerSession: { key: 'session_id', id: 'codex-interrupt-session-1' },
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
       expect(listener).toHaveBeenLastCalledWith(
@@ -198,7 +217,8 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'claude',
           intent: 'plain-escape'
         })
-      ).toBe(true)
+      ).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
     } finally {
       vi.useRealTimers()
     }
@@ -328,7 +348,8 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'claude',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
     } finally {
       vi.useRealTimers()
     }
@@ -402,7 +423,27 @@ describe('AgentHookServer listener replay', () => {
         intent: 'ctrl-c'
       })
 
-      expect(applied).toBe(true)
+      expect(applied).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          payload: {
+            state: 'done',
+            prompt: 'wrap up',
+            agentType: 'claude',
+            interrupted: true,
+            subagents: [{ id: 'a1', state: 'idle', startedAt: 900, agentType: 'probe1' }]
+          }
+        },
+        'conn-1'
+      )
+
       expect(server.getStatusSnapshot()[0]).toMatchObject({
         state: 'done',
         interrupted: true,
@@ -442,7 +483,8 @@ describe('AgentHookServer listener replay', () => {
           intent: 'plain-escape',
           inputCount: 2
         })
-      ).toBe(true)
+      ).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
 
       vi.setSystemTime(1_501)
       server.ingestRemote(
@@ -462,8 +504,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'long task',
           agentType: 'opencode',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
       expect(listener).toHaveBeenLastCalledWith(
@@ -595,7 +637,20 @@ describe('AgentHookServer listener replay', () => {
           inputCount: 2
         })
 
-        expect(applied).toBe(true)
+        expect(applied).toBe(false)
+        expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working', agentType })
+
+        vi.setSystemTime(1_501)
+        server.ingestRemote(
+          {
+            paneKey: PANE,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            payload: { state: 'done', prompt: 'long task', agentType }
+          },
+          'conn-1'
+        )
+
         expect(server.getStatusSnapshot()).toEqual([
           expect.objectContaining({
             state: 'done',

@@ -127,7 +127,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'opencode',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -153,7 +153,7 @@ describe('AgentHookServer listener replay', () => {
           agentType: 'opencode',
           lastAssistantMessage: 'partial answer',
           receivedAt: 2_000,
-          stateStartedAt: 2_000
+          stateStartedAt: 1_000
         })
       ])
     } finally {
@@ -193,7 +193,23 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'opencode',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: {
+            state: 'done',
+            prompt: 'retryable task',
+            agentType: 'opencode',
+            lastAssistantMessage: 'partial answer'
+          }
+        },
+        'conn-1'
+      )
 
       vi.setSystemTime(20_000)
       server.ingestRemote(
@@ -219,8 +235,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'retryable task',
           agentType: 'opencode',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
     } finally {
@@ -254,7 +270,19 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'unknown',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+      expect(server.getStatusSnapshot()[0]).toMatchObject({ state: 'working' })
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: { state: 'done', prompt: 'custom hook' }
+        },
+        'conn-1'
+      )
 
       expect(server.getStatusSnapshot()).toEqual([
         expect.objectContaining({
@@ -346,7 +374,26 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'custom-agent',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: GOOD_PANE,
+          state: 'working',
+          prompt: 'custom task',
+          agentType: 'custom-agent'
+        })
+      ])
+
+      vi.setSystemTime(1_251)
+      server.ingestRemote(
+        {
+          paneKey: GOOD_PANE,
+          tabId: 'tab-good',
+          worktreeId: 'wt-1',
+          payload: { state: 'done', prompt: 'custom task', agentType: 'custom-agent' }
+        },
+        'conn-1'
+      )
 
       expect(server.getStatusSnapshot()).toEqual([
         expect.objectContaining({

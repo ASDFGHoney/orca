@@ -53,7 +53,18 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'pi',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: { state: 'done', prompt: 'long task', agentType: 'pi' }
+        },
+        'conn-1'
+      )
 
       vi.setSystemTime(6_000)
       server.ingestRemote(
@@ -78,8 +89,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'long task',
           agentType: 'pi',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
     } finally {
@@ -119,7 +130,24 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'claude',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          payload: {
+            state: 'done',
+            prompt: 'Do I have gpu acceleration on on my terminal?',
+            agentType: 'claude',
+            interrupted: true
+          }
+        },
+        'conn-1'
+      )
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -146,8 +174,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'Do I have gpu acceleration on on my terminal?',
           agentType: 'claude',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
     } finally {
@@ -187,7 +215,22 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'codex',
           intent: 'plain-escape'
         })
-      ).toBe(true)
+      ).toBe(false)
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          payload: {
+            state: 'done',
+            prompt: 'Run sleep 30, then reply done.',
+            agentType: 'codex'
+          }
+        },
+        'conn-1'
+      )
 
       vi.setSystemTime(6_000)
       server.ingestRemote(
@@ -214,8 +257,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'Run sleep 30, then reply done.',
           agentType: 'codex',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
     } finally {
@@ -249,7 +292,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'pi',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -268,7 +311,7 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'second task',
           agentType: 'pi',
           receivedAt: 2_000,
-          stateStartedAt: 2_000
+          stateStartedAt: 1_000
         })
       ])
     } finally {
@@ -304,7 +347,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'claude',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -326,7 +369,7 @@ describe('AgentHookServer listener replay', () => {
           agentType: 'claude',
           interrupted: undefined,
           receivedAt: 2_000,
-          stateStartedAt: 2_000
+          stateStartedAt: 1_000
         })
       ])
     } finally {
@@ -361,7 +404,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'pi',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(2_000)
       server.ingestRemote(
@@ -381,7 +424,7 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'retryable task',
           agentType: 'pi',
           receivedAt: 2_000,
-          stateStartedAt: 2_000
+          stateStartedAt: 1_000
         })
       ])
     } finally {
@@ -417,7 +460,24 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'claude',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
+
+      vi.setSystemTime(1_501)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          payload: {
+            state: 'done',
+            prompt: 'repeat task',
+            agentType: 'claude',
+            interrupted: true
+          }
+        },
+        'conn-1'
+      )
 
       vi.setSystemTime(16_501)
       server.ingestRemote(
@@ -444,8 +504,8 @@ describe('AgentHookServer listener replay', () => {
           prompt: 'repeat task',
           agentType: 'claude',
           interrupted: true,
-          receivedAt: 1_500,
-          stateStartedAt: 1_500
+          receivedAt: 1_501,
+          stateStartedAt: 1_501
         })
       ])
     } finally {
@@ -479,7 +539,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'pi',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(16_501)
       server.ingestRemote(
@@ -499,7 +559,7 @@ describe('AgentHookServer listener replay', () => {
           agentType: 'pi',
           interrupted: undefined,
           receivedAt: 16_501,
-          stateStartedAt: 16_501
+          stateStartedAt: 1_000
         })
       ])
     } finally {
@@ -533,7 +593,7 @@ describe('AgentHookServer listener replay', () => {
           baselineAgentType: 'pi',
           intent: 'ctrl-c'
         })
-      ).toBe(true)
+      ).toBe(false)
 
       vi.setSystemTime(16_501)
       server.ingestRemote(
@@ -561,7 +621,7 @@ describe('AgentHookServer listener replay', () => {
           toolName: 'bash',
           toolInput: '/bin/sleep 90',
           receivedAt: 16_501,
-          stateStartedAt: 16_501
+          stateStartedAt: 1_000
         })
       ])
     } finally {
