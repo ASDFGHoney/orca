@@ -27,4 +27,12 @@ describe('shouldRetireLaunchAuthorityOnCommandFinished', () => {
     expect(shouldRetireLaunchAuthorityOnCommandFinished('node')).toBe(false)
     expect(shouldRetireLaunchAuthorityOnCommandFinished('python3')).toBe(false)
   })
+  // Why: the guard requires a *known* shell, so a user on ksh/dash/tcsh could
+  // never settle launched-agent authority until the pty itself exited.
+  it.each(['ksh', 'dash', 'tcsh', 'csh', 'ash', 'mksh', 'elvish', 'xonsh'])(
+    'settles launch authority when the foreground shell is %s',
+    (shell) => {
+      expect(shouldRetireLaunchAuthorityOnCommandFinished(shell)).toBe(true)
+    }
+  )
 })

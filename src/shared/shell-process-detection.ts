@@ -2,7 +2,9 @@
 // renderer (agent-ready-wait, new-workspace). A bare shell is the negative
 // signal for "is an agent running" because it garbles injected preambles.
 const SHELL_NAMES = new Set(
-  '|bash|zsh|sh|fish|cmd|cmd.exe|powershell|powershell.exe|pwsh|pwsh.exe|nu'.split('|')
+  '|bash|zsh|sh|fish|cmd|cmd.exe|powershell|powershell.exe|pwsh|pwsh.exe|nu|ksh|mksh|dash|ash|tcsh|csh|elvish|xonsh'.split(
+    '|'
+  )
 )
 const WINDOWS_PROCESS_EXTENSION_RE = /\.(?:exe|cmd|bat|ps1)$/i
 

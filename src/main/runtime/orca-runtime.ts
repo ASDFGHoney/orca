@@ -15273,6 +15273,10 @@ export class OrcaRuntimeService {
         this.markPtyLivenessUnverifiable(ptyId, SSH_EXIT_UNCONFIRMED_REASON)
       }
       this.restoredOrchestrationAuthorityByPtyId.delete(ptyId)
+      // Why: launch authority is deliberately preserved here (unverifiable, not
+      // exited), but the settle-generation counter is bookkeeping for an
+      // in-flight command-finished check that can no longer land.
+      this.launchAuthorityCommandFinishedGenerationByPtyId.delete(ptyId)
     } else {
       this.retirePtyAgentLaunchAuthority(ptyId)
     }
