@@ -353,6 +353,42 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     })
   })
 
+  it('keeps a host exit authoritative when it lands during the unproven cancellation', async () => {
+    const mux = createMockMux()
+    const activation = {
+      status: 'pending',
+      clientGeneration: 2,
+      ownerGeneration: 3,
+      ptyIncarnation: 'incarnation-reattached',
+      deliveryToken: 'token-first',
+      checkpointSourceEndSu: 0,
+      recoveryEndSu: 0
+    }
+    mux.request.mockImplementation(async (method: string) => {
+      if (method === 'pty.cancelDelivery') {
+        // The owning host reports the process dead while the cancel round trip is in flight.
+        notificationHandler(mux)('pty.exit', {
+          id: 'pty-old',
+          code: 0,
+          incarnationId: 'incarnation-reattached'
+        })
+        return { canceled: false, sentEndSu: 0, creditedEndSu: 0 }
+      }
+      if (method === 'pty.attach') {
+        return { ...restoreRequiredAnswer, sourceActivation: activation }
+      }
+      return undefined
+    })
+    const provider = new SshPtyProvider('conn-1', mux as never)
+    provider.onExit((payload) => provider.acceptExitedPty(payload.id))
+
+    const message = await spawnError(provider)
+
+    expect(message).toContain(SSH_PTY_RESTORE_REQUIRED_ERROR)
+    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBe(false)
+  })
+
   it('never reports a delivery failure as session expiry when restoration keeps failing', async () => {
     const mux = createMockMux()
     mux.request.mockResolvedValue(restoreRequiredAnswer)

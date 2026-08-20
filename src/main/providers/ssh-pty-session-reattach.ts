@@ -23,6 +23,7 @@ import {
   type PtySourceReceivingActivation
 } from '../../shared/pty-source-receiving-activation'
 import type { SshPtyReceivingActivationLease } from './ssh-pty-notification-routing'
+import type { SshPtyLiveEvidence } from './ssh-pty-liveness-state'
 import { parseSshPtySourceRecoveryResult } from './ssh-pty-source-recovery-result'
 
 export type SshPtyAttachResult = {
@@ -231,6 +232,12 @@ export async function reattachSshPtySessionWithExitFence(
 export async function reattachSshPtySessionForSpawn(
   args: Parameters<typeof reattachSshPtySessionWithExitFence>[0] & {
     acceptLivePty: (relayPtyId: string) => void
+    beginLivePtyEvidence: (appPtyId: string) => SshPtyLiveEvidence
+    settleLivePtyEvidence: (
+      appPtyId: string,
+      evidence: SshPtyLiveEvidence,
+      acceptLive: boolean
+    ) => void
     acceptUnverifiablePty: (relayPtyId: string) => void
     acceptAmbiguousExitPty: (relayPtyId: string) => void
     acceptExitedPty: (relayPtyId: string) => void
@@ -244,11 +251,18 @@ export async function reattachSshPtySessionForSpawn(
       const unresumable = result
       result = undefined
       if (unresumable.sourceActivationLease) {
-        const canceled = await unresumable.sourceActivationLease.rollback()
-        if (!canceled) {
+        // Why: the exit fence is already closed, so a host exit landing during this cancel round
+        // trip must be able to refuse the live promotion below instead of being overwritten.
+        const liveEvidence = args.beginLivePtyEvidence(unresumable.id)
+        let unprovenCancel = false
+        try {
+          unprovenCancel = !(await unresumable.sourceActivationLease.rollback())
+        } finally {
+          args.settleLivePtyEvidence(unresumable.id, liveEvidence, unprovenCancel)
+        }
+        if (unprovenCancel) {
           // Why: the attach answered with an incarnation, so the PTY is live; only its delivery
           // is stuck, and an unproven cancellation just blocks the second attach.
-          args.acceptLivePty(unresumable.id)
           throw new Error(
             `${SSH_PTY_RESTORE_REQUIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
           )
