@@ -293,8 +293,10 @@ storage live in the profile partition and survive, but an unsubmitted form or
 an SPA's in-memory state does not. A page is never parked while a paired
 client is streaming it, while a command against it is in flight, while its
 initial load is still running, while it is waiting on a certificate decision,
-while a wake is still rebuilding it, or while it is writing an active
-download — parking cancels a download, so an active one always vetoes it. A stream ending counts as use, so a viewer who closes the pane gets
+or while a wake is still rebuilding it. An active download vetoes the park
+decision — parking cancels downloads — but a download that begins during the
+teardown itself is still cancelled, exactly as if the tab had been closed at
+that instant. A stream ending counts as use, so a viewer who closes the pane gets
 the full idle window before the page parks, even if they only watched. A navigation that has still not finished by the load timeout is
 deliberately reclaimable — otherwise one stalled page per create could hold a
 renderer forever, which is the failure this exists to prevent; waking it simply

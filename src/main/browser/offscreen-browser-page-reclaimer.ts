@@ -17,6 +17,9 @@ import { nextOffscreenBrowserReclaimCheckAt } from './offscreen-browser-page-rec
 // timer for the moment its own answer could next change. There is deliberately
 // no recurring sweep: a host doing nothing holds no timer at all.
 
+/** Node's setTimeout ceiling; longer delays are clamped by Node to 1ms. */
+const MAX_RECLAIM_TIMER_DELAY_MS = 2_147_483_647
+
 export type OffscreenBrowserReclaimerDeps = {
   pages: OffscreenBrowserOpenPages
   budget: BrowserRetentionBudget
@@ -79,8 +82,13 @@ export class OffscreenBrowserPageReclaimer {
     }
     // Why the floor: a deadline in the past that the last sweep could not act on
     // would re-arm at 0ms, and a timer that re-arms itself instantly is a pegged
-    // CPU on an otherwise idle server.
-    const delay = Math.max(0, at - now, this.backoffUntil - now)
+    // CPU on an otherwise idle server. Why the ceiling: Node clamps a setTimeout
+    // beyond 2^31-1ms to 1ms — the same spin, reachable by configuring the idle
+    // window past ~24.8 days. Re-checking at the horizon is harmless.
+    const delay = Math.min(
+      Math.max(0, at - now, this.backoffUntil - now),
+      MAX_RECLAIM_TIMER_DELAY_MS
+    )
     this.timer = setTimeout(() => {
       this.timer = null
       this.runSweep()

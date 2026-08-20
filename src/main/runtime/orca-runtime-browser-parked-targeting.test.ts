@@ -171,6 +171,22 @@ describe('headless parked-page targeting', () => {
     ])
   })
 
+  it('reports listing indices, not bridge registration order, from show and switch', async () => {
+    // Why: a park+wake permutes the bridge's registration order. The index a
+    // caller gets back must name the same tab in the listing they read, or
+    // chaining it into --index addresses a different tab.
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const fake = createFakeHeadlessHost(['c', 'a'], [], ['a', 'c'])
+    const commands = new RuntimeBrowserCommands(fake.host)
+
+    const current = await commands.browserTabCurrent({ worktree: 'id:wt-1' })
+    expect(current.tab.browserPageId).toBe('c')
+    expect(current.tab.index).toBe(1)
+
+    const switched = await commands.browserTabSwitch({ page: 'c', worktree: 'id:wt-1' })
+    expect(switched).toMatchObject({ browserPageId: 'c', switched: 1 })
+  })
+
   it('switches to the page the listed index named, not one an implicit wake promoted', async () => {
     // Why: with every page parked, resolving the worktree first wakes the most
     // recently used one, which makes it live and moves it to listing index 0.

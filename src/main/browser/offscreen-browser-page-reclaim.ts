@@ -36,7 +36,13 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   // Number() consumes the whole string, so '1e9' parses fully and trailing
   // garbage falls back instead of truncating.
   const parsed = Number(raw)
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    // Why the warning: parseInt used to truncate '60000ms' to 60000; falling
+    // back silently would change such a knob's behavior with no signal.
+    console.warn(`[offscreen-browser] ignoring invalid ${name}=${raw}`)
+    return fallback
+  }
+  return parsed
 }
 
 export function readOffscreenBrowserRetentionBudget(): BrowserRetentionBudget {

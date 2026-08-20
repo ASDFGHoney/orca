@@ -38,6 +38,7 @@ function createReclaimer(
     pages?: OffscreenBrowserPage[]
     pinned?: readonly string[]
     park?: (browserPageId: string, live: Map<string, OffscreenBrowserPage>) => Promise<void>
+    budget?: BrowserRetentionBudget
   } = {}
 ) {
   const live = new Map<string, OffscreenBrowserPage>(
@@ -51,7 +52,7 @@ function createReclaimer(
   } as unknown as OffscreenBrowserOpenPages
   const reclaimer = new OffscreenBrowserPageReclaimer({
     pages,
-    budget: BUDGET,
+    budget: args.budget ?? BUDGET,
     isReleasing: () => false,
     isWaking: () => false,
     hasCertificateChallenge: () => false,
@@ -199,6 +200,23 @@ describe('OffscreenBrowserPageReclaimer scheduling', () => {
     await vi.advanceTimersByTimeAsync(BUDGET.graceMs * 10)
     expect(attempts).toBeGreaterThan(0)
     expect(attempts).toBeLessThanOrEqual(11)
+  })
+
+  it('caps the armed delay below the setTimeout ceiling', () => {
+    // Why: Node clamps a delay past 2^31-1ms to 1ms — a documented "set the
+    // idle window very high" configuration would otherwise spin the sweep at
+    // 1ms forever on an idle host.
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const { reclaimer } = createReclaimer({
+      pages: [page('a', 1_000_000)],
+      budget: { ...BUDGET, idleMs: 100_000_000_000 }
+    })
+    reclaimer.reschedule()
+
+    expect(reclaimer.isScheduled).toBe(true)
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1] as number)
+    expect(delays.length).toBeGreaterThan(0)
+    expect(Math.max(...delays)).toBeLessThanOrEqual(2_147_483_647)
   })
 
   it('arms nothing when stop lands while a sweep is in flight', async () => {

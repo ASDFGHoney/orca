@@ -104,16 +104,22 @@ export class OffscreenBrowserOpenPages {
    * tie when none is recorded.
    */
   parkedIdForImplicitTarget(worktreeId?: string): string | null {
+    // Why MRU among the flagged: the claim is strict per scope, so a scoped
+    // query sees at most one flag — but the scope-less query spans every
+    // worktree and can see one flag per scope. Recency picks the page that
+    // actually held the most recent active claim, matching the bridge's own
+    // global-pointer semantics; creation order would pick the oldest scope.
+    let flagged: OffscreenBrowserPage | null = null
     let best: OffscreenBrowserPage | null = null
     for (const page of this.parked(worktreeId)) {
-      if (page.activeWhenParked) {
-        return page.browserPageId
+      if (page.activeWhenParked && (!flagged || page.lastActivityAt > flagged.lastActivityAt)) {
+        flagged = page
       }
       if (!best || page.lastActivityAt > best.lastActivityAt) {
         best = page
       }
     }
-    return best?.browserPageId ?? null
+    return (flagged ?? best)?.browserPageId ?? null
   }
 
   /**

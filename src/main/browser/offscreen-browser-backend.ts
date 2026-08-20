@@ -120,7 +120,12 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     // either the parked-active flag, or a live pointer whose teardown found no
     // other live tab to promote. A worktree with open pages and no active tab
     // breaks the one-selected-tab assumption every paired client renders on.
-    if (page && !this.options.getAgentBrowserBridge?.()?.getActivePageId(page.worktreeId)) {
+    // Gate on the book, not the bridge: getActivePageId resolves through
+    // resolveActiveTab, which reassigns the active pointers as a side effect,
+    // and its undefined scope means "anywhere" while the promotion is strict.
+    // A scope holding a resident page needs no promotion — the live listing
+    // marks one of its tabs active itself.
+    if (page && !this.pages.resident().some((open) => open.worktreeId === page.worktreeId)) {
       this.pages.promoteParkedActive(page.worktreeId)
     }
     // Why: closing changes both residency and rank, and with the last page gone

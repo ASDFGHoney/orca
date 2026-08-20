@@ -655,6 +655,28 @@ export class RuntimeBrowserCommands {
   // it into opening yet another one, which is the leak this fixes. Every
   // index-addressed command resolves through this same list so `tab list`
   // indices and `--index` never disagree.
+  /** Headless serve with the parked-aware, creation-ordered listing. */
+  private isHeadlessOffscreenListing(): boolean {
+    return (
+      this.host.getOffscreenBrowserBackend()?.listOpenPageIds !== undefined &&
+      !this.host.getAvailableAuthoritativeWindow()
+    )
+  }
+
+  /** The page's position in the creation-ordered listing; null on desktop. */
+  private headlessListedTabIndex(
+    worktreeId: string | undefined,
+    browserPageId: string
+  ): number | null {
+    if (!this.isHeadlessOffscreenListing()) {
+      return null
+    }
+    const index = this.listBrowserTabsIncludingParked(worktreeId).findIndex(
+      (tab) => tab.browserPageId === browserPageId
+    )
+    return index === -1 ? null : index
+  }
+
   private listBrowserTabsIncludingParked(
     worktreeId: string | undefined
   ): BrowserTabListResult['tabs'] {
@@ -770,12 +792,13 @@ export class RuntimeBrowserCommands {
       target.worktreeId,
       target.browserPageId
     )
-    // Why (STA-4341): waking the target makes it live, which renumbers the
-    // bridge's own listing. Report the index the caller passed — the one the
-    // listing they read actually names — rather than a position that describes
-    // neither their request nor what they were looking at.
-    const result =
-      indexed && params.index !== undefined ? { ...switched, switched: params.index } : switched
+    // Why (STA-4341): the bridge computes `switched` over its registration
+    // order, which any park+wake permutes. Report the target's position in the
+    // creation-ordered listing instead — the same number `tab list` prints and
+    // `--index` resolves against — or a caller chaining the reported number
+    // into `--index` addresses a different tab than the one it switched to.
+    const listedIndex = this.headlessListedTabIndex(target.worktreeId, switched.browserPageId)
+    const result = listedIndex === null ? switched : { ...switched, switched: listedIndex }
     if (params.focus) {
       // Why: scope focus to the tab's owning worktree; the renderer never yanks the user across worktrees on this signal (see focusBrowserTabInWorktree).
       const worktreeId =
@@ -1874,17 +1897,30 @@ export class RuntimeBrowserCommands {
     explicitWorktreeId?: string
   ): BrowserTabListResult['tabs'][number] {
     const worktreeId = explicitWorktreeId ?? browserManager.getWorktreeIdForTab(browserPageId)
-    const tab = this.requireAgentBrowserBridge()
-      .tabList(worktreeId)
-      .tabs.find((entry) => entry.browserPageId === browserPageId)
-    if (!tab) {
-      const scope = worktreeId ? ' in this worktree' : ''
-      throw new BrowserError(
-        'browser_tab_not_found',
-        `Browser page ${browserPageId} was not found${scope}`
+    // Why (STA-4341): the bridge numbers tabs by registration order, which any
+    // park+wake permutes. Every index a headless caller sees must come from the
+    // creation-ordered listing `tab list` prints, or `tab show`/`tab current`
+    // report a number that names a different tab in that listing.
+    if (this.isHeadlessOffscreenListing()) {
+      const tab = this.listBrowserTabsIncludingParked(worktreeId).find(
+        (entry) => entry.browserPageId === browserPageId
       )
+      if (tab) {
+        return tab
+      }
+    } else {
+      const tab = this.requireAgentBrowserBridge()
+        .tabList(worktreeId)
+        .tabs.find((entry) => entry.browserPageId === browserPageId)
+      if (tab) {
+        return this.enrichBrowserTabInfo(tab)
+      }
     }
-    return this.enrichBrowserTabInfo(tab)
+    const scope = worktreeId ? ' in this worktree' : ''
+    throw new BrowserError(
+      'browser_tab_not_found',
+      `Browser page ${browserPageId} was not found${scope}`
+    )
   }
 
   // Why: headless serve path — the offscreen backend registers synchronously, so there is no webview-mount wait.

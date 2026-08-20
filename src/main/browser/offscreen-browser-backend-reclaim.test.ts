@@ -817,6 +817,35 @@ describe('OffscreenBrowserBackend reclamation', () => {
         .map((page) => page.browserPageId)
         .sort()
     ).toEqual(['g', 'w'])
+    // Why: with one flag per scope, a scope-less implicit command must target
+    // the page that held the MOST RECENT active claim — not the oldest scope's
+    // page just because it comes first in creation order.
+    expect(h.backend.getParkedPageIdForImplicitTarget()).toBe('g')
+  })
+
+  it('promotes for a scope even while another worktree has a resident page', async () => {
+    // Why: the promotion gate is per scope. A live tab elsewhere on the host
+    // says nothing about this worktree's selection.
+    const h = createHarness({ activePageId: 'holder' })
+    await h.backend.createTab({ url: 'https://a', browserPageId: 'a', worktreeId: 'wt-1' })
+    h.clock.value += 1_000
+    await h.backend.createTab({
+      url: 'https://holder',
+      browserPageId: 'holder',
+      worktreeId: 'wt-1'
+    })
+    h.clock.value += 1_000
+    await h.backend.createTab({ url: 'https://other', browserPageId: 'other', worktreeId: 'wt-2' })
+    h.clock.value += 120_000
+    await h.backend.wakeTab('other')
+    await h.backend.reclaimIdlePages()
+    h.activePageId = undefined
+
+    await h.backend.closeTab('holder')
+
+    expect(
+      h.backend.listParkedPages('wt-1').map((page) => [page.browserPageId, page.active === true])
+    ).toEqual([['a', true]])
   })
 
   it('targets the page that was active, not merely the most recently used', async () => {
