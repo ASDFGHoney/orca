@@ -12,8 +12,9 @@ import { ANTIGRAVITY_PRE_TOOL_USE_DECISION } from './hook-events'
 // allocates for each hook visible; curl.exe (Win10 1803+) finishes in ~10ms and, unlike
 // PowerShell, does not recode the UTF-8 payload through the console code page.
 const WINDOWS_ANTIGRAVITY_HOOK_POST_COMMAND = buildWindowsAgentHookPostCommand('antigravity', [
-  // Why: the event name lives in the wrapper's env, not the payload, and the listener
-  // reads it as a top-level form field — same position as the POSIX branch below.
+  // Why: Antigravity alone takes its event name from the wrapper's env rather than the piped
+  // payload. Before `extraFormLines` existed this forced a private copy of the shared command,
+  // which is how this script missed the fleet-wide move to curl for three months (#15117).
   '  --data-urlencode "hook_event_name=%ORCA_ANTIGRAVITY_EVENT%" ^'
 ])
 
