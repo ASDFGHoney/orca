@@ -3380,7 +3380,7 @@
       "providers": ["local", "daemon", "ssh", "runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "daemon", "ssh", "runtime"],
-      "coverageNotes": "Live macOS Electron tests prove exact local PTY disappearance after parked-tab close and detached-pgid descendant death after agent close. Deterministic tests cover final-pane CLI close durability, persisted-empty restart suppression, same-incarnation handle continuity, replacement and hard graph-loss stale fencing, preallocated-handle supersession, daemon and SSH routing, local/daemon pending-snapshot ownership across natural exit, stale-root descendant-signal suppression, graceful-to-immediate kill upgrades, duplicate-kill completion sharing, locale-stable bounded/fresh/coalesced process-table reads, deadline-safe successor scans, cycle-safe linear descendant traversal, target-only escalation indexing, 32-wide bulk teardown, source-scan timestamp identity, same-second PID ambiguity, ordinary runtime close ownership, unified-only hydration, split ownership, pane detach transfer, restart alias hydration, and late-hook suppression; live Linux, Windows, WSL, SSH, and remote-runtime process evidence remains pending.",
+      "coverageNotes": "Live macOS Electron tests prove exact local PTY disappearance after parked-tab close and detached-pgid descendant death after agent close. A headed paired desktop/client journey proves a replacement handle remains writable and uniquely owned before terminal.closeTab, while an isolated CDP-attached desktop proves terminal.close acknowledges exact PTY teardown, removes the rendered tab, and leaves fresh host inventory empty. Deterministic tests cover final-pane CLI close durability, persisted-empty restart suppression, same-incarnation handle continuity, replacement and hard graph-loss stale fencing, preallocated-handle supersession, daemon and SSH routing, local/daemon pending-snapshot ownership across natural exit, stale-root descendant-signal suppression, graceful-to-immediate kill upgrades, duplicate-kill completion sharing, locale-stable bounded/fresh/coalesced process-table reads, deadline-safe successor scans, cycle-safe linear descendant traversal, target-only escalation indexing, 32-wide bulk teardown, source-scan timestamp identity, same-second PID ambiguity, ordinary runtime close ownership, unified-only hydration, split ownership, pane detach transfer, restart alias hydration, and late-hook suppression. The isolated headless orca serve fixture did not publish runtime/worktree state before terminal creation on 2026-08-20, so live headless close parity remains pending alongside Linux, Windows, WSL, and SSH process evidence.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/8628",
         "https://github.com/stablyai/orca/pull/8706",
@@ -3397,6 +3397,7 @@
         "pnpm dlx node@24 ./node_modules/vitest/vitest.mjs run --config config/vitest.config.ts src/main/agent-hooks/server-pane-authority.test.ts src/main/ipc/agent-hooks.test.ts src/main/ipc/agent-pane-authority-ownership.test.ts src/main/ipc/pty-management.test.ts src/main/persistence-initial-load.test.ts src/main/persistence-pane-identity-migration.test.ts src/main/persistence-pty-binding-reconciliation.test.ts src/renderer/src/store/slices/agent-pane-authority.test.ts src/renderer/src/store/slices/terminal-pane-detach-agent-identity.test.ts src/renderer/src/store/slices/terminal-tab-retirement.test.ts src/renderer/src/store/slices/terminal-tab-retirement-store.test.ts tests/e2e/completed-worker-retirement-resume.unit.test.ts src/renderer/src/components/shared/kill-all-terminal-surfaces.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/pty-descendant-termination.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host.test.ts src/main/providers/local-pty-provider-shutdown.test.ts src/main/runtime/worktree-teardown.test.ts",
         "pnpm run test:e2e -- tests/e2e/terminal-tab-close-restart-persistence.spec.ts --workers=1",
+        "pnpm run test:e2e -- tests/e2e/paired-remote-terminal-materialization-reconnect.spec.ts --workers=1",
         "pnpm run test:e2e -- tests/e2e/terminal-parked-close-retirement.spec.ts --workers=1",
         "pnpm run test:e2e -- tests/e2e/agent-descendant-process-kill.spec.ts --workers=1"
       ],
@@ -3429,6 +3430,7 @@
         "tests/e2e/completed-worker-retirement-resume.unit.test.ts",
         "src/renderer/src/components/shared/kill-all-terminal-surfaces.test.ts",
         "tests/e2e/terminal-tab-close-restart-persistence.spec.ts",
+        "tests/e2e/paired-remote-terminal-materialization-reconnect.spec.ts",
         "tests/e2e/terminal-parked-close-retirement.spec.ts",
         "tests/e2e/agent-descendant-process-kill.spec.ts"
       ],
@@ -3594,6 +3596,33 @@
           "result": "passed",
           "durationSeconds": 18.8,
           "summary": "A fresh isolated Electron profile closed a split terminal tab through the runtime CLI and kept both renderer and runtime terminal inventories empty after restart."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime-terminal-close-incarnation-race.test.ts src/main/runtime/rpc/terminal-tab-close-expectation.test.ts src/main/window/terminal-tab-close-request-relay.test.ts src/renderer/src/components/terminal/terminal-tab-close-expectation.test.ts src/renderer/src/hooks/useIpcEvents-close-routing-session-tabs.test.ts",
+          "result": "passed",
+          "durationSeconds": 9.06,
+          "summary": "Thirty-one checks passed on rebased candidate 7546cdcf91, including twelve controlled-barrier replacement and unchanged-incarnation cases across both close entry points, runtime and renderer graph surfaces, and git and folder workspaces."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm run test:e2e -- tests/e2e/terminal-tab-close-restart-persistence.spec.ts --workers=1",
+          "result": "passed",
+          "durationSeconds": 26.2,
+          "summary": "A fresh isolated Electron build acknowledged terminal.close, removed the exact split tab and provider sessions, and preserved the explicit-empty state across restart."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm run test:e2e -- tests/e2e/paired-remote-terminal-materialization-reconnect.spec.ts --workers=1",
+          "result": "passed",
+          "durationSeconds": 20.7,
+          "summary": "A headed paired desktop/client rebound to a replacement handle and PTY, observed one owning host session plus the marker in host reads and rendered output, then closed that exact handle through terminal.closeTab; the separate headless case remains pre-existing fixme."
         }
       ],
       "runtimeBudget": {
@@ -3606,7 +3635,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "STA-4327 used two byte-identical oracles. Runtime oracle cd248b67cc10ef64f2def315b86c3b0236b102639d03c65a0c5d9519e538d3af failed the same three durability/continuity checks on reported v1.4.180 (0b62333cf1), latest main (9bb8836bb6), and disabled fix; runtime candidate 3cf8a37447 passed 5/5, and final code candidate 121e112d77 separately passed its expanded 6/6 oracle. Renderer oracle 3b0949eef8b792cf5b09cfa55341f4216c08714f158e4b132e988e8114636cea failed both explicit-empty hydration/fallback checks on v1.4.180, latest main, and disabled fix, while renderer candidate 121e112d77 passed 2/2."
+        "evidence": "STA-4327 used two byte-identical oracles. Runtime oracle cd248b67cc10ef64f2def315b86c3b0236b102639d03c65a0c5d9519e538d3af failed the same three durability/continuity checks on reported v1.4.180 (0b62333cf1), latest main (9bb8836bb6), and disabled fix; runtime candidate 3cf8a37447 passed 5/5, and final code candidate 121e112d77 separately passed its expanded 6/6 oracle. Renderer oracle 3b0949eef8b792cf5b09cfa55341f4216c08714f158e4b132e988e8114636cea failed both explicit-empty hydration/fallback checks on v1.4.180, latest main, and disabled fix, while renderer candidate 121e112d77 passed 2/2. STA-4489 oracle 3e1a3c25b1910e68aa189a1a8767f7a372812d6d01acbb344caf915ac23f09fe failed all six replacement cases while passing six unchanged-incarnation controls on latest main 3e079debec and on candidate 7546cdcf91 with only the seven production fix files reversed; the byte-identical oracle passed 12/12 on candidate 7546cdcf91."
       },
       "performanceBudget": {
         "required": true,
