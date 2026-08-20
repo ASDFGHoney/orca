@@ -215,6 +215,63 @@ describe('structured TUI launch tab binding', () => {
     }
   })
 
+  it('reports a reservation release that fails, without masking the proof error', async () => {
+    const runtime = terminalAdoptionHarness()
+    const host = structuredHostDouble({
+      releaseAdoptedTuiReservation: vi.fn(async () => {
+        throw new Error('store write failed')
+      })
+    })
+    setStructuredAgentSessionHost(host as never)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    proveCodexTuiRollout.mockRejectedValueOnce(
+      new Error('The agent terminal did not prove the expected Codex rollout.')
+    )
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+      hostId: 'local',
+      pid: 4242,
+      processStartTimeMs: 1_700_000_000_000,
+      spawnToken: 'spawn-adopt'
+    })
+
+    try {
+      await expect(
+        runtime.adoptStructuredAgentSessionTerminal(
+          {
+            envelope: {
+              sessionId: 'session-release-failure',
+              clientOperationId: 'operation-release-failure',
+              expectedRuntimeFence: null,
+              payloadFingerprint: 'f'.repeat(64)
+            },
+            worktree: `id:${WORKTREE_ID}`,
+            tabId: 'tab-adopt',
+            paneKey: 'tab-adopt:leaf-adopt',
+            ptyId: 'pty-adopt',
+            threadId: 'thread-adopt'
+          },
+          { callerKey: 'renderer-1' }
+        )
+      ).rejects.toThrow('did not prove the expected Codex rollout')
+
+      const reserved = host.reserveAdoptedTuiOwner.mock.calls[0]?.[0] as { spawnToken: string }
+      const logged = warn.mock.calls.find(
+        ([message]) => message === '[native-chat] adopted TUI reservation release failed'
+      )?.[1] as { error: Error } | undefined
+      // A latched lease refuses every later attempt, so the cause cannot vanish with the throw.
+      expect(logged).toMatchObject({
+        sessionId: 'session-release-failure',
+        fence: 1,
+        spawnToken: reserved.spawnToken
+      })
+      expect(logged?.error.message).toBe('store write failed')
+    } finally {
+      warn.mockRestore()
+      setStructuredAgentSessionHost(null)
+      agentSessionPtyWriteGate.unbindPty('pty-adopt')
+    }
+  })
+
   it('refuses a thread proof when the Codex process changes during it', async () => {
     const runtime = terminalAdoptionHarness()
     const host = structuredHostDouble()

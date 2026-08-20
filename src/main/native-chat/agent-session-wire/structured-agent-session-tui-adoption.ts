@@ -5,11 +5,7 @@ import type {
   AgentSessionMutationResult
 } from '../../../shared/agent-session-wire'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
-import {
-  admitAttachOrRefuse,
-  attachJournal,
-  reserveRequestFor
-} from './structured-agent-session-attach'
+import { admitAttachOrRefuse, attachJournal } from './structured-agent-session-attach'
 import type {
   StructuredAgentSessionCaller,
   StructuredAgentSessionHostDeps,
@@ -22,8 +18,6 @@ export type StructuredTuiAdoptionRequest = {
   caller: StructuredAgentSessionCaller
   params: AgentSessionAttachParams
   owner: StructuredTuiOwner
-  claimKeyId: string
-  launchEnv?: Record<string, string>
 }
 
 export function adoptStructuredTuiOwner(
@@ -48,32 +42,19 @@ async function adopt(
     return admitted
   }
   let record = input.deps.store.getRecord(sessionId)
-  let replayed = record !== null
-  if (record && isStructuredTuiAdoptionReservation(record, owner.process.spawnToken)) {
+  if (!record) {
+    // Adoption reserves the lease before it may prove the pane, and nothing deletes a record, so
+    // this call always runs against one. Refusing beats reserving here: a second acquisition mode
+    // that no caller can enter is coverage that proves nothing.
+    throw new Error('agent_session_ownership_unknown')
+  }
+  let replayed = true
+  if (isStructuredTuiAdoptionReservation(record, owner.process.spawnToken)) {
     // This adoption's own pre-proof reservation: turn it into an owner rather than reserve again.
     replayed = false
     record = await proveAdoptedTuiOwner(input, record)
-  } else if (record) {
-    assertMatchingTuiOwner(record, owner)
   } else {
-    const reserved = await input.deps.store.reserveOwner(
-      reserveRequestFor({
-        sessionId,
-        params,
-        authority: {
-          spawnToken: owner.process.spawnToken,
-          claimKeyId: input.claimKeyId,
-          handoffOperationId: params.envelope.clientOperationId,
-          probe: { outcome: 'reservation-unused' },
-          ...(input.launchEnv ? { launchEnv: input.launchEnv } : {})
-        },
-        callerKey: input.caller.callerKey,
-        fingerprint: admitted.fingerprint,
-        now: input.now()
-      })
-    )
-    replayed = reserved.disposition === 'replayed'
-    record = await proveAdoptedTuiOwner(input, reserved.record)
+    assertMatchingTuiOwner(record, owner)
   }
   const attached = await attachJournal({
     record,

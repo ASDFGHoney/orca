@@ -79,15 +79,34 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+/** What the runtime does before it may type `/status` into the pane it is adopting. */
+async function reserveAdoption(attach: AgentSessionAttachParams, spawnToken: string) {
+  return host.reserveAdoptedTuiOwner({
+    caller: CALLER,
+    sessionId: attach.envelope.sessionId,
+    clientOperationId: attach.envelope.clientOperationId,
+    fingerprint: attach.envelope.payloadFingerprint,
+    location: attach.location,
+    provider: 'codex',
+    accountHome: attach.accountHome,
+    spawnToken,
+    claimKeyId: 'key-1'
+  })
+}
+
 describe('structured TUI adoption', () => {
   it('mints a durable TUI owner without starting a native provider', async () => {
     const adoptedOwner = owner()
+    const attach = params()
+    await expect(reserveAdoption(attach, adoptedOwner.process.spawnToken)).resolves.toMatchObject({
+      ok: true,
+      fence: 1
+    })
 
     const result = await host.adoptTuiOwner({
       caller: CALLER,
-      params: params(),
-      owner: adoptedOwner,
-      claimKeyId: 'key-1'
+      params: attach,
+      owner: adoptedOwner
     })
 
     expect(result).toMatchObject({ ok: true, replayed: false, fence: 1 })
@@ -107,17 +126,22 @@ describe('structured TUI adoption', () => {
     const invalid = params()
     invalid.envelope.payloadFingerprint = '0'.repeat(64)
 
-    const result = await host.adoptTuiOwner({
-      caller: CALLER,
-      params: invalid,
-      owner: owner(),
-      claimKeyId: 'key-1'
-    })
+    const result = await host.adoptTuiOwner({ caller: CALLER, params: invalid, owner: owner() })
 
     expect(result).toMatchObject({
       ok: false,
       refusal: { code: 'agent_session_operation_conflict' }
     })
+    expect(store.getRecord(SESSION)).toBeNull()
+    expect(acquire).not.toHaveBeenCalled()
+  })
+
+  // The reservation is the only way in: adoption has no second mode that acquires the lease
+  // itself, so nothing here may invent an owner for a session the store has never heard of.
+  it('refuses to adopt a session that holds no reservation', async () => {
+    await expect(
+      host.adoptTuiOwner({ caller: CALLER, params: params(), owner: owner() })
+    ).rejects.toThrow('agent_session_ownership_unknown')
     expect(store.getRecord(SESSION)).toBeNull()
     expect(acquire).not.toHaveBeenCalled()
   })

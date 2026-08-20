@@ -81,6 +81,21 @@ describe('structured chat adoption guard on the launch path', () => {
     await vi.waitFor(() => expect(mockSetTabViewMode).toHaveBeenCalledWith('tab-1', 'chat'))
   })
 
+  it('stays in terminal view when Codex never became ready', async () => {
+    mockWaitForAgentReady.mockResolvedValue({ ready: false, reason: 'timeout' })
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
+
+    await vi.waitFor(() => expect(mockWaitForAgentReady).toHaveBeenCalled())
+    // Let every continuation the ready wait could have queued run before asserting it did not flip.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Chat adoption probes the pane's foreground process: flipping now hands the user an adoption
+    // error in place of the terminal Codex is still starting in.
+    expect(mockSetTabViewMode).not.toHaveBeenCalledWith('tab-1', 'chat')
+  })
+
   it('keeps an SSH Codex tab on the bridge', async () => {
     store.repos = [{ id: 'repo-1', connectionId: 'ssh-a', path: '/repo' }]
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')

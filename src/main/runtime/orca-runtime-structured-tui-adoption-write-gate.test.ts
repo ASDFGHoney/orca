@@ -252,6 +252,52 @@ describe('structured Codex adoption against the real PTY write gate', () => {
     })
   }, 30_000)
 
+  it('lets the attempt holding the reservation win when two adoptions overlap', async () => {
+    // Both attempts park here: reservation taken and pane bound, proof not yet written.
+    const arrived: string[] = []
+    let releaseBoth: () => void = () => {}
+    const bothArrived = new Promise<void>((resolve) => {
+      releaseBoth = resolve
+    })
+    readStructuredTuiProcessIdentity.mockImplementation(
+      async (input: { hostId: string; spawnToken: string }) => {
+        if (!arrived.includes(input.spawnToken)) {
+          arrived.push(input.spawnToken)
+          if (arrived.length === 2) {
+            releaseBoth()
+          }
+          await bothArrived
+        }
+        return {
+          hostId: input.hostId,
+          pid: 4242,
+          processStartTimeMs: 1_700_000_000_000,
+          spawnToken: input.spawnToken
+        }
+      }
+    )
+
+    const superseded = rig.runtime.adoptStructuredAgentSessionTerminal(
+      { ...adoptInput(), threadId: THREAD_ID },
+      { callerKey: 'renderer-1' }
+    )
+    superseded.catch(() => undefined)
+    await vi.waitFor(() => expect(arrived).toHaveLength(1))
+    // The second attempt carries the same sessionId and supersedes the first one's reservation.
+    const winner = rig.runtime.adoptStructuredAgentSessionTerminal(
+      { ...adoptInput(), threadId: THREAD_ID },
+      { callerKey: 'renderer-1' }
+    )
+
+    await expect(winner).resolves.toMatchObject({ ok: true })
+    await expect(superseded).rejects.toThrow('could not verify its Codex session')
+    // The loser's cleanup ran against a pane and a reservation that were no longer its own.
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
+    expect(rig.store.getRecord(SESSION_ID)).toMatchObject({
+      lease: { runtimeKind: 'tui', claimStatus: 'live', handoffStage: null }
+    })
+  }, 30_000)
+
   it('refuses a pane another structured session already owns', async () => {
     agentSessionPtyWriteGate.bindPty(PTY_ID, 'someone-elses-session')
 
