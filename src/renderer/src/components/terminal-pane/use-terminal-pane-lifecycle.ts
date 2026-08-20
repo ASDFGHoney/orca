@@ -499,11 +499,15 @@ export function paneOwnsQueuedStartup(
  * Why one-shot: `onPtySpawn` fires on every fresh spawn a pane makes — hibernation wake, the
  * respawn ladder — but only the first carried the queued command. A command queued onto the tab
  * afterwards belongs to that later launch, and spending it here would drop it undelivered.
+ *
+ * Why `isStillQueued` on top of that guard: the replacement can also arrive before this pane's very
+ * first spawn, so the slot is only spent while it still holds the command this pane launched.
  */
 export function createQueuedStartupConsumer(
   paneStartup: object | null | undefined,
   queuedStartup: object | null | undefined,
-  consume: () => void
+  consume: () => void,
+  isStillQueued: () => boolean
 ): (() => void) | undefined {
   if (!paneOwnsQueuedStartup(paneStartup, queuedStartup)) {
     return undefined
@@ -513,7 +517,12 @@ export function createQueuedStartupConsumer(
     if (spent) {
       return
     }
+    // Why spent regardless: this pane's launch is its one chance at the slot; a later spawn of the
+    // same pane must not spend whatever command took its place.
     spent = true
+    if (!isStillQueued()) {
+      return
+    }
     consume()
   }
 }
@@ -1338,7 +1347,11 @@ export function useTerminalPaneLifecycle({
         const onQueuedStartupSpawned = createQueuedStartupConsumer(
           ptyDeps.startup,
           startupWithSetupSplitWait,
-          () => useAppStore.getState().consumeTabStartupCommand(tabId)
+          () => useAppStore.getState().consumeTabStartupCommand(tabId),
+          // Why `startup` and not startupWithSetupSplitWait: setup-split hands the pane a copy, so only
+          // the raw prop still matches the object the store holds. Read and consume run in one
+          // synchronous step, so nothing can queue in between.
+          () => useAppStore.getState().pendingStartupByTabId[tabId] === startup
         )
         const panePtyBinding = connectPanePty(pane, manager, {
           ...ptyDeps,

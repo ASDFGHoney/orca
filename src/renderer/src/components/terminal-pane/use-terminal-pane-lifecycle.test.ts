@@ -233,9 +233,9 @@ describe('createQueuedStartupConsumer', () => {
 
     // A setup split's borrowed payload, structurally identical to the queued command.
     expect(
-      createQueuedStartupConsumer({ command: 'echo queued' }, queuedStartup, consume)
+      createQueuedStartupConsumer({ command: 'echo queued' }, queuedStartup, consume, () => true)
     ).toBeUndefined()
-    expect(createQueuedStartupConsumer(null, queuedStartup, consume)).toBeUndefined()
+    expect(createQueuedStartupConsumer(null, queuedStartup, consume, () => true)).toBeUndefined()
     expect(consume).not.toHaveBeenCalled()
   })
 
@@ -245,7 +245,7 @@ describe('createQueuedStartupConsumer', () => {
     const queuedStartup = { command: 'echo queued' }
     const consume = vi.fn()
 
-    const consumer = createQueuedStartupConsumer(queuedStartup, queuedStartup, consume)
+    const consumer = createQueuedStartupConsumer(queuedStartup, queuedStartup, consume, () => true)
     expect(consumer).toBeTypeOf('function')
 
     consumer?.()
@@ -253,6 +253,51 @@ describe('createQueuedStartupConsumer', () => {
     consumer?.()
 
     expect(consume).toHaveBeenCalledTimes(1)
+  })
+
+  // Why: a replacement can land before this pane's own spawn, so the one-shot guard alone still lets
+  // the callback delete a command it never launched (STA-4876).
+  it('leaves a command that replaced the captured one queued for its own launch', () => {
+    const capturedStartup = { command: 'echo captured' }
+    let pending: object | null = capturedStartup
+    const consume = vi.fn(() => {
+      pending = null
+    })
+
+    const consumer = createQueuedStartupConsumer(
+      capturedStartup,
+      capturedStartup,
+      consume,
+      () => pending === capturedStartup
+    )
+    const replacement = { command: 'echo replacement' }
+    pending = replacement
+
+    consumer?.()
+
+    expect(consume).not.toHaveBeenCalled()
+    expect(pending).toBe(replacement)
+  })
+
+  // Why: the replacement belongs to the launch that queued it, so this pane's respawn ladder must not
+  // reach for it after skipping its own spent chance.
+  it('does not spend a replacement on a later spawn of the same pane', () => {
+    const capturedStartup = { command: 'echo captured' }
+    let pending: object | null = { command: 'echo replacement' }
+    const consume = vi.fn()
+
+    const consumer = createQueuedStartupConsumer(
+      capturedStartup,
+      capturedStartup,
+      consume,
+      () => pending === capturedStartup
+    )
+
+    consumer?.()
+    pending = capturedStartup
+    consumer?.()
+
+    expect(consume).not.toHaveBeenCalled()
   })
 })
 
