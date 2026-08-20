@@ -159,7 +159,11 @@ export default function ImportedWorktreesVisibilityLine({
         {hostContextLabel && placement !== 'pinned-fallback' ? (
           <span className="inline-flex min-w-0 shrink items-center gap-1">
             {hostContextHostId ? (
-              <NoticeHostGlyph hostId={hostContextHostId} hostLabel={hostContextLabel} />
+              <NoticeHostGlyph
+                hostId={hostContextHostId}
+                hostLabel={hostContextLabel}
+                keyboardFocusable
+              />
             ) : null}
             <span className="min-w-0 truncate text-[10px] leading-none text-muted-foreground">
               {hostContextLabel}

@@ -1,16 +1,19 @@
 // @vitest-environment happy-dom
 
 /**
- * Notice rows reuse the worktree card's host indicator so one project's rows
- * read the same way wherever they appear: a server glyph with a "Project on …"
- * tooltip, nothing at all for local.
+ * Notice rows reuse one host vocabulary: monitor for local, server for remote,
+ * with the worktree card's "Project on …" tooltip copy.
  */
-import { act, type ReactNode } from 'react'
+import { act, cloneElement, type ReactElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import NoticeHostGlyph from './NoticeHostGlyph'
 import en from '../../i18n/locales/en.json'
+import es from '../../i18n/locales/es.json'
+import ja from '../../i18n/locales/ja.json'
+import ko from '../../i18n/locales/ko.json'
+import zh from '../../i18n/locales/zh.json'
 
 const runtimeStatusByEnvironmentId = new Map<string, { status?: unknown }>()
 
@@ -20,7 +23,8 @@ vi.mock('@/store', () => ({
 
 vi.mock('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: ReactElement<{ 'data-testid'?: string }> }) =>
+    cloneElement(children, { 'data-testid': 'tooltip-trigger' }),
   TooltipContent: ({ children }: { children: ReactNode }) => (
     <span data-testid="tooltip">{children}</span>
   )
@@ -28,13 +32,23 @@ vi.mock('@/components/ui/tooltip', () => ({
 
 const roots: Root[] = []
 
-async function render(hostId: string, hostLabel = 'openclaw'): Promise<HTMLDivElement> {
+async function render(
+  hostId: string,
+  hostLabel = 'openclaw',
+  keyboardFocusable = false
+): Promise<HTMLDivElement> {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   roots.push(root)
   await act(async () => {
-    root.render(<NoticeHostGlyph hostId={hostId as never} hostLabel={hostLabel} />)
+    root.render(
+      <NoticeHostGlyph
+        hostId={hostId as never}
+        hostLabel={hostLabel}
+        keyboardFocusable={keyboardFocusable}
+      />
+    )
   })
   return container
 }
@@ -86,6 +100,23 @@ describe('NoticeHostGlyph', () => {
     )
   })
 
+  it('makes a passive row glyph keyboard reachable with an accessible name', async () => {
+    const container = await render('ssh:openclaw-target', 'openclaw', true)
+    const trigger = container.querySelector('[data-testid="tooltip-trigger"]')
+
+    expect(trigger?.getAttribute('tabindex')).toBe('0')
+    expect(trigger?.getAttribute('role')).toBe('img')
+    expect(trigger?.getAttribute('aria-label')).toBe('Project on SSH host openclaw')
+  })
+
+  it('does not add a nested tab stop when the glyph is inside a button', async () => {
+    const container = await render('ssh:openclaw-target')
+
+    expect(
+      container.querySelector('[data-testid="tooltip-trigger"]')?.hasAttribute('tabindex')
+    ).toBe(false)
+  })
+
   it('draws one glyph vocabulary: a monitor for local, a server for remote', async () => {
     const local = await render('local', 'Local Mac')
     const remote = await render('ssh:openclaw-target')
@@ -111,4 +142,16 @@ describe('NoticeHostGlyph', () => {
       runtimeHostProject: 'Project on {{hostName}}'
     })
   })
+
+  it.each(Object.entries({ es, ja, ko, zh }))(
+    'keeps its copy in the %s catalog',
+    (_locale, catalog) => {
+      expect(catalog.auto.components.sidebar.NoticeHostGlyph).toMatchObject({
+        hostDisconnected: expect.stringContaining('{{hostName}}'),
+        sshHostProject: expect.stringContaining('{{hostName}}'),
+        localHostProject: expect.any(String),
+        runtimeHostProject: expect.stringContaining('{{hostName}}')
+      })
+    }
+  )
 })

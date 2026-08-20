@@ -103,7 +103,11 @@ export default function NewExternalWorktreesInboxLine({
           {hostContextLabel ? (
             <span className="inline-flex min-w-0 shrink items-center gap-1">
               {hostContextHostId ? (
-                <NoticeHostGlyph hostId={hostContextHostId} hostLabel={hostContextLabel} />
+                <NoticeHostGlyph
+                  hostId={hostContextHostId}
+                  hostLabel={hostContextLabel}
+                  keyboardFocusable={false}
+                />
               ) : null}
               <span className="min-w-0 truncate text-[10px] leading-none text-muted-foreground">
                 {hostContextLabel}

@@ -9,6 +9,7 @@ import { translate } from '@/i18n/i18n'
 type NoticeHostGlyphProps = {
   hostId: ExecutionHostId
   hostLabel: string
+  keyboardFocusable: boolean
 }
 
 /**
@@ -21,7 +22,8 @@ type NoticeHostGlyphProps = {
  */
 export default function NoticeHostGlyph({
   hostId,
-  hostLabel
+  hostLabel,
+  keyboardFocusable
 }: NoticeHostGlyphProps): React.JSX.Element | null {
   const host = parseExecutionHostId(hostId)
   const isDisconnected = useAppStore((s) => {
@@ -61,7 +63,13 @@ export default function NoticeHostGlyph({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center" data-notice-host-kind={host.kind}>
+        <span
+          aria-label={keyboardFocusable ? tooltip : undefined}
+          className="inline-flex shrink-0 items-center rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-worktree-sidebar-ring"
+          data-notice-host-kind={host.kind}
+          role={keyboardFocusable ? 'img' : undefined}
+          tabIndex={keyboardFocusable ? 0 : undefined}
+        >
           <HostRowIcon
             hostId={hostId}
             className={`size-3 shrink-0 ${

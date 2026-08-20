@@ -6,8 +6,6 @@ import { cn } from '@/lib/utils'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import { ProjectOptionDetail } from './ProjectComboboxRow'
 import { translate } from '@/i18n/i18n'
-// Re-exported from its shared home so both the composer and the sidebar draw
-// one host glyph vocabulary.
 import { HostRowIcon } from '../host-row-icon'
 
 export { HostRowIcon }
