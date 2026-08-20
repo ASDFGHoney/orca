@@ -18211,6 +18211,14 @@ export class OrcaRuntimeService {
     this.stopRequestedPtyIds.add(ptyId)
   }
 
+  markPtyHistoryPreservingStopRequested(ptyId: string): void {
+    this.intentionalHandlelessPtyStops.set(ptyId, this.ptysById.get(ptyId)?.incarnationId ?? null)
+  }
+
+  clearPtyHistoryPreservingStopRequested(ptyId: string): void {
+    this.intentionalHandlelessPtyStops.delete(ptyId)
+  }
+
   isPtyStopRequested(ptyId: string): boolean {
     return this.stopRequestedPtyIds.has(ptyId)
   }
@@ -30791,17 +30799,14 @@ export class OrcaRuntimeService {
     const stoppedPtyIds: string[] = []
     for (const ptyId of [...expected].sort()) {
       if (opts.keepHistory) {
-        this.intentionalHandlelessPtyStops.set(
-          ptyId,
-          this.ptysById.get(ptyId)?.incarnationId ?? null
-        )
+        this.markPtyHistoryPreservingStopRequested(ptyId)
       }
       try {
         if (!(await this.ptyController.stopAndWait(ptyId, { keepHistory: opts.keepHistory }))) {
           throw Object.assign(new Error('terminal_exact_stop_failed'), { ptyId })
         }
       } finally {
-        this.intentionalHandlelessPtyStops.delete(ptyId)
+        this.clearPtyHistoryPreservingStopRequested(ptyId)
       }
       stoppedPtyIds.push(ptyId)
     }

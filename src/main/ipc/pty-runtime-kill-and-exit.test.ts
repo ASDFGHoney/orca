@@ -163,6 +163,12 @@ describe('registerPtyHandlers', () => {
     deletePtyOwnership('missing-pty')
   })
   it('rethrows non-not-found local provider shutdown failures', async () => {
+    const runtime = {
+      setPtyController: vi.fn(),
+      markPtyStopRequested: vi.fn(),
+      markPtyHistoryPreservingStopRequested: vi.fn(),
+      clearPtyHistoryPreservingStopRequested: vi.fn()
+    }
     setLocalPtyProvider({
       spawn: vi.fn(),
       write: vi.fn(),
@@ -186,11 +192,13 @@ describe('registerPtyHandlers', () => {
       getProfiles: vi.fn()
     } as never)
     handlers.clear()
-    registerPtyHandlers(mainWindow as never)
+    registerPtyHandlers(mainWindow as never, runtime as never)
 
-    await expect(handlers.get('pty:kill')!(null, { id: 'local-pty' })).rejects.toThrow(
-      'daemon unavailable'
-    )
+    await expect(
+      handlers.get('pty:kill')!(null, { id: 'local-pty', keepHistory: true })
+    ).rejects.toThrow('daemon unavailable')
+    expect(runtime.markPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
+    expect(runtime.clearPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
   })
   it('rejects runtime terminal IDs before unowned local provider routing', async () => {
     const shutdown = vi.spyOn(getLocalPtyProvider(), 'shutdown')
@@ -206,7 +214,9 @@ describe('registerPtyHandlers', () => {
     const shutdown = vi.fn(async () => undefined)
     const runtime = {
       setPtyController: vi.fn(),
-      onPtyExit: vi.fn()
+      onPtyExit: vi.fn(),
+      markPtyHistoryPreservingStopRequested: vi.fn(),
+      clearPtyHistoryPreservingStopRequested: vi.fn()
     }
     setLocalPtyProvider({
       spawn: vi.fn(),
@@ -240,6 +250,14 @@ describe('registerPtyHandlers', () => {
       keepHistory: true
     })
     expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', -1, undefined)
+    expect(runtime.markPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
+    expect(runtime.clearPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
+    expect(runtime.markPtyHistoryPreservingStopRequested.mock.invocationCallOrder[0]).toBeLessThan(
+      runtime.onPtyExit.mock.invocationCallOrder[0]!
+    )
+    expect(runtime.onPtyExit.mock.invocationCallOrder[0]).toBeLessThan(
+      runtime.clearPtyHistoryPreservingStopRequested.mock.invocationCallOrder[0]!
+    )
     expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:exit', {
       id: 'local-pty',
       code: -1

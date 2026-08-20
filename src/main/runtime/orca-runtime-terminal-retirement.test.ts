@@ -470,6 +470,35 @@ describe('OrcaRuntimeService terminal surface retirement', () => {
     })
   })
 
+  it('preserves a surface while its history-preserving stop is in flight', async () => {
+    const session = makePersistedSplitSession()
+    const setWorkspaceSession = vi.fn()
+    const runtime = new OrcaRuntimeService(
+      runtimeStore({
+        getWorkspaceSession: () => session,
+        setWorkspaceSession,
+        flushOrThrow: vi.fn()
+      })
+    )
+    runtime.attachWindow(1)
+    syncSplit(runtime)
+    runtime.registerPty('pty-left', WORKTREE_ID, null, {
+      tabId: 'tab',
+      leafId: 'left',
+      incarnationId: 'incarnation-left'
+    })
+
+    runtime.markPtyHistoryPreservingStopRequested('pty-left')
+    runtime.onPtyExit('pty-left', 0, 'incarnation-left')
+    runtime.clearPtyHistoryPreservingStopRequested('pty-left')
+
+    expect((await runtime.listMobileSessionTabs(`id:${WORKTREE_ID}`)).tabs).toEqual([
+      expect.objectContaining({ id: 'tab::left' }),
+      expect.objectContaining({ id: 'tab::right' })
+    ])
+    expect(setWorkspaceSession).not.toHaveBeenCalled()
+  })
+
   it('ignores a delayed exit from an older incarnation of a reused PTY id', async () => {
     const setWorkspaceSession = vi.fn()
     const runtime = new OrcaRuntimeService(
