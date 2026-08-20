@@ -11437,7 +11437,82 @@ export class OrcaRuntimeService {
       throw new Error('Could not prove the Codex terminal process.')
     }
     const rootProcessId = listing.rootProcessId
-    const spawnToken = randomUUID()
+    const sessionId = input.envelope.sessionId
+    const priorBoundSessionId = agentSessionPtyWriteGate.boundSessionId(input.ptyId)
+    if (priorBoundSessionId !== null && priorBoundSessionId !== sessionId) {
+      throw new Error('This terminal pane already belongs to another structured Codex session.')
+    }
+    const host = getStructuredAgentSessionHost()
+    if (!host) {
+      throw new Error('structured_agent_session_unsupported')
+    }
+    const launchEnv = resolveTuiAgentLaunchEnv(
+      'codex',
+      this.requireStore().getSettings().agentDefaultEnv
+    )
+    // Why the reservation comes before the proof: `admitProof` authorizes the `/status` probe only
+    // for a reservation that already names this session, `tui`, and this spawn token. Reserving
+    // afterwards left the probe unauthorized, so every adoption failed at its first keystroke.
+    const reserved = await host.reserveAdoptedTuiOwner({
+      caller,
+      sessionId,
+      clientOperationId: input.envelope.clientOperationId,
+      fingerprint: input.envelope.payloadFingerprint,
+      location: intent.location,
+      provider: intent.provider,
+      accountHome: intent.accountHome,
+      spawnToken: randomUUID(),
+      claimKeyId: this.agentSessionClaimSigner.keyId,
+      launchEnv
+    })
+    if (!reserved.ok) {
+      return reserved
+    }
+    const { fence, spawnToken } = reserved
+    agentSessionPtyWriteGate.bindPty(input.ptyId, sessionId)
+    let owned = false
+    try {
+      return await this.attachAdoptedStructuredTui({
+        input,
+        caller,
+        host,
+        intent,
+        launchEnv,
+        fence,
+        spawnToken,
+        rootProcessId,
+        pty,
+        onOwned: () => {
+          owned = true
+        }
+      })
+    } finally {
+      if (!owned) {
+        // A failed proof must leave nothing behind: an unreleased reservation is exactly the
+        // latched lease that makes the next attempt refuse itself.
+        if (priorBoundSessionId === null) {
+          agentSessionPtyWriteGate.unbindPty(input.ptyId)
+        }
+        await host
+          .releaseAdoptedTuiReservation({ sessionId, fence, spawnToken })
+          .catch(() => undefined)
+      }
+    }
+  }
+
+  private async attachAdoptedStructuredTui(args: {
+    input: Parameters<OrcaRuntimeService['adoptStructuredAgentSessionTerminal']>[0]
+    caller: StructuredAgentSessionCaller
+    host: NonNullable<ReturnType<typeof getStructuredAgentSessionHost>>
+    intent: AgentSessionAttachParams
+    launchEnv: Record<string, string>
+    fence: number
+    spawnToken: string
+    rootProcessId: number
+    pty: RuntimePtyWorktreeRecord
+    onOwned: () => void
+  }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
+    const { input, caller, host, intent, launchEnv, fence, spawnToken, rootProcessId, pty } = args
     const readPty = (): RuntimePtyWorktreeRecord => {
       const current = this.ptysById.get(input.ptyId)
       if (!current?.connected || current.paneKey !== input.paneKey) {
@@ -11500,7 +11575,9 @@ export class OrcaRuntimeService {
         threadId,
         resumed: false,
         origin: 'adopted',
-        fence: 1,
+        // Why not 1: a retry supersedes the previous attempt's reservation, and `proveOwner`
+        // refuses a handle link minted at any fence but the reservation's own.
+        fence,
         observedAt: Date.now()
       }),
       transcriptPath,
@@ -11528,14 +11605,6 @@ export class OrcaRuntimeService {
       runtimeKind: 'tui',
       providerHandle: { kind: 'codex', threadId }
     }
-    const launchEnv = resolveTuiAgentLaunchEnv(
-      'codex',
-      this.requireStore().getSettings().agentDefaultEnv
-    )
-    const host = getStructuredAgentSessionHost()
-    if (!host) {
-      throw new Error('structured_agent_session_unsupported')
-    }
     const adopted = await host.adoptTuiOwner({
       caller,
       params,
@@ -11544,8 +11613,9 @@ export class OrcaRuntimeService {
       launchEnv
     })
     if (adopted.ok) {
+      // The pane stays bound to the reservation this call already made; only the owner is new.
       this.adoptedStructuredTuiOwners.set(input.envelope.sessionId, owner)
-      agentSessionPtyWriteGate.bindPty(input.ptyId, input.envelope.sessionId)
+      args.onOwned()
     }
     return adopted
   }

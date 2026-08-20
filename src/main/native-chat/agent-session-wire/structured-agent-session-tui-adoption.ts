@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import type {
   AgentSessionAttachResult,
   AgentSessionMutationResult
@@ -15,6 +16,7 @@ import type {
   StructuredAgentSessionHostSession
 } from './structured-agent-session-host-types'
 import type { StructuredTuiOwner } from './structured-agent-session-handoff-types'
+import { isStructuredTuiAdoptionReservation } from './structured-agent-session-tui-adoption-reservation'
 
 export type StructuredTuiAdoptionRequest = {
   caller: StructuredAgentSessionCaller
@@ -47,7 +49,13 @@ async function adopt(
   }
   let record = input.deps.store.getRecord(sessionId)
   let replayed = record !== null
-  if (!record) {
+  if (record && isStructuredTuiAdoptionReservation(record, owner.process.spawnToken)) {
+    // This adoption's own pre-proof reservation: turn it into an owner rather than reserve again.
+    replayed = false
+    record = await proveAdoptedTuiOwner(input, record)
+  } else if (record) {
+    assertMatchingTuiOwner(record, owner)
+  } else {
     const reserved = await input.deps.store.reserveOwner(
       reserveRequestFor({
         sessionId,
@@ -65,21 +73,7 @@ async function adopt(
       })
     )
     replayed = reserved.disposition === 'replayed'
-    record = reserved.record
-    await input.deps.store.commitProcessIdentity({
-      sessionId,
-      fence: record.lease.runtimeFence,
-      process: owner.process,
-      now: input.now()
-    })
-    record = await input.deps.store.proveOwner({
-      sessionId,
-      fence: record.lease.runtimeFence,
-      link: owner.link,
-      now: input.now()
-    })
-  } else {
-    assertMatchingTuiOwner(record, owner)
+    record = await proveAdoptedTuiOwner(input, reserved.record)
   }
   const attached = await attachJournal({
     record,
@@ -114,6 +108,27 @@ async function adopt(
       unconfirmedClientMessageIds: attached.unconfirmedClientMessageIds
     }
   }
+}
+
+/** Steps 4 and 5 of acquisition against a reservation that already exists at this fence. */
+async function proveAdoptedTuiOwner(
+  input: Parameters<typeof adoptStructuredTuiOwner>[0],
+  record: AgentSessionRecord
+): Promise<AgentSessionRecord> {
+  const { sessionId } = record
+  const fence = record.lease.runtimeFence
+  await input.deps.store.commitProcessIdentity({
+    sessionId,
+    fence,
+    process: input.owner.process,
+    now: input.now()
+  })
+  return input.deps.store.proveOwner({
+    sessionId,
+    fence,
+    link: input.owner.link,
+    now: input.now()
+  })
 }
 
 function assertMatchingTuiOwner(

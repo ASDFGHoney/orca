@@ -77,6 +77,20 @@ function terminalAdoptionHarness() {
   return runtime
 }
 
+/** The host half adoption now needs: the lease is reserved before the provider probe runs. */
+function structuredHostDouble(overrides: Record<string, unknown> = {}) {
+  return {
+    reserveAdoptedTuiOwner: vi.fn(async (input: { spawnToken: string }) => ({
+      ok: true,
+      fence: 1,
+      spawnToken: input.spawnToken
+    })),
+    releaseAdoptedTuiReservation: vi.fn(async () => undefined),
+    adoptTuiOwner: vi.fn(async () => ({ ok: true, replayed: false, fence: 1 })),
+    ...overrides
+  }
+}
+
 function notifier(revealTerminalSession: ReturnType<typeof vi.fn>) {
   return {
     worktreesChanged: vi.fn(),
@@ -105,7 +119,7 @@ describe('structured TUI launch tab binding', () => {
   it('adopts the proven local Codex pane as a durable TUI owner', async () => {
     const runtime = terminalAdoptionHarness()
     const adoptTuiOwner = vi.fn(async () => ({ ok: true, replayed: false, fence: 1 }))
-    setStructuredAgentSessionHost({ adoptTuiOwner } as never)
+    setStructuredAgentSessionHost(structuredHostDouble({ adoptTuiOwner }) as never)
     proveCodexTuiRollout.mockResolvedValueOnce({
       transcriptPath: '/tmp/codex-home/rollout.jsonl'
     })
@@ -162,6 +176,8 @@ describe('structured TUI launch tab binding', () => {
 
   it('refuses adoption when the provider rollout cannot be proved', async () => {
     const runtime = terminalAdoptionHarness()
+    const host = structuredHostDouble()
+    setStructuredAgentSessionHost(host as never)
     proveCodexTuiRollout.mockRejectedValueOnce(
       new Error('The agent terminal did not prove the expected Codex rollout.')
     )
@@ -172,29 +188,37 @@ describe('structured TUI launch tab binding', () => {
       spawnToken: 'spawn-adopt'
     })
 
-    await expect(
-      runtime.adoptStructuredAgentSessionTerminal(
-        {
-          envelope: {
-            sessionId: 'session-adopt',
-            clientOperationId: 'operation-adopt',
-            expectedRuntimeFence: null,
-            payloadFingerprint: 'f'.repeat(64)
+    try {
+      await expect(
+        runtime.adoptStructuredAgentSessionTerminal(
+          {
+            envelope: {
+              sessionId: 'session-adopt',
+              clientOperationId: 'operation-adopt',
+              expectedRuntimeFence: null,
+              payloadFingerprint: 'f'.repeat(64)
+            },
+            worktree: `id:${WORKTREE_ID}`,
+            tabId: 'tab-adopt',
+            paneKey: 'tab-adopt:leaf-adopt',
+            ptyId: 'pty-adopt',
+            threadId: 'thread-adopt'
           },
-          worktree: `id:${WORKTREE_ID}`,
-          tabId: 'tab-adopt',
-          paneKey: 'tab-adopt:leaf-adopt',
-          ptyId: 'pty-adopt',
-          threadId: 'thread-adopt'
-        },
-        { callerKey: 'renderer-1' }
-      )
-    ).rejects.toThrow('did not prove the expected Codex rollout')
-    expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
+          { callerKey: 'renderer-1' }
+        )
+      ).rejects.toThrow('did not prove the expected Codex rollout')
+      expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
+      // A proof that never lands hands the reservation back; nothing latches the next attempt.
+      expect(host.releaseAdoptedTuiReservation).toHaveBeenCalledTimes(1)
+    } finally {
+      setStructuredAgentSessionHost(null)
+    }
   })
 
   it('refuses a thread proof when the Codex process changes during it', async () => {
     const runtime = terminalAdoptionHarness()
+    const host = structuredHostDouble()
+    setStructuredAgentSessionHost(host as never)
     proveCodexTuiRollout.mockResolvedValueOnce({
       transcriptPath: '/tmp/codex-home/rollout.jsonl'
     })
@@ -231,12 +255,14 @@ describe('structured TUI launch tab binding', () => {
       )
     ).rejects.toThrow('process changed during conversation proof')
     expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
+    expect(host.releaseAdoptedTuiReservation).toHaveBeenCalledTimes(1)
+    setStructuredAgentSessionHost(null)
   })
 
   it('discovers the provider thread when hook status has not published it yet', async () => {
     const runtime = terminalAdoptionHarness()
     const adoptTuiOwner = vi.fn(async () => ({ ok: true, replayed: false, fence: 1 }))
-    setStructuredAgentSessionHost({ adoptTuiOwner } as never)
+    setStructuredAgentSessionHost(structuredHostDouble({ adoptTuiOwner }) as never)
     resolveLiveCodexTuiRollout.mockResolvedValueOnce({
       threadId: 'thread-discovered',
       transcriptPath: '/tmp/codex-home/discovered.jsonl'

@@ -60,6 +60,13 @@ import {
   adoptStructuredTuiOwner,
   type StructuredTuiAdoptionRequest
 } from './structured-agent-session-tui-adoption'
+import {
+  releaseStructuredTuiAdoptionReservation,
+  reserveStructuredTuiAdoption,
+  type StructuredTuiAdoptionReservationRelease,
+  type StructuredTuiAdoptionReservationRequest,
+  type StructuredTuiAdoptionReservationResult
+} from './structured-agent-session-tui-adoption-reservation'
 import { readStructuredAgentSessionHistoryResult } from './structured-agent-session-history-result'
 export type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
 
@@ -207,6 +214,20 @@ export class StructuredAgentSessionHost {
     )
     return this.tasks.trackAttach(attaching)
   }
+
+  /** Reserve the lease an adopted TUI must hold before the write gate will admit its proof. */
+  reserveAdoptedTuiOwner = (
+    input: StructuredTuiAdoptionReservationRequest
+  ): Promise<StructuredTuiAdoptionReservationResult> =>
+    this.serialize(input.sessionId, () =>
+      reserveStructuredTuiAdoption({ ...input, deps: this.deps, now: this.now })
+    )
+
+  /** Hand back a reservation whose proof never landed, so the next attempt is not refused by it. */
+  releaseAdoptedTuiReservation = (input: StructuredTuiAdoptionReservationRelease): Promise<void> =>
+    this.serialize(input.sessionId, () =>
+      releaseStructuredTuiAdoptionReservation({ ...input, deps: this.deps, now: this.now })
+    )
 
   adoptTuiOwner = (
     input: StructuredTuiAdoptionRequest
