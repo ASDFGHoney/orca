@@ -308,6 +308,25 @@ describe('shared agent-hook-listener', () => {
       toolInput: 'pnpm test'
     })
     expect(tool?.payload.interactivePrompt).toBeUndefined()
+
+    const done = normalizeHookPayload(
+      state,
+      'omp',
+      {
+        paneKey: PANE_KEY,
+        tabId: 'tab-1',
+        worktreeId: 'wt',
+        env: 'production',
+        version: '1',
+        payload: { hook_event_name: 'agent_end' }
+      },
+      'production'
+    )
+    expect(done?.payload).toMatchObject({
+      state: 'done',
+      prompt: 'wire omp status',
+      agentType: 'omp'
+    })
   })
 
   it('maps OMP ask to blocked without publishing a native prompt', () => {

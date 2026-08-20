@@ -43,6 +43,10 @@ import type {
   TerminalSideEffectBatch,
   TerminalSideEffectFact
 } from '../../shared/terminal-side-effect-facts'
+import {
+  COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS,
+  shouldRetireLaunchAuthorityOnCommandFinished
+} from './command-finished-launch-authority'
 import type { TerminalGitHubPRLink } from '../../shared/terminal-github-pr-link-detector'
 import { TerminalKittyKeyboardModeTracker } from '../../shared/terminal-kitty-keyboard-mode-tracker'
 import { parseTerminalKittyKeyboardFlags } from '../../shared/terminal-kitty-keyboard-flags'
@@ -3661,6 +3665,7 @@ export class OrcaRuntimeService {
     string,
     RestoredOrchestrationAuthorityReceipt
   >()
+  private launchAuthorityCommandFinishedGenerationByPtyId = new Map<string, number>()
   private ptyControllerInventorySequence = 0
   private ptyControllerAggregateInventoryGeneration = 0
   private ptyControllerInventoryGenerationByProvider = new Map<string, number>()
@@ -11459,7 +11464,7 @@ export class OrcaRuntimeService {
         this.recordTerminalSideEffectFact(ptyId, { kind: 'bell' })
         return
       case 'command-finished':
-        this.retirePtyAgentLaunchAuthority(ptyId)
+        void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId)
         this.recordTerminalSideEffectFact(ptyId, {
           kind: 'command-finished',
           exitCode: fact.exitCode
@@ -11748,7 +11753,7 @@ export class OrcaRuntimeService {
           this.confirmPtyAgentExit(ptyId)
         },
         onCommandFinished: (exitCode: number | null) => {
-          this.retirePtyAgentLaunchAuthority(ptyId)
+          void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId)
           this.recordTerminalSideEffectFact(ptyId, { kind: 'command-finished', exitCode })
         },
         onBell: () => {
@@ -13963,6 +13968,7 @@ export class OrcaRuntimeService {
   }
 
   private retirePtyAgentLaunchAuthority(ptyId: string): void {
+    this.launchAuthorityCommandFinishedGenerationByPtyId.delete(ptyId)
     const pty = this.ptysById.get(ptyId)
     if (!pty) {
       return
@@ -13989,6 +13995,41 @@ export class OrcaRuntimeService {
     for (const paneKey of paneKeys) {
       this.retireAgentHookCompatibilityAuthorityFn?.(paneKey)
     }
+  }
+
+  // Why: full-screen agents leak nested-shell OSC 133;D onto the main PTY.
+  // Retire launched-agent hook authority only after the execution host shows
+  // a shell in the foreground; a failed/null read is unverifiable, not exited.
+  private async maybeRetireLaunchAuthorityAfterCommandFinished(ptyId: string): Promise<void> {
+    const generation = (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) ?? 0) + 1
+    this.launchAuthorityCommandFinishedGenerationByPtyId.set(ptyId, generation)
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+      if (typeof timer.unref === 'function') {
+        timer.unref()
+      }
+    })
+    if (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) !== generation) {
+      return
+    }
+    if (!this.ptysById.get(ptyId)) {
+      return
+    }
+    let foregroundProcess: string | null = null
+    try {
+      foregroundProcess =
+        (await (this.ptyController?.confirmForegroundProcess?.(ptyId) ??
+          this.ptyController?.getForegroundProcess(ptyId))) ?? null
+    } catch {
+      return
+    }
+    if (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) !== generation) {
+      return
+    }
+    if (!shouldRetireLaunchAuthorityOnCommandFinished(foregroundProcess)) {
+      return
+    }
+    this.retirePtyAgentLaunchAuthority(ptyId)
   }
 
   async resolveTerminalCwd(handle: string): Promise<string | null> {

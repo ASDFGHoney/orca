@@ -64,6 +64,7 @@ import {
   resolveWorktreeScanCacheTtlMs,
   type RuntimeTerminalAgentStatusEvent
 } from './orca-runtime'
+import { COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS } from './command-finished-launch-authority'
 import { RUNTIME_GRAPH_RELOAD_TIMEOUT_MS } from './runtime-graph-reload-lifecycle'
 import {
   appendRecentPtyPathCandidates,
@@ -13182,7 +13183,8 @@ describe('OrcaRuntimeService', () => {
       spawn,
       write: () => true,
       kill: () => true,
-      getForegroundProcess: async () => null
+      getForegroundProcess: async () => 'zsh',
+      confirmForegroundProcess: async () => 'zsh'
     })
     runtime.setNotifier({
       worktreesChanged: vi.fn(),
@@ -13220,7 +13222,14 @@ describe('OrcaRuntimeService', () => {
       })
     ).toBeDefined()
 
-    runtime.onPtyData('pty-authority', '\x1b]133;D;0\x07', 100)
+    vi.useFakeTimers()
+    try {
+      runtime.onPtyData('pty-authority', '\x1b]133;D;0\x07', 100)
+      expect(retireAuthority).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
 
     expect(retireAuthority).toHaveBeenCalledWith(spawnEnv.ORCA_PANE_KEY)
     expect(runtime.verifyOrchestrationCompatibilityCaller(evidence)).toBeNull()
@@ -13231,10 +13240,117 @@ describe('OrcaRuntimeService', () => {
     ).toBeUndefined()
   })
 
-  it('retires only receipted restored PTY authority on command completion and exit', () => {
+  it('keeps launched-agent authority when command-finished still shows OMP foreground', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-omp-nested', incarnationId: 'process-omp' })
+    const retireAuthority = vi.fn()
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      attestAgentHookCompatibilityAuthority: (candidate) => ({
+        paneKey: candidate.paneKey,
+        source: 'current_hook'
+      }),
+      retireAgentHookCompatibilityAuthority: retireAuthority
+    })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'omp',
+      confirmForegroundProcess: async () => 'omp'
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-omp-nested' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'omp',
+      launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+    })
+
+    vi.useFakeTimers()
+    try {
+      runtime.onPtyData('pty-omp-nested', '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(retireAuthority).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an unverifiable command-finished foreground read as agent exit', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-unverified', incarnationId: 'process-u' })
+    const retireAuthority = vi.fn()
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      attestAgentHookCompatibilityAuthority: (candidate) => ({
+        paneKey: candidate.paneKey,
+        source: 'current_hook'
+      }),
+      retireAgentHookCompatibilityAuthority: retireAuthority
+    })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null,
+      confirmForegroundProcess: async () => null
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-unverified' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'omp',
+      launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+    })
+
+    vi.useFakeTimers()
+    try {
+      runtime.onPtyData('pty-unverified', '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(retireAuthority).not.toHaveBeenCalled()
+  })
+
+  it('retires only receipted restored PTY authority on command completion and exit', async () => {
     const retireAuthority = vi.fn()
     const runtime = new OrcaRuntimeService(store, undefined, {
       retireAgentHookCompatibilityAuthority: retireAuthority
+    })
+    runtime.setPtyController({
+      spawn: vi.fn(),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'zsh',
+      confirmForegroundProcess: async () => 'zsh'
     })
     const internals = runtime as unknown as {
       recordPtyWorktree: (ptyId: string, worktreeId: string, state: Record<string, unknown>) => void
@@ -13277,10 +13393,17 @@ describe('OrcaRuntimeService', () => {
       hostScope: { kind: 'local', hostId: 'local' }
     })
 
-    runtime.emitDaemonPtyTransientFact('pty-restored-command', {
-      kind: 'command-finished',
-      exitCode: 0
-    })
+    vi.useFakeTimers()
+    try {
+      runtime.emitDaemonPtyTransientFact('pty-restored-command', {
+        kind: 'command-finished',
+        exitCode: 0
+      })
+      expect(retireAuthority).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
     runtime.onPtyExit('pty-restored-exit', 0, 'restored-exit')
     runtime.onPtyExit('pty-ordinary-shell', 0, 'ordinary-shell')
 
