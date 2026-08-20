@@ -187,6 +187,11 @@ import {
   getProviderSessionClaimKey,
   isPassiveCompletedHibernationEvidence
 } from '@/lib/sleeping-agent-pane-ownership'
+import {
+  bindConfirmedAgentExitResumePane,
+  retireConfirmedAgentExitResumeRecord,
+  scheduleUnbindConfirmedAgentExitResumePane
+} from '@/lib/confirmed-agent-exit-resume-retirement'
 import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
 import { createPaneForegroundAgentTracker } from './pane-foreground-agent-tracker'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
@@ -1272,28 +1277,6 @@ export function connectPanePty(
   const isLegacyWorkerAutomaticResumeBlocked = (): boolean =>
     getSleepingRecordForPane(useAppStore.getState())?.record.automaticResumeBlockedBy ===
     'legacy-orchestration-worker'
-  const clearSleepingRecordProviderDuplicates = (
-    state: ReturnType<typeof useAppStore.getState>,
-    consumed: { paneKey: string; record: SleepingAgentSessionRecord }
-  ): void => {
-    state.clearSleepingAgentSession(consumed.paneKey)
-    for (const [paneKey, record] of Object.entries(state.sleepingAgentSessionsByPaneKey)) {
-      if (
-        paneKey !== consumed.paneKey &&
-        record.worktreeId === consumed.record.worktreeId &&
-        record.agent === consumed.record.agent &&
-        agentProviderSessionsEqual(
-          record.agent,
-          record.providerSession,
-          consumed.record.providerSession
-        )
-      ) {
-        // Why: legacy pane aliases can leave multiple sleeping rows for one
-        // provider session; once this pane resumes it, every alias is stale.
-        state.clearSleepingAgentSession(paneKey)
-      }
-    }
-  }
   const launchToken = paneStartup?.launchConfig
     ? (paneStartup.launchToken ?? createBrowserUuid())
     : undefined
@@ -2664,6 +2647,7 @@ export function connectPanePty(
     handledExitPtyId = ptyId
     agentCompletionCoordinator.dispose()
     dropSideEffectFactConsumer()
+    scheduleUnbindConfirmedAgentExitResumePane(ptyId)
     // Why: main clears gate state on PTY exit too; this only resets the
     // pane-local marker so a reused pane cannot skip re-marking a new PTY.
     releaseHiddenRendererPtyDelivery()
@@ -3022,7 +3006,9 @@ export function connectPanePty(
   ): void => {
     if (activePanePtyBinding && activePanePtyBinding !== ptyId) {
       reportPanePtyVisibility(activePanePtyBinding, false)
+      scheduleUnbindConfirmedAgentExitResumePane(activePanePtyBinding)
     }
+    bindConfirmedAgentExitResumePane(ptyId, cacheKey)
     setPanePtyFitBinding(ptyId)
     activePanePtyBinding = ptyId
     reportPanePtyVisibility(ptyId, deps.isVisibleRef.current)
@@ -3409,8 +3395,13 @@ export function connectPanePty(
     }
   }
   const onAgentExited = (): void => {
-    // Why: eligibility can disappear transiently during reconnect, but a
-    // confirmed shell-title transition is authoritative for native-chat exit.
+    // Why: a bare PTY exit may be recoverable, but a confirmed return to the
+    // shell means the agent ended before its terminal. Retire that resume
+    // authority so a later app restart cannot resurrect it.
+    const sleepingRecordEntry = getSleepingRecordForPane(useAppStore.getState())
+    if (sleepingRecordEntry) {
+      retireConfirmedAgentExitResumeRecord(useAppStore.getState(), sleepingRecordEntry)
+    }
     deps.onAgentExitedRef.current(pane.leafId)
     clearSuppressedTitleSideEffects()
     clearCommandInferredPaneAgent()
@@ -5155,7 +5146,7 @@ export function connectPanePty(
       startup: ColdRestoreAgentResumeStartup | null
     ): void => {
       if (startup && !startup.useLiveEntry && startup.sleepingRecordEntry) {
-        clearSleepingRecordProviderDuplicates(useAppStore.getState(), startup.sleepingRecordEntry)
+        retireConfirmedAgentExitResumeRecord(useAppStore.getState(), startup.sleepingRecordEntry)
       }
     }
     const mergeStartupEnvWithPaneIdentity = (
