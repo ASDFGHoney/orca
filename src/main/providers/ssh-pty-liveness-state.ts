@@ -1,5 +1,4 @@
 export const MAX_SSH_PTY_EXIT_TOMBSTONES = 1000
-export const MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES = 1000
 
 export type SshPtyLiveEvidence = { valid: boolean }
 export type SshPtyLiveEvidenceWindow = {
@@ -10,7 +9,6 @@ export type SshPtyLiveEvidenceWindow = {
 export class SshPtyLivenessState {
   readonly livePtyIds = new Set<string>()
   private readonly exitedPtyIds = new Set<string>()
-  private readonly ambiguousExitPtyIds = new Set<string>()
   private readonly pendingLiveEvidenceByPtyId = new Map<string, Set<SshPtyLiveEvidence>>()
   private readonly liveEvidenceWindows = new Set<SshPtyLiveEvidenceWindow>()
 
@@ -30,7 +28,6 @@ export class SshPtyLivenessState {
     this.liveEvidenceWindows.clear()
     this.livePtyIds.clear()
     this.exitedPtyIds.clear()
-    this.ambiguousExitPtyIds.clear()
   }
 
   probe(id: string): boolean | null {
@@ -39,7 +36,6 @@ export class SshPtyLivenessState {
 
   acceptLive(id: string): void {
     const appPtyId = this.toAppPtyId(id)
-    this.ambiguousExitPtyIds.delete(appPtyId)
     this.exitedPtyIds.delete(appPtyId)
     this.livePtyIds.add(appPtyId)
   }
@@ -96,7 +92,6 @@ export class SshPtyLivenessState {
 
   acceptExited(id: string): void {
     const appPtyId = this.toAppPtyId(id)
-    this.ambiguousExitPtyIds.delete(appPtyId)
     this.refuseLiveEvidenceAfterExit(appPtyId)
     this.livePtyIds.delete(appPtyId)
     this.exitedPtyIds.delete(appPtyId)
@@ -109,17 +104,12 @@ export class SshPtyLivenessState {
     }
   }
 
+  // Why not a tombstone: an exit nobody could attribute leaves the verdict unverifiable. It differs
+  // from acceptUnverifiable only in also refusing the live claims an open window could still settle.
   acceptUnverifiableExit(id: string): void {
     const appPtyId = this.toAppPtyId(id)
     this.acceptUnverifiable(appPtyId)
     this.refuseLiveEvidenceAfterExit(appPtyId)
-    this.ambiguousExitPtyIds.add(appPtyId)
-    if (this.ambiguousExitPtyIds.size > MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES) {
-      const oldest = this.ambiguousExitPtyIds.values().next().value
-      if (oldest !== undefined) {
-        this.ambiguousExitPtyIds.delete(oldest)
-      }
-    }
   }
 
   // Why: an exit the owning host reported outranks every live claim an open window can still

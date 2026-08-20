@@ -4,10 +4,7 @@ import {
   SSH_PTY_RESTORE_REQUIRED_ERROR,
   SSH_SESSION_EXPIRED_ERROR
 } from './ssh-pty-errors'
-import {
-  MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES,
-  MAX_SSH_PTY_EXIT_TOMBSTONES
-} from './ssh-pty-liveness-state'
+import { MAX_SSH_PTY_EXIT_TOMBSTONES } from './ssh-pty-liveness-state'
 import { SshPtyProvider } from './ssh-pty-provider'
 
 // The relay answers `restoreRequired` from its DELIVERY layer only: `requireRestore`
@@ -174,15 +171,16 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     ).resolves.toBe(false)
   })
 
-  it('bounds ambiguous exit retention without disturbing the other panes on the host', async () => {
+  it('leaves an unattributable exit unverifiable without disturbing the other panes', async () => {
     const mux = createMockMux()
     const provider = new SshPtyProvider('conn-1', mux as never)
     provider.acceptLivePty('ssh:conn-1@@pty-live')
+    provider.acceptLivePty('ssh:conn-1@@pty-ambiguous')
 
-    for (let index = 0; index <= MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES; index += 1) {
-      provider.acceptAmbiguousExitPty(`pty-${index}`)
-    }
+    provider.acceptAmbiguousExitPty('pty-ambiguous')
 
+    // Why not `false`: no host attributed this exit to the pane, so it is not evidence of death.
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-ambiguous')).resolves.toBeNull()
     expect(mux.dispose).not.toHaveBeenCalled()
     await expect(provider.probePtyLiveness('ssh:conn-1@@pty-live')).resolves.toBe(true)
   })
