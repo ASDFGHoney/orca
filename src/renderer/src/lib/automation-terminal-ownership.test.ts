@@ -114,24 +114,40 @@ describe('automation terminal ownership', () => {
     expect(closeTab).not.toHaveBeenCalled()
   })
 
-  it('preserves a tab activated after launch even when focus later moves away', () => {
+  it('keeps live terminal identity when hibernation fails', async () => {
+    const { closeTab, shutdownCompletedAgentPaneForHibernation, store } = createStore()
+    const error = new Error('capture failed')
+    shutdownCompletedAgentPaneForHibernation.mockRejectedValueOnce(error)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ownership = own(store)
+
+    expect(await ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
+    expect(consoleError).toHaveBeenCalledWith(
+      '[automations] Failed to hibernate owned automation terminal:',
+      error
+    )
+    expect(closeTab).not.toHaveBeenCalled()
+  })
+
+  it('preserves a tab activated after launch even when focus later moves away', async () => {
     const { closeTab, store, update } = createStore()
     const ownership = own(store)
 
     update({ activeWorktreeId: WORKTREE_ID, activeTabId: TAB_ID })
     update({ activeWorktreeId: 'other-worktree', activeTabId: 'other-tab' })
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 
-  it('preserves a tab that received user input after launch', () => {
+  it('preserves a tab that received user input after launch', async () => {
     const { closeTab, store, update } = createStore()
     const ownership = own(store)
 
     update({ lastTerminalInputAtByPaneKey: { [PANE_KEY]: 200 } })
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 
@@ -145,7 +161,7 @@ describe('automation terminal ownership', () => {
       'pane layout',
       { tabsByWorktree: null, ptyIdsByTabId: undefined, layoutPty: 'pty-replacement' }
     ]
-  ])('refuses a replacement identity in the %s binding', (_label, drift) => {
+  ])('refuses a replacement identity in the %s binding', async (_label, drift) => {
     const { closeTab, getState, store, update } = createStore()
     const ownership = own(store)
     const tab = getState().tabsByWorktree[WORKTREE_ID]![0]!
@@ -166,11 +182,11 @@ describe('automation terminal ownership', () => {
         : {})
     })
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 
-  it('refuses a tab recreated with the same id', () => {
+  it('refuses a tab recreated with the same id', async () => {
     const { closeTab, getState, store, update } = createStore()
     const ownership = own(store)
     update({
@@ -181,28 +197,28 @@ describe('automation terminal ownership', () => {
       }
     })
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 
   it.each([
     ['remote runtime', { runtimeKind: 'environment' as const }],
     ['remote PTY identity', { ptyId: 'remote:env-1@@terminal-1' }]
-  ])('never owns a %s terminal', (_label, overrides) => {
+  ])('never owns a %s terminal', async (_label, overrides) => {
     const { closeTab, store } = createStore()
     const ownership = own(store, overrides)
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 
-  it('release consumes ownership without closing the terminal', () => {
+  it('release consumes ownership without closing the terminal', async () => {
     const { closeTab, store } = createStore()
     const ownership = own(store)
 
     ownership.release()
 
-    expect(ownership.finalize()).toBe(false)
+    expect(await ownership.finalize()).toBe(false)
     expect(closeTab).not.toHaveBeenCalled()
   })
 })
