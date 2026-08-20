@@ -33491,7 +33491,8 @@ export class OrcaRuntimeService {
     }
     return mergeParkedBrowserTabs(
       this.agentBrowserBridge.tabList(worktreeId).tabs,
-      this.offscreenBrowserBackend?.listParkedPages?.(worktreeId) ?? []
+      this.offscreenBrowserBackend?.listParkedPages?.(worktreeId) ?? [],
+      this.offscreenBrowserBackend?.listOpenPageIds?.(worktreeId)
     )
   }
 

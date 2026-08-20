@@ -68,6 +68,33 @@ describe('mergeParkedBrowserTabs', () => {
     expect(merged.filter((tab) => tab.active).map((tab) => tab.browserPageId)).toEqual(['b'])
   })
 
+  it('orders by creation so parking never renumbers an index the caller read', () => {
+    // Why: the bridge lists by registration order, which a park/wake cycle
+    // mutates (a woken tab re-registers at the end). A tab created first must
+    // stay at index 0 whether or not its renderer is currently reclaimed.
+    const merged = mergeParkedBrowserTabs([live('b', 0, true)], [parked('a')], ['a', 'b'])
+    expect(merged.map((tab) => [tab.browserPageId, tab.index, tab.parked === true])).toEqual([
+      ['a', 0, true],
+      ['b', 1, false]
+    ])
+  })
+
+  it('reindexes an all-live listing when the creation order disagrees', () => {
+    const merged = mergeParkedBrowserTabs([live('b', 0), live('a', 1, true)], [], ['a', 'b'])
+    expect(merged.map((tab) => [tab.browserPageId, tab.index])).toEqual([
+      ['a', 0],
+      ['b', 1]
+    ])
+  })
+
+  it('keeps ids missing from the creation order at their merged position', () => {
+    const merged = mergeParkedBrowserTabs([live('x', 0, true)], [parked('a')], ['a'])
+    expect(merged.map((tab) => [tab.browserPageId, tab.index])).toEqual([
+      ['a', 0],
+      ['x', 1]
+    ])
+  })
+
   it('carries a parked page load failure into the listing', () => {
     const loadError = { code: -105, description: 'NAME_NOT_RESOLVED', validatedUrl: 'https://nope' }
     const [tab] = mergeParkedBrowserTabs([], [{ ...parked('b'), loadError }])

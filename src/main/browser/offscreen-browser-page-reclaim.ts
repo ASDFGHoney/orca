@@ -28,10 +28,14 @@ export const OFFSCREEN_BROWSER_PINNED_RECHECK_MS = OFFSCREEN_BROWSER_PARK_GRACE_
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
-  if (raw === undefined) {
+  if (raw === undefined || raw.trim() === '') {
     return fallback
   }
-  const parsed = Number.parseInt(raw, 10)
+  // Why Number, not parseInt: parseInt('1e9') is 1, silently turning the
+  // documented "set the idle window very high" advice into a 1ms window.
+  // Number() consumes the whole string, so '1e9' parses fully and trailing
+  // garbage falls back instead of truncating.
+  const parsed = Number(raw)
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
 

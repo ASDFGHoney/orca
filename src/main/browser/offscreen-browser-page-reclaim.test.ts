@@ -73,6 +73,18 @@ describe('readOffscreenBrowserRetentionBudget', () => {
     process.env.ORCA_HEADLESS_BROWSER_RESIDENT_LIMIT = 'lots'
     expect(readOffscreenBrowserRetentionBudget().limit).toBe(OFFSCREEN_BROWSER_RESIDENT_LIMIT)
   })
+
+  it('reads scientific notation whole, not truncated to its mantissa', () => {
+    // Why: parseInt('1e9') is 1 — an operator following the docs' "set the
+    // idle window very high" advice would get a 1ms window instead.
+    process.env.ORCA_HEADLESS_BROWSER_PARK_IDLE_MS = '1e9'
+    expect(readOffscreenBrowserRetentionBudget().idleMs).toBe(1_000_000_000)
+  })
+
+  it('falls back on trailing garbage instead of truncating it', () => {
+    process.env.ORCA_HEADLESS_BROWSER_PARK_IDLE_MS = '1234abc'
+    expect(readOffscreenBrowserRetentionBudget().idleMs).toBe(OFFSCREEN_BROWSER_IDLE_PARK_MS)
+  })
 })
 
 describe('nextOffscreenBrowserReclaimCheckAt', () => {

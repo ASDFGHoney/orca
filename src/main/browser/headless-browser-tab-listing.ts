@@ -9,9 +9,14 @@ import type { ParkedBrowserPage } from './browser-backend'
 
 export function mergeParkedBrowserTabs(
   live: readonly BrowserTabInfo[],
-  parked: readonly ParkedBrowserPage[]
+  parked: readonly ParkedBrowserPage[],
+  // Why: the bridge lists by registration order, which parking and waking both
+  // mutate (a woken tab re-registers at the end). Ordering by the page book's
+  // creation order instead keeps every tab's index stable across a park — an
+  // index the caller read must never be renumbered by a background timer.
+  creationOrder?: readonly string[]
 ): BrowserTabInfo[] {
-  if (parked.length === 0) {
+  if (parked.length === 0 && !creationOrder) {
     return [...live]
   }
   // Why: parking clears the bridge's active pointer, which then lands on a
@@ -37,5 +42,16 @@ export function mergeParkedBrowserTabs(
       profileId: page.profileId ?? null
     })
   }
+  if (!creationOrder) {
+    return merged
+  }
+  const rank = new Map(creationOrder.map((browserPageId, index) => [browserPageId, index]))
   return merged
+    .map((tab, index) => ({ tab, index }))
+    .sort((left, right) => {
+      const leftRank = rank.get(left.tab.browserPageId) ?? creationOrder.length + left.index
+      const rightRank = rank.get(right.tab.browserPageId) ?? creationOrder.length + right.index
+      return leftRank - rightRank
+    })
+    .map(({ tab }, index) => ({ ...tab, index }))
 }

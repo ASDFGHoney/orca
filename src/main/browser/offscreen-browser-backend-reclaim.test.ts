@@ -160,7 +160,8 @@ function createHarness(
     onProcessSwap: vi.fn(async (browserPageId: string, webContentsId: number) => {
       order.push(`process-swap:${browserPageId}:${webContentsId}`)
     }),
-    isActiveBrowserPage: (browserPageId: string) => state.activePageId === browserPageId
+    isActiveBrowserPage: (browserPageId: string) => state.activePageId === browserPageId,
+    getActivePageId: () => state.activePageId
   } as unknown as AgentBrowserBridge
 
   const backend = new OffscreenBrowserBackend(manager, {
@@ -727,6 +728,50 @@ describe('OffscreenBrowserBackend reclamation', () => {
 
     const claimed = h.backend.listParkedPages().filter((page) => page.active)
     expect(claimed.map((page) => page.browserPageId)).toEqual(['b'])
+  })
+
+  it('hands the active flag to a survivor when the parked holder closes', async () => {
+    // Why: closing a parked page has no bridge teardown to promote a successor,
+    // so without this the worktree's every remaining tab reports inactive and a
+    // paired client loses its one-selected-tab assumption.
+    const h = createHarness({ activePageId: 'b' })
+    await h.backend.createTab({ url: 'https://a', browserPageId: 'a', worktreeId: 'wt-1' })
+    h.clock.value += 1_000
+    await h.backend.createTab({ url: 'https://b', browserPageId: 'b', worktreeId: 'wt-1' })
+    h.clock.value += 120_000
+    await h.backend.reclaimIdlePages()
+    h.activePageId = undefined
+
+    await h.backend.closeTab('b')
+
+    expect(
+      h.backend.listParkedPages('wt-1').map((page) => [page.browserPageId, page.active === true])
+    ).toEqual([['a', true]])
+  })
+
+  it('scopes the parked active claim to its worktree, undefined included', async () => {
+    // Why: a remote `tab create` without --worktree makes a worktree-less page;
+    // parking it while active must not wipe another worktree's parked flag.
+    const h = createHarness({ activePageId: 'w' })
+    await h.backend.createTab({ url: 'https://w', browserPageId: 'w', worktreeId: 'wt-1' })
+    await h.backend.createTab({ url: 'https://g', browserPageId: 'g' })
+    h.clock.value += 120_000
+    await h.backend.wakeTab('g')
+    await h.backend.reclaimIdlePages()
+    h.activePageId = 'g'
+    h.clock.value += 120_000
+    await h.backend.reclaimIdlePages()
+
+    expect(
+      h.backend.listParkedPages('wt-1').map((page) => [page.browserPageId, page.active === true])
+    ).toEqual([['w', true]])
+    expect(
+      h.backend
+        .listParkedPages()
+        .filter((page) => page.active)
+        .map((page) => page.browserPageId)
+        .sort()
+    ).toEqual(['g', 'w'])
   })
 
   it('targets the page that was active, not merely the most recently used', async () => {

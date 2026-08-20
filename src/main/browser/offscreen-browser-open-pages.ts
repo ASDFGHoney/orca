@@ -73,6 +73,17 @@ export class OffscreenBrowserOpenPages {
     )
   }
 
+  /**
+   * Every open page's id in creation order, resident or parked. Listings order
+   * by this so a tab's position never moves because its renderer was reclaimed
+   * — an index read minutes ago must not be renumbered by a background timer.
+   */
+  openIds(worktreeId?: string): string[] {
+    return this.all()
+      .filter((page) => !worktreeId || page.worktreeId === worktreeId)
+      .map((page) => page.browserPageId)
+  }
+
   listParked(worktreeId?: string): ParkedBrowserPage[] {
     return this.parked(worktreeId).map((page) => ({
       browserPageId: page.browserPageId,
@@ -105,12 +116,36 @@ export class OffscreenBrowserOpenPages {
     return best?.browserPageId ?? null
   }
 
-  /** Only one page per worktree may carry the active flag across a park. */
+  /**
+   * Only one page per worktree may carry the active flag across a park.
+   * Strict scope: a worktree-less page clears only other worktree-less pages —
+   * an undefined filter would wipe every worktree's flag host-wide.
+   */
   claimParkedActive(browserPageId: string, worktreeId?: string): void {
-    for (const page of this.parked(worktreeId)) {
-      if (page.browserPageId !== browserPageId) {
+    for (const page of this.parked()) {
+      if (page.browserPageId !== browserPageId && page.worktreeId === worktreeId) {
         page.activeWhenParked = false
       }
     }
+  }
+
+  /**
+   * Hand the active flag to the most recently used parked page when nothing
+   * in the scope holds it. Closing the flag's holder (or the last live tab)
+   * must not leave a worktree whose every page reports inactive — a paired
+   * client assumes one selected browser tab per worktree.
+   */
+  promoteParkedActive(worktreeId?: string): void {
+    const scoped = this.parked().filter((page) => page.worktreeId === worktreeId)
+    if (scoped.length === 0 || scoped.some((page) => page.activeWhenParked)) {
+      return
+    }
+    let best = scoped[0]
+    for (const page of scoped) {
+      if (page.lastActivityAt > best.lastActivityAt) {
+        best = page
+      }
+    }
+    best.activeWhenParked = true
   }
 }

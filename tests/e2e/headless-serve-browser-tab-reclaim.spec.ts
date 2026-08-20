@@ -238,11 +238,12 @@ test('resolves --index against the listing that includes parked tabs', async ({ 
 
     const before = await listTabs(host, worktreeId)
     expect(before).toHaveLength(5)
-    // Why: parked pages sit after the resident ones, so the last index is the
-    // one the bridge's live-only index handling would never have reached.
-    const targetIndex = before.length - 1
+    // Why: the listing is creation-ordered, so parked and resident tabs are
+    // interleaved. Target a parked one — an index the bridge's live-only index
+    // handling would either miss or resolve to a different (live) tab.
+    const targetIndex = before.findIndex((tab) => tab.parked === true)
+    expect(targetIndex).toBeGreaterThanOrEqual(0)
     const targeted = before[targetIndex]
-    expect(targeted.parked).toBe(true)
 
     await host.client.call('browser.tabClose', {
       index: targetIndex,

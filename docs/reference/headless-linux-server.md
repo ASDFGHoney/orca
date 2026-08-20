@@ -292,8 +292,9 @@ park does _not_ preserve is in-page JavaScript state — cookies and local
 storage live in the profile partition and survive, but an unsubmitted form or
 an SPA's in-memory state does not. A page is never parked while a paired
 client is streaming it, while a command against it is in flight, while its
-initial load is still running, or while it is waiting on a certificate
-decision. A stream ending counts as use, so a viewer who closes the pane gets
+initial load is still running, while it is waiting on a certificate decision,
+while a wake is still rebuilding it, or while it is writing an active
+download — parking cancels a download, so an active one always vetoes it. A stream ending counts as use, so a viewer who closes the pane gets
 the full idle window before the page parks, even if they only watched. A navigation that has still not finished by the load timeout is
 deliberately reclaimable — otherwise one stalled page per create could hold a
 renderer forever, which is the failure this exists to prevent; waking it simply
@@ -882,7 +883,7 @@ refuse to run there and print the command to run on the machine you want.
 - Clients cannot connect: make sure `--pairing-address` is an address reachable
   from the client, and make sure firewalls allow the selected `--port`.
 - Journal shows `Another Orca instance is already running for this userData
-profile` and the unit exits `3`: another process already owns the profile, so
+  profile` and the unit exits `3`: another process already owns the profile, so
   `RestartPreventExitStatus=3` leaves the unit `failed` on purpose. Find the
   owner with `systemctl status orca-serve` and `pgrep -af orca`. Stop it (or
   keep it and leave the unit down), then run

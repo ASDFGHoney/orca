@@ -45,6 +45,9 @@ export type BrowserBackend = {
   wakeTab?(browserPageId: string): Promise<boolean>
   /** Pages this backend still owns whose renderer is currently reclaimed. */
   listParkedPages?(worktreeId?: string): ParkedBrowserPage[]
+  /** Open page ids in creation order, resident or parked — listings sort by
+   *  this so parking never renumbers a tab index the caller already read. */
+  listOpenPageIds?(worktreeId?: string): string[]
   /** The parked page a page-less command should target: the one that was
    *  active when it parked, else the most recently used. */
   getParkedPageIdForImplicitTarget?(worktreeId?: string): string | null

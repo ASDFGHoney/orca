@@ -50,7 +50,13 @@ type FakeHeadlessHost = {
   closedPageIds: string[]
 }
 
-function createFakeHeadlessHost(live: string[], parked: string[]): FakeHeadlessHost {
+function createFakeHeadlessHost(
+  live: string[],
+  parked: string[],
+  // Why a separate order: creation order is what the real page book carries;
+  // live-then-parked only coincides with it until something parks.
+  creationOrder: string[] = [...live, ...parked]
+): FakeHeadlessHost {
   const state: FakeHeadlessHost = {
     host: null as unknown as RuntimeBrowserCommandHost,
     livePageIds: [...live],
@@ -109,7 +115,11 @@ function createFakeHeadlessHost(live: string[], parked: string[]): FakeHeadlessH
         url: `https://example.test/${browserPageId}`,
         title: browserPageId
       })),
-    getParkedPageIdForImplicitTarget: () => state.parkedPageIds.at(-1) ?? null
+    getParkedPageIdForImplicitTarget: () => state.parkedPageIds.at(-1) ?? null,
+    listOpenPageIds: () =>
+      creationOrder.filter(
+        (id) => state.livePageIds.includes(id) || state.parkedPageIds.includes(id)
+      )
   } as unknown as BrowserBackend
 
   state.host = {
@@ -143,6 +153,22 @@ describe('headless parked-page targeting', () => {
       ['parked-c', 2, true]
     ])
     expect(fake.wakeCalls).toEqual([])
+  })
+
+  it('keeps a tab index stable when an older tab parks', async () => {
+    // Why: pre-reclaim, headless indices moved only on create/close. A listing
+    // ordered by residency would let a background park renumber an index the
+    // agent read minutes earlier, silently retargeting its next command.
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const fake = createFakeHeadlessHost(['live-b'], ['parked-a'], ['parked-a', 'live-b'])
+    const commands = new RuntimeBrowserCommands(fake.host)
+
+    const listed = await commands.browserTabList({ worktree: 'id:wt-1' })
+
+    expect(listed.tabs.map((tab) => [tab.browserPageId, tab.index, tab.parked === true])).toEqual([
+      ['parked-a', 0, true],
+      ['live-b', 1, false]
+    ])
   })
 
   it('switches to the page the listed index named, not one an implicit wake promoted', async () => {

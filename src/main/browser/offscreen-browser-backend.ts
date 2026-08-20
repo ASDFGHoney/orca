@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import type { BrowserWindow } from 'electron'
 import { ORCA_BROWSER_PARTITION } from '../../shared/constants'
 import type { AgentBrowserBridge } from './agent-browser-bridge'
 import type { BrowserBackend, BrowserBackendCreateTab, ParkedBrowserPage } from './browser-backend'
@@ -11,8 +10,8 @@ import {
   OffscreenBrowserOpenPages,
   type OffscreenBrowserPage
 } from './offscreen-browser-open-pages'
+import { materializeOffscreenBrowserRenderer } from './offscreen-browser-renderer-attachment'
 import {
-  createOffscreenBrowserWindow,
   loadOffscreenBrowserUrl,
   OFFSCREEN_BROWSER_WAKE_LOAD_BUDGET_MS
 } from './offscreen-browser-window'
@@ -117,6 +116,13 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     const page = this.pages.delete(browserPageId) ?? null
     this.waking.delete(browserPageId)
     await this.releaseRenderer(page, browserPageId)
+    // Why: the closed page may have carried the scope's only active claim —
+    // either the parked-active flag, or a live pointer whose teardown found no
+    // other live tab to promote. A worktree with open pages and no active tab
+    // breaks the one-selected-tab assumption every paired client renders on.
+    if (page && !this.options.getAgentBrowserBridge?.()?.getActivePageId(page.worktreeId)) {
+      this.pages.promoteParkedActive(page.worktreeId)
+    }
     // Why: closing changes both residency and rank, and with the last page gone
     // this arms nothing at all.
     this.reclaimer.reschedule()
@@ -205,6 +211,11 @@ export class OffscreenBrowserBackend implements BrowserBackend {
 
   listParkedPages(worktreeId?: string): ParkedBrowserPage[] {
     return this.pages.listParked(worktreeId)
+  }
+
+  /** Open page ids in creation order — the stable order listings sort by. */
+  listOpenPageIds(worktreeId?: string): string[] {
+    return this.pages.openIds(worktreeId)
   }
 
   /** The parked page a page-less command should target in this worktree. */
@@ -315,70 +326,30 @@ export class OffscreenBrowserBackend implements BrowserBackend {
   }
 
   private materialize(page: OffscreenBrowserPage): void {
-    const win = createOffscreenBrowserWindow(page.partition)
-    try {
-      this.attachWindow(page, win)
-    } catch (error) {
-      // Why: the window exists before anything that can fail. Abandoning it
-      // here would leak a hidden renderer nothing owns or can reach.
-      page.window = null
-      if (!win.isDestroyed()) {
-        win.destroy()
+    materializeOffscreenBrowserRenderer(page, {
+      isDeliberateTeardown: (browserPageId) => this.releasing.has(browserPageId),
+      onRendererLost: (webContentsId) => {
+        this.pages.delete(page.browserPageId)
+        // Why: an unprompted renderer loss must reclaim the helper session too,
+        // or a crash loop leaks one session, CDP proxy and listening port per
+        // page — the same leak the deliberate teardown path fixes.
+        void this.options
+          .getAgentBrowserBridge?.()
+          ?.onTabClosed(webContentsId)
+          .catch(() => {})
+        this.browserManager.unregisterGuest(page.browserPageId)
+        this.reclaimer.reschedule()
+      },
+      registerGuest: (webContentsId) => {
+        const profile = page.profileId ? browserSessionRegistry.getProfile(page.profileId) : null
+        this.browserManager.registerOffscreenGuest({
+          browserPageId: page.browserPageId,
+          worktreeId: page.worktreeId,
+          sessionProfileId: page.profileId ?? null,
+          userAgentMode: profile?.userAgentMode,
+          webContentsId
+        })
       }
-      throw error
-    }
-  }
-
-  private attachWindow(page: OffscreenBrowserPage, win: BrowserWindow): void {
-    page.window = win
-    // Why: reading win.webContents once the contents are destroyed throws, and
-    // the throw would escape the 'destroyed' listener into the main process.
-    // Capture the id while it is still safe to read.
-    const webContentsId = win.webContents.id
-    // Why: the record's address must follow the page, not the create call — an
-    // agent that navigates with `goto` or in-page script has to be woken back
-    // to where it actually is. A chrome-error address is the failure, not a
-    // destination, so it never replaces the address that produced it.
-    const recordAddress = (url: string): void => {
-      if (page.window === win && url && !url.startsWith('chrome-error://')) {
-        page.url = url
-      }
-    }
-    // did-navigate is main-frame only; did-frame-navigate covers subframes.
-    win.webContents.on('did-navigate', (_event, url) => recordAddress(url))
-    // Why: an iframe changing its own hash also fires did-navigate-in-page. A
-    // subframe navigation is not a navigation of the tab, and adopting its
-    // address would wake the page onto the iframe's document.
-    win.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-      if (isMainFrame) {
-        recordAddress(url)
-      }
-    })
-    // Why: if the window is destroyed out from under us (crash, app teardown),
-    // drop the page so commands fail cleanly instead of resolving a dead
-    // WebContents. Parking destroys it deliberately, so it opts out here.
-    win.webContents.once('destroyed', () => {
-      if (this.releasing.has(page.browserPageId) || page.window !== win) {
-        return
-      }
-      this.pages.delete(page.browserPageId)
-      // Why: an unprompted renderer loss must reclaim the helper session too, or
-      // a crash loop leaks one session, CDP proxy and listening port per page —
-      // the same leak the deliberate teardown path fixes.
-      void this.options
-        .getAgentBrowserBridge?.()
-        ?.onTabClosed(webContentsId)
-        .catch(() => {})
-      this.browserManager.unregisterGuest(page.browserPageId)
-      this.reclaimer.reschedule()
-    })
-    const profile = page.profileId ? browserSessionRegistry.getProfile(page.profileId) : null
-    this.browserManager.registerOffscreenGuest({
-      browserPageId: page.browserPageId,
-      worktreeId: page.worktreeId,
-      sessionProfileId: page.profileId ?? null,
-      userAgentMode: profile?.userAgentMode,
-      webContentsId
     })
   }
 

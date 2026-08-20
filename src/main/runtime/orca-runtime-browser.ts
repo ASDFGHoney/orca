@@ -658,9 +658,11 @@ export class RuntimeBrowserCommands {
   private listBrowserTabsIncludingParked(
     worktreeId: string | undefined
   ): BrowserTabListResult['tabs'] {
+    const offscreen = this.host.getOffscreenBrowserBackend()
     const merged = mergeParkedBrowserTabs(
       this.requireAgentBrowserBridge().tabList(worktreeId).tabs,
-      this.host.getOffscreenBrowserBackend()?.listParkedPages?.(worktreeId) ?? []
+      offscreen?.listParkedPages?.(worktreeId) ?? [],
+      offscreen?.listOpenPageIds?.(worktreeId)
     )
     return merged.map((tab) =>
       tab.parked
