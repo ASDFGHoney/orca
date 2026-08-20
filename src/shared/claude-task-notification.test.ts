@@ -82,12 +82,18 @@ describe('Claude task notifications', () => {
       [
         notificationRecord('running-task', 'running'),
         notificationRecord('completed-task', 'completed'),
-        notificationRecord('killed-task', 'killed')
+        notificationRecord('killed-task', 'killed'),
+        JSON.stringify({
+          type: 'queue-operation',
+          operation: 'enqueue',
+          content:
+            '<task-notification><task-id>queued-task</task-id><status>completed</status></task-notification>'
+        })
       ].join('\n')
     )
     try {
       expect(readClaudeTerminalTaskNotificationIds(transcriptPath)).toEqual(
-        new Set(['completed-task', 'killed-task'])
+        new Set(['completed-task', 'killed-task', 'queued-task'])
       )
     } finally {
       rmSync(dir, { recursive: true, force: true })

@@ -167,16 +167,13 @@ describe('listClaudeSubagentSessions', () => {
         }
       },
       {
-        type: 'user',
-        promptSource: 'system',
-        origin: { kind: 'task-notification' },
+        // The view-only scanner preserves historical queue-record support.
+        type: 'queue-operation',
+        operation: 'enqueue',
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:02:00.000Z',
-        message: {
-          role: 'user',
-          content:
-            '<task-notification>\n<task-id>crashed</task-id>\n<status>failed</status>\n</task-notification>'
-        }
+        content:
+          '<task-notification>\n<task-id>crashed</task-id>\n<status>failed</status>\n</task-notification>'
       },
       {
         // Synchronous Tasks finish with a toolUseResult record, no notification.

@@ -16,7 +16,11 @@ const TERMINAL_TASK_STATUSES = new Set([
 
 /** Read terminal Claude task notifications from the bounded transcript tail. */
 export function readClaudeTerminalTaskNotificationIds(transcriptPath: unknown): Set<string> {
-  return new Set(readClaudeTerminalTaskNotifications(transcriptPath).map(({ taskId }) => taskId))
+  return new Set(
+    readClaudeTerminalTaskNotificationsInternal(transcriptPath, 0, false).map(
+      ({ taskId }) => taskId
+    )
+  )
 }
 
 export type ClaudeTerminalTaskNotification = {
@@ -28,6 +32,14 @@ export type ClaudeTerminalTaskNotification = {
 export function readClaudeTerminalTaskNotifications(
   transcriptPath: unknown,
   minimumByteOffset = 0
+): ClaudeTerminalTaskNotification[] {
+  return readClaudeTerminalTaskNotificationsInternal(transcriptPath, minimumByteOffset, true)
+}
+
+function readClaudeTerminalTaskNotificationsInternal(
+  transcriptPath: unknown,
+  minimumByteOffset: number,
+  requireProviderDelivery: boolean
 ): ClaudeTerminalTaskNotification[] {
   if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) {
     return []
@@ -70,7 +82,7 @@ export function readClaudeTerminalTaskNotifications(
         lineStart = newline === -1 ? buffer.length : newline + 1
         continue
       }
-      const notification = parseClaudeTaskNotificationLine(line)
+      const notification = parseClaudeTaskNotificationLineInternal(line, requireProviderDelivery)
       if (notification && TERMINAL_TASK_STATUSES.has(notification.status)) {
         notifications.push({ ...notification, byteOffset: start + lineStart })
       }
@@ -85,7 +97,21 @@ export function readClaudeTerminalTaskNotifications(
 export function parseClaudeTaskNotificationLine(
   line: string
 ): { taskId: string; status: string } | null {
-  const notification = taskNotificationText(line)
+  return parseClaudeTaskNotificationLineInternal(line, true)
+}
+
+/** Preserve historical queue-record support for view-only transcript status. */
+export function parseClaudeTaskNotificationLineForDisplay(
+  line: string
+): { taskId: string; status: string } | null {
+  return parseClaudeTaskNotificationLineInternal(line, false)
+}
+
+function parseClaudeTaskNotificationLineInternal(
+  line: string,
+  requireProviderDelivery: boolean
+): { taskId: string; status: string } | null {
+  const notification = taskNotificationText(line, requireProviderDelivery)
   if (
     !notification.startsWith(CLAUDE_TASK_NOTIFICATION_MARKER) ||
     !notification.endsWith('</task-notification>')
@@ -97,23 +123,27 @@ export function parseClaudeTaskNotificationLine(
   return taskId && status ? { taskId, status } : null
 }
 
-function taskNotificationText(line: string): string {
+function taskNotificationText(line: string, requireProviderDelivery: boolean): string {
   try {
     const parsed = JSON.parse(line) as unknown
     if (!parsed || typeof parsed !== 'object') {
       return ''
     }
     const record = parsed as Record<string, unknown>
-    const origin =
-      record.origin && typeof record.origin === 'object'
-        ? (record.origin as Record<string, unknown>)
-        : undefined
-    if (
-      record.type !== 'user' ||
-      record.promptSource !== 'system' ||
-      origin?.kind !== 'task-notification'
-    ) {
-      return ''
+    if (requireProviderDelivery) {
+      const origin =
+        record.origin && typeof record.origin === 'object'
+          ? (record.origin as Record<string, unknown>)
+          : undefined
+      if (
+        record.type !== 'user' ||
+        record.promptSource !== 'system' ||
+        origin?.kind !== 'task-notification'
+      ) {
+        return ''
+      }
+    } else if (typeof record.content === 'string') {
+      return record.content.trim()
     }
     if (!record.message || typeof record.message !== 'object') {
       return ''

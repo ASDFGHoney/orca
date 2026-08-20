@@ -275,8 +275,8 @@ describe('Claude background task status', () => {
     }
   })
 
-  it('refreshes ownership when Claude reports a reused task id as running', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'claude-idle-reused-task-'))
+  it('preserves completion evidence across repeated running inventories', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-idle-repeated-task-'))
     const transcriptPath = join(dir, 'session.jsonl')
     writeFileSync(transcriptPath, '')
     try {
@@ -293,16 +293,6 @@ describe('Claude background task status', () => {
         background_tasks: [RUNNING_SHELL]
       })
 
-      expect(
-        claudeEvent(state, SOURCE_PANE, {
-          hook_event_name: 'Notification',
-          notification_type: 'idle_prompt',
-          transcript_path: transcriptPath
-        })
-      ).toBeUndefined()
-      expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
-
-      appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
       expect(
         claudeEvent(state, SOURCE_PANE, {
           hook_event_name: 'Notification',

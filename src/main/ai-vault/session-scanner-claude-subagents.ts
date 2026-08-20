@@ -8,7 +8,7 @@ import type {
 } from '../../shared/ai-vault-types'
 import {
   CLAUDE_TASK_NOTIFICATION_MARKER,
-  parseClaudeTaskNotificationLine
+  parseClaudeTaskNotificationLineForDisplay
 } from '../../shared/claude-task-notification'
 import {
   openTranscriptReadStream,
@@ -235,7 +235,7 @@ async function collectSubagentTaskStatuses(parentFilePath: string): Promise<Map<
       // dot on a view-only row, so we don't gate on user-type markers here (that
       // would risk dropping genuine harness-delivered statuses).
       if (hasNotification) {
-        const notification = parseClaudeTaskNotificationLine(line)
+        const notification = parseClaudeTaskNotificationLineForDisplay(line)
         if (notification) {
           statuses.set(notification.taskId, notification.status)
           continue

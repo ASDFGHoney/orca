@@ -2670,6 +2670,7 @@ function updateClaudeBackgroundTaskEvidence(
       transcriptByteOffset = null
     }
   }
+  const previous = state.claudeBackgroundTaskObservationsByPaneKey.get(paneKey)
   const observations = new Map<
     string,
     { transcriptPath: string; transcriptByteOffset: number; nonAgent: boolean }
@@ -2683,7 +2684,14 @@ function updateClaudeBackgroundTaskEvidence(
         .map((task) => ({ id: task.id, nonAgent: false }))
     ]
     for (const task of runningTasks) {
-      if (transcriptPath && transcriptByteOffset !== null) {
+      const existing = previous?.get(task.id)
+      if (
+        existing &&
+        existing.transcriptPath === transcriptPath &&
+        existing.nonAgent === task.nonAgent
+      ) {
+        observations.set(task.id, existing)
+      } else if (transcriptPath && transcriptByteOffset !== null) {
         observations.set(task.id, { transcriptPath, transcriptByteOffset, nonAgent: task.nonAgent })
       } else if (task.nonAgent) {
         hasUnidentified = true
