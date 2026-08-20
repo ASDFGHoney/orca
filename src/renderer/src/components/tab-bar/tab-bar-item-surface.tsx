@@ -59,6 +59,8 @@ export function renderTabBarItems({
     tabAgentTypesByTabId,
     nativeChatTabWideFallbackUnsafeTabsById,
     nativeChatTranscriptIsLocalReadable,
+    customTuiAgents,
+    deletedCustomTuiAgents,
     toggleTabViewMode,
     statusByRelativePath
   } = runtime
@@ -97,6 +99,8 @@ export function renderTabBarItems({
           detectedAgent,
           resolvedAgent: tabWideFallbackSafe ? resolvedAgent : null,
           nativeChatTranscriptIsLocalReadable,
+          customTuiAgents,
+          deletedCustomTuiAgents,
           isChatViewMode: unifiedTabForItem.viewMode === 'chat'
         })
       return (

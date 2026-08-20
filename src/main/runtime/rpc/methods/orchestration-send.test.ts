@@ -584,6 +584,7 @@ describe('orchestration RPC methods', () => {
         tabId: opts.tabId ?? 'tab_1',
         leafId: opts.leafId ?? handle,
         title: opts.title ?? null,
+        ...(opts.baseAgent ? { baseAgent: opts.baseAgent } : {}),
         connected: opts.connected ?? true,
         writable: opts.writable ?? true,
         lastOutputAt: opts.lastOutputAt ?? null,
@@ -722,11 +723,15 @@ describe('orchestration RPC methods', () => {
       expect(result.messages[0].to_handle).toBe('term_b')
     })
 
-    it('fans out agent name group (@claude) by title match', async () => {
+    // Agent-name groups resolve from the validated base harness, not title text:
+    // a custom agent joins its base's group and an unattributed terminal is
+    // omitted rather than guessed.
+    it('fans out agent name group (@claude) by base harness', async () => {
       setupWithTerminals([
-        makeSummary('term_a', { title: 'Claude Code' }),
-        makeSummary('term_b', { title: 'Claude Code' }),
-        makeSummary('term_c', { title: 'Codex' })
+        makeSummary('term_a', { baseAgent: 'claude' }),
+        makeSummary('term_b', { baseAgent: 'claude' }),
+        makeSummary('term_c', { baseAgent: 'codex' }),
+        makeSummary('term_d', { title: 'Claude Code' })
       ])
 
       const result = (await call('orchestration.send', {
@@ -739,10 +744,10 @@ describe('orchestration RPC methods', () => {
       expect(result.messages[0].to_handle).toBe('term_b')
     })
 
-    it('fans out @droid by title match', async () => {
+    it('fans out @droid by base harness', async () => {
       setupWithTerminals([
-        makeSummary('term_a', { title: 'Codex' }),
-        makeSummary('term_b', { title: 'Droid ready' }),
+        makeSummary('term_a', { baseAgent: 'codex' }),
+        makeSummary('term_b', { baseAgent: 'droid' }),
         makeSummary('term_c', { title: 'Android build' })
       ])
 
@@ -756,11 +761,13 @@ describe('orchestration RPC methods', () => {
       expect(result.messages[0].to_handle).toBe('term_b')
     })
 
-    it('fans out @cursor by title match without claiming a cursor-mentioning title', async () => {
+    // `cursor` is ordinary vocabulary in another agent's task-summary title, and
+    // base-harness resolution is what keeps @cursor out of that Claude prompt.
+    it('fans out @cursor without claiming a cursor-mentioning title', async () => {
       setupWithTerminals([
-        makeSummary('term_a', { title: 'Codex' }),
-        makeSummary('term_b', { title: 'Cursor ready' }),
-        makeSummary('term_c', { title: '✳ Fix the text cursor blink' })
+        makeSummary('term_a', { baseAgent: 'codex' }),
+        makeSummary('term_b', { baseAgent: 'cursor' }),
+        makeSummary('term_c', { baseAgent: 'claude', title: '✳ Fix the text cursor blink' })
       ])
 
       const result = (await call('orchestration.send', {

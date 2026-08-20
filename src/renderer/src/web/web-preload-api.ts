@@ -33,9 +33,6 @@ import type {
 import type { SearchResult } from '../../../shared/code-search-types'
 import type { DirEntry } from '../../../shared/filesystem-entry-types'
 import type {
-  CreateWorktreeResult,
-  DetectedWorktreeListResult,
-  ForceDeleteWorktreeBranchResult,
   GlobalSettings,
   WorktreeVisibilityDefaults
 } from '../../../shared/global-settings-types'
@@ -53,6 +50,7 @@ import type {
   WorkspaceSessionState
 } from '../../../shared/workspace-session-state-types'
 import type {
+  CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
 } from '../../../shared/worktree/create-types'
@@ -1716,14 +1714,17 @@ function createAiVaultApi(): NonNullable<Partial<PreloadApi>['aiVault']> {
     // Why: the browser client echoes only the entry's identity — never its
     // filePath (trusted desktop IPC only). The paired server re-validates against
     // its own scan and re-derives the transcript path before assembling.
-    resumeCommand: (entry: AgentLaunchVaultResumeEntry) =>
+    resumeCommand: (entry: AgentLaunchVaultResumeEntry, targetPlatform?: NodeJS.Platform) =>
       callRuntimeResult<AgentLaunchVaultResumeCopyResult>('aiVault.resumeCommand', {
         entry: {
           executionHostId: entry.executionHostId,
           agent: entry.agent,
           sessionId: entry.sessionId,
           ...(entry.resumeLocator ? { resumeLocator: entry.resumeLocator } : {})
-        }
+        },
+        // Additive: a host that predates this ignores it and keeps quoting for
+        // its own platform, which is the pre-change behavior.
+        ...(targetPlatform ? { targetPlatform } : {})
       }),
     resumeDetails: (entry: AgentLaunchVaultResumeEntry) =>
       callRuntimeResult<AgentLaunchVaultResumeDetailsResult>('aiVault.resumeDetails', {

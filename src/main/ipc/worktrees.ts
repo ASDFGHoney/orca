@@ -31,10 +31,13 @@ import type { Repo } from '../../shared/repo-types'
 import type {
   AdoptProvisionedRootArgs,
   CreateWorktreeArgs,
+  CreatedWorktreeResult,
   CreateWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
 } from '../../shared/worktree/create-types'
+import type { RetryAgentLaunchAction } from '../../shared/agent-launch-worktree-recovery'
+import { WorktreeAgentLaunchPreCreateError } from '../agent-launch/agent-launch-worktree-resolution'
 import type { WorkspaceLineage, WorktreeLineage } from '../../shared/worktree/lineage-types'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
 import type {
@@ -1073,7 +1076,7 @@ function createFolderWorkspace(
   args: CreateWorktreeArgsWithSystemProvenance,
   repo: Repo,
   store: Store
-): CreateWorktreeResult {
+): CreatedWorktreeResult {
   const now = Date.now()
   const instanceId = randomUUID()
   const worktreeId = getFolderWorkspaceInstanceId(repo, instanceId)
@@ -2266,6 +2269,34 @@ export function registerWorktreeHandlers(
         const sourceParse = workspaceSourceSchema.safeParse(args.telemetrySource)
         const source: WorkspaceSource = sourceParse.success ? sourceParse.data : 'unknown'
 
+        // Stage 1 before git (parallel-wire with `worktree.create` RPC): a capacity
+        // or identity rejection must leave no workspace behind. Without this the
+        // desktop path created the workspace and dropped `agentLaunch` in silence —
+        // the renderer sets `hostOwnedLaunch` and never spawns a primary of its own.
+        const agentLaunchPrepared = args.agentLaunch
+          ? await runtime.prepareLocalWorktreeCreateAgentLaunch(repo, args.agentLaunch)
+          : null
+        if (agentLaunchPrepared && !agentLaunchPrepared.ok) {
+          releaseAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)
+          if (agentLaunchPrepared.failure) {
+            return {
+              created: false,
+              agentLaunchResult: { status: 'failed', failure: agentLaunchPrepared.failure }
+            }
+          }
+          if (agentLaunchPrepared.requestError) {
+            return {
+              created: false,
+              agentLaunchResult: {
+                status: 'rejected',
+                requestError: agentLaunchPrepared.requestError
+              }
+            }
+          }
+          throw new WorktreeAgentLaunchPreCreateError({})
+        }
+        const agentLaunchFinish = agentLaunchPrepared?.ok ? agentLaunchPrepared : null
+
         const automationProvenance = resolveAutomationWorkspaceProvenance({
           authority: runtime,
           repoSelector: args.repoId,
@@ -2277,7 +2308,7 @@ export function registerWorktreeHandlers(
           automationProvenance
         }
 
-        let result: CreateWorktreeResult
+        let result: CreatedWorktreeResult
         try {
           // Why: wrap only the helpers; the pre-validation throws above are IPC-shape bugs, not the git/filesystem failures the funnel tracks.
           result = isFolderRepo(repo)
@@ -2286,6 +2317,8 @@ export function registerWorktreeHandlers(
               ? await createRemoteWorktree(createArgs, repo, store, mainWindow)
               : await createLocalWorktree(createArgs, repo, store, mainWindow, runtime)
         } catch (error) {
+          // No worktree to own the reservation, so hand the capacity straight back.
+          agentLaunchFinish?.release()
           releaseAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)
           track('workspace_create_failed', {
             source,
@@ -2295,6 +2328,30 @@ export function registerWorktreeHandlers(
           throw error
         }
         finishAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)
+
+        // Stage 2 after git: convert the reservation into the one host-spawned agent
+        // terminal. A post-create failure keeps the workspace and reports through
+        // `agentLaunchResult`; it never spawns a substitute blank terminal (I9).
+        if (agentLaunchFinish) {
+          const finished = await runtime.finishLocalWorktreeCreateAgentLaunch(
+            agentLaunchFinish,
+            result.worktree.id,
+            { repoPath: repo.path, worktreePath: result.worktree.path },
+            result.setup
+          )
+          result = {
+            ...result,
+            ...(finished.agentLaunchResult
+              ? { agentLaunchResult: finished.agentLaunchResult }
+              : {}),
+            ...(finished.startupTerminal ? { startupTerminal: finished.startupTerminal } : {}),
+            // The Setup tab must run the same wrapped script the sequenced agent
+            // waits on (#6298), so replace the command the renderer would activate.
+            ...(result.setup && finished.wrappedSetupCommand
+              ? { setup: { ...result.setup, command: finished.wrappedSetupCommand } }
+              : {})
+          }
+        }
 
         // Why: reaching here means create succeeded (helpers throw); skip a separate workspace_initialized (telemetry-plan.md§Deferred); never send the branch name.
         track('workspace_created', {
@@ -2324,7 +2381,7 @@ export function registerWorktreeHandlers(
 
   ipcMain.handle(
     'worktrees:adoptProvisionedRoot',
-    async (_event, rawArgs: AdoptProvisionedRootArgs): Promise<CreateWorktreeResult> => {
+    async (_event, rawArgs: AdoptProvisionedRootArgs): Promise<CreatedWorktreeResult> => {
       const args = normalizeLinkedWorkItemFields(rawArgs)
       return withWorktreeSpan({ stage: 'create' }, async () => {
         const repo = findExactRepoOwner(store, args.repoId, args.executionHostId)
@@ -2339,7 +2396,7 @@ export function registerWorktreeHandlers(
           repo,
           request: args.automationProvenanceRequest
         })
-        let result: CreateWorktreeResult
+        let result: CreatedWorktreeResult
         try {
           result = await adoptProvisionedRootSshCheckout({
             userDataPath: app.getPath('userData'),
@@ -3378,12 +3435,15 @@ export function registerWorktreeHandlers(
 
   ipcMain.handle(
     'worktrees:retryAgentLaunch',
-    (_event, args: {
-      worktreeId: string
-      expectedFailureId: string
-      clientMutationId: string
-      action: import('../../shared/agent-launch-worktree-recovery').RetryAgentLaunchAction
-    }) =>
+    (
+      _event,
+      args: {
+        worktreeId: string
+        expectedFailureId: string
+        clientMutationId: string
+        action: RetryAgentLaunchAction
+      }
+    ) =>
       runtime.retryWorktreeAgentLaunch(
         `id:${args.worktreeId}`,
         {
@@ -3408,12 +3468,15 @@ export function registerWorktreeHandlers(
   )
   ipcMain.handle(
     'worktrees:retryBackgroundAgentLaunch',
-    (_event, args: {
-      attemptId: string
-      expectedFailureId: string
-      clientMutationId: string
-      action: import('../../shared/agent-launch-worktree-recovery').RetryAgentLaunchAction
-    }) => runtime.retryBackgroundAgentLaunch(args, undefined)
+    (
+      _event,
+      args: {
+        attemptId: string
+        expectedFailureId: string
+        clientMutationId: string
+        action: RetryAgentLaunchAction
+      }
+    ) => runtime.retryBackgroundAgentLaunch(args, undefined)
   )
   ipcMain.handle(
     'worktrees:forgetBackgroundAgentLaunch',
@@ -3426,7 +3489,9 @@ export function registerWorktreeHandlers(
   ipcMain.handle(
     'worktrees:unknownAgentLaunchSiblingCount',
     (_event, args: { worktreeId: string }) =>
-      runtime.unknownWorktreeAgentLaunchSiblingCount(`id:${args.worktreeId}`, undefined).then((count) => ({ count }))
+      runtime
+        .unknownWorktreeAgentLaunchSiblingCount(`id:${args.worktreeId}`, undefined)
+        .then((count) => ({ count }))
   )
   ipcMain.handle(
     'worktrees:forgetUnknownAgentLaunchSiblings',

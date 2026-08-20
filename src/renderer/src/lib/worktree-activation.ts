@@ -28,6 +28,7 @@ import type { ExecutionHostId } from '../../../shared/execution-host'
 import { findFolderWorkspaceOwner } from './folder-workspace-runtime-owner'
 import type {
   AgentStartedTelemetry,
+  StartupLaunchTelemetry,
   WorktreeStartupPayload
 } from '@/lib/worktree-startup-payload'
 import type { IssueCommandLaunch } from '@/lib/worktree-setup-issue-command-queue'
@@ -35,9 +36,7 @@ import { ensureWorktreeHasInitialTerminal } from '@/lib/worktree-initial-termina
 import { ensureWebRuntimeWorktreeTerminalAfterWake } from '@/lib/web-runtime-worktree-terminal-after-wake'
 import { applyWorktreeNavViewEntry } from '@/lib/worktree-nav-view-history-replay'
 
-export type { AgentStartedTelemetry, WorktreeStartupPayload }
-export type StartupLaunchTelemetry = Omit<AgentStartedTelemetry, 'agent_kind'> &
-  Partial<Pick<AgentStartedTelemetry, 'agent_kind'>>
+export type { AgentStartedTelemetry, StartupLaunchTelemetry, WorktreeStartupPayload }
 export { ensureWorktreeHasInitialTerminal }
 
 /**

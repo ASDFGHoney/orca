@@ -5,7 +5,7 @@ import { app, ipcMain } from 'electron'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { Store } from '../persistence'
 import type { ReleaseBuildListResult, UpdateCheckOptions } from '../../shared/update-status-types'
-import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
+import type { CreatedWorktreeResult } from '../../shared/worktree/create-types'
 import type { WorktreeStartupLaunch } from '../../shared/worktree/launch-types'
 import { RELEASE_CHANNELS, type ReleaseChannel } from '../../shared/release-channel'
 import {
@@ -344,9 +344,9 @@ function registerRuntimeWindowLifecycle(
     activateWorktree: (
       repoId,
       worktreeId,
-      setup?: CreateWorktreeResult['setup'],
+      setup?: CreatedWorktreeResult['setup'],
       startup?: WorktreeStartupLaunch,
-      defaultTabs?: CreateWorktreeResult['defaultTabs']
+      defaultTabs?: CreatedWorktreeResult['defaultTabs']
     ) => {
       send('ui:activateWorktree', {
         repoId,
@@ -418,6 +418,9 @@ function registerRuntimeWindowLifecycle(
           ...(opts.cwd ? { cwd: opts.cwd } : {}),
           ...(opts.launchConfig ? { launchConfig: opts.launchConfig } : {}),
           ...(opts.launchToken ? { launchToken: opts.launchToken } : {}),
+          // commitSuccessfulLaunchNotices reveals purely to deliver these; dropping
+          // the field made the renderer's attachLaunchNotices branch dead code.
+          ...(opts.launchNotices ? { launchNotices: opts.launchNotices } : {}),
           ...(opts.launchAgent ? { launchAgent: opts.launchAgent } : {}),
           ...(opts.viewMode ? { viewMode: opts.viewMode } : {}),
           activate: opts.activate !== false,

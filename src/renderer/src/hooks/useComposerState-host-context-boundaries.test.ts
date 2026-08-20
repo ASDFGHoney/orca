@@ -798,7 +798,9 @@ describe('useComposerState host-context boundaries', () => {
       'setSidebarOpen(true)'
     )
 
-    expect(activation).toContain('hostSpawnedPrimary: true')
+    // Consolidated onto backendStartupTerminalSpawned, which both activation and
+    // the seeding helper read to skip creating a second primary terminal.
+    expect(activation).toContain('backendStartupTerminalSpawned: true')
     expect(activation).not.toContain('startup:')
     expect(HOOK_SOURCE).not.toContain('buildCreatedAgentReopenStartup')
   })

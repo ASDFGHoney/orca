@@ -149,6 +149,11 @@ async function spawnPane(args: {
     tabId: args.tabId,
     leafId: args.leafId
   })
+  // The agentLaunch-outcome variant is unreachable here (no agentLaunch sent),
+  // but the union is only discriminated by the presence of `id`.
+  if (!('id' in result)) {
+    throw new Error('pty.spawn returned no terminal id')
+  }
   return result.id
 }
 

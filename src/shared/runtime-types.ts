@@ -17,10 +17,13 @@ import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalColorOverrides } from './terminal-color-overrides'
 import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from './terminal-tab-types'
 import type { BuiltInTuiAgent, TuiAgent } from './tui-agent'
-import type { CreatedWorktreeResult, NotCreatedWorktreeResult } from './types'
-import type { AgentLaunchSpawnOutcome } from './agent-launch-spawn-request'
+import type { AgentLaunchInput, AgentLaunchSpawnOutcome } from './agent-launch-spawn-request'
 import type { PersistedLaunchNoticeState } from './agent-launch-contract'
-import type { CreateWorktreeResult, RemoveWorktreeResult } from './worktree/create-types'
+import type {
+  CreatedWorktreeResult,
+  NotCreatedWorktreeResult,
+  RemoveWorktreeResult
+} from './worktree/create-types'
 import type {
   WorkspaceLineage,
   WorktreeLineage,
@@ -707,7 +710,7 @@ type RuntimeTerminalCreateBaseRequestPayload = {
   resumeProviderSession?: AgentProviderSessionMetadata
   launchToken?: string
   launchAgent?: TuiAgent
-  agentLaunch?: import('./agent-launch-spawn-request').AgentLaunchInput
+  agentLaunch?: AgentLaunchInput
   clientKind?: 'mobile' | 'runtime'
   viewMode?: 'terminal' | 'chat'
   startupCommandDelivery?: StartupCommandDelivery
@@ -935,19 +938,26 @@ export type RuntimeWorktreeRecord = Worktree & {
   git: GitWorktreeInfo
 }
 
-export type RuntimeWorktreeCreateResult = {
-  created?: true
-  worktree: RuntimeWorktreeRecord
-  lineage: WorktreeLineage | null
-  workspaceLineage?: WorkspaceLineage | null
-  warnings: WorktreeLineageWarning[]
-  warning?: string
-  startupTerminal?: CreateWorktreeResult['startupTerminal']
-  agentTerminalHandle?: string
-  agentLaunchResult?: CreatedWorktreeResult['agentLaunchResult'] | NotCreatedWorktreeResult['agentLaunchResult']
-} | NotCreatedWorktreeResult
+export type RuntimeWorktreeCreateResult =
+  | {
+      created?: true
+      worktree: RuntimeWorktreeRecord
+      lineage: WorktreeLineage | null
+      workspaceLineage?: WorkspaceLineage | null
+      warnings: WorktreeLineageWarning[]
+      warning?: string
+      startupTerminal?: CreatedWorktreeResult['startupTerminal']
+      agentTerminalHandle?: string
+      agentLaunchResult?:
+        | CreatedWorktreeResult['agentLaunchResult']
+        | NotCreatedWorktreeResult['agentLaunchResult']
+    }
+  | NotCreatedWorktreeResult
 
-export type CreatedRuntimeWorktreeCreateResult = Exclude<RuntimeWorktreeCreateResult, { created: false }>
+export type CreatedRuntimeWorktreeCreateResult = Exclude<
+  RuntimeWorktreeCreateResult,
+  { created: false }
+>
 
 export type RuntimeWorktreeRemoveResult = RemoveWorktreeResult & {
   removed: boolean

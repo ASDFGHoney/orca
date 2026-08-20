@@ -73,7 +73,8 @@ import { ORCA_PROTECTED_ENV_KEYS } from '../agent-launch/compose-agent-launch-en
 import { resolveResumeLaunchIngest } from '../agent-launch/agent-launch-resume-ingest'
 import { resolveRevalidatedVaultResume } from '../agent-launch/agent-launch-vault-resume'
 import { revalidateAiVaultResumeEntry } from './ai-vault-resume-command'
-import { discoverAiVaultSessionsAcrossHosts } from './ai-vault'
+import { discoverAiVaultSessionsAcrossHosts, getAiVaultSessionResumePreparation } from './ai-vault'
+import { mergeTerminalEnvDeletionKeys } from '../../shared/terminal-env-deletion-keys'
 import { resolveStartupShell } from '../../shared/tui-agent-startup-shell'
 import { getHostAgentSessionRecordStore } from '../agent-launch/agent-session-record-store-host'
 import { registerHostSessionLaunch } from '../agent-launch/agent-session-launch-registration'
@@ -6415,7 +6416,13 @@ export function registerPtyHandlers(
           const descriptor = describeSpawnExecutionHost({
             connectionId: args.connectionId,
             cwd,
-            terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell
+            // Why: this pane's tab shell overrides the global setting, and the
+            // host now quotes the launch/resume argv for it (#12320).
+            shellOverride: args.shellOverride,
+            terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell,
+            // A WSL-runtime project runs bash even from a Windows drive-path
+            // worktree, which the cwd alone cannot reveal.
+            projectRuntime: args.projectRuntime
           })
           const hostState = await deriveAgentLaunchHostState(
             {
@@ -6503,7 +6510,8 @@ export function registerPtyHandlers(
             // buildVaultResumeStartup re-derives it from this session.
             const session = await revalidateAiVaultResumeEntry(
               vault.entry,
-              discoverAiVaultSessionsAcrossHosts
+              discoverAiVaultSessionsAcrossHosts,
+              getAiVaultSessionResumePreparation()
             )
             if (!session) {
               return {
@@ -6548,6 +6556,14 @@ export function registerPtyHandlers(
               args.commandDelivery = 'provider'
               if (startup.env) {
                 args.env = { ...args.env, ...startup.env }
+              }
+              // A real-home Codex resume must UNSET the home Orca's own process
+              // exports, or the spawned pane inherits it and resumes elsewhere.
+              if (startup.envToDelete) {
+                args.envToDelete = mergeTerminalEnvDeletionKeys(
+                  args.envToDelete,
+                  startup.envToDelete
+                )
               }
               if (startup.launchConfig) {
                 args.launchConfig = startup.launchConfig
@@ -6682,6 +6698,12 @@ export function registerPtyHandlers(
             // oversized inline draft) return the text for the renderer to paste
             // UNSUBMITTED; native-flag/env drafts deliver host-side and set nothing.
             agentLaunchDraftPrompt = resolution.plan.draftPrompt ?? null
+          }
+          // Why: an SSH startup command must wait for the remote shell's ready
+          // marker. The client set this while it built the command; on the
+          // host-resolved path only the host can.
+          if (args.connectionId && args.command && args.startupCommandDelivery === undefined) {
+            args.startupCommandDelivery = 'shell-ready'
           }
         }
         const isClaudeLaunch =

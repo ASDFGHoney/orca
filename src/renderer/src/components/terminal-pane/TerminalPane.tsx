@@ -530,6 +530,9 @@ function TerminalPane(
         ?.viewMode === 'chat'
   )
   const nativeChatEnabled = useAppStore((store) => store.settings?.experimentalNativeChat === true)
+  // Custom agents reach native chat through their base harness, so the toggle gate needs the catalog.
+  const customTuiAgents = useAppStore((store) => store.settings?.customTuiAgents)
+  const deletedCustomTuiAgents = useAppStore((store) => store.settings?.deletedCustomTuiAgents)
   const effectiveChatViewMode = nativeChatEnabled && isChatViewMode
   const unifiedTabLabel = useAppStore(
     (store) =>
@@ -619,11 +622,15 @@ function TerminalPane(
         launchAgent: detectedAgent ? null : launchAgent,
         detectedAgent,
         resolvedAgent: detectedAgent ? null : resolveTitleAgentForLeaf(leafId),
-        nativeChatTranscriptIsLocalReadable
+        nativeChatTranscriptIsLocalReadable,
+        customTuiAgents,
+        deletedCustomTuiAgents
       })
     },
     [
       tabAgentTypeByLeaf,
+      customTuiAgents,
+      deletedCustomTuiAgents,
       nativeChatEnabled,
       nativeChatTranscriptIsLocalReadable,
       terminalTab?.launchAgent,

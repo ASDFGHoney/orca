@@ -265,6 +265,7 @@ import type {
   Automation,
   AutomationCreateInput,
   AutomationRun,
+  AutomationRunPersistInput,
   AutomationUpdateInput,
   AutomationWorkspaceMode
 } from '../../shared/automations-types'
@@ -343,7 +344,7 @@ import type {
   WorktreeRemoteBranchConflictEvent
 } from '../../shared/worktree/base-ref-drift-types'
 import type {
-  CreateWorktreeResult,
+  CreatedWorktreeResult,
   ForceDeleteWorktreeBranchResult,
   RemoveWorktreeResult
 } from '../../shared/worktree/create-types'
@@ -366,7 +367,6 @@ import type {
   Worktree
 } from '../../shared/worktree/types'
 import type { TaskSourceContext } from '../../shared/task-source-context'
-import type { CreatedWorktreeResult } from '../../shared/types'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree/removal'
 import {
   LOCAL_EXECUTION_HOST_ID,
@@ -473,6 +473,7 @@ import {
   type RuntimeSyncedTab,
   type RuntimeMarkdownReadTabResult,
   type RuntimeMarkdownSaveTabResult,
+  type RuntimeMobileSessionCreateTerminalAgentLaunchFailure,
   type RuntimeMobileSessionCreateTerminalResult,
   type RuntimeMobileSessionClientTab,
   type RuntimeMobileSessionMarkdownTab,
@@ -1113,7 +1114,6 @@ import { normalizeSparseDirectories } from '../ipc/sparse-checkout-directories'
 import type { PtyBindingSourceExpectation, Store } from '../persistence'
 import { collectLayoutLeafIdsInOrder } from '../persistence/restoring-sessions/terminal-layout-normalization'
 import type { StatsCollector } from '../stats/collector'
-import { AgentDetector } from '../stats/agent-detector'
 import { getOrCreateAgentCatalogService } from '../agent-launch/agent-catalog-service'
 import { registerOrchestrationOwnerScanner } from '../agent-launch/agent-catalog-owner-scanners'
 import { getHostAgentLaunchBoundary } from '../agent-launch/agent-launch-boundary-host'
@@ -1189,6 +1189,8 @@ import type {
   AgentLaunchVaultResumeDetailsResult,
   AgentLaunchVaultResumeEntry
 } from '../../shared/agent-launch-spawn-request'
+import { applyAiVaultResumePreparation } from '../../shared/ai-vault-resume-preparation'
+import { mergeTerminalEnvDeletionKeys } from '../../shared/terminal-env-deletion-keys'
 import {
   findVaultResumeSession,
   resolveRevalidatedVaultResume,
@@ -1519,13 +1521,20 @@ export type WorktreeCreateAgentLaunchPreparedOk = {
   release: () => void
   finish: (
     worktreeId: string,
-    authoritativePaths: { repoPath: string | null; worktreePath: string | null },
+    authoritativePaths: {
+      repoPath: string | null
+      worktreePath: string | null
+    },
     spawn: WorktreeLaunchSpawn
   ) => Promise<WorktreeAgentLaunchOutcome>
 }
 
 export type WorktreeCreateAgentLaunchPrepared =
-  | { ok: false; failure?: AgentLaunchFailure; requestError?: AgentLaunchRequestError }
+  | {
+      ok: false
+      failure?: AgentLaunchFailure
+      requestError?: AgentLaunchRequestError
+    }
   | WorktreeCreateAgentLaunchPreparedOk
 
 export type LocalWorktreeCreateAgentLaunchFinished = {
@@ -1745,6 +1754,7 @@ type AgentTerminalCreateResolution =
 type VaultResumeBypassFields = {
   command: string
   env?: Record<string, string>
+  envToDelete?: string[]
   launchConfig?: SleepingAgentLaunchConfig
   launchNotices?: PersistedLaunchNoticeState
 }
@@ -1759,8 +1769,10 @@ type MobileSessionTerminalCreateOptions = {
   command?: string
   cwd?: string
   env?: Record<string, string>
+  envToDelete?: string[]
   startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
   agent?: TuiAgent
+  agentPrompt?: string
   launchConfig?: SleepingAgentLaunchConfig
   launchAgent?: TuiAgent
   agentLaunch?: AgentLaunchInput
@@ -1773,29 +1785,30 @@ type MobileSessionTerminalCreateOptions = {
   signal?: AbortSignal
 }
 
+type MobileTerminalStartupCommand = {
+  command?: string
+  env?: Record<string, string>
+  /** A real-home Codex vault resume must UNSET this process's own exports. */
+  envToDelete?: string[]
+  startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
+  launchConfig?: SleepingAgentLaunchConfig
+  launchAgent?: TuiAgent
+  /** The receipt's token, so the spawned PTY exports the one the host minted
+   *  rather than letting the spawn path invent a second, unmatched one. */
+  launchToken?: string
+}
+
 type MobileTerminalStartupResolution =
   | {
       kind: 'command'
-      startupCommand: {
-        command?: string
-        env?: Record<string, string>
-        startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
-        launchConfig?: SleepingAgentLaunchConfig
-        launchAgent?: TuiAgent
-      }
+      startupCommand: MobileTerminalStartupCommand
       admissionToken: null
       receipt: null
       launchNotices?: PersistedLaunchNoticeState
     }
   | {
       kind: 'launched'
-      startupCommand: {
-        command?: string
-        env?: Record<string, string>
-        startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
-        launchConfig?: SleepingAgentLaunchConfig
-        launchAgent?: TuiAgent
-      }
+      startupCommand: MobileTerminalStartupCommand
       admissionToken: string
       receipt: AgentLaunchReceipt
       launchNotices?: PersistedLaunchNoticeState
@@ -1803,13 +1816,7 @@ type MobileTerminalStartupResolution =
     }
   | { kind: 'failed'; outcome: TerminalAgentLaunchFailure }
 
-function mergeTerminalEnvDeletionKeys(
-  first: readonly string[] | undefined,
-  second: readonly string[] | undefined
-): string[] | undefined {
-  const merged = [...new Set([...(first ?? []), ...(second ?? [])])]
-  return merged.length > 0 ? merged : undefined
-}
+type MobileTerminalStartupSettlement = Exclude<MobileTerminalStartupResolution, { kind: 'failed' }>
 
 type AgentSessionCreateOperation = {
   fingerprint: string
@@ -2148,9 +2155,11 @@ type RuntimePtyController = {
   markReversibleStops?(ptyIds: readonly string[]): () => void
   getCwd?(ptyId: string): Promise<string | null>
   getForegroundProcess(ptyId: string): Promise<string | null>
-  inspectProcess?(
-    ptyId: string
-  ): Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean; unavailable?: true }>
+  inspectProcess?(ptyId: string): Promise<{
+    foregroundProcess: string | null
+    hasChildProcesses: boolean
+    unavailable?: true
+  }>
   confirmForegroundProcess?(ptyId: string): Promise<string | null>
   hasChildProcesses?(ptyId: string): Promise<boolean>
   clearBuffer?(ptyId: string): Promise<void>
@@ -3249,7 +3258,7 @@ async function hasLocalWorktreeBaseRef(
 }
 
 function getSetupRunnerCommandPlatformForLaunch(
-  setup: CreateWorktreeResult['setup'],
+  setup: CreatedWorktreeResult['setup'],
   fallbackPlatform: 'windows' | 'posix'
 ): 'windows' | 'posix' {
   return getSetupRunnerCommandPlatformForPath(setup?.runnerScriptPath ?? '', fallbackPlatform)
@@ -3329,7 +3338,10 @@ export class OrcaRuntimeService {
   // same clientMutationId returns the in-flight operation instead of duplicating.
   private mobileTerminalCreateByMutationId = new Map<
     string,
-    Promise<RuntimeMobileSessionCreateTerminalResult>
+    Promise<
+      | RuntimeMobileSessionCreateTerminalResult
+      | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
+    >
   >()
   private readonly terminalCreateIdempotency = new RemoteRuntimeTerminalCreateIdempotency()
   // Why: concurrent clients sleeping one host workspace must share one physical teardown.
@@ -3546,11 +3558,19 @@ export class OrcaRuntimeService {
   private subscriptionConnectionByEntry = new Map<string, string>()
   private activeBrowserScreencastsByConnection = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    {
+      cancel: (emitEnd?: boolean) => void
+      done: Promise<void>
+      connectionKey: string
+    }
   >()
   private activeBrowserScreencastsByPage = new Map<
     string,
-    { cancel: (emitEnd?: boolean) => void; done: Promise<void>; connectionKey: string }
+    {
+      cancel: (emitEnd?: boolean) => void
+      done: Promise<void>
+      connectionKey: string
+    }
   >()
   // Why: mobile clients subscribe to desktop notifications via
   // notifications.subscribe. This set enables fan-out — each connected
@@ -6503,9 +6523,13 @@ export class OrcaRuntimeService {
   }
 
   async resolveAiVaultResumeCommand(
-    entry: AgentLaunchVaultResumeEntry
+    entry: AgentLaunchVaultResumeEntry,
+    targetPlatform?: NodeJS.Platform
   ): Promise<VaultResumeCopyResult> {
-    const discovered = await this.listAiVaultSessions({ limit: 2000, force: true })
+    const discovered = await this.listAiVaultSessions({
+      limit: 2000,
+      force: true
+    })
     const fresh = discovered.sessions.some(
       (session) => session.executionHostId === entry.executionHostId
     )
@@ -6514,7 +6538,8 @@ export class OrcaRuntimeService {
     return resolveVaultResumeCopyCommand({
       entry,
       sessions: fresh.sessions,
-      hostPlatform: process.platform,
+      // The client names its paste target's platform; the host never runs this.
+      hostPlatform: targetPlatform ?? process.platform,
       settings: this.store?.getSettings?.()
     })
   }
@@ -6992,9 +7017,9 @@ export class OrcaRuntimeService {
   private notifyHostActivateWorktree(
     repoId: string,
     worktreeId: string,
-    setup?: CreateWorktreeResult['setup'],
+    setup?: CreatedWorktreeResult['setup'],
     startup?: WorktreeStartupLaunch,
-    defaultTabs?: CreateWorktreeResult['defaultTabs']
+    defaultTabs?: CreatedWorktreeResult['defaultTabs']
   ): void {
     this.notifier?.activateWorktree(repoId, worktreeId, setup, startup, defaultTabs)
   }
@@ -7002,9 +7027,9 @@ export class OrcaRuntimeService {
   private notifyClientsActivateWorktree(
     repoId: string,
     worktreeId: string,
-    setup?: CreateWorktreeResult['setup'],
+    setup?: CreatedWorktreeResult['setup'],
     startup?: WorktreeStartupLaunch,
-    defaultTabs?: CreateWorktreeResult['defaultTabs']
+    defaultTabs?: CreatedWorktreeResult['defaultTabs']
   ): void {
     this.emitClientEvent(
       toRuntimeActivateWorktreeEvent(repoId, worktreeId, setup, startup, defaultTabs)
@@ -8548,9 +8573,10 @@ export class OrcaRuntimeService {
    * against the local partition strands the real ghost and bumps a foreign host's epoch.
    * Returns null when nothing may be published because persistence is unavailable or failed.
    */
-  private persistTerminalSurfaceRetirements(
-    retiredSurfaces: readonly RetiredTerminalSurface[]
-  ): { accepted: RetiredTerminalSurface[]; unpersisted: RetiredTerminalSurface[] } | null {
+  private persistTerminalSurfaceRetirements(retiredSurfaces: readonly RetiredTerminalSurface[]): {
+    accepted: RetiredTerminalSurface[]
+    unpersisted: RetiredTerminalSurface[]
+  } | null {
     const surfacesByHostId = new Map<ExecutionHostId, RetiredTerminalSurface[]>()
     for (const surface of retiredSurfaces) {
       const hostId =
@@ -8564,7 +8590,10 @@ export class OrcaRuntimeService {
     }
     const accepted: RetiredTerminalSurface[] = []
     const unpersisted: RetiredTerminalSurface[] = []
-    const pendingWrites: { hostId: ExecutionHostId; session: WorkspaceSessionState }[] = []
+    const pendingWrites: {
+      hostId: ExecutionHostId
+      session: WorkspaceSessionState
+    }[] = []
     for (const [hostId, surfaces] of surfacesByHostId) {
       const session = this.store?.getWorkspaceSession?.(hostId)
       if (!session) {
@@ -8703,6 +8732,7 @@ export class OrcaRuntimeService {
               ...(ptyId ? { ptyId } : {}),
               ...(tab.startupCwd ? { startupCwd: tab.startupCwd } : {}),
               ...(tab.launchAgent ? { launchAgent: tab.launchAgent } : {}),
+              ...(tab.launchNotices ? { launchNotices: tab.launchNotices } : {}),
               ...(layout ? { parentLayout: this.cloneTerminalLayoutSnapshot(layout) } : {}),
               ...(tab.color != null ? { color: tab.color } : {}),
               ...(tab.isPinned ? { isPinned: true } : {}),
@@ -10089,7 +10119,11 @@ export class OrcaRuntimeService {
   private persistHeadlessSessionTabProps(
     worktreeId: string,
     tabId: string,
-    props: { color?: string | null; isPinned?: boolean; viewMode?: 'terminal' | 'chat' }
+    props: {
+      color?: string | null
+      isPinned?: boolean
+      viewMode?: 'terminal' | 'chat'
+    }
   ): void {
     const session = this.getWorkspaceSessionForWorktree(worktreeId)
     if (!session || !this.store?.setWorkspaceSession) {
@@ -10141,7 +10175,11 @@ export class OrcaRuntimeService {
   private applyHeadlessSessionTabPropsToSnapshot(
     worktreeId: string,
     tabId: string,
-    props: { color?: string | null; isPinned?: boolean; viewMode?: 'terminal' | 'chat' }
+    props: {
+      color?: string | null
+      isPinned?: boolean
+      viewMode?: 'terminal' | 'chat'
+    }
   ): void {
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
@@ -10226,13 +10264,14 @@ export class OrcaRuntimeService {
       : args.tabId
     const session = this.store?.getWorkspaceSession?.()
     const tab = session?.tabsByWorktree[worktreeId]?.find((candidate) => candidate.id === hostTabId)
-    const existing = tab?.launchNotices
-    if (
-      !session ||
-      !this.store?.setWorkspaceSession ||
-      !existing ||
-      existing.launchToken !== args.launchToken
-    ) {
+    // A host-spawned background terminal keeps its notices only on the live pty
+    // record, so that record is an equal source of truth for the dismissal.
+    const ptys = this.collectTabLaunchNoticePtys(worktreeId, hostTabId, session, args.launchToken)
+    const existing = tab?.launchNotices ?? ptys[0]?.launchNotices ?? undefined
+    if (!existing || existing.launchToken !== args.launchToken) {
+      return { ok: false, changed: false }
+    }
+    if (tab?.launchNotices && !this.store?.setWorkspaceSession) {
       return { ok: false, changed: false }
     }
     const remaining = existing.notices.filter((notice) => notice.code !== args.code)
@@ -10241,9 +10280,55 @@ export class OrcaRuntimeService {
     }
     const nextState =
       remaining.length > 0 ? { launchToken: existing.launchToken, notices: remaining } : undefined
-    this.persistTabLaunchNotices(session, worktreeId, hostTabId, nextState)
+    // Why: a later republish of the pty record would otherwise resurrect the
+    // dismissed notice from the stale live copy.
+    for (const pty of ptys) {
+      pty.launchNotices = nextState ?? null
+    }
+    if (session && tab?.launchNotices) {
+      this.persistTabLaunchNotices(session, worktreeId, hostTabId, nextState)
+    }
     this.applyLaunchNoticesToSnapshot(worktreeId, hostTabId, nextState)
     return { ok: true, changed: true }
+  }
+
+  /** Live pty records that mirror one tab's notice state, matched by launch token
+   *  so a dismissal never touches a different launch's notices. */
+  private collectTabLaunchNoticePtys(
+    worktreeId: string,
+    tabId: string,
+    session: WorkspaceSessionState | undefined,
+    launchToken: string
+  ): RuntimePtyWorktreeRecord[] {
+    const ptyIds = new Set<string>()
+    const tab = session?.tabsByWorktree[worktreeId]?.find((candidate) => candidate.id === tabId)
+    if (tab?.ptyId) {
+      ptyIds.add(tab.ptyId)
+    }
+    for (const id of Object.values(
+      session?.terminalLayoutsByTabId?.[tabId]?.ptyIdsByLeafId ?? {}
+    )) {
+      if (id) {
+        ptyIds.add(id)
+      }
+    }
+    for (const snapshotTab of this.mobileSessionTabsByWorktree.get(worktreeId)?.tabs ?? []) {
+      if (snapshotTab.type === 'terminal' && snapshotTab.parentTabId === tabId) {
+        if (snapshotTab.ptyId) {
+          ptyIds.add(snapshotTab.ptyId)
+        }
+      }
+    }
+    for (const [ptyId, pty] of this.ptysById) {
+      if (pty.worktreeId === worktreeId && pty.tabId === tabId) {
+        ptyIds.add(ptyId)
+      }
+    }
+    return [...ptyIds]
+      .map((ptyId) => this.ptysById.get(ptyId))
+      .filter(
+        (pty): pty is RuntimePtyWorktreeRecord => pty?.launchNotices?.launchToken === launchToken
+      )
   }
 
   private persistTabLaunchNotices(
@@ -15621,7 +15706,10 @@ export class OrcaRuntimeService {
     // mobile subscriber. With multi-mobile, peer subscribers keep the
     // floor; only when the inner map empties do we transition to desktop.
     const ptysWithSurvivingPeers: string[] = []
-    const ptysToRestore: { ptyId: string; baseline: { cols: number; rows: number } | null }[] = []
+    const ptysToRestore: {
+      ptyId: string
+      baseline: { cols: number; rows: number } | null
+    }[] = []
     for (const [ptyId, inner] of this.mobileSubscribers) {
       const subscriber = inner.get(clientId)
       if (!subscriber) {
@@ -16013,7 +16101,11 @@ export class OrcaRuntimeService {
   getRemoteDesktopFitHold(
     ptyId: string,
     subscriptionKey: string
-  ): { mode: 'remote-desktop-fit' | 'desktop-fit'; cols: number; rows: number } {
+  ): {
+    mode: 'remote-desktop-fit' | 'desktop-fit'
+    cols: number
+    rows: number
+  } {
     const size = this.getTerminalSize(ptyId) ?? { cols: 0, rows: 0 }
     return {
       mode: this.isRemoteDesktopViewerOwner(ptyId, subscriptionKey)
@@ -16033,7 +16125,10 @@ export class OrcaRuntimeService {
     return owner ? (this.remoteDesktopViewers.get(ptyId)?.get(owner) ?? null) : null
   }
 
-  private resolveRemoteDesktopHostReclaimTarget(ptyId: string): { cols: number; rows: number } {
+  private resolveRemoteDesktopHostReclaimTarget(ptyId: string): {
+    cols: number
+    rows: number
+  } {
     const target = this.remoteDesktopHostReclaimTargets.get(ptyId)
     if (target) {
       return target
@@ -16699,10 +16794,18 @@ export class OrcaRuntimeService {
   private pickEarliestRestoreTarget(
     inner: Map<
       string,
-      { subscribedAt: number; previousCols: number | null; previousRows: number | null }
+      {
+        subscribedAt: number
+        previousCols: number | null
+        previousRows: number | null
+      }
     >
   ): { previousCols: number; previousRows: number } | null {
-    let best: { subscribedAt: number; previousCols: number; previousRows: number } | null = null
+    let best: {
+      subscribedAt: number
+      previousCols: number
+      previousRows: number
+    } | null = null
     for (const sub of inner.values()) {
       if (sub.previousCols == null || sub.previousRows == null) {
         continue
@@ -16749,7 +16852,10 @@ export class OrcaRuntimeService {
   // Why: four-step fallback chain for desktop-restore targets. Always
   // returns a value; the terminal {80,24} branch is reached only under
   // bug. Wrapping the chain as a single helper prevents callsite drift.
-  private resolveDesktopRestoreTarget(ptyId: string): { cols: number; rows: number } {
+  private resolveDesktopRestoreTarget(ptyId: string): {
+    cols: number
+    rows: number
+  } {
     // 1. Earliest-by-subscribedAt subscriber with non-null baseline.
     const inner = this.mobileSubscribers.get(ptyId)
     if (inner) {
@@ -17232,10 +17338,16 @@ export class OrcaRuntimeService {
         subscriber.previousRows != null &&
         !this.pickEarliestRestoreTarget(inner)
       ) {
-        let earliestSurvivor: { clientId: string; subscribedAt: number } | null = null
+        let earliestSurvivor: {
+          clientId: string
+          subscribedAt: number
+        } | null = null
         for (const sub of inner.values()) {
           if (earliestSurvivor === null || sub.subscribedAt < earliestSurvivor.subscribedAt) {
-            earliestSurvivor = { clientId: sub.clientId, subscribedAt: sub.subscribedAt }
+            earliestSurvivor = {
+              clientId: sub.clientId,
+              subscribedAt: sub.subscribedAt
+            }
           }
         }
         if (earliestSurvivor) {
@@ -17558,7 +17670,13 @@ export class OrcaRuntimeService {
 
   private notifyTerminalResize(
     ptyId: string,
-    event: { cols: number; rows: number; displayMode: string; reason: string; seq?: number }
+    event: {
+      cols: number
+      rows: number
+      displayMode: string
+      reason: string
+      seq?: number
+    }
   ): void {
     const listeners = this.resizeListeners.get(ptyId)
     if (!listeners) {
@@ -22088,9 +22206,11 @@ export class OrcaRuntimeService {
     return { removed: true }
   }
 
-  async inspectTerminalProcess(
-    terminalSelector: string
-  ): Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean; unavailable?: true }> {
+  async inspectTerminalProcess(terminalSelector: string): Promise<{
+    foregroundProcess: string | null
+    hasChildProcesses: boolean
+    unavailable?: true
+  }> {
     const leaf = this.resolveLiveLeafForHandle(terminalSelector)
     if (!leaf?.ptyId || !this.ptyController) {
       throw new Error('terminal_gone')
@@ -22596,7 +22716,10 @@ export class OrcaRuntimeService {
   }
 
   async createHostedReview(
-    args: CreateHostedReviewInput & { repoSelector: string; worktreeSelector?: string }
+    args: CreateHostedReviewInput & {
+      repoSelector: string
+      worktreeSelector?: string
+    }
   ): Promise<CreateHostedReviewResult> {
     const { repo, repoPath } = await this.resolveHostedReviewTarget(args)
     const executionOptions = this.getHostedReviewExecutionOptions(repo)
@@ -22629,7 +22752,10 @@ export class OrcaRuntimeService {
   }
 
   async createStackedHostedReview(
-    args: CreateStackedHostedReviewInput & { repoSelector: string; worktreeSelector?: string }
+    args: CreateStackedHostedReviewInput & {
+      repoSelector: string
+      worktreeSelector?: string
+    }
   ): Promise<CreateStackedHostedReviewResult> {
     const { repo, repoPath } = await this.resolveHostedReviewTarget(args)
     const executionOptions = this.getHostedReviewExecutionOptions(repo)
@@ -22956,7 +23082,12 @@ export class OrcaRuntimeService {
   async updateGitLabRepoMR(
     repoSelector: string,
     iid: number,
-    updates: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[] },
+    updates: {
+      title?: string
+      body?: string
+      addLabels?: string[]
+      removeLabels?: string[]
+    },
     projectRef?: GitLabProjectRef | null
   ): Promise<Awaited<ReturnType<typeof updateGitLabMR>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
@@ -24383,7 +24514,11 @@ export class OrcaRuntimeService {
     agent: TuiAgent,
     prompt: string | undefined,
     launchPreferences?: AgentLaunchPreferences
-  ): { agent: TuiAgent; startup: WorktreeStartupLaunch; followup?: WorktreeStartupFollowup } {
+  ): {
+    agent: TuiAgent
+    startup: WorktreeStartupLaunch
+    followup?: WorktreeStartupFollowup
+  } {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -24595,7 +24730,7 @@ export class OrcaRuntimeService {
   private async createDefaultTabTerminals(
     worktreeSelector: string,
     worktreeId: string,
-    defaultTabs: CreateWorktreeResult['defaultTabs'] | undefined,
+    defaultTabs: CreatedWorktreeResult['defaultTabs'] | undefined,
     surfacing: { surfaceOwner?: false } = {}
   ): Promise<string[]> {
     if (!defaultTabs || defaultTabs.tabs.length === 0 || !this.ptyController?.spawn) {
@@ -24894,74 +25029,83 @@ export class OrcaRuntimeService {
     }
   }
 
-  private async createManagedWorktreeAfterLaunchPrepare(args: {
-    repoSelector: string
-    name: string
-    /** True only when `name` came from Orca's creature-name generator; gates retirement so a name
-     *  the user typed stays reusable. Absent for CLI and automation callers. */
-    nameWasGenerated?: boolean
-    baseBranch?: string
-    compareBaseRef?: string
-    branchNameOverride?: string
-    linkedIssue?: number | null
-    linkedPR?: number | null
-    linkedLinearIssue?: string
-    linkedLinearIssueWorkspaceId?: string | null
-    linkedLinearIssueOrganizationUrlKey?: string | null
-    linkedGitLabMR?: number | null
-    linkedGitLabIssue?: number | null
-    linkedBitbucketPR?: number | null
-    linkedAzureDevOpsPR?: number | null
-    linkedGiteaPR?: number | null
-    linkedWorkItem?: WorkspaceLinkedItem | null
-    linkedTaskSourceContext?: TaskSourceContext | null
-    comment?: string
-    displayName?: string
-    telemetrySource?: WorkspaceCreateTelemetrySource
-    workspaceStatus?: string
-    manualOrder?: number
-    sparseCheckout?: { directories: string[]; presetId?: string }
-    pushTarget?: GitPushTarget
-    runHooks?: boolean
-    activate?: boolean
-    /** Who the create's activation is addressed to. Defaults to 'all' so host/CLI callers keep
-     *  revealing on every surface; the RPC layer narrows it to 'caller' for paired clients. */
-    navigation?: RuntimeNavigationTarget
-    setupDecision?: 'run' | 'skip' | 'inherit'
-    awaitTerminalProvisioning?: boolean
-    observeSetupCompletion?: boolean
-    createdWithAgent?: TuiAgent
-    startupAgent?: TuiAgent
-    startupLaunchPreferences?: AgentLaunchPreferences
-    startupPrompt?: string
-    pendingFirstAgentMessageRename?: boolean
-    automationProvenance?: AutomationWorkspaceProvenance
-    cliProvenance?: CliWorkspaceProvenance
-    creatorProvenance?: Worktree['creatorProvenance']
-    startup?: WorktreeStartupLaunch
-    startupDraft?: string
-    startupDraftPaste?: WorktreeStartupDraftPaste
-    lineage?: WorktreeLineageInput
-    // The one host-atomic launch request shape (shared with pty.spawn,
-    // terminal.create, and session.tabs.createTerminal). When present the host
-    // IGNORES the client startup/createdWithAgent for the agent terminal and
-    // runs the two-stage transactional launch.
-    agentLaunch?: AgentLaunchSpawnRequest
-    agentLaunchClientKind?: AuthenticatedClientKind
-    // Surface-owned agent_started telemetry for a host-emitted interactive create
-    // (Option A: the host emits from the validated receipt, not the renderer).
-    // agent_kind + used_custom_agent are host-derived from the receipt — only the
-    // surface fields cross. Omitted for automation/orchestration/background creates,
-    // which must not emit agent_started (omission = no host emit).
-    agentLaunchTelemetry?: Pick<
-      NonNullable<WorktreeStartupLaunch['telemetry']>,
-      'launch_source' | 'request_kind'
-    >
-  },
-  repo: Repo,
-  createSettings: ReturnType<RuntimeStore['getSettings']>,
-  agentLaunchFinish: WorktreeCreateAgentLaunchPreparedOk | null
+  private async createManagedWorktreeAfterLaunchPrepare(
+    args: {
+      repoSelector: string
+      name: string
+      /** True only when `name` came from Orca's creature-name generator; gates retirement so a name
+       *  the user typed stays reusable. Absent for CLI and automation callers. */
+      nameWasGenerated?: boolean
+      baseBranch?: string
+      compareBaseRef?: string
+      branchNameOverride?: string
+      linkedIssue?: number | null
+      linkedPR?: number | null
+      linkedLinearIssue?: string
+      linkedLinearIssueWorkspaceId?: string | null
+      linkedLinearIssueOrganizationUrlKey?: string | null
+      linkedGitLabMR?: number | null
+      linkedGitLabIssue?: number | null
+      linkedBitbucketPR?: number | null
+      linkedAzureDevOpsPR?: number | null
+      linkedGiteaPR?: number | null
+      linkedWorkItem?: WorkspaceLinkedItem | null
+      linkedTaskSourceContext?: TaskSourceContext | null
+      comment?: string
+      displayName?: string
+      telemetrySource?: WorkspaceCreateTelemetrySource
+      workspaceStatus?: string
+      manualOrder?: number
+      sparseCheckout?: { directories: string[]; presetId?: string }
+      pushTarget?: GitPushTarget
+      runHooks?: boolean
+      activate?: boolean
+      /** Who the create's activation is addressed to. Defaults to 'all' so host/CLI callers keep
+       *  revealing on every surface; the RPC layer narrows it to 'caller' for paired clients. */
+      navigation?: RuntimeNavigationTarget
+      setupDecision?: 'run' | 'skip' | 'inherit'
+      awaitTerminalProvisioning?: boolean
+      observeSetupCompletion?: boolean
+      createdWithAgent?: TuiAgent
+      startupAgent?: TuiAgent
+      startupLaunchPreferences?: AgentLaunchPreferences
+      startupPrompt?: string
+      pendingFirstAgentMessageRename?: boolean
+      automationProvenance?: AutomationWorkspaceProvenance
+      cliProvenance?: CliWorkspaceProvenance
+      creatorProvenance?: Worktree['creatorProvenance']
+      startup?: WorktreeStartupLaunch
+      startupDraft?: string
+      startupDraftPaste?: WorktreeStartupDraftPaste
+      lineage?: WorktreeLineageInput
+      // The one host-atomic launch request shape (shared with pty.spawn,
+      // terminal.create, and session.tabs.createTerminal). When present the host
+      // IGNORES the client startup/createdWithAgent for the agent terminal and
+      // runs the two-stage transactional launch.
+      agentLaunch?: AgentLaunchSpawnRequest
+      agentLaunchClientKind?: AuthenticatedClientKind
+      /** Authenticated paired device behind `agentLaunchClientKind`. Host-set at the
+       *  RPC boundary (never client JSON); narrows the admission principal so one
+       *  phone's capacity and recovery rows are its own. */
+      agentLaunchDeviceId?: string
+      // Surface-owned agent_started telemetry for a host-emitted interactive create
+      // (Option A: the host emits from the validated receipt, not the renderer).
+      // agent_kind + used_custom_agent are host-derived from the receipt — only the
+      // surface fields cross. Omitted for automation/orchestration/background creates,
+      // which must not emit agent_started (omission = no host emit).
+      agentLaunchTelemetry?: Pick<
+        NonNullable<WorktreeStartupLaunch['telemetry']>,
+        'launch_source' | 'request_kind'
+      >
+    },
+    repo: Repo,
+    createSettings: ReturnType<RuntimeStore['getSettings']>,
+    agentLaunchFinish: WorktreeCreateAgentLaunchPreparedOk | null
   ): Promise<CreatedWorktreeResult> {
+    // The public entry guarded this, but the narrowing does not cross the call.
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
     const requestedAgent = args.startupAgent ?? args.createdWithAgent
     const requestedAgentEnabled =
       requestedAgent !== undefined
@@ -25809,7 +25953,7 @@ export class OrcaRuntimeService {
       }
     }
 
-    let setup: CreateWorktreeResult['setup']
+    let setup: CreatedWorktreeResult['setup']
     let warning: string | undefined = includeCopyWarning
     // Why: CLI-created worktrees do not have a renderer preview to mismatch
     // against. Trust is granted by the direct CLI invocation (`--run-hooks`),
@@ -27204,7 +27348,12 @@ export class OrcaRuntimeService {
     targetBranch?: string
     isCrossRepository?: boolean
   }): Promise<
-    { baseBranch: string; compareBaseRef?: string; pushTarget?: GitPushTarget } | { error: string }
+    | {
+        baseBranch: string
+        compareBaseRef?: string
+        pushTarget?: GitPushTarget
+      }
+    | { error: string }
   > {
     if (!this.store) {
       throw new Error('runtime_unavailable')
@@ -28413,16 +28562,15 @@ export class OrcaRuntimeService {
     paths: readonly (string | null | undefined)[],
     repo: Repo | null
   ): string | null {
-    if (platform === process.platform) {
-      return null
-    }
+    // A UNC path names its distro outright, so it classifies even when the surface's
+    // platform matches this host's (a Windows-host repo under \\wsl$).
     for (const path of paths) {
       const distro = path ? parseWslUncPath(path)?.distro : undefined
       if (distro) {
         return distro
       }
     }
-    if (!repo || repo.connectionId) {
+    if (platform === process.platform || !repo || repo.connectionId) {
       return null
     }
     const resolution = resolveLocalProjectRuntimeForRepo(this.requireStore(), repo)
@@ -28632,6 +28780,9 @@ export class OrcaRuntimeService {
             clientMutationId: null,
             requestedAgent: prepared.requestedAgent,
             intent: intent.kind,
+            // The reservation's holder; persisted into the pending snapshot so a
+            // restart rebuilds capacity into this device's bucket, not the kind's.
+            principal,
             execute: () =>
               executeWorktreeAgentLaunch(deps, scopedContext, authoritativePaths, {
                 reservationId,
@@ -28751,7 +28902,11 @@ export class OrcaRuntimeService {
    *  may still run). Authorization is authenticated worktree access to the
    *  attempt's worktree; expectedOperationId is an anti-race guard, not a secret. */
   async forgetBackgroundAgentLaunch(
-    args: { attemptId: string; expectedOperationId: string; clientMutationId: string },
+    args: {
+      attemptId: string
+      expectedOperationId: string
+      clientMutationId: string
+    },
     clientKind: AuthenticatedClientKind,
     deviceId?: string
   ): Promise<ForgetUnknownAgentLaunchResult> {
@@ -28930,6 +29085,7 @@ export class OrcaRuntimeService {
         clientMutationId: input.clientMutationId,
         requestedAgent: prepared.requestedAgent,
         intent: 'background',
+        principal,
         priorFailureId: input.priorFailureId,
         execute: () =>
           executeWorktreeAgentLaunch(deps, context, authoritativePaths, {
@@ -29019,7 +29175,11 @@ export class OrcaRuntimeService {
    *  worktree scopes, excluding the anchor. */
   private enumerateBulkForgetWorktreeSiblings(
     clientKind: AuthenticatedClientKind,
-    opts: { executionHostId: AgentLaunchExecutionHostId; excludeScope: string; deviceId?: string }
+    opts: {
+      executionHostId: AgentLaunchExecutionHostId
+      excludeScope: string
+      deviceId?: string
+    }
   ): string[] {
     const principal = agentLaunchAdmissionPrincipal(clientKind, opts.deviceId)
     const store = this.requireStore()
@@ -29286,14 +29446,18 @@ export class OrcaRuntimeService {
           // Contract: keep an existing launch_state_unknown failureId stable
           // across idempotent re-runs (ReconcileScopePersistence).
           const existing = run.agentLaunchFailure
-          store.updateAutomationRun({
+          // The reconciler supplies an ALREADY-minted wrapper, so this write must
+          // go in as the persist input rather than the plain wire failure the
+          // dispatch path stamps.
+          const update: AutomationRunPersistInput = {
             runId,
             status: run.status,
             agentLaunchFailure:
               existing?.code === 'launch_state_unknown'
                 ? { ...failure, failureId: existing.failureId }
                 : failure
-          })
+          }
+          store.updateAutomationRun(update)
         }
       }
     }
@@ -29347,12 +29511,14 @@ export class OrcaRuntimeService {
    *  authoritative) never answers at all. */
   private hostEchoesLaunchTokens(hostId: AgentLaunchExecutionHostId): boolean {
     const owner = this.connectionOwnerForExecutionHost(hostId)
-    const provider = owner
-      ? owner.connectionId
-        ? this.getSshProviderFn?.(owner.connectionId)
-        : this.getLocalProvider()
-      : null
-    return provider?.providesLaunchTokenListings?.() !== false
+    if (owner?.connectionId) {
+      // A dropped SSH connection answers nothing, and silence is not an echo: counting
+      // it as authoritative lets a missing token settle a live agent as absent.
+      const provider = this.getSshProviderFn?.(owner.connectionId)
+      return provider ? provider.providesLaunchTokenListings?.() !== false : false
+    }
+    // The in-process local provider never answers at all, so absence means yes here.
+    return (owner ? this.getLocalProvider() : null)?.providesLaunchTokenListings?.() !== false
   }
 
   /** The worktree a launch's terminal must belong to, by intent. */
@@ -29546,6 +29712,7 @@ export class OrcaRuntimeService {
         clientMutationId: input.clientMutationId,
         requestedAgent: prepared.requestedAgent,
         intent: 'interactive',
+        principal,
         priorFailureId: input.priorFailureId,
         execute: () =>
           executeWorktreeAgentLaunch(deps, context, authoritativePaths, {
@@ -29713,7 +29880,10 @@ export class OrcaRuntimeService {
   async finishLocalWorktreeCreateAgentLaunch(
     prepared: WorktreeCreateAgentLaunchPreparedOk,
     worktreeId: string,
-    authoritativePaths: { repoPath: string | null; worktreePath: string | null },
+    authoritativePaths: {
+      repoPath: string | null
+      worktreePath: string | null
+    },
     setup: CreatedWorktreeResult['setup']
   ): Promise<LocalWorktreeCreateAgentLaunchFinished> {
     let wrappedSetupCommand: string | undefined
@@ -29796,6 +29966,9 @@ export class OrcaRuntimeService {
           startupCommand: {
             command: resolution.fields.command,
             ...(resolution.fields.env ? { env: resolution.fields.env } : {}),
+            ...(resolution.fields.envToDelete
+              ? { envToDelete: resolution.fields.envToDelete }
+              : {}),
             ...(resolution.fields.launchConfig
               ? { launchConfig: resolution.fields.launchConfig }
               : {})
@@ -29822,8 +29995,11 @@ export class OrcaRuntimeService {
           ...(resolution.fields.env ? { env: resolution.fields.env } : {}),
           launchConfig: resolution.fields.launchConfig,
           launchAgent: resolution.fields.launchAgent,
+          launchToken: resolution.fields.launchToken,
           ...(resolution.fields.startupCommandDelivery
-            ? { startupCommandDelivery: resolution.fields.startupCommandDelivery }
+            ? {
+                startupCommandDelivery: resolution.fields.startupCommandDelivery
+              }
             : {})
         }
       }
@@ -29888,7 +30064,12 @@ export class OrcaRuntimeService {
 
       const handler = (
         event: Electron.IpcMainEvent,
-        r: { requestId: string; tabId?: string; title?: string; error?: string }
+        r: {
+          requestId: string
+          tabId?: string
+          title?: string
+          error?: string
+        }
       ): void => {
         if (event.sender !== win.webContents || r.requestId !== requestId) {
           return
@@ -30284,7 +30465,7 @@ export class OrcaRuntimeService {
     return [...byWorktreeId.values()]
   }
 
- /** Resolve a host-owned agentLaunch for a terminal workspace through the launch
+  /** Resolve a host-owned agentLaunch for a terminal workspace through the launch
    *  boundary, marking workspace trust in the boundary's pre-admission preflight
    *  hook (driven by the resolved base agent's preflightTrust preset). */
   private async resolveWorkspaceAgentLaunch(
@@ -30324,11 +30505,20 @@ export class OrcaRuntimeService {
       if (!session) {
         return {
           kind: 'failed',
-          outcome: { status: 'failed', failure: { code: 'invalid_launch_snapshot' } }
+          outcome: {
+            status: 'failed',
+            failure: { code: 'invalid_launch_snapshot' }
+          }
         }
       }
+      // The echoed entry carries identity only: the Codex account repin the
+      // client computed cannot ride over it, so redo it against this host's
+      // own freshly discovered row before assembling anything.
+      const preparedSession = await applyAiVaultResumePreparation(session, (prepareArgs) =>
+        this.prepareAiVaultSessionResume(prepareArgs)
+      )
       const resolution = resolveRevalidatedVaultResume({
-        session,
+        session: preparedSession,
         sessionRecordStore: getHostAgentSessionRecordStore(),
         targetExecutionHostId: executionHostIdForDescriptor(descriptor),
         targetPlatform: platformForDescriptor(descriptor),
@@ -30341,6 +30531,9 @@ export class OrcaRuntimeService {
           fields: {
             command: resolution.startup.command,
             ...(resolution.startup.env ? { env: resolution.startup.env } : {}),
+            ...(resolution.startup.envToDelete
+              ? { envToDelete: resolution.startup.envToDelete }
+              : {}),
             ...(resolution.startup.launchConfig
               ? { launchConfig: resolution.startup.launchConfig }
               : {}),
@@ -30442,6 +30635,8 @@ export class OrcaRuntimeService {
       ...this.pickTerminalPresentationOptions(opts),
       command: fields.command,
       ...(fields.env ? { env: fields.env } : {}),
+      // A real-home Codex resume must UNSET the home Orca's own process exports.
+      ...(fields.envToDelete ? { envToDelete: fields.envToDelete } : {}),
       ...(fields.launchConfig ? { launchConfig: fields.launchConfig } : {}),
       ...(fields.launchNotices ? { launchNotices: fields.launchNotices } : {})
     }
@@ -30578,7 +30773,12 @@ export class OrcaRuntimeService {
   private getAgentSessionExecutionNamespace(
     workspace: TerminalWorkspaceLaunchScope,
     agent: TuiAgent
-  ): { machine: string; principal: string; container: string; providerRoot: string } | null {
+  ): {
+    machine: string
+    principal: string
+    container: string
+    providerRoot: string
+  } | null {
     if (workspace.connectionId) {
       // Why: SSH target ids are not execution-namespace proof. Preserve the
       // legacy launch until an attested route can safely participate in claims.
@@ -31002,6 +31202,16 @@ export class OrcaRuntimeService {
       const agentLaunchAdmissionToken =
         resolution.kind === 'launched' ? resolution.admissionToken : null
       const agentLaunchReceipt = resolution.kind === 'launched' ? resolution.receipt : null
+      let agentLaunchSettled = false
+      // Every exit between admission and registration settles exactly once;
+      // a stranded token holds admission capacity until the process restarts.
+      const settleAgentLaunchOnce = (settlement: 'registered' | 'failed'): void => {
+        if (agentLaunchAdmissionToken === null || agentLaunchSettled) {
+          return
+        }
+        agentLaunchSettled = true
+        getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchAdmissionToken, settlement)
+      }
       let ptySpawnCommitReported = false
       const reportPtySpawnCommitted = (): void => {
         if (ptySpawnCommitReported) {
@@ -31196,9 +31406,7 @@ export class OrcaRuntimeService {
             persistHostSessionBinding: true
           })
         } catch (error) {
-          if (agentLaunchAdmissionToken !== null) {
-            getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchAdmissionToken, 'failed')
-          }
+          settleAgentLaunchOnce('failed')
           throw error
         } finally {
           releaseStablePaneCreate?.()
@@ -31321,7 +31529,7 @@ export class OrcaRuntimeService {
           warning = createTerminalRevealWarning(handle)
         }
         if (agentLaunchAdmissionToken !== null) {
-          getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchAdmissionToken, 'registered')
+          settleAgentLaunchOnce('registered')
           if (agentLaunchReceipt) {
             registerHostSessionLaunch({
               boundary: getHostAgentLaunchBoundary(),
@@ -31359,6 +31567,10 @@ export class OrcaRuntimeService {
             ? { agentLaunch: { status: 'launched' as const, receipt: agentLaunchReceipt } }
             : {})
         }
+      } catch (error) {
+        // Pre-spawn work (pane adoption, agent-teams plan build) throws here too.
+        settleAgentLaunchOnce('failed')
+        throw error
       } finally {
         releaseStablePaneCreate()
       }
@@ -31401,7 +31613,12 @@ export class OrcaRuntimeService {
 
       const handler = (
         event: Electron.IpcMainEvent,
-        r: { requestId: string; tabId?: string; title?: string; error?: string }
+        r: {
+          requestId: string
+          tabId?: string
+          title?: string
+          error?: string
+        }
       ): void => {
         if (event.sender !== win.webContents || r.requestId !== requestId) {
           return
@@ -31702,9 +31919,14 @@ export class OrcaRuntimeService {
       clientMutationId?: string
       agentLaunch?: AgentLaunchInput
       clientKind?: AuthenticatedClientKind
+      // The paired device the caller authenticated as; scopes the launch
+      // admission principal per device instead of per client kind.
+      deviceId?: string
       signal?: AbortSignal
     } = {}
-  ): Promise<RuntimeMobileSessionCreateTerminalResult> {
+  ): Promise<
+    RuntimeMobileSessionCreateTerminalResult | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
+  > {
     const navigation = opts.navigation ?? 'all'
     const select = opts.select ?? opts.activate !== false
     const runOpts = {
@@ -31712,7 +31934,9 @@ export class OrcaRuntimeService {
       activate: select && navigationTargetsHost(navigation)
     }
     const mutationId = opts.clientMutationId
-    let result: RuntimeMobileSessionCreateTerminalResult
+    let result:
+      | RuntimeMobileSessionCreateTerminalResult
+      | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
     if (!mutationId) {
       result = await this.runCreateMobileSessionTerminal(worktreeSelector, runOpts)
     } else {
@@ -31737,6 +31961,10 @@ export class OrcaRuntimeService {
         }, drop)
       }
       result = await run
+    }
+    // A pre-spawn typed failure created no tab; there is nothing to navigate to.
+    if (!('tab' in result)) {
+      return result
     }
     if (select) {
       const worktreeId =
@@ -31772,25 +32000,130 @@ export class OrcaRuntimeService {
       clientMutationId?: string
       agentLaunch?: AgentLaunchInput
       clientKind?: AuthenticatedClientKind
+      deviceId?: string
       signal?: AbortSignal
     } = {}
-  ): Promise<RuntimeMobileSessionCreateTerminalResult> {
-    const pairedCreate = Boolean(opts.clientNavigationId)
+  ): Promise<
+    RuntimeMobileSessionCreateTerminalResult | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
+  > {
+    // The host owns the launch (U3). Resolving only the client-authored command
+    // here is what let a phone's vault resume open a bare login shell and still
+    // report success, because `agentLaunch` carries no `command` at all.
     const graphEpoch = this.captureReadyGraphEpoch()
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(worktreeSelector)
+    // A stale anchor is a bad request: reject it before the resolver admits a launch.
+    const afterDesktopTabId = this.resolveMobileTerminalInsertionAnchor(
+      workspace.id,
+      opts.afterTabId
+    )
+    const startup = await this.resolveMobileTerminalStartup(workspace, opts)
+    if (startup.kind === 'failed') {
+      return { agentLaunch: startup.outcome }
+    }
+    let surface: RuntimeMobileSessionCreateTerminalResult
+    try {
+      surface = await this.spawnMobileSessionTerminalForStartup(
+        workspace,
+        opts,
+        startup.startupCommand,
+        graphEpoch,
+        afterDesktopTabId
+      )
+    } catch (error) {
+      if (startup.admissionToken !== null) {
+        getHostAgentLaunchBoundary().settleAgentLaunch(startup.admissionToken, 'failed')
+      }
+      throw error
+    }
+    return await this.finalizeMobileTerminalLaunch(workspace.id, surface, startup)
+  }
+
+  /** Settle a host-resolved mobile launch once its surface exists: the admission
+   *  token, the notices the client reads back, the private session record resume
+   *  attribution rides, and any post-ready prompt. A plain command resolution
+   *  (no admission) passes straight through. */
+  private async finalizeMobileTerminalLaunch(
+    worktreeId: string,
+    surface: RuntimeMobileSessionCreateTerminalResult,
+    startup: MobileTerminalStartupSettlement
+  ): Promise<RuntimeMobileSessionCreateTerminalResult> {
+    const receipt = startup.receipt
+    if (startup.admissionToken !== null) {
+      getHostAgentLaunchBoundary().settleAgentLaunch(startup.admissionToken, 'registered')
+    }
+    const notices =
+      startup.launchNotices ??
+      (receipt && receipt.notices.length > 0
+        ? { launchToken: receipt.launchToken, notices: receipt.notices }
+        : undefined)
+    if (notices) {
+      await this.commitSuccessfulLaunchNotices(
+        worktreeId,
+        surface.tab.parentTabId,
+        notices,
+        surface.tab.ptyId ?? null
+      )
+    }
+    const handle = this.getMobileSessionTerminalHandle(worktreeId, surface.tab)
+    if (startup.admissionToken !== null && receipt) {
+      // The renderer spawned from a pre-resolved command (no client agentLaunch),
+      // so pty.ts never registers this launch — stage its attribution here.
+      registerHostSessionLaunch({
+        boundary: getHostAgentLaunchBoundary(),
+        store: getHostAgentSessionRecordStore(),
+        launchToken: startup.admissionToken,
+        worktreeId,
+        receipt,
+        paneKey: makePaneKey(surface.tab.parentTabId, surface.tab.leafId),
+        ...(handle ? { terminalId: handle } : {})
+      })
+    }
+    if (startup.kind === 'launched' && startup.postReadyPrompt && handle) {
+      this.deliverTerminalLaunchPrompt(handle, startup.receipt.baseAgent, startup.postReadyPrompt)
+    }
+    return {
+      ...surface,
+      ...(receipt ? { agentLaunch: { status: 'launched' as const, receipt } } : {})
+    }
+  }
+
+  /** Resolves the desktop tab a mobile create inserts after. Runs before launch
+   *  resolution so a stale anchor rejects without admitting anything. */
+  private resolveMobileTerminalInsertionAnchor(
+    worktreeId: string,
+    afterTabId: string | undefined
+  ): string | undefined {
+    this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
+    if (!afterTabId) {
+      return undefined
+    }
+    const anchor = this.mobileSessionTabsByWorktree
+      .get(worktreeId)
+      ?.tabs.find((tab) => tab.id === afterTabId)
+    if (!anchor) {
+      throw new Error('after_tab_not_found')
+    }
+    return anchor.type === 'terminal' ? anchor.parentTabId : anchor.id
+  }
+
+  private async spawnMobileSessionTerminalForStartup(
+    workspace: TerminalWorkspaceLaunchScope,
+    opts: {
+      afterTabId?: string
+      targetGroupId?: string
+      cwd?: string
+      viewMode?: 'terminal' | 'chat'
+      activate?: boolean
+      clientNavigationId?: string
+      signal?: AbortSignal
+    },
+    startupCommand: MobileTerminalStartupCommand,
+    graphEpoch: number,
+    afterDesktopTabId: string | undefined
+  ): Promise<RuntimeMobileSessionCreateTerminalResult> {
+    const pairedCreate = Boolean(opts.clientNavigationId)
     const worktreeId = workspace.id
     const cwd = this.resolveWorkspaceTerminalStartupCwd(workspace, opts.cwd)
-    this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
-    let afterDesktopTabId: string | undefined
-    if (opts.afterTabId) {
-      const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
-      const anchor = snapshot?.tabs.find((tab) => tab.id === opts.afterTabId)
-      if (!anchor) {
-        throw new Error('after_tab_not_found')
-      }
-      afterDesktopTabId = anchor.type === 'terminal' ? anchor.parentTabId : anchor.id
-    }
-    const startupCommand = await this.resolveMobileSessionTerminalCommand(workspace, opts)
     this.assertStableReadyGraph(graphEpoch)
     if (opts.signal?.aborted) {
       throw new Error('client_disconnected')
@@ -31808,6 +32141,7 @@ export class OrcaRuntimeService {
           envToDelete: startupCommand.envToDelete,
           startupCommandDelivery: startupCommand.startupCommandDelivery,
           launchAgent: startupCommand.launchAgent,
+          launchToken: startupCommand.launchToken,
           viewMode: opts.viewMode,
           targetGroupId: opts.targetGroupId,
           launchConfig: startupCommand.launchConfig,
@@ -31839,7 +32173,12 @@ export class OrcaRuntimeService {
 
         const handler = (
           event: Electron.IpcMainEvent,
-          r: { requestId: string; tabId?: string; title?: string; error?: string }
+          r: {
+            requestId: string
+            tabId?: string
+            title?: string
+            error?: string
+          }
         ): void => {
           if (event.sender !== win.webContents || r.requestId !== requestId) {
             return
@@ -31866,6 +32205,7 @@ export class OrcaRuntimeService {
           ...(startupCommand.envToDelete ? { envToDelete: startupCommand.envToDelete } : {}),
           ...(startupCommand.launchConfig ? { launchConfig: startupCommand.launchConfig } : {}),
           ...(startupCommand.launchAgent ? { launchAgent: startupCommand.launchAgent } : {}),
+          ...(startupCommand.launchToken ? { launchToken: startupCommand.launchToken } : {}),
           ...(opts.viewMode ? { viewMode: opts.viewMode } : {}),
           startupCommandDelivery: startupCommand.startupCommandDelivery,
           source: 'runtime-session',
@@ -31931,8 +32271,12 @@ export class OrcaRuntimeService {
             env: startupCommand.env,
             envToDelete: startupCommand.envToDelete,
             startupCommandDelivery: startupCommand.startupCommandDelivery,
-            identity: { tabId: pendingSurface.tab.parentTabId, leafId: pendingSurface.tab.leafId },
+            identity: {
+              tabId: pendingSurface.tab.parentTabId,
+              leafId: pendingSurface.tab.leafId
+            },
             launchAgent: startupCommand.launchAgent,
+            launchToken: startupCommand.launchToken,
             viewMode: opts.viewMode,
             targetGroupId: opts.targetGroupId,
             launchConfig: startupCommand.launchConfig,
@@ -32062,6 +32406,9 @@ export class OrcaRuntimeService {
       startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
       identity?: { tabId: string; leafId: string; sessionId?: string }
       launchAgent?: TuiAgent
+      /** Host-minted launch token; without it the spawn path invents its own and
+       *  the receipt's token matches no live PTY. */
+      launchToken?: string
       viewMode?: 'terminal' | 'chat'
       targetGroupId?: string
       launchConfig?: SleepingAgentLaunchConfig
@@ -32082,6 +32429,7 @@ export class OrcaRuntimeService {
       envToDelete: opts.envToDelete,
       ...(opts.launchConfig ? { launchConfig: opts.launchConfig } : {}),
       ...(opts.launchAgent ? { launchAgent: opts.launchAgent } : {}),
+      ...(opts.launchToken ? { launchToken: opts.launchToken } : {}),
       ...(opts.viewMode ? { viewMode: opts.viewMode } : {}),
       startupCommandDelivery: opts.startupCommandDelivery,
       ...(opts.identity
@@ -32192,7 +32540,11 @@ export class OrcaRuntimeService {
   private waitForMobileTerminalSurface(
     worktreeId: string,
     parentTabId: string,
-    options: { timeoutMs?: number; requireReady?: boolean; signal?: AbortSignal } = {}
+    options: {
+      timeoutMs?: number
+      requireReady?: boolean
+      signal?: AbortSignal
+    } = {}
   ): Promise<RuntimeMobileSessionCreateTerminalResult> {
     const timeoutMs = options.timeoutMs ?? MOBILE_TERMINAL_SURFACE_TIMEOUT_MS
     const existing = this.findMobileTerminalSurface(worktreeId, parentTabId, options)
@@ -36199,7 +36551,8 @@ export class OrcaRuntimeService {
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
+      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
+      ...this.resolveTerminalAttribution(pty)
     }
   }
 
@@ -36999,6 +37352,9 @@ export class OrcaRuntimeService {
         ...(tab.ptyId ? { ptyId: tab.ptyId } : {}),
         ...(tab.terminalTheme ? { terminalTheme: tab.terminalTheme } : {}),
         ...(launchAgent ? { launchAgent } : {}),
+        // Why: the dismissal RPC is client-driven, so the notice must reach the
+        // client projection or there is nothing to dismiss.
+        ...(tab.launchNotices ? { launchNotices: tab.launchNotices } : {}),
         ...clientAgentStatus,
         ...(turnCompletedAt !== undefined ? { turnCompletedAt } : {}),
         ...(tab.parentLayout ? { parentLayout: tab.parentLayout } : {}),
@@ -38178,7 +38534,8 @@ export class OrcaRuntimeService {
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
+      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
+      ...this.resolveTerminalAttribution(pty)
     }
   }
 
@@ -40282,9 +40639,11 @@ export class OrcaRuntimeService {
     return project.teams?.some((team) => team.id === teamId) === true
   }
 
-  private async getLinearViewerForWrite(
-    workspaceId: string
-  ): Promise<{ id: string; displayName?: string | null; avatarUrl?: string | null }> {
+  private async getLinearViewerForWrite(workspaceId: string): Promise<{
+    id: string
+    displayName?: string | null
+    avatarUrl?: string | null
+  }> {
     try {
       return await getLinearViewerForWorkspaceOrThrow(workspaceId)
     } catch (error) {
@@ -42764,7 +43123,13 @@ function parseAnsiControlSequence(
   value: string,
   escapeIndex: number
 ):
-  | { kind: 'csi'; final: string; params: string; firstParam: number | null; endIndex: number }
+  | {
+      kind: 'csi'
+      final: string
+      params: string
+      firstParam: number | null
+      endIndex: number
+    }
   | {
       kind: 'other'
       endIndex: number
@@ -42948,10 +43313,20 @@ function terminalReadLimit(limit: number | undefined, defaultLimit: number): num
 function trimTerminalPreviewToCharacterBudget(
   lines: string[],
   characterBudget: number
-): { tail: string[]; limited: boolean; omittedLineCount: number; slicedFirstLine: boolean } {
+): {
+  tail: string[]
+  limited: boolean
+  omittedLineCount: number
+  slicedFirstLine: boolean
+} {
   let totalCharacters = lines.reduce((sum, line) => sum + line.length, 0)
   if (totalCharacters <= characterBudget) {
-    return { tail: lines, limited: false, omittedLineCount: 0, slicedFirstLine: false }
+    return {
+      tail: lines,
+      limited: false,
+      omittedLineCount: 0,
+      slicedFirstLine: false
+    }
   }
 
   let omittedLineCount = 0
@@ -43388,7 +43763,10 @@ function findTerminalWaitBlockedSignal(
   if (!TERMINAL_WAIT_BLOCKED_SENTINEL_RE.test(normalized)) {
     return null
   }
-  const candidates: { reason: RuntimeTerminalWaitBlockedReason; index: number }[] = []
+  const candidates: {
+    reason: RuntimeTerminalWaitBlockedReason
+    index: number
+  }[] = []
   const updateIndex = normalized.lastIndexOf('update available')
   if (updateIndex !== -1 && normalized.includes('press enter to continue', updateIndex)) {
     candidates.push({ reason: 'codex-update-prompt', index: updateIndex })
@@ -43725,7 +44103,12 @@ function indexPersistedPtySurfaceBindings(
 > {
   const bindingByPtyId = new Map<
     string,
-    { worktreeId: string; tabId: string; paneKey: string; incarnationId: string }
+    {
+      worktreeId: string
+      tabId: string
+      paneKey: string
+      incarnationId: string
+    }
   >()
   const ambiguousPtyIds = new Set<string>()
   for (const [worktreeId, tabs] of Object.entries(session?.tabsByWorktree ?? {})) {
@@ -43946,7 +44329,10 @@ function getLeafWorktreeStatus(
 }
 
 function classifyLatestAgentTitle(
-  ...titles: { title: string | null | undefined; updatedAt: number | null | undefined }[]
+  ...titles: {
+    title: string | null | undefined
+    updatedAt: number | null | undefined
+  }[]
 ): 'agent' | 'management' | 'neutral' {
   return classifyAgentTitle(getLatestAgentCandidateTitle(...titles))
 }
@@ -44056,13 +44442,19 @@ function terminalTitleBlocksExplicitAgentStatus(title: string | null): boolean {
 }
 
 function getLatestAgentCandidateTitle(
-  ...titles: { title: string | null | undefined; updatedAt: number | null | undefined }[]
+  ...titles: {
+    title: string | null | undefined
+    updatedAt: number | null | undefined
+  }[]
 ): string | null {
   return getLatestAgentCandidateTitleInfo(...titles)?.title ?? null
 }
 
 function getLatestAgentCandidateTitleInfo(
-  ...titles: { title: string | null | undefined; updatedAt: number | null | undefined }[]
+  ...titles: {
+    title: string | null | undefined
+    updatedAt: number | null | undefined
+  }[]
 ): { title: string; updatedAt: number } | null {
   let latest: { title: string; updatedAt: number } | null = null
   for (const candidate of titles) {

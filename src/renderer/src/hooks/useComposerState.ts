@@ -3818,6 +3818,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         {
           linkedWorkItem: toFolderWorkspaceLinkedTask(submitLinkedWorkItem),
           linkedTaskSourceContext: taskSourceContext,
+          ...(nameWasGenerated ? { nameWasGenerated: true } : {}),
           agentLaunch,
           agentLaunchTelemetry: {
             launch_source:

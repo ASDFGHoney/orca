@@ -14,7 +14,10 @@ import type {
 import type { AgentKind, LaunchSource, RequestKind } from '../../shared/telemetry-events'
 import type { AgentLaunchNoticeCode } from '../../shared/agent-launch-contract'
 import type { PersistedLaunchNoticeState } from '../../shared/agent-launch-contract'
-import type { AgentLaunchSpawnOutcome } from '../../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchInput,
+  AgentLaunchSpawnOutcome
+} from '../../shared/agent-launch-spawn-request'
 import type { TerminalSideEffectBatch } from '../../shared/terminal-side-effect-facts'
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { TuiAgent } from '../../shared/tui-agent'
@@ -36,6 +39,10 @@ export type PtyApi = {
     envToDelete?: string[]
     command?: string
     commandDelivery?: 'renderer' | 'provider'
+    // Host-owned launch request (U3): identity/session + prompt policy only. When
+    // set, main resolves the command and mints the token, superseding the
+    // command/launchConfig/launchToken/launchAgent fields.
+    agentLaunch?: AgentLaunchInput
     launchConfig?: SleepingAgentLaunchConfig
     resumeProviderSession?: AgentProviderSessionMetadata
     launchToken?: string
@@ -54,31 +61,34 @@ export type PtyApi = {
     tabId?: string
     leafId?: string
     // Why: main fires `agent_started` only on spawn success, so launch metadata rides this field (telemetry-plan.md §Agent launch semantics).
-    telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+    // agent_kind is optional because the host-resolved agentLaunch path overwrites
+    // it from the validated receipt (a custom id has no client-known kind); the
+    // surface still owns launch_source/request_kind.
+    telemetry?: { agent_kind?: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
   }) => Promise<
     | {
-    id: string
-    launchAgent?: TuiAgent
-    launchConfig?: SleepingAgentLaunchConfig
-    snapshot?: string
-    snapshotCols?: number
-    snapshotRows?: number
-    snapshotPrefixAnsi?: string
-    snapshotFrameAnsi?: string
-    snapshotFrameRestoreAnsi?: string
-    snapshotKittyKeyboardFlags?: number
-    snapshotSeq?: number
-    isReattach?: boolean
-    isAlternateScreen?: boolean
-    replay?: string
-    sessionExpired?: boolean
-    coldRestore?: { scrollback: string; cwd: string; cols?: number; rows?: number }
-    startupCwdFallback?: { kind: 'worktree'; cwd: string }
-    agentResumeUnavailable?: true
-    agentLaunch?: Extract<AgentLaunchSpawnOutcome, { status: 'launched' }>
-    followupPrompt?: string
-    launchNotices?: PersistedLaunchNoticeState
-  }
+        id: string
+        launchAgent?: TuiAgent
+        launchConfig?: SleepingAgentLaunchConfig
+        snapshot?: string
+        snapshotCols?: number
+        snapshotRows?: number
+        snapshotPrefixAnsi?: string
+        snapshotFrameAnsi?: string
+        snapshotFrameRestoreAnsi?: string
+        snapshotKittyKeyboardFlags?: number
+        snapshotSeq?: number
+        isReattach?: boolean
+        isAlternateScreen?: boolean
+        replay?: string
+        sessionExpired?: boolean
+        coldRestore?: { scrollback: string; cwd: string; cols?: number; rows?: number }
+        startupCwdFallback?: { kind: 'worktree'; cwd: string }
+        agentResumeUnavailable?: true
+        agentLaunch?: Extract<AgentLaunchSpawnOutcome, { status: 'launched' }>
+        followupPrompt?: string
+        launchNotices?: PersistedLaunchNoticeState
+      }
     | { agentLaunch: AgentLaunchSpawnOutcome }
   >
   write: (id: string, data: string) => void

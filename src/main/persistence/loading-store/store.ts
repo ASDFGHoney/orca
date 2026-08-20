@@ -22,8 +22,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import type {
   Automation,
   AutomationCreateInput,
-  AutomationDispatchResult,
   AutomationRun,
+  AutomationRunPersistInput,
   AutomationRunTrigger,
   AutomationUpdateInput
 } from '../../../shared/automations-types'
@@ -842,6 +842,10 @@ export class Store {
         })
         if (agentCatalogMigration.schemaNewerThanSupported) {
           this.agentCatalogSchemaTooNew = agentCatalogMigration.schemaNewerThanSupported
+          // Why: the in-memory model is v1, produced by normalizers that drop unknown
+          // fields. Any write would rewrite the whole v2 file from it and truncate the
+          // profile. Only two authoring services consult the flag; freezing stops the rest.
+          this.freezeWrites()
         } else if (agentCatalogMigration.didMigrate || agentCatalogMigration.backupError) {
           this.loadNeedsSave = this.loadNeedsSave || agentCatalogMigration.didMigrate
           this.agentCatalogMigrationError = agentCatalogMigration.backupError ?? null
@@ -2480,7 +2484,7 @@ export class Store {
     )
   }
 
-  updateAutomationRun(result: AutomationDispatchResult): AutomationRun {
+  updateAutomationRun(result: AutomationRunPersistInput): AutomationRun {
     return updateAutomationRunOperation(this.getAutomationRunOperations(), result)
   }
 
@@ -2697,6 +2701,7 @@ export class Store {
     })
     if (migration.schemaNewerThanSupported) {
       this.agentCatalogSchemaTooNew = migration.schemaNewerThanSupported
+      this.freezeWrites()
       this.agentCatalogMigrationError = null
       this.preV1RawContentsAwaitingBackup = null
       return {
@@ -2791,13 +2796,15 @@ export class Store {
     updates: Partial<GlobalSettings>,
     options: { notifyListeners?: boolean; originWebContentsId?: number } = {}
   ): GlobalSettings {
-    if (this.writesFrozen) {
-      throw new Error('Cannot durably persist settings while writes are frozen')
-    }
+    // Order matters: a too-new profile also freezes writes, and that specific
+    // reason is what the settings UI surfaces to the user.
     if (this.agentCatalogSchemaTooNew) {
       throw new Error(
         'Agent catalog schema is newer than this build supports; profile is read-only'
       )
+    }
+    if (this.writesFrozen) {
+      throw new Error('Cannot durably persist settings while writes are frozen')
     }
     const previousSettings = this.state.settings
     const settings = this.updateSettings(updates, { notifyListeners: false })
@@ -3993,8 +4000,13 @@ export class Store {
     }
   }
 
-  /** Re-enable writes after a failed recovery-point restore. */
+  /** Re-enable writes after a failed recovery-point restore. Refuses to lift a
+   *  schema-too-new freeze: that one is not about a stale in-memory copy of a
+   *  compatible file, it is about a file this build cannot represent. */
   unfreezeWrites(): void {
+    if (this.agentCatalogSchemaTooNew) {
+      return
+    }
     this.writesFrozen = false
   }
 
