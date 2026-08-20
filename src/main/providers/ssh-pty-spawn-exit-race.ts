@@ -8,9 +8,11 @@ type QuarantinedSshPtyExit = {
 
 type PendingSshPtySpawn = {
   relayPtyId?: string
+  finished?: boolean
   exits: {
     relayPtyId: string
     incarnationId?: PtyIncarnationId
+    held?: boolean
     quarantine?: QuarantinedSshPtyExit
   }[]
 }
@@ -43,14 +45,19 @@ export class SshPtySpawnExitRaceTracker {
       }
     }
     for (const operation of this.pending) {
-      const held = operation.relayPtyId === relayPtyId && publish !== undefined
+      // Why: an operation still awaiting its id can bind to this one and fence the exit, so it
+      // needs the quarantine to record that verdict — but only a bound match holds the release.
+      const tracked =
+        publish !== undefined &&
+        (operation.relayPtyId === relayPtyId || operation.relayPtyId === undefined)
+      const held = tracked && operation.relayPtyId === relayPtyId
       if (held) {
         quarantine.holders++
       }
       operation.exits.push({
         relayPtyId,
         ...(isPtyIncarnationId(incarnationId) ? { incarnationId } : {}),
-        ...(held ? { quarantine } : {})
+        ...(tracked ? { held, quarantine } : {})
       })
     }
     return quarantine.holders > 0
@@ -79,15 +86,21 @@ export class SshPtySpawnExitRaceTracker {
   }
 
   finish(operation: PendingSshPtySpawn): void {
+    if (operation.finished) {
+      // Why: a second decrement would release the exit while a sibling operation still holds it.
+      return
+    }
+    operation.finished = true
     this.pending.delete(operation)
     for (const exit of operation.exits) {
       const quarantine = exit.quarantine
-      if (!quarantine) {
+      if (!quarantine || !exit.held) {
         continue
       }
       quarantine.holders--
       // Why: a failed attach never classifies, and the host's exit is still positive death
       // evidence — release it once no other operation can still claim it, or it is lost forever.
+      // A release the reattach could not attribute is still fenced by isCurrentPtyExit (pty.ts).
       if (quarantine.holders === 0 && !quarantine.classified) {
         quarantine.publish()
       }
