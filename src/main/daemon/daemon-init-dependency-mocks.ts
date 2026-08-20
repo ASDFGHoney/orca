@@ -111,6 +111,7 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
     readonly getActiveSessionIds: Mock
     readonly fanoutSyntheticExits: Mock
     readonly listProcesses: Mock
+    readonly inspectProcess: Mock
     readonly listSessions: Mock
     readonly establishLifecycleLease: Mock
     readonly shutdown: Mock
@@ -130,6 +131,10 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
       this.listProcesses = vi.fn(async () =>
         listProcessesControl.current ? listProcessesControl.current() : []
       )
+      this.inspectProcess = vi.fn(async () => ({
+        foregroundProcess: 'zsh',
+        hasChildProcesses: false
+      }))
       this.listSessions = vi.fn(async () => [...defaultListSessionsSessions])
       const lifecycleLeaseError = lifecycleLeaseErrors.shift()
       this.establishLifecycleLease = vi.fn(async () => {

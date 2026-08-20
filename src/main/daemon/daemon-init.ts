@@ -43,6 +43,7 @@ import {
 } from './daemon-host-relocation'
 import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
 import { trackDaemonReplaced, trackDaemonRetired } from './daemon-lifecycle-event'
+import { retireIdleLegacyDaemonGenerations } from './legacy-daemon-generation-retirement'
 import type { DaemonReplaceReason } from '../../shared/daemon-lifecycle-telemetry'
 import {
   getLocalPtyProvider,
@@ -993,6 +994,14 @@ export async function initDaemonPtyProvider(
     releaseDaemonAdoptionLease(newSpawner.getHandle())
 
     legacyAdapters = await createLegacyDaemonAdapters(runtimeDir)
+    // Why: same-protocol restart already reaps the predecessor; a protocol bump used to leave empty previous generations running forever (STA-2018).
+    legacyAdapters = (
+      await retireIdleLegacyDaemonGenerations({
+        adapters: legacyAdapters,
+        runtimeDir,
+        currentEntryPath: getDaemonEntryPath()
+      })
+    ).kept
     routedAdapter =
       launchMode === 'degraded-new-pty-fallback'
         ? new DegradedDaemonPtyProvider({
@@ -1154,7 +1163,13 @@ async function runRestartDaemon(): Promise<RestartDaemonResult> {
 
   const runtimeDir = getRuntimeDir()
   const currentOnly = getCurrentDaemonAdapter(currentAdapter)
-  const legacyAdapters = getLegacyDaemonAdapters(currentAdapter)
+  const legacyAdapters = (
+    await retireIdleLegacyDaemonGenerations({
+      adapters: getLegacyDaemonAdapters(currentAdapter),
+      runtimeDir,
+      currentEntryPath: getDaemonEntryPath()
+    })
+  ).kept
 
   // Step 1: synthesize pty:exit for every active session BEFORE teardown — the daemon's shutdown path never fans onExit to clients (session.ts:246-252), so the renderer would otherwise never see exits.
   const fallbackKilledCount =
