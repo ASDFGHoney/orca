@@ -29820,16 +29820,17 @@ export class OrcaRuntimeService {
           try {
             await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId)
           } catch (error) {
-            // Exit handling or another host-tab transaction may retire this surface first.
-            if (
-              !(error instanceof Error) ||
-              (error.message !== 'workspace_session_unavailable' &&
-                error.message !== 'tab_not_found')
-            ) {
+            if (!(error instanceof Error)) {
               throw error
             }
             if (error.message === 'workspace_session_unavailable') {
               this.notifier?.closeTerminal(tabId)
+            } else if (
+              error.message !== 'tab_not_found' ||
+              this.findMobileTerminalSurface(pty.pty.worktreeId, tabId)
+            ) {
+              // Only absence in both persistence and the live publication proves another owner finished teardown.
+              throw error
             }
           }
         } else {

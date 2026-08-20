@@ -118,7 +118,7 @@ test('physical Windows exit wins the headless-tab close race', async ({ testRepo
     const processBefore = await queryWindowsAncestry(childPid!)
     expect(processBefore).toMatchObject([
       { pid: childPid, name: 'node.exe' },
-      { name: 'pwsh.exe' },
+      { name: expect.stringMatching(/^(?:pwsh|powershell)\.exe$/i) },
       { name: 'electron.exe' }
     ])
     const ptyShellPid = processBefore[1]!.pid

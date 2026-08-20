@@ -31441,7 +31441,6 @@ describe('OrcaRuntimeService', () => {
     runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
     await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
     const handle = runtime.preAllocateHandleForPty(ptyId)
-    vi.spyOn(runtime, 'closeMobileSessionTab').mockRejectedValue(new Error('tab_not_found'))
 
     await expect(runtime.closeTerminal(handle)).resolves.toEqual({
       handle,
@@ -31449,6 +31448,52 @@ describe('OrcaRuntimeService', () => {
       ptyKilled: true
     })
     expect(kill).toHaveBeenCalledWith(ptyId)
+    expect((await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs).toEqual([])
+  })
+
+  it('does not mask a missing durable tab while its headless surface remains live', async () => {
+    const ptyId = 'headless-worker-live-tab'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makeWorkspaceSessionWithHeadlessTerminal({
+        tabsByWorktree: {
+          [TEST_WORKTREE_ID]: [
+            {
+              id: 'host-tab',
+              ptyId,
+              worktreeId: TEST_WORKTREE_ID,
+              title: 'Headless worker',
+              customTitle: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: 1
+            }
+          ]
+        },
+        terminalLayoutsByTabId: {
+          'host-tab': makeHeadlessTerminalLayout({ [HEADLESS_LEAF_ID]: ptyId })
+        }
+      })
+    )
+    const kill = vi.fn(() => false)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.setPtyController({
+      write: () => true,
+      kill,
+      getForegroundProcess: async () => null,
+      listProcesses: async () => []
+    })
+    runtime.registerPty(ptyId, TEST_WORKTREE_ID, null, {
+      tabId: 'host-tab',
+      leafId: HEADLESS_LEAF_ID
+    })
+    runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
+    await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const handle = runtime.preAllocateHandleForPty(ptyId)
+    vi.spyOn(runtime, 'closeMobileSessionTab').mockRejectedValue(new Error('tab_not_found'))
+
+    await expect(runtime.closeTerminal(handle)).rejects.toThrow('tab_not_found')
+    expect(kill).toHaveBeenCalledWith(ptyId)
+    expect((await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs).not.toEqual([])
   })
 
   it('keeps the renderer close transaction for an adopted runtime-owned tab', async () => {
