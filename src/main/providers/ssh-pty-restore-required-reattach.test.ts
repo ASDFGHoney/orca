@@ -303,7 +303,7 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(2)
   })
 
-  it('does not install a second activation when the first cancellation is unverifiable', async () => {
+  it('keeps the PTY live when the first activation cancellation is unproven', async () => {
     const mux = createMockMux()
     const activation = {
       status: 'pending',
@@ -339,10 +339,12 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
 
     const message = await spawnError(provider)
 
-    expect(message).toContain(SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR)
+    // The attach answered with an incarnation, so the PTY is proven live; only the retry is blocked.
+    expect(message).toContain(SSH_PTY_RESTORE_REQUIRED_ERROR)
+    expect(message).not.toContain(SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR)
     expect(message).not.toContain(SSH_SESSION_EXPIRED_ERROR)
-    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
-    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBeNull()
+    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(true)
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBe(true)
     expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(1)
     expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.spawn')).toHaveLength(0)
     expect(mux.request).toHaveBeenCalledWith('pty.cancelDelivery', {

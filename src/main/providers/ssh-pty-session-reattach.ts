@@ -246,8 +246,11 @@ export async function reattachSshPtySessionForSpawn(
       if (unresumable.sourceActivationLease) {
         const canceled = await unresumable.sourceActivationLease.rollback()
         if (!canceled) {
+          // Why: the attach answered with an incarnation, so the PTY is live; only its delivery
+          // is stuck, and an unproven cancellation just blocks the second attach.
+          args.acceptLivePty(unresumable.id)
           throw new Error(
-            `${SSH_PTY_LIVENESS_UNVERIFIABLE_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
+            `${SSH_PTY_RESTORE_REQUIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
           )
         }
       }
