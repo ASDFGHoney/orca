@@ -29284,7 +29284,12 @@ describe('OrcaRuntimeService', () => {
       settled = true
     })
 
-    await vi.waitFor(() => expect(closeTerminalTab).toHaveBeenCalledWith('host-tab'))
+    await vi.waitFor(() =>
+      expect(closeTerminalTab).toHaveBeenCalledWith(
+        'host-tab',
+        expect.objectContaining({ localPtyTeardownOwnedExternally: true })
+      )
+    )
     expect(settled).toBe(false)
 
     acknowledged.resolve()
@@ -29292,7 +29297,7 @@ describe('OrcaRuntimeService', () => {
       handle: terminal.handle,
       tabId: 'host-tab',
       closeMode: 'tab',
-      ptyKilled: false
+      ptyKilled: true
     })
   })
 
@@ -31390,9 +31395,10 @@ describe('OrcaRuntimeService', () => {
       ptyKilled: true
     })
 
-    expect(closeTerminalTab).toHaveBeenCalledWith('host-tab', {
-      localPtyTeardownOwnedExternally: true
-    })
+    expect(closeTerminalTab).toHaveBeenCalledWith(
+      'host-tab',
+      expect.objectContaining({ localPtyTeardownOwnedExternally: true })
+    )
     expect(closeTerminal).toHaveBeenCalledWith('host-tab')
     expect(getSession().tabsByWorktree[TEST_WORKTREE_ID]).toEqual([])
     expect(getSession().terminalLayoutsByTabId['host-tab']).toBeUndefined()

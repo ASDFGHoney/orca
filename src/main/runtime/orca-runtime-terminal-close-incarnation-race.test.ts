@@ -178,9 +178,9 @@ function createHarness(testCase: MatrixCase) {
       } = {}
     ) => {
       await commitBarrier.promise
-      const currentPtyId = session.terminalLayoutsByTabId[TAB_ID]?.ptyIdsByLeafId[LEAF_ID]
+      const currentPtyId = session.terminalLayoutsByTabId[TAB_ID]?.ptyIdsByLeafId?.[LEAF_ID]
       const currentIncarnation =
-        session.terminalPtyIncarnationsByPaneKey[makePaneKey(TAB_ID, LEAF_ID)]
+        session.terminalPtyIncarnationsByPaneKey?.[makePaneKey(TAB_ID, LEAF_ID)]
       const expected = options.expectedTerminal
       if (
         expected &&

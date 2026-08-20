@@ -302,9 +302,10 @@ describe('terminal close and handle incarnation continuity', () => {
     })
 
     await vi.waitFor(() =>
-      expect(harness.closeTerminalTab).toHaveBeenCalledWith(TAB_ID, {
-        localPtyTeardownOwnedExternally: true
-      })
+      expect(harness.closeTerminalTab).toHaveBeenCalledWith(
+        TAB_ID,
+        expect.objectContaining({ localPtyTeardownOwnedExternally: true })
+      )
     )
     expect(settled).toBe(false)
     expect(harness.getSession().tabsByWorktree[WORKTREE_ID]).toHaveLength(1)

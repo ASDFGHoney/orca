@@ -3384,11 +3384,14 @@
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/8628",
         "https://github.com/stablyai/orca/pull/8706",
-        "https://github.com/stablyai/orca/issues/14524"
+        "https://github.com/stablyai/orca/issues/14524",
+        "https://linear.app/stably/issue/STA-4489",
+        "https://github.com/stablyai/orca/pull/14590"
       ],
-      "invariant": "Close permanently removes the owned provider session, agent descendants, persisted tab/layout authority, and resume authority even when no TerminalPane is mounted; final-pane CLI close does not acknowledge before durable tab retirement, and a persisted explicit-empty state prevents initial-tab fallback from repopulating the workspace after reload or restart. A handle remains valid while the same provider-attested PTY incarnation survives renderer reload or re-key, and becomes stale without adopting a replacement incarnation. A terminating id remains reserved through natural exit, duplicate callers await the same completion, and immediate teardown upgrades any graceful request without signalling a recycled PID or a descendant tree after root ownership is lost; process-table work is locale-stable, bounded, fresh for each post-start request, same-turn coalesced, and begins within the requesting caller's deadline, including bulk worktree cleanup; detach and park preserve ownership; aliases prevent a detached agent's immutable physical pane key from being retired with its former tab.",
-      "oracle": "Capture exact tab, pane, PTY, handle, incarnation, and persisted layout identities. Final-pane terminal.close must kill the exact PTY once, invoke one durability-acknowledged tab retirement, stay pending until the persisted row is removed, and never fall back to the fire-and-forget pane event; reload/restart must keep the explicitly emptied worktree at zero terminal tabs and provider sessions. Reloading the renderer with the same tab/pane/PTY/incarnation must keep the handle readable; changing only the incarnation behind the same PTY id, losing the authoritative graph, or superseding the renderer handle with a preallocated handle must reject the old handle with terminal_handle_stale. Parked-close tests prove the exact PTY disappears; descendant/process tests keep natural exits reserved, upgrade teardown safely, bound/coalesce process-table work, and protect recycled identities.",
+      "invariant": "Close permanently removes the owned provider session, agent descendants, persisted tab/layout authority, and resume authority even when no TerminalPane is mounted; a close authorized for terminal incarnation A never closes, kills, retires, or tombstones replacement incarnation B, while unchanged A still closes. Final-pane CLI close does not acknowledge before durable tab retirement, and a persisted explicit-empty state prevents initial-tab fallback from repopulating the workspace after reload or restart. A handle remains valid while the same provider-attested PTY incarnation survives renderer reload or re-key, and becomes stale without adopting a replacement incarnation. A terminating id remains reserved through natural exit, duplicate callers await the same completion, and immediate teardown upgrades any graceful request without signalling a recycled PID or a descendant tree after root ownership is lost; process-table work is locale-stable, bounded, fresh for each post-start request, same-turn coalesced, and begins within the requesting caller's deadline, including bulk worktree cleanup; detach and park preserve ownership; aliases prevent a detached agent's immutable physical pane key from being retired with its former tab.",
+      "oracle": "Capture exact tab, pane, PTY, handle, incarnation, and persisted layout identities. Pause final-pane terminal.close and terminal.closeTab at the acknowledged renderer commit, replace or republish the PTY under the same tab/leaf, then release: replacement B must remain in the persisted session and live inventory, accept reads through its new handle, and never appear in renderer retirement or provider stop calls; unchanged A must retire and stop exactly once. Cover runtime-published and renderer-graph tabs plus git and folder workspaces, including a reused PTY id with a new incarnation. Final-pane terminal.close must kill the exact PTY once, invoke one durability-acknowledged tab retirement, stay pending until the persisted row is removed, and never fall back to the fire-and-forget pane event; reload/restart must keep the explicitly emptied worktree at zero terminal tabs and provider sessions. Reloading the renderer with the same tab/pane/PTY/incarnation must keep the handle readable; changing only the incarnation behind the same PTY id, losing the authoritative graph, or superseding the renderer handle with a preallocated handle must reject the old handle with terminal_handle_stale. Parked-close tests prove the exact PTY disappears; descendant/process tests keep natural exits reserved, upgrade teardown safely, bound/coalesce process-table work, and protect recycled identities.",
       "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime-terminal-close-incarnation-race.test.ts src/main/runtime/rpc/terminal-tab-close-expectation.test.ts src/main/window/terminal-tab-close-request-relay.test.ts src/renderer/src/components/terminal/terminal-tab-close-expectation.test.ts src/renderer/src/hooks/useIpcEvents-close-routing-session-tabs.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime-terminal-close-continuity.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal/initial-terminal.test.ts src/renderer/src/lib/worktree-activation-default-tabs.test.ts src/renderer/src/store/slices/terminals-explicit-empty-hydration.test.ts",
         "pnpm dlx node@24 ./node_modules/vitest/vitest.mjs run --config config/vitest.config.ts src/main/agent-hooks/server-pane-authority.test.ts src/main/ipc/agent-hooks.test.ts src/main/ipc/agent-pane-authority-ownership.test.ts src/main/ipc/pty-management.test.ts src/main/persistence-initial-load.test.ts src/main/persistence-pane-identity-migration.test.ts src/main/persistence-pty-binding-reconciliation.test.ts src/renderer/src/store/slices/agent-pane-authority.test.ts src/renderer/src/store/slices/terminal-pane-detach-agent-identity.test.ts src/renderer/src/store/slices/terminal-tab-retirement.test.ts src/renderer/src/store/slices/terminal-tab-retirement-store.test.ts tests/e2e/completed-worker-retirement-resume.unit.test.ts src/renderer/src/components/shared/kill-all-terminal-surfaces.test.ts",
@@ -3398,6 +3401,11 @@
         "pnpm run test:e2e -- tests/e2e/agent-descendant-process-kill.spec.ts --workers=1"
       ],
       "testFiles": [
+        "src/main/runtime/orca-runtime-terminal-close-incarnation-race.test.ts",
+        "src/main/runtime/rpc/terminal-tab-close-expectation.test.ts",
+        "src/main/window/terminal-tab-close-request-relay.test.ts",
+        "src/renderer/src/components/terminal/terminal-tab-close-expectation.test.ts",
+        "src/renderer/src/hooks/useIpcEvents-close-routing-session-tabs.test.ts",
         "src/main/runtime/orca-runtime-terminal-close-continuity.test.ts",
         "src/renderer/src/components/terminal/initial-terminal.test.ts",
         "src/renderer/src/lib/worktree-activation-default-tabs.test.ts",
@@ -3425,6 +3433,14 @@
         "tests/e2e/agent-descendant-process-kill.spec.ts"
       ],
       "assertionRefs": [
+        {
+          "file": "src/main/runtime/orca-runtime-terminal-close-incarnation-race.test.ts",
+          "assertions": [
+            "terminal.close and terminal.closeTab reject replacement B at the controlled renderer commit barrier without retiring, stopping, or tombstoning it",
+            "unchanged A still retires and stops across runtime publications, renderer graphs, git worktrees, and folder workspaces",
+            "same-PTY-id replacement is distinguished by provider incarnation while new-PTY replacement is distinguished by the exact binding"
+          ]
+        },
         {
           "file": "src/main/runtime/orca-runtime-terminal-close-continuity.test.ts",
           "assertions": [
@@ -3594,7 +3610,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The close path is user-triggered and bounded by canonical live-owner indexing. Production ps has a 1s kill timeout; 20 same-turn requests execute one fresh process-table read, while requests arriving after a scan starts immediately share one successor so their deadline is not consumed waiting and no unusable ps starts after timeout. Completed tables are never reused. Bulk worktree shutdown runs in 32-wide batches so each batch can coalesce its initial scan without unbounded provider fanout. Descendant traversal uses a visited set and index cursor; a Node 24 local 100,000-wide synthetic tree fell from 861ms to 16.7ms, and escalation indexes only the requested descendant PIDs instead of duplicating the full process table. Escalation uses the same bounded coordinator, and kill-all store scale remains covered by terminal-session.kill-all-surface-cleanup."
+        "evidence": "The close path is user-triggered and adds one targeted local-runtime identity comparison at the existing acknowledged renderer commit; it adds no polling, inventory listing, subprocess, retry, listener, or global fanout. Production ps has a 1s kill timeout; 20 same-turn requests execute one fresh process-table read, while requests arriving after a scan starts immediately share one successor so their deadline is not consumed waiting and no unusable ps starts after timeout. Completed tables are never reused. Bulk worktree shutdown runs in 32-wide batches so each batch can coalesce its initial scan without unbounded provider fanout. Descendant traversal uses a visited set and index cursor; a Node 24 local 100,000-wide synthetic tree fell from 861ms to 16.7ms, and escalation indexes only the requested descendant PIDs instead of duplicating the full process table. Escalation uses the same bounded coordinator, and kill-all store scale remains covered by terminal-session.kill-all-surface-cleanup."
       },
       "promotionCriteria": [
         "Accumulate 100 clean runs or 14 days on required CI platforms.",
