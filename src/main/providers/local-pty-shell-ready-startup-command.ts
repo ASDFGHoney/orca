@@ -4,8 +4,7 @@
 import type * as pty from 'node-pty'
 import { buildStartupCommandSubmission } from '../../shared/startup-command-submission'
 
-// Match the daemon barrier so slow interactive rc files do not receive queued commands mid-startup.
-export const STARTUP_COMMAND_READY_MAX_WAIT_MS = 15_000
+export const STARTUP_COMMAND_READY_MAX_WAIT_MS = 1500
 const POST_SHELL_READY_STARTUP_COMMAND_DELAY_MS = 30
 const POST_SHELL_READY_STARTUP_COMMAND_FALLBACK_MS = 200
 

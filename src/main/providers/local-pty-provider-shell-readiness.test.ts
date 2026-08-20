@@ -114,7 +114,6 @@ vi.mock('../shell-prompt-readiness-probe', () => ({
 }))
 
 import { LocalPtyProvider } from './local-pty-provider'
-import { STARTUP_COMMAND_READY_MAX_WAIT_MS } from './local-pty-shell-ready-startup-command'
 import {
   applyLocalPtyProviderMockDefaults,
   createLocalPtyMockProcess,
@@ -239,12 +238,6 @@ describe('LocalPtyProvider', () => {
         expect(onData).not.toHaveBeenCalled()
 
         vi.advanceTimersByTime(1500)
-        await Promise.resolve()
-
-        expect(onData).not.toHaveBeenCalled()
-        expect(mockProc.write).not.toHaveBeenCalled()
-
-        vi.advanceTimersByTime(STARTUP_COMMAND_READY_MAX_WAIT_MS - 1500)
         await Promise.resolve()
 
         expect(onData).toHaveBeenCalledWith(
