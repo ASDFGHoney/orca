@@ -56,6 +56,7 @@ export async function buildPtyIpcSpawnOptions(
       ? { prevalidatedCwd: ctx.prevalidatedCwd }
       : {}),
     env: ctx.spawnEnv,
+    historyIsolationEnabled: ctx.deps.getSettings?.()?.terminalScopeHistoryByWorktree ?? true,
     ...(ctx.isMintedSessionId ? { isNewSession: true } : {})
   }
   if (!args.connectionId && !ctx.isDaemonHostSpawn) {
@@ -140,7 +141,22 @@ export async function buildPtyIpcSpawnOptions(
       ? paneSpawnReservationsByOwnerKey.get(ctx.paneSpawnReservationKey)
       : undefined
     if (existingPaneSpawnAfterPreflight) {
-      return { ...(await existingPaneSpawnAfterPreflight.promise), isReattach: true }
+      const reattach = {
+        ...(await existingPaneSpawnAfterPreflight.promise),
+        isReattach: true as const
+      }
+      // Why: discard only a distinct provisional id; the winner may have committed this id's real size.
+      if (ctx.effectiveSessionId !== undefined) {
+        const provisionalSizeKey = ctx.effectiveSessionAppId ?? ctx.effectiveSessionId
+        if (provisionalSizeKey !== reattach.id) {
+          if (ctx.hadSessionSizeBeforeAttach && ctx.sessionSizeBeforeAttach) {
+            ptySizes.set(provisionalSizeKey, ctx.sessionSizeBeforeAttach)
+          } else {
+            ptySizes.delete(provisionalSizeKey)
+          }
+        }
+      }
+      return reattach
     }
     ctx.paneSpawnReservation = ctx.paneSpawnReservationKey
       ? reservePaneSpawn(ctx.paneSpawnReservationKey)

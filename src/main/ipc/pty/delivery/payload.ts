@@ -37,15 +37,22 @@ export function sendModelRestoreNeededMarker(
   id: string,
   reason: PtyModelRestoreReason,
   markerSeq: number | undefined
-): void {
+): boolean {
   if (session.mainWindow.isDestroyed()) {
-    return
+    return false
   }
-  session.mainWindow.webContents.send('pty:modelRestoreNeeded', {
-    id,
-    reason,
-    ...(typeof markerSeq === 'number' ? { markerSeq } : {})
-  })
+  try {
+    session.mainWindow.webContents.send('pty:modelRestoreNeeded', {
+      id,
+      reason,
+      ...(typeof markerSeq === 'number' ? { markerSeq } : {})
+    })
+  } catch (error) {
+    // Why: a disposed render frame throws synchronously here, and this rides the data path.
+    console.error('[pty] renderer model-restore marker send failed', error)
+    return false
+  }
+  return true
 }
 
 export function sendPtyDataToRenderer(
@@ -114,21 +121,17 @@ export function sendPtyDataToRenderer(
       projectionsTransferred = true
     }
   }
-  if (session.rendererDeliveryRestoreNeededPtys.has(id)) {
-    try {
-      sendModelRestoreNeededMarker(
-        session,
-        id,
-        'delivery-heal',
-        session.runtime?.getPtyOutputSequence(id)
-      )
-      session.rendererDeliveryRestoreNeededPtys.delete(id)
-    } catch (error) {
-      console.error(
-        '[pty] renderer delivery-heal marker send failed; restore remains pending',
-        error
-      )
-    }
+  if (
+    session.rendererDeliveryRestoreNeededPtys.has(id) &&
+    sendModelRestoreNeededMarker(
+      session,
+      id,
+      'delivery-heal',
+      session.runtime?.getPtyOutputSequence(id)
+    )
+  ) {
+    // Why cleared only on a successful send: an unsent marker leaves the restore pending.
+    session.rendererDeliveryRestoreNeededPtys.delete(id)
   }
   return { sent: true, projectionsTransferred }
 }

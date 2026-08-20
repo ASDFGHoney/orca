@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
 import { parseTerminalKittyKeyboardFlags } from '../../../../shared/terminal-kitty-keyboard-flags'
+import { isMainWindowPtyIpcEvent } from './write-input'
 import type { PtyIpcSession, SerializeResult } from '../session'
 
 export function settleSerializeRequest(
@@ -22,7 +23,7 @@ export function installPtySerializeBufferIpc(session: PtyIpcSession): void {
   ipcMain.on(
     'pty:serializeBuffer:response',
     (
-      _event,
+      event,
       args: {
         requestId?: string
         snapshot?: {
@@ -35,7 +36,11 @@ export function installPtySerializeBufferIpc(session: PtyIpcSession): void {
         } | null
       }
     ) => {
-      if (typeof args?.requestId !== 'string') {
+      // Why: the snapshot seeds terminal restore state, so only the main window may settle it.
+      if (
+        !isMainWindowPtyIpcEvent(event, session.mainWindow, session.mainWindow.webContents) ||
+        typeof args?.requestId !== 'string'
+      ) {
         return
       }
       const snapshot = args.snapshot

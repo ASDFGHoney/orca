@@ -57,7 +57,11 @@ export function installPtyWriteIpcHandlers(deps: {
             () => runtime.claimRemoteDesktopHost(args.id, args.cols, args.rows)
           )
         : runtime.claimRemoteDesktopHost(args.id, args.cols, args.rows)
-    ).catch(() => false)
+    ).catch((error) => {
+      // Why: a failed claim silently discards every gated keystroke for this pane.
+      console.error('[pty] remote desktop host claim failed; gated input will be discarded', error)
+      return false
+    })
     hostViewportClaimTails.set(args.id, claim)
     void claim.then(() => {
       if (hostViewportClaimTails.get(args.id) === claim) {

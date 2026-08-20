@@ -11,19 +11,23 @@ export function adoptMaterializedRuntimePtySpawn(
   startupAlreadyAwaited = false
 ): Promise<PtySpawnResult | null> | PtySpawnResult | null {
   const args = ctx.args
-  ctx.codexHomeLaunchStartedAt = !args.connectionId ? new Date() : undefined
-  ctx.codexHomeLaunchStartedSequence = !args.connectionId
-    ? allocatePtyLifecycleSequence()
-    : undefined
-  ctx.preAdoptedStablePane = args.adoptedStablePane ?? null
-  ctx.reattachedCodexHomeRoutes = !args.connectionId
-    ? new Map(
-        snapshotCodexPaneHomeRoutes([
-          ctx.preAdoptedStablePane?.result.id,
-          args.sessionId ? getAppPtyId(args.connectionId, args.sessionId) : undefined
-        ])
-      )
-    : new Map<string, CodexPaneHomeRoute | null>()
+  // Why: the re-entry after the startup await must not re-mint the lifecycle
+  // sequence or re-snapshot routes taken before the barrier.
+  if (!startupAlreadyAwaited) {
+    ctx.codexHomeLaunchStartedAt = !args.connectionId ? new Date() : undefined
+    ctx.codexHomeLaunchStartedSequence = !args.connectionId
+      ? allocatePtyLifecycleSequence()
+      : undefined
+    ctx.preAdoptedStablePane = args.adoptedStablePane ?? null
+    ctx.reattachedCodexHomeRoutes = !args.connectionId
+      ? new Map(
+          snapshotCodexPaneHomeRoutes([
+            ctx.preAdoptedStablePane?.result.id,
+            args.sessionId ? getAppPtyId(args.connectionId, args.sessionId) : undefined
+          ])
+        )
+      : new Map<string, CodexPaneHomeRoute | null>()
+  }
   const startupPromise = ctx.deps.getLocalPtyStartupPromise(args.connectionId)
   if (startupPromise && !startupAlreadyAwaited) {
     return startupPromise.then(() => adoptMaterializedRuntimePtySpawn(ctx, true))

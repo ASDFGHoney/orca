@@ -83,6 +83,13 @@ export async function commitRuntimePtySpawn(ctx: RuntimePtySpawnState) {
         ...(ctx.env ? { launchEnv: ctx.env } : {})
       })
     }
+    // Why: the adopted branch returns before the normal settle site, so the
+    // reservation must be resolved here or every later spawn for this pane
+    // awaits a promise that never settles.
+    resolvePaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, {
+      ...ctx.result,
+      isReattach: true
+    })
     return {
       id: ctx.result.id,
       ...(ctx.result.incarnationId ? { incarnationId: ctx.result.incarnationId } : {}),

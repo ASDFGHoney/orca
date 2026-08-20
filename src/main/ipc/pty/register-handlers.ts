@@ -32,6 +32,7 @@ import {
   setRendererGateResetState
 } from './provider/listener-lifecycle'
 import {
+  resetRendererDeliveryAccountingForLifecycleReset,
   setResetRendererDeliveryAccountingForLifecycleReset,
   clearRendererDispatcherReadyWatchdog
 } from './delivery/debug'
@@ -65,6 +66,9 @@ export function registerPtyHandlers(
   store?: Store,
   options?: PtyIpcSessionOptions
 ): void {
+  // Why first: the outgoing session owns the producer pauses, so its real reset must run
+  // before the bridge is neutralized or a PTY paused during re-registration stays paused.
+  resetRendererDeliveryAccountingForLifecycleReset()
   // Why: a re-registration means a new window owns delivery — cancel the prior closure's watchdog and neutralize its bridged reset so mark-hidden below can't arm a timer against the dead closure.
   clearRendererDispatcherReadyWatchdog()
   setResetRendererDeliveryAccountingForLifecycleReset(() => {})

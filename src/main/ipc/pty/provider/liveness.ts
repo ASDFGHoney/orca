@@ -110,10 +110,16 @@ export async function verifyPtyStopped(
   if (!opts?.keepHistory) {
     return true
   }
-  const deadline = Date.now() + KEEP_HISTORY_STOP_SETTLE_MS
+  const settleDeadline = Date.now() + KEEP_HISTORY_STOP_SETTLE_MS
+  // Why: deadlineMs is absolute, so the settle poll must not outlive the caller's teardown budget.
+  const deadline =
+    opts.deadlineMs !== undefined ? Math.min(settleDeadline, opts.deadlineMs) : settleDeadline
   while (Date.now() < deadline) {
-    await delay(KEEP_HISTORY_STOP_POLL_MS)
-    if (await isProviderPtyLive(provider, ptyId, opts?.deadlineMs)) {
+    await delay(Math.min(KEEP_HISTORY_STOP_POLL_MS, deadline - Date.now()))
+    if (Date.now() >= deadline) {
+      break
+    }
+    if (await isProviderPtyLive(provider, ptyId, deadline)) {
       return false
     }
   }

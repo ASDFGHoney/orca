@@ -42,8 +42,19 @@ export function syncPtyBackgroundedDelivery(
     known: rendererVisibilityKnownPtys.has(id),
     visible: visibleRendererPtys.has(id)
   })
+  const previous = session.backgroundedDeliverySyncByPty.get(id)
   session.backgroundedDeliverySyncByPty.set(id, background)
-  provider.setPtyBackgrounded(id, background)
+  try {
+    provider.setPtyBackgrounded(id, background)
+  } catch (error) {
+    // Why: a recorded state the provider never took would short-circuit every later sync for this PTY.
+    if (previous === undefined) {
+      session.backgroundedDeliverySyncByPty.delete(id)
+    } else {
+      session.backgroundedDeliverySyncByPty.set(id, previous)
+    }
+    console.error('[pty] setPtyBackgrounded failed; delivery sync state rolled back', error)
+  }
 }
 
 export function resyncBackgroundedDeliveriesAfterGateReset(session: PtyIpcSession): void {

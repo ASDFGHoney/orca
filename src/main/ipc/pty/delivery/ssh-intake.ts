@@ -45,7 +45,9 @@ export function installSessionSshOutputIntake(session: PtyIpcSession): void {
       return release
     },
     finalizeExit: (event) => {
-      session.runtime?.onPtyExit(event.id, event.code, event.ptyIncarnation)
+      session.runtime?.onPtyExit(event.id, event.code, event.ptyIncarnation, {
+        hostExitConfirmed: true
+      })
       session.finalizePtyExitForRenderer(event)
     },
     pauseProvider: (generation, id) => {

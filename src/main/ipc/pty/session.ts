@@ -115,7 +115,7 @@ export type PtyIpcSession = {
     id: string,
     reason: PtyModelRestoreReason,
     markerSeq: number | undefined
-  ) => void
+  ) => boolean
   updateProducerFlowControl: (id: string) => void
   applyCumulativeAck: (id: string, processedChars: number) => number
   readCurrentPtyRendererDeliveryDebugSnapshot: () => PtyRendererDeliveryDebugSnapshot

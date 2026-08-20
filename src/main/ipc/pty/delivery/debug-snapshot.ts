@@ -159,7 +159,7 @@ export function warnIfDroppingHiddenBytesForVisiblePty(
   }
   session.lastHiddenDropContradictionWarnAtMs = now
   console.warn('[pty] hidden-delivery gate is dropping bytes for a visible/active pty', {
-    id,
+    id: redactPtyIdForDiagnostics(id),
     droppedChars,
     visible: visibleRendererPtys.has(id),
     active: activeRendererPtys.has(id),

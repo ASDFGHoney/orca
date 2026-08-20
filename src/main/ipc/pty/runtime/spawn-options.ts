@@ -42,6 +42,7 @@ export async function buildRuntimePtySpawnOptions(
     rows: args.rows,
     cwd: ctx.cwd,
     env: ctx.env,
+    historyIsolationEnabled: ctx.deps.getSettings?.()?.terminalScopeHistoryByWorktree ?? true,
     ...(ctx.isNewDaemonSession ? { isNewSession: true } : {})
   }
   if (!args.connectionId && !ctx.isDaemonHostSpawn) {
@@ -203,7 +204,7 @@ export async function buildRuntimePtySpawnOptions(
       ) {
         throw new Error('terminal_pane_owner_unknown')
       }
-      return {
+      const reattach = {
         id: concurrentOwner.ptyId,
         ...(concurrentOwner.incarnationId ? { incarnationId: concurrentOwner.incarnationId } : {}),
         stablePaneOwner: {
@@ -212,6 +213,18 @@ export async function buildRuntimePtySpawnOptions(
           leafId: concurrentOwner.leafId
         }
       }
+      // Why: the winner owns its id's size; only a distinct losing session id remains provisional.
+      if (ctx.sessionId !== undefined) {
+        const provisionalSizeKey = ctx.effectiveSessionAppId ?? ctx.sessionId
+        if (provisionalSizeKey !== reattach.id) {
+          if (ctx.hadSessionSizeBeforeAttach && ctx.sessionSizeBeforeAttach) {
+            ptySizes.set(provisionalSizeKey, ctx.sessionSizeBeforeAttach)
+          } else {
+            ptySizes.delete(provisionalSizeKey)
+          }
+        }
+      }
+      return reattach
     }
   }
   ctx.finishTerminalInstall = beginPtySpawnForWorktree(args.worktreeId, ctx.cwd, args.connectionId)

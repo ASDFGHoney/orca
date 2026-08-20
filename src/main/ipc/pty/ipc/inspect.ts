@@ -231,9 +231,18 @@ export function installPtyInspectIpcHandlers(deps: {
     }
   )
 
-  ipcMain.handle('pty:inspectProcess', async (_event, args: { id: string }) =>
-    inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id)
-  )
+  ipcMain.handle('pty:inspectProcess', async (_event, args: { id: string }) => {
+    // Why: same routing hazard as pty:hasPty — an unroutable id must read as unavailable, not as a local-provider answer or a raised IPC error.
+    if (
+      typeof args?.id !== 'string' ||
+      !args.id ||
+      args.id.startsWith('remote:') ||
+      !hasPtyProviderForInspection(args.id)
+    ) {
+      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true as const }
+    }
+    return inspectPtyProviderProcessForRenderer(getProviderForPty(args.id), args.id)
+  })
 
   ipcMain.handle(
     'pty:confirmForegroundProcess',

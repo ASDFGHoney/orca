@@ -49,7 +49,12 @@ export function getProviderForPty(ptyId: string): IPtyProvider {
 export function hasPtyProviderForInspection(ptyId: string): boolean {
   // Why: process inspection is background polling; disconnected SSH hosts should read as idle, not raise repeated IPC errors.
   const connectionId = ptyOwnership.get(ptyId)
-  return connectionId == null || sshProviders.has(connectionId)
+  if (connectionId === undefined) {
+    // Why: mirror getProviderForPty — an unowned id still routes by its encoded SSH owner.
+    const parsedSshId = parseAppSshPtyId(ptyId)
+    return !parsedSshId || sshProviders.has(parsedSshId.connectionId)
+  }
+  return connectionId === null || sshProviders.has(connectionId)
 }
 
 export function getAppPtyId(connectionId: string | null | undefined, ptyId: string): string {

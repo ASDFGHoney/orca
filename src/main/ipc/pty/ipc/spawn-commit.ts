@@ -25,6 +25,7 @@ import { persistPtyIpcSpawnCommit } from './spawn-commit-persist'
 export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawnResult> {
   const args = ctx.args
   const { rendererPreSignaled, rendererAlreadyRegistered } = await persistPtyIpcSpawnCommit(ctx)
+  ctx.agentTeamsLeaderHandle = null
 
   // Why: seed the headless emulator before registerPty so concurrent live PTY data lands on top of the seed, not replacing it (mobile keeps the daemon-restored scrollback).
   // Skip when the renderer will be authoritative — its xterm buffer is richer than the daemon snapshot.

@@ -14,6 +14,9 @@ import {
 // multiple SSH relays; coordinate claims above every provider boundary too.
 export const agentSessionOwners = new ClaimedAgentPtyOwnerRegistry()
 let agentSessionOwnerReconciliation: Promise<void> | null = null
+// Why: this reconcile gates spawn; a wedged relay listing must fail closed (rejecting
+// with unknown ownership) instead of blocking the spawn path indefinitely.
+const OWNER_LISTING_DEADLINE_MS = 5_000
 
 // Why: restore payloads (reattach snapshot / cold-restore scrollback / relay
 // replay + lastTitle) ride spawn RPC results, never onPtyData, so EVERY spawn
@@ -67,10 +70,13 @@ export async function reconcileAgentSessionOwnerListings(): Promise<void> {
       { provider: localProvider, connectionId: null },
       ...Array.from(sshProviders, ([connectionId, provider]) => ({ provider, connectionId }))
     ]
+    const deadlineMs = Date.now() + OWNER_LISTING_DEADLINE_MS
     const listings = await Promise.all(
       providers.map(async ({ provider, connectionId }) => ({
         connectionId,
-        sessions: await provider.listProcesses()
+        sessions: await provider.listProcesses({ deadlineMs }).catch(() => {
+          throw new Error('agent_session_ownership_unknown')
+        })
       }))
     )
     const advertisedOwners: AgentSessionOwnerBinding[] = []

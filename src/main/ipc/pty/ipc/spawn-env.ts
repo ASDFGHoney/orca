@@ -89,6 +89,7 @@ export async function assemblePtyIpcSpawnEnv(ctx: PtyIpcSpawnState): Promise<voi
       handle: ctx.preAllocatedHandle,
       baseEnv: ctx.baseEnv ?? {}
     })
+    ctx.agentTeamsLeaderHandle = ctx.preAllocatedHandle
     ctx.baseEnv = {
       ...ctx.baseEnv,
       ...prepared.env

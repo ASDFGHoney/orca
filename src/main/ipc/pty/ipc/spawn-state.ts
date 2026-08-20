@@ -52,6 +52,8 @@ export type PtyIpcSpawnState = {
   baseEnv: Record<string, string> | undefined
   effectiveLaunchConfig: SleepingAgentLaunchConfig | undefined
   preAllocatedHandle: string | null
+  /** Leader handle this spawn allocated Agent Teams state for; must be released if the spawn is abandoned. */
+  agentTeamsLeaderHandle: string | null
   requestedAgentTeamsPath: string | undefined
   agentTeamsEnvToDelete: string[] | undefined
   stablePaneKey: string | null
@@ -124,6 +126,7 @@ export function createPtyIpcSpawnState(
     baseEnv: undefined,
     effectiveLaunchConfig: undefined,
     preAllocatedHandle: null,
+    agentTeamsLeaderHandle: null,
     requestedAgentTeamsPath: undefined,
     agentTeamsEnvToDelete: undefined,
     stablePaneKey: null,

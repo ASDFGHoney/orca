@@ -44,7 +44,6 @@ export function createPtyWriteInput(deps: {
   ) => boolean
 } {
   const { mainWindow, runtime, clearHiddenRendererResizeOutput } = deps
-  void mainWindow
 
   const reportUnavailablePtyWrite = (id: string, error: unknown): void => {
     if (
@@ -123,9 +122,6 @@ export function createPtyWriteInput(deps: {
       return false
     }
   }
-
-  type PtyWritePayload = { id: string; data: string }
-  type PtyViewportClaimPayload = { id: string; cols: number; rows: number }
 
   const isPtyWritePayload = (value: unknown): value is PtyWritePayload =>
     typeof value === 'object' &&

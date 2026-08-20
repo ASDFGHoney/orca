@@ -84,6 +84,7 @@ export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {
   })
 
   // Why: fire-and-forget — clears the DaemonPtyAdapter's sticky cold-restore cache after the renderer consumed it; no-op for non-daemon providers.
+  ipcMain.removeAllListeners('pty:ackColdRestore')
   ipcMain.on('pty:ackColdRestore', (_event, args: { id: string }) => {
     const provider = tryGetProviderForPty(args.id)
     if (provider && 'ackColdRestore' in provider && typeof provider.ackColdRestore === 'function') {
@@ -92,6 +93,7 @@ export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {
   })
 
   // Why: renderer ACKs bound main→renderer delivery without stopping PTY ingestion — agent/status consumers still see every chunk via the provider/runtime path.
+  ipcMain.removeAllListeners('pty:ackData')
   ipcMain.on(
     'pty:ackData',
     (_event, args: { id: string; charCount?: number; processedChars?: number }) => {
@@ -114,6 +116,7 @@ export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {
     }
   )
 
+  ipcMain.removeAllListeners('pty:deliveryResyncResponse')
   ipcMain.on(
     'pty:deliveryResyncResponse',
     (_event, args: { requestId: number; processedCharsByPty: Record<string, number> }) => {
@@ -142,6 +145,7 @@ export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {
   )
 
   // Why invoke + renderer-initiated: the field wedge (v1.4.121-rc.0) kills every main→renderer push channel while invoke survives, so the resync rides here plus a write-off lane.
+  ipcMain.removeHandler('pty:reportRendererDeliveryState')
   ipcMain.handle(
     'pty:reportRendererDeliveryState',
     (_event, args: PtyRendererDeliveryStateReport): PtyRendererDeliveryHealthReply => {

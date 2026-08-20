@@ -8,6 +8,7 @@ import {
   reservePaneSpawn
 } from '../pane/spawn-reservation'
 import { resolveStablePaneOwner } from '../pane/stable-owner'
+import { ptySizes } from '../delivery/visibility-state'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
 import { adoptMaterializedRuntimePtySpawn } from './spawn-early'
 import { prepareRuntimePtySpawn } from './spawn-preflight'
@@ -29,6 +30,18 @@ function toRuntimeSpawnReply(result: {
     ...(typeof result.wslDistro === 'string' ? { wslDistro: result.wslDistro } : {}),
     ...(result.stablePaneOwner ? { stablePaneOwner: result.stablePaneOwner } : {}),
     ...(result.agentSessionEnsure ? { agentSessionEnsure: result.agentSessionEnsure } : {})
+  }
+}
+
+function restoreProvisionalPtySize(ctx: ReturnType<typeof createRuntimePtySpawnState>): void {
+  if (ctx.sessionId === undefined) {
+    return
+  }
+  const key = ctx.effectiveSessionAppId ?? ctx.sessionId
+  if (ctx.hadSessionSizeBeforeAttach && ctx.sessionSizeBeforeAttach) {
+    ptySizes.set(key, ctx.sessionSizeBeforeAttach)
+  } else {
+    ptySizes.delete(key)
   }
 }
 
@@ -63,24 +76,25 @@ export async function spawnPtyFromRuntimeController(
       ctx.paneSpawnReservation = reservePaneSpawn(ownerKey)
     }
   }
-  const materializedOrPromise = adoptMaterializedRuntimePtySpawn(ctx)
-  const materialized =
-    materializedOrPromise instanceof Promise ? await materializedOrPromise : materializedOrPromise
-  if (materialized) {
-    return toRuntimeSpawnReply(materialized)
-  }
-  const earlyAdopt = await prepareRuntimePtySpawn(ctx)
-  if (earlyAdopt) {
-    return toRuntimeSpawnReply(earlyAdopt)
-  }
-  const earlyReserved = await buildRuntimePtySpawnOptions(ctx)
-  if (earlyReserved) {
-    return toRuntimeSpawnReply(earlyReserved)
-  }
   try {
+    const materializedOrPromise = adoptMaterializedRuntimePtySpawn(ctx)
+    const materialized =
+      materializedOrPromise instanceof Promise ? await materializedOrPromise : materializedOrPromise
+    if (materialized) {
+      return toRuntimeSpawnReply(materialized)
+    }
+    const earlyAdopt = await prepareRuntimePtySpawn(ctx)
+    if (earlyAdopt) {
+      return toRuntimeSpawnReply(earlyAdopt)
+    }
+    const earlyReserved = await buildRuntimePtySpawnOptions(ctx)
+    if (earlyReserved) {
+      return toRuntimeSpawnReply(earlyReserved)
+    }
     await executeRuntimePtySpawn(ctx)
     return toRuntimeSpawnReply(await commitRuntimePtySpawn(ctx))
   } catch (err) {
+    restoreProvisionalPtySize(ctx)
     if (ctx.pendingRegistrationPtyId) {
       deps.runtime?.cancelPendingPtyRegistration?.(
         ctx.pendingRegistrationPtyId,

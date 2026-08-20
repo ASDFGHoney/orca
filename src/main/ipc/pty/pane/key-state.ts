@@ -34,6 +34,13 @@ export function rememberPaneKeyForPty(ptyId: string, paneKey: unknown): string |
   if (!isValidPaneKey(normalizedPaneKey)) {
     return null
   }
+  // Why: a re-registered ptyId would otherwise leave its old paneKey pointing here.
+  const previousPaneKey = ptyPaneKey.get(ptyId)
+  if (previousPaneKey && previousPaneKey !== normalizedPaneKey) {
+    if (paneKeyPtyId.get(previousPaneKey) === ptyId) {
+      paneKeyPtyId.delete(previousPaneKey)
+    }
+  }
   ptyPaneKey.set(ptyId, normalizedPaneKey)
   paneKeyPtyId.set(normalizedPaneKey, ptyId)
   return normalizedPaneKey

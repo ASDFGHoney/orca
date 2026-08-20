@@ -39,6 +39,12 @@ export function declarePendingPaneSerializer(
   sender: WebContents | undefined
 ): number {
   const gen = ++pendingSerializerGenSeq
+  // Why: a sender destroyed before the declaration never fires 'destroyed' again,
+  // so its entry would strand in pendingByPaneKey and suppress the daemon seed forever.
+  if (sender?.isDestroyed()) {
+    cleanupPendingPaneSerializersForSender(sender.id)
+    return gen
+  }
   registerPendingPaneSerializerCleanup(sender)
   const replaced = pendingByPaneKey.get(paneKey)
   if (replaced) {
