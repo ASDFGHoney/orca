@@ -19,7 +19,7 @@ const INCARNATION_A = '22222222-2222-4222-8222-222222222222'
 const INCARNATION_B = '33333333-3333-4333-8333-333333333333'
 
 type CloseEntry = 'terminal.close' | 'terminal.closeTab'
-type Surface = 'runtime-publication' | 'renderer-graph'
+type Surface = 'runtime-publication' | 'runtime-headless' | 'renderer-graph'
 type Replacement = 'new-pty' | 'same-pty-new-incarnation'
 type ExpectedTerminal = {
   terminalHandle: string
@@ -138,7 +138,10 @@ function makeFolderWorkspace(): FolderWorkspace {
   }
 }
 
-function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: boolean } = {}) {
+function createHarness(
+  testCase: MatrixCase,
+  options: { pauseProviderStop?: boolean; pauseIdOnlyKill?: boolean } = {}
+) {
   const workspaceId = testCase.workspace === 'folder' ? FOLDER_WORKSPACE_ID : GIT_WORKSPACE_ID
   let session: WorkspaceSessionState = makeSession(workspaceId, PTY_A, INCARNATION_A)
   const liveProcesses = new Map([[PTY_A, INCARNATION_A]])
@@ -147,6 +150,7 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
   const commitBarrier = makeDeferred()
   const providerStopEntered = makeDeferred()
   const providerStopBarrier = makeDeferred()
+  const idOnlyKillBarrier = makeDeferred()
   const repo = {
     id: REPO_ID,
     path: WORKTREE_PATH,
@@ -222,7 +226,13 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
       return liveProcesses.delete(ptyId)
     }
   )
-  const kill = vi.fn((ptyId: string) => liveProcesses.delete(ptyId))
+  const kill = vi.fn((ptyId: string) => {
+    if (options.pauseIdOnlyKill) {
+      void idOnlyKillBarrier.promise.then(() => liveProcesses.delete(ptyId))
+      return true
+    }
+    return liveProcesses.delete(ptyId)
+  })
   const listProcesses = vi.fn(async () =>
     [...liveProcesses].map(([id, incarnationId]) => ({
       id,
@@ -244,25 +254,31 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
 
   const syncGraph = (ptyId: string, snapshotVersion: number) =>
     runtime.syncWindowGraph(1, {
-      tabs: [
-        {
-          tabId: TAB_ID,
-          worktreeId: workspaceId,
-          title: 'Incarnation fixture shell',
-          activeLeafId: LEAF_ID,
-          layout: { type: 'leaf', leafId: LEAF_ID }
-        }
-      ],
-      leaves: [
-        {
-          tabId: TAB_ID,
-          worktreeId: workspaceId,
-          leafId: LEAF_ID,
-          paneRuntimeId: 7,
-          ptyId
-        }
-      ],
-      ...(testCase.surface === 'runtime-publication'
+      tabs:
+        testCase.surface === 'runtime-headless'
+          ? []
+          : [
+              {
+                tabId: TAB_ID,
+                worktreeId: workspaceId,
+                title: 'Incarnation fixture shell',
+                activeLeafId: LEAF_ID,
+                layout: { type: 'leaf', leafId: LEAF_ID }
+              }
+            ],
+      leaves:
+        testCase.surface === 'runtime-headless'
+          ? []
+          : [
+              {
+                tabId: TAB_ID,
+                worktreeId: workspaceId,
+                leafId: LEAF_ID,
+                paneRuntimeId: 7,
+                ptyId
+              }
+            ],
+      ...(testCase.surface !== 'renderer-graph'
         ? {
             mobileSessionTabs: [
               {
@@ -289,7 +305,7 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
         : {})
     })
 
-  if (testCase.surface === 'runtime-publication') {
+  if (testCase.surface !== 'renderer-graph') {
     runtime.registerPty(PTY_A, workspaceId, null, {
       tabId: TAB_ID,
       leafId: LEAF_ID,
@@ -323,8 +339,10 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
     commitBarrier,
     providerStopEntered,
     providerStopBarrier,
+    idOnlyKillBarrier,
     replaceWithB,
     liveProcesses,
+    kill,
     retiredPtys,
     rendererStoppedPtys,
     getSession: () => session
@@ -397,4 +415,37 @@ describe('handle-authorized final-pane close is incarnation safe', () => {
       })
     }
   )
+
+  it('terminal.closeTab preserves a republished headless replacement while exact stop waits', async () => {
+    const harness = createHarness(
+      {
+        name: 'terminal.closeTab runtime headless',
+        entry: 'terminal.closeTab',
+        surface: 'runtime-headless',
+        workspace: 'git',
+        replacement: 'same-pty-new-incarnation'
+      },
+      { pauseProviderStop: true, pauseIdOnlyKill: true }
+    )
+    const [terminalA] = (await harness.runtime.listTerminals(`id:${harness.workspaceId}`)).terminals
+
+    const closing = harness.runtime.closeTerminalTab(terminalA.handle)
+    await harness.providerStopEntered.promise
+    const terminalB = await harness.replaceWithB()
+    harness.idOnlyKillBarrier.resolve()
+    harness.providerStopBarrier.resolve()
+
+    await expect(closing).resolves.toMatchObject({
+      handle: terminalA.handle,
+      tabId: TAB_ID,
+      ptyKilled: false
+    })
+    expect(harness.kill).not.toHaveBeenCalled()
+    expect(harness.liveProcesses.get(terminalB.ptyId!)).toBe(INCARNATION_B)
+    expect(harness.getSession().tabsByWorktree[harness.workspaceId]).toHaveLength(1)
+    expect(await harness.runtime.readTerminal(terminalB.handle)).toMatchObject({
+      handle: terminalB.handle,
+      status: 'running'
+    })
+  })
 })

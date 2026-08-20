@@ -9289,7 +9289,9 @@ export class OrcaRuntimeService {
       // renderer's live pin guard and durable close transaction.
       if (closingWholeParent && !this.tabs.has(tab.parentTabId)) {
         this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab, {
-          killPtys: options.reason === undefined || options.reason === 'user'
+          killPtys:
+            !options.localPtyTeardownOwnedExternally &&
+            (options.reason === undefined || options.reason === 'user')
         })
         this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
         this.store?.flushOrThrow?.()
@@ -9338,7 +9340,8 @@ export class OrcaRuntimeService {
           // Why: after relay recovery the renderer can acknowledge a tab it no longer mirrors; the HUB must still retire its SSH-owned surface.
           this.closeHeadlessMobileTerminalTab(worktreeId, remainingSnapshot, remainingTab, {
             // Why: the renderer may already have durably removed the tab before acknowledging.
-            allowMissingPersistedTab: true
+            allowMissingPersistedTab: true,
+            killPtys: !options.localPtyTeardownOwnedExternally
           })
           this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
           this.store?.flushOrThrow?.()
@@ -9354,13 +9357,17 @@ export class OrcaRuntimeService {
       // Why: notifier implementations without the acknowledged relay may expose
       // only raw pane close. Runtime-owned parents still need de-persist + kill.
       if (closingWholeParent && this.isRuntimeOwnedHeadlessMobileTab(worktreeId, tab)) {
-        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab)
+        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab, {
+          killPtys: !options.localPtyTeardownOwnedExternally
+        })
         this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
         this.store?.flushOrThrow?.()
         return finishCommittedClose()
       }
       if (!this.notifier?.closeTerminal) {
-        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab)
+        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab, {
+          killPtys: !options.localPtyTeardownOwnedExternally
+        })
         this.store?.flushOrThrow?.()
         return finishCommittedClose()
       }
