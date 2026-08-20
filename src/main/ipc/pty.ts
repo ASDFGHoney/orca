@@ -7746,6 +7746,10 @@ export function registerPtyHandlers(
         runtime?.onPtyExit(args.id, -1, incarnationId)
         rememberSyntheticKillExit(args.id)
         sendPtyExitToRenderer({ id: args.id, code: -1 })
+        if (historyPreservingStopId !== undefined) {
+          runtime?.preservePtyHistoryThroughLateExit(args.id, historyPreservingStopId)
+          historyPreservingStopId = undefined
+        }
         return
       }
       const shutdownProvider = provider ?? getProviderForPty(args.id)
@@ -7780,6 +7784,10 @@ export function registerPtyHandlers(
         runtime?.onPtyExit(args.id, -1, incarnationId)
         rememberSyntheticKillExit(args.id)
         sendPtyExitToRenderer({ id: args.id, code: -1 })
+        if (connectionId && historyPreservingStopId !== undefined) {
+          runtime?.preservePtyHistoryThroughLateExit(args.id, historyPreservingStopId)
+          historyPreservingStopId = undefined
+        }
       }
     } finally {
       if (historyPreservingStopId !== undefined) {

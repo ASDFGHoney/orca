@@ -357,6 +357,30 @@ describe('registerPtyHandlers', () => {
       [['pty:exit', { id: 'local-pty', code: -1 }]]
     )
   })
+  it('retains an SSH history lease after a synthetic exit until the host exit arrives', async () => {
+    const runtime = {
+      setPtyController: vi.fn(),
+      markPtyHistoryPreservingStopRequested: vi.fn(() => 1),
+      preservePtyHistoryThroughLateExit: vi.fn(),
+      clearPtyHistoryPreservingStopRequested: vi.fn(),
+      markPtyStopRequested: vi.fn(),
+      onPtyExit: vi.fn()
+    }
+    registerSshPtyProvider('ssh-history', {
+      shutdown: vi.fn(async () => undefined),
+      onExit: vi.fn(() => () => {})
+    } as never)
+    setPtyOwnership('ssh-history-pty', 'ssh-history')
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, runtime as never)
+
+    await handlers.get('pty:kill')!(null, { id: 'ssh-history-pty', keepHistory: true })
+
+    expect(runtime.onPtyExit).toHaveBeenCalledWith('ssh-history-pty', -1, undefined)
+    expect(runtime.preservePtyHistoryThroughLateExit).toHaveBeenCalledWith('ssh-history-pty', 1)
+    expect(runtime.clearPtyHistoryPreservingStopRequested).not.toHaveBeenCalled()
+    deletePtyOwnership('ssh-history-pty')
+  })
   it('waits for the desktop startup barrier before renderer local spawns resolve the provider', async () => {
     const barrier = makeDeferred()
     registerPtyHandlers(
