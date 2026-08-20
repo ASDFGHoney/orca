@@ -1,5 +1,8 @@
 import { useMemo } from 'react'
-import { parseWslUncPath } from '../../../../shared/wsl-paths'
+import {
+  createWslAliasedPathInsideOrEqualMatcher,
+  normalizedWslPathAliases
+} from '../../../../shared/wsl-path-aliases'
 import { splitWorktreeIdForFilesystem } from '../../../../shared/worktree/id'
 import {
   getRepoExecutionHostId,
@@ -8,7 +11,6 @@ import {
   type ExecutionHostId
 } from '../../../../shared/execution-host'
 import {
-  createNormalizedPathInsideOrEqualMatcher,
   isRuntimePathAbsolute,
   normalizeRuntimePathForComparison
 } from '../../../../shared/cross-platform-path'
@@ -87,9 +89,9 @@ function resolveWorktreeInfoFromCandidates(
   }
 
   const sessionHostId = normalizeExecutionHostId(session.executionHostId)
-  const normalizedCwd = normalizeRuntimePathForComparison(session.cwd)
+  const cwdAliases = normalizedWslPathAliases(session.cwd)
   const matched = candidates
-    .filter((candidate) => candidate.ownsNormalizedCwd(normalizedCwd))
+    .filter((candidate) => cwdAliases.some((alias) => candidate.ownsNormalizedCwd(alias)))
     .filter((candidate) => !sessionHostId || candidate.hostId === sessionHostId)
     .sort(compareWorktreeCandidates)
 
@@ -229,20 +231,13 @@ function makeWorktreeCandidate(
   hostId: ExecutionHostId,
   source: WorktreeCandidate['source']
 ): WorktreeCandidate {
-  const ownsCwd = createNormalizedPathInsideOrEqualMatcher(path)
-  // A WSL UNC root also owns sessions recorded under its Linux-native cwd.
-  const wslPath = parseWslUncPath(path)
-  const ownsCwdViaWslAlias = wslPath
-    ? createNormalizedPathInsideOrEqualMatcher(wslPath.linuxPath)
-    : null
   return {
     worktree,
     path,
     hostId,
     status: worktree.isArchived ? 'archived' : 'active',
     source,
-    ownsNormalizedCwd: (normalizedCwd) =>
-      ownsCwd(normalizedCwd) || (ownsCwdViaWslAlias?.(normalizedCwd) ?? false),
+    ownsNormalizedCwd: createWslAliasedPathInsideOrEqualMatcher(path),
     normalizedPathLength: normalizeRuntimePathForComparison(path).length
   }
 }

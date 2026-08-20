@@ -70,6 +70,20 @@ describe('resolveMobileAgentHistorySessionWorktree', () => {
     ).toBeNull()
   })
 
+  it('matches a Windows drive worktree against a WSL /mnt/c transcript cwd', () => {
+    const resolved = resolveMobileAgentHistorySessionWorktree({
+      session: session('/mnt/c/Users/neil/orca/orca'),
+      worktrees: [
+        worktree({
+          worktreeId: 'win-wsl',
+          path: String.raw`C:\Users\neil\orca\orca`
+        })
+      ],
+      activeWorktreeId: 'win-wsl'
+    })
+    expect(resolved).toMatchObject({ status: 'current', worktreeId: 'win-wsl' })
+  })
+
   it('matches WSL UNC worktree paths against Linux transcript paths', () => {
     const resolved = resolveMobileAgentHistorySessionWorktree({
       session: session('/home/ada/repo/app'),

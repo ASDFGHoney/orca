@@ -6,10 +6,9 @@ import {
   wslGatedStat
 } from '../native-chat/wsl-transcript-fs-access'
 import { WslTranscriptFsError } from '../native-chat/wsl-transcript-fs-gate'
-import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
 import { encodeClaudeProjectPaths, isClaudeProjectDirInScope } from './claude-project-dir-encoding'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
-import { parseWslUncPath } from '../../shared/wsl-paths'
+import { isWslAliasedPathInsideOrEqual, wslPathAliases } from '../../shared/wsl-path-aliases'
 import { recordSessionScanIssue } from './session-scan-issues'
 import type { FileWithMtime } from './session-scanner-types'
 import { errorMessage, extractString, parseJsonObject } from './session-scanner-values'
@@ -86,7 +85,10 @@ export async function discoverInScopeClaudeFiles(args: {
   for (const rootDir of args.rootDirs) {
     for (const projectDir of await listProjectDirs(rootDir, scopeProjectPrefixes, args.issues)) {
       const cwd = await cachedProjectDirCwd(projectDir, args.issues)
-      if (!cwd || !args.scopePaths.some((scopePath) => isCwdInsideScopePath(scopePath, cwd))) {
+      if (
+        !cwd ||
+        !args.scopePaths.some((scopePath) => isWslAliasedPathInsideOrEqual(scopePath, cwd))
+      ) {
         continue
       }
       await collectClaudeFiles({
@@ -104,33 +106,13 @@ export async function discoverInScopeClaudeFiles(args: {
 function claudeProjectScopePrefixes(scopePaths: readonly string[]): Set<string> {
   const prefixes = new Set<string>()
   for (const scopePath of scopePaths) {
-    for (const candidate of scopePathCandidates(scopePath)) {
+    for (const candidate of wslPathAliases(scopePath)) {
       for (const prefix of encodeClaudeProjectPaths(candidate)) {
         prefixes.add(prefix)
       }
     }
   }
   return prefixes
-}
-
-function scopePathCandidates(scopePath: string): string[] {
-  const wslScopePath = parseWslUncPath(scopePath)
-  return wslScopePath ? [scopePath, wslScopePath.linuxPath] : [scopePath]
-}
-
-function isCwdInsideScopePath(scopePath: string, cwd: string): boolean {
-  if (isPathInsideOrEqual(scopePath, cwd)) {
-    return true
-  }
-
-  const wslScopePath = parseWslUncPath(scopePath)
-  if (!wslScopePath) {
-    return false
-  }
-
-  // WSL transcripts record Linux cwd values even when the renderer sends the
-  // active worktree as a Windows UNC path.
-  return isPathInsideOrEqual(wslScopePath.linuxPath, cwd)
 }
 
 async function listProjectDirs(

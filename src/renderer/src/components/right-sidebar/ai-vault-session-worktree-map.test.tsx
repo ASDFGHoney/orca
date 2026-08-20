@@ -186,6 +186,31 @@ describe('useAiVaultSessionWorktreeMap', () => {
     })
   })
 
+  it('matches a Windows drive worktree against a WSL /mnt/c session cwd', () => {
+    const windowsWorktree = makeWorktree({
+      id: String.raw`repo-1::C:\Users\neil\orca\orca`,
+      path: String.raw`C:\Users\neil\orca\orca`,
+      displayName: 'orca'
+    })
+    const session = makeSession({
+      id: 'claude:mnt-c',
+      cwd: '/mnt/c/Users/neil/orca/orca'
+    })
+
+    const { result } = renderHook(() =>
+      useAiVaultSessionWorktreeMap({
+        sessions: [session],
+        repos,
+        worktrees: [windowsWorktree]
+      })
+    )
+
+    expect(result.current.get(session.id)).toMatchObject({
+      status: 'active',
+      worktreeId: windowsWorktree.id
+    })
+  })
+
   it('does not attribute a session to a workspace that merely shares a path prefix', () => {
     // Guards the candidate matcher's boundary: hoisting the root normalization
     // out of the loop must not degrade containment into a bare startsWith, or

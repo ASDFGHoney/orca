@@ -19,6 +19,14 @@ describe('encodeClaudeProjectPath', () => {
     expect(encodeClaudeProjectPath('C:\\')).toBe('C--')
   })
 
+  it('encodes a WSL drvfs mount separately from the Windows drive spelling', () => {
+    // Claude in WSL records cwd as /mnt/c/... even when Orca's worktree is C:\...
+    expect(encodeClaudeProjectPath('/mnt/c/Users/neil/orca/orca')).toBe(
+      '-mnt-c-Users-neil-orca-orca'
+    )
+    expect(encodeClaudeProjectPath('C:\\Users\\neil\\orca\\orca')).toBe('C--Users-neil-orca-orca')
+  })
+
   it('encodes a WSL UNC path', () => {
     expect(encodeClaudeProjectPath('\\\\wsl$\\Ubuntu\\home\\ada\\orca\\workspaces')).toBe(
       '--wsl--Ubuntu-home-ada-orca-workspaces'

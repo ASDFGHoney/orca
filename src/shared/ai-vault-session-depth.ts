@@ -1,4 +1,4 @@
-import { isPathInsideOrEqual } from './cross-platform-path'
+import { isWslAliasedPathInsideOrEqual } from './wsl-path-aliases'
 import type { AiVaultListArgs, AiVaultListResult } from './ai-vault-types'
 
 export const DEFAULT_AI_VAULT_SCAN_LIMIT = 1000
@@ -43,7 +43,7 @@ export function truncateAiVaultListResult(
     let scopedCount = 0
     for (const session of result.sessions) {
       const cwd = session.cwd
-      if (cwd && scopePaths.some((scopePath) => isPathInsideOrEqual(scopePath, cwd))) {
+      if (cwd && scopePaths.some((scopePath) => isWslAliasedPathInsideOrEqual(scopePath, cwd))) {
         selectedIds.add(session.id)
         if (++scopedCount >= depth) {
           break

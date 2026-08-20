@@ -1,5 +1,5 @@
-import { isPathInsideOrEqual, isRuntimePathAbsolute } from '../../../src/shared/cross-platform-path'
-import { parseWslUncPath } from '../../../src/shared/wsl-paths'
+import { isRuntimePathAbsolute } from '../../../src/shared/cross-platform-path'
+import { isWslAliasedPathInsideOrEqual } from '../../../src/shared/wsl-path-aliases'
 import { splitWorktreeIdForFilesystem } from '../../../src/shared/worktree/id'
 import type { AiVaultSession } from '../../../src/shared/ai-vault-types'
 import type { Worktree } from '../worktree/workspace-list-types'
@@ -33,7 +33,7 @@ export function resolveMobileAgentHistorySessionWorktree(args: {
   const sessionCwd = args.session.cwd
 
   const candidates = buildMobileWorktreeCandidates(args.worktrees)
-    .filter((candidate) => isSessionInWorktreePath(candidate.path, sessionCwd))
+    .filter((candidate) => isWslAliasedPathInsideOrEqual(candidate.path, sessionCwd))
     .sort(compareWorktreeCandidates)
   const best = candidates[0]
   if (!best) {
@@ -77,14 +77,6 @@ function buildMobileWorktreeCandidates(worktrees: readonly Worktree[]): Worktree
 
 function hasUsablePath(pathValue: string): boolean {
   return Boolean(pathValue.trim() && isRuntimePathAbsolute(pathValue))
-}
-
-function isSessionInWorktreePath(worktreePath: string, sessionCwd: string): boolean {
-  if (isPathInsideOrEqual(worktreePath, sessionCwd)) {
-    return true
-  }
-  const wslPath = parseWslUncPath(worktreePath)
-  return wslPath ? isPathInsideOrEqual(wslPath.linuxPath, sessionCwd) : false
 }
 
 function compareWorktreeCandidates(left: WorktreeCandidate, right: WorktreeCandidate): number {
