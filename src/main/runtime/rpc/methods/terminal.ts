@@ -1405,20 +1405,22 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       const assertPromptInputAuthority =
         params.agentPrompt === true && params.client?.type === 'desktop'
           ? (ptyId?: string): void => {
+              if (signal?.aborted) {
+                throw new Error('request_aborted')
+              }
               assertTerminalSendExactPtyBinding(runtime, params.terminal, ptyId)
               if (ptyId && isTerminalInputLockedForClient(runtime, ptyId, params.client)) {
                 throw new Error('terminal_guard_not_writable')
               }
             }
           : undefined
-      const beforeWrite = assertSendPreconditions ?? assertPromptInputAuthority
+      const beforeWrite = assertSendPreconditions
       const useSettledAgentPrompt =
         params.agentPrompt === true &&
         hasText &&
         params.enter === true &&
         params.interrupt !== true &&
-        params.client?.type === 'desktop' &&
-        (await runtime.isTerminalRunningSettledPromptAgent(params.terminal))
+        params.client?.type === 'desktop'
       const reserveWrite =
         params.inputKind !== 'query-reply' && leaf?.ptyId && mobileFloorClientId
           ? (ptyId: string): void => {
@@ -1431,26 +1433,32 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           : undefined
       let result
       try {
-        result = useSettledAgentPrompt
-          ? await runtime.sendTerminalAgentPrompt(params.terminal, params.text!, {
+        if (useSettledAgentPrompt) {
+          result = await runtime.sendTerminalAgentPrompt(params.terminal, params.text!, {
+            beforeWrite,
+            assertWriteAuthority: assertPromptInputAuthority,
+            signal,
+            requireSettledForeground: true
+          })
+        }
+        if (!useSettledAgentPrompt || result?.accepted !== true) {
+          result = await runtime.sendTerminal(
+            params.terminal,
+            {
+              text: params.text,
+              enter: params.enter === true,
+              interrupt: params.interrupt === true
+            },
+            {
               beforeWrite,
-              signal
-            })
-          : await runtime.sendTerminal(
-              params.terminal,
-              {
-                text: params.text,
-                enter: params.enter === true,
-                interrupt: params.interrupt === true
-              },
-              {
-                beforeWrite,
-                ...(reserveWrite ? { reserveWrite } : {}),
-                ...(params.inputKind !== 'query-reply' && mobileFloorClientId
-                  ? { afterWrite: () => commitMobileInputFloorClaim(mobileFloorClaim) }
-                  : {})
-              }
-            )
+              assertWriteAuthority: assertPromptInputAuthority,
+              ...(reserveWrite ? { reserveWrite } : {}),
+              ...(params.inputKind !== 'query-reply' && mobileFloorClientId
+                ? { afterWrite: () => commitMobileInputFloorClaim(mobileFloorClaim) }
+                : {})
+            }
+          )
+        }
       } catch (error) {
         mobileFloorClaim.current?.rollback()
         const refusedReason = getTerminalSendGuardRefusedReason(error)
