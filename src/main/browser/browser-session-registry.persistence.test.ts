@@ -538,8 +538,7 @@ describe('BrowserSessionRegistry persistence', () => {
       rawUrl: 'https://example.com/account'
     })
 
-    // Why: a cross-origin sub-frame can request a permission, and getURL() reports the TOP-LEVEL
-    // document. Attributing the denial to the embedder tells the user the wrong site asked.
+    // A subframe denial must name the requester, not its top-level embedder.
     browserManagerNotifyPermissionDeniedMock.mockClear()
     requestHandler(guestWc, 'geolocation', permissionCallback, {
       requestingUrl: 'https://widget.example.net/embed',
@@ -553,8 +552,7 @@ describe('BrowserSessionRegistry persistence', () => {
       })
     )
 
-    // Why: requestingUrl is absent on some request shapes; the top-level document is the fallback,
-    // not a crash or an empty origin.
+    // Missing or empty frame URLs fall back to the visible top-level page.
     browserManagerNotifyPermissionDeniedMock.mockClear()
     requestHandler(guestWc, 'geolocation', permissionCallback, { isMainFrame: true })
     await vi.waitFor(() =>
@@ -562,6 +560,33 @@ describe('BrowserSessionRegistry persistence', () => {
         guestWebContentsId: 401,
         permission: 'geolocation',
         rawUrl: 'https://example.com/account'
+      })
+    )
+
+    browserManagerNotifyPermissionDeniedMock.mockClear()
+    requestHandler(guestWc, 'geolocation', permissionCallback, {
+      requestingUrl: '',
+      isMainFrame: false
+    })
+    await vi.waitFor(() =>
+      expect(browserManagerNotifyPermissionDeniedMock).toHaveBeenCalledWith({
+        guestWebContentsId: 401,
+        permission: 'geolocation',
+        rawUrl: 'https://example.com/account'
+      })
+    )
+
+    // Opaque frame URLs have no site Orca can name accurately.
+    browserManagerNotifyPermissionDeniedMock.mockClear()
+    requestHandler(guestWc, 'geolocation', permissionCallback, {
+      requestingUrl: 'about:blank',
+      isMainFrame: false
+    })
+    await vi.waitFor(() =>
+      expect(browserManagerNotifyPermissionDeniedMock).toHaveBeenCalledWith({
+        guestWebContentsId: 401,
+        permission: 'geolocation',
+        rawUrl: ''
       })
     )
     expect(
@@ -735,6 +760,7 @@ describe('BrowserSessionRegistry persistence', () => {
     const callback = vi.fn()
 
     requestHandler(guestWc, 'media', callback, { mediaTypes: ['video'] })
+    guestWc.getURL.mockReturnValue('https://example.com/after-navigation')
 
     await vi.waitFor(() => expect(callback).toHaveBeenCalledWith(false))
     expect(browserManagerNotifyPermissionDeniedMock).toHaveBeenCalledWith({

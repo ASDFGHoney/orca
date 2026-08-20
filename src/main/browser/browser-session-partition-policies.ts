@@ -22,6 +22,21 @@ const handleWillDownload = (
   browserManager.handleGuestWillDownload({ guestWebContentsId: webContents.id, item })
 }
 
+function resolvePermissionNoticeUrl(
+  webContents: Electron.WebContents,
+  details: Electron.PermissionRequest | undefined
+): string {
+  const requestingUrl = details?.requestingUrl
+  if (!requestingUrl) {
+    return webContents.getURL()
+  }
+  try {
+    return new URL(requestingUrl).origin === 'null' ? '' : requestingUrl
+  } catch {
+    return ''
+  }
+}
+
 export function installBrowserSessionPartitionPolicies(profile: BrowserSessionProfile): void {
   const { partition } = profile
   const sess = session.fromPartition(partition)
@@ -37,13 +52,10 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
     setupClientHintsOverride(sess, cleanUA)
   }
   sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    // Why: a permission request can come from a cross-origin sub-frame, and getURL() reports the
-    // TOP-LEVEL document. Attributing a sub-frame's denial to the embedder tells the user the wrong
-    // site asked. Every PermissionRequest variant carries requestingUrl; fall back to the top-level
-    // document only when it is missing.
-    const requestingUrl = (details as Electron.PermissionRequest | undefined)?.requestingUrl
     // Why: defer media to macOS TCC; denying at the session layer throws NotAllowedError even after the user granted Camera/Mic to the OS.
     if (permission === 'media') {
+      // Capture before async handling; opaque frames cannot be attributed to a named site.
+      const rawUrl = resolvePermissionNoticeUrl(webContents, details)
       void requestSystemMediaAccess(
         details as Electron.MediaAccessPermissionRequest | undefined
       ).then(
@@ -52,7 +64,7 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
             browserManager.notifyPermissionDenied({
               guestWebContentsId: webContents.id,
               permission,
-              rawUrl: requestingUrl || webContents.getURL()
+              rawUrl
             })
           }
           callback(granted)
@@ -62,7 +74,7 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
           browserManager.notifyPermissionDenied({
             guestWebContentsId: webContents.id,
             permission,
-            rawUrl: requestingUrl || webContents.getURL()
+            rawUrl
           })
           callback(false)
         }
@@ -71,10 +83,11 @@ export function installBrowserSessionPartitionPolicies(profile: BrowserSessionPr
     }
     const allowed = isAutoGrantedBrowserSessionPermission(permission)
     if (!allowed) {
+      const rawUrl = resolvePermissionNoticeUrl(webContents, details)
       browserManager.notifyPermissionDenied({
         guestWebContentsId: webContents.id,
         permission,
-        rawUrl: requestingUrl || webContents.getURL()
+        rawUrl
       })
     }
     callback(allowed)
