@@ -107,6 +107,8 @@ const CLAUDE_THINKING_LEVELS: ThinkingLevel[] = [
   { id: 'max', label: 'Max' }
 ]
 
+const PI_DEFAULT_MODEL_ID = 'default'
+
 function uniqueModels(models: CommitMessageModel[]): CommitMessageModel[] {
   const seen = new Set<string>()
   return models.filter((model) => {
@@ -500,22 +502,19 @@ export const COMMIT_MESSAGE_AGENT_SPECS: Partial<Record<TuiAgent, CommitMessageA
       '--no-context-files',
       '--mode',
       'text',
-      '--model',
-      model,
+      ...(model === PI_DEFAULT_MODEL_ID ? [] : ['--model', model]),
       ...(thinkingLevel ? ['--thinking', thinkingLevel] : [])
     ],
     modelSource: 'dynamic',
     modelDiscovery: { binary: 'pi', args: ['--list-models'], parse: parsePiModels },
     models: [
       {
-        // Why: Pi commonly authenticates through GitHub Copilot locally; using
-        // that provider avoids selecting a raw OpenAI model when no key exists.
-        id: 'github-copilot/gpt-5.4-mini',
-        label: 'Github Copilot GPT 5.4 Mini',
-        ...withOpenAiThinking('gpt-5.4-mini')
+        id: PI_DEFAULT_MODEL_ID,
+        label: 'Pi default',
+        isDefault: true
       }
     ],
-    defaultModelId: 'github-copilot/gpt-5.4-mini'
+    defaultModelId: PI_DEFAULT_MODEL_ID
   },
   amp: {
     id: 'amp',
@@ -796,7 +795,8 @@ function toCommitMessageAgentCapability(
       ...(model.description ? { description: model.description } : {}),
       ...(model.thinkingLevels ? { thinkingLevels: [...model.thinkingLevels] } : {}),
       ...(model.defaultThinkingLevel ? { defaultThinkingLevel: model.defaultThinkingLevel } : {}),
-      ...(model.supportsFastMode ? { supportsFastMode: true } : {})
+      ...(model.supportsFastMode ? { supportsFastMode: true } : {}),
+      ...(model.isDefault ? { isDefault: true } : {})
     }))
   }
 }

@@ -288,6 +288,12 @@ function finalizeModelDiscoveryOutput(
     }
     return { success: false, error: `${spec.label} returned no available models.` }
   }
+  const cliDefault = spec.models.find(
+    (model) => model.id === spec.defaultModelId && model.isDefault
+  )
+  if (cliDefault && !models.some((model) => model.id === cliDefault.id)) {
+    models = [cliDefault, ...models]
+  }
   const defaultModelId = models.some((model) => model.id === spec.defaultModelId)
     ? spec.defaultModelId
     : models[0].id
