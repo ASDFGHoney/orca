@@ -27,6 +27,7 @@ const PS_RETRY = '/tmp/orca-prompt-ps-retry'
 const PS_RETRY_ENTERED = '/tmp/orca-prompt-ps-retry-entered'
 const PS_RETRY_RELEASE = '/tmp/orca-prompt-ps-retry-release'
 const PS_COUNT = '/tmp/orca-prompt-ps-count'
+const TERMINAL_CLOSE_CLEANUP_TIMEOUT_MS = 5_000
 const execFileAsync = promisify(execFile)
 
 type RuntimeTerminalSummary = {
@@ -46,6 +47,26 @@ async function callRuntime<TResult>(page: Page, method: string, params: unknown)
     },
     { method, params }
   ) as Promise<TResult>
+}
+
+async function closeRemoteTerminalsBestEffort(page: Page, handles: string[]): Promise<void> {
+  let timeout: NodeJS.Timeout | null = null
+  try {
+    await Promise.race([
+      Promise.all(
+        handles.map((terminal) =>
+          callRuntime(page, 'terminal.closeTab', { terminal }).catch(() => undefined)
+        )
+      ),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, TERMINAL_CLOSE_CLEANUP_TIMEOUT_MS)
+      })
+    ])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
 }
 
 async function createRemoteTerminal(
@@ -263,22 +284,21 @@ test.describe('Docker SSH settled prompt submission', () => {
         description: `target=${remote.targetId} worktree=${remote.worktreeId} agentPty=${terminal.ptyId} survivorPty=${survivor.ptyId} psCalls=${remoteFile(target, PS_COUNT)}`
       })
     } finally {
-      await Promise.all(
-        terminalHandles.map((terminal) =>
-          callRuntime(orcaPage, 'terminal.closeTab', { terminal }).catch(() => undefined)
-        )
-      )
-      if (target) {
-        try {
-          execDockerSshRelayTargetControlCommand(
-            target,
-            `rm -f ${PS_OBSERVE} ${PS_FAIL} ${PS_RELEASE} ${PS_RETRY} ${PS_RETRY_RELEASE}`
-          )
-        } finally {
+      try {
+        await closeRemoteTerminalsBestEffort(orcaPage, terminalHandles)
+      } finally {
+        if (target) {
+          try {
+            execDockerSshRelayTargetControlCommand(
+              target,
+              `rm -f ${PS_OBSERVE} ${PS_FAIL} ${PS_RELEASE} ${PS_RETRY} ${PS_RETRY_RELEASE}`
+            )
+          } finally {
+            cleanupDockerSshRelayTarget(target)
+          }
+        } else {
           cleanupDockerSshRelayTarget(target)
         }
-      } else {
-        cleanupDockerSshRelayTarget(target)
       }
     }
   })

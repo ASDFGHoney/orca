@@ -89,6 +89,36 @@ describe('terminal agent prompt send RPC', () => {
     expect(sendTerminalAgentPrompt).toHaveBeenCalledOnce()
   })
 
+  it('does not fall back after settled foreground authority is lost', async () => {
+    const sendTerminal = vi.fn()
+    const sendTerminalAgentPrompt = vi
+      .fn()
+      .mockRejectedValue(new Error('terminal_guard_not_writable'))
+    const runtime = makeRuntime({
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      getDriver: vi.fn().mockReturnValue({ kind: 'idle' }),
+      sendTerminal,
+      sendTerminalAgentPrompt
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest({
+        terminal: 'terminal-1',
+        text: 'review this change',
+        enter: true,
+        agentPrompt: true,
+        client: { id: 'orca-cli', type: 'desktop' }
+      })
+    )
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: { send: { accepted: false, bytesWritten: 0 } }
+    })
+    expect(sendTerminal).not.toHaveBeenCalled()
+  })
+
   it('does not send delayed Enter after a paired mobile client takes the floor', async () => {
     const writes: string[] = []
     const ordering: string[] = []

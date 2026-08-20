@@ -24236,8 +24236,105 @@ describe('OrcaRuntimeService', () => {
       runtime.sendTerminalAgentPrompt(handle, 'review this change', {
         requireSettledForeground: true
       })
-    ).resolves.toMatchObject({ accepted: false, bytesWritten: 0 })
+    ).rejects.toThrow('terminal_guard_not_writable')
     expect(writes).toEqual([])
+  })
+
+  it('refuses settled delivery when foreground inspection becomes unavailable', async () => {
+    const writes: string[] = []
+    const getForegroundProcess = vi
+      .fn()
+      .mockResolvedValueOnce('codex')
+      .mockRejectedValueOnce(new Error('foreground unavailable'))
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+
+    await expect(
+      runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+        requireSettledForeground: true
+      })
+    ).rejects.toThrow('terminal_guard_not_writable')
+    expect(writes).toEqual([])
+  })
+
+  it('revalidates settled foreground after the pre-write guard yields', async () => {
+    const writes: string[] = []
+    const getForegroundProcess = vi
+      .fn()
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValue('zsh')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+
+    await expect(
+      runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+        beforeWrite: async () => undefined,
+        requireSettledForeground: true
+      })
+    ).rejects.toThrow('terminal_guard_not_writable')
+    expect(writes).toEqual([])
+  })
+
+  it('revalidates settled foreground before delayed Enter', async () => {
+    vi.useFakeTimers()
+    const writes: string[] = []
+    const getForegroundProcess = vi
+      .fn()
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValue('zsh')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+
+    const send = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+      requireSettledForeground: true
+    })
+    const rejected = expect(send).rejects.toThrow('terminal_guard_not_writable')
+    await vi.runAllTimersAsync()
+
+    await rejected
+    expect(writes.some((data) => data.includes('review this change'))).toBe(true)
+    expect(writes.filter((data) => data === '\r')).toHaveLength(0)
   })
 
   it('cancels bounded wrapper recognition without writing or retrying', async () => {
@@ -24272,6 +24369,43 @@ describe('OrcaRuntimeService', () => {
 
     await rejected
     expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+    expect(writes).toEqual([])
+  })
+
+  it('cancels an in-flight settled foreground inspection without writing', async () => {
+    const controller = new AbortController()
+    let inspectionStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      inspectionStarted = resolve
+    })
+    const runtime = new OrcaRuntimeService(store)
+    const writes: string[] = []
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => {
+        inspectionStarted()
+        return await new Promise<string | null>(() => undefined)
+      }
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+    const send = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
+      requireSettledForeground: true,
+      signal: controller.signal
+    })
+    const rejected = expect(send).rejects.toThrow('request_aborted')
+
+    await started
+    controller.abort()
+
+    await rejected
     expect(writes).toEqual([])
   })
 

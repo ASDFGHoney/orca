@@ -356,14 +356,8 @@ test('paired mobile floor takeover blocks the CLI delayed Enter', async ({
       send: { accepted: false, bytesWritten: 0 }
     })
     const observedInput = readObservedInput(fixtureInputObservation)
-    expect(observedInput).toContain(marker)
-    expect(observedInput).toContain('mobile-owner-input')
-    if (process.platform === 'win32') {
-      expect(observedInput).toContain(prompt)
-    } else {
-      expect(observedInput).toContain(`\x1b[200~${prompt}\x1b[201~`)
-    }
-    expect(observedInput).not.toContain('\r')
+    const desktopFrame = process.platform === 'win32' ? prompt : `\x1b[200~${prompt}\x1b[201~`
+    expect(observedInput).toBe(`${desktopFrame}mobile-owner-input`)
   } finally {
     subscription.close()
     await callDevCli(

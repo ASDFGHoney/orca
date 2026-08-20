@@ -9421,7 +9421,7 @@
         "https://linear.app/stably/issue/STA-4488",
         "https://github.com/stablyai/orca/issues/14525"
       ],
-      "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when a bounded foreground read positively identifies the exact target as Claude or Codex on a desktop call; known transient wrappers may resolve within the existing bound, and proven current foreground identity outranks historical launch identity for render settlement. The exact PTY binding and desktop input-floor authority are rechecked before every paste chunk and delayed Enter. Every other agent, stale agent metadata over a shell, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
+      "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when a bounded foreground read positively identifies the exact target as Claude or Codex on a desktop call; known transient wrappers may resolve within the existing bound, and proven current foreground identity outranks historical launch identity for render settlement. Once target proof exists, a changed or unavailable foreground refuses the request without legacy fallback; foreground identity is rechecked after the pre-write guard and before delayed Enter, while exact PTY binding and desktop input-floor authority are rechecked before every paste chunk and delayed Enter. Every other positively identified agent or shell, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
       "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units drive a node-to-Codex wrapper transition with fake time, prove fresh foreground Codex outranks stale non-target launch identity at the render gate, and transfer the paired-mobile floor between paste and suffix while recording request, PTY generation, owner, exact writes, and ordering. The baseline must fall back or write Enter in all three cases; the candidate must settle once or reject before cross-owner Enter, with no direct fallback or duplicate input.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
@@ -9464,7 +9464,8 @@
             "a speculative CLI prompt check does not poll wrapper foregrounds",
             "a known transient wrapper resolves to Codex within the bounded foreground retry",
             "current foreground proof stays request-local inside the PTY generation queue and outranks stale launch identity",
-            "identity transition, cancellation, and concurrent classification cannot write or fan out",
+            "identity transition, unavailable inspection, cancellation, and concurrent classification cannot write, fall back, or fan out",
+            "foreground authority is rechecked after an awaited pre-write guard and before delayed Enter",
             "the PTY write boundary retains bracketed framing and one delayed submit"
           ]
         },
@@ -9530,8 +9531,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
           "result": "passed",
-          "durationSeconds": 10.8,
-          "summary": "The 1,262-test candidate gate passed with one existing skip. Its three ticket oracles fail on origin/main and with only the candidate production hunks disabled, then pass together on the candidate. Follow-up adversarial contracts also prove request-local identity, cancellation after one wrapper read, serialized concurrent classification, and a non-yielding floor check beside each PTY write."
+          "durationSeconds": 11.6,
+          "summary": "The final 1,235-test candidate gate passed with one existing skip in 11.6s. Its three ticket oracles fail on origin/main and with only the candidate production hunks disabled, then pass together on the candidate. Follow-up adversarial contracts also prove request-local identity, prompt refusal after foreground loss or unavailable inspection, abort-aware foreground reads, serialized classification, and a non-yielding floor check beside each PTY write."
         },
         {
           "date": "2026-08-20",
@@ -9539,8 +9540,8 @@
           "platform": "macos",
           "command": "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 34.6,
-          "summary": "All four source-built Electron prompt journeys passed. The encrypted paired-mobile case recorded desktop then mobile authority, the exact bracketed prompt frame plus mobile bytes at fake-agent stdin, no carriage return, and an accepted=false desktop result after takeover."
+          "durationSeconds": 35.2,
+          "summary": "All four source-built Electron prompt journeys passed. The encrypted paired-mobile case recorded desktop then mobile authority, the exact and only bracketed prompt frame followed by mobile bytes at fake-agent stdin, no carriage return, and an accepted=false desktop result after takeover."
         },
         {
           "date": "2026-08-20",
@@ -9548,8 +9549,8 @@
           "platform": "linux",
           "command": "pnpm run build:relay && ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ssh-docker-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 39.4,
-          "summary": "The candidate passed against an ephemeral Debian SSH target and real relay with two controlled half-open process reads, an asserted upper retry bound, one post-render remote Enter, SSH execution-host proof, unconditional target cleanup, and an unrelated live remote PTY. The byte-identical oracle fails when only settled-wrapper delivery is disabled because legacy delivery settles before the retry barrier."
+          "durationSeconds": 37.2,
+          "summary": "The candidate passed against an ephemeral Debian SSH target and real relay with two controlled half-open process reads, an asserted upper retry bound, one post-render remote Enter, SSH execution-host proof, bounded best-effort terminal close followed by unconditional target cleanup, and an unrelated live remote PTY. The byte-identical oracle fails when only settled-wrapper delivery is disabled because legacy delivery settles before the retry barrier."
         }
       ],
       "runtimeBudget": {

@@ -19391,6 +19391,11 @@ export class OrcaRuntimeService {
         await options.beforeWrite?.(ptyId)
         assertAgentPromptRequestActive(options.signal)
         this.assertAgentPromptGeneration(ptyId, generation)
+        if (!wrotePasteBytes && options.settlementAgent) {
+          await this.assertSettledPromptForeground(ptyId, options.settlementAgent, options.signal)
+          assertAgentPromptRequestActive(options.signal)
+          this.assertAgentPromptGeneration(ptyId, generation)
+        }
         this.assertAgentPromptPermissionSafe(
           permissionBaseline,
           this.getAgentPromptActivity(handle, ptyId)
@@ -19444,6 +19449,11 @@ export class OrcaRuntimeService {
     }
     assertAgentPromptRequestActive(options.signal)
     this.assertAgentPromptGeneration(ptyId, generation)
+    if (options.settlementAgent) {
+      await this.assertSettledPromptForeground(ptyId, options.settlementAgent, options.signal)
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+    }
     const baseline = this.getAgentPromptActivity(handle, ptyId)
     this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
     options.assertWriteAuthority?.(ptyId)
@@ -19529,6 +19539,24 @@ export class OrcaRuntimeService {
   private assertAgentPromptGeneration(ptyId: string, expected: number): void {
     if (this.getPtyLifecycleGeneration(ptyId) !== expected) {
       throw new Error('terminal_handle_stale')
+    }
+  }
+
+  private async assertSettledPromptForeground(
+    ptyId: string,
+    expectedAgent: TuiAgent,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (!this.ptyController) {
+      throw new Error('terminal_guard_not_writable')
+    }
+    const foregroundProcess = await waitForAgentPromptPromise(
+      this.ptyController.getForegroundProcess(ptyId),
+      signal
+    )
+    assertAgentPromptRequestActive(signal)
+    if (recognizeAgentProcess(foregroundProcess)?.agent !== expectedAgent) {
+      throw new Error('terminal_guard_not_writable')
     }
   }
 
@@ -34604,7 +34632,7 @@ export class OrcaRuntimeService {
   // Why: title is the tightest agent-presence signal, but a Claude management title is negative evidence for task activity.
   async isTerminalRunningAgent(
     handle: string,
-    options: { retryForegroundWrappers?: boolean } = {}
+    options: { retryForegroundWrappers?: boolean; signal?: AbortSignal } = {}
   ): Promise<boolean> {
     try {
       const pty = this.getLivePtyForHandle(handle)
@@ -34645,7 +34673,10 @@ export class OrcaRuntimeService {
       if (!leaf.ptyId || !this.ptyController) {
         return false
       }
-      const fg = await this.ptyController.getForegroundProcess(leaf.ptyId)
+      const fg = await waitForAgentPromptPromise(
+        this.ptyController.getForegroundProcess(leaf.ptyId),
+        options.signal
+      )
       // Why: a bare `Cursor Agent` title is identity, not liveness — it reads the same
       // whether cursor-agent is parked or long exited with the shell back. A null
       // foreground is untracked, not alive, so no-evidence must stay a refusal. A live
@@ -34662,9 +34693,11 @@ export class OrcaRuntimeService {
       // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
       return await this.isRecognizedForegroundAgentProcess(leaf.ptyId, fg, {
         suppressClaude: shouldSuppressClaudeForeground,
-        retryWrappers: options.retryForegroundWrappers !== false
+        retryWrappers: options.retryForegroundWrappers !== false,
+        signal: options.signal
       })
     } catch {
+      assertAgentPromptRequestActive(options.signal)
       return false
     }
   }
@@ -34696,27 +34729,43 @@ export class OrcaRuntimeService {
       return null
     }
     assertAgentPromptRequestActive(signal)
-    const foregroundProcess = await this.ptyController.getForegroundProcess(ptyId)
+    const foregroundProcess = await waitForAgentPromptPromise(
+      this.ptyController.getForegroundProcess(ptyId),
+      signal
+    )
     const recognized = await this.recognizeForegroundAgentProcess(ptyId, foregroundProcess, {
       signal
     })
     if (!isTerminalSendSettlementAgent(recognized?.agent)) {
+      if (!foregroundProcess || this.isAgentWrapperForegroundProcess(foregroundProcess)) {
+        throw new Error('terminal_guard_not_writable')
+      }
       return null
     }
     assertAgentPromptRequestActive(signal)
-    if (!(await this.isTerminalRunningAgent(handle, { retryForegroundWrappers: false }))) {
-      return null
+    if (
+      !(await this.isTerminalRunningAgent(handle, {
+        retryForegroundWrappers: false,
+        signal
+      }))
+    ) {
+      throw new Error('terminal_guard_not_writable')
     }
     assertAgentPromptRequestActive(signal)
-    const confirmed = recognizeAgentProcess(await this.ptyController.getForegroundProcess(ptyId))
+    const confirmed = recognizeAgentProcess(
+      await waitForAgentPromptPromise(this.ptyController.getForegroundProcess(ptyId), signal)
+    )
     assertAgentPromptRequestActive(signal)
-    return confirmed?.agent === recognized.agent ? recognized.agent : null
+    if (confirmed?.agent !== recognized.agent) {
+      throw new Error('terminal_guard_not_writable')
+    }
+    return recognized.agent
   }
 
   private async isPtyRunningAgent(
     pty: RuntimePtyWorktreeRecord,
     leaf: RuntimeLeafRecord | null = null,
-    options: { retryForegroundWrappers?: boolean } = {}
+    options: { retryForegroundWrappers?: boolean; signal?: AbortSignal } = {}
   ): Promise<boolean> {
     const leafTitle = leaf
       ? getLatestAgentCandidateTitle(
@@ -34760,7 +34809,10 @@ export class OrcaRuntimeService {
     if (!this.ptyController) {
       return false
     }
-    const fg = await this.ptyController.getForegroundProcess(pty.ptyId)
+    const fg = await waitForAgentPromptPromise(
+      this.ptyController.getForegroundProcess(pty.ptyId),
+      options.signal
+    )
     // Why: mirrors the leaf path — an unreadable foreground is indistinguishable from an
     // exited one, so a bare Cursor identity title never substitutes for corroboration.
     if (!fg) {
@@ -34776,14 +34828,15 @@ export class OrcaRuntimeService {
     // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
     return await this.isRecognizedForegroundAgentProcess(pty.ptyId, fg, {
       suppressClaude: shouldSuppressClaudeForeground,
-      retryWrappers: options.retryForegroundWrappers !== false
+      retryWrappers: options.retryForegroundWrappers !== false,
+      signal: options.signal
     })
   }
 
   private async isRecognizedForegroundAgentProcess(
     ptyId: string,
     foregroundProcess: string,
-    options: { suppressClaude?: boolean; retryWrappers?: boolean } = {}
+    options: { suppressClaude?: boolean; retryWrappers?: boolean; signal?: AbortSignal } = {}
   ): Promise<boolean> {
     return (await this.recognizeForegroundAgentProcess(ptyId, foregroundProcess, options)) !== null
   }
@@ -34812,7 +34865,10 @@ export class OrcaRuntimeService {
     while (Date.now() - startedAt < FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS) {
       await waitForAgentPromptDelay(FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS, options.signal)
       assertAgentPromptRequestActive(options.signal)
-      const refreshedProcess = await this.ptyController.getForegroundProcess(ptyId)
+      const refreshedProcess = await waitForAgentPromptPromise(
+        this.ptyController.getForegroundProcess(ptyId),
+        options.signal
+      )
       assertAgentPromptRequestActive(options.signal)
       const refreshedRecognition = recognizeAgentProcess(refreshedProcess)
       if (refreshedRecognition !== null) {
