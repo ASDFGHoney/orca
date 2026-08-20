@@ -45,7 +45,7 @@ describe('terminal agent prompt send RPC', () => {
     expect(response.ok).toBe(true)
     expect(runtime.isTerminalRunningSettledPromptAgent).toHaveBeenCalledWith('terminal-1')
     expect(sendTerminalAgentPrompt).toHaveBeenCalledWith('terminal-1', 'review this change', {
-      beforeWrite: undefined,
+      beforeWrite: expect.any(Function),
       signal: undefined
     })
     expect(sendTerminal).not.toHaveBeenCalled()
@@ -81,8 +81,77 @@ describe('terminal agent prompt send RPC', () => {
     expect(sendTerminal).toHaveBeenCalledWith(
       'terminal-1',
       { text: 'echo x', enter: true, interrupt: false },
-      { beforeWrite: undefined }
+      { beforeWrite: expect.any(Function) }
     )
     expect(sendTerminalAgentPrompt).not.toHaveBeenCalled()
+  })
+
+  it('does not send delayed Enter after a paired mobile client takes the floor', async () => {
+    const writes: string[] = []
+    const ordering: string[] = []
+    let floorOwner: 'desktop' | 'mobile' = 'desktop'
+    let releaseSettlement!: () => void
+    const settlement = new Promise<void>((resolve) => {
+      releaseSettlement = resolve
+    })
+    let pasteWritten!: () => void
+    const paste = new Promise<void>((resolve) => {
+      pasteWritten = resolve
+    })
+    const sendTerminal = vi.fn()
+    const sendTerminalAgentPrompt = vi.fn(
+      async (
+        _handle: string,
+        _prompt: string,
+        options: { beforeWrite?: (ptyId: string) => void }
+      ) => {
+        await options.beforeWrite?.('pty-1')
+        writes.push('prompt')
+        ordering.push('request-4488:generation-1:desktop:paste')
+        pasteWritten()
+        await settlement
+        await options.beforeWrite?.('pty-1')
+        writes.push('\r')
+        ordering.push('request-4488:generation-1:mobile:enter')
+        return { handle: 'terminal-1', accepted: true, bytesWritten: 7 }
+      }
+    )
+    const runtime = makeRuntime({
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      getDriver: vi.fn(() =>
+        floorOwner === 'mobile'
+          ? { kind: 'mobile' as const, clientId: 'mobile-1' }
+          : { kind: 'desktop' as const }
+      ),
+      isTerminalRunningSettledPromptAgent: vi.fn().mockResolvedValue(true),
+      sendTerminal,
+      sendTerminalAgentPrompt
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = dispatcher.dispatch(
+      makeRequest({
+        terminal: 'terminal-1',
+        text: 'prompt',
+        enter: true,
+        agentPrompt: true,
+        client: { id: 'orca-cli', type: 'desktop' }
+      })
+    )
+    await paste
+    floorOwner = 'mobile'
+    ordering.push('request-4488:generation-1:mobile:floor')
+    releaseSettlement()
+
+    await expect(response).resolves.toMatchObject({
+      ok: true,
+      result: { send: { accepted: false, bytesWritten: 0 } }
+    })
+    expect(writes).toEqual(['prompt'])
+    expect(ordering).toEqual([
+      'request-4488:generation-1:desktop:paste',
+      'request-4488:generation-1:mobile:floor'
+    ])
+    expect(sendTerminal).not.toHaveBeenCalled()
   })
 })

@@ -1402,7 +1402,16 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       }
       const mobileFloorClientId = resolveMobileFloorClientId(driver, params.client)
       const mobileFloorClaim: MobileInputFloorClaimHolder = { current: null }
-      const beforeWrite = assertSendPreconditions
+      const assertPromptInputAuthority =
+        params.agentPrompt === true && params.client?.type === 'desktop'
+          ? (ptyId?: string): void => {
+              assertTerminalSendExactPtyBinding(runtime, params.terminal, ptyId)
+              if (ptyId && isTerminalInputLockedForClient(runtime, ptyId, params.client)) {
+                throw new Error('terminal_guard_not_writable')
+              }
+            }
+          : undefined
+      const beforeWrite = assertSendPreconditions ?? assertPromptInputAuthority
       const useSettledAgentPrompt =
         params.agentPrompt === true &&
         hasText &&

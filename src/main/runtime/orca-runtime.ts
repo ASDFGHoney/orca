@@ -550,7 +550,8 @@ import { repoIsRemote } from '../../shared/agent-launch-remote'
 import {
   isAgentForegroundWrapperProcess,
   isExpectedAgentProcess,
-  recognizeAgentProcess
+  recognizeAgentProcess,
+  type RecognizedAgentProcess
 } from '../../shared/agent-process-recognition'
 import {
   haveSameDisabledTuiAgents,
@@ -19505,7 +19506,7 @@ export class OrcaRuntimeService {
     dispose: () => void
   } | null {
     const pty = this.ptysById.get(ptyId)
-    const agent = pty?.launchAgent ?? pty?.foregroundAgent
+    const agent = pty?.foregroundAgent ?? pty?.launchAgent
     if (!isTerminalSendSettlementAgent(agent)) {
       return null
     }
@@ -34642,7 +34643,8 @@ export class OrcaRuntimeService {
       if (!ptyId || !trackedPty || !this.ptyController) {
         return false
       }
-      const recognized = recognizeAgentProcess(await this.ptyController.getForegroundProcess(ptyId))
+      const foregroundProcess = await this.ptyController.getForegroundProcess(ptyId)
+      const recognized = await this.recognizeForegroundAgentProcess(ptyId, foregroundProcess)
       const recognizedAgent = recognized?.agent
       if (!isTerminalSendSettlementAgent(recognizedAgent)) {
         return false
@@ -34729,19 +34731,27 @@ export class OrcaRuntimeService {
     foregroundProcess: string,
     options: { suppressClaude?: boolean; retryWrappers?: boolean } = {}
   ): Promise<boolean> {
+    return (await this.recognizeForegroundAgentProcess(ptyId, foregroundProcess, options)) !== null
+  }
+
+  private async recognizeForegroundAgentProcess(
+    ptyId: string,
+    foregroundProcess: string | null,
+    options: { suppressClaude?: boolean; retryWrappers?: boolean } = {}
+  ): Promise<RecognizedAgentProcess | null> {
     const initialRecognition = recognizeAgentProcess(foregroundProcess)
     if (initialRecognition !== null) {
-      return !(
-        options.suppressClaude === true &&
+      return options.suppressClaude === true &&
         isExpectedAgentProcess(initialRecognition.processName, 'claude')
-      )
+        ? null
+        : initialRecognition
     }
     if (
       options.retryWrappers === false ||
       !this.isAgentWrapperForegroundProcess(foregroundProcess) ||
       !this.ptyController
     ) {
-      return false
+      return null
     }
     const startedAt = Date.now()
     while (Date.now() - startedAt < FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS) {
@@ -34751,19 +34761,19 @@ export class OrcaRuntimeService {
       const refreshedProcess = await this.ptyController.getForegroundProcess(ptyId)
       const refreshedRecognition = recognizeAgentProcess(refreshedProcess)
       if (refreshedRecognition !== null) {
-        return !(
-          options.suppressClaude === true &&
+        return options.suppressClaude === true &&
           isExpectedAgentProcess(refreshedRecognition.processName, 'claude')
-        )
+          ? null
+          : refreshedRecognition
       }
       if (!refreshedProcess || !this.isAgentWrapperForegroundProcess(refreshedProcess)) {
-        return false
+        return null
       }
     }
-    return false
+    return null
   }
 
-  private isAgentWrapperForegroundProcess(processName: string): boolean {
+  private isAgentWrapperForegroundProcess(processName: string | null): boolean {
     // Why: daemon/SSH PTYs can report the interpreter before the async cmdline cache resolves; retry only known wrappers.
     return isAgentForegroundWrapperProcess(processName)
   }

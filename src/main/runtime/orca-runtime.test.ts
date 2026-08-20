@@ -17049,6 +17049,40 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('uses proven current Codex foreground identity ahead of stale launch identity', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          acknowledgeAgentPromptSubmit(runtime, 'pty-bg', data)
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex'
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        launchAgent: 'aider'
+      })
+
+      await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      await vi.advanceTimersByTimeAsync(AGENT_PROMPT_SUBMIT_DELAY_MS)
+      expect(writes).not.toContain('\r')
+
+      runtime.onPtyData('pty-bg', '\x1b[?25hcomposer rendered', Date.now())
+      await vi.advanceTimersByTimeAsync(1_500)
+      await sendPromise
+
+      expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('submits a silent Claude composer once after the bounded render fallback', async () => {
     vi.useFakeTimers()
     try {
@@ -24147,6 +24181,31 @@ describe('OrcaRuntimeService', () => {
       runtime.isTerminalRunningAgent(handle, { retryForegroundWrappers: false })
     ).resolves.toBe(false)
     expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles a CLI prompt after a transient foreground wrapper resolves to Codex', async () => {
+    vi.useFakeTimers()
+    const getForegroundProcess = vi.fn().mockResolvedValueOnce('node').mockResolvedValue('codex')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+    syncSinglePty(runtime, 'pty-bg', { paneTitle: 'bash' })
+
+    const settled = runtime.isTerminalRunningSettledPromptAgent(handle)
+    await vi.advanceTimersByTimeAsync(150)
+
+    await expect(settled).resolves.toBe(true)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(3)
   })
 
   it.each(['claude', 'codex'] as const)(
