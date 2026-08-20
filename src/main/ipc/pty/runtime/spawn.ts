@@ -87,14 +87,16 @@ export async function spawnPtyFromRuntimeController(
     if (earlyAdopt) {
       return toRuntimeSpawnReply(earlyAdopt)
     }
-    const earlyReserved = await buildRuntimePtySpawnOptions(ctx)
+    const earlyReserved = await buildRuntimePtySpawnOptions(ctx).catch((error: unknown) => {
+      restoreProvisionalPtySize(ctx)
+      throw error
+    })
     if (earlyReserved) {
       return toRuntimeSpawnReply(earlyReserved)
     }
     await executeRuntimePtySpawn(ctx)
     return toRuntimeSpawnReply(await commitRuntimePtySpawn(ctx))
   } catch (err) {
-    restoreProvisionalPtySize(ctx)
     if (ctx.pendingRegistrationPtyId) {
       deps.runtime?.cancelPendingPtyRegistration?.(
         ctx.pendingRegistrationPtyId,

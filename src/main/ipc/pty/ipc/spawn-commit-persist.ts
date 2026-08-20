@@ -84,7 +84,10 @@ export async function persistPtyIpcSpawnCommit(ctx: PtyIpcSpawnState): Promise<{
     })
   }
   if (ctx.preAllocatedHandle && !ctx.stablePaneOwner?.handle) {
-    ctx.deps.runtime?.registerPreAllocatedHandleForPty(ctx.result.id, ctx.preAllocatedHandle)
+    if (ctx.deps.runtime?.registerPreAllocatedHandleForPty) {
+      ctx.deps.runtime.registerPreAllocatedHandleForPty(ctx.result.id, ctx.preAllocatedHandle)
+      ctx.agentTeamsLeaderHandle = null
+    }
   }
   ptySizes.set(ctx.result.id, { cols: args.cols, rows: args.rows })
   if (ctx.effectiveSessionAppId !== undefined && ctx.effectiveSessionAppId !== ctx.result.id) {

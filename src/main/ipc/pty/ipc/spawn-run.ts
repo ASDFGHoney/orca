@@ -38,7 +38,10 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
   try {
     await preparePtyIpcSpawnPreflight(ctx)
     await assemblePtyIpcSpawnEnv(ctx)
-    const earlyReserved = await buildPtyIpcSpawnOptions(ctx)
+    const earlyReserved = await buildPtyIpcSpawnOptions(ctx).catch((error: unknown) => {
+      restoreProvisionalPtySize(ctx)
+      throw error
+    })
     if (earlyReserved) {
       // Why: this request lost the pane to the reservation winner, so its
       // pre-allocated leader handle never binds to a PTY. Nothing else can
@@ -51,7 +54,6 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, args: PtySpawnIpcArg
     return await commitPtyIpcSpawn(ctx)
   } catch (err) {
     releaseAbandonedAgentTeamsLeader(ctx)
-    restoreProvisionalPtySize(ctx)
     if (ctx.preSpawnHiddenMarkId !== null) {
       ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState(ctx.preSpawnHiddenMarkId, false)
     }
