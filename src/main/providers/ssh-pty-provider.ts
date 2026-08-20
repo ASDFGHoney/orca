@@ -99,8 +99,10 @@ export class SshPtyProvider implements IPtyProvider {
           this.outputState.installReceivingActivation(relayPtyId, activation),
         rememberPtyIncarnation: (relayPtyId, incarnationId) =>
           this.outputState.acceptPtyIncarnation(relayPtyId, incarnationId),
-        acceptLivePty: (relayPtyId) => this.acceptLivePty(relayPtyId),
-        beginLivePtyEvidence: (appPtyId) => this.beginLivePtyEvidence(appPtyId),
+        beginLivePtyEvidenceWindow: () => this.livenessState.beginLiveEvidenceWindow(),
+        closeLivePtyEvidenceWindow: (window) => this.livenessState.closeLiveEvidenceWindow(window),
+        beginLivePtyEvidence: (appPtyId, window) =>
+          this.livenessState.beginLiveEvidence(appPtyId, window),
         settleLivePtyEvidence: (appPtyId, evidence, acceptLive) =>
           this.settleLivePtyEvidence(appPtyId, evidence, acceptLive),
         acceptUnverifiablePty: (relayPtyId) => this.acceptUnverifiablePty(relayPtyId),

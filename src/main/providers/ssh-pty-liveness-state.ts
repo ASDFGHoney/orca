@@ -90,14 +90,14 @@ export class SshPtyLivenessState {
 
   acceptUnverifiable(id: string): void {
     const appPtyId = this.toAppPtyId(id)
-    this.invalidateLiveEvidence(appPtyId)
+    this.invalidatePendingLiveEvidence(appPtyId)
     this.livePtyIds.delete(appPtyId)
   }
 
   acceptExited(id: string): void {
     const appPtyId = this.toAppPtyId(id)
     this.ambiguousExitPtyIds.delete(appPtyId)
-    this.invalidateLiveEvidence(appPtyId)
+    this.refuseLiveEvidenceAfterExit(appPtyId)
     this.livePtyIds.delete(appPtyId)
     this.exitedPtyIds.delete(appPtyId)
     this.exitedPtyIds.add(appPtyId)
@@ -112,6 +112,7 @@ export class SshPtyLivenessState {
   acceptUnverifiableExit(id: string): void {
     const appPtyId = this.toAppPtyId(id)
     this.acceptUnverifiable(appPtyId)
+    this.refuseLiveEvidenceAfterExit(appPtyId)
     this.ambiguousExitPtyIds.add(appPtyId)
     if (this.ambiguousExitPtyIds.size > MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES) {
       const oldest = this.ambiguousExitPtyIds.values().next().value
@@ -121,10 +122,18 @@ export class SshPtyLivenessState {
     }
   }
 
-  private invalidateLiveEvidence(appPtyId: string): void {
+  // Why: an exit the owning host reported outranks every live claim an open window can still
+  // produce, including one from a request issued after it — a reattach retries over the same id.
+  private refuseLiveEvidenceAfterExit(appPtyId: string): void {
     for (const window of this.liveEvidenceWindows) {
       window.invalidatedPtyIds.add(appPtyId)
     }
+    this.invalidatePendingLiveEvidence(appPtyId)
+  }
+
+  // Why: loss of contact is not evidence of death, so it stales only the claims already in flight;
+  // a later request that does reach the host may still prove the PTY live.
+  private invalidatePendingLiveEvidence(appPtyId: string): void {
     const pending = this.pendingLiveEvidenceByPtyId.get(appPtyId)
     if (!pending) {
       return

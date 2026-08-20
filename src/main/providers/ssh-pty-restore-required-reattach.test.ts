@@ -47,6 +47,23 @@ const restoreRequiredAnswer = {
   sourceRecovery: { status: 'restoreRequired', reason: 'checkpointUnavailable' }
 }
 
+const firstActivation = {
+  status: 'pending',
+  clientGeneration: 2,
+  ownerGeneration: 3,
+  ptyIncarnation: 'incarnation-reattached',
+  deliveryToken: 'token-first',
+  checkpointSourceEndSu: 0,
+  recoveryEndSu: 0
+}
+
+const secondActivation = {
+  ...firstActivation,
+  clientGeneration: 4,
+  ownerGeneration: 5,
+  deliveryToken: 'token-second'
+}
+
 async function spawnError(provider: SshPtyProvider): Promise<string> {
   try {
     await provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })
@@ -258,7 +275,8 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     const id = 'ssh:conn-1@@pty-inventory-unverifiable'
     const mux = createMockMux()
     const provider = new SshPtyProvider('conn-1', mux as never)
-    provider.onExit((payload) => provider.acceptUnverifiablePty(payload.id))
+    // An exit with no incarnation is ambiguous exit evidence, not loss of contact.
+    provider.onExit((payload) => provider.acceptAmbiguousExitPty(payload.id))
     mux.request.mockImplementation(async (method: string, _params, options) => {
       if (method !== 'pty.listProcesses') {
         return undefined
@@ -279,6 +297,33 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     await provider.listProcesses()
 
     await expect(provider.probePtyLiveness(id)).resolves.toBeNull()
+  })
+
+  it('lets a later inventory prove liveness after a concurrent loss of contact', async () => {
+    const id = 'ssh:conn-1@@pty-recovered'
+    const mux = createMockMux()
+    const provider = new SshPtyProvider('conn-1', mux as never)
+    mux.request.mockImplementation(async (method: string, _params, options) => {
+      if (method !== 'pty.listProcesses') {
+        return undefined
+      }
+      // A sibling operation loses contact while this request is in flight; that is not death.
+      provider.acceptUnverifiablePty(id)
+      const result = [
+        {
+          id: 'pty-recovered',
+          cwd: '/work',
+          title: 'shell',
+          incarnationId: 'incarnation-recovered'
+        }
+      ]
+      options?.beforeResolve?.(result)
+      return result
+    })
+
+    await provider.listProcesses()
+
+    await expect(provider.probePtyLiveness(id)).resolves.toBe(true)
   })
 
   it('re-attaches over the live PTY instead of reporting exited', async () => {
@@ -303,15 +348,6 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
 
   it('keeps the PTY live when the first activation cancellation is unproven', async () => {
     const mux = createMockMux()
-    const activation = {
-      status: 'pending',
-      clientGeneration: 2,
-      ownerGeneration: 3,
-      ptyIncarnation: 'incarnation-reattached',
-      deliveryToken: 'token-first',
-      checkpointSourceEndSu: 0,
-      recoveryEndSu: 0
-    }
     mux.request.mockImplementation(async (method: string) => {
       if (method === 'pty.cancelDelivery') {
         return { canceled: false, sentEndSu: 0, creditedEndSu: 0 }
@@ -319,17 +355,9 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
       if (method === 'pty.attach') {
         const attachCount = mux.request.mock.calls.filter((call) => call[0] === method).length
         if (attachCount === 1) {
-          return { ...restoreRequiredAnswer, sourceActivation: activation }
+          return { ...restoreRequiredAnswer, sourceActivation: firstActivation }
         }
-        return {
-          incarnationId: 'incarnation-reattached',
-          sourceActivation: {
-            ...activation,
-            clientGeneration: 4,
-            ownerGeneration: 5,
-            deliveryToken: 'token-second'
-          }
-        }
+        return { incarnationId: 'incarnation-reattached', sourceActivation: secondActivation }
       }
       return undefined
     })
@@ -355,15 +383,6 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
 
   it('keeps a host exit authoritative when it lands during the unproven cancellation', async () => {
     const mux = createMockMux()
-    const activation = {
-      status: 'pending',
-      clientGeneration: 2,
-      ownerGeneration: 3,
-      ptyIncarnation: 'incarnation-reattached',
-      deliveryToken: 'token-first',
-      checkpointSourceEndSu: 0,
-      recoveryEndSu: 0
-    }
     mux.request.mockImplementation(async (method: string) => {
       if (method === 'pty.cancelDelivery') {
         // The owning host reports the process dead while the cancel round trip is in flight.
@@ -375,7 +394,7 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
         return { canceled: false, sentEndSu: 0, creditedEndSu: 0 }
       }
       if (method === 'pty.attach') {
-        return { ...restoreRequiredAnswer, sourceActivation: activation }
+        return { ...restoreRequiredAnswer, sourceActivation: firstActivation }
       }
       return undefined
     })
@@ -385,6 +404,68 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     const message = await spawnError(provider)
 
     expect(message).toContain(SSH_PTY_RESTORE_REQUIRED_ERROR)
+    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBe(false)
+  })
+
+  it('keeps a host exit authoritative when it lands during a proven cancellation', async () => {
+    const mux = createMockMux()
+    mux.request.mockImplementation(async (method: string) => {
+      if (method === 'pty.cancelDelivery') {
+        // The owning host reports the process dead while the cancel round trip is in flight.
+        notificationHandler(mux)('pty.exit', {
+          id: 'pty-old',
+          code: 0,
+          incarnationId: 'incarnation-reattached'
+        })
+        return { canceled: true, sentEndSu: 0, creditedEndSu: 0 }
+      }
+      if (method === 'pty.attach') {
+        const attachCount = mux.request.mock.calls.filter((call) => call[0] === method).length
+        if (attachCount === 1) {
+          return { ...restoreRequiredAnswer, sourceActivation: firstActivation }
+        }
+        return { incarnationId: 'incarnation-reattached', replay: 'buffered-output' }
+      }
+      return undefined
+    })
+    const provider = new SshPtyProvider('conn-1', mux as never)
+    provider.onExit((payload) => provider.acceptExitedPty(payload.id))
+
+    await provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })
+
+    expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(2)
+    expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBe(false)
+  })
+
+  it('keeps a host exit authoritative when the retried attach still requires restoration', async () => {
+    const mux = createMockMux()
+    mux.request.mockImplementation(async (method: string) => {
+      if (method === 'pty.cancelDelivery') {
+        notificationHandler(mux)('pty.exit', {
+          id: 'pty-old',
+          code: 0,
+          incarnationId: 'incarnation-reattached'
+        })
+        return { canceled: true, sentEndSu: 0, creditedEndSu: 0 }
+      }
+      if (method === 'pty.attach') {
+        const attachCount = mux.request.mock.calls.filter((call) => call[0] === method).length
+        // The retry has no delivery left to cancel, so nothing after it can re-observe the exit.
+        return attachCount === 1
+          ? { ...restoreRequiredAnswer, sourceActivation: firstActivation }
+          : restoreRequiredAnswer
+      }
+      return undefined
+    })
+    const provider = new SshPtyProvider('conn-1', mux as never)
+    provider.onExit((payload) => provider.acceptExitedPty(payload.id))
+
+    const message = await spawnError(provider)
+
+    expect(message).toContain(SSH_PTY_RESTORE_REQUIRED_ERROR)
+    expect(mux.request.mock.calls.filter((call) => call[0] === 'pty.attach')).toHaveLength(2)
     expect(provider.hasPty('ssh:conn-1@@pty-old')).toBe(false)
     await expect(provider.probePtyLiveness('ssh:conn-1@@pty-old')).resolves.toBe(false)
   })

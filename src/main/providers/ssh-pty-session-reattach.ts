@@ -23,7 +23,7 @@ import {
   type PtySourceReceivingActivation
 } from '../../shared/pty-source-receiving-activation'
 import type { SshPtyReceivingActivationLease } from './ssh-pty-notification-routing'
-import type { SshPtyLiveEvidence } from './ssh-pty-liveness-state'
+import type { SshPtyLiveEvidence, SshPtyLiveEvidenceWindow } from './ssh-pty-liveness-state'
 import { parseSshPtySourceRecoveryResult } from './ssh-pty-source-recovery-result'
 
 export type SshPtyAttachResult = {
@@ -231,8 +231,9 @@ export async function reattachSshPtySessionWithExitFence(
 
 export async function reattachSshPtySessionForSpawn(
   args: Parameters<typeof reattachSshPtySessionWithExitFence>[0] & {
-    acceptLivePty: (relayPtyId: string) => void
-    beginLivePtyEvidence: (appPtyId: string) => SshPtyLiveEvidence
+    beginLivePtyEvidenceWindow: () => SshPtyLiveEvidenceWindow
+    closeLivePtyEvidenceWindow: (window: SshPtyLiveEvidenceWindow) => void
+    beginLivePtyEvidence: (appPtyId: string, window: SshPtyLiveEvidenceWindow) => SshPtyLiveEvidence
     settleLivePtyEvidence: (
       appPtyId: string,
       evidence: SshPtyLiveEvidence,
@@ -243,6 +244,13 @@ export async function reattachSshPtySessionForSpawn(
     acceptExitedPty: (relayPtyId: string) => void
   }
 ): Promise<PtySpawnResult> {
+  // Why: the exit fence closes with each attach attempt, so a host exit landing between them is
+  // published against no operation. One window spans every attempt, and promoteLive is the only
+  // way out of this function to `live` — no path can erase that tombstone without consulting it.
+  const evidenceWindow = args.beginLivePtyEvidenceWindow()
+  const promoteLive = (appPtyId: string): void => {
+    args.settleLivePtyEvidence(appPtyId, args.beginLivePtyEvidence(appPtyId, evidenceWindow), true)
+  }
   let result: SshPtyReattachResult | undefined
   try {
     result = await reattachSshPtySessionWithExitFence(args)
@@ -250,33 +258,26 @@ export async function reattachSshPtySessionForSpawn(
       // Why: restoreRequired retired only the delivery record; a fresh attach targets the live PTY.
       const unresumable = result
       result = undefined
-      if (unresumable.sourceActivationLease) {
-        // Why: the exit fence is already closed, so a host exit landing during this cancel round
-        // trip must be able to refuse the live promotion below instead of being overwritten.
-        const liveEvidence = args.beginLivePtyEvidence(unresumable.id)
-        let unprovenCancel = false
-        try {
-          unprovenCancel = !(await unresumable.sourceActivationLease.rollback())
-        } finally {
-          args.settleLivePtyEvidence(unresumable.id, liveEvidence, unprovenCancel)
-        }
-        if (unprovenCancel) {
-          // Why: the attach answered with an incarnation, so the PTY is live; only its delivery
-          // is stuck, and an unproven cancellation just blocks the second attach.
-          throw new Error(
-            `${SSH_PTY_RESTORE_REQUIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
-          )
-        }
+      if (
+        unresumable.sourceActivationLease &&
+        !(await unresumable.sourceActivationLease.rollback())
+      ) {
+        // Why: the attach answered with an incarnation, so the PTY is live; only its delivery
+        // is stuck, and an unproven cancellation just blocks the second attach.
+        promoteLive(unresumable.id)
+        throw new Error(
+          `${SSH_PTY_RESTORE_REQUIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, unresumable.id)}`
+        )
       }
       result = await reattachSshPtySessionWithExitFence(args)
       if (result.sourceRecovery?.status === 'restoreRequired') {
-        args.acceptLivePty(result.id)
+        promoteLive(result.id)
         throw new Error(
           `${SSH_PTY_RESTORE_REQUIRED_ERROR}: ${toRelaySshPtyId(args.connectionId, result.id)}`
         )
       }
     }
-    args.acceptLivePty(result.id)
+    promoteLive(result.id)
     result.sourceActivationLease?.commit()
     const { sourceActivationLease: _lease, sourceRecovery: _recovery, ...spawnResult } = result
     return spawnResult
@@ -300,5 +301,7 @@ export async function reattachSshPtySessionForSpawn(
       }
     }
     throw error
+  } finally {
+    args.closeLivePtyEvidenceWindow(evidenceWindow)
   }
 }
