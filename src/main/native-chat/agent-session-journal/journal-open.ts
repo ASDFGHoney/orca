@@ -9,8 +9,9 @@
 import type { AgentJournalSubmission } from '../../../shared/agent-session-journal-types'
 import { findSequenceGap } from './journal-cursor'
 import {
+  quarantineInvalidJournalSnapshot,
   readJournalLog,
-  readJournalSnapshotFile,
+  readJournalSnapshot,
   type JournalSnapshotFile
 } from './journal-log-file'
 import { AGENT_SESSION_JOURNAL_SCHEMA_VERSION } from '../../../shared/agent-session-journal-types'
@@ -44,11 +45,15 @@ export async function loadJournal(
   journalDir: string,
   sessionId: string
 ): Promise<JournalLoad | null> {
-  const snapshot = await readJournalSnapshotFile(journalDir)
+  const snapshotRead = await readJournalSnapshot(journalDir)
+  if (snapshotRead.status === 'invalid') {
+    await quarantineInvalidJournalSnapshot(journalDir)
+  }
+  const snapshot = snapshotRead.status === 'valid' ? snapshotRead.snapshot : null
   const log = await readJournalLog(journalDir)
   const epoch = resolveEpoch(snapshot, log.rows)
   if (!epoch) {
-    return log.unreadable ? emptyReadOnlyLoad(sessionId) : null
+    return snapshotRead.status === 'invalid' || log.hasBytes ? emptyReadOnlyLoad(sessionId) : null
   }
 
   const compactedThrough = snapshot?.epoch === epoch ? snapshot.compactedThrough : 0
@@ -110,18 +115,12 @@ function emptyReadOnlyLoad(sessionId: string): JournalLoad {
   }
 }
 
-/** The snapshot names the live epoch; without one, the newest epoch row does. */
+/** The snapshot names the live epoch; without one, the newest valid row does. */
 function resolveEpoch(snapshot: JournalSnapshotFile | null, rows: JournalRow[]): string | null {
   if (snapshot?.epoch) {
     return snapshot.epoch
   }
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index]
-    if (row?.kind === 'epoch') {
-      return row.epoch
-    }
-  }
-  return null
+  return rows.at(-1)?.epoch ?? null
 }
 
 function seedState(

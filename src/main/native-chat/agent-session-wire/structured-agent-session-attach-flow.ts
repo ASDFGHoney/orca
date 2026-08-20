@@ -95,7 +95,11 @@ export async function performAttach(
     }
     return {
       ok: false,
-      refusal: classifyStoreFailure(error, store.getRecord(sessionId)?.lease.runtimeFence ?? null)
+      refusal: classifyStoreFailure(
+        error,
+        store.getRecord(sessionId)?.lease.runtimeFence ?? null,
+        store.getRecord(sessionId)
+      )
     }
   }
 

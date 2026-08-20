@@ -1,7 +1,6 @@
 // Structured agent-session host: where the lease, journal, and provider adapter meet.
 // Mutations share one durable admission path and serialize per session.
 
-import { randomUUID } from 'node:crypto'
 import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
 import type {
@@ -21,11 +20,9 @@ import type {
   AgentSessionWireRefusal
 } from '../../../shared/agent-session-wire'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
-import { performAttach } from './structured-agent-session-attach-flow'
 import {
   admitAndRunAgentSessionMutation,
-  AGENT_SESSION_NOT_ATTACHED,
-  refuseAgentSessionMutation
+  AGENT_SESSION_NOT_ATTACHED
 } from './structured-agent-session-mutation-admission'
 import { createRestartReconciler } from './structured-agent-session-restart-reconcile'
 import {
@@ -49,8 +46,9 @@ import {
 } from './structured-agent-session-host-handoff'
 import { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
-import { pinnedAgentSessionLaunchEnv } from './structured-agent-session-launch-env'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
+import { attachStructuredAgentSession } from './structured-agent-session-attach-orchestration'
+import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import type {
   StructuredAgentSessionCaller,
   StructuredAgentSessionHostDeps,
@@ -111,6 +109,7 @@ export class StructuredAgentSessionHost {
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
       restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
+      reapOrphanChildren: () => this.runtimeState.reapOrphanChildren(),
       now: this.now
     })
     this.runtimeState.startLeaseRenewal()
@@ -141,67 +140,41 @@ export class StructuredAgentSessionHost {
     })
   }
 
+  /** What attach needs from this host, named so its dependencies cannot grow unnoticed. */
+  private attachContext(): StructuredAgentSessionAttachContext {
+    return {
+      deps: this.deps,
+      runtimeState: this.runtimeState,
+      sessions: this.sessions,
+      subscribers: this.subscribers,
+      tasks: this.tasks,
+      reconcileLeases: (sessionId) => this.reconcileLeases(sessionId),
+      serialize: (sessionId, task) => this.serialize(sessionId, task),
+      now: () => this.now()
+    }
+  }
+
   attach(
     caller: StructuredAgentSessionCaller,
     params: AgentSessionAttachParams
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
-    const attaching = this.serialize(params.envelope.sessionId, async () => {
-      const sessionId = params.envelope.sessionId
-      const unreconciled = await this.reconcileLeases(sessionId)
-      if (unreconciled) {
-        return refuseAgentSessionMutation(unreconciled)
-      }
-      await this.runtimeState.resolveRecovery(sessionId)
-      const eventSink = this.runtimeState.eventSinkFor(sessionId)
-      const attached = await performAttach({
-        store: this.deps.store,
-        adapter: this.deps.adapter,
-        journalRoot: this.deps.journalRoot,
-        eventSink: eventSink.sink,
-        onAcquiring: () => eventSink.unbind(),
-        beforeJournalOpen: async () => {
-          eventSink.unbind()
-          await eventSink.drained()
-        },
-        authority: {
-          spawnToken: this.deps.mintSpawnToken?.() ?? randomUUID(),
-          claimKeyId: this.deps.claimKeyId,
-          handoffOperationId: params.envelope.clientOperationId,
-          probe: await this.runtimeState.probeOwner(sessionId),
-          ...(await pinnedAgentSessionLaunchEnv(this.deps.resolveLaunchEnv, params))
-        },
-        callerKey: caller.callerKey,
-        params,
-        now: () => this.now(),
-        onAttached: (attached) => {
-          const fence = this.deps.store.getRecord(sessionId)?.lease.runtimeFence ?? 0
-          const previousFence = this.sessions.get(sessionId)?.fence
-          this.sessions.set(sessionId, { journal: attached.journal, params, fence })
-          if (attached.recovery) {
-            this.subscribers.reset(sessionId, attached.journal, attached.recovery.reset, fence)
-          } else if (previousFence !== undefined && previousFence !== fence) {
-            this.subscribers.snapshot(sessionId, attached.journal, fence)
-          } else {
-            this.subscribers.publish(sessionId, attached.journal)
-          }
-          eventSink.bind({
-            journal: attached.journal,
-            fence,
-            publish: () => this.subscribers.publish(sessionId, attached.journal)
-          })
-        }
-      })
-      if (!attached.ok && !this.sessions.has(sessionId)) {
-        eventSink.close()
-        this.runtimeState.discardEventSink(sessionId)
-      }
-      return attached
-    })
-    return this.tasks.trackAttach(attaching)
+    return attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
   }
 
-  // oxfmt-ignore
-  adoptTuiOwner = (input: StructuredTuiAdoptionRequest): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> => this.serialize(input.params.envelope.sessionId, () => adoptStructuredTuiOwner({ ...input, deps: this.deps, now: this.now, publish: (sessionId, session) => this.sessions.set(sessionId, session), retain: (sessionId, owner) => this.handoffs.adoptTuiOwner(sessionId, owner), snapshot: (sessionId, session) => this.subscribers.snapshot(sessionId, session.journal, session.fence) }))
+  adoptTuiOwner = (
+    input: StructuredTuiAdoptionRequest
+  ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> =>
+    this.serialize(input.params.envelope.sessionId, () =>
+      adoptStructuredTuiOwner({
+        ...input,
+        deps: this.deps,
+        now: this.now,
+        publish: (sessionId, session) => this.sessions.set(sessionId, session),
+        retain: (sessionId, owner) => this.handoffs.adoptTuiOwner(sessionId, owner),
+        snapshot: (sessionId, session) =>
+          this.subscribers.snapshot(sessionId, session.journal, session.fence)
+      })
+    )
 
   flushStreamedEvents = (sessionId: string): Promise<void> =>
     this.runtimeState.flushEventSink(sessionId)

@@ -23,7 +23,6 @@ import {
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
 import {
-  applyAgentSessionRestartAdjudication,
   commitAgentSessionProcessIdentity,
   evictAgentSessionOwner,
   proveAgentSessionOwner,
@@ -31,6 +30,7 @@ import {
   setAgentSessionJournalCheckpoint,
   type AgentSessionProcessIdentityCommit
 } from './agent-session-lease-transitions'
+import { applyAgentSessionRestartAdjudication } from './agent-session-restart-lease-transitions'
 import { agentSessionReconciliationTargetMatches } from './agent-session-reconciliation-target'
 import { replaceAgentSessionRecordOptions } from './agent-session-record-options'
 import {

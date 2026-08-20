@@ -63,8 +63,8 @@ export function sentRequest(
 export function sentRequests(
   socket: MockWebSocket,
   method: string
-): Array<{ id: string; params?: unknown }> {
-  const requests: Array<{ id: string; params?: unknown }> = []
+): { id: string; params?: unknown }[] {
+  const requests: { id: string; params?: unknown }[] = []
   for (const payload of socket.sent) {
     const decoded = JSON.parse(payload.replace(/^encrypted:/, '')) as {
       id: string

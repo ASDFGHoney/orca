@@ -9,7 +9,7 @@ import {
 } from '../../../src/shared/structured-agent-session-outbox'
 import { createStructuredAgentSessionOperationId } from '../../../src/shared/structured-agent-session-mutation'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
-import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
+import { isLogicalClientCutoverError } from '../transport/logical-client-cutover-error'
 
 export {
   createStructuredAgentSessionOutboxEntry as createMobileStructuredOutboxEntry,
