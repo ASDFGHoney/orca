@@ -23,10 +23,12 @@ type OwnershipState = Pick<
   | 'terminalLayoutsByTabId'
   | 'lastTerminalInputAtByPaneKey'
   | 'closeTab'
+  | 'shutdownCompletedAgentPaneForHibernation'
 >
 
 function createStore() {
   const closeTab = vi.fn()
+  const shutdownCompletedAgentPaneForHibernation = vi.fn().mockResolvedValue(undefined)
   let state: OwnershipState = {
     activeWorktreeId: 'other-worktree',
     activeTabId: 'other-tab',
@@ -50,7 +52,8 @@ function createStore() {
       [TAB_ID]: singlePaneLayoutSnapshot(LEAF_ID, PTY_ID)
     },
     lastTerminalInputAtByPaneKey: {},
-    closeTab
+    closeTab,
+    shutdownCompletedAgentPaneForHibernation
   }
   const listeners = new Set<(state: AppState, previousState: AppState) => void>()
   const store: AutomationTerminalOwnershipStore = {
@@ -67,7 +70,13 @@ function createStore() {
       listener(state as unknown as AppState, previousState as unknown as AppState)
     }
   }
-  return { closeTab, getState: () => state, store, update }
+  return {
+    closeTab,
+    getState: () => state,
+    shutdownCompletedAgentPaneForHibernation,
+    store,
+    update
+  }
 }
 
 function own(
@@ -89,23 +98,20 @@ function own(
 describe('automation terminal ownership', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('closes the exact fresh desktop tab once after the PTY exit binding is cleared', () => {
-    const { closeTab, store, update } = createStore()
+  it('hibernates the exact fresh desktop session once after automation completion', async () => {
+    const { closeTab, shutdownCompletedAgentPaneForHibernation, store } = createStore()
     const ownership = own(store)
-    update({
-      ptyIdsByTabId: { [TAB_ID]: [] },
-      tabsByWorktree: {
-        [WORKTREE_ID]: [{ ...store.getState().tabsByWorktree[WORKTREE_ID]![0]!, ptyId: null }]
-      }
-    })
 
-    expect(ownership.finalize()).toBe(true)
-    expect(ownership.finalize()).toBe(false)
-    expect(closeTab).toHaveBeenCalledTimes(1)
-    expect(closeTab).toHaveBeenCalledWith(TAB_ID, {
-      recordInteraction: false,
-      reason: 'cleanup'
+    expect(await ownership.finalize()).toBe(true)
+    expect(await ownership.finalize()).toBe(false)
+    expect(shutdownCompletedAgentPaneForHibernation).toHaveBeenCalledOnce()
+    expect(shutdownCompletedAgentPaneForHibernation).toHaveBeenCalledWith(WORKTREE_ID, {
+      paneKey: PANE_KEY,
+      tabId: TAB_ID,
+      leafId: LEAF_ID,
+      ptyId: PTY_ID
     })
+    expect(closeTab).not.toHaveBeenCalled()
   })
 
   it('preserves a tab activated after launch even when focus later moves away', () => {
