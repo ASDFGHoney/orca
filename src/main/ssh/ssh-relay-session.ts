@@ -2581,7 +2581,11 @@ export class SshRelaySession {
       attachedLeaseIds.add(ptyId)
       recoveryActivationLease?.commit()
       recoveryActivationLease = undefined
-      pendingReattach.livePassthrough = targetedDeliveryRecovery !== undefined
+      // Why not a plain assignment: on the plain-reconnect path finishSourceRecovery has already
+      // opened live passthrough, and closing it here would quarantine output nothing drains.
+      if (targetedDeliveryRecovery !== undefined) {
+        pendingReattach.livePassthrough = true
+      }
       if (!recoveryRequest && !targetedDeliveryRecovery) {
         this.forwardReattachReplay(appPtyId, attachResult.replay ?? '')
       }
