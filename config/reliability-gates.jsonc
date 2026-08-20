@@ -7867,9 +7867,7 @@
         },
         {
           "file": "src/main/providers/pty-process-inspection.test.ts",
-          "assertions": [
-            "unverifiable liveness continues authoritative remote process inspection"
-          ]
+          "assertions": ["unverifiable liveness continues authoritative remote process inspection"]
         },
         {
           "file": "src/main/ssh/ssh-relay-session-incarnation.test.ts",
@@ -7893,9 +7891,7 @@
         },
         {
           "file": "src/main/ssh/ssh-relay-session.test.ts",
-          "assertions": [
-            "reconnect reattaches a detached lease after restoreRequired"
-          ]
+          "assertions": ["reconnect reattaches a detached lease after restoreRequired"]
         },
         {
           "file": "src/main/ipc/repos-remote.test.ts",
