@@ -97,6 +97,7 @@
     // project's serve spec; the module has no imports, so listing it pulls in nothing else.
     "../src/main/startup/serve-mode-argv.ts",
     "../src/main/runtime/runtime-metadata.ts",
+    "../src/main/sqlite/live-sqlite-readonly.ts",
     "../src/main/sqlite/sync-database.ts",
     "../src/main/win32-utils.ts"
   ],

@@ -1,5 +1,8 @@
 import { yieldToEventLoop } from '../../shared/event-loop-yield'
-import Database from '../sqlite/sync-database'
+import {
+  isLiveSqliteUnavailableError,
+  openLiveSqliteReadonly
+} from '../sqlite/live-sqlite-readonly'
 import { createUsageEventAggregation } from '../usage/usage-event-aggregation'
 import {
   compareOpenCodeClaimPriority,
@@ -54,9 +57,9 @@ export async function parseOpenCodeUsageDatabase(
   options: { claimSession?: (sessionId: string) => boolean } = {}
 ): Promise<OpenCodeUsagePersistedDatabase> {
   const processedDatabase = await getProcessedDatabaseInfo(dbPath)
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  let db: ReturnType<typeof openLiveSqliteReadonly> | null = null
   try {
-    db.pragma('query_only = ON')
+    db = openLiveSqliteReadonly(dbPath)
     const events: OpenCodeUsageAttributedEvent[] = []
     const claimedBySessionId = new Map<string, boolean>()
     let hasDeferredClaims = false
@@ -89,8 +92,19 @@ export async function parseOpenCodeUsageDatabase(
         .map(([sessionId]) => sessionId),
       hasDeferredClaims
     }
+  } catch (error) {
+    if (isLiveSqliteUnavailableError(error)) {
+      return {
+        ...processedDatabase,
+        sessions: [],
+        dailyAggregates: [],
+        ownedSessionIds: [],
+        hasDeferredClaims: false
+      }
+    }
+    throw error
   } finally {
-    db.close()
+    db?.close()
   }
 }
 
