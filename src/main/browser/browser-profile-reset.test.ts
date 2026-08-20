@@ -10,11 +10,12 @@ vi.mock('electron', () => ({
 import { findPartitionWebContents, resetBrowserProfilePartition } from './browser-profile-reset'
 import { acquireCookieMutationLock, withCookieMutationLock } from './browser-cookie-import-clear'
 
-type SessionMock = Session & Mocked<Pick<Session, 'clearData'>>
+type SessionMock = Session & Mocked<Pick<Session, 'clearData' | 'clearStorageData'>>
 
 function makeSession(overrides: Partial<SessionMock> = {}): SessionMock {
   return {
     clearData: vi.fn<Session['clearData']>(async () => undefined),
+    clearStorageData: vi.fn<Session['clearStorageData']>(async () => undefined),
     ...overrides
   } as SessionMock
 }
@@ -33,7 +34,7 @@ describe('resetBrowserProfilePartition', () => {
     getAllWebContentsMock.mockReturnValue([])
   })
 
-  it('clears the whole partition, not a filtered subset', async () => {
+  it('rotates media-device IDs and clears the whole partition', async () => {
     const targetSession = makeSession()
     await resetBrowserProfilePartition({
       targetSession,
@@ -41,6 +42,8 @@ describe('resetBrowserProfilePartition', () => {
       clearPendingCookieImport: vi.fn(),
       clearImportedSource: vi.fn()
     })
+    expect(targetSession.clearStorageData).toHaveBeenCalledTimes(1)
+    expect(targetSession.clearStorageData).toHaveBeenCalledWith({ storages: ['cookies'] })
     expect(targetSession.clearData).toHaveBeenCalledTimes(1)
     expect(targetSession.clearData).toHaveBeenCalledWith()
   })
@@ -61,6 +64,7 @@ describe('resetBrowserProfilePartition', () => {
     const order: string[] = []
     const clearImportedSource = vi.fn(() => void order.push('source'))
     const targetSession = makeSession({
+      clearStorageData: vi.fn(async () => void order.push('clearStorageData')),
       clearData: vi.fn(async () => void order.push('clearData'))
     })
     await resetBrowserProfilePartition({
@@ -70,7 +74,7 @@ describe('resetBrowserProfilePartition', () => {
       clearImportedSource
     })
     expect(clearImportedSource).toHaveBeenCalledTimes(1)
-    expect(order).toEqual(['source', 'staged', 'clearData'])
+    expect(order).toEqual(['source', 'staged', 'clearStorageData', 'clearData'])
   })
 
   it('reloads every live context in the partition after clearing', async () => {
@@ -130,6 +134,26 @@ describe('resetBrowserProfilePartition', () => {
       })
     ).resolves.toBeUndefined()
     expect(healthy.reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('reloads live contexts after a partially failed clear', async () => {
+    const targetSession = makeSession({
+      clearData: vi.fn(async () => {
+        throw new Error('clear failed')
+      })
+    })
+    const live = makeContents(targetSession)
+    getAllWebContentsMock.mockReturnValue([live])
+
+    await expect(
+      resetBrowserProfilePartition({
+        targetSession,
+        partition: 'persist:orca-browser',
+        clearPendingCookieImport: vi.fn(),
+        clearImportedSource: vi.fn()
+      })
+    ).rejects.toThrow('clear failed')
+    expect(live.reload).toHaveBeenCalledTimes(1)
   })
 
   it('waits for the session mutation lock and releases it after failure', async () => {

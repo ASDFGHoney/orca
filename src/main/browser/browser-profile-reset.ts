@@ -36,8 +36,14 @@ export async function resetBrowserProfilePartition(
     // Clear metadata first so a partial reset never advertises an import whose data may be gone.
     clearImportedSource()
     clearPendingCookieImport(partition)
-    // clearStorageData bypasses trust-token, bounce-tracking, and network-history removal.
-    await targetSession.clearData()
-    reloadPartitionContexts(targetSession)
+    try {
+      // Electron only rotates its persisted media-device ID salt on a cookie storage clear.
+      await targetSession.clearStorageData({ storages: ['cookies'] })
+      // BrowsingDataRemover additionally reaches trust tokens, bounce tracking, and network history.
+      await targetSession.clearData()
+    } finally {
+      // A rejected removal can still leave the partition partially cleared.
+      reloadPartitionContexts(targetSession)
+    }
   })
 }
