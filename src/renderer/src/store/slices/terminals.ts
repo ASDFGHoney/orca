@@ -51,6 +51,7 @@ import type { AiVaultSessionTitle } from '../../../../shared/ai-vault-session-ti
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
 import { sweepRetiredTerminalTabState } from './retired-terminal-tab-state-sweep'
+import { stampLaunchAgentLeafIdOnFirstLayout } from './launch-agent-leaf-stamp'
 import { clearTransientTerminalState, emptyLayoutSnapshot } from './terminal-helpers'
 import {
   collectReleasedLeafIds,
@@ -2065,11 +2066,16 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       const tabs = s.tabsByWorktree[ownerWorktreeId] ?? []
       const tabIndex = tabs.findIndex((t) => t.id === tabId)
       const currentTab = tabs[tabIndex]
-      if (!currentTab?.launchAgent) {
+      if (!currentTab?.launchAgent && !currentTab?.launchAgentLeafId) {
         return s
       }
-      const { launchAgent: _launchAgent, ...tabWithoutLaunchAgent } = currentTab
+      const {
+        launchAgent: _launchAgent,
+        launchAgentLeafId: _launchAgentLeafId,
+        ...tabWithoutLaunchAgent
+      } = currentTab
       void _launchAgent
+      void _launchAgentLeafId
       const nextTabs = [...tabs]
       nextTabs[tabIndex] = tabWithoutLaunchAgent
       scheduleRuntimeGraphSync()
@@ -3591,8 +3597,21 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       if (existing && terminalLayoutEqual(existing, normalized.snapshot)) {
         return s
       }
+      const ownerWorktreeId = getTerminalTabOwnerWorktreeId(s.tabsByWorktree, tabId)
+      const stampedTabs =
+        ownerWorktreeId === null
+          ? null
+          : stampLaunchAgentLeafIdOnFirstLayout({
+              tabs: s.tabsByWorktree[ownerWorktreeId] ?? [],
+              tabId,
+              previousLayout: existing,
+              nextLayout: normalized.snapshot
+            })
       return {
-        terminalLayoutsByTabId: { ...s.terminalLayoutsByTabId, [tabId]: normalized.snapshot }
+        terminalLayoutsByTabId: { ...s.terminalLayoutsByTabId, [tabId]: normalized.snapshot },
+        ...(stampedTabs && ownerWorktreeId
+          ? { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: stampedTabs } }
+          : {})
       }
     })
     transferNormalizedTerminalLayoutPtyOwnership(get(), tabId, ownershipTransfers)

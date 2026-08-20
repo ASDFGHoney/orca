@@ -1091,7 +1091,10 @@ function buildMirroredTerminalTabs(
         sortOrder: sortOffset + index,
         createdAt: existing?.createdAt ?? now + index,
         // Why: launchAgent is host-owned lifecycle metadata; once the host omits it, don't resurrect stale startup intent.
-        ...(launchAgent ? { launchAgent } : {})
+        ...(launchAgent ? { launchAgent } : {}),
+        // Why: launchAgentLeafId is client-stamped from the first sole leaf; the
+        // host snapshot does not carry it, so dropping it would recycle identity.
+        ...(existing?.launchAgentLeafId ? { launchAgentLeafId: existing.launchAgentLeafId } : {})
       },
       hostTabId: parentTabId,
       ptyIds,
@@ -2195,6 +2198,7 @@ function terminalTabEqual(a: TerminalTab, b: TerminalTab): boolean {
     a.generation === b.generation &&
     a.shellOverride === b.shellOverride &&
     a.launchAgent === b.launchAgent &&
+    a.launchAgentLeafId === b.launchAgentLeafId &&
     a.pendingActivationSpawn === b.pendingActivationSpawn
   )
 }
