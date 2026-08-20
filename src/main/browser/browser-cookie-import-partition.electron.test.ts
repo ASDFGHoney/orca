@@ -16,12 +16,7 @@ afterAll(() => {
   }
 })
 
-// Why: on CI runners this Electron launch intermittently never reaches `ready` — the fixture's
-// watchdog fires with its step still 'starting', and the same signature hits sibling cookie
-// fixtures on unrelated PRs, including one whose watchdog allows 20s. Measured off-runner, `ready`
-// costs ~0.1-0.4s even at a quarter CPU, so the launch is wedged rather than slow and no watchdog
-// value fixes it. Relaunch once, and only for that signature: every assertion, import failure, and
-// crash after `ready` still fails on the first attempt.
+// Retry once when Electron startup times out before `ready`; keep later failures fatal.
 const FIXTURE_LAUNCH_ATTEMPTS = 2
 
 function neverReachedElectronReady(fixtureResult: string): boolean {
