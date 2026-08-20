@@ -1,37 +1,21 @@
 // Structured agent-session host: where the lease, journal, and provider adapter meet.
 // Mutations share one durable admission path and serialize per session.
 
-import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
 import type {
   AgentSessionAttachResult,
-  AgentSessionCancelResult,
   AgentSessionHistoryRequest,
   AgentSessionHistoryResult,
   AgentSessionHandoffRequest,
   AgentSessionHandoffResult,
   AgentSessionHandoffStatus,
-  AgentSessionMutationEnvelope,
   AgentSessionMutationResult,
-  AgentSessionOptionResult,
   AgentSessionOptionsResult,
-  AgentSessionPromptResult,
-  AgentSessionSendResult,
   AgentSessionWireRefusal
 } from '../../../shared/agent-session-wire'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
-import {
-  admitAndRunAgentSessionMutation,
-  AGENT_SESSION_NOT_ATTACHED
-} from './structured-agent-session-mutation-admission'
+import { AGENT_SESSION_NOT_ATTACHED } from './structured-agent-session-mutation-admission'
 import { createRestartReconciler } from './structured-agent-session-restart-reconcile'
-import {
-  cancelPlan,
-  promptPlan,
-  sendPlan,
-  setOptionPlan,
-  type MutationPlan
-} from './structured-agent-session-mutation-plans'
 import {
   AgentSessionSubscribers,
   type AgentSessionSubscribeInput
@@ -58,6 +42,14 @@ import type {
 import { resumeHeldStructuredAgentSession } from './structured-agent-session-hold-resume'
 import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
+import {
+  cancelStructuredAgentSessionTurn,
+  readStructuredAgentSessionOptions,
+  respondToStructuredAgentSessionPrompt,
+  sendStructuredAgentSessionTurn,
+  setStructuredAgentSessionOption,
+  type StructuredAgentSessionMutationContext
+} from './structured-agent-session-host-mutations'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
 import type {
   StructuredAgentSessionCaller,
@@ -119,7 +111,8 @@ export class StructuredAgentSessionHost {
       serialize: (sessionId, task) => this.serialize(sessionId, task),
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
-      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId)
+      restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
+      reapOrphanChildren: () => this.runtimeState.reapOrphanChildren()
     })
     this.runtimeState.startLeaseRenewal()
   }
@@ -207,14 +200,28 @@ export class StructuredAgentSessionHost {
     caller: StructuredAgentSessionCaller,
     params: AgentSessionAttachParams
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
+    // Why here and not in the orchestration: the host owns per-session serialization and the
+    // in-flight attach set, so the module stays testable without a task queue.
     const attaching = this.serialize(params.envelope.sessionId, () =>
       attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
     )
     return this.tasks.trackAttach(attaching)
   }
 
-  // oxfmt-ignore
-  adoptTuiOwner = (input: StructuredTuiAdoptionRequest): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> => this.serialize(input.params.envelope.sessionId, () => adoptStructuredTuiOwner({ ...input, deps: this.deps, now: this.now, publish: (sessionId, session) => this.sessions.set(sessionId, session), retain: (sessionId, owner) => this.handoffs.adoptTuiOwner(sessionId, owner), snapshot: (sessionId, session) => this.subscribers.snapshot(sessionId, session.journal, session.fence) }))
+  adoptTuiOwner = (
+    input: StructuredTuiAdoptionRequest
+  ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> =>
+    this.serialize(input.params.envelope.sessionId, () =>
+      adoptStructuredTuiOwner({
+        ...input,
+        deps: this.deps,
+        now: this.now,
+        publish: (sessionId, session) => this.sessions.set(sessionId, session),
+        retain: (sessionId, owner) => this.handoffs.adoptTuiOwner(sessionId, owner),
+        snapshot: (sessionId, session) =>
+          this.subscribers.snapshot(sessionId, session.journal, session.fence)
+      })
+    )
 
   flushStreamedEvents = (sessionId: string): Promise<void> =>
     this.runtimeState.flushEventSink(sessionId)
@@ -227,73 +234,43 @@ export class StructuredAgentSessionHost {
     await this.runtimeState.flushAllEventSinks()
   }
 
-  send(
-    caller: StructuredAgentSessionCaller,
-    params: {
-      envelope: AgentSessionMutationEnvelope
-      body: AgentJournalMessageItem
-      retryUnknown?: true
-      beforeRun?: () => void
+  private mutationContext(): StructuredAgentSessionMutationContext {
+    return {
+      deps: this.deps,
+      sessions: this.sessions,
+      publish: (sessionId, journal) => this.subscribers.publish(sessionId, journal),
+      requireSession: (sessionId) => this.requireSession(sessionId),
+      serialize: (sessionId, task) => this.serialize(sessionId, task),
+      now: () => this.now()
     }
-  ): Promise<AgentSessionMutationResult<AgentSessionSendResult>> {
-    return this.mutate(caller, params.envelope, sendPlan(params))
   }
 
-  cancel(
+  send = (
     caller: StructuredAgentSessionCaller,
-    params: { envelope: AgentSessionMutationEnvelope; turnId: string }
-  ): Promise<AgentSessionMutationResult<AgentSessionCancelResult>> {
-    return this.mutate(caller, params.envelope, cancelPlan(params))
-  }
+    params: Parameters<typeof sendStructuredAgentSessionTurn>[2]
+  ): ReturnType<typeof sendStructuredAgentSessionTurn> =>
+    sendStructuredAgentSessionTurn(this.mutationContext(), caller, params)
 
-  respondToPrompt(
+  cancel = (
     caller: StructuredAgentSessionCaller,
-    params: {
-      envelope: AgentSessionMutationEnvelope
-      kind: 'approval' | 'question'
-      itemId: string
-      expectedRevision: number
-      optionId: string
-    }
-  ): Promise<AgentSessionMutationResult<AgentSessionPromptResult>> {
-    return this.mutate(caller, params.envelope, promptPlan(params))
-  }
+    params: Parameters<typeof cancelStructuredAgentSessionTurn>[2]
+  ): ReturnType<typeof cancelStructuredAgentSessionTurn> =>
+    cancelStructuredAgentSessionTurn(this.mutationContext(), caller, params)
 
-  setOption(
+  respondToPrompt = (
     caller: StructuredAgentSessionCaller,
-    params: { envelope: AgentSessionMutationEnvelope; key: string; value: string }
-  ): Promise<AgentSessionMutationResult<AgentSessionOptionResult>> {
-    return this.mutate(caller, params.envelope, setOptionPlan(params))
-  }
+    params: Parameters<typeof respondToStructuredAgentSessionPrompt>[2]
+  ): ReturnType<typeof respondToStructuredAgentSessionPrompt> =>
+    respondToStructuredAgentSessionPrompt(this.mutationContext(), caller, params)
 
-  readOptions(sessionId: string): Promise<AgentSessionOptionsResult> {
-    return this.serialize(sessionId, async () => {
-      const session = this.requireSession(sessionId)
-      if (!this.deps.adapter.readOptions) {
-        throw new Error('structured_agent_session_options_unsupported')
-      }
-      return this.deps.adapter.readOptions({ sessionId, fence: session.fence })
-    })
-  }
-
-  private mutate<TValue>(
+  setOption = (
     caller: StructuredAgentSessionCaller,
-    envelope: AgentSessionMutationEnvelope,
-    plan: MutationPlan<TValue>
-  ): Promise<AgentSessionMutationResult<TValue>> {
-    return this.serialize(envelope.sessionId, () =>
-      admitAndRunAgentSessionMutation({
-        store: this.deps.store,
-        adapter: this.deps.adapter,
-        callerKey: caller.callerKey,
-        envelope,
-        plan,
-        journal: this.sessions.get(envelope.sessionId)?.journal,
-        publish: (journal) => this.subscribers.publish(envelope.sessionId, journal),
-        now: () => this.now()
-      })
-    )
-  }
+    params: Parameters<typeof setStructuredAgentSessionOption>[2]
+  ): ReturnType<typeof setStructuredAgentSessionOption> =>
+    setStructuredAgentSessionOption(this.mutationContext(), caller, params)
+
+  readOptions = (sessionId: string): Promise<AgentSessionOptionsResult> =>
+    readStructuredAgentSessionOptions(this.mutationContext(), sessionId)
 
   requestHandoff(
     caller: StructuredAgentSessionCaller,

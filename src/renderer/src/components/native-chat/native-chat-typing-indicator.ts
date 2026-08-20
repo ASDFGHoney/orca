@@ -13,7 +13,7 @@
 
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import { NATIVE_CHAT_STREAMING_ID } from '../../../../shared/native-chat-streaming'
-import { isCommandMarkerId } from './native-chat-pending'
+import { isCommandMarkerId } from './native-chat-command-marker'
 
 /** A row carrying only tool activity — no prose. It is progress, not an answer. */
 function isToolActivityOnlyRow(message: NativeChatMessage): boolean {

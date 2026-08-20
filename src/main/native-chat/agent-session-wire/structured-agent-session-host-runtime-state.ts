@@ -6,6 +6,7 @@ import {
 } from './structured-agent-session-event-sink'
 import type { StructuredAgentSessionHostDeps } from './structured-agent-session-host'
 import { StructuredAgentSessionLeaseRenewer } from './structured-agent-session-lease-renewer'
+import { stopOrphanAgentSessionChildren } from '../../runtime/agent-session-orphan-child-reaper'
 import { resolveStructuredSessionRecovery } from './structured-agent-session-recovery-resolution'
 
 export class StructuredAgentSessionHostRuntimeState {
@@ -57,6 +58,19 @@ export class StructuredAgentSessionHostRuntimeState {
 
   async flushAllEventSinks(): Promise<void> {
     await Promise.all([...this.eventSinks.values()].map((sink) => sink.drained()))
+  }
+
+  /** Stops children carrying a spawn token no lease claims. A failure here must not block
+   *  restore: an unreaped orphan is a worse outcome than a session that never comes back. */
+  reapOrphanChildren(): Promise<number[]> {
+    return stopOrphanAgentSessionChildren({
+      store: this.deps.store,
+      ...(this.deps.scanSpawnTokenProcesses ? { scan: this.deps.scanSpawnTokenProcesses } : {}),
+      ...(this.deps.stopOwnerProcess ? { stop: this.deps.stopOwnerProcess } : {})
+    }).catch((error: unknown) => {
+      this.deps.onEventSinkError?.({ sessionId: 'orphan-spawn-token-reap', error })
+      return []
+    })
   }
 
   /** Exit from a latched recovery stage when present-time evidence permits one. */

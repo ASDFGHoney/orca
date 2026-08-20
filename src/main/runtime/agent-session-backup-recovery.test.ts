@@ -2,13 +2,66 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { isAgentSessionFenceCurrent } from '../../shared/agent-session-lease-adjudication'
+import { evaluateAgentSessionAcquisition } from '../../shared/agent-session-lease-adjudication'
+import { isAgentSessionRecord } from '../../shared/agent-session-record'
+import { agentSessionLeaseFixture } from '../../shared/agent-session-record.test-fixture'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import {
   agentSessionStorePath,
   loadAgentSessionStore,
   saveAgentSessionStore
 } from './agent-session-record-store-file'
+
+/** Reserve, observe the spawn, prove the handle: the only path to a `live` lease, whose invariant
+ *  is that the head handle was minted at exactly the current fence. One store instance throughout,
+ *  because reopening marks every lease unreconciled and refuses the next two steps. */
+async function seedLiveSession(sessionId: string): Promise<number> {
+  const store = await openStore()
+  const reserved = await store.reserveOwner({
+    sessionId,
+    location: {
+      executionHostId: 'local',
+      wslDistro: null,
+      workspaceId: 'workspace-1',
+      workspaceKind: 'git-worktree'
+    },
+    provider: 'codex',
+    accountHome: { variable: 'CODEX_HOME', path: join(root, 'codex-home') },
+    runtimeKind: 'native',
+    expectedFence: null,
+    spawnToken: 'seed-live',
+    claimKeyId: 'key-1',
+    handoffOperationId: null,
+    probe: { outcome: 'reservation-unused' },
+    operation: { callerKey: 'test', operationId: operationId(), fingerprint: 'seed-live' },
+    now: NOW
+  })
+  const fence = reserved.record.lease.runtimeFence
+  await store.commitProcessIdentity({
+    sessionId,
+    fence,
+    process: {
+      hostId: 'local',
+      pid: 4242,
+      processStartTimeMs: NOW,
+      spawnToken: 'seed-live'
+    },
+    now: NOW
+  })
+  await store.proveOwner({
+    sessionId,
+    fence,
+    link: {
+      linkId: 'link-live-1',
+      origin: 'created',
+      mintedAtFence: fence,
+      observedAt: NOW,
+      handle: { provider: 'codex', threadId: `thread-${sessionId}` }
+    },
+    now: NOW
+  })
+  return fence
+}
 
 let root: string
 let storePath: string
@@ -106,21 +159,43 @@ describe('recovery from the committed backup', () => {
     expect(JSON.parse(await readFile(storePath, 'utf-8'))).toBeTruthy()
   })
 
-  it('refuses a writer holding a pre-crash fence', async () => {
+  it('never grants the fence the lost commit could already have handed out', async () => {
     const fence = await seedSession('session-a')
     // A second commit is what produces the backup; the first write has nothing to rotate.
     await seedSession('session-b')
     await rm(storePath, { force: true })
 
     const store = await openStore()
+    // The floor lands in the first transaction after recovery, not at load.
     await store.retireClaimKey(`retire-${operationId()}`, NOW)
     const record = store.getRecord('session-a')
     expect(record).toBeTruthy()
-    // Strict equality: the floor must DOMINATE the highest fence the lost commit could grant,
-    // which is fence + 1. Anything at or below that is refused.
-    expect(isAgentSessionFenceCurrent(record!.lease, fence)).toBe(false)
-    expect(isAgentSessionFenceCurrent(record!.lease, fence + 1)).toBe(false)
-    expect(record!.lease.runtimeFence).toBe(fence + 2)
+
+    // The lost commit could have granted fence + 1. Adjudication must skip it, or two writers
+    // end up holding the same number under strict-equality comparison.
+    const granted = evaluateAgentSessionAcquisition({
+      lease: { ...record!.lease, unreconciled: false, ownerProcess: null, claimStatus: 'released' },
+      expectedFence: record!.lease.runtimeFence,
+      handoffOperationId: null,
+      probe: { outcome: 'reservation-unused' }
+    })
+    expect(granted.decision).toBe('granted')
+    expect(granted.decision === 'granted' && granted.nextFence).toBeGreaterThan(fence + 1)
+  })
+
+  it('leaves recovered records valid, so the next load does not quarantine them', async () => {
+    await seedLiveSession('session-a')
+    await seedSession('session-b')
+    await rm(storePath, { force: true })
+
+    const store = await openStore()
+    await store.retireClaimKey(`retire-${operationId()}`, NOW)
+    const record = store.getRecord('session-a')
+    expect(record?.lease.claimStatus).toBe('live')
+    // A `live` lease means a provider handle proven at exactly lease.runtimeFence. Recovery that
+    // rewrote the fence broke that, so the record failed validation, was quarantined on the next
+    // load, and dropped straight back to the same backup.
+    expect(isAgentSessionRecord(record)).toBe(true)
   })
 
   it('carries ownership evidence forward verbatim', async () => {
@@ -185,19 +260,37 @@ describe('a transient primary read failure is not recovery', () => {
 })
 
 describe('the fence-step bound the +2 floor rests on', () => {
-  it('advances a session fence by at most one per transaction', async () => {
-    const store = await openStore()
-    await store.retireClaimKey(`retire-${operationId()}`, NOW)
-    await seedSession('session-a')
-    const loaded = await loadAgentSessionStore(storePath, 'local')
-    const start = loaded.state.records.get('session-a')!.lease.runtimeFence
+  it('advances a session fence by exactly one per grant when no floor is set', () => {
+    const granted = evaluateAgentSessionAcquisition({
+      lease: agentSessionLeaseFixture({
+        runtimeFence: 7,
+        claimStatus: 'released',
+        ownerProcess: null,
+        provenHandleLinkId: null
+      }),
+      expectedFence: 7,
+      handoffOperationId: null,
+      probe: { outcome: 'reservation-unused' }
+    })
+    // If a grant could ever advance by more than one, the +2 recovery floor would stop dominating
+    // the highest fence a single lost commit can have handed out.
+    expect(granted.decision === 'granted' && granted.nextFence).toBe(8)
+  })
 
-    const reopened = await openStore()
-    const before = reopened.getRecord('session-a')!.lease.runtimeFence
-    await reopened.retireClaimKey(`retire-${operationId()}`, NOW)
-    const after = reopened.getRecord('session-a')!.lease.runtimeFence
-    expect(after - before).toBeLessThanOrEqual(1)
-    expect(start).toBeGreaterThan(0)
+  it('honours a recovery floor that sits above the next step', () => {
+    const granted = evaluateAgentSessionAcquisition({
+      lease: agentSessionLeaseFixture({
+        runtimeFence: 7,
+        minimumNextFence: 9,
+        claimStatus: 'released',
+        ownerProcess: null,
+        provenHandleLinkId: null
+      }),
+      expectedFence: 7,
+      handoffOperationId: null,
+      probe: { outcome: 'reservation-unused' }
+    })
+    expect(granted.decision === 'granted' && granted.nextFence).toBe(9)
   })
 })
 

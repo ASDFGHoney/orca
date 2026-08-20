@@ -11,7 +11,7 @@
 import { appendFile, mkdir, open, readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { durableWriteTempPath, writeFileDurable } from '../../durable-file-write'
+import { durableWriteTempPath, renameDurable, writeFileDurable } from '../../durable-file-write'
 import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
@@ -56,7 +56,14 @@ export type JournalReadResult = {
   malformed: number
   /** Raw suffix beginning at the first malformed line, if any. */
   remainder?: string
+  /** Distinguishes an absent/empty log from bytes that could not name an epoch. */
+  hasBytes: boolean
 }
+
+export type JournalSnapshotReadResult =
+  | { status: 'missing' }
+  | { status: 'valid'; snapshot: JournalSnapshotFile }
+  | { status: 'invalid' }
 
 const NEWLINE_BYTE = 0x0a
 
@@ -67,13 +74,33 @@ export async function ensureJournalDir(journalDir: string): Promise<void> {
 export async function readJournalSnapshotFile(
   journalDir: string
 ): Promise<JournalSnapshotFile | null> {
+  const result = await readJournalSnapshot(journalDir)
+  return result.status === 'valid' ? result.snapshot : null
+}
+
+export async function readJournalSnapshot(journalDir: string): Promise<JournalSnapshotReadResult> {
   try {
     const raw = await readFile(join(journalDir, JOURNAL_SNAPSHOT_FILE), 'utf-8')
-    const parsed = JSON.parse(raw) as JournalSnapshotFile
-    return typeof parsed?.epoch === 'string' ? parsed : null
-  } catch {
-    return null
+    const parsed: unknown = JSON.parse(raw)
+    return isJournalSnapshotFile(parsed)
+      ? { status: 'valid', snapshot: parsed }
+      : { status: 'invalid' }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'missing' }
+    }
+    if (error instanceof SyntaxError) {
+      return { status: 'invalid' }
+    }
+    throw error
   }
+}
+
+export async function quarantineInvalidJournalSnapshot(journalDir: string): Promise<string> {
+  const source = join(journalDir, JOURNAL_SNAPSHOT_FILE)
+  const target = join(journalDir, `quarantine-snapshot-${Date.now()}-${randomUUID()}.json`)
+  await renameDurable(source, target)
+  return target
 }
 
 export async function writeJournalSnapshotFile(
@@ -88,8 +115,11 @@ export async function readJournalLog(journalDir: string): Promise<JournalReadRes
   let raw: string
   try {
     raw = await readFile(join(journalDir, JOURNAL_LOG_FILE), 'utf-8')
-  } catch {
-    return { rows: [], unreadable: false, malformed: 0 }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { rows: [], unreadable: false, malformed: 0, hasBytes: false }
+    }
+    throw error
   }
   const rows: JournalRow[] = []
   let unreadable = false
@@ -109,12 +139,75 @@ export async function readJournalLog(journalDir: string): Promise<JournalReadRes
     }
     if (parsed.unreadable) {
       unreadable = true
-      break
+      return { rows, unreadable, malformed, remainder: raw.slice(offset), hasBytes: raw.length > 0 }
     }
     malformed += 1
-    return { rows, unreadable, malformed, remainder: raw.slice(offset) }
+    return { rows, unreadable, malformed, remainder: raw.slice(offset), hasBytes: raw.length > 0 }
   }
-  return { rows, unreadable, malformed }
+  return { rows, unreadable, malformed, hasBytes: raw.length > 0 }
+}
+
+function isJournalSnapshotFile(value: unknown): value is JournalSnapshotFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const snapshot = value as Record<string, unknown>
+  return (
+    typeof snapshot.v === 'number' &&
+    typeof snapshot.epoch === 'string' &&
+    snapshot.epoch.length > 0 &&
+    typeof snapshot.compactedThrough === 'number' &&
+    typeof snapshot.highestFence === 'number' &&
+    arrayOf(snapshot.items, isRenderItem) &&
+    arrayOf(snapshot.submissions, isSubmission) &&
+    arrayOf(snapshot.receipts, isReceipt) &&
+    arrayOf(snapshot.aliases, isAlias) &&
+    arrayOf(snapshot.tail, (row) => parseJournalRow(JSON.stringify(row)).ok)
+  )
+}
+
+function arrayOf(value: unknown, predicate: (entry: unknown) => boolean): value is unknown[] {
+  return Array.isArray(value) && value.every(predicate)
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function isRenderItem(value: unknown): boolean {
+  const item = recordOf(value)
+  return Boolean(
+    item &&
+    typeof item.itemId === 'string' &&
+    typeof item.revision === 'number' &&
+    recordOf(item.body)
+  )
+}
+
+function isSubmission(value: unknown): boolean {
+  const submission = recordOf(value)
+  return Boolean(submission && typeof submission.clientMessageId === 'string')
+}
+
+function isReceipt(value: unknown): boolean {
+  const receipt = recordOf(value)
+  return Boolean(
+    receipt &&
+    typeof receipt.clientMessageId === 'string' &&
+    typeof receipt.providerItemId === 'string' &&
+    typeof receipt.epoch === 'string' &&
+    typeof receipt.sequence === 'number' &&
+    typeof receipt.acceptedAt === 'number'
+  )
+}
+
+function isAlias(value: unknown): boolean {
+  const alias = recordOf(value)
+  return Boolean(
+    alias && typeof alias.providerItemId === 'string' && typeof alias.itemId === 'string'
+  )
 }
 
 /**
@@ -150,8 +243,11 @@ export async function appendJournalRows(
         await handle.close()
       }
     }
-  } catch {
-    // The append below creates a missing log; other read errors remain visible.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+    // The append below creates a missing log.
   }
   const payload = `${rows.map(serializeJournalRow).join('\n')}\n`
   await appendFile(path, payload, 'utf-8')

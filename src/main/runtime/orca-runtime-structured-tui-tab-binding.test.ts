@@ -106,13 +106,16 @@ describe('structured TUI launch tab binding', () => {
     const runtime = terminalAdoptionHarness()
     const adoptTuiOwner = vi.fn(async () => ({ ok: true, replayed: false, fence: 1 }))
     setStructuredAgentSessionHost({ adoptTuiOwner } as never)
-    resolvePinnedCodexRolloutProof.mockResolvedValueOnce('/tmp/codex-home/rollout.jsonl')
-    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+    proveCodexTuiRollout.mockResolvedValueOnce({
+      transcriptPath: '/tmp/codex-home/rollout.jsonl'
+    })
+    const process = {
       hostId: 'local',
       pid: 4242,
       processStartTimeMs: 1_700_000_000_000,
       spawnToken: 'spawn-adopt'
-    })
+    }
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce(process).mockResolvedValueOnce(process)
 
     try {
       await expect(
@@ -147,6 +150,10 @@ describe('structured TUI launch tab binding', () => {
         })
       )
       expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBe('session-adopt')
+      expect(proveCodexTuiRollout).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'thread-adopt' })
+      )
+      expect(resolvePinnedCodexRolloutProof).not.toHaveBeenCalled()
     } finally {
       agentSessionPtyWriteGate.unbindPty('pty-adopt')
       setStructuredAgentSessionHost(null)
@@ -155,7 +162,15 @@ describe('structured TUI launch tab binding', () => {
 
   it('refuses adoption when the provider rollout cannot be proved', async () => {
     const runtime = terminalAdoptionHarness()
-    resolvePinnedCodexRolloutProof.mockResolvedValueOnce(null)
+    proveCodexTuiRollout.mockRejectedValueOnce(
+      new Error('The agent terminal did not prove the expected Codex rollout.')
+    )
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+      hostId: 'local',
+      pid: 4242,
+      processStartTimeMs: 1_700_000_000_000,
+      spawnToken: 'spawn-adopt'
+    })
 
     await expect(
       runtime.adoptStructuredAgentSessionTerminal(
@@ -174,7 +189,47 @@ describe('structured TUI launch tab binding', () => {
         },
         { callerKey: 'renderer-1' }
       )
-    ).rejects.toThrow('Could not find the rollout')
+    ).rejects.toThrow('did not prove the expected Codex rollout')
+    expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
+  })
+
+  it('refuses a thread proof when the Codex process changes during it', async () => {
+    const runtime = terminalAdoptionHarness()
+    proveCodexTuiRollout.mockResolvedValueOnce({
+      transcriptPath: '/tmp/codex-home/rollout.jsonl'
+    })
+    readStructuredTuiProcessIdentity
+      .mockResolvedValueOnce({
+        hostId: 'local',
+        pid: 4242,
+        processStartTimeMs: 1_700_000_000_000,
+        spawnToken: 'spawn-adopt'
+      })
+      .mockResolvedValueOnce({
+        hostId: 'local',
+        pid: 5252,
+        processStartTimeMs: 1_700_000_010_000,
+        spawnToken: 'spawn-adopt'
+      })
+
+    await expect(
+      runtime.adoptStructuredAgentSessionTerminal(
+        {
+          envelope: {
+            sessionId: 'session-process-swap',
+            clientOperationId: 'operation-process-swap',
+            expectedRuntimeFence: null,
+            payloadFingerprint: 'f'.repeat(64)
+          },
+          worktree: `id:${WORKTREE_ID}`,
+          tabId: 'tab-adopt',
+          paneKey: 'tab-adopt:leaf-adopt',
+          ptyId: 'pty-adopt',
+          threadId: 'thread-adopt'
+        },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('process changed during conversation proof')
     expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
   })
 
@@ -186,12 +241,13 @@ describe('structured TUI launch tab binding', () => {
       threadId: 'thread-discovered',
       transcriptPath: '/tmp/codex-home/discovered.jsonl'
     })
-    readStructuredTuiProcessIdentity.mockResolvedValueOnce({
+    const process = {
       hostId: 'local',
       pid: 4242,
       processStartTimeMs: 1_700_000_000_000,
       spawnToken: 'spawn-adopt'
-    })
+    }
+    readStructuredTuiProcessIdentity.mockResolvedValueOnce(process).mockResolvedValueOnce(process)
 
     try {
       await expect(

@@ -28,6 +28,15 @@ export type JournalCompactionPolicy = {
   minTailRows: number
   /** Keep every row observed within this window. */
   retainTailMs: number
+  /**
+   * `window` honours `retainTailMs` outright. `budget-pressure` lets it yield:
+   * the alternative is refusing the user's writes until the window ages out,
+   * and the tail is only a resume optimization — compaction folds every shed
+   * row into the snapshot before truncating the log, so a client that loses
+   * its resume point reloads instead of losing conversation. Defaults to
+   * `window`.
+   */
+  retention?: 'window' | 'budget-pressure'
 }
 
 /** Two hours of tail comfortably covers a phone that slept through a commute,
@@ -111,7 +120,13 @@ function retainTail(
   const byAge = rows.findIndex((row) => row.ts >= floor)
   const byCount = rows.length - policy.minTailRows
   const start = byAge === -1 ? byCount : Math.min(byAge, byCount)
-  return rows.slice(start)
+  if (policy.retention !== 'budget-pressure') {
+    return rows.slice(start)
+  }
+  // Halve rather than empty: the newer half keeps live clients resuming, and
+  // shedding at least one row guarantees the append that triggered this makes
+  // progress instead of latching the session read-only.
+  return rows.slice(Math.max(start, Math.ceil(rows.length / 2)))
 }
 
 /** Only when the retention window would actually drop rows: inside it,
@@ -126,4 +141,22 @@ export function journalTailIsReadyToCompact(
     return false
   }
   return (tailRows[0]?.ts ?? now) < now - policy.retainTailMs
+}
+
+/** The policy an append falls back to when the size bound would otherwise
+ *  refuse it: both floors that normally protect the tail step aside. */
+export function budgetPressurePolicy(policy: JournalCompactionPolicy): JournalCompactionPolicy {
+  return { ...policy, minTailRows: 0, retention: 'budget-pressure' }
+}
+
+/** Budget pressure may need to shed rows before the ordinary batching threshold.
+ *  Pass a `budget-pressure` policy, or a tail wholly inside the retention
+ *  window answers false and the size bound refuses every append until it ages
+ *  out — two hours of a session the user cannot write to. */
+export function journalTailCanShedRows(
+  tailRows: readonly JournalRow[],
+  policy: JournalCompactionPolicy,
+  now: number
+): boolean {
+  return retainTail(tailRows, policy, now).length < tailRows.length
 }

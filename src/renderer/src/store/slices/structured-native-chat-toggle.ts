@@ -14,6 +14,7 @@ import {
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import { translate } from '@/i18n/i18n'
+import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
 import type { AppState } from '../types'
 
 export type NativeChatRoute = 'structured' | 'bridge'
@@ -26,9 +27,13 @@ export function nativeChatRouteForTerminal(input: {
   agent: AgentType | null
   structuredSessionId?: string
   mode: 'terminal' | 'chat'
+  structuredAvailable?: boolean
 }): NativeChatRoute {
+  if (input.structuredAvailable === false) {
+    return 'bridge'
+  }
   if (input.structuredSessionId) {
-    return 'structured'
+    return input.agent === null || input.agent === 'codex' ? 'structured' : 'bridge'
   }
   return input.mode === 'chat' ? nativeChatRouteForAgent(input.agent) : 'bridge'
 }
@@ -93,7 +98,7 @@ async function waitForOwner(
       { sessionId }
     )
     if (status.phase === 'failed') {
-      throw new Error(status.error?.message ?? 'Codex ownership transfer failed.')
+      return status
     }
     if (status.owner === owner && status.phase === 'idle') {
       return status
@@ -106,16 +111,18 @@ async function waitForOwner(
 async function requestHandoff(
   sessionId: string,
   direction: 'to-native' | 'to-tui',
-  fence: number
+  fence: number,
+  clientOperationId: string,
+  action: 'start' | 'retry'
 ): Promise<void> {
-  const fields = { direction, mode: 'after-turn' as const, action: 'start' as const }
+  const fields = { direction, mode: 'after-turn' as const, action }
   const result = await callStructuredAgentSession<AgentSessionMutationResult<unknown>>(
     { kind: 'local' },
     'agentSession.handoff',
     {
       envelope: {
         sessionId,
-        clientOperationId: operationId(),
+        clientOperationId,
         expectedRuntimeFence: fence,
         payloadFingerprint: structuredAgentSessionPayloadFingerprint({
           method: 'agentSession.requestHandoff',
@@ -133,6 +140,23 @@ async function requestHandoff(
 
 const pendingTabs = new Set<string>()
 
+async function recoverableHandoffOperation(
+  sessionId: string,
+  direction: 'to-native' | 'to-tui'
+): Promise<string | null> {
+  const status = await callStructuredAgentSession<AgentSessionHandoffStatus>(
+    { kind: 'local' },
+    'agentSession.handoffStatus',
+    { sessionId }
+  )
+  return status.phase === 'failed' &&
+    status.direction === direction &&
+    status.operationId &&
+    status.error?.recoverableOwner !== 'none'
+    ? status.operationId
+    : null
+}
+
 export async function setTerminalNativeChatMode(input: {
   getState: () => AppState
   patch: (tabId: string, patch: Partial<Tab>) => void
@@ -149,14 +173,21 @@ export async function setTerminalNativeChatMode(input: {
     return 'ignored'
   }
   const facts = activeTerminalFacts(input.getState(), tab)
+  const structuredAvailable = canUseStructuredNativeChat(input.getState(), tab.worktreeId)
   if (
     nativeChatRouteForTerminal({
       agent: facts.agent,
       structuredSessionId: tab.structuredSessionId,
-      mode: input.mode
+      mode: input.mode,
+      structuredAvailable
     }) === 'bridge'
   ) {
-    input.patch(tab.id, { viewMode: input.mode })
+    input.patch(tab.id, {
+      viewMode: input.mode,
+      ...(tab.structuredSessionId && facts.agent !== 'codex'
+        ? { structuredSessionId: undefined }
+        : {})
+    })
     return 'bridge'
   }
   pendingTabs.add(tab.id)
@@ -203,15 +234,30 @@ export async function setTerminalNativeChatMode(input: {
       fence = await currentFence(sessionId)
     }
     const direction = input.mode === 'chat' ? 'to-native' : 'to-tui'
-    await requestHandoff(sessionId, direction, fence)
-    await waitForOwner(sessionId, input.mode === 'chat' ? 'native' : 'tui')
+    const recoverableOperationId = await recoverableHandoffOperation(sessionId, direction)
+    const handoffOperationId = recoverableOperationId ?? operationId()
+    await requestHandoff(
+      sessionId,
+      direction,
+      fence,
+      handoffOperationId,
+      recoverableOperationId ? 'retry' : 'start'
+    )
+    const status = await waitForOwner(sessionId, input.mode === 'chat' ? 'native' : 'tui')
+    if (status.phase === 'failed') {
+      throw new Error(status.error?.message ?? 'Codex ownership transfer failed.')
+    }
     input.patch(tab.id, { structuredSessionId: sessionId, viewMode: input.mode })
     return 'structured'
   } catch (error) {
     toast.error(
       translate(
-        'components.native-chat.structuredAdoptionFailed',
-        'Could not switch this Codex session to structured chat'
+        input.mode === 'chat'
+          ? 'components.native-chat.structuredAdoptionFailed'
+          : 'components.native-chat.structuredReturnToTerminalFailed',
+        input.mode === 'chat'
+          ? 'Could not switch this Codex session to structured chat'
+          : 'Could not return this Codex session to the terminal'
       ),
       { description: error instanceof Error ? error.message : String(error) }
     )
