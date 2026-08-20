@@ -133,9 +133,13 @@ describe('RelayAgentHookServer', () => {
       appendFileSync(
         transcriptPath,
         `${JSON.stringify({
-          type: 'queue-operation',
-          content:
-            '<task-notification>\n<task-id>shell-1</task-id>\n<status>completed</status>\n</task-notification>'
+          type: 'user',
+          promptSource: 'system',
+          origin: { kind: 'task-notification' },
+          message: {
+            content:
+              '<task-notification>\n<task-id>shell-1</task-id>\n<status>completed</status>\n</task-notification>'
+          }
         })}\n`
       )
       await post({ hook_event_name: 'PreToolUse', tool_name: 'Bash' })

@@ -144,6 +144,8 @@ describe('listClaudeSubagentSessions', () => {
       {
         // Interim notification: superseded by the terminal one below.
         type: 'user',
+        promptSource: 'system',
+        origin: { kind: 'task-notification' },
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:00:30.000Z',
         message: {
@@ -154,6 +156,8 @@ describe('listClaudeSubagentSessions', () => {
       },
       {
         type: 'user',
+        promptSource: 'system',
+        origin: { kind: 'task-notification' },
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:01:00.000Z',
         message: {
@@ -163,13 +167,16 @@ describe('listClaudeSubagentSessions', () => {
         }
       },
       {
-        // queue-operation records carry the notification as a plain string.
-        type: 'queue-operation',
-        operation: 'enqueue',
+        type: 'user',
+        promptSource: 'system',
+        origin: { kind: 'task-notification' },
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:02:00.000Z',
-        content:
-          '<task-notification>\n<task-id>crashed</task-id>\n<status>failed</status>\n</task-notification>'
+        message: {
+          role: 'user',
+          content:
+            '<task-notification>\n<task-id>crashed</task-id>\n<status>failed</status>\n</task-notification>'
+        }
       },
       {
         // Synchronous Tasks finish with a toolUseResult record, no notification.
@@ -240,6 +247,8 @@ describe('listClaudeSubagentSessions', () => {
       },
       {
         type: 'user',
+        promptSource: 'system',
+        origin: { kind: 'task-notification' },
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:01:00.000Z',
         message: { role: 'user', content: notification }
@@ -269,6 +278,8 @@ describe('listClaudeSubagentSessions', () => {
     await writeJsonlFile(parentFilePath, [
       {
         type: 'user',
+        promptSource: 'system',
+        origin: { kind: 'task-notification' },
         sessionId: 'parent-session',
         timestamp: '2026-07-05T10:00:00.000Z',
         message: {

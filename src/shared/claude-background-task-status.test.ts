@@ -32,10 +32,14 @@ function claudeEvent(state: HookListenerState, paneKey: string, payload: Record<
 
 function taskNotificationLine(taskId: string, status = 'completed'): string {
   return `${JSON.stringify({
-    type: 'queue-operation',
-    content:
-      `<task-notification>\n<task-id>${taskId}</task-id>\n` +
-      `<status>${status}</status>\n</task-notification>`
+    type: 'user',
+    promptSource: 'system',
+    origin: { kind: 'task-notification' },
+    message: {
+      content:
+        `<task-notification>\n<task-id>${taskId}</task-id>\n` +
+        `<status>${status}</status>\n</task-notification>`
+    }
   })}\n`
 }
 
@@ -186,8 +190,9 @@ describe('Claude background task status', () => {
           hook_event_name: 'Notification',
           notification_type: 'idle_prompt',
           transcript_path: transcriptPath
-        })?.state
-      ).toBe('working')
+        })
+      ).toBeUndefined()
+      expect(state.claudeLeadStateByPaneKey.get(SOURCE_PANE)?.state).toBe('done')
 
       appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
       expect(
@@ -195,8 +200,9 @@ describe('Claude background task status', () => {
           hook_event_name: 'Notification',
           notification_type: 'idle_prompt',
           transcript_path: transcriptPath
-        })?.state
-      ).toBe('working')
+        })
+      ).toMatchObject({ state: 'working' })
+      expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
 
       appendFileSync(transcriptPath, taskNotificationLine('shell-2', 'failed'))
       expect(
@@ -228,8 +234,9 @@ describe('Claude background task status', () => {
           hook_event_name: 'Notification',
           notification_type: 'idle_prompt',
           transcript_path: transcriptPath
-        })?.state
-      ).toBe('working')
+        })
+      ).toBeUndefined()
+      expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -251,8 +258,9 @@ describe('Claude background task status', () => {
           hook_event_name: 'Notification',
           notification_type: 'idle_prompt',
           transcript_path: transcriptPath
-        })?.state
-      ).toBe('working')
+        })
+      ).toBeUndefined()
+      expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
 
       appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
       expect(
@@ -262,6 +270,46 @@ describe('Claude background task status', () => {
           transcript_path: transcriptPath
         })?.state
       ).toBe('done')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refreshes ownership when Claude reports a reused task id as running', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-idle-reused-task-'))
+    const transcriptPath = join(dir, 'session.jsonl')
+    writeFileSync(transcriptPath, '')
+    try {
+      const state = createHookListenerState()
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        transcript_path: transcriptPath,
+        background_tasks: [RUNNING_SHELL]
+      })
+      appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        transcript_path: transcriptPath,
+        background_tasks: [RUNNING_SHELL]
+      })
+
+      expect(
+        claudeEvent(state, SOURCE_PANE, {
+          hook_event_name: 'Notification',
+          notification_type: 'idle_prompt',
+          transcript_path: transcriptPath
+        })
+      ).toBeUndefined()
+      expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
+
+      appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
+      expect(
+        claudeEvent(state, SOURCE_PANE, {
+          hook_event_name: 'Notification',
+          notification_type: 'idle_prompt',
+          transcript_path: transcriptPath
+        })
+      ).toMatchObject({ state: 'done' })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -306,6 +354,7 @@ describe('Claude background task status', () => {
         background_tasks: [RUNNING_SHELL],
         session_crons: [{ id: 'cron-1' }]
       })
+      appendFileSync(transcriptPath, taskNotificationLine(RUNNING_SHELL.id))
 
       expect(
         claudeEvent(state, SOURCE_PANE, {
@@ -328,6 +377,21 @@ describe('Claude background task status', () => {
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Notification',
         notification_type: 'permission_prompt'
+      })
+    ).toBeUndefined()
+    expect(state.claudeLeadStateByPaneKey.get(SOURCE_PANE)?.state).toBe('working')
+  })
+
+  it('does not treat idle_prompt alone as task completion evidence', () => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'UserPromptSubmit', prompt: 'run it' })
+    claudeEvent(state, SOURCE_PANE, { hook_event_name: 'PreToolUse', tool_name: 'Bash' })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Notification',
+        notification_type: 'idle_prompt',
+        transcript_path: 'unowned-session.jsonl'
       })
     ).toBeUndefined()
     expect(state.claudeLeadStateByPaneKey.get(SOURCE_PANE)?.state).toBe('working')

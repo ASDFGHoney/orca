@@ -2670,7 +2670,6 @@ function updateClaudeBackgroundTaskEvidence(
       transcriptByteOffset = null
     }
   }
-  const previous = state.claudeBackgroundTaskObservationsByPaneKey.get(paneKey)
   const observations = new Map<
     string,
     { transcriptPath: string; transcriptByteOffset: number; nonAgent: boolean }
@@ -2684,14 +2683,7 @@ function updateClaudeBackgroundTaskEvidence(
         .map((task) => ({ id: task.id, nonAgent: false }))
     ]
     for (const task of runningTasks) {
-      const existing = previous?.get(task.id)
-      if (
-        existing &&
-        existing.transcriptPath === transcriptPath &&
-        existing.nonAgent === task.nonAgent
-      ) {
-        observations.set(task.id, existing)
-      } else if (transcriptPath && transcriptByteOffset !== null) {
+      if (transcriptPath && transcriptByteOffset !== null) {
         observations.set(task.id, { transcriptPath, transcriptByteOffset, nonAgent: task.nonAgent })
       } else if (task.nonAgent) {
         hasUnidentified = true
@@ -2720,11 +2712,11 @@ function reconcileClaudeIdlePromptTasks(
   state: HookListenerState,
   paneKey: string,
   hookPayload: Record<string, unknown>
-): void {
+): boolean {
   const transcriptPath = readString(hookPayload, 'transcript_path')
   const observations = state.claudeBackgroundTaskObservationsByPaneKey.get(paneKey)
   if (!transcriptPath || !observations) {
-    return
+    return false
   }
   const matchingObservations = Array.from(observations.entries()).filter(
     ([, observation]) => observation.transcriptPath === transcriptPath
@@ -2733,7 +2725,7 @@ function reconcileClaudeIdlePromptTasks(
     ...matchingObservations.map(([, observation]) => observation.transcriptByteOffset)
   )
   if (!Number.isFinite(minimumByteOffset)) {
-    return
+    return false
   }
   const notifications = readClaudeTerminalTaskNotifications(transcriptPath, minimumByteOffset)
   const terminalTaskIds = new Set<string>()
@@ -2750,7 +2742,7 @@ function reconcileClaudeIdlePromptTasks(
     }
   }
   if (terminalTaskIds.size === 0) {
-    return
+    return false
   }
   if (observations.size === 0) {
     state.claudeBackgroundTaskObservationsByPaneKey.delete(paneKey)
@@ -2766,7 +2758,7 @@ function reconcileClaudeIdlePromptTasks(
   }
   const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
   if (!roster) {
-    return
+    return true
   }
   for (const taskId of terminalTaskIds) {
     stopClaudeSubagent(roster, taskId)
@@ -2774,6 +2766,7 @@ function reconcileClaudeIdlePromptTasks(
   if (roster.size === 0) {
     state.claudeSubagentRosterByPaneKey.delete(paneKey)
   }
+  return true
 }
 
 function resolveClaudePaneState(
@@ -3097,6 +3090,10 @@ function normalizeClaudeEvent(
   const previousLead = state.claudeLeadStateByPaneKey.get(paneKey)
   const isIdlePromptNotification =
     eventName === 'Notification' && hookPayload['notification_type'] === 'idle_prompt'
+  const reconciledIdlePrompt =
+    isIdlePromptNotification && eventAgentId === undefined
+      ? reconcileClaudeIdlePromptTasks(state, paneKey, hookPayload)
+      : false
   // Why: only a turn boundary may declare an interrupt or carry a prior one forward; any other event starts a fresh turn and drops it.
   const isTurnBoundary = eventName === 'Stop' || eventName === 'StopFailure'
   const interrupted =
@@ -3134,16 +3131,13 @@ function normalizeClaudeEvent(
       : eventName === 'PermissionRequest' || isAskUserQuestion
         ? 'waiting'
         : isTurnBoundary ||
-            isIdlePromptNotification ||
+            reconciledIdlePrompt ||
             (eventName === 'PostCompact' && hookPayload.trigger === 'manual')
           ? 'done'
           : null
 
   if (!reportedStateName) {
     return null
-  }
-  if (isIdlePromptNotification && eventAgentId === undefined) {
-    reconcileClaudeIdlePromptTasks(state, paneKey, hookPayload)
   }
   if (backgroundTasks.present && eventAgentId === undefined) {
     updateClaudeBackgroundTaskEvidence(
@@ -3278,12 +3272,12 @@ function normalizeClaudeEvent(
   // Why: the lead already ended — the pane stays `working` only because background inventory is still registered. `stateStartedAt` is pinned for that whole run, so this end time is the per-turn identity and the later all-clear's pair key.
   const turnCompletedAt =
     eventAgentId === undefined &&
-    (isTurnBoundary || isIdlePromptNotification) &&
+    (isTurnBoundary || reconciledIdlePrompt) &&
     reportedStateName === 'done' &&
     interrupted !== true
       ? effectiveState === 'working'
         ? (previousLead?.turnCompletedAt ?? Date.now())
-        : isIdlePromptNotification
+        : reconciledIdlePrompt
           ? previousLead?.turnCompletedAt
           : undefined
       : undefined

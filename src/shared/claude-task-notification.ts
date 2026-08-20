@@ -86,7 +86,10 @@ export function parseClaudeTaskNotificationLine(
   line: string
 ): { taskId: string; status: string } | null {
   const notification = taskNotificationText(line)
-  if (!notification.startsWith(CLAUDE_TASK_NOTIFICATION_MARKER)) {
+  if (
+    !notification.startsWith(CLAUDE_TASK_NOTIFICATION_MARKER) ||
+    !notification.endsWith('</task-notification>')
+  ) {
     return null
   }
   const taskId = TASK_ID_PATTERN.exec(notification)?.[1]?.trim()
@@ -101,8 +104,16 @@ function taskNotificationText(line: string): string {
       return ''
     }
     const record = parsed as Record<string, unknown>
-    if (typeof record.content === 'string') {
-      return record.content.trim()
+    const origin =
+      record.origin && typeof record.origin === 'object'
+        ? (record.origin as Record<string, unknown>)
+        : undefined
+    if (
+      record.type !== 'user' ||
+      record.promptSource !== 'system' ||
+      origin?.kind !== 'task-notification'
+    ) {
+      return ''
     }
     if (!record.message || typeof record.message !== 'object') {
       return ''

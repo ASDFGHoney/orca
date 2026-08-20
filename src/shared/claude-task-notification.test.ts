@@ -10,15 +10,20 @@ import {
 
 function notificationRecord(taskId: string, status: string): string {
   return JSON.stringify({
-    type: 'queue-operation',
-    content:
-      `<task-notification>\n<task-id>${taskId}</task-id>\n` +
-      `<status>${status}</status>\n</task-notification>`
+    type: 'user',
+    promptSource: 'system',
+    origin: { kind: 'task-notification' },
+    message: {
+      role: 'user',
+      content:
+        `<task-notification>\n<task-id>${taskId}</task-id>\n` +
+        `<status>${status}</status>\n</task-notification>`
+    }
   })
 }
 
 describe('Claude task notifications', () => {
-  it('parses queue and user delivery shapes but not quoted prose', () => {
+  it('parses provider task delivery but not queue or user-authored shapes', () => {
     expect(parseClaudeTaskNotificationLine(notificationRecord('task-1', 'completed'))).toEqual({
       taskId: 'task-1',
       status: 'completed'
@@ -27,6 +32,8 @@ describe('Claude task notifications', () => {
       parseClaudeTaskNotificationLine(
         JSON.stringify({
           type: 'user',
+          promptSource: 'system',
+          origin: { kind: 'task-notification' },
           message: {
             content: [
               {
@@ -41,10 +48,26 @@ describe('Claude task notifications', () => {
     expect(
       parseClaudeTaskNotificationLine(
         JSON.stringify({
+          type: 'queue-operation',
+          operation: 'enqueue',
+          content:
+            '<task-notification><task-id>task-2</task-id><status>failed</status></task-notification>'
+        })
+      )
+    ).toBeNull()
+    expect(
+      parseClaudeTaskNotificationLine(
+        notificationRecord('task-4', 'completed').replace('</task-notification>', '')
+      )
+    ).toBeNull()
+    expect(
+      parseClaudeTaskNotificationLine(
+        JSON.stringify({
           type: 'user',
+          promptSource: 'user',
           message: {
             content:
-              'Explain <task-notification><task-id>task-3</task-id><status>completed</status></task-notification>'
+              '<task-notification><task-id>task-3</task-id><status>completed</status></task-notification>'
           }
         })
       )
@@ -74,7 +97,8 @@ describe('Claude task notifications', () => {
   it('skips a partial JSONL record at the ownership offset', () => {
     const dir = mkdtempSync(join(tmpdir(), 'claude-task-offset-'))
     const transcriptPath = join(dir, 'session.jsonl')
-    const partialRecord = '{"type":"user","message":{"content":"'
+    const partialRecord =
+      '{"type":"user","promptSource":"system","origin":{"kind":"task-notification"},"message":{"content":"'
     writeFileSync(transcriptPath, partialRecord)
     try {
       appendFileSync(

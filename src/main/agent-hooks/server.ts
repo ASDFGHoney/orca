@@ -39,6 +39,7 @@ import {
   warnOnHookEnvOrVersionMismatch,
   writeEndpointFile,
   type AgentHookEventPayload,
+  type ClaudeLeadTurnState,
   type HookListenerState
 } from '../../shared/agent-hook-listener'
 import {
@@ -51,7 +52,8 @@ import {
   claudeTeammateIdMatchesName,
   claudeRosterHasRestoredSnapshotSubagent,
   claudeRosterHasWorkingSubagent,
-  claudeRosterToSnapshots
+  claudeRosterToSnapshots,
+  type ClaudeSubagentRoster
 } from '../../shared/claude-subagent-roster'
 import {
   isAgentHookSource,
@@ -118,6 +120,12 @@ type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
 type NormalizedLocalHook = {
   event: AgentHookEventPayload | null
   onAccepted?: () => void
+}
+
+function cloneClaudeSubagentRoster(
+  roster: ClaudeSubagentRoster | undefined
+): ClaudeSubagentRoster | undefined {
+  return roster ? new Map(Array.from(roster, ([id, tracked]) => [id, { ...tracked }])) : undefined
 }
 
 type PersistedAgentHookEventPayload = Omit<
@@ -2043,6 +2051,10 @@ export class AgentHookServer {
     const previousUnidentifiedTask =
       this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.has(paneKey)
     const previousActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
+    const previousSubagentRoster = cloneClaudeSubagentRoster(
+      this.state.claudeSubagentRosterByPaneKey.get(paneKey)
+    )
+    const previousLeadState = this.cloneClaudeLeadState(paneKey)
     const event = normalizeHookPayload(this.state, source, body, this.env)
     const nextRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
     const nextTaskObservations = new Map(
@@ -2051,6 +2063,10 @@ export class AgentHookServer {
     const nextUnidentifiedTask =
       this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.has(paneKey)
     const nextActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
+    const nextSubagentRoster = cloneClaudeSubagentRoster(
+      this.state.claudeSubagentRosterByPaneKey.get(paneKey)
+    )
+    const nextLeadState = this.cloneClaudeLeadState(paneKey)
     this.setClaudeBackgroundEvidence(
       paneKey,
       previousRunningTask,
@@ -2058,13 +2074,15 @@ export class AgentHookServer {
       previousUnidentifiedTask,
       previousActiveCron
     )
+    this.setClaudeSubagentRoster(paneKey, previousSubagentRoster)
+    this.setClaudeLeadState(paneKey, previousLeadState)
     if (!event || event.paneKey !== paneKey) {
       return { event }
     }
-    // Why: nested CLIs may inherit the pane key; only accepted statuses may mutate its background-work gate.
+    // Why: nested CLIs may inherit the pane key; only accepted statuses may mutate Claude lifecycle evidence.
     return {
       event,
-      onAccepted: () =>
+      onAccepted: () => {
         this.setClaudeBackgroundEvidence(
           paneKey,
           nextRunningTask,
@@ -2072,6 +2090,35 @@ export class AgentHookServer {
           nextUnidentifiedTask,
           nextActiveCron
         )
+        this.setClaudeSubagentRoster(paneKey, nextSubagentRoster)
+        this.setClaudeLeadState(paneKey, nextLeadState)
+      }
+    }
+  }
+
+  private setClaudeSubagentRoster(paneKey: string, roster: ClaudeSubagentRoster | undefined): void {
+    if (roster) {
+      this.state.claudeSubagentRosterByPaneKey.set(paneKey, roster)
+    } else {
+      this.state.claudeSubagentRosterByPaneKey.delete(paneKey)
+    }
+  }
+
+  private cloneClaudeLeadState(paneKey: string): ClaudeLeadTurnState | undefined {
+    const lead = this.state.claudeLeadStateByPaneKey.get(paneKey)
+    return lead
+      ? {
+          ...lead,
+          ...(lead.stateBeforeWait ? { stateBeforeWait: { ...lead.stateBeforeWait } } : {})
+        }
+      : undefined
+  }
+
+  private setClaudeLeadState(paneKey: string, lead: ClaudeLeadTurnState | undefined): void {
+    if (lead) {
+      this.state.claudeLeadStateByPaneKey.set(paneKey, lead)
+    } else {
+      this.state.claudeLeadStateByPaneKey.delete(paneKey)
     }
   }
 
