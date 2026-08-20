@@ -128,7 +128,7 @@ async function buildRig(): Promise<ProofRig> {
   const internal = runtime as unknown as {
     ptysById: Map<string, unknown>
     resolveRuntimeFileTarget(): Promise<unknown>
-    resolveStructuredAgentSessionCreateIntent(input: { envelope: unknown }): Promise<unknown>
+    resolveStructuredAgentSessionAdoptionIntent(input: { envelope: unknown }): Promise<unknown>
     issueStructuredTuiPtyHandle(): string
   }
   internal.ptysById.set(PTY_ID, ptyRecord)
@@ -136,7 +136,10 @@ async function buildRig(): Promise<ProofRig> {
     connectionId: null,
     worktree: { id: WORKTREE_ID }
   }))
-  internal.resolveStructuredAgentSessionCreateIntent = vi.fn(async ({ envelope }) => ({
+  // Why the adoption intent and not the create one: adoption resolves the pane's OWN account
+  // home, which this rig has no pane-account record for. The pane-home resolution itself is
+  // covered by orca-runtime-structured-tui-adoption-account-home.test.ts.
+  internal.resolveStructuredAgentSessionAdoptionIntent = vi.fn(async ({ envelope }) => ({
     envelope,
     location: {
       executionHostId: 'local',

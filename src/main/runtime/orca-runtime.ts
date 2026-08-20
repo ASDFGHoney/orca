@@ -122,7 +122,12 @@ import { readStructuredTuiProcessIdentity } from './structured-tui-process-ident
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
 import { evaluateStructuredTuiRecoveryClaim } from './structured-tui-recovery-claim-match'
 import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
-import { getSystemCodexHomePath } from '../codex/codex-home-paths'
+import { getSystemCodexHomePath, resolveOrcaManagedCodexHomePath } from '../codex/codex-home-paths'
+import { getCodexPaneAccount } from '../codex/codex-pane-account-registry'
+import {
+  describeCodexPaneLaunchHomeFailure,
+  resolveCodexPaneLaunchHome
+} from '../codex/codex-pane-launch-home'
 import {
   agentSessionPtyWriteGate,
   type AgentSessionPtyWriteAdmittance
@@ -11423,10 +11428,11 @@ export class OrcaRuntimeService {
     if (target.connectionId || target.worktree.id !== pty.worktreeId) {
       throw new Error('Structured Codex chat is unavailable for remote terminals.')
     }
-    const intent = await this.resolveStructuredAgentSessionCreateIntent({
+    const intent = await this.resolveStructuredAgentSessionAdoptionIntent({
       envelope: input.envelope,
       worktree: input.worktree,
-      agent: 'codex'
+      agent: 'codex',
+      ptyId: input.ptyId
     })
     const listing = (await this.ptyController?.listProcesses?.())?.find(
       (candidate) =>
@@ -11650,6 +11656,60 @@ export class OrcaRuntimeService {
     worktree: string
     agent: 'codex'
   }): Promise<AgentSessionAttachParams> {
+    return this.resolveStructuredAgentSessionIntent(input, ({ workspacePath, launchEnv }) => {
+      // A create has no process yet, so the current selection is what it must follow.
+      const preparedHome = this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
+      const configuredHome = launchEnv.CODEX_HOME
+      return (
+        preparedHome?.trim() ||
+        (this.prepareCodexStructuredLaunchFn ? getSystemCodexHomePath() : configuredHome?.trim()) ||
+        getSystemCodexHomePath()
+      )
+    })
+  }
+
+  /**
+   * Why adoption resolves its own intent: the pane's Codex is already running under the
+   * CODEX_HOME it was spawned with, and only that home's sessions directory can hold its
+   * rollout. Following the create intent here probed the currently selected account instead,
+   * so adopting a pane on any other account failed with no hint that the account mismatched.
+   */
+  async resolveStructuredAgentSessionAdoptionIntent(input: {
+    envelope: { sessionId: string; clientOperationId: string }
+    worktree: string
+    agent: 'codex'
+    ptyId: string
+  }): Promise<AgentSessionAttachParams> {
+    return this.resolveStructuredAgentSessionIntent(input, () =>
+      this.resolveAdoptedCodexPaneHomePath(input.ptyId)
+    )
+  }
+
+  private resolveAdoptedCodexPaneHomePath(ptyId: string): string {
+    const resolved = resolveCodexPaneLaunchHome({
+      record: getCodexPaneAccount(ptyId),
+      settings: this.requireStore().getSettings(),
+      systemCodexHomePath: getSystemCodexHomePath(),
+      sharedRuntimeCodexHomePath: resolveOrcaManagedCodexHomePath()
+    })
+    // Never fall back to the selected home: a silent wrong-home probe is what hid the mismatch.
+    if (resolved.kind !== 'attributed') {
+      throw new Error(describeCodexPaneLaunchHomeFailure(resolved))
+    }
+    return resolved.path
+  }
+
+  private async resolveStructuredAgentSessionIntent(
+    input: {
+      envelope: { sessionId: string; clientOperationId: string }
+      worktree: string
+      agent: 'codex'
+    },
+    resolveAccountHomePath: (context: {
+      workspacePath: string
+      launchEnv: NodeJS.ProcessEnv
+    }) => string
+  ): Promise<AgentSessionAttachParams> {
     const support = await this.getStructuredAgentSessionCreateSupport(input.worktree, input.agent)
     if (!support.supported) {
       throw new Error('structured_agent_session_unsupported')
@@ -11658,8 +11718,6 @@ export class OrcaRuntimeService {
     const launchEnv = resolveTuiAgentLaunchEnv('codex', settings.agentDefaultEnv)
     const location = await this.resolveStructuredAgentSessionLocation(input.worktree)
     const workspacePath = (await this.resolveRuntimeFileTarget(input.worktree)).worktree.path
-    const preparedHome = this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
-    const configuredHome = launchEnv.CODEX_HOME
     return {
       envelope: {
         sessionId: input.envelope.sessionId,
@@ -11672,12 +11730,7 @@ export class OrcaRuntimeService {
       agent: 'codex',
       accountHome: {
         variable: 'CODEX_HOME',
-        path:
-          preparedHome?.trim() ||
-          (this.prepareCodexStructuredLaunchFn
-            ? getSystemCodexHomePath()
-            : configuredHome?.trim()) ||
-          getSystemCodexHomePath()
+        path: resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
     }
