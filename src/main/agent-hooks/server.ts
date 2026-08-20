@@ -103,7 +103,11 @@ type NormalizedLocalHook = {
 
 type PersistedAgentHookEventPayload = Omit<
   EnrichedAgentHookEventPayload,
-  'claudeRunningNonAgentTask' | 'launchToken' | 'promptInteractionKey' | 'restoredUnconfirmed'
+  | 'claudeRunningNonAgentTask'
+  | 'launchToken'
+  | 'promptInteractionKey'
+  | 'restoredUnconfirmed'
+  | 'sessionNonce'
 > & {
   launchTokenHash?: string
 }
@@ -2824,6 +2828,8 @@ export class AgentHookServer {
         promptInteractionKey: _promptInteractionKey,
         // Why: never persisted — hydrate re-stamps it, so a stored copy could only drift.
         restoredUnconfirmed: _restoredUnconfirmed,
+        // Why: a one-shot resume nonce is meaningless after the process it named exits.
+        sessionNonce: _sessionNonce,
         launchToken,
         ...persistedPayload
       } = payload as EnrichedAgentHookEventPayload
