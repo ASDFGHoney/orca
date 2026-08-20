@@ -2037,30 +2037,66 @@ export class AgentHookServer {
       return { event: normalizeHookPayload(this.state, source, body, this.env) }
     }
     const previousRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
+    const previousTaskObservations = new Map(
+      this.state.claudeBackgroundTaskObservationsByPaneKey.get(paneKey) ?? []
+    )
+    const previousUnidentifiedTask =
+      this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.has(paneKey)
     const previousActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
     const event = normalizeHookPayload(this.state, source, body, this.env)
     const nextRunningTask = this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey)
+    const nextTaskObservations = new Map(
+      this.state.claudeBackgroundTaskObservationsByPaneKey.get(paneKey) ?? []
+    )
+    const nextUnidentifiedTask =
+      this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.has(paneKey)
     const nextActiveCron = this.state.claudeActiveSessionCronPaneKeys.has(paneKey)
-    this.setClaudeBackgroundEvidence(paneKey, previousRunningTask, previousActiveCron)
+    this.setClaudeBackgroundEvidence(
+      paneKey,
+      previousRunningTask,
+      previousTaskObservations,
+      previousUnidentifiedTask,
+      previousActiveCron
+    )
     if (!event || event.paneKey !== paneKey) {
       return { event }
     }
     // Why: nested CLIs may inherit the pane key; only accepted statuses may mutate its background-work gate.
     return {
       event,
-      onAccepted: () => this.setClaudeBackgroundEvidence(paneKey, nextRunningTask, nextActiveCron)
+      onAccepted: () =>
+        this.setClaudeBackgroundEvidence(
+          paneKey,
+          nextRunningTask,
+          nextTaskObservations,
+          nextUnidentifiedTask,
+          nextActiveCron
+        )
     }
   }
 
   private setClaudeBackgroundEvidence(
     paneKey: string,
     hasRunningTask: boolean,
+    taskObservations: ReadonlyMap<
+      string,
+      { transcriptPath: string; transcriptByteOffset: number; nonAgent: boolean }
+    >,
+    hasUnidentifiedTask: boolean,
     hasActiveCron: boolean
   ): void {
     if (hasRunningTask) {
       this.state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
+      this.state.claudeBackgroundTaskObservationsByPaneKey.set(paneKey, new Map(taskObservations))
+      if (hasUnidentifiedTask) {
+        this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.add(paneKey)
+      } else {
+        this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.delete(paneKey)
+      }
     } else {
       this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+      this.state.claudeBackgroundTaskObservationsByPaneKey.delete(paneKey)
+      this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.delete(paneKey)
     }
     if (hasActiveCron) {
       this.state.claudeActiveSessionCronPaneKeys.add(paneKey)
@@ -2386,8 +2422,12 @@ export class AgentHookServer {
         ? () => {
             if (envelope.claudeRunningNonAgentTask) {
               this.state.claudeRunningNonAgentTaskPaneKeys.add(paneKey)
+              this.state.claudeBackgroundTaskObservationsByPaneKey.delete(paneKey)
+              this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.add(paneKey)
             } else {
               this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+              this.state.claudeBackgroundTaskObservationsByPaneKey.delete(paneKey)
+              this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.delete(paneKey)
             }
           }
         : undefined
@@ -2620,6 +2660,8 @@ export class AgentHookServer {
           this.state.claudeSubagentRosterByPaneKey.delete(paneKey)
           this.state.claudeLeadStateByPaneKey.delete(paneKey)
           this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
+          this.state.claudeBackgroundTaskObservationsByPaneKey.delete(paneKey)
+          this.state.claudeUnidentifiedRunningNonAgentTaskPaneKeys.delete(paneKey)
           this.state.claudeActiveSessionCronPaneKeys.delete(paneKey)
         }
       }
