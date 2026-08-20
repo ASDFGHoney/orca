@@ -252,6 +252,7 @@ import { ManagedCodexHomeTemporarilyUnavailableError } from './codex-accounts/ho
 import { resolveHostCodexSessionSourceHome } from './codex/codex-session-source-home'
 import type { CodexSessionResumePreparation } from './codex/codex-session-resume-home'
 import { prepareCodexSessionResume } from './codex/codex-session-resume-preparation'
+import { snapshotCodexResumeHomes } from './codex/codex-resume-home-snapshot'
 import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from './codex/codex-home-paths'
 import { normalizeRuntimePathForComparison } from '../shared/cross-platform-path'
 import type { AgentProviderSessionMetadata } from '../shared/agent-session-resume'
@@ -1163,20 +1164,18 @@ async function prepareCodexSessionResumeForLaunch(args: {
   }
   const systemHomePath = getSystemCodexHomePath()
   // Why: codexSessionSourceHome is import-only; treating it as CODEX_HOME would mutate history sources and bypass account auth.
-  const trustedHomes = [
-    systemHomePath,
-    ...codexRuntimeHome.getHostCodexHomePathsForSessionDiscovery()
-  ]
   const settingsStore = store
-  // Why: resolved eagerly, once, before any ranking or provenance match. The
-  // marker read used to be deferred into the ranking thunk so a
-  // provenance-present resume never paid for it, but that optimisation let an
-  // unreadable selected home reach the PTY as "no selection": the provenance
-  // branch simply omits the account from `trustedHomes` and another account's
-  // readable alias wins. A throw here refuses the whole resume instead
-  // (#STA-4422).
-  const selectedAccountCodexHome =
-    codexRuntimeHome.resolveSelectedHostAccountCodexHomePathForResume()
+  // Why: discovery omits a home whose ownership read is `indeterminate`
+  // (antivirus EBUSY); selection microseconds later may verify that same home.
+  // Snapshot both from this one call and union the verified selected home into
+  // the scan list, or a competing alias in another account wins (STA-4919).
+  // An unreadable selected home still throws rather than collapsing to "no
+  // selection" (STA-4422). The selected home is included only because this
+  // read verified it — never because verification was skipped.
+  const { trustedCodexHomes: trustedHomes, selectedAccountCodexHome } = snapshotCodexResumeHomes({
+    systemHomePath,
+    runtimeHome: codexRuntimeHome
+  })
   // Why: a `fresh` outcome must skip migration, trust and hook repair entirely — there is
   // no verified origin home to prepare, so the PTY layer drops the resume argv (#10793).
   const preparation = await prepareCodexSessionResume({
