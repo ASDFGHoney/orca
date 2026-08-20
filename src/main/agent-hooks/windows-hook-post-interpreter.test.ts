@@ -1,14 +1,7 @@
-// Why (#15117): Antigravity spent three months posting hook status through Windows
-// PowerShell 5.1 after every other agent had moved to curl.exe. Nothing caught it, because
-// the drift was invisible to per-agent tests: the shared builder took only `(source)` and had
-// no way to add the extra form field Antigravity needs, so it forked a private copy of the
-// then-correct PowerShell command (#2100). When the shared builder switched to curl (#6402),
-// every agent that *called* it was fixed for free and the private copy silently was not.
-//
-// This suite asserts the invariant that drift violated, across every agent at once: a managed
-// Windows .cmd hook posts through curl.exe and spawns no interpreter. It generates the scripts
-// under a mocked win32 platform rather than executing them, so it guards the POSIX CI legs too
-// — the drift would otherwise only be visible on a Windows runner.
+// Why (#15117): an agent holding a private copy of the shared post command missed the move to
+// curl for three months, invisible to per-agent tests. Assert the invariant across every agent
+// at once: a managed Windows .cmd hook posts through curl.exe and spawns no interpreter.
+// Generated under a mocked win32 platform, not executed, so the POSIX CI legs guard it too.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

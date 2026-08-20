@@ -26,20 +26,25 @@ describe('shared agent-hook-listener', () => {
   // Why (#15117): the Windows script posts stdin verbatim through curl, so an event that
   // fires without a payload arrives as `payload=""` rather than the `{}` the POSIX script
   // substitutes. Both transports must still produce the status transition.
-  it('accepts an Antigravity event whose payload arrived empty', () => {
-    const started = normalizeHookPayload(
-      state,
-      'antigravity',
-      {
-        paneKey: PANE_KEY,
-        tabId: 'tab-1',
-        worktreeId: 'wt',
-        hook_event_name: 'PreInvocation',
-        payload: ''
-      },
-      'production'
-    )
-    expect(started?.payload).toMatchObject({ state: 'working', agentType: 'antigravity' })
+  it('accepts an Antigravity event whose payload is empty or whitespace-only', () => {
+    for (const payload of ['', '   ', '\r\n']) {
+      const started = normalizeHookPayload(
+        state,
+        'antigravity',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          hook_event_name: 'PreInvocation',
+          payload
+        },
+        'production'
+      )
+      expect(started?.payload, `payload ${JSON.stringify(payload)}`).toMatchObject({
+        state: 'working',
+        agentType: 'antigravity'
+      })
+    }
   })
 
   // Why (#15117): this is the shape Windows actually produces — curl omits the form field

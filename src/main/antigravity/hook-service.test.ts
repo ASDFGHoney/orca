@@ -98,8 +98,6 @@ describe('AntigravityHookService', () => {
     )
     expect(script).toContain('/hook/antigravity')
     if (process.platform === 'win32') {
-      // Why (#15117): PowerShell's ~300ms cold start per hook event is what made the
-      // per-event console visible; curl.exe keeps the flash imperceptible.
       expect(script).not.toContain('powershell.exe')
       expect(script).toContain('%SystemRoot%\\System32\\curl.exe')
       expect(script).toContain('hook_event_name=%ORCA_ANTIGRAVITY_EVENT%')

@@ -7,14 +7,10 @@ import {
 import { buildWindowsAgentHookPostCommand } from '../agent-hooks/installer-utils'
 import { ANTIGRAVITY_PRE_TOOL_USE_DECISION } from './hook-events'
 
-// Why (#15117): Antigravity was the last agent posting hook status through Windows
-// PowerShell 5.1. Its ~300ms cold start per event is what made the console the agent
-// allocates for each hook visible; curl.exe (Win10 1803+) finishes in ~10ms and, unlike
-// PowerShell, does not recode the UTF-8 payload through the console code page.
+// Why (#15117): PowerShell cost ~300ms of startup per event, which is what made the console
+// the agent allocates for each hook last long enough to see.
 const WINDOWS_ANTIGRAVITY_HOOK_POST_COMMAND = buildWindowsAgentHookPostCommand('antigravity', [
-  // Why: Antigravity alone takes its event name from the wrapper's env rather than the piped
-  // payload. Before `extraFormLines` existed this forced a private copy of the shared command,
-  // which is how this script missed the fleet-wide move to curl for three months (#15117).
+  // Why: Antigravity alone takes its event name from the wrapper's env, not the piped payload.
   '  --data-urlencode "hook_event_name=%ORCA_ANTIGRAVITY_EVENT%" ^'
 ])
 
@@ -22,9 +18,8 @@ export function getManagedScript(target: 'local' | 'posix' = 'local'): string {
   if (target === 'local' && process.platform === 'win32') {
     return [
       '@echo off',
-      // Why (#9358/#9941): a bare `setlocal` inherits delayed expansion from the caller, and
-      // every `!` in a percent-expanded value on the curl line is then eaten as a delayed
-      // reference — silently mangling paneKey and dropping worktreeId. `!` is legal in a path.
+      // Why (#9358/#9941): inherited delayed expansion eats `!` out of the percent-expanded
+      // curl args, mangling paneKey and dropping worktreeId. `!` is legal in a Windows path.
       'setlocal DisableDelayedExpansion',
       'if /I "%ORCA_ANTIGRAVITY_EVENT%"=="Stop" (',
       '  echo {"decision":""}',

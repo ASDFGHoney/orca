@@ -1,10 +1,5 @@
-// Why (#15117): Antigravity was the last agent whose Windows hook posted status through
-// Windows PowerShell 5.1. The agent spawns each hook itself, so Orca cannot suppress the
-// console it allocates — but PowerShell's ~300ms cold start is what made that console
-// linger long enough to be seen, roughly every 2-6s for a whole session. Moving to
-// curl.exe removes the interpreter from the hot path. Shape assertions alone would not
-// catch a curl line that posts nothing, so this suite pipes a real payload through the
-// installed wrappers and follows it to a listener.
+// Why (#15117): shape assertions cannot catch a curl line that posts nothing, so this suite
+// pipes a real payload through the installed wrappers and follows it to a live listener.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
@@ -99,7 +94,9 @@ type HookRun = { exitCode: number | null; stdout: string; stderr: string; timedO
 function runWrapper(
   wrapperPath: string,
   env: NodeJS.ProcessEnv,
-  stdinPayload: string = PAYLOAD
+  // Why: `null` abandons stdin instead of closing it — the shape a caller outside an Orca
+  // pane produces, and the only way to prove the env guard exits before reading (#11549).
+  stdinPayload: string | null = PAYLOAD
 ): Promise<HookRun> {
   return new Promise((resolve, reject) => {
     // Why: mirror how Antigravity spawns the hook — `cmd /c <bare .cmd path>`, the exact
@@ -131,7 +128,12 @@ function runWrapper(
       // Why: curl exits once the POST is written; give the listener a beat to finish reading it.
       setTimeout(() => resolve({ exitCode, stdout, stderr, timedOut }), 250)
     })
-    child.stdin.end(Buffer.from(stdinPayload, 'utf8'))
+    // Why: an abandoned pipe raises EPIPE once the child exits; swallow it so the run still
+    // resolves on the child's own terms.
+    child.stdin.on('error', () => {})
+    if (stdinPayload !== null) {
+      child.stdin.end(Buffer.from(stdinPayload, 'utf8'))
+    }
   })
 }
 
@@ -273,7 +275,8 @@ describe.skipIf(process.platform !== 'win32')('Antigravity Windows hook payload 
     // so the guard must exit before the read — otherwise the console lingers indefinitely.
     const result = await runWrapper(
       join(home, '.orca', 'agent-hooks', 'antigravity-pre-tool-use.cmd'),
-      hookEnvironment({ USERPROFILE: home, HOME: home })
+      hookEnvironment({ USERPROFILE: home, HOME: home }),
+      null
     )
 
     expect(result.timedOut).toBe(false)
