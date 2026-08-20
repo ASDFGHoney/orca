@@ -159,4 +159,32 @@ describe('live query replies', () => {
     expect(visible(emissions)).toContain(caretEcho('\x1b]11;rgb:00\x07'))
     ingress.drainAndClose()
   })
+  // The self-heal for the one case an immediate write cannot serve: a program that
+  // queries while cooked and then arms raw mode with TCSAFLUSH discards the reply along
+  // with the rest of its input queue. Measured on a real pty; TCSANOW/TCSADRAIN (libuv,
+  // so every Node agent) keep it. Such a program re-queries after its own timeout, and
+  // the re-query must NOT be swallowed as already-answered — it is passed downstream so
+  // the renderer's emulator answers it, by which point the program is raw.
+  it('passes a duplicate query downstream instead of swallowing it', () => {
+    const writes: string[] = []
+    const emissions: PtyIngressEmission[] = []
+    const ingress = new PtyStartupIngress({
+      intent: { colors: { foreground: '#2e3434', background: '#ffffff' }, deadlineMs: 5_000 },
+      ownerBackend: 'posix-pty',
+      write: (data) => void writes.push(data),
+      onEmission: (emission) => void emissions.push(emission)
+    })
+
+    ingress.accept('\x1b]11;?\x07')
+    expect(writes).toEqual(['\x1b]11;rgb:ffff/ffff/ffff\x1b\\'])
+    // Answered here, so the query itself is consumed and never rendered.
+    expect(visible(emissions)).toBe('')
+
+    ingress.accept('\x1b]11;?\x07')
+    // Not answered twice — a duplicate reply corrupts a parser already mid-read — but
+    // forwarded verbatim, so the downstream emulator can answer the retry.
+    expect(writes).toHaveLength(1)
+    expect(visible(emissions)).toBe('\x1b]11;?\x07')
+    ingress.drainAndClose()
+  })
 })

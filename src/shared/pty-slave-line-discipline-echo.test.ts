@@ -48,4 +48,55 @@ describe('createPtySlaveLineEditorProbe', () => {
     answerStty('lflags: -echo\ncchars: lnext = <undef>;\n')
     await expect(probe?.()).resolves.toBe('unknown')
   })
+  // These cover createSttyProbe, which the line-editor probe shares. The ECHO probe that
+  // used to exercise them is gone, but the subprocess machinery under it is still live.
+  it('shares one in-flight stty process per PTY', async () => {
+    const probe = createPtySlaveLineEditorProbe('/dev/ttys048', 'darwin')
+    const pending: { finish?: () => void } = {}
+    execFileMock.mockImplementationOnce((_cmd, _args, _opts, callback) => {
+      pending.finish = () => callback(null, LINE_EDITOR, '')
+    })
+
+    const first = probe?.()
+    const second = probe?.()
+    expect(execFileMock).toHaveBeenCalledTimes(1)
+    pending.finish?.()
+    await expect(first).resolves.toBe('line-editor')
+    await expect(second).resolves.toBe('line-editor')
+  })
+
+  it('passes the device with the flag its own platform understands', async () => {
+    answerStty(LINE_EDITOR)
+    await createPtySlaveLineEditorProbe('/dev/ttys048', 'darwin')?.()
+    expect(execFileMock.mock.calls[0]?.[1]).toEqual(['-a', '-f', '/dev/ttys048'])
+    answerStty(LINE_EDITOR)
+    await createPtySlaveLineEditorProbe('/dev/pts/3', 'linux')?.()
+    expect(execFileMock.mock.calls[1]?.[1]).toEqual(['-a', '-F', '/dev/pts/3'])
+  })
+
+  it('keeps probing after a transient failure and only latches a permanent one', async () => {
+    const probe = createPtySlaveLineEditorProbe('/dev/ttys048', 'darwin')
+    // Why: a multi-pane restore forks these in a burst, so EAGAIN and the timeout kill
+    // are contention — condemning the pty to guessing for its whole life on one of
+    // those is the failure mode, not the protection.
+    for (const transient of [
+      Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' }),
+      Object.assign(new Error('killed'), { killed: true }),
+      Object.assign(new Error('too many files'), { code: 'EMFILE' })
+    ]) {
+      execFileMock.mockImplementationOnce((_c, _a, _o, cb) => cb(transient, '', ''))
+      await expect(probe?.()).resolves.toBe('unknown')
+    }
+    execFileMock.mockImplementationOnce((_c, _a, _o, cb) => cb(null, LINE_EDITOR, ''))
+    await expect(probe?.()).resolves.toBe('line-editor')
+    expect(execFileMock).toHaveBeenCalledTimes(4)
+
+    // A non-zero exit means the device is gone or was never a tty: permanent.
+    execFileMock.mockImplementationOnce((_c, _a, _o, cb) =>
+      cb(Object.assign(new Error('not a tty'), { code: 1 }), '', '')
+    )
+    await expect(probe?.()).resolves.toBe('unknown')
+    await expect(probe?.()).resolves.toBe('unknown')
+    expect(execFileMock).toHaveBeenCalledTimes(5)
+  })
 })
