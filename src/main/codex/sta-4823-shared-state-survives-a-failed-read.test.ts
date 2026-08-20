@@ -26,12 +26,20 @@ const denials = vi.hoisted(() => {
       state.readOnlyPaths.add(path)
     },
     /**
-     * `existsSync` reports false and content reads throw, but `statSync` and the
-     * atomic replace still work. This is the shape that actually loses data: the
-     * caller concludes "no file here", builds fresh content, and the rename
-     * lands because rename needs permission on the DIRECTORY, not the target.
-     * Guarding the write as well would let a test pass because the write failed
-     * rather than because the fix refused.
+     * `existsSync` reports false while the path is still there, and the write
+     * still lands.
+     *
+     * MEASURED, and not what I first assumed: a file-permission denial does NOT
+     * produce this. `chmod 000` on macOS and `icacls /deny (R)` on Windows both
+     * leave `existsSync` TRUE, leave `stat`/`lstat` succeeding, and fail only
+     * the content read (EACCES / EPERM errno -4048). The shape modelled here is
+     * the UNC / `\\wsl$` transport, where an unreachable distro reports errno
+     * `UNKNOWN` at every level and `existsSync` folds that to false.
+     *
+     * The distinction decides what the guard is worth: under a permission denial
+     * the pre-fix code already failed safe, because `existsSync` was true so it
+     * took the read branch and threw. Only a transport that lies about existence
+     * reaches the rebuild-from-empty path.
      */
     denyExistence(path: string): void {
       state.existenceDeniedPaths.add(path)
