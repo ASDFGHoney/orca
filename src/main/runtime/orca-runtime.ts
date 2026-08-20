@@ -19547,17 +19547,25 @@ export class OrcaRuntimeService {
     expectedAgent: TuiAgent,
     signal?: AbortSignal
   ): Promise<void> {
-    if (!this.ptyController) {
-      throw new Error('terminal_guard_not_writable')
-    }
-    const foregroundProcess = await waitForAgentPromptPromise(
-      this.ptyController.getForegroundProcess(ptyId),
-      signal
-    )
+    const foregroundProcess = await this.readSettledPromptForegroundConfirmation(ptyId, signal)
     assertAgentPromptRequestActive(signal)
     if (recognizeAgentProcess(foregroundProcess)?.agent !== expectedAgent) {
       throw new Error('terminal_guard_not_writable')
     }
+  }
+
+  private async readSettledPromptForegroundConfirmation(
+    ptyId: string,
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const controller = this.ptyController
+    if (!controller) {
+      throw new Error('terminal_guard_not_writable')
+    }
+    const foreground = controller.confirmForegroundProcess
+      ? controller.confirmForegroundProcess(ptyId)
+      : controller.getForegroundProcess(ptyId)
+    return await waitForAgentPromptPromise(foreground, signal)
   }
 
   private createAgentPromptRenderGate(
@@ -34753,7 +34761,7 @@ export class OrcaRuntimeService {
     }
     assertAgentPromptRequestActive(signal)
     const confirmed = recognizeAgentProcess(
-      await waitForAgentPromptPromise(this.ptyController.getForegroundProcess(ptyId), signal)
+      await this.readSettledPromptForegroundConfirmation(ptyId, signal)
     )
     assertAgentPromptRequestActive(signal)
     if (confirmed?.agent !== recognized.agent) {

@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type { Page } from '@stablyai/playwright-test'
+import {
+  AGENT_PROMPT_SUBMIT,
+  buildAgentPromptPasteBytes
+} from '../../src/shared/agent-prompt-injection'
 import { expect, test } from './helpers/orca-app'
 import { waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import {
@@ -248,8 +252,7 @@ test.describe('Docker SSH settled prompt submission', () => {
       await expect(send).resolves.toMatchObject({ send: { accepted: true } })
       await expect.poll(() => remoteFile(target!, REMOTE_REPORT)).not.toBe('')
       const observedInput = remoteInput(target)
-      expect(observedInput).toContain(prompt)
-      expect(observedInput.match(/\r/g)).toHaveLength(1)
+      expect(observedInput).toBe(`${buildAgentPromptPasteBytes(prompt)}${AGENT_PROMPT_SUBMIT}`)
       expect(JSON.parse(remoteFile(target, REMOTE_REPORT))).toMatchObject({
         contractOk: true,
         submitted: true,
