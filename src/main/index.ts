@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, type Tray } from 'electron'
+import { applyMacPressAndHoldDefaultAtStartup } from './macos-press-and-hold-default'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
 import { electronApp, is } from '@electron-toolkit/utils'
 import {
@@ -857,6 +858,9 @@ if (hasSingleInstanceLock) {
   installDevParentSignalQuit(shouldCoupleToDevParent)
   // Why: run after configureDevUserDataPath but before app.setName('Orca') (whenReady), which changes the resolved path on case-sensitive filesystems.
   initDataPath()
+  // Why here: AppKit reads ApplePressAndHoldEnabled as the process starts, so this is the last
+  // point that can still matter for this launch; it needs the canonical userData path above.
+  applyMacPressAndHoldDefaultAtStartup(getCanonicalUserDataPath())
   // Why: use the canonical userData path — late app.getPath('userData') can resolve differently across restarts, defeating persistence.
   initSessionParseCachePersistence({
     filePath: join(getCanonicalUserDataPath(), 'ai-vault', 'session-parse-cache.json'),
