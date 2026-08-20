@@ -32,6 +32,7 @@ export class SshPtySpawnExitRaceTracker {
     operation.relayPtyId = relayPtyId
   }
 
+  /** True when the tracker owns publication of this exit: deferred to a holder, or already sent. */
   recordExit(relayPtyId: string, incarnationId: unknown, publish?: () => void): boolean {
     let published = false
     const quarantine: QuarantinedSshPtyExit = {
@@ -60,7 +61,15 @@ export class SshPtySpawnExitRaceTracker {
         ...(tracked ? { held, quarantine } : {})
       })
     }
-    return quarantine.holders > 0
+    if (publish === undefined) {
+      return false
+    }
+    if (quarantine.holders === 0) {
+      // Why: no operation can fence this exit, so send it now — through the quarantine, so a
+      // later binder that attributes it cannot deliver the same death a second time.
+      quarantine.publish()
+    }
+    return true
   }
 
   classifyPendingExit(
@@ -69,8 +78,14 @@ export class SshPtySpawnExitRaceTracker {
   ): SshPtyPendingExitOutcome {
     const sameIdExits = operation.exits.filter((exit) => exit.relayPtyId === result.id)
     for (const exit of sameIdExits) {
-      // Why: a reached verdict owns the exit, so finish() must not second-guess it and re-publish.
-      if (exit.quarantine) {
+      // Why: classifying claims the exit and silences its holder's release, so only claim what this
+      // operation actually attributed — it owned the PTY when the exit arrived, or both incarnations
+      // are known and comparable. A late binder that cannot compare identities has proven nothing,
+      // and stamping its "I can't tell" would strand a death the host reported.
+      const attributed =
+        exit.held === true ||
+        (result.incarnationId !== undefined && exit.incarnationId !== undefined)
+      if (exit.quarantine && attributed) {
         exit.quarantine.classified = true
       }
     }
