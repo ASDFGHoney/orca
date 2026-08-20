@@ -192,6 +192,17 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
   const text = content?.trim() ?? ''
   const previewText = useMemo(() => normalizeMobileMarkdownPreviewHtml(text), [text])
   const blocks = useMemo(() => parseMobileMarkdown(previewText), [previewText])
+  // Stable per-block keys: content-derived, with an occurrence suffix so repeated
+  // identical blocks stay distinct across re-parses.
+  const blockKeys = useMemo(() => {
+    const seen = new Map<string, number>()
+    return blocks.map((block) => {
+      const base = `${block.type}:${'text' in block ? block.text : JSON.stringify(block)}`
+      const occurrence = seen.get(base) ?? 0
+      seen.set(base, occurrence + 1)
+      return `${base}#${occurrence}`
+    })
+  }, [blocks])
   // Scale prose sizes; inline spans inherit fontSize from the wrapping Text.
   const scaled = (size: number): { fontSize: number; lineHeight: number } | null =>
     textScale !== 1 ? { fontSize: size * textScale, lineHeight: (size + 6) * textScale } : null
@@ -208,7 +219,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
         if (block.type === 'heading') {
           return (
             <MarkdownText
-              key={index}
+              key={blockKeys[index]}
               style={[styles.heading, block.level <= 2 ? styles.headingLarge : null]}
             >
               {renderInline(block.text, onOpenFile)}
@@ -217,7 +228,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
         }
         if (block.type === 'quote') {
           return (
-            <View key={index} style={styles.quote}>
+            <View key={blockKeys[index]} style={styles.quote}>
               <MarkdownText style={styles.quoteText}>
                 {renderInline(block.text, onOpenFile)}
               </MarkdownText>
@@ -240,7 +251,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
             )
           }
           return (
-            <View key={index} style={styles.codeBlock}>
+            <View key={blockKeys[index]} style={styles.codeBlock}>
               {block.language ? (
                 <MarkdownText style={styles.codeLanguage}>{block.language}</MarkdownText>
               ) : null}
@@ -251,7 +262,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
         if (block.type === 'image') {
           return (
             <Pressable
-              key={index}
+              key={blockKeys[index]}
               style={styles.imageFrame}
               onPress={() => openMarkdownHref(block.url, onOpenFile)}
             >
@@ -268,7 +279,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
           const hiddenRows = Math.max(0, block.rows.length - visibleRows.length)
           const hiddenColumns = Math.max(0, block.headers.length - visibleHeaders.length)
           return (
-            <ScrollView key={index} horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView key={blockKeys[index]} horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.table}>
                 <View style={styles.tableRow}>
                   {visibleHeaders.map((header, cellIndex) => (
@@ -299,7 +310,7 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
         }
         if (block.type === 'list') {
           return (
-            <View key={index} style={styles.list}>
+            <View key={blockKeys[index]} style={styles.list}>
               {block.items.map((item, itemIndex) => (
                 <View key={itemIndex} style={styles.listItem}>
                   <MarkdownText style={styles.listMarker}>
@@ -320,10 +331,10 @@ function MobileMarkdownInner({ content, fallback = '', textScale = 1, onOpenFile
           )
         }
         if (block.type === 'rule') {
-          return <View key={index} style={styles.rule} />
+          return <View key={blockKeys[index]} style={styles.rule} />
         }
         return (
-          <MarkdownText key={index} style={[styles.paragraph, proseScale]}>
+          <MarkdownText key={blockKeys[index]} style={[styles.paragraph, proseScale]}>
             {block.text.split('\n').map((line, lineIndex) => (
               <Fragment key={lineIndex}>
                 {lineIndex > 0 ? '\n' : null}

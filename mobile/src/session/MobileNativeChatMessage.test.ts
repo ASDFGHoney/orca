@@ -182,7 +182,7 @@ describe('MobileNativeChatMessage', () => {
 })
 
 function isInsidePressable(node: ReactTestInstance): boolean {
-  let current: ReactTestInstance | null = node.parent
+  let current = node.parent
   while (current) {
     if (current.type === ('Pressable' as never)) {
       return true

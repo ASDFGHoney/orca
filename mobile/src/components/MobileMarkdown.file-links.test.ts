@@ -132,18 +132,20 @@ describe('MobileMarkdown file links', () => {
 })
 
 describe('MobileMarkdown text selection', () => {
-  let renderer: ReactTestRenderer | null = null
+  // Why: definite assignment, not `| null` - react-test-renderer's types are
+  // unavailable to the type-aware lint pass, so a written union trips
+  // no-redundant-type-constituents.
+  let renderer!: ReactTestRenderer
 
   afterEach(() => {
     act(() => renderer?.unmount())
-    renderer = null
   })
 
   function renderMarkdown(content: string): ReactTestRenderer {
     act(() => {
       renderer = create(createElement(MobileMarkdown, { content }))
     })
-    return renderer!
+    return renderer
   }
 
   it('makes paragraph text selectable for long-press copy', () => {
