@@ -5,43 +5,29 @@ import {
 } from './terminal-query-reply'
 
 /**
- * True when `delivery` has taken ownership of the WHOLE payload.
+ * True when `delivery` wrote the WHOLE payload.
  *
- * All-or-nothing on purpose, and decided BEFORE any reply is written: a mid-payload
- * decision would either duplicate the constituents already written or drop the rest,
- * and taking a payload that needs no ordering at all would skip the caller's own
- * queues. The daemon's post-ready flush
- * gate is the one that matters: a CPR written past it lands ahead of the buffered
- * startup command and the shell executes the spliced remainder instead of the command.
+ * Only a payload made entirely of cooked-echo-risk replies is taken. Those need their
+ * echo shapes armed around the write, and they are what a program sits blocked on, so
+ * they bypass the host's startup input gate. Everything else — CPR, DA, and any mixed
+ * payload — stays on the host's own path and is written there in call order, which is
+ * what keeps a CPR from passing the daemon's post-ready flush gate and splicing into the
+ * buffered startup command.
+ *
+ * Ordering needs no machinery here: every reply is written the moment it is accepted, so
+ * the pty sees them in the order the caller produced them.
  */
 export function deliverTerminalQueryReplyPayload(
   data: string,
-  delivery: Pick<PtyStartupReplyDelivery, 'answer' | 'answerInOrder' | 'hasDeferredWrites'>
+  delivery: Pick<PtyStartupReplyDelivery, 'answer'>
 ): boolean {
   const replies = extractOnlyTerminalQueryReplies(data)
-  if (!replies) {
+  if (!replies || !replies.every(needsCookedEchoSafeQueryReply)) {
     return false
   }
-  // Nothing here needs echo containment and nothing is deferred, so there is nothing to
-  // order behind: leave it on the caller's path.
-  if (!delivery.hasDeferredWrites && !replies.some(needsCookedEchoSafeQueryReply)) {
-    return false
-  }
-  // Why `any` and not `all`: returning false after an earlier constituent was already
-  // written would have the caller re-write the whole payload and duplicate it into the
-  // child's stdin, which corrupts a parser mid-read. Returning false only when NOTHING
-  // was written is what makes the caller's fallback safe.
-  //
-  // The residual case is a mixed payload where one constituent fails (the pty closed
-  // mid-loop) and another succeeded: that one is dropped, because nothing can un-write
-  // its predecessors. Its `onFailed` still fires. Not reachable while the pty is alive —
-  // both entry points only refuse once closed or once a write has thrown.
   let accepted = false
   for (const reply of replies) {
-    const handled = needsCookedEchoSafeQueryReply(reply)
-      ? delivery.answer(reply)
-      : delivery.answerInOrder(reply)
-    accepted = handled || accepted
+    accepted = delivery.answer(reply) || accepted
   }
   return accepted
 }

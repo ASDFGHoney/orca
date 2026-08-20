@@ -81,11 +81,7 @@ import {
   isAgentSessionSurfaceBinding,
   type AgentSessionOwnerBinding
 } from '../shared/agent-session-host-authority'
-import {
-  createPtySlaveEchoProbe,
-  createPtySlaveEchoSyncProbe,
-  readPtySlavePath
-} from '../shared/pty-slave-line-discipline-echo'
+import { readPtySlavePath } from '../shared/pty-slave-line-discipline-echo'
 import {
   deleteRelayFishHistory,
   deleteRelayHistory,
@@ -799,15 +795,11 @@ export class PtyHandler {
           : {}
       )
     }
-    const echoProbe = createPtySlaveEchoProbe(readPtySlavePath(managed.pty))
-    const echoSyncProbe = createPtySlaveEchoSyncProbe(managed.pty)
     managed.startupIngress ??= new PtyStartupIngress({
       ...(managed.startupIngressIntent ? { intent: managed.startupIngressIntent } : {}),
       ownerBackend: managed.ownerBackend,
       write: (data) => managed.pty.write(data),
-      onEmission: emitIngressData,
-      ...(echoProbe ? { echoProbe } : {}),
-      ...(echoSyncProbe ? { echoSyncProbe } : {})
+      onEmission: emitIngressData
     })
     const startup = managed.startupCommand
     if (startup?.waitForShellReady) {

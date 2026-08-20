@@ -11080,12 +11080,11 @@
         "https://github.com/stablyai/orca/issues/7329",
         "https://github.com/stablyai/orca/issues/13892"
       ],
-      "invariant": "The desktop PTY input queue retains at most 64 explicitly sourced pending terminal query replies and 4096 UTF-16 code units. Every retained reply reaches the provider as one atomic write, allowing the host to keep later DA1/CPR replies behind an earlier deferred OSC/private DSR reply. Overflow removes only the oldest query replies, never ordinary input except the documented modified-F3/CPR byte collision, and drain failures cannot clear a newer queue generation.",
+      "invariant": "The desktop PTY input queue retains at most 64 explicitly sourced pending terminal query replies and 4096 UTF-16 code units. Every retained reply reaches the provider as one atomic write, and the host writes each reply the moment it accepts it, so replies reach the PTY in the order they were produced with no queue that could reorder them. A reply's own echo is contained on the output side by projecting its known echo shapes; the ESC-initial verbatim shape is matched only when complete, never held as a partial, so a query torn at its own ESC is still answered. Overflow removes only the oldest query replies, never ordinary input except the documented modified-F3/CPR byte collision, and drain failures cannot clear a newer queue generation.",
       "oracle": "Synchronously enqueue separate 10,000-entry OSC and DA1 reply floods before the scheduled drain and assert that only the initial immediate reply and newest 64 pending replies are written, each as one provider write, before a trailing keystroke. At the host boundary, defer an OSC reply and assert that separate or legacy-coalesced DA1/CPR replies flush after it in observed query order. At the remote-runtime boundary, preserve separate writes around pending ordinary input, async validation, and viewport-claim buffering. Repeat behind 10,000 ordinary inputs and exercise the text ceiling, real xterm generation, provider-write failure, rejected yield, and clear/reuse generation fencing.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-input-write-queue.test.ts src/renderer/src/components/terminal-pane/pty-transport-input-write.test.ts src/shared/terminal-query-reply.test.ts src/shared/pty-startup-ingress-live-query-reply.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-batching.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-query-reply-immediate.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-input-coalescing.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/shared/pty-startup-reply-delivery.test.ts",
         "pnpm exec playwright test tests/e2e/terminal-osc-color-queries.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm exec playwright test tests/e2e/terminal-typing-latency.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/pty-input-write-queue-ssh.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
@@ -11098,7 +11097,6 @@
         "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-input-coalescing.test.ts",
         "src/shared/terminal-query-reply.test.ts",
         "src/shared/pty-startup-ingress-live-query-reply.test.ts",
-        "src/shared/pty-startup-reply-delivery.test.ts",
         "tests/e2e/terminal-osc-color-queries.spec.ts",
         "tests/e2e/terminal-typing-latency.spec.ts",
         "tests/e2e/pty-input-write-queue-ssh.spec.ts"
@@ -11153,12 +11151,6 @@
           "file": "src/shared/pty-startup-ingress-live-query-reply.test.ts",
           "assertions": [
             "repeated live query replies are delivered independently and their cooked echoes stay hidden"
-          ]
-        },
-        {
-          "file": "src/shared/pty-startup-reply-delivery.test.ts",
-          "assertions": [
-            "a later DA1 stays behind a deferred OSC reply, ordering-only replies are bounded, and a proven-quiet slave takes the same-turn fast path"
           ]
         },
         {

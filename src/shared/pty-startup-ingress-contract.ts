@@ -1,6 +1,5 @@
 import type { PtyOwnerBackend } from './pty-owner-backend'
 import type { PtyStartupIngressIntent } from './pty-startup-ingress-intent'
-import type { PtySlaveEchoProbe, PtySlaveEchoSyncProbe } from './pty-slave-line-discipline-echo'
 
 export type PtyIngressEmission = {
   data: string
@@ -19,14 +18,6 @@ export type PtyStartupIngressOptions = {
    * the reply waits for `quiet` instead of relying on echo-shape recognition. Absent
    * on backends with no line discipline to read (ConPTY, wsl.exe).
    */
-  echoProbe?: PtySlaveEchoProbe
-  /**
-   * Same verdict without a fork, so it can be consulted inside the query's own turn.
-   * A `quiet` answer here writes the reply immediately rather than deferring it, which
-   * is what keeps a later reply in the same turn from overtaking it (#13892). Absent
-   * when the host's node-pty lacks Orca's patch, which degrades to `echoProbe` alone.
-   */
-  echoSyncProbe?: PtySlaveEchoSyncProbe
 }
 
 export type PtyIngressSourceSpan = {

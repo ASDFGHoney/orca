@@ -160,7 +160,6 @@ describe('query reply ordering (termenv OSC-then-CPR)', () => {
     const pty: string[] = []
     const ingress = new PtyStartupIngress({
       ownerBackend: 'posix-pty',
-      echoProbe: async () => 'quiet',
       write: (data) => pty.push(data),
       onEmission: () => {}
     })
@@ -182,7 +181,6 @@ describe('query reply ordering (termenv OSC-then-CPR)', () => {
     const pty: string[] = []
     const ingress = new PtyStartupIngress({
       ownerBackend: 'posix-pty',
-      echoProbe: async () => 'quiet',
       write: (data) => pty.push(data),
       onEmission: () => {}
     })
@@ -223,7 +221,6 @@ describe('writes that still bypass the ordered queue', () => {
   it.each(BYPASSING)('does not take $what', ({ data }) => {
     const ingress = new PtyStartupIngress({
       ownerBackend: 'posix-pty',
-      echoProbe: () => new Promise(() => {}),
       write: () => {},
       onEmission: () => {}
     })

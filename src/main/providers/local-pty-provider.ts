@@ -75,11 +75,7 @@ import { PtyStartupIngress, type PtyIngressEmission } from '../../shared/pty-sta
 import { resolvePtyOwnerBackend } from '../../shared/pty-owner-backend'
 import { signalPosixPtyForegroundGroup } from '../pty/posix-pty-foreground-group'
 import { readPtsName } from '../pty/node-pty-pts-name'
-import {
-  createPtySlaveEchoProbe,
-  createPtySlaveEchoSyncProbe,
-  readPtySlavePath
-} from '../../shared/pty-slave-line-discipline-echo'
+import { readPtySlavePath } from '../../shared/pty-slave-line-discipline-echo'
 import {
   createShellStartupOutputScanState,
   drainShellStartupOutputScanState,
@@ -1001,8 +997,6 @@ export class LocalPtyProvider implements IPtyProvider {
         )
       }
     }
-    const startupEchoProbe = createPtySlaveEchoProbe(readPtySlavePath(proc))
-    const startupEchoSyncProbe = createPtySlaveEchoSyncProbe(proc)
     const startupIngress = new PtyStartupIngress({
       ...(args.startupIngress ? { intent: args.startupIngress } : {}),
       ownerBackend: resolvePtyOwnerBackend({
@@ -1011,9 +1005,7 @@ export class LocalPtyProvider implements IPtyProvider {
         wslDistro: spawnedWslDistro
       }),
       write: (data) => proc.write(data),
-      onEmission: emitIngressData,
-      ...(startupEchoProbe ? { echoProbe: startupEchoProbe } : {}),
-      ...(startupEchoSyncProbe ? { echoSyncProbe: startupEchoSyncProbe } : {})
+      onEmission: emitIngressData
     })
     startupIngressByPty.set(id, startupIngress)
 

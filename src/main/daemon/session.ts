@@ -19,7 +19,6 @@ import type {
   TakePendingOutputResult,
   TerminalSnapshot
 } from './types'
-import { createPtySlaveEchoProbe } from '../../shared/pty-slave-line-discipline-echo'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 
 export class Session {
@@ -74,14 +73,11 @@ export class Session {
       acceptStartupIngress: (data) => this.startupIngress.accept(data)
     })
 
-    const echoProbe = createPtySlaveEchoProbe(this.subprocess.slavePath)
     this.startupIngress = new PtyStartupIngress({
       ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
       ...(opts.ownerBackend ? { ownerBackend: opts.ownerBackend } : {}),
       write: (data) => this.subprocess.write(data),
-      onEmission: (emission) => this.output.emit(emission),
-      ...(echoProbe ? { echoProbe } : {}),
-      ...(this.subprocess.echoSyncProbe ? { echoSyncProbe: this.subprocess.echoSyncProbe } : {})
+      onEmission: (emission) => this.output.emit(emission)
     })
     this.shellReady.startPromptReadinessProbe()
     this.subprocess.onData((data) => this.handleSubprocessData(data))

@@ -55,12 +55,7 @@ export class PtyStartupIngress {
   constructor(options: PtyStartupIngressOptions) {
     this.intent = options.intent
     this.ownerBackend = options.ownerBackend ?? 'posix-pty'
-    this.delivery = new PtyStartupReplyDelivery(
-      this.ownerBackend,
-      options.write,
-      options.echoProbe,
-      options.echoSyncProbe
-    )
+    this.delivery = new PtyStartupReplyDelivery(this.ownerBackend, options.write)
     this.onEmission = options.onEmission
     this.queryOpen = options.intent !== undefined
     if (options.intent) {
@@ -313,7 +308,7 @@ export class PtyStartupIngress {
       // deferred write that fails after reporting success invalidates only its own
       // claim. Dropping every claim would let a slot that did land be answered a
       // second time, and a duplicate reply corrupts a parser already mid-read.
-      if (!this.delivery.answer(reply, () => this.answeredSlots.delete(slot))) {
+      if (!this.delivery.answer(reply)) {
         this.answeredSlots.delete(slot)
         return wroteAny
       }

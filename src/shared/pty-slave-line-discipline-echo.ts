@@ -1,21 +1,18 @@
 import { execFile, type ExecFileException } from 'node:child_process'
 
-// Why this exists: a startup color reply is written to the PTY master, and a POSIX
-// line discipline in ECHO copies it straight back out as visible junk (#12112).
-// Whether that will happen is readable state on the slave, not something that has to
-// be inferred from the bytes that come back — so Orca asks instead of guessing.
+// Reads the slave's line-discipline state for shell-prompt readiness detection.
+//
+// Orca deliberately does NOT read the ECHO bit to decide when to write a terminal reply.
+// It used to, and withholding the write until the bit was clear is what made the write
+// asynchronous and let replies overtake each other (#15559). Reply echoes are handled
+// on the output side instead — see pty-startup-reply-echo-shapes.ts.
 
 /** `unknown` means "could not be determined", never "assume quiet". */
 export type PtySlaveLineDisciplineEcho = 'echoing' | 'quiet' | 'unknown'
 
-export type PtySlaveEchoProbe = () => Promise<PtySlaveLineDisciplineEcho>
-
 export type PtySlaveLineEditorState = 'line-editor' | 'other' | 'unknown'
 
 export type PtySlaveLineEditorProbe = () => Promise<PtySlaveLineEditorState>
-
-/** Same verdict, read without a fork — cheap enough to consult inside a query's own turn. */
-export type PtySlaveEchoSyncProbe = () => PtySlaveLineDisciplineEcho
 
 const STTY_TIMEOUT_MS = 2_000
 // `stty -a` prints the lflags as a space-separated list where a disabled flag is
@@ -29,14 +26,6 @@ function sttyArgs(ptsName: string, platform: NodeJS.Platform): readonly string[]
   return platform === 'darwin' || platform.includes('bsd')
     ? ['-a', '-f', ptsName]
     : ['-a', '-F', ptsName]
-}
-
-function parseEchoFlag(sttyOutput: string): PtySlaveLineDisciplineEcho {
-  const match = ECHO_FLAG.exec(sttyOutput)
-  if (!match) {
-    return 'unknown'
-  }
-  return match[1] === '-' ? 'quiet' : 'echoing'
 }
 
 function parseLineEditorState(sttyOutput: string): PtySlaveLineEditorState {
@@ -89,58 +78,6 @@ function runStty(ptsName: string, platform: NodeJS.Platform): Promise<SttyProbeR
 export function readPtySlavePath(pty: unknown): string | undefined {
   const candidate = (pty as { ptsName?: unknown } | null | undefined)?.ptsName
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined
-}
-
-/**
- * Fork-free ECHO read off the master fd Orca already owns (#13892).
- *
- * Linux and the BSDs (so macOS) redirect a master's mode ioctls to the slave — POSIX
- * does not specify pty master termios, so this is per-kernel behaviour, covered by the
- * node-pty lane on both platforms. node-pty's patched
- * `readEchoState` answers for the slave without a subprocess — which is what makes it
- * usable inside the query's own event-loop turn, where the async probe is not. A host
- * whose node-pty is unpatched (older relay, upstream prebuild) has no such method and
- * gets no probe, so it keeps today's deferred behavior with no wire change.
- */
-export function createPtySlaveEchoSyncProbe(
-  pty: unknown,
-  platform: NodeJS.Platform = process.platform
-): PtySlaveEchoSyncProbe | undefined {
-  if (platform === 'win32') {
-    return undefined
-  }
-  const readEchoState = (pty as { readEchoState?: unknown } | null | undefined)?.readEchoState
-  if (typeof readEchoState !== 'function') {
-    return undefined
-  }
-  return () => {
-    let state: unknown
-    try {
-      state = (readEchoState as (this: unknown) => unknown).call(pty)
-    } catch {
-      return 'unknown'
-    }
-    if (state === 1) {
-      return 'echoing'
-    }
-    // -1 (unreadable fd) and anything unexpected must not read as proof of quiet.
-    return state === 0 ? 'quiet' : 'unknown'
-  }
-}
-
-/**
- * Probe for whether the slave would echo a write to the master right now.
- *
- * Returns undefined when the platform has no line discipline to read: ConPTY and
- * wsl.exe do not echo a master write at all, so a caller with no probe is correct to
- * write immediately rather than degraded. A probe that exists but answers `unknown`
- * is the degraded case, and callers must not read that as `quiet`.
- */
-export function createPtySlaveEchoProbe(
-  ptsName: string | undefined,
-  platform: NodeJS.Platform = process.platform
-): PtySlaveEchoProbe | undefined {
-  return createSttyProbe(ptsName, platform, parseEchoFlag)
 }
 
 export function createPtySlaveLineEditorProbe(
