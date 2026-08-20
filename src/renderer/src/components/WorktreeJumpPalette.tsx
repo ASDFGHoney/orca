@@ -1196,6 +1196,7 @@ function WorktreeJumpPaletteContent({
       worktreeOrder,
       browserTabsByWorktree,
       browserPagesByWorkspace,
+      unifiedTabsByWorktree,
       activeBrowserTabId,
       activeWorktreeId,
       activeWorkspaceExecutionHostId,
@@ -1212,6 +1213,7 @@ function WorktreeJumpPaletteContent({
     browserSortedWorktrees,
     repoByHostIdentity,
     repoMap,
+    unifiedTabsByWorktree,
     worktreeOrder
   ])
 
@@ -3234,10 +3236,7 @@ function WorktreeJumpPaletteContent({
                   ? (sshConnectionStates.get(sshConnectionId)?.status ?? 'disconnected')
                   : null
                 const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
-                const sessionAge = formatPaletteSessionAge(
-                  worktree.lastActivityAt,
-                  paletteNowMs
-                )
+                const sessionAge = formatPaletteSessionAge(worktree.lastActivityAt, paletteNowMs)
                 return (
                   <CommandItem
                     key={renderKey}
@@ -3546,7 +3545,10 @@ function WorktreeJumpPaletteContent({
                   ? resolveRepoForWorktree(simulatorWorktree)
                   : undefined
                 const simulatorRepoName = simulatorRepo?.displayName ?? result.repoName
-                const sessionAge = formatPaletteSessionAge(result.lastActiveAt ?? null, paletteNowMs)
+                const sessionAge = formatPaletteSessionAge(
+                  result.lastActiveAt ?? null,
+                  paletteNowMs
+                )
 
                 return (
                   <CommandItem

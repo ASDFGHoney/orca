@@ -115,8 +115,8 @@ function compareEmptyQueryResults(
   return compareText(a.title, b.title)
 }
 
-// Why: simulator tabs follow browser-tab Cmd+J ordering — deterministic and
-// context-first until Orca tracks per-tab recency for this surface.
+// Why: empty-query simulator ordering stays deterministic and context-first;
+// lastActiveAt only breaks ties between equally-ranked query matches.
 function positionScore(entry: SearchableSimulatorTab): number {
   if (entry.isCurrentTab) {
     return entry.worktreeSortIndex * 100 - 4000
@@ -150,7 +150,11 @@ function baseResult(entry: SearchableSimulatorTab): SimulatorPaletteSearchResult
     isCurrentWorktree: entry.isCurrentWorktree,
     score: positionScore(entry),
     qualityClass: null,
-    rank: null
+    rank: null,
+    // Never older than the tab itself: creation is a focus event too.
+    lastActiveAt: entry.tab.lastFocusedAt
+      ? Math.max(entry.tab.lastFocusedAt, entry.tab.createdAt)
+      : null
   }
 }
 

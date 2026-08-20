@@ -28,6 +28,8 @@ export type SearchableBrowserPage = {
   worktreeSortIndex: number
   isCurrentPage: boolean
   isCurrentWorktree: boolean
+  /** Last time the owning browser workspace was focused; null when never focused. */
+  lastActiveAt?: number | null
   /** Normalized field index, built once per entry rather than per keystroke. */
   document: PaletteDocument
 }
@@ -130,8 +132,8 @@ function compareEmptyQueryResults(
   return compareText(a.title, b.title)
 }
 
-// Why: empty-query browser ordering is intentionally deterministic and context-first.
-// The palette should not invent hidden browser recency semantics.
+// Why: empty-query browser ordering is intentionally deterministic and context-first;
+// lastActiveAt only breaks ties between equally-ranked query matches.
 function positionScore(entry: SearchableBrowserPage): number {
   if (entry.isCurrentPage) {
     return entry.worktreeSortIndex * 100 - 4000
@@ -163,7 +165,8 @@ function baseResult(entry: SearchableBrowserPage): BrowserPaletteSearchResult {
     isCurrentWorktree: entry.isCurrentWorktree,
     score: positionScore(entry),
     qualityClass: null,
-    rank: null
+    rank: null,
+    lastActiveAt: entry.lastActiveAt ?? null
   }
 }
 

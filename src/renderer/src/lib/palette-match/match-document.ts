@@ -163,7 +163,8 @@ function rankAssignments(args: {
   let worstQuality: PaletteMatchQuality = 'field-exact'
   let fuzzyTokenCount = 0
   const fields = new Set<string>()
-  let hasDirectHit = args.usesEvidence
+  // Derive from field metadata only: an evidence field can itself be a container.
+  let hasDirectHit = false
 
   for (const assignment of args.assignments) {
     if (paletteMatchQualityRank(assignment.quality) > paletteMatchQualityRank(worstQuality)) {
