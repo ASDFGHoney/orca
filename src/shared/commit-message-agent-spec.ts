@@ -109,6 +109,14 @@ const CLAUDE_THINKING_LEVELS: ThinkingLevel[] = [
 
 const PI_DEFAULT_MODEL_ID = 'default'
 
+/**
+ * The model id Orca used to persist for Pi before `Pi default` existed. Orca itself
+ * seeded this into `selectedModelByAgent.pi` the first time a user picked Pi, so a
+ * pre-upgrade user carries it even though they never chose a Copilot model. Treated
+ * as "no selection" on read so the fix reaches them (STA-4249).
+ */
+export const PI_RETIRED_COPILOT_DEFAULT_MODEL_ID = 'github-copilot/gpt-5.4-mini'
+
 function uniqueModels(models: CommitMessageModel[]): CommitMessageModel[] {
   const seen = new Set<string>()
   return models.filter((model) => {

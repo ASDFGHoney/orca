@@ -118,6 +118,38 @@ describe('source-control AI resolution', () => {
     }
   )
 
+  // Why: Orca seeded `github-copilot/gpt-5.4-mini` into selectedModelByAgent.pi the
+  // first time a user picked Pi on a pre-fix build, and `pi --list-models` still
+  // lists it, so the resolution chain honoured it and STA-4249 kept reproducing for
+  // every upgrading user. The other cases here all start from an empty selection.
+  it.each(['commitMessage', 'pullRequest', 'branchName'] as const)(
+    'ignores the retired Copilot default that Orca persisted for Pi, for %s',
+    (operation) => {
+      const base = piSettings()
+      base.sourceControlAi!.selectedModelByAgent = { pi: 'github-copilot/gpt-5.4-mini' }
+      base.commitMessageAi!.selectedModelByAgent = { pi: 'github-copilot/gpt-5.4-mini' }
+      base.sourceControlAi!.discoveredModelsByAgent = {
+        pi: [{ id: 'github-copilot/gpt-5.4-mini', label: 'GPT-5.4 mini' }]
+      }
+
+      const resolved = resolveSourceControlAiForOperation({
+        settings: base,
+        repo: null,
+        operation,
+        discoveryHostKey: 'local'
+      })
+      expect(resolved.ok).toBe(true)
+      if (!resolved.ok) {
+        throw new Error(resolved.error)
+      }
+      const result = planCommitMessageGeneration(resolved.value.params, 'PROMPT')
+
+      expect(result).toMatchObject({ ok: true })
+      expect(result.ok && result.plan.args).not.toContain('--model')
+      expect(result.ok && result.plan.args).not.toContain('github-copilot/gpt-5.4-mini')
+    }
+  )
+
   it.each(['commitMessage', 'pullRequest', 'branchName'] as const)(
     'passes an explicit Pi model override for %s',
     (operation) => {

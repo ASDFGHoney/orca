@@ -8,7 +8,8 @@ import {
   listCommitMessageAgentCapabilities,
   type CustomAgentId,
   isCustomAgentId,
-  resolveCommitMessageAgentChoice
+  resolveCommitMessageAgentChoice,
+  PI_RETIRED_COPILOT_DEFAULT_MODEL_ID
 } from './commit-message-agent-spec'
 import { LOCAL_COMMIT_MESSAGE_HOST_KEY } from './commit-message-host-key'
 import {
@@ -949,7 +950,7 @@ function selectPersistedModelId(args: {
   defaultModelId: string
 }): string {
   const { source, legacy, repoOverrides, operation, hostKey, agentId, defaultModelId } = args
-  return (
+  const persisted =
     readSourceControlAiModelChoiceForHost(
       repoOverrides?.modelOverridesByOperation?.[operation],
       hostKey,
@@ -966,7 +967,14 @@ function selectPersistedModelId(args: {
       ? legacy?.selectedModelByAgent?.[agentId]
       : undefined) ??
     defaultModelId
-  )
+  // Why: Orca seeded `github-copilot/gpt-5.4-mini` into Pi's persisted selection
+  // before `Pi default` existed, so a pre-upgrade user is pinned to a Copilot model
+  // they never chose and STA-4249 would still reproduce for them. Discovery still
+  // lists that id, so the resolution chain below would otherwise honour it.
+  if (agentId === 'pi' && persisted === PI_RETIRED_COPILOT_DEFAULT_MODEL_ID) {
+    return defaultModelId
+  }
+  return persisted
 }
 
 function resolveThinkingLevel(args: {
