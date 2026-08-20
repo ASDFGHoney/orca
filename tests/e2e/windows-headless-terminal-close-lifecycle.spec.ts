@@ -57,6 +57,10 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function terminalParentTabIds(result: RuntimeMobileSessionTabsResult): string[] {
+  return result.tabs.flatMap((tab) => (tab.type === 'terminal' ? [tab.parentTabId] : []))
+}
+
 async function readChildPid(client: RuntimeClient, handle: string): Promise<number | null> {
   const read = await client.call<{ terminal: RuntimeTerminalRead }>('terminal.read', {
     terminal: handle
@@ -112,6 +116,12 @@ test('physical Windows exit wins the headless-tab close race', async ({ testRepo
       )
       .not.toBeNull()
     const processBefore = await queryWindowsAncestry(childPid!)
+    expect(processBefore).toMatchObject([
+      { pid: childPid, name: 'node.exe' },
+      { name: 'pwsh.exe' },
+      { name: 'electron.exe' }
+    ])
+    const ptyShellPid = processBefore[1]!.pid
     const windowCountBefore = await host.app.evaluate(
       ({ BrowserWindow }) => BrowserWindow.getAllWindows().length
     )
@@ -122,7 +132,7 @@ test('physical Windows exit wins the headless-tab close race', async ({ testRepo
       worktree: `id:${worktreeId}`
     })
     expect(windowCountBefore).toBe(0)
-    expect(hostTabsBefore.result.tabs.some((tab) => tab.parentTabId === terminal.tabId)).toBe(true)
+    expect(terminalParentTabIds(hostTabsBefore.result)).toEqual([terminal.tabId])
     expect(inventoryBefore.result.terminals).toContainEqual(
       expect.objectContaining({ handle: terminal.handle, connected: true, writable: true })
     )
@@ -140,35 +150,42 @@ test('physical Windows exit wins the headless-tab close race', async ({ testRepo
       closeError = error instanceof Error ? error.message : String(error)
     }
     const closeElapsedMs = performance.now() - closeStartedAt
+    expect(closeError).toBeNull()
 
     await expect
       .poll(() => isProcessAlive(childPid!), { message: 'Windows child survived close' })
       .toBe(false)
-    let inventoryAfter: RuntimeTerminalListResult | null = null
+    await expect
+      .poll(() => isProcessAlive(ptyShellPid), { message: 'Windows PTY shell survived close' })
+      .toBe(false)
     await expect
       .poll(
         async () => {
-          inventoryAfter = (
+          const inventory = (
             await client.call<RuntimeTerminalListResult>('terminal.list', {
               worktree: `id:${worktreeId}`
             })
           ).result
-          return inventoryAfter.terminals.some((entry) => entry.handle === terminal.handle)
+          return inventory.terminals.length
         },
         { message: 'Closed terminal remained in the authoritative runtime inventory' }
       )
-      .toBe(false)
+      .toBe(0)
+    const inventoryAfter = (
+      await client.call<RuntimeTerminalListResult>('terminal.list', {
+        worktree: `id:${worktreeId}`
+      })
+    ).result
     const hostTabsAfter = await client.call<RuntimeMobileSessionTabsResult>('session.tabs.list', {
       worktree: `id:${worktreeId}`
     })
 
     console.log(
-      `[sta4903] ${JSON.stringify({ terminal, processBefore, windowCountBefore, hostTabIdsBefore: hostTabsBefore.result.tabs.map((tab) => tab.parentTabId), close, closeError, closeElapsedMs, processAliveAfter: isProcessAlive(childPid!), hostTabIdsAfter: hostTabsAfter.result.tabs.map((tab) => tab.parentTabId), inventoryHandlesAfter: inventoryAfter?.terminals.map((entry) => entry.handle) })}`
+      `[sta4903] ${JSON.stringify({ terminal, processBefore, windowCountBefore, hostTabIdsBefore: terminalParentTabIds(hostTabsBefore.result), close, closeError, closeElapsedMs, processAliveAfter: { child: isProcessAlive(childPid!), ptyShell: isProcessAlive(ptyShellPid) }, hostTabIdsAfter: terminalParentTabIds(hostTabsAfter.result), inventoryHandlesAfter: inventoryAfter.terminals.map((entry) => entry.handle) })}`
     )
 
-    expect(closeError).toBeNull()
-    expect(close).toMatchObject({ handle: terminal.handle, ptyKilled: expect.any(Boolean) })
-    expect(hostTabsAfter.result.tabs.some((tab) => tab.parentTabId === terminal.tabId)).toBe(false)
+    expect(close).toMatchObject({ handle: terminal.handle, tabId: terminal.tabId })
+    expect(terminalParentTabIds(hostTabsAfter.result)).toEqual([])
   } finally {
     await host.dispose()
   }
