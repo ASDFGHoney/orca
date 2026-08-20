@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from 'electron'
 
 const electron = vi.hoisted(() => {
@@ -56,6 +56,10 @@ describe('cookie clear debugger lifecycle', () => {
     lease.release.mockClear()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('memoizes a pending hidden-window attachment across concurrent callers', async () => {
     const store = openCookieClearStore(targetSession())
     const snapshot = store.snapshotClearIdentities([])
@@ -97,5 +101,38 @@ describe('cookie clear debugger lifecycle', () => {
 
     await expect(restore).rejects.toThrow(/restore/i)
     expect(sendCommand.mock.calls.map(([, params]) => params?.name)).toEqual(['first', 'second'])
+  })
+
+  it('classifies a retired command as timed out only after its late result settles', async () => {
+    vi.useFakeTimers()
+    let resolveCommand!: (value: unknown) => void
+    const pendingCommand = new Promise<unknown>((resolve) => {
+      resolveCommand = resolve
+    })
+    const store = openCookieClearStore(targetSession())
+    const write = store.writeCookieIdentity({
+      url: 'https://late.example/',
+      name: 'late',
+      value: 'value',
+      sameSite: 'unspecified'
+    })
+    const window = electron.windows[0]
+    window.webContents.debugger.sendCommand.mockReturnValueOnce(pendingCommand)
+    window.resolveLoad()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(lease.release).toHaveBeenCalledOnce()
+    expect(window.destroy).toHaveBeenCalledOnce()
+    await expect(
+      Promise.race([write.then(() => 'settled'), Promise.resolve('pending')])
+    ).resolves.toBe('pending')
+
+    resolveCommand({ success: true })
+    await expect(write).rejects.toMatchObject({
+      name: 'CookieDebuggerCommandTimeoutError',
+      message: 'Cookie debugger command Network.setCookie timed out after 10000ms'
+    })
+    store.dispose()
+    expect(lease.release).toHaveBeenCalledOnce()
   })
 })
