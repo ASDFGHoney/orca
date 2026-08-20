@@ -322,7 +322,11 @@ function MobileNativeChatMessageImpl({
     return (
       <View style={styles.row}>
         <View accessibilityRole={needsAttention ? 'alert' : 'summary'} style={styles.notice}>
-          <Text style={styles.noticeText}>{text}</Text>
+          {/* Why: notice copy is what users paste into bug reports, so it must be
+              long-press selectable like every other bubble (STA-4983). */}
+          <Text selectable style={styles.noticeText}>
+            {text}
+          </Text>
         </View>
       </View>
     )
