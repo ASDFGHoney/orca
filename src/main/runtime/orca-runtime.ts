@@ -29161,7 +29161,7 @@ export class OrcaRuntimeService {
   private findMobileTerminalSurface(
     worktreeId: string,
     parentTabId: string,
-    options: { requireReady?: boolean } = {}
+    options: { leafId?: string; requireReady?: boolean } = {}
   ): RuntimeMobileSessionCreateTerminalResult | null {
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
@@ -29169,7 +29169,10 @@ export class OrcaRuntimeService {
     }
     const result = this.toMobileSessionTabsResult(snapshot)
     const tab = result.tabs.find(
-      (candidate) => candidate.type === 'terminal' && candidate.parentTabId === parentTabId
+      (candidate) =>
+        candidate.type === 'terminal' &&
+        candidate.parentTabId === parentTabId &&
+        (options.leafId === undefined || candidate.leafId === options.leafId)
     )
     if (!tab || tab.type !== 'terminal') {
       return null
@@ -29192,7 +29195,9 @@ export class OrcaRuntimeService {
   ): boolean {
     // Why: missing persistence is ambiguous while a sibling or stale live publication still owns the surface.
     return (
-      error.message === 'tab_not_found' && !this.findMobileTerminalSurface(worktreeId, parentTabId)
+      error.message === 'tab_not_found' &&
+      !this.tabs.has(parentTabId) &&
+      !this.findMobileTerminalSurface(worktreeId, parentTabId)
     )
   }
 
@@ -29208,7 +29213,7 @@ export class OrcaRuntimeService {
           candidate.parentLayout?.ptyIdsByLeafId?.[candidate.leafId] === ptyId)
     )
     return tab?.type === 'terminal'
-      ? this.findMobileTerminalSurface(worktreeId, tab.parentTabId)
+      ? this.findMobileTerminalSurface(worktreeId, tab.parentTabId, { leafId: tab.leafId })
       : null
   }
 
@@ -29795,9 +29800,8 @@ export class OrcaRuntimeService {
     if (pty) {
       // Why: PTY exit can immediately replace a ready SSH publication with a pending one, so capture its durable HUB surface before killing it.
       const surface =
-        (pty.pty.tabId
-          ? this.findMobileTerminalSurface(pty.pty.worktreeId, pty.pty.tabId)
-          : null) ?? this.findMobileTerminalSurfaceForPty(pty.pty.worktreeId, pty.pty.ptyId)
+        this.findMobileTerminalSurfaceForPty(pty.pty.worktreeId, pty.pty.ptyId) ??
+        (pty.pty.tabId ? this.findMobileTerminalSurface(pty.pty.worktreeId, pty.pty.tabId) : null)
       const tabId = surface?.tab.parentTabId ?? pty.pty.tabId ?? pty.record.tabId
       // Why: relay recovery can leave stale renderer leaves; the persisted HUB layout defines whether closing this PTY closes the whole surface.
       const siblingCount = surface?.tab.parentLayout
@@ -29831,7 +29835,16 @@ export class OrcaRuntimeService {
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
       }
       const ptyKilled = await this.stopExplicitlyClosedTabPtys([pty.pty.ptyId], pty.pty.ptyId)
-      if (!ptyKilled || siblingCount <= 1) {
+      // Why: an exit callback can retire the addressed split leaf before an unconfirmed stop returns; parent fallback would destroy its surviving siblings.
+      const addressedSplitSurfaceRetired =
+        siblingCount > 1 &&
+        surface !== null &&
+        !this.mobileSessionSnapshotHasSurface(
+          pty.pty.worktreeId,
+          surface.tab.parentTabId,
+          surface.tab.leafId
+        )
+      if ((!ptyKilled || siblingCount <= 1) && !addressedSplitSurfaceRetired) {
         if (surface) {
           // Why: paired viewers keep ended streams mounted until the HUB publishes removal, so explicit close uses the durable host-tab transaction instead of viewer-local exit handling.
           try {

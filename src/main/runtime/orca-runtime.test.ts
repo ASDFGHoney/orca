@@ -31475,9 +31475,10 @@ describe('OrcaRuntimeService', () => {
       })
     )
     const kill = vi.fn(() => true)
+    const closeTerminal = vi.fn()
     const closeTerminalTab = vi.fn(async () => {})
     const runtime = new OrcaRuntimeService(runtimeStore as never)
-    runtime.setNotifier({ closeTerminalTab } as never)
+    runtime.setNotifier({ closeTerminal, closeTerminalTab } as never)
     runtime.setPtyController({
       write: () => true,
       kill,
@@ -31526,6 +31527,7 @@ describe('OrcaRuntimeService', () => {
       ptyKilled: true
     })
     expect(kill).toHaveBeenCalledWith(ptyId)
+    expect(closeTerminal).toHaveBeenCalledWith('host-tab')
     expect(closeTerminalTab).not.toHaveBeenCalled()
     expect(getSession().tabsByWorktree[TEST_WORKTREE_ID]).toEqual([])
     expect((await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs).toEqual([])
@@ -31574,6 +31576,113 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.closeTerminal(handle)).rejects.toThrow('tab_not_found')
     expect(kill).toHaveBeenCalledWith(ptyId)
     expect((await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs).not.toEqual([])
+  })
+
+  it('does not settle a missing mobile projection while the renderer still owns the parent', () => {
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(getDefaultWorkspaceSession())
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'host-tab',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Headless worker',
+          activeLeafId: HEADLESS_LEAF_ID,
+          layout: null
+        }
+      ],
+      leaves: []
+    })
+    const isAlreadyRetired = (
+      runtime as unknown as {
+        isAlreadyRetiredMobileTerminalSurfaceError: (
+          error: Error,
+          worktreeId: string,
+          parentTabId: string
+        ) => boolean
+      }
+    ).isAlreadyRetiredMobileTerminalSurfaceError.bind(runtime)
+
+    expect(isAlreadyRetired(new Error('tab_not_found'), TEST_WORKTREE_ID, 'host-tab')).toBe(false)
+  })
+
+  it('keeps a split sibling when exit retires the addressed leaf before an unconfirmed stop returns', async () => {
+    const tabId = '33333333-3333-4333-8333-333333333333'
+    const leftPtyId = 'headless-split-left'
+    const rightPtyId = 'headless-split-right'
+    const layout = makeHeadlessTerminalLayout({
+      [HEADLESS_LEAF_ID]: leftPtyId,
+      [HEADLESS_SECOND_LEAF_ID]: rightPtyId
+    })
+    const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(
+      makeWorkspaceSessionWithHeadlessTerminal({
+        activeTabId: tabId,
+        activeTabIdByWorktree: { [TEST_WORKTREE_ID]: tabId },
+        tabsByWorktree: {
+          [TEST_WORKTREE_ID]: [
+            {
+              id: tabId,
+              ptyId: leftPtyId,
+              worktreeId: TEST_WORKTREE_ID,
+              title: 'Split workers',
+              customTitle: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: 1
+            }
+          ]
+        },
+        terminalLayoutsByTabId: { [tabId]: layout }
+      })
+    )
+    let runtime!: OrcaRuntimeService
+    let tabIdsAfterExit: string[] = []
+    const kill = vi.fn(() => false)
+    const stopAndWait = vi.fn(async (ptyId: string) => {
+      runtime.onPtyExit(ptyId, 0)
+      tabIdsAfterExit = (await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs.map(
+        (tab) => tab.id
+      )
+      return false
+    })
+    runtime = new OrcaRuntimeService({ ...runtimeStore, flushOrThrow: vi.fn() } as never)
+    runtime.setPtyController({
+      write: () => true,
+      kill,
+      stopAndWait,
+      getForegroundProcess: async () => null,
+      listProcesses: async () => []
+    })
+    runtime.registerPty(leftPtyId, TEST_WORKTREE_ID, null, {
+      tabId,
+      leafId: HEADLESS_LEAF_ID
+    })
+    runtime.registerPty(rightPtyId, TEST_WORKTREE_ID, null, {
+      tabId,
+      leafId: HEADLESS_SECOND_LEAF_ID
+    })
+    runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
+    await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const rightHandle = runtime.preAllocateHandleForPty(rightPtyId)
+
+    await expect(runtime.closeTerminal(rightHandle)).resolves.toMatchObject({
+      handle: rightHandle,
+      tabId,
+      ptyKilled: false,
+      ptyStopVerdict: 'unverifiable'
+    })
+
+    expect(stopAndWait).toHaveBeenCalledWith(rightPtyId, expect.anything())
+    expect(tabIdsAfterExit).toEqual([`${tabId}::${HEADLESS_LEAF_ID}`])
+    expect(kill).toHaveBeenCalledWith(rightPtyId)
+    expect(kill).not.toHaveBeenCalledWith(leftPtyId)
+    expect(getSession().tabsByWorktree[TEST_WORKTREE_ID]).toHaveLength(1)
+    expect(getSession().terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId).toMatchObject({
+      [HEADLESS_LEAF_ID]: leftPtyId
+    })
+    expect(
+      (await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)).tabs.map((tab) => tab.id)
+    ).toEqual([`${tabId}::${HEADLESS_LEAF_ID}`])
   })
 
   it('keeps the renderer close transaction for an adopted runtime-owned tab', async () => {
