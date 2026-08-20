@@ -233,6 +233,45 @@ describe('headless parked-page targeting', () => {
     expect(fake.wakeCalls).toEqual([])
   })
 
+  it('pins a page for the reclaimer exactly while a client streams it', async () => {
+    // Why: the reclaimer's streamed-page veto rides on this signal; if it goes
+    // false while a stream runs, a watched pane blacks out mid-view.
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const { startBrowserScreencast } = await import('../browser/browser-screencast-stream')
+    let resolveDone!: () => void
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve
+    })
+    vi.mocked(startBrowserScreencast).mockResolvedValue({
+      stop: vi.fn(() => resolveDone()),
+      done
+    } as never)
+    const fake = createFakeHeadlessHost(['live-a'], [])
+    const commands = new RuntimeBrowserCommands(fake.host)
+    expect(commands.isBrowserPageStreamed('live-a')).toBe(false)
+
+    const started = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'live-a', format: 'jpeg' },
+      { sendBinary: vi.fn() }
+    )
+    expect(commands.isBrowserPageStreamed('live-a')).toBe(true)
+
+    started.session.stop()
+    await started.session.done
+    expect(commands.isBrowserPageStreamed('live-a')).toBe(false)
+  })
+
+  it('closes a parked page by explicit id without rebuilding its renderer', async () => {
+    const fake = createFakeHeadlessHost(['live-a'], ['parked-b'])
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const commands = new RuntimeBrowserCommands(fake.host)
+
+    await commands.browserTabClose({ page: 'parked-b', worktree: 'id:wt-1' })
+
+    expect(fake.closedPageIds).toEqual(['parked-b'])
+    expect(fake.wakeCalls).toEqual([])
+  })
+
   it('counts a stream ending as page use so the idle clock restarts then', async () => {
     // Why: streaming pins the page but frames are not activity, so a client
     // that only watched for longer than the idle window would otherwise have

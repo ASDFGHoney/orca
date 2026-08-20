@@ -39,6 +39,8 @@ export class OffscreenBrowserPageReclaimer {
   private sweepInFlight: Promise<unknown> | null = null
   /** Set when a sweep parked nothing — see reschedule(). */
   private backoffUntil = 0
+  /** stop() is terminal: nothing may arm a timer after it. */
+  private stopped = false
 
   constructor(private readonly deps: OffscreenBrowserReclaimerDeps) {}
 
@@ -59,8 +61,10 @@ export class OffscreenBrowserPageReclaimer {
   reschedule(): void {
     this.clearTimer()
     // Why: a sweep re-arms itself when it settles. Arming now would race it
-    // against state the in-flight parks are still changing.
-    if (this.sweepInFlight) {
+    // against state the in-flight parks are still changing. And after stop()
+    // nothing may arm at all — a still-settling sweep or a 'destroyed' handler
+    // firing inside destroyAll would otherwise schedule a check post-shutdown.
+    if (this.stopped || this.sweepInFlight) {
       return
     }
     const now = this.deps.now()
@@ -91,6 +95,7 @@ export class OffscreenBrowserPageReclaimer {
   }
 
   stop(): void {
+    this.stopped = true
     this.clearTimer()
     this.sweepInFlight = null
     this.backoffUntil = 0
@@ -138,7 +143,15 @@ export class OffscreenBrowserPageReclaimer {
       if (!this.isSafeToReclaim(browserPageId)) {
         continue
       }
-      await this.deps.park(browserPageId)
+      try {
+        await this.deps.park(browserPageId)
+      } catch {
+        // Why: a park that throws must still reach the backoff below. Letting
+        // it propagate skips the assignment, and the next reschedule would see
+        // a deadline in the past with a zero backoff — an instant re-sweep
+        // that fails the same way, forever. Retried on the next check instead.
+        continue
+      }
       parked.push(browserPageId)
     }
     // Why measured rather than reported: a sweep that frees nothing leaves the

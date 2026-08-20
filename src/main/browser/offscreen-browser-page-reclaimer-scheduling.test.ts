@@ -173,4 +173,55 @@ describe('OffscreenBrowserPageReclaimer scheduling', () => {
     expect(reclaimer.isScheduled).toBe(false)
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it('backs off instead of spinning when a park rejects', async () => {
+    // Why: a rejection used to skip the backoff assignment entirely, and the
+    // next reschedule saw a deadline in the past with zero backoff — an
+    // instant re-sweep that failed the same way, pegging an idle host.
+    let attempts = 0
+    const { reclaimer, clock } = createReclaimer({
+      pages: [page('a', 1_000_000), page('b', 1_000_000), page('stuck', 500_000)],
+      park: async (browserPageId, live) => {
+        if (browserPageId !== 'stuck') {
+          return
+        }
+        attempts += 1
+        if (attempts > 100) {
+          live.delete(browserPageId)
+          return
+        }
+        throw new Error('helper session teardown failed')
+      }
+    })
+    clock.value += BUDGET.graceMs
+    reclaimer.reschedule()
+
+    await vi.advanceTimersByTimeAsync(BUDGET.graceMs * 10)
+    expect(attempts).toBeGreaterThan(0)
+    expect(attempts).toBeLessThanOrEqual(11)
+  })
+
+  it('arms nothing when stop lands while a sweep is in flight', async () => {
+    // Why: stop() clears sweepInFlight, so without a terminal flag the sweep's
+    // own re-arm no longer sees itself in flight and schedules a fresh check
+    // after shutdown.
+    let releasePark = (): void => {}
+    const gate = new Promise<void>((resolve) => (releasePark = resolve))
+    const { reclaimer, clock } = createReclaimer({
+      pages: [page('a', 1_000_000), page('b', 1_000_000), page('over', 500_000)],
+      park: async () => {
+        await gate
+      }
+    })
+    clock.value += BUDGET.graceMs
+    reclaimer.reschedule()
+    await vi.advanceTimersByTimeAsync(BUDGET.graceMs)
+
+    reclaimer.stop()
+    releasePark()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(reclaimer.isScheduled).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })

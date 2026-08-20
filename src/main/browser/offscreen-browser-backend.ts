@@ -237,6 +237,7 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     if (!page?.window || page.window.isDestroyed()) {
       return
     }
+    const window = page.window
     // Why: the record's address is kept current by did-navigate, so parking
     // never has to guess it from a WebContents that may be sitting on the blank
     // page a failed load left behind.
@@ -257,6 +258,16 @@ export class OffscreenBrowserBackend implements BrowserBackend {
     // already destroyed the helper session and moved the worktree's active
     // pointer, so an abort leaves a resident page with reset automation state.
     await this.releaseRenderer(page, browserPageId)
+    // Why: a wake awaiting this same release resumes BEFORE this line — its
+    // reaction registered later on the same promise — and can have already
+    // re-materialized the page. The park owns only the window it destroyed:
+    // nulling the field blindly would drop the wake's fresh renderer off the
+    // record (leaking it — close and destroyAll walk page.window), list the
+    // page as parked and live at once, and let the wake report success while
+    // loadPage no-ops on a nulled window.
+    if (page.window !== window) {
+      return
+    }
     page.window = null
     if (page.activeWhenParked) {
       // Why: teardown promotes another live tab to active, which then parks

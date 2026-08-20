@@ -786,6 +786,12 @@ describe('OffscreenBrowserBackend reclamation', () => {
     expect(h.windows[0].isDestroyed()).toBe(true)
     expect(h.windows[1].isDestroyed()).toBe(false)
     expect(h.registered.get('a')).toBe(h.windows[1].webContents.id)
+    // Why: the park resumes after the wake re-materialized the window. It must
+    // not null the fresh window off the record — that leaks the renderer (no
+    // reference left for close/destroyAll), lists the page as parked and live
+    // at once, and reports the wake successful against a blank page.
+    expect(h.backend.listParkedPages()).toEqual([])
+    expect(loadOffscreenBrowserUrl.mock.calls.some(([win]) => win === h.windows[1])).toBe(true)
   })
 
   it('keeps a parked page after its renderer emits destroyed', async () => {
