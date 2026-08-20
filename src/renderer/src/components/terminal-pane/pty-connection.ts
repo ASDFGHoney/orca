@@ -3102,17 +3102,10 @@ export function connectPanePty(
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
     bindActivePanePty(ptyId, { seedInitialAgentStatus: true })
-    // Why here and nowhere earlier: this is the only point that proves *this* pane's fresh spawn
-    // carried the queued command and survived. A pane retired mid-connect never reaches it, so the
-    // command stays queued for the next mount instead of vanishing (STA-4876).
-    // Why after the bind, and not before: while the tab still has no ptyId, the queued entry is the
-    // only thing keeping its worktree out of the retention-budget force-park
-    // (hasPendingRetentionSpawnWork) — dropping it first unmounts this pane mid-spawn.
-    // Caveat this does NOT cover: the consume tracks "a pty exists", not "the command ran". Windows
-    // embeds short commands in the shell argv, so they execute before the spawn resolves — a pane
-    // retired in that window re-delivers on remount. On POSIX the write waits for shell-ready, so a
-    // pty that dies before then loses a command this already spent. Closing either needs a
-    // delivery signal from main, not this callback.
+    // Spend the queued command only after this pane has a bound PTY. Retired panes never reach
+    // this point, and the pending entry keeps the worktree from being force-parked during spawn.
+    // This marks spawn, not delivery: Windows may run argv-embedded commands earlier, while POSIX
+    // delivery can still be waiting for shell-ready.
     try {
       deps.onQueuedStartupSpawned?.()
     } catch {
