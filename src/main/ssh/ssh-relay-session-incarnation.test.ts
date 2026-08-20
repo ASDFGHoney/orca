@@ -79,7 +79,13 @@ vi.mock('../providers/ssh-pty-provider', () => ({
       this.pendingLiveEvidence.clear()
     })
     acceptAmbiguousExitPty = vi.fn((id: string) => this.acceptUnverifiablePty(id))
-    acceptExitedPtyLiveness = vi.fn()
+    // Mirrors SshPtyLivenessState.acceptExited, which invalidates pending live evidence.
+    acceptExitedPtyLiveness = vi.fn((_id: string) => {
+      for (const evidence of this.pendingLiveEvidence) {
+        evidence.valid = false
+      }
+      this.pendingLiveEvidence.clear()
+    })
     acceptExitedPty = vi.fn()
     dispose = vi.fn()
 
@@ -307,7 +313,7 @@ describe('SSH relay PTY incarnation exits', () => {
       onData: ReturnType<typeof vi.fn>
       onExit: ReturnType<typeof vi.fn>
       acceptLivePty: ReturnType<typeof vi.fn>
-      acceptAmbiguousExitPty: ReturnType<typeof vi.fn>
+      acceptExitedPtyLiveness: ReturnType<typeof vi.fn>
       settleLivePtyEvidence: ReturnType<typeof vi.fn>
     }
     vi.mocked(getSshPtyProvider).mockReturnValue(provider as never)
@@ -340,7 +346,7 @@ describe('SSH relay PTY incarnation exits', () => {
     settleOutput()
 
     await vi.waitFor(() => expect(provider.settleLivePtyEvidence).toHaveBeenCalledOnce())
-    expect(provider.acceptAmbiguousExitPty).toHaveBeenCalledExactlyOnceWith(id)
+    expect(provider.acceptExitedPtyLiveness).toHaveBeenCalledExactlyOnceWith(id)
     expect(provider.acceptLivePty).not.toHaveBeenCalled()
   })
 
@@ -373,7 +379,7 @@ describe('SSH relay PTY incarnation exits', () => {
     expect(acceptOutputExitMock).not.toHaveBeenCalled()
   })
 
-  it('marks a legacy exit unverifiable without incarnation ownership', async () => {
+  it('delivers an exit from a relay that never sends an incarnation', async () => {
     const { mockConn, mockStore, mockPortForward, getMainWindow } = createMockDeps()
     const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
     await session.establish(mockConn)
@@ -388,16 +394,22 @@ describe('SSH relay PTY incarnation exits', () => {
       ptyIncarnation: string
     }) => void
 
+    // No incarnation was ever recorded for this PTY, so isCurrentPtyExit admits the exit.
     onExit({
       id: 'ssh:target-1@@pty-legacy',
-      code: 0,
+      code: 3,
       providerGeneration: 31,
       ptyIncarnation: 'legacy:31:1:pty-legacy'
     })
 
-    expect(provider.acceptAmbiguousExitPty).toHaveBeenCalledExactlyOnceWith(
-      'ssh:target-1@@pty-legacy'
+    await vi.waitFor(() =>
+      expect(acceptOutputExitMock).toHaveBeenCalledWith({
+        id: 'ssh:target-1@@pty-legacy',
+        code: 3,
+        providerGeneration: 31,
+        ptyIncarnation: 'legacy:31:1:pty-legacy'
+      })
     )
-    expect(acceptOutputExitMock).not.toHaveBeenCalled()
+    expect(provider.acceptAmbiguousExitPty).not.toHaveBeenCalled()
   })
 })

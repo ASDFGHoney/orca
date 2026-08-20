@@ -1785,11 +1785,12 @@ export class SshRelaySession {
         this.wakeRecovery(pendingReattach)
         return
       }
-      if (!payload.incarnationId) {
-        ptyProvider.acceptAmbiguousExitPty(payload.id)
-        return
-      }
       if (!isCurrentPtyExit(payload)) {
+        // Why: an exit we cannot attribute to the recorded incarnation is not proof THIS PTY died.
+        // A relay that never sends incarnations records none, so its exits still deliver.
+        if (!payload.incarnationId) {
+          ptyProvider.acceptAmbiguousExitPty(payload.id)
+        }
         return
       }
       void this.acceptPtyExit(payload).catch(() => {})
