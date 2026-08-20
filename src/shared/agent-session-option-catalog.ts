@@ -71,6 +71,19 @@ export function mergeCatalogModels(
   return [...merged, ...discoveredById.values()]
 }
 
+/** Keep only consent-gated seed rows a replacing probe legitimately omitted. */
+export function mergeDiscoveredModelsWithConsentGatedSeeds(
+  catalog: AgentSessionOptionCatalog,
+  discovered: readonly CatalogModel[]
+): CatalogModel[] {
+  const consentGatedIds = catalog.consentGatedModelIds ?? []
+  const discoveredIds = new Set(discovered.map((model) => model.id))
+  const missingConsentGatedModels = catalog.models.filter(
+    (model) => consentGatedIds.includes(model.id) && !discoveredIds.has(model.id)
+  )
+  return [...missingConsentGatedModels, ...discovered]
+}
+
 /** Discovery decides membership; the seed keeps its option menus, which discovery never carries.
  *  Why: an unseeded model inherits the default seed's options because these catalogs' options are
  *  global CLI flags, not per-model capabilities — dropping them would hide the picker entirely. */

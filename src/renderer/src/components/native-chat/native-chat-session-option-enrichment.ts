@@ -2,6 +2,7 @@ import type { AgentType } from '../../../../shared/agent-status-types'
 import {
   getAgentSessionOptionCatalog,
   mergeCatalogModels,
+  mergeDiscoveredModelsWithConsentGatedSeeds,
   mergeDiscoveredAuthoritativeModels,
   type CatalogModel
 } from '../../../../shared/agent-session-option-catalog'
@@ -101,12 +102,11 @@ export function ensureNativeChatModelEnrichment(args: {
       if (!discovered || discovered.length === 0) {
         return
       }
-      entry.models =
-        args.agent === 'claude'
-          ? [...discovered]
-          : catalog.discoveredModelsAreAuthoritative
-            ? mergeDiscoveredAuthoritativeModels(catalog.models, discovered)
-            : mergeCatalogModels(catalog.models, discovered)
+      entry.models = catalog.discoveredModelsReplaceSeed
+        ? mergeDiscoveredModelsWithConsentGatedSeeds(catalog, discovered)
+        : catalog.discoveredModelsAreAuthoritative
+          ? mergeDiscoveredAuthoritativeModels(catalog.models, discovered)
+          : mergeCatalogModels(catalog.models, discovered)
       for (const listener of entry.listeners) {
         listener([...entry.models])
       }

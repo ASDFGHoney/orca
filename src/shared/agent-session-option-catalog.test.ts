@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { getAgentSessionOptionCatalog, mergeCatalogModels } from './agent-session-option-catalog'
+import {
+  getAgentSessionOptionCatalog,
+  mergeCatalogModels,
+  mergeDiscoveredModelsWithConsentGatedSeeds
+} from './agent-session-option-catalog'
 import { resolveAgentSessionOptionLaunch } from './agent-session-option-launch'
 import {
   resolveNativeChatSessionOptionDefaults,
@@ -119,6 +123,28 @@ describe('agent session option catalog', () => {
     expect(sonnet.description).toBe('Sonnet 5 · Efficient')
     expect(sonnet.isDefault).toBe(true)
     expect(sonnet.options.map(({ id }) => id)).toEqual(['effort'])
+  })
+
+  it('restores only consent-gated Claude rows omitted by a replacing probe', () => {
+    const catalog = getAgentSessionOptionCatalog('claude')!
+    expect(catalog.discoveredModelsReplaceSeed).toBe(true)
+    const merged = mergeDiscoveredModelsWithConsentGatedSeeds(catalog, [
+      { id: 'opus[1m]', label: 'Opus (1M context)', options: [] },
+      { id: 'sonnet', label: 'Sonnet', options: [] },
+      { id: 'haiku', label: 'Haiku', options: [] }
+    ])
+    expect(merged.map(({ id }) => id)).toEqual(['fable', 'opus[1m]', 'sonnet', 'haiku'])
+    expect(merged.some(({ id }) => id === 'opus')).toBe(false)
+    expect(merged[0].options.map(({ id }) => id)).toEqual(['effort'])
+  })
+
+  it('keeps a probed Fable row unique and unchanged', () => {
+    const catalog = getAgentSessionOptionCatalog('claude')!
+    const discovered = [
+      { id: 'sonnet', label: 'Sonnet', options: [] },
+      { id: 'fable', label: 'Fable (live)', options: [] }
+    ]
+    expect(mergeDiscoveredModelsWithConsentGatedSeeds(catalog, discovered)).toEqual(discovered)
   })
 
   it('parses Cursor model discovery without treating headings as models', () => {
