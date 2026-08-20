@@ -29,6 +29,7 @@ import { publishTerminalViewAttributes } from './terminal-view-attributes-publis
 import { normalizeTerminalLineHeight } from '../../../../shared/terminal-line-height-settings'
 import { maybePushMode2031Flip } from './terminal-mode-2031-replies'
 import { resolveTerminalMinimumContrastRatio } from '@/lib/terminal-contrast-correction'
+import { normalizeTerminalPadding } from '../../../../shared/terminal-padding-settings'
 
 export function hexToRgba(hex: string, alpha: number): string {
   let clean = hex.replace('#', '')
@@ -185,8 +186,8 @@ export function applyTerminalAppearance(
     opacityTransitionMs: paneStyles.opacityTransitionMs,
     dividerThicknessPx: paneStyles.dividerThicknessPx,
     focusFollowsMouse: paneStyles.focusFollowsMouse,
-    paddingX: Math.round(settings.terminalPaddingX ?? 4),
-    paddingY: Math.round(settings.terminalPaddingY ?? 4)
+    paddingX: normalizeTerminalPadding(settings.terminalPaddingX ?? 4),
+    paddingY: normalizeTerminalPadding(settings.terminalPaddingY ?? 4)
   })
 
   for (const pane of manager.getPanes()) {
