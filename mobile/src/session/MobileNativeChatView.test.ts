@@ -89,6 +89,15 @@ const BOTTOM_INSET = 34
 const ROUTE_INSET = KEYBOARD_HEIGHT - BOTTOM_INSET
 const KEYBOARD_OPEN = 2
 const KEYBOARD_CLOSING = 3
+const KEYBOARD_CLOSED = 4
+
+/** `useKeyboardFrame` binds its platform source once at module load, so the
+ *  Android branch only runs in a freshly imported copy of the view. */
+async function loadChatViewForPlatform(platformOS: string): Promise<typeof MobileNativeChatView> {
+  mocks.platformOS = platformOS
+  vi.resetModules()
+  return (await import('./MobileNativeChatView')).MobileNativeChatView
+}
 
 type Overrides = {
   messages?: Parameters<typeof MobileNativeChatView>[0]['messages']
@@ -106,8 +115,8 @@ function assistantTurn(id: string, text: string): NativeChatMessage {
   return { id, role: 'assistant', blocks: [{ type: 'text', text }], timestamp: 0, source: 'hook' }
 }
 
-function chatViewElement(overrides: Overrides): ReturnType<typeof createElement> {
-  return createElement(MobileNativeChatView, {
+function chatViewProps(overrides: Overrides): Parameters<typeof MobileNativeChatView>[0] {
+  return {
     messages: [],
     folded: [],
     status: 'ready',
@@ -117,7 +126,11 @@ function chatViewElement(overrides: Overrides): ReturnType<typeof createElement>
     composerText: '',
     onComposerTextChange: vi.fn(),
     ...overrides
-  })
+  }
+}
+
+function chatViewElement(overrides: Overrides): ReturnType<typeof createElement> {
+  return createElement(MobileNativeChatView, chatViewProps(overrides))
 }
 
 describe('MobileNativeChatView', () => {
@@ -199,11 +212,53 @@ describe('MobileNativeChatView', () => {
   })
 
   it('dismisses on drag where there is no interactive keyboard', async () => {
-    mocks.platformOS = 'android'
+    const AndroidChatView = await loadChatViewForPlatform('android')
 
-    await render()
+    await act(async () => {
+      renderer = create(createElement(AndroidChatView, chatViewProps({})))
+    })
 
     expect(listProps().keyboardDismissMode).toBe('on-drag')
+  })
+
+  it('never rides the keyboard observer on Android', async () => {
+    // Reanimated's Android observer would seize the activity's window insets,
+    // so that platform must stay on the route inset even mid-"drag".
+    const AndroidChatView = await loadChatViewForPlatform('android')
+    mocks.keyboardState = KEYBOARD_CLOSING
+    mocks.keyboardHeight = 180
+
+    await act(async () => {
+      renderer = create(
+        createElement(AndroidChatView, chatViewProps({ keyboardInset: ROUTE_INSET }))
+      )
+    })
+
+    expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
+  })
+
+  it('holds the lift when a restored keyboard reports no frame to follow', async () => {
+    // iOS can restore the keyboard with no animation for the observer to ride:
+    // it stays CLOSED at height 0 while the route already reports full lift.
+    mocks.keyboardState = KEYBOARD_CLOSED
+    mocks.keyboardHeight = 0
+
+    await render({ keyboardInset: ROUTE_INSET })
+
+    expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
+  })
+
+  it('follows the keyboard frame as it moves, not just at mount', async () => {
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+    await render({ keyboardInset: ROUTE_INSET })
+    expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
+
+    mocks.keyboardState = KEYBOARD_CLOSING
+    mocks.keyboardHeight = 120
+    await update({ keyboardInset: ROUTE_INSET })
+
+    expect(rootPaddingBottom()).toBe(120)
   })
 
   it('keeps link taps landing while the keyboard is up', async () => {

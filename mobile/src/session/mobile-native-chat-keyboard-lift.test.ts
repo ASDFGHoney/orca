@@ -8,10 +8,6 @@ const IOS_KEYBOARD_HEIGHT = 336
 const BOTTOM_INSET = 34
 // The route lifts by the keyboard height minus the home indicator on iOS.
 const COMMITTED_INSET = IOS_KEYBOARD_HEIGHT - BOTTOM_INSET
-const OPEN = 2
-const CLOSING = 3
-const CLOSED = 4
-const UNKNOWN = 0
 
 describe('resolveNativeChatKeyboardDismissMode', () => {
   it('follows the finger on iOS', () => {
@@ -25,10 +21,10 @@ describe('resolveNativeChatKeyboardDismissMode', () => {
 })
 
 describe('resolveNativeChatBottomPad', () => {
-  it('falls back to the route inset until the keyboard observer reports', () => {
+  it('falls back to the route inset while the keyboard observer is idle', () => {
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: UNKNOWN,
+        keyboardFrameIsLive: false,
         liveKeyboardHeight: 0,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -39,7 +35,7 @@ describe('resolveNativeChatBottomPad', () => {
   it('keeps the composer clear of the home indicator with no keyboard', () => {
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: UNKNOWN,
+        keyboardFrameIsLive: false,
         liveKeyboardHeight: 0,
         committedInset: 0,
         bottomInset: BOTTOM_INSET
@@ -50,7 +46,7 @@ describe('resolveNativeChatBottomPad', () => {
   it('matches the route inset while the keyboard sits open', () => {
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: OPEN,
+        keyboardFrameIsLive: true,
         liveKeyboardHeight: IOS_KEYBOARD_HEIGHT,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -62,7 +58,7 @@ describe('resolveNativeChatBottomPad', () => {
     // keyboardWillHide has not fired yet, so committedInset still reads full lift.
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: CLOSING,
+        keyboardFrameIsLive: true,
         liveKeyboardHeight: 180,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -73,7 +69,7 @@ describe('resolveNativeChatBottomPad', () => {
   it('never lets a part-dragged keyboard pull the composer under the home indicator', () => {
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: CLOSING,
+        keyboardFrameIsLive: true,
         liveKeyboardHeight: 12,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -84,11 +80,25 @@ describe('resolveNativeChatBottomPad', () => {
   it('rests on the bottom inset once the drag commits', () => {
     expect(
       resolveNativeChatBottomPad({
-        keyboardState: CLOSED,
+        keyboardFrameIsLive: false,
         liveKeyboardHeight: 0,
         committedInset: 0,
         bottomInset: BOTTOM_INSET
       })
     ).toBe(BOTTOM_INSET)
+  })
+
+  it('holds the lift when a restored keyboard reports no frame to follow', () => {
+    // iOS can put the keyboard back with no animation for the observer to ride
+    // (foregrounding with the composer focused), leaving its height at 0 while
+    // the route already knows the keyboard is up.
+    expect(
+      resolveNativeChatBottomPad({
+        keyboardFrameIsLive: false,
+        liveKeyboardHeight: 0,
+        committedInset: COMMITTED_INSET,
+        bottomInset: BOTTOM_INSET
+      })
+    ).toBe(IOS_KEYBOARD_HEIGHT)
   })
 })

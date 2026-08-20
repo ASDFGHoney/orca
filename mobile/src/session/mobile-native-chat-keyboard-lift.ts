@@ -1,7 +1,3 @@
-/** Reanimated reports UNKNOWN until its keyboard observer has seen an event, and
- *  we never subscribe on Android, so it stays UNKNOWN there. */
-const KEYBOARD_STATE_UNKNOWN = 0
-
 export type NativeChatKeyboardDismissMode = 'interactive' | 'on-drag'
 
 /** iOS drags the keyboard down with the finger; Android has no interactive mode,
@@ -13,9 +9,13 @@ export function resolveNativeChatKeyboardDismissMode(
 }
 
 export type NativeChatBottomPadInput = {
-  keyboardState: number
-  /** Real keyboard frame height sampled on the UI thread — it tracks an
-   *  interactive drag frame by frame. */
+  /** Whether the keyboard observer is publishing a real frame right now. While
+   *  it is idle its height reads 0 even with the keyboard up — iOS can restore
+   *  a keyboard with no animation for the observer to follow — so only the
+   *  route's inset knows the keyboard is there. */
+  keyboardFrameIsLive: boolean
+  /** Keyboard frame height sampled on the UI thread; tracks an interactive drag
+   *  frame by frame. */
   liveKeyboardHeight: number
   /** The route's React-state lift, which stays at its full value until the
    *  interactive gesture commits and `keyboardWillHide` finally fires. */
@@ -26,7 +26,7 @@ export type NativeChatBottomPadInput = {
 /** Bottom padding that keeps the composer glued to the top of the keyboard. */
 export function resolveNativeChatBottomPad(input: NativeChatBottomPadInput): number {
   'worklet'
-  if (input.keyboardState === KEYBOARD_STATE_UNKNOWN) {
+  if (!input.keyboardFrameIsLive) {
     return input.committedInset + input.bottomInset
   }
   // The keyboard frame already spans the home indicator, so it replaces the
