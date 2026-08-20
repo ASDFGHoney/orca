@@ -29185,6 +29185,17 @@ export class OrcaRuntimeService {
     return surface
   }
 
+  private isAlreadyRetiredMobileTerminalSurfaceError(
+    error: Error,
+    worktreeId: string,
+    parentTabId: string
+  ): boolean {
+    // Why: missing persistence is ambiguous while a sibling or stale live publication still owns the surface.
+    return (
+      error.message === 'tab_not_found' && !this.findMobileTerminalSurface(worktreeId, parentTabId)
+    )
+  }
+
   private findMobileTerminalSurfaceForPty(
     worktreeId: string,
     ptyId: string
@@ -29799,10 +29810,16 @@ export class OrcaRuntimeService {
             localPtyTeardownOwnedExternally: true
           })
         } catch (error) {
-          if (!(error instanceof Error) || error.message !== 'workspace_session_unavailable') {
+          if (!(error instanceof Error)) {
             throw error
           }
-          this.notifier.closeTerminal?.(tabId)
+          if (error.message === 'workspace_session_unavailable') {
+            this.notifier.closeTerminal?.(tabId)
+          } else if (
+            !this.isAlreadyRetiredMobileTerminalSurfaceError(error, pty.pty.worktreeId, tabId)
+          ) {
+            throw error
+          }
         }
         const ptyKilled = await this.stopExplicitlyClosedTabPtys(ptyIdsToKill, pty.pty.ptyId)
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
@@ -29826,10 +29843,8 @@ export class OrcaRuntimeService {
             if (error.message === 'workspace_session_unavailable') {
               this.notifier?.closeTerminal(tabId)
             } else if (
-              error.message !== 'tab_not_found' ||
-              this.findMobileTerminalSurface(pty.pty.worktreeId, tabId)
+              !this.isAlreadyRetiredMobileTerminalSurfaceError(error, pty.pty.worktreeId, tabId)
             ) {
-              // Only absence in both persistence and the live publication proves another owner finished teardown.
               throw error
             }
           }
