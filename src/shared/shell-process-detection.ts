@@ -22,17 +22,10 @@ export function isShellProcess(processName: string): boolean {
   )
 }
 
-const DEFAULT_TERMINAL_TITLE_RE = /^terminal \d+$/i
-
-/** A shell name or the tab's default Terminal title; blank titles are no evidence. */
+/** A shell name or the tab's own neutral default title; blank titles are no evidence. */
 export function titleShowsNoAgent(title: string, defaultTitle?: string): boolean {
   const trimmed = title.trim()
-  return (
-    trimmed.length > 0 &&
-    (isShellProcess(trimmed) ||
-      trimmed === defaultTitle?.trim() ||
-      DEFAULT_TERMINAL_TITLE_RE.test(trimmed))
-  )
+  return trimmed.length > 0 && (isShellProcess(trimmed) || trimmed === defaultTitle?.trim())
 }
 
 // Why: a ConPTY-side buffer clear cannot reach PSReadLine's cached cursor

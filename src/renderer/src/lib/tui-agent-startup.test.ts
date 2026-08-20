@@ -426,7 +426,10 @@ describe('titleShowsNoAgent', () => {
   it('treats shell names and default Terminal titles as no agent', () => {
     expect(titleShowsNoAgent('zsh')).toBe(true)
     expect(titleShowsNoAgent('cmd.exe')).toBe(true)
-    expect(titleShowsNoAgent('Terminal 1')).toBe(true)
+    // A bare "Terminal N" is NOT evidence of exit on its own: a pane can carry a
+    // retained agent identity under that title (use-tab-agent-retained-identity).
+    // It only means "no agent" when it matches the tab's own default title.
+    expect(titleShowsNoAgent('Terminal 1')).toBe(false)
     expect(titleShowsNoAgent('Terminal 1', 'Terminal 1')).toBe(true)
   })
 
