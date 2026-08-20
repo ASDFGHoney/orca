@@ -2771,6 +2771,21 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       }
     }
 
+    const stateAfterShutdown = get()
+    const tabAfterShutdown = (stateAfterShutdown.tabsByWorktree[worktreeId] ?? []).find(
+      (candidate) => candidate.id === opts.tabId
+    )
+    const panePtyAfterShutdown =
+      stateAfterShutdown.terminalLayoutsByTabId[opts.tabId]?.ptyIdsByLeafId?.[opts.leafId]
+    if (
+      !tabAfterShutdown ||
+      tabAfterShutdown.createdAt !== tab.createdAt ||
+      (panePtyAfterShutdown !== undefined && panePtyAfterShutdown !== opts.ptyId)
+    ) {
+      // Why: the stopped process is gone, but a replacement pane owns all later store cleanup.
+      return
+    }
+
     set((s) => {
       const existingPtyIds = s.ptyIdsByTabId[opts.tabId] ?? []
       const shutdownPtyIdSet = new Set(rendererShutdownPtyIds)

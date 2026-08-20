@@ -332,6 +332,88 @@ describe('shutdownWorktreeTerminals (sleep) — agent status hygiene', () => {
     expect(state.sleepingAgentSessionsByPaneKey[targetPaneKey]).toBeDefined()
   })
 
+  it('does not clear a replacement pane that binds while hibernation is stopping', async () => {
+    const store = createTestStore()
+    const wt = 'repo1::/path/wt1'
+    const targetLeaf = '11111111-1111-4111-8111-111111111111'
+    const targetPaneKey = `tab-1:${targetLeaf}`
+    let finishKill: (() => void) | undefined
+    mockApi.pty.kill.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishKill = resolve
+        })
+    )
+    seedStore(store, {
+      worktreesByRepo: {
+        repo1: [makeWorktree({ id: wt, repoId: 'repo1', path: '/path/wt1' })]
+      },
+      tabsByWorktree: {
+        [wt]: [makeTab({ id: 'tab-1', worktreeId: wt, title: 'Codex', ptyId: 'pty-agent' })]
+      },
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: targetLeaf },
+          activeLeafId: targetLeaf,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [targetLeaf]: 'pty-agent' }
+        }
+      },
+      ptyIdsByTabId: { 'tab-1': ['pty-agent'] }
+    })
+    store
+      .getState()
+      .setAgentStatus(
+        targetPaneKey,
+        { state: 'done', prompt: 'old run', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 2000, stateStartedAt: 1000 },
+        { tabId: 'tab-1', worktreeId: wt },
+        { providerSession: { key: 'session_id', id: 'old-session' } }
+      )
+
+    const shutdown = store.getState().shutdownCompletedAgentPaneForHibernation(wt, {
+      paneKey: targetPaneKey,
+      tabId: 'tab-1',
+      leafId: targetLeaf,
+      ptyId: 'pty-agent'
+    })
+    store.setState((state) => ({
+      tabsByWorktree: {
+        ...state.tabsByWorktree,
+        [wt]: state.tabsByWorktree[wt]!.map((tab) =>
+          tab.id === 'tab-1' ? { ...tab, ptyId: 'pty-replacement' } : tab
+        )
+      },
+      terminalLayoutsByTabId: {
+        ...state.terminalLayoutsByTabId,
+        'tab-1': {
+          ...state.terminalLayoutsByTabId['tab-1']!,
+          ptyIdsByLeafId: { [targetLeaf]: 'pty-replacement' }
+        }
+      },
+      ptyIdsByTabId: { ...state.ptyIdsByTabId, 'tab-1': ['pty-replacement'] }
+    }))
+    store
+      .getState()
+      .setAgentStatus(
+        targetPaneKey,
+        { state: 'working', prompt: 'replacement run', agentType: 'codex' },
+        'Codex',
+        { updatedAt: 3000, stateStartedAt: 3000 },
+        { tabId: 'tab-1', worktreeId: wt },
+        { providerSession: { key: 'session_id', id: 'replacement-session' } }
+      )
+    finishKill?.()
+    await shutdown
+
+    expect(store.getState().ptyIdsByTabId['tab-1']).toEqual(['pty-replacement'])
+    expect(store.getState().agentStatusByPaneKey[targetPaneKey]).toMatchObject({
+      state: 'working',
+      providerSession: { key: 'session_id', id: 'replacement-session' }
+    })
+  })
+
   it('keeps manual sleep worktree-wide', async () => {
     const store = createTestStore()
     const wt = 'repo1::/path/wt1'

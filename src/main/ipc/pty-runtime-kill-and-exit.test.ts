@@ -166,7 +166,8 @@ describe('registerPtyHandlers', () => {
     const runtime = {
       setPtyController: vi.fn(),
       markPtyStopRequested: vi.fn(),
-      markPtyHistoryPreservingStopRequested: vi.fn(),
+      markPtyHistoryPreservingStopRequested: vi.fn(() => 1),
+      preservePtyHistoryThroughLateExit: vi.fn(),
       clearPtyHistoryPreservingStopRequested: vi.fn()
     }
     setLocalPtyProvider({
@@ -198,7 +199,8 @@ describe('registerPtyHandlers', () => {
       handlers.get('pty:kill')!(null, { id: 'local-pty', keepHistory: true })
     ).rejects.toThrow('daemon unavailable')
     expect(runtime.markPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
-    expect(runtime.clearPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
+    expect(runtime.preservePtyHistoryThroughLateExit).toHaveBeenCalledWith('local-pty', 1)
+    expect(runtime.clearPtyHistoryPreservingStopRequested).not.toHaveBeenCalled()
   })
   it('rejects runtime terminal IDs before unowned local provider routing', async () => {
     const shutdown = vi.spyOn(getLocalPtyProvider(), 'shutdown')
@@ -215,7 +217,7 @@ describe('registerPtyHandlers', () => {
     const runtime = {
       setPtyController: vi.fn(),
       onPtyExit: vi.fn(),
-      markPtyHistoryPreservingStopRequested: vi.fn(),
+      markPtyHistoryPreservingStopRequested: vi.fn(() => 1),
       clearPtyHistoryPreservingStopRequested: vi.fn()
     }
     setLocalPtyProvider({
@@ -251,7 +253,7 @@ describe('registerPtyHandlers', () => {
     })
     expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', -1, undefined)
     expect(runtime.markPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
-    expect(runtime.clearPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty')
+    expect(runtime.clearPtyHistoryPreservingStopRequested).toHaveBeenCalledWith('local-pty', 1)
     expect(runtime.markPtyHistoryPreservingStopRequested.mock.invocationCallOrder[0]).toBeLessThan(
       runtime.onPtyExit.mock.invocationCallOrder[0]!
     )

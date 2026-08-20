@@ -4033,7 +4033,8 @@ export function registerPtyHandlers(
   async function shutdownProviderAndDetectExit(
     provider: IPtyProvider,
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number },
+    onExitObserved?: () => void
   ): Promise<boolean> {
     let providerExitObserved = false
     const expectedIncarnationId = ptyIncarnationById.get(id)
@@ -4043,6 +4044,7 @@ export function registerPtyHandlers(
         (!expectedIncarnationId || payload.incarnationId === expectedIncarnationId)
       ) {
         providerExitObserved = true
+        onExitObserved?.()
       }
     })
     try {
@@ -7722,9 +7724,9 @@ export function registerPtyHandlers(
       throw new Error('Invalid PTY provider id')
     }
     runtime?.markPtyStopRequested?.(args.id)
-    if (args.keepHistory) {
-      runtime?.markPtyHistoryPreservingStopRequested(args.id)
-    }
+    let historyPreservingStopId = args.keepHistory
+      ? runtime?.markPtyHistoryPreservingStopRequested(args.id)
+      : undefined
     try {
       const ownedConnectionId = ptyOwnership.get(args.id)
       const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
@@ -7749,13 +7751,24 @@ export function registerPtyHandlers(
       const shutdownProvider = provider ?? getProviderForPty(args.id)
       let providerExitObserved = false
       try {
-        providerExitObserved = await shutdownProviderAndDetectExit(shutdownProvider, args.id, {
-          immediate: true,
-          keepHistory: args.keepHistory ?? false
-        })
+        providerExitObserved = await shutdownProviderAndDetectExit(
+          shutdownProvider,
+          args.id,
+          {
+            immediate: true,
+            keepHistory: args.keepHistory ?? false
+          },
+          () => {
+            providerExitObserved = true
+          }
+        )
       } catch (err) {
         if (!isPtyAlreadyGoneError(err)) {
           // Why: a failed shutdown can leave the process alive (SSH relay grace window / local daemon); keep ownership/lease state so the user can retry.
+          if (historyPreservingStopId !== undefined && !providerExitObserved) {
+            runtime?.preservePtyHistoryThroughLateExit(args.id, historyPreservingStopId)
+            historyPreservingStopId = undefined
+          }
           throw err
         }
         /* session already dead — cleanup below handles the rest */
@@ -7769,8 +7782,8 @@ export function registerPtyHandlers(
         sendPtyExitToRenderer({ id: args.id, code: -1 })
       }
     } finally {
-      if (args.keepHistory) {
-        runtime?.clearPtyHistoryPreservingStopRequested(args.id)
+      if (historyPreservingStopId !== undefined) {
+        runtime?.clearPtyHistoryPreservingStopRequested(args.id, historyPreservingStopId)
       }
     }
   })
