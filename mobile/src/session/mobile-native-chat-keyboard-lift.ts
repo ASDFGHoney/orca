@@ -1,11 +1,18 @@
 export type NativeChatKeyboardDismissMode = 'interactive' | 'on-drag'
 
 /** iOS drags the keyboard down with the finger; Android has no interactive mode,
- *  so there the drag itself commits the hide. */
+ *  so there the drag itself commits the hide.
+ *
+ *  Following an interactive drag also needs the keyboard observer to be
+ *  publishing frames — Reanimated arms that in `keyboardDidShow`, which a view
+ *  mounting with the keyboard already up never hears. Dismissing on drag is the
+ *  safe answer until a frame arrives: an interactive drag would otherwise slide
+ *  the keyboard out from under a composer we have no way to move. */
 export function resolveNativeChatKeyboardDismissMode(
-  platform: string
+  platform: string,
+  keyboardFrameSeen: boolean
 ): NativeChatKeyboardDismissMode {
-  return platform === 'ios' ? 'interactive' : 'on-drag'
+  return platform === 'ios' && keyboardFrameSeen ? 'interactive' : 'on-drag'
 }
 
 export type NativeChatBottomPadInput = {

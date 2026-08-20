@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { MobileNativeChatView } from './MobileNativeChatView'
 
-const mocks = vi.hoisted(() => ({ platformOS: 'ios', keyboardHeight: 0, keyboardState: 0 }))
+const mocks = vi.hoisted(() => ({
+  platformOS: 'ios',
+  keyboardHeight: 0,
+  keyboardState: 0,
+  /** The latest useAnimatedStyle updater, so a test can re-run it the way the
+   *  UI thread does — without a React render. */
+  padUpdater: null as null | (() => { paddingBottom: number })
+}))
 
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
@@ -26,16 +33,46 @@ vi.mock('react-native-safe-area-context', () => ({
 
 // Reanimated evaluates the updater and hands its result to the view as a style,
 // which is what this stand-in does; the keyboard frame is the mock's to drive.
-vi.mock('react-native-reanimated', () => ({
-  default: { View: 'Animated.View' },
-  KeyboardState: { UNKNOWN: 0, OPENING: 1, OPEN: 2, CLOSING: 3, CLOSED: 4 },
-  useAnimatedKeyboard: () => ({
-    height: { value: mocks.keyboardHeight },
-    state: { value: mocks.keyboardState }
-  }),
-  useAnimatedStyle: (updater: () => unknown) => updater(),
-  useSharedValue: (value: unknown) => ({ value })
-}))
+// The shared values are getters so a re-run of a captured updater sees the
+// current frame, exactly as reading `.value` on the UI thread would.
+vi.mock('react-native-reanimated', async () => {
+  const React = await import('react')
+  return {
+    default: { View: 'Animated.View' },
+    KeyboardState: { UNKNOWN: 0, OPENING: 1, OPEN: 2, CLOSING: 3, CLOSED: 4 },
+    useAnimatedKeyboard: () => ({
+      height: {
+        get value() {
+          return mocks.keyboardHeight
+        }
+      },
+      state: {
+        get value() {
+          return mocks.keyboardState
+        }
+      }
+    }),
+    useAnimatedStyle: (updater: () => { paddingBottom: number }) => {
+      mocks.padUpdater = updater
+      return updater()
+    },
+    // Reanimated runs the reaction off the shared values it reads; after commit
+    // is close enough, and keeps the state update out of the render phase.
+    useAnimatedReaction: (
+      prepare: () => unknown,
+      react: (current: unknown, previous: unknown) => void
+    ) => {
+      const previous = React.useRef<unknown>(null)
+      const current = prepare()
+      React.useEffect(() => {
+        react(current, previous.current)
+        previous.current = current
+      })
+    },
+    runOnJS: (fn: unknown) => fn,
+    useSharedValue: (value: unknown) => ({ value })
+  }
+})
 
 vi.mock('react-native-gesture-handler', () => {
   const chain = {
@@ -142,6 +179,7 @@ describe('MobileNativeChatView', () => {
     mocks.platformOS = 'ios'
     mocks.keyboardHeight = 0
     mocks.keyboardState = 0
+    mocks.padUpdater = null
   })
 
   async function render(overrides: Overrides = {}): Promise<void> {
@@ -206,9 +244,21 @@ describe('MobileNativeChatView', () => {
   }
 
   it('lets the list drag the iOS keyboard down with the finger', async () => {
-    await render()
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+
+    await render({ keyboardInset: ROUTE_INSET })
 
     expect(listProps().keyboardDismissMode).toBe('interactive')
+  })
+
+  it('will not drag a keyboard the observer cannot report', async () => {
+    // Mounting with the keyboard already up (chat<->terminal toggle) leaves
+    // Reanimated's interactive-drag KVO unarmed, so an interactive drag would
+    // strand the composer at full lift. Dismiss on drag until a frame lands.
+    await render({ keyboardInset: ROUTE_INSET })
+
+    expect(listProps().keyboardDismissMode).toBe('on-drag')
   })
 
   it('dismisses on drag where there is no interactive keyboard', async () => {
@@ -248,7 +298,9 @@ describe('MobileNativeChatView', () => {
     expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
   })
 
-  it('follows the keyboard frame as it moves, not just at mount', async () => {
+  it('reads the keyboard frame inside the updater, not at render time', async () => {
+    // An interactive drag produces no React render — the UI thread just re-runs
+    // the updater. Anything hoisted out of it would freeze at the mount value.
     mocks.keyboardState = KEYBOARD_OPEN
     mocks.keyboardHeight = KEYBOARD_HEIGHT
     await render({ keyboardInset: ROUTE_INSET })
@@ -256,9 +308,8 @@ describe('MobileNativeChatView', () => {
 
     mocks.keyboardState = KEYBOARD_CLOSING
     mocks.keyboardHeight = 120
-    await update({ keyboardInset: ROUTE_INSET })
 
-    expect(rootPaddingBottom()).toBe(120)
+    expect(mocks.padUpdater?.().paddingBottom).toBe(120)
   })
 
   it('keeps link taps landing while the keyboard is up', async () => {

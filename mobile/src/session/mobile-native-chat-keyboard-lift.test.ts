@@ -10,13 +10,17 @@ const BOTTOM_INSET = 34
 const COMMITTED_INSET = IOS_KEYBOARD_HEIGHT - BOTTOM_INSET
 
 describe('resolveNativeChatKeyboardDismissMode', () => {
-  it('follows the finger on iOS', () => {
-    expect(resolveNativeChatKeyboardDismissMode('ios')).toBe('interactive')
+  it('follows the finger on iOS once the observer reports frames', () => {
+    expect(resolveNativeChatKeyboardDismissMode('ios', true)).toBe('interactive')
+  })
+
+  it('will not drag a keyboard it cannot follow', () => {
+    expect(resolveNativeChatKeyboardDismissMode('ios', false)).toBe('on-drag')
   })
 
   it('commits the hide on drag everywhere else', () => {
-    expect(resolveNativeChatKeyboardDismissMode('android')).toBe('on-drag')
-    expect(resolveNativeChatKeyboardDismissMode('web')).toBe('on-drag')
+    expect(resolveNativeChatKeyboardDismissMode('android', true)).toBe('on-drag')
+    expect(resolveNativeChatKeyboardDismissMode('web', true)).toBe('on-drag')
   })
 })
 

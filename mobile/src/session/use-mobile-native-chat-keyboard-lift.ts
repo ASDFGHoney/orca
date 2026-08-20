@@ -1,10 +1,12 @@
 import { Platform } from 'react-native'
 import type { ViewStyle } from 'react-native'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   KeyboardState,
+  runOnJS,
   useAnimatedKeyboard,
+  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   type AnimatedKeyboardInfo,
@@ -41,6 +43,17 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
 } {
   const bottomInset = useSafeAreaInsets().bottom
   const keyboard = useKeyboardFrame()
+  // The observer stays silent until it has a keyboard frame to report; the
+  // dismiss mode has to wait for that, so mirror it into React once.
+  const [keyboardFrameSeen, setKeyboardFrameSeen] = useState(false)
+  useAnimatedReaction(
+    () => keyboard.state.value !== KeyboardState.UNKNOWN,
+    (seen, previous) => {
+      if (seen && previous !== true) {
+        runOnJS(setKeyboardFrameSeen)(true)
+      }
+    }
+  )
   const padStyle = useAnimatedStyle(() => {
     const state = keyboard.state.value
     return {
@@ -55,5 +68,8 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
       })
     }
   })
-  return { dismissMode: resolveNativeChatKeyboardDismissMode(Platform.OS), padStyle }
+  return {
+    dismissMode: resolveNativeChatKeyboardDismissMode(Platform.OS, keyboardFrameSeen),
+    padStyle
+  }
 }
