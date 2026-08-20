@@ -678,7 +678,6 @@ import { retireTerminalSurfaceFromPersistence } from './mobile-session-terminal-
 import {
   NO_OBSERVING_PROVIDER_REASON,
   SSH_EXIT_UNCONFIRMED_REASON,
-  SSH_PROVIDER_UNREGISTERED_REASON,
   type PtyLivenessVerdict
 } from '../../shared/pty-liveness-verdict'
 import {
@@ -1915,7 +1914,11 @@ type RuntimePtyController = {
   retireRejectedPty?(ptyId: string, stopConfirmed: boolean): void
   stopAndWait?(
     ptyId: string,
-    opts?: { keepHistory?: boolean; deadlineMs?: number }
+    opts?: {
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: PtyIncarnationId
+    }
   ): Promise<boolean>
   markReversibleStops?(ptyIds: readonly string[]): () => void
   getCwd?(ptyId: string): Promise<string | null>
@@ -3165,10 +3168,10 @@ export class OrcaRuntimeService {
   private ptyForegroundAgentRefreshes = new Map<string, PtyForegroundAgentRefresh>()
   private ptyForegroundProcessReads = new Map<string, PtyForegroundProcessReadEntry>()
   private ptyDelayedForegroundSnapshotTitleObservations = new Map<string, number>()
-  // Why a set and not a timer: the intent is retired by the exit it explains, or
+  // Why a map and not a timer: the intent is retired by the exact exit it explains, or
   // by the next lifecycle generation on that id (advancePtyLifecycleGeneration),
   // so a stop that never produced an exit cannot outlive its process.
-  private readonly stopRequestedPtyIds = new Set<string>()
+  private readonly stopRequestedPtyIds = new Map<string, string | undefined>()
   private _orchestrationDb: OrchestrationDb | null = null
   private messageWaitersByHandle = new Map<string, Set<MessageWaiter>>()
   private readonly orchestrationMailboxOwner = new OrchestrationMailboxOwner({
@@ -15192,6 +15195,9 @@ export class OrcaRuntimeService {
   ): void {
     const pty = this.ptysById.get(ptyId)
     if (exitIncarnationId && pty?.incarnationId && exitIncarnationId !== pty.incarnationId) {
+      if (this.stopRequestedPtyIds.get(ptyId) === exitIncarnationId) {
+        this.stopRequestedPtyIds.delete(ptyId)
+      }
       return
     }
     // Why intent first: a requested stop can still be delivered by the provider's
@@ -15204,10 +15210,12 @@ export class OrcaRuntimeService {
     const observedCause = options?.cause ?? resolveUnreportedExitCause(exitCode)
     const stopNeverConfirmed =
       observedCause.kind === 'unknown' && observedCause.reason === 'stop_unverified'
+    const stopRequestedIncarnationId = this.stopRequestedPtyIds.get(ptyId)
+    const stopMatchesExit =
+      this.stopRequestedPtyIds.has(ptyId) &&
+      (stopRequestedIncarnationId === undefined || exitIncarnationId === stopRequestedIncarnationId)
     const exitCause: TerminalExitCause =
-      this.stopRequestedPtyIds.has(ptyId) && !stopNeverConfirmed
-        ? OPERATOR_CLOSE_EXIT_CAUSE
-        : observedCause
+      stopMatchesExit && !stopNeverConfirmed ? OPERATOR_CLOSE_EXIT_CAUSE : observedCause
     this.stopRequestedPtyIds.delete(ptyId)
     const preservesAbnormalSshSurface =
       this.isSshOwnedPtyId(ptyId) &&
@@ -18252,8 +18260,8 @@ export class OrcaRuntimeService {
    * separates "the operator closed it" from "the agent died", so it is recorded
    * where it is known rather than reconstructed afterwards (STA-4603).
    */
-  markPtyStopRequested(ptyId: string): void {
-    this.stopRequestedPtyIds.add(ptyId)
+  markPtyStopRequested(ptyId: string, incarnationId?: string): void {
+    this.stopRequestedPtyIds.set(ptyId, incarnationId)
   }
 
   isPtyStopRequested(ptyId: string): boolean {
@@ -29595,63 +29603,81 @@ export class OrcaRuntimeService {
     return count
   }
 
-  private getPtyIdsForExplicitTabClose(worktreeId: string, tabId: string): string[] {
-    const ptyIds = new Set<string>()
+  private getPtyTargetsForExplicitTabClose(
+    worktreeId: string,
+    tabId: string
+  ): { ptyId: string; incarnationId?: string }[] {
+    const targets = new Map<string, string | undefined>()
+    const remember = (ptyId: string, incarnationId?: string): void => {
+      if (!targets.has(ptyId) || incarnationId !== undefined) {
+        targets.set(ptyId, incarnationId)
+      }
+    }
     for (const pty of this.ptysById.values()) {
       if (pty.connected && pty.worktreeId === worktreeId && pty.tabId === tabId) {
-        ptyIds.add(pty.ptyId)
+        remember(pty.ptyId, pty.incarnationId ?? undefined)
       }
     }
     for (const leaf of this.leaves.values()) {
       if (leaf.worktreeId === worktreeId && leaf.tabId === tabId && leaf.ptyId) {
-        ptyIds.add(leaf.ptyId)
+        remember(
+          leaf.ptyId,
+          this.ptysById.get(leaf.ptyId)?.incarnationId ??
+            this.getPersistedTerminalIncarnation(worktreeId, tabId, leaf.leafId, leaf.ptyId) ??
+            undefined
+        )
       }
     }
-    return [...ptyIds]
+    return [...targets].map(([ptyId, incarnationId]) => ({
+      ptyId,
+      ...(incarnationId ? { incarnationId } : {})
+    }))
   }
 
   private async stopExplicitlyClosedTabPtys(
-    ptyIds: readonly string[],
+    targets: readonly { ptyId: string; incarnationId?: string }[],
     addressedPtyId: string,
     expectedTerminal?: TerminalTabCloseExpectation
   ): Promise<boolean> {
     let addressedPtyStopped = false
     const deadlineMs = Date.now() + EXPLICIT_TERMINAL_CLOSE_STOP_TIMEOUT_MS
-    for (const ptyId of ptyIds) {
+    for (const target of targets) {
+      const { ptyId, incarnationId } = target
       if (ptyId === expectedTerminal?.ptyId) {
         this.verifyTerminalTabCloseExpectation(expectedTerminal)
+      }
+      if (!incarnationId) {
+        this.markPtyLivenessUnverifiable(
+          ptyId,
+          'the PTY provider did not publish an incarnation for exact close'
+        )
+        continue
       }
       // Why here: this is the single funnel for an explicit close, and the
       // intent must be on record before the stop, since the provider may report
       // the exit itself with a status that reads like a natural finish.
-      this.markPtyStopRequested(ptyId)
+      this.markPtyStopRequested(ptyId, incarnationId)
       let stopped = false
       if (this.ptyController?.stopAndWait) {
         try {
-          stopped = await this.ptyController.stopAndWait(ptyId, { deadlineMs })
+          stopped = await this.ptyController.stopAndWait(ptyId, {
+            deadlineMs,
+            expectedIncarnationId: incarnationId
+          })
         } catch (error) {
           this.markPtyLivenessUnverifiable(
             ptyId,
             error instanceof Error ? error.message : String(error)
           )
         }
-        if (!stopped) {
-          const verdict = this.getPtyLivenessVerdict(ptyId)
-          const providerAlreadyRetiredPty =
-            verdict?.status === 'unverifiable' &&
-            verdict.reason === SSH_PROVIDER_UNREGISTERED_REASON
-          if (!providerAlreadyRetiredPty) {
-            this.ptyController.kill(ptyId)
-            if (!verdict || verdict.status === 'live') {
-              this.markPtyLivenessUnverifiable(
-                ptyId,
-                'a follow-up stop was issued but its outcome could not be verified'
-              )
-            }
-          }
+        if (!stopped && !this.getPtyLivenessVerdict(ptyId)) {
+          this.markPtyLivenessUnverifiable(
+            ptyId,
+            'incarnation-addressed stop could not confirm the PTY exited'
+          )
         }
       } else {
-        stopped = this.ptyController?.kill(ptyId) ?? false
+        this.markPtyLivenessUnverifiable(ptyId, 'incarnation-addressed stop is unavailable')
       }
       if (ptyId === addressedPtyId) {
         addressedPtyStopped = stopped
@@ -29935,7 +29961,7 @@ export class OrcaRuntimeService {
         ? countTerminalLayoutLeaves(surface.tab.parentLayout.root)
         : this.countLeavesInTab(tabId)
       if (siblingCount <= 1 && surface && this.tabs.has(tabId) && this.notifier?.closeTerminalTab) {
-        const ptyIdsToKill = this.getPtyIdsForExplicitTabClose(pty.pty.worktreeId, tabId)
+        const ptyIdsToKill = this.getPtyTargetsForExplicitTabClose(pty.pty.worktreeId, tabId)
         try {
           await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, {
             localPtyTeardownOwnedExternally: true,
@@ -29955,7 +29981,7 @@ export class OrcaRuntimeService {
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
       }
       if (siblingCount <= 1 && !surface && pty.pty.tabId && this.notifier?.closeTerminalTab) {
-        const ptyIdsToKill = this.getPtyIdsForExplicitTabClose(pty.pty.worktreeId, tabId)
+        const ptyIdsToKill = this.getPtyTargetsForExplicitTabClose(pty.pty.worktreeId, tabId)
         await this.notifier.closeTerminalTab(tabId, {
           localPtyTeardownOwnedExternally: true,
           expectedTerminal
@@ -29968,7 +29994,14 @@ export class OrcaRuntimeService {
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
       }
       const ptyKilled = await this.stopExplicitlyClosedTabPtys(
-        [pty.pty.ptyId],
+        [
+          {
+            ptyId: pty.pty.ptyId,
+            ...(expectedTerminal.incarnationId
+              ? { incarnationId: expectedTerminal.incarnationId }
+              : {})
+          }
+        ],
         pty.pty.ptyId,
         expectedTerminal
       )
@@ -29998,9 +30031,16 @@ export class OrcaRuntimeService {
     const siblingCount = this.countLeavesInTab(leaf.tabId)
     const ptyIdsToKill =
       siblingCount <= 1
-        ? this.getPtyIdsForExplicitTabClose(leaf.worktreeId, leaf.tabId)
+        ? this.getPtyTargetsForExplicitTabClose(leaf.worktreeId, leaf.tabId)
         : leaf.ptyId
-          ? [leaf.ptyId]
+          ? [
+              {
+                ptyId: leaf.ptyId,
+                ...(expectedTerminal?.incarnationId
+                  ? { incarnationId: expectedTerminal.incarnationId }
+                  : {})
+              }
+            ]
           : []
     if (siblingCount <= 1 && this.notifier?.closeTerminalTab) {
       await this.notifier.closeTerminalTab(leaf.tabId, {
@@ -30062,7 +30102,7 @@ export class OrcaRuntimeService {
         tabId,
         leafId
       )
-      const ptyIdsToKill = this.getPtyIdsForExplicitTabClose(pty.pty.worktreeId, tabId)
+      const ptyIdsToKill = this.getPtyTargetsForExplicitTabClose(pty.pty.worktreeId, tabId)
       await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, {
         reason: 'user',
         localPtyTeardownOwnedExternally: true,
@@ -30079,7 +30119,7 @@ export class OrcaRuntimeService {
     this.assertGraphReady()
     const { leaf } = this.getLiveLeafForHandle(handle)
     const expectedTerminal = this.buildLeafTerminalTabCloseExpectation(handle, leaf)
-    const ptyIdsToKill = this.getPtyIdsForExplicitTabClose(leaf.worktreeId, leaf.tabId)
+    const ptyIdsToKill = this.getPtyTargetsForExplicitTabClose(leaf.worktreeId, leaf.tabId)
     await this.closeMobileSessionTab(`id:${leaf.worktreeId}`, leaf.tabId, {
       reason: 'user',
       localPtyTeardownOwnedExternally: true,

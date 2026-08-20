@@ -207,13 +207,21 @@ function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: bool
       }
     }
   )
-  const stopAndWait = vi.fn(async (ptyId: string) => {
-    providerStopEntered.resolve()
-    if (options.pauseProviderStop) {
-      await providerStopBarrier.promise
+  const stopAndWait = vi.fn(
+    async (ptyId: string, stopOptions?: { expectedIncarnationId?: string }) => {
+      providerStopEntered.resolve()
+      if (options.pauseProviderStop) {
+        await providerStopBarrier.promise
+      }
+      if (
+        stopOptions?.expectedIncarnationId !== undefined &&
+        liveProcesses.get(ptyId) !== stopOptions.expectedIncarnationId
+      ) {
+        return false
+      }
+      return liveProcesses.delete(ptyId)
     }
-    return liveProcesses.delete(ptyId)
-  })
+  )
   const kill = vi.fn((ptyId: string) => liveProcesses.delete(ptyId))
   const listProcesses = vi.fn(async () =>
     [...liveProcesses].map(([id, incarnationId]) => ({

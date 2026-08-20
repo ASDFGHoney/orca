@@ -905,6 +905,7 @@ export class PtyHandler {
     this.dispatcher.onRequest('pty.spawn', (p, context) => this.spawn(p, context))
     this.dispatcher.onRequest('pty.attach', (p, context) => this.attach(p, context))
     this.dispatcher.onRequest('pty.shutdown', (p) => this.shutdown(p))
+    this.dispatcher.onRequest('pty.shutdownIncarnation', (p) => this.shutdown(p, true))
     this.dispatcher.onRequest('pty.sendSignal', (p) => this.sendSignal(p))
     this.dispatcher.onRequest('pty.getCwd', (p) => this.getCwd(p))
     this.dispatcher.onRequest('pty.getInitialCwd', (p) => this.getInitialCwd(p))
@@ -1906,12 +1907,22 @@ export class PtyHandler {
     return { cols: managed.pty.cols, rows: managed.pty.rows }
   }
 
-  private async shutdown(params: Record<string, unknown>): Promise<void> {
+  private async shutdown(
+    params: Record<string, unknown>,
+    requireExpectedIncarnation = false
+  ): Promise<void> {
     const id = params.id as string
     const immediate = params.immediate as boolean
     const managed = this.ptys.get(id)
     if (!managed) {
       return
+    }
+    const expectedIncarnationId = params.expectedIncarnationId
+    if (
+      (requireExpectedIncarnation && typeof expectedIncarnationId !== 'string') ||
+      (typeof expectedIncarnationId === 'string' && managed.incarnationId !== expectedIncarnationId)
+    ) {
+      throw new Error('terminal_incarnation_mismatch')
     }
 
     if (immediate) {

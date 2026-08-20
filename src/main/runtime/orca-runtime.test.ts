@@ -29206,15 +29206,17 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('operates PTY-backed mobile session terminals without a renderer graph', async () => {
-    const spawn = vi.fn().mockResolvedValue({ id: 'laptop-created-pty' })
-    const kill = vi.fn(() => true)
+    const incarnationId = 'laptop-created-incarnation'
+    const spawn = vi.fn().mockResolvedValue({ id: 'laptop-created-pty', incarnationId })
+    const stopAndWait = vi.fn(async () => true)
     const closeTerminal = vi.fn()
     const runtime = new OrcaRuntimeService(store)
     runtime.setNotifier({ closeTerminal } as never)
     runtime.setPtyController({
       spawn,
       write: () => true,
-      kill,
+      kill: () => true,
+      stopAndWait,
       getForegroundProcess: async () => null
     })
 
@@ -29239,7 +29241,10 @@ describe('OrcaRuntimeService', () => {
       tabId: 'laptop-tab',
       ptyKilled: true
     })
-    expect(kill).toHaveBeenCalledWith('laptop-created-pty')
+    expect(stopAndWait).toHaveBeenCalledWith(
+      'laptop-created-pty',
+      expect.objectContaining({ expectedIncarnationId: incarnationId })
+    )
     expect(closeTerminal).toHaveBeenCalledWith('laptop-tab')
   })
 
@@ -29249,11 +29254,13 @@ describe('OrcaRuntimeService', () => {
     )
     const acknowledged = makeDeferred()
     const closeTerminalTab = vi.fn(() => acknowledged.promise)
+    const stopAndWait = vi.fn(async () => true)
     const runtime = new OrcaRuntimeService(runtimeStore as never)
     runtime.setNotifier({ closeTerminal: vi.fn(), closeTerminalTab } as never)
     runtime.setPtyController({
       write: () => true,
       kill: () => true,
+      stopAndWait,
       getForegroundProcess: async () => null,
       listProcesses: async () => []
     })
@@ -29276,6 +29283,11 @@ describe('OrcaRuntimeService', () => {
           ptyId: 'persisted-pty'
         }
       ]
+    })
+    runtime.registerPty('persisted-pty', TEST_WORKTREE_ID, null, {
+      tabId: 'host-tab',
+      leafId: HEADLESS_LEAF_ID,
+      incarnationId: 'persisted-incarnation'
     })
     const [terminal] = (await runtime.listTerminals()).terminals
     const pending = runtime.closeTerminalTab(terminal.handle)
@@ -29468,17 +29480,19 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('reuses pane close for live PTYs that do not own a renderer tab', async () => {
-    const kill = vi.fn(() => true)
+    const stopAndWait = vi.fn(async () => true)
     const closeTerminalTab = vi.fn(async () => {})
     const runtime = new OrcaRuntimeService(store)
     runtime.setNotifier({ closeTerminal: vi.fn(), closeTerminalTab } as never)
     runtime.setPtyController({
       write: () => true,
-      kill,
+      kill: () => true,
+      stopAndWait,
       getForegroundProcess: async () => null,
       listProcesses: async () => [
         {
           id: 'floating-created-pty',
+          incarnationId: 'floating-incarnation',
           cwd: TEST_WORKTREE_PATH,
           title: 'Claude'
         }
@@ -29492,7 +29506,10 @@ describe('OrcaRuntimeService', () => {
       tabId: terminal.tabId,
       ptyKilled: true
     })
-    expect(kill).toHaveBeenCalledWith('floating-created-pty')
+    expect(stopAndWait).toHaveBeenCalledWith(
+      'floating-created-pty',
+      expect.objectContaining({ expectedIncarnationId: 'floating-incarnation' })
+    )
     expect(closeTerminalTab).not.toHaveBeenCalled()
   })
 
@@ -31316,6 +31333,7 @@ describe('OrcaRuntimeService', () => {
 
   it('retires an SSH-owned surface when a stale renderer acknowledges close after relay recovery', async () => {
     const ptyId = 'ssh:ssh-1@@relay-recovered-pty'
+    const incarnationId = 'relay-recovered-incarnation'
     const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(
       makeWorkspaceSessionWithHeadlessTerminal({
         tabsByWorktree: {
@@ -31340,21 +31358,23 @@ describe('OrcaRuntimeService', () => {
     const closeTerminal = vi.fn()
     const closeTerminalTab = vi.fn(async () => {})
     let runtime!: OrcaRuntimeService
-    const kill = vi.fn((closedPtyId: string) => {
-      runtime.onPtyExit(closedPtyId, 0)
+    const stopAndWait = vi.fn(async (closedPtyId: string) => {
+      runtime.onPtyExit(closedPtyId, 0, incarnationId)
       return true
     })
     runtime = new OrcaRuntimeService(runtimeStore as never)
     runtime.setNotifier({ closeTerminal, closeTerminalTab } as never)
     runtime.setPtyController({
       write: () => true,
-      kill,
+      kill: () => true,
+      stopAndWait,
       getForegroundProcess: async () => null,
       listProcesses: async () => []
     })
     runtime.registerPty(ptyId, TEST_WORKTREE_ID, 'ssh-1', {
       tabId: 'host-tab',
-      leafId: HEADLESS_LEAF_ID
+      leafId: HEADLESS_LEAF_ID,
+      incarnationId
     })
     runtime.syncWindowGraph(1, {
       tabs: [

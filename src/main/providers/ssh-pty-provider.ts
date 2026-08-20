@@ -207,14 +207,20 @@ export class SshPtyProvider implements IPtyProvider {
 
   async shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: string
+    }
   ): Promise<void> {
     await this.mux.request(
-      'pty.shutdown',
+      opts.expectedIncarnationId ? 'pty.shutdownIncarnation' : 'pty.shutdown',
       {
         id: this.toRelayPtyId(id),
         immediate: opts.immediate ?? false,
-        keepHistory: opts.keepHistory ?? false
+        keepHistory: opts.keepHistory ?? false,
+        ...(opts.expectedIncarnationId ? { expectedIncarnationId: opts.expectedIncarnationId } : {})
       },
       relayTimeoutOptions(opts.deadlineMs)
     )

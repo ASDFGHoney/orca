@@ -1162,6 +1162,18 @@ function finishPtyShutdown(
   return incarnationId
 }
 
+function finishExpectedPtyShutdown(
+  id: string,
+  connectionId: string | null | undefined,
+  store: Store | undefined,
+  expectedIncarnationId: string | undefined
+): { finished: boolean; incarnationId?: string } {
+  if (expectedIncarnationId !== undefined && ptyIncarnationById.get(id) !== expectedIncarnationId) {
+    return { finished: false }
+  }
+  return { finished: true, incarnationId: finishPtyShutdown(id, connectionId, store) }
+}
+
 // ─── Host PTY env assembly ──────────────────────────────────────────
 // Why: centralize host-local env injections so both spawn paths (local + daemon) get them; implemented twice they drifted, silently breaking daemon PTYs.
 
@@ -4033,10 +4045,15 @@ export function registerPtyHandlers(
   async function shutdownProviderAndDetectExit(
     provider: IPtyProvider,
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: string
+    }
   ): Promise<boolean> {
     let providerExitObserved = false
-    const expectedIncarnationId = ptyIncarnationById.get(id)
+    const expectedIncarnationId = opts.expectedIncarnationId ?? ptyIncarnationById.get(id)
     const unsubscribe = provider.onExit((payload) => {
       if (
         payload.id === id &&
@@ -5736,7 +5753,13 @@ export function registerPtyHandlers(
       }
     },
     stopAndWait: async (ptyId, opts) => {
-      runtime?.markPtyStopRequested?.(ptyId)
+      if (
+        opts?.expectedIncarnationId !== undefined &&
+        ptyIncarnationById.get(ptyId) !== opts.expectedIncarnationId
+      ) {
+        return false
+      }
+      runtime?.markPtyStopRequested?.(ptyId, opts?.expectedIncarnationId)
       let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
       const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
       connectionId ??= parsedSshId?.connectionId
@@ -5788,7 +5811,10 @@ export function registerPtyHandlers(
         providerExitObserved = await shutdownProviderAndDetectExit(provider, ptyId, {
           immediate: true,
           keepHistory: opts?.keepHistory ?? false,
-          deadlineMs
+          deadlineMs,
+          ...(opts?.expectedIncarnationId
+            ? { expectedIncarnationId: opts.expectedIncarnationId }
+            : {})
         })
       } catch (err) {
         if (!isPtyAlreadyGoneError(err)) {
@@ -5805,6 +5831,12 @@ export function registerPtyHandlers(
         }
       }
       try {
+        if (
+          opts?.expectedIncarnationId !== undefined &&
+          ptyIncarnationById.get(ptyId) !== opts.expectedIncarnationId
+        ) {
+          return false
+        }
         if (!(await verifyPtyStopped(provider, ptyId, opts))) {
           runtime?.markPtyLivenessLive?.(ptyId)
           return false
@@ -5823,7 +5855,16 @@ export function registerPtyHandlers(
         )
         return false
       }
-      const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
+      const finished = finishExpectedPtyShutdown(
+        ptyId,
+        connectionId,
+        store,
+        opts?.expectedIncarnationId
+      )
+      if (!finished.finished) {
+        return false
+      }
+      const { incarnationId } = finished
       if (!providerExitObserved) {
         // The owning provider's fresh inventory observed absence, so this is a
         // death certificate even when its exit event was missed.

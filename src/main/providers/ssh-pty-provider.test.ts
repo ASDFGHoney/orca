@@ -163,6 +163,36 @@ describe('SshPtyProvider', () => {
     )
   })
 
+  it('uses a fail-closed relay method for incarnation-addressed shutdown', async () => {
+    await provider.shutdown(scopedPty1, {
+      immediate: true,
+      expectedIncarnationId: 'incarnation-a'
+    })
+    expectRequest(
+      mux.request,
+      'pty.shutdownIncarnation',
+      {
+        id: 'pty-1',
+        immediate: true,
+        keepHistory: false,
+        expectedIncarnationId: 'incarnation-a'
+      },
+      undefined
+    )
+  })
+
+  it('does not fall back to an unsafe shutdown on an old relay', async () => {
+    mux.request.mockRejectedValueOnce(new Error('Method not found: pty.shutdownIncarnation'))
+
+    await expect(
+      provider.shutdown(scopedPty1, {
+        immediate: true,
+        expectedIncarnationId: 'incarnation-a'
+      })
+    ).rejects.toThrow('Method not found')
+    expect(mux.request).not.toHaveBeenCalledWith('pty.shutdown', expect.anything())
+  })
+
   it('shutdown forwards keepHistory: true over the relay', async () => {
     await provider.shutdown(scopedPty1, { immediate: true, keepHistory: true })
     expectRequest(
