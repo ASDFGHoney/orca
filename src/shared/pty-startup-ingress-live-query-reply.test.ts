@@ -466,4 +466,63 @@ describe('PtyStartupIngress live query replies (#13137)', () => {
     expect(calls).toBe(1)
     ingress.drainAndClose()
   })
+  // node-pty delivers onData inside the master write, so a query can be answered while
+  // the queue is mid-flush. A detached flush array would show that reply an empty queue
+  // and it would take the same-turn path, landing ahead of entries not yet written.
+  it('does not let a reply answered during the flush jump queued entries', async () => {
+    vi.useFakeTimers()
+    const written: string[] = []
+    const tag = (d: string): string => d.slice(9, 11)
+    let verdict: PtySlaveLineDisciplineEcho = 'echoing'
+    let reentered = false
+    let ingress!: PtyStartupIngress
+    ingress = new PtyStartupIngress({
+      ownerBackend: 'posix-pty',
+      echoSyncProbe: () => verdict,
+      write: (data) => {
+        written.push(data)
+        if (!reentered && tag(data) === '01') {
+          reentered = true
+          ingress.answerLiveQueryReply(`\x1b]11;rgb:99\x07`)
+        }
+      },
+      onEmission: () => {}
+    })
+
+    for (const n of ['01', '02', '03']) {
+      expect(ingress.answerLiveQueryReply(`\x1b]11;rgb:${n}\x07`)).toBe(true)
+    }
+    expect(written).toEqual([])
+
+    // The tty went raw while the replies were held, so the flush sees a quiet kernel.
+    verdict = 'quiet'
+    await vi.advanceTimersByTimeAsync(250)
+
+    expect(written.map(tag)).toEqual(['01', '02', '03', '99'])
+    ingress.drainAndClose()
+  })
+
+  it('does not accept a reply after an overflow flush tore the pty down', () => {
+    vi.useFakeTimers()
+    const written: string[] = []
+    let ingress!: PtyStartupIngress
+    ingress = new PtyStartupIngress({
+      ownerBackend: 'posix-pty',
+      echoSyncProbe: () => 'echoing',
+      write: (data) => {
+        written.push(data)
+        if (written.length === 1) {
+          ingress.drainAndClose()
+        }
+      },
+      onEmission: () => {}
+    })
+
+    for (let i = 0; i < 64; i += 1) {
+      ingress.answerLiveQueryReply(`\x1b]11;rgb:${String(i).padStart(2, '0')}\x07`)
+    }
+    // Accepting this would queue it behind a closed delivery: never written, never
+    // reported, and the host has already been told the write was handled.
+    expect(ingress.answerLiveQueryReply('\x1b]11;rgb:AA\x07')).toBe(false)
+  })
 })

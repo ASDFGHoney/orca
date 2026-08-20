@@ -146,6 +146,12 @@ export class PtyStartupReplyDelivery {
     }
     if (this.pendingWrites.length >= MAX_TRACKED_REPLIES) {
       this.flushPendingWrites()
+      // Why re-check: the flush writes, and a write can re-enter all the way to
+      // teardown. Accepting here would queue behind a closed delivery, so the reply is
+      // never written and the caller is never told.
+      if (this.closed) {
+        return false
+      }
     }
     // A fresh queue starts a fresh budget, so a second query arriving after the first
     // one exhausted its own still gets probed rather than going straight to guessing.
@@ -318,8 +324,24 @@ export class PtyStartupReplyDelivery {
   private flushPendingWrites(kernelEchoImpossible = false): void {
     this.clearWriteTimer()
     this.clearActiveEchoProbe()
-    for (const pending of this.pendingWrites.splice(0)) {
+    // Why shift one at a time rather than splice the array off: writeProvider can
+    // re-enter synchronously (node-pty delivers onData inside the write), and a query
+    // answered in that turn would see an emptied queue, take the same-turn path, and
+    // land ahead of entries this loop has not written yet — the exact inversion the
+    // queue exists to prevent. Bounded by the length at entry so a re-entrant push
+    // cannot spin the loop; anything added rides the timer re-armed below, still in
+    // order because it is behind everything here.
+    let remaining = this.pendingWrites.length
+    while (remaining > 0) {
+      remaining -= 1
+      const pending = this.pendingWrites.shift()
+      if (!pending) {
+        break
+      }
       this.writeReply(pending.reply, pending.onFailed, kernelEchoImpossible, pending.projectEcho)
+    }
+    if (this.pendingWrites.length > 0) {
+      this.armWriteTimer()
     }
   }
 
