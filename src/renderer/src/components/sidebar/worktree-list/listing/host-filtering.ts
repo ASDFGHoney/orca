@@ -9,6 +9,7 @@ import {
 import type { FolderWorkspacePathStatusRequest } from '../../../../../../shared/folder-workspace-path-status'
 import type { FolderWorkspace } from '../../../../../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../../../../../shared/project-group-types'
+import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
 
 /** null means "no host filter" — every host is visible. */
 export function getVisibleSidebarHostIdSet(
@@ -77,23 +78,7 @@ export function getFolderWorkspaceExecutionHostIdForRows({
   projectGroup: Pick<ProjectGroup, 'connectionId' | 'executionHostId'> | undefined
   defaultHostId: ExecutionHostId
 }): ExecutionHostId {
-  const explicitFolderHostId = normalizeExecutionHostId(folderWorkspace.executionHostId)
-  if (explicitFolderHostId) {
-    return explicitFolderHostId
-  }
-  if (projectGroup) {
-    const explicitProjectGroupHostId = normalizeExecutionHostId(projectGroup.executionHostId)
-    if (explicitProjectGroupHostId) {
-      return explicitProjectGroupHostId
-    }
-    const projectGroupHostId = getProjectGroupExecutionHostIdForRows(projectGroup, defaultHostId)
-    if (projectGroupHostId !== defaultHostId || !folderWorkspace.connectionId) {
-      return projectGroupHostId
-    }
-  }
-  return folderWorkspace.connectionId
-    ? toSshExecutionHostId(folderWorkspace.connectionId)
-    : defaultHostId
+  return getFolderWorkspaceHostId(folderWorkspace, projectGroup, defaultHostId)
 }
 
 export function getRuntimeEnvironmentIdForFolderPathStatusHost(
