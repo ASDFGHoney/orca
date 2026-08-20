@@ -1057,6 +1057,7 @@ export function useTerminalPaneLifecycle({
             pendingCandidateKeyReleaseActive: pendingCandidateReleaseGuardActive,
             linuxOrphanCandidateDigitGuardActive:
               linuxCandidateClassification.candidateDigitGuardActive,
+            hangulPreedit: imeCompositionTracker.isHangulPreedit(),
             isMac,
             isLinux
           }
