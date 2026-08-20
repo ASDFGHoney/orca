@@ -1128,6 +1128,10 @@ export function connect(
       return lastConnectedAt
     },
 
+    getLastInboundAt(): number | null {
+      return livenessWatchdog.getLastInboundAt() || null
+    },
+
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener)
       return () => stateListeners.delete(listener)

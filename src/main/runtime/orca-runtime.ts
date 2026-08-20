@@ -1128,6 +1128,7 @@ import {
   isGeneratedWorktreeCreateName,
   WORKTREE_CREATE_MAX_SUFFIX_ATTEMPTS
 } from '../worktree-create-candidates'
+import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../shared/new-workspace/worktree-create-retry-policy'
 import {
   failedWorktreeCreationNeedsRetirement,
   getRetiredNameRegistryForRepo,
@@ -2074,8 +2075,9 @@ function getAgentLaunchPlatformForRepo(
 const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
 // Why: same idempotency window for worktree.create — a phone whose create was
 // interrupted by a connection migration retries with the same clientMutationId
-// and reuses the just-created worktree instead of spawning a duplicate.
-const WORKTREE_CREATE_RESULT_TTL_MS = 60_000
+// and reuses the just-created worktree instead of spawning a duplicate. Shared with
+// the mobile client so its replay budget is sized against the real window.
+const WORKTREE_CREATE_RESULT_TTL_MS = WORKTREE_CREATE_DEDUPE_TTL_MS
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
@@ -17219,7 +17221,10 @@ export class OrcaRuntimeService {
       // in passive desktop-watch mode.
       this.setMobileDisplayMode(ptyId, 'auto')
       if (this.hasRemoteDesktopLayoutState(ptyId)) {
-        return this.applyRemoteDesktopLayout(ptyId)
+        // Why: the lock is already released above, so this re-layout is
+        // best-effort. Reporting its `ok` would tell the desktop "nothing was
+        // reclaimed" and cost the caller its post-take-back refit and focus.
+        await this.applyRemoteDesktopLayout(ptyId)
       }
       return true
     }
@@ -17235,14 +17240,14 @@ export class OrcaRuntimeService {
         clearTimeout(softLeaver.timer)
         this.pendingSoftLeavers.delete(ptyId)
       }
-      const priorDriver = this.getDriver(ptyId)
+      // Why: applyRemoteDesktopLayout no-ops while the driver still reads mobile.
       this.setDriver(ptyId, { kind: 'idle' })
-      const converged = await this.applyRemoteDesktopLayout(ptyId)
-      if (!converged) {
-        this.setDriver(ptyId, priorDriver)
-        return false
-      }
-      this.setDriver(ptyId, { kind: 'desktop' })
+      // Why: best-effort, like the local held branch below. A host whose resize
+      // keeps failing (dropped SSH/WSL provider, exited PTY) would otherwise
+      // roll the lock back and leave the banner stranded, making every retry a
+      // no-op — the one branch that broke this method's release guarantee.
+      await this.applyRemoteDesktopLayout(ptyId)
+      this.releaseDesktopTakeBack(ptyId)
       this.setMobileDisplayMode(ptyId, 'auto')
       return true
     }
@@ -18046,8 +18051,10 @@ export class OrcaRuntimeService {
   // Returns the post-condition "no fit-override remains held" (#7588): `true`
   // when it cleared a held override OR nothing was held to begin with, `false`
   // only when a restore was attempted and the resize failed (override rolled
-  // back, still held). reclaimTerminalForDesktop gates its driver/mode
-  // transitions on this; other callers ignore it.
+  // back, still held). Informational for every caller today —
+  // reclaimTerminalForDesktop deliberately does NOT gate on it, because an
+  // explicit take-back must drop the lock even when the resize cannot
+  // converge. Do not reinstate a convergence gate there.
   async applyMobileDisplayMode(ptyId: string): Promise<boolean> {
     const mode = this.getMobileDisplayMode(ptyId)
     const inner = this.mobileSubscribers.get(ptyId)
@@ -36739,7 +36746,10 @@ export class OrcaRuntimeService {
   private isPtyKnownExited(ptyId: string): boolean {
     const pty = this.ptysById.get(ptyId)
     if (pty) {
-      return !pty.connected
+      // Why: `!connected` is an inference, not proof. The liveness sweep clears it with no
+      // exit code for every PTY of a dropped relay, so reading that as an exit retires the
+      // lease of a process still running on the host — 'unknown' must keep watching.
+      return getPtyTerminalState(pty) === 'exited'
     }
     return this.getLeavesForPty(ptyId).some((leaf) => getTerminalState(leaf) === 'exited')
   }
