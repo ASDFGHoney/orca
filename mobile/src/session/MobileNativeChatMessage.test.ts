@@ -152,4 +152,22 @@ describe('MobileNativeChatMessage', () => {
     expect(tree.root.findAllByType('ChevronDown' as never)).toHaveLength(1)
     expect(tree.root.findAllByType('SquareChevronRight' as never)).toHaveLength(1)
   })
+
+  it('renders a system notice as a banner, not an agent bubble with copy controls', () => {
+    const tree = render({
+      id: 'notice-1',
+      role: 'system',
+      blocks: [{ type: 'text', text: 'Please run /login in Claude Code.' }],
+      timestamp: null,
+      source: 'transcript',
+      noticeKind: 'agent-notice',
+      noticeLevel: 'warning'
+    })
+    expect(textIn(tree.root)).toContain('Please run /login in Claude Code.')
+    expect(tree.root.findAllByType('Pressable' as never)).toHaveLength(0)
+    const banner = tree.root
+      .findAllByType('View' as never)
+      .find((node) => node.props.accessibilityRole === 'alert')
+    expect(banner).toBeTruthy()
+  })
 })

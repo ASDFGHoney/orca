@@ -413,6 +413,7 @@ function NativeChatResolvedView({
             onLinkClick={nativeChatFileLinkClick}
             allowFileUriLinks={fileLinkContext !== null}
             failedDeliveryMessageIds={failedLaunchPromptMessageIds}
+            onSwitchToTerminal={onSwitchToTerminal}
           />
         )}
       </div>

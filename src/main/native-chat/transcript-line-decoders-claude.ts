@@ -3,7 +3,8 @@
 import {
   NATIVE_CHAT_INTERRUPTED_STATUS_TEXT,
   type NativeChatBlock,
-  type NativeChatMessage
+  type NativeChatMessage,
+  type NativeChatNoticeLevel
 } from '../../shared/native-chat-types'
 import {
   asRecord,
@@ -23,6 +24,9 @@ export function decodeClaudeTranscriptLine(
     return null
   }
   const role = record.type
+  if (role === 'system') {
+    return decodeClaudeSystemNotice(record, fallbackId)
+  }
   if (role !== 'user' && role !== 'assistant') {
     return null
   }
@@ -81,4 +85,57 @@ function claudeMessageRole(
 function parseTimestamp(value: unknown): number | null {
   const parsed = timestampMs(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+// Observed Claude JSONL `type:"system"` subtypes (local transcripts +
+// anthropics/claude-code#53516). Telemetry/recap/command envelopes stay silent;
+// unknown future subtypes with extractable copy surface so the next login-style
+// notice cannot disappear the way `informational` did.
+const CLAUDE_SYSTEM_NOISE_SUBTYPES = new Set([
+  'stop_hook_summary',
+  'turn_duration',
+  'away_summary',
+  'local_command',
+  'hook_callback',
+  'init'
+])
+
+function decodeClaudeSystemNotice(
+  record: Record<string, unknown>,
+  fallbackId: string
+): NativeChatMessage | null {
+  const subtype = extractString(record.subtype)
+  if (subtype && CLAUDE_SYSTEM_NOISE_SUBTYPES.has(subtype)) {
+    return null
+  }
+  const text = claudeSystemNoticeText(record)
+  if (!text) {
+    return null
+  }
+  return {
+    id: extractString(record.uuid) ?? fallbackId,
+    role: 'system',
+    blocks: [{ type: 'text', text }],
+    timestamp: parseTimestamp(record.timestamp),
+    source: 'transcript',
+    noticeKind: 'agent-notice',
+    noticeLevel: claudeSystemNoticeLevel(record.level)
+  }
+}
+
+function claudeSystemNoticeText(record: Record<string, unknown>): string | null {
+  const content = extractString(record.content)
+  if (content) {
+    return content
+  }
+  const error = record.error
+  return (
+    extractString(error) ??
+    extractString(asRecord(error)?.formatted) ??
+    extractString(asRecord(error)?.message)
+  )
+}
+
+function claudeSystemNoticeLevel(value: unknown): NativeChatNoticeLevel {
+  return value === 'warning' || value === 'error' ? value : 'info'
 }
