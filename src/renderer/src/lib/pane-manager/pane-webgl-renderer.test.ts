@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { ManagedPaneInternal } from './pane-manager-types'
 import {
@@ -66,7 +66,7 @@ function createFittablePane(): ManagedPaneInternal {
 type FakeRenderService = {
   _isPaused: boolean
   _needsFullRefresh: boolean
-  refreshRows: ReturnType<typeof vi.fn>
+  refreshRows: Mock<(start: number, end: number, sync?: boolean) => void>
 }
 
 /** A pane whose xterm render service is paused, as it is whenever the pane has
@@ -81,7 +81,7 @@ function createPausedPane(display: 'block' | 'none'): {
     _isPaused: true,
     _needsFullRefresh: false,
     // Mirrors xterm: a refresh while paused only latches the pending full repaint.
-    refreshRows: vi.fn(() => {
+    refreshRows: vi.fn<(start: number, end: number, sync?: boolean) => void>(() => {
       if (renderService._isPaused) {
         renderService._needsFullRefresh = true
       }
