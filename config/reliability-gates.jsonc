@@ -9411,9 +9411,9 @@
       ],
       "platforms": ["macos", "linux", "windows"],
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
-      "coveredPlatforms": ["macos", "windows"],
-      "coveredProviders": ["local"],
-      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, transient wrapper resolution, fresh foreground identity over stale launch metadata, paired-mobile floor takeover before delayed Enter, framing bytes, stale-agent shell fallback, and exact legacy behavior for every other configured agent. SSH, daemon, and remote-runtime live evidence remain explicit gaps.",
+      "coveredPlatforms": ["macos", "linux", "windows"],
+      "coveredProviders": ["local", "ssh"],
+      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. A real encrypted mobile subscription proves desktop-to-mobile floor takeover with exact fake-agent stdin, and an ephemeral Linux Docker SSH target proves half-open relay process inspection, transient wrapper retry, exact remote input, SSH execution ownership, and unrelated-PTY survival. Daemon and paired remote-runtime live evidence remain explicit gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4328",
         "https://linear.app/stably/issue/STA-4486",
@@ -9426,6 +9426,7 @@
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
         "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+        "pnpm run build:relay && ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ssh-docker-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm.cmd exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "node tests/tools/repro-terminal-send-submit.mjs --cli orca --worktree <registered-worktree> --discard-report"
       ],
@@ -9436,6 +9437,7 @@
         "src/main/runtime/orca-runtime.test.ts",
         "src/shared/agent-prompt-injection.test.ts",
         "tests/e2e/terminal-send-agent-prompt-submit.spec.ts",
+        "tests/e2e/ssh-docker-agent-prompt-submit.spec.ts",
         "tests/tools/repro-terminal-send-submit.mjs"
       ],
       "assertionRefs": [
@@ -9470,7 +9472,16 @@
           "assertions": [
             "the public source-built CLI submits after a delayed composer render without rescue",
             "the fake agent receives the marker and zero premature Enter on macOS and Windows",
-            "POSIX preserves one bracketed-paste frame while Windows validates the ConPTY-observable payload"
+            "POSIX preserves one bracketed-paste frame while Windows validates the ConPTY-observable payload",
+            "a real paired mobile floor takeover blocks delayed desktop Enter with exact PTY input"
+          ]
+        },
+        {
+          "file": "tests/e2e/ssh-docker-agent-prompt-submit.spec.ts",
+          "assertions": [
+            "two half-open SSH relay wrapper inspections precede a bounded retry that identifies Codex",
+            "the remote fake agent receives one post-render Enter and no premature Enter",
+            "execution stays on the SSH host and an unrelated remote PTY remains writable"
           ]
         }
       ],
@@ -9519,19 +9530,37 @@
           "result": "passed",
           "durationSeconds": 12.9,
           "summary": "The 1,227-test candidate gate passed with one existing skip. Its three controlled oracles also failed on origin/main and with only the candidate production hunks disabled, then passed together on the candidate: node-to-Codex wrapper settlement, current foreground over stale launch identity, and paired-mobile floor takeover before delayed Enter."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 34.0,
+          "summary": "All four source-built Electron prompt journeys passed. The encrypted paired-mobile case recorded desktop then mobile authority, prompt and mobile bytes at fake-agent stdin, no carriage return, and an accepted=false desktop result after takeover."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "linux",
+          "command": "pnpm run build:relay && ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ssh-docker-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 31.3,
+          "summary": "The candidate passed against an ephemeral Debian SSH target and real relay with two controlled half-open process reads, bounded wrapper retry, one post-render remote Enter, SSH execution-host proof, and an unrelated live remote PTY. The byte-identical oracle failed when only the settled-wrapper fix was disabled because the send settled through legacy delivery before the retry barrier."
         }
       ],
       "runtimeBudget": {
-        "p95Seconds": 90,
-        "scope": "focused units plus one isolated Electron CLI/PTY journey"
+        "p95Seconds": 180,
+        "scope": "focused units, isolated Electron CLI/paired-mobile journeys, and one Docker SSH relay journey"
       },
       "flakeHistory": {
         "status": "unknown",
         "evidence": "The final oracle passed twice in independent macOS app launches and twice on physical Windows. A shared --repeat-each fixture mode failed before test execution because only one seeded worktree loaded; supported isolated invocations were used for product evidence. CI history is not yet collected."
       },
       "redGreenEvidence": {
-        "status": "partial",
-        "evidence": "The fake-composer oracle was red against the installed pre-fix runtime with prematureEnters=1 and rescueSent=true. It also caught a source-built late-identity race with a complete paste frame but one premature Enter before the render gate began resolving foreground identity. The final candidate is green on macOS and Windows with prematureEnters=0 and rescueSent=false."
+        "status": "complete",
+        "evidence": "The same controlled unit oracles are red on origin/main and with each production fix disabled, then green together on the candidate. The paired-mobile Electron oracle is green on the candidate, while its byte-identical controlled floor-takeover oracle is red without the delayed authority recheck. The Docker SSH oracle is green on the candidate and red with only settled-wrapper retry disabled, where legacy delivery settles before the retry barrier. Existing macOS and Windows fake-composer evidence remains green with prematureEnters=0 and rescueSent=false."
       },
       "performanceBudget": {
         "required": true,
@@ -9542,7 +9571,7 @@
         "Retain mixed-version evidence that old hosts strip the optional intent and new hosts accept old clients without a protocol bump."
       ],
       "knownGaps": [
-        "Live SSH/daemon/remote-runtime evidence is not yet attached.",
+        "Live daemon and paired remote-runtime evidence is not yet attached; SSH relay and paired mobile-to-local-runtime evidence are covered.",
         "Only Claude and Codex opt into settlement; every other agent retains the legacy behavior until independently validated.",
         "A new CLI talking to an old host safely loses the optional field and therefore keeps the old timing behavior until the host updates.",
         "The E2E fake agent models the submission race without requiring external agent authentication; live account-backed agents are covered separately."
