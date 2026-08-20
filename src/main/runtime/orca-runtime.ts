@@ -29820,7 +29820,7 @@ export class OrcaRuntimeService {
           try {
             await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId)
           } catch (error) {
-            // The PTY exit may retire its headless tab before this late surface cleanup.
+            // Exit handling or another host-tab transaction may retire this surface first.
             if (
               !(error instanceof Error) ||
               (error.message !== 'workspace_session_unavailable' &&
