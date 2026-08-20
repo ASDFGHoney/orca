@@ -138,13 +138,15 @@ function makeFolderWorkspace(): FolderWorkspace {
   }
 }
 
-function createHarness(testCase: MatrixCase) {
+function createHarness(testCase: MatrixCase, options: { pauseProviderStop?: boolean } = {}) {
   const workspaceId = testCase.workspace === 'folder' ? FOLDER_WORKSPACE_ID : GIT_WORKSPACE_ID
   let session: WorkspaceSessionState = makeSession(workspaceId, PTY_A, INCARNATION_A)
   const liveProcesses = new Map([[PTY_A, INCARNATION_A]])
   const retiredPtys: string[] = []
   const rendererStoppedPtys: string[] = []
   const commitBarrier = makeDeferred()
+  const providerStopEntered = makeDeferred()
+  const providerStopBarrier = makeDeferred()
   const repo = {
     id: REPO_ID,
     path: WORKTREE_PATH,
@@ -205,7 +207,13 @@ function createHarness(testCase: MatrixCase) {
       }
     }
   )
-  const stopAndWait = vi.fn(async (ptyId: string) => liveProcesses.delete(ptyId))
+  const stopAndWait = vi.fn(async (ptyId: string) => {
+    providerStopEntered.resolve()
+    if (options.pauseProviderStop) {
+      await providerStopBarrier.promise
+    }
+    return liveProcesses.delete(ptyId)
+  })
   const kill = vi.fn((ptyId: string) => liveProcesses.delete(ptyId))
   const listProcesses = vi.fn(async () =>
     [...liveProcesses].map(([id, incarnationId]) => ({
@@ -282,8 +290,8 @@ function createHarness(testCase: MatrixCase) {
   }
   syncGraph(PTY_A, 1)
 
-  const replaceWithB = async () => {
-    const ptyId = testCase.replacement === 'same-pty-new-incarnation' ? PTY_A : PTY_B
+  const replaceWithB = async (replacementKind = testCase.replacement) => {
+    const ptyId = replacementKind === 'same-pty-new-incarnation' ? PTY_A : PTY_B
     liveProcesses.clear()
     liveProcesses.set(ptyId, INCARNATION_B)
     session = makeSession(workspaceId, ptyId, INCARNATION_B)
@@ -305,6 +313,8 @@ function createHarness(testCase: MatrixCase) {
     workspaceId,
     closeTerminalTab,
     commitBarrier,
+    providerStopEntered,
+    providerStopBarrier,
     replaceWithB,
     liveProcesses,
     retiredPtys,
@@ -354,4 +364,29 @@ describe('handle-authorized final-pane close is incarnation safe', () => {
     expect(harness.liveProcesses.has(PTY_A)).toBe(false)
     expect(harness.retiredPtys).toEqual([PTY_A])
   })
+
+  it.each(cases)(
+    '$name preserves B after renderer commit while provider stop waits',
+    async (testCase) => {
+      const harness = createHarness(testCase, { pauseProviderStop: true })
+      const [terminalA] = (await harness.runtime.listTerminals(`id:${harness.workspaceId}`))
+        .terminals
+
+      const closing = invokeClose(harness.runtime, testCase.entry, terminalA.handle)
+      await vi.waitFor(() => expect(harness.closeTerminalTab).toHaveBeenCalledTimes(1))
+      harness.commitBarrier.resolve()
+      await harness.providerStopEntered.promise
+
+      const terminalB = await harness.replaceWithB('same-pty-new-incarnation')
+      harness.providerStopBarrier.resolve()
+
+      await closing.catch(() => undefined)
+      expect(harness.getSession().tabsByWorktree[harness.workspaceId]).toHaveLength(1)
+      expect(harness.liveProcesses.get(terminalB.ptyId!)).toBe(INCARNATION_B)
+      expect(await harness.runtime.readTerminal(terminalB.handle)).toMatchObject({
+        handle: terminalB.handle,
+        status: 'running'
+      })
+    }
+  )
 })
