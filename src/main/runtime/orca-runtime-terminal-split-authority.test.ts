@@ -79,8 +79,10 @@ function createHarness(
     deferReveal?: boolean
     deferSpawn?: boolean
     deferStop?: boolean
+    exactStopSupported?: boolean
     includePairedSnapshot?: boolean
     rendererMounted?: boolean
+    spawnIncarnationId?: string | null
     sourceIncarnationId?: string
     stopAndWaitResult?: boolean
   } = {}
@@ -109,15 +111,20 @@ function createHarness(
     },
     persistPtyBinding: () => true
   }
-  let resolveSpawn: ((result: { id: string; incarnationId: string }) => void) | undefined
+  const spawnIncarnationId =
+    options.spawnIncarnationId === undefined ? SPLIT_INCARNATION_ID : options.spawnIncarnationId
+  let resolveSpawn: ((result: { id: string; incarnationId?: string }) => void) | undefined
   const spawn = options.deferSpawn
     ? vi.fn(
         () =>
-          new Promise<{ id: string; incarnationId: string }>((resolve) => {
+          new Promise<{ id: string; incarnationId?: string }>((resolve) => {
             resolveSpawn = resolve
           })
       )
-    : vi.fn(async () => ({ id: SPLIT_PTY_ID, incarnationId: SPLIT_INCARNATION_ID }))
+    : vi.fn(async () => ({
+        id: SPLIT_PTY_ID,
+        ...(spawnIncarnationId ? { incarnationId: spawnIncarnationId } : {})
+      }))
   const kill = vi.fn(() => true)
   const retireRejectedPty = vi.fn()
   let resolveStop: ((stopped: boolean) => void) | undefined
@@ -129,6 +136,7 @@ function createHarness(
           })
       )
     : vi.fn(async () => options.stopAndWaitResult ?? true)
+  const supportsIncarnationAddressedStop = vi.fn(async () => options.exactStopSupported ?? true)
   let resolveReveal: ((result: { tabId: string }) => void) | undefined
   const revealTerminalSession = options.deferReveal
     ? vi.fn(
@@ -153,6 +161,7 @@ function createHarness(
     write: () => true,
     kill,
     retireRejectedPty,
+    supportsIncarnationAddressedStop,
     ...(options.stopAndWaitResult !== undefined || options.deferStop ? { stopAndWait } : {}),
     getForegroundProcess: async () => null
   })
@@ -202,6 +211,7 @@ function createHarness(
     kill,
     retireRejectedPty,
     stopAndWait,
+    supportsIncarnationAddressedStop,
     revealTerminalSession,
     getSession: () => session,
     getSnapshot: () => internals.mobileSessionTabsByWorktree.get(WORKTREE_ID),
@@ -228,7 +238,11 @@ function createHarness(
       }),
     getSplitIncarnation: () => internals.ptysById.get(SPLIT_PTY_ID)?.incarnationId,
     resolveStop: (stopped: boolean) => resolveStop?.(stopped),
-    resolveSpawn: () => resolveSpawn?.({ id: SPLIT_PTY_ID, incarnationId: SPLIT_INCARNATION_ID })
+    resolveSpawn: () =>
+      resolveSpawn?.({
+        id: SPLIT_PTY_ID,
+        ...(spawnIncarnationId ? { incarnationId: spawnIncarnationId } : {})
+      })
   }
 }
 
@@ -278,6 +292,46 @@ describe('remote runtime terminal split authority', () => {
     expect.soft(harness.spawn).not.toHaveBeenCalled()
     expect.soft(harness.kill).not.toHaveBeenCalled()
     expect.soft(harness.revealTerminalSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses a legacy SSH split owner before spawning an unaddressable PTY', async () => {
+    const harness = createHarness(true, {
+      connectionId: 'ssh-legacy',
+      exactStopSupported: false,
+      sourceIncarnationId: 'source-incarnation'
+    })
+
+    await expect(
+      harness.runtime.splitTerminal(harness.handle, { direction: 'vertical' })
+    ).rejects.toThrow('terminal_incarnation_fence_unavailable')
+
+    expect(harness.supportsIncarnationAddressedStop).toHaveBeenCalledWith(SOURCE_PTY_ID, {
+      deadlineMs: expect.any(Number),
+      expectedIncarnationId: 'source-incarnation'
+    })
+    expect(harness.spawn).not.toHaveBeenCalled()
+    expect(harness.stopAndWait).not.toHaveBeenCalled()
+    expect(harness.kill).not.toHaveBeenCalled()
+  })
+
+  it('never stops a rejected split by ID when spawn omits its incarnation', async () => {
+    const harness = createHarness(false, {
+      deferReveal: true,
+      includePairedSnapshot: true,
+      sourceIncarnationId: 'projected-before',
+      spawnIncarnationId: null,
+      stopAndWaitResult: true
+    })
+
+    const split = harness.runtime.splitTerminal(harness.handle, { direction: 'horizontal' })
+    await vi.waitFor(() => expect(harness.revealTerminalSession).toHaveBeenCalledOnce())
+    harness.replaceSourceIncarnation('projected-after')
+    harness.resolveReveal()
+
+    await expect(split).rejects.toThrow('terminal_split_source_not_found')
+    expect(harness.stopAndWait).not.toHaveBeenCalled()
+    expect(harness.retireRejectedPty).toHaveBeenCalledWith(SPLIT_PTY_ID, false, undefined)
+    expect(harness.kill).not.toHaveBeenCalled()
   })
 
   it.each([

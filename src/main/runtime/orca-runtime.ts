@@ -30275,6 +30275,14 @@ export class OrcaRuntimeService {
     }
     const sourceIncarnationId =
       sourceAuthority.liveIncarnationId ?? sourceAuthority.persistedIncarnationId
+    if (
+      (await this.ptyController.supportsIncarnationAddressedStop?.(pty.ptyId, {
+        deadlineMs: Date.now() + REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS,
+        ...(sourceIncarnationId ? { expectedIncarnationId: sourceIncarnationId } : {})
+      })) === false
+    ) {
+      throw new Error('terminal_incarnation_fence_unavailable')
+    }
     const leafId = randomUUID()
     const preAllocatedHandle = this.createPreAllocatedTerminalHandle()
     const paneKey = makePaneKey(parentTabId, leafId)
@@ -30393,14 +30401,16 @@ export class OrcaRuntimeService {
     } catch (error) {
       this.setPairedRendererSessionOwnership(result.id, false)
       let stopped = false
-      try {
-        stopped =
-          (await this.ptyController.stopAndWait?.(result.id, {
-            deadlineMs: Date.now() + REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS,
-            ...(result.incarnationId ? { expectedIncarnationId: result.incarnationId } : {})
-          })) ?? false
-      } catch {
-        // Exact cleanup remains unverifiable; preserve the original split authority error.
+      if (result.incarnationId) {
+        try {
+          stopped =
+            (await this.ptyController.stopAndWait?.(result.id, {
+              deadlineMs: Date.now() + REJECTED_SPLIT_PTY_STOP_TIMEOUT_MS,
+              expectedIncarnationId: result.incarnationId
+            })) ?? false
+        } catch {
+          // Exact cleanup remains unverifiable; preserve the original split authority error.
+        }
       }
       try {
         this.ptyController.retireRejectedPty?.(result.id, stopped, result.incarnationId)
