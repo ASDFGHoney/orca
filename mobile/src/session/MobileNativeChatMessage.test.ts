@@ -152,4 +152,42 @@ describe('MobileNativeChatMessage', () => {
     expect(tree.root.findAllByType('ChevronDown' as never)).toHaveLength(1)
     expect(tree.root.findAllByType('SquareChevronRight' as never)).toHaveLength(1)
   })
+
+  it('makes outgoing bubble text selectable for long-press copy', () => {
+    const tree = render(userMessage([{ type: 'text', text: 'copy me back' }]))
+    const bubble = tree.root
+      .findAllByType('Text' as never)
+      .find((node) => String(node.children.join('')) === 'copy me back')
+    expect(bubble).toBeDefined()
+    expect(bubble!.props.selectable).toBe(true)
+    expect(isInsidePressable(bubble!)).toBe(false)
+  })
+
+  it('makes image-ref fallback text selectable', () => {
+    const tree = render(userMessage([{ type: 'image-ref', path: '/tmp/host.png' }]))
+    const fallback = tree.root
+      .findAllByType('Text' as never)
+      .find((node) => String(node.children.join('')).includes('/tmp/host.png'))
+    expect(fallback).toBeDefined()
+    expect(fallback!.props.selectable).toBe(true)
+  })
+
+  it('renders incoming prose as markdown instead of a non-selectable bubble', () => {
+    const tree = render(toolMessage([{ type: 'text', text: 'agent reply' }]))
+    expect(tree.root.findAllByType('MobileMarkdown' as never)).toHaveLength(1)
+    expect(
+      tree.root.findAllByType('Text' as never).some((node) => node.props.selectable === false)
+    ).toBe(false)
+  })
 })
+
+function isInsidePressable(node: ReactTestInstance): boolean {
+  let current: ReactTestInstance | null = node.parent
+  while (current) {
+    if (current.type === ('Pressable' as never)) {
+      return true
+    }
+    current = current.parent
+  }
+  return false
+}
