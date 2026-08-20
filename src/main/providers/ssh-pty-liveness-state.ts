@@ -14,10 +14,7 @@ export class SshPtyLivenessState {
   private readonly pendingLiveEvidenceByPtyId = new Map<string, Set<SshPtyLiveEvidence>>()
   private readonly liveEvidenceWindows = new Set<SshPtyLiveEvidenceWindow>()
 
-  constructor(
-    private readonly toAppPtyId: (id: string) => string,
-    private readonly onAmbiguousExitCapacityExceeded?: () => void
-  ) {}
+  constructor(private readonly toAppPtyId: (id: string) => string) {}
 
   clear(): void {
     for (const evidence of this.pendingLiveEvidenceByPtyId.values()) {
@@ -117,8 +114,10 @@ export class SshPtyLivenessState {
     this.acceptUnverifiable(appPtyId)
     this.ambiguousExitPtyIds.add(appPtyId)
     if (this.ambiguousExitPtyIds.size > MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES) {
-      this.ambiguousExitPtyIds.clear()
-      this.onAmbiguousExitCapacityExceeded?.()
+      const oldest = this.ambiguousExitPtyIds.values().next().value
+      if (oldest !== undefined) {
+        this.ambiguousExitPtyIds.delete(oldest)
+      }
     }
   }
 

@@ -52,9 +52,7 @@ export class SshPtyProvider implements IPtyProvider {
     this.mux = mux
     this.agentSessionCapabilities = new SshAgentSessionCapabilities(mux)
     this.getAppliedSize = createSshPtyAppliedSizeReader(mux, connectionId)
-    this.livenessState = new SshPtyLivenessState(this.toAppPtyId, () =>
-      this.closeOutputIntake('ambiguous-exit-state-cap')
-    )
+    this.livenessState = new SshPtyLivenessState(this.toAppPtyId)
 
     this.outputState = new SshPtyProviderOutputState(providerGeneration, {
       mux,

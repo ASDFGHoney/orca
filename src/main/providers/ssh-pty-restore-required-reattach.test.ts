@@ -157,19 +157,17 @@ describe('SSH PTY reattach when the relay requires source restoration', () => {
     ).resolves.toBe(false)
   })
 
-  it('bounds ambiguous exit retention by resetting the output intake', () => {
+  it('bounds ambiguous exit retention without disturbing the other panes on the host', async () => {
     const mux = createMockMux()
     const provider = new SshPtyProvider('conn-1', mux as never)
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      for (let index = 0; index <= MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES; index += 1) {
-        provider.acceptAmbiguousExitPty(`pty-${index}`)
-      }
-    } finally {
-      log.mockRestore()
+    provider.acceptLivePty('ssh:conn-1@@pty-live')
+
+    for (let index = 0; index <= MAX_SSH_PTY_AMBIGUOUS_EXIT_STATES; index += 1) {
+      provider.acceptAmbiguousExitPty(`pty-${index}`)
     }
 
-    expect(mux.dispose).toHaveBeenCalledExactlyOnceWith('connection_lost')
+    expect(mux.dispose).not.toHaveBeenCalled()
+    await expect(provider.probePtyLiveness('ssh:conn-1@@pty-live')).resolves.toBe(true)
   })
 
   it('keeps reconnect liveness unverifiable until relay activation', async () => {
