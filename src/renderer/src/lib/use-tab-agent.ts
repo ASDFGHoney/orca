@@ -148,10 +148,11 @@ export function resolveTabAgentFromSignals(args: {
     processShellForeground: args.processShellForeground
   })
   const activeLaunchAgent = launchedAgentExited ? null : launchAgent
-  // Why: exit evidence already clears launch identity; a leftover sleeping
-  // record is hibernation occupancy, not a live occupant after /exit.
+  // Why: a shell-named title is /exit occupancy loss. processProvesShell alone
+  // is not — restore spawns a shell before the agent relaunches, and the
+  // sleeping record is still the occupant until resume consumes it.
   const activeSleepingSessionAgent =
-    launchedAgentExited || processProvesShell ? null : sleepingSessionAgent
+    launchedAgentExited && noAgentTitle ? null : sleepingSessionAgent
   // Why: re-own the foreground process within its title-identity group so OMP's nested pi (shell → omp → pi) can't flip an OMP-owned tab's icon.
   const processAgent = resolveSignalAgentForLaunchOwner(args.processAgent, owner)
   // Identity-first precedence (see JSDoc): live hook > process > title > completed > sleeping > launch > sibling.
@@ -177,7 +178,7 @@ export function resolveTabAgentFromSignals(args: {
  * 2. Process identity — recognized foreground process (local only); re-owned within its title-identity group so OMP's nested `pi` (shell → omp → pi) can't flip the icon.
  * 3. Title — only a reuse override or legacy standalone identity; native OpenCode titles cannot displace durable ownership.
  * 4. Idle focused identity — the pane's completed hook or sidebar-retained completion; suppressed locally once OSC 133;D proves exit.
- * 5. Sleeping session identity — current provider-session ownership; suppressed on the same local exit evidence as launch identity.
+ * 5. Sleeping session identity — current provider-session ownership; suppressed only when a shell-named title proves /exit, not when a restore shell is merely foreground.
  * 6. launchAgent — bootstrap before any hook/process signal; cleared once exit evidence shows it left.
  * 7. Sibling-pane identity (live, then completed/retained) — split-tab fallback.
  */

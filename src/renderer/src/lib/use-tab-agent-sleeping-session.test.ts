@@ -134,7 +134,24 @@ describe('resolveTabAgentFromSignals sleeping-session precedence', () => {
     ).toBeNull()
   })
 
-  it('retires a leftover sleeping identity on confirmed shell even when the OSC title is stuck', () => {
+  it('keeps sleeping occupancy while a restore shell is foreground before the agent relaunches', () => {
+    // Why: processProvesShell is a replacement-shell fact, not /exit. A
+    // stale launchAgent must not win during the restore-from-sleep window.
+    expect(
+      resolveTabAgentFromSignals({
+        hasObservedAgentSignal: false,
+        isRemote: false,
+        title: 'Terminal 1',
+        hookAgent: null,
+        processAgent: null,
+        processShellForeground: true,
+        sleepingSessionAgent: 'claude',
+        launchAgent: 'codex'
+      })
+    ).toBe('claude')
+  })
+
+  it('keeps sleeping occupancy on a stuck agent title while a restore shell is foreground', () => {
     expect(
       resolveTabAgentFromSignals({
         hasObservedAgentSignal: true,
@@ -146,7 +163,7 @@ describe('resolveTabAgentFromSignals sleeping-session precedence', () => {
         sleepingSessionAgent: 'codex',
         launchAgent: 'codex'
       })
-    ).toBeNull()
+    ).toBe('codex')
   })
 
   it('keeps the icon when a launched agent only changes its conversation title', () => {
@@ -286,6 +303,28 @@ describe('useTabAgent sleeping-session', () => {
 
     expect(latestHookAgent).toBe('claude')
     expect(getForegroundProcess).not.toHaveBeenCalled()
+  })
+
+  it('keeps the tab icon when a restore shell is foreground and sleeping occupancy remains', async () => {
+    const paneKey = makePaneKey('tab-1', LEAF_ID)
+    useAppStore.setState({
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF_ID },
+          activeLeafId: LEAF_ID,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [LEAF_ID]: 'pty-1' }
+        }
+      },
+      agentStatusByPaneKey: {},
+      sleepingAgentSessionsByPaneKey: { [paneKey]: sleepingRecord(paneKey, 'claude') },
+      paneForegroundAgentByPaneKey: {
+        [paneKey]: { agent: null, shellForeground: true }
+      }
+    })
+
+    await renderHookProbe({ ...baseTab, title: '✳ Codex' })
+    expect(latestHookAgent).toBe('claude')
   })
 
   it('retires the tab icon when a sleeping session remains after confirmed shell foreground', async () => {
