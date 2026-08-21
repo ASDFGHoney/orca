@@ -192,8 +192,8 @@ export function piFixture(): IncrementalAgentFixture {
 
 // OMP is a Pi fork sharing the message-graph format, but keys the model on
 // `model` (not Pi's `modelId`); its own fixture exercises the registry's 'omp'
-// branch and that model-key difference. (The session `title` is included for
-// realism only — the parser derives the title from the first user message.)
+// branch and that model-key difference. The header title outranks the first
+// user prompt, matching a real `/rename`.
 export function ompFixture(): IncrementalAgentFixture {
   return {
     agent: 'omp',
