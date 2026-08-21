@@ -82,7 +82,9 @@ function fakeClaude() {
       send: async (message) => {
         connection.sent.push(message)
         if (message.type === 'user') {
-          handlers.onMessage?.({ ...message, uuid: 'user-1' })
+          // The real CLI stamps `isReplay` on the echo `--replay-user-messages`
+          // produces; a double that omits it does not exercise the send path.
+          handlers.onMessage?.({ ...message, uuid: 'user-1', isReplay: true })
         }
       },
       respond: async (requestId, response) => {
