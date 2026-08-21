@@ -148,6 +148,18 @@ describe('useFileExplorerWatch pending refreshes', () => {
     expect(refreshTree).not.toHaveBeenCalled()
   })
 
+  it('does not resync after hiding Files and revealing a different worktree', async () => {
+    const hook = renderWatch('/repo')
+    hook.rerender({ visiblePath: null })
+    hook.rerender({ visiblePath: '/other' })
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(refreshTree).not.toHaveBeenCalled()
+
+    hook.rerender({ visiblePath: '/repo' })
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(refreshTree).not.toHaveBeenCalled()
+  })
+
   it('flushes main SSH batches on the next turn without another debounce window', async () => {
     ownerRef.current = { kind: 'ssh', connectionId: 'ssh-1' }
     renderWatch()
