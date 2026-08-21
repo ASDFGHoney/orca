@@ -15,14 +15,14 @@ export type AgentScratchWorktreePathMatcher = (worktreePath: string) => boolean
 
 export function createAgentScratchWorktreeSourceMatcher(
   checkoutPaths: readonly string[],
-  configuredWorktreeBasePaths: readonly string[] = []
+  configuredWorktreeBasePaths: readonly string[]
 ): WorktreeVisibilitySourceMatcher {
   return createWorktreeVisibilitySourceMatcher(checkoutPaths, [], configuredWorktreeBasePaths)
 }
 
 export function createAgentScratchWorktreePathMatcher(
   checkoutPaths: readonly string[],
-  configuredWorktreeBasePaths: readonly string[] = []
+  configuredWorktreeBasePaths: readonly string[]
 ): AgentScratchWorktreePathMatcher {
   const classify = createAgentScratchWorktreeSourceMatcher(
     checkoutPaths,
@@ -34,7 +34,7 @@ export function createAgentScratchWorktreePathMatcher(
 export function isAgentScratchWorktreePath(
   repoPath: string,
   worktreePath: string,
-  configuredWorktreeBasePaths: readonly string[] = []
+  configuredWorktreeBasePaths: readonly string[]
 ): boolean {
   return createAgentScratchWorktreePathMatcher(
     [repoPath],
