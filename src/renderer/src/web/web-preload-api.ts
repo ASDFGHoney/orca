@@ -2422,6 +2422,7 @@ function createBrowserApi(): NonNullable<Partial<PreloadApi>['browser']> {
         )
       }),
     sessionClearDefaultCookies: () => Promise.resolve(false),
+    sessionClearDefaultGoogleCookies: () => Promise.resolve(false),
     notifyActiveTabChanged: () => Promise.resolve(false)
   } as unknown as NonNullable<Partial<PreloadApi>['browser']>
 }
