@@ -231,10 +231,10 @@ export function runProcessSync(spec: ProcessSpec): ProcessResult {
     signal: result.signal,
     stdout: result.stdout?.toString('utf8') ?? '',
     stderr: result.stderr?.toString('utf8') ?? '',
-    // Why check both: Node reports a sync timeout as SIGTERM plus an ETIMEDOUT
-    // error, and which one arrives depends on how the child died.
-    timedOut:
-      result.signal === 'SIGTERM' ||
-      (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
+    // Why ETIMEDOUT and not the signal: a timeout kills with SIGTERM, but so
+    // does anything else that terminates the child, and only a timeout also
+    // sets this error. Reading the signal alone reports a deliberately
+    // stopped process as having timed out, which callers retry.
+    timedOut: (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveSpawn } from './run-process'
+import { resolveSpawn, runProcessSync } from './run-process'
 import { WINDOWS_ARGUMENT_CORPUS } from './windows-command-line-corpus'
 
 const SPEC = { program: 'C:\\bin\\agent.cmd', args: ['--prompt', 'hi'] }
@@ -57,5 +57,38 @@ describe('resolveSpawn', () => {
       }
       expect(quoted, `${name}: line ends mid-quote`).toBe(false)
     }
+  })
+})
+
+describe('runProcessSync', () => {
+  it('reports a timeout as timedOut', () => {
+    const result = runProcessSync({
+      program: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 5000)'],
+      timeoutMs: 300
+    })
+    expect(result.timedOut).toBe(true)
+  })
+
+  it('does not report a deliberately terminated child as timedOut', () => {
+    // Both cases exit on SIGTERM, so reading the signal alone conflates them —
+    // and a caller that retries on timeout would then retry a process someone
+    // stopped on purpose.
+    const result = runProcessSync({
+      program: process.execPath,
+      args: ['-e', 'process.kill(process.pid, "SIGTERM")'],
+      timeoutMs: 30_000
+    })
+    expect(result.signal).toBe('SIGTERM')
+    expect(result.timedOut).toBe(false)
+  })
+
+  it('captures stdout and the exit code without throwing on failure', () => {
+    const result = runProcessSync({
+      program: process.execPath,
+      args: ['-e', 'process.stdout.write("hi"); process.exit(3)']
+    })
+    expect(result.stdout).toBe('hi')
+    expect(result.code).toBe(3)
   })
 })
