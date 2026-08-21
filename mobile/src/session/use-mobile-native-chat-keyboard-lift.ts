@@ -1,6 +1,6 @@
 import { Platform } from 'react-native'
 import type { ViewStyle } from 'react-native'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   KeyboardState,
@@ -65,11 +65,20 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
       }
     }
   )
+  // A keyboard on its way out has already zeroed the route's inset, so hold on
+  // to the settled lift — it is the only sane ceiling left for the frame.
+  const [lastSettledPad, setLastSettledPad] = useState(0)
+  useEffect(() => {
+    if (committedInset > 0) {
+      setLastSettledPad(committedInset + bottomInset)
+    }
+  }, [committedInset, bottomInset])
   const padStyle = useAnimatedStyle(() => ({
     paddingBottom: resolveNativeChatBottomPad({
       phase: keyboardPhase(keyboard.state.value),
       liveKeyboardHeight: keyboard.height.value,
       committedInset,
+      lastSettledPad,
       bottomInset
     })
   }))

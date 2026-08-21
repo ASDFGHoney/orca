@@ -43,6 +43,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'unreported',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 0,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -54,6 +55,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'unreported',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 0,
         committedInset: 0,
         bottomInset: BOTTOM_INSET
@@ -65,6 +67,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'settling',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: IOS_KEYBOARD_HEIGHT,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -77,6 +80,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'dismissing',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 180,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -88,6 +92,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'dismissing',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 12,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -99,6 +104,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'unreported',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 0,
         committedInset: 0,
         bottomInset: BOTTOM_INSET
@@ -113,6 +119,7 @@ describe('resolveNativeChatBottomPad', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'unreported',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 0,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
@@ -130,6 +137,7 @@ describe('resolveNativeChatBottomPad on an undocked keyboard', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'settling',
+        lastSettledPad: 0,
         liveKeyboardHeight: FLOATING_TOP_EDGE,
         committedInset: 260,
         bottomInset: BOTTOM_INSET
@@ -143,6 +151,7 @@ describe('resolveNativeChatBottomPad on an undocked keyboard', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'dismissing',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 200,
         committedInset: 0,
         bottomInset: BOTTOM_INSET
@@ -154,10 +163,28 @@ describe('resolveNativeChatBottomPad on an undocked keyboard', () => {
     expect(
       resolveNativeChatBottomPad({
         phase: 'settling',
+        lastSettledPad: IOS_KEYBOARD_HEIGHT,
         liveKeyboardHeight: 90,
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
       })
     ).toBe(90)
+  })
+})
+
+describe('resolveNativeChatBottomPad while an undocked keyboard leaves', () => {
+  it('caps the closing frame at the lift the keyboard actually settled on', () => {
+    // The route has already zeroed its inset, so the settled pad is the only
+    // ceiling left — without it a floating keyboard's top edge would fling the
+    // composer most of the way up the screen for the whole close animation.
+    expect(
+      resolveNativeChatBottomPad({
+        phase: 'dismissing',
+        liveKeyboardHeight: 900,
+        committedInset: 0,
+        lastSettledPad: 294,
+        bottomInset: BOTTOM_INSET
+      })
+    ).toBe(294)
   })
 })

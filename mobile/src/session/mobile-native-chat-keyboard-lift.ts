@@ -42,6 +42,9 @@ export type NativeChatBottomPadInput = {
   /** The route's React-state lift, which stays at its full value until the
    *  interactive gesture commits and `keyboardWillHide` finally fires. */
   committedInset: number
+  /** The pad last shown for a settled keyboard, which outlives the route's inset
+   *  going back to zero. 0 before any keyboard has settled. */
+  lastSettledPad: number
   bottomInset: number
 }
 
@@ -53,13 +56,14 @@ export function resolveNativeChatBottomPad(input: NativeChatBottomPadInput): num
   if (input.phase === 'unreported') {
     return committedPad
   }
-  // A keyboard frame spans the home indicator already, so below it takes the
-  // place of the bottom inset rather than stacking on top of it.
-  if (input.phase === 'dismissing') {
-    return Math.max(input.liveKeyboardHeight, input.bottomInset)
-  }
-  // Rising or resting, the route's inset is the settled target, so it also caps
-  // a frame that is taller than the keyboard: an undocked iPad keyboard floats
-  // mid-screen, and its top edge is nowhere near the height of its own panel.
-  return Math.max(Math.min(input.liveKeyboardHeight, committedPad), input.bottomInset)
+  // Cap the frame against the tallest lift we have reason to believe in. The
+  // observer reports the distance to the keyboard's *top edge*, which for an
+  // undocked iPad keyboard floating mid-screen is nowhere near the height of the
+  // panel; uncapped it would throw the composer up the screen with it. The
+  // route's inset is that ceiling while a keyboard settles, and once one is
+  // leaving the inset has already zeroed, so the last settled pad is.
+  const ceiling = Math.max(committedPad, input.lastSettledPad)
+  // A keyboard frame spans the home indicator already, so it takes the place of
+  // the bottom inset rather than stacking on top of it.
+  return Math.max(Math.min(input.liveKeyboardHeight, ceiling), input.bottomInset)
 }
