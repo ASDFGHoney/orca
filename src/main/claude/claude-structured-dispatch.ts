@@ -78,36 +78,11 @@ function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
   return message.type === 'user' && message.parent_tool_use_id === null && message.isReplay === true
 }
 
-let warnedAboutMissingReplayMarker = false
-
-/** A CLI that echoes without the marker cannot be told apart at runtime from a
- *  turn that simply had no boundary inside the ack budget: both just report
- *  "delivery unconfirmed". Say it once so the cause is diagnosable. */
-function warnIfEchoLacksReplayMarker(message: Record<string, unknown>): void {
-  if (
-    warnedAboutMissingReplayMarker ||
-    message.type !== 'user' ||
-    message.parent_tool_use_id !== null ||
-    message.isReplay !== undefined ||
-    message.tool_use_result !== undefined
-  ) {
-    return
-  }
-  warnedAboutMissingReplayMarker = true
-  console.warn(
-    '[claude-structured] user frame arrived without isReplay while a send was waiting; ' +
-      'sends will report delivery unconfirmed until the CLI stamps the marker'
-  )
-}
-
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
   const isUserReplay = isClaudeUserMessageReplay(message)
-  if (!isUserReplay && session.dispatchWaiters.length > 0) {
-    warnIfEchoLacksReplayMarker(message)
-  }
   const isCompletedCommand = message.type === 'result'
   if (
     (!isUserReplay && !isCompletedCommand) ||
