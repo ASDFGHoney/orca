@@ -127,3 +127,36 @@ describe('abort', () => {
     expect(result.timedOut).toBe(false)
   }, 20_000)
 })
+
+describe('stdin delivery failures', () => {
+  it('survives a child that exits without reading its input', async () => {
+    // The queued write fails with EPIPE, and an unhandled error on a stream is
+    // an uncaught exception — it would take the whole main process down.
+    const result = await runProcess({
+      program: process.execPath,
+      args: ['-e', 'process.exit(7)'],
+      input: 'x'.repeat(1024 * 1024),
+      timeoutMs: 15_000
+    })
+    expect(result.code).toBe(7)
+    expect(result.timedOut).toBe(false)
+  }, 20_000)
+})
+
+describe('a signal that is already aborted', () => {
+  it('stops the child instead of running it to the timeout', async () => {
+    // addEventListener never fires for an abort that already happened, so the
+    // caller would wait out the full deadline having already given up.
+    const controller = new AbortController()
+    controller.abort()
+    const startedAt = Date.now()
+    const result = await runProcess({
+      program: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      timeoutMs: 30_000,
+      signal: controller.signal
+    })
+    expect(result.timedOut).toBe(false)
+    expect(Date.now() - startedAt).toBeLessThan(10_000)
+  }, 20_000)
+})

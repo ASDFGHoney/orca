@@ -15,11 +15,18 @@ export const WINDOWS_ARGUMENT_CORPUS: readonly { name: string; value: string }[]
   { name: 'empty', value: '' },
   { name: 'space', value: 'hello world' },
   { name: 'double-quote', value: 'say "hi" ok' },
+  { name: 'quote-only', value: '"' },
+  { name: 'two-quotes', value: '""' },
   { name: 'caret', value: 'a^b' },
   { name: 'ampersand', value: 'a&b' },
   { name: 'pipe', value: 'a|b' },
   { name: 'redirect', value: 'a<b>c' },
   { name: 'percent-pair', value: 'e%F%g' },
+  // The shape that broke: a backslash immediately before a percent. Quoting
+  // inserts a quote there, and a quote after a single backslash is an escaped
+  // quote to CommandLineToArgvW.
+  { name: 'percent-after-backslash', value: 'C:\\Users\\%F%\\x' },
+  { name: 'percent-after-two-backslashes', value: 'C:\\\\%F%' },
   { name: 'percent-lone', value: '100% done' },
   { name: 'bang', value: 'q!VAR!r' },
   { name: 'parens', value: 'a(b)c' },
