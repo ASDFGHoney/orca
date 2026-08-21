@@ -60,33 +60,14 @@ const STATUS_WITH_CONTEXT_RE = /^(?:ready|idle|done)(?:\s+\([^)]*\))?$/i
 const DEFAULT_TERMINAL_TITLE_RE = /^terminal \d+$/i
 
 function isIdentityStatusTitle(titleLower: string, identityLower: string): boolean {
-  return (
-    titleLower === identityLower ||
-    titleLower === `${identityLower} ready` ||
-    titleLower === `${identityLower} idle` ||
-    titleLower === `${identityLower} done` ||
-    titleLower === `${identityLower} working` ||
-    titleLower === `${identityLower} thinking` ||
-    titleLower === `${identityLower} running` ||
-    titleLower === `${identityLower} - action required`
-  )
+  return IDENTITY_STATUS_SUFFIXES.some((suffix) => titleLower === `${identityLower}${suffix}`)
 }
 
-function isAgentIdentityStatusTitle(
-  titleLower: string,
-  agentType: AgentType | null | undefined,
-  agentTypeLabelLower: string
-): boolean {
-  if (KNOWN_IDENTITY_STATUS_TITLES_LOWER.has(titleLower)) {
-    return true
-  }
-  if (isIdentityStatusTitle(titleLower, agentTypeLabelLower)) {
-    return true
-  }
+function isAgentIdentityStatusTitle(titleLower: string, agentTypeLabelLower: string): boolean {
+  // Why: the Set covers well-known labels when the tab bar passes no agent type.
   return (
-    AGENT_IDENTITY_ALIASES_LOWER[agentType ?? '']?.some((identity) =>
-      isIdentityStatusTitle(titleLower, identity)
-    ) ?? false
+    KNOWN_IDENTITY_STATUS_TITLES_LOWER.has(titleLower) ||
+    isIdentityStatusTitle(titleLower, agentTypeLabelLower)
   )
 }
 
@@ -115,7 +96,7 @@ export function conversationNameFromLiveTitle(
   if (
     SYNTHETIC_STATUS_TITLES_LOWER.has(lower) ||
     lower === FALLBACK_TAB_TITLE_LOWER ||
-    isAgentIdentityStatusTitle(lower, agentType, agentTypeLabelLower) ||
+    isAgentIdentityStatusTitle(lower, agentTypeLabelLower) ||
     STATUS_WITH_CONTEXT_RE.test(stripped) ||
     DEFAULT_TERMINAL_TITLE_RE.test(stripped) ||
     isClaudeManagementTitle(stripped) ||

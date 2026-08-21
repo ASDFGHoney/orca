@@ -103,6 +103,56 @@ describe('tab title resolution', () => {
     ).toBe('Repair provider-native tab titles')
   })
 
+  it('keeps AI Vault titles above a meaningful live title, which still beats generated', () => {
+    const aiVaultTitle = {
+      agent: 'codex' as const,
+      sessionId: 'codex-session',
+      title: 'Vault conversation'
+    }
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          aiVaultTitle,
+          generatedTitle: 'First prompt title',
+          title: 'Investigate replay bug'
+        },
+        true
+      )
+    ).toBe('Vault conversation')
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          generatedTitle: 'First prompt title',
+          title: 'Investigate replay bug'
+        },
+        true
+      )
+    ).toBe('Investigate replay bug')
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          generatedTitle: 'First prompt title',
+          title: 'Claude working'
+        },
+        true
+      )
+    ).toBe('First prompt title')
+    expect(
+      resolveUnifiedTabLabel(
+        {
+          customLabel: null,
+          aiVaultTitle,
+          generatedLabel: 'First prompt title',
+          label: 'Investigate replay bug'
+        },
+        true
+      )
+    ).toBe('Vault conversation')
+  })
+
   it('keeps manual and quick-command labels ahead of AI Vault titles', () => {
     const aiVaultTitle = {
       agent: 'claude' as const,
