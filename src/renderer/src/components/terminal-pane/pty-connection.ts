@@ -307,7 +307,8 @@ import {
 } from '../../../../shared/agent-session-resume'
 import {
   normalizeCompatibleAgentTitleForOwner,
-  resolveCompatibleAgentTypeForOwner
+  resolveCompatibleAgentTypeForOwner,
+  shareCompatibleTitleIdentityGroup
 } from '../../../../shared/agent-title-owner'
 import { resolvePaneAgentOwnerRecord } from '../../../../shared/pane-agent-owner'
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
@@ -1556,15 +1557,13 @@ export function connectPanePty(
       return false
     }
     const explicitTitleAgentType = resolveCommittedTitleAgentType(title)
-    const activeHookAgentForTitle = resolveCompatibleAgentTypeForOwner(
-      activeHookStatus?.agentType,
-      explicitTitleAgentType
-    )
+    // Why: pick-a-winner ownership would treat a Pi idle title as a different
+    // agent than a live OMP hook. Same-group titles are wrapper frames, not reuse.
     const titleNamesDifferentKnownAgent =
       explicitTitleAgentType &&
       activeHookStatus?.agentType &&
       activeHookStatus.agentType !== 'unknown' &&
-      activeHookAgentForTitle !== explicitTitleAgentType
+      !shareCompatibleTitleIdentityGroup(activeHookStatus.agentType, explicitTitleAgentType)
     return !titleNamesDifferentKnownAgent
   }
   let pendingSuppressedTitleSideEffects: {
