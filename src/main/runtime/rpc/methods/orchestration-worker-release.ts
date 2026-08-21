@@ -1,14 +1,16 @@
 import { z } from 'zod'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import { ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import type { WorkerTerminalListState } from '../../orchestration/worker-terminal-ownership'
+import {
+  exposeWorkerTerminalResource,
+  type WorkerTerminalListState
+} from '../../orchestration/worker-terminal-ownership'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
 import { requiredString } from '../schemas'
 import {
   archiveSummary,
   completeWorkerTerminalRelease,
-  exposeWorkerTerminalResource,
   type WorkerReleaseReceipt
 } from './orchestration-worker-release-completion'
 import { requireHomeAttachment } from './orchestration-federation-control'

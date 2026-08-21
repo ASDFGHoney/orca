@@ -4,6 +4,7 @@ import type { RuntimeTerminalInteractiveWait } from '../../../../shared/runtime-
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { RemoteDispatchAttachmentRow } from '../../orchestration/types'
+import { exposeWorkerTerminalResource } from '../../orchestration/worker-terminal-ownership'
 import { defineMethod, type RpcMethod } from '../core'
 import { OptionalFiniteNumber, requiredString } from '../schemas'
 import { readExactWorkerOutput } from './orchestration-worker-output'
@@ -28,18 +29,19 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
     name: 'orchestration.federationShow',
     params: FederationDispatchParams,
     handler: async (params, { runtime, authenticatedCallerFingerprint }) => {
+      const db = runtime.getOrchestrationDb()
       const attachment = requireHomeAttachment(
         runtime,
         params.dispatchId,
         authenticatedCallerFingerprint
       )
       const observation = await inspectRemoteAttachment(runtime, params.dispatchId)
+      const resource = db.getWorkerTerminalResourceByOwner(params.dispatchId)
       return {
         dispatchId: params.dispatchId,
         runtimeEpoch: runtime.getRuntimeId(),
         attachment: exposeRemoteAttachment(attachment),
-        terminalResource:
-          runtime.getOrchestrationDb().getWorkerTerminalResourceByOwner(params.dispatchId) ?? null,
+        terminalResource: resource ? exposeWorkerTerminalResource(resource) : null,
         terminal: observation.exact ? observation.terminal : null,
         observation: {
           status: observation.status,

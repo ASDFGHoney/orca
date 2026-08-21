@@ -121,6 +121,25 @@ describe('orchestration federated terminal lifecycle', () => {
       ownership_state: 'owned',
       release_state: 'not_requested'
     })
+    const shown = await homeDispatcher.dispatch({
+      id: 'rpc_federated_worker_show',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerShow',
+      params: { dispatch: dispatchId }
+    })
+    expect(shown).toMatchObject({
+      ok: true,
+      result: {
+        terminalResource: {
+          ownershipState: 'owned',
+          releaseState: 'not_requested',
+          terminalHandle: 'term_windows_worker'
+        }
+      }
+    })
+    expect(
+      (shown as { result: { terminalResource: Record<string, unknown> } }).result.terminalResource
+    ).not.toHaveProperty('ownership_state')
     const releaseRequest = {
       id: 'rpc_federated_release',
       authToken: 'coordinator-token',
