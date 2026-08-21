@@ -13290,6 +13290,64 @@ describe('OrcaRuntimeService', () => {
     expect(retireAuthority).not.toHaveBeenCalled()
   })
 
+  it('ignores a stale command-finished settle after a later nested 133;D', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-stale-d', incarnationId: 'process-stale' })
+    const retireAuthority = vi.fn()
+    let foregroundProcess = 'zsh'
+    const confirmForegroundProcess = vi.fn(async () => foregroundProcess)
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      attestAgentHookCompatibilityAuthority: (candidate) => ({
+        paneKey: candidate.paneKey,
+        source: 'current_hook'
+      }),
+      retireAgentHookCompatibilityAuthority: retireAuthority
+    })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: confirmForegroundProcess,
+      confirmForegroundProcess
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-stale-d' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'omp',
+      launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+    })
+
+    vi.useFakeTimers()
+    try {
+      runtime.onPtyData('pty-stale-d', '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(100)
+      runtime.onPtyData('pty-stale-d', '\x1b]133;D;0\x07', 200)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS - 100)
+      expect(retireAuthority).not.toHaveBeenCalled()
+      foregroundProcess = 'omp'
+      await vi.advanceTimersByTimeAsync(100)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(retireAuthority).not.toHaveBeenCalled()
+    expect(confirmForegroundProcess).toHaveBeenCalledTimes(1)
+  })
+
   it('does not treat an unverifiable command-finished foreground read as agent exit', async () => {
     const spawn = vi.fn().mockResolvedValue({ id: 'pty-unverified', incarnationId: 'process-u' })
     const retireAuthority = vi.fn()
@@ -13503,16 +13561,19 @@ describe('OrcaRuntimeService', () => {
       issuePtyHandle: (pty: unknown) => string
       dropDisconnectedPtyRecord: (ptyId: string) => void
       syntheticTerminalHandles: Set<string>
+      launchAuthorityCommandFinishedGenerationByPtyId: Map<string, number>
     }
     const pty = internals.recordPtyWorktree('pty-pruned', TEST_WORKTREE_ID, {
       connected: false
     })
     const handle = internals.issuePtyHandle(pty)
+    internals.launchAuthorityCommandFinishedGenerationByPtyId.set('pty-pruned', 3)
     expect(internals.syntheticTerminalHandles.has(handle)).toBe(true)
 
     internals.dropDisconnectedPtyRecord('pty-pruned')
 
     expect(internals.syntheticTerminalHandles.has(handle)).toBe(false)
+    expect(internals.launchAuthorityCommandFinishedGenerationByPtyId.has('pty-pruned')).toBe(false)
   })
 
   it('drops an out-of-order aggregate inventory after a newer SSH inventory', async () => {
