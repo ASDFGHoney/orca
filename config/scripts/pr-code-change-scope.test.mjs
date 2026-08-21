@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { Readable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
-import { isDocsOnlyPath, shouldRunPrChecks } from './pr-code-change-scope.mjs'
+import { isDocsOnlyPath, readChangedPaths, shouldRunPrChecks } from './pr-code-change-scope.mjs'
 
 const projectDir = resolve(import.meta.dirname, '../..')
 const prWorkflow = parse(readFileSync(join(projectDir, '.github/workflows/pr.yml'), 'utf8'))
@@ -53,6 +54,18 @@ describe('docs-only path classification', () => {
 
   it('runs PR Checks when the diff is empty rather than skipping by accident', () => {
     expect(shouldRunPrChecks([])).toBe(true)
+  })
+
+  it('reads changed paths from a delayed pipe without synchronous fd reads', async () => {
+    const stream = Readable.from(
+      (async function* () {
+        yield 'docs/plan.md\n'
+        await Promise.resolve()
+        yield 'src/main/index.ts\n'
+      })()
+    )
+
+    await expect(readChangedPaths(stream)).resolves.toEqual(['docs/plan.md', 'src/main/index.ts'])
   })
 })
 
