@@ -44,7 +44,7 @@ export async function createSshTranscriptRangeFs(
   async function stat(filePath: string, statSignal?: AbortSignal): Promise<TranscriptFileStamp> {
     statSignal?.throwIfAborted()
     requireSameProvider(connectionId, providerSnapshot)
-    const stamp = await provider.stat(filePath)
+    const stamp = await provider.stat(filePath, { signal: statSignal })
     requireSameProvider(connectionId, providerSnapshot)
     const mtimeMs = stamp.mtimeMs ?? stamp.mtime
     return {

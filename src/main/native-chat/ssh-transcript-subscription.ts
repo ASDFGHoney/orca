@@ -4,8 +4,8 @@ import { createSshTranscriptRangeFs } from './ssh-transcript-range-fs'
 import {
   DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS,
   isTranscriptHostUnverifiableError,
-  TRANSCRIPT_UNVERIFIABLE_MESSAGE,
-  UNRESOLVED_TRANSCRIPT_MESSAGE
+  REMOTE_UNRESOLVED_TRANSCRIPT_MESSAGE,
+  TRANSCRIPT_UNVERIFIABLE_MESSAGE
 } from './transcript-host-verdict'
 import { nativeChatLineDecoderForAgent } from './transcript-tail-reader'
 import { installTranscriptWatcher } from './transcript-watch-engine'
@@ -87,7 +87,7 @@ export function subscribeSshNativeChatTranscript(
     }
     unresolvedNoticeEmitted = true
     try {
-      args.onInitialSnapshot([], false, 0, UNRESOLVED_TRANSCRIPT_MESSAGE)
+      args.onInitialSnapshot([], false, 0, REMOTE_UNRESOLVED_TRANSCRIPT_MESSAGE)
     } catch {
       // The advisory cannot own retry liveness when its subscriber is closing.
     }
@@ -147,6 +147,7 @@ export function subscribeSshNativeChatTranscript(
         result?.unsubscribe()
         return
       }
+      unverifiableEmitted = false
       if (result) {
         installed = result
         retryMs = args.resolvePollIntervalMs ?? INITIAL_RETRY_MS
