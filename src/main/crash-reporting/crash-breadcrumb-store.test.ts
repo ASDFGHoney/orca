@@ -12,6 +12,46 @@ afterEach(() => {
 })
 
 describe('crash breadcrumb store', () => {
+  describe('reporter-origin filtering', () => {
+    it('drops other renderers crumbs while keeping unattributed ones', () => {
+      recordCrashBreadcrumb('app_started')
+      recordCrashBreadcrumb('own_event', undefined, 'renderer:1')
+      recordCrashBreadcrumb('sibling_event', undefined, 'renderer:2')
+
+      expect(getCrashBreadcrumbSnapshot('renderer:1').map((entry) => entry.name)).toEqual([
+        'app_started',
+        'own_event'
+      ])
+    })
+
+    it('returns the whole ring when the reporter has no origin', () => {
+      recordCrashBreadcrumb('app_started')
+      recordCrashBreadcrumb('own_event', undefined, 'renderer:1')
+      recordCrashBreadcrumb('sibling_event', undefined, 'renderer:2')
+
+      expect(getCrashBreadcrumbSnapshot().map((entry) => entry.name)).toEqual([
+        'app_started',
+        'own_event',
+        'sibling_event'
+      ])
+    })
+
+    it('keeps a coalesced crumb on its emitter report only', () => {
+      recordCoalescedCrashBreadcrumb({
+        name: 'renderer_error',
+        data: { message: 'boom' },
+        coalesceKey: 'renderer_error:boom',
+        minIntervalMs: 30_000,
+        origin: 'renderer:1'
+      })
+
+      expect(getCrashBreadcrumbSnapshot('renderer:1').map((entry) => entry.name)).toEqual([
+        'renderer_error'
+      ])
+      expect(getCrashBreadcrumbSnapshot('renderer:2')).toEqual([])
+    })
+  })
+
   it('keeps a fixed-size in-memory snapshot', () => {
     for (let index = 0; index < 32; index += 1) {
       recordCrashBreadcrumb(`event_${index}`, { index })

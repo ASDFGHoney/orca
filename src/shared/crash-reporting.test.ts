@@ -91,6 +91,22 @@ describe('crash-reporting shared helpers', () => {
     })
   })
 
+  it('carries a breadcrumb origin through sanitization and redaction', () => {
+    const breadcrumbs = sanitizeCrashReportBreadcrumbs([
+      { createdAt: '2026-05-16T01:00:00.000Z', name: 'main_event' },
+      { createdAt: '2026-05-16T01:00:01.000Z', name: 'renderer_event', origin: 'renderer:7' },
+      {
+        createdAt: '2026-05-16T01:00:02.000Z',
+        name: 'spoofed_event',
+        origin: '/Users/alice/project'
+      }
+    ])
+
+    expect(breadcrumbs?.[0].origin).toBeUndefined()
+    expect(breadcrumbs?.[1].origin).toBe('renderer:7')
+    expect(breadcrumbs?.[2].origin).toBe('[redacted-path]')
+  })
+
   it('recognizes crash reasons captured by Electron process-gone events', () => {
     expect(isCrashReportReason('abnormal-exit')).toBe(true)
     expect(isCrashReportReason('crashed')).toBe(true)

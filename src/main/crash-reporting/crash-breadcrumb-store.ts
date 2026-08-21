@@ -30,6 +30,8 @@ type CoalescedBreadcrumbState = {
   emitted?: CrashReportBreadcrumb
   /** Newest suppressed payload, sanitized only if a snapshot actually asks for it. */
   pending?: CrashReportBreadcrumbData
+  /** Origin of the key's emitter, so a materialized orphan stays attributed. */
+  origin?: string
 }
 
 let breadcrumbs: CrashReportBreadcrumb[] = []
@@ -45,16 +47,19 @@ function retainedBreadcrumbKey(breadcrumb: CrashReportBreadcrumb): string | null
   return `${breadcrumb.name}:${String(surface)}:${String(threshold)}`
 }
 
-/** Returns the stored breadcrumb so coalescing can refresh the entry it owns. */
+/** Returns the stored breadcrumb so coalescing can refresh the entry it owns.
+ *  `origin` marks a renderer-scoped crumb; main-process callers omit it. */
 export function recordCrashBreadcrumb(
   name: string,
-  data?: CrashReportBreadcrumbData
+  data?: CrashReportBreadcrumbData,
+  origin?: string
 ): CrashReportBreadcrumb | undefined {
   const sanitized = sanitizeCrashReportBreadcrumbs([
     {
       createdAt: new Date().toISOString(),
       name,
-      data
+      data,
+      ...(origin ? { origin } : {})
     }
   ])
   const breadcrumb = sanitized?.[0]
@@ -85,12 +90,14 @@ export function recordCoalescedCrashBreadcrumb({
   name,
   data,
   coalesceKey,
-  minIntervalMs
+  minIntervalMs,
+  origin
 }: {
   name: string
   data?: CrashReportBreadcrumbData
   coalesceKey: string
   minIntervalMs: number
+  origin?: string
 }): { suppressedSinceLast: number } | undefined {
   const now = monotonicNow()
   const previous = coalescedBreadcrumbs.get(coalesceKey)
@@ -136,7 +143,8 @@ export function recordCoalescedCrashBreadcrumb({
     windowStartedAtMs: now,
     suppressed: 0,
     carried: suppressedSinceLast,
-    resolved: 0
+    resolved: 0,
+    ...(origin ? { origin } : {})
   }
   coalescedBreadcrumbs.set(coalesceKey, state)
   while (coalescedBreadcrumbs.size > MAX_COALESCE_KEYS) {
@@ -149,7 +157,8 @@ export function recordCoalescedCrashBreadcrumb({
   }
   state.emitted = recordCrashBreadcrumb(
     name,
-    suppressedSinceLast > 0 ? { ...data, suppressedSinceLast } : data
+    suppressedSinceLast > 0 ? { ...data, suppressedSinceLast } : data,
+    origin
   )
   return { suppressedSinceLast }
 }
@@ -206,10 +215,14 @@ function preservePendingCoalescedBreadcrumb(state: CoalescedBreadcrumbState): vo
   if (state.emitted || unresolved <= 0) {
     return
   }
-  recordCrashBreadcrumb(state.name, {
-    ...state.pending,
-    suppressedSinceLast: unresolved
-  })
+  recordCrashBreadcrumb(
+    state.name,
+    {
+      ...state.pending,
+      suppressedSinceLast: unresolved
+    },
+    state.origin
+  )
   state.resolved = state.suppressed
   state.pending = undefined
 }
@@ -220,12 +233,26 @@ function resolveAllPendingCoalescedBreadcrumbs(): void {
   }
 }
 
-export function getCrashBreadcrumbSnapshot(): CrashReportBreadcrumb[] {
+/** Main-process crumbs (no origin) are evidence for every report; a renderer's
+ *  crumbs belong only to its own. Callers scope coalesce keys by origin so a
+ *  suppressed repeat never lands in an entry the emitter's report filters out. */
+function isVisibleToReporter(
+  breadcrumb: CrashReportBreadcrumb,
+  reporterOrigin: string | undefined
+): boolean {
+  return !reporterOrigin || !breadcrumb.origin || breadcrumb.origin === reporterOrigin
+}
+
+/** Without `reporterOrigin` (GPU/utility/child crashes) the whole ring is
+ *  returned. Filtering runs after the shared budget on purpose: a sibling's
+ *  crumbs can still cost this report ring slots — capacity is a separate change. */
+export function getCrashBreadcrumbSnapshot(reporterOrigin?: string): CrashReportBreadcrumb[] {
   resolveAllPendingCoalescedBreadcrumbs()
   // Why: long sessions must retain threshold profiles without growing the 30-entry budget.
   const retained = [...retainedBreadcrumbs.values()]
   const recent = breadcrumbs.slice(-(MAX_BREADCRUMBS - retained.length))
   return [...retained, ...recent]
+    .filter((breadcrumb) => isVisibleToReporter(breadcrumb, reporterOrigin))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     .map((breadcrumb) => ({
       ...breadcrumb,

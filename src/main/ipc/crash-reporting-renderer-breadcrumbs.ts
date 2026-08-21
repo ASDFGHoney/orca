@@ -125,26 +125,37 @@ function rendererBreadcrumbCoalesceKey(
   return JSON.stringify([name, message, ...sourceIdentity])
 }
 
-export function recordRendererBreadcrumbFromRenderer(args?: {
-  name?: unknown
-  data?: unknown
-}): void {
+/** `origin` scopes the crumb to the sending renderer; absent means unattributed
+ *  (visible on every report), which is how this behaved before attribution. */
+export function recordRendererBreadcrumbFromRenderer(
+  args?: {
+    name?: unknown
+    data?: unknown
+  },
+  origin?: string
+): void {
   if (!args || typeof args.name !== 'string') {
     return
   }
   const data = sanitizeRendererBreadcrumbData(args.data)
   if (COALESCED_RENDERER_BREADCRUMB_NAMES.has(args.name)) {
-    const coalesceKey = rendererBreadcrumbCoalesceKey(args.name, data)
-    if (!coalesceKey) {
-      recordCrashBreadcrumb(args.name, data)
+    const eventKey = rendererBreadcrumbCoalesceKey(args.name, data)
+    if (!eventKey) {
+      recordCrashBreadcrumb(args.name, data, origin)
       recordRendererBreadcrumbTrace(args.name, data)
       return
     }
+    // Why: windows run the same bundle, so an unscoped key lets whichever
+    // emitted first own the entry — the sibling's copy is suppressed into a
+    // crumb its own report filters out, and the owner's count claims it.
+    // Costs one slot per storming window; still MAX_COALESCE_KEYS-bounded.
+    const coalesceKey = origin ? `${origin}\u0000${eventKey}` : eventKey
     const coalesceResult = recordCoalescedCrashBreadcrumb({
       name: args.name,
       data,
       coalesceKey,
-      minIntervalMs: RENDERER_BREADCRUMB_COALESCE_MS
+      minIntervalMs: RENDERER_BREADCRUMB_COALESCE_MS,
+      origin
     })
     // Why: tracing every suppressed duplicate would preserve the same
     // serialization and disk churn that breadcrumb coalescing removes.
@@ -157,7 +168,7 @@ export function recordRendererBreadcrumbFromRenderer(args?: {
       )
     }
   } else {
-    recordCrashBreadcrumb(args.name, data)
+    recordCrashBreadcrumb(args.name, data, origin)
     recordRendererBreadcrumbTrace(args.name, data)
   }
 }

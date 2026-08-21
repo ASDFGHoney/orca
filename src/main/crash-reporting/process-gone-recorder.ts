@@ -6,6 +6,7 @@ import {
   sanitizeCrashReportString,
   type CrashReportBreadcrumbData
 } from '../../shared/crash-reporting'
+import { rendererCrashBreadcrumbOrigin } from '../../shared/crash-breadcrumb-origin'
 import { decodePosixWaitStatus, describePosixWaitStatus } from '../../shared/posix-wait-status'
 import type { CrashReportStore } from './crash-report-store'
 import { getCrashBreadcrumbSnapshot } from './crash-breadcrumb-store'
@@ -41,6 +42,9 @@ export type ProcessGoneCrashEvent = {
   exitCode: number | null
   expectedTeardown: ExpectedTeardownScope
   details: Record<string, unknown>
+  /** Crashing webContents, when the source is a renderer. Kept out of `details`
+   *  so this internal Chromium id never reaches the user-facing report text. */
+  webContentsId?: number
 }
 
 type CrashReportRecorderStore = Pick<CrashReportStore, 'record' | 'attachDetails'>
@@ -209,7 +213,13 @@ export function recordProcessGoneCrash(
     },
     event.processType
   )
-  const breadcrumbs = getCrashBreadcrumbSnapshot()
+  // Why: renderer crumbs are per-window evidence, so a report scopes to its own
+  // renderer; child/GPU crashes have no window and keep the whole ring.
+  const breadcrumbs = getCrashBreadcrumbSnapshot(
+    event.webContentsId === undefined
+      ? undefined
+      : rendererCrashBreadcrumbOrigin(event.webContentsId)
+  )
   const span = startSpan('electron.process_gone', {
     attributes: {
       'crash.source': event.source,

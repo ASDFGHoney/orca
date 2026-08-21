@@ -4,6 +4,7 @@ import type {
   ReactErrorBoundaryReportArgs,
   ReactErrorBoundaryReportResult
 } from '../../shared/crash-reporting'
+import { rendererCrashBreadcrumbOrigin } from '../../shared/crash-breadcrumb-origin'
 import type { CrashReportStore } from '../crash-reporting/crash-report-store'
 import { getCrashBreadcrumbSnapshot } from '../crash-reporting/crash-breadcrumb-store'
 
@@ -118,7 +119,8 @@ function getRendererErrorReportKey(args: ReactErrorBoundaryReportArgs): string {
 
 export async function recordRendererErrorReport(
   store: CrashReportStore,
-  args: unknown
+  args: unknown,
+  webContentsId?: number
 ): Promise<ReactErrorBoundaryReportResult> {
   const normalized = normalizeRendererErrorReportArgs(args)
   if (!normalized) {
@@ -167,7 +169,9 @@ export async function recordRendererErrorReport(
     },
     // Why: React render failures are recoverable only because a boundary
     // caught them; persist the same recent app breadcrumbs as native crashes.
-    breadcrumbs: getCrashBreadcrumbSnapshot()
+    breadcrumbs: getCrashBreadcrumbSnapshot(
+      webContentsId === undefined ? undefined : rendererCrashBreadcrumbOrigin(webContentsId)
+    )
   })
 
   return { ok: true, report, deduped: false }

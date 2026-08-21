@@ -76,8 +76,11 @@ function registerHandlersWithStubStore(): void {
   } as never)
 }
 
-function emitRendererBreadcrumb(args: unknown): void {
-  listeners.get('crashReports:recordBreadcrumb')?.(null, args)
+function emitRendererBreadcrumb(args: unknown, senderId?: number): void {
+  listeners.get('crashReports:recordBreadcrumb')?.(
+    senderId === undefined ? null : { sender: { id: senderId } },
+    args
+  )
 }
 
 describe('renderer breadcrumb IPC routing', () => {
@@ -187,9 +190,11 @@ describe('renderer breadcrumb IPC routing', () => {
       data: { reasonType: 'Object' }
     })
 
-    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith('renderer_unhandled_rejection', {
-      reasonType: 'Object'
-    })
+    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith(
+      'renderer_unhandled_rejection',
+      { reasonType: 'Object' },
+      undefined
+    )
     expect(recordCoalescedCrashBreadcrumbMock).not.toHaveBeenCalled()
     expect(startSpanMock).toHaveBeenCalledTimes(1)
   })
@@ -382,10 +387,39 @@ describe('renderer breadcrumb IPC routing', () => {
   it('records non-error renderer breadcrumbs without coalescing', () => {
     emitRendererBreadcrumb({ name: 'renderer_bootstrap_started', data: { dev: true } })
 
-    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith('renderer_bootstrap_started', {
-      dev: true
-    })
+    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith(
+      'renderer_bootstrap_started',
+      { dev: true },
+      undefined
+    )
     expect(recordCoalescedCrashBreadcrumbMock).not.toHaveBeenCalled()
+  })
+
+  it('attributes breadcrumbs to the sending webContents on both record paths', () => {
+    emitRendererBreadcrumb({ name: 'renderer_bootstrap_started', data: { dev: true } }, 7)
+    emitRendererBreadcrumb({ name: 'renderer_error', data: { message: 'boom' } }, 7)
+
+    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith(
+      'renderer_bootstrap_started',
+      { dev: true },
+      'renderer:7'
+    )
+    expect(recordCoalescedCrashBreadcrumbMock.mock.calls[0]?.[0]).toMatchObject({
+      origin: 'renderer:7'
+    })
+  })
+
+  it('scopes the coalesce key per sender so windows do not share one entry', () => {
+    emitRendererBreadcrumb({ name: 'renderer_error', data: { message: 'boom' } }, 7)
+    emitRendererBreadcrumb({ name: 'renderer_error', data: { message: 'boom' } }, 9)
+    emitRendererBreadcrumb({ name: 'renderer_error', data: { message: 'boom' } })
+
+    const keys = recordCoalescedCrashBreadcrumbMock.mock.calls.map((call) => call[0].coalesceKey)
+    expect(new Set(keys).size).toBe(3)
+    // An unattributed sender keeps the pre-attribution key, so nothing shifts for it.
+    expect(keys[2]).not.toContain('renderer:')
+    expect(keys[0]).toContain('renderer:7')
+    expect(keys[1]).toContain('renderer:9')
   })
 
   it('ignores renderer breadcrumbs without a string name', () => {

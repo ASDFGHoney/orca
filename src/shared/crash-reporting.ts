@@ -17,12 +17,15 @@ export type CrashReportBreadcrumb = {
   createdAt: string
   name: string
   data?: CrashReportBreadcrumbData
+  /** Emitting surface, absent for main-process crumbs (global evidence). */
+  origin?: string
 }
 
 export type CrashReportBreadcrumbInput = {
   createdAt: string
   name: string
   data?: Record<string, unknown>
+  origin?: string
 }
 
 export type CrashReportRecord = {
@@ -127,6 +130,7 @@ export type CrashReportCopyDiagnosticsArgs = {
 const MAX_STRING_DETAIL_LENGTH = 240
 const MAX_STACK_DETAIL_LENGTH = 4_000
 const MAX_BREADCRUMB_NAME_LENGTH = 80
+const MAX_BREADCRUMB_ORIGIN_LENGTH = 80
 const MAX_BREADCRUMBS = 30
 const MAX_FORMATTED_REPORT_LENGTH = 64_000
 const FORMATTED_REPORT_TRUNCATION_SUFFIX =
@@ -221,10 +225,14 @@ export function sanitizeCrashReportBreadcrumbs(
         return null
       }
       const data = breadcrumb.data ? sanitizeCrashReportDetails(breadcrumb.data) : {}
+      const origin = breadcrumb.origin
+        ? sanitizeCrashReportString(breadcrumb.origin).slice(0, MAX_BREADCRUMB_ORIGIN_LENGTH)
+        : ''
       return {
         createdAt: sanitizeCrashReportString(breadcrumb.createdAt),
         name: sanitizeCrashReportString(breadcrumb.name).slice(0, MAX_BREADCRUMB_NAME_LENGTH),
-        ...(Object.keys(data).length > 0 ? { data } : {})
+        ...(Object.keys(data).length > 0 ? { data } : {}),
+        ...(origin ? { origin } : {})
       }
     })
     .filter((breadcrumb): breadcrumb is CrashReportBreadcrumb => breadcrumb !== null)
