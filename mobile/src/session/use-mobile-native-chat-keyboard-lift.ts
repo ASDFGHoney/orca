@@ -15,6 +15,7 @@ import {
 import {
   resolveNativeChatBottomPad,
   resolveNativeChatKeyboardDismissMode,
+  nativeChatKeyboardIsReported,
   type NativeChatKeyboardDismissMode,
   type NativeChatKeyboardPhase
 } from './mobile-native-chat-keyboard-lift'
@@ -52,15 +53,15 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
 } {
   const bottomInset = useSafeAreaInsets().bottom
   const keyboard = useKeyboardFrame()
-  // The dismiss mode is a React prop, so mirror the phase across — and mirror
-  // the same one the padding uses, or the two disagree in exactly the state the
-  // fallback exists for and the drag strands the composer again.
-  const [reportedPhase, setReportedPhase] = useState<NativeChatKeyboardPhase>('unreported')
+  // The dismiss mode is a React prop, so mirror the observer across — derived
+  // from the same phase the padding reads, or the two disagree in exactly the
+  // state the fallback exists for and the drag strands the composer again.
+  const [keyboardIsReported, setKeyboardIsReported] = useState(false)
   useAnimatedReaction(
-    () => keyboardPhase(keyboard.state.value),
-    (phase, previous) => {
-      if (phase !== previous) {
-        runOnJS(setReportedPhase)(phase)
+    () => nativeChatKeyboardIsReported(keyboardPhase(keyboard.state.value)),
+    (reported, previous) => {
+      if (reported !== previous) {
+        runOnJS(setKeyboardIsReported)(reported)
       }
     }
   )
@@ -73,7 +74,7 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
     })
   }))
   return {
-    dismissMode: resolveNativeChatKeyboardDismissMode(Platform.OS, reportedPhase),
+    dismissMode: resolveNativeChatKeyboardDismissMode(Platform.OS, keyboardIsReported),
     padStyle
   }
 }

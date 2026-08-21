@@ -189,10 +189,15 @@ export function MobileNativeChatView({
 
   // Follow the tail as the conversation grows and keep the newest message above
   // the keyboard when it opens — but only when already pinned to the bottom, so
-  // we don't yank the user away while they read history. (Also fires on keyboard
-  // close, which is harmless while atBottom.)
+  // we don't yank the user away while they read history.
+  const previousKeyboardInset = useRef(keyboardInset)
   useEffect(() => {
-    if (data.length === 0 || !atBottom) {
+    // A shrinking inset is the keyboard leaving, which is now usually the user's
+    // own downward swipe; jumping to the tail would undo the scroll they just
+    // made. The growing viewport also keeps `atBottom` true through that swipe.
+    const keyboardLeaving = keyboardInset < previousKeyboardInset.current
+    previousKeyboardInset.current = keyboardInset
+    if (data.length === 0 || !atBottom || keyboardLeaving) {
       return
     }
     const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60)

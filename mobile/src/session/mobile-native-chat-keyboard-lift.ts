@@ -21,9 +21,17 @@ export type NativeChatKeyboardPhase =
  *  to move, which is the gap this whole change exists to close. */
 export function resolveNativeChatKeyboardDismissMode(
   platform: string,
-  phase: NativeChatKeyboardPhase
+  keyboardIsReported: boolean
 ): NativeChatKeyboardDismissMode {
-  return platform === 'ios' && phase !== 'unreported' ? 'interactive' : 'on-drag'
+  return platform === 'ios' && keyboardIsReported ? 'interactive' : 'on-drag'
+}
+
+/** The half of the phase the dismiss mode cares about. Kept separate because the
+ *  observer flips between `settling` and `dismissing` on every direction change
+ *  of the finger, and only this boolean is worth waking React for. */
+export function nativeChatKeyboardIsReported(phase: NativeChatKeyboardPhase): boolean {
+  'worklet'
+  return phase !== 'unreported'
 }
 
 export type NativeChatBottomPadInput = {
@@ -40,12 +48,13 @@ export type NativeChatBottomPadInput = {
 /** Bottom padding that keeps the composer glued to the top of the keyboard. */
 export function resolveNativeChatBottomPad(input: NativeChatBottomPadInput): number {
   'worklet'
-  // The keyboard frame already spans the home indicator, so it replaces the
-  // bottom inset rather than stacking on top of it.
+  // The route already subtracted the bottom inset from its lift, so add it back.
   const committedPad = input.committedInset + input.bottomInset
   if (input.phase === 'unreported') {
     return committedPad
   }
+  // A keyboard frame spans the home indicator already, so below it takes the
+  // place of the bottom inset rather than stacking on top of it.
   if (input.phase === 'dismissing') {
     return Math.max(input.liveKeyboardHeight, input.bottomInset)
   }

@@ -13,6 +13,13 @@ const mocks = vi.hoisted(() => ({
   padUpdater: null as null | (() => { paddingBottom: number })
 }))
 
+/** Stands in for the FlatList instance the view scrolls through its ref. */
+const listInstance = {
+  scrollToEnd: vi.fn(),
+  scrollToIndex: vi.fn(),
+  scrollToOffset: vi.fn()
+}
+
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
   FlatList: 'FlatList',
@@ -180,11 +187,14 @@ describe('MobileNativeChatView', () => {
     mocks.keyboardHeight = 0
     mocks.keyboardState = 0
     mocks.padUpdater = null
+    vi.clearAllMocks()
   })
 
   async function render(overrides: Overrides = {}): Promise<void> {
     await act(async () => {
-      renderer = create(chatViewElement(overrides))
+      renderer = create(chatViewElement(overrides), {
+        createNodeMock: (element) => (element.type === 'FlatList' ? listInstance : null)
+      })
     })
   }
 
@@ -358,6 +368,49 @@ describe('MobileNativeChatView', () => {
     await render({ keyboardInset: ROUTE_INSET })
 
     expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
+  })
+
+  it('does not yank the list back to the tail when the keyboard is swiped away', async () => {
+    // Dismissing by drag scrolls the transcript, and the viewport grows as the
+    // keyboard leaves — so `atBottom` survives the swipe and the tail-follow
+    // effect would undo exactly the scroll the user just made.
+    vi.useFakeTimers()
+    try {
+      const folded = [assistantTurn('a1', 'The tests pass.')]
+      mocks.keyboardState = KEYBOARD_OPEN
+      mocks.keyboardHeight = KEYBOARD_HEIGHT
+      await render({ folded, keyboardInset: ROUTE_INSET })
+      await act(async () => vi.advanceTimersByTime(200))
+      listInstance.scrollToEnd.mockClear()
+
+      mocks.keyboardState = KEYBOARD_CLOSED
+      mocks.keyboardHeight = 0
+      await update({ folded, keyboardInset: 0 })
+      await act(async () => vi.advanceTimersByTime(200))
+
+      expect(listInstance.scrollToEnd).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still lifts the newest message clear of an opening keyboard', async () => {
+    vi.useFakeTimers()
+    try {
+      const folded = [assistantTurn('a1', 'The tests pass.')]
+      await render({ folded, keyboardInset: 0 })
+      await act(async () => vi.advanceTimersByTime(200))
+      listInstance.scrollToEnd.mockClear()
+
+      mocks.keyboardState = KEYBOARD_OPEN
+      mocks.keyboardHeight = KEYBOARD_HEIGHT
+      await update({ folded, keyboardInset: ROUTE_INSET })
+      await act(async () => vi.advanceTimersByTime(200))
+
+      expect(listInstance.scrollToEnd).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders the route-reported failure verbatim', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  nativeChatKeyboardIsReported,
   resolveNativeChatBottomPad,
   resolveNativeChatKeyboardDismissMode
 } from './mobile-native-chat-keyboard-lift'
@@ -9,18 +10,31 @@ const BOTTOM_INSET = 34
 // The route lifts by the keyboard height minus the home indicator on iOS.
 const COMMITTED_INSET = IOS_KEYBOARD_HEIGHT - BOTTOM_INSET
 
+describe('nativeChatKeyboardIsReported', () => {
+  it('is true for every phase that carries a frame', () => {
+    // Both reported phases must agree, or the finger's direction changes would
+    // wake React on every frame of the drag.
+    expect(nativeChatKeyboardIsReported('settling')).toBe(true)
+    expect(nativeChatKeyboardIsReported('dismissing')).toBe(true)
+  })
+
+  it('is false while the observer is silent', () => {
+    expect(nativeChatKeyboardIsReported('unreported')).toBe(false)
+  })
+})
+
 describe('resolveNativeChatKeyboardDismissMode', () => {
   it('follows the finger on iOS once the observer reports frames', () => {
-    expect(resolveNativeChatKeyboardDismissMode('ios', 'settling')).toBe('interactive')
+    expect(resolveNativeChatKeyboardDismissMode('ios', true)).toBe('interactive')
   })
 
   it('will not drag a keyboard it cannot follow', () => {
-    expect(resolveNativeChatKeyboardDismissMode('ios', 'unreported')).toBe('on-drag')
+    expect(resolveNativeChatKeyboardDismissMode('ios', false)).toBe('on-drag')
   })
 
   it('commits the hide on drag everywhere else', () => {
-    expect(resolveNativeChatKeyboardDismissMode('android', 'settling')).toBe('on-drag')
-    expect(resolveNativeChatKeyboardDismissMode('web', 'settling')).toBe('on-drag')
+    expect(resolveNativeChatKeyboardDismissMode('android', true)).toBe('on-drag')
+    expect(resolveNativeChatKeyboardDismissMode('web', true)).toBe('on-drag')
   })
 })
 
