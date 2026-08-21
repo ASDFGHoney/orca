@@ -5,7 +5,8 @@ import {
   registerPtyMock,
   setMigrationUnsupportedPtyMock,
   clearMigrationUnsupportedPtysForPaneKeyMock,
-  clearPaneKeyAliasesForPtyMock
+  clearPaneKeyAliasesForPtyMock,
+  spawnMock
 } from './pty-ipc-mock-registry'
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import { getDefaultWorkspaceSession } from '../../shared/constants'
@@ -462,8 +463,46 @@ describe('registerPtyHandlers', () => {
 
     expect(registerPtyMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        paneKey: null
+        paneKey: stablePaneKey
       })
+    )
+  })
+  it('stamps a reminted $$ pane key as the metadata-proven canonical key', async () => {
+    registerPtyHandlers(mainWindow as never)
+    const leafId = '11111111-1111-4111-8111-111111111111'
+    const stablePaneKey = makePaneKey('tab-1', leafId)
+    const remintedPaneKey = '$$MFRGGZDFMY:L$$'
+    await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      worktreeId: 'wt-1',
+      tabId: 'tab-1',
+      leafId,
+      env: {
+        ORCA_PANE_KEY: remintedPaneKey,
+        ORCA_AGENT_LAUNCH_TOKEN: 'launch-remint'
+      }
+    })
+
+    expect(spawnMock.mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ORCA_PANE_KEY: stablePaneKey,
+          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remint'
+        })
+      })
+    )
+    expect(registerPtyMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        paneKey: stablePaneKey
+      })
+    )
+    expect(registerPaneKeyAliasMock).toHaveBeenCalledWith(
+      remintedPaneKey,
+      stablePaneKey,
+      expect.any(String),
+      expect.any(Number),
+      { authorityVerified: true }
     )
   })
   it('does not let an old PTY teardown clear a newer pane-key owner', async () => {

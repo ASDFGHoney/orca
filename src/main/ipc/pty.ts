@@ -148,6 +148,7 @@ import {
   parseLegacyNumericPaneKey,
   parsePaneKey
 } from '../../shared/stable-pane-id'
+import { isOpaqueRemintedPaneKey } from '../../shared/pane-key-alias'
 import { isValidTerminalTabId } from '../../shared/terminal-tab-id'
 import { parseTerminalKittyKeyboardFlags } from '../../shared/terminal-kitty-keyboard-flags'
 import {
@@ -6340,6 +6341,10 @@ export function registerPtyHandlers(
           ? { ...sshSourceEnv, ...claudeAuth.envPatch }
           : sshSourceEnv
         const spawnPaneKey = baseEnvWithAuth?.ORCA_PANE_KEY
+        const remintedSpawnPaneKey =
+          typeof spawnPaneKey === 'string' && isOpaqueRemintedPaneKey(spawnPaneKey.trim())
+            ? spawnPaneKey.trim()
+            : null
         const parsedSpawnPaneKey = parseValidPaneKey(spawnPaneKey)
         const verifiedPaneKey =
           parsedSpawnPaneKey &&
@@ -6368,7 +6373,7 @@ export function registerPtyHandlers(
           isTerminalLeafId(args.leafId)
             ? makePaneKey(args.tabId, args.leafId)
             : null
-        const stablePaneKey = verifiedPaneKey ?? migrationUnsupportedPaneKey
+        const stablePaneKey = verifiedPaneKey ?? migrationUnsupportedPaneKey ?? metadataPaneKey
         let baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
         const shouldRefreshAgentTeamsEnv =
           !preAdoptedStablePane &&
@@ -7121,6 +7126,16 @@ export function registerPtyHandlers(
             { authorityVerified: true }
           )
           clearMigrationUnsupportedPtysForPaneKey(migrationUnsupportedPaneKey)
+        } else if (remintedSpawnPaneKey && validatedPaneKey) {
+          // Why: reminted $$ tokens are spawn-physical; alias them to the metadata-proven
+          // tab:leaf key so later hooks still route after env is rewritten to canonical.
+          agentHookServer.registerPaneKeyAlias(
+            remintedSpawnPaneKey,
+            validatedPaneKey,
+            result.id,
+            Date.now(),
+            { authorityVerified: true }
+          )
         } else if (validatedPaneKey) {
           if (!result.isReattach) {
             clearMigrationUnsupportedPtysForPaneKey(validatedPaneKey)
