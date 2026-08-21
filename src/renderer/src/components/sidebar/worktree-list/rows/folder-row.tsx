@@ -7,7 +7,10 @@ import type {
   WorktreeLineage
 } from '../../../../../../shared/worktree/lineage-types'
 import type { Worktree } from '../../../../../../shared/worktree/types'
-import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
+import {
+  composeWorktreeHostIdentity,
+  getWorktreeHostIdentity
+} from '../../../../../../shared/worktree/host-qualified-identity'
 import type { FolderWorkspacePathStatus } from '../../../../../../shared/folder-workspace-path-status'
 import { isConfirmedStaleFolderPathStatus } from '../../../../../../shared/folder-workspace-path-status'
 import { folderWorkspaceToWorktreeForHost } from '../../../../../../shared/folder-workspace-worktree'
@@ -21,7 +24,6 @@ import type { FolderWorkspaceItemRow } from '../listing/renderable-rows'
 import { getWorktreeOptionId } from './option-dom'
 import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
-import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
 import { getFolderWorkspaceSidebarRowKey } from '../listing/render-row'
 
 export type FolderWorkspaceRowContext = {
