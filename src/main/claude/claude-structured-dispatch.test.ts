@@ -234,6 +234,32 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  it.each([
+    ['/README.md - what does this do?', 'a bare filename'],
+    ['  /clear', 'an indented command, which the TUI reads as prose']
+  ])('keeps %s off the result path (%s)', async (text) => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'result',
+      subtype: 'success',
+      session_id: 'provider-session',
+      uuid: 'unrelated-turn-result'
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame('real-replay', text))
+    await expect(dispatched).resolves.toMatchObject({
+      providerIdentity: { uuid: 'real-replay' }
+    })
+  })
+
   // The waiter queue is positional, so shifting the head on a send failure
   // resolves whichever dispatch happens to be first - reporting a delivered
   // message as unconfirmed while the send that actually failed keeps waiting.

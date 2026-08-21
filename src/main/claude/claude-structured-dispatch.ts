@@ -185,22 +185,25 @@ function waitForReplay(
   return { waiter, replayed }
 }
 
+// A command token: `/model`, `/clear`, `/project:foo`. Not `/Users/me/foo.ts`
+// (slash) and not `/README.md` (dot).
+const SLASH_COMMAND_TOKEN = /^\/[a-z0-9][\w:-]*$/i
+
 /**
  * A slash command, not a message that merely opens with a path.
  *
  * `acceptsResult` lets a send settle on a bare `result` frame, which carries no
  * correlation to the dispatch that is waiting - so a false positive lets an
  * unrelated turn's result claim the send's identity, and the real echo then
- * appends a second row. `/Users/me/repo/foo.ts - explain this` is an ordinary
- * message; the second slash is what gives it away.
+ * appends a second row. This is stricter than `classifyNativeChatSend`, which
+ * treats any `/`-leading token as command-ish: over-classifying is safe there
+ * (it only suppresses an echo) and unsafe here.
+ *
+ * No trimming, matching that classifier's documented rule: the supported TUIs
+ * only treat a LINE-LEADING token as a command, so `  /clear` is prose.
  */
 function isSlashCommandText(text: string): boolean {
-  const trimmed = text.trimStart()
-  if (!trimmed.startsWith('/')) {
-    return false
-  }
-  const token = trimmed.slice(1).split(/\s/, 1)[0] ?? ''
-  return token.length > 0 && !token.includes('/')
+  return SLASH_COMMAND_TOKEN.test(text.split(/\s/, 1)[0] ?? '')
 }
 
 export async function dispatchClaudeTurn(
