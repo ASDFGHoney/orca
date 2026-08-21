@@ -98,6 +98,7 @@ import {
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
 import { LOCAL_EXECUTION_HOST_ID, toSshExecutionHostId } from '../../shared/execution-host'
+import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
 
 export type { AgentHookSource }
@@ -141,6 +142,12 @@ type PersistedAgentHookAuthorityCommitment = {
   tabId?: string
   worktreeId?: string
   observedAt: number
+}
+
+function agentHookExecutionHostId(connectionId: string | null | undefined) {
+  return connectionId && !isWslHookRelayConnectionId(connectionId)
+    ? toSshExecutionHostId(connectionId)
+    : LOCAL_EXECUTION_HOST_ID
 }
 
 export type AgentHookStatusChangeEntry = {
@@ -335,7 +342,7 @@ function sanitizeHydratedEntry(
   const providerSession: AgentProviderSessionMetadata | undefined = normalizedProviderSession
     ? {
         ...normalizedProviderSession,
-        executionHostId: connectionId ? toSshExecutionHostId(connectionId) : LOCAL_EXECUTION_HOST_ID
+        executionHostId: agentHookExecutionHostId(connectionId)
       }
     : undefined
   const providerSessionOnly = record.providerSessionOnly === true
@@ -1331,9 +1338,7 @@ export class AgentHookServer {
         ...payload,
         providerSession: {
           ...payload.providerSession,
-          executionHostId: payload.connectionId
-            ? toSshExecutionHostId(payload.connectionId)
-            : LOCAL_EXECUTION_HOST_ID
+          executionHostId: agentHookExecutionHostId(payload.connectionId)
         }
       }
     }
@@ -2310,7 +2315,7 @@ export class AgentHookServer {
     const providerSession: AgentProviderSessionMetadata | undefined = normalizedProviderSession
       ? {
           ...normalizedProviderSession,
-          executionHostId: toSshExecutionHostId(trimmedConnectionId)
+          executionHostId: agentHookExecutionHostId(trimmedConnectionId)
         }
       : undefined
     // Why: relay crosses a trust boundary — re-run the canonical normalizer to enforce caps/invariants (returns null on malformed).

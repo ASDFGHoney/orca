@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-20",
+  "updatedAt": "2026-08-21",
   "policy": {
     "maturityLevels": ["experimental", "soak", "blocking", "accepted-gap", "deprecated"],
     "blockingPromotion": {
@@ -4660,7 +4660,7 @@
       "providers": ["local", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": ["local", "ssh", "wsl", "remote-runtime"],
-      "coverageNotes": "A deterministic host-routing oracle covers local, exact SSH, unknown ownership, reconnect, provider replacement, bounded range reads, and WSL exact-path contracts. A Docker Linux SSH/relay target plus headed macOS Electron/CDP proves remote snapshot and tail rendering for SSH git and folder workspaces. A compiled windowless serve journey covers the shared runtime boundary.",
+      "coverageNotes": "A deterministic host-routing oracle covers local, exact SSH, unknown ownership, reconnect, provider replacement, bounded range reads, WSL ingress ownership, and WSL exact-path contracts. A Docker Linux SSH/relay target plus headed macOS Electron/CDP proves remote snapshot and tail rendering for SSH git and folder workspaces. A compiled windowless serve journey covers the shared runtime boundary.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/13663",
         "https://github.com/stablyai/orca/pull/15515",
@@ -4670,7 +4670,7 @@
       "oracle": "The focused oracle gives the desktop and SSH providers identical session ids and transcript paths but different bytes, then requires the exact SSH owner for snapshot and live append. It also proves unknown ownership cannot install a local watcher, provider loss and replacement rearm once, throwing advisory callbacks cannot kill retry, and large appends never call whole-file read or reread the prefix. The identical baseline/candidate/disabled/revert comparison and a real Docker SSH plus Electron/CDP journey supply independent red/green and rendered evidence.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/ssh-transcript-host-routing.test.ts --reporter=dot",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/server-hook-http-ingest.test.ts src/main/agent-hooks/server-ingest-terminal-status.test.ts src/main/agent-hooks/server-last-status-hydrate-validation.test.ts src/main/ipc/native-chat.test.ts src/main/providers/ssh-filesystem-dispatch.test.ts src/main/runtime/rpc/methods/native-chat.test.ts src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts src/renderer/src/components/native-chat/native-chat-session-transport.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts src/shared/agent-session-resume.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/server-hook-http-ingest.test.ts src/main/agent-hooks/server-ingest-remote.test.ts src/main/agent-hooks/server-ingest-terminal-status.test.ts src/main/agent-hooks/server-last-status-hydrate-validation.test.ts src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts src/main/ipc/native-chat.test.ts src/main/native-chat/transcript-watch-error.test.ts src/main/native-chat/transcript-watch-resolve-poll.test.ts src/main/native-chat/transcript-watch-unresolved-notice.test.ts src/main/providers/ssh-filesystem-dispatch.test.ts src/main/runtime/rpc/methods/native-chat.test.ts src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts src/renderer/src/components/native-chat/native-chat-session-transport.test.ts src/renderer/src/components/native-chat/use-native-chat-live-session.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts src/shared/agent-session-resume.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/transcript-watch-wsl-exact-path.test.ts --reporter=dot",
         "pnpm --dir mobile exec vitest run --root .. mobile/src/session/mobile-native-chat-eligibility.test.ts mobile/src/session/use-mobile-native-chat-session.test.ts --reporter=dot",
         "pnpm exec electron-vite build --mode e2e && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-native-chat-runtime-routing.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -4678,15 +4678,21 @@
       ],
       "testFiles": [
         "src/main/native-chat/ssh-transcript-host-routing.test.ts",
+        "src/main/native-chat/transcript-watch-error.test.ts",
+        "src/main/native-chat/transcript-watch-resolve-poll.test.ts",
+        "src/main/native-chat/transcript-watch-unresolved-notice.test.ts",
         "src/main/native-chat/transcript-watch-wsl-exact-path.test.ts",
         "src/main/agent-hooks/server-hook-http-ingest.test.ts",
+        "src/main/agent-hooks/server-ingest-remote.test.ts",
         "src/main/agent-hooks/server-ingest-terminal-status.test.ts",
         "src/main/agent-hooks/server-last-status-hydrate-validation.test.ts",
+        "src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts",
         "src/main/ipc/native-chat.test.ts",
         "src/main/providers/ssh-filesystem-dispatch.test.ts",
         "src/main/runtime/rpc/methods/native-chat.test.ts",
         "src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts",
         "src/renderer/src/components/native-chat/native-chat-session-transport.test.ts",
+        "src/renderer/src/components/native-chat/use-native-chat-live-session.test.ts",
         "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts",
         "src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts",
         "src/shared/agent-session-resume.test.ts",
@@ -4709,6 +4715,12 @@
           "assertions": [
             "local hook ingress stamps local ownership",
             "authenticated remote hook ingress overwrites a spoofed owner with the connection's SSH owner"
+          ]
+        },
+        {
+          "file": "src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts",
+          "assertions": [
+            "WSL relay hook ingress retains local transcript ownership for host-side UNC translation"
           ]
         },
         {

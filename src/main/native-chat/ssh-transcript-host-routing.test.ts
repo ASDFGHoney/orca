@@ -143,13 +143,16 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     expect(readFileRange).toHaveBeenCalled()
   })
 
-  it('retries a ranged snapshot when the remote file is replaced mid-read', async () => {
+  it('retries consecutive ranged snapshots when the remote file is replaced mid-read', async () => {
     const transcriptPath = '/tmp/replaced-mid-read.jsonl'
     const oldBytes = Buffer.from(
       `${claudeLine('old-large', 'a'.repeat(80_000))}${claudeLine('old-tail', 'old')}`
     )
+    const middleBytes = Buffer.from(
+      `${claudeLine('middle-large', 'b'.repeat(80_000))}${claudeLine('middle-tail', 'middle')}`
+    )
     const newBytes = Buffer.from(
-      `${claudeLine('new-large', 'b'.repeat(80_000))}${claudeLine('new-tail', 'new')}`
+      `${claudeLine('new-large', 'c'.repeat(80_000))}${claudeLine('new-tail', 'new')}`
     )
     let current = oldBytes
     let inode = 11
@@ -159,8 +162,11 @@ describe('native chat SSH transcript host routing (#13663)', () => {
         const bytes = current.subarray(position, position + length)
         rangeReadCount++
         if (rangeReadCount === 3) {
-          current = newBytes
+          current = middleBytes
           inode = 12
+        } else if (rangeReadCount === 6) {
+          current = newBytes
+          inode = 13
         }
         return { bytes, bytesRead: bytes.length }
       }
@@ -193,7 +199,7 @@ describe('native chat SSH transcript host routing (#13663)', () => {
 
     expect(result).toMatchObject({ messages: [{ id: 'new-large' }, { id: 'new-tail' }] })
     expect(result).not.toMatchObject({ messages: [{ id: 'old-large' }, { id: 'old-tail' }] })
-    expect(readFileRange.mock.calls.length).toBeGreaterThan(4)
+    expect(readFileRange.mock.calls.length).toBeGreaterThan(7)
   })
 
   it('withholds remote append batches and restores the cursor after invalidation', async () => {

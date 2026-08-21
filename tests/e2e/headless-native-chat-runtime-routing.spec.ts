@@ -14,11 +14,12 @@ function claudeLine(id: string, text: string): string {
 test('routes native-chat ownership through a headless runtime', async () => {
   test.setTimeout(180_000)
   const host = await launchHeadlessPairedRuntimeHost()
-  const homePath = await host.app.evaluate(({ app }) => app.getPath('home'))
-  const transcriptPath = path.join(homePath, `native-chat-headless-${Date.now()}.jsonl`)
-  writeFileSync(transcriptPath, claudeLine('headless-real', 'headless runtime bytes'))
+  let transcriptPath: string | undefined
 
   try {
+    const homePath = await host.app.evaluate(({ app }) => app.getPath('home'))
+    transcriptPath = path.join(homePath, `native-chat-headless-${Date.now()}.jsonl`)
+    writeFileSync(transcriptPath, claudeLine('headless-real', 'headless runtime bytes'))
     const owned = await host.client.call<{
       messages: { id: string }[]
       hasMore: boolean
@@ -59,7 +60,9 @@ test('routes native-chat ownership through a headless runtime', async () => {
       unverifiable: true
     })
   } finally {
-    rmSync(transcriptPath, { force: true })
+    if (transcriptPath) {
+      rmSync(transcriptPath, { force: true })
+    }
     await host.dispose()
   }
 })

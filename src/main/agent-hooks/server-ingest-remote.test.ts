@@ -91,6 +91,34 @@ describe('AgentHookServer ingestRemote', () => {
     }
   })
 
+  it('keeps WSL relay transcript ownership on the local host', () => {
+    const server = new AgentHookServer()
+    const listener = vi.fn()
+    server.setListener(listener)
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        tabId: 'tab-1',
+        worktreeId: 'wt-1',
+        providerSession: {
+          key: 'session_id',
+          id: 'claude-wsl-session',
+          transcriptPath: '/home/dev/.claude/projects/repo/claude-wsl-session.jsonl'
+        },
+        payload: { state: 'working', prompt: 'p', agentType: 'claude' }
+      },
+      'wsl:Ubuntu'
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'wsl:Ubuntu',
+        providerSession: expect.objectContaining({ executionHostId: 'local' })
+      })
+    )
+  })
+
   it('fans a Pi session-only status out to plugins, not just the renderer', () => {
     const server = new AgentHookServer()
     const rendererListener = vi.fn()
