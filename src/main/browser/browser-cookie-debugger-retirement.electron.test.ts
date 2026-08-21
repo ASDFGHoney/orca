@@ -19,6 +19,7 @@ type FixtureResult = {
   step: string
   firstError: { name: string; message: string } | null
   secondError: { name: string; message: string } | null
+  thirdError: { name: string; message: string } | null
   events: string[]
   recoveredCookieValues: string[]
 }
@@ -101,24 +102,16 @@ async function run() {
   mark('quarantine proven')
 
   if (!resolveOrphan) throw new Error('the injected cookie command never started')
+  await new Promise((resolve) => setImmediate(resolve))
   resolveOrphan()
   await new Promise((resolve) => setImmediate(resolve))
 
+  let thirdError = null
   await withCookieMutationLock(targetSession, async () => {
     events.push('third:start')
-    const store = openCookieClearStore(targetSession)
-    try {
-      await store.writeCookieIdentity({
-        url: 'https://recovered.example/',
-        name: 'recovered',
-        value: 'written-after-quarantine',
-        sameSite: 'unspecified',
-        secure: true
-      })
-      events.push('third:done')
-    } finally {
-      store.dispose()
-    }
+  }).catch((error) => {
+    thirdError = { name: error?.name || '', message: String(error?.message || error) }
+    events.push('third:error')
   })
 
   const cookies = await targetSession.cookies.get({ name: 'recovered' })
@@ -130,7 +123,7 @@ async function run() {
   clearTimeout(fixtureTimeout)
   writeFileSync(
     resultPath,
-    JSON.stringify({ step, firstError, secondError, events, recoveredCookieValues })
+    JSON.stringify({ step, firstError, secondError, thirdError, events, recoveredCookieValues })
   )
   app.exit(0)
 }
@@ -187,7 +180,7 @@ async function runFixture(): Promise<FixtureResult> {
 }
 
 describe('cookie debugger retirement in Electron', () => {
-  it('quarantines an unsettled cookie command and recovers after its late completion', async () => {
+  it('keeps an ambiguously retired cookie command quarantined after late completion', async () => {
     const result = await runFixture()
 
     expect(result.step).toBe('quarantine proven')
@@ -198,19 +191,19 @@ describe('cookie debugger retirement in Electron', () => {
     expect(result.secondError).toEqual({
       name: 'CookieMutationQuarantinedError',
       message:
-        'A previous cookie import is still finishing in Chromium. Wait a moment and try again; if it continues, restart Orca.'
+        'A cookie import timed out in Chromium, so this browser session is locked for safety. Restart Orca before importing cookies again.'
     })
-    expect(result.events).not.toContain('second:start')
-    expect(result.events.indexOf('first:error')).toBeLessThan(
-      result.events.indexOf('first:late-completion')
-    )
-    expect(result.events.indexOf('first:late-completion')).toBeLessThan(
-      result.events.indexOf('third:start')
-    )
-    expect(result.events).toContain('target:1:Network.setCookie')
-    expect(result.events).toContain('target:1:destroyed')
-    expect(result.events).toContain('target:2:Network.setCookie')
-    expect(result.events).toContain('third:done')
-    expect(result.recoveredCookieValues).toEqual(['written-after-quarantine'])
+    expect(result.thirdError).toEqual(result.secondError)
+    expect(result.events).toEqual([
+      'first:start',
+      'target:1:created',
+      'target:1:Network.setCookie',
+      'first:error',
+      'second:error',
+      'target:1:destroyed',
+      'first:late-completion',
+      'third:error'
+    ])
+    expect(result.recoveredCookieValues).toEqual([])
   }, 60_000)
 })

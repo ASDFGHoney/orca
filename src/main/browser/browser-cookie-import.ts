@@ -93,6 +93,7 @@ import {
 } from './browser-cookie-import-clear'
 import { openCookieClearStore } from './browser-cookie-clear-store'
 import {
+  areCookieMutationsQuarantined,
   COOKIE_MUTATION_QUARANTINED_REASON,
   isCookieMutationQuarantinedError
 } from './browser-cookie-mutation-quarantine'
@@ -2113,6 +2114,12 @@ export async function importCookiesFromBrowser(
         memoryFailed += phase.writeRejected
       } finally {
         cookieClearStore.dispose()
+      }
+
+      if (areCookieMutationsQuarantined(targetSession)) {
+        browserSessionRegistry.clearPendingCookieImport(targetPartition)
+        discardStagingFile()
+        return { ok: false, reason: COOKIE_MUTATION_QUARANTINED_REASON }
       }
 
       diag(

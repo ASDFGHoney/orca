@@ -21,7 +21,7 @@ export async function sendCookieDebuggerCommand(
   session: CookieDebuggerCommandSession,
   method: string,
   params: Record<string, unknown> | undefined,
-  retire: (settled: Promise<void>) => void
+  retire: () => void
 ): Promise<unknown> {
   let timedOut = false
   let retirementError: unknown = null
@@ -35,11 +35,6 @@ export async function sendCookieDebuggerCommand(
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(() => {
       timedOut = true
-      try {
-        retire(settled)
-      } catch (error) {
-        retirementError = error
-      }
       resolve()
     }, COOKIE_DEBUGGER_COMMAND_TIMEOUT_MS)
   })
@@ -49,12 +44,22 @@ export async function sendCookieDebuggerCommand(
     if (!timedOut) {
       return await command
     }
+    let settledDuringGrace = false
     await Promise.race([
-      settled,
+      settled.then(() => {
+        settledDuringGrace = true
+      }),
       new Promise<void>((resolve) => {
         retirementTimer = setTimeout(resolve, COOKIE_DEBUGGER_RETIREMENT_TIMEOUT_MS)
       })
     ])
+    if (!settledDuringGrace) {
+      try {
+        retire()
+      } catch (error) {
+        retirementError = error
+      }
+    }
     throw new CookieDebuggerCommandTimeoutError(method, { cause: retirementError })
   } finally {
     if (timer) {

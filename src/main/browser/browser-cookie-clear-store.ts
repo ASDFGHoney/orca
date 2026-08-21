@@ -216,8 +216,8 @@ export function openCookieClearStore(
   let attached: CookieDebuggerSession | null = null
   let pendingAttach: Promise<CookieDebuggerSession> | null = null
   let disposed = false
-  const retire = (session: CookieDebuggerSession, settled: Promise<void>) => {
-    quarantineCookieMutations(targetSession, settled)
+  const retire = (session: CookieDebuggerSession) => {
+    quarantineCookieMutations(targetSession)
     if (attached === session) {
       attached = null
     }
@@ -253,7 +253,7 @@ export function openCookieClearStore(
   const sendCommand = async (method: string, params?: Record<string, unknown>) => {
     assertCookieMutationsAvailable(targetSession)
     const session = await attach()
-    return sendCookieDebuggerCommand(session, method, params, (settled) => retire(session, settled))
+    return sendCookieDebuggerCommand(session, method, params, () => retire(session))
   }
   return {
     get: (filter) => targetSession.cookies.get(filter),
