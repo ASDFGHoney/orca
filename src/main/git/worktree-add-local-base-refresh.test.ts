@@ -396,6 +396,47 @@ describe('addWorktree', () => {
     ])
   })
 
+  // #15331: evaluation runs before `-b <branch>` exists, so rev-list fails on the missing local ref.
+  it('does not warn when worktree add itself creates the local base branch', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'abc123\n' }) // rev-parse --verify --quiet refs/remotes/origin/feature-x^{commit}
+      .mockRejectedValueOnce(
+        new Error(
+          "fatal: ambiguous argument 'refs/heads/feature-x...refs/remotes/origin/feature-x': unknown revision or path not in the working tree."
+        )
+      ) // rev-list: refs/heads/feature-x does not exist yet
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add
+      .mockResolvedValueOnce({ stdout: '' }) // config --local --replace-all branch.<branch>.base
+      .mockRejectedValueOnce(Object.assign(new Error('key unset'), { code: 1 })) // config --get push.autoSetupRemote (unset)
+      .mockResolvedValueOnce({ stdout: '' }) // config --local set push.autoSetupRemote
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature-x',
+      'feature-x',
+      'origin/feature-x',
+      true
+    )
+
+    expect(result.localBaseRefRefresh?.status).not.toBe('skipped_not_fast_forward')
+    expect(result.localBaseRefRefresh).toEqual({
+      status: 'updated',
+      baseRef: 'origin/feature-x',
+      localBranch: 'feature-x'
+    })
+    // The branch was created at the remote base — no extra probing, no ref mutation.
+    expect(gitExecFileAsyncMock.mock.calls).toHaveLength(6)
+    expect(gitExecFileAsyncMock.mock.calls[2]?.[0]).toEqual([
+      'worktree',
+      'add',
+      '--no-track',
+      '-b',
+      'feature-x',
+      '/repo-feature-x',
+      'refs/remotes/origin/feature-x'
+    ])
+  })
+
   it('skips local base refresh when captured OIDs are no longer ancestor-safe', async () => {
     gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: 'abc123\n' }) // rev-parse refs/remotes/origin/main^{commit}
     gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '0\t2\n' }) // stale rev-list result

@@ -1021,6 +1021,18 @@ async function performAddWorktree(
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
   }
 
+  // #15331: `-b` refuses an existing branch, so reaching here proves git just created localBranch at
+  // the remote base; the pre-create rev-list only failed because refs/heads/<branch> did not exist yet.
+  // SHORTCUT: local path only. The SSH equivalent (refreshLocalBaseRefForRemoteWorktreeCreate in
+  // src/main/ipc/worktree-remote.ts) evaluates pre-create too; mirror this once the warning is
+  // reported against a remote repo.
+  if (
+    localBaseRefRefresh?.status === 'skipped_not_fast_forward' &&
+    localBaseRefRefresh.localBranch === branch
+  ) {
+    localBaseRefRefresh = { ...localBaseRefRefresh, status: 'updated' }
+  }
+
   if (effectiveBase) {
     await persistWorktreeCreationBase(worktreePath, branch, effectiveBase, options)
   }
