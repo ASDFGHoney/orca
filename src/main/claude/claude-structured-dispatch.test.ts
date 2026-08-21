@@ -128,6 +128,46 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // Dispatch base64-encodes a local image path, and `claudeMessageBody` models
+  // only text and URL images - so gating the waiter on "the translator would
+  // build a body" refuses an image-only send its own replay, times out, and
+  // reports a delivered message as unconfirmed (retry then sends it twice).
+  it('accepts the replay of a send that carries only a local image', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'orca-claude-replay-'))
+    try {
+      const path = join(directory, 'shot.png')
+      await writeFile(path, Buffer.alloc(64))
+      const session = sessionFor()
+      const dispatched = dispatchClaudeTurn(
+        session,
+        { clientMessageId: 'client-1', body: userMessage([{ type: 'image-ref', path }]) },
+        100
+      )
+      await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+      resolveClaudeReplayWaiter(session, {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
+          ]
+        },
+        parent_tool_use_id: null,
+        session_id: 'provider-session',
+        uuid: 'image-replay-uuid',
+        isReplay: true
+      })
+
+      await expect(dispatched).resolves.toMatchObject({
+        state: 'accepted',
+        providerIdentity: { uuid: 'image-replay-uuid' }
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('rejects more than twenty URL images before sending', async () => {
     const session = sessionFor()
     const body = userMessage(

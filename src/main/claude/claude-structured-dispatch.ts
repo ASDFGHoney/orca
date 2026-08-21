@@ -5,7 +5,7 @@ import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
-import { claudeMessageBody, readClaudeMessageEnvelope } from './claude-structured-item-translation'
+import { claudeRecord } from './claude-structured-item-translation'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -61,16 +61,27 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
  * claims — the user's message then renders twice, once from the submission row
  * and once from the replay.
  *
- * Gate on the same body the journal translator builds, so the identity dispatch
- * adopts is always the one the echo upserts into. A frame we cannot recognize
- * leaves the send `unknown` ("delivery unconfirmed"), never duplicated.
+ * Measured against the real CLI: a queued send's replay is published at the first
+ * tool boundary after it is queued, 2-3 ms AFTER that boundary's tool result. So
+ * rejecting tool results costs no time — whenever there was a frame to adopt, the
+ * right one follows immediately.
+ *
+ * Reject on the tool-result shape rather than on "the journal translator would
+ * build a body from this": `claudeMessageBody` models only text and URL images,
+ * so an image-only send (dispatch base64-encodes local paths) has no modeled
+ * block and would be refused its own replay, timing out into a false
+ * "delivery unconfirmed" that invites a genuine duplicate send on retry.
  */
 function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
   if (message.type !== 'user' || message.parent_tool_use_id !== null) {
     return false
   }
-  const envelope = readClaudeMessageEnvelope(message)
-  return envelope?.role === 'user' && claudeMessageBody(envelope) !== null
+  const content = claudeRecord(message.message)?.content
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    !content.some((part) => claudeRecord(part)?.type === 'tool_result')
+  )
 }
 
 export function resolveClaudeReplayWaiter(
