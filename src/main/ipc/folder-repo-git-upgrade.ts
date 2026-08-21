@@ -152,16 +152,12 @@ async function pollOnce(watch: UpgradeWatch): Promise<void> {
     const key = candidateKey(repo)
     liveKeys.add(key)
     if (isSshCandidate(repo)) {
-      const signature = await readRemoteGitMarkerSignature(repo)
-      if (
-        signature === 'unverifiable' ||
-        signature === null ||
-        rejectedMarkers.get(key) === signature
-      ) {
+      const marker = await readRemoteGitMarkerSignature(repo)
+      if (marker.status !== 'present' || rejectedMarkers.get(key) === marker.signature) {
         continue
       }
       if ((await upgradeSshFolderRepo(watch, repo)) === 'rejected') {
-        rejectedMarkers.set(key, signature)
+        rejectedMarkers.set(key, marker.signature)
       }
       continue
     }

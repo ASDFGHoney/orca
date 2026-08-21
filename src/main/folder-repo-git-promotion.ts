@@ -103,27 +103,40 @@ function isRemoteMissingPathError(error: unknown): boolean {
   return /\bENOENT\b|no such file|not found/i.test(message)
 }
 
+/**
+ * Remote `.git` probe verdict. A bare `string | 'unverifiable'` union collapses —
+ * the literal is subsumed by `string`, so callers get no type help distinguishing
+ * "could not look" from a signature. Keep the three outcomes structurally distinct.
+ */
+export type RemoteGitMarkerSignature =
+  | { status: 'present'; signature: string }
+  | { status: 'absent' }
+  | { status: 'unverifiable' }
+
 export async function readRemoteGitMarkerSignature(
   repo: Pick<Repo, 'path' | 'connectionId'>
-): Promise<string | null | 'unverifiable'> {
+): Promise<RemoteGitMarkerSignature> {
   const connectionId = repo.connectionId
   if (!connectionId) {
-    return 'unverifiable'
+    return { status: 'unverifiable' }
   }
   const filesystem = getSshFilesystemProvider(connectionId)
   const git = getSshGitProvider(connectionId)
   const host = git?.getHostPlatform()
   if (!filesystem || !git || !host) {
-    return 'unverifiable'
+    return { status: 'unverifiable' }
   }
   try {
     const marker = await filesystem.stat(joinRemotePath(host, repo.path, '.git'))
-    return `${marker.mtimeMs ?? marker.mtime}:${marker.ino ?? 0}:${marker.type}`
+    return {
+      status: 'present',
+      signature: `${marker.mtimeMs ?? marker.mtime}:${marker.ino ?? 0}:${marker.type}`
+    }
   } catch (error) {
     if (isRemoteMissingPathError(error)) {
-      return null
+      return { status: 'absent' }
     }
-    return 'unverifiable'
+    return { status: 'unverifiable' }
   }
 }
 
