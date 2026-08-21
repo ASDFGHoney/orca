@@ -46,6 +46,28 @@ describe('getAgentRowConversationName', () => {
     expect(getAgentRowConversationName(tab, 'claude', false)).toBeNull()
   })
 
+  it('falls back to the generated title for Codex is-thinking OSC frames', () => {
+    const tab = makeTab({ generatedTitle: 'Fix intake flow', title: '⠋ Codex is thinking' })
+    expect(getAgentRowConversationName(tab, 'codex', true)).toBe('Fix intake flow')
+    expect(getAgentRowConversationName(tab, 'codex', false)).toBeNull()
+    expect(
+      getAgentRowConversationName(
+        makeTab({ generatedTitle: 'Fix intake flow', title: '⠋ Codex is thinking' }),
+        null,
+        true
+      )
+    ).toBe('Fix intake flow')
+  })
+
+  it('falls back to the generated title for Grok rotating working frames', () => {
+    const tab = makeTab({
+      generatedTitle: 'Fix intake flow',
+      title: '⠋ - Waiting for response… - grok'
+    })
+    expect(getAgentRowConversationName(tab, 'grok', true)).toBe('Fix intake flow')
+    expect(getAgentRowConversationName(tab, 'grok', false)).toBeNull()
+  })
+
   it('heals a persisted first-prompt name when a later live conversation name is present', () => {
     const tab = makeTab({
       generatedTitle: 'Upload the Kimi-K3 model to GitHub',

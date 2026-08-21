@@ -141,6 +141,26 @@ describe('tab title resolution', () => {
       )
     ).toBe('First prompt title')
     expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          generatedTitle: 'First prompt title',
+          title: '⠋ Codex is thinking'
+        },
+        true
+      )
+    ).toBe('First prompt title')
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          generatedTitle: 'First prompt title',
+          title: '⠋ - Waiting for response… - grok'
+        },
+        true
+      )
+    ).toBe('First prompt title')
+    expect(
       resolveUnifiedTabLabel(
         {
           customLabel: null,

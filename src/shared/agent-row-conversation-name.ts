@@ -11,6 +11,7 @@ import { stripLeadingAgentTitleDecorationOrEmpty } from './agent-title-decoratio
 import { formatAgentTypeLabel, WELL_KNOWN_AGENT_TYPE_LABELS } from './agent-type-label'
 import { isMeaningfulOpenCodeTerminalTitle } from './opencode-terminal-title'
 import { SYNTHETIC_AGENT_TITLE_PROFILES } from './synthetic-agent-title'
+import { isGrokRotatingWorkingTitle } from './terminal-title-agent-type'
 import type { TerminalTab } from './terminal-tab-types'
 
 export type ConversationNameTab = Pick<
@@ -37,6 +38,8 @@ const AGENT_IDENTITY_ALIASES_LOWER: Readonly<Record<string, readonly string[]>> 
   gemini: ['gemini cli']
 }
 
+// Why: Claude OSC is "Claude working"; Codex's stored working title is
+// "Codex is thinking". Both must lose to a generated conversation name.
 const IDENTITY_STATUS_SUFFIXES = [
   '',
   ' ready',
@@ -45,6 +48,12 @@ const IDENTITY_STATUS_SUFFIXES = [
   ' working',
   ' thinking',
   ' running',
+  ' is ready',
+  ' is idle',
+  ' is done',
+  ' is working',
+  ' is thinking',
+  ' is running',
   ' - action required'
 ] as const
 
@@ -89,6 +98,10 @@ export function conversationNameFromLiveTitle(
   const original = liveTitle.trim()
   const stripped = stripLeadingAgentTitleDecorationOrEmpty(original).trim()
   if (!stripped) {
+    return null
+  }
+  // Why: rotating Grok frames keep the spinner; classify before stripping.
+  if (isGrokRotatingWorkingTitle(original)) {
     return null
   }
   const lower = stripped.toLowerCase()
