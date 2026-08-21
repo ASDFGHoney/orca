@@ -167,12 +167,14 @@ describe('native chat transcript watcher errors', () => {
     const filePath = join(root, 'transcript.jsonl')
     await mkdir(filePath)
     const snapshots: string[][] = []
+    let errorCallbackCount = 0
     const subscription = await subscribeNativeChatTranscript({
       agent: 'claude',
       sessionId: 'session',
       filePath,
       onInitialSnapshot: (messages, _hasMore, _beforeOffset, error) => {
         if (error) {
+          errorCallbackCount += 1
           throw new Error('subscriber is closing')
         }
         snapshots.push(messages.map((message) => message.id))
@@ -183,6 +185,7 @@ describe('native chat transcript watcher errors', () => {
     })
 
     try {
+      await vi.waitFor(() => expect(errorCallbackCount).toBe(1))
       await rm(filePath, { recursive: true, force: true })
       await writeFile(filePath, claudeLine('u-recovered-after-throw', 'user', 'back'))
       await vi.waitFor(() => expect(snapshots).toContainEqual(['u-recovered-after-throw']))
