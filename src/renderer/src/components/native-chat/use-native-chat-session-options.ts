@@ -123,18 +123,19 @@ export function useNativeChatSessionOptions(args: {
   // The screen text that last parsed into reported values, so a later model
   // discovery can re-resolve it against the host's real ids.
   const reportedScreenRef = useRef<string | null>(null)
-  const tuiSeededRef = useRef(false)
+  // Pty whose TUI already named the model. Written only after a committed
+  // scrape — never during render, and never cleared by a later unparseable frame.
+  const tuiSeededPtyIdRef = useRef<string | null>(null)
   const previousHookModelRef = useRef<string | null>(null)
   const discoveryContext = useMemo(
     () => resolveNativeChatModelDiscoveryContext(terminalTabId),
     [terminalTabId]
   )
-  const surface = useMemo(() => {
+  const { surface, seededFromScreen } = useMemo(() => {
     // Why: native chat currently attaches only after startup is already queued;
     // exposing a draft picker here would claim it can still mutate that command.
     if (!targetPtyId) {
-      tuiSeededRef.current = false
-      return null
+      return { surface: null, seededFromScreen: false }
     }
     const scopeKey = targetPtyId ?? terminalTabId
     const discoveredModels = discoveryContext
@@ -145,31 +146,33 @@ export function useNativeChatSessionOptions(args: {
       readTerminalScreen?.(),
       discoveredModels ?? undefined
     )
-    tuiSeededRef.current = screenValues != null
-    return createNativeChatPtySessionOptions({
-      agent,
-      scopeKey,
-      ...(targetPtyId ? { fallbackScopeKey: terminalTabId } : {}),
-      // Why: the catalog seed carries version-neutral family labels, so it is
-      // safe on every host while the once-per-host probe runs or after it fails
-      // — without it the whole picker would pop in late or never appear.
-      ...(discoveryContext ? { initialModels: discoveredModels ?? undefined } : {}),
-      mode: targetPtyId ? 'live' : 'draft',
-      reportedValues: screenValues,
-      dispatchCommand,
-      onAgentPicker,
-      persistSelection: ({ modelId, optionId, value, adoptModelAsLaunchDefault }) =>
-        enqueueSessionOptionSettingsWrite((persisted) =>
-          updateNativeChatSessionOptionDefaults({
-            persisted,
-            agent,
-            modelId,
-            optionId,
-            value,
-            adoptModelAsLaunchDefault
-          })
-        )
-    })
+    return {
+      surface: createNativeChatPtySessionOptions({
+        agent,
+        scopeKey,
+        ...(targetPtyId ? { fallbackScopeKey: terminalTabId } : {}),
+        // Why: the catalog seed carries version-neutral family labels, so it is
+        // safe on every host while the once-per-host probe runs or after it fails
+        // — without it the whole picker would pop in late or never appear.
+        ...(discoveryContext ? { initialModels: discoveredModels ?? undefined } : {}),
+        mode: targetPtyId ? 'live' : 'draft',
+        reportedValues: screenValues,
+        dispatchCommand,
+        onAgentPicker,
+        persistSelection: ({ modelId, optionId, value, adoptModelAsLaunchDefault }) =>
+          enqueueSessionOptionSettingsWrite((persisted) =>
+            updateNativeChatSessionOptionDefaults({
+              persisted,
+              agent,
+              modelId,
+              optionId,
+              value,
+              adoptModelAsLaunchDefault
+            })
+          )
+      }),
+      seededFromScreen: screenValues != null
+    }
   }, [
     agent,
     dispatchCommand,
@@ -186,6 +189,9 @@ export function useNativeChatSessionOptions(args: {
     }
     let cancelled = false
     reportedScreenRef.current = null
+    if (seededFromScreen && targetPtyId) {
+      tuiSeededPtyIdRef.current = targetPtyId
+    }
     const reportCurrentValues = async (): Promise<void> => {
       let authoritativeScreen: string | null = null
       if (targetPtyId && window.api?.pty?.getMainBufferSnapshot) {
@@ -219,7 +225,7 @@ export function useNativeChatSessionOptions(args: {
           return
         }
         reportedScreenRef.current = screen
-        tuiSeededRef.current = true
+        tuiSeededPtyIdRef.current = targetPtyId
         surface.reportSessionOptions(reportedValues)
         return
       }
@@ -228,7 +234,7 @@ export function useNativeChatSessionOptions(args: {
     return () => {
       cancelled = true
     }
-  }, [agent, discoveryContext, readTerminalScreen, surface, targetPtyId])
+  }, [agent, discoveryContext, readTerminalScreen, seededFromScreen, surface, targetPtyId])
 
   // Hook reports follow later /model and provider-fallback changes. The first
   // slug is skipped only when the TUI screen already named the model — otherwise
@@ -250,11 +256,11 @@ export function useNativeChatSessionOptions(args: {
       return
     }
     previousHookModelRef.current = matched
-    if (!previous && tuiSeededRef.current) {
+    if (!previous && (seededFromScreen || tuiSeededPtyIdRef.current === targetPtyId)) {
       return
     }
     surface.reportSessionOptions(values)
-  }, [agent, reportedModel, surface])
+  }, [agent, reportedModel, seededFromScreen, surface, targetPtyId])
 
   useEffect(() => {
     if (!surface || !discoveryContext) {

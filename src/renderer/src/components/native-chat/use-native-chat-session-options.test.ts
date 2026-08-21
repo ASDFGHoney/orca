@@ -254,6 +254,38 @@ describe('useNativeChatSessionOptions model reporting', () => {
     expect(effortValue(result.current.snapshot)).toBe('max')
   })
 
+  it('does not let a late hook model replace a TUI seed after the frame scrolls away', async () => {
+    // Why: the first SessionStart slug is the launched id. Once the TUI has
+    // named the effective model, a later render that can no longer parse the
+    // frame must not treat that slug as a fresh report.
+    seedNativeChatAppliedSessionOptions('pty-codex-scrolled', 'codex', {
+      model: 'gpt-5.6-terra'
+    })
+    const { result, rerender } = renderHook(
+      ({ reportedModel, frameVisible }) =>
+        useNativeChatSessionOptions({
+          agent: 'codex',
+          terminalTabId: 'tab-codex-scrolled',
+          targetPtyId: 'pty-codex-scrolled',
+          dispatchCommand: vi.fn(),
+          readTerminalScreen: () =>
+            frameVisible ? CODEX_STATUS_LINE : 'conversation has scrolled past the frame',
+          reportedModel
+        }),
+      { initialProps: { reportedModel: null as string | null, frameVisible: true } }
+    )
+
+    await waitFor(() =>
+      expect(modelDescriptor(result.current.snapshot).currentValue).toBe('gpt-5.6-luna')
+    )
+
+    rerender({ reportedModel: 'gpt-5.6-terra', frameVisible: false })
+
+    await waitFor(() =>
+      expect(modelDescriptor(result.current.snapshot).currentValue).toBe('gpt-5.6-luna')
+    )
+  })
+
   it('treats a Codex catalog label and id as the same model', async () => {
     seedNativeChatAppliedSessionOptions('pty-codex-label', 'codex', { model: 'gpt-5.6-terra' })
     const { result } = renderHook(() =>
