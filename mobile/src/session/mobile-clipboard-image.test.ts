@@ -150,8 +150,15 @@ describe('mobile clipboard image paste helpers', () => {
   })
 
   it('brackets generated image paths before sending to the terminal', () => {
-    expect(buildMobileImagePastePayload('/tmp/orca.png')).toBe('\x1b[200~/tmp/orca.png\x1b[201~')
-    expect(buildMobileImagePastePayload('/tmp/\x1b.png')).toBe('\x1b[200~/tmp/\u241b.png\x1b[201~')
+    expect(buildMobileImagePastePayload('/tmp/orca.png')).toBe('\x1b[200~/tmp/orca.png\x1b[201~ ')
+    expect(buildMobileImagePastePayload('/tmp/\x1b.png')).toBe('\x1b[200~/tmp/\u241b.png\x1b[201~ ')
+  })
+
+  it('keeps the prompt separate from the bracketed image path', () => {
+    const image = buildMobileImagePastePayload('/tmp/orca.png')
+    const combined = `${image}add the QR code`
+    expect(combined).toContain('.png\x1b[201~ add')
+    expect(combined).not.toContain('.png\x1b[201~add')
   })
 })
 

@@ -178,5 +178,5 @@ export function buildMobileImagePastePayload(filePath: string): string {
   // Why: generated image paths are paste payloads, not ordinary typed input.
   // Bracket the path even when it is one line so agents receive it atomically
   // and stale terminal paste state cannot turn it into shell commands.
-  return `\x1b[200~${filePath.split('\x1b').join('\u241b')}\x1b[201~`
+  return `\x1b[200~${filePath.split('\x1b').join('\u241b')}\x1b[201~ `
 }

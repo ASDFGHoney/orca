@@ -53,9 +53,9 @@ describe('pasteMobileNativeChatImagePaths', () => {
         client: { id: 'device-9', type: 'mobile' }
       }
     })
-    expect(client.calls[1]?.params.text).toBe('\x1b[200~/tmp/a.png\x1b[201~')
-    expect(client.calls[2]?.params.text).toBe('\x1b[200~/tmp/b.png\x1b[201~')
-    expect(client.calls[3]?.params.text).toBe('\x1b[200~/tmp/c.png\x1b[201~')
+    expect(client.calls[1]?.params.text).toBe('\x1b[200~/tmp/a.png\x1b[201~ ')
+    expect(client.calls[2]?.params.text).toBe('\x1b[200~/tmp/b.png\x1b[201~ ')
+    expect(client.calls[3]?.params.text).toBe('\x1b[200~/tmp/c.png\x1b[201~ ')
   })
 
   it('stops and reports failure as soon as a paste is rejected', async () => {
@@ -72,7 +72,7 @@ describe('pasteMobileNativeChatImagePaths', () => {
     expect(ok).toBe(false)
     // Never attempts the second path after the first is rejected.
     expect(client.calls).toHaveLength(2)
-    expect(client.calls[1]?.params.text).toBe('\x1b[200~/tmp/a.png\x1b[201~')
+    expect(client.calls[1]?.params.text).toBe('\x1b[200~/tmp/a.png\x1b[201~ ')
     expect(client.calls[0]?.params).not.toHaveProperty('client')
   })
 
