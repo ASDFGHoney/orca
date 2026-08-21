@@ -194,7 +194,8 @@ export function MobileNativeChatView({
   useEffect(() => {
     // A shrinking inset is the keyboard leaving, which is now usually the user's
     // own downward swipe; jumping to the tail would undo the scroll they just
-    // made. The growing viewport also keeps `atBottom` true through that swipe.
+    // made. (The viewport grows as the keyboard goes, so `atBottom` can well
+    // still be true at that point — hence the guard rather than relying on it.)
     const keyboardLeaving = keyboardInset < previousKeyboardInset.current
     previousKeyboardInset.current = keyboardInset
     if (data.length === 0 || !atBottom || keyboardLeaving) {

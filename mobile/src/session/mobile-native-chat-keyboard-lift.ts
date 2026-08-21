@@ -53,15 +53,19 @@ export function resolveNativeChatBottomPad(input: NativeChatBottomPadInput): num
   'worklet'
   // The route already subtracted the bottom inset from its lift, so add it back.
   const committedPad = input.committedInset + input.bottomInset
-  if (input.phase === 'unreported') {
+  // Only a keyboard on its way out needs the live frame. A keyboard coming up
+  // reaches the same place either way, and the route gets there first — riding
+  // the frame instead would race it, and losing that race drops the composer to
+  // the home indicator for a frame before it climbs back.
+  if (input.phase !== 'dismissing') {
     return committedPad
   }
   // Cap the frame against the tallest lift we have reason to believe in. The
   // observer reports the distance to the keyboard's *top edge*, which for an
   // undocked iPad keyboard floating mid-screen is nowhere near the height of the
-  // panel; uncapped it would throw the composer up the screen with it. The
-  // route's inset is that ceiling while a keyboard settles, and once one is
-  // leaving the inset has already zeroed, so the last settled pad is.
+  // panel; uncapped it would throw the composer up the screen with it. By now
+  // the route's inset may already have zeroed, so the last settled pad is the
+  // ceiling that outlives it.
   const ceiling = Math.max(committedPad, input.lastSettledPad)
   // A keyboard frame spans the home indicator already, so it takes the place of
   // the bottom inset rather than stacking on top of it.

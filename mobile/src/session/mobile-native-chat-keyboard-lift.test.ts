@@ -159,7 +159,10 @@ describe('resolveNativeChatBottomPad on an undocked keyboard', () => {
     ).toBe(200)
   })
 
-  it('rides the opening keyboard up without overshooting its target', () => {
+  it('goes straight to the settled lift as the keyboard opens', () => {
+    // A part-risen frame must not pull the composer back down: the route is
+    // already at the target, and following the frame would race it — losing
+    // that race drops the composer to the home indicator and bounces it back.
     expect(
       resolveNativeChatBottomPad({
         phase: 'settling',
@@ -168,7 +171,7 @@ describe('resolveNativeChatBottomPad on an undocked keyboard', () => {
         committedInset: COMMITTED_INSET,
         bottomInset: BOTTOM_INSET
       })
-    ).toBe(90)
+    ).toBe(IOS_KEYBOARD_HEIGHT)
   })
 })
 
