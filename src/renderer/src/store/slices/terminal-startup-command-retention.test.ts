@@ -75,4 +75,20 @@ describe('queued startup command retention', () => {
 
     expect(store.getState().pendingStartupByTabId[siblingId]).toEqual({ command: 'echo theirs' })
   })
+
+  it('stamps a bare cursor-agent startup with a launch token so the pane env can carry it', () => {
+    const store = createTestStore()
+    const tabId = seedWorktreeWithTab(store)
+    store.getState().queueTabStartupCommand(tabId, { command: 'cursor-agent' })
+
+    const queued = store.getState().pendingStartupByTabId[tabId]
+    expect(queued?.launchAgent).toBe('cursor')
+    expect(queued?.launchConfig).toEqual({
+      agentCommand: 'cursor-agent',
+      agentArgs: '',
+      agentEnv: {}
+    })
+    expect(queued?.launchToken).toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/i))
+    expect(queued?.env?.ORCA_AGENT_LAUNCH_TOKEN).toBe(queued?.launchToken)
+  })
 })

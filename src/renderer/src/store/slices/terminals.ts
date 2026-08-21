@@ -110,6 +110,7 @@ import { parseRemoteRuntimePtyId, toRemoteRuntimePtyId } from '@/runtime/runtime
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { requestRemoteWorktreeSleep } from '@/runtime/remote-worktree-sleep'
 import { createBrowserUuid } from '@/lib/browser-uuid'
+import { attachQueuedAgentLaunchAuthority } from '../../../../shared/queued-agent-launch-authority'
 import { getFolderWorkspaceConnectionId } from '@/lib/folder-workspace-connection'
 import {
   clearDirectSshTerminalBindings,
@@ -3668,15 +3669,17 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   },
 
   queueTabStartupCommand: (tabId, startup) => {
-    // Why: launchToken is only meaningful for tracked launch-config reuse; plain startup commands must not mint a synthetic token.
-    const launchToken = startup.launchConfig
-      ? (startup.launchToken ?? createBrowserUuid())
+    // Why: launchToken is only meaningful for tracked TUI-agent launches; plain
+    // shell commands must not mint a synthetic token a later typed agent could inherit.
+    const authorized = attachQueuedAgentLaunchAuthority(startup)
+    const launchToken = authorized.launchConfig
+      ? (authorized.launchToken ?? createBrowserUuid())
       : undefined
     set((s) => ({
       pendingStartupByTabId: {
         ...s.pendingStartupByTabId,
         [tabId]: {
-          ...startup,
+          ...authorized,
           ...(launchToken ? { launchToken } : {})
         }
       }

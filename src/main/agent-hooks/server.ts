@@ -1123,7 +1123,7 @@ export class AgentHookServer {
 
   private getAgentStatusDisposition(
     paneKey: string,
-    event?: { hookEventName?: string; isReplay?: boolean }
+    event?: { hookEventName?: string; isReplay?: boolean; source?: AgentHookSource }
   ): 'accept' | 'restart' | 'suppress' {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
     const paneRetired =
@@ -1139,9 +1139,12 @@ export class AgentHookServer {
     // Why: command completion retires launch authority but leaves its shell pane reusable.
     // A live SessionStart proves a new agent process owns the retired pane just like a
     // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
+    // Cursor's new-turn events are beforeSubmitPrompt/sessionStart, not UserPromptSubmit (STA-3487).
     if (
-      (event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart') &&
-      event.isReplay !== true
+      event?.isReplay !== true &&
+      (event?.hookEventName === 'UserPromptSubmit' ||
+        event?.hookEventName === 'SessionStart' ||
+        (event?.source === 'cursor' && isNewTurnEvent('cursor', event.hookEventName)))
     ) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
@@ -2250,7 +2253,8 @@ export class AgentHookServer {
         : undefined
     const statusDisposition = this.getAgentStatusDisposition(paneKey, {
       hookEventName,
-      isReplay: envelope.isReplay === true
+      isReplay: envelope.isReplay === true,
+      source
     })
     if (statusDisposition === 'suppress') {
       return
@@ -2468,7 +2472,8 @@ export class AgentHookServer {
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
               hookEventName: normalized.event.hookEventName,
-              isReplay: normalized.event.isReplay
+              isReplay: normalized.event.isReplay,
+              source: normalized.event.source
             })
           : 'suppress'
         if (normalized.event && statusDisposition !== 'suppress') {
