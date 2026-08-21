@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Cookie } from 'electron'
 import type { sendCookieDebuggerCommand } from './browser-cookie-debugger-command'
 import { createChromiumCookieTestDatabase } from './browser-cookie-import-test-database'
 import type { DetectedBrowser } from './browser-cookie-import'
@@ -14,6 +15,7 @@ const electron = vi.hoisted(() => {
   type PendingCommand = {
     promise: Promise<unknown>
     resolve: (value: unknown) => void
+    reject: (reason: unknown) => void
   }
 
   const events: string[] = []
@@ -28,7 +30,7 @@ const electron = vi.hoisted(() => {
     return {
       partition,
       cookies: {
-        get: vi.fn(async () => []),
+        get: vi.fn(async (): Promise<Cookie[]> => []),
         set: vi.fn(async () => undefined),
         remove: vi.fn(async (_url: string, name: string) => {
           events.push(`remove:${partition}:${name}`)
@@ -55,13 +57,19 @@ const electron = vi.hoisted(() => {
     firstCommandStarted = () => undefined
     commandTimeoutEnabled = true
     let resolveCommand!: (value: unknown) => void
+    let rejectCommand!: (reason: unknown) => void
     firstCommand = {
-      promise: new Promise((resolve) => {
+      promise: new Promise((resolve, reject) => {
         resolveCommand = resolve
+        rejectCommand = reject
       }),
       resolve: (value) => {
         events.push('A:late-completion')
         resolveCommand(value)
+      },
+      reject: (reason) => {
+        events.push('A:late-rejection')
+        rejectCommand(reason)
       }
     }
   }
@@ -197,6 +205,30 @@ describe('cookie import debugger timeout', () => {
     return state
   }
 
+  function createNativeBrowser(partition: string): DetectedBrowser {
+    const sourceCookiesPath = join(fixtureDir, 'Chrome', 'Default', 'Network', 'Cookies')
+    const targetCookiesPath = join(
+      fixtureDir,
+      'Partitions',
+      partition.replace('persist:', ''),
+      'Network',
+      'Cookies'
+    )
+    createChromiumCookieTestDatabase(sourceCookiesPath, [
+      { name: 'native', value: 'source-value' }
+    ]).close()
+    createChromiumCookieTestDatabase(targetCookiesPath, []).close()
+    return {
+      family: 'chrome',
+      label: 'Google Chrome',
+      cookiesPath: sourceCookiesPath,
+      keychainService: 'Chrome Safe Storage',
+      keychainAccount: 'Chrome',
+      profiles: [{ name: 'Default', directory: 'Default' }],
+      selectedProfile: 'Default'
+    }
+  }
+
   it('recovers after retirement proves the late command settled during its grace period', async () => {
     const firstStarted = electron.onFirstCommand()
     const first = importCookiesFromFile(writeCookieSource('first'), 'persist:timeout-oracle')
@@ -287,6 +319,34 @@ describe('cookie import debugger timeout', () => {
     expect(electron.windows).toHaveLength(2)
   })
 
+  it('stays poisoned when the timed-out command rejects during the retirement grace', async () => {
+    const firstStarted = electron.onFirstCommand()
+    const first = importCookiesFromFile(writeCookieSource('first'), 'persist:timeout-rejection')
+    await firstStarted
+    const second = importCookiesFromFile(writeCookieSource('second'), 'persist:timeout-rejection')
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    electron.firstCommand().reject(new Error('debugger transport detached'))
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(firstResult).toEqual({
+      ok: false,
+      reason: expect.stringContaining('Could not safely replace cookies for the imported sites.')
+    })
+    expect(secondResult).toEqual({
+      ok: false,
+      reason:
+        'A cookie import timed out in Chromium, so this browser session is locked for safety. Restart Orca before importing cookies again.'
+    })
+    expect(electron.events).toEqual([
+      'A:Network.setCookie',
+      'A:late-rejection',
+      'A:detach',
+      'A:destroy'
+    ])
+    expect(electron.windows).toHaveLength(1)
+  })
+
   it('exposes the permanent-blockage signal when retirement is disabled', async () => {
     electron.setCommandTimeoutEnabled(false)
     const firstStarted = electron.onFirstCommand()
@@ -318,21 +378,7 @@ describe('cookie import debugger timeout', () => {
   })
 
   it('reports an ambiguously retired native Chromium write as a failure', async () => {
-    const sourceCookiesPath = join(fixtureDir, 'Chrome', 'Default', 'Network', 'Cookies')
-    const targetCookiesPath = join(fixtureDir, 'Partitions', 'native-timeout', 'Network', 'Cookies')
-    createChromiumCookieTestDatabase(sourceCookiesPath, [
-      { name: 'native', value: 'source-value' }
-    ]).close()
-    createChromiumCookieTestDatabase(targetCookiesPath, []).close()
-    const browser: DetectedBrowser = {
-      family: 'chrome',
-      label: 'Google Chrome',
-      cookiesPath: sourceCookiesPath,
-      keychainService: 'Chrome Safe Storage',
-      keychainAccount: 'Chrome',
-      profiles: [{ name: 'Default', directory: 'Default' }],
-      selectedProfile: 'Default'
-    }
+    const browser = createNativeBrowser('persist:native-timeout')
     const firstStarted = electron.onFirstCommand()
     const resultPromise = importCookiesFromBrowser(browser, 'persist:native-timeout')
     await firstStarted
@@ -345,5 +391,35 @@ describe('cookie import debugger timeout', () => {
         'A cookie import timed out in Chromium, so this browser session is locked for safety. Restart Orca before importing cookies again.'
     })
     expect(electron.events).toEqual(['A:Network.setCookie', 'A:detach', 'A:destroy'])
+  })
+
+  it('reports an ambiguously retired native Chromium snapshot as quarantined', async () => {
+    const partition = 'persist:native-snapshot-timeout'
+    const browser = createNativeBrowser(partition)
+    electron.fromPartition(partition).cookies.get.mockResolvedValue([
+      {
+        domain: '.example.com',
+        hostOnly: false,
+        path: '/',
+        name: 'existing',
+        value: 'old-value',
+        secure: false,
+        httpOnly: false,
+        session: true,
+        sameSite: 'unspecified'
+      }
+    ])
+    const firstStarted = electron.onFirstCommand()
+    const resultPromise = importCookiesFromBrowser(browser, partition)
+    await firstStarted
+
+    await vi.advanceTimersByTimeAsync(11_000)
+
+    await expect(resultPromise).resolves.toEqual({
+      ok: false,
+      reason:
+        'A cookie import timed out in Chromium, so this browser session is locked for safety. Restart Orca before importing cookies again.'
+    })
+    expect(electron.events).toEqual(['A:Network.getAllCookies', 'A:detach', 'A:destroy'])
   })
 })

@@ -28,9 +28,9 @@ export async function sendCookieDebuggerCommand(
   let timer: ReturnType<typeof setTimeout> | null = null
   let retirementTimer: ReturnType<typeof setTimeout> | null = null
   const command = Promise.resolve().then(() => session.debugger.sendCommand(method, params))
-  const settled = command.then(
-    () => undefined,
-    () => undefined
+  const outcome = command.then(
+    () => 'fulfilled' as const,
+    () => 'rejected' as const
   )
   const deadline = new Promise<void>((resolve) => {
     timer = setTimeout(() => {
@@ -40,20 +40,20 @@ export async function sendCookieDebuggerCommand(
   })
 
   try {
-    await Promise.race([settled, deadline])
+    await Promise.race([outcome, deadline])
     if (!timedOut) {
       return await command
     }
-    let settledDuringGrace = false
-    await Promise.race([
-      settled.then(() => {
-        settledDuringGrace = true
-      }),
-      new Promise<void>((resolve) => {
-        retirementTimer = setTimeout(resolve, COOKIE_DEBUGGER_RETIREMENT_TIMEOUT_MS)
+    const graceOutcome = await Promise.race([
+      outcome,
+      new Promise<'pending'>((resolve) => {
+        retirementTimer = setTimeout(
+          () => resolve('pending'),
+          COOKIE_DEBUGGER_RETIREMENT_TIMEOUT_MS
+        )
       })
     ])
-    if (!settledDuringGrace) {
+    if (graceOutcome !== 'fulfilled') {
       try {
         retire()
       } catch (error) {

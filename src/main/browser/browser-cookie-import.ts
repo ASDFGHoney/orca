@@ -2181,18 +2181,14 @@ export async function importCookiesFromBrowser(
       } catch {
         /* may already be closed */
       }
-      try {
-        stagingDb?.close()
-      } catch {
-        /* may already be closed */
-      }
+      closeStagingDb()
       // Why: drop the staging DB so a stale staged import isn't applied on the next cold start.
-      try {
-        unlinkSync(stagingCookiesPath)
-      } catch {
-        /* may not exist yet */
-      }
+      discardStagingFile()
       diag(`  SQLite import failed: ${String(err)}`)
+      if (areCookieMutationsQuarantined(targetSession)) {
+        browserSessionRegistry.clearPendingCookieImport(targetPartition)
+        return { ok: false, reason: COOKIE_MUTATION_QUARANTINED_REASON }
+      }
       return {
         ok: false,
         reason: reasonWithDiagLog(
