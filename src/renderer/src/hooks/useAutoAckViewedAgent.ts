@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/store'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import type { AgentStatusEntry } from '../../../shared/agent-status-types'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import type { TerminalLayoutSnapshot } from '../../../shared/terminal-tab-types'
@@ -153,6 +154,7 @@ export function useAutoAckViewedAgent(): void {
     // Init to undefined so the first maybeAck() (on mount) always passes the ref guard and scans.
     let lastActiveView: unknown = undefined
     let lastActiveTabId: unknown = undefined
+    let lastFloatingWorkspaceActiveTabId: unknown = undefined
     let lastAgentStatus: unknown = undefined
     let lastRetained: unknown = undefined
     let lastAcknowledged: unknown = undefined
@@ -161,9 +163,12 @@ export function useAutoAckViewedAgent(): void {
 
     const maybeAck = (): void => {
       const s = useAppStore.getState()
+      const floatingWorkspaceActiveTabId =
+        s.activeTabIdByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? null
       if (
         s.activeView === lastActiveView &&
         s.activeTabId === lastActiveTabId &&
+        floatingWorkspaceActiveTabId === lastFloatingWorkspaceActiveTabId &&
         s.agentStatusByPaneKey === lastAgentStatus &&
         s.retainedAgentsByPaneKey === lastRetained &&
         s.acknowledgedAgentsByPaneKey === lastAcknowledged &&
@@ -186,37 +191,48 @@ export function useAutoAckViewedAgent(): void {
         }
       }
       const activeTabId = s.activeTabId
-      if (!activeTabId) {
+      // Why: also check Floating Workspace tab even if it's not the active worktree, so agents there get acknowledged when visible.
+      const ackTabIds = [activeTabId, floatingWorkspaceActiveTabId].filter(Boolean) as string[]
+      if (ackTabIds.length === 0) {
         return
       }
-      const activeLeafId = resolveActiveLeafId(s, activeTabId)
       // Why: advance refs only after gates pass, else the diff is consumed and a gated-out transition never re-acks when focus returns.
       lastActiveView = s.activeView
       lastActiveTabId = s.activeTabId
+      lastFloatingWorkspaceActiveTabId = floatingWorkspaceActiveTabId
       lastAgentStatus = s.agentStatusByPaneKey
       lastRetained = s.retainedAgentsByPaneKey
       lastAcknowledged = s.acknowledgedAgentsByPaneKey
       lastLayouts = s.terminalLayoutsByTabId
       lastUnreadAgentCompletionPanes = s.unreadAgentCompletionPanes
-      const toAck = computeAutoAckTargets(s, activeTabId, activeLeafId)
-      const activePaneKey = computeViewedAgentCompletionPaneKey(s, activeTabId, activeLeafId)
-      if (toAck.length > 0 || activePaneKey) {
-        const paneKeysToClear = new Set(toAck)
-        if (activePaneKey) {
-          paneKeysToClear.add(activePaneKey)
-        }
-        acknowledgeViewedAgentAttention(s, {
-          activeWorktreeId: shouldClearViewedAgentWorktreeUnread(s, {
-            activeWorktreeId: s.activeWorktreeId,
-            activeTabId,
-            paneKeysToClear
+
+      for (const tabId of ackTabIds) {
+        const activeLeafId = resolveActiveLeafId(s, tabId)
+        const toAck = computeAutoAckTargets(s, tabId, activeLeafId)
+        const activePaneKey = computeViewedAgentCompletionPaneKey(s, tabId, activeLeafId)
+        if (toAck.length > 0 || activePaneKey) {
+          const paneKeysToClear = new Set(toAck)
+          if (activePaneKey) {
+            paneKeysToClear.add(activePaneKey)
+          }
+          // Why: for Floating Workspace tabs, still use activeWorktreeId to avoid clearing unseen signals in other worktrees.
+          const worktreeId =
+            tabId === floatingWorkspaceActiveTabId
+              ? FLOATING_TERMINAL_WORKTREE_ID
+              : s.activeWorktreeId
+          acknowledgeViewedAgentAttention(s, {
+            activeWorktreeId: shouldClearViewedAgentWorktreeUnread(s, {
+              activeWorktreeId: worktreeId,
+              activeTabId: tabId,
+              paneKeysToClear
+            })
+              ? worktreeId
+              : null,
+            activeTabId: tabId,
+            paneKeys: toAck,
+            activePaneKey
           })
-            ? s.activeWorktreeId
-            : null,
-          activeTabId,
-          paneKeys: toAck,
-          activePaneKey
-        })
+        }
       }
     }
     // Why: run once on mount to catch a restored session that already has agents on the visible tab.
