@@ -192,11 +192,13 @@ export function MobileNativeChatView({
   // we don't yank the user away while they read history.
   const previousKeyboardInset = useRef(keyboardInset)
   useEffect(() => {
-    // A shrinking inset is the keyboard leaving, which is now usually the user's
+    // The keyboard reaching zero is it leaving, which is now usually the user's
     // own downward swipe; jumping to the tail would undo the scroll they just
     // made. (The viewport grows as the keyboard goes, so `atBottom` can well
     // still be true at that point — hence the guard rather than relying on it.)
-    const keyboardLeaving = keyboardInset < previousKeyboardInset.current
+    // A merely *shorter* keyboard — a hardware one attaching, a suggestion strip
+    // collapsing — is not a dismissal and must not suppress the tail-follow.
+    const keyboardLeaving = keyboardInset === 0 && previousKeyboardInset.current > 0
     previousKeyboardInset.current = keyboardInset
     if (data.length === 0 || !atBottom || keyboardLeaving) {
       return

@@ -464,6 +464,28 @@ describe('MobileNativeChatView', () => {
     }
   })
 
+  it('still follows the tail when the keyboard only gets shorter', async () => {
+    // Attaching a hardware keyboard drops the inset to the accessory bar; the
+    // keyboard has not left, so a new message must still pull the tail in.
+    vi.useFakeTimers()
+    try {
+      const folded = [assistantTurn('a1', 'The tests pass.')]
+      mocks.keyboardState = KEYBOARD_OPEN
+      mocks.keyboardHeight = KEYBOARD_HEIGHT
+      await render({ folded, keyboardInset: ROUTE_INSET })
+      await act(async () => vi.advanceTimersByTime(200))
+      listInstance.scrollToEnd.mockClear()
+
+      const grown = [...folded, assistantTurn('a2', 'And again.')]
+      await update({ folded: grown, keyboardInset: 21 })
+      await act(async () => vi.advanceTimersByTime(200))
+
+      expect(listInstance.scrollToEnd).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('still lifts the newest message clear of an opening keyboard', async () => {
     vi.useFakeTimers()
     try {
