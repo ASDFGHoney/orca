@@ -293,7 +293,13 @@ function preserveDeleteSiblingPosition(scope: HTMLElement | null): () => void {
 
 export type WorkspaceStatusAssignmentPlan =
   | { readonly kind: 'board-sync'; readonly worktreeIds: readonly string[] }
-  | { readonly kind: 'local-only'; readonly localWriteIds: readonly string[] }
+  | {
+      readonly kind: 'local-only'
+      readonly localWrites: readonly {
+        worktreeId: string
+        executionHostId: Worktree['hostId']
+      }[]
+    }
 
 // Why: the context-menu "Move to Status" routes to the board's local-first +
 // Linear-sync path when the board wired a callback, else a local-only write of
@@ -308,10 +314,10 @@ export function planWorkspaceStatusAssignment(
   if (boardSyncEnabled) {
     return { kind: 'board-sync', worktreeIds: worktrees.map((item) => item.id) }
   }
-  const localWriteIds = worktrees
+  const localWrites = worktrees
     .filter((item) => getWorkspaceStatus(item, workspaceStatuses) !== status)
-    .map((item) => item.id)
-  return { kind: 'local-only', localWriteIds }
+    .map((item) => ({ worktreeId: item.id, executionHostId: item.hostId }))
+  return { kind: 'local-only', localWrites }
 }
 
 const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
@@ -566,8 +572,8 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   }, [worktree.hostId, worktree.id, worktree.isUnread, updateWorktreeMeta])
 
   const handleTogglePin = useCallback(() => {
-    setWorktreesPinnedAndReveal([worktree.id], !worktree.isPinned)
-  }, [worktree.id, worktree.isPinned, setWorktreesPinnedAndReveal])
+    setWorktreesPinnedAndReveal([worktree.id], !worktree.isPinned, worktree.hostId)
+  }, [worktree.hostId, worktree.id, worktree.isPinned, setWorktreesPinnedAndReveal])
 
   const handleCreateGroupFromRepo = useCallback(() => {
     if (!repo) {
@@ -628,7 +634,13 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
       // Why: outside the workspace board (e.g. the sidebar list) status changes
       // are local-only; Linear sync is scoped to board moves like drag-and-drop.
       void Promise.all(
-        plan.localWriteIds.map((id) => updateWorktreeMeta(id, { workspaceStatus: status }))
+        plan.localWrites.map(({ worktreeId, executionHostId }) =>
+          updateWorktreeMeta(
+            worktreeId,
+            { workspaceStatus: status },
+            executionHostId ? { executionHostId } : undefined
+          )
+        )
       )
     },
     [

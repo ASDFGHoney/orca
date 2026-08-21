@@ -102,6 +102,12 @@ describe('folder workspace host resolution', () => {
       expected: OWNER_HOST_ID
     },
     {
+      name: 'workspace executionHostId over conflicting group executionHostId',
+      workspace: { executionHostId: 'local' as const },
+      group: { executionHostId: OWNER_HOST_ID },
+      expected: 'local'
+    },
+    {
       name: 'neither authoritative field',
       workspace: {},
       group: {},

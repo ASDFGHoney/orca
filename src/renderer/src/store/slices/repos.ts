@@ -1164,9 +1164,24 @@ function mergeFetchedProjectGroupsForHost(
 }
 
 function getCatalogFolderWorkspaceHostId(
-  workspace: FolderWorkspace,
+  workspace: Pick<FolderWorkspace, 'connectionId' | 'executionHostId' | 'projectGroupId'>,
   projectGroups: readonly ProjectGroup[]
 ): ExecutionHostId {
+  return getFolderWorkspaceHostIdFromGroups(workspace, projectGroups, LOCAL_EXECUTION_HOST_ID)
+}
+
+// Why: a legacy direct-SSH row can outlive its group during independent catalog refreshes.
+function getLegacyCompatibleCatalogFolderWorkspaceHostId(
+  workspace: Pick<FolderWorkspace, 'connectionId' | 'executionHostId' | 'projectGroupId'>,
+  projectGroups: readonly ProjectGroup[]
+): ExecutionHostId {
+  const explicitHostId = parseExecutionHostId(workspace.executionHostId)?.id
+  if (explicitHostId) {
+    return explicitHostId
+  }
+  if (workspace.connectionId) {
+    return toSshExecutionHostId(workspace.connectionId)
+  }
   return getFolderWorkspaceHostIdFromGroups(workspace, projectGroups, LOCAL_EXECUTION_HOST_ID)
 }
 
@@ -1199,7 +1214,7 @@ function mergeFetchedFolderWorkspacesForHost({
     fetched.map((workspace) => getFolderWorkspaceHostIdentity(workspace, projectGroups))
   )
   const preserved = previous.filter((workspace) => {
-    const existingHostId = getCatalogFolderWorkspaceHostId(workspace, projectGroups)
+    const existingHostId = getLegacyCompatibleCatalogFolderWorkspaceHostId(workspace, projectGroups)
     return (
       !catalogOwnsHost(hostId, existingHostId) ||
       fetchedIdentities.has(getFolderWorkspaceHostIdentity(workspace, projectGroups))
@@ -1893,7 +1908,10 @@ export type RepoSlice = {
     updates: FolderWorkspaceUpdates,
     options?: { executionHostId?: ExecutionHostId }
   ) => Promise<boolean>
-  deleteFolderWorkspace: (folderWorkspaceId: string) => Promise<boolean>
+  deleteFolderWorkspace: (
+    folderWorkspaceId: string,
+    options?: { executionHostId?: ExecutionHostId }
+  ) => Promise<boolean>
   updateProjectGroup: (
     groupId: string,
     updates: Partial<Pick<ProjectGroup, 'name' | 'isCollapsed' | 'tabOrder' | 'color'>>
@@ -2967,12 +2985,19 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  deleteFolderWorkspace: async (folderWorkspaceId) => {
+  deleteFolderWorkspace: async (folderWorkspaceId, options) => {
     const state = get()
-    if (!findFolderWorkspaceOwner(state, folderWorkspaceId)) {
+    const owner = findFolderWorkspaceOwner(state, folderWorkspaceId, options?.executionHostId)
+    if (!owner) {
       return false
     }
-    const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderWorkspace(state, folderWorkspaceId)
+    const ownerHostId =
+      options?.executionHostId ?? getCatalogFolderWorkspaceHostId(owner, state.projectGroups)
+    const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderWorkspace(
+      state,
+      folderWorkspaceId,
+      ownerHostId
+    )
     try {
       // Why: deletion targets the folder's owner; focus may be on a different host.
       const target = getActiveRuntimeTarget({ activeRuntimeEnvironmentId: runtimeEnvironmentId })
@@ -2991,13 +3016,21 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         return false
       }
       const workspaceKey = folderWorkspaceKey(folderWorkspaceId)
-      set((s) => ({
-        folderWorkspaces: s.folderWorkspaces.filter(
-          (workspace) => workspace.id !== folderWorkspaceId
-        ),
-        folderWorkspacePathStatuses: {}
-      }))
-      get().purgeWorktreeTerminalState([workspaceKey])
+      let shouldPurgeTerminalState = false
+      set((s) => {
+        const folderWorkspaces = s.folderWorkspaces.filter(
+          (workspace) =>
+            workspace.id !== folderWorkspaceId ||
+            getCatalogFolderWorkspaceHostId(workspace, s.projectGroups) !== ownerHostId
+        )
+        shouldPurgeTerminalState = !folderWorkspaces.some(
+          (workspace) => workspace.id === folderWorkspaceId
+        )
+        return { folderWorkspaces, folderWorkspacePathStatuses: {} }
+      })
+      if (shouldPurgeTerminalState) {
+        get().purgeWorktreeTerminalState([workspaceKey])
+      }
       return true
     } catch (err) {
       console.error('Failed to delete folder workspace:', err)

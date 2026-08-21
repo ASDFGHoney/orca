@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FolderWorkspace } from '../../../../../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../../../../../shared/project-group-types'
 import {
+  filterFolderWorkspacesForVisibleHosts,
   getFolderPathStatusRouteOptionsForRows,
   getFolderWorkspaceExecutionHostIdForRows,
   getProjectGroupExecutionHostIdForRows,
@@ -143,5 +144,28 @@ describe('WorktreeList host filtering ownership', () => {
         folderWorkspace: folderWorkspace({ executionHostId: 'runtime:env-1' })
       })
     ).toEqual({ runtimeEnvironmentId: 'env-1' })
+  })
+
+  it('filters mixed same-id groups independently of catalog order', () => {
+    const workspace = folderWorkspace()
+    const legacyGroup = group()
+    const runtimeGroup = group({ executionHostId: 'runtime:env-1' })
+
+    for (const groups of [
+      [legacyGroup, runtimeGroup],
+      [runtimeGroup, legacyGroup]
+    ]) {
+      expect(
+        filterFolderWorkspacesForVisibleHosts([workspace], groups, new Set(['local']), 'local')
+      ).toEqual([workspace])
+      expect(
+        filterFolderWorkspacesForVisibleHosts(
+          [workspace],
+          groups,
+          new Set(['runtime:env-1']),
+          'local'
+        )
+      ).toEqual([])
+    }
   })
 })

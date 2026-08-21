@@ -36,12 +36,16 @@ export function getRenderRowSidebarKey(
   return null
 }
 
-export function rowKeyMatchesRenderRow(row: RenderRow, rowKey: string): boolean {
+export function rowKeyMatchesRenderRow(
+  row: RenderRow,
+  rowKey: string,
+  defaultHostId: ExecutionHostId = LOCAL_EXECUTION_HOST_ID
+): boolean {
   if (row.type === 'lineage-group') {
     return row.rows.some((item) => item.rowKey === rowKey)
   }
   return (
-    getRenderRowSidebarKey(row) === rowKey ||
+    getRenderRowSidebarKey(row, defaultHostId) === rowKey ||
     (row.type === 'folder-workspace' && folderWorkspaceKey(row.folderWorkspace.id) === rowKey)
   )
 }

@@ -27,11 +27,27 @@ export async function expectFolderWorkspaceSidebarGrouping(
         (candidate) =>
           candidate.folderPath === localFolderPath && candidate.executionHostId === 'local'
       )
-    if (!runtimeWorkspace || !localWorkspace) {
+    const runtimeGroup = runtimeWorkspace
+      ? store
+          .getState()
+          .projectGroups.find(
+            (group) =>
+              group.id === runtimeWorkspace.projectGroupId && group.executionHostId === hostId
+          )
+      : null
+    const localGroup = localWorkspace
+      ? store
+          .getState()
+          .projectGroups.find(
+            (group) =>
+              group.id === localWorkspace.projectGroupId && group.executionHostId === 'local'
+          )
+      : null
+    if (!runtimeWorkspace || !localWorkspace || !runtimeGroup || !localGroup) {
       throw new Error('Runtime folder unavailable for sidebar grouping')
     }
     store.getState().setVisibleWorkspaceHostIds(['local', hostId])
-    return { runtimeWorkspace, localWorkspace }
+    return { runtimeWorkspace, localWorkspace, runtimeGroup, localGroup }
   }, args)
   expect(targets.runtimeWorkspace.executionHostId).toBe(args.hostId)
   expect(targets.localWorkspace.executionHostId).toBe('local')
@@ -109,26 +125,40 @@ export async function expectFolderWorkspaceSidebarGrouping(
             Number(right.dataset.index ?? Number.MAX_SAFE_INTEGER)
         )
         let hostId: string | null = null
-        const result: Record<string, string | null> = {}
+        let projectGroupText: string | null = null
+        const result: Record<string, { hostId: string | null; projectGroupText: string | null }> =
+          {}
         for (const row of rows) {
           const hostHeader = row.querySelector<HTMLElement>('[data-host-header-drag-id]')
           if (hostHeader) {
             hostId = hostHeader.dataset.hostHeaderDragId ?? null
+            projectGroupText = null
+          }
+          const projectGroupHeader = row.querySelector<HTMLElement>(
+            '[data-project-group-header-id]'
+          )
+          if (projectGroupHeader) {
+            projectGroupText = projectGroupHeader.textContent
           }
           const identity = row.dataset.worktreeHostIdentity
           if (identity && targetIdentities.includes(identity)) {
-            result[identity] = hostId
+            result[identity] = { hostId, projectGroupText }
           }
         }
         return result
       },
       [runtimeIdentity, localIdentity]
     )
-    expect(placement).toEqual({ [runtimeIdentity]: args.hostId, [localIdentity]: 'local' })
+    expect(placement[runtimeIdentity]?.hostId).toBe(args.hostId)
+    expect(placement[localIdentity]?.hostId).toBe('local')
+    if (groupBy.id === 'repo') {
+      expect(placement[runtimeIdentity]?.projectGroupText).toContain(targets.runtimeGroup.name)
+      expect(placement[localIdentity]?.projectGroupText).toContain(targets.localGroup.name)
+    }
     placements.push({
       groupBy: groupBy.id,
-      runtimeHostId: placement[runtimeIdentity]!,
-      localHostId: placement[localIdentity]!
+      runtimeHostId: placement[runtimeIdentity]!.hostId!,
+      localHostId: placement[localIdentity]!.hostId!
     })
     await page.screenshot({
       path: testInfo.outputPath(`sta-4964-${args.screenshotPrefix}-${groupBy.id}.png`),
