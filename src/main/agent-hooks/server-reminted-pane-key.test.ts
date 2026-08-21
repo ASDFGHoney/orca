@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentHookServer, _internals } from './server'
-import { buildBody, postHookEvent, PANE } from './server.test-fixtures'
+import { buildBody, GOOD_PANE, postHookEvent, PANE } from './server.test-fixtures'
 
 const { getCohortAtEmitMock, trackMock } = vi.hoisted(() => ({
   getCohortAtEmitMock: vi.fn(),
@@ -141,6 +141,81 @@ describe('reminted $$ pane keys on the OMP hook pipeline', () => {
           paneKey: PANE,
           state: 'working',
           prompt: 'owned turn',
+          agentType: 'omp'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('does not rebind a reminted token onto a different pane', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      // Why: spawn A then spawn B can share one $$ token in env with different tab/leaf.
+      // Overwriting would let leftover remint posts stamp spawn B's pane.
+      server.registerPaneKeyAlias(REMINTED, PANE, 'pty-a', 10, { authorityVerified: true })
+      server.registerPaneKeyAlias(REMINTED, GOOD_PANE, 'pty-b', 20, { authorityVerified: true })
+      const start = await postHookEvent(
+        server,
+        buildBody(
+          { hook_event_name: 'before_agent_start', prompt: 'owned remint turn' },
+          { paneKey: REMINTED, tabId: 'tab-good' }
+        ),
+        '/hook/omp'
+      )
+      expect(start.status).toBe(204)
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          state: 'working',
+          prompt: 'owned remint turn',
+          agentType: 'omp'
+        })
+      ])
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('updates the remint alias pty when the destination pane is unchanged', () => {
+    const server = new AgentHookServer()
+    const listener = vi.fn()
+    server.setPaneKeyAliasPersistenceListener(listener)
+    server.registerPaneKeyAlias(REMINTED, PANE, 'pty-a', 10, { authorityVerified: true })
+    server.registerPaneKeyAlias(REMINTED, PANE, 'pty-b', 20, { authorityVerified: true })
+    expect(listener).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        legacyPaneKey: REMINTED,
+        stablePaneKey: PANE,
+        ptyId: 'pty-b',
+        updatedAt: 20
+      })
+    ])
+  })
+
+  it('does not let a later persist row rebind a reminted token', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      server.registerPaneKeyAlias(REMINTED, PANE, 'pty-a', 10, { authorityVerified: true })
+      server.registerPaneKeyAlias(REMINTED, GOOD_PANE, 'pty-b', 20, { overwriteExisting: false })
+      await postHookEvent(
+        server,
+        buildBody(
+          { hook_event_name: 'before_agent_start', prompt: 'restored remint' },
+          { paneKey: REMINTED, tabId: 'tab-good' }
+        ),
+        '/hook/omp'
+      )
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          paneKey: PANE,
+          tabId: 'tab-1',
+          state: 'working',
+          prompt: 'restored remint',
           agentType: 'omp'
         })
       ])

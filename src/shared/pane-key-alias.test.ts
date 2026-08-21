@@ -18,5 +18,7 @@ describe('opaque reminted pane keys', () => {
     expect(canRegisterPaneKeyAlias('tab-1:0', CANONICAL)).toBe(true)
     expect(canRegisterPaneKeyAlias('$$not-a-token$$', CANONICAL)).toBe(false)
     expect(canRegisterPaneKeyAlias('nearest-pane', CANONICAL)).toBe(false)
+    expect(canRegisterPaneKeyAlias(REMINTED, '$$ONXW2ZJAON:L$$')).toBe(false)
+    expect(canRegisterPaneKeyAlias(REMINTED, 'tab-1:0')).toBe(false)
   })
 })

@@ -90,7 +90,7 @@ import {
   isAskUserQuestionTool,
   type AgentQuestionAnsweredInferenceRequest
 } from '../../shared/agent-question-answered-intent'
-import { canRegisterPaneKeyAlias } from '../../shared/pane-key-alias'
+import { canRegisterPaneKeyAlias, isOpaqueRemintedPaneKey } from '../../shared/pane-key-alias'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import type { LegacyPaneKeyAliasEntry } from '../../shared/persisted-state-types'
 import {
@@ -1727,6 +1727,11 @@ export class AgentHookServer {
     }
     const existing = this.legacyPaneKeyAliases.get(fromPaneKey)
     if (existing && options?.overwriteExisting === false) {
+      return
+    }
+    // Why: remint tokens have no embedded tab id; first pane wins so a later spawn
+    // cannot steal leftover $$…:L$$ posts onto a different tab:leaf.
+    if (existing && existing.stablePaneKey !== toPaneKey && isOpaqueRemintedPaneKey(fromPaneKey)) {
       return
     }
     const normalizedPtyId =

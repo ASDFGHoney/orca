@@ -505,6 +505,46 @@ describe('registerPtyHandlers', () => {
       { authorityVerified: true }
     )
   })
+  it('aliases a reminted env token only onto this spawn metadata pane', async () => {
+    registerPtyHandlers(mainWindow as never)
+    const leafId = '22222222-2222-4222-8222-222222222222'
+    const claimedPaneKey = makePaneKey('tab-2', leafId)
+    const remintedPaneKey = '$$MFRGGZDFMY:L$$'
+    await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      worktreeId: 'wt-1',
+      tabId: 'tab-2',
+      leafId,
+      env: {
+        ORCA_PANE_KEY: remintedPaneKey,
+        ORCA_AGENT_LAUNCH_TOKEN: 'launch-remint'
+      }
+    })
+
+    expect(spawnMock.mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ORCA_PANE_KEY: claimedPaneKey,
+          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remint'
+        })
+      })
+    )
+    expect(registerPaneKeyAliasMock).toHaveBeenCalledWith(
+      remintedPaneKey,
+      claimedPaneKey,
+      expect.any(String),
+      expect.any(Number),
+      { authorityVerified: true }
+    )
+    expect(registerPaneKeyAliasMock).not.toHaveBeenCalledWith(
+      remintedPaneKey,
+      expect.stringContaining('tab-1:'),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    )
+  })
   it('does not let an old PTY teardown clear a newer pane-key owner', async () => {
     registerPtyHandlers(mainWindow as never)
     const leafId = '11111111-1111-4111-8111-111111111111'
