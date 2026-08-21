@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { VirtualItem } from '@tanstack/react-virtual'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import type { FolderWorkspace } from '../../../../../../shared/folder-workspace-types'
+import type { ProjectGroup } from '../../../../../../shared/project-group-types'
 import {
   HOST_STICKY_PINNED_HEIGHT,
   buildLineageRowRekeyMap,
@@ -41,6 +43,21 @@ function itemStub(id: string): RenderRow {
   return { type: 'item', key: id } as unknown as RenderRow
 }
 
+function folderRow(executionHostId: ExecutionHostId): RenderRow {
+  return {
+    type: 'folder-workspace',
+    key: 'folder-workspace:same-id',
+    folderWorkspace: {
+      id: 'same-id',
+      executionHostId,
+      projectGroupId: 'group-id'
+    } as FolderWorkspace,
+    projectGroup: { id: 'group-id', executionHostId } as ProjectGroup,
+    depth: 0,
+    groupDepth: 0
+  }
+}
+
 function virtualItem(index: number, start: number): VirtualItem {
   return { index, start } as VirtualItem
 }
@@ -72,6 +89,13 @@ describe('getRenderRowKey', () => {
   it('preserves unsectioned group header keys', () => {
     expect(getRenderRowKey(groupRow('workspace-status:in-progress'))).toBe(
       'hdr:workspace-status:in-progress'
+    )
+  })
+
+  it('keeps identical folder workspace ids distinct across hosts', () => {
+    expect(getRenderRowKey(folderRow('local'))).toBe('folder-workspace:local|folder:same-id')
+    expect(getRenderRowKey(folderRow('runtime:owner'))).toBe(
+      'folder-workspace:runtime:owner|folder:same-id'
     )
   })
 })

@@ -1,4 +1,7 @@
 import type { HostSectionRow } from '../../host-section-rows'
+import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
+import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
+import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
 
 type WorktreeItemRow = Extract<HostSectionRow, { type: 'item' }>
 export type RenderRow =
@@ -25,7 +28,11 @@ export function getRenderRowKey(row: RenderRow): string {
     return `pending:${row.creationId}`
   }
   if (row.type === 'folder-workspace') {
-    return `folder-workspace:${row.folderWorkspace.id}`
+    const hostId = getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, 'local')
+    return `folder-workspace:${composeWorktreeHostIdentity(
+      hostId,
+      folderWorkspaceKey(row.folderWorkspace.id)
+    )}`
   }
   return `wt:${row.rowKey}`
 }
