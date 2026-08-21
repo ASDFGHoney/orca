@@ -4,19 +4,26 @@ const SENSITIVE_QUERY_KEY_PATTERNS = [
   /^code$/,
   /^credential(?:s)?$/,
   /^csrf$/,
+  /^hmac$/,
   /^id_token$/,
+  /^jwt$/,
   /^oauth_state$/,
+  /^otp$/,
   /^password$/,
   /^passwd$/,
+  /^pwd$/,
   /^refresh_token$/,
   /^secret$/,
   /^security_token$/,
-  /^session(?:_?id)?$/,
+  /^session(?:_?(?:id|token))?$/,
   /^sig(?:nature)?$/,
+  /^sid$/,
   /^state$/,
   /^(?:access_|auth_)?token$/,
   /^api_?key$/,
   /^client_secret$/,
+  /^private_key$/,
+  /(?:^|_)(?:credential|password|passwd|secret|signature|token)$/,
   /^x_amz_/,
   /^x_goog_(?:credential|signature)$/
 ]
@@ -89,7 +96,11 @@ export function isMobileWebPageBrowserNavigationUrl(value: string): boolean {
 }
 
 function isSensitiveQueryKey(key: string): boolean {
-  const normalized = key.trim().toLowerCase().replaceAll('-', '_')
+  const normalized = key
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
   return SENSITIVE_QUERY_KEY_PATTERNS.some((pattern) => pattern.test(normalized))
 }
 

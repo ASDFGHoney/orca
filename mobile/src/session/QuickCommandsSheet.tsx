@@ -3,7 +3,7 @@ import { Alert, View, Text, Pressable, StyleSheet } from 'react-native'
 import { ChevronLeft } from 'lucide-react-native'
 import { colors, spacing } from '../theme/mobile-theme'
 import { BottomDrawer } from '../components/BottomDrawer'
-import type { TerminalQuickCommand } from '../../../src/shared/types'
+import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-command-types'
 import {
   getQuickCommandPreview,
   MAX_QUICK_COMMANDS,

@@ -1,4 +1,5 @@
-import type { GitHubOwnerRepo, TuiAgent } from '../../../src/shared/types'
+import type { GitHubOwnerRepo } from '../../../src/shared/github/pull-request-types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 import type { TaskProvider } from '../../../src/shared/task-providers'
 import type {
   MobileWebTaskBootstrapResult,

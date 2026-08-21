@@ -76,12 +76,14 @@ export function useMobileNativeChatMessageSend(args: {
 
   const sendMessage = useCallback(
     async (
-      text: string,
+      draftText: string,
       images: string[] | undefined,
       syncComposer: boolean,
       recordControlSend: boolean,
       sharedDeadline?: number
     ): Promise<MobileNativeChatSendOutcome> => {
+      // The host writes trailing whitespace verbatim onto the agent's input line.
+      const text = draftText.trimEnd()
       const target = targetRef.current
       const origin = captureSendOrigin(text)
       const agent = agentRef.current
@@ -97,7 +99,7 @@ export function useMobileNativeChatMessageSend(args: {
         return 'rejected'
       }
       if (syncComposer) {
-        clearDraftForSend(origin, text)
+        clearDraftForSend(origin, draftText)
       }
       const seededLaunchDraft = readSeededLaunchDraftSeed()
       if (seededLaunchDraft && !images?.length) {
@@ -109,7 +111,7 @@ export function useMobileNativeChatMessageSend(args: {
         )
         if (clearOutcome !== 'accepted') {
           if (syncComposer) {
-            restoreRejectedDraft(origin, text)
+            restoreRejectedDraft(origin, draftText)
           }
           onSendError('Message not sent')
           return 'rejected'
@@ -143,7 +145,7 @@ export function useMobileNativeChatMessageSend(args: {
       }
       if (outcome === 'rejected') {
         if (syncComposer) {
-          restoreRejectedDraft(origin, text)
+          restoreRejectedDraft(origin, draftText)
         }
         onSendError('Message not sent')
         return 'rejected'

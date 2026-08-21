@@ -1,5 +1,8 @@
 import { MAX_RENDERED_DIFF_COMBINED_CHARACTERS } from '../../../src/shared/large-diff-render-limit'
-import type { GitHubPRFileContents, GitHubRepositoryIdentity } from '../../../src/shared/types'
+import type {
+  GitHubPRFileContents,
+  GitHubRepositoryIdentity
+} from '../../../src/shared/github/pull-request-types'
 
 export const MOBILE_PR_FILE_CONTENT_CACHE_MAX_ENTRIES = 8
 export const MOBILE_PR_FILE_CONTENT_CACHE_MAX_BYTES = MAX_RENDERED_DIFF_COMBINED_CHARACTERS * 4

@@ -2,7 +2,7 @@ import type {
   DiffComment,
   MobileDiffReviewFileState,
   MobileDiffReviewState
-} from '../../../src/shared/types'
+} from '../../../src/shared/diff-comment-types'
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type {
   MobileWebSourceControlReviewMetadataResult,

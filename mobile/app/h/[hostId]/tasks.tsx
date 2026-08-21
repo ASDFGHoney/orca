@@ -33,6 +33,7 @@ import {
 import { useHostClient } from '../../../src/transport/client-context'
 import {
   useLastConnectedAt,
+  useRelayRecoveryStatus,
   useReconnectAttempt
 } from '../../../src/transport/client-context-connection-metrics'
 import { classifyConnection } from '../../../src/transport/connection-health'
@@ -156,11 +157,11 @@ import {
   isIterationCurrent,
   sortRows,
   type ProjectGroup
-} from '../../../../src/shared/github-project-group-sort'
+} from '../../../../src/shared/github/project-group-sort'
 import type {
   GitHubProjectSortDirection,
   GitHubProjectTable as SharedGitHubProjectTable
-} from '../../../../src/shared/github-project-types'
+} from '../../../../src/shared/github/project-types'
 import {
   CROSS_REPO_DISPLAY_LIMIT,
   isGitHubWorkItemsSshRemoteRequiredError,
@@ -186,19 +187,19 @@ import {
   useMobilePrFileContentCache
 } from '../../../src/tasks/use-mobile-pr-file-content-cache'
 import type {
-  BaseRefSearchResult,
   GitHubOwnerRepo,
-  ProviderCheckSummary,
-  PersistedTrustedOrcaHooks,
-  SparsePreset,
-  TuiAgent
-} from '../../../../src/shared/types'
+  ProviderCheckSummary
+} from '../../../../src/shared/github/pull-request-types'
+import type { PersistedTrustedOrcaHooks } from '../../../../src/shared/orca-yaml-hook-types'
+import type { BaseRefSearchResult } from '../../../../src/shared/repo-types'
+import type { TuiAgent } from '../../../../src/shared/tui-agent'
+import type { SparsePreset } from '../../../../src/shared/worktree/create-types'
 import type { SshConnectionState } from '../../../../src/shared/ssh-types'
 import type { HostedReviewDecision } from '../../../../src/shared/hosted-review'
 import {
   githubProjectHost,
   githubProjectIdentityKey as githubProjectKey
-} from '../../../../src/shared/github-project-identity'
+} from '../../../../src/shared/github/project-identity'
 
 type RepoSummary = HostTaskRepository
 
@@ -2219,6 +2220,7 @@ export default function MobileTasksScreen({
   const reconnectAttempts = connectionMetrics?.reconnectAttempts ?? nativeReconnectAttempts
   const lastConnectedAt = connectionMetrics?.lastConnectedAt ?? nativeLastConnectedAt
   const taskListOperationsRef = useRef<HostTaskListOperations | null>(null)
+  const relayRecovery = useRelayRecoveryStatus(nativeHostBinding ? hostId : undefined)
   const loadGenerationRef = useRef(0)
   const taskResumeRef = useRef<TaskResumeState>({})
   const repoList = useHostRepoList<RepoSummary>(
@@ -7906,7 +7908,8 @@ export default function MobileTasksScreen({
   const headerVerdict = classifyConnection({
     state: connState,
     reconnectAttempts,
-    lastConnectedAt
+    lastConnectedAt,
+    ...relayRecovery
   })
   const emptyLabel =
     connState !== 'connected'

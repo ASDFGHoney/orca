@@ -23,6 +23,13 @@ describe('mobileWebPageBrowserUrl', () => {
       'https://example.com/callback?id_token=secret&view=mobile',
       'https://example.com/callback?view=mobile'
     ],
+    [
+      'https://ci.example.com/deploy?run=1&sessionToken=secret',
+      'https://ci.example.com/deploy?run=1'
+    ],
+    ['https://example.com/?jwt=secret&view=mobile', 'https://example.com/?view=mobile'],
+    ['https://example.com/?private_key=secret&view=mobile', 'https://example.com/?view=mobile'],
+    ['https://example.com/?client.secret=secret&view=mobile', 'https://example.com/?view=mobile'],
     ['https://example.com/#access_token=secret', 'https://example.com/'],
     ['https://example.com/#/callback?refresh_token=secret&view=mobile', 'https://example.com/'],
     ['file:///private/repository/secret.txt', 'file:///[redacted]']

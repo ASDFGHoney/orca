@@ -19,12 +19,17 @@ export type {
 
 export type {
   FileChunkReadResult,
+  FilesystemDirectoryReadOptions,
+  FileRangeReadResult,
+  FileReadLimits,
   FileReadResult,
   FileStat,
   FileUploadSession,
   IFilesystemProvider,
   TerminalArtifactAccessOptions
 } from './filesystem-provider-contract'
+
+export { FileRangeReadUnsupportedError } from './filesystem-provider-contract'
 
 // ─── Git Provider ───────────────────────────────────────────────────
 

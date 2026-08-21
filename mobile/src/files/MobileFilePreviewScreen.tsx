@@ -238,7 +238,8 @@ export function MobileFilePreviewScreen({
   )
   const meta = previewParams ? `${worktreeLabel} - ${displayPath}` : 'Preview'
   const isEditableTerminalArtifact =
-    previewSource?.source === 'terminalArtifact' && isEditableMobileTerminalArtifactPreview(preview)
+    previewSource?.source === 'terminalArtifact' &&
+    isEditableMobileTerminalArtifactPreview(preview, previewSource.readOnly === true)
   const canSaveArtifact =
     isEditableTerminalArtifact &&
     draftSourceKeyRef.current === previewSourceKey &&

@@ -25,6 +25,7 @@ export type HostSessionTerminalFileResolveRequest = {
   terminalHandle: string | null
   pathText: string
   cwd: string | null
+  nativeChatContext: import('../../../src/shared/runtime-types').RuntimeNativeChatFileContext | null
   line: number | null
   column: number | null
 }

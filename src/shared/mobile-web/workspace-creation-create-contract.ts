@@ -87,6 +87,7 @@ export const MobileWebCreationBlankPayloadSchema = z
   .object({
     repoId: MobileWebCreationRepoIdSchema,
     baseName: NameSchema,
+    nameWasGenerated: z.boolean(),
     agentChoice: AgentChoiceSchema,
     comment: OptionalTextSchema,
     setupDecision: SetupDecisionSchema

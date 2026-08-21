@@ -1,4 +1,5 @@
-import type { GitHubWorkItem, GitLabWorkItem } from '../../../src/shared/types'
+import type { GitHubWorkItem } from '../../../src/shared/github/work-item-types'
+import type { GitLabWorkItem } from '../../../src/shared/gitlab-types'
 import {
   normalizeGitHubLinkQuery,
   parseGitHubIssueOrPRLink,
@@ -7,8 +8,8 @@ import {
 } from '../../../src/shared/new-workspace/github-links'
 import { parseGitLabIssueOrMRLink } from '../../../src/shared/new-workspace/gitlab-links'
 import { isSmartWorkspaceSourceQueryWithinLimit } from '../../../src/shared/new-workspace/smart-workspace-source-results'
-import { githubRepoIdentityKey } from '../../../src/shared/github-repository-identity-key'
 import type { HostWorkspaceCreationOperations } from '../worktree/host-workspace-creation-operations'
+import { githubRepoIdentityKey } from '../../../src/shared/github/repository-identity-key'
 
 // A repo the picker can switch to for a cross-repo GitHub paste. Slug is derived
 // best-effort from the repo's remote metadata.

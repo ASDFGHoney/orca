@@ -6,7 +6,8 @@ import type { AgentCompletionStatusSnapshot } from './agent-completion-coordinat
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { TerminalColorSchemeMode } from '../../../../shared/terminal-color-scheme-protocol'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
-import type { SetupSplitDirection, TuiAgent } from '../../../../shared/types'
+import type { TuiAgent } from '../../../../shared/tui-agent'
+import type { SetupSplitDirection } from '../../../../shared/worktree/launch-types'
 import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
@@ -48,6 +49,9 @@ export type PtyConnectionDeps = {
   } | null
   restoredLeafId?: string | null
   restoredPtyIdByLeafId?: Record<string, string>
+  /** Park intent sampled at render time, before the host disposes the tab's
+   *  watchers; consumed once the restored layout has been replayed. */
+  mountFollowsTerminalPark: boolean
   paneTransportsRef: React.RefObject<Map<number, PtyTransport>>
   paneMode2031Ref: React.RefObject<Map<number, boolean>>
   /** Per-pane mirror of the kitty keyboard flags the pane's application
@@ -66,6 +70,11 @@ export type PtyConnectionDeps = {
     (paneId: number, state: PtyTransportRecoveryState | null) => void
   >
   clearTabPtyId: (tabId: string, ptyId: string) => void
+  /** Set only on the pane carrying the tab's queued startup command; called once its own fresh
+   *  spawn exists, which is the first moment a live shell exists to receive it. Not proof of
+   *  delivery: Windows runs an argv-embedded command before this, and a POSIX shell can die
+   *  before the shell-ready write. */
+  onQueuedStartupSpawned?: () => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   isPtyShutdownPending: (ptyId: string) => boolean
   updateTabTitle: (tabId: string, title: string) => void

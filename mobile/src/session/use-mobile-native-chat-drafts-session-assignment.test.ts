@@ -36,7 +36,8 @@ describe('useMobileNativeChatDrafts session assignment', () => {
         messages,
         launchDraft: null,
         chatActive: true,
-        transcriptLoading: false
+        transcriptLoading: false,
+        transcriptSettled: true
       })
       return null
     }

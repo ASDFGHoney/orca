@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { isMobileWebSha256 } from './protocol-token-contract'
 
+export type MobileWebExecutionHostId = 'local' | `ssh:${string}` | `runtime:${string}`
+
 export const MobileWebCreationRepoIdSchema = z.string().min(1).max(128)
 const EmptyPayloadSchema = z.object({}).strict()
 
@@ -32,8 +34,27 @@ export const MobileWebCreationRepositoriesResultSchema = z
           .object({
             id: MobileWebCreationRepoIdSchema,
             displayName: z.string().min(1).max(240),
+            path: z.string().max(4_096),
             badgeColor: z.string().max(64).optional(),
             connectionId: MobileWebCreationRepoIdSchema.nullable().optional(),
+            executionHostId: z.custom<MobileWebExecutionHostId>(
+              (value) =>
+                value === 'local' ||
+                (typeof value === 'string' &&
+                  (value.startsWith('ssh:executionHost_') ||
+                    value.startsWith('runtime:executionHost_')))
+            ),
+            executionHostLabel: z.string().min(1).max(240),
+            projectId: z.string().min(1).max(128),
+            upstream: z
+              .object({
+                owner: z.string().min(1).max(240),
+                repo: z.string().min(1).max(240),
+                host: z.string().min(1).max(240).optional()
+              })
+              .strict()
+              .nullable()
+              .optional(),
             kind: z.enum(['git', 'folder']).optional()
           })
           .strict()
@@ -67,6 +88,12 @@ export const MobileWebCreationAvailabilityResultSchema = z
 
 export const MobileWebCreationRepoPayloadSchema = z
   .object({ repoId: MobileWebCreationRepoIdSchema })
+  .strict()
+export const MobileWebCreationRetiredNamesResultSchema = z
+  .object({
+    exhaustedTiers: z.number().int().nonnegative().max(999_999),
+    names: z.array(z.string().min(1).max(240)).max(1_000)
+  })
   .strict()
 export const MobileWebCreationAgentDetectionPayloadSchema = z
   .object({ repoId: MobileWebCreationRepoIdSchema.nullable() })
@@ -127,7 +154,22 @@ export const MobileWebCreationRuntimeCapabilitiesPayloadSchema = EmptyPayloadSch
 export const MobileWebCreationRuntimeCapabilitiesResultSchema = z
   .object({
     tasksSupported: z.boolean(),
-    idempotentWorktreeCreateSupported: z.boolean()
+    idempotentWorktreeCreateSupported: z.boolean(),
+    hostPlatform: z
+      .enum([
+        'aix',
+        'android',
+        'darwin',
+        'freebsd',
+        'haiku',
+        'linux',
+        'openbsd',
+        'sunos',
+        'win32',
+        'cygwin',
+        'netbsd'
+      ])
+      .nullable()
   })
   .strict()
 
@@ -174,10 +216,16 @@ export type MobileWebCreationRepositoriesResult = z.infer<
   typeof MobileWebCreationRepositoriesResultSchema
 >
 export type MobileWebCreationSettingsResult = z.infer<typeof MobileWebCreationSettingsResultSchema>
+export type MobileWebCreationRuntimeCapabilitiesResult = z.infer<
+  typeof MobileWebCreationRuntimeCapabilitiesResultSchema
+>
 export type MobileWebCreationTrustedHooksResult = z.infer<
   typeof MobileWebCreationTrustedHooksResultSchema
 >
 export type MobileWebCreationRepoPayload = z.infer<typeof MobileWebCreationRepoPayloadSchema>
+export type MobileWebCreationRetiredNamesResult = z.infer<
+  typeof MobileWebCreationRetiredNamesResultSchema
+>
 export type MobileWebCreationAgentDetectionPayload = z.infer<
   typeof MobileWebCreationAgentDetectionPayloadSchema
 >

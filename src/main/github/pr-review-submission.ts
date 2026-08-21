@@ -3,7 +3,7 @@ import type {
   HostedReviewSubmissionComment,
   HostedReviewSubmissionResult
 } from '../../shared/hosted-review-submission'
-import type { GitHubRepositoryIdentity } from '../../shared/types'
+import type { GitHubRepositoryIdentity } from '../../shared/github/pull-request-types'
 import { resolveGitHubRepoExecution } from './github-api-repository'
 import {
   acquire,

@@ -16,25 +16,34 @@ import {
 } from './ssh-filesystem-provider-watch'
 import type {
   IFilesystemProvider,
+  FileRangeReadResult,
+  FileReadLimits,
   FileStat,
   FileReadResult,
   FileUploadSession,
   TerminalArtifactAccessOptions
 } from './types'
-import type { DirEntry, FsChangeEvent, SearchOptions, SearchResult } from '../../shared/types'
+import type { SearchOptions, SearchResult } from '../../shared/code-search-types'
+import type { DirEntry, FsChangeEvent } from '../../shared/filesystem-entry-types'
 import { routeSshFilesystemWatchNotification } from './ssh-filesystem-watch-notifications'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
 import { isWindowsRemoteHost, type RemoteHostPlatform } from '../ssh/ssh-remote-platform'
-import { SshFilesystemDirectoryReader } from './ssh-filesystem-directory-reader'
-import { requestSshMarkdownDocumentPaths } from './ssh-markdown-document-listing'
+import {
+  probeSshQuickOpenSearchCapability,
+  probeSshRangedReadCapability
+} from './ssh-filesystem-provider-capabilities'
+import { readSshFileRange } from './ssh-filesystem-range-read'
+import {
+  readSshTerminalArtifact,
+  writeSshTerminalArtifact
+} from './ssh-filesystem-terminal-artifact'
 import {
   readSshFileChunk,
-  readSshTerminalArtifact,
   readSshTerminalArtifactChunk
 } from './ssh-filesystem-bounded-file-reader'
-import { writeSshTerminalArtifact } from './ssh-filesystem-terminal-artifact-writer'
+import { SshFilesystemDirectoryReader } from './ssh-filesystem-directory-reader'
+import { requestSshMarkdownDocumentPaths } from './ssh-markdown-document-listing'
 const WORKSPACE_SPACE_SCAN_TIMEOUT_MS = 130_000
-
 export class SshFilesystemProvider implements IFilesystemProvider {
   private connectionId: string
   private mux: SshChannelMultiplexer
@@ -58,7 +67,9 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     this.directoryReader = new SshFilesystemDirectoryReader(mux)
 
     if (createSftp) {
-      // Why: system SSH lacks an ssh2 SFTP channel, so only advertise folder transfer when available.
+      // Why: system SSH has raw single-file transfer but no ssh2 SFTP channel;
+      // omitting this method makes folder capability truthful at the provider boundary.
+      // windowsRemotePaths is provider-owned (from host platform), not a caller option.
       const windowsRemotePaths = hostPlatform ? isWindowsRemoteHost(hostPlatform) : undefined
       this.downloadFolder = (sourcePath, destinationPath, options) =>
         downloadFolderViaSftp(createSftp, sourcePath, destinationPath, {
@@ -98,10 +109,14 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     return this.directoryReader.readDir(dirPath, options)
   }
 
-  async readFile(filePath: string): Promise<FileReadResult> {
-    // Why: streaming avoids relay frame limits while old relays retain their legacy 10 MB path.
+  async readFile(filePath: string, limits?: FileReadLimits): Promise<FileReadResult> {
+    // Why: streaming is the default path so previews above the legacy single-
+    // frame budget (~12 MB after base64) don't hit MAX_MESSAGE_SIZE. Old relays
+    // that don't implement fs.readFileStream surface as MethodNotFound; we fall
+    // back to the legacy single-shot fs.readFile (which retains the old 10 MB
+    // cap on those hosts).
     try {
-      return await readFileViaStream(this.mux, filePath)
+      return await readFileViaStream(this.mux, filePath, limits)
     } catch (err) {
       if (isMethodNotFoundError(err)) {
         if (!this.loggedStreamFallback) {
@@ -116,28 +131,45 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     }
   }
 
-  async readFileChunk(
-    filePath: string,
-    offset: number,
-    length: number
-  ): Promise<{ contentBase64: string; bytesRead: number; eof: boolean }> {
+  readFileChunk(filePath: string, offset: number, length: number) {
     return readSshFileChunk(this.mux, filePath, offset, length)
   }
 
-  async readTerminalArtifact(
+  readFileRange(
+    filePath: string,
+    position: number,
+    length: number,
+    options?: { signal?: AbortSignal }
+  ): Promise<FileRangeReadResult> {
+    return readSshFileRange(this.mux, filePath, position, length, options?.signal)
+  }
+
+  supportsFileRangeRead(options?: { signal?: AbortSignal }): Promise<boolean> {
+    return probeSshRangedReadCapability(this.mux, options?.signal)
+  }
+
+  readTerminalArtifact(
     filePath: string,
     options: TerminalArtifactAccessOptions
   ): Promise<FileReadResult> {
     return readSshTerminalArtifact(this.mux, filePath, options)
   }
 
-  async readTerminalArtifactChunk(
+  readTerminalArtifactChunk(
     filePath: string,
     offset: number,
     length: number,
     options: TerminalArtifactAccessOptions
-  ): Promise<{ contentBase64: string; bytesRead: number; eof: boolean }> {
+  ) {
     return readSshTerminalArtifactChunk(this.mux, filePath, offset, length, options)
+  }
+
+  writeTerminalArtifact(
+    filePath: string,
+    content: string,
+    options: TerminalArtifactAccessOptions
+  ): Promise<FileStat> {
+    return writeSshTerminalArtifact(this.mux, filePath, content, options)
   }
 
   async downloadFile(sourcePath: string, destinationPath: string): Promise<void> {
@@ -169,14 +201,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
 
   async writeFile(filePath: string, content: string): Promise<void> {
     await this.mux.request('fs.writeFile', { filePath, content })
-  }
-
-  async writeTerminalArtifact(
-    filePath: string,
-    content: string,
-    options: TerminalArtifactAccessOptions
-  ): Promise<FileStat> {
-    return writeSshTerminalArtifact(this.mux, filePath, content, options)
   }
 
   async writeFileBase64(filePath: string, contentBase64: string): Promise<void> {
@@ -292,7 +316,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
 
   async listFiles(
     rootPath: string,
-    options?: { excludePaths?: string[]; signal?: AbortSignal; maxResults?: number }
+    options?: Parameters<IFilesystemProvider['listFiles']>[1]
   ): Promise<string[]> {
     const params: Record<string, unknown> = { rootPath }
     if (options?.excludePaths && options.excludePaths.length > 0) {
@@ -300,6 +324,9 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     }
     if (options?.maxResults !== undefined) {
       params.maxResults = options.maxResults
+    }
+    if (options?.searchQuery !== undefined) {
+      params.searchQuery = options.searchQuery
     }
     // Why #7721: the signal lets a workspace switch send rpc.cancel so the
     // relay aborts the full-tree scan instead of stacking abandoned scans
@@ -311,6 +338,8 @@ export class SshFilesystemProvider implements IFilesystemProvider {
 
   listMarkdownDocuments = (rootPath: string) => requestSshMarkdownDocumentPaths(this.mux, rootPath)
 
+  supportsQuickOpenSearch = (options: { signal?: AbortSignal } = {}): Promise<boolean> =>
+    probeSshQuickOpenSearchCapability(this.mux, options.signal)
   async watch(
     rootPath: string,
     callback: (events: FsChangeEvent[]) => void,

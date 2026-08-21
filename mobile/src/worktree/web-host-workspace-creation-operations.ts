@@ -1,10 +1,12 @@
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
+import { MobileWebBridgeClientError } from '../../../src/mobile-web/src/mobile-web-bridge-client-error'
 import type {
   MobileWebCreationSelection,
   MobileWebCreationFromSourcePayload
 } from '../../../src/shared/mobile-web/workspace-creation-create-contract'
-import type { TuiAgent } from '../../../src/shared/types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 import type { MobileComposerCreateSelection } from '../tasks/mobile-composer-source-types'
+import { GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE } from '../tasks/mobile-work-items'
 import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import type {
   CreateBlankWorkspaceOperationArgs,
@@ -18,11 +20,9 @@ export function webHostWorkspaceCreationOperations(
 ): HostWorkspaceCreationOperations {
   return {
     async listRepositories() {
-      return (await client.workspaceCreation.repositories()).repositories.map((repository) => ({
-        ...repository,
-        path: ''
-      }))
+      return (await client.workspaceCreation.repositories()).repositories
     },
+    readRetiredWorktreeNames: (repoId) => client.workspaceCreation.retiredNames({ repoId }),
     readRuntimeSettings: async () => webRuntimeSettings(await client.workspaceCreation.settings()),
     readTrustedHooks: () => client.workspaceCreation.trustedHooks(),
     isGitLabCliInstalled: () => client.workspaceCreation.gitLabAvailable(),
@@ -36,8 +36,16 @@ export function webHostWorkspaceCreationOperations(
     saveSparsePreset: (repoId, payload) =>
       client.workspaceCreation.saveSparsePreset({ repoId, ...payload }),
     persistSetupTrust: (args) => client.workspaceCreation.persistTrust(args),
-    searchGitHubItems: (repoId, query) =>
-      client.workspaceCreationSource.searchGitHub(repoId, query),
+    async searchGitHubItems(repoId, query) {
+      try {
+        return await client.workspaceCreationSource.searchGitHub(repoId, query)
+      } catch (error) {
+        if (error instanceof MobileWebBridgeClientError && error.code === 'not_found') {
+          throw new Error(GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE)
+        }
+        throw error
+      }
+    },
     searchGitLabItems: (repoId, query, state) =>
       client.workspaceCreationSource.searchGitLab(repoId, query, state),
     searchLinearIssues: (query, linearWorkspaceId) =>
@@ -79,6 +87,7 @@ async function createBlankWorkspace(
     const result = await client.workspaceCreationCreate.createBlank({
       repoId: args.repoId,
       baseName: args.baseName,
+      nameWasGenerated: args.nameWasGenerated,
       agentChoice: args.agentChoice,
       comment: args.comment,
       setupDecision: args.setupDecision

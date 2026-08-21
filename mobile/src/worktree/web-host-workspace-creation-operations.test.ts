@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
+import { MobileWebBridgeClientError } from '../../../src/mobile-web/src/mobile-web-bridge-client-error'
 import { webHostWorkspaceCreationOperations } from './web-host-workspace-creation-operations'
 
 describe('web host workspace creation operations', () => {
-  it('rebuilds bounded mobile view models without host paths or commands', async () => {
+  it('rebuilds bounded mobile view models with opaque hosted authority', async () => {
     const client = bridgeClient()
     const operations = webHostWorkspaceCreationOperations(
       client as unknown as MobileWebBridgeClient
@@ -14,8 +15,11 @@ describe('web host workspace creation operations', () => {
         id: 'repo-page-1',
         displayName: 'Orca',
         connectionId: 'repo-page-1',
+        executionHostId: 'ssh:executionHost-page-1',
+        executionHostLabel: 'Host',
+        projectId: 'project-page-1',
         kind: 'git',
-        path: ''
+        path: '/workspace/orca'
       }
     ])
     await expect(operations.readRuntimeSettings()).resolves.toEqual({
@@ -117,6 +121,20 @@ describe('web host workspace creation operations', () => {
       })
     ).resolves.toEqual({ error: 'Unable to create workspace. Try again.' })
   })
+
+  it('preserves the native SSH GitHub remote state without exposing host details', async () => {
+    const client = bridgeClient()
+    client.workspaceCreationSource.searchGitHub.mockRejectedValue(
+      new MobileWebBridgeClientError('not_found', false)
+    )
+    const operations = webHostWorkspaceCreationOperations(
+      client as unknown as MobileWebBridgeClient
+    )
+
+    await expect(operations.searchGitHubItems('repo-page-1', '')).rejects.toThrow(
+      'GitHub work items require a GitHub remote for SSH repositories'
+    )
+  })
 })
 
 function bridgeClient() {
@@ -128,6 +146,10 @@ function bridgeClient() {
             id: 'repo-page-1',
             displayName: 'Orca',
             connectionId: 'repo-page-1',
+            executionHostId: 'ssh:executionHost-page-1',
+            executionHostLabel: 'Host',
+            projectId: 'project-page-1',
+            path: '/workspace/orca',
             kind: 'git'
           }
         ]
@@ -148,6 +170,9 @@ function bridgeClient() {
         name: 'pr-7',
         warning: 'Setup completed with a warning.'
       })
+    },
+    workspaceCreationSource: {
+      searchGitHub: vi.fn().mockResolvedValue([])
     }
   }
 }

@@ -18,7 +18,8 @@ export function nativeHostSessionTerminalFileOperations(
           pathText: request.pathText,
           crossWorkspace: true,
           ...(request.terminalHandle ? { terminal: request.terminalHandle } : {}),
-          ...(request.cwd ? { cwd: request.cwd } : {})
+          ...(request.cwd ? { cwd: request.cwd } : {}),
+          ...(request.nativeChatContext ? { nativeChatContext: request.nativeChatContext } : {})
         },
         { timeoutMs: 10_000 }
       )

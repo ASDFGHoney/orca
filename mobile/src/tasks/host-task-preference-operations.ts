@@ -1,4 +1,4 @@
-import type { PersistedTrustedOrcaHooks } from '../../../src/shared/types'
+import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
 import type { MobileWebTaskSettingsUpdatePayload } from '../../../src/shared/mobile-web/task-read-contract'
 import type { HostTaskBootstrap } from './host-task-read-operations'
 

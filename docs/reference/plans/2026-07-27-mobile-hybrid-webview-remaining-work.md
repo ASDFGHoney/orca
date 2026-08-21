@@ -528,8 +528,12 @@ remain open.
       malformed-payload and request-limit coverage. Page-side result admission
       repeats request-specific collection and chunk limits. Sustained
       allocation fuzzing remains.
-- [ ] Complete an independent threat-model and adversarial review.
-- [ ] Resolve every high-severity security finding.
+- [x] Complete an independent threat-model and adversarial review. The
+      2026-08-21 OpenCode review covered the bridge, native shells, package
+      store, runtime RPC, Relay, and SSH boundaries.
+- [x] Resolve every high-severity security finding. Bounded SSH/Relay methods
+      are wired end to end, file-watch teardown is connection-owned, and common
+      credential query forms are redacted, with focused regression tests.
 
 ## 4. Device, Topology, Accessibility, and Performance Gates
 

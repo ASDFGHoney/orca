@@ -96,6 +96,7 @@ describe('mobile web workspace creation round trip', () => {
     const result = await pageClient.workspaceCreationCreate.createBlank({
       repoId: repositories.repositories[0]!.id,
       baseName: 'mobile-workspace',
+      nameWasGenerated: false,
       agentChoice: 'codex',
       setupDecision: 'skip'
     })
@@ -104,7 +105,11 @@ describe('mobile web workspace creation round trip', () => {
       {
         id: expect.stringMatching(/^repo_/),
         displayName: 'Orca',
-        connectionId: expect.stringMatching(/^repo_/)
+        path: '/Users/private/orca',
+        connectionId: expect.stringMatching(/^repo_/),
+        executionHostId: expect.stringMatching(/^ssh:executionHost_/),
+        executionHostLabel: 'Host',
+        projectId: expect.stringMatching(/^project_/)
       }
     ])
     expect(result).toEqual({
@@ -126,9 +131,7 @@ describe('mobile web workspace creation round trip', () => {
     )?.[1]
     expect(createParams).not.toHaveProperty('startupCommand')
     expect(sendRequest).not.toHaveBeenCalledWith('settings.get')
-    expect(JSON.stringify(shellMessages)).not.toMatch(
-      /Users\/private|repo-secret|worktree-secret|ssh-private-id/
-    )
+    expect(JSON.stringify(shellMessages)).not.toMatch(/repo-secret|worktree-secret|ssh-private-id/)
 
     pageClient.dispose()
     broker.dispose()

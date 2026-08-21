@@ -1,7 +1,11 @@
 import { memo, useState } from 'react'
 import { Image, Pressable, Text, View } from 'react-native'
 import { Check, CornerDownRight, ExternalLink, Pencil, Trash2, Undo2 } from 'lucide-react-native'
-import type { GitHubReaction, GitHubReactionContent, PRComment } from '../../../../src/shared/types'
+import type {
+  GitHubReaction,
+  GitHubReactionContent,
+  PRComment
+} from '../../../../src/shared/github/comment-types'
 import { colors } from '../../theme/mobile-theme'
 import { useMobilePrShellOperations } from '../../platform/mobile-pr-shell-operations'
 import { canEditComment, isResolvableComment } from '../../session/pr-comment-actions'

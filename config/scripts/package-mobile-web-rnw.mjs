@@ -82,7 +82,7 @@ for (const [assetPath, bytes] of packaged) {
 
 const assets = [...packaged]
   .map(([assetPath, bytes]) => manifestAsset(assetPath, bytes))
-  .sort((left, right) => left.path.localeCompare(right.path))
+  .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
 const manifestWithoutIdentity = {
   schemaVersion: MOBILE_WEB_MANIFEST_SCHEMA_VERSION,
   buildId: '0'.repeat(64),

@@ -1712,8 +1712,13 @@ copy.
   repeats request-specific file, Source Control, task-list, provider-diff,
   workspace, chunk, and native-chat pagination ceilings; full fuzzing and
   sustained allocation evidence remain.
-- [ ] Complete an independent threat-model and adversarial review.
-- [ ] Resolve every high-severity finding before cutover.
+- [x] Complete an independent threat-model and adversarial review. An
+      independent OpenCode security review completed on 2026-08-21 across the
+      bridge, native shells, package store, runtime RPC, Relay, and SSH paths.
+- [x] Resolve every high-severity finding before cutover. The review's unwired
+      bounded SSH/Relay operations were restored end to end; cross-connection
+      file-watch teardown and browser URL credential redaction were also fixed
+      with focused regression coverage.
 
 ## 12. Physical Device and Topology Validation
 

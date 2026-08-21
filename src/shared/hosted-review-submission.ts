@@ -1,5 +1,5 @@
 import type { GitLabProjectRef } from './gitlab-types'
-import type { GitHubRepositoryIdentity } from './types'
+import type { GitHubRepositoryIdentity } from './github/pull-request-types'
 
 export type HostedReviewSubmissionAction = 'comment' | 'approve' | 'request-changes'
 

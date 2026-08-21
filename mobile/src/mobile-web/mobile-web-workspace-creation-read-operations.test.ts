@@ -8,7 +8,7 @@ function authority(): MobileWebWorkspaceAuthority {
 }
 
 describe('mobile web workspace creation reads', () => {
-  it('returns opaque repositories without paths, remote identity, or connection IDs', async () => {
+  it('returns presentation data with opaque repository, project, and execution authority', async () => {
     const sendRequest = vi.fn().mockResolvedValue({
       ok: true,
       result: {
@@ -39,13 +39,18 @@ describe('mobile web workspace creation reads', () => {
         {
           id: expect.stringMatching(/^repo_/),
           displayName: 'Orca',
+          path: '/Users/private/orca',
           connectionId: expect.stringMatching(/^repo_/),
+          executionHostId: expect.stringMatching(/^ssh:executionHost_/),
+          executionHostLabel: 'Host',
+          projectId: expect.stringMatching(/^project_/),
+          upstream: { owner: 'acme', repo: 'orca' },
           kind: 'git'
         }
       ]
     })
-    expect(JSON.stringify(result)).not.toContain('/Users/private')
     expect(JSON.stringify(result)).not.toContain('ssh-secret-target')
+    expect(JSON.stringify(result)).not.toContain('/host/repo-id')
     expect(JSON.stringify(result)).not.toContain('secret.example')
   })
 
@@ -103,6 +108,42 @@ describe('mobile web workspace creation reads', () => {
     })
     expect(JSON.stringify(result)).not.toContain('private-key')
     expect(JSON.stringify(result)).not.toContain('connectionGeneration')
+  })
+
+  it('reads retired names through opaque repository authority', async () => {
+    const sendRequest = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { repos: [{ id: 'host-repo', displayName: 'Orca', path: '/workspace/orca' }] }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          retiredNamesByRepo: { 'host-repo': ['nautilus'] },
+          retiredNameTiersByRepo: { 'host-repo': 2 }
+        }
+      })
+    const workspaceAuthority = authority()
+    const listed = (await executeMobileWebWorkspaceCreationReadOperation({
+      operation: 'creationRepositories',
+      payload: {},
+      client: { sendRequest } as unknown as RpcClient,
+      authority: workspaceAuthority
+    })) as { repositories: { id: string }[] }
+    const repoId = listed.repositories[0]!.id
+
+    await expect(
+      executeMobileWebWorkspaceCreationReadOperation({
+        operation: 'creationRetiredNames',
+        payload: { repoId },
+        client: { sendRequest } as unknown as RpcClient,
+        authority: workspaceAuthority
+      })
+    ).resolves.toEqual({ exhaustedTiers: 2, names: ['nautilus'] })
+    expect(sendRequest).toHaveBeenLastCalledWith('worktree.listRetiredNames', {
+      repo: 'id:host-repo'
+    })
   })
 
   it('never returns configured launch commands with page settings', async () => {

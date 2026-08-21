@@ -1,4 +1,4 @@
-import type { GitHubOwnerRepo } from '../../../src/shared/types'
+import type { GitHubOwnerRepo } from '../../../src/shared/github/pull-request-types'
 import { MOBILE_TASKS_CAPABILITY } from './mobile-tasks-capability'
 import type {
   HostTaskBootstrap,

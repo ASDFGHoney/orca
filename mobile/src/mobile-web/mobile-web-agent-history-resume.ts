@@ -7,12 +7,12 @@ import type { RpcClient } from '../transport/rpc-client'
 import {
   buildMobileAiVaultResumeLaunch,
   createMobileAiVaultResumeMutationRegistry,
-  readMobileRuntimeHostPlatform,
   readMobileRuntimeTerminalWindowsShell,
   resolveMobileAiVaultResumePlatform,
   resumeAiVaultSessionInTerminal,
   type MobileAiVaultResumeSettings
 } from '../session/ai-vault-resume-launch'
+import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import {
   prepareMobileAiVaultSessionResume,
   RESUME_RPC_TIMEOUT_MS

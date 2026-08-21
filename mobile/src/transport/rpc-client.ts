@@ -36,7 +36,14 @@ import {
 import { markRpcDeliveryUnknown } from './rpc-delivery-ambiguity'
 import { openRpcRequestBudget, resolvePostConnectRequestTimeout } from './rpc-request-budget'
 import { isRpcResponse } from './rpc-response-shape'
-import { createRpcActivityProbe } from './rpc-client-activity-probe'
+import {
+  isStreamingSubscriptionReadyResult,
+  isTerminalSubscribedResult
+} from './rpc-subscription-result-shapes'
+import {
+  RpcSessionLivenessWatchdog,
+  type RpcSessionIdentity
+} from './rpc-session-liveness-watchdog'
 import { isStaleForegroundDial } from './rpc-stale-dial'
 import {
   createMobileInboundFrameQueue,
@@ -57,23 +64,13 @@ import {
   routeTerminalMultiplexFrame
 } from './rpc-client-terminal-multiplex'
 import type { RpcClient, RpcClientSendRequestOptions } from './rpc-client-contract'
+import type { RpcConnectWaiter, RpcPendingRequest } from './rpc-client-request-state'
 
 export type {
   RpcClient,
   RpcClientSendRequestOptions,
   RpcClientSendRequestOptions as SendRequestOptions
 } from './rpc-client-contract'
-
-type PendingRequest = {
-  resolve: (response: RpcResponse) => void
-  reject: (error: Error) => void
-}
-
-type ConnectWaiter = {
-  resolve: () => void
-  reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout> | null
-}
 
 type StreamingListener = (result: unknown) => void
 
@@ -106,6 +103,7 @@ const CONNECT_TIMEOUT_MS = 12_000
 const HANDSHAKE_TIMEOUT_MS = 5_000
 // Why: RN may not expose WebSocket.readyState constants, but the CONNECTING protocol value (0) is stable across runtimes.
 const WEBSOCKET_CONNECTING_STATE = 0
+const LIVENESS_REQUEST_ID_PREFIX = 'mobile-liveness-'
 
 export type ConnectOptions = {
   onStateChange?: (state: ConnectionState) => void
@@ -155,7 +153,7 @@ export function connect(
   let lastConnectedAt: number | null = null
   // Why: cheap diagnostics for RN/OkHttp process-state poisoning (retry cadence, inbound traffic, close timing).
   let lastInboundAt: number | null = null
-  let inboundSequence = 0
+  let livenessIdentity: (RpcSessionIdentity & { socket: WebSocket }) | null = null
   let lastWsClosedAt: number | null = null
   let wsConstructionCounter = 0
   let dialStartedAt = 0
@@ -164,7 +162,7 @@ export function connect(
   let sharedKey: Uint8Array | null = null
   const serverPublicKey = publicKeyFromBase64(serverPublicKeyB64)
 
-  const pending = new Map<string, PendingRequest>()
+  const pending = new Map<string, RpcPendingRequest>()
   const streamListeners = new Map<string, StreamRequest>()
   const terminalStreamListeners = new Map<number, StreamingListener>()
   const terminalStreamIdsByRequest = new Map<string, Set<number>>()
@@ -172,7 +170,7 @@ export function connect(
   let activeBrowserScreencastRequestId: string | null = null
   let pendingBrowserScreencastRequestId: string | null = null
   const stateListeners = new Set<(state: ConnectionState) => void>()
-  const connectWaiters: ConnectWaiter[] = []
+  const connectWaiters: RpcConnectWaiter[] = []
 
   if (onStateChange) {
     stateListeners.add(onStateChange)
@@ -241,7 +239,7 @@ export function connect(
       return Promise.reject(new Error('Connection retry limit reached'))
     }
     return new Promise((resolve, reject) => {
-      const waiter: ConnectWaiter = { resolve, reject, timeout: null }
+      const waiter: RpcConnectWaiter = { resolve, reject, timeout: null }
       if (timeoutMs !== undefined) {
         // Why: per-request timeouts must cover offline/reconnect waiting, not just the RPC after connect.
         waiter.timeout = setTimeout(
@@ -305,6 +303,7 @@ export function connect(
     const openingWs = ws
     let openingWsAuthenticated = false
     let openingWsLastInboundAt: number | null = null
+    let openingLivenessIdentity: (RpcSessionIdentity & { socket: WebSocket }) | null = null
     const closeForOverload = (direction: 'Inbound' | 'Outbound', detail: string): void => {
       emitLog('error', `${direction} WebSocket overload`, detail)
       openingWs.close()
@@ -359,7 +358,12 @@ export function connect(
         type: 'e2ee_hello',
         publicKeyB64: publicKeyToBase64(ephemeral.publicKey)
       })
-      openingWs.send(hello)
+      try {
+        openingWs.send(hello)
+      } catch {
+        closeAndSynthesize(openingWs)
+        return
+      }
       emitLog('info', 'Sent e2ee_hello', 'Awaiting server e2ee_ready')
 
       sharedKey = deriveSharedKey(ephemeral.secretKey, serverPublicKey)
@@ -427,9 +431,11 @@ export function connect(
               streamCount: streamListeners.size
             })
             openingWsAuthenticated = true
+            openingLivenessIdentity = { socket: openingWs }
+            livenessIdentity = openingLivenessIdentity
+            livenessWatchdog.start(openingLivenessIdentity)
             setState('connected')
             emitLog('success', 'Authenticated', 'Channel ready for RPC')
-            activityProbe.start()
             for (const [id, stream] of streamListeners) {
               if (stream.cancelled) {
                 removeStreamListener(id)
@@ -449,8 +455,9 @@ export function connect(
               ) {
                 stream.sent = true
               } else {
-                emitStreamError(stream, 'Connection interrupted')
-                removeStreamListener(id)
+                // The failed write already starts recovery; retain every stream for replay.
+                markStreamsForReplay()
+                break
               }
             }
           } else if (
@@ -481,13 +488,21 @@ export function connect(
           rawData,
           key: sharedKey,
           isCurrent: () => ws === openingWs,
-          onFrame: handleBinaryFrame
+          onFrame: (frame) => {
+            if (openingLivenessIdentity) {
+              livenessWatchdog.noteAuthenticatedInbound(openingLivenessIdentity)
+            }
+            handleBinaryFrame(frame)
+          }
         })
       }
 
       const plaintext = decrypt(raw, sharedKey)
       if (plaintext === null) {
         return
+      }
+      if (openingLivenessIdentity) {
+        livenessWatchdog.noteAuthenticatedInbound(openingLivenessIdentity)
       }
 
       const response = tryParseMobileJsonTextWithinLimits(plaintext)
@@ -498,8 +513,9 @@ export function connect(
         return
       }
       openingOutbound.acknowledge(response.id)
-      recordValidatedInboundTraffic()
-
+      if (response.id.startsWith(LIVENESS_REQUEST_ID_PREFIX)) {
+        return
+      }
       // Why: a mid-session unauthorized may be transient (issue #5200) — handleAuthRejection retries before latching auth-failed.
       if (!response.ok && response.error.code === 'unauthorized') {
         handleAuthRejection('Unauthorized — pairing may be revoked')
@@ -650,7 +666,10 @@ export function connect(
     pendingBrowserScreencastRequestId = null
     markStreamsForReplay()
     clearHandshakeTimer()
-    activityProbe.stop()
+    if (livenessIdentity?.socket === closedWs) {
+      livenessWatchdog.stop(livenessIdentity)
+      livenessIdentity = null
+    }
     if (intentionallyClosed) {
       console.log('[net] handleSocketClosed — intentional close')
       setState('disconnected')
@@ -681,6 +700,10 @@ export function connect(
 
   // Why: an auth rejection may be transient (issue #5200) — retry up to AUTH_RETRY_BUDGET times before latching auth-failed.
   function handleAuthRejection(reason: string, preserveRecovery = false): void {
+    if (livenessIdentity) {
+      livenessWatchdog.stop(livenessIdentity)
+      livenessIdentity = null
+    }
     authRejectionCount++
     if (authRejectionCount < AUTH_RETRY_BUDGET) {
       console.log('[net] auth rejected — retrying handshake', {
@@ -880,25 +903,18 @@ export function connect(
     }
   }
 
-  function recordValidatedInboundTraffic(): void {
-    inboundSequence++
-  }
-
   function handleBinaryFrame(bytes: Uint8Array): void {
     const browserFrame = decodeBrowserScreencastFrame(bytes)
     if (browserFrame) {
-      recordValidatedInboundTraffic()
       handleBrowserBinaryFrame(browserFrame)
       return
     }
     if (routeTerminalMultiplexFrame(bytes, streamListeners.values())) {
-      recordValidatedInboundTraffic()
       return
     }
     handleTerminalBinaryFrame(bytes, {
       terminalSnapshots,
-      getListener: (streamId) => terminalStreamListeners.get(streamId),
-      recordValidatedInboundTraffic
+      getListener: (streamId) => terminalStreamListeners.get(streamId)
     })
   }
 
@@ -918,7 +934,10 @@ export function connect(
     getSharedKey: () => sharedKey,
     getSocket: () => ws,
     getState: () => state,
-    onSocketDesync: (socket) => handleSocketClosed(socket, { timedOut: false })
+    onSocketDesync: (socket) => {
+      synthesizedCloses.remember(socket, authenticationGeneration)
+      handleSocketClosed(socket, { timedOut: false })
+    }
   })
 
   function sendBrowserScreencastUnsubscribe(subscriptionId: string): void {
@@ -945,15 +964,23 @@ export function connect(
     }
   }
 
-  const activityProbe = createRpcActivityProbe({
-    getState: () => state,
-    getSocket: () => ws,
-    getInboundSequence: () => inboundSequence,
-    nextId,
-    registerPending: (id, onSettled) => pending.set(id, { resolve: onSettled, reject: onSettled }),
-    clearPending: (id) => pending.delete(id),
-    sendProbe: (id) => sendEncrypted({ id, deviceToken, method: 'status.get' }),
-    forceReconnect: closeAndSynthesize
+  const livenessWatchdog = new RpcSessionLivenessWatchdog({
+    transport: 'direct',
+    sendProbe: (identity) => {
+      if (identity !== livenessIdentity || state !== 'connected') {
+        return false
+      }
+      return sendEncrypted({
+        id: `${LIVENESS_REQUEST_ID_PREFIX}${nextId()}`,
+        deviceToken,
+        method: 'status.get'
+      })
+    },
+    terminate: (identity) => {
+      if (identity === livenessIdentity && livenessIdentity.socket === ws) {
+        closeAndSynthesize(livenessIdentity.socket)
+      }
+    }
   })
 
   openConnection()
@@ -1112,6 +1139,10 @@ export function connect(
       return lastConnectedAt
     },
 
+    getLastInboundAt(): number | null {
+      return livenessWatchdog.getLastInboundAt() || null
+    },
+
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener)
       return () => stateListeners.delete(listener)
@@ -1122,10 +1153,11 @@ export function connect(
         return
       }
       if (state === 'connected') {
-        // Why: OS can kill the TCP path while backgrounded without onclose; probe now to detect the half-open socket in ≤8s (issue #5049).
+        // Why: resume probes now; three fair misses detect a half-open socket within 24s.
         console.log('[net] foreground — probing live connection')
-        activityProbe.start()
-        activityProbe.run()
+        if (livenessIdentity) {
+          livenessWatchdog.probeNow(livenessIdentity)
+        }
         return
       }
       const dialing = ws
@@ -1159,12 +1191,12 @@ export function connect(
         reconnectTimer = null
       }
       clearConnectTimer()
-      if (handshakeTimer) {
-        clearTimeout(handshakeTimer)
-        handshakeTimer = null
-      }
-      activityProbe.stop()
+      clearHandshakeTimer()
       disposeActiveOutbound()
+      if (livenessIdentity) {
+        livenessWatchdog.stop(livenessIdentity)
+        livenessIdentity = null
+      }
       if (ws) {
         ws.close()
         ws = null
@@ -1175,26 +1207,4 @@ export function connect(
       rejectAllPending('Client closed', { deliveryUnknown: true })
     }
   }
-}
-
-function isTerminalSubscribedResult(
-  value: unknown
-): value is { type: 'subscribed'; streamId: number } {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    (value as { type?: unknown }).type === 'subscribed' &&
-    typeof (value as { streamId?: unknown }).streamId === 'number'
-  )
-}
-
-function isStreamingSubscriptionReadyResult(
-  value: unknown
-): value is { type: 'ready'; subscriptionId: string } {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    (value as { type?: unknown }).type === 'ready' &&
-    typeof (value as { subscriptionId?: unknown }).subscriptionId === 'string'
-  )
 }

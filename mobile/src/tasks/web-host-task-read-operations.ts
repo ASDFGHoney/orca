@@ -1,5 +1,5 @@
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
-import type { TuiAgent } from '../../../src/shared/types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 import { normalizeWorkspaceAgent } from './workspace-agent-selection'
 import type { HostTaskBootstrap, HostTaskReadOperations } from './host-task-read-operations'
 

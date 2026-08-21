@@ -30,6 +30,7 @@ export type RpcClient = {
   getState: () => ConnectionState
   getReconnectAttempt: () => number
   getLastConnectedAt: () => number | null
+  getLastInboundAt?: () => number | null
   onStateChange: (listener: (state: ConnectionState) => void) => () => void
   notifyForeground: (reason?: ForegroundNudgeReason) => void
   close: () => void

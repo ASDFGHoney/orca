@@ -5,6 +5,7 @@
     "../src/shared/agent-status-limits.ts",
     "../src/shared/clipboard-text.ts",
     "../src/shared/event-loop-yield.ts",
+    "../src/shared/file-link-location.ts",
     "../src/shared/mobile-markdown-document.ts",
     "../src/shared/mobile-web/**/*",
     "../src/shared/terminal-file-link-matcher.ts",

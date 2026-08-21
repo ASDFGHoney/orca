@@ -3,28 +3,23 @@ import { MOBILE_WEB_NATIVE_CHAT_PENDING_DELIVERY_LIMIT } from '../../../src/shar
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import type { HostSessionChatPendingDeliveryOperations } from './host-session-chat-pending-delivery-operations'
 import {
-  countImageSourceTurnsAfter,
   countUserTextOccurrences,
   findLandedImagePreviewEchoes,
   mergeLandedImagePreviewEchoes,
-  migrateImagePreviewMessageIds,
-  normalizedUserText
+  migrateImagePreviewMessageIds
 } from './mobile-native-chat-draft-reconcile'
+import { rebaseMobileNativeChatPendingBaselines } from './mobile-native-chat-pending-baseline'
+import { retireLandedMobileNativeChatPending } from './mobile-native-chat-pending-retirement'
 import {
   combineMobileNativeChatPending,
   mergeWaitingSessionPending,
   nextMobileNativeChatPendingId,
   omitMobileNativeChatPendingKey,
-  removeWaitingSessionPending
+  removeWaitingSessionPending,
+  type MobileNativeChatPendingMessage
 } from './mobile-native-chat-pending-echo'
 
-export type MobileNativeChatPendingMessage = {
-  id: string
-  text: string
-  expectedOccurrence: number
-  images?: string[]
-  baselineTailMessageId: string | null
-}
+export type { MobileNativeChatPendingMessage } from './mobile-native-chat-pending-echo'
 
 export type MobileNativeChatPendingDeliveryTarget = {
   workspaceId: string
@@ -38,6 +33,7 @@ export type MobileNativeChatPendingDeliveryOrigin = {
   normalizedText: string
   baselineOccurrences: number
   baselineTailMessageId: string | null
+  baselineResolved: boolean
   pendingTarget: MobileNativeChatPendingDeliveryTarget | null
 }
 
@@ -51,6 +47,7 @@ export function useMobileNativeChatPendingDeliveries(args: {
   sessionId: string | null
   messages: readonly NativeChatMessage[]
   persistence: HostSessionChatPendingDeliveryOperations | null
+  transcriptSettled: boolean
 }): {
   pendingKey: string | null
   pending: MobileNativeChatPendingMessage[]
@@ -58,7 +55,7 @@ export function useMobileNativeChatPendingDeliveries(args: {
   captureOrigin: (normalizedText: string) => MobileNativeChatPendingDeliveryOrigin
   accept: (origin: MobileNativeChatPendingDeliveryOrigin, text: string, images?: string[]) => void
 } {
-  const { hostId, worktreeId, tabId, sessionId, messages, persistence } = args
+  const { hostId, worktreeId, tabId, sessionId, messages, persistence, transcriptSettled } = args
   const waitingKey = tabId ? `${hostId}\0${worktreeId}\0${tabId}` : null
   const pendingKey = tabId && sessionId ? `${hostId}\0${worktreeId}\0${tabId}\0${sessionId}` : null
   const pendingTarget = useMemo(
@@ -155,7 +152,8 @@ export function useMobileNativeChatPendingDeliveries(args: {
         const deliveries = stored.map((delivery) => ({
           id: nextMobileNativeChatPendingId(nextMessageIdRef),
           ...delivery,
-          baselineTailMessageId: null
+          baselineTailMessageId: null,
+          baselineResolved: false
         }))
         const nextState =
           deliveries.length > 0
@@ -179,9 +177,10 @@ export function useMobileNativeChatPendingDeliveries(args: {
       normalizedText,
       baselineOccurrences: countUserTextOccurrences(messages, normalizedText),
       baselineTailMessageId: messages.at(-1)?.id ?? null,
+      baselineResolved: transcriptSettled,
       pendingTarget
     }),
-    [messages, pendingKey, pendingTarget, waitingKey]
+    [messages, pendingKey, pendingTarget, transcriptSettled, waitingKey]
   )
 
   const accept = useCallback(
@@ -211,6 +210,7 @@ export function useMobileNativeChatPendingDeliveries(args: {
               ? expectedImageEchoOrdinal
               : origin.baselineOccurrences + earlierOutstanding + 1,
           baselineTailMessageId: origin.baselineTailMessageId,
+          baselineResolved: origin.baselineResolved,
           ...(images && images.length > 0 ? { images } : {})
         }
       ].slice(-MOBILE_WEB_NATIVE_CHAT_PENDING_DELIVERY_LIMIT)
@@ -252,35 +252,24 @@ export function useMobileNativeChatPendingDeliveries(args: {
     if (pending.length === 0) {
       return
     }
-    const landedImagePreviews = findLandedImagePreviewEchoes(messages, pending)
+    const landedImagePreviews = findLandedImagePreviewEchoes(
+      messages,
+      pending.filter((item) => item.baselineResolved)
+    )
     const landedImagePendingIds = new Set(landedImagePreviews.map((preview) => preview.pendingId))
     if (landedImagePreviews.length > 0) {
       setImagePreviewsBySession((previous) =>
         mergeLandedImagePreviewEchoes(previous, pendingKey, landedImagePreviews)
       )
     }
-    const landedCounts = new Map<string, number>()
-    for (const message of messages) {
-      const text = normalizedUserText(message)
-      if (text) {
-        landedCounts.set(text, (landedCounts.get(text) ?? 0) + 1)
-      }
-    }
-    const next = pending.filter((item) => {
-      if (landedImagePendingIds.has(item.id)) {
-        return false
-      }
-      if (item.images?.length) {
-        return true
-      }
-      return item.text.trim() === ''
-        ? countImageSourceTurnsAfter(messages, item.baselineTailMessageId) < item.expectedOccurrence
-        : (landedCounts.get(item.text.trim()) ?? 0) < item.expectedOccurrence
-    })
-    if (next.length !== pending.length) {
+    const rebased = transcriptSettled
+      ? rebaseMobileNativeChatPendingBaselines(messages, pending)
+      : pending
+    const next = retireLandedMobileNativeChatPending(messages, rebased, landedImagePendingIds)
+    if (next !== pending) {
       replacePending(pendingKey, pendingTarget, next)
     }
-  }, [messages, pending, pendingKey, pendingTarget, replacePending])
+  }, [messages, pending, pendingKey, pendingTarget, replacePending, transcriptSettled])
 
   return {
     pendingKey,

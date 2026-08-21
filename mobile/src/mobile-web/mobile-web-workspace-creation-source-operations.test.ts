@@ -87,6 +87,28 @@ describe('mobile web workspace creation sources', () => {
     expect(JSON.stringify(result)).not.toContain('remoteUrl')
     expect(JSON.stringify(result)).not.toContain('secret')
   })
+
+  it('maps the SSH GitHub remote requirement without exposing host errors', async () => {
+    const authority = workspaceAuthority()
+    authority.synchronizeCreationRepositories([{ id: 'host-repo-secret' }])
+    const pageRepoId = authority.pageRepoId('host-repo-secret')
+    const sendRequest = vi.fn().mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'runtime_error',
+        message: 'GitHub work items require a GitHub remote for SSH repositories: secret-host'
+      }
+    })
+
+    await expect(
+      executeMobileWebWorkspaceCreationSourceOperation({
+        operation: 'creationSearchGitHub',
+        payload: { repoId: pageRepoId, query: 'mobile' },
+        client: { sendRequest } as unknown as RpcClient,
+        authority
+      })
+    ).rejects.toMatchObject({ code: 'not_found' })
+  })
 })
 
 function workspaceAuthority(): MobileWebWorkspaceAuthority {

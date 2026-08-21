@@ -2,7 +2,7 @@ import type {
   HostedReviewSubmissionInput,
   HostedReviewSubmissionResult
 } from '../../shared/hosted-review-submission'
-import type { IssueSourcePreference } from '../../shared/types'
+import type { IssueSourcePreference } from '../../shared/repo-types'
 import { submitGitHubPullRequestReview } from '../github/pr-review-submission'
 import { addMRComment, addMRInlineComment } from '../gitlab/client'
 import {

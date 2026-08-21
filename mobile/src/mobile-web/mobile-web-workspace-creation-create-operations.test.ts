@@ -182,6 +182,7 @@ function blankPayload(repoId: string) {
   return {
     repoId,
     baseName: 'secure-workspace',
+    nameWasGenerated: false,
     agentChoice: 'blank',
     setupDecision: 'skip'
   }

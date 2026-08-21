@@ -1,4 +1,7 @@
-import type { TerminalQuickCommand, TerminalQuickCommandScope } from '../../../src/shared/types'
+import type {
+  TerminalQuickCommand,
+  TerminalQuickCommandScope
+} from '../../../src/shared/terminal-quick-command-types'
 import type { TerminalQuickCommandMutation } from '../terminal/quick-commands'
 
 export type HostSessionQuickCommandSnapshot = {

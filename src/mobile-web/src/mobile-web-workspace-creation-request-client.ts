@@ -8,6 +8,7 @@ import {
   MobileWebCreationRepoPayloadSchema,
   MobileWebCreationRepositoriesPayloadSchema,
   MobileWebCreationRepositoriesResultSchema,
+  MobileWebCreationRetiredNamesResultSchema,
   MobileWebCreationRuntimeCapabilitiesPayloadSchema,
   MobileWebCreationRuntimeCapabilitiesResultSchema,
   MobileWebCreationSettingsPayloadSchema,
@@ -23,6 +24,8 @@ import {
   type MobileWebCreationRepoHooksResult,
   type MobileWebCreationRepoPayload,
   type MobileWebCreationRepositoriesResult,
+  type MobileWebCreationRetiredNamesResult,
+  type MobileWebCreationRuntimeCapabilitiesResult,
   type MobileWebCreationSettingsResult,
   type MobileWebCreationSparsePresetSavePayload,
   type MobileWebCreationSshStateResult,
@@ -39,6 +42,16 @@ export class MobileWebWorkspaceCreationRequestClient {
       'creationRepositories',
       MobileWebCreationRepositoriesPayloadSchema,
       MobileWebCreationRepositoriesResultSchema
+    )
+  }
+
+  retiredNames(
+    payload: MobileWebCreationRepoPayload
+  ): Promise<MobileWebCreationRetiredNamesResult> {
+    return this.repoRequest(
+      'creationRetiredNames',
+      payload,
+      MobileWebCreationRetiredNamesResultSchema
     )
   }
 
@@ -98,10 +111,7 @@ export class MobileWebWorkspaceCreationRequestClient {
     return this.repoRequest('creationRepoHooks', payload, MobileWebCreationRepoHooksResultSchema)
   }
 
-  runtimeCapabilities(): Promise<{
-    tasksSupported: boolean
-    idempotentWorktreeCreateSupported: boolean
-  }> {
+  runtimeCapabilities(): Promise<MobileWebCreationRuntimeCapabilitiesResult> {
     return this.emptyRequest(
       'creationRuntimeCapabilities',
       MobileWebCreationRuntimeCapabilitiesPayloadSchema,

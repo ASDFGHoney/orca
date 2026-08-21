@@ -2,7 +2,7 @@ import type {
   MobileWebTaskDetailComment,
   MobileWebTaskGitHubDetailResult
 } from '../../../src/shared/mobile-web/task-detail-contract'
-import type { GitHubPRFileContents } from '../../../src/shared/types'
+import type { GitHubPRFileContents } from '../../../src/shared/github/pull-request-types'
 import type { HostTaskProjectItemTarget } from './host-task-project-mutation-operations'
 
 export type HostTaskProjectFileOperations = {

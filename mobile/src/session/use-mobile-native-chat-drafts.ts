@@ -20,6 +20,7 @@ export type MobileNativeChatSendOrigin = MobileNativeChatPendingDeliveryOrigin &
   draftKey: string
 }
 
+// Ack-lost sends wait for a transcript echo before surfacing as unconfirmed.
 const UNCONFIRMED_SEND_DEADLINE_MS = 20_000
 
 export function useMobileNativeChatDrafts(args: {
@@ -40,6 +41,10 @@ export function useMobileNativeChatDrafts(args: {
   transcriptLoading?: boolean
   persistence?: HostSessionChatDraftOperations | null
   pendingPersistence?: HostSessionChatPendingDeliveryOperations | null
+  /** `messages` is this session's own settled history — so an empty one really
+   *  is an empty conversation, not a read that failed or never ran. Only then
+   *  does a send's captured tail describe a real boundary. */
+  transcriptSettled: boolean
 }): {
   composerText: string
   setComposerText: Dispatch<SetStateAction<string>>
@@ -70,7 +75,8 @@ export function useMobileNativeChatDrafts(args: {
     chatActive = true,
     transcriptLoading,
     persistence = null,
-    pendingPersistence = null
+    pendingPersistence = null,
+    transcriptSettled
   } = args
   const draftKey = mobileNativeChatScopeKey(hostId, worktreeId, tabId)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -90,7 +96,8 @@ export function useMobileNativeChatDrafts(args: {
     tabId,
     sessionId,
     messages,
-    persistence: pendingPersistence
+    persistence: pendingPersistence,
+    transcriptSettled
   })
   const activePendingKeyRef = useRef(pendingKey)
   activePendingKeyRef.current = pendingKey

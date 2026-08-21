@@ -10,7 +10,7 @@ import { clearMobileWebColdResumeRouteForHost } from '../mobile-web/mobile-web-c
 export async function removeHostAndCloseClient(
   hostId: string,
   hostPublicKey: string,
-  closeHostClient: (hostId: string) => void
+  forgetHostClient: (hostId: string) => void
 ): Promise<void> {
   // Why: cache deletion is recoverable by redownload, while a completed unpair must not leave host code behind.
   await removeMobileWebHostCache(hostPublicKey)
@@ -19,7 +19,7 @@ export async function removeHostAndCloseClient(
   // storage failure; closing immediately after success prevents socket leaks.
   await removeHost(hostId)
   try {
-    closeHostClient(hostId)
+    forgetHostClient(hostId)
   } finally {
     // Why: host-scoped process state must not survive a completed unpair.
     forgetHostNotificationSession(hostId)

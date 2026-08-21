@@ -144,7 +144,8 @@ export function useMobileNativeChatController(args: {
     chatActive: showNativeChat,
     transcriptLoading: nativeChatSession.transcriptLoading,
     persistence: draftOperations,
-    pendingPersistence: pendingDeliveryOperations
+    pendingPersistence: pendingDeliveryOperations,
+    transcriptSettled: nativeChatSession.status === 'ready'
   })
 
   const nativeChatStatus = activeChatResolution ? activeSessionTab?.agentStatus : null

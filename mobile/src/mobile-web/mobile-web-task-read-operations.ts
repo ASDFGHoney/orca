@@ -35,7 +35,7 @@ import {
   MobileWebTaskLinearListPayloadSchema,
   MobileWebTaskLinearListResultSchema
 } from '../../../src/shared/mobile-web/task-list-contract'
-import type { PersistedTrustedOrcaHooks } from '../../../src/shared/types'
+import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
 import type { HostTaskRepository } from '../tasks/host-task-read-operations'
 import { nativeHostTaskDetailOperations } from '../tasks/native-host-task-detail-operations'
 import { nativeHostTaskListOperations } from '../tasks/native-host-task-list-operations'

@@ -1,8 +1,9 @@
-import type { PersistedTrustedOrcaHooks } from '../../../src/shared/types'
+import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
 import type { SshConnectionState } from '../../../src/shared/ssh-types'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcSuccess } from '../transport/types'
 import { readNewWorktreeRuntimeCapabilities } from '../tasks/worktree-create-capability'
+import { readRetiredNameRegistryForRepo } from '../../../src/shared/worktree/retired-name-cache'
 import type {
   HostWorkspaceCreationOperations,
   NewWorkspaceRepoHooks,
@@ -13,6 +14,7 @@ import type {
 type ReadOperations = Pick<
   HostWorkspaceCreationOperations,
   | 'listRepositories'
+  | 'readRetiredWorktreeNames'
   | 'readRuntimeSettings'
   | 'readTrustedHooks'
   | 'isGitLabCliInstalled'
@@ -31,6 +33,12 @@ export function nativeHostWorkspaceCreationReadOperations(client: RpcClient): Re
         client.sendRequest('repo.list')
       )
       return result.repos
+    },
+    async readRetiredWorktreeNames(repoId) {
+      const result = await successfulResult<unknown>(
+        client.sendRequest('worktree.listRetiredNames', { repo: `id:${repoId}` })
+      )
+      return readRetiredNameRegistryForRepo(result, repoId)
     },
     async readRuntimeSettings() {
       const result = await successfulResult<{ settings: NewWorkspaceRuntimeSettings }>(

@@ -16,8 +16,11 @@ import {
   MobileWebCreationRepoQueryPayloadSchema,
   MobileWebCreationRepoSlugResultSchema
 } from '../../../src/shared/mobile-web/workspace-creation-source-contract'
-import type { GitHubWorkItem, GitLabWorkItem, LinearIssue } from '../../../src/shared/types'
+import type { GitHubWorkItem } from '../../../src/shared/github/work-item-types'
+import type { GitLabWorkItem } from '../../../src/shared/gitlab-types'
+import type { LinearIssue } from '../../../src/shared/linear/issue-types'
 import type { RpcClient } from '../transport/rpc-client'
+import { isGitHubWorkItemsSshRemoteRequiredError } from '../tasks/mobile-work-items'
 import { nativeHostWorkspaceCreationOperations } from '../worktree/native-host-workspace-creation-operations'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
@@ -48,7 +51,7 @@ export async function executeMobileWebWorkspaceCreationSourceOperation(args: {
     const payload = MobileWebCreationRepoQueryPayloadSchema.parse(args.payload)
     const hostRepoId = args.authority.hostRepoId(payload.repoId)
     if (args.operation === 'creationSearchGitHub') {
-      const items = await operations.searchGitHubItems(hostRepoId, payload.query)
+      const items = await searchGitHubItems(operations, hostRepoId, payload.query)
       return MobileWebCreationGitHubSearchResultSchema.parse({
         items: items.map((item) => presentGitHubItem(item, payload.repoId))
       })
@@ -58,6 +61,21 @@ export async function executeMobileWebWorkspaceCreationSourceOperation(args: {
     })
   }
   return executeCreationLookupOrBase(args, operations)
+}
+
+async function searchGitHubItems(
+  operations: ReturnType<typeof nativeHostWorkspaceCreationOperations>,
+  repoId: string,
+  query: string
+): ReturnType<typeof operations.searchGitHubItems> {
+  try {
+    return await operations.searchGitHubItems(repoId, query)
+  } catch (error) {
+    if (isGitHubWorkItemsSshRemoteRequiredError(error)) {
+      throw new MobileWebBrokerError('not_found')
+    }
+    throw error
+  }
 }
 
 async function executeCreationLookupOrBase(

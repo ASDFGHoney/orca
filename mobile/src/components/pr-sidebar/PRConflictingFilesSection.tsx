@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { Check, Copy, FileWarning, Sparkles } from 'lucide-react-native'
 import { colors } from '../../theme/mobile-theme'
 import { useMobilePrShellOperations } from '../../platform/mobile-pr-shell-operations'
-import type { PRInfo } from '../../../../src/shared/types'
+import type { PRInfo } from '../../../../src/shared/github/pull-request-types'
 import { PRSection } from './PRSection'
 import { resolveConflictDisplay } from './pr-conflict-presentation'
 import { prConflictStyles as styles } from './pr-conflict-styles'

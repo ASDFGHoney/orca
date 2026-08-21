@@ -8,6 +8,8 @@ import {
   type ExecutionHostId
 } from '../../../shared/execution-host'
 import { SEARCH_ENGINE_LABELS, type SearchEngine } from '../../../shared/browser-url'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
+import { BROWSER_SCREENCAST_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import {
   getClientCreationActionPolicy,
   type ClientCreationActionAvailability
@@ -21,6 +23,50 @@ export type OpenWorkspaceBrowserTabRequest = {
   targetGroupId?: string
   url: string
   intent: WorkspaceBrowserTabIntent
+  expectedRuntimeEnvironmentId?: string
+}
+
+function isExpectedRuntimeBrowserRoute(
+  state: AppState,
+  availability: ClientCreationActionAvailability,
+  route: ReturnType<typeof resolveWorktreeOperationRoute>,
+  workspaceId: string,
+  expectedRuntimeEnvironmentId: string
+): boolean {
+  if (availability.state !== 'enabled' || workspaceId === FLOATING_TERMINAL_WORKTREE_ID || !route) {
+    return false
+  }
+  const expectedEnvironmentId = expectedRuntimeEnvironmentId.trim()
+  const environmentId = route.runtimeEnvironmentId?.trim() || null
+  const capabilities =
+    state.runtimeStatusByEnvironmentId?.get(expectedEnvironmentId)?.status?.capabilities
+  if (
+    environmentId !== expectedEnvironmentId ||
+    !capabilities?.includes(BROWSER_SCREENCAST_RUNTIME_CAPABILITY)
+  ) {
+    return false
+  }
+  const host = parseExecutionHostId(route.executionHostId)
+  return (
+    !route.executionHostId ||
+    Boolean(host && (host.kind !== 'runtime' || host.environmentId === environmentId))
+  )
+}
+
+export function canOpenWorkspaceBrowserTabOnRuntime(
+  state: AppState,
+  workspaceId: string,
+  expectedRuntimeEnvironmentId: string
+): boolean {
+  const availability = getClientCreationActionPolicy(state, workspaceId)['managed-browser']
+  const route = resolveWorktreeOperationRoute(state, workspaceId)
+  return isExpectedRuntimeBrowserRoute(
+    state,
+    availability,
+    route,
+    workspaceId,
+    expectedRuntimeEnvironmentId
+  )
 }
 
 // Why: concurrent URL tabs are indistinguishable under a shared "Open URL"
@@ -133,6 +179,22 @@ export async function openWorkspaceBrowserTab(
     throw openFailure(presentation.error, 'no active worktree route')
   }
   const environmentId = route.runtimeEnvironmentId?.trim() || null
+  const expectedEnvironmentId =
+    request.expectedRuntimeEnvironmentId === undefined
+      ? null
+      : request.expectedRuntimeEnvironmentId.trim()
+  if (
+    expectedEnvironmentId !== null &&
+    !isExpectedRuntimeBrowserRoute(
+      state,
+      availability,
+      route,
+      request.workspaceId,
+      expectedEnvironmentId
+    )
+  ) {
+    throw openFailure(presentation.error, 'asserted runtime cannot provide this managed browser')
+  }
   const host = parseExecutionHostId(route.executionHostId)
   if (!environmentId) {
     if (!host || host.kind === 'runtime') {
@@ -162,6 +224,8 @@ export async function openWorkspaceBrowserTab(
       environmentId,
       url: request.url,
       targetGroupId: request.targetGroupId,
+      // Owner-pinned links need the host tab published before client reconciliation.
+      ...(expectedEnvironmentId !== null ? { waitForRegistration: true } : {}),
       // Why: the tab is opened from this workspace's tab bar, so surface that
       // workspace — otherwise a background worktree looks like nothing happened.
       selectWorktree: true,

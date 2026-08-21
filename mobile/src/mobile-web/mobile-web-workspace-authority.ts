@@ -1,4 +1,11 @@
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import {
+  getRepoExecutionHostId,
+  parseExecutionHostId,
+  type ExecutionHostId
+} from '../../../src/shared/execution-host'
+import { getProjectIdentityKey } from '../../../src/shared/project-host-setup-projection'
+import type { NewWorkspaceRepository } from '../worktree/host-workspace-creation-operations'
 
 export type MobileWebHostWorkspaceBinding = {
   workspaceId: string
@@ -11,6 +18,8 @@ export class MobileWebWorkspaceAuthority {
   private readonly pageRepoIdByHostId = new Map<string, string>()
   private readonly hostRepoIdByPageId = new Map<string, string>()
   private readonly hostConnectionIdByPageRepoId = new Map<string, string>()
+  private readonly pageProjectIdByHostId = new Map<string, string>()
+  private readonly pageExecutionHostIdByHostId = new Map<string, ExecutionHostId>()
   private nextHandle = 0
 
   constructor(private readonly randomBytes: (length: number) => Uint8Array) {}
@@ -74,16 +83,32 @@ export class MobileWebWorkspaceAuthority {
     hostRepoIds.forEach((hostRepoId) => this.rememberRepo(hostRepoId))
   }
 
-  synchronizeCreationRepositories(
-    repositories: readonly { id: string; connectionId?: string | null }[]
-  ): void {
+  synchronizeCreationRepositories(repositories: readonly NewWorkspaceRepository[]): void {
     this.synchronizeRepositories(repositories.map((repo) => repo.id))
     this.hostConnectionIdByPageRepoId.clear()
     for (const repo of repositories) {
       if (repo.connectionId) {
         this.hostConnectionIdByPageRepoId.set(this.pageRepoId(repo.id), repo.connectionId)
       }
+      this.rememberProject(getProjectIdentityKey(repo))
+      this.rememberExecutionHost(getRepoExecutionHostId(repo))
     }
+  }
+
+  pageProjectId(hostProjectId: string): string {
+    const pageProjectId = this.pageProjectIdByHostId.get(hostProjectId)
+    if (!pageProjectId) {
+      throw new MobileWebBrokerError('not_found')
+    }
+    return pageProjectId
+  }
+
+  pageExecutionHostId(hostExecutionHostId: ExecutionHostId): ExecutionHostId {
+    const pageExecutionHostId = this.pageExecutionHostIdByHostId.get(hostExecutionHostId)
+    if (!pageExecutionHostId) {
+      throw new MobileWebBrokerError('not_found')
+    }
+    return pageExecutionHostId
   }
 
   hostConnectionId(pageRepoId: string): string {
@@ -120,6 +145,8 @@ export class MobileWebWorkspaceAuthority {
     this.pageRepoIdByHostId.clear()
     this.hostRepoIdByPageId.clear()
     this.hostConnectionIdByPageRepoId.clear()
+    this.pageProjectIdByHostId.clear()
+    this.pageExecutionHostIdByHostId.clear()
   }
 
   private rememberWorkspace(hostWorkspaceId: string): void {
@@ -139,7 +166,28 @@ export class MobileWebWorkspaceAuthority {
     }
   }
 
-  private createHandle(prefix: 'workspace' | 'repo'): string {
+  private rememberProject(hostProjectId: string): void {
+    if (!this.pageProjectIdByHostId.has(hostProjectId)) {
+      this.pageProjectIdByHostId.set(hostProjectId, this.createHandle('project'))
+    }
+  }
+
+  private rememberExecutionHost(hostExecutionHostId: ExecutionHostId): void {
+    if (this.pageExecutionHostIdByHostId.has(hostExecutionHostId)) {
+      return
+    }
+    const host = parseExecutionHostId(hostExecutionHostId)
+    if (!host || host.kind === 'local') {
+      this.pageExecutionHostIdByHostId.set(hostExecutionHostId, 'local')
+      return
+    }
+    this.pageExecutionHostIdByHostId.set(
+      hostExecutionHostId,
+      `${host.kind}:${this.createHandle('executionHost')}`
+    )
+  }
+
+  private createHandle(prefix: 'workspace' | 'repo' | 'project' | 'executionHost'): string {
     const bytes = this.randomBytes(16)
     if (bytes.byteLength !== 16) {
       throw new MobileWebBrokerError('internal')

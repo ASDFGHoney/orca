@@ -63,8 +63,10 @@ export class MobileRelayRpcStreams {
     void this.options
       .waitForConnected()
       .then(() => {
-        if (!stream.cancelled && !this.options.sendFrame({ id, method, params: stream.params })) {
-          this.fail(id, stream, 'Connection interrupted')
+        if (!stream.cancelled) {
+          if (!this.options.sendFrame({ id, method, params: stream.params })) {
+            this.fail(id, stream, 'Connection interrupted')
+          }
         }
       })
       .catch((error: unknown) => {
@@ -130,8 +132,7 @@ export class MobileRelayRpcStreams {
     }
     handleTerminalBinaryFrame(bytes, {
       terminalSnapshots: this.terminalSnapshots,
-      getListener: (streamId) => this.terminalListeners.get(streamId),
-      recordValidatedInboundTraffic: () => {}
+      getListener: (streamId) => this.terminalListeners.get(streamId)
     })
   }
 

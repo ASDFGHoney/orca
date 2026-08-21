@@ -15,7 +15,7 @@ import {
   parseNormalizedTerminalQuickCommands,
   type TerminalQuickCommandMutation
 } from '../../../src/shared/terminal-quick-commands'
-import type { TerminalQuickCommand } from '../../../src/shared/types'
+import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-command-types'
 import { isFloatingWorkspaceWorktreeId } from '../session/floating-workspace'
 import { getRepoIdFromMobileWorktreeId } from '../session/mobile-session-route-helpers'
 import { loadMobileNewTabAgentOptions } from '../session/mobile-new-tab-agent-loader'

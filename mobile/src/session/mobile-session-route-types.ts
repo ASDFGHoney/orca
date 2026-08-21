@@ -1,9 +1,9 @@
+import type { DiffComment } from '../../../src/shared/diff-comment-types'
 import type { MobileBrowserTab } from '../browser/MobileBrowserPane'
 import type { MobileTerminalTheme } from '../terminal/terminal-webview-contract'
 import type { MobileDiffLine } from './mobile-diff-lines'
 import type { MobileHighlightedDiffLine, MobileSyntaxSegment } from './mobile-file-syntax'
 import type { TerminalRecord } from './mobile-terminal-records'
-import type { DiffComment } from '../../../src/shared/types'
 import type { MobileNativeChatAgentStatusWithProvider } from './mobile-native-chat-eligibility'
 
 export type Terminal = TerminalRecord
@@ -61,6 +61,8 @@ export type SessionTabsResult = {
   tabs: MobileSessionTab[]
   activeTabId: string | null
   activeTabType: MobileSessionTabType | null
+  /** Host explicitly navigated this device (desktop/CLI `navigation: clients|all`), not a plain republication. */
+  navigationIntent?: 'follow'
 }
 
 export type RuntimeStatusResult = {

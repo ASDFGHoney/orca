@@ -1,4 +1,4 @@
-import type { DirEntry } from '../../shared/types'
+import type { DirEntry } from '../../shared/filesystem-entry-types'
 import {
   assertFilesystemDirectoryWithinLimit,
   resolveFilesystemDirectoryListingLimits

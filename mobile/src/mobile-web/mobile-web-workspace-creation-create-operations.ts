@@ -5,7 +5,8 @@ import {
   type MobileWebCreationSelection
 } from '../../../src/shared/mobile-web/workspace-creation-create-contract'
 import { buildLinearWorkspaceSource } from '../../../src/shared/new-workspace/workspace-source'
-import type { GitHubWorkItem, GitLabWorkItem } from '../../../src/shared/types'
+import type { GitHubWorkItem } from '../../../src/shared/github/work-item-types'
+import type { GitLabWorkItem } from '../../../src/shared/gitlab-types'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileComposerCreateSelection } from '../tasks/mobile-composer-source-types'
 import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'

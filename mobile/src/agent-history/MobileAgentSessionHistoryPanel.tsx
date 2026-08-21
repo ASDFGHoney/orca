@@ -4,11 +4,11 @@ import { recentSessionConversationTurns } from '../../../src/shared/ai-vault-ses
 import { useHostClient } from '../transport/client-context'
 import type { RpcSuccess } from '../transport/types'
 import type { RpcClient } from '../transport/rpc-client'
+import { readMobileRuntimeHostPlatform } from '../transport/mobile-runtime-host-platform'
 import { getWorktreeLabel } from '../session/worktree-label'
 import {
   buildMobileAiVaultResumeLaunch,
   createMobileAiVaultResumeMutationRegistry,
-  readMobileRuntimeHostPlatform,
   readMobileRuntimeTerminalWindowsShell,
   resolveMobileAiVaultResumePlatform,
   resumeAiVaultSessionInTerminal,

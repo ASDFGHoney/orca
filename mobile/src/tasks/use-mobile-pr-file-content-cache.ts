@@ -1,5 +1,8 @@
 import { useCallback, useState } from 'react'
-import type { GitHubPRFileContents, GitHubRepositoryIdentity } from '../../../src/shared/types'
+import type {
+  GitHubPRFileContents,
+  GitHubRepositoryIdentity
+} from '../../../src/shared/github/pull-request-types'
 import {
   MobilePrFileContentCache,
   createMobilePrFileContentKey,

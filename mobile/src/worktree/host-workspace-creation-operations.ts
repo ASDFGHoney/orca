@@ -1,13 +1,11 @@
-import type {
-  BaseRefSearchResult,
-  GitHubPrStartPoint,
-  GitHubWorkItem,
-  GitLabWorkItem,
-  LinearIssue,
-  PersistedTrustedOrcaHooks,
-  SparsePreset,
-  TuiAgent
-} from '../../../src/shared/types'
+import type { GitHubWorkItem } from '../../../src/shared/github/work-item-types'
+import type { GitLabWorkItem } from '../../../src/shared/gitlab-types'
+import type { LinearIssue } from '../../../src/shared/linear/issue-types'
+import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
+import type { BaseRefSearchResult } from '../../../src/shared/repo-types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
+import type { SparsePreset } from '../../../src/shared/worktree/create-types'
+import type { GitHubPrStartPoint } from '../../../src/shared/worktree/types'
 import type { RepoSlug } from '../../../src/shared/new-workspace/github-links'
 import type { SshConnectionState } from '../../../src/shared/ssh-types'
 import type { WorktreeCreateResult } from '../tasks/worktree-create-retry'
@@ -24,6 +22,10 @@ import type {
 import type { WorkspaceAgentChoice } from '../tasks/workspace-agent-selection'
 import type { WorkspaceCreateSetupDecision } from '../tasks/workspace-create-params'
 import type { SetupHookTrust } from '../tasks/setup-hook-trust'
+import type { ExecutionHostId } from '../../../src/shared/execution-host'
+import type { GitRemoteIdentity } from '../../../src/shared/git-remote-identity'
+import type { RepoIcon } from '../../../src/shared/repo-icon'
+import type { RetiredNameRegistry } from '../../../src/shared/worktree/retired-name-registry'
 
 export type NewWorkspaceRepository = {
   id: string
@@ -31,9 +33,13 @@ export type NewWorkspaceRepository = {
   path: string
   badgeColor?: string
   connectionId?: string | null
+  executionHostId?: ExecutionHostId | null
+  executionHostLabel?: string
+  projectId?: string
   kind?: 'git' | 'folder'
   upstream?: { owner: string; repo: string; host?: string } | null
-  gitRemoteIdentity?: { remoteUrl?: string; canonicalKey?: string } | null
+  repoIcon?: RepoIcon | null
+  gitRemoteIdentity?: GitRemoteIdentity | null
 }
 
 export type NewWorkspaceRuntimeSettings = {
@@ -53,6 +59,7 @@ export type CreateBlankWorkspaceOperationArgs = {
   repoId: string
   baseName: string
   agentChoice: WorkspaceAgentChoice
+  nameWasGenerated: boolean
   comment: string | undefined
   setupDecision: WorkspaceCreateSetupDecision
   supportsIdempotentCutoverRetry: boolean | Promise<boolean>
@@ -72,6 +79,7 @@ export type CreateWorkspaceFromSourceOperationArgs = {
 
 export type HostWorkspaceCreationOperations = {
   listRepositories(): Promise<NewWorkspaceRepository[]>
+  readRetiredWorktreeNames(repoId: string): Promise<RetiredNameRegistry>
   readRuntimeSettings(): Promise<NewWorkspaceRuntimeSettings>
   readTrustedHooks(): Promise<PersistedTrustedOrcaHooks>
   isGitLabCliInstalled(): Promise<boolean>

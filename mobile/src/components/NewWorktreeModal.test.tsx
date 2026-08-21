@@ -44,18 +44,32 @@ vi.mock('./MobileAgentIcon', () => ({ MobileAgentIcon: 'MobileAgentIcon' }))
 vi.mock('./TaskProviderLogo', () => ({ TaskProviderLogo: 'TaskProviderLogo' }))
 
 import { setCachedRepos } from '../cache/repo-cache'
+import { getLocalExecutionHostLabel } from '../../../src/shared/execution-host'
 import { NewWorktreeModal } from './NewWorktreeModal'
 
-const repos = [{ id: 'repo-1', displayName: 'orca', path: '/src/orca', kind: 'git' }]
+const LOCAL_HOST_LABEL = getLocalExecutionHostLabel('darwin')
 
-function repoPickerNames(renderer: ReactTestRenderer | null): string[] {
-  const pickers = renderer?.root.findAll((node) => node.type === 'PickerListDrawer') ?? []
-  const repoPicker = pickers.find((node) => node.props.title === 'Repository')
-  return ((repoPicker?.props.items ?? []) as { label: string }[]).map((item) => item.label)
+const repos = [
+  {
+    id: 'repo-1',
+    displayName: 'orca',
+    path: '/src/orca',
+    kind: 'git',
+    upstream: { owner: 'stablyai', repo: 'orca' }
+  }
+]
+
+function pickerItems(
+  renderer: ReactTestRenderer,
+  title: string
+): { label: string; detail: string }[] {
+  const pickers = renderer.root.findAll((node) => node.type === 'PickerListDrawer')
+  const picker = pickers.find((node) => node.props.title === title)
+  return picker?.props.items ?? []
 }
 
-describe('NewWorktreeModal repo list', () => {
-  let renderer: ReactTestRenderer | null = null
+describe('NewWorktreeModal project targets', () => {
+  let renderer: ReactTestRenderer
 
   beforeEach(() => {
     setCachedRepos('host-1', repos)
@@ -63,7 +77,6 @@ describe('NewWorktreeModal repo list', () => {
 
   afterEach(() => {
     act(() => renderer?.unmount())
-    renderer = null
   })
 
   it('keeps the cached repos when the in-flight repo.list rejects on a dropped connection', async () => {
@@ -73,7 +86,8 @@ describe('NewWorktreeModal repo list', () => {
         listRepositories,
         readRuntimeCapabilities: vi.fn().mockResolvedValue({
           tasksSupported: false,
-          idempotentWorktreeCreateSupported: false
+          idempotentWorktreeCreateSupported: false,
+          hostPlatform: 'darwin'
         }),
         readRuntimeSettings: vi.fn().mockResolvedValue({}),
         readTrustedHooks: vi.fn().mockResolvedValue({}),
@@ -108,6 +122,72 @@ describe('NewWorktreeModal repo list', () => {
     })
 
     expect(listRepositories).toHaveBeenCalledOnce()
-    expect(repoPickerNames(renderer)).toEqual(['orca'])
+    expect(pickerItems(renderer, 'Project')).toEqual([
+      expect.objectContaining({ label: 'orca', detail: 'stablyai/orca' })
+    ])
+    expect(pickerItems(renderer, 'Run on')).toEqual([
+      expect.objectContaining({ label: LOCAL_HOST_LABEL, detail: '/src/orca' })
+    ])
+  })
+
+  it('groups same-name checkouts under one project with separate run targets', async () => {
+    const listedRepos = [
+      ...repos,
+      {
+        id: 'repo-2',
+        displayName: 'orca',
+        path: '/home/dev/orca',
+        connectionId: 'build-server',
+        kind: 'git',
+        upstream: { owner: 'stablyai', repo: 'orca' }
+      }
+    ]
+    const operations = new Proxy(
+      {
+        listRepositories: vi.fn().mockResolvedValue(listedRepos),
+        readRuntimeCapabilities: vi.fn().mockResolvedValue({
+          tasksSupported: false,
+          idempotentWorktreeCreateSupported: false,
+          hostPlatform: 'darwin'
+        }),
+        readRuntimeSettings: vi.fn().mockResolvedValue({}),
+        readTrustedHooks: vi.fn().mockResolvedValue({}),
+        isGitLabCliInstalled: vi.fn().mockResolvedValue(false),
+        isLinearConnected: vi.fn().mockResolvedValue(false)
+      },
+      {
+        get(target, property) {
+          if (property in target) {
+            return target[property as keyof typeof target]
+          }
+          return vi.fn().mockResolvedValue(null)
+        }
+      }
+    ) as unknown as HostWorkspaceCreationOperations
+
+    await act(async () => {
+      renderer = create(
+        createElement(NewWorktreeModal, {
+          visible: true,
+          operations,
+          hostId: 'host-1',
+          openExternalUrl: vi.fn(),
+          onCreated: () => {},
+          onClose: () => {}
+        })
+      )
+      await Promise.resolve()
+    })
+
+    expect(pickerItems(renderer, 'Project')).toEqual([
+      expect.objectContaining({ label: 'orca', detail: 'stablyai/orca' })
+    ])
+    expect(pickerItems(renderer, 'Run on')).toEqual([
+      expect.objectContaining({ label: LOCAL_HOST_LABEL, detail: '/src/orca' }),
+      expect.objectContaining({
+        label: 'SSH · build-server',
+        detail: '/home/dev/orca'
+      })
+    ])
   })
 })

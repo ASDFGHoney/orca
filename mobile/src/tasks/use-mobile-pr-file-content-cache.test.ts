@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { GitHubPRFileContents } from '../../../src/shared/types'
+import type { GitHubPRFileContents } from '../../../src/shared/github/pull-request-types'
 import { useMobilePrFileContentCache } from './use-mobile-pr-file-content-cache'
 
 type CacheResult = ReturnType<typeof useMobilePrFileContentCache>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { TerminalQuickCommand } from '../../../src/shared/types'
+import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-command-types'
 import type { RpcClient } from '../transport/rpc-client'
 import { executeMobileWebSessionQuickCommandOperation } from './mobile-web-session-quick-command-operations'
 import { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'

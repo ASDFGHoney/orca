@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { usePathname, useRouter } from 'expo-router'
 import { leaveHostRoute } from '../host-route-exit'
-import { useCloseHost, useForceReconnect } from '../transport/client-context'
+import { useForceReconnect, useForgetHostClient } from '../transport/client-context'
 import { removeHostAndCloseClient } from '../transport/host-removal-lifecycle'
 import { MOBILE_WEB_NATIVE_CAPABILITY_AUTHORITY } from '../mobile-web/mobile-web-native-capability-authority'
 import { navigateFromHostScreenList } from './host-screen-route-navigation'
@@ -13,7 +13,7 @@ export function useDefaultHostScreenShellOperations(args: {
 }): HostScreenShellOperations {
   const router = useRouter()
   const pathname = usePathname()
-  const closeHostClient = useCloseHost()
+  const closeHostClient = useForgetHostClient()
   const forceReconnectHost = useForceReconnect()
 
   return useMemo(

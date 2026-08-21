@@ -29,7 +29,11 @@ import {
   completeMobileWebNativeRouteHandoffAfterResponse,
   MobileWebNativeRouteHandoff
 } from '../src/mobile-web/mobile-web-native-route-handoff'
-import { useCloseHost, useForceReconnect, useHostClient } from '../src/transport/client-context'
+import {
+  useForceReconnect,
+  useForgetHostClient,
+  useHostClient
+} from '../src/transport/client-context'
 import {
   useLastConnectedAt,
   useReconnectAttempt
@@ -60,7 +64,7 @@ export default function HybridScreen() {
   const selectHost = useCallback((hostId: string | undefined) => setSelectedHostId(hostId), [])
   const e2eHostId = useMobileWebE2eHostSelection(hosts, selectedHostId, selectHost)
   const { client, state } = useHostClient(selectedHostId)
-  const closeHostClient = useCloseHost()
+  const closeHostClient = useForgetHostClient()
   const forceReconnectHost = useForceReconnect()
   const reconnectAttempts = useReconnectAttempt(selectedHostId)
   const lastConnectedAt = useLastConnectedAt(selectedHostId)

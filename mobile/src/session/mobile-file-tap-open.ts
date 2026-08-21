@@ -1,3 +1,4 @@
+import type { RuntimeNativeChatFileContext } from '../../../src/shared/runtime-types'
 import { filesystemPathToFileUri } from '../../../src/shared/file-uri-path'
 import { createMobileFilePreviewHref } from '../files/mobile-file-preview-route'
 import { classifyMobileArtifact } from './mobile-artifact-kind'
@@ -17,6 +18,7 @@ export type OpenMobileFileTapOptions<T extends FileTapSessionTab> = {
   terminalHandle?: string | null
   pathText: string
   cwd?: string | null
+  nativeChatContext?: RuntimeNativeChatFileContext | null
   line: number | null
   column: number | null
   pushPreviewRoute: (href: ReturnType<typeof createMobileFilePreviewHref>) => void
@@ -75,6 +77,7 @@ async function openMobileFileTapAsync<T extends FileTapSessionTab>(
     terminalHandle: terminalHandle || null,
     pathText: options.pathText,
     cwd: options.cwd?.trim() || null,
+    nativeChatContext: options.nativeChatContext ?? null,
     line: options.line,
     column: options.column
   })
@@ -103,6 +106,12 @@ async function openMobileFileTapAsync<T extends FileTapSessionTab>(
         ...(options.cwd && options.cwd.trim().length > 0 ? { cwd: options.cwd } : {}),
         ...(options.terminalHandle && options.terminalHandle.trim().length > 0
           ? { terminal: options.terminalHandle }
+          : {}),
+        ...(options.nativeChatContext
+          ? {
+              nativeChatTab: options.nativeChatContext.tabId,
+              nativeChatSession: options.nativeChatContext.sessionId
+            }
           : {}),
         name: displayNameFromPath(resolved.absolutePath),
         ...(options.line !== null ? { line: String(options.line) } : {}),

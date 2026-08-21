@@ -4,6 +4,8 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Type-only, so it is erased before the `./mobile-native-chat-send` mock below applies.
+import type { MobileNativeChatSendOutcome } from './mobile-native-chat-send'
 
 const sendWithOutcome = vi.fn()
 const clearInputWrite = vi.fn()
@@ -36,6 +38,9 @@ describe('useMobileNativeChatMessageSend', () => {
   let renderer: ReactTestRenderer | null = null
   let api: Send | null = null
   const acceptSend = vi.fn()
+  const captureSendOrigin = vi.fn(() => ({ draftKey: 'k', pendingKey: 'p' }) as never)
+  const clearDraftForSend = vi.fn()
+  const restoreRejectedDraft = vi.fn()
   const holdUnconfirmedSend = vi.fn()
   const onCommandSend = vi.fn()
   const commandSendRef = { current: onCommandSend }
@@ -90,10 +95,10 @@ describe('useMobileNativeChatMessageSend', () => {
         targetRef,
         agentRef,
         commandSendRef,
-        captureSendOrigin: () => ({ draftKey: 'k', pendingKey: 'p' }) as never,
+        captureSendOrigin,
         readSeededLaunchDraftSeed,
-        clearDraftForSend: () => {},
-        restoreRejectedDraft: () => {},
+        clearDraftForSend,
+        restoreRejectedDraft,
         acceptSend,
         holdUnconfirmedSend,
         onSendError
@@ -106,10 +111,12 @@ describe('useMobileNativeChatMessageSend', () => {
   }
 
   const sentArgs = (): {
+    text?: string
     clearInputFirst?: boolean
     resolvedLaunchDraft?: { text: string; createdAt: number }
   } =>
     sendWithOutcome.mock.calls[0]![0] as {
+      text?: string
       clearInputFirst?: boolean
       resolvedLaunchDraft?: { text: string; createdAt: number }
     }
@@ -124,6 +131,9 @@ describe('useMobileNativeChatMessageSend', () => {
     typeCommandWithOutcome.mockReset()
     typeCommandWithOutcome.mockResolvedValue('accepted')
     acceptSend.mockReset()
+    captureSendOrigin.mockClear()
+    clearDraftForSend.mockReset()
+    restoreRejectedDraft.mockReset()
     holdUnconfirmedSend.mockReset()
     onCommandSend.mockReset()
     commandSendRef.current = onCommandSend
@@ -415,5 +425,54 @@ describe('useMobileNativeChatMessageSend', () => {
     // The answer released its own hold on the way out.
     expect(acquireMobileNativeChatTerminalWrite('term')).toBe(true)
     releaseMobileNativeChatTerminalWrite('term')
+  })
+
+  // The host writes these bytes verbatim, so whitespace the match key drops must
+  // not reach the agent's input line and glue the next rapid send onto it (#14262).
+  it('trims trailing whitespace without changing leading prompt content', async () => {
+    mount(() => null)
+    await act(async () => {
+      await api!.send('  run the tests \n')
+    })
+    expect(sentArgs().text).toBe('  run the tests')
+    expect(captureSendOrigin).toHaveBeenCalledWith('  run the tests')
+    expect(acceptSend.mock.calls[0]![1]).toBe('  run the tests')
+  })
+
+  it('trims trailing whitespace on a question answer too', async () => {
+    mount(() => null)
+    await act(async () => {
+      await api!.answerQuestion('\n 1 ')
+    })
+    expect(sentArgs().text).toBe('\n 1')
+  })
+
+  // #14819: the trim is a wire concern only. A rejected send hands the composer
+  // back to the user, and it has to be the draft they typed, blank lines included.
+  it('restores the untrimmed draft when the send is rejected', async () => {
+    const draft = 'first line\n\nsecond line\n\n'
+    sendWithOutcome.mockResolvedValue('rejected')
+    mount(() => null)
+
+    await act(async () => {
+      await api!.send(draft)
+    })
+
+    expect(sentArgs().text).toBe('first line\n\nsecond line')
+    expect(restoreRejectedDraft.mock.calls[0]![1]).toBe(draft)
+    expect(clearDraftForSend.mock.calls[0]![1]).toBe(draft)
+  })
+
+  it('restores the untrimmed draft when the launch-draft pre-clear is rejected', async () => {
+    const draft = 'ship it   '
+    clearInputWrite.mockResolvedValue(false)
+    mount(() => ({ text: DRAFT, createdAt: 1 }))
+
+    await act(async () => {
+      await api!.send(draft)
+    })
+
+    expect(sendWithOutcome).not.toHaveBeenCalled()
+    expect(restoreRejectedDraft.mock.calls[0]![1]).toBe(draft)
   })
 })

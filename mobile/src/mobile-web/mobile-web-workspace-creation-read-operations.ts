@@ -8,6 +8,7 @@ import {
   MobileWebCreationRepoPayloadSchema,
   MobileWebCreationRepositoriesPayloadSchema,
   MobileWebCreationRepositoriesResultSchema,
+  MobileWebCreationRetiredNamesResultSchema,
   MobileWebCreationRuntimeCapabilitiesPayloadSchema,
   MobileWebCreationRuntimeCapabilitiesResultSchema,
   MobileWebCreationSettingsPayloadSchema,
@@ -19,7 +20,13 @@ import {
   MobileWebCreationTrustedHooksPayloadSchema,
   MobileWebCreationTrustedHooksResultSchema
 } from '../../../src/shared/mobile-web/workspace-creation-read-contract'
-import type { PersistedTrustedOrcaHooks } from '../../../src/shared/types'
+import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
+import {
+  getRepoExecutionHostId,
+  getExecutionHostLabel,
+  parseExecutionHostId
+} from '../../../src/shared/execution-host'
+import { getProjectIdentityKey } from '../../../src/shared/project-host-setup-projection'
 import type { RpcClient } from '../transport/rpc-client'
 import { nativeHostWorkspaceCreationOperations } from '../worktree/native-host-workspace-creation-operations'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
@@ -39,11 +46,25 @@ export async function executeMobileWebWorkspaceCreationReadOperation(args: {
     return MobileWebCreationRepositoriesResultSchema.parse({
       repositories: repositories.map((repo) => {
         const id = args.authority.pageRepoId(repo.id)
+        const executionHostId = getRepoExecutionHostId(repo)
         return {
           id,
           displayName: repo.displayName,
+          path: repo.path,
           ...(repo.badgeColor ? { badgeColor: repo.badgeColor } : {}),
           connectionId: repo.connectionId ? id : null,
+          executionHostId: args.authority.pageExecutionHostId(executionHostId),
+          executionHostLabel: pageExecutionHostLabel(executionHostId),
+          projectId: args.authority.pageProjectId(getProjectIdentityKey(repo)),
+          ...(repo.upstream
+            ? {
+                upstream: {
+                  owner: repo.upstream.owner,
+                  repo: repo.upstream.repo,
+                  ...(repo.upstream.host ? { host: repo.upstream.host } : {})
+                }
+              }
+            : {}),
           ...(repo.kind ? { kind: repo.kind } : {})
         }
       })
@@ -108,6 +129,13 @@ export async function executeMobileWebWorkspaceCreationReadOperation(args: {
   return executeRepoCreationRead(args, operations)
 }
 
+function pageExecutionHostLabel(
+  executionHostId: ReturnType<typeof getRepoExecutionHostId>
+): string {
+  const host = parseExecutionHostId(executionHostId)
+  return host?.kind === 'local' ? getExecutionHostLabel(executionHostId) : 'Host'
+}
+
 async function executeRepoCreationRead(
   args: {
     operation: string
@@ -136,6 +164,11 @@ async function executeRepoCreationRead(
   }
   const payload = MobileWebCreationRepoPayloadSchema.parse(args.payload)
   const hostRepoId = args.authority.hostRepoId(payload.repoId)
+  if (args.operation === 'creationRetiredNames') {
+    return MobileWebCreationRetiredNamesResultSchema.parse(
+      await operations.readRetiredWorktreeNames(hostRepoId)
+    )
+  }
   if (args.operation === 'creationSshState' || args.operation === 'creationSshConnect') {
     const connectionId = args.authority.hostConnectionId(payload.repoId)
     const state =

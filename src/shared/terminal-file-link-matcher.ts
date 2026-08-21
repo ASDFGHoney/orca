@@ -20,20 +20,11 @@ const TRAILING_TRIM_CHARS = new Set([')', ']', '}', '"', "'", ',', ';', '.'])
 type TextRange = { text: string; startIndex: number; endIndex: number }
 
 export function parseTerminalFileLinkTarget(value: string): TerminalFileLinkTarget | null {
-  const match = /^(.*?)(?::(\d+))?(?::(\d+))?$/.exec(value)
-  if (!match) {
+  const parsed = parseFileLinkLocation(value)
+  if (!parsed || parsed.pathText.endsWith('/') || parsed.pathText.endsWith('\\')) {
     return null
   }
-  const pathText = match[1]
-  if (!pathText || pathText.endsWith('/') || pathText.endsWith('\\')) {
-    return null
-  }
-  const line = match[2] ? Number.parseInt(match[2], 10) : null
-  const column = match[3] ? Number.parseInt(match[3], 10) : null
-  if ((line !== null && line < 1) || (column !== null && column < 1)) {
-    return null
-  }
-  return { pathText, line, column }
+  return parsed
 }
 
 export function findTerminalFileLinks(lineText: string): TerminalFileLinkMatch[] {
@@ -173,3 +164,4 @@ function hasSpacedPathExtension(text: string): boolean {
     trimmed && /\s/.test(trimmed) && /\.[A-Za-z0-9_+-]+(?::\d+)?(?::\d+)?$/.test(trimmed)
   )
 }
+import { parseFileLinkLocation } from './file-link-location'
