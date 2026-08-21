@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/terminal-tab-types'
 import { emptyLayoutSnapshot, singlePaneLayoutSnapshot } from './terminal-helpers'
-import { stampLaunchAgentLeafIdOnFirstLayout } from './launch-agent-leaf-stamp'
+import {
+  resolveLaunchAgentLeafId,
+  stampLaunchAgentLeafIdOnFirstLayout
+} from './launch-agent-leaf-stamp'
 
 const LEAF_A = '11111111-1111-4111-8111-111111111111'
 const LEAF_B = '22222222-2222-4222-8222-222222222222'
@@ -76,5 +79,40 @@ describe('stampLaunchAgentLeafIdOnFirstLayout', () => {
     })
 
     expect(stamped).toBeNull()
+  })
+})
+
+describe('resolveLaunchAgentLeafId', () => {
+  it('stamps the first sole leaf while launch identity is live', () => {
+    expect(
+      resolveLaunchAgentLeafId({
+        launchAgent: 'cursor',
+        existingLeafId: undefined,
+        previousLayout: emptyLayoutSnapshot(),
+        nextLayout: singlePaneLayoutSnapshot(LEAF_A)
+      })
+    ).toBe(LEAF_A)
+  })
+
+  it('keeps the original pin after a remaining sibling becomes the sole leaf', () => {
+    expect(
+      resolveLaunchAgentLeafId({
+        launchAgent: 'cursor',
+        existingLeafId: LEAF_A,
+        previousLayout: splitLayout(),
+        nextLayout: singlePaneLayoutSnapshot(LEAF_B)
+      })
+    ).toBe(LEAF_A)
+  })
+
+  it('drops the pin when launch identity is gone', () => {
+    expect(
+      resolveLaunchAgentLeafId({
+        launchAgent: undefined,
+        existingLeafId: LEAF_A,
+        previousLayout: singlePaneLayoutSnapshot(LEAF_A),
+        nextLayout: singlePaneLayoutSnapshot(LEAF_A)
+      })
+    ).toBeUndefined()
   })
 })
