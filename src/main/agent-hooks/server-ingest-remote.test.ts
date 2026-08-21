@@ -65,7 +65,8 @@ describe('AgentHookServer ingestRemote', () => {
           providerSession: {
             key: 'session_id',
             id: 'pi-session-1',
-            transcriptPath: '/tmp/pi-session-1.jsonl'
+            transcriptPath: '/tmp/pi-session-1.jsonl',
+            executionHostId: 'ssh:conn-1'
           }
         })
       )
