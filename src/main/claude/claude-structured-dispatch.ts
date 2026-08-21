@@ -199,8 +199,18 @@ const SLASH_COMMAND_TOKEN = /^\/[a-z0-9][\w:-]*$/i
  * treats any `/`-leading token as command-ish: over-classifying is safe there
  * (it only suppresses an echo) and unsafe here.
  *
- * No trimming, matching that classifier's documented rule: the supported TUIs
- * only treat a LINE-LEADING token as a command, so `  /clear` is prose.
+ * No trimming, and MEASURED rather than inherited from the TUI rule: `  /clear`
+ * came back from `claude -p --input-format stream-json` as a stamped replay, so
+ * this lane also reads an indented token as prose.
+ *
+ * Residual, unfixable by shape: `/tmp what is in here?` matches, because `/tmp`
+ * is indistinguishable from `/clear`. The agent's command catalog cannot close
+ * it either - `getVerifiedNativeChatCommands('claude')` is a curated `/` menu
+ * (clear, compact, init, review, help) and omits real built-ins like `/model`
+ * and `/permissions`, both measured as answering with a bare `result` and no
+ * echo; gating on it would strand those sends instead. Measured mitigation: a
+ * path-leading message DOES get a stamped replay, so it only mis-settles if an
+ * unrelated `result` beats that replay.
  */
 function isSlashCommandText(text: string): boolean {
   return SLASH_COMMAND_TOKEN.test(text.split(/\s/, 1)[0] ?? '')
