@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
+import { REMOTE_TRACKING_FETCH_TIMEOUT_MS } from '../../shared/git-remote-tracking-fetch-timeout'
 import { gitExecFileAsync } from '../git/runner'
 import { createLocalWorktreePushTargetGit } from './worktree-push-target-git'
 
@@ -38,7 +39,11 @@ describe('local worktree push-target git adapter', () => {
         target.remoteName,
         `+refs/heads/${target.branchName}:refs/remotes/${target.remoteName}/${target.branchName}`
       ],
-      { cwd: 'C:\\repo', wslDistro: 'Ubuntu' }
+      {
+        cwd: 'C:\\repo',
+        wslDistro: 'Ubuntu',
+        timeout: REMOTE_TRACKING_FETCH_TIMEOUT_MS
+      }
     )
     expect(execGit).toHaveBeenNthCalledWith(
       3,
@@ -65,6 +70,18 @@ describe('local worktree push-target git adapter', () => {
   it('keeps a remote whose HTTPS endpoint uses a non-default port', async () => {
     execGit.mockResolvedValueOnce({
       stdout: 'https://github.com:8443/contributor/orca.git\n',
+      stderr: ''
+    })
+    const git = createLocalWorktreePushTargetGit()
+
+    await git.removeRemoteIfMatches('/repo', target)
+
+    expect(execGit).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a remote whose SSH endpoint uses a non-default port', async () => {
+    execGit.mockResolvedValueOnce({
+      stdout: 'ssh://git@github.com:2222/contributor/orca.git\n',
       stderr: ''
     })
     const git = createLocalWorktreePushTargetGit()

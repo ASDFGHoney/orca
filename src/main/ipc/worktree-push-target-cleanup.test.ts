@@ -287,19 +287,14 @@ describe('sameGitHubRemoteUrl', () => {
     ).toBe(false)
   })
 
-  it('falls back to exact equality for non-GitHub hosts', () => {
+  it('rejects non-GitHub hosts even when the raw URLs are identical', () => {
     expect(
       sameGitHubRemoteUrl(
         'git@gitlab.com:contributor/orca.git',
         'git@gitlab.com:contributor/orca.git'
       )
-    ).toBe(true)
-    expect(
-      sameGitHubRemoteUrl(
-        'git@gitlab.com:contributor/orca.git',
-        'https://gitlab.com/contributor/orca.git'
-      )
     ).toBe(false)
+    expect(sameGitHubRemoteUrl('../sibling-repo', '../sibling-repo')).toBe(false)
   })
 
   it('does not ignore non-default HTTPS ports', () => {
@@ -309,5 +304,35 @@ describe('sameGitHubRemoteUrl', () => {
         'https://github.com/contributor/orca.git'
       )
     ).toBe(false)
+  })
+
+  it('does not ignore non-default SSH ports', () => {
+    expect(
+      sameGitHubRemoteUrl(
+        'ssh://git@github.com:2222/contributor/orca.git',
+        'git@github.com:contributor/orca.git'
+      )
+    ).toBe(false)
+    expect(
+      sameGitHubRemoteUrl(
+        'ssh://git@github.com:2222/contributor/orca.git',
+        'ssh://git@github.com/contributor/orca.git'
+      )
+    ).toBe(false)
+  })
+
+  it('keeps default and documented SSH endpoints equivalent', () => {
+    expect(
+      sameGitHubRemoteUrl(
+        'ssh://git@github.com:22/contributor/orca.git',
+        'git@github.com:contributor/orca.git'
+      )
+    ).toBe(true)
+    expect(
+      sameGitHubRemoteUrl(
+        'ssh://git@ssh.github.com:443/contributor/orca.git',
+        'git@github.com:contributor/orca.git'
+      )
+    ).toBe(true)
   })
 })

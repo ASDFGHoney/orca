@@ -2,6 +2,7 @@ import type { GitPushTarget } from '../../shared/worktree/types'
 import { assertGitPushTargetShape } from '../../shared/git-push-target-validation'
 import { sameGitHubRemoteUrl } from '../../shared/git-push-target-remote-url'
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
+import { REMOTE_TRACKING_FETCH_TIMEOUT_MS } from '../../shared/git-remote-tracking-fetch-timeout'
 import { gitExecFileAsync } from '../git/runner'
 
 export type WorktreePushTargetGit = {
@@ -23,7 +24,8 @@ type LocalGitOptions = { wslDistro?: string }
 export function createLocalWorktreePushTargetGit(
   gitOptions: LocalGitOptions = {}
 ): WorktreePushTargetGit {
-  const exec = (args: string[], cwd: string) => gitExecFileAsync(args, { cwd, ...gitOptions })
+  const exec = (args: string[], cwd: string, options: { timeout?: number } = {}) =>
+    gitExecFileAsync(args, { cwd, ...gitOptions, ...options })
   return {
     async validateTarget(repoPath, target) {
       assertGitPushTargetShape(target)
@@ -51,7 +53,8 @@ export function createLocalWorktreePushTargetGit(
           target.remoteName,
           `+refs/heads/${target.branchName}:refs/remotes/${target.remoteName}/${target.branchName}`
         ],
-        repoPath
+        repoPath,
+        { timeout: REMOTE_TRACKING_FETCH_TIMEOUT_MS }
       )
     },
     async configureUpstream(worktreePath, branchName, target) {

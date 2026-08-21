@@ -101,6 +101,7 @@ import {
   configureWorktreePushTargetOp,
   removeWorktreePushTargetRemoteOp
 } from './git-handler-worktree-push-target'
+import { REMOTE_TRACKING_FETCH_TIMEOUT_MS } from '../shared/git-remote-tracking-fetch-timeout'
 
 const execFileAsync = promisify(execFile)
 const MAX_GIT_BUFFER = 10 * 1024 * 1024
@@ -961,7 +962,8 @@ export class GitHandler {
       }
 
       try {
-        const git = (args: string[]) => this.git(args, worktreePath, { signal: context?.signal })
+        const git = (args: string[], opts: { timeout?: number } = {}) =>
+          this.git(args, worktreePath, { signal: context?.signal, ...opts })
         const { stdout } = await git(['remote'])
         const remotes = stdout
           .split(/\r?\n/)
@@ -972,14 +974,21 @@ export class GitHandler {
         }
         await git(['check-ref-format', `refs/heads/${branch}`])
         await git(['check-ref-format', ref])
-        await git([
-          ...(skipAutoMaintenance ? GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS : []),
-          'fetch',
-          '--no-tags',
-          remote,
-          `+refs/heads/${branch}:${ref}`
-        ])
+        await git(
+          [
+            ...(skipAutoMaintenance ? GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS : []),
+            'fetch',
+            '--no-tags',
+            remote,
+            `+refs/heads/${branch}:${ref}`
+          ],
+          { timeout: REMOTE_TRACKING_FETCH_TIMEOUT_MS }
+        )
       } catch (error) {
+        // Why: a timeout kill has no git stderr; name it so the client can classify it as transient.
+        if (isExecKilledError(error)) {
+          throw new Error(`Fetching "${branch}" from "${remote}" timed out.`)
+        }
         // Why: create-worktree needs a write-capable fetch that generic git.exec rejects; narrow RPC keeps the allowlist tight.
         throw new Error(normalizeGitErrorMessage(error, 'fetch'))
       }

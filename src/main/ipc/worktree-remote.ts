@@ -1762,44 +1762,30 @@ export async function createRemoteWorktree(
       } catch (rollbackError) {
         console.warn('[worktree-create] Failed to roll back remote sparse worktree:', rollbackError)
       }
-      if (!rollbackSucceeded && shouldRetireGeneratedName) {
-        try {
-          await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
-        } finally {
-          await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
-        }
-      } else {
+      if (rollbackSucceeded) {
+        // Why: only a removed worktree proves nothing still needs the push-target remote.
         await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
+      } else if (shouldRetireGeneratedName) {
+        await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
       }
       throw err
     }
   }
 
   // Why: fallible metadata work after creation must not leave a real workspace name reusable.
+  // The push-target remote stays: the worktree exists and still needs somewhere to push.
   if (shouldRetireGeneratedName) {
-    try {
-      await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
-    } catch (error) {
-      await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
-      throw error
-    }
+    await retireGeneratedWorktreeName(store, repo, settings, effectiveSanitizedName)
   }
 
   // Re-list to get the created worktree info
-  let gitWorktrees: GitWorktreeInfo[]
-  try {
-    gitWorktrees = await timing.time('list_created_worktree', async () =>
-      provider.listWorktrees(repo.path)
-    )
-  } catch (error) {
-    await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
-    throw error
-  }
+  const gitWorktrees: GitWorktreeInfo[] = await timing.time('list_created_worktree', async () =>
+    provider.listWorktrees(repo.path)
+  )
   const created = gitWorktrees.find(
     (gw) => gw.branch?.endsWith(branchName) || gw.path.endsWith(effectiveSanitizedName)
   )
   if (!created) {
-    await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
     throw new Error('Worktree created but not found in listing')
   }
 
@@ -1809,17 +1795,14 @@ export async function createRemoteWorktree(
   const metadataBaseRef = args.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
   let configuredPushTarget: GitPushTarget | undefined
   if (preparedPushTarget) {
-    try {
-      configuredPushTarget = await configureCreatedWorktreePushTargetWithGit(
-        createSshWorktreePushTargetGit(provider),
-        created.path,
-        branchName,
-        preparedPushTarget
-      )
-    } catch (error) {
-      await cleanupNewRemoteWorktreePushTarget(provider, repo.path, addedPushTargetRemote)
-      throw error
-    }
+    // Why: the worktree already exists here, and a failed upstream config can still have applied
+    // remotely, so the remote is retained for recovery instead of removed under a live worktree.
+    configuredPushTarget = await configureCreatedWorktreePushTargetWithGit(
+      createSshWorktreePushTargetGit(provider),
+      created.path,
+      branchName,
+      preparedPushTarget
+    )
   }
   const metaUpdates: Partial<WorktreeMeta> = {
     // Why: path-derived IDs get reused after external deletion; rotate instance identity so stale lineage can't attach to the new occupant.

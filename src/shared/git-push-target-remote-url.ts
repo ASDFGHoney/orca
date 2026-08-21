@@ -1,4 +1,25 @@
-import { foldComparableGitHubHost } from './git-remote-host-alias'
+import { foldComparableGitHubHost, foldWwwHostAlias } from './git-remote-host-alias'
+
+const DEFAULT_REMOTE_PORTS: Record<string, string> = {
+  'git:': '9418',
+  'git+ssh:': '22',
+  'ssh:': '22',
+  'http:': '80',
+  'https:': '443'
+}
+
+// Why: an explicit non-default port names a different endpoint, so it must stay in the identity.
+function foldGitHubEndpoint(protocol: string, hostname: string, port: string): string {
+  const host = foldComparableGitHubHost(hostname)
+  if (!port || port === DEFAULT_REMOTE_PORTS[protocol]) {
+    return host
+  }
+  // GitHub documents ssh.github.com:443 as SSH-over-HTTPS for its default SSH endpoint.
+  if (port === '443' && foldWwwHostAlias(hostname) === 'ssh.github.com') {
+    return host
+  }
+  return `${host}:${port}`
+}
 
 function parseGitHubRemoteUrl(url: string): { owner: string; repo: string } | null {
   const trimmed = url.trim()
@@ -11,14 +32,11 @@ function parseGitHubRemoteUrl(url: string): { owner: string; repo: string } | nu
   }
   try {
     const parsed = new URL(trimmed)
-    if (!['git:', 'git+ssh:', 'http:', 'https:', 'ssh:'].includes(parsed.protocol.toLowerCase())) {
+    const protocol = parsed.protocol.toLowerCase()
+    if (!['git:', 'git+ssh:', 'http:', 'https:', 'ssh:'].includes(protocol)) {
       return null
     }
-    const protocol = parsed.protocol.toLowerCase()
-    const host = foldComparableGitHubHost(
-      protocol === 'http:' || protocol === 'https:' ? parsed.host : parsed.hostname
-    )
-    if (host !== 'github.com') {
+    if (foldGitHubEndpoint(protocol, parsed.hostname, parsed.port) !== 'github.com') {
       return null
     }
     const parts = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/')
@@ -31,10 +49,9 @@ function parseGitHubRemoteUrl(url: string): { owner: string; repo: string } | nu
   }
 }
 
+// Why: comparison is GitHub-only; raw string equality would let an unsupported-provider
+// remote match persisted metadata and be removed by cleanup.
 export function sameGitHubRemoteUrl(left: string, right: string): boolean {
-  if (left === right) {
-    return true
-  }
   const parsedLeft = parseGitHubRemoteUrl(left)
   const parsedRight = parseGitHubRemoteUrl(right)
   return Boolean(
