@@ -1,6 +1,5 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { isMethodNotFoundError, readFileViaStream } from '../ssh/ssh-filesystem-stream-reader'
-import { uploadBuffer } from '../ssh/sftp-upload'
 import { lstatViaSftp } from './ssh-filesystem-provider-sftp'
 import {
   downloadFileViaSftp,
@@ -43,6 +42,7 @@ import {
 } from './ssh-filesystem-bounded-file-reader'
 import { SshFilesystemDirectoryReader } from './ssh-filesystem-directory-reader'
 import { requestSshMarkdownDocumentPaths } from './ssh-markdown-document-listing'
+import { writeSshFileBase64Chunk } from './ssh-filesystem-binary-write'
 const WORKSPACE_SPACE_SCAN_TIMEOUT_MS = 130_000
 export class SshFilesystemProvider implements IFilesystemProvider {
   private connectionId: string
@@ -212,25 +212,13 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     contentBase64: string,
     append: boolean
   ): Promise<void> {
-    const contents = Buffer.from(contentBase64, 'base64')
-    if (this.rawTransfer?.writeBuffer) {
-      await this.rawTransfer.writeBuffer(filePath, contents, { append, exclusive: !append })
-      return
-    }
-    if (!this.createSftp) {
-      throw new Error('remote_binary_upload_unavailable')
-    }
-    const sftp = await this.createSftp()
-    try {
-      // Why: relay fs.writeFile is text-only. SFTP writes the decoded bytes
-      // directly so runtime uploads do not corrupt images, PDFs, or archives.
-      await uploadBuffer(sftp, contents, filePath, {
-        append,
-        exclusive: !append
-      })
-    } finally {
-      sftp.end()
-    }
+    await writeSshFileBase64Chunk({
+      createSftp: this.createSftp,
+      rawTransfer: this.rawTransfer,
+      filePath,
+      contentBase64,
+      append
+    })
   }
 
   async stat(filePath: string): Promise<FileStat> {
