@@ -1,7 +1,7 @@
 import { encrypt, encryptBytes } from './e2ee'
-import {
-  TerminalInputStreamRegistry,
-  type TerminalInputSendResult
+import type {
+  TerminalInputSendResult,
+  TerminalInputStreamRegistry
 } from './rpc-client-terminal-input-send'
 import type { ConnectionState } from './types'
 

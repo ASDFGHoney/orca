@@ -27,7 +27,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
-  sent: Array<string | Uint8Array> = []
+  sent: (string | Uint8Array)[] = []
   close = vi.fn(() => {
     this.readyState = 3
     this.onclose?.()
