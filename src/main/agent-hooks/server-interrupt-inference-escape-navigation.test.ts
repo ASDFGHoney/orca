@@ -52,14 +52,13 @@ function ingestWorking(
   return server.getStatusSnapshot()[0]!
 }
 
+// Why: take the snapshot row type itself rather than a hand-written structural
+// shape - the payload's fields are optional, so a narrower literal type does not
+// accept it and typecheck fails (tests are excluded from the mobile tsconfig but
+// not from this one).
 function inferEscape(
   server: AgentHookServer,
-  baseline: {
-    receivedAt: number
-    stateStartedAt: number
-    prompt: string
-    agentType: string | undefined
-  }
+  baseline: ReturnType<AgentHookServer['getStatusSnapshot']>[0]
 ) {
   return server.inferInterrupt({
     paneKey: PANE,
