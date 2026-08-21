@@ -65,6 +65,9 @@ export type ClaudeSession = {
   fence: number
   prompts: ClaudePromptRegistry
   dispatchWaiters: ClaudeDispatchWaiter[]
+  /** Set once this CLI is seen stamping `isReplay` on its user echo. From then on
+   *  a frame without it cannot be an echo, so the shape fallback is switched off. */
+  sawUserReplayMarker?: boolean
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
   translator: ClaudeJournalTranslator | null

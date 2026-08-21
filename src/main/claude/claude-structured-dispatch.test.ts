@@ -157,6 +157,44 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // Once this CLI is seen stamping the marker, the injected-turn allowlist must
+  // stop being load-bearing: an unrecognized injected shape would otherwise still
+  // steal the identity.
+  it('stops trusting frame shape once the CLI is seen stamping isReplay', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    resolveClaudeReplayWaiter(session, userReplayFrame('replay-one', 'one'))
+    await expect(first).resolves.toMatchObject({ state: 'accepted' })
+
+    const second = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    // An injected shape nobody has enumerated yet, so the allowlist would pass it.
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: '<some-new-notice>hi' }] },
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'unknown-injected-uuid'
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame('replay-two', 'two'))
+    await expect(second).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'replay-two' }
+    })
+  })
+
   // `readClaudeMessageEnvelope` already tolerates string content, so refusing it
   // here would be a new way for a send to never be acknowledged.
   it('accepts a replay whose content is a plain string', async () => {

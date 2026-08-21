@@ -53,9 +53,10 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
 }
 
 /** Text of a top-level user frame, or null when it is a tool-result turn (or
- *  carries nothing). `content` may be a plain string - a shape
- *  `readClaudeMessageEnvelope` already tolerates. An image-only echo has no text
- *  and correctly yields ''. */
+ *  carries nothing). A plain-string `content` is accepted so a CLI that sends the
+ *  simpler shape can still settle its send - note the translator models only the
+ *  array form, so such an echo settles the dispatch without upserting a body, the
+ *  same way an image-only echo does. An image-only echo has no text, yielding ''. */
 function claudeUserFrameText(content: unknown): string | null {
   if (typeof content === 'string') {
     return content
@@ -82,21 +83,31 @@ function claudeUserFrameText(content: unknown): string | null {
  * bubble.
  *
  * `--replay-user-messages` stamps `isReplay` on the genuine echo, so trust that
- * when it is there. The shape test is the fallback for a CLI that omits it:
- * without one, a send that is never acknowledged times out into a false
- * "delivery unconfirmed", and retrying it sends the message to Claude twice.
+ * when it is there. The shape test is only a fallback for a CLI that omits the
+ * marker, and it stays off once this session has seen one: the launch args always
+ * request replays, so after that a frame without the marker is by construction not
+ * the echo, and the hand-maintained injected-turn list must not be load-bearing.
+ * Without any fallback, a CLI that never stamps it would leave every send timing
+ * out into a false "delivery unconfirmed", and retrying sends the message twice.
  *
  * Measured against the real CLI: a queued send's replay is published at the
  * first tool boundary after it is queued, 2-3 ms AFTER that boundary's tool
  * result. So rejecting tool results costs no time - whenever there was a frame
  * to adopt, the right one follows immediately.
  */
-function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
+function isClaudeUserMessageReplay(
+  session: ClaudeSession,
+  message: Record<string, unknown>
+): boolean {
   if (message.type !== 'user' || message.parent_tool_use_id !== null) {
     return false
   }
   if (message.isReplay === true) {
+    session.sawUserReplayMarker = true
     return true
+  }
+  if (session.sawUserReplayMarker) {
+    return false
   }
   const text = claudeUserFrameText(claudeRecord(message.message)?.content)
   return text !== null && !isKnownHarnessInjectedUserTurnText(text)
@@ -106,7 +117,7 @@ export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const isUserReplay = isClaudeUserMessageReplay(message)
+  const isUserReplay = isClaudeUserMessageReplay(session, message)
   const isCompletedCommand = message.type === 'result'
   if (
     (!isUserReplay && !isCompletedCommand) ||
