@@ -124,7 +124,13 @@ from one job is what reaped users' backgrounded work on a clean `exit`.
 
 It belongs to the daemon and never to the app: an app-main crash must still
 leave sessions alive, which `.github/workflows/win-crash-survival-e2e.yml`
-asserts.
+asserts. The app spawns the daemon `detached` and is itself in no job, so
+nothing is inherited across that boundary.
+
+The consequence is that a PTY hosted by the app rather than the daemon gets a
+per-PTY job but no crash reaping. That is deliberate — the alternative is a
+kill-on-close job on the app, which is exactly what the crash-survival
+guarantee forbids.
 
 Once the shell exits, node-pty drops its handle record and closes the job, so a
 terminated tree reports `null` rather than `[]`. Null means *unverifiable* in
