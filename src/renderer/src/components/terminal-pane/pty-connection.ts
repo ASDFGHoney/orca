@@ -2144,6 +2144,9 @@ export function connectPanePty(
     publish: (entry) => useAppStore.getState().setPaneForegroundAgent(cacheKey, entry),
     hasKnownAgentIdentity: paneHasKnownAgentIdentity,
     onConfirmedShellForeground: (reason) => {
+      // Why: confirmed shell already clears titles and launch routing; a leftover
+      // pane sleeping record would keep painting the exited agent on the tab.
+      useAppStore.getState().clearSleepingAgentSession(cacheKey)
       clearStaleAgentTabTitleOnConfirmedShell()
       // Why: a hard-killed agent leaves mouse/focus/kitty modes armed, and the
       // surviving shell then receives pointer moves as typed SGR reports; the

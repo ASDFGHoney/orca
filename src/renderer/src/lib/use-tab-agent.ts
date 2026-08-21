@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
-import { isShellProcess } from '../../../shared/agent-detection'
+import { titleShowsNoAgent } from '../../../shared/agent-detection'
 import { worktreeUsesRemoteConnection } from '@/store/slices/terminals'
 import { parseRemoteRuntimePtyId } from '@/runtime/runtime-terminal-stream'
 import { isTerminalLeafId, makePaneKey } from '../../../shared/stable-pane-id'
@@ -21,12 +21,6 @@ import { isOpenCodeNativeTitle } from '../../../shared/opencode-terminal-title'
 import { resolvePaneAgentOwner } from '../../../shared/pane-agent-owner'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
-
-// A shell name or the tab's neutral default title (where inferred-interrupt reset parks it); blank titles are no evidence.
-function titleShowsNoAgent(title: string, defaultTitle?: string): boolean {
-  const trimmed = title.trim()
-  return trimmed.length > 0 && (isShellProcess(trimmed) || trimmed === defaultTitle?.trim())
-}
 
 /**
  * Resolves wrapper-compatible signal identity against the launch owner.
@@ -154,6 +148,10 @@ export function resolveTabAgentFromSignals(args: {
     processShellForeground: args.processShellForeground
   })
   const activeLaunchAgent = launchedAgentExited ? null : launchAgent
+  // Why: exit evidence already clears launch identity; a leftover sleeping
+  // record is hibernation occupancy, not a live occupant after /exit.
+  const activeSleepingSessionAgent =
+    launchedAgentExited || processProvesShell ? null : sleepingSessionAgent
   // Why: re-own the foreground process within its title-identity group so OMP's nested pi (shell → omp → pi) can't flip an OMP-owned tab's icon.
   const processAgent = resolveSignalAgentForLaunchOwner(args.processAgent, owner)
   // Identity-first precedence (see JSDoc): live hook > process > title > completed > sleeping > launch > sibling.
@@ -162,7 +160,7 @@ export function resolveTabAgentFromSignals(args: {
     processAgent ??
     titleAgent ??
     idleFocusedIdentity ??
-    sleepingSessionAgent ??
+    activeSleepingSessionAgent ??
     activeLaunchAgent ??
     liveSiblingIdentity ??
     idleSiblingIdentity
@@ -179,7 +177,7 @@ export function resolveTabAgentFromSignals(args: {
  * 2. Process identity — recognized foreground process (local only); re-owned within its title-identity group so OMP's nested `pi` (shell → omp → pi) can't flip the icon.
  * 3. Title — only a reuse override or legacy standalone identity; native OpenCode titles cannot displace durable ownership.
  * 4. Idle focused identity — the pane's completed hook or sidebar-retained completion; suppressed locally once OSC 133;D proves exit.
- * 5. Sleeping session identity — current provider-session ownership.
+ * 5. Sleeping session identity — current provider-session ownership; suppressed on the same local exit evidence as launch identity.
  * 6. launchAgent — bootstrap before any hook/process signal; cleared once exit evidence shows it left.
  * 7. Sibling-pane identity (live, then completed/retained) — split-tab fallback.
  */
