@@ -104,15 +104,24 @@ export function readStoredCodexCredentialState(authPath: string): StoredCodexCre
     // Why: Windows auth.json rotation can surface transient EPERM/EBUSY reads.
     return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable'
   }
+  return classifyStoredCodexAuthContents(raw).state
+}
+
+export type StoredCodexAuthMode = 'apikey' | 'chatgpt' | 'other'
+
+export function classifyStoredCodexAuthContents(raw: string): {
+  state: Exclude<StoredCodexCredentialState, 'missing'>
+  mode: StoredCodexAuthMode | null
+} {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
     // Torn JSON means a write is in flight, not that the credential is gone.
-    return 'unreadable'
+    return { state: 'unreadable', mode: null }
   }
   if (!isRecord(parsed) || Object.keys(parsed).length === 0) {
-    return 'no-credential'
+    return { state: 'no-credential', mode: null }
   }
   const auth = parsed as StoredCodexAuth
   const hasCredential =
@@ -120,13 +129,34 @@ export function readStoredCodexCredentialState(authPath: string): StoredCodexCre
       ? hasCredentialWithoutDeclaredMode(auth)
       : hasCredentialForDeclaredMode(auth)
   if (hasCredential) {
-    return 'present'
+    return { state: 'present', mode: storedAuthMode(auth) }
   }
-  return hasIncompleteCredentialMaterial(auth) ? 'incomplete' : 'no-credential'
+  return {
+    state: hasIncompleteCredentialMaterial(auth) ? 'incomplete' : 'no-credential',
+    mode: null
+  }
 }
 
 export function hasStoredCodexCredential(authPath: string): boolean {
   return readStoredCodexCredentialState(authPath) === 'present'
+}
+
+function storedAuthMode(auth: StoredCodexAuth): StoredCodexAuthMode {
+  if (isNonEmptyString(auth.auth_mode)) {
+    switch (auth.auth_mode) {
+      case 'apikey':
+        return 'apikey'
+      case 'chatgpt':
+      case 'chatgptAuthTokens':
+        return 'chatgpt'
+      default:
+        return 'other'
+    }
+  }
+  if (isNonEmptyString(auth.OPENAI_API_KEY)) {
+    return 'apikey'
+  }
+  return hasChatGptCredential(auth.tokens) ? 'chatgpt' : 'other'
 }
 
 function hasCredentialForDeclaredMode(auth: StoredCodexAuth): boolean {
