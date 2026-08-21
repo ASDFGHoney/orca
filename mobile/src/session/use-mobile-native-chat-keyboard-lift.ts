@@ -86,6 +86,10 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
       setLastSettledPad(committedInset + bottomInset)
     }
   }, [committedInset, bottomInset])
+  // Order matters: useAnimatedReaction registers no outputs, so Reanimated has
+  // no dependency edge from the latch above to this mapper and falls back to
+  // registration order. Declaring padStyle last is what keeps it reading a
+  // fresh latch — a reaction added below here would cost a frame per drag.
   const padStyle = useAnimatedStyle(() => ({
     paddingBottom: resolveNativeChatBottomPad({
       phase: keyboardPhase(keyboard.state.value, keyboardIsLeaving.value),
