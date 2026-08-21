@@ -201,4 +201,25 @@ describe('listTerminals provider activity seed for never-attached daemon PTYs', 
       unattached.map((pane) => pane.ptyId)
     )
   })
+
+  it('does not spend the restore-tail budget a later read still fetches at 120 rows', async () => {
+    const ptyId = 'pty-list-must-not-consume-restore-tail'
+    const { runtime, serializeProviderBuffer } = makeRuntime({
+      panes: [{ ptyId, leafId: UUID(4) }],
+      serializeProviderBuffer: async () =>
+        providerSnapshot('Thinking… 12.4k tokens\r\nEditing src/foo.ts\r\n')
+    })
+
+    const { terminals } = await runtime.listTerminals(`id:${WORKTREE_ID}`)
+    expect(terminals[0]).toMatchObject({
+      ptyId,
+      preview: expect.stringContaining('Thinking… 12.4k tokens')
+    })
+    expect(serializeProviderBuffer).toHaveBeenCalledOnce()
+    expect(serializeProviderBuffer.mock.calls[0]![1]!.scrollbackRows).toBeLessThan(120)
+
+    serializeProviderBuffer.mockClear()
+    await runtime.readTerminal(terminals[0]!.handle)
+    expect(serializeProviderBuffer).toHaveBeenCalledWith(ptyId, { scrollbackRows: 120 })
+  })
 })

@@ -1522,6 +1522,8 @@ type RuntimePtyWorktreeRecord = {
   // provider snapshot must not be re-asked on every list (200-row hot path).
   providerActivitySeedAttempted?: boolean
   providerActivityObservation?: 'unverifiable'
+  // Listing-only screen; must not write the restore tail (read/reveal owns that budget).
+  providerActivityPreview?: string
 }
 
 type TerminalAgentStatusSnapshot = {
@@ -11069,6 +11071,7 @@ export class OrcaRuntimeService {
       pty.disconnectedAt = null
       pty.lastOutputAt = at
       pty.providerActivityObservation = undefined
+      pty.providerActivityPreview = undefined
       const normalized = normalizeTerminalChunk(data, pty.tailPendingAnsi)
       pty.tailPendingAnsi = normalized.pendingAnsi
       const nextTail = appendNormalizedToTailBuffer(
@@ -17185,6 +17188,9 @@ export class OrcaRuntimeService {
       resolvedWorktrees,
       targetWorktreeId
     )
+    if (controllerInventory) {
+      await this.seedUnattachedLocalDaemonPtyActivityFromProvider(controllerInventory.livePtyIds)
+    }
     const refreshedPtyLiveness = controllerInventory
       ? new Set(controllerInventory.livePtyIds)
       : null
@@ -32742,22 +32748,18 @@ export class OrcaRuntimeService {
       }
     }
     this.pruneDisconnectedPtyRecords()
-    const livePtyIdsForActivitySeed = targetWorktreeId ? selectedLivePtyIds : allLivePtyIds
-    if (deadline === undefined || Date.now() < deadline) {
-      await this.seedUnattachedLocalDaemonPtyActivityFromProvider(livePtyIdsForActivitySeed)
-    }
     return {
-      livePtyIds: livePtyIdsForActivitySeed,
+      livePtyIds: targetWorktreeId ? selectedLivePtyIds : allLivePtyIds,
       allLivePtyIds,
       terminalIdentityByPtyId: controllerIdentityByPtyId,
       queriedHostIds
     }
   }
 
-  // Why: inventory records a never-attached local daemon PTY at construction
-  // defaults; list would otherwise report lastOutputAt:null / preview:"" as if
-  // that were an observation. Seed once from the same provider snapshot `read`
-  // already consults. Recency stays unset — snapshot bytes are historical.
+  // Why: list would otherwise report lastOutputAt:null / preview:"" for a
+  // never-attached local daemon PTY as if that were an observation. Seed a
+  // listing-only preview from a shallow provider snapshot. Recency stays unset
+  // — snapshot bytes are historical — and the restore tail is left for read.
   private async seedUnattachedLocalDaemonPtyActivityFromProvider(
     livePtyIds: ReadonlySet<string>
   ): Promise<void> {
@@ -32767,6 +32769,10 @@ export class OrcaRuntimeService {
         break
       }
       if (!this.isKnownUnattachedLocalDaemonPty(ptyId)) {
+        continue
+      }
+      // Recovered legacy workers own a 120-row provider read; listing must not serialize them.
+      if (this.legacyWorkerRecoveredPtys.has(ptyId)) {
         continue
       }
       const pty = this.ptysById.get(ptyId)
@@ -32804,7 +32810,11 @@ export class OrcaRuntimeService {
       VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
       null
     )
-    if (!this.ptysById.has(pty.ptyId) || !restoredTerminalTailSeedAllowed(pty)) {
+    if (
+      !this.ptysById.has(pty.ptyId) ||
+      this.legacyWorkerRecoveredPtys.has(pty.ptyId) ||
+      !restoredTerminalTailSeedAllowed(pty)
+    ) {
       return
     }
     if (!snapshot) {
@@ -32812,10 +32822,12 @@ export class OrcaRuntimeService {
       return
     }
     const text = `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
-    this.seedTerminalRestoreTail(pty.ptyId, {
-      ...(text.length > 0 ? { text } : {}),
-      ...(snapshot.lastTitle ? { lastTitle: snapshot.lastTitle } : {})
-    })
+    // Listing preview only — applying this 24-row snapshot to the restore tail
+    // spends the one-shot seed and blocks the 120-row read/reveal fetch.
+    const seed = text.length > 0 ? buildRestoredTerminalTailSeed(text) : null
+    if (seed) {
+      pty.providerActivityPreview = seed.preview
+    }
   }
 
   private refreshFloatingWorkspacePtyLiveness(): Set<string> | null {
@@ -33050,10 +33062,11 @@ export class OrcaRuntimeService {
       !leaf.ptyId.startsWith('remote:') &&
       parseAppSshPtyId(leaf.ptyId) === null &&
       this.ptyController?.hasPty?.(leaf.ptyId) !== true
+    const preview = leaf.preview || pty?.providerActivityPreview || ''
     const activityUnverifiable =
       !provenAbsent &&
       leaf.lastOutputAt === null &&
-      leaf.preview.length === 0 &&
+      preview.length === 0 &&
       pty?.providerActivityObservation === 'unverifiable'
     return {
       handle: this.issueHandle(leaf),
@@ -33069,7 +33082,7 @@ export class OrcaRuntimeService {
       connected: provenAbsent ? false : leaf.connected,
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
-      preview: leaf.preview,
+      preview,
       ...(activityUnverifiable ? { activityObservation: 'unverifiable' } : {}),
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
       ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
@@ -35035,9 +35048,10 @@ export class OrcaRuntimeService {
 
     const pane = parsePaneKey(pty.paneKey ?? '')
     const orphaned = !pty.tabId || !pane || pane.tabId !== pty.tabId
+    const preview = pty.preview || pty.providerActivityPreview || ''
     const activityUnverifiable =
       pty.lastOutputAt === null &&
-      pty.preview.length === 0 &&
+      preview.length === 0 &&
       pty.providerActivityObservation === 'unverifiable'
     return {
       handle: this.issuePtyHandle(pty),
@@ -35053,7 +35067,7 @@ export class OrcaRuntimeService {
       connected: pty.connected,
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
-      preview: pty.preview,
+      preview,
       ...(activityUnverifiable ? { activityObservation: 'unverifiable' } : {}),
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
       ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
