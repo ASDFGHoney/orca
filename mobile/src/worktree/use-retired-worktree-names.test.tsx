@@ -28,14 +28,24 @@ function mountNames() {
     )
   }
 
-  function Probe({ repoId, refreshKey }: { repoId: string | null; refreshKey: string }) {
-    latest = useRetiredWorktreeNames(readRetiredNames, repoId, refreshKey)
+  function Probe({
+    repoId,
+    refreshKey,
+    readNames
+  }: {
+    repoId: string | null
+    refreshKey: string
+    readNames: (repoId: string) => Promise<RetiredNameRegistry>
+  }) {
+    latest = useRetiredWorktreeNames(readNames, repoId, refreshKey)
     return null
   }
 
   let renderer!: ReturnType<typeof create>
   act(() => {
-    renderer = create(createElement(Probe, { repoId: 'repo-1', refreshKey: 'a' }))
+    renderer = create(
+      createElement(Probe, { repoId: 'repo-1', refreshKey: 'a', readNames: readRetiredNames })
+    )
   })
   return {
     get registry(): RetiredNameRegistry {
@@ -47,7 +57,7 @@ function mountNames() {
     requests,
     rerender(props: { repoId: string | null; refreshKey: string }) {
       act(() => {
-        renderer.update(createElement(Probe, props))
+        renderer.update(createElement(Probe, { ...props, readNames: readRetiredNames }))
       })
     },
     async settle(
