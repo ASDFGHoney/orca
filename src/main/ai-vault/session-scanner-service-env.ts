@@ -36,6 +36,9 @@ const AGENT_ROOT_ENV_ALLOWLIST = [
   'CODEX_HOME',
   'COPILOT_HOME',
   'DEVIN_HOME',
+  // Why: Devin's Windows CLI writes transcripts under %APPDATA%; without this
+  // the forked scanner child falls back to ~/.local/share and finds nothing.
+  'APPDATA',
   'GROK_HOME',
   'KIMI_CODE_HOME',
   'OMP_CODING_AGENT_DIR',

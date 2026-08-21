@@ -4,6 +4,7 @@ import { joinRemotePath } from '../ssh/ssh-remote-platform'
 import { parseAntigravitySessionContent } from './session-scanner-antigravity-parser'
 import { isAntigravityTranscriptPath } from './session-scanner-antigravity-paths'
 import { parseCodexSessionContent } from './session-scanner-codex-parser'
+import { defaultDevinTranscriptsSegments } from './session-scanner-devin-paths'
 import { parseDevinSessionContent } from './session-scanner-devin-parser'
 import { parseDroidSessionContent } from './session-scanner-droid-parser'
 import { parseMessageGraphSessionContent } from './session-scanner-graph-parsers'
@@ -89,7 +90,7 @@ export function remoteSessionSources(
       'devin',
       remoteHome,
       hostPlatform,
-      ['.local', 'share', 'devin', 'cli', 'transcripts'],
+      defaultDevinTranscriptsSegments(hostPlatform.os),
       ['.json'],
       parseDevinSessionContent
     ),
