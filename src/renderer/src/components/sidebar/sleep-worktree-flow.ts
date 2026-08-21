@@ -108,6 +108,12 @@ function preserveSidebarWorktreePosition(worktreeId: string): () => void {
 
 function describeSleepFailure(error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error)
+  if (detail.includes('agent_sleep_capture_missing')) {
+    return translate(
+      'auto.components.sidebar.sleep.worktree.flow.capture.missing',
+      'A session could not be saved for resume, so the workspace was kept open.'
+    )
+  }
   if (detail.includes('legacy')) {
     return translate(
       'auto.components.sidebar.sleep.worktree.flow.legacy.unverified',

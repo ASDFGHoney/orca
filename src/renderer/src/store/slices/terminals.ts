@@ -155,6 +155,10 @@ import {
   type AgentStatusWorktreeShutdownReason
 } from './agent-status'
 import {
+  AGENT_SLEEP_CAPTURE_MISSING,
+  listUnrecordableManualSleepAgentPanes
+} from './manual-sleep-recovery-guard'
+import {
   buildTerminalTabRetirementPlan,
   classifyTerminalRetirementWorktree,
   isTerminalTabPresent,
@@ -2946,6 +2950,17 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
             : {})
         })
       : {}
+    if (keepIdentifiers && shutdownReason === 'manual-sleep' && rendererShutdownPtyIds.length > 0) {
+      const unrecordablePaneKeys = listUnrecordableManualSleepAgentPanes(
+        get(),
+        worktreeId,
+        sleepingAgentSessionRecords,
+        opts?.sleepingPaneKeys
+      )
+      if (unrecordablePaneKeys.length > 0) {
+        throw new Error(AGENT_SLEEP_CAPTURE_MISSING)
+      }
+    }
     const retainedCompletionEvidence =
       shutdownReason === 'auto-hibernate-completed-agent'
         ? collectHibernatedCompletionEvidenceForWorktree(get(), worktreeId, opts?.sleepingPaneKeys)

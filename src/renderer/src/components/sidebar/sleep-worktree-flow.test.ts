@@ -212,6 +212,24 @@ describe('runSleepWorktree', () => {
     )
   })
 
+  it('restores the active workspace when resume metadata cannot be captured', async () => {
+    mocks.state.activeWorktreeId = 'wt-1'
+    mocks.state.shutdownWorktreeTerminals.mockRejectedValueOnce(
+      new Error('agent_sleep_capture_missing')
+    )
+
+    await runSleepWorktree('wt-1')
+
+    expect(mocks.state.setActiveWorktree.mock.calls).toEqual([[null], ['wt-1']])
+    expect(mocks.suspendWorkspace).not.toHaveBeenCalled()
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Failed to sleep workspace',
+      expect.objectContaining({
+        description: 'A session could not be saved for resume, so the workspace was kept open.'
+      })
+    )
+  })
+
   it('restores the active workspace when terminal convergence fails', async () => {
     mocks.state.activeWorktreeId = 'wt-1'
     mocks.state.shutdownWorktreeTerminals.mockRejectedValueOnce(
