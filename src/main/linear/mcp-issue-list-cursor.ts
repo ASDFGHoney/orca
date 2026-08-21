@@ -27,7 +27,12 @@ export function decodeIssueListCursor(
       'workspaceId' in parsed &&
       'cursor' in parsed &&
       typeof parsed.workspaceId === 'string' &&
-      typeof parsed.cursor === 'string'
+      typeof parsed.cursor === 'string' &&
+      // A hand-crafted payload must not smuggle back the fan-out selector or an empty
+      // workspace, both of which would silently widen the read past the bound workspace.
+      parsed.workspaceId !== 'all' &&
+      parsed.workspaceId.length > 0 &&
+      parsed.cursor.length > 0
     ) {
       return { workspaceId: parsed.workspaceId, cursor: parsed.cursor }
     }
@@ -63,8 +68,8 @@ export function resolveIssueListCursor(request: {
   }
   if (cursor.startsWith(ISSUE_LIST_CURSOR_PREFIX)) {
     throw cursorWorkspaceError(
-      'Cursor pagination requires a concrete Linear workspace.',
-      'Pass --workspace with result.meta.workspaceId from the previous list-issues page.'
+      'Cursor was issued by Orca but is malformed or truncated.',
+      'Re-run list-issues without --cursor, then page with the nextCursor it returns.'
     )
   }
   if (!request.workspaceId) {

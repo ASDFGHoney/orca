@@ -6,6 +6,7 @@ import type {
   LinearIssueTaskUpdateRequest
 } from './agent-access'
 import type { LinearInlineMedia } from './inline-media'
+import type { LinearPriorityLabel } from './priority-label'
 import type { LinearIssueActivityEntry } from './issue-activity'
 
 export type LinearIssueSummary = {
@@ -21,7 +22,7 @@ export type LinearIssueSummary = {
   assignee?: LinearUserSummary | null
   labels: LinearNamedEntity[]
   priority?: number | null
-  priorityLabel?: string | null
+  priorityLabel?: LinearPriorityLabel
   estimate?: number | null
   dueDate?: string | null
   branchName?: string | null
@@ -144,7 +145,7 @@ export type LinearSearchIssueSummary = Pick<
 
 export type LinearSearchResult = {
   issues: LinearSearchIssueSummary[]
-  truncated: boolean
+  truncated?: boolean
   meta: {
     query: string
     workspaceId?: (string & {}) | 'all'
@@ -210,7 +211,7 @@ export type LinearTeamLabelsResult = {
 
 export type LinearIssueListResult = {
   issues: LinearSearchIssueSummary[]
-  truncated: boolean
+  truncated?: boolean
   meta: {
     filter: LinearIssueListFilter
     workspaceId?: (string & {}) | 'all'
@@ -238,7 +239,7 @@ export type LinearAgentProjectSummary = {
 
 export type LinearProjectListResult = {
   projects: LinearAgentProjectSummary[]
-  truncated: boolean
+  truncated?: boolean
   meta: {
     query?: string
     workspaceId?: (string & {}) | 'all'

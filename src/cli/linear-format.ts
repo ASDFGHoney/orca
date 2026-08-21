@@ -74,7 +74,7 @@ export function formatLinearSearch(result: LinearSearchResult): string {
   }
   return appendLinearListTruncation(
     result.issues.map(formatSearchRow).join('\n'),
-    result.meta.returned,
+    result.issues.length,
     result.truncated ?? result.meta.limitReached
   )
 }
@@ -122,7 +122,7 @@ export function formatLinearIssueList(result: LinearIssueListResult): string {
   }
   return appendLinearListTruncation(
     result.issues.map(formatSearchRow).join('\n'),
-    result.meta.returned,
+    result.issues.length,
     result.truncated ?? result.meta.hasMore
   )
 }
@@ -133,7 +133,7 @@ export function formatLinearMcpIssueList(result: LinearMcpIssueListResult): stri
   }
   return appendLinearListTruncation(
     result.issues.map(formatSearchRow).join('\n'),
-    result.meta.returned,
+    result.issues.length,
     result.truncated ?? result.meta.hasMore
   )
 }

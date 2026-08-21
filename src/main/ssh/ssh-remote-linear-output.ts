@@ -50,7 +50,7 @@ export function formatRemoteLinearCli(result: unknown): { stdout: string; stderr
     return {
       stdout: `${appendLinearListTruncation(
         formatLinearIssueRows(result.issues),
-        result.meta.returned,
+        result.issues.length,
         result.truncated ?? result.meta.limitReached
       )}\n`,
       stderr: linearListWarnings(result, 'Linear search')
@@ -60,7 +60,7 @@ export function formatRemoteLinearCli(result: unknown): { stdout: string; stderr
     return {
       stdout: `${appendLinearListTruncation(
         formatLinearIssueRows(result.issues),
-        result.meta.returned,
+        result.issues.length,
         result.truncated ?? result.meta.hasMore
       )}\n`,
       stderr: linearMcpListWarnings(result)
@@ -70,7 +70,7 @@ export function formatRemoteLinearCli(result: unknown): { stdout: string; stderr
     return {
       stdout: `${appendLinearListTruncation(
         formatLinearIssueRows(result.issues),
-        result.meta.returned,
+        result.issues.length,
         result.truncated ?? result.meta.hasMore
       )}\n`,
       stderr: linearListWarnings(result)

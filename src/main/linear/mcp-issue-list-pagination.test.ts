@@ -162,6 +162,124 @@ describe('list-issues pagination contract', () => {
     })
   })
 
+  it('walks every page when no limit is set and reports a complete read', async () => {
+    rawRequest
+      .mockResolvedValueOnce(
+        pageResponse([issueNode('issue-1', 'ENG-1', '2026-07-03T00:00:00.000Z')], true, 'page-2')
+      )
+      .mockResolvedValueOnce(
+        pageResponse([issueNode('issue-2', 'ENG-2', '2026-07-02T00:00:00.000Z')], true, 'page-3')
+      )
+      .mockResolvedValueOnce(
+        pageResponse([issueNode('issue-3', 'ENG-3', '2026-07-01T00:00:00.000Z')], false)
+      )
+    const { listMcpIssues } = await import('./mcp-issue-list')
+
+    const result = await listMcpIssues({})
+
+    expect(result.issues.map((issue) => issue.identifier)).toEqual(['ENG-1', 'ENG-2', 'ENG-3'])
+    expect(result.truncated).toBe(false)
+    expect(result.meta).toMatchObject({ limit: null, returned: 3, hasMore: false })
+    expect(result.meta.nextCursor).toBeUndefined()
+    expect(rawRequest.mock.calls.map((call) => call[1]?.after)).toEqual([
+      undefined,
+      'page-2',
+      'page-3'
+    ])
+    expect(rawRequest.mock.calls[0]?.[1]).toMatchObject({ first: 250 })
+  })
+
+  it('pages past the Linear per-request maximum to satisfy a larger explicit limit', async () => {
+    const page = (start: number, count: number, hasNextPage: boolean, endCursor?: string) =>
+      pageResponse(
+        Array.from({ length: count }, (_unused, index) =>
+          issueNode(`issue-${start + index}`, `ENG-${start + index}`, '2026-07-01T00:00:00.000Z')
+        ),
+        hasNextPage,
+        endCursor
+      )
+    rawRequest
+      .mockResolvedValueOnce(page(1, 250, true, 'page-2'))
+      .mockResolvedValueOnce(page(251, 50, true, 'page-3'))
+    const { listMcpIssues } = await import('./mcp-issue-list')
+
+    const result = await listMcpIssues({ limit: 300 })
+
+    expect(result.issues).toHaveLength(300)
+    expect(result.truncated).toBe(true)
+    expect(result.meta).toMatchObject({ limit: 300, returned: 300, hasMore: true })
+    expect(rawRequest.mock.calls.map((call) => call[1]?.first)).toEqual([250, 50])
+  })
+
+  it('stops and reports truncation when a provider never stops offering pages', async () => {
+    rawRequest.mockResolvedValue(
+      pageResponse([issueNode('issue-1', 'ENG-1', '2026-07-01T00:00:00.000Z')], true, 'same-cursor')
+    )
+    const { listMcpIssues } = await import('./mcp-issue-list')
+
+    const result = await listMcpIssues({})
+
+    expect(result.truncated).toBe(true)
+    expect(result.meta.hasMore).toBe(true)
+    expect(rawRequest.mock.calls.length).toBeLessThanOrEqual(200)
+    expect(result.meta.nextCursor).toMatch(/^orca\.linear\.v1\./)
+  })
+
+  it('stops paging when a page claims more results but hands back no cursor', async () => {
+    rawRequest.mockResolvedValue(
+      pageResponse([issueNode('issue-1', 'ENG-1', '2026-07-01T00:00:00.000Z')], true)
+    )
+    const { listMcpIssues } = await import('./mcp-issue-list')
+
+    const result = await listMcpIssues({})
+
+    expect(rawRequest).toHaveBeenCalledTimes(1)
+    expect(result.truncated).toBe(true)
+    expect(result.meta.nextCursor).toBeUndefined()
+  })
+
+  it('stops on the read budget and hands back a cursor instead of outliving the RPC', async () => {
+    vi.useFakeTimers()
+    try {
+      let issued = 0
+      rawRequest.mockImplementation(() => {
+        issued += 1
+        vi.advanceTimersByTime(11_000)
+        return Promise.resolve(
+          pageResponse(
+            [issueNode(`issue-${issued}`, `ENG-${issued}`, '2026-07-01T00:00:00.000Z')],
+            true,
+            `page-${issued}`
+          )
+        )
+      })
+      const { listMcpIssues } = await import('./mcp-issue-list')
+
+      const result = await listMcpIssues({})
+
+      expect(issued).toBe(2)
+      expect(result.truncated).toBe(true)
+      expect(result.meta.nextCursor).toMatch(/^orca\.linear\.v1\./)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refuses a hand-crafted cursor that smuggles a fan-out or empty workspace', async () => {
+    const { encodeIssueListCursor } = await import('./mcp-issue-list-cursor')
+    const { listMcpIssues } = await import('./mcp-issue-list')
+
+    for (const workspaceId of ['all', '']) {
+      await expect(
+        listMcpIssues({ cursor: encodeIssueListCursor(workspaceId, 'linear-end') })
+      ).rejects.toMatchObject({ code: 'linear_invalid_workspace' })
+    }
+    await expect(
+      listMcpIssues({ cursor: encodeIssueListCursor('workspace-1', '') })
+    ).rejects.toMatchObject({ code: 'linear_invalid_workspace' })
+    expect(rawRequest).not.toHaveBeenCalled()
+  })
+
   it('maps every Linear priority number onto the CLI setter label', async () => {
     rawRequest.mockResolvedValue(
       pageResponse(

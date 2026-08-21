@@ -1,12 +1,8 @@
-export function linearListTruncationLine(returned: number, truncated: boolean): string | null {
-  return truncated ? `truncated: showing ${returned}` : null
-}
-
+// Why: the count is a row count, not a total — Linear's issues() connection has no totalCount.
 export function appendLinearListTruncation(
   body: string,
-  returned: number,
+  shown: number,
   truncated: boolean
 ): string {
-  const line = linearListTruncationLine(returned, truncated)
-  return line ? `${body}\n${line}` : body
+  return truncated ? `${body}\ntruncated: showing ${shown}` : body
 }

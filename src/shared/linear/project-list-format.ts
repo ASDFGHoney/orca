@@ -24,7 +24,7 @@ export function formatLinearProjectListRows(result: LinearProjectListResult): st
     .join('\n')
   return appendLinearListTruncation(
     body,
-    result.meta.returned,
+    result.projects.length,
     result.truncated ?? result.meta.hasMore
   )
 }
