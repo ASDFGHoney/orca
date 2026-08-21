@@ -30,6 +30,34 @@ function makeSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings {
 }
 
 describe('repo-specific worktree ownership layouts', () => {
+  it('lets an explicitly configured Claude base outrank the built-in scratch path', () => {
+    const repo = makeRepo({ worktreeBasePath: '.claude/worktrees' })
+    const settings = makeSettings()
+    const worktree = makeWorktree('/projects/a/repo/.claude/worktrees/repo/feature')
+
+    expect(
+      classifyWorktreeOwnership({
+        repo,
+        settings,
+        worktree,
+        knownOrcaLayouts: buildKnownOrcaWorkspaceLayouts(settings, repo)
+      })
+    ).toBe('external')
+  })
+
+  it('keeps the same path classified as scratch without the explicit base', () => {
+    const repo = makeRepo()
+    const settings = makeSettings()
+    expect(
+      classifyWorktreeOwnership({
+        repo,
+        settings,
+        worktree: makeWorktree('/projects/a/repo/.claude/worktrees/repo/feature'),
+        knownOrcaLayouts: buildKnownOrcaWorkspaceLayouts(settings, repo)
+      })
+    ).toBe('agent-scratch')
+  })
+
   it('resolves the same relative base path from each repo root', () => {
     const settings = makeSettings()
     const repoA = makeRepo({ path: '/projects/a/repo', worktreeBasePath: '../worktrees' })
