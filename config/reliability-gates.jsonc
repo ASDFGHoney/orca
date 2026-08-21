@@ -4666,11 +4666,11 @@
         "https://github.com/stablyai/orca/pull/15515",
         "https://github.com/stablyai/orca/pull/15517"
       ],
-      "invariant": "A located provider session resolves and reads transcript bytes only through its stamped execution owner. Unknown or unavailable ownership is unverifiable and never falls back to the desktop filesystem. SSH snapshots and tails use bounded positional reads and reject stale provider generations; locator-free legacy requests retain host-local behavior.",
-      "oracle": "The focused oracle gives the desktop and SSH providers identical session ids and transcript paths but different bytes, then requires the exact SSH owner for snapshot and live append. It also proves unknown ownership cannot install a local watcher, provider loss and replacement rearm once, throwing advisory callbacks cannot kill retry, and large appends never call whole-file read or reread the prefix. The identical baseline/candidate/disabled/revert comparison and a real Docker SSH plus Electron/CDP journey supply independent red/green and rendered evidence.",
+      "invariant": "A located provider session resolves and reads transcript bytes only through its stamped execution owner. Unknown or unavailable ownership is unverifiable and never falls back to the desktop filesystem. SSH snapshots and tails use bounded positional reads, forward cancellation, and reject stale provider generations; locator-free legacy requests retain host-local behavior.",
+      "oracle": "The focused oracle gives the desktop and SSH providers identical session ids and transcript paths but different bytes, then requires the exact SSH owner for snapshot and live append. It also proves unknown ownership cannot install a local watcher, repeated provider loss rearms one advisory per outage, a restored-but-missing remote path replaces stale unverifiable text, throwing advisory callbacks cannot kill retry, cancellation reaches remote stat, and large appends never call whole-file read or reread the prefix. The identical baseline/candidate/disabled/revert comparison and a real Docker SSH plus Electron/CDP journey supply independent red/green and rendered evidence.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/ssh-transcript-host-routing.test.ts --reporter=dot",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/server-hook-http-ingest.test.ts src/main/agent-hooks/server-ingest-remote.test.ts src/main/agent-hooks/server-ingest-terminal-status.test.ts src/main/agent-hooks/server-last-status-hydrate-validation.test.ts src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts src/main/ipc/native-chat.test.ts src/main/native-chat/transcript-watch-error.test.ts src/main/native-chat/transcript-watch-resolve-poll.test.ts src/main/native-chat/transcript-watch-unresolved-notice.test.ts src/main/providers/ssh-filesystem-dispatch.test.ts src/main/runtime/rpc/methods/native-chat.test.ts src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts src/renderer/src/components/native-chat/native-chat-session-transport.test.ts src/renderer/src/components/native-chat/use-native-chat-live-session.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts src/shared/agent-session-resume.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/server-hook-http-ingest.test.ts src/main/agent-hooks/server-ingest-remote.test.ts src/main/agent-hooks/server-ingest-terminal-status.test.ts src/main/agent-hooks/server-last-status-hydrate-validation.test.ts src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts src/main/ipc/native-chat.test.ts src/main/native-chat/transcript-watch-error.test.ts src/main/native-chat/transcript-watch-resolve-poll.test.ts src/main/native-chat/transcript-watch-unresolved-notice.test.ts src/main/providers/ssh-filesystem-dispatch.test.ts src/main/providers/ssh-filesystem-provider-range.test.ts src/main/runtime/rpc/methods/native-chat.test.ts src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts src/renderer/src/components/native-chat/native-chat-session-transport.test.ts src/renderer/src/components/native-chat/use-native-chat-live-session.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts src/shared/agent-session-resume.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/transcript-watch-wsl-exact-path.test.ts --reporter=dot",
         "pnpm --dir mobile exec vitest run --root .. mobile/src/session/mobile-native-chat-eligibility.test.ts mobile/src/session/use-mobile-native-chat-session.test.ts --reporter=dot",
         "pnpm exec electron-vite build --mode e2e && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-native-chat-runtime-routing.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -4689,6 +4689,7 @@
         "src/main/agent-hooks/wsl-hook-relay-live.integration.test.ts",
         "src/main/ipc/native-chat.test.ts",
         "src/main/providers/ssh-filesystem-dispatch.test.ts",
+        "src/main/providers/ssh-filesystem-provider-range.test.ts",
         "src/main/runtime/rpc/methods/native-chat.test.ts",
         "src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts",
         "src/renderer/src/components/native-chat/native-chat-session-transport.test.ts",
@@ -4724,6 +4725,10 @@
           ]
         },
         {
+          "file": "src/main/providers/ssh-filesystem-provider-range.test.ts",
+          "assertions": ["remote stat forwards cancellation to the SSH multiplexer"]
+        },
+        {
           "file": "src/main/runtime/rpc/methods/native-chat.test.ts",
           "assertions": [
             "runtime read and subscription forward the normalized provider-session locator"
@@ -4745,7 +4750,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/ssh-transcript-host-routing.test.ts --reporter=dot",
           "result": "passed",
           "durationSeconds": 3,
-          "summary": "The finalized candidate passed all 16 deterministic ownership, reconnect, replacement-race, advisory, legacy, binding, and bounded-range cases; disabling exact SSH-owner recognition failed 11/16 and restoration returned to 16/16. The byte-identical earlier 13-case oracle failed 11/13 on latest origin/main and the advisory-only PR head, passed 13/13 on the candidate, failed 9/13 with the owner fix disabled, and returned to 13/13 after restoration."
+          "summary": "The post-review candidate passed all 17 deterministic ownership, reconnect, repeated-outage, replacement-race, advisory, legacy, cancellation, binding, and bounded-range cases. Disabling remote stat cancellation, outage rearming, and remote-specific unresolved copy failed 3/17; restoration returned to 17/17. The prior 16-case candidate passed 16/16, failed 11/16 with exact SSH-owner recognition disabled, and returned to 16/16. The byte-identical earlier 13-case oracle failed 11/13 on latest origin/main and the advisory-only PR head, passed 13/13 on the candidate, failed 9/13 with the owner fix disabled, and returned to 13/13 after restoration."
         },
         {
           "date": "2026-08-21",
@@ -4768,7 +4773,7 @@
       ],
       "runtimeBudget": {
         "p95Seconds": 15,
-        "scope": "16-case deterministic routing oracle plus one compiled headless runtime journey; Docker/headed Electron remains manual"
+        "scope": "17-case deterministic routing oracle plus one compiled headless runtime journey; Docker/headed Electron remains manual"
       },
       "flakeHistory": {
         "status": "soaking",
@@ -4776,7 +4781,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The byte-identical 13-case oracle failed 11/13 on latest origin/main 59892a2f13 and advisory-only PR head aba8aafafa, passed 13/13 on the candidate, failed 9/13 when only exact SSH-owner recognition was disabled, and passed 13/13 after restoration. The finalized 16-case candidate passed 16/16, failed 11/16 under the same mutation, and returned to 16/16 after restoration. Baseline headed Electron visibly selected desktop lookalike bytes in both SSH workspace kinds; the candidate rendered only remote snapshot and tail bytes."
+        "evidence": "The byte-identical 13-case oracle failed 11/13 on latest origin/main 59892a2f13 and advisory-only PR head aba8aafafa, passed 13/13 on the candidate, failed 9/13 when only exact SSH-owner recognition was disabled, and passed 13/13 after restoration. The prior 16-case candidate passed 16/16, failed 11/16 under the same owner mutation, and returned to 16/16. The post-review 17-case candidate passed 17/17, failed 3/17 when remote stat cancellation, outage rearming, and remote-specific unresolved copy were disabled together, and returned to 17/17. Baseline headed Electron visibly selected desktop lookalike bytes in both SSH workspace kinds; the candidate rendered only remote snapshot and tail bytes."
       },
       "performanceBudget": {
         "required": true,

@@ -62,23 +62,24 @@ function memoryProvider(files: Map<string, Buffer>) {
       return { bytes, bytesRead: bytes.length }
     }
   )
+  const stat = vi.fn(async (filePath: string): Promise<FileStat> => {
+    const bytes = files.get(filePath)
+    if (!bytes) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, stat '${filePath}'`), {
+        code: 'ENOENT'
+      })
+    }
+    return { size: bytes.length, type: 'file', mtime: 1, mtimeMs: 1, dev: 7, ino: 11 }
+  })
   const provider = {
-    async stat(filePath: string): Promise<FileStat> {
-      const bytes = files.get(filePath)
-      if (!bytes) {
-        throw Object.assign(new Error(`ENOENT: no such file or directory, stat '${filePath}'`), {
-          code: 'ENOENT'
-        })
-      }
-      return { size: bytes.length, type: 'file', mtime: 1, mtimeMs: 1, dev: 7, ino: 11 }
-    },
+    stat,
     readFile,
     readFileRange,
     async supportsFileRangeRead() {
       return true
     }
   } as unknown as IFilesystemProvider
-  return { provider, readFile, readFileRange }
+  return { provider, readFile, readFileRange, stat }
 }
 
 function routedArgs(transcriptPath: string): {
@@ -128,19 +129,24 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     const transcriptPath = join(root, 'session.jsonl')
     await writeFile(transcriptPath, claudeLine('desktop-poison', 'wrong host'))
     const files = new Map([[transcriptPath, Buffer.from(claudeLine('remote-real', 'right host'))]])
-    const { provider, readFile, readFileRange } = memoryProvider(files)
+    const { provider, readFile, readFileRange, stat } = memoryProvider(files)
     mocks.getProvider.mockReturnValue(provider)
+    const controller = new AbortController()
 
-    const result = await readNativeChatTranscriptTail({
-      ...routedArgs(transcriptPath),
-      limit: 40
-    } as Parameters<typeof readNativeChatTranscriptTail>[0])
+    const result = await readNativeChatTranscriptTail(
+      {
+        ...routedArgs(transcriptPath),
+        limit: 40
+      } as Parameters<typeof readNativeChatTranscriptTail>[0],
+      controller.signal
+    )
 
     expect(result).toMatchObject({ messages: [{ id: 'remote-real' }], hasMore: false })
     expect(result).not.toMatchObject({ messages: [{ id: 'desktop-poison' }] })
     expect(mocks.getProvider).toHaveBeenCalledWith('ssh-owner')
     expect(readFile).not.toHaveBeenCalled()
     expect(readFileRange).toHaveBeenCalled()
+    expect(stat).toHaveBeenCalledWith(transcriptPath, { signal: controller.signal })
   })
 
   it('retries consecutive ranged snapshots when the remote file is replaced mid-read', async () => {
@@ -509,6 +515,19 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       expect(getActiveNativeChatWatcherCount()).toBe(before + 1)
       expect(snapshots.some((snapshot) => snapshot.ids.includes('before-loss'))).toBe(true)
       expect(snapshots.at(-1)?.ids).toEqual(['after-restore'])
+
+      const firstOutageFrames = snapshots.filter(
+        (snapshot) => snapshot.error === 'Transcript unverifiable on the remote host'
+      ).length
+      changeProvider(undefined)
+      await vi.waitFor(() =>
+        expect(
+          snapshots.filter(
+            (snapshot) => snapshot.error === 'Transcript unverifiable on the remote host'
+          )
+        ).toHaveLength(firstOutageFrames + 1)
+      )
+      expect(getActiveNativeChatWatcherCount()).toBe(before)
     } finally {
       subscription.unsubscribe()
     }
@@ -544,10 +563,31 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     }
   })
 
-  it('emits one unresolved advisory while an exact remote path is still missing', async () => {
+  it('emits one advisory while a registered provider remains unreachable', async () => {
+    const transcriptPath = '/tmp/unreachable-provider-session.jsonl'
+    const { provider, stat } = memoryProvider(new Map())
+    stat.mockRejectedValue(Object.assign(new Error('connection lost'), { code: 'CONNECTION_LOST' }))
+    mocks.getProvider.mockReturnValue(provider)
+    const errors: (string | undefined)[] = []
+    const subscription = await subscribeNativeChatTranscript({
+      ...routedArgs(transcriptPath),
+      onInitialSnapshot: (_messages, _hasMore, _beforeOffset, error) => errors.push(error),
+      onAppend: () => {},
+      resolvePollIntervalMs: 5
+    })
+
+    try {
+      await vi.waitFor(() => expect(stat.mock.calls.length).toBeGreaterThanOrEqual(3))
+      expect(errors).toEqual(['Transcript unverifiable on the remote host'])
+    } finally {
+      subscription.unsubscribe()
+    }
+  })
+
+  it('replaces an unverifiable advisory after the remote host becomes reachable', async () => {
     const transcriptPath = '/tmp/not-yet-written.jsonl'
     const { provider } = memoryProvider(new Map())
-    mocks.getProvider.mockReturnValue(provider)
+    mocks.getProvider.mockReturnValue(undefined)
     const errors: (string | undefined)[] = []
     const subscription = await subscribeNativeChatTranscript({
       ...routedArgs(transcriptPath),
@@ -558,9 +598,12 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     })
 
     try {
+      await vi.waitFor(() => expect(errors).toEqual(['Transcript unverifiable on the remote host']))
+      changeProvider(provider)
       await vi.waitFor(() =>
         expect(errors).toEqual([
-          'No transcript found for this session on this machine. If the agent runs on a remote host its transcript lives there; otherwise it may not have been written yet.'
+          'Transcript unverifiable on the remote host',
+          'No transcript found for this session on its remote host. It may not have been written yet.'
         ])
       )
     } finally {
