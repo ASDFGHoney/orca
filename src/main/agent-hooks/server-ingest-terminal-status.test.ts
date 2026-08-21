@@ -27,6 +27,27 @@ afterEach(() => {
 })
 
 describe('AgentHookServer ingestTerminalStatus', () => {
+  it('overwrites remote provider-session ownership with the authenticated connection', () => {
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        providerSession: {
+          key: 'session_id',
+          id: 'session-1',
+          executionHostId: 'ssh:spoofed'
+        },
+        payload: { state: 'working', prompt: 'route transcript', agentType: 'claude' }
+      },
+      'real-owner'
+    )
+
+    expect(server.getStatusSnapshot()[0]?.providerSession).toEqual({
+      key: 'session_id',
+      id: 'session-1',
+      executionHostId: 'ssh:real-owner'
+    })
+  })
   it('preserves a hook turn stamp when an OSC repaint omits hook-only completion text', () => {
     const server = new AgentHookServer()
     const listener = vi.fn()

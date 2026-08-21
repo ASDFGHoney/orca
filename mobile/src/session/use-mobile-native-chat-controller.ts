@@ -85,7 +85,8 @@ export function useMobileNativeChatController(args: {
     sourceIdentity: encodeNativeChatTranscriptIdentity([hostId, worktreeId]),
     agent: activeChatResolution?.agent ?? null,
     sessionId: activeChatSessionId,
-    transcriptPath: activeChatResolution?.transcriptPath ?? null
+    transcriptPath: activeChatResolution?.transcriptPath ?? null,
+    providerSession: activeChatResolution?.providerSession ?? null
   })
   const {
     composerText: chatComposerText,

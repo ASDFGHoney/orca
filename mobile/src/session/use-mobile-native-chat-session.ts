@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createNativeChatTranscriptRetention,
   encodeNativeChatTranscriptIdentity
 } from '../../../src/shared/native-chat-transcript-retention'
 import { createNativeChatMerger, replaceList } from '../../../src/shared/native-chat-merge'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import type { AgentProviderSessionMetadata } from '../../../src/shared/agent-session-resume'
 import { buildNativeChatSubscriptionId } from '../../../src/shared/native-chat-stream-unsubscribe'
 import type { RpcClient } from '../transport/rpc-client'
 import {
@@ -51,14 +52,32 @@ export function useMobileNativeChatSession(args: {
   agent: string | null
   sessionId: string | null
   transcriptPath: string | null
+  providerSession?: AgentProviderSessionMetadata | null
 }): MobileNativeChatSession {
-  const { client, sourceIdentity, agent, sessionId, transcriptPath } = args
+  const { client, sourceIdentity, agent, sessionId, transcriptPath, providerSession } = args
   const [messages, setMessages] = useState<NativeChatMessage[]>([])
+  const providerSessionKey = providerSession?.key
+  const providerSessionId = providerSession?.id
+  const providerTranscriptPath = providerSession?.transcriptPath
+  const providerExecutionHostId = providerSession?.executionHostId
+  const providerSessionLocator = useMemo(
+    () =>
+      providerSessionKey && providerSessionId
+        ? {
+            key: providerSessionKey,
+            id: providerSessionId,
+            ...(providerTranscriptPath ? { transcriptPath: providerTranscriptPath } : {}),
+            ...(providerExecutionHostId ? { executionHostId: providerExecutionHostId } : {})
+          }
+        : null,
+    [providerExecutionHostId, providerSessionId, providerSessionKey, providerTranscriptPath]
+  )
   const identity = encodeNativeChatTranscriptIdentity([
     sourceIdentity,
     agent,
     sessionId,
-    transcriptPath
+    transcriptPath,
+    providerSessionLocator?.executionHostId ?? null
   ])
   // Pre-read status is a pure function of the props, so derive it rather than
   // letting the effect write it a commit later.
@@ -145,7 +164,8 @@ export function useMobileNativeChatSession(args: {
         sessionId,
         limit: limitRef.current,
         subscriptionId: buildNativeChatSubscriptionId(agent, sessionId),
-        ...(transcriptPath ? { transcriptPath } : {})
+        ...(transcriptPath ? { transcriptPath } : {}),
+        ...(providerSessionLocator ? { providerSession: providerSessionLocator } : {})
       },
       (raw) => {
         if (cancelled) {
@@ -206,7 +226,7 @@ export function useMobileNativeChatSession(args: {
       cancelled = true
       unsubscribe()
     }
-  }, [client, agent, sessionId, transcriptPath, identity, setList])
+  }, [client, agent, sessionId, transcriptPath, providerSessionLocator, identity, setList])
 
   const loadEarlier = useCallback(() => {
     if (!client || !agent || !sessionId || loadingEarlierRef.current || !hasMore) {
@@ -232,7 +252,8 @@ export function useMobileNativeChatSession(args: {
           sessionId,
           limit: beforeOffset === null ? nextLimit : pageLimit,
           ...(beforeOffset === null ? {} : { beforeOffset }),
-          ...(transcriptPath ? { transcriptPath } : {})
+          ...(transcriptPath ? { transcriptPath } : {}),
+          ...(providerSessionLocator ? { providerSession: providerSessionLocator } : {})
         })
         if (!response.ok) {
           return
@@ -271,7 +292,7 @@ export function useMobileNativeChatSession(args: {
         }
       }
     })()
-  }, [client, agent, sessionId, transcriptPath, hasMore, setList])
+  }, [client, agent, sessionId, transcriptPath, providerSessionLocator, hasMore, setList])
 
   // Held for any unsettled read, not just an in-flight one: a stream error or a
   // dropped client would otherwise trade the conversation for an error card.

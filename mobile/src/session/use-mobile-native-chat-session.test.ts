@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import type { AgentProviderSessionMetadata } from '../../../src/shared/agent-session-resume'
 import type { RpcClient } from '../transport/rpc-client'
 import {
   useMobileNativeChatSession,
@@ -32,22 +33,50 @@ describe('useMobileNativeChatSession', () => {
     renderer = null
   })
 
-  function Harness({ client }: { client: RpcClient | null }): null {
+  function Harness({
+    client,
+    providerSession
+  }: {
+    client: RpcClient | null
+    providerSession?: AgentProviderSessionMetadata
+  }): null {
     state = useMobileNativeChatSession({
       client,
       sourceIdentity: 'host-a\0workspace-a',
       agent: 'claude',
       sessionId: 'session',
-      transcriptPath: null
+      transcriptPath: null,
+      providerSession
     })
     return null
   }
 
-  async function mount(client: RpcClient): Promise<void> {
+  async function mount(
+    client: RpcClient,
+    providerSession?: AgentProviderSessionMetadata
+  ): Promise<void> {
     await act(async () => {
-      renderer = create(createElement(Harness, { client }))
+      renderer = create(createElement(Harness, { client, providerSession }))
     })
   }
+
+  it('forwards SSH ownership through the mobile subscribe request', async () => {
+    const providerSession = {
+      key: 'session_id' as const,
+      id: 'session',
+      transcriptPath: '/tmp/session.jsonl',
+      executionHostId: 'ssh:builder' as const
+    }
+    const subscribe = vi.fn(() => () => {})
+
+    await mount({ subscribe } as unknown as RpcClient, providerSession)
+
+    expect(subscribe).toHaveBeenCalledWith(
+      'nativeChat.subscribe',
+      expect.objectContaining({ providerSession }),
+      expect.any(Function)
+    )
+  })
 
   it('drops an older-page response captured before transcript replacement', async () => {
     let resolveEarlier: (response: unknown) => void = () => {}

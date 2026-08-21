@@ -15,9 +15,10 @@ import type {
 } from '../../../shared/runtime-types'
 import type { TerminalPaneSplitSource } from '../../../shared/feature-education-telemetry'
 import type { StartupCommandDelivery } from '../../../shared/codex-startup-delivery'
-import type {
-  SleepingAgentLaunchConfig,
-  AgentProviderSessionMetadata
+import {
+  agentProviderSessionForResume,
+  type AgentProviderSessionMetadata,
+  type SleepingAgentLaunchConfig
 } from '../../../shared/agent-session-resume'
 import { BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import { agentResumeHostAuthorityCapability } from './agent-resume-host-authority-capability'
@@ -294,7 +295,7 @@ async function createWebRuntimeSessionTerminalResult(
                       kind: 'explicit',
                       worktree: toRuntimeWorktreeSelector(args.worktreeId),
                       agent,
-                      providerSession: args.providerSession!,
+                      providerSession: agentProviderSessionForResume(args.providerSession!),
                       ...(args.launchConfig?.ompResumeFilePath
                         ? { ompResumeFilePath: args.launchConfig.ompResumeFilePath }
                         : {}),

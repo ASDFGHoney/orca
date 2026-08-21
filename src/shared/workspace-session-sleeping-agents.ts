@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { normalizeExecutionHostId, type ExecutionHostId } from './execution-host'
 import {
   getAgentResumeArgv,
   normalizeAgentProviderSession,
@@ -19,7 +20,12 @@ const agentProviderSessionSchema = z.preprocess(
     id: z.string().min(1).max(512),
     // Why: Pi resumes by its authoritative session file, so dropping this
     // field during hydration makes an otherwise valid record unusable.
-    transcriptPath: z.string().min(1).optional()
+    transcriptPath: z.string().min(1).optional(),
+    executionHostId: z
+      .custom<ExecutionHostId>(
+        (value) => typeof value === 'string' && normalizeExecutionHostId(value) === value
+      )
+      .optional()
   })
 )
 

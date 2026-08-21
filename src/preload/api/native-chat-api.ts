@@ -3,6 +3,7 @@ import type {
   NativeChatMessage,
   NativeChatTurnLifecycle
 } from '../../shared/native-chat-types'
+import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 
 // notFound marks a not-yet-on-disk miss (retry-worthy) vs a real read/parse error (#8401).
 export type NativeChatReadSessionResult =
@@ -10,7 +11,7 @@ export type NativeChatReadSessionResult =
       messages: NativeChatMessage[]
       lifecycle?: NativeChatTurnLifecycle
     }
-  | { error: string; notFound?: true }
+  | { error: string; notFound?: true; unverifiable?: true }
 
 /** Messages appended to a live-tailed transcript since the previous emit. */
 export type NativeChatAppendedMessages = NativeChatMessage[]
@@ -49,6 +50,7 @@ export type NativeChatSubscribeArgs = {
   sessionId: string
   /** Authoritative transcript path from the agent hook (providerSession). */
   transcriptPath?: string
+  providerSession?: AgentProviderSessionMetadata
   /** First snapshot size; later readSession calls grow this for pagination. */
   limit?: number
 }
@@ -60,7 +62,8 @@ export type NativeChatApi = {
     agent: AgentType,
     sessionId: string,
     limit?: number,
-    transcriptPath?: string
+    transcriptPath?: string,
+    providerSession?: AgentProviderSessionMetadata
   ) => Promise<NativeChatReadSessionResult>
   /** Live-tail a transcript. The first frame is a bounded race-safe snapshot;
    *  later frames contain only newly appended messages. */

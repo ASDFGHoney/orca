@@ -82,6 +82,32 @@ describe('getNativeChatSessionTransport — selection', () => {
     expect(nativeChatReadSession).not.toHaveBeenCalled()
   })
 
+  it('forwards the whole provider-session locator through desktop IPC', async () => {
+    nativeChatReadSession.mockResolvedValue({ messages: [] })
+    const providerSession = {
+      key: 'session_id' as const,
+      id: 'sess-1',
+      transcriptPath: '/t/path',
+      executionHostId: 'ssh:builder' as const
+    }
+
+    await getNativeChatSessionTransport(null).readSession(
+      'claude',
+      'sess-1',
+      40,
+      '/t/path',
+      providerSession
+    )
+
+    expect(nativeChatReadSession).toHaveBeenCalledWith(
+      'claude',
+      'sess-1',
+      40,
+      '/t/path',
+      providerSession
+    )
+  })
+
   it('validates lifecycle metadata on runtime read responses', async () => {
     markRuntimeEnvironmentCompatible(ENV)
     const lifecycle = { state: 'completed', turnId: 'turn-1', timestamp: 42 } as const
@@ -204,6 +230,37 @@ describe('runtime subscribe', () => {
       messages: [message('m-replacement')],
       hasMore: true
     })
+  })
+
+  it('forwards the whole provider-session locator through runtime subscriptions', async () => {
+    markRuntimeEnvironmentCompatible(ENV)
+    stubSubscribe()
+    const providerSession = {
+      key: 'session_id' as const,
+      id: 'sess-1',
+      transcriptPath: '/t/path',
+      executionHostId: 'ssh:builder' as const
+    }
+
+    getNativeChatSessionTransport(ENV).subscribe(
+      {
+        subscriptionId: 's-1',
+        agent: 'claude',
+        sessionId: 'sess-1',
+        transcriptPath: '/t/path',
+        providerSession
+      },
+      vi.fn()
+    )
+    await Promise.resolve()
+
+    expect(runtimeEnvironmentsSubscribe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'nativeChat.subscribe',
+        params: expect.objectContaining({ providerSession })
+      }),
+      expect.any(Object)
+    )
   })
 
   it('validates lifecycle metadata on runtime stream frames', async () => {
