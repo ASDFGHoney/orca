@@ -150,10 +150,7 @@ function parseCronField(args: {
       end = parseCronNumber(endPart, args.names ?? null, args.field)
     } else {
       start = parseCronNumber(rangePart, args.names ?? null, args.field)
-      // Why: `5/15` is the shorthand for `5-<max>/15` that Quartz and every cron
-      // editor read as "from 5, every 15". Ending at `start` kept the value and
-      // dropped the step, which no cron dialect does — the automation then ran
-      // once per field cycle instead of on the interval the user wrote.
+      // Why: `5/15` is the `5-<max>/15` shorthand; ending at `start` dropped the step.
       end = stepPart === undefined ? start : args.max
     }
 

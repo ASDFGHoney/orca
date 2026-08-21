@@ -201,9 +201,7 @@ describe('automation schedules', () => {
   })
 
   it('runs a bare start value with a step through the end of its field', () => {
-    // Why: `5/15` is the shorthand every cron editor and Quartz read as
-    // "from 5, every 15" — 5,20,35,50. Dropping the step silently turned it
-    // into a single value, so the automation ran hourly instead.
+    // Why: `5/15` means 5,20,35,50; dropping the step made the automation hourly.
     const anchor = new Date('2026-05-01T00:00:00').getTime()
     const runs: number[] = []
     let cursor = anchor
