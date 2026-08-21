@@ -6,6 +6,10 @@ import type { AgentJournalMessageItem } from '../../shared/agent-session-journal
 import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import type { ClaudeSession } from './claude-structured-session-state'
 
+// vi.waitFor's first successful poll lands ~50ms after the waiter is armed, so a
+// 100ms ack budget leaves almost none for the frame under parallel load.
+const ACK_BUDGET_MS = 5_000
+
 function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession {
   return {
     connection: { send } as unknown as ClaudeSession['connection'],
@@ -43,7 +47,7 @@ describe('Claude structured dispatch image limits', () => {
     const dispatched = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: '/permissions' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -69,7 +73,7 @@ describe('Claude structured dispatch image limits', () => {
     const dispatched = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -96,7 +100,7 @@ describe('Claude structured dispatch image limits', () => {
     const dispatched = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -136,7 +140,7 @@ describe('Claude structured dispatch image limits', () => {
     const dispatched = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -165,7 +169,7 @@ describe('Claude structured dispatch image limits', () => {
     const first = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
     resolveClaudeReplayWaiter(session, userReplayFrame('replay-one', 'one'))
@@ -174,7 +178,7 @@ describe('Claude structured dispatch image limits', () => {
     const second = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -202,7 +206,7 @@ describe('Claude structured dispatch image limits', () => {
     const dispatched = dispatchClaudeTurn(
       session,
       { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-      100
+      ACK_BUDGET_MS
     )
     await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -230,12 +234,10 @@ describe('Claude structured dispatch image limits', () => {
       const path = join(directory, 'shot.png')
       await writeFile(path, Buffer.alloc(64))
       const session = sessionFor()
-      // Real file I/O runs before the ack timer starts, so give this one room:
-      // a 100ms budget can expire under parallel load before the frame arrives.
       const dispatched = dispatchClaudeTurn(
         session,
         { clientMessageId: 'client-1', body: userMessage([{ type: 'image-ref', path }]) },
-        5_000
+        ACK_BUDGET_MS
       )
       await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
@@ -261,6 +263,36 @@ describe('Claude structured dispatch image limits', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  // The waiter queue is positional, so shifting the head on a send failure
+  // resolves whichever dispatch happens to be first - reporting a delivered
+  // message as unconfirmed while the send that actually failed keeps waiting.
+  it('retires its own waiter when the send fails, not the one at the head', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    const firstWaiter = session.dispatchWaiters[0]
+
+    session.connection.send = vi.fn().mockRejectedValue(new Error('broken pipe'))
+    await expect(
+      dispatchClaudeTurn(
+        session,
+        { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
+        ACK_BUDGET_MS
+      )
+    ).resolves.toEqual({ state: 'unknown', reason: 'broken pipe' })
+
+    expect(session.dispatchWaiters).toEqual([firstWaiter])
+    resolveClaudeReplayWaiter(session, userReplayFrame('replay-one', 'one'))
+    await expect(first).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'replay-one' }
+    })
   })
 
   it('rejects more than twenty URL images before sending', async () => {

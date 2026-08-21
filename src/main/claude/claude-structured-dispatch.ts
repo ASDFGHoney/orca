@@ -3,7 +3,7 @@ import { open } from 'node:fs/promises'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
-import type { ClaudeSession } from './claude-structured-session-state'
+import type { ClaudeDispatchWaiter, ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
 import { isKnownHarnessInjectedUserTurnText } from '../../shared/harness-injected-user-turns'
 import { claudeRecord } from './claude-structured-item-translation'
@@ -189,26 +189,35 @@ async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]>
   return content
 }
 
+function dropWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void {
+  const index = session.dispatchWaiters.indexOf(waiter)
+  if (index !== -1) {
+    session.dispatchWaiters.splice(index, 1)
+  }
+}
+
+/** Arms a waiter and hands it back, so a failure can retire ITS OWN waiter — the
+ *  queue is positional, and shifting the head resolves whichever send happens to
+ *  be first instead. */
 function waitForReplay(
   session: ClaudeSession,
   timeoutMs: number,
   acceptsResult: boolean
-): Promise<string | null> {
-  return new Promise((resolve) => {
-    const waiter = {
+): { waiter: ClaudeDispatchWaiter; replayed: Promise<string | null> } {
+  let waiter!: ClaudeDispatchWaiter
+  const replayed = new Promise<string | null>((resolve) => {
+    waiter = {
       acceptsResult,
       resolve,
       timer: setTimeout(() => {
-        const index = session.dispatchWaiters.indexOf(waiter)
-        if (index !== -1) {
-          session.dispatchWaiters.splice(index, 1)
-        }
+        dropWaiter(session, waiter)
         resolve(null)
       }, timeoutMs)
     }
     waiter.timer.unref?.()
     session.dispatchWaiters.push(waiter)
   })
+  return { waiter, replayed }
 }
 
 export async function dispatchClaudeTurn(
@@ -225,7 +234,7 @@ export async function dispatchClaudeTurn(
   const acceptsResult = input.body.blocks.some(
     (block) => block.type === 'text' && block.text.trimStart().startsWith('/')
   )
-  const replayed = waitForReplay(session, timeoutMs, acceptsResult)
+  const { waiter, replayed } = waitForReplay(session, timeoutMs, acceptsResult)
   try {
     await session.connection.send({
       type: 'user',
@@ -234,11 +243,9 @@ export async function dispatchClaudeTurn(
       session_id: session.providerSessionId
     })
   } catch (error) {
-    const waiter = session.dispatchWaiters.shift()
-    if (waiter) {
-      clearTimeout(waiter.timer)
-      waiter.resolve(null)
-    }
+    dropWaiter(session, waiter)
+    clearTimeout(waiter.timer)
+    waiter.resolve(null)
     return { state: 'unknown', reason: (error as Error).message }
   }
   const uuid = await replayed
