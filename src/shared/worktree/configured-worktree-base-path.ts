@@ -5,6 +5,7 @@ import {
   resolveRuntimePath
 } from '../cross-platform-path'
 import type { Repo } from '../repo-types'
+import { resolveWslRepoWorktreeBasePath } from '../wsl-paths'
 
 export function isRuntimePathAbsoluteForRepo(repoPath: string, layoutPath: string): boolean {
   const pathFlavor =
@@ -29,5 +30,9 @@ export function resolveConfiguredWorktreeBasePaths(
   repo: Pick<Repo, 'path' | 'worktreeBasePath'> | undefined
 ): string[] {
   const configured = repo?.worktreeBasePath?.trim()
-  return repo && configured ? [resolveWorkspaceLayoutPath(repo.path, configured)] : []
+  if (!repo || !configured) {
+    return []
+  }
+  const runtimeBase = resolveWslRepoWorktreeBasePath(repo.path, configured)
+  return [resolveWorkspaceLayoutPath(repo.path, runtimeBase)]
 }

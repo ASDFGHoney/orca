@@ -166,6 +166,17 @@ describe('a configured worktree base that collides with a built-in visibility so
       visible: true
     })
   })
+
+  it('keeps the configured base external when workspace nesting is flat', () => {
+    const repo = makeRepo({ worktreeBasePath: '.claude/worktrees' })
+
+    expect(
+      detect(repo, configuredBaseWorktree, makeSettings({ nestWorkspaces: false }))
+    ).toMatchObject({
+      ownership: 'external',
+      visible: true
+    })
+  })
 })
 
 describe('agent scratch stays hidden for repos that did not configure that base (#9388)', () => {

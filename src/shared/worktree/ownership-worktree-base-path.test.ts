@@ -154,6 +154,25 @@ describe('repo-specific worktree ownership layouts', () => {
     ).toBe('external')
   })
 
+  it('preserves mixed-case WSL paths while resolving the configured base', () => {
+    const repo = makeRepo({
+      path: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\Dev\\Repo',
+      worktreeBasePath: '/home/Dev/Repo/.claude/worktrees'
+    })
+    const settings = makeSettings({ workspaceDir: 'C:\\global' })
+
+    expect(
+      classifyWorktreeOwnership({
+        repo,
+        settings,
+        worktree: makeWorktree(
+          '\\\\wsl.localhost\\Ubuntu-24.04\\home\\Dev\\Repo\\.claude\\worktrees\\feature'
+        ),
+        knownOrcaLayouts: buildKnownOrcaWorkspaceLayouts(settings, repo)
+      })
+    ).toBe('external')
+  })
+
   it('includes relative global layouts for SSH repos without applying absolute desktop paths', () => {
     const repo = makeRepo({ path: '/remote/repo', connectionId: 'ssh-1' })
     const relativeSettings = makeSettings({ workspaceDir: '../worktrees' })

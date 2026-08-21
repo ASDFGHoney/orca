@@ -136,6 +136,15 @@ export function classifyWorktreeOwnership(args: {
     return 'agent-scratch'
   }
 
+  if (
+    resolveConfiguredWorktreeBasePaths(args.repo).some(
+      (basePath) => relativePathInsideRoot(basePath, args.worktree.path) !== null
+    )
+  ) {
+    // Why: an explicit project base is trusted even when global workspace nesting is flat.
+    return 'external'
+  }
+
   if (isUnderFlatOrUntrustedOrcaRoot(args.worktree.path, args.knownOrcaLayouts)) {
     return 'unknown-legacy'
   }
