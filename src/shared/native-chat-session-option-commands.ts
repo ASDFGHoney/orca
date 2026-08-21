@@ -121,6 +121,12 @@ function recordCommandApply(args: {
   }
   const previousModelId = effectiveModelId
   if (optionId === 'model') {
+    // Why: SessionOptionValue widened to string | boolean for fast mode, but a
+    // model id is always a string - a boolean here is a malformed command, not a
+    // model, and must not index valuesByModel or reach the persist callback.
+    if (typeof value !== 'string') {
+      return false
+    }
     if (previousModelId !== value) {
       // Why: a model command can reset model-scoped state, so an older value
       // from a prior visit is no longer evidence about this live session.
