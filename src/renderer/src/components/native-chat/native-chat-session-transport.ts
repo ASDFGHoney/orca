@@ -43,8 +43,10 @@ export function toRuntimeNativeChatErrorMessage(err: unknown): string {
  *  using this adapter (R3). Preserves whatever `subscribe` returns (sync fn on
  *  desktop, promise on the web bridge) — the hook's teardown handles both (R6). */
 const localNativeChatTransport: NativeChatSessionTransport = {
-  readSession: (agent, sessionId, limit, transcriptPath) =>
-    window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath),
+  readSession: (agent, sessionId, limit, transcriptPath, providerSession) =>
+    providerSession
+      ? window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath, providerSession)
+      : window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath),
   subscribe: (args, onFrame) => window.api.nativeChat.subscribe(args, onFrame)
 }
 
@@ -52,12 +54,18 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
   const target: RuntimeClientTarget = { kind: 'environment', environmentId }
 
   return {
-    readSession: async (agent, sessionId, limit, transcriptPath) => {
+    readSession: async (agent, sessionId, limit, transcriptPath, providerSession) => {
       try {
         const result = await callRuntimeRpc<unknown>(
           target,
           'nativeChat.readSession',
-          { agent, sessionId, limit, transcriptPath },
+          {
+            agent,
+            sessionId,
+            limit,
+            transcriptPath,
+            ...(providerSession ? { providerSession } : {})
+          },
           { timeoutMs: 15_000 }
         )
         return parseRuntimeNativeChatReadSessionResult(result)
@@ -66,7 +74,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
       }
     },
     subscribe: (args, onFrame) => {
-      const { subscriptionId, agent, sessionId, transcriptPath, limit } = args
+      const { subscriptionId, agent, sessionId, transcriptPath, providerSession, limit } = args
       let cancelled = false
       let receivedInitial = false
       let handleUnsubscribe: (() => void) | null = null
@@ -105,7 +113,14 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
             {
               selector: environmentId,
               method: 'nativeChat.subscribe',
-              params: { subscriptionId, agent, sessionId, transcriptPath, limit },
+              params: {
+                subscriptionId,
+                agent,
+                sessionId,
+                transcriptPath,
+                providerSession,
+                limit
+              },
               timeoutMs: 15_000
             },
             {

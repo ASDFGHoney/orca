@@ -12,6 +12,13 @@ import type {
 } from './transcript-watch-contract'
 import { nativeChatLineDecoderForAgent } from './transcript-tail-reader'
 import { WslTranscriptFsError, wslTranscriptFsRefusal } from './wsl-transcript-fs-gate'
+import { resolveNativeChatTranscriptOwner } from './native-chat-transcript-owner'
+import { subscribeSshNativeChatTranscript } from './ssh-transcript-subscription'
+import {
+  DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS,
+  TRANSCRIPT_UNVERIFIABLE_MESSAGE,
+  UNRESOLVED_TRANSCRIPT_MESSAGE
+} from './transcript-host-verdict'
 
 export { readNativeChatTranscriptTail } from './transcript-tail-reader'
 export { getActiveNativeChatWatcherCount } from './transcript-watch-engine'
@@ -54,11 +61,6 @@ const FALLBACK_RESOLVE_POLL_MS = 5_000
 // poll forever. Past this deadline say so instead of spinning silently. A slow
 // first flush can legitimately exceed it (#8401), so this is advisory only: the
 // poll keeps running and the real transcript replaces the notice.
-const UNRESOLVED_NOTICE_MS = 60_000
-// Claims only what the deadline establishes — nothing resolved here — because a
-// remote host, a cold WSL distro and a slow first flush all land on it.
-const UNRESOLVED_TRANSCRIPT_MESSAGE =
-  'No transcript found for this session on this machine. If the agent runs on a remote host its transcript lives there; otherwise it may not have been written yet.'
 
 function exactTranscriptPath(args: SubscribeNativeChatTranscriptArgs): string | null {
   const path = args.transcriptPath?.trim()
@@ -72,7 +74,7 @@ function exactTranscriptPath(args: SubscribeNativeChatTranscriptArgs): string | 
  * unsubscribe() cancels it. Reports watching:true — the engine's first drain
  * delivers the initial snapshot once the file appears, so subscribers must not
  * settle a merely not-yet-flushed transcript into a permanent error (#8401).
- * Past UNRESOLVED_NOTICE_MS it emits one advisory error snapshot (#13663) and
+ * Past the unresolved deadline it emits one advisory error snapshot (#13663) and
  * keeps polling, so a late transcript still replaces it.
  */
 function subscribeViaResolvePoll(
@@ -97,7 +99,7 @@ function subscribeViaResolvePoll(
   let gateErrorEmitted = false
   let unresolvedNoticeEmitted = false
   const startedAt = Date.now()
-  const unresolvedNoticeMs = args.unresolvedNoticeMs ?? UNRESOLVED_NOTICE_MS
+  const unresolvedNoticeMs = args.unresolvedNoticeMs ?? DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS
   const resolveController = new AbortController()
 
   /** Both advisories run under `void runAttempt()`, so a subscriber that throws
@@ -261,6 +263,24 @@ export async function subscribeNativeChatTranscript(
   // instead of resolve-polling an unresolvable target forever.
   if (!args.filePath && !args.sessionId.trim()) {
     return { unsubscribe: () => {}, watching: false }
+  }
+
+  if (!args.filePath) {
+    const owner = resolveNativeChatTranscriptOwner(args)
+    if (owner.kind === 'unknown') {
+      try {
+        args.onInitialSnapshot?.([], false, 0, TRANSCRIPT_UNVERIFIABLE_MESSAGE)
+      } catch {
+        // The caller owns teardown; unknown ownership must still avoid local IO.
+      }
+      return { unsubscribe: () => {}, watching: true }
+    }
+    if (owner.kind === 'ssh') {
+      return subscribeSshNativeChatTranscript(owner, args, setupSignal)
+    }
+    if (owner.kind === 'local') {
+      args = { ...args, transcriptPath: owner.providerSession.transcriptPath }
+    }
   }
 
   let installed: NativeChatTranscriptSubscription | null

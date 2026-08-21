@@ -4641,6 +4641,149 @@
       "demotionRule": "Demote if discovery and launch can resolve different authorities, a scoped Floating probe overwrites the active-project inventory, or local context selection adds recurring scans or retained in-flight entries."
     },
     {
+      "id": "native-chat.transcript-host-ownership",
+      "title": "Native chat reads and tails transcripts only on their owning execution host",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "native-chat",
+      "layer": "cross-boundary",
+      "surfaces": [
+        "provider-session identity",
+        "agent hook ingress",
+        "transcript snapshot",
+        "transcript live tail",
+        "Electron IPC",
+        "paired runtime RPC",
+        "mobile native chat"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos", "linux"],
+      "coveredProviders": ["local", "ssh", "wsl", "remote-runtime"],
+      "coverageNotes": "A deterministic host-routing oracle covers local, exact SSH, unknown ownership, reconnect, provider replacement, bounded range reads, and WSL exact-path contracts. A Docker Linux SSH/relay target plus headed macOS Electron/CDP proves remote snapshot and tail rendering for SSH git and folder workspaces. A compiled windowless serve journey covers the shared runtime boundary.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/13663",
+        "https://github.com/stablyai/orca/pull/15515",
+        "https://github.com/stablyai/orca/pull/15517"
+      ],
+      "invariant": "A located provider session resolves and reads transcript bytes only through its stamped execution owner. Unknown or unavailable ownership is unverifiable and never falls back to the desktop filesystem. SSH snapshots and tails use bounded positional reads and reject stale provider generations; locator-free legacy requests retain host-local behavior.",
+      "oracle": "The focused oracle gives the desktop and SSH providers identical session ids and transcript paths but different bytes, then requires the exact SSH owner for snapshot and live append. It also proves unknown ownership cannot install a local watcher, provider loss and replacement rearm once, throwing advisory callbacks cannot kill retry, and large appends never call whole-file read or reread the prefix. The identical baseline/candidate/disabled/revert comparison and a real Docker SSH plus Electron/CDP journey supply independent red/green and rendered evidence.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/ssh-transcript-host-routing.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/server-hook-http-ingest.test.ts src/main/agent-hooks/server-ingest-terminal-status.test.ts src/main/agent-hooks/server-last-status-hydrate-validation.test.ts src/main/ipc/native-chat.test.ts src/main/providers/ssh-filesystem-dispatch.test.ts src/main/runtime/rpc/methods/native-chat.test.ts src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts src/renderer/src/components/native-chat/native-chat-session-transport.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts src/shared/agent-session-resume.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/transcript-watch-wsl-exact-path.test.ts --reporter=dot",
+        "pnpm --dir mobile exec vitest run --root .. mobile/src/session/mobile-native-chat-eligibility.test.ts mobile/src/session/use-mobile-native-chat-session.test.ts --reporter=dot",
+        "pnpm exec electron-vite build --mode e2e && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-native-chat-runtime-routing.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+        "Isolated headed Orca Electron/CDP against a throwaway Docker Linux SSH/relay target, with same-path desktop poison and remote-only live append"
+      ],
+      "testFiles": [
+        "src/main/native-chat/ssh-transcript-host-routing.test.ts",
+        "src/main/native-chat/transcript-watch-wsl-exact-path.test.ts",
+        "src/main/agent-hooks/server-hook-http-ingest.test.ts",
+        "src/main/agent-hooks/server-ingest-terminal-status.test.ts",
+        "src/main/agent-hooks/server-last-status-hydrate-validation.test.ts",
+        "src/main/ipc/native-chat.test.ts",
+        "src/main/providers/ssh-filesystem-dispatch.test.ts",
+        "src/main/runtime/rpc/methods/native-chat.test.ts",
+        "src/renderer/src/components/native-chat/native-chat-pane-resolution.test.ts",
+        "src/renderer/src/components/native-chat/native-chat-session-transport.test.ts",
+        "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-host-session-launch.test.ts",
+        "src/renderer/src/runtime/web-runtime-session-terminal-host-authority.test.ts",
+        "src/shared/agent-session-resume.test.ts",
+        "mobile/src/session/mobile-native-chat-eligibility.test.ts",
+        "mobile/src/session/use-mobile-native-chat-session.test.ts",
+        "tests/e2e/headless-native-chat-runtime-routing.spec.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/native-chat/ssh-transcript-host-routing.test.ts",
+          "assertions": [
+            "the exact SSH owner wins over desktop and other-SSH same-id/path lookalikes",
+            "unknown ownership never reads or watches locally",
+            "remote snapshot and append survive provider loss, replacement, and advisory callback failure",
+            "every remote request is at most 256 KiB and a large append does not reread the prefix or call readFile"
+          ]
+        },
+        {
+          "file": "src/main/agent-hooks/server-hook-http-ingest.test.ts",
+          "assertions": [
+            "local hook ingress stamps local ownership",
+            "authenticated remote hook ingress overwrites a spoofed owner with the connection's SSH owner"
+          ]
+        },
+        {
+          "file": "src/main/runtime/rpc/methods/native-chat.test.ts",
+          "assertions": [
+            "runtime read and subscription forward the normalized provider-session locator"
+          ]
+        },
+        {
+          "file": "tests/e2e/headless-native-chat-runtime-routing.spec.ts",
+          "assertions": [
+            "a compiled windowless runtime reads an explicit local owner",
+            "the same real file is unverifiable through a located session whose owner is absent"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-21",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/native-chat/ssh-transcript-host-routing.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 3,
+          "summary": "The finalized candidate passed all 16 deterministic ownership, reconnect, replacement-race, advisory, legacy, binding, and bounded-range cases; disabling exact SSH-owner recognition failed 11/16 and restoration returned to 16/16. The byte-identical earlier 13-case oracle failed 11/13 on latest origin/main and the advisory-only PR head, passed 13/13 on the candidate, failed 9/13 with the owner fix disabled, and returned to 13/13 after restoration."
+        },
+        {
+          "date": "2026-08-21",
+          "runner": "manual",
+          "platform": "macos",
+          "command": "Isolated headed Orca Electron/CDP against a throwaway Docker Linux SSH/relay target, with same-path desktop poison and remote-only live append",
+          "result": "passed",
+          "durationSeconds": 180,
+          "summary": "SSH git-worktree and folder-workspace native chat rendered the real remote initial snapshot and later remote-only append; DOM assertions found neither desktop poison marker. The remote bytes were independently read inside Docker while the desktop poison file remained present."
+        },
+        {
+          "date": "2026-08-21",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec electron-vite build --mode e2e && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-native-chat-runtime-routing.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 9,
+          "summary": "The compiled headless runtime passed explicit-owner read and unknown-owner no-fallback assertions through the registered runtime RPC."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 15,
+        "scope": "16-case deterministic routing oracle plus one compiled headless runtime journey; Docker/headed Electron remains manual"
+      },
+      "flakeHistory": {
+        "status": "soaking",
+        "evidence": "Repeated focused local oracles and the compiled headless journey pass; long-term CI history is not yet available."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The byte-identical 13-case oracle failed 11/13 on latest origin/main 59892a2f13 and advisory-only PR head aba8aafafa, passed 13/13 on the candidate, failed 9/13 when only exact SSH-owner recognition was disabled, and passed 13/13 after restoration. The finalized 16-case candidate passed 16/16, failed 11/16 under the same mutation, and returned to 16/16 after restoration. Baseline headed Electron visibly selected desktop lookalike bytes in both SSH workspace kinds; the candidate rendered only remote snapshot and tail bytes."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "SSH reads require readFileRange support, cap each request at the shared 256 KiB maximum, and tail from the last byte offset. The large-append oracle requires total requested bytes no more than append size plus 256 bytes, rejects any whole-file read, and verifies the prefix is not polled again."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days of soak history.",
+        "Keep the Docker SSH git and folder workspace snapshot/tail journey green when transcript routing changes.",
+        "Add physical Windows SSH and WSL live evidence before claiming full platform coverage.",
+        "Exercise mixed-version live pairing against at least one older client and one older host."
+      ],
+      "knownGaps": [
+        "Physical Windows SSH and live WSL transcript journeys were not run; WSL exact-path behavior is contract-tested.",
+        "The live Docker target used the current relay; older live relay and mixed-version pairing remain contract-only.",
+        "SSH provider sessions without an authoritative transcript path fail closed instead of running a broad remote session-id scan."
+      ],
+      "demotionRule": "Demote if a located session can read a non-owner filesystem, provider loss selects local bytes, reconnect leaves duplicate or stale watchers, any SSH poll uses whole-file reads, or the bounded-range oracle flakes without a product or harness defect."
+    },
+    {
       "id": "agent-session.provider-ownership",
       "title": "Provider sessions are resumed once per workspace ownership claim",
       "maturity": "experimental",

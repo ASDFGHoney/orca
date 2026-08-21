@@ -121,6 +121,50 @@ describe('Last-status persistence', () => {
     }
   })
 
+  it('upgrades persisted provider sessions with their stored execution owner', async () => {
+    mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
+    const receivedAt = recentTs()
+    writeFileSync(
+      lastStatusPath(),
+      JSON.stringify({
+        version: 2,
+        entries: {
+          [PANE]: {
+            paneKey: PANE,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            connectionId: 'persisted-ssh-owner',
+            receivedAt,
+            stateStartedAt: receivedAt,
+            providerSession: {
+              key: 'session_id',
+              id: 'persisted-session',
+              transcriptPath: '/remote/session.jsonl'
+            },
+            payload: { state: 'done', prompt: '', agentType: 'claude' }
+          }
+        }
+      }),
+      'utf8'
+    )
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      const listener = vi.fn()
+      server.setListener(listener)
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerSession: expect.objectContaining({
+            id: 'persisted-session',
+            executionHostId: 'ssh:persisted-ssh-owner'
+          })
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
   it('rejects a stale version mismatch on hydrate', async () => {
     mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
     writeFileSync(

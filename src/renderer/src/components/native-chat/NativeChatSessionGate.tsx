@@ -35,7 +35,8 @@ export function NativeChatSessionGate({
       return {
         ...currentResolution,
         sessionId: previousResolution.sessionId,
-        transcriptPath: previousResolution.transcriptPath
+        transcriptPath: previousResolution.transcriptPath,
+        providerSession: previousResolution.providerSession
       }
     }
     return currentResolution
