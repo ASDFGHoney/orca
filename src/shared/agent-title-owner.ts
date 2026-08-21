@@ -107,7 +107,9 @@ function hasIdleSuffix(title: string, sourceProfile: SyntheticAgentTitleProfile)
 
 /**
  * Why: remote OMP surfaces may report Pi as the live status identity, while
- * launch ownership still identifies the user-selected agent.
+ * launch ownership still identifies the user-selected agent. The owner wins,
+ * except when the owner is the group's generic identity and the incoming frame
+ * names a specific sibling — downgrading that makes the label oscillate.
  */
 export function resolveCompatibleAgentTypeForOwner(
   incomingAgentType: AgentType | null | undefined,
@@ -123,6 +125,9 @@ export function resolveCompatibleAgentTypeForOwner(
     !ownerProfile?.titleIdentityGroup ||
     incomingProfile.titleIdentityGroup !== ownerProfile.titleIdentityGroup
   ) {
+    return incomingAgentType
+  }
+  if (ownerProfile.titleIdentityFallback && !incomingProfile.titleIdentityFallback) {
     return incomingAgentType
   }
   return ownerAgentType as AgentType
@@ -145,6 +150,10 @@ export function normalizeCompatibleAgentTitleForOwner(
     !source?.profile.titleIdentityGroup ||
     source.profile.titleIdentityGroup !== ownerProfile.titleIdentityGroup
   ) {
+    return title
+  }
+  // Why: a specific sibling title (OMP) must not be rewritten through the generic Pi owner.
+  if (ownerProfile.titleIdentityFallback && !source.profile.titleIdentityFallback) {
     return title
   }
   const sourceStatus = getSourceTitleStatus(source.sourceTitle)

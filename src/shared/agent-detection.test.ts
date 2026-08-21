@@ -183,7 +183,8 @@ describe('Pi-compatible title detection', () => {
     ['π: tmp', 'omp', 'OMP ready'],
     ['\u280b π: tmp', 'omp', '\u280b OMP'],
     ['\u280b π - tmp', 'omp', '\u280b OMP'],
-    ['\u280b OMP', 'pi', '\u280b Pi'],
+    // Why: a live OMP title must not be rewritten through the generic Pi owner.
+    ['\u280b OMP', 'pi', '\u280b OMP'],
     ['lucky-echidna | \u283c π - Diagnose Orca terminal title flicker - test', 'omp', '\u280b OMP'],
     ['lucky-echidna | Pi ready', 'omp', 'OMP ready'],
     ['Codex | Pi ready', 'omp', 'OMP ready'],
@@ -232,6 +233,32 @@ describe('Pi-compatible title detection', () => {
     expect(status.agentType).toBe('omp')
     expect(status.terminalTitle).toBe('\u280b OMP')
     expect(resolveCompatibleAgentTypeForOwner('codex', 'omp')).toBe('codex')
+  })
+
+  it('keeps a live OMP identity from being downgraded by a generic Pi owner', () => {
+    const status = normalizeCompatibleAgentStatusEntryForOwner(
+      {
+        state: 'working',
+        prompt: '',
+        updatedAt: 1,
+        stateStartedAt: 1,
+        agentType: 'omp',
+        paneKey: 'tab-1:leaf-1',
+        terminalTitle: '\u280b OMP',
+        stateHistory: []
+      },
+      'pi'
+    )
+
+    expect(status.agentType).toBe('omp')
+    expect(status.terminalTitle).toBe('\u280b OMP')
+    expect(resolveCompatibleAgentTypeForOwner('omp', 'pi')).toBe('omp')
+  })
+
+  it('still re-owns generic Pi frames when the pane is actually OMP', () => {
+    expect(resolveCompatibleAgentTypeForOwner('pi', 'omp')).toBe('omp')
+    expect(normalizeCompatibleAgentTitleForOwner('\u280b Pi', 'omp')).toBe('\u280b OMP')
+    expect(normalizeCompatibleAgentTitleForOwner('Pi ready', 'omp')).toBe('OMP ready')
   })
 
   it.each(['~/omp/working', 'omp-harness ready', '~/pi/working', 'pi-scratch ready'])(
