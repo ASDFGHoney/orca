@@ -249,6 +249,51 @@ export function getDefaultWslDistro(): string | null {
 }
 
 /**
+ * A WSL `$HOME` probe either answered, answered with a non-absolute path, or
+ * failed to answer. Callers that would fall through to a different account's
+ * home must keep `unavailable` distinct from a missing distro.
+ */
+export type WslHomeResolution =
+  | { kind: 'resolved'; uncPath: string }
+  | { kind: 'unavailable'; error: unknown }
+  | { kind: 'invalid' }
+
+function rememberResolvedWslHome(distro: string, uncPath: string): WslHomeResolution {
+  wslHomeCache.set(distro, uncPath)
+  return { kind: 'resolved', uncPath }
+}
+
+function classifyWslHomeStdout(distro: string, stdout: string): WslHomeResolution {
+  const home = stdout.trim()
+  if (!home || !home.startsWith('/')) {
+    return { kind: 'invalid' }
+  }
+  return rememberResolvedWslHome(distro, toWindowsWslPath(home, distro))
+}
+
+/**
+ * Typed WSL home lookup. Cached successes only — a failure must be retried,
+ * never remembered as "this distro has no home".
+ */
+export function resolveWslHome(distro: string): WslHomeResolution {
+  const cached = wslHomeCache.get(distro)
+  if (cached) {
+    return { kind: 'resolved', uncPath: cached }
+  }
+
+  try {
+    const home = execFileSync('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000
+    })
+    return classifyWslHomeStdout(distro, home)
+  } catch (error) {
+    return { kind: 'unavailable', error }
+  }
+}
+
+/**
  * Get the home directory for a WSL distro, returned as a Windows UNC path.
  * Result is cached per distro for the process lifetime.
  *
@@ -257,27 +302,8 @@ export function getDefaultWslDistro(): string | null {
  * WSL user's $HOME to compute that path.
  */
 export function getWslHome(distro: string): string | null {
-  if (wslHomeCache.has(distro)) {
-    return wslHomeCache.get(distro)!
-  }
-
-  try {
-    const home = execFileSync('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000
-    }).trim()
-
-    if (!home || !home.startsWith('/')) {
-      return null
-    }
-
-    const uncPath = toWindowsWslPath(home, distro)
-    wslHomeCache.set(distro, uncPath)
-    return uncPath
-  } catch {
-    return null
-  }
+  const resolved = resolveWslHome(distro)
+  return resolved.kind === 'resolved' ? resolved.uncPath : null
 }
 
 /** Pure cache lookup — never probes. Lets callers that memoize a derived value avoid caching one
@@ -286,26 +312,23 @@ export function hasCachedWslHome(distro: string): boolean {
   return wslHomeCache.has(distro)
 }
 
-export async function getWslHomeAsync(distro: string): Promise<string | null> {
-  if (wslHomeCache.has(distro)) {
-    return wslHomeCache.get(distro)!
+export async function resolveWslHomeAsync(distro: string): Promise<WslHomeResolution> {
+  const cached = wslHomeCache.get(distro)
+  if (cached) {
+    return { kind: 'resolved', uncPath: cached }
   }
 
   try {
-    const home = (
-      await execFileUtf8('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'])
-    ).trim()
-
-    if (!home || !home.startsWith('/')) {
-      return null
-    }
-
-    const uncPath = toWindowsWslPath(home, distro)
-    wslHomeCache.set(distro, uncPath)
-    return uncPath
-  } catch {
-    return null
+    const home = await execFileUtf8('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'])
+    return classifyWslHomeStdout(distro, home)
+  } catch (error) {
+    return { kind: 'unavailable', error }
   }
+}
+
+export async function getWslHomeAsync(distro: string): Promise<string | null> {
+  const resolved = await resolveWslHomeAsync(distro)
+  return resolved.kind === 'resolved' ? resolved.uncPath : null
 }
 
 export function _resetWslCachesForTests(): void {

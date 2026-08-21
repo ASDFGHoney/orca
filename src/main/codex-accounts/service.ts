@@ -61,6 +61,11 @@ import {
   ManagedCodexHomeTemporarilyUnavailableError
 } from './host-codex-managed-home-ownership'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
+import {
+  buildWslManagedHomeCreateArgs,
+  buildWslManagedHomePresenceArgs,
+  classifyWslManagedHomeExecError
+} from './wsl-managed-home-presence'
 
 const LOGIN_TIMEOUT_MS = 120_000
 const MAX_LOGIN_OUTPUT_CHARS = 4_000
@@ -864,6 +869,11 @@ export class CodexAccountService {
       // runtime home instead of the default host target.
       this.runtimeHome.syncForCurrentSelection(targetSelection)
     } catch (error) {
+      if (error instanceof ManagedCodexHomeTemporarilyUnavailableError) {
+        // Why: login already persisted; a locked runtime must not roll back a
+        // completed add into doAddAccount's home-deleting catch.
+        return this.getSnapshot()
+      }
       // Why: settings were already written; if a post-write step fails, restore the
       // previous account/selection so the caller's managed-home cleanup cannot leave
       // a dangling, broken managed account behind in settings.
@@ -1465,27 +1475,21 @@ export class CodexAccountService {
       return
     }
 
+    try {
+      execFileSync('wsl.exe', buildWslManagedHomePresenceArgs(wslInfo.distro, wslInfo.linuxPath), {
+        encoding: 'utf-8',
+        timeout: 5000
+      })
+      return
+    } catch (error) {
+      if (classifyWslManagedHomeExecError(error) !== 'absent') {
+        throw new ManagedCodexHomeTemporarilyUnavailableError(undefined, { cause: error })
+      }
+    }
+
     execFileSync(
       'wsl.exe',
-      [
-        '-d',
-        wslInfo.distro,
-        '--exec',
-        'bash',
-        '-lc',
-        buildEncodedWslBashCommand(
-          [
-            'set -euo pipefail',
-            `candidate=${shellQuote(wslInfo.linuxPath)}`,
-            `expected_marker=${shellQuote(account.id)}`,
-            'marker="$candidate/.orca-managed-home"',
-            'if [ -e "$candidate" ] && [ ! -f "$marker" ]; then exit 41; fi',
-            'if [ -f "$marker" ] && [ "$(cat "$marker")" != "$expected_marker" ]; then exit 42; fi',
-            'mkdir -p -- "$candidate"',
-            'printf "%s\\n" "$expected_marker" > "$marker"'
-          ].join('\n')
-        )
-      ],
+      buildWslManagedHomeCreateArgs(wslInfo.distro, wslInfo.linuxPath, account.id),
       { encoding: 'utf-8', timeout: 5000 }
     )
   }

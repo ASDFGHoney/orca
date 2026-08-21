@@ -391,6 +391,9 @@ describe('CodexAccountService config sync', () => {
         writeFileSync(join(wslManagedHomePath, '.orca-managed-home'), 'account-1\n', 'utf-8')
         return ''
       }
+      if (script.includes('stat --')) {
+        throw Object.assign(new Error('No such file or directory'), { status: 2 })
+      }
       if (script.includes('readlink -f')) {
         return `${wslLinuxHomePath}\n`
       }
