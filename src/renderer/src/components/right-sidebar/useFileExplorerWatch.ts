@@ -122,6 +122,8 @@ export function useFileExplorerWatch({
   const deferredRef = useRef<FsChangedPayload[]>([])
   const resyncWatchKeysRef = useRef(new Set<string>())
   const activeResyncByWatchKeyRef = useRef(new Map<string, () => void>())
+  const visibleWorktreePathRef = useRef(worktreePath)
+  visibleWorktreePathRef.current = worktreePath
 
   // Why: a ref bridges processPayload to the flush effect so it can replay deferred payloads without re-subscribing (design §6.2).
   const processPayloadRef = useRef<((payload: FsChangedPayload) => void) | null>(null)
@@ -264,9 +266,12 @@ export function useFileExplorerWatch({
       if (activeResyncByWatchKey.get(currentWatchKey) === scheduler.requestFullRefresh) {
         activeResyncByWatchKey.delete(currentWatchKey)
       }
-      const hadDeferredEvents = deferredRef.current.length > 0
-      if (scheduler.cancel() || hadDeferredEvents) {
-        // The tree cache survives Files being hidden, so remember work canceled after receipt.
+      scheduler.cancel()
+      // Why: Files stays mounted while hidden (search / owner flicker), so the
+      // tree cache survives and events in the unsubscribed gap never arrive.
+      // Worktree switches already resetAndLoad — don't queue a second full read.
+      const latestVisiblePath = visibleWorktreePathRef.current
+      if (latestVisiblePath === null || latestVisiblePath === currentWorktreePath) {
         resyncWatchKeys.add(currentWatchKey)
       }
       deferredRef.current = []
