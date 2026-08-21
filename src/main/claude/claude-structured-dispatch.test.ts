@@ -260,6 +260,39 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // Captured from claude 2.1.237: the model-switch breadcrumb is enqueued as
+  // `{type:'user', parent_tool_use_id:null, isReplay:true}` with STRING content.
+  // Orca triggers it itself from the model picker, and the CLI's own
+  // RemoteSessionManager filters the same frames by content prefix.
+  it('does not adopt a model-switch breadcrumb even though it is stamped', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: '<local-command-stdout>Set model to Sonnet</local-command-stdout>'
+      },
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'breadcrumb-uuid',
+      isReplay: true
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
+    await expect(dispatched).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'user-replay-uuid' }
+    })
+  })
+
   // The waiter queue is positional, so shifting the head on a send failure
   // resolves whichever dispatch happens to be first - reporting a delivered
   // message as unconfirmed while the send that actually failed keeps waiting.
@@ -287,6 +320,26 @@ describe('Claude structured dispatch image limits', () => {
     await expect(first).resolves.toMatchObject({
       state: 'accepted',
       providerIdentity: { uuid: 'replay-one' }
+    })
+  })
+
+  // A write can reach Claude and still reject on the following flush.
+  it('keeps an identity the replay already claimed when the send then rejects', async () => {
+    const session = sessionFor()
+    session.connection.send = vi.fn().mockImplementation(async () => {
+      resolveClaudeReplayWaiter(session, userReplayFrame('landed-anyway', 'hello'))
+      throw new Error('flush failed')
+    })
+
+    await expect(
+      dispatchClaudeTurn(
+        session,
+        { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
+        ACK_BUDGET_MS
+      )
+    ).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'landed-anyway' }
     })
   })
 

@@ -4,7 +4,9 @@ import type { AgentJournalMessageItem } from '../../shared/agent-session-journal
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeDispatchWaiter, ClaudeSession } from './claude-structured-session-state'
+import { isKnownHarnessInjectedUserTurnText } from '../../shared/harness-injected-user-turns'
 import { readClaudeFrameString } from './claude-structured-init-proof'
+import { claudeRecord } from './claude-structured-item-translation'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -50,32 +52,53 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.webp': 'image/webp'
 }
 
+/** Leading text of a top-level user frame, for harness classification. The CLI
+ *  serializes an injected breadcrumb's content as a plain string and a typed
+ *  echo's as a block array, so both shapes have to be read. */
+function claudeUserFrameText(message: Record<string, unknown>): string {
+  const content = claudeRecord(message.message)?.content
+  if (typeof content === 'string') {
+    return content
+  }
+  if (!Array.isArray(content)) {
+    return ''
+  }
+  return content
+    .map((part) => {
+      const text = claudeRecord(part)?.text
+      return typeof text === 'string' ? text : ''
+    })
+    .join('\n')
+}
+
 /**
  * The frame that carries the user's own message back.
  *
- * `type: 'user'` with a null `parent_tool_use_id` is not enough on its own:
- * Claude publishes tool results and harness-injected turns (interruption
- * notices, system reminders, local-command output) in the same shape. Adopting
- * one leaves the real replay to land under an identity nothing claims, so the
- * user's message renders twice - and an injected turn is worse than a tool
- * result, because it DOES build a body and upserts over the user's own bubble.
+ * `type: 'user'` with a null `parent_tool_use_id` is not enough: Claude
+ * publishes tool results and harness-injected turns in the same shape. Adopting
+ * one leaves the real replay under an identity nothing claims, so the user's
+ * message renders twice - and an injected turn is worse than a tool result,
+ * because it can build a body and upsert over the user's own bubble.
  *
- * `CLAUDE_STRUCTURED_BASE_ARGS` always passes `--replay-user-messages`, and the
- * CLI stamps `isReplay` on every echo it publishes in reply - measured for text,
- * image-only and text+image sends. So the marker is the whole test: no content
- * sniffing, and nothing here depends on the injected-turn list that
- * prompt-derived UI maintains for its own reasons.
+ * `isReplay` is necessary but NOT sufficient. Claude stamps it on its own
+ * injected breadcrumbs too: 2.1.237 enqueues the model-switch notice as
+ * `{type:'user', parent_tool_use_id:null, isReplay:true}` whose content is the
+ * string `<local-command-stdout>Set model to ...`. Orca triggers that path
+ * itself from the model picker (`setClaudeStructuredOption` sends `set_model`,
+ * and reconnect replays it). The CLI's own RemoteSessionManager cannot use the
+ * marker alone either - it filters the same frames by content prefix, logging
+ * "Dropped own set_model breadcrumb echo".
  *
- * A slash command may get no user echo at all; `acceptsResult` settles those on
- * the command's result receipt instead.
- *
- * Measured against the real CLI: a queued send's replay is published at the
- * first tool boundary after it is queued, 2-3 ms AFTER that boundary's tool
- * result. So rejecting tool results costs no time - whenever there was a frame
- * to adopt, the right one follows immediately.
+ * So: require the marker, then reject the harness shapes. The residual is a
+ * genuine echo whose own text opens with a harness tag (a user pasting a
+ * transcript excerpt), which is rarer than a model switch and fails the safe
+ * way - `unknown`, not a corrupted bubble.
  */
 function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
-  return message.type === 'user' && message.parent_tool_use_id === null && message.isReplay === true
+  if (message.type !== 'user' || message.parent_tool_use_id !== null || message.isReplay !== true) {
+    return false
+  }
+  return !isKnownHarnessInjectedUserTurnText(claudeUserFrameText(message))
 }
 
 export function resolveClaudeReplayWaiter(
@@ -239,6 +262,22 @@ export async function dispatchClaudeTurn(
       session_id: session.providerSessionId
     })
   } catch (error) {
+    // A write can reach Claude and still reject on the flush that follows, so the
+    // replay may already have claimed this waiter. Reporting `unknown` then
+    // strands an identity nothing else can adopt, and the echo duplicates.
+    if (!session.dispatchWaiters.includes(waiter)) {
+      const settled = await replayed
+      if (settled) {
+        return {
+          state: 'accepted',
+          providerIdentity: {
+            provider: 'claude',
+            sessionId: session.providerSessionId,
+            uuid: settled
+          }
+        }
+      }
+    }
     dropWaiter(session, waiter)
     clearTimeout(waiter.timer)
     waiter.resolve(null)
