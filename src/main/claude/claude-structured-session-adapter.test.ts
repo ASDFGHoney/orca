@@ -120,9 +120,13 @@ function fakeClaude(
       send: async (message) => {
         connection.sent.push(message)
         if (message.type === 'user' && options.replayUuid !== null) {
+          // The real CLI stamps `isReplay` on every echo `--replay-user-messages`
+          // produces; a double that omits it invites a gate that cannot tell an
+          // echo from an injected turn.
           handlers.onMessage?.({
             ...message,
-            uuid: options.replayUuid ?? 'user-uuid'
+            uuid: options.replayUuid ?? 'user-uuid',
+            isReplay: true
           })
         }
       },

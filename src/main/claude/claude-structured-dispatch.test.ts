@@ -161,73 +161,10 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
-  // Once this CLI is seen stamping the marker, the injected-turn allowlist must
-  // stop being load-bearing: an unrecognized injected shape would otherwise still
-  // steal the identity.
-  it('stops trusting frame shape once the CLI is seen stamping isReplay', async () => {
-    const session = sessionFor()
-    const first = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-    resolveClaudeReplayWaiter(session, userReplayFrame('replay-one', 'one'))
-    await expect(first).resolves.toMatchObject({ state: 'accepted' })
-
-    const second = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    // An injected shape nobody has enumerated yet, so the allowlist would pass it.
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text: '<some-new-notice>hi' }] },
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'unknown-injected-uuid'
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame('replay-two', 'two'))
-    await expect(second).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'replay-two' }
-    })
-  })
-
-  // `readClaudeMessageEnvelope` already tolerates string content, so refusing it
-  // here would be a new way for a send to never be acknowledged.
-  it('accepts a replay whose content is a plain string', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      message: { role: 'user', content: 'hello' },
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'string-replay-uuid'
-    })
-
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'string-replay-uuid' }
-    })
-  })
-
-  // Dispatch base64-encodes a local image path, and `claudeMessageBody` models
-  // only text and URL images - so gating the waiter on "the translator would
-  // build a body" refuses an image-only send its own replay, times out, and
-  // reports a delivered message as unconfirmed (retry then sends it twice).
+  // Measured: the CLI stamps an image-only echo like any other, and its content
+  // carries no text. A gate that sniffed content for a modeled body would refuse
+  // this send its own replay, time out, and report a delivered message as
+  // unconfirmed - which sends it twice on retry.
   it('accepts the replay of a send that carries only a local image', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'orca-claude-replay-'))
     try {
@@ -241,8 +178,6 @@ describe('Claude structured dispatch image limits', () => {
       )
       await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
-      // Deliberately UNSTAMPED: `isReplay` would short-circuit the gate and leave
-      // the content branch this test exists for untested.
       resolveClaudeReplayWaiter(session, {
         type: 'user',
         message: {
@@ -253,7 +188,8 @@ describe('Claude structured dispatch image limits', () => {
         },
         parent_tool_use_id: null,
         session_id: 'provider-session',
-        uuid: 'image-replay-uuid'
+        uuid: 'image-replay-uuid',
+        isReplay: true
       })
 
       await expect(dispatched).resolves.toMatchObject({

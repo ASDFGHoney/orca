@@ -5,8 +5,6 @@ import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeDispatchWaiter, ClaudeSession } from './claude-structured-session-state'
 import { readClaudeFrameString } from './claude-structured-init-proof'
-import { isKnownHarnessInjectedUserTurnText } from '../../shared/harness-injected-user-turns'
-import { claudeRecord } from './claude-structured-item-translation'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -52,72 +50,39 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.webp': 'image/webp'
 }
 
-/** Text of a top-level user frame, or null when it is a tool-result turn (or
- *  carries nothing). A plain-string `content` is accepted so a CLI that sends the
- *  simpler shape can still settle its send - note the translator models only the
- *  array form, so such an echo settles the dispatch without upserting a body, the
- *  same way an image-only echo does. An image-only echo has no text, yielding ''. */
-function claudeUserFrameText(content: unknown): string | null {
-  if (typeof content === 'string') {
-    return content
-  }
-  if (!Array.isArray(content) || content.length === 0) {
-    return null
-  }
-  const parts = content.map((part) => claudeRecord(part))
-  if (parts.some((part) => part?.type === 'tool_result')) {
-    return null
-  }
-  return parts.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('\n')
-}
-
 /**
  * The frame that carries the user's own message back.
  *
  * `type: 'user'` with a null `parent_tool_use_id` is not enough on its own:
  * Claude publishes tool results and harness-injected turns (interruption
  * notices, system reminders, local-command output) in the same shape. Adopting
- * one of those leaves the real replay to land under an identity nothing claims,
- * so the user's message renders twice - and an injected turn is worse than a
- * tool result, because it DOES build a body and upserts over the user's own
- * bubble.
+ * one leaves the real replay to land under an identity nothing claims, so the
+ * user's message renders twice - and an injected turn is worse than a tool
+ * result, because it DOES build a body and upserts over the user's own bubble.
  *
- * `--replay-user-messages` stamps `isReplay` on the genuine echo, so trust that
- * when it is there. The shape test is only a fallback for a CLI that omits the
- * marker, and it stays off once this session has seen one: the launch args always
- * request replays, so after that a frame without the marker is by construction not
- * the echo, and the hand-maintained injected-turn list must not be load-bearing.
- * Without any fallback, a CLI that never stamps it would leave every send timing
- * out into a false "delivery unconfirmed", and retrying sends the message twice.
+ * `CLAUDE_STRUCTURED_BASE_ARGS` always passes `--replay-user-messages`, and the
+ * CLI stamps `isReplay` on every echo it publishes in reply - measured for text,
+ * image-only and text+image sends. So the marker is the whole test: no content
+ * sniffing, and nothing here depends on the injected-turn list that
+ * prompt-derived UI maintains for its own reasons.
+ *
+ * A slash command may get no user echo at all; `acceptsResult` settles those on
+ * the command's result receipt instead.
  *
  * Measured against the real CLI: a queued send's replay is published at the
  * first tool boundary after it is queued, 2-3 ms AFTER that boundary's tool
  * result. So rejecting tool results costs no time - whenever there was a frame
  * to adopt, the right one follows immediately.
  */
-function isClaudeUserMessageReplay(
-  session: ClaudeSession,
-  message: Record<string, unknown>
-): boolean {
-  if (message.type !== 'user' || message.parent_tool_use_id !== null) {
-    return false
-  }
-  if (message.isReplay === true) {
-    session.sawUserReplayMarker = true
-    return true
-  }
-  if (session.sawUserReplayMarker) {
-    return false
-  }
-  const text = claudeUserFrameText(claudeRecord(message.message)?.content)
-  return text !== null && !isKnownHarnessInjectedUserTurnText(text)
+function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
+  return message.type === 'user' && message.parent_tool_use_id === null && message.isReplay === true
 }
 
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const isUserReplay = isClaudeUserMessageReplay(session, message)
+  const isUserReplay = isClaudeUserMessageReplay(message)
   const isCompletedCommand = message.type === 'result'
   if (
     (!isUserReplay && !isCompletedCommand) ||
