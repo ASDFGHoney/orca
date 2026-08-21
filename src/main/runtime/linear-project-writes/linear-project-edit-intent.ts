@@ -2,19 +2,19 @@ import {
   LINEAR_PROJECT_EDITABLE_FIELDS,
   type LinearProjectEditRequest,
   type LinearProjectEditableField
-} from '../../shared/linear/project-agent-writes'
-import { linearError } from '../linear/issue-context-errors'
-import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
-import type { LinearProjectFieldEdits } from '../linear/project-field-edits'
-import { dedupeLinearReferenceInputs } from '../linear/project-reference-inputs'
+} from '../../../shared/linear/project-agent-writes'
+import { linearError } from '../../linear/issue-context-errors'
+import { normalizeLinearLineEndings } from '../../linear/linear-text-digest'
+import type { LinearProjectFieldEdits } from '../../linear/project-field-edits'
+import { dedupeLinearReferenceInputs } from '../../linear/project-reference-inputs'
 import {
   resolveWorkspaceTeamsForWrite,
   resolveWorkspaceUserForWrite
-} from '../linear/project-write-actors'
+} from '../../linear/project-write-actors'
 import {
   resolveProjectLabelsForWrite,
   resolveProjectStatusForWrite
-} from '../linear/project-write-references'
+} from '../../linear/project-write-references'
 import { assertLinearProjectTextCaps } from './linear-project-text-caps'
 
 type ReadOptions = { signal?: AbortSignal }

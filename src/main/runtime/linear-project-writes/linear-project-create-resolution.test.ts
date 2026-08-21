@@ -5,13 +5,13 @@ const resolveWorkspaceUserForWrite = vi.fn()
 const resolveProjectStatusForWrite = vi.fn()
 const resolveProjectLabelsForWrite = vi.fn()
 
-vi.mock('../linear/project-create-workspace-scope', () => ({
+vi.mock('../../linear/project-create-workspace-scope', () => ({
   resolveProjectCreateScope: (...args: unknown[]) => resolveProjectCreateScope(...args)
 }))
-vi.mock('../linear/project-write-actors', () => ({
+vi.mock('../../linear/project-write-actors', () => ({
   resolveWorkspaceUserForWrite: (...args: unknown[]) => resolveWorkspaceUserForWrite(...args)
 }))
-vi.mock('../linear/project-write-references', () => ({
+vi.mock('../../linear/project-write-references', () => ({
   resolveProjectStatusForWrite: (...args: unknown[]) => resolveProjectStatusForWrite(...args),
   resolveProjectLabelsForWrite: (...args: unknown[]) => resolveProjectLabelsForWrite(...args)
 }))

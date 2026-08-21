@@ -1,5 +1,5 @@
-import type { LinearProjectUpdateHealth } from '../../shared/linear/project-agent-access'
-import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
+import type { LinearProjectUpdateHealth } from '../../../shared/linear/project-agent-access'
+import { normalizeLinearLineEndings } from '../../linear/linear-text-digest'
 
 /** Normalized intent of one append-only project update post. */
 export type LinearProjectUpdateAddIntent = {

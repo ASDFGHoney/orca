@@ -1,5 +1,5 @@
-import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
-import { sameLinearProjectContent } from '../linear/project-content-rewrites'
+import { normalizeLinearLineEndings } from '../../linear/linear-text-digest'
+import { sameLinearProjectContent } from '../../linear/project-content-rewrites'
 
 /** A fully resolved create intent: every reference is already a Linear UUID. */
 export type LinearProjectCreateIntent = {

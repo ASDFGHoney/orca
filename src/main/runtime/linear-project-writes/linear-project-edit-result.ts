@@ -1,19 +1,19 @@
 import type {
   LinearProjectFieldSnapshot,
   LinearProjectRef
-} from '../../shared/linear/project-agent-access'
+} from '../../../shared/linear/project-agent-access'
 import type {
   LinearProjectEditResult,
   LinearProjectEditableField
-} from '../../shared/linear/project-agent-writes'
+} from '../../../shared/linear/project-agent-writes'
 import {
   changedLinearProjectFields,
   type LinearProjectFieldEdits
-} from '../linear/project-field-edits'
+} from '../../linear/project-field-edits'
 import {
   toLinearProjectFieldSnapshot,
   type LinearProjectInternalSnapshot
-} from '../linear/project-field-snapshot'
+} from '../../linear/project-field-snapshot'
 
 type EditOutcome = {
   project: LinearProjectRef

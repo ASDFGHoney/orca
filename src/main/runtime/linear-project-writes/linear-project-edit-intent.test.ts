@@ -5,11 +5,11 @@ const resolveWorkspaceTeamsForWrite = vi.fn()
 const resolveProjectStatusForWrite = vi.fn()
 const resolveProjectLabelsForWrite = vi.fn()
 
-vi.mock('../linear/project-write-actors', () => ({
+vi.mock('../../linear/project-write-actors', () => ({
   resolveWorkspaceUserForWrite: (...args: unknown[]) => resolveWorkspaceUserForWrite(...args),
   resolveWorkspaceTeamsForWrite: (...args: unknown[]) => resolveWorkspaceTeamsForWrite(...args)
 }))
-vi.mock('../linear/project-write-references', () => ({
+vi.mock('../../linear/project-write-references', () => ({
   resolveProjectStatusForWrite: (...args: unknown[]) => resolveProjectStatusForWrite(...args),
   resolveProjectLabelsForWrite: (...args: unknown[]) => resolveProjectLabelsForWrite(...args)
 }))

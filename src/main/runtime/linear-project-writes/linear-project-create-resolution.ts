@@ -1,13 +1,13 @@
-import type { LinearProjectCreateRequest } from '../../shared/linear/project-agent-writes'
-import { linearError } from '../linear/issue-context-errors'
-import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
-import { resolveProjectCreateScope } from '../linear/project-create-workspace-scope'
-import { dedupeLinearReferenceInputs } from '../linear/project-reference-inputs'
-import { resolveWorkspaceUserForWrite } from '../linear/project-write-actors'
+import type { LinearProjectCreateRequest } from '../../../shared/linear/project-agent-writes'
+import { linearError } from '../../linear/issue-context-errors'
+import { normalizeLinearLineEndings } from '../../linear/linear-text-digest'
+import { resolveProjectCreateScope } from '../../linear/project-create-workspace-scope'
+import { dedupeLinearReferenceInputs } from '../../linear/project-reference-inputs'
+import { resolveWorkspaceUserForWrite } from '../../linear/project-write-actors'
 import {
   resolveProjectLabelsForWrite,
   resolveProjectStatusForWrite
-} from '../linear/project-write-references'
+} from '../../linear/project-write-references'
 import type { LinearProjectCreateIntent } from './linear-project-create-intent'
 import { assertLinearProjectTextCaps } from './linear-project-text-caps'
 

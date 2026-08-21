@@ -2,9 +2,9 @@ import {
   LINEAR_PROJECT_DESCRIPTION_CAP,
   LINEAR_PROJECT_NAME_CAP,
   linearProjectTextCapError
-} from '../../shared/linear/project-agent-writes'
-import { linearError } from '../linear/issue-context-errors'
-import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
+} from '../../../shared/linear/project-agent-writes'
+import { linearError } from '../../linear/issue-context-errors'
+import { normalizeLinearLineEndings } from '../../linear/linear-text-digest'
 
 /**
  * Rejects over-cap prose before the mutation is sent. Linear enforces both caps

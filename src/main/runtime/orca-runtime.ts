@@ -952,19 +952,19 @@ import { normalizeLinearLineEndings } from '../linear/linear-text-digest'
 import {
   projectMatchesCreateIntent,
   type LinearProjectCreateIntent
-} from './linear-project-create-intent'
-import { resolveLinearProjectCreateIntent } from './linear-project-create-resolution'
+} from './linear-project-writes/linear-project-create-intent'
+import { resolveLinearProjectCreateIntent } from './linear-project-writes/linear-project-create-resolution'
 import { editProjectFieldsForAgent } from '../linear/project-field-edits'
 import {
   resolveLinearProjectEditIntent,
   type LinearProjectEditIntent
-} from './linear-project-edit-intent'
-import { buildLinearProjectEditResult } from './linear-project-edit-result'
+} from './linear-project-writes/linear-project-edit-intent'
+import { buildLinearProjectEditResult } from './linear-project-writes/linear-project-edit-result'
 import {
   projectUpdateMatchesAddIntent,
   type LinearProjectUpdateAddIntent
-} from './linear-project-update-write-intent'
-import { linearProjectWriteUnconfirmed } from './linear-project-write-recovery'
+} from './linear-project-writes/linear-project-update-write-intent'
+import { linearProjectWriteUnconfirmed } from './linear-project-writes/linear-project-write-recovery'
 import {
   listProjectLabelsForAgent,
   listProjectStatusesForAgent

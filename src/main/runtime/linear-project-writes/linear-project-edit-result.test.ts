@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildLinearProjectEditResult } from './linear-project-edit-result'
-import type { LinearProjectInternalSnapshot } from '../linear/project-field-snapshot'
+import type { LinearProjectInternalSnapshot } from '../../linear/project-field-snapshot'
 
 const PROJECT = {
   id: '0f3a1c9e-2b7d-4a51-9c62-8d5f0e7b4a13',

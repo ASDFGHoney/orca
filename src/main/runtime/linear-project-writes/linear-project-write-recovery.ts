@@ -2,8 +2,8 @@ import {
   linearError,
   sanitizeLinearErrorMessage,
   type LinearAgentAccessError
-} from '../linear/issue-context-errors'
-import { linearSha256Hex, normalizeLinearLineEndings } from '../linear/linear-text-digest'
+} from '../../linear/issue-context-errors'
+import { linearSha256Hex, normalizeLinearLineEndings } from '../../linear/linear-text-digest'
 import type { LinearProjectCreateIntent } from './linear-project-create-intent'
 import type { LinearProjectEditIntent } from './linear-project-edit-intent'
 import type { LinearProjectUpdateAddIntent } from './linear-project-update-write-intent'
