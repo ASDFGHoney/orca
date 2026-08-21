@@ -247,7 +247,7 @@ describe('SSH Linear project update add argument rejection', () => {
       dispatchProjectWrite(['linear', 'project', 'update', 'add', '--body', 'Done'])
     ).rejects.toMatchObject({
       code: 'invalid_argument',
-      message: 'Pass a project as a positional argument or --id <project>'
+      message: 'Pass a Linear project UUID, slugId, URL, or exact name positionally or as --id'
     })
   })
 

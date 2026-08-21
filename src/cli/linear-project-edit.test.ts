@@ -173,24 +173,41 @@ describe('orca linear project edit', () => {
 
   // Why: `--flag=value` parses before the boolean lookup, so a negated clear must
   // not read as a clear — that would silently destroy the field it meant to keep.
-  it('rejects a --clear-* flag that carries a value instead of clearing the field', async () => {
-    await main([...EDIT, 'payments-v2', '--clear-content=false'], '/tmp/repo')
+  it('leaves the field untouched when a --clear-* flag is negated', async () => {
+    await runEdit(['--clear-content=false', '--name', 'Payments V3'])
 
-    expect(callMock).not.toHaveBeenCalled()
-    expect(firstError()).toContain('--clear-content takes no value')
+    expect(sentRequest()).toEqual({ input: 'payments-v2', name: 'Payments V3' })
   })
 
-  // Why: consumers test booleans with `=== true`, so `--hide-diff=true` used to parse
-  // as the string 'true' and read as off — silently doing the opposite of what was asked.
-  it.each(['--hide-diff=true', '--json=true', '--clear-lead=false'])(
-    'rejects %s rather than reading it as off',
-    async (token) => {
-      await main([...EDIT, 'payments-v2', token], '/tmp/repo')
+  // Why: `--clear-content=true` has to mean the same as bare `--clear-content`, or a
+  // caller spelling the value out would silently keep the content it asked to drop.
+  it('clears the field when a --clear-* flag is spelled with an explicit true', async () => {
+    await runEdit(['--clear-content=true'])
 
-      expect(callMock).not.toHaveBeenCalled()
-      expect(firstError()).toContain('takes no value')
-    }
-  )
+    expect(sentRequest()).toEqual({ input: 'payments-v2', content: null })
+  })
+
+  it('rejects a --clear-* flag carrying a value that is not a boolean', async () => {
+    await main([...EDIT, 'payments-v2', '--clear-content=maybe'], '/tmp/repo')
+
+    expect(callMock).not.toHaveBeenCalled()
+    expect(firstError()).toContain('--clear-content is a boolean flag')
+  })
+
+  // Why: `--json=true` is a boolean spelling scripts already use; rejecting it would
+  // break every caller that passes the flag that way.
+  it('accepts a boolean global flag written as --json=true', async () => {
+    await runEdit(['--json=true', '--name', 'Payments V3'])
+
+    expect(callMock).toHaveBeenCalled()
+    expect(JSON.parse(firstLog())).toMatchObject({ ok: true })
+  })
+
+  it('drops a boolean global flag written as --json=false', async () => {
+    await runEdit(['--json=false', '--name', 'Payments V3'])
+
+    expect(() => JSON.parse(firstLog())).toThrow()
+  })
 
   it('clears description to empty text and content, lead and dates to null', async () => {
     await runEdit([

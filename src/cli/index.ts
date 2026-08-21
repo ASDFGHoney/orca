@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  argvRequestsJson,
   findCommandSpec,
   normalizeCommandPositionals,
   parseArgs,
@@ -79,7 +80,7 @@ export async function main(
     const resolved = normalizeCommandPositionals(COMMAND_SPECS, parseArgs(argv, COMMAND_PATHS))
     parsed = { ...resolved, flags: foldRepeatableFlags(COMMAND_SPECS, resolved) }
   } catch (error) {
-    reportCliError(error, argv.includes('--json'), { commandPath: [] })
+    reportCliError(error, argvRequestsJson(argv), { commandPath: [] })
     process.exitCode = 1
     return
   }

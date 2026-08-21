@@ -204,7 +204,7 @@ function buildRemoteLinearProjectUpdateAddRequest(
   if (!input) {
     throw new RemoteLinearWriteArgumentError(
       'invalid_argument',
-      'Pass a project as a positional argument or --id <project>'
+      'Pass a Linear project UUID, slugId, URL, or exact name positionally or as --id'
     )
   }
   const body = readRemoteBody(parsed.flags, true, stdin)

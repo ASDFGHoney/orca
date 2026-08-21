@@ -127,6 +127,43 @@ describe('orca linear project update add', () => {
     )
   })
 
+  // Why: `--flag=value` parses before the boolean lookup, so an uncoerced `--hide-diff=true`
+  // read as off and posted the update with the diff the caller asked to hide.
+  it.each([
+    ['--hide-diff', true],
+    ['--hide-diff=true', true],
+    ['--hide-diff=false', false]
+  ])('reads %s as isDiffHidden %s', async (token, expected) => {
+    queueFixtures(callMock, okFixture('req_update', updateAddResult()))
+
+    await main(
+      [
+        'linear',
+        'project',
+        'update',
+        'add',
+        'launch-q3',
+        '--body',
+        'Rails merged',
+        token,
+        '--json'
+      ],
+      '/tmp/repo'
+    )
+
+    expect(callMock).toHaveBeenCalledWith(
+      'linear.agentProjectUpdateAdd',
+      {
+        input: 'launch-q3',
+        workspaceId: undefined,
+        body: 'Rails merged',
+        isDiffHidden: expected,
+        writeId: undefined
+      },
+      WRITE_TIMEOUT
+    )
+  })
+
   it('sends --id, --workspace, normalized --health, --hide-diff and --write-id', async () => {
     queueFixtures(callMock, okFixture('req_update', updateAddResult()))
 

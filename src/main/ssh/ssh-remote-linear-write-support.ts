@@ -282,7 +282,7 @@ export function remotePositional(parsed: ParsedRemoteCli, startIndex: number): s
 export function requiredString(flags: Map<string, string | boolean>, name: string): string {
   const value = optionalString(flags, name)
   if (!value) {
-    throw new RemoteLinearWriteArgumentError('invalid_argument', `Missing --${name}`)
+    throw new RemoteLinearWriteArgumentError('invalid_argument', `Missing required --${name}`)
   }
   return value
 }
@@ -295,7 +295,7 @@ export function requiredStringAllowingEmpty(
   if (typeof value === 'string') {
     return value
   }
-  throw new RemoteLinearWriteArgumentError('invalid_argument', `Missing --${name}`)
+  throw new RemoteLinearWriteArgumentError('invalid_argument', `Missing required --${name}`)
 }
 
 export function optionalString(

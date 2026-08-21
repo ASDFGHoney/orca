@@ -84,6 +84,13 @@ export function foldRemoteFlagOccurrences(
   const repeatable = remoteRepeatableFlags(commandPath)
   const flags = new Map<string, string | boolean>()
   for (const { name, value } of occurrences) {
+    // Why: `--flag=false` means the flag was not requested. Deleting rather than storing
+    // `false` matches the local parser for consumers that read presence, and keeps a later
+    // `--flag` winning over an earlier `--flag=false` on both transports.
+    if (value === false) {
+      flags.delete(name)
+      continue
+    }
     const previous = flags.get(name)
     if (repeatable.has(name) && typeof previous === 'string') {
       // Why: a trailing valueless `--member` must not wipe the members already

@@ -503,6 +503,7 @@ import {
   RuntimeGraphReloadLifecycle
 } from './runtime-graph-reload-lifecycle'
 import {
+  LINEAR_SEARCH_MAX_LIMIT,
   LINEAR_WRITE_BODY_CAP,
   clampLinearProjectMetadataLimit,
   clampLinearProjectUpdatesLimit,
@@ -37420,7 +37421,7 @@ export class OrcaRuntimeService {
         throw this.linearAmbiguousProjectError(trimmed, candidates)
       }
       if (candidates.length === 0) {
-        throw this.linearUnmatchedProjectError(trimmed, [])
+        throw await this.linearUnmatchedProjectError(trimmed, [], team.workspaceId)
       }
       await this.assertLinearProjectIncludesTeam(candidates[0], team.id, team.workspaceId, trimmed)
       return candidates[0]
@@ -37438,7 +37439,7 @@ export class OrcaRuntimeService {
     if (candidates.length > 0) {
       await this.assertLinearProjectIncludesTeam(candidates[0], team.id, team.workspaceId, trimmed)
     }
-    throw this.linearUnmatchedProjectError(trimmed, candidates)
+    throw await this.linearUnmatchedProjectError(trimmed, candidates, team.workspaceId)
   }
 
   private linearAmbiguousProjectError(
@@ -37455,14 +37456,33 @@ export class OrcaRuntimeService {
     )
   }
 
-  private linearUnmatchedProjectError(
+  /**
+   * An exact-match miss still names near-misses so the caller can retry by id;
+   * the exact lookup cannot supply them, so they come from a fuzzy search.
+   */
+  private async linearUnmatchedProjectError(
     input: string,
-    projects: LinearProjectSummary[]
-  ): LinearAgentAccessError {
+    projects: LinearProjectSummary[],
+    workspaceId: string
+  ): Promise<LinearAgentAccessError> {
+    const suggestions =
+      projects.length > 0 ? projects : await this.searchLinearProjectSuggestions(input, workspaceId)
     return linearError('linear_invalid_project', `No Linear project exactly matched "${input}".`, {
-      projects: this.linearProjectCandidates(projects),
+      projects: this.linearProjectCandidates(suggestions),
       nextSteps: ['Run `orca linear project list --query <name> --json` and retry by id.']
     })
+  }
+
+  /** Suggestions are best-effort: a failed search must never replace the real miss. */
+  private async searchLinearProjectSuggestions(
+    query: string,
+    workspaceId: string
+  ): Promise<LinearProjectSummary[]> {
+    try {
+      return (await listLinearProjects(query, LINEAR_SEARCH_MAX_LIMIT, workspaceId, true)).items
+    } catch {
+      return []
+    }
   }
 
   private linearProjectCandidates(

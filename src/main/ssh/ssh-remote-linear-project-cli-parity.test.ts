@@ -140,6 +140,46 @@ describe('linear project edit matches the local CLI', () => {
   })
 })
 
+/**
+ * `--flag=value` is split before the boolean lookup on both transports. Local
+ * `parseArgs` coerces the value; the shim used to keep the raw string, so every
+ * boolean flag written that way read as off and silently did the opposite.
+ */
+describe('boolean flags written as --flag=value match the local CLI', () => {
+  it.each([
+    ['--hide-diff', true],
+    ['--hide-diff=true', true],
+    ['--hide-diff=1', true],
+    ['--hide-diff=false', false],
+    ['--hide-diff=0', false]
+  ])('reads %s as isDiffHidden %s', async (token, expected) => {
+    await expect(remote([...UPDATE_ADD, 'launch-q3', '--body', 'b', token])).resolves.toEqual({
+      params: { input: 'launch-q3', body: 'b', isDiffHidden: expected }
+    })
+  })
+
+  it('rejects a boolean flag carrying a value that is not a boolean', async () => {
+    await expect(
+      remote([...UPDATE_ADD, 'launch-q3', '--body', 'b', '--hide-diff=sometimes'])
+    ).resolves.toEqual({
+      error:
+        '--hide-diff is a boolean flag; pass --hide-diff on its own, or --hide-diff=true or --hide-diff=false.'
+    })
+  })
+
+  it('keeps a later bare flag winning over an earlier negated one', async () => {
+    await expect(
+      remote([...UPDATE_ADD, 'launch-q3', '--body', 'b', '--hide-diff=false', '--hide-diff'])
+    ).resolves.toEqual({ params: { input: 'launch-q3', body: 'b', isDiffHidden: true } })
+  })
+
+  it('keeps a later negated flag winning over an earlier bare one', async () => {
+    await expect(
+      remote([...UPDATE_ADD, 'launch-q3', '--body', 'b', '--hide-diff', '--hide-diff=false'])
+    ).resolves.toEqual({ params: { input: 'launch-q3', body: 'b', isDiffHidden: false } })
+  })
+})
+
 describe('linear project update add matches the local CLI', () => {
   it.each([
     [['launch-q3', '--body', ''], 'Linear project update body must not be empty'],

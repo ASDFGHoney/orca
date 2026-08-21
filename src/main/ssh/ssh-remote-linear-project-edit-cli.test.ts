@@ -189,10 +189,33 @@ describe('SSH Linear project edit value and clear exclusivity', () => {
     })
   }
 
-  it('rejects a clear flag that was given a value', async () => {
+  it('rejects a clear flag given a value that is not a boolean', async () => {
     await expect(dispatchEdit([...TARGET, '--clear-lead=maybe'])).rejects.toMatchObject({
       code: 'invalid_argument',
-      message: '--clear-lead takes no value'
+      message:
+        '--clear-lead is a boolean flag; pass --clear-lead on its own, or --clear-lead=true or --clear-lead=false.'
+    })
+  })
+
+  // Why: the local CLI coerces these; leaving the shim uncoerced made `--clear-lead=true`
+  // read as off over SSH and silently keep the lead the caller asked to drop.
+  it('clears the field for an explicit --clear-lead=true, as the local CLI does', async () => {
+    const dispatch = await dispatchEdit([...TARGET, '--clear-lead=true'])
+
+    expect(dispatch.mock.calls[0][0].params).toEqual({
+      input: 'launch-a1b2',
+      lead: null,
+      workspaceId: undefined
+    })
+  })
+
+  it('leaves the field untouched for --clear-lead=false, as the local CLI does', async () => {
+    const dispatch = await dispatchEdit([...TARGET, '--clear-lead=false', '--name', 'Renamed'])
+
+    expect(dispatch.mock.calls[0][0].params).toEqual({
+      input: 'launch-a1b2',
+      name: 'Renamed',
+      workspaceId: undefined
     })
   })
 })
@@ -269,7 +292,7 @@ describe('SSH Linear project edit argument rejection', () => {
       dispatchEdit(['linear', 'project', 'edit', '--name', 'Launch'])
     ).rejects.toMatchObject({
       code: 'invalid_argument',
-      message: 'Pass a project as a positional argument or --id <project>'
+      message: 'Pass a Linear project UUID, slugId, URL, or exact name positionally or as --id'
     })
     await expect(
       dispatchEdit([...TARGET, '--id', 'other', '--name', 'Launch'])

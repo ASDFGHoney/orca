@@ -1,3 +1,7 @@
+import {
+  cliBooleanFlagValueError,
+  parseCliBooleanFlagValue
+} from '../../shared/cli-boolean-flag-value'
 import { RemoteCliArgumentError, type ParsedRemoteCli } from './ssh-remote-cli-argument-error'
 import {
   foldRemoteFlagOccurrences,
@@ -18,10 +22,19 @@ export function parseRemoteCliArgs(argv: string[]): ParsedRemoteCli {
     // Why: the SSH relay-backed shim should accept values beginning with `--` via `--flag=value`.
     const equalsIndex = assignment.indexOf('=')
     if (equalsIndex !== -1) {
-      occurrences.push({
-        name: assignment.slice(0, equalsIndex),
-        value: assignment.slice(equalsIndex + 1)
-      })
+      const name = assignment.slice(0, equalsIndex)
+      const raw = assignment.slice(equalsIndex + 1)
+      // Why: parity with the local parser — an uncoerced `--hide-diff=true` reads as off
+      // here and silently posts the update with the diff the caller asked to hide.
+      if (isRemoteBooleanFlag(name, commandPath)) {
+        const enabled = parseCliBooleanFlagValue(raw)
+        if (enabled === null) {
+          throw new RemoteCliArgumentError('invalid_argument', cliBooleanFlagValueError(name))
+        }
+        occurrences.push({ name, value: enabled })
+        continue
+      }
+      occurrences.push({ name, value: raw })
       continue
     }
 
