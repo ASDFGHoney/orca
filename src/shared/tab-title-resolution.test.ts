@@ -11,7 +11,7 @@ describe('tab title resolution', () => {
     ).toBe('Claude working')
   })
 
-  it('places generated titles between manual and live titles when enabled', () => {
+  it('places generated titles between manual and status live titles when enabled', () => {
     expect(
       resolveTerminalTabTitle(
         { customTitle: null, generatedTitle: 'Refactor auth', title: 'Claude working' },
@@ -24,6 +24,19 @@ describe('tab title resolution', () => {
         true
       )
     ).toBe('Payments')
+  })
+
+  it('uses a meaningful live title ahead of a generated first-prompt title', () => {
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          generatedTitle: 'Upload the Kimi-K3 model to GitHub',
+          title: 'Refactor auth middleware'
+        },
+        true
+      )
+    ).toBe('Refactor auth middleware')
   })
 
   it('uses meaningful native OpenCode session titles before generated titles', () => {
@@ -152,6 +165,19 @@ describe('tab title resolution', () => {
         true
       )
     ).toBe('Fix flaky tests')
+  })
+
+  it('uses a meaningful live unified label ahead of a generated label', () => {
+    expect(
+      resolveUnifiedTabLabel(
+        {
+          customLabel: null,
+          generatedLabel: 'Upload the Kimi-K3 model to GitHub',
+          label: 'Refactor auth middleware'
+        },
+        true
+      )
+    ).toBe('Refactor auth middleware')
   })
 
   it('uses quick command labels before generated unified labels', () => {
