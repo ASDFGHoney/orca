@@ -35,8 +35,9 @@ export type ProcessSpec = {
   timeoutMs?: number
   /** Written to stdin then closed. Omit to leave stdin empty and closed. */
   input?: string
-  /** Cap on captured stdout/stderr; beyond it the process is killed. */
+  /** Cap on captured stdout/stderr; output past it is discarded. */
   maxOutputBytes?: number
+  /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
 }
 
@@ -104,13 +105,39 @@ export function spawnProcess(spec: ProcessSpec): ChildProcess {
 }
 
 /**
+ * Collects output up to a cap, so a chatty child cannot grow the heap.
+ *
+ * Accepts strings as well as buffers: a stream someone called `setEncoding` on
+ * emits strings, and concatenating those as buffers throws inside a `data`
+ * handler, where the rejection has nowhere to go and the caller just hangs.
+ */
+function createOutputSink(maxBytes: number): {
+  write: (chunk: Buffer | string) => void
+  text: () => string
+} {
+  const chunks: Buffer[] = []
+  let bytes = 0
+  return {
+    write(raw) {
+      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+      const remaining = maxBytes - bytes
+      if (remaining <= 0) {
+        return
+      }
+      chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk)
+      bytes += chunk.length
+    },
+    text: () => Buffer.concat(chunks).toString('utf8')
+  }
+}
+
+/**
  * Run a child process to completion and capture its output.
  *
  * Never rejects on a non-zero exit — the exit code is data. Rejects only when
  * the process could not be started at all.
  */
 export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
-  const timeoutMs = spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS
   const maxOutputBytes = spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
 
   return new Promise<ProcessResult>((resolve, reject) => {
@@ -122,73 +149,44 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       return
     }
 
-    const stdoutChunks: Buffer[] = []
-    const stderrChunks: Buffer[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
+    const stdout = createOutputSink(maxOutputBytes)
+    const stderr = createOutputSink(maxOutputBytes)
     let timedOut = false
     let settled = false
 
-    const collect = (chunks: Buffer[], chunk: Buffer, bytes: number): number => {
-      const remaining = maxOutputBytes - bytes
-      if (remaining <= 0) {
-        return bytes
-      }
-      chunks.push(chunk.length > remaining ? chunk.subarray(0, remaining) : chunk)
-      return bytes + chunk.length
-    }
-
-    const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+    const settle = (act: () => void): void => {
       if (settled) {
         return
       }
       settled = true
       clearTimeout(timer)
       spec.signal?.removeEventListener('abort', onAbort)
-      resolve({
-        code,
-        signal,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
-        timedOut
-      })
+      act()
     }
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdoutBytes = collect(stdoutChunks, chunk, stdoutBytes)
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderrBytes = collect(stderrChunks, chunk, stderrBytes)
-    })
+    child.stdout?.on('data', (chunk: Buffer | string) => stdout.write(chunk))
+    child.stderr?.on('data', (chunk: Buffer | string) => stderr.write(chunk))
 
     const timer = setTimeout(() => {
       timedOut = true
       terminate(child)
-    }, timeoutMs)
+    }, spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS)
     timer.unref?.()
 
     const onAbort = (): void => terminate(child)
     spec.signal?.addEventListener('abort', onAbort, { once: true })
 
-    child.once('error', (error) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      spec.signal?.removeEventListener('abort', onAbort)
-      reject(error)
-    })
-    child.once('close', (code, signal) => finish(code, signal))
+    child.once('error', (error) => settle(() => reject(error)))
+    child.once('close', (code, signal) =>
+      settle(() =>
+        resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
+      )
+    )
 
-    if (spec.input !== undefined) {
-      child.stdin?.end(spec.input)
-    } else {
-      // Why close rather than leave open: a child that reads stdin (a hook
-      // draining its payload, a CLI probing for a TTY) otherwise blocks until
-      // the timeout instead of seeing EOF immediately.
-      child.stdin?.end()
-    }
+    // Why close rather than leave open: a child that reads stdin (a hook
+    // draining its payload, a CLI probing for a TTY) otherwise blocks until the
+    // timeout instead of seeing EOF immediately.
+    child.stdin?.end(spec.input)
   })
 }
 

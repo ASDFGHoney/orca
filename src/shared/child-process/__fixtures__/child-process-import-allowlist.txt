@@ -56,7 +56,6 @@ src/main/daemon/daemon-process-start-time.ts
 src/main/emulator/android/android-avd-boot.ts
 src/main/emulator/android/android-command-runner.ts
 src/main/emulator/android/scrcpy-stream-session.ts
-src/main/emulator/serve-sim-execution.ts
 src/main/emulator/serve-sim-helper-processes.ts
 src/main/emulator/serve-sim-runtime-materializer.ts
 src/main/emulator/simctl-simulator-devices.ts
@@ -96,12 +95,9 @@ src/main/ipc/worktree-apfs-clone.ts
 src/main/ipc/wsl-watcher-process-exit.ts
 src/main/linux-lid-sleep-assertion.ts
 src/main/local-builds/local-build-candidate.ts
-src/main/local-worktree-filesystem.ts
 src/main/macos-system-sleep-assertion.ts
 src/main/macos-tcc-prompt-watch.ts
 src/main/memory/collector.ts
-src/main/memory/host-memory.ts
-src/main/memory/windows-process-resource-collector.ts
 src/main/native-chat/wsl-transcript-fs-process-slot.ts
 src/main/native-chat/wsl-transcript-fs-process-spawn.ts
 src/main/network/macos-system-resolver-health.ts
@@ -110,7 +106,6 @@ src/main/pi/agent-status-wsl-curl-source.ts
 src/main/plugins/plugin-host-process.ts
 src/main/ports/port-scan-command-execution.ts
 src/main/providers/macos-login-session-pty-probe.ts
-src/main/providers/macos-tcc-login-shell.ts
 src/main/providers/process-cwd.ts
 src/main/providers/windows-conpty-process-membership.ts
 src/main/providers/windows-foreground-process-rows.ts
