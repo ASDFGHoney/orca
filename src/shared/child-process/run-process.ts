@@ -1,5 +1,6 @@
 import {
   spawn as nodeSpawn,
+  spawnSync as nodeSpawnSync,
   type ChildProcess,
   type SpawnOptions as NodeSpawnOptions
 } from 'node:child_process'
@@ -202,5 +203,38 @@ function terminate(child: ChildProcess): void {
     child.kill()
   } catch {
     /* already gone */
+  }
+}
+
+/**
+ * Synchronous variant, for the call sites that genuinely cannot await — CLI
+ * entry points and teardown paths that run while the event loop is stopping.
+ *
+ * Prefer `runProcess`. This exists so those callers still get the Windows
+ * invariants (hidden console, correct `.cmd` argv) instead of reaching for
+ * `execFileSync` and re-deciding them.
+ */
+export function runProcessSync(spec: ProcessSpec): ProcessResult {
+  const resolved = resolveSpawn(spec, process.platform)
+  const result = nodeSpawnSync(resolved.file, [...resolved.args], {
+    ...resolved.options,
+    input: spec.input,
+    timeout: spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS,
+    maxBuffer: spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    encoding: 'buffer'
+  })
+  if (result.error && (result.error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') {
+    throw result.error
+  }
+  return {
+    code: result.status,
+    signal: result.signal,
+    stdout: result.stdout?.toString('utf8') ?? '',
+    stderr: result.stderr?.toString('utf8') ?? '',
+    // Why check both: Node reports a sync timeout as SIGTERM plus an ETIMEDOUT
+    // error, and which one arrives depends on how the child died.
+    timedOut:
+      result.signal === 'SIGTERM' ||
+      (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT'
   }
 }
