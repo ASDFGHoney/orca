@@ -1140,6 +1140,10 @@ export class AgentHookServer {
     // A live SessionStart proves a new agent process owns the retired pane just like a
     // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
     // Cursor's new-turn events are beforeSubmitPrompt/sessionStart, not UserPromptSubmit (STA-3487).
+    // Why not the full isNewTurnEvent map: that classifier stamps observation boundaries, but
+    // this gate is also a fence. pi/omp/prime-agent `before_agent_start` is a new-turn for
+    // stamping, yet lifting the retired-pane fence on it unfences a closed tab's pane after
+    // closedAgentStatusTabIds LRU eviction (STA-4114).
     if (
       event?.isReplay !== true &&
       (event?.hookEventName === 'UserPromptSubmit' ||

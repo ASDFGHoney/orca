@@ -24,6 +24,57 @@ describe('attachQueuedAgentLaunchAuthority', () => {
     expect(attachQueuedAgentLaunchAuthority({ command: 'codex exec summarize' })).toEqual({
       command: 'codex exec summarize'
     })
+    expect(attachQueuedAgentLaunchAuthority({ command: 'cursor-agent --foo' })).toEqual({
+      command: 'cursor-agent --foo'
+    })
+  })
+
+  it('does not mint a token for an unrecognized command even when launchConfig is present', () => {
+    expect(
+      attachQueuedAgentLaunchAuthority({
+        command: 'echo hi',
+        launchConfig: { agentArgs: '', agentEnv: {} }
+      })
+    ).toEqual({
+      command: 'echo hi',
+      launchConfig: { agentArgs: '', agentEnv: {} }
+    })
+  })
+
+  it('stamps a non-bare invocation when launchConfig is already present', () => {
+    const stamped = attachQueuedAgentLaunchAuthority({
+      command: 'codex exec summarize',
+      launchConfig: { agentCommand: 'codex exec summarize', agentArgs: '', agentEnv: {} }
+    })
+    expect(stamped.launchAgent).toBe('codex')
+    expect(stamped.launchToken).toMatch(UUID_RE)
+    expect(stamped.env?.ORCA_AGENT_LAUNCH_TOKEN).toBe(stamped.launchToken)
+  })
+
+  it('overwrites a captured ORCA_AGENT_LAUNCH_TOKEN with the minted token', () => {
+    const stamped = attachQueuedAgentLaunchAuthority({
+      command: 'codex resume sess-1',
+      launchAgent: 'codex',
+      launchConfig: {
+        agentCommand: 'codex',
+        agentArgs: '',
+        agentEnv: { CODEX_PROFILE: 'captured', ORCA_AGENT_LAUNCH_TOKEN: 'stale-token' }
+      },
+      env: { CODEX_PROFILE: 'captured', ORCA_AGENT_LAUNCH_TOKEN: 'stale-token' }
+    })
+    expect(stamped.launchToken).toMatch(UUID_RE)
+    expect(stamped.launchToken).not.toBe('stale-token')
+    expect(stamped.env?.ORCA_AGENT_LAUNCH_TOKEN).toBe(stamped.launchToken)
+    expect(stamped.env?.CODEX_PROFILE).toBe('captured')
+  })
+
+  it('mints a distinct token per call so a sibling cannot inherit authority', () => {
+    const first = attachQueuedAgentLaunchAuthority({ command: 'cursor-agent' })
+    const second = attachQueuedAgentLaunchAuthority({ command: 'cursor-agent' })
+    expect(first.launchToken).toMatch(UUID_RE)
+    expect(second.launchToken).toMatch(UUID_RE)
+    expect(first.launchToken).not.toBe(second.launchToken)
+    expect(first.env?.ORCA_AGENT_LAUNCH_TOKEN).not.toBe(second.env?.ORCA_AGENT_LAUNCH_TOKEN)
   })
 
   it('reuses an explicit launch token instead of minting another', () => {

@@ -3671,17 +3671,13 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   queueTabStartupCommand: (tabId, startup) => {
     // Why: launchToken is only meaningful for tracked TUI-agent launches; plain
     // shell commands must not mint a synthetic token a later typed agent could inherit.
+    // attachQueuedAgentLaunchAuthority is the sole mint — a leftover launchConfig
+    // fallback would stamp a token without injecting ORCA_AGENT_LAUNCH_TOKEN.
     const authorized = attachQueuedAgentLaunchAuthority(startup)
-    const launchToken = authorized.launchConfig
-      ? (authorized.launchToken ?? createBrowserUuid())
-      : undefined
     set((s) => ({
       pendingStartupByTabId: {
         ...s.pendingStartupByTabId,
-        [tabId]: {
-          ...authorized,
-          ...(launchToken ? { launchToken } : {})
-        }
+        [tabId]: { ...authorized }
       }
     }))
   },
