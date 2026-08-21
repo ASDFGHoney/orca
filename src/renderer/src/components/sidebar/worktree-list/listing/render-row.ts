@@ -10,6 +10,16 @@ export type RenderRow =
   | HostSectionRow
   | { type: 'lineage-group'; key: string; rows: WorktreeItemRow[] }
 
+export function getFolderWorkspaceSidebarRowKey(
+  row: Extract<HostSectionRow, { type: 'folder-workspace' }>,
+  defaultHostId: ExecutionHostId
+): string {
+  return composeWorktreeHostIdentity(
+    getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, defaultHostId),
+    folderWorkspaceKey(row.folderWorkspace.id)
+  )
+}
+
 export function getRenderRowKey(
   row: RenderRow,
   defaultHostId: ExecutionHostId = LOCAL_EXECUTION_HOST_ID
@@ -33,11 +43,7 @@ export function getRenderRowKey(
     return `pending:${row.creationId}`
   }
   if (row.type === 'folder-workspace') {
-    const hostId = getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, defaultHostId)
-    return `folder-workspace:${composeWorktreeHostIdentity(
-      hostId,
-      folderWorkspaceKey(row.folderWorkspace.id)
-    )}`
+    return `folder-workspace:${getFolderWorkspaceSidebarRowKey(row, defaultHostId)}`
   }
   return `wt:${row.rowKey}`
 }

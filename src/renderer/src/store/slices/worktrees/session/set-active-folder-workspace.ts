@@ -115,7 +115,8 @@ export function createSetActiveFolderWorkspace(
         folderWorkspaces: workspace.isUnread
           ? s.folderWorkspaces.map((entry) =>
               entry.id === folderWorkspaceId &&
-              (!executionHostId || folderWorkspaceMatchesHost(entry, executionHostId))
+              (!executionHostId ||
+                folderWorkspaceMatchesHost(entry, s.projectGroups, executionHostId))
                 ? { ...entry, isUnread: false }
                 : entry
             )

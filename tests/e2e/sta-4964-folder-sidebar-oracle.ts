@@ -81,6 +81,24 @@ export async function expectFolderWorkspaceSidebarGrouping(
     await expect(runtimeRow).toContainText(targets.runtimeWorkspace.name)
     await expect(localRow).toHaveCount(1)
     await expect(localRow).toContainText(targets.localWorkspace.name)
+    await localRow.locator('[data-worktree-card-surface]').click()
+    await expect
+      .poll(() =>
+        page.evaluate(() => ({
+          worktreeId: window.__store?.getState().activeWorktreeId ?? null,
+          hostId: window.__store?.getState().activeWorkspaceExecutionHostId ?? null
+        }))
+      )
+      .toEqual({ worktreeId: `folder:${targets.localWorkspace.id}`, hostId: 'local' })
+    await runtimeRow.locator('[data-worktree-card-surface]').click()
+    await expect
+      .poll(() =>
+        page.evaluate(() => ({
+          worktreeId: window.__store?.getState().activeWorktreeId ?? null,
+          hostId: window.__store?.getState().activeWorkspaceExecutionHostId ?? null
+        }))
+      )
+      .toEqual({ worktreeId: `folder:${targets.runtimeWorkspace.id}`, hostId: args.hostId })
     const placement = await page.evaluate(
       (targetIdentities) => {
         const rows = [

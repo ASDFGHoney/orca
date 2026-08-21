@@ -103,6 +103,26 @@ describe('worktree list folder reveal', () => {
     ).toMatchObject({ hostId: 'runtime:env-1', displayName: 'Runtime folder' })
   })
 
+  it('uses the owning group for legacy workspace host resolution', () => {
+    const folderWorkspace = makeFolderWorkspace({ connectionId: 'legacy-target' })
+    const runtimeGroup = makeProjectGroup({
+      id: folderWorkspace.projectGroupId,
+      executionHostId: 'runtime:env-1'
+    })
+
+    expect(
+      getKnownSidebarWorktreeById(
+        folderWorkspaceKey(folderWorkspace.id),
+        new Map(),
+        [folderWorkspace],
+        [],
+        'runtime:env-1',
+        [runtimeGroup],
+        'local'
+      )
+    ).toMatchObject({ hostId: 'runtime:env-1' })
+  })
+
   it('keeps pending reveals alive for folder workspaces missing from raw git worktrees', () => {
     const folderWorkspace = makeFolderWorkspace()
     const gitWorktree = makeWorktree('git-worktree-1')
@@ -135,6 +155,33 @@ describe('worktree list folder reveal', () => {
         [child, root]
       )
     ).toEqual([getProjectGroupHeaderKey(root.id), getProjectGroupHeaderKey(child.id)])
+  })
+
+  it('expands the requested host when folder and group ids collide', () => {
+    const runtimeHostId = 'runtime:env-1' as const
+    const groups = [
+      makeProjectGroup({ id: 'group-child', name: 'Local', executionHostId: 'local' }),
+      makeProjectGroup({
+        id: 'group-child',
+        name: 'Runtime',
+        executionHostId: runtimeHostId
+      })
+    ]
+    const workspaces = [
+      makeFolderWorkspace({ name: 'Local', executionHostId: 'local' }),
+      makeFolderWorkspace({ name: 'Runtime', executionHostId: runtimeHostId })
+    ]
+
+    expect(
+      getFolderWorkspaceRevealGroupKeys(folderWorkspaceKey(workspaces[0]!.id), workspaces, groups, {
+        groupBy: 'repo',
+        defaultHostId: 'local',
+        executionHostId: runtimeHostId
+      })
+    ).toEqual([
+      getProjectGroupHeaderKey(JSON.stringify([runtimeHostId, 'group-child'])),
+      `host:${runtimeHostId}`
+    ])
   })
 })
 

@@ -554,12 +554,16 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   )
 
   const handleCopyPath = useCallback(() => {
-    window.api.ui.writeClipboardText(worktree.path)
+    void window.api.ui.writeClipboardText(worktree.path)
   }, [worktree.path])
 
   const handleToggleRead = useCallback(() => {
-    updateWorktreeMeta(worktree.id, { isUnread: !worktree.isUnread })
-  }, [worktree.id, worktree.isUnread, updateWorktreeMeta])
+    void updateWorktreeMeta(
+      worktree.id,
+      { isUnread: !worktree.isUnread },
+      worktree.hostId ? { executionHostId: worktree.hostId } : undefined
+    )
+  }, [worktree.hostId, worktree.id, worktree.isUnread, updateWorktreeMeta])
 
   const handleTogglePin = useCallback(() => {
     setWorktreesPinnedAndReveal([worktree.id], !worktree.isPinned)
@@ -642,6 +646,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
       // Why: the same workspace ID can exist under two hosts. Naming the owner
       // keeps the dialog on this row instead of the ambiguous lookup.
       repoId: worktree.repoId,
+      executionHostId: worktree.hostId,
       currentDisplayName: worktree.displayName,
       currentIssue: worktree.linkedIssue,
       currentPR: worktree.linkedPR,
@@ -650,6 +655,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
     })
   }, [
     worktree.id,
+    worktree.hostId,
     worktree.repoId,
     worktree.displayName,
     worktree.linkedIssue,

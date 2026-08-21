@@ -6,6 +6,16 @@ import {
 import type { FolderWorkspace } from './folder-workspace-types'
 import type { ProjectGroup } from './project-group-types'
 
+export function getProjectGroupHostId(
+  projectGroup: Pick<ProjectGroup, 'connectionId' | 'executionHostId'>,
+  defaultHostId: ExecutionHostId
+): ExecutionHostId {
+  return (
+    normalizeExecutionHostId(projectGroup.executionHostId) ??
+    (projectGroup.connectionId ? toSshExecutionHostId(projectGroup.connectionId) : defaultHostId)
+  )
+}
+
 export function getFolderWorkspaceHostId(
   folderWorkspace: Pick<FolderWorkspace, 'connectionId' | 'executionHostId'>,
   projectGroup: Pick<ProjectGroup, 'connectionId' | 'executionHostId'> | null | undefined,
@@ -36,22 +46,50 @@ export function getFolderWorkspaceHostIdFromGroups(
   if (folderHostId) {
     return folderHostId
   }
-  const groupExecutionHostIds = new Set(
-    matchingGroups
-      .map((group) => normalizeExecutionHostId(group.executionHostId))
-      .filter((hostId): hostId is ExecutionHostId => hostId !== null)
+  const resolvedGroupHostIds = new Set(
+    matchingGroups.map((group) => getFolderWorkspaceHostId(folderWorkspace, group, defaultHostId))
   )
-  if (groupExecutionHostIds.size === 1) {
-    return [...groupExecutionHostIds][0]!
+  if (resolvedGroupHostIds.size === 1) {
+    return [...resolvedGroupHostIds][0]!
   }
   if (folderWorkspace.connectionId) {
     return toSshExecutionHostId(folderWorkspace.connectionId)
   }
-  const groupConnectionHostIds = new Set(
-    matchingGroups
-      .map((group) => group.connectionId)
-      .filter((connectionId): connectionId is string => Boolean(connectionId))
-      .map(toSshExecutionHostId)
+  return defaultHostId
+}
+
+export function findFolderWorkspaceProjectGroup(
+  folderWorkspace: Pick<FolderWorkspace, 'connectionId' | 'executionHostId' | 'projectGroupId'>,
+  projectGroups: readonly ProjectGroup[],
+  defaultHostId: ExecutionHostId
+): ProjectGroup | null {
+  const matchingGroups = projectGroups.filter(
+    (group) => group.id === folderWorkspace.projectGroupId
   )
-  return groupConnectionHostIds.size === 1 ? [...groupConnectionHostIds][0]! : defaultHostId
+  if (matchingGroups.length <= 1) {
+    return matchingGroups[0] ?? null
+  }
+  const targetHostId = getFolderWorkspaceHostIdFromGroups(
+    folderWorkspace,
+    matchingGroups,
+    defaultHostId
+  )
+  const exactHostMatches = matchingGroups.filter(
+    (group) => normalizeExecutionHostId(group.executionHostId) === targetHostId
+  )
+  if (exactHostMatches.length === 1) {
+    return exactHostMatches[0]!
+  }
+  if (folderWorkspace.connectionId) {
+    const connectionMatches = matchingGroups.filter(
+      (group) => group.connectionId === folderWorkspace.connectionId
+    )
+    if (connectionMatches.length === 1) {
+      return connectionMatches[0]!
+    }
+  }
+  const compatibleGroups = matchingGroups.filter(
+    (group) => getFolderWorkspaceHostId(folderWorkspace, group, defaultHostId) === targetHostId
+  )
+  return compatibleGroups.length === 1 ? compatibleGroups[0]! : null
 }

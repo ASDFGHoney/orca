@@ -1,14 +1,20 @@
 import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
-import { getWorktreeExecutionHostId } from '../../../../../../shared/execution-host'
+import {
+  getWorktreeExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID
+} from '../../../../../../shared/execution-host'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
-import type { RenderRow } from '../listing/render-row'
+import { getFolderWorkspaceSidebarRowKey, type RenderRow } from '../listing/render-row'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { isPinnedWorktreeRow, type WorktreeItemRow } from '../listing/renderable-rows'
 import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
 
-export function getRenderRowSidebarKey(row: RenderRow): string | null {
+export function getRenderRowSidebarKey(
+  row: RenderRow,
+  defaultHostId: ExecutionHostId = LOCAL_EXECUTION_HOST_ID
+): string | null {
   if (row.type === 'header') {
     return row.key
   }
@@ -16,7 +22,7 @@ export function getRenderRowSidebarKey(row: RenderRow): string | null {
     return row.rowKey
   }
   if (row.type === 'folder-workspace') {
-    return folderWorkspaceKey(row.folderWorkspace.id)
+    return getFolderWorkspaceSidebarRowKey(row, defaultHostId)
   }
   if (row.type === 'pending-creation') {
     return `pending:${row.creationId}`
@@ -34,7 +40,10 @@ export function rowKeyMatchesRenderRow(row: RenderRow, rowKey: string): boolean 
   if (row.type === 'lineage-group') {
     return row.rows.some((item) => item.rowKey === rowKey)
   }
-  return getRenderRowSidebarKey(row) === rowKey
+  return (
+    getRenderRowSidebarKey(row) === rowKey ||
+    (row.type === 'folder-workspace' && folderWorkspaceKey(row.folderWorkspace.id) === rowKey)
+  )
 }
 
 function itemMatchesWorktree(
