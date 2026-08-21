@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { resolveSpawn, runProcessSync } from './run-process'
-import { WINDOWS_ARGUMENT_CORPUS } from './windows-command-line-corpus'
+import { WINDOWS_ARGUMENT_CORPUS } from './__fixtures__/windows-argument-corpus'
 
 const SPEC = { program: 'C:\\bin\\agent.cmd', args: ['--prompt', 'hi'] }
 

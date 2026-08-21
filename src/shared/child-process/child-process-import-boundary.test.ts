@@ -1,7 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CHILD_PROCESS_IMPORT_ALLOWLIST } from './child-process-import-allowlist'
 
 /**
  * Guard the spawn chokepoint at the tree level rather than per call site.
@@ -15,6 +14,15 @@ import { CHILD_PROCESS_IMPORT_ALLOWLIST } from './child-process-import-allowlist
  * to be correct today, because "correct today" is exactly what the wrong files
  * also were before someone copied them.
  */
+/** The ratchet, held as data so it reads as the list it is. */
+const CHILD_PROCESS_IMPORT_ALLOWLIST: readonly string[] = readFileSync(
+  join(__dirname, '__fixtures__', 'child-process-import-allowlist.txt'),
+  'utf8'
+)
+  .split('\n')
+  .map((line) => line.trim())
+  .filter((line) => line.length > 0 && !line.startsWith('#'))
+
 const IMPORT_PATTERN =
   /(?:from\s+['"]node:child_process['"]|from\s+['"]child_process['"]|require\(\s*['"]node:child_process['"]|require\(\s*['"]child_process['"])/
 

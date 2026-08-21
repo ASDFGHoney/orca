@@ -4,7 +4,7 @@ import {
   isCmdInterpretedProgram,
   quoteWindowsArgument
 } from './windows-command-line'
-import { WINDOWS_ARGUMENT_CORPUS } from './windows-command-line-corpus'
+import { WINDOWS_ARGUMENT_CORPUS } from './__fixtures__/windows-argument-corpus'
 
 /**
  * Decode a command line the way `CommandLineToArgvW` does, so the encoder is

@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runProcess } from './run-process'
-import { WINDOWS_ARGUMENT_CORPUS, WINDOWS_ARGUMENT_CORPUS_ENV } from './windows-command-line-corpus'
+import {
+  WINDOWS_ARGUMENT_CORPUS,
+  WINDOWS_ARGUMENT_CORPUS_ENV
+} from './__fixtures__/windows-argument-corpus'
 
 /**
  * The other half of the encoding proof: the unit test checks the bytes against
