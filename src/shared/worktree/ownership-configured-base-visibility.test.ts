@@ -151,11 +151,38 @@ describe('a configured worktree base that collides with a built-in visibility so
     })
 
     expect(
-      detect(repo, String.raw`F:\GitHub\OrbisCXM\.claude\worktrees\OrbisCXM\squash`)
+      detect(repo, String.raw`f:\github\ORBISCXM\.claude\worktrees\OrbisCXM\squash`)
     ).toMatchObject({
       ownership: 'external',
       visible: true
     })
+  })
+
+  it('matches configured bases across Windows UNC casing and separators', () => {
+    const repo = makeRepo({
+      path: String.raw`\\BuildHost\Share\OrbisCXM`,
+      worktreeBasePath: String.raw`.claude\worktrees`
+    })
+
+    expect(
+      detect(repo, '//buildhost/share/orbiscxm/.claude/worktrees/OrbisCXM/squash')
+    ).toMatchObject({ ownership: 'external', visible: true })
+  })
+
+  it('resolves a relative configured base on the SSH execution host', () => {
+    const repo = makeRepo({
+      path: '/remote/OrbisCXM',
+      connectionId: 'ssh-1',
+      worktreeBasePath: '.claude/worktrees'
+    })
+
+    const detected = detect(repo, '/remote/OrbisCXM/.claude/worktrees/review')
+
+    expect(detected).toMatchObject({
+      ownership: 'external',
+      visible: true
+    })
+    expect(detected.visibilitySource).toBeUndefined()
   })
 
   it('resolves an absolute configured base that matches a built-in source', () => {
@@ -183,9 +210,12 @@ describe('agent scratch stays hidden for repos that did not configure that base 
   const scratchWorktree = '/repos/OrbisCXM/.claude/worktrees/OrbisCXM/agent-a04ccaaa'
 
   it('hides an unconfigured .claude/worktrees checkout', () => {
-    expect(detect(makeRepo(), scratchWorktree)).toMatchObject({
+    const detected = detect(makeRepo(), scratchWorktree)
+
+    expect(detected).toMatchObject({
       ownership: 'agent-scratch',
-      visible: false
+      visible: false,
+      visibilitySource: { kind: 'built-in', id: 'claude' }
     })
   })
 
