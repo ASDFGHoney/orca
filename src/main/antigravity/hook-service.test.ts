@@ -106,7 +106,11 @@ describe('AntigravityHookService', () => {
       expect(script).toContain('setlocal DisableDelayedExpansion')
     } else {
       expect(script).toContain('hook_event_name=${ORCA_ANTIGRAVITY_EVENT}')
-      expect(script).toContain(`payload=$(${POSIX_HOOK_STDIN_READER})`)
+      expect(script).toContain(`${POSIX_HOOK_STDIN_READER} <&3 &`)
+      expect(script).toContain('command -p sleep')
+      expect(script).toContain('kill -9 "$_orca_cat"')
+      expect(script).toContain('exec 3<&0')
+      expect(script.indexOf('[ -z "$ORCA_PANE_KEY" ]')).toBeLessThan(script.indexOf('_orca_cat=$!'))
       expect(script).toContain("payload='{}'")
       expect(script).not.toContain('if [ -z "$payload" ]; then\n  exit 0\nfi')
       // Why: payload is piped to curl via stdin (`payload@-`) so it never lands

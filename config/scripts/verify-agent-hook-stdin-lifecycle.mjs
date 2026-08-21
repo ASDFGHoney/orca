@@ -140,10 +140,23 @@ function readGeneratedScripts(home, minMtime) {
       throw new Error([fileName, ' predates the Electron launch'].join(''))
     }
     const body = readFileSync(path, 'utf8')
-    const captureIndex = body.indexOf('payload=$(cat)')
-    const firstExitIndex = body.indexOf('exit 0')
-    if (captureIndex === -1 || firstExitIndex <= captureIndex) {
-      throw new Error([fileName, ' can exit before capturing stdin'].join(''))
+    if (fileName === 'antigravity-hook.sh') {
+      const guardIndex = body.indexOf('[ -z "$ORCA_PANE_KEY" ]')
+      const captureIndex = body.indexOf('exec 3<&0')
+      if (
+        guardIndex === -1 ||
+        captureIndex === -1 ||
+        captureIndex <= guardIndex ||
+        !body.includes('kill -9 "$_orca_cat"')
+      ) {
+        throw new Error([fileName, ' is missing the bounded stdin watchdog'].join(''))
+      }
+    } else {
+      const captureIndex = body.indexOf('payload=$(cat)')
+      const firstExitIndex = body.indexOf('exit 0')
+      if (captureIndex === -1 || firstExitIndex <= captureIndex) {
+        throw new Error([fileName, ' can exit before capturing stdin'].join(''))
+      }
     }
     return { body, fileName, path, source }
   })
