@@ -59,4 +59,17 @@ describe('renderer PTY delivery claims', () => {
     setRendererPtyVisibilityClaim({}, PTY_ID, false)
     expect(setRendererPtyVisible).toHaveBeenCalledWith(PTY_ID, false)
   })
+
+  it('ungates a visible renderer even while a stale hidden owner still holds a claim', () => {
+    const visiblePane = {}
+    const staleHidden = acquireHiddenRendererPtyDeliveryClaim(PTY_ID)
+    expect(setHiddenRendererPty).toHaveBeenLastCalledWith(PTY_ID, true)
+
+    setRendererPtyVisibilityClaim(visiblePane, PTY_ID, true)
+    expect(setHiddenRendererPty).toHaveBeenLastCalledWith(PTY_ID, false)
+
+    staleHidden()
+    expect(setHiddenRendererPty).toHaveBeenLastCalledWith(PTY_ID, false)
+    releaseRendererPtyVisibilityClaim(visiblePane)
+  })
 })
