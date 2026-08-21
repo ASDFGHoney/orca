@@ -154,7 +154,8 @@ export type TabsSlice = {
   createEmptySplitGroup: (
     worktreeId: string,
     sourceGroupId: string,
-    direction: TabSplitDirection
+    direction: TabSplitDirection,
+    opts?: { activate?: boolean }
   ) => string | null
   moveUnifiedTabToGroup: (
     tabId: string,
@@ -1636,7 +1637,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
     return true
   },
 
-  createEmptySplitGroup: (worktreeId, sourceGroupId, direction) => {
+  createEmptySplitGroup: (worktreeId, sourceGroupId, direction, opts) => {
     const newGroupId = createBrowserUuid()
     const newGroup: TabGroup = {
       id: newGroupId,
@@ -1644,6 +1645,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       activeTabId: null,
       tabOrder: []
     }
+    const shouldActivate = opts?.activate !== false
     set((state) => {
       const existing = state.groupsByWorktree[worktreeId] ?? []
       const currentLayout =
@@ -1660,7 +1662,14 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
           ...state.layoutByWorktree,
           [worktreeId]: replaceLeaf(currentLayout, sourceGroupId, replacement)
         },
-        activeGroupIdByWorktree: { ...state.activeGroupIdByWorktree, [worktreeId]: newGroupId }
+        ...(shouldActivate
+          ? {
+              activeGroupIdByWorktree: {
+                ...state.activeGroupIdByWorktree,
+                [worktreeId]: newGroupId
+              }
+            }
+          : {})
       }
     })
     get().recordFeatureInteraction?.('terminal-panes')
