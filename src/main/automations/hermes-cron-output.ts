@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { open, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { openLiveSqliteReadonly } from '../sqlite/live-sqlite-readonly'
+import Database from '../sqlite/sync-database'
 
 const HERMES_HOME = process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes')
 const HERMES_OUTPUT_DIR = join(HERMES_HOME, 'cron', 'output')
@@ -769,7 +769,7 @@ function readHermesSessionDbRunRefs(jobId: string): HermesSessionRunRef[] {
     return []
   }
   try {
-    const db = openLiveSqliteReadonly(HERMES_STATE_DB)
+    const db = new Database(HERMES_STATE_DB, { readonly: true, fileMustExist: true })
     try {
       const pattern = `cron\\_${escapeSqlLike(jobId)}\\_%`
       const rows = db
@@ -803,7 +803,7 @@ function readHermesSessionDbRunById(jobId: string, runId: string): unknown {
     return null
   }
   try {
-    const db = openLiveSqliteReadonly(HERMES_STATE_DB)
+    const db = new Database(HERMES_STATE_DB, { readonly: true, fileMustExist: true })
     try {
       const row = db
         .prepare(

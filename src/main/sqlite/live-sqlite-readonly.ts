@@ -1,4 +1,7 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+// Why: a namespace import defers export resolution to call time. Named imports bind at
+// module evaluation, so any suite that partially mocks `fs` fails the moment this module
+// is pulled into its graph - even when it never touches sqlite.
+import * as nodeFs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import SyncDatabase from './sync-database'
@@ -37,10 +40,13 @@ export function isLiveSqliteUnavailableError(error: unknown): boolean {
 
 type LiveSqliteFileCopy = (source: string, dest: string) => void
 
-let copyLiveSqliteFile: LiveSqliteFileCopy = copyFileSync
+const DEFAULT_LIVE_SQLITE_FILE_COPY: LiveSqliteFileCopy = (src, dest) =>
+  nodeFs.copyFileSync(src, dest)
+
+let copyLiveSqliteFile: LiveSqliteFileCopy = DEFAULT_LIVE_SQLITE_FILE_COPY
 
 export function setLiveSqliteFileCopyForTests(copy: LiveSqliteFileCopy | null): void {
-  copyLiveSqliteFile = copy ?? copyFileSync
+  copyLiveSqliteFile = copy ?? DEFAULT_LIVE_SQLITE_FILE_COPY
 }
 
 type SnapshotLease = {
@@ -87,16 +93,16 @@ function configureQueryOnly(db: SyncDatabase): SyncDatabase {
 }
 
 function copyLiveSqliteSnapshot(sourcePath: string): SnapshotLease {
-  const dir = mkdtempSync(join(tmpdir(), 'orca-live-sqlite-'))
+  const dir = nodeFs.mkdtempSync(join(tmpdir(), 'orca-live-sqlite-'))
   const dbFile = join(dir, 'db.sqlite')
   try {
     copyLiveSqliteFile(sourcePath, dbFile)
     const walPath = `${sourcePath}-wal`
-    if (existsSync(walPath)) {
+    if (nodeFs.existsSync(walPath)) {
       copyLiveSqliteFile(walPath, `${dbFile}-wal`)
     }
   } catch (error) {
-    rmSync(dir, { recursive: true, force: true })
+    nodeFs.rmSync(dir, { recursive: true, force: true })
     throw error
   }
   return { dir, dbFile, refs: 0, idleTimer: null }
@@ -112,7 +118,7 @@ function clearSnapshotIdle(lease: SnapshotLease): void {
 function disposeSnapshot(sourcePath: string, lease: SnapshotLease): void {
   clearSnapshotIdle(lease)
   snapshotLeases.delete(sourcePath)
-  rmSync(lease.dir, { recursive: true, force: true })
+  nodeFs.rmSync(lease.dir, { recursive: true, force: true })
 }
 
 function acquireSnapshot(sourcePath: string): { dbFile: string; release: () => void } {
