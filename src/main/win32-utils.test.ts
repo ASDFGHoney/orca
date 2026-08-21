@@ -6,6 +6,7 @@ import {
   getCmdExePath,
   getRegExePath,
   getSpawnArgsForWindows,
+  wrapWindowsStartWait,
   isPermissionError,
   isWindowsBatchScript,
   resolveWindowsCommand,
@@ -116,6 +117,37 @@ describe('getSpawnArgsForWindows', () => {
     withPlatform('win32', () => {
       const { spawnArgs } = getSpawnArgsForWindows('C:\\Tools\\idea.cmd', ['C:\\workspaces\\orca'])
       expect(spawnArgs).toEqual(['/d', '/c', 'C:\\Tools\\idea.cmd', 'C:\\workspaces\\orca'])
+    })
+  })
+
+  it('wraps an interactive login in start /wait with an empty title argv', () => {
+    withPlatform('win32', () => {
+      const { spawnCmd, spawnArgs } = wrapWindowsStartWait(getCmdExePath(), [
+        '/d',
+        '/c',
+        'C:\\Tools\\claude.cmd',
+        'auth',
+        'login',
+        '--claudeai'
+      ])
+      expect(spawnCmd).toBe(getCmdExePath())
+      expect(spawnArgs).toEqual([
+        '/d',
+        '/c',
+        'start',
+        '',
+        '/wait',
+        getCmdExePath(),
+        '/d',
+        '/c',
+        'C:\\Tools\\claude.cmd',
+        'auth',
+        'login',
+        '--claudeai'
+      ])
+      expect(spawnArgs[3]).toBe('')
+      expect(spawnArgs).not.toContain('/B')
+      expect(spawnArgs).not.toContain('""')
     })
   })
 

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import type { ClaudeManagedAccount } from '../../shared/managed-account-types'
 import { readActiveClaudeKeychainCredentials } from './keychain'
+import { getCmdExePath } from '../../shared/windows-batch-spawn'
 import {
   createService,
   resetClaudeKeychainMocks,
@@ -549,9 +550,9 @@ describe('ClaudeAccountService credential capture', () => {
       const addPromise = service.addAccount()
       await vi.waitFor(() => {
         expect(spawnMock).toHaveBeenCalledWith(
-          process.env.ComSpec ?? 'cmd.exe',
-          ['/d', '/v:off', '/s', '/c', '""claude" "auth" "login" "--claudeai""'],
-          expect.objectContaining({ shell: false, windowsVerbatimArguments: true })
+          getCmdExePath(),
+          ['/d', '/c', 'start', '', '/wait', 'claude', 'auth', 'login', '--claudeai'],
+          expect.objectContaining({ stdio: 'ignore', windowsHide: true })
         )
       })
 

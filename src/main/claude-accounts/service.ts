@@ -35,6 +35,7 @@ import { parseWslUncPath } from '../../shared/wsl-paths'
 import { toWindowsWslPath } from '../wsl'
 import { runWslProcess } from '../wsl/wsl-runner'
 import { buildWindowsCommandInvocation } from './windows-command-invocation'
+import { buildWindowsHostInteractiveLoginSpawn } from '../../shared/windows-interactive-login-spawn'
 import {
   getClaudeSelectionTargetForAccount,
   getSelectedClaudeAccountIdForTarget,
@@ -1043,8 +1044,27 @@ export class ClaudeAccountService {
     options?: { allowFailure?: boolean; signal?: AbortSignal; keepStdinOpen?: boolean }
   ): Promise<string> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const spawnConfig =
-        configDir.linuxPath && configDir.wslDistro
+      const isWindowsHostInteractiveLogin =
+        process.platform === 'win32' &&
+        configDir.linuxPath === null &&
+        configDir.wslDistro === null &&
+        args[0] === 'auth' &&
+        args[1] === 'login'
+      const interactiveLogin = isWindowsHostInteractiveLogin
+        ? buildWindowsHostInteractiveLoginSpawn(resolveClaudeCommand(), args)
+        : null
+      const spawnConfig = interactiveLogin
+        ? {
+            command: interactiveLogin.command,
+            args: interactiveLogin.args,
+            env: {
+              ...process.env,
+              CLAUDE_CONFIG_DIR: configDir.windowsPath
+            },
+            shell: false,
+            windowsVerbatimArguments: false
+          }
+        : configDir.linuxPath && configDir.wslDistro
           ? {
               command: 'wsl.exe',
               args: [
@@ -1082,20 +1102,24 @@ export class ClaudeAccountService {
         // Why: Claude's browser auth can bind its callback lifetime to stdin.
         // Keeping stdin open prevents hidden managed-login runs from tearing down
         // the local callback server before the browser returns.
-        stdio: [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+        stdio: interactiveLogin
+          ? interactiveLogin.stdio
+          : [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         shell: spawnConfig.shell,
         // On Windows this is wsl.exe or a cmd invocation; without the flag it
         // opens a console and steals foreground on every managed login (#10488).
         windowsHide: true,
         windowsVerbatimArguments: spawnConfig.windowsVerbatimArguments,
+        windowsHide: interactiveLogin?.windowsHide,
         env: spawnConfig.env,
         // Why: Claude auth can leave browser/login descendants alive after denial.
         // A process group lets cancellation terminate the whole POSIX login tree.
         detached: process.platform !== 'win32'
       })
+      interactiveLogin?.dispose()
       const stdout = child.stdout
       const stderr = child.stderr
-      if (!stdout || !stderr) {
+      if (!interactiveLogin && (!stdout || !stderr)) {
         if (options?.keepStdinOpen) {
           child.stdin?.destroy()
         }
@@ -1130,8 +1154,8 @@ export class ClaudeAccountService {
           clearTimeout(timeout)
           timeout = null
         }
-        stdout.off('data', appendOutput)
-        stderr.off('data', appendOutput)
+        stdout?.off('data', appendOutput)
+        stderr?.off('data', appendOutput)
         child.off('error', onError)
         child.off(completionEvent, onDone)
         options?.signal?.removeEventListener('abort', onAbort)
@@ -1139,8 +1163,8 @@ export class ClaudeAccountService {
           child.stdin?.destroy()
         }
         if (completesOnExit) {
-          stdout.destroy()
-          stderr.destroy()
+          stdout?.destroy()
+          stderr?.destroy()
         }
       }
       const settle = (callback: () => void): void => {
@@ -1229,8 +1253,8 @@ export class ClaudeAccountService {
         })
       }
 
-      stdout.on('data', appendOutput)
-      stderr.on('data', appendOutput)
+      stdout?.on('data', appendOutput)
+      stderr?.on('data', appendOutput)
       child.on('error', onError)
       // Native Windows browsers can inherit these pipes and indefinitely delay close.
       child.on(completionEvent, onDone)

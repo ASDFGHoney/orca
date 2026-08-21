@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   deleteKeychainMock,
   getVersionManagerBinPathsMock,
+  openWindowsInteractiveStdioMock,
   readKeychainMock,
   resolveCliCommandMock,
   rmSyncMock,
@@ -16,6 +17,9 @@ const {
 } = vi.hoisted(() => ({
   deleteKeychainMock: vi.fn(),
   getVersionManagerBinPathsMock: vi.fn(),
+  openWindowsInteractiveStdioMock: vi.fn(
+    (): { stdio: [number, number, number]; dispose: () => void } | 'inherit' => 'inherit'
+  ),
   readKeychainMock: vi.fn(),
   resolveCliCommandMock: vi.fn(),
   rmSyncMock: vi.fn(),
@@ -44,6 +48,22 @@ vi.mock('../../main/claude-accounts/keychain', () => ({
 vi.mock('../../shared/node-cli-command-resolution', () => ({
   getVersionManagerBinPaths: getVersionManagerBinPathsMock,
   resolveCliCommand: resolveCliCommandMock
+}))
+vi.mock('../../shared/windows-console-stdio', () => ({
+  openWindowsInteractiveStdio: openWindowsInteractiveStdioMock,
+  stdioForWindowsInteractiveChild: (json: boolean) => {
+    const opened = openWindowsInteractiveStdioMock()
+    if (opened === 'inherit') {
+      return {
+        stdio: ['inherit', json ? process.stderr : 'inherit', 'inherit'],
+        dispose: () => {}
+      }
+    }
+    return {
+      stdio: [opened.stdio[0], json ? process.stderr : opened.stdio[1], opened.stdio[2]],
+      dispose: opened.dispose
+    }
+  }
 }))
 
 import { ACCOUNT_HANDLERS } from './account'
@@ -105,6 +125,7 @@ describe('account CLI handlers', () => {
   beforeEach(() => {
     Object.defineProperty(process, 'platform', originalPlatform)
     spawnMock.mockReset().mockImplementation(() => successfulChild())
+    openWindowsInteractiveStdioMock.mockReset().mockReturnValue('inherit')
     resolveCliCommandMock.mockReset().mockImplementation((command: string) => command)
     getVersionManagerBinPathsMock.mockReset().mockReturnValue([])
     readKeychainMock.mockReset().mockResolvedValue(null)
@@ -157,6 +178,40 @@ describe('account CLI handlers', () => {
     expect(callMock).toHaveBeenCalledWith('accounts.addCodexFromHome', {
       sourceHome: spawnOptions.env.CODEX_HOME
     })
+  })
+
+  it('passes Windows console device handles to the login child instead of inheriting Electron stdio', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const dispose = vi.fn()
+    openWindowsInteractiveStdioMock.mockReturnValue({
+      stdio: [11, 12, 12],
+      dispose
+    })
+
+    await ACCOUNT_HANDLERS['account add'](context('codex'))
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'codex',
+      ['login', '--device-auth'],
+      expect.objectContaining({ stdio: [11, 12, 12] })
+    )
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps JSON login prompts off the CLI stdout envelope when console fds are attached', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    openWindowsInteractiveStdioMock.mockReturnValue({
+      stdio: [11, 12, 12],
+      dispose: vi.fn()
+    })
+
+    await ACCOUNT_HANDLERS['account add'](context('codex', true))
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'codex',
+      ['login', '--device-auth'],
+      expect.objectContaining({ stdio: [11, process.stderr, 12] })
+    )
   })
 
   it('routes Windows package-manager shims through the safe cmd launcher', async () => {

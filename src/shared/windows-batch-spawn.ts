@@ -87,3 +87,18 @@ export function getSpawnArgsForWindows(
   }
   return { spawnCmd: command, spawnArgs: args }
 }
+
+/**
+ * Inverse of `detachedGui`'s `start "" /B`: a visible console that waits.
+ * Title is the empty argv entry so libuv emits `""` rather than `"\"\""`.
+ */
+export function wrapWindowsStartWait(
+  spawnCmd: string,
+  spawnArgs: string[]
+): { spawnCmd: string; spawnArgs: string[] } {
+  const cmdExePath = getCmdExePath()
+  return {
+    spawnCmd: cmdExePath,
+    spawnArgs: ['/d', '/c', 'start', '', '/wait', spawnCmd, ...spawnArgs]
+  }
+}

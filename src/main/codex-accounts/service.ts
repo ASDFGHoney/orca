@@ -6,6 +6,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { app } from 'electron'
 import { getSpawnArgsForWindows } from '../win32-utils'
+import { buildWindowsHostInteractiveLoginSpawn } from '../../shared/windows-interactive-login-spawn'
 import type {
   CodexManagedAccount,
   CodexManagedAccountSummary,
@@ -1711,12 +1712,20 @@ export class CodexAccountService {
             command: 'wsl.exe',
             args: buildWslCodexLoginArgs(wslInfo.distro, wslInfo.linuxPath),
             env: process.env,
-            codexCommand: 'codex'
+            codexCommand: 'codex',
+            interactiveLogin: null
           }
         : (() => {
             const codexCommand = resolveCodexCommand()
-            // Why: Windows codex may be a .cmd/.bat; spawn+shell:true would trigger DEP0190, so invoke cmd.exe /c explicitly.
-            const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(codexCommand, ['login'])
+            // Why: Windows host login needs a real console; otherwise inherit/hide
+            // leaves the child unable to read a paste-code / device-auth prompt.
+            const interactiveLogin =
+              process.platform === 'win32'
+                ? buildWindowsHostInteractiveLoginSpawn(codexCommand, ['login'])
+                : null
+            const { spawnCmd, spawnArgs } = interactiveLogin
+              ? { spawnCmd: interactiveLogin.command, spawnArgs: interactiveLogin.args }
+              : getSpawnArgsForWindows(codexCommand, ['login'])
             return {
               command: spawnCmd,
               args: spawnArgs,
@@ -1724,15 +1733,19 @@ export class CodexAccountService {
                 ...process.env,
                 CODEX_HOME: managedHomePath
               },
-              codexCommand
+              codexCommand,
+              interactiveLogin
             }
           })()
       const child = spawn(spawnConfig.command, spawnConfig.args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        // Why: prevents a console window flash for .cmd/.bat entrypoints routed through cmd.exe on Windows.
-        windowsHide: true,
+        stdio: spawnConfig.interactiveLogin
+          ? spawnConfig.interactiveLogin.stdio
+          : ['ignore', 'pipe', 'pipe'],
+        // Why: hide the outer wrapper only. A dedicated login console stays visible.
+        windowsHide: spawnConfig.interactiveLogin?.windowsHide ?? true,
         env: spawnConfig.env
       })
+      spawnConfig.interactiveLogin?.dispose()
 
       let settled = false
       let output = ''
@@ -1761,8 +1774,8 @@ export class CodexAccountService {
           clearTimeout(postAuthExitTimeout)
           postAuthExitTimeout = null
         }
-        child.stdout.off('data', appendOutput)
-        child.stderr.off('data', appendOutput)
+        child.stdout?.off('data', appendOutput)
+        child.stderr?.off('data', appendOutput)
         child.off('error', onError)
         child.off('close', onClose)
       }
@@ -1845,8 +1858,8 @@ export class CodexAccountService {
         })
       }
 
-      child.stdout.on('data', appendOutput)
-      child.stderr.on('data', appendOutput)
+      child.stdout?.on('data', appendOutput)
+      child.stderr?.on('data', appendOutput)
       child.on('error', onError)
       child.on('close', onClose)
     })

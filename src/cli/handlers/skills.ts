@@ -15,6 +15,7 @@ import {
   UnsafeWindowsBatchArgumentsError,
   WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
 } from '../../shared/windows-batch-spawn'
+import { openWindowsInteractiveStdio } from '../../shared/windows-console-stdio'
 import { isSkillsCliAgentKeyShaped, toSkillsCliAgentKeys } from '../../shared/skills-cli-agent-keys'
 import {
   buildAgentFeatureSkillInstallArgs,
@@ -143,10 +144,14 @@ function runNpxSkills(args: string[]): Promise<number> {
     // Why: npx is an `#!/usr/bin/env node` script, so resolving it off PATH is
     // not enough — without node alongside it the child exits 127 with no
     // 'error' event and the message below never fires.
+    const consoleStdio = openWindowsInteractiveStdio()
     const child = spawn(spawnCmd, spawnArgs, {
-      stdio: 'inherit',
+      stdio: consoleStdio === 'inherit' ? 'inherit' : consoleStdio.stdio,
       env: { ...process.env, PATH: buildNpxPath(resolved) }
     })
+    if (consoleStdio !== 'inherit') {
+      consoleStdio.dispose()
+    }
     // Why: a missing npx/Node on a headless host surfaces as a raw spawn ENOENT;
     // wrap it so the CLI reports an actionable message like every other failure here.
     child.once('error', (error) => {
