@@ -12,6 +12,7 @@ import {
 } from './issue-context-fanout'
 import { ISSUE_FIELDS, mapIssue, type RawIssue } from './issue-context-raw'
 import { resolveWorkspaceSelector } from './issue-context-workspaces'
+import { encodeIssueListCursor, resolveIssueListCursor } from './mcp-issue-list-cursor'
 
 const LIST_ISSUES_DEFAULT_LIMIT = 50
 const LIST_ISSUES_MAX_LIMIT = 250
@@ -53,15 +54,10 @@ const LIST_ISSUES_QUERY = `
 export async function listMcpIssues(
   request: LinearMcpIssueListRequest
 ): Promise<LinearMcpIssueListResult> {
-  if (request.cursor && (!request.workspaceId || request.workspaceId === 'all')) {
-    throw linearError(
-      'linear_invalid_workspace',
-      'Cursor pagination requires a concrete Linear workspace.'
-    )
-  }
+  const pagination = resolveIssueListCursor(request)
   const limit = clampLimit(request.limit)
   const orderBy = request.orderBy ?? 'updatedAt'
-  const { entries, failures: entryFailures } = getIssueListEntries(request.workspaceId)
+  const { entries, failures: entryFailures } = getIssueListEntries(pagination.workspaceId)
   if (entries.length === 0) {
     if (entryFailures[0]) {
       throw entryFailures[0].error
@@ -70,9 +66,14 @@ export async function listMcpIssues(
       nextSteps: ['Connect Linear from Orca settings, then retry the issue list.']
     })
   }
+  const pagedRequest = {
+    ...request,
+    cursor: pagination.linearCursor,
+    workspaceId: pagination.workspaceId
+  }
   const { pages, failures } = await readIssueListWorkspaces(
     entries,
-    request,
+    pagedRequest,
     limit,
     orderBy,
     entryFailures
@@ -85,17 +86,19 @@ export async function listMcpIssues(
     hasMore = true
     issues.length = limit
   }
+  const workspaceId = pagination.workspaceId === 'all' ? 'all' : entries[0].workspace.id
   return {
     issues,
+    truncated: hasMore,
     meta: {
       limit,
       returned: issues.length,
       hasMore,
-      ...(hasMore && request.workspaceId !== 'all' && pages.length === 1 && pages[0].nextCursor
-        ? { nextCursor: pages[0].nextCursor }
+      ...(hasMore && workspaceId !== 'all' && pages.length === 1 && pages[0].nextCursor
+        ? { nextCursor: encodeIssueListCursor(workspaceId, pages[0].nextCursor) }
         : {}),
       orderBy,
-      workspaceId: request.workspaceId === 'all' ? 'all' : entries[0].workspace.id,
+      workspaceId,
       partial: failures.length > 0,
       workspaceErrors: failures.map(({ workspace, code, message }) => ({
         workspace,

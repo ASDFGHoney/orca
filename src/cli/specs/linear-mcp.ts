@@ -68,7 +68,12 @@ export const LINEAR_MCP_COMMAND_SPECS: CommandSpec[] = [
     examples: [
       'orca linear list-issues --team ENG --state started --assignee me --json',
       'orca linear list-issues --query auth --updated-at -P7D --limit 100 --json',
-      'orca linear list-issues --cursor <cursor> --workspace <id> --json'
+      'orca linear list-issues --cursor <cursor> --json'
+    ],
+    notes: [
+      'Default --limit is 50 (max 250). JSON sets result.truncated when more matches exist; text prints truncated: showing N.',
+      'Reuse --cursor from the previous page. Issued cursors bind the workspace; raw Linear cursors still need --workspace.',
+      '--priority is 0=none, 1=urgent, 2=high, 3=medium, 4=low. JSON includes priorityLabel on each issue.'
     ]
   },
   {

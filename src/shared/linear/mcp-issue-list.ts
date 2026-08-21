@@ -24,6 +24,7 @@ export type LinearMcpIssueListRequest = {
 
 export type LinearMcpIssueListResult = {
   issues: (LinearIssueSummary & { workspace: LinearWorkspaceCandidate })[]
+  truncated: boolean
   meta: {
     limit: number
     returned: number

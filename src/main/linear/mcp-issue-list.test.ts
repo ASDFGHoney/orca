@@ -108,13 +108,14 @@ describe('MCP-compatible Linear issue listing', () => {
     expect(rawRequest.mock.calls[0]?.[1]).not.toMatchObject({
       filter: { team: { or: expect.arrayContaining([{ id: { eq: 'ENG' } }]) } }
     })
+    expect(result.truncated).toBe(true)
     expect(result.meta).toMatchObject({
       limit: 100,
       returned: 1,
       hasMore: true,
-      nextCursor: 'next-page',
       orderBy: 'createdAt'
     })
+    expect(result.meta.nextCursor).toMatch(/^orca\.linear\.v1\./)
     expect(result.issues[0]).toMatchObject({
       identifier: 'ENG-1',
       workspace: { id: 'workspace-1', name: 'Acme' }
