@@ -541,7 +541,7 @@ test(`proves STA-4593 A/B/C across ${coordinatorMode} Windows and isolated WSL $
         alreadySettled: boolean
       }>('orchestration.workerStop', { dispatch: workerC.dispatchId })
       .catch(() => null)
-    if (stopped.result.state === 'stopped') {
+    if (supportsStopVerdict) {
       expect(stoppedAgain?.result).toMatchObject({
         state: 'stopped',
         processAction: 'none',
@@ -552,7 +552,7 @@ test(`proves STA-4593 A/B/C across ${coordinatorMode} Windows and isolated WSL $
     expect(
       remoteTerminals.result.terminals.some((terminal) => terminal.handle === controlHandle)
     ).toBe(true)
-    if (stopped.result.state === 'stopped') {
+    if (supportsStopVerdict) {
       expect(
         remoteTerminals.result.terminals.some((terminal) => terminal.handle === workerC.handle)
       ).toBe(false)

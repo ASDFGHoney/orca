@@ -10525,6 +10525,7 @@
         "src/main/runtime/rpc/orchestration-mutation-ledger.test.ts",
         "src/main/runtime/orchestration/worker-transcript-read.test.ts",
         "src/main/runtime/orchestration/worker-output-archive.test.ts",
+        "src/main/runtime/rpc/methods/orchestration-worker-stop-liveness-verdict.test.ts",
         "src/renderer/src/lib/worker-terminal-takeover-report.test.ts",
         "tests/e2e/completed-worker-retirement-resume.unit.test.ts",
         "tests/e2e/orchestration-worker-settlement-release-cli.spec.ts",
@@ -10630,6 +10631,24 @@
       "evidenceRuns": [
         {
           "date": "2026-08-20",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/worker-output-archive.test.ts src/main/runtime/rpc/methods/orchestration-worker-stop-liveness-verdict.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 7.81,
+          "summary": "Two focused files passed 10 tests covering bounded capability-redacted command archives and exact-incarnation stop fencing."
+        },
+        {
+          "date": "2026-08-20",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/orchestration-federation-terminal-lifecycle.test.ts src/main/runtime/rpc/methods/orchestration-federation-agent-launch.test.ts src/main/runtime/orca-runtime.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 14.95,
+          "summary": "Three focused files passed 1,194 tests covering federated terminal release and public resource shape, authority rollback, and globally bounded exited transcript retention."
+        },
+        {
+          "date": "2026-08-20",
           "runner": "manual",
           "platform": "windows",
           "command": "SKIP_BUILD=1 STA4593_COORDINATOR_MODE=headless STA4593_EXPECT_FEDERATED_RELEASE=1 STA4593_PAIRING_CODE_PATH=<latest-main-pairing-code> pnpm exec playwright test tests/e2e/sta4593-wsl-federation-lifecycle.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -10697,8 +10716,8 @@
           "platform": "windows",
           "command": "pnpm run build:cli && SKIP_BUILD=1 pnpm exec playwright test tests/e2e/orchestration-worker-settlement-release-cli.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 20,
-          "summary": "The exact squashed fake Codex oracle published structural idle and prompt-acceptance signals, then the compiled CLI rejected false completion, completed the exact Dispatch, and reconciled its dead retained resource without touching the coordinator terminal."
+          "durationSeconds": 18.5,
+          "summary": "The exact fake Codex oracle published structural idle and prompt-acceptance signals, then the compiled CLI rejected false completion, completed the exact Dispatch, and reconciled its dead retained resource without touching the coordinator terminal."
         },
         {
           "date": "2026-08-12",
@@ -10738,7 +10757,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "For STA-4593, the physical Windows-to-WSL oracle passed A but failed B on latest main 012e9f410c because final output disappeared after WSL PTY exit; its independent C pass retained release and returned stop_unknown/tab_not_found. The same oracle failed B with the owning WSL runtime at 3f961ddc01, passed A/B but failed release with identity_unproven at 9303ebc1fb, and passed strict A/B/C headed and hidden on the squashed candidate. The byte-identical compiled-CLI oracle left the dead resource external/retained on main 5ea7df1a5b, passed on the candidate with released/released SQLite state and processAction none, and reproduced external/retained after disabling the claimed production files at merge-base 64aec94cb2."
+        "evidence": "For STA-4593, the physical Windows-to-WSL oracle passed A but failed B on latest main 012e9f410c because final output disappeared after WSL PTY exit; its independent C pass retained release and returned stop_unknown/tab_not_found. The same oracle failed B with the owning WSL runtime at 3f961ddc01, passed A/B but failed release with identity_unproven at 9303ebc1fb, and passed strict A/B/C headed and hidden on the candidate. The byte-identical compiled-CLI oracle left the dead resource external/retained on main 5ea7df1a5b, passed on the candidate with released/released SQLite state and processAction none, and reproduced external/retained after disabling the claimed production files at merge-base 64aec94cb2."
       },
       "performanceBudget": {
         "required": true,
