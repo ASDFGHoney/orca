@@ -247,6 +247,7 @@ describe('WslHookRelayManager', () => {
     // Codex is the one agent whose home Orca redirects for WSL sessions.
     expect(deps.installHooks).toHaveBeenCalledWith(expect.anything(), home, {
       codexHomeDir: `${home}/.local/share/orca/codex-runtime-home/home`,
+      deferCodexTrustUntilConfigToml: true,
       agents: ['codex']
     })
 

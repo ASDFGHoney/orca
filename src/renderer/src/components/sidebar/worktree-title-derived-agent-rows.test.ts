@@ -239,6 +239,35 @@ describe('buildTitleDerivedAgentRows', () => {
     expect(rows.map((row) => [row.agentType, row.state])).toEqual([['codex', 'working']])
   })
 
+  it('keeps a Claude title-derived row when Codex is also launched elsewhere', () => {
+    const rows = buildWorktreeAgentRows({
+      tabs: [
+        makeTab('tab-claude', { launchAgent: 'claude' }),
+        makeTab('tab-codex', { launchAgent: 'codex' })
+      ],
+      entries: [],
+      retained: [],
+      runtimePaneTitlesByTabId: {
+        'tab-claude': { 1: '✳ Claude Code' },
+        'tab-codex': { 1: '⠼ demo-repo' }
+      },
+      ptyIdsByTabId: {
+        'tab-claude': ['pty-claude'],
+        'tab-codex': ['pty-codex']
+      },
+      terminalLayoutsByTabId: {
+        'tab-claude': makeSingleLayout(LEAF_ID_1),
+        'tab-codex': makeSingleLayout(LEAF_ID_2)
+      },
+      now: 2000
+    })
+
+    expect(rows.map((row) => [row.tab.id, row.agentType, row.state])).toEqual([
+      ['tab-claude', 'claude', 'idle'],
+      ['tab-codex', 'codex', 'working']
+    ])
+  })
+
   it('produces no row for a spinner-only title when the tab has no launch identity', () => {
     const rows = buildWorktreeAgentRows({
       tabs: [makeTab('tab-1')],

@@ -16,11 +16,15 @@ import { kimiHookService } from '../kimi/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
 
 export type RemoteManagedHookInstallOptions = {
-  /** Explicit CODEX_HOME dir for redirected runtimes (WSL managed runtime
-   *  home). Codex-only: it is the one agent whose home Orca redirects. Also
-   *  defers the config.toml trust write until that file exists, so the
-   *  launch path's only-if-absent seed is never pre-empted. */
+  /** Explicit CODEX_HOME dir (WSL managed runtime home, or the SSH host's
+   *  login-shell CODEX_HOME). Codex is the one agent whose home Orca may
+   *  redirect; installing into ~/.codex when the process reads another home
+   *  leaves the pane hookless. */
   codexHomeDir?: string
+  /** WSL-only: skip the trust write when config.toml is absent so the launch
+   *  path's only-if-absent seed is never pre-empted. SSH probed homes write
+   *  trust immediately. */
+  deferCodexTrustUntilConfigToml?: boolean
   /** Explicit GROK_HOME for remote runtimes that redirect Grok's config. */
   grokHomeDir?: string
   /** Stops before starting the next installer when the owning relay request
@@ -50,7 +54,10 @@ const REMOTE_MANAGED_HOOK_INSTALLERS: readonly RemoteManagedHookInstaller[] = [
         sftp,
         remoteHome,
         options?.codexHomeDir
-          ? { codexHomeDir: options.codexHomeDir, deferTrustUntilConfigToml: true }
+          ? {
+              codexHomeDir: options.codexHomeDir,
+              deferTrustUntilConfigToml: options.deferCodexTrustUntilConfigToml === true
+            }
           : undefined
       )
   ],

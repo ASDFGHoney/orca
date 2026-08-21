@@ -483,6 +483,19 @@ describe('resolveTabAgentFromSignals', () => {
     ).toBe('claude')
   })
 
+  it('does not treat an unreachable SSH Codex pane as missing', () => {
+    expect(
+      resolveTabAgentFromSignals({
+        hasObservedAgentSignal: true,
+        isRemote: true,
+        title: '~/demo-repo',
+        hookAgent: null,
+        processAgent: null,
+        launchAgent: 'codex'
+      })
+    ).toBe('codex')
+  })
+
   it('treats the neutral default title as exit evidence alongside shell titles', () => {
     expect(
       resolveTabAgentFromSignals({

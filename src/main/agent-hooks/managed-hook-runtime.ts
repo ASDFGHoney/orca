@@ -12,16 +12,18 @@ import {
 } from './managed-hook-owner-identity'
 
 const execFileAsync = promisify(execFile)
-const GROK_HOME_MAX_LENGTH = 4096
-const GROK_HOME_PROBE_TIMEOUT_MS = 8_000
+const RELAY_ENV_HOME_MAX_LENGTH = 4096
+const RELAY_ENV_HOME_PROBE_TIMEOUT_MS = 8_000
 
 export type ManagedHookInstallSummary = {
   installers: number
   errors: number
 }
 
-function defaultGrokHome(home: string): string {
-  return `${home.replace(/\/+$/, '') || home}/.grok`
+type RelayLoginEnvHome = 'GROK_HOME' | 'CODEX_HOME'
+
+function defaultAgentHome(home: string, dirName: string): string {
+  return `${home.replace(/\/+$/, '') || home}/${dirName}`
 }
 
 function hasControlCharacter(value: string): boolean {
@@ -31,10 +33,10 @@ function hasControlCharacter(value: string): boolean {
   })
 }
 
-function normalizeGrokHome(candidate: string): string | null {
+function normalizePosixHome(candidate: string): string | null {
   if (
     candidate.length === 0 ||
-    candidate.length > GROK_HOME_MAX_LENGTH ||
+    candidate.length > RELAY_ENV_HOME_MAX_LENGTH ||
     candidate !== candidate.trim() ||
     !candidate.startsWith('/') ||
     candidate.includes('\\') ||
@@ -53,24 +55,37 @@ function resolveLoginShell(): string {
   return candidate
 }
 
-export async function resolveRelayGrokHome(home: string, signal?: AbortSignal): Promise<string> {
-  const fallback = defaultGrokHome(home)
+async function resolveRelayLoginEnvHome(
+  home: string,
+  envName: RelayLoginEnvHome,
+  defaultDirName: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const fallback = defaultAgentHome(home, defaultDirName)
   try {
     const shell = resolveLoginShell()
     const shellName = basename(shell)
     const mode = shellName === 'sh' || shellName === 'dash' ? '-c' : '-lc'
     // Why: agent PTYs start login shells, so read the same profile-derived
-    // GROK_HOME without opening two additional SSH exec channels.
+    // home without opening two additional SSH exec channels.
     const { stdout } = await execFileAsync(
       shell,
-      [mode, `printenv GROK_HOME | head -c ${GROK_HOME_MAX_LENGTH + 1}`],
-      { encoding: 'utf8', timeout: GROK_HOME_PROBE_TIMEOUT_MS, signal }
+      [mode, `printenv ${envName} | head -c ${RELAY_ENV_HOME_MAX_LENGTH + 1}`],
+      { encoding: 'utf8', timeout: RELAY_ENV_HOME_PROBE_TIMEOUT_MS, signal }
     )
-    return normalizeGrokHome(stdout.split(/\r?\n/, 1)[0] ?? '') ?? fallback
+    return normalizePosixHome(stdout.split(/\r?\n/, 1)[0] ?? '') ?? fallback
   } catch {
     signal?.throwIfAborted()
     return fallback
   }
+}
+
+export async function resolveRelayGrokHome(home: string, signal?: AbortSignal): Promise<string> {
+  return resolveRelayLoginEnvHome(home, 'GROK_HOME', '.grok', signal)
+}
+
+export async function resolveRelayCodexHome(home: string, signal?: AbortSignal): Promise<string> {
+  return resolveRelayLoginEnvHome(home, 'CODEX_HOME', '.codex', signal)
 }
 
 export async function installManagedHooks(options?: {
@@ -86,6 +101,9 @@ export async function installManagedHooks(options?: {
   }
   const home = homedir()
   const grokHomeDir = await resolveRelayGrokHome(home, options?.signal)
+  const codexHomeDir = agents.includes('codex')
+    ? await resolveRelayCodexHome(home, options?.signal)
+    : undefined
   options?.signal?.throwIfAborted()
   const hostIdentity = scopeManagedHookHostIdentity(
     await readManagedHookHostIdentity(),
@@ -100,6 +118,7 @@ export async function installManagedHooks(options?: {
         home,
         {
           grokHomeDir,
+          ...(codexHomeDir ? { codexHomeDir } : {}),
           signal: options?.signal,
           agents
         }

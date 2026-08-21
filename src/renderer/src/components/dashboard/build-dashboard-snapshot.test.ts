@@ -552,6 +552,48 @@ describe('buildDashboardSnapshot', () => {
     expect(done?.bucket).toBe('done')
   })
 
+  it('shows a stopped Codex agent as done instead of dropping the card', () => {
+    const donePaneKey = makePaneKey(TAB_ID, GONE_LEAF_ID)
+    const snapshot = buildDashboardSnapshot(
+      baseState({
+        retainedAgentsByPaneKey: {
+          [donePaneKey]: {
+            entry: entry({
+              paneKey: donePaneKey,
+              state: 'done',
+              agentType: 'codex',
+              prompt: 'Codex'
+            }),
+            worktreeId: 'w1',
+            tab: tab() as never,
+            agentType: 'codex',
+            startedAt: NOW - 60_000
+          } as never
+        }
+      }),
+      NOW
+    )
+    const done = snapshot.cards.find((c) => c.agentType === 'codex')
+    expect(done?.bucket).toBe('done')
+    expect(done?.dotState).toBe('done')
+  })
+
+  it('keeps a live Codex hook card when the title no longer names the agent', () => {
+    const snapshot = buildDashboardSnapshot(
+      baseState({
+        tabsByWorktree: { w1: [{ ...tab(), launchAgent: 'codex', title: 'zsh' }] },
+        agentStatusByPaneKey: {
+          [PANE_KEY]: entry({ agentType: 'codex', state: 'working', prompt: 'Codex' })
+        },
+        runtimePaneTitlesByTabId: { [TAB_ID]: { 1: 'zsh' } }
+      }),
+      NOW
+    )
+    expect(snapshot.cards).toEqual([
+      expect.objectContaining({ agentType: 'codex', bucket: 'working' })
+    ])
+  })
+
   it('includes collapsed subagents and workspace status metadata on the parent card', () => {
     const snapshot = buildDashboardSnapshot(
       baseState({

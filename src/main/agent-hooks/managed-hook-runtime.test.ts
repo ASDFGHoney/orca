@@ -17,7 +17,8 @@ const { execFile } = await import('node:child_process')
 const execFileMock = vi.mocked(execFile)
 const { execFile: actualExecFile } =
   await vi.importActual<typeof NodeChildProcess>('node:child_process')
-const { installManagedHooks, resolveRelayGrokHome } = await import('./managed-hook-runtime')
+const { installManagedHooks, resolveRelayCodexHome, resolveRelayGrokHome } =
+  await import('./managed-hook-runtime')
 
 type ExecFileCallback = (error: Error | null, result?: { stdout: string; stderr: string }) => void
 
@@ -32,6 +33,22 @@ function stubProbeFailure(error: Error): void {
   execFileMock.mockImplementation(((...args: unknown[]) => {
     ;(args.at(-1) as ExecFileCallback)(error)
     return undefined
+  }) as unknown as typeof execFile)
+}
+
+function stubPrintenv(values: Record<string, string>): void {
+  execFileMock.mockImplementation(((...args: unknown[]) => {
+    const command = (args[1] as string[] | undefined)?.[1] ?? ''
+    const matched = Object.entries(values).find(([name]) => command.includes(`printenv ${name}`))
+    const callback = args.at(-1) as ExecFileCallback
+    if (matched) {
+      callback(null, { stdout: `${matched[1]}\n`, stderr: '' })
+      return undefined
+    }
+    return (actualExecFile as (...callArgs: unknown[]) => unknown)(
+      ...args.slice(0, -1),
+      (error: Error | null, stdout: string, stderr: string) => callback(error, { stdout, stderr })
+    )
   }) as unknown as typeof execFile)
 }
 
@@ -156,5 +173,51 @@ describe.runIf(process.platform !== 'win32')('installManagedHooks', () => {
     })
 
     expect((await readdir(home)).sort()).toEqual(['.claude', '.orca', SHELL_NAME, SHELL_RUNS_NAME])
+  })
+
+  it('installs Codex hooks into the login-shell CODEX_HOME, not ~/.codex', async () => {
+    const home = await createTempHome()
+    const probedHome = join(home, 'custom-codex-home')
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('SHELL', '/bin/sh')
+    stubPrintenv({ CODEX_HOME: probedHome })
+
+    await expect(installManagedHooks({ agents: ['codex'] })).resolves.toEqual({
+      installers: 1,
+      errors: 0
+    })
+
+    const { readFile } = await import('node:fs/promises')
+    const hooks = await readFile(join(probedHome, 'hooks.json'), 'utf8')
+    expect(hooks).toContain('codex-hook.sh')
+    const toml = await readFile(join(probedHome, 'config.toml'), 'utf8')
+    expect(toml).toContain('trusted_hash')
+    await expect(readdir(join(home, '.codex'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe.runIf(process.platform !== 'win32')('resolveRelayCodexHome', () => {
+  it('uses the login-shell CODEX_HOME and normalizes trailing separators', async () => {
+    vi.stubEnv('SHELL', '/bin/sh')
+    stubProbeOutput('/srv/codex///\n')
+
+    await expect(resolveRelayCodexHome('/home/orca')).resolves.toBe('/srv/codex')
+
+    const [shell, args] = execFileMock.mock.calls[0] ?? []
+    expect(shell).toBe('/bin/sh')
+    expect(args?.[0]).toBe('-c')
+    expect(args?.[1]).toContain('printenv CODEX_HOME')
+  })
+
+  it('falls back to ~/.codex when the probe is empty, relative, or fails', async () => {
+    vi.stubEnv('SHELL', '/bin/sh')
+    stubProbeOutput('\n')
+    await expect(resolveRelayCodexHome('/home/orca')).resolves.toBe('/home/orca/.codex')
+
+    stubProbeOutput('../relative\n')
+    await expect(resolveRelayCodexHome('/home/orca')).resolves.toBe('/home/orca/.codex')
+
+    stubProbeFailure(Object.assign(new Error('spawn timed out'), { killed: true }))
+    await expect(resolveRelayCodexHome('/home/orca')).resolves.toBe('/home/orca/.codex')
   })
 })
