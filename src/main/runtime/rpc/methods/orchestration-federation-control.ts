@@ -8,6 +8,7 @@ import { defineMethod, type RpcMethod } from '../core'
 import { OptionalFiniteNumber, requiredString } from '../schemas'
 import { readExactWorkerOutput } from './orchestration-worker-output'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
+import { readArchivedWorkerOutput } from './orchestration-worker-archive-read'
 
 const FederationDispatchParams = z.object({
   dispatchId: requiredString('Missing Dispatch ID')
@@ -37,6 +38,8 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
         dispatchId: params.dispatchId,
         runtimeEpoch: runtime.getRuntimeId(),
         attachment: exposeRemoteAttachment(attachment),
+        terminalResource:
+          runtime.getOrchestrationDb().getWorkerTerminalResourceByOwner(params.dispatchId) ?? null,
         terminal: observation.exact ? observation.terminal : null,
         observation: {
           status: observation.status,
@@ -62,13 +65,21 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
           `Remote Dispatch ${params.dispatchId} no longer resolves to its exact process.`
         )
       }
+      const terminal = await runtime.readTerminal(observation.terminal.handle, {
+        cursor: params.cursor,
+        limit: params.limit
+      })
+      const afterRead = await inspectRemoteAttachment(runtime, params.dispatchId)
+      if (!afterRead.exact) {
+        throw new OrchestrationError(
+          'worker_identity_changed',
+          `Remote Dispatch ${params.dispatchId} changed process while output was read.`
+        )
+      }
       return {
         dispatchId: params.dispatchId,
         runtimeEpoch: runtime.getRuntimeId(),
-        terminal: await runtime.readTerminal(observation.terminal.handle, {
-          cursor: params.cursor,
-          limit: params.limit
-        })
+        terminal
       }
     }
   }),
@@ -81,6 +92,27 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
         params.dispatchId,
         authenticatedCallerFingerprint
       )
+      const db = runtime.getOrchestrationDb()
+      const resource = db.getWorkerTerminalResourceByOwner(params.dispatchId)
+      if (
+        resource &&
+        db.getWorkerTerminalArchive(params.dispatchId) &&
+        ['releasing', 'unknown', 'released'].includes(resource.release_state)
+      ) {
+        return {
+          dispatchId: params.dispatchId,
+          runtimeEpoch: runtime.getRuntimeId(),
+          output: await readArchivedWorkerOutput({
+            db,
+            dispatchId: params.dispatchId,
+            workerState: attachment.state,
+            resource,
+            source: params.source,
+            cursor: params.cursor,
+            limit: params.limit
+          })
+        }
+      }
       const observation = await inspectRemoteAttachment(runtime, params.dispatchId)
       if (!observation.exact || !observation.terminal) {
         throw new OrchestrationError(
@@ -194,7 +226,7 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
   })
 ]
 
-function requireHomeAttachment(
+export function requireHomeAttachment(
   runtime: OrcaRuntimeService,
   dispatchId: string,
   callerFingerprint: string | undefined
@@ -209,7 +241,7 @@ function requireHomeAttachment(
   return attachment
 }
 
-async function inspectRemoteAttachment(
+export async function inspectRemoteAttachment(
   runtime: OrcaRuntimeService,
   dispatchId: string
 ): Promise<{

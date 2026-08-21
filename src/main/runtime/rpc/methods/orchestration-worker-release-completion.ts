@@ -11,7 +11,13 @@ import {
 } from '../../orchestration/worker-output-archive'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
-import { inspectWorkerTerminal } from './orchestration-worker-observation'
+import {
+  inspectWorkerTerminal,
+  resolveWorkerTerminalOwner,
+  workerTerminalLeaseIsCurrent,
+  type WorkerTerminalOwnerKind
+} from './orchestration-worker-observation'
+import { inspectRemoteAttachment } from './orchestration-federation-control'
 import { orchestrationTimestampToMs } from './orchestration-worker-output'
 
 export type WorkerReleaseReceipt = {
@@ -30,6 +36,7 @@ type WorkerTerminalReleaseArgs = {
   dispatchId: string
   resource: WorkerTerminalResourceRow
   mode?: 'interactive' | 'recovery'
+  owner?: WorkerTerminalOwnerKind
 }
 
 const activeReleaseByRuntime = new WeakMap<
@@ -106,8 +113,8 @@ async function completeWorkerTerminalReleaseOnce(
   args: WorkerTerminalReleaseArgs
 ): Promise<WorkerReleaseReceipt> {
   const { runtime, db, dispatchId, resource } = args
-  const worker = db.getWorkerDispatch(dispatchId)
-  if (!worker || worker.agent_terminal_handle !== resource.terminal_handle) {
+  const owner = resolveWorkerTerminalOwner(db, dispatchId, args.owner)
+  if (!owner || owner.terminalHandle !== resource.terminal_handle) {
     const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
     return {
       dispatchId,
@@ -117,7 +124,10 @@ async function completeWorkerTerminalReleaseOnce(
       archive: archiveSummary(retained)
     }
   }
-  const observation = await inspectWorkerTerminal(runtime, db, dispatchId)
+  const observation =
+    args.owner === 'remote_attachment'
+      ? await inspectRemoteAttachment(runtime, dispatchId)
+      : await inspectWorkerTerminal(runtime, db, dispatchId)
   if (observation.status === 'identity_changed') {
     const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
     return {
@@ -128,7 +138,7 @@ async function completeWorkerTerminalReleaseOnce(
       archive: archiveSummary(retained)
     }
   }
-  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource)) {
+  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource, args.owner)) {
     const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
     return {
       dispatchId,
@@ -175,7 +185,7 @@ async function completeWorkerTerminalReleaseOnce(
       runtime,
       dispatchId,
       terminalHandle: resource.terminal_handle,
-      attachedAtMs: orchestrationTimestampToMs(worker.created_at)
+      attachedAtMs: orchestrationTimestampToMs(owner.createdAt)
     })
     capturedArchive = { kind: captured.kind, content: JSON.stringify(captured.content) }
     archiveSource = captured.kind === 'transcript_pin' ? 'transcript' : 'terminal'
@@ -201,7 +211,7 @@ async function completeWorkerTerminalReleaseOnce(
       archive: archiveSummary(releasing)
     }
   }
-  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing)) {
+  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing, args.owner)) {
     const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
     return {
       dispatchId,
@@ -259,27 +269,6 @@ async function completeWorkerTerminalReleaseOnce(
       observation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
     archive: archiveSummary(released)
   }
-}
-
-function workerTerminalLeaseIsCurrent(
-  runtime: OrcaRuntimeService,
-  db: OrchestrationDb,
-  dispatchId: string,
-  resource: WorkerTerminalResourceRow
-): boolean {
-  const worker = db.getWorkerDispatch(dispatchId)
-  const authority = runtime.getOrchestrationDispatchAuthority(resource.terminal_handle)
-  return Boolean(
-    worker?.agent_terminal_handle === resource.terminal_handle &&
-    authority &&
-    resource.host_scope === JSON.stringify(authority.hostScope) &&
-    db.isDispatchProcessCurrent({
-      dispatchId,
-      paneKey: runtime.getTerminalPaneKey(resource.terminal_handle),
-      processIncarnation: runtime.getTerminalProcessIncarnation(resource.terminal_handle)
-    }) &&
-    !db.workerTerminalResourceHasIdentityConflict(resource.id)
-  )
 }
 
 function summarizeStoredArchive(archive: WorkerTerminalArchiveRow): {

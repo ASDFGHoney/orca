@@ -106,6 +106,7 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
           worker: exposeWorker(worker),
           server: { environmentId: server.environmentId, name: server.name },
           remoteRuntimeEpoch: remote.runtimeEpoch,
+          terminalResource: remote.terminalResource ?? null,
           terminal: remote.terminal,
           observation: {
             ...remote.observation,
