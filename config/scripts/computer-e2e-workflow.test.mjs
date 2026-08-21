@@ -140,10 +140,15 @@ describe('computer-use e2e workflow', () => {
       'config/scripts/macos-computer-helper-owner-loss-group-recovery.test.mjs'
     )
     expect(runs).toContain('pnpm verify:computer-native')
+    expect(runs).toContain(
+      'pnpm vitest run --config config/vitest.config.ts config/scripts/macos-computer-helper-build-contract.test.mjs'
+    )
+    expect(runs).toContain('pnpm build:unpack')
     const launchServicesRepro = runs.find((run) =>
       run.includes('macos-computer-use-launchservices-repro.test.ts')
     )
     expect(launchServicesRepro).toBeTruthy()
+    expect(runs.indexOf('pnpm build:unpack')).toBeLessThan(runs.indexOf(launchServicesRepro))
     expect(runs.join('\n')).not.toContain('test:e2e:computer')
     expect(workflow.on.pull_request.paths).toEqual(
       expect.arrayContaining([
