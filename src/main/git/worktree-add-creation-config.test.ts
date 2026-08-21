@@ -99,6 +99,43 @@ describe('addWorktree', () => {
     ])
   })
 
+  it('enables long paths for native Windows worktree creation', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add
+
+    try {
+      await addWorktree('/repo', '/repo-feature', 'feature/test', 'feature/test', false, false, {
+        checkoutExistingBranch: true
+      })
+
+      expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+        ['-c', 'core.longpaths=true', 'worktree', 'add', '/repo-feature', 'feature/test'],
+        { cwd: '/repo', timeout: WORKTREE_ADD_TIMEOUT_MS }
+      )
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('does not pass the Windows-only long-path option to WSL Git', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add
+
+    try {
+      await addWorktree('/repo', '/repo-feature', 'feature/test', 'feature/test', false, false, {
+        checkoutExistingBranch: true,
+        wslDistro: 'Ubuntu'
+      })
+
+      expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+        ['worktree', 'add', '/repo-feature', 'feature/test'],
+        { cwd: '/repo', wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
+      )
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
   it('bounds the worktree add call with a positive timeout (STA-1292 OneDrive stall guard)', async () => {
     // Why: without a timeout, a OneDrive cloud-placeholder checkout can stall
     // `git worktree add` for minutes. Assert the runner receives a non-zero

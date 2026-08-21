@@ -975,7 +975,11 @@ async function performAddWorktree(
 ): Promise<AddWorktreeResult> {
   let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
   let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
-  const args = ['worktree', 'add']
+  // Why: enable long paths for this Windows checkout without changing user Git config.
+  const args =
+    process.platform === 'win32' && !options.wslDistro
+      ? ['-c', 'core.longpaths=true', 'worktree', 'add']
+      : ['worktree', 'add']
   let effectiveBase: string | undefined
   if (noCheckout) {
     args.push('--no-checkout')
