@@ -18,6 +18,7 @@ afterAll(() => {
 type FixtureResult = {
   step: string
   firstError: { name: string; message: string } | null
+  secondError: { name: string; message: string } | null
   events: string[]
   recoveredCookieValues: string[]
 }
@@ -26,11 +27,7 @@ function fixtureMain(bundlePath: string, resultPath: string): string {
   return `
 const { app, BrowserWindow, session } = require('electron')
 const { writeFileSync } = require('node:fs')
-const {
-  openCookieClearStore,
-  sendCookieDebuggerCommand,
-  withCookieMutationLock
-} = require(${JSON.stringify(bundlePath)})
+const { openCookieClearStore, withCookieMutationLock } = require(${JSON.stringify(bundlePath)})
 const resultPath = ${JSON.stringify(resultPath)}
 let step = 'starting'
 const events = []
@@ -49,72 +46,92 @@ async function run() {
   const targetSession = session.fromPartition(partition)
   const keeper = new BrowserWindow({ show: false })
   await keeper.loadURL('data:text/html,<title>fixture keeper</title>')
-  const firstWindow = new BrowserWindow({
-    show: false,
-    webPreferences: { session: targetSession, sandbox: true, contextIsolation: true }
+  let targetCount = 0
+  let resolveOrphan = null
+  app.on('web-contents-created', (_event, contents) => {
+    targetCount += 1
+    const label = String(targetCount)
+    events.push('target:' + label + ':created')
+    contents.once('destroyed', () => events.push('target:' + label + ':destroyed'))
+    const sendCommand = contents.debugger.sendCommand.bind(contents.debugger)
+    contents.debugger.sendCommand = (method, params) => {
+      events.push('target:' + label + ':' + method)
+      if (label === '1' && method === 'Network.setCookie') {
+        return new Promise((resolve) => {
+          resolveOrphan = () => {
+            events.push('first:late-completion')
+            resolve({ success: true })
+          }
+        })
+      }
+      return sendCommand(method, params)
+    }
   })
-  await firstWindow.loadURL('data:text/html,<title>wedged cookie debugger</title>')
-  const firstDebugger = firstWindow.webContents.debugger
-  firstDebugger.attach('1.3')
 
   let firstError = null
   const first = withCookieMutationLock(targetSession, async () => {
     events.push('first:start')
-    try {
-      await sendCookieDebuggerCommand(
-        { debugger: firstDebugger },
-        'Runtime.evaluate',
-        { expression: 'new Promise(() => {})', awaitPromise: true },
-        () => {
-          events.push('first:retire')
-          if (firstDebugger.isAttached()) firstDebugger.detach()
-          firstWindow.destroy()
-        }
-      )
-    } catch (error) {
-      firstError = { name: error?.name || '', message: String(error?.message || error) }
-      events.push('first:error')
-    }
-  })
-
-  const second = withCookieMutationLock(targetSession, async () => {
-    events.push('second:start')
     const store = openCookieClearStore(targetSession)
     try {
       await store.writeCookieIdentity({
-        url: 'https://recovered.example/',
-        name: 'recovered',
-        value: 'written-after-retirement',
+        url: 'https://wedged.example/',
+        name: 'wedged',
+        value: 'never-committed',
         sameSite: 'unspecified',
         secure: true
       })
-      events.push('second:done')
+    } catch (error) {
+      firstError = { name: error?.name || '', message: String(error?.message || error) }
+      events.push('first:error')
     } finally {
       store.dispose()
     }
   })
 
+  let secondError = null
+  const second = withCookieMutationLock(targetSession, async () => {
+    events.push('second:start')
+  }).catch((error) => {
+    secondError = { name: error?.name || '', message: String(error?.message || error) }
+    events.push('second:error')
+  })
+
   mark('commands started')
   await Promise.all([first, second])
-  mark('imports settled')
+  mark('quarantine proven')
 
-  const viewer = new BrowserWindow({
-    show: false,
-    webPreferences: { session: targetSession, sandbox: true, contextIsolation: true }
+  if (!resolveOrphan) throw new Error('the injected cookie command never started')
+  resolveOrphan()
+  await new Promise((resolve) => setImmediate(resolve))
+
+  await withCookieMutationLock(targetSession, async () => {
+    events.push('third:start')
+    const store = openCookieClearStore(targetSession)
+    try {
+      await store.writeCookieIdentity({
+        url: 'https://recovered.example/',
+        name: 'recovered',
+        value: 'written-after-quarantine',
+        sameSite: 'unspecified',
+        secure: true
+      })
+      events.push('third:done')
+    } finally {
+      store.dispose()
+    }
   })
-  await viewer.loadURL('data:text/html,<title>cookie debugger verifier</title>')
-  const viewerDebugger = viewer.webContents.debugger
-  viewerDebugger.attach('1.3')
-  const cookies = (await viewerDebugger.sendCommand('Network.getAllCookies')).cookies
+
+  const cookies = await targetSession.cookies.get({ name: 'recovered' })
   const recoveredCookieValues = cookies
     .filter((cookie) => cookie.name === 'recovered')
     .map((cookie) => cookie.value)
-  viewerDebugger.detach()
-  viewer.destroy()
   keeper.destroy()
 
   clearTimeout(fixtureTimeout)
-  writeFileSync(resultPath, JSON.stringify({ step, firstError, events, recoveredCookieValues }))
+  writeFileSync(
+    resultPath,
+    JSON.stringify({ step, firstError, secondError, events, recoveredCookieValues })
+  )
   app.exit(0)
 }
 
@@ -136,7 +153,6 @@ async function runFixture(): Promise<FixtureResult> {
     bundleEntryPath,
     [
       `export { openCookieClearStore } from ${JSON.stringify(join(process.cwd(), 'src/main/browser/browser-cookie-clear-store.ts'))}`,
-      `export { sendCookieDebuggerCommand } from ${JSON.stringify(join(process.cwd(), 'src/main/browser/browser-cookie-debugger-command.ts'))}`,
       `export { withCookieMutationLock } from ${JSON.stringify(join(process.cwd(), 'src/main/browser/browser-cookie-import-clear.ts'))}`
     ].join('\n')
   )
@@ -171,21 +187,30 @@ async function runFixture(): Promise<FixtureResult> {
 }
 
 describe('cookie debugger retirement in Electron', () => {
-  it('settles the wedged command before a queued cookie mutation starts', async () => {
+  it('quarantines an unsettled cookie command and recovers after its late completion', async () => {
     const result = await runFixture()
 
-    expect(result.step).toBe('imports settled')
+    expect(result.step).toBe('quarantine proven')
     expect(result.firstError).toEqual({
       name: 'CookieDebuggerCommandTimeoutError',
-      message: 'Cookie debugger command Runtime.evaluate timed out after 10000ms'
+      message: 'Cookie debugger command Network.setCookie timed out after 10000ms'
     })
-    expect(result.events).toEqual([
-      'first:start',
-      'first:retire',
-      'first:error',
-      'second:start',
-      'second:done'
-    ])
-    expect(result.recoveredCookieValues).toEqual(['written-after-retirement'])
+    expect(result.secondError).toEqual({
+      name: 'CookieMutationQuarantinedError',
+      message:
+        'A previous cookie import is still finishing in Chromium. Wait a moment and try again; if it continues, restart Orca.'
+    })
+    expect(result.events).not.toContain('second:start')
+    expect(result.events.indexOf('first:error')).toBeLessThan(
+      result.events.indexOf('first:late-completion')
+    )
+    expect(result.events.indexOf('first:late-completion')).toBeLessThan(
+      result.events.indexOf('third:start')
+    )
+    expect(result.events).toContain('target:1:Network.setCookie')
+    expect(result.events).toContain('target:1:destroyed')
+    expect(result.events).toContain('target:2:Network.setCookie')
+    expect(result.events).toContain('third:done')
+    expect(result.recoveredCookieValues).toEqual(['written-after-quarantine'])
   }, 60_000)
 })
