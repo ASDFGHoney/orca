@@ -88,6 +88,7 @@ import {
   getRepoExecutionHostId,
   isRuntimeOwnedSshTargetId,
   LOCAL_EXECUTION_HOST_ID,
+  normalizeExecutionHostId,
   parseExecutionHostId,
   toRuntimeExecutionHostId,
   toSshExecutionHostId,
@@ -100,6 +101,7 @@ import {
 } from '../../../../shared/worktree/visibility-sources'
 import { cleanupEphemeralVmRuntimesForDeleted } from '@/lib/ephemeral-vm-runtime-cleanup'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../../shared/workspace-scope'
+import { getFolderWorkspaceHostIdFromGroups } from '../../../../shared/folder-workspace-host'
 import { formatFolderWorkspaceCreateError } from '../../lib/folder-workspace-path-status'
 import { getEnvironmentSshStateGeneration } from './runtime-environment-ssh'
 import { getRuntimeEnvironmentConnectionGeneration } from './runtime-status'
@@ -1120,9 +1122,12 @@ function mergeProjectCompatibilityForHostRepoChange({
   })
 }
 
-function getProjectGroupHostId(group: Pick<ProjectGroup, 'connectionId' | 'executionHostId'>) {
-  if (group.executionHostId) {
-    return group.executionHostId
+function getProjectGroupHostId(
+  group: Pick<ProjectGroup, 'connectionId' | 'executionHostId'>
+): ExecutionHostId {
+  const executionHostId = normalizeExecutionHostId(group.executionHostId)
+  if (executionHostId) {
+    return executionHostId
   }
   return group.connectionId ? toSshExecutionHostId(group.connectionId) : LOCAL_EXECUTION_HOST_ID
 }
@@ -1158,32 +1163,18 @@ function mergeFetchedProjectGroupsForHost(
   )
 }
 
-function getFolderWorkspaceHostId(
+function getCatalogFolderWorkspaceHostId(
   workspace: FolderWorkspace,
   projectGroups: readonly ProjectGroup[]
 ): ExecutionHostId {
-  const explicitHostId = parseExecutionHostId(workspace.executionHostId)?.id
-  if (explicitHostId) {
-    return explicitHostId
-  }
-  if (workspace.connectionId) {
-    return toSshExecutionHostId(workspace.connectionId)
-  }
-  const matchingHosts = new Set(
-    projectGroups
-      .filter((group) => group.id === workspace.projectGroupId)
-      .map(getProjectGroupHostId)
-  )
-  return matchingHosts.size === 1
-    ? ([...matchingHosts][0] as ExecutionHostId)
-    : LOCAL_EXECUTION_HOST_ID
+  return getFolderWorkspaceHostIdFromGroups(workspace, projectGroups, LOCAL_EXECUTION_HOST_ID)
 }
 
 function getFolderWorkspaceHostIdentity(
   workspace: FolderWorkspace,
   projectGroups: readonly ProjectGroup[]
 ): string {
-  return JSON.stringify([getFolderWorkspaceHostId(workspace, projectGroups), workspace.id])
+  return JSON.stringify([getCatalogFolderWorkspaceHostId(workspace, projectGroups), workspace.id])
 }
 
 function getFolderWorkspaceUpdateIdentity(
@@ -1208,7 +1199,7 @@ function mergeFetchedFolderWorkspacesForHost({
     fetched.map((workspace) => getFolderWorkspaceHostIdentity(workspace, projectGroups))
   )
   const preserved = previous.filter((workspace) => {
-    const existingHostId = getFolderWorkspaceHostId(workspace, projectGroups)
+    const existingHostId = getCatalogFolderWorkspaceHostId(workspace, projectGroups)
     return (
       !catalogOwnsHost(hostId, existingHostId) ||
       fetchedIdentities.has(getFolderWorkspaceHostIdentity(workspace, projectGroups))
@@ -1247,13 +1238,13 @@ function getFolderWorkspaceCatalogReplacementIdentities(
   const replacedIdentities = new Set(
     catalog.folderWorkspaces.map((workspace) =>
       getFolderWorkspaceUpdateIdentity(
-        getFolderWorkspaceHostId(workspace, projectGroups),
+        getCatalogFolderWorkspaceHostId(workspace, projectGroups),
         workspace.id
       )
     )
   )
   for (const workspace of currentFolderWorkspaces) {
-    const hostId = getFolderWorkspaceHostId(workspace, projectGroups)
+    const hostId = getCatalogFolderWorkspaceHostId(workspace, projectGroups)
     if (catalogOwnsHost(catalog.hostId, hostId)) {
       replacedIdentities.add(getFolderWorkspaceUpdateIdentity(hostId, workspace.id))
     }
@@ -1461,7 +1452,7 @@ function folderWorkspaceWithFetchedOwner(
     executionHostId:
       target.kind === 'environment'
         ? getRuntimeTargetHostId(target)
-        : getFolderWorkspaceHostId(workspace, projectGroups)
+        : getCatalogFolderWorkspaceHostId(workspace, projectGroups)
   }
 }
 
@@ -1510,14 +1501,14 @@ async function reconcileFailedFolderWorkspaceUpdate(args: {
       folderWorkspaces: refreshed
         ? state.folderWorkspaces.map((workspace) =>
             workspace.id === args.folderWorkspaceId &&
-            getFolderWorkspaceHostId(workspace, state.projectGroups) === args.ownerHostId
+            getCatalogFolderWorkspaceHostId(workspace, state.projectGroups) === args.ownerHostId
               ? mergeFolderWorkspaceUpdateResponse(workspace, refreshed, latestFields)
               : workspace
           )
         : state.folderWorkspaces.filter(
             (workspace) =>
               workspace.id !== args.folderWorkspaceId ||
-              getFolderWorkspaceHostId(workspace, state.projectGroups) !== args.ownerHostId
+              getCatalogFolderWorkspaceHostId(workspace, state.projectGroups) !== args.ownerHostId
           ),
       ...(folderWorkspaceUpdateInvalidatesPathStatus(latestFields) || !refreshed
         ? { folderWorkspacePathStatuses: {} }
@@ -1671,7 +1662,8 @@ async function fetchRuntimeAddProjectPathStatus(args: {
 
 function getFolderWorkspaceStatusRequestSnapshot(
   state: Pick<AppState, 'projectGroups' | 'folderWorkspaces' | 'repos' | 'sshConnectionStates'>,
-  request: FolderWorkspacePathStatusRequest
+  request: FolderWorkspacePathStatusRequest,
+  options?: FolderWorkspacePathStatusRouteOptions
 ): string | null {
   if (request.scope === 'path') {
     const candidateRepos = state.repos.filter((repo) =>
@@ -1704,18 +1696,36 @@ function getFolderWorkspaceStatusRequestSnapshot(
     )
   }
 
-  const scope =
+  const runtimeHostId = options?.runtimeEnvironmentId
+    ? toRuntimeExecutionHostId(options.runtimeEnvironmentId)
+    : null
+  const excludeRuntimeHosts = options?.runtimeEnvironmentId === null
+  const matchesRouteHost = (hostId: ExecutionHostId): boolean =>
+    runtimeHostId
+      ? hostId === runtimeHostId
+      : !excludeRuntimeHosts || parseExecutionHostId(hostId)?.kind !== 'runtime'
+  const scopeCandidates =
     request.scope === 'project-group'
-      ? state.projectGroups.find((group) => group.id === request.projectGroupId)
-      : state.folderWorkspaces.find((workspace) => workspace.id === request.folderWorkspaceId)
+      ? state.projectGroups.filter((group) => group.id === request.projectGroupId)
+      : state.folderWorkspaces.filter((workspace) => workspace.id === request.folderWorkspaceId)
+  const scope =
+    scopeCandidates.find((candidate) =>
+      'parentPath' in candidate
+        ? matchesRouteHost(getProjectGroupHostId(candidate))
+        : matchesRouteHost(getCatalogFolderWorkspaceHostId(candidate, state.projectGroups))
+    ) ?? scopeCandidates[0]
+  const matchingProjectGroups =
+    scope && 'projectGroupId' in scope
+      ? state.projectGroups.filter((group) => group.id === scope.projectGroupId)
+      : []
   const projectGroup =
     request.scope === 'project-group'
       ? scope && 'parentPath' in scope
         ? scope
         : null
-      : scope && 'projectGroupId' in scope
-        ? state.projectGroups.find((group) => group.id === scope.projectGroupId)
-        : null
+      : (matchingProjectGroups.find((group) => matchesRouteHost(getProjectGroupHostId(group))) ??
+        matchingProjectGroups[0] ??
+        null)
   const folderPath =
     request.scope === 'project-group'
       ? scope && 'parentPath' in scope
@@ -1791,9 +1801,10 @@ function getFreshFolderWorkspacePathStatusFromCache(args: {
 
 function getFolderWorkspacePathStatusRequestSnapshotForRead(
   state: AppState,
-  request: FolderWorkspacePathStatusRequest
+  request: FolderWorkspacePathStatusRequest,
+  options?: FolderWorkspacePathStatusRouteOptions
 ): string | null {
-  return getFolderWorkspaceStatusRequestSnapshot(state, request)
+  return getFolderWorkspaceStatusRequestSnapshot(state, request, options)
 }
 
 export type RepoSlice = {
@@ -2626,13 +2637,17 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     const state = get()
     const cacheKey = get().getFolderWorkspacePathStatusCacheKey(request, options)
     const cached = state.folderWorkspacePathStatuses[cacheKey]
-    const requestSnapshot = getFolderWorkspacePathStatusRequestSnapshotForRead(state, request)
+    const requestSnapshot = getFolderWorkspacePathStatusRequestSnapshotForRead(
+      state,
+      request,
+      options
+    )
     return getFreshFolderWorkspacePathStatusFromCache({ entry: cached, requestSnapshot })
   },
 
   fetchFolderWorkspacePathStatus: async (request, options) => {
     const cacheKey = get().getFolderWorkspacePathStatusCacheKey(request, options)
-    const requestSnapshot = getFolderWorkspaceStatusRequestSnapshot(get(), request)
+    const requestSnapshot = getFolderWorkspaceStatusRequestSnapshot(get(), request, options)
     const cached = get().folderWorkspacePathStatuses[cacheKey]
     const freshCachedStatus = getFreshFolderWorkspacePathStatusFromCache({
       entry: cached,
@@ -2659,7 +2674,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       set((state) => ({
         folderWorkspacePathStatuses:
           requestSnapshot !== null &&
-          getFolderWorkspaceStatusRequestSnapshot(state, request) === requestSnapshot
+          getFolderWorkspaceStatusRequestSnapshot(state, request, options) === requestSnapshot
             ? {
                 ...state.folderWorkspacePathStatuses,
                 [cacheKey]: { status, checkedAt: Date.now(), requestSnapshot }
@@ -2922,7 +2937,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         set((s) => ({
           folderWorkspaces: s.folderWorkspaces.map((workspace) =>
             workspace.id === folderWorkspaceId &&
-            getFolderWorkspaceHostId(workspace, s.projectGroups) === ownerHostId
+            getCatalogFolderWorkspaceHostId(workspace, s.projectGroups) === ownerHostId
               ? mergeFolderWorkspaceUpdateResponse(workspace, updated, latestFields, {
                   rejectOlderResponse: catalogChanged
                 })

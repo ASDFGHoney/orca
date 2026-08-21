@@ -123,9 +123,63 @@ test('keeps a runtime-owned folder under its paired host in every grouping mode 
     expect(new Set(seeded.map((workspace) => workspace.id)).size).toBe(1)
     expect(seeded.map((workspace) => workspace.executionHostId)).toEqual(['local', runtimeHostId])
 
+    await client.page.evaluate(async (environmentId) => {
+      const store = window.__store
+      if (!store) {
+        throw new Error('Renderer store unavailable')
+      }
+      await window.api.runtimeEnvironments.disconnect({ selector: environmentId })
+      store.getState().setRuntimeEnvironmentStatus(environmentId, {
+        status: null,
+        checkedAt: Date.now()
+      })
+    }, client.environmentId)
     await expectFolderWorkspaceSidebarGrouping(client.page, testInfo, {
       folderPath: runtimeFolderPath,
-      hostId: runtimeHostId
+      hostId: runtimeHostId,
+      localFolderPath,
+      screenshotPrefix: 'disconnected'
+    })
+
+    const reconnected = await client.page.evaluate(
+      async (args) => {
+        const store = window.__store
+        if (!store) {
+          throw new Error('Renderer store unavailable')
+        }
+        const response = await window.api.runtimeEnvironments.connect({
+          selector: args.environmentId,
+          timeoutMs: 15_000
+        })
+        if (!response.ok) {
+          throw new Error(response.error.message)
+        }
+        store.getState().setRuntimeEnvironmentStatus(args.environmentId, {
+          status: response.result,
+          checkedAt: Date.now()
+        })
+        await Promise.all([
+          store.getState().fetchProjectGroups({ runtimeEnvironmentId: args.environmentId }),
+          store.getState().fetchFolderWorkspaces({ runtimeEnvironmentId: args.environmentId })
+        ])
+        return store
+          .getState()
+          .folderWorkspaces.filter(
+            (workspace) =>
+              workspace.folderPath === args.runtimeFolderPath ||
+              workspace.folderPath === args.localFolderPath
+          )
+          .map((workspace) => workspace.executionHostId)
+          .sort()
+      },
+      { environmentId: client.environmentId, localFolderPath, runtimeFolderPath }
+    )
+    expect(reconnected).toEqual(['local', runtimeHostId])
+    await expectFolderWorkspaceSidebarGrouping(client.page, testInfo, {
+      folderPath: runtimeFolderPath,
+      hostId: runtimeHostId,
+      localFolderPath,
+      screenshotPrefix: 'reconnected'
     })
   } finally {
     await client.dispose()

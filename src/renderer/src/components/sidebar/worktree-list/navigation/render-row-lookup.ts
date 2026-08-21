@@ -6,6 +6,7 @@ import { getWorktreeHostIdentity } from '../../../../../../shared/worktree/host-
 import type { RenderRow } from '../listing/render-row'
 import type { PinnedWorktreeDisplayPolicy } from '../grouping/row-types'
 import { isPinnedWorktreeRow, type WorktreeItemRow } from '../listing/renderable-rows'
+import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
 
 export function getRenderRowSidebarKey(row: RenderRow): string | null {
   if (row.type === 'header') {
@@ -58,7 +59,12 @@ export function renderRowContainsWorktree(
     return false
   }
   if (row.type === 'folder-workspace') {
-    return folderWorkspaceKey(row.folderWorkspace.id) === worktreeId
+    return (
+      folderWorkspaceKey(row.folderWorkspace.id) === worktreeId &&
+      (executionHostId === undefined ||
+        getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, executionHostId) ===
+          executionHostId)
+    )
   }
   if (row.type === 'lineage-group') {
     return row.rows.some((item) => itemMatchesWorktree(item, worktreeId, executionHostId))
@@ -112,7 +118,12 @@ export function findPreferredRenderRowIndexForWorktreeIdentity(
     // Why: host-qualified reveals are emitted for folder workspaces too, and a
     // walker that only knows item rows returns -1 so the reveal never lands.
     if (row.type === 'folder-workspace') {
-      if (folderWorkspaceKey(row.folderWorkspace.id) === worktree.id) {
+      if (
+        folderWorkspaceKey(row.folderWorkspace.id) === worktree.id &&
+        (!worktree.hostId ||
+          getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, worktree.hostId) ===
+            worktree.hostId)
+      ) {
         return index
       }
       continue

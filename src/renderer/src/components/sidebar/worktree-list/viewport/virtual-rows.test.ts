@@ -43,7 +43,9 @@ function itemStub(id: string): RenderRow {
   return { type: 'item', key: id } as unknown as RenderRow
 }
 
-function folderRow(executionHostId: ExecutionHostId): RenderRow {
+function folderRow(
+  executionHostId: ExecutionHostId
+): Extract<RenderRow, { type: 'folder-workspace' }> {
   return {
     type: 'folder-workspace',
     key: 'folder-workspace:same-id',
@@ -96,6 +98,15 @@ describe('getRenderRowKey', () => {
     expect(getRenderRowKey(folderRow('local'))).toBe('folder-workspace:local|folder:same-id')
     expect(getRenderRowKey(folderRow('runtime:owner'))).toBe(
       'folder-workspace:runtime:owner|folder:same-id'
+    )
+  })
+
+  it('uses the focused host for a legacy folder with no owner fields', () => {
+    const row = folderRow('local')
+    delete row.folderWorkspace.executionHostId
+    delete row.projectGroup.executionHostId
+    expect(getRenderRowKey(row, 'runtime:focused')).toBe(
+      'folder-workspace:runtime:focused|folder:same-id'
     )
   })
 })

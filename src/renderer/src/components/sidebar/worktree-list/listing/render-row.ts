@@ -2,13 +2,18 @@ import type { HostSectionRow } from '../../host-section-rows'
 import { getFolderWorkspaceHostId } from '../../folder-workspace-host-id'
 import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
 import { folderWorkspaceKey } from '../../../../../../shared/workspace-scope'
+import { LOCAL_EXECUTION_HOST_ID } from '../../../../../../shared/execution-host'
+import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 
 type WorktreeItemRow = Extract<HostSectionRow, { type: 'item' }>
 export type RenderRow =
   | HostSectionRow
   | { type: 'lineage-group'; key: string; rows: WorktreeItemRow[] }
 
-export function getRenderRowKey(row: RenderRow): string {
+export function getRenderRowKey(
+  row: RenderRow,
+  defaultHostId: ExecutionHostId = LOCAL_EXECUTION_HOST_ID
+): string {
   if (row.type === 'host-header') {
     return `host:${row.hostId}`
   }
@@ -28,7 +33,7 @@ export function getRenderRowKey(row: RenderRow): string {
     return `pending:${row.creationId}`
   }
   if (row.type === 'folder-workspace') {
-    const hostId = getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, 'local')
+    const hostId = getFolderWorkspaceHostId(row.folderWorkspace, row.projectGroup, defaultHostId)
     return `folder-workspace:${composeWorktreeHostIdentity(
       hostId,
       folderWorkspaceKey(row.folderWorkspace.id)

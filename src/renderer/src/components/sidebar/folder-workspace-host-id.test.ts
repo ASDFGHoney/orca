@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../../../shared/project-group-types'
-import { getFolderWorkspaceHostId } from './folder-workspace-host-id'
+import {
+  getFolderWorkspaceHostId,
+  getFolderWorkspaceHostIdFromGroups
+} from './folder-workspace-host-id'
 import { addHostSectionRows, type HostSectionOption } from './host-section-rows'
 import type { Row } from './worktree-list/grouping/row-types'
 
@@ -171,5 +174,17 @@ describe('folder workspace host resolution', () => {
     expect(folderPlacements(connected)).toEqual(expected)
     expect(folderPlacements(disconnected)).toEqual(expected)
     expect(folderPlacements(reconnected)).toEqual(expected)
+  })
+
+  it('does not invent a group owner when same-id groups disagree across hosts', () => {
+    const workspace = folderWorkspace({ connectionId: 'legacy-target' })
+    const groups = [
+      projectGroup({ executionHostId: 'local' }),
+      projectGroup({ executionHostId: OWNER_HOST_ID })
+    ]
+
+    expect(getFolderWorkspaceHostIdFromGroups(workspace, groups, FOCUSED_HOST_ID)).toBe(
+      'ssh:legacy-target'
+    )
   })
 })

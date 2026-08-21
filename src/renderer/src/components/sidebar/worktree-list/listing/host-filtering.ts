@@ -88,6 +88,12 @@ export function getRuntimeEnvironmentIdForFolderPathStatusHost(
   return parsed?.kind === 'runtime' ? parsed.environmentId : null
 }
 
+export function getFolderPathStatusRouteOptionsForHost(hostId: ExecutionHostId): {
+  runtimeEnvironmentId: string | null
+} {
+  return { runtimeEnvironmentId: getRuntimeEnvironmentIdForFolderPathStatusHost(hostId) }
+}
+
 function getProjectGroupExecutionHostIdForFolderPathStatus(
   group: Pick<ProjectGroup, 'connectionId' | 'executionHostId'>
 ): ExecutionHostId {
@@ -100,32 +106,25 @@ function getProjectGroupExecutionHostIdForFolderPathStatus(
 
 export function getFolderPathStatusRouteOptionsForRows({
   request,
-  projectGroupsById,
-  folderWorkspacesById
+  projectGroup,
+  folderWorkspace
 }: {
   request: FolderWorkspacePathStatusRequest
-  projectGroupsById: ReadonlyMap<string, ProjectGroup>
-  folderWorkspacesById: ReadonlyMap<string, FolderWorkspace>
+  projectGroup: ProjectGroup | null | undefined
+  folderWorkspace?: FolderWorkspace
 }): { runtimeEnvironmentId: string | null } | undefined {
-  const folderWorkspace =
-    request.scope === 'folder-workspace'
-      ? folderWorkspacesById.get(request.folderWorkspaceId)
-      : undefined
-  const group =
-    request.scope === 'project-group'
-      ? projectGroupsById.get(request.projectGroupId)
-      : projectGroupsById.get(folderWorkspace?.projectGroupId ?? '')
-  if (!group) {
+  if (request.scope === 'project-group' && !projectGroup) {
     return undefined
   }
   const hostId =
     request.scope === 'project-group'
-      ? getProjectGroupExecutionHostIdForFolderPathStatus(group)
+      ? getProjectGroupExecutionHostIdForFolderPathStatus(projectGroup!)
       : getFolderWorkspaceExecutionHostIdForRows({
           folderWorkspace: folderWorkspace ?? { connectionId: null, executionHostId: null },
-          projectGroup: group,
-          defaultHostId: getProjectGroupExecutionHostIdForFolderPathStatus(group)
+          projectGroup: projectGroup ?? undefined,
+          defaultHostId: projectGroup
+            ? getProjectGroupExecutionHostIdForFolderPathStatus(projectGroup)
+            : 'local'
         })
-  const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderPathStatusHost(hostId)
-  return { runtimeEnvironmentId }
+  return getFolderPathStatusRouteOptionsForHost(hostId)
 }

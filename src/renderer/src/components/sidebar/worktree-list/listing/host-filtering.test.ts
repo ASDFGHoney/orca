@@ -87,8 +87,7 @@ describe('WorktreeList host filtering ownership', () => {
     expect(
       getFolderPathStatusRouteOptionsForRows({
         request: { scope: 'project-group', projectGroupId: runtimeGroup.id },
-        projectGroupsById: new Map([[runtimeGroup.id, runtimeGroup]]),
-        folderWorkspacesById: new Map()
+        projectGroup: runtimeGroup
       })
     ).toEqual({ runtimeEnvironmentId: 'env-1' })
   })
@@ -99,8 +98,8 @@ describe('WorktreeList host filtering ownership', () => {
     expect(
       getFolderPathStatusRouteOptionsForRows({
         request: { scope: 'folder-workspace', folderWorkspaceId: workspace.id },
-        projectGroupsById: new Map([[runtimeGroup.id, runtimeGroup]]),
-        folderWorkspacesById: new Map([[workspace.id, workspace]])
+        projectGroup: runtimeGroup,
+        folderWorkspace: workspace
       })
     ).toEqual({ runtimeEnvironmentId: 'env-1' })
   })
@@ -110,8 +109,7 @@ describe('WorktreeList host filtering ownership', () => {
     expect(
       getFolderPathStatusRouteOptionsForRows({
         request: { scope: 'project-group', projectGroupId: localGroup.id },
-        projectGroupsById: new Map([[localGroup.id, localGroup]]),
-        folderWorkspacesById: new Map()
+        projectGroup: localGroup
       })
     ).toEqual({ runtimeEnvironmentId: null })
   })
@@ -121,9 +119,29 @@ describe('WorktreeList host filtering ownership', () => {
     expect(
       getFolderPathStatusRouteOptionsForRows({
         request: { scope: 'project-group', projectGroupId: sshGroup.id },
-        projectGroupsById: new Map([[sshGroup.id, sshGroup]]),
-        folderWorkspacesById: new Map()
+        projectGroup: sshGroup
       })
     ).toEqual({ runtimeEnvironmentId: null })
+  })
+
+  it('routes identical folder ids from each concrete host row', () => {
+    const request = { scope: 'folder-workspace' as const, folderWorkspaceId: 'folder-1' }
+    const localGroup = group({ executionHostId: 'local' })
+    const runtimeGroup = group({ executionHostId: 'runtime:env-1' })
+
+    expect(
+      getFolderPathStatusRouteOptionsForRows({
+        request,
+        projectGroup: localGroup,
+        folderWorkspace: folderWorkspace({ executionHostId: 'local' })
+      })
+    ).toEqual({ runtimeEnvironmentId: null })
+    expect(
+      getFolderPathStatusRouteOptionsForRows({
+        request,
+        projectGroup: runtimeGroup,
+        folderWorkspace: folderWorkspace({ executionHostId: 'runtime:env-1' })
+      })
+    ).toEqual({ runtimeEnvironmentId: 'env-1' })
   })
 })

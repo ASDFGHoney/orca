@@ -85,6 +85,24 @@ describe('worktree list folder reveal', () => {
     })
   })
 
+  it('resolves identical folder ids to the requested execution host', () => {
+    const local = makeFolderWorkspace({ executionHostId: 'local', name: 'Local folder' })
+    const runtime = makeFolderWorkspace({
+      executionHostId: 'runtime:env-1',
+      name: 'Runtime folder'
+    })
+
+    expect(
+      getKnownSidebarWorktreeById(
+        folderWorkspaceKey(runtime.id),
+        new Map(),
+        [local, runtime],
+        [],
+        'runtime:env-1'
+      )
+    ).toMatchObject({ hostId: 'runtime:env-1', displayName: 'Runtime folder' })
+  })
+
   it('keeps pending reveals alive for folder workspaces missing from raw git worktrees', () => {
     const folderWorkspace = makeFolderWorkspace()
     const gitWorktree = makeWorktree('git-worktree-1')

@@ -79,4 +79,23 @@ describe('host-qualified reveal lookup finds folder workspaces', () => {
       )
     ).toBe(-1)
   })
+
+  it('selects the requested host when folder ids collide', () => {
+    const rows: RenderRow[] = ['local', 'runtime:env-1'].map((executionHostId) => ({
+      type: 'folder-workspace',
+      key: `folder-workspace:${executionHostId}`,
+      folderWorkspace: { ...FOLDER_WORKSPACE, executionHostId },
+      projectGroup: { ...PROJECT_GROUP, executionHostId },
+      depth: 0,
+      groupDepth: 0
+    })) as RenderRow[]
+
+    expect(
+      findPreferredRenderRowIndexForWorktreeIdentity(
+        rows,
+        { id: folderWorkspaceKey(FOLDER_WORKSPACE.id), hostId: 'runtime:env-1' },
+        'single-location'
+      )
+    ).toBe(1)
+  })
 })

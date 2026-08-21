@@ -4,25 +4,37 @@ import { expect } from './helpers/orca-app'
 export async function expectFolderWorkspaceSidebarGrouping(
   page: Page,
   testInfo: TestInfo,
-  args: { folderPath: string; hostId: `runtime:${string}` }
+  args: {
+    folderPath: string
+    hostId: `runtime:${string}`
+    localFolderPath: string
+    screenshotPrefix: string
+  }
 ): Promise<void> {
-  const target = await page.evaluate(({ folderPath, hostId }) => {
+  const targets = await page.evaluate(({ folderPath, hostId, localFolderPath }) => {
     const store = window.__store
     if (!store) {
       throw new Error('Renderer store unavailable')
     }
-    const workspace = store
+    const runtimeWorkspace = store
       .getState()
       .folderWorkspaces.find(
         (candidate) => candidate.folderPath === folderPath && candidate.executionHostId === hostId
       )
-    if (!workspace) {
+    const localWorkspace = store
+      .getState()
+      .folderWorkspaces.find(
+        (candidate) =>
+          candidate.folderPath === localFolderPath && candidate.executionHostId === 'local'
+      )
+    if (!runtimeWorkspace || !localWorkspace) {
       throw new Error('Runtime folder unavailable for sidebar grouping')
     }
     store.getState().setVisibleWorkspaceHostIds(['local', hostId])
-    return { id: workspace.id, name: workspace.name, executionHostId: workspace.executionHostId }
+    return { runtimeWorkspace, localWorkspace }
   }, args)
-  expect(target.executionHostId).toBe(args.hostId)
+  expect(targets.runtimeWorkspace.executionHostId).toBe(args.hostId)
+  expect(targets.localWorkspace.executionHostId).toBe('local')
 
   const cases = [
     { id: 'repo', label: 'Project' },
@@ -30,8 +42,9 @@ export async function expectFolderWorkspaceSidebarGrouping(
     { id: 'pr-status', label: 'PR' },
     { id: 'none', label: 'None' }
   ] as const
-  const identity = `${args.hostId}|folder:${target.id}`
-  const placements: { groupBy: string; hostId: string; identity: string }[] = []
+  const runtimeIdentity = `${args.hostId}|folder:${targets.runtimeWorkspace.id}`
+  const localIdentity = `local|folder:${targets.localWorkspace.id}`
+  const placements: { groupBy: string; runtimeHostId: string; localHostId: string }[] = []
 
   for (const groupBy of cases) {
     await page.evaluate((groupById) => window.__store?.getState().setGroupBy(groupById), groupBy.id)
@@ -59,36 +72,48 @@ export async function expectFolderWorkspaceSidebarGrouping(
           executionHostId: hostId
         })
       },
-      { folderWorkspaceId: target.id, hostId: args.hostId }
+      { folderWorkspaceId: targets.runtimeWorkspace.id, hostId: args.hostId }
     )
 
-    const folderRow = page.locator(`[data-worktree-host-identity="${identity}"]`)
-    await expect(folderRow).toBeVisible()
-    await expect(folderRow).toContainText(target.name)
-    const placement = await page.evaluate((targetIdentity) => {
-      const rows = [
-        ...document.querySelectorAll<HTMLElement>('[data-worktree-sidebar] [data-index]')
-      ].sort(
-        (left, right) =>
-          Number(left.dataset.index ?? Number.MAX_SAFE_INTEGER) -
-          Number(right.dataset.index ?? Number.MAX_SAFE_INTEGER)
-      )
-      let hostId: string | null = null
-      for (const row of rows) {
-        const hostHeader = row.querySelector<HTMLElement>('[data-host-header-drag-id]')
-        if (hostHeader) {
-          hostId = hostHeader.dataset.hostHeaderDragId ?? null
+    const runtimeRow = page.locator(`[data-worktree-host-identity="${runtimeIdentity}"]`)
+    const localRow = page.locator(`[data-worktree-host-identity="${localIdentity}"]`)
+    await expect(runtimeRow).toHaveCount(1)
+    await expect(runtimeRow).toContainText(targets.runtimeWorkspace.name)
+    await expect(localRow).toHaveCount(1)
+    await expect(localRow).toContainText(targets.localWorkspace.name)
+    const placement = await page.evaluate(
+      (targetIdentities) => {
+        const rows = [
+          ...document.querySelectorAll<HTMLElement>('[data-worktree-sidebar] [data-index]')
+        ].sort(
+          (left, right) =>
+            Number(left.dataset.index ?? Number.MAX_SAFE_INTEGER) -
+            Number(right.dataset.index ?? Number.MAX_SAFE_INTEGER)
+        )
+        let hostId: string | null = null
+        const result: Record<string, string | null> = {}
+        for (const row of rows) {
+          const hostHeader = row.querySelector<HTMLElement>('[data-host-header-drag-id]')
+          if (hostHeader) {
+            hostId = hostHeader.dataset.hostHeaderDragId ?? null
+          }
+          const identity = row.dataset.worktreeHostIdentity
+          if (identity && targetIdentities.includes(identity)) {
+            result[identity] = hostId
+          }
         }
-        if (row.dataset.worktreeHostIdentity === targetIdentity) {
-          return { hostId, identity: row.dataset.worktreeHostIdentity ?? '' }
-        }
-      }
-      return null
-    }, identity)
-    expect(placement).toEqual({ hostId: args.hostId, identity })
-    placements.push({ groupBy: groupBy.id, ...placement! })
+        return result
+      },
+      [runtimeIdentity, localIdentity]
+    )
+    expect(placement).toEqual({ [runtimeIdentity]: args.hostId, [localIdentity]: 'local' })
+    placements.push({
+      groupBy: groupBy.id,
+      runtimeHostId: placement[runtimeIdentity]!,
+      localHostId: placement[localIdentity]!
+    })
     await page.screenshot({
-      path: testInfo.outputPath(`sta-4964-${groupBy.id}.png`),
+      path: testInfo.outputPath(`sta-4964-${args.screenshotPrefix}-${groupBy.id}.png`),
       fullPage: true
     })
   }
