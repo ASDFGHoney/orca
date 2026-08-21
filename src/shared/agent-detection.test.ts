@@ -14,7 +14,8 @@ import {
   hasCompatibleAgentTitleIdentity,
   normalizeCompatibleAgentStatusEntryForOwner,
   normalizeCompatibleAgentTitleForOwner,
-  resolveCompatibleAgentTypeForOwner
+  resolveCompatibleAgentTypeForOwner,
+  shareCompatibleTitleIdentityGroup
 } from './agent-title-owner'
 import { SYNTHETIC_AGENT_TITLE_PROFILES } from './synthetic-agent-title'
 
@@ -253,6 +254,36 @@ describe('Pi-compatible title detection', () => {
     expect(status.agentType).toBe('omp')
     expect(status.terminalTitle).toBe('\u280b OMP')
     expect(resolveCompatibleAgentTypeForOwner('omp', 'pi')).toBe('omp')
+  })
+
+  it('keeps explicit launch Pi ownership over an incoming OMP identity', () => {
+    expect(resolveCompatibleAgentTypeForOwner('omp', 'pi', { ownerIsLaunch: true })).toBe('pi')
+    expect(normalizeCompatibleAgentTitleForOwner('\u280b OMP', 'pi', { ownerIsLaunch: true })).toBe(
+      '\u280b Pi'
+    )
+    const status = normalizeCompatibleAgentStatusEntryForOwner(
+      {
+        state: 'working',
+        prompt: '',
+        updatedAt: 1,
+        stateStartedAt: 1,
+        agentType: 'omp',
+        paneKey: 'tab-1:leaf-1',
+        terminalTitle: '\u280b OMP',
+        stateHistory: []
+      },
+      'pi',
+      { ownerIsLaunch: true }
+    )
+    expect(status.agentType).toBe('pi')
+    expect(status.terminalTitle).toBe('\u280b Pi')
+  })
+
+  it('treats Pi and OMP as one title-identity group', () => {
+    expect(shareCompatibleTitleIdentityGroup('pi', 'omp')).toBe(true)
+    expect(shareCompatibleTitleIdentityGroup('omp', 'pi')).toBe(true)
+    expect(shareCompatibleTitleIdentityGroup('pi', 'codex')).toBe(false)
+    expect(shareCompatibleTitleIdentityGroup('pi', null)).toBe(false)
   })
 
   it('still re-owns generic Pi frames when the pane is actually OMP', () => {

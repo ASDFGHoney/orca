@@ -15,6 +15,11 @@ type TitleProfileMatch = {
 
 type TitleLabelProfileMatch = Pick<TitleProfileMatch, 'profile'>
 
+export type CompatibleAgentOwnerOptions = {
+  /** User-selected launch identity. Same-group incoming frames collapse to the owner. */
+  ownerIsLaunch?: boolean
+}
+
 const COMPATIBLE_IDLE_TITLE_RE = /(?<![\w./\\-])(?:ready|idle|done)(?![\w-])/i
 
 /**
@@ -106,14 +111,47 @@ function hasIdleSuffix(title: string, sourceProfile: SyntheticAgentTitleProfile)
 }
 
 /**
+ * True when both agents are the same, or members of one title-identity group
+ * (OMP wraps Pi). Same-group titles are not reuse evidence.
+ */
+export function shareCompatibleTitleIdentityGroup(
+  left: AgentType | null | undefined,
+  right: AgentType | null | undefined
+): boolean {
+  if (!left || !right) {
+    return false
+  }
+  if (left === right) {
+    return true
+  }
+  const leftGroup = getSyntheticAgentTitleProfile(left)?.titleIdentityGroup
+  const rightGroup = getSyntheticAgentTitleProfile(right)?.titleIdentityGroup
+  return Boolean(leftGroup && leftGroup === rightGroup)
+}
+
+function specificSiblingOutranksGenericOwner(
+  ownerProfile: SyntheticAgentTitleProfile,
+  incomingProfile: SyntheticAgentTitleProfile,
+  ownerIsLaunch: boolean
+): boolean {
+  // Launch ownership is identity. Only an inferred generic owner (a status frame
+  // that reported Pi) yields to a specific sibling so the label cannot oscillate.
+  return (
+    !ownerIsLaunch &&
+    Boolean(ownerProfile.titleIdentityFallback) &&
+    !incomingProfile.titleIdentityFallback
+  )
+}
+
+/**
  * Why: remote OMP surfaces may report Pi as the live status identity, while
- * launch ownership still identifies the user-selected agent. The owner wins,
- * except when the owner is the group's generic identity and the incoming frame
- * names a specific sibling — downgrading that makes the label oscillate.
+ * launch ownership still identifies the user-selected agent. The owner wins.
+ * An inferred generic owner yields to a specific sibling; explicit launch never does.
  */
 export function resolveCompatibleAgentTypeForOwner(
   incomingAgentType: AgentType | null | undefined,
-  ownerAgentType: AgentType | null | undefined
+  ownerAgentType: AgentType | null | undefined,
+  options?: CompatibleAgentOwnerOptions
 ): AgentType | undefined {
   if (!incomingAgentType) {
     return undefined
@@ -127,7 +165,13 @@ export function resolveCompatibleAgentTypeForOwner(
   ) {
     return incomingAgentType
   }
-  if (ownerProfile.titleIdentityFallback && !incomingProfile.titleIdentityFallback) {
+  if (
+    specificSiblingOutranksGenericOwner(
+      ownerProfile,
+      incomingProfile,
+      options?.ownerIsLaunch === true
+    )
+  ) {
     return incomingAgentType
   }
   return ownerAgentType as AgentType
@@ -139,7 +183,8 @@ export function resolveCompatibleAgentTypeForOwner(
  */
 export function normalizeCompatibleAgentTitleForOwner(
   title: string,
-  ownerAgentType: AgentType | null | undefined
+  ownerAgentType: AgentType | null | undefined,
+  options?: CompatibleAgentOwnerOptions
 ): string {
   const ownerProfile = getSyntheticAgentTitleProfile(ownerAgentType)
   if (!ownerProfile?.titleIdentityGroup) {
@@ -152,8 +197,14 @@ export function normalizeCompatibleAgentTitleForOwner(
   ) {
     return title
   }
-  // Why: a specific sibling title (OMP) must not be rewritten through the generic Pi owner.
-  if (ownerProfile.titleIdentityFallback && !source.profile.titleIdentityFallback) {
+  // Why: a specific sibling title (OMP) must not be rewritten through an inferred Pi owner.
+  if (
+    specificSiblingOutranksGenericOwner(
+      ownerProfile,
+      source.profile,
+      options?.ownerIsLaunch === true
+    )
+  ) {
     return title
   }
   const sourceStatus = getSourceTitleStatus(source.sourceTitle)
@@ -181,11 +232,16 @@ export function normalizeCompatibleAgentTitleForOwner(
  */
 export function normalizeCompatibleAgentStatusEntryForOwner(
   entry: AgentStatusEntry,
-  ownerAgentType: AgentType | null | undefined
+  ownerAgentType: AgentType | null | undefined,
+  options?: CompatibleAgentOwnerOptions
 ): AgentStatusEntry {
-  const agentType = resolveCompatibleAgentTypeForOwner(entry.agentType, ownerAgentType)
+  const agentType = resolveCompatibleAgentTypeForOwner(entry.agentType, ownerAgentType, options)
   const terminalTitle = entry.terminalTitle
-    ? normalizeCompatibleAgentTitleForOwner(entry.terminalTitle, agentType ?? ownerAgentType)
+    ? normalizeCompatibleAgentTitleForOwner(
+        entry.terminalTitle,
+        agentType ?? ownerAgentType,
+        options
+      )
     : entry.terminalTitle
   if (agentType === entry.agentType && terminalTitle === entry.terminalTitle) {
     return entry

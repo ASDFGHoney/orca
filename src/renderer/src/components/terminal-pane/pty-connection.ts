@@ -309,7 +309,7 @@ import {
   normalizeCompatibleAgentTitleForOwner,
   resolveCompatibleAgentTypeForOwner
 } from '../../../../shared/agent-title-owner'
-import { resolvePaneAgentOwner } from '../../../../shared/pane-agent-owner'
+import { resolvePaneAgentOwnerRecord } from '../../../../shared/pane-agent-owner'
 import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import {
   isExpectedAgentProcess,
@@ -1728,21 +1728,24 @@ export function connectPanePty(
    * OMP-owned pane back to Pi; command ownership covers manually typed `omp`
    * in generic terminals where launch metadata does not exist.
    */
-  const getAuthoritativePaneAgent = (): AgentType | undefined => {
+  const getAuthoritativePaneOwner = (): {
+    agent: AgentType | undefined
+    ownerIsLaunch: boolean
+  } => {
     const state = useAppStore.getState()
     const tab = (state.tabsByWorktree[deps.worktreeId] ?? []).find(
       (entry) => entry.id === deps.tabId
     )
-    return (
-      resolvePaneAgentOwner({
-        launchAgent: tab?.launchAgent,
-        startupLaunchAgent: paneStartup?.launchAgent,
-        initialStatusAgent: paneStartup?.initialAgentStatus?.agent,
-        commandInferredAgent: commandInferredPaneAgent,
-        hookAgent: state.agentStatusByPaneKey[cacheKey]?.agentType
-      }) ?? undefined
-    )
+    const record = resolvePaneAgentOwnerRecord({
+      launchAgent: tab?.launchAgent,
+      startupLaunchAgent: paneStartup?.launchAgent,
+      initialStatusAgent: paneStartup?.initialAgentStatus?.agent,
+      commandInferredAgent: commandInferredPaneAgent,
+      hookAgent: state.agentStatusByPaneKey[cacheKey]?.agentType
+    })
+    return { agent: record?.agent, ownerIsLaunch: record?.ownerIsLaunch === true }
   }
+  const getAuthoritativePaneAgent = (): AgentType | undefined => getAuthoritativePaneOwner().agent
   // Why: the renderer veto (owner evidence beating a Gemini-looking title) must
   // use only pane-scoped, CURRENT ownership. getAuthoritativePaneAgent leads
   // with the tab-shared `tab.launchAgent` and a never-cleared
@@ -2807,10 +2810,12 @@ export function connectPanePty(
     // Why: one owner-aware decision drives the display label, the runtime/tab
     // title, task-completion tracking, and the renderer gate, so raw title text
     // can no longer disable GPU behind stronger owner evidence (#7428/#7447).
+    const displayOwner = getAuthoritativePaneOwner()
     const decision = resolvePaneTitleDecision({
       normalizedTitle: title,
       rawTitle,
-      displayOwnerAgentType: getAuthoritativePaneAgent(),
+      displayOwnerAgentType: displayOwner.agent,
+      displayOwnerIsLaunch: displayOwner.ownerIsLaunch,
       rendererOwnerAgentType: getPaneScopedRendererOwner(),
       userGpuMode: useAppStore.getState().settings?.terminalGpuAcceleration ?? 'auto'
     })
@@ -2869,13 +2874,13 @@ export function connectPanePty(
     if (!initialStatus || !routing) {
       return
     }
+    const paneOwner = getAuthoritativePaneOwner()
     const statusPayload = {
       state: 'working' as const,
       prompt: initialStatus.prompt,
-      agentType: resolveCompatibleAgentTypeForOwner(
-        initialStatus.agent,
-        getAuthoritativePaneAgent()
-      ),
+      agentType: resolveCompatibleAgentTypeForOwner(initialStatus.agent, paneOwner.agent, {
+        ownerIsLaunch: paneOwner.ownerIsLaunch
+      }),
       // Why: Orca launched this agent, so this row predates any provider signal for the pane.
       observation: rendererAgentStatusObservations.observe(cacheKey, {
         origin: 'launch',
@@ -3735,8 +3740,15 @@ export function connectPanePty(
       return
     }
     const title = currentState.runtimePaneTitlesByTabId?.[deps.tabId]?.[pane.id]
-    const authoritativePaneAgent = getAuthoritativePaneAgent()
-    const agentType = resolveCompatibleAgentTypeForOwner(payload.agentType, authoritativePaneAgent)
+    const authoritativePaneOwner = getAuthoritativePaneOwner()
+    const authoritativePaneAgent = authoritativePaneOwner.agent
+    const agentType = resolveCompatibleAgentTypeForOwner(
+      payload.agentType,
+      authoritativePaneAgent,
+      {
+        ownerIsLaunch: authoritativePaneOwner.ownerIsLaunch
+      }
+    )
     const statusPayload = agentType === payload.agentType ? payload : { ...payload, agentType }
     // Why: this is the remote-runtime path where the renderer, not main, parses OSC 9999 out of
     // PTY bytes — so the renderer is the sequencing authority for these rows and says so. Kept
@@ -3754,7 +3766,8 @@ export function connectPanePty(
     const statusTitle = resolvedStatusTitle
       ? normalizeCompatibleAgentTitleForOwner(
           resolvedStatusTitle,
-          agentType ?? authoritativePaneAgent
+          agentType ?? authoritativePaneAgent,
+          { ownerIsLaunch: authoritativePaneOwner.ownerIsLaunch }
         )
       : resolvedStatusTitle
     // Why: proves the claim — only a pane that really produced byte-derived
