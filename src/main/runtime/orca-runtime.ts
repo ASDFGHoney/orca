@@ -1518,6 +1518,10 @@ type RuntimePtyWorktreeRecord = {
   waitBlockedAt: number | null
   // Why: memoized wait scan of the current retained tail (see RuntimeLeafRecord).
   tailWaitState?: TerminalTailWaitState
+  // Why: inventory rediscovers daemon PTYs this main never attached to; a failed
+  // provider snapshot must not be re-asked on every list (200-row hot path).
+  providerActivitySeedAttempted?: boolean
+  providerActivityObservation?: 'unverifiable'
 }
 
 type TerminalAgentStatusSnapshot = {
@@ -11064,6 +11068,7 @@ export class OrcaRuntimeService {
       pty.connected = true
       pty.disconnectedAt = null
       pty.lastOutputAt = at
+      pty.providerActivityObservation = undefined
       const normalized = normalizeTerminalChunk(data, pty.tailPendingAnsi)
       pty.tailPendingAnsi = normalized.pendingAnsi
       const nextTail = appendNormalizedToTailBuffer(
@@ -32737,12 +32742,80 @@ export class OrcaRuntimeService {
       }
     }
     this.pruneDisconnectedPtyRecords()
+    const livePtyIdsForActivitySeed = targetWorktreeId ? selectedLivePtyIds : allLivePtyIds
+    if (deadline === undefined || Date.now() < deadline) {
+      await this.seedUnattachedLocalDaemonPtyActivityFromProvider(livePtyIdsForActivitySeed)
+    }
     return {
-      livePtyIds: targetWorktreeId ? selectedLivePtyIds : allLivePtyIds,
+      livePtyIds: livePtyIdsForActivitySeed,
       allLivePtyIds,
       terminalIdentityByPtyId: controllerIdentityByPtyId,
       queriedHostIds
     }
+  }
+
+  // Why: inventory records a never-attached local daemon PTY at construction
+  // defaults; list would otherwise report lastOutputAt:null / preview:"" as if
+  // that were an observation. Seed once from the same provider snapshot `read`
+  // already consults. Recency stays unset — snapshot bytes are historical.
+  private async seedUnattachedLocalDaemonPtyActivityFromProvider(
+    livePtyIds: ReadonlySet<string>
+  ): Promise<void> {
+    const candidates: RuntimePtyWorktreeRecord[] = []
+    for (const ptyId of livePtyIds) {
+      if (candidates.length >= DEFAULT_TERMINAL_LIST_LIMIT) {
+        break
+      }
+      if (!this.isKnownUnattachedLocalDaemonPty(ptyId)) {
+        continue
+      }
+      const pty = this.ptysById.get(ptyId)
+      if (!pty || pty.providerActivitySeedAttempted || !restoredTerminalTailSeedAllowed(pty)) {
+        continue
+      }
+      pty.providerActivitySeedAttempted = true
+      candidates.push(pty)
+    }
+    if (candidates.length === 0) {
+      return
+    }
+    const serialize = this.ptyController?.serializeProviderBuffer
+    if (!serialize) {
+      for (const pty of candidates) {
+        pty.providerActivityObservation = 'unverifiable'
+      }
+      return
+    }
+    await Promise.all(
+      candidates.map((pty) => this.seedOneUnattachedLocalDaemonPtyActivity(pty, serialize))
+    )
+  }
+
+  private async seedOneUnattachedLocalDaemonPtyActivity(
+    pty: RuntimePtyWorktreeRecord,
+    serialize: NonNullable<RuntimePtyController['serializeProviderBuffer']>
+  ): Promise<void> {
+    // Why Promise.resolve().then: a synchronous serialize throw must become a
+    // rejection so withTimeout can map it to null instead of aborting the sweep.
+    const snapshot = await withTimeout(
+      Promise.resolve().then(() =>
+        serialize(pty.ptyId, { scrollbackRows: LIST_PROVIDER_ACTIVITY_SEED_ROWS })
+      ),
+      VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
+      null
+    )
+    if (!this.ptysById.has(pty.ptyId) || !restoredTerminalTailSeedAllowed(pty)) {
+      return
+    }
+    if (!snapshot) {
+      pty.providerActivityObservation = 'unverifiable'
+      return
+    }
+    const text = `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
+    this.seedTerminalRestoreTail(pty.ptyId, {
+      ...(text.length > 0 ? { text } : {}),
+      ...(snapshot.lastTitle ? { lastTitle: snapshot.lastTitle } : {})
+    })
   }
 
   private refreshFloatingWorkspacePtyLiveness(): Set<string> | null {
@@ -32977,6 +33050,11 @@ export class OrcaRuntimeService {
       !leaf.ptyId.startsWith('remote:') &&
       parseAppSshPtyId(leaf.ptyId) === null &&
       this.ptyController?.hasPty?.(leaf.ptyId) !== true
+    const activityUnverifiable =
+      !provenAbsent &&
+      leaf.lastOutputAt === null &&
+      leaf.preview.length === 0 &&
+      pty?.providerActivityObservation === 'unverifiable'
     return {
       handle: this.issueHandle(leaf),
       ptyId: leaf.ptyId,
@@ -32992,6 +33070,7 @@ export class OrcaRuntimeService {
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
+      ...(activityUnverifiable ? { activityObservation: 'unverifiable' } : {}),
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
       ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
     }
@@ -34956,6 +35035,10 @@ export class OrcaRuntimeService {
 
     const pane = parsePaneKey(pty.paneKey ?? '')
     const orphaned = !pty.tabId || !pane || pane.tabId !== pty.tabId
+    const activityUnverifiable =
+      pty.lastOutputAt === null &&
+      pty.preview.length === 0 &&
+      pty.providerActivityObservation === 'unverifiable'
     return {
       handle: this.issuePtyHandle(pty),
       ptyId: pty.ptyId,
@@ -34971,6 +35054,7 @@ export class OrcaRuntimeService {
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
+      ...(activityUnverifiable ? { activityObservation: 'unverifiable' } : {}),
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
       ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
     }
@@ -38588,6 +38672,9 @@ const VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS = 750
 const VISIBLE_TERMINAL_SNAPSHOT_RETRY_MS = 1_000
 const MAX_PREVIEW_LINES = 6
 const MAX_PREVIEW_CHARS = 300
+// Why: list preview is 6 lines; extra rows cover CR redraws without a full
+// terminal-read snapshot (DEFAULT_TERMINAL_READ_LIMIT is 120).
+const LIST_PROVIDER_ACTIVITY_SEED_ROWS = 24
 const WORKTREE_STATUS_PRIORITY: Record<RuntimeWorktreeStatus, number> = {
   inactive: 0,
   active: 1,
