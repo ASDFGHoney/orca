@@ -264,6 +264,7 @@ export async function installTranscriptWatcher(
           // A still-pending initial drain also surfaces one error snapshot so a
           // watching client isn't stranded at 'loading' when the read keeps
           // throwing; initialDrain stays true so a recovered read can still win.
+          scheduleRotationRetry()
           if (
             !closed &&
             initialDrain &&
@@ -272,9 +273,12 @@ export async function installTranscriptWatcher(
             !(error instanceof TranscriptRangeReadInvalidatedError)
           ) {
             initialErrorEmitted = true
-            onInitialSnapshot([], false, 0, transcriptInitialReadErrorMessage(error))
+            try {
+              onInitialSnapshot([], false, 0, transcriptInitialReadErrorMessage(error))
+            } catch {
+              // A closing subscriber cannot own retry liveness.
+            }
           }
-          scheduleRotationRetry()
           break
         }
       } while (pendingReadRequested && !closed)

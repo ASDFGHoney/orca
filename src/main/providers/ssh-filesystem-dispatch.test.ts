@@ -80,21 +80,23 @@ describe('SSH filesystem provider generations', () => {
     })
     const replacement = {} as IFilesystemProvider
 
-    registerSshFilesystemProvider('generation-conn', provider)
-    const first = getSshFilesystemProviderSnapshot('generation-conn')
-    unregisterSshFilesystemProvider('generation-conn')
-    registerSshFilesystemProvider('generation-conn', replacement)
-    const third = getSshFilesystemProviderSnapshot('generation-conn')
+    try {
+      registerSshFilesystemProvider('generation-conn', provider)
+      const first = getSshFilesystemProviderSnapshot('generation-conn')
+      unregisterSshFilesystemProvider('generation-conn')
+      registerSshFilesystemProvider('generation-conn', replacement)
+      const third = getSshFilesystemProviderSnapshot('generation-conn')
 
-    expect(states.map((state) => state.generation)).toEqual([
-      first!.generation,
-      first!.generation + 1,
-      first!.generation + 2
-    ])
-    expect(states.map((state) => state.provider)).toEqual([provider, undefined, replacement])
-    expect(third).toEqual({ provider: replacement, generation: first!.generation + 2 })
-
-    unsubscribe()
-    unregisterSshFilesystemProvider('generation-conn')
+      expect(states.map((state) => state.generation)).toEqual([
+        first!.generation,
+        first!.generation + 1,
+        first!.generation + 2
+      ])
+      expect(states.map((state) => state.provider)).toEqual([provider, undefined, replacement])
+      expect(third).toEqual({ provider: replacement, generation: first!.generation + 2 })
+    } finally {
+      unsubscribe()
+      unregisterSshFilesystemProvider('generation-conn')
+    }
   })
 })

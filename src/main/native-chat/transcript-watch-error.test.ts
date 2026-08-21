@@ -160,6 +160,36 @@ describe('native chat transcript watcher errors', () => {
 
     subscription.unsubscribe()
   })
+
+  it('keeps retrying when the initial error subscriber throws', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-native-chat-throwing-initial-error-'))
+    roots.push(root)
+    const filePath = join(root, 'transcript.jsonl')
+    await mkdir(filePath)
+    const snapshots: string[][] = []
+    const subscription = await subscribeNativeChatTranscript({
+      agent: 'claude',
+      sessionId: 'session',
+      filePath,
+      onInitialSnapshot: (messages, _hasMore, _beforeOffset, error) => {
+        if (error) {
+          throw new Error('subscriber is closing')
+        }
+        snapshots.push(messages.map((message) => message.id))
+      },
+      onAppend: () => {},
+      initialLimit: 40,
+      debounceMs: 0
+    })
+
+    try {
+      await rm(filePath, { recursive: true, force: true })
+      await writeFile(filePath, claudeLine('u-recovered-after-throw', 'user', 'back'))
+      await vi.waitFor(() => expect(snapshots).toContainEqual(['u-recovered-after-throw']))
+    } finally {
+      subscription.unsubscribe()
+    }
+  })
 })
 
 function claudeLine(uuid: string, role: 'user' | 'assistant', text: string): string {

@@ -165,6 +165,50 @@ describe('Last-status persistence', () => {
     }
   })
 
+  it('hydrates WSL relay provider sessions as local transcript owners', async () => {
+    mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
+    const receivedAt = recentTs()
+    writeFileSync(
+      lastStatusPath(),
+      JSON.stringify({
+        version: 2,
+        entries: {
+          [PANE]: {
+            paneKey: PANE,
+            tabId: 'tab-1',
+            worktreeId: 'wt-1',
+            connectionId: 'wsl:Ubuntu',
+            receivedAt,
+            stateStartedAt: receivedAt,
+            providerSession: {
+              key: 'session_id',
+              id: 'persisted-wsl-session',
+              transcriptPath: '/home/dev/.claude/projects/repo/session.jsonl'
+            },
+            payload: { state: 'done', prompt: '', agentType: 'claude' }
+          }
+        }
+      }),
+      'utf8'
+    )
+    const server = new AgentHookServer()
+    await server.start({ env: 'production', userDataPath })
+    try {
+      const listener = vi.fn()
+      server.setListener(listener)
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerSession: expect.objectContaining({
+            id: 'persisted-wsl-session',
+            executionHostId: 'local'
+          })
+        })
+      )
+    } finally {
+      server.stop()
+    }
+  })
+
   it('rejects a stale version mismatch on hydrate', async () => {
     mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
     writeFileSync(

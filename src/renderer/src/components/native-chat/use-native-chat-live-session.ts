@@ -131,9 +131,7 @@ export function useNativeChatLiveSession(
     let cancelled = false
     // Set by the first authoritative frame so the readSession seed below can't clobber a live snapshot.
     let frameArrived = false
-    // Why: this hook's notFound window and the main-side unresolved notice both
-    // expire at ~60s on the same transcript; the stream owns recovery, so its
-    // message wins regardless of which lands last.
+    // Prefer the recovery-owning stream error over concurrent seed-read errors.
     let streamErrorShown = false
     const retryTimer = createNativeChatReadRetryTimer()
     const retryStartedAt = Date.now()
@@ -214,8 +212,7 @@ export function useNativeChatLiveSession(
             // Why: an error frame carries no transcript, so it must not consume the seed — a healthy read still has to repair the pane.
             streamErrorShown = true
             const error = frame.error
-            // Why: nor may it trade already-read history for an error card (mobile
-            // keeps its retained transcript for the same reason).
+            // Retain existing transcript history after a stream error.
             setRead((prev) =>
               prev.phase === 'ready' && prev.messages.length > 0 ? prev : { phase: 'error', error }
             )

@@ -16,6 +16,7 @@ import {
 
 type NativeChatSshOwner = Extract<NativeChatTranscriptOwner, { kind: 'ssh' }>
 type ReadTranscriptTailFile = typeof readNativeChatTranscriptTailFile
+const MAX_INVALIDATED_READ_ATTEMPTS = 3
 
 type OwnedSshTranscriptReadDependencies = {
   decode: NativeChatLineDecoder | null
@@ -43,32 +44,31 @@ export async function readOwnedSshNativeChatTranscriptTail(
   }
   try {
     const rangeFs = await createSshTranscriptRangeFs(owner.connectionId, signal)
-    let result: Awaited<ReturnType<ReadTranscriptTailFile>>
-    try {
-      result = await readTailFile(
-        owner.transcriptPath,
-        args.limit,
-        decode,
-        true,
-        args.beforeOffset,
-        decodeLifecycle,
-        signal,
-        rangeFs
-      )
-    } catch (error) {
-      if (!(error instanceof TranscriptRangeReadInvalidatedError)) {
-        throw error
+    let result: Awaited<ReturnType<ReadTranscriptTailFile>> | undefined
+    for (let attempt = 0; attempt < MAX_INVALIDATED_READ_ATTEMPTS; attempt++) {
+      try {
+        result = await readTailFile(
+          owner.transcriptPath,
+          args.limit,
+          decode,
+          true,
+          args.beforeOffset,
+          decodeLifecycle,
+          signal,
+          rangeFs
+        )
+        break
+      } catch (error) {
+        if (
+          !(error instanceof TranscriptRangeReadInvalidatedError) ||
+          attempt === MAX_INVALIDATED_READ_ATTEMPTS - 1
+        ) {
+          throw error
+        }
       }
-      result = await readTailFile(
-        owner.transcriptPath,
-        args.limit,
-        decode,
-        true,
-        args.beforeOffset,
-        decodeLifecycle,
-        signal,
-        rangeFs
-      )
+    }
+    if (!result) {
+      throw new Error('Transcript read did not produce a result')
     }
     return {
       messages: result.messages,
