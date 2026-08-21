@@ -1933,6 +1933,7 @@ function TerminalPane(
         forceBracketedPaste: options?.forceBracketedPaste,
         forceBracketedPasteForMultiline: options?.forceBracketedPasteForMultiline,
         windowsInputRecordNewline: options?.windowsInputRecordNewline,
+        followedByNonImageInput: options?.followedByNonImageInput,
         terminalBracketedPasteMode: pane.terminal.modes.bracketedPasteMode
       })
       const execution = await executeTerminalPastePlan(plan, {
