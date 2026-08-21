@@ -128,6 +128,60 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // An injected turn is the worse half of this class: unlike a tool result it
+  // DOES build a journal body, so adopting its uuid upserts harness text over the
+  // user's own bubble AND leaves the real replay to append as a second row.
+  it('does not adopt a harness-injected user turn as the user replay', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'injected-uuid'
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
+
+    await expect(dispatched).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'user-replay-uuid' }
+    })
+  })
+
+  // `readClaudeMessageEnvelope` already tolerates string content, so refusing it
+  // here would be a new way for a send to never be acknowledged.
+  it('accepts a replay whose content is a plain string', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
+      100
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      message: { role: 'user', content: 'hello' },
+      parent_tool_use_id: null,
+      session_id: 'provider-session',
+      uuid: 'string-replay-uuid'
+    })
+
+    await expect(dispatched).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'string-replay-uuid' }
+    })
+  })
+
   // Dispatch base64-encodes a local image path, and `claudeMessageBody` models
   // only text and URL images - so gating the waiter on "the translator would
   // build a body" refuses an image-only send its own replay, times out, and
