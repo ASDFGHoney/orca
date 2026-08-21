@@ -161,10 +161,10 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
-  // Measured: the CLI stamps an image-only echo like any other, and its content
-  // carries no text. A gate that sniffed content for a modeled body would refuse
-  // this send its own replay, time out, and report a delivered message as
-  // unconfirmed - which sends it twice on retry.
+  // NOT red against the merge base - the old predicate accepts this frame too.
+  // It pins that the gate never sniffs content: an image-only echo carries no
+  // text and builds no journal body, so any body-model gate would refuse this
+  // send its own replay and report a delivered message as unconfirmed.
   it('accepts the replay of a send that carries only a local image', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'orca-claude-replay-'))
     try {
@@ -199,6 +199,39 @@ describe('Claude structured dispatch image limits', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  // `acceptsResult` settles a send on a bare `result` frame, which carries no
+  // correlation to the waiting dispatch - so a message that merely opens with a
+  // path must not opt into it, or an unrelated turn's result claims its identity.
+  it('does not let a path-leading message settle on an unrelated result frame', async () => {
+    const session = sessionFor()
+    const dispatched = dispatchClaudeTurn(
+      session,
+      {
+        clientMessageId: 'client-1',
+        body: userMessage([{ type: 'text', text: '/Users/me/repo/src/foo.ts - explain this' }])
+      },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'result',
+      subtype: 'success',
+      session_id: 'provider-session',
+      uuid: 'unrelated-turn-result'
+    })
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(
+      session,
+      userReplayFrame('real-replay', '/Users/me/repo/src/foo.ts - explain this')
+    )
+    await expect(dispatched).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: 'real-replay' }
+    })
   })
 
   // The waiter queue is positional, so shifting the head on a send failure

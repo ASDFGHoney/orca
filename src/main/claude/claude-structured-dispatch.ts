@@ -185,6 +185,24 @@ function waitForReplay(
   return { waiter, replayed }
 }
 
+/**
+ * A slash command, not a message that merely opens with a path.
+ *
+ * `acceptsResult` lets a send settle on a bare `result` frame, which carries no
+ * correlation to the dispatch that is waiting - so a false positive lets an
+ * unrelated turn's result claim the send's identity, and the real echo then
+ * appends a second row. `/Users/me/repo/foo.ts - explain this` is an ordinary
+ * message; the second slash is what gives it away.
+ */
+function isSlashCommandText(text: string): boolean {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('/')) {
+    return false
+  }
+  const token = trimmed.slice(1).split(/\s/, 1)[0] ?? ''
+  return token.length > 0 && !token.includes('/')
+}
+
 export async function dispatchClaudeTurn(
   session: ClaudeSession,
   input: { clientMessageId: string; body: AgentJournalMessageItem },
@@ -197,7 +215,7 @@ export async function dispatchClaudeTurn(
     return { state: 'rejected', reason: (error as Error).message }
   }
   const acceptsResult = input.body.blocks.some(
-    (block) => block.type === 'text' && block.text.trimStart().startsWith('/')
+    (block) => block.type === 'text' && isSlashCommandText(block.text)
   )
   const { waiter, replayed } = waitForReplay(session, timeoutMs, acceptsResult)
   try {
