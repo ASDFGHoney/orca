@@ -1994,10 +1994,13 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       if (!current || sameTitle) {
         return s
       }
-      // Why: first-prompt generated titles belong to the previous provider session.
+      // Why: wipe only when a previously bound vault session unbinds or changes.
+      // First bind (undefined → session) is the same conversation; ranking already
+      // prefers vault, and clearing would re-open write-once first-prompt generation.
+      const previous = current.aiVaultTitle
       const sessionChanged =
-        current.aiVaultTitle?.agent !== aiVaultTitle?.agent ||
-        current.aiVaultTitle?.sessionId !== aiVaultTitle?.sessionId
+        previous != null &&
+        (previous.agent !== aiVaultTitle?.agent || previous.sessionId !== aiVaultTitle?.sessionId)
       const ownerTabs = tabs.map((tab) =>
         tab.id === tabId
           ? {
@@ -2042,6 +2045,10 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     const tabs = state.tabsByWorktree[ownerWorktreeId] ?? []
     const currentTab = tabs.find((tab) => tab.id === tabId)
     if (!currentTab || currentTab.customTitle?.trim() || currentTab.quickCommandLabel?.trim()) {
+      return
+    }
+    // Why: /clear writes aiVaultTitle null and drops generatedTitle; a later ping still carries the previous prompt.
+    if (currentTab.aiVaultTitle === null && options?.replaceExistingGeneratedTitle !== true) {
       return
     }
     const existingGeneratedTitle = currentTab.generatedTitle?.trim()

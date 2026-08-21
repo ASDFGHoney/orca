@@ -118,6 +118,45 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect(patch.tabsByWorktree?.[WT]?.[0]?.launchAgent).toBeUndefined()
   })
 
+  it('keeps an explicit-null AI Vault title across a live-title snapshot rebuild', () => {
+    const existingTab: TerminalTab = {
+      id: toWebTerminalSurfaceTabId('host-tab-1'),
+      ptyId: 'remote:web-env-1@@terminal-1',
+      worktreeId: WT,
+      title: 'Claude working',
+      defaultTitle: 'Terminal',
+      customTitle: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: NOW,
+      aiVaultTitle: null
+    }
+
+    const patch = applyWebSessionTabsSnapshot(
+      makeState({
+        tabsByWorktree: { [WT]: [existingTab] },
+        ptyIdsByTabId: { [existingTab.id]: ['remote:web-env-1@@terminal-1'] }
+      }),
+      makeSnapshot([
+        {
+          type: 'terminal',
+          id: HOST_SURFACE_ID,
+          title: 'Claude',
+          parentTabId: 'host-tab-1',
+          leafId: LEAF_ID,
+          isActive: true,
+          status: 'ready',
+          terminal: 'terminal-1'
+        }
+      ]),
+      ENV,
+      NOW + 1
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect(patch.tabsByWorktree?.[WT]?.[0]?.aiVaultTitle).toBeNull()
+    expect(patch.unifiedTabsByWorktree?.[WT]?.[0]?.aiVaultTitle).toBeNull()
+  })
+
   it('drops mirrored startup cwd when a later host snapshot omits it', () => {
     const existingTab: TerminalTab = {
       id: toWebTerminalSurfaceTabId('host-tab-1'),

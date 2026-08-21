@@ -73,6 +73,12 @@ export function useTabGroupItemProjections({
             defaultTitle: terminalTab?.defaultTitle,
             quickCommandLabel: terminalTab?.quickCommandLabel ?? item.quickCommandLabel ?? null,
             generatedTitle: terminalTab?.generatedTitle ?? item.generatedLabel ?? null,
+            // Why: TabBar re-resolves this projection; dropping vault lets first-bind generated win.
+            ...(terminalTab?.aiVaultTitle !== undefined
+              ? { aiVaultTitle: terminalTab.aiVaultTitle }
+              : item.aiVaultTitle !== undefined
+                ? { aiVaultTitle: item.aiVaultTitle }
+                : {}),
             customTitle: item.customLabel ?? terminalTab?.customTitle ?? null,
             color: item.color ?? terminalTab?.color ?? null,
             sortOrder: item.sortOrder,

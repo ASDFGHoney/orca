@@ -1136,7 +1136,9 @@ function buildMirroredTerminalTabs(
         // Why: the host transport carries no generated title, so rebuilding the tab
         // without this dropped the client's agent-prompt label on every snapshot.
         ...(existing?.generatedTitle ? { generatedTitle: existing.generatedTitle } : {}),
-        ...(existing?.aiVaultTitle ? { aiVaultTitle: existing.aiVaultTitle } : {}),
+        // Why: /clear stores explicit null to pause first-prompt regen; a truthy copy
+        // would drop that sentinel on the next live-title snapshot and restore it.
+        ...(existing?.aiVaultTitle !== undefined ? { aiVaultTitle: existing.aiVaultTitle } : {}),
         ...(quickCommandLabel ? { quickCommandLabel } : {}),
         ...(startupCwd ? { startupCwd } : {}),
         customTitle: existing?.customTitle ?? null,
@@ -1512,7 +1514,7 @@ function buildTerminalUnifiedTab(
     label: tab.title,
     ...(tab.quickCommandLabel?.trim() ? { quickCommandLabel: tab.quickCommandLabel.trim() } : {}),
     ...(tab.generatedTitle?.trim() ? { generatedLabel: tab.generatedTitle.trim() } : {}),
-    ...(tab.aiVaultTitle ? { aiVaultTitle: tab.aiVaultTitle } : {}),
+    ...(tab.aiVaultTitle !== undefined ? { aiVaultTitle: tab.aiVaultTitle } : {}),
     customLabel: tab.customTitle,
     color: tab.color,
     sortOrder: tab.sortOrder,
