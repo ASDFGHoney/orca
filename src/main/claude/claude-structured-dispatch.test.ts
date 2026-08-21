@@ -230,13 +230,17 @@ describe('Claude structured dispatch image limits', () => {
       const path = join(directory, 'shot.png')
       await writeFile(path, Buffer.alloc(64))
       const session = sessionFor()
+      // Real file I/O runs before the ack timer starts, so give this one room:
+      // a 100ms budget can expire under parallel load before the frame arrives.
       const dispatched = dispatchClaudeTurn(
         session,
         { clientMessageId: 'client-1', body: userMessage([{ type: 'image-ref', path }]) },
-        100
+        5_000
       )
       await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
+      // Deliberately UNSTAMPED: `isReplay` would short-circuit the gate and leave
+      // the content branch this test exists for untested.
       resolveClaudeReplayWaiter(session, {
         type: 'user',
         message: {
@@ -247,8 +251,7 @@ describe('Claude structured dispatch image limits', () => {
         },
         parent_tool_use_id: null,
         session_id: 'provider-session',
-        uuid: 'image-replay-uuid',
-        isReplay: true
+        uuid: 'image-replay-uuid'
       })
 
       await expect(dispatched).resolves.toMatchObject({
