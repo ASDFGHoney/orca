@@ -10,7 +10,8 @@ import { Table } from '@tiptap/extension-table'
 import { TableCell } from '@tiptap/extension-table-cell'
 import { TableHeader } from '@tiptap/extension-table-header'
 import { TableRow } from '@tiptap/extension-table-row'
-import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
+import { BlockMath } from '@tiptap/extension-mathematics'
+import { RichMarkdownInlineMath } from './rich-markdown-inline-math'
 import { Markdown } from '@tiptap/markdown'
 import { createLowlight, common } from 'lowlight'
 import { loadLocalImageSrc, onImageCacheInvalidated } from './useLocalImageSrc'
@@ -201,7 +202,7 @@ export function createRichMarkdownExtensions({
     TableRow,
     TableHeader,
     TableCell,
-    InlineMath.configure({
+    RichMarkdownInlineMath.configure({
       katexOptions: {
         throwOnError: false
       }
