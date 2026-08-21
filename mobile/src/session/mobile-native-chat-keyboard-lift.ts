@@ -2,9 +2,10 @@ export type NativeChatKeyboardDismissMode = 'interactive' | 'on-drag'
 
 /** Which source is authoritative for the composer's lift right now. */
 export type NativeChatKeyboardPhase =
-  /** The keyboard observer is silent, so only the route's inset knows whether a
-   *  keyboard is up. It stays silent through a whole session when iOS restores
-   *  a keyboard with no animation for the observer to arm itself on. */
+  /** No frame worth following: either the observer has said nothing at all, or
+   *  it has settled on closed. Only the route's inset knows whether a keyboard
+   *  is up — iOS can restore one with no animation for the observer to ride,
+   *  and it then says nothing for that whole keyboard session. */
   | 'unreported'
   /** Coming up, or resting open: the route's inset is the settled target. */
   | 'settling'
@@ -32,6 +33,25 @@ export function resolveNativeChatKeyboardDismissMode(
 export function nativeChatKeyboardIsReported(phase: NativeChatKeyboardPhase): boolean {
   'worklet'
   return phase !== 'unreported'
+}
+
+/** Whether an interactive dismissal is still in flight.
+ *
+ *  Reanimated re-reads the keyboard's centre on every KVO tick and flips to
+ *  OPENING on any *upward* pixel, so the reported state alone cannot tell a
+ *  wobbling finger from a keyboard genuinely coming back. Latch the drag from
+ *  its first closing frame until the keyboard settles one way or the other, or
+ *  a wobble mid-swipe teleports the composer up to the full lift. */
+export function nativeChatKeyboardStaysLeaving(input: {
+  wasLeaving: boolean
+  isClosing: boolean
+  hasSettled: boolean
+}): boolean {
+  'worklet'
+  if (input.isClosing) {
+    return true
+  }
+  return input.hasSettled ? false : input.wasLeaving
 }
 
 export type NativeChatBottomPadInput = {

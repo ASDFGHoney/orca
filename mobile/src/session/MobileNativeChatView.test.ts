@@ -10,7 +10,14 @@ const mocks = vi.hoisted(() => ({
   keyboardState: 0,
   /** The latest useAnimatedStyle updater, so a test can re-run it the way the
    *  UI thread does — without a React render. */
-  padUpdater: null as null | (() => { paddingBottom: number })
+  padUpdater: null as null | (() => { paddingBottom: number }),
+  /** Registered useAnimatedReaction mappers, so a test can fire them the way a
+   *  shared-value change does — with no React render involved. */
+  reactions: [] as {
+    prepare: () => unknown
+    react: (c: unknown, p: unknown) => void
+    previous: unknown
+  }[]
 }))
 
 /** Stands in for the FlatList instance the view scrolls through its ref. */
@@ -63,21 +70,36 @@ vi.mock('react-native-reanimated', async () => {
       mocks.padUpdater = updater
       return updater()
     },
-    // Reanimated runs the reaction off the shared values it reads; after commit
-    // is close enough, and keeps the state update out of the render phase.
     useAnimatedReaction: (
       prepare: () => unknown,
       react: (current: unknown, previous: unknown) => void
     ) => {
-      const previous = React.useRef<unknown>(null)
-      const current = prepare()
+      const entry = React.useRef({ prepare, react, previous: null as unknown })
+      entry.current.prepare = prepare
+      entry.current.react = react
       React.useEffect(() => {
-        react(current, previous.current)
-        previous.current = current
+        const registered = entry.current
+        mocks.reactions.push(registered)
+        return () => {
+          mocks.reactions = mocks.reactions.filter((candidate) => candidate !== registered)
+        }
+      }, [])
+      // A mapper also fires for whatever changed while React was re-rendering.
+      React.useEffect(() => {
+        const current = entry.current.prepare()
+        if (current !== entry.current.previous) {
+          entry.current.react(current, entry.current.previous)
+          entry.current.previous = current
+        }
       })
     },
     runOnJS: (fn: unknown) => fn,
-    useSharedValue: (value: unknown) => ({ value })
+    // Real shared values are stable across renders, and the drag latch depends
+    // on that — a fresh object each render would silently reset it.
+    useSharedValue: (value: unknown) => {
+      const ref = React.useRef({ value })
+      return ref.current
+    }
   }
 })
 
@@ -132,6 +154,7 @@ const BOTTOM_INSET = 34
 /** The route lifts by the keyboard height minus the home indicator on iOS. */
 const ROUTE_INSET = KEYBOARD_HEIGHT - BOTTOM_INSET
 const KEYBOARD_OPEN = 2
+const KEYBOARD_OPENING = 1
 const KEYBOARD_CLOSING = 3
 const KEYBOARD_CLOSED = 4
 
@@ -187,6 +210,7 @@ describe('MobileNativeChatView', () => {
     mocks.keyboardHeight = 0
     mocks.keyboardState = 0
     mocks.padUpdater = null
+    mocks.reactions = []
     vi.clearAllMocks()
   })
 
@@ -245,6 +269,19 @@ describe('MobileNativeChatView', () => {
 
   function listProps(): Record<string, unknown> {
     return renderer!.root.find((node) => node.type === 'FlatList').props
+  }
+
+  /** Re-runs the UI thread's mappers off the current keyboard frame and reports
+   *  the padding they produce — a keyboard moving causes no React render. */
+  function paddingAfterUiThreadFrame(): number {
+    for (const reaction of mocks.reactions) {
+      const current = reaction.prepare()
+      if (current !== reaction.previous) {
+        reaction.react(current, reaction.previous)
+        reaction.previous = current
+      }
+    }
+    return mocks.padUpdater!().paddingBottom
   }
 
   /** Bottom padding the chat root actually renders with. */
@@ -325,6 +362,39 @@ describe('MobileNativeChatView', () => {
     expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
   })
 
+  it('keeps following the frame when the finger wobbles back up mid-drag', async () => {
+    // Reanimated reports OPENING on any upward pixel of an interactive drag, so
+    // reading the state alone would snap the composer to the full lift while the
+    // keyboard is still half way down, then back again on the next pixel.
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+    await render({ keyboardInset: ROUTE_INSET })
+
+    mocks.keyboardState = KEYBOARD_CLOSING
+    mocks.keyboardHeight = 180
+    expect(paddingAfterUiThreadFrame()).toBe(180)
+
+    mocks.keyboardState = KEYBOARD_OPENING
+    mocks.keyboardHeight = 190
+
+    expect(paddingAfterUiThreadFrame()).toBe(190)
+  })
+
+  it('goes back to the route lift once the keyboard settles open again', async () => {
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+    await render({ keyboardInset: ROUTE_INSET })
+    mocks.keyboardState = KEYBOARD_CLOSING
+    mocks.keyboardHeight = 180
+    expect(paddingAfterUiThreadFrame()).toBe(180)
+
+    // The cancelled drag lets the keyboard spring back and settle.
+    mocks.keyboardState = KEYBOARD_OPEN
+    mocks.keyboardHeight = KEYBOARD_HEIGHT
+
+    expect(paddingAfterUiThreadFrame()).toBe(KEYBOARD_HEIGHT)
+  })
+
   it('reads the keyboard frame inside the updater, not at render time', async () => {
     // An interactive drag produces no React render — the UI thread just re-runs
     // the updater. Anything hoisted out of it would freeze at the mount value.
@@ -336,7 +406,7 @@ describe('MobileNativeChatView', () => {
     mocks.keyboardState = KEYBOARD_CLOSING
     mocks.keyboardHeight = 120
 
-    expect(mocks.padUpdater?.().paddingBottom).toBe(120)
+    expect(paddingAfterUiThreadFrame()).toBe(120)
   })
 
   it('keeps link taps landing while the keyboard is up', async () => {

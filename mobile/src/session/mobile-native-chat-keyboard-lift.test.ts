@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   nativeChatKeyboardIsReported,
+  nativeChatKeyboardStaysLeaving,
   resolveNativeChatBottomPad,
   resolveNativeChatKeyboardDismissMode
 } from './mobile-native-chat-keyboard-lift'
@@ -189,5 +190,32 @@ describe('resolveNativeChatBottomPad while an undocked keyboard leaves', () => {
         bottomInset: BOTTOM_INSET
       })
     ).toBe(294)
+  })
+})
+
+describe('nativeChatKeyboardStaysLeaving', () => {
+  it('latches on the first closing frame', () => {
+    expect(
+      nativeChatKeyboardStaysLeaving({ wasLeaving: false, isClosing: true, hasSettled: false })
+    ).toBe(true)
+  })
+
+  it('holds through the upward pixels of a wobbling finger', () => {
+    // Reanimated calls that movement OPENING even though the drag is still live.
+    expect(
+      nativeChatKeyboardStaysLeaving({ wasLeaving: true, isClosing: false, hasSettled: false })
+    ).toBe(true)
+  })
+
+  it('releases once the keyboard settles either way', () => {
+    expect(
+      nativeChatKeyboardStaysLeaving({ wasLeaving: true, isClosing: false, hasSettled: true })
+    ).toBe(false)
+  })
+
+  it('stays clear while a keyboard is genuinely coming up', () => {
+    expect(
+      nativeChatKeyboardStaysLeaving({ wasLeaving: false, isClosing: false, hasSettled: false })
+    ).toBe(false)
   })
 })

@@ -16,16 +16,17 @@ import {
   resolveNativeChatBottomPad,
   resolveNativeChatKeyboardDismissMode,
   nativeChatKeyboardIsReported,
+  nativeChatKeyboardStaysLeaving,
   type NativeChatKeyboardDismissMode,
   type NativeChatKeyboardPhase
 } from './mobile-native-chat-keyboard-lift'
 
-function keyboardPhase(state: KeyboardState): NativeChatKeyboardPhase {
+function keyboardPhase(state: KeyboardState, isLeaving: boolean): NativeChatKeyboardPhase {
   'worklet'
-  if (state === KeyboardState.OPENING || state === KeyboardState.OPEN) {
-    return 'settling'
+  if (state === KeyboardState.UNKNOWN || state === KeyboardState.CLOSED) {
+    return 'unreported'
   }
-  return state === KeyboardState.CLOSING ? 'dismissing' : 'unreported'
+  return isLeaving ? 'dismissing' : 'settling'
 }
 
 function useUntrackedKeyboard(): AnimatedKeyboardInfo {
@@ -56,9 +57,21 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
   // The dismiss mode is a React prop, so mirror the observer across — derived
   // from the same phase the padding reads, or the two disagree in exactly the
   // state the fallback exists for and the drag strands the composer again.
+  // Latched separately from the reported state — see nativeChatKeyboardStaysLeaving.
+  const keyboardIsLeaving = useSharedValue(false)
+  useAnimatedReaction(
+    () => keyboard.state.value,
+    (state) => {
+      keyboardIsLeaving.value = nativeChatKeyboardStaysLeaving({
+        wasLeaving: keyboardIsLeaving.value,
+        isClosing: state === KeyboardState.CLOSING,
+        hasSettled: state === KeyboardState.OPEN || state === KeyboardState.CLOSED
+      })
+    }
+  )
   const [keyboardIsReported, setKeyboardIsReported] = useState(false)
   useAnimatedReaction(
-    () => nativeChatKeyboardIsReported(keyboardPhase(keyboard.state.value)),
+    () => nativeChatKeyboardIsReported(keyboardPhase(keyboard.state.value, false)),
     (reported, previous) => {
       if (reported !== previous) {
         runOnJS(setKeyboardIsReported)(reported)
@@ -75,7 +88,7 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
   }, [committedInset, bottomInset])
   const padStyle = useAnimatedStyle(() => ({
     paddingBottom: resolveNativeChatBottomPad({
-      phase: keyboardPhase(keyboard.state.value),
+      phase: keyboardPhase(keyboard.state.value, keyboardIsLeaving.value),
       liveKeyboardHeight: keyboard.height.value,
       committedInset,
       lastSettledPad,
