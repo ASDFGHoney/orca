@@ -100,6 +100,9 @@ describe('fetchGrokRateLimits', () => {
     )
   })
 
+  // Why: this payload emits NO usage scalars, so the omitted percent really is
+  // the dropped protobuf zero (#9214/#9219). #15740's payload does emit them —
+  // keep the two shapes apart.
   it('maps an omitted protobuf percentage as zero for a weekly credits period', async () => {
     authState.file = freshAuthJson()
     netFetchMock.mockResolvedValueOnce(
@@ -122,6 +125,105 @@ describe('fetchGrokRateLimits', () => {
     expect(result.weekly?.usedPercent).toBe(0)
     expect(result.weekly?.resetsAt).toBe(Date.parse('2026-07-24T19:38:56.948570+00:00'))
     expect(result.monthly).toBeUndefined()
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  // Why: #15740 — an absent creditUsagePercent alongside explicitly-emitted zero
+  // credit fields means "not reported", never 0%.
+  it('reports usage as unavailable when the credits view omits the percent but emits explicit zero credit fields', async () => {
+    authState.file = freshAuthJson()
+    netFetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          config: {
+            currentPeriod: {
+              type: 'USAGE_PERIOD_TYPE_WEEKLY',
+              start: '2026-08-16T12:54:39.515635+00:00',
+              end: '2026-08-23T12:54:39.515635+00:00'
+            },
+            onDemandCap: { val: 100 },
+            onDemandUsed: { val: 0 },
+            isUnifiedBillingUser: true,
+            prepaidBalance: { val: 0 },
+            topUpMethod: 'TOP_UP_METHOD_SAVED_PAYMENT_METHOD',
+            billingPeriodStart: '2026-08-16T12:54:39.515635+00:00',
+            billingPeriodEnd: '2026-08-23T12:54:39.515635+00:00'
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          config: {
+            monthlyLimit: { val: 0 },
+            used: { val: 37.5 },
+            billingPeriodStart: '2026-08-16T12:54:39.515635+00:00',
+            billingPeriodEnd: '2026-08-23T12:54:39.515635+00:00'
+          }
+        })
+      )
+
+    const result = await fetchGrokRateLimits()
+    expect(result.status).toBe('unavailable')
+    expect(result.weekly).toBeNull()
+    expect(result.monthly).toBeUndefined()
+    expect(result.error).toMatch(/did not report a usage percentage/i)
+    expect(netFetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('computes the weekly percentage from used and limit when the percent is omitted', async () => {
+    authState.file = freshAuthJson()
+    netFetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-08-16T12:54:39.515635+00:00',
+            end: '2026-08-23T12:54:39.515635+00:00'
+          },
+          billingPeriodStart: '2026-08-16T12:54:39.515635+00:00',
+          billingPeriodEnd: '2026-08-23T12:54:39.515635+00:00',
+          monthlyLimit: { val: 100 },
+          used: { val: 25 }
+        }
+      })
+    )
+
+    const result = await fetchGrokRateLimits()
+    expect(result.status).toBe('ok')
+    expect(result.weekly?.usedPercent).toBe(25)
+    expect(result.weekly?.windowMinutes).toBe(10_080)
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([{ val: 0 }, { val: '0' }])(
+    'does not divide by a zero monthly limit (%o)',
+    async (monthlyLimit) => {
+      authState.file = freshAuthJson()
+      netFetchMock
+        .mockResolvedValueOnce(jsonResponse({ config: { isUnifiedBillingUser: true } }))
+        .mockResolvedValueOnce(jsonResponse({ config: { monthlyLimit, used: { val: 12 } } }))
+
+      const result = await fetchGrokRateLimits()
+      expect(result.status).toBe('unavailable')
+      expect(result.weekly).toBeNull()
+      expect(result.monthly).toBeUndefined()
+      expect(result.error).toMatch(/did not report a usage percentage/i)
+    }
+  )
+
+  it('reads a flat billing payload that carries usage fields but no percent', async () => {
+    authState.file = freshAuthJson()
+    netFetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        monthlyLimit: { val: 200 },
+        used: { val: 50 },
+        billingPeriodEnd: '2026-09-01T00:00:00+00:00'
+      })
+    )
+
+    const result = await fetchGrokRateLimits()
+    expect(result.status).toBe('ok')
+    expect(result.weekly?.usedPercent).toBe(25)
     expect(netFetchMock).toHaveBeenCalledTimes(1)
   })
 
