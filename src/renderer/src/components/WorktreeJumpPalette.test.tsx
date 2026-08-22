@@ -8,7 +8,7 @@ import type * as ReactI18Next from 'react-i18next'
 import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
 import WorktreeJumpPalette from './WorktreeJumpPalette'
-import { makeRepo, makeWorktree } from './worktree-jump-palette-test-fixtures'
+import { makeRecentTabState, makeRepo, makeWorktree } from './worktree-jump-palette-test-fixtures'
 
 const { activateAndRevealWorktree } = vi.hoisted(() => ({
   activateAndRevealWorktree: vi.fn(() => false)
@@ -48,9 +48,10 @@ vi.mock('@/components/repo/RepoBadgeLabel', () => ({
   RepoBadgeMark: () => <span data-repo-badge-mark="true" />
 }))
 
-vi.mock('@/components/cmd-j/palette-host-badge', () => ({
-  getPaletteHostBadge: () => null
+const { getPaletteHostBadge } = vi.hoisted(() => ({
+  getPaletteHostBadge: vi.fn(() => null as { hostId: 'local'; label: string } | null)
 }))
+vi.mock('@/components/cmd-j/palette-host-badge', () => ({ getPaletteHostBadge }))
 
 // Why: activation reaches into window.api and the whole worktree-reveal path; the palette's own
 // contract is which result it hands over, so stub the boundary and assert on that.
@@ -191,6 +192,7 @@ describe('WorktreeJumpPalette', () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     setCommandQuery = null
     activateAndRevealWorktree.mockClear()
+    getPaletteHostBadge.mockReturnValue(null)
     useAppStore.setState(initialAppState, true)
     testContainer = document.createElement('div')
     document.body.appendChild(testContainer)
@@ -228,6 +230,17 @@ describe('WorktreeJumpPalette', () => {
     // Why kept: the exemption keys on isMainWorktree, not the branch name, so a
     // branchless folder workspace is the project's entry point too.
     expect(testContainer.textContent).toContain('Folder workspace')
+  })
+
+  it('renders the owning host badge on worktree and tab rows', async () => {
+    getPaletteHostBadge.mockReturnValue({ hostId: 'local', label: 'Local Mac' })
+    await renderPalette(makeRecentTabState())
+
+    const badge = '[aria-label="Host: Local Mac"]'
+    expect(testContainer.querySelector(`[data-command-item*="worktree:"] ${badge}`)).not.toBeNull()
+    expect(
+      testContainer.querySelector(`[data-command-item*="workspace-tab:"] ${badge}`)
+    ).not.toBeNull()
   })
 
   it('keeps the explicit default-branch filter authoritative', async () => {

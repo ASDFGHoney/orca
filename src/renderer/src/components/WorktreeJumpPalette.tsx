@@ -141,6 +141,7 @@ import {
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
 import { buildSidebarHostOptions } from '@/components/sidebar/sidebar-host-options'
 import { getPaletteHostBadge } from '@/components/cmd-j/palette-host-badge'
+import PaletteHostBadgeChip from '@/components/cmd-j/PaletteHostBadgeChip'
 import { getWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 import { getRepoHostIdentity } from '@/store/slices/repo-host-identity'
 import type { Repo } from '../../../shared/repo-types'
@@ -3221,6 +3222,7 @@ function WorktreeJumpPaletteContent({
                   : null
                 const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
                 const sessionAge = formatPaletteSessionAge(worktree.lastActivityAt, paletteNowMs)
+                const hostBadge = getPaletteHostBadge(repo, hostOptions, hostFilterActive)
                 return (
                   <CommandItem
                     key={renderKey}
@@ -3329,6 +3331,7 @@ function WorktreeJumpPaletteContent({
                           )}
                         </div>
                         <div className="flex shrink-0 items-center gap-1.5">
+                          <PaletteHostBadgeChip badge={hostBadge} />
                           {repoName && (
                             <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
                               <RepoBadgeMark color={repo?.badgeColor} />
@@ -3350,6 +3353,9 @@ function WorktreeJumpPaletteContent({
               if (entry.type === 'project-target') {
                 const result = entry.result
                 const isProject = result.kind === 'project'
+                const hostBadge = isProject
+                  ? getPaletteHostBadge(result.repo, hostOptions, hostFilterActive)
+                  : null
                 const badgeLabel = isProject
                   ? translate('auto.components.WorktreeJumpPalette.projectBadge', 'Project')
                   : translate('auto.components.WorktreeJumpPalette.repoGroupBadge', 'Repo group')
@@ -3377,6 +3383,7 @@ function WorktreeJumpPaletteContent({
                         </div>
                         {isProject ? (
                           <div className="flex shrink-0 items-center gap-1.5">
+                            <PaletteHostBadgeChip badge={hostBadge} />
                             <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
                               <RepoBadgeMark color={result.repo.badgeColor} />
                               <span className="truncate">{result.repo.displayName}</span>
@@ -3434,6 +3441,11 @@ function WorktreeJumpPaletteContent({
                   ? resolveRepoForWorktree(workspaceTabWorktree)
                   : undefined
                 const workspaceTabRepoName = workspaceTabRepo?.displayName ?? result.repoName
+                const workspaceTabHostBadge = getPaletteHostBadge(
+                  workspaceTabRepo,
+                  hostOptions,
+                  hostFilterActive
+                )
                 const workspaceTabFallback =
                   result.contentType === 'terminal' && result.occupantAgent ? (
                     <span
@@ -3500,6 +3512,7 @@ function WorktreeJumpPaletteContent({
                             worktree={workspaceTabWorktree}
                             className="max-w-[280px] truncate text-[12px] font-medium text-muted-foreground"
                           />
+                          <PaletteHostBadgeChip badge={workspaceTabHostBadge} />
                           {workspaceTabRepoName && (
                             <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
                               <RepoBadgeMark color={workspaceTabRepo?.badgeColor} />
@@ -3529,6 +3542,11 @@ function WorktreeJumpPaletteContent({
                   ? resolveRepoForWorktree(simulatorWorktree)
                   : undefined
                 const simulatorRepoName = simulatorRepo?.displayName ?? result.repoName
+                const simulatorHostBadge = getPaletteHostBadge(
+                  simulatorRepo,
+                  hostOptions,
+                  hostFilterActive
+                )
                 const sessionAge = formatPaletteSessionAge(
                   result.lastActiveAt ?? null,
                   paletteNowMs
@@ -3582,6 +3600,7 @@ function WorktreeJumpPaletteContent({
                             worktree={simulatorWorktree}
                             className="max-w-[280px] truncate text-[12px] font-medium text-muted-foreground"
                           />
+                          <PaletteHostBadgeChip badge={simulatorHostBadge} />
                           {simulatorRepoName && (
                             <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
                               <RepoBadgeMark color={simulatorRepo?.badgeColor} />
@@ -3610,6 +3629,11 @@ function WorktreeJumpPaletteContent({
                 ? resolveRepoForWorktree(browserWorktree)
                 : undefined
               const browserRepoName = browserRepo?.displayName ?? result.repoName
+              const browserHostBadge = getPaletteHostBadge(
+                browserRepo,
+                hostOptions,
+                hostFilterActive
+              )
               const sessionAge = formatPaletteSessionAge(result.lastActiveAt ?? null, paletteNowMs)
 
               return (
@@ -3660,6 +3684,7 @@ function WorktreeJumpPaletteContent({
                           worktree={browserWorktree}
                           className="max-w-[280px] truncate text-[12px] font-medium text-muted-foreground"
                         />
+                        <PaletteHostBadgeChip badge={browserHostBadge} />
                         {browserRepoName && (
                           <span className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
                             <RepoBadgeMark color={browserRepo?.badgeColor} />
