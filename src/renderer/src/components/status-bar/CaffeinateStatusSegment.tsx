@@ -41,6 +41,11 @@ function activityLabel(active: boolean): string {
     : translate('auto.components.status.bar.CaffeinateStatusSegment.inactive', 'Inactive')
 }
 
+/** Why a reserved height: availability resolves asynchronously, and this menu opens
+ *  upward — a description growing a line would shift every item above it mid-click. */
+const ENGINE_DESCRIPTION_CLASS =
+  'block min-h-8 text-[11px] font-normal leading-4 text-muted-foreground'
+
 function engineLabel(engine: MacosAwakeEngine): string {
   return engine === 'amphetamine'
     ? translate('auto.components.status.bar.CaffeinateStatusSegment.amphetamine', 'Amphetamine')
@@ -63,7 +68,7 @@ function amphetamineDescription(status: ComputerAwakeStatus): string {
   }
   return translate(
     'auto.components.status.bar.CaffeinateStatusSegment.amphetamineDescription',
-    'Hand the session to Amphetamine so its triggers and app rules apply'
+    'Use an Amphetamine session — yours is never replaced or ended'
   )
 }
 
@@ -195,7 +200,7 @@ export function CaffeinateStatusSegment({
               <DropdownMenuRadioItem value="caffeinate" className="py-1.5">
                 <span className="flex flex-col">
                   <span>{engineLabel('caffeinate')}</span>
-                  <span className="text-[11px] font-normal text-muted-foreground">
+                  <span className={ENGINE_DESCRIPTION_CLASS}>
                     {translate(
                       'auto.components.status.bar.CaffeinateStatusSegment.caffeinateDescription',
                       'Built into macOS — blocks idle and system sleep'
@@ -210,7 +215,7 @@ export function CaffeinateStatusSegment({
               >
                 <span className="flex flex-col">
                   <span>{engineLabel('amphetamine')}</span>
-                  <span className="text-[11px] font-normal text-muted-foreground">
+                  <span className={ENGINE_DESCRIPTION_CLASS}>
                     {amphetamineDescription(serviceStatus)}
                   </span>
                 </span>

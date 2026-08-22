@@ -64,7 +64,7 @@ export function getAgentAwakeEngineDescription(
   if (amphetamineInstalled === false) {
     return translate(
       'auto.components.settings.AgentAwakeSetting.engineDescriptionMissing',
-      'Caffeinate is built into macOS. Install Amphetamine to hand the session to its triggers and app rules instead.'
+      'Caffeinate is built into macOS. Install Amphetamine to keep awake through an Amphetamine session instead.'
     )
   }
   if (unavailableReason === 'automation-denied') {
@@ -75,7 +75,7 @@ export function getAgentAwakeEngineDescription(
   }
   return translate(
     'auto.components.settings.AgentAwakeSetting.engineDescription',
-    'Caffeinate is built into macOS. Amphetamine hands the session to the app so its triggers and app rules apply.'
+    'Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and never replaces or ends a session you started yourself.'
   )
 }
 

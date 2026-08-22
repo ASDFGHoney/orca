@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ElectronApplication } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
+import { waitForStartupFocusToSettle } from './helpers/status-bar-menu'
 import { readHookEndpoint } from './helpers/agent-hook-endpoint'
 
 async function postCodexHookEvent(
@@ -34,6 +35,7 @@ test('shows Caffeinate mode and Agent activity in the status bar', async ({
 }) => {
   await waitForSessionReady(orcaPage)
 
+  await waitForStartupFocusToSettle(orcaPage)
   const offStatus = orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' })
   await expect(offStatus).toBeVisible()
   await expect(offStatus).toHaveText('Off')
@@ -74,6 +76,7 @@ test('offers the macOS keep-awake engine picker in the status bar', async ({ orc
   test.skip(process.platform !== 'darwin', 'the engine picker is macOS only')
   await waitForSessionReady(orcaPage)
 
+  await waitForStartupFocusToSettle(orcaPage)
   await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
   const caffeinateEngine = orcaPage.getByRole('menuitemradio', { name: /^Caffeinate/ })
   const amphetamineEngine = orcaPage.getByRole('menuitemradio', { name: /^Amphetamine/ })
@@ -96,6 +99,13 @@ test('offers the macOS keep-awake engine picker in the status bar', async ({ orc
 
   const engineSelectedProof = process.env.ORCA_AWAKE_ENGINE_SELECTED_PROOF_PATH
   if (engineSelectedProof) {
-    await orcaPage.screenshot({ path: engineSelectedProof })
+    // Let the closing menu finish unmounting, or the reopened one resolves to
+    // the exiting node and detaches mid-screenshot.
+    await expect(orcaPage.getByRole('menu')).toBeHidden()
+    await orcaPage.getByRole('button', { name: /^Amphetamine, Off/ }).click()
+    await expect(orcaPage.getByRole('menu')).toBeVisible()
+    await orcaPage
+      .getByRole('menu')
+      .screenshot({ path: engineSelectedProof, animations: 'disabled' })
   }
 })

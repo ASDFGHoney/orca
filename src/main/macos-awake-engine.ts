@@ -4,10 +4,8 @@ import {
   type AmphetamineUnavailableReason,
   type MacosAwakeEngine
 } from '../shared/computer-awake-mode'
-import {
-  detectAmphetamineInstalled,
-  MacosAmphetamineSleepAssertion
-} from './macos-amphetamine-sleep-assertion'
+import { detectAmphetamineInstalled } from './macos-amphetamine-session'
+import { MacosAmphetamineSleepAssertion } from './macos-amphetamine-sleep-assertion'
 import { MacosSystemSleepAssertion } from './macos-system-sleep-assertion'
 
 type Logger = Pick<Console, 'debug' | 'warn'>

@@ -1,31 +1,32 @@
 import type { AmphetamineUnavailableReason } from '../shared/computer-awake-mode'
-import { runProcess, runProcessSync } from '../shared/child-process/run-process'
+import { AmphetamineFailureBackoff } from './macos-amphetamine-failure-backoff'
+import {
+  AMPHETAMINE_END_SESSION_SCRIPT,
+  AMPHETAMINE_PROBE_SCRIPT,
+  AMPHETAMINE_START_SESSION_SCRIPT,
+  classifyAmphetamineFailure,
+  isOrcaShapedSession,
+  NO_AMPHETAMINE_SESSION,
+  parseAmphetamineSession,
+  runOsascriptSyncWithRunProcess,
+  runOsascriptWithRunProcess,
+  type AmphetamineSessionState,
+  type OsascriptResult,
+  type RunOsascript,
+  type RunOsascriptSync
+} from './macos-amphetamine-session'
 
-export const AMPHETAMINE_BUNDLE_ID = 'com.if.Amphetamine'
 export const MACOS_AMPHETAMINE_ASSERTION_RETRY_MS = 30_000
-export const MACOS_AMPHETAMINE_OSASCRIPT_TIMEOUT_MS = 10_000
-
-const OSASCRIPT = '/usr/bin/osascript'
-
-/** Indefinite session: Amphetamine's own preferences decide display sleep, screen lock and lid behavior. */
-const START_SESSION_SCRIPT = `tell application id "${AMPHETAMINE_BUNDLE_ID}" to start new session`
-const END_SESSION_SCRIPT = `tell application id "${AMPHETAMINE_BUNDLE_ID}" to end session`
-/** Launch Services lookup only — resolving a bundle id sends no Apple event, so it cannot trigger a consent prompt. */
-const LOCATE_APP_SCRIPT = `POSIX path of (path to application id "${AMPHETAMINE_BUNDLE_ID}")`
-
-export type { AmphetamineUnavailableReason }
+/** A session Orca adopted can expire on its own, so re-check while we depend on it. */
+export const MACOS_AMPHETAMINE_RECONCILE_MS = 30_000
 
 type Logger = Pick<Console, 'debug' | 'warn'>
 
-export type OsascriptResult = {
-  code: number | null
-  stdout: string
-  stderr: string
-  timedOut: boolean
-}
-
-export type RunOsascript = (script: string) => Promise<OsascriptResult>
-export type RunOsascriptSync = (script: string) => OsascriptResult
+/**
+ * `owned` = Orca started this session and may end it.
+ * `adopted` = a session was already running, so Orca's goal is met by someone else's and Orca must not touch it.
+ */
+type SessionHold = 'owned' | 'adopted' | null
 
 type MacosAmphetamineSleepAssertionOptions = {
   logger?: Logger
@@ -33,64 +34,19 @@ type MacosAmphetamineSleepAssertionOptions = {
   onUnexpectedFailure?: (reason: string) => void
   onUnavailable?: (reason: AmphetamineUnavailableReason) => void
   platform?: NodeJS.Platform
+  reconcileMs?: number
   runOsascript?: RunOsascript
   runOsascriptSync?: RunOsascriptSync
-}
-
-export function runOsascriptWithRunProcess(script: string): Promise<OsascriptResult> {
-  return runProcess({
-    program: OSASCRIPT,
-    args: ['-e', script],
-    timeoutMs: MACOS_AMPHETAMINE_OSASCRIPT_TIMEOUT_MS
-  })
-}
-
-export function runOsascriptSyncWithRunProcess(script: string): OsascriptResult {
-  return runProcessSync({
-    program: OSASCRIPT,
-    args: ['-e', script],
-    timeoutMs: MACOS_AMPHETAMINE_OSASCRIPT_TIMEOUT_MS
-  })
-}
-
-/** Resolve the bundle through Launch Services; a non-zero exit means no copy is installed. */
-export async function detectAmphetamineInstalled(
-  runOsascriptImpl: RunOsascript = runOsascriptWithRunProcess,
-  platform: NodeJS.Platform = process.platform
-): Promise<boolean> {
-  if (platform !== 'darwin') {
-    return false
-  }
-  try {
-    const result = await runOsascriptImpl(LOCATE_APP_SCRIPT)
-    return result.code === 0 && result.stdout.trim().length > 0
-  } catch {
-    return false
-  }
-}
-
-export function classifyAmphetamineFailure(
-  result: OsascriptResult
-): AmphetamineUnavailableReason | null {
-  const text = `${result.stderr} ${result.stdout}`
-  // -1728/-10814: Launch Services cannot resolve the bundle id, i.e. Amphetamine is not installed.
-  if (text.includes('-1728') || text.includes('-10814')) {
-    return 'not-installed'
-  }
-  // -1743/errAEEventNotPermitted: the user denied Orca's Automation grant for Amphetamine.
-  if (text.includes('-1743') || text.includes('Not authorized to send Apple events')) {
-    return 'automation-denied'
-  }
-  return null
 }
 
 /**
  * Holds a wake assertion through Amphetamine instead of `caffeinate`.
  *
- * Unlike `caffeinate`, there is no child process to own: Amphetamine keeps the
- * session, so start/stop are one-shot Apple events and the session outlives a
- * crashed Orca. Only sessions this object started are ever ended, so a session
- * the user started by hand is never cancelled.
+ * Amphetamine's session is global and singular — `start new session` ends whatever
+ * was running, including the user's Triggers — so this class never writes before
+ * it reads. If a session already exists it is adopted, not replaced; a session
+ * Orca started is only ended while it still matches the shape Orca created. The
+ * user's intent always outranks Orca's.
  */
 export class MacosAmphetamineSleepAssertion {
   private readonly logger: Logger
@@ -98,17 +54,16 @@ export class MacosAmphetamineSleepAssertion {
   private readonly onUnexpectedFailure: (reason: string) => void
   private readonly onUnavailable: (reason: AmphetamineUnavailableReason) => void
   private readonly platform: NodeJS.Platform
+  private readonly reconcileMs: number
   private readonly runOsascript: RunOsascript
   private readonly runOsascriptSync: RunOsascriptSync
+  private readonly backoff: AmphetamineFailureBackoff
   private desired: 'started' | 'stopped' = 'stopped'
-  private sessionActive = false
+  private hold: SessionHold = null
   private queue: Promise<void> = Promise.resolve()
   private disposed = false
   private unavailableReason: AmphetamineUnavailableReason | null = null
-  private retryNotBefore: number | null = null
-  private retryTimer: ReturnType<typeof setTimeout> | null = null
-  private lastFailureKey: string | null = null
-  private warnedForLastFailure = false
+  private reconcileTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(options: MacosAmphetamineSleepAssertionOptions = {}) {
     this.logger = options.logger ?? console
@@ -116,8 +71,15 @@ export class MacosAmphetamineSleepAssertion {
     this.onUnexpectedFailure = options.onUnexpectedFailure ?? (() => {})
     this.onUnavailable = options.onUnavailable ?? (() => {})
     this.platform = options.platform ?? process.platform
+    this.reconcileMs = options.reconcileMs ?? MACOS_AMPHETAMINE_RECONCILE_MS
     this.runOsascript = options.runOsascript ?? runOsascriptWithRunProcess
     this.runOsascriptSync = options.runOsascriptSync ?? runOsascriptSyncWithRunProcess
+    this.backoff = new AmphetamineFailureBackoff({
+      logger: this.logger,
+      now: this.now,
+      retryMs: MACOS_AMPHETAMINE_ASSERTION_RETRY_MS,
+      onRetryDue: () => this.onUnexpectedFailure('macos-amphetamine-assertion-retry')
+    })
   }
 
   start(reason: string): void {
@@ -125,6 +87,7 @@ export class MacosAmphetamineSleepAssertion {
       return
     }
     this.desired = 'started'
+    this.startReconcileTimer()
     this.enqueue(reason)
   }
 
@@ -133,7 +96,8 @@ export class MacosAmphetamineSleepAssertion {
       return
     }
     this.desired = 'stopped'
-    this.resetRetrySuppression()
+    this.stopReconcileTimer()
+    this.backoff.reset()
     this.enqueue(reason)
   }
 
@@ -143,15 +107,22 @@ export class MacosAmphetamineSleepAssertion {
     }
     this.disposed = true
     this.desired = 'stopped'
-    this.resetRetrySuppression()
-    if (!this.sessionActive) {
+    this.stopReconcileTimer()
+    this.backoff.reset()
+    if (this.hold !== 'owned') {
+      this.hold = null
       return
     }
+    this.hold = null
     // Why sync: quit tears the event loop down before an awaited osascript could
     // report back, and a missed `end session` leaves the Mac awake indefinitely.
-    this.sessionActive = false
     try {
-      const result = this.runOsascriptSync(END_SESSION_SCRIPT)
+      const probe = this.runOsascriptSync(AMPHETAMINE_PROBE_SCRIPT)
+      const state = probe.code === 0 ? parseAmphetamineSession(probe.stdout) : null
+      if (state && !isOrcaShapedSession(state)) {
+        return
+      }
+      const result = this.runOsascriptSync(AMPHETAMINE_END_SESSION_SCRIPT)
       if (result.code !== 0) {
         this.logger.warn('[agent-awake] failed to end Amphetamine session on dispose', { result })
       }
@@ -169,6 +140,11 @@ export class MacosAmphetamineSleepAssertion {
     return this.unavailableReason
   }
 
+  /** 'owned' or 'adopted' while a session backs this assertion; null when nothing does. */
+  getHold(): SessionHold {
+    return this.hold
+  }
+
   private enqueue(reason: string): void {
     this.queue = this.queue.then(() => this.reconcile(reason)).catch(() => {})
   }
@@ -179,33 +155,42 @@ export class MacosAmphetamineSleepAssertion {
       if (this.disposed) {
         return
       }
-      if (this.desired === 'started' && !this.sessionActive) {
-        if (!(await this.startSession(reason))) {
+      if (this.desired === 'started') {
+        if (!(await this.ensureSession(reason))) {
           return
         }
-        continue
+      } else if (!(await this.releaseSession(reason))) {
+        return
       }
-      if (this.desired === 'stopped' && this.sessionActive) {
-        if (!(await this.endSession(reason))) {
-          return
-        }
-        continue
+      if (this.desired === (this.hold ? 'started' : 'stopped')) {
+        return
       }
-      return
     }
   }
 
-  private async startSession(reason: string): Promise<boolean> {
+  /** Returns false when it could not make progress, so the caller stops looping. */
+  private async ensureSession(reason: string): Promise<boolean> {
     if (this.unavailableReason) {
       return false
     }
-    if (this.retryNotBefore !== null && this.now() < this.retryNotBefore) {
-      this.scheduleRetry()
+    const state = await this.probeSession(reason)
+    if (!state) {
+      return false
+    }
+    if (state.presence === 'active') {
+      // Someone else's session already keeps the Mac awake. Adopting is both
+      // sufficient and the only way to avoid destroying their Trigger or timer.
+      if (this.hold !== 'owned' || !isOrcaShapedSession(state)) {
+        this.hold = 'adopted'
+      }
+      return true
+    }
+    if (this.backoff.isSuppressed()) {
       return false
     }
     let result: OsascriptResult
     try {
-      result = await this.runOsascript(START_SESSION_SCRIPT)
+      result = await this.runOsascript(AMPHETAMINE_START_SESSION_SCRIPT)
     } catch (error) {
       this.handleFailure('spawn-error', reason, error)
       return false
@@ -214,37 +199,87 @@ export class MacosAmphetamineSleepAssertion {
       this.handleScriptFailure('start', reason, result)
       return false
     }
-    this.sessionActive = true
-    this.resetRetrySuppression()
-    this.resetFailureStreak()
+    this.hold = 'owned'
+    this.backoff.reset()
     return true
   }
 
-  private async endSession(reason: string): Promise<boolean> {
+  private async releaseSession(reason: string): Promise<boolean> {
+    if (this.hold === null) {
+      return true
+    }
+    if (this.hold === 'adopted') {
+      // Never end a session Orca did not start.
+      this.hold = null
+      return true
+    }
+    const state = await this.probeSession(reason)
+    if (state && !isOrcaShapedSession(state)) {
+      // Replaced while we held it; the replacement is the user's to end.
+      this.hold = null
+      return true
+    }
     let result: OsascriptResult
     try {
-      result = await this.runOsascript(END_SESSION_SCRIPT)
+      result = await this.runOsascript(AMPHETAMINE_END_SESSION_SCRIPT)
     } catch (error) {
       this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, error })
-      // Keep `sessionActive` so a later stop retries; the session is still live.
+      // Keep the hold so a later stop retries; the session is still live.
       return false
     }
     if (result.code !== 0 || result.timedOut) {
       this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, result })
       // A missing app or revoked grant means there is no session left to end either.
-      if (classifyAmphetamineFailure(result)) {
-        this.sessionActive = false
-        return true
+      if (!classifyAmphetamineFailure(result)) {
+        return false
       }
-      return false
     }
-    this.sessionActive = false
-    this.resetFailureStreak()
+    this.hold = null
+    this.backoff.reset()
     return true
   }
 
+  private async probeSession(reason: string): Promise<AmphetamineSessionState | null> {
+    let result: OsascriptResult
+    try {
+      result = await this.runOsascript(AMPHETAMINE_PROBE_SCRIPT)
+    } catch (error) {
+      this.handleFailure('probe-spawn-error', reason, error)
+      return null
+    }
+    if (result.code !== 0 || result.timedOut) {
+      this.handleScriptFailure('probe', reason, result)
+      return null
+    }
+    // An unparseable read must not be treated as "no session" — that would start
+    // a session on top of the user's.
+    return parseAmphetamineSession(result.stdout) ?? NO_AMPHETAMINE_SESSION
+  }
+
+  private startReconcileTimer(): void {
+    if (this.reconcileTimer || this.reconcileMs <= 0) {
+      return
+    }
+    this.reconcileTimer = setInterval(() => {
+      if (this.desired === 'started' && !this.disposed) {
+        this.enqueue('amphetamine-reconcile')
+      }
+    }, this.reconcileMs)
+    if (typeof this.reconcileTimer.unref === 'function') {
+      this.reconcileTimer.unref()
+    }
+  }
+
+  private stopReconcileTimer(): void {
+    if (!this.reconcileTimer) {
+      return
+    }
+    clearInterval(this.reconcileTimer)
+    this.reconcileTimer = null
+  }
+
   private handleScriptFailure(
-    step: 'start' | 'end',
+    step: 'start' | 'probe',
     reason: string,
     result: OsascriptResult
   ): void {
@@ -269,7 +304,8 @@ export class MacosAmphetamineSleepAssertion {
       return
     }
     this.unavailableReason = unavailableReason
-    this.resetRetrySuppression()
+    this.stopReconcileTimer()
+    this.backoff.reset()
     this.logger.warn('[agent-awake] Amphetamine is unavailable', {
       reason,
       unavailableReason,
@@ -279,48 +315,7 @@ export class MacosAmphetamineSleepAssertion {
   }
 
   private handleFailure(failureKey: string, reason: string, details: unknown): void {
-    this.logFailure(failureKey, reason, details)
-    this.retryNotBefore = this.now() + MACOS_AMPHETAMINE_ASSERTION_RETRY_MS
-    this.scheduleRetry()
+    this.backoff.record(failureKey, reason, details)
     this.onUnexpectedFailure('macos-amphetamine-assertion-failure')
-  }
-
-  private logFailure(failureKey: string, reason: string, details: unknown): void {
-    const payload = { reason, details }
-    if (this.lastFailureKey === failureKey && this.warnedForLastFailure) {
-      this.logger.debug('[agent-awake] Amphetamine session command failed repeatedly', payload)
-      return
-    }
-    this.lastFailureKey = failureKey
-    this.warnedForLastFailure = true
-    this.logger.warn('[agent-awake] Amphetamine session command failed', payload)
-  }
-
-  private scheduleRetry(): void {
-    if (this.retryNotBefore === null || this.retryTimer) {
-      return
-    }
-    const retryDelay = Math.max(0, this.retryNotBefore - this.now())
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null
-      this.onUnexpectedFailure('macos-amphetamine-assertion-retry')
-    }, retryDelay)
-    if (typeof this.retryTimer.unref === 'function') {
-      this.retryTimer.unref()
-    }
-  }
-
-  private resetRetrySuppression(): void {
-    this.retryNotBefore = null
-    if (!this.retryTimer) {
-      return
-    }
-    clearTimeout(this.retryTimer)
-    this.retryTimer = null
-  }
-
-  private resetFailureStreak(): void {
-    this.lastFailureKey = null
-    this.warnedForLastFailure = false
   }
 }

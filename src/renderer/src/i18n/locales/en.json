@@ -3757,7 +3757,7 @@
             "amphetamine": "Amphetamine",
             "engine": "Engine",
             "caffeinateDescription": "Built into macOS \u2014 blocks idle and system sleep",
-            "amphetamineDescription": "Hand the session to Amphetamine so its triggers and app rules apply",
+            "amphetamineDescription": "Use an Amphetamine session \u2014 yours is never replaced or ended",
             "amphetamineMissing": "Not installed \u2014 get Amphetamine from the Mac App Store",
             "amphetamineDenied": "Blocked \u2014 allow Orca under Privacy & Security \u203a Automation",
             "amphetamineFallback": "Using Caffeinate until Amphetamine is available.",
@@ -11193,8 +11193,8 @@
           "caffeinate": "Caffeinate",
           "amphetamine": "Amphetamine",
           "engineTitle": "Keep awake engine",
-          "engineDescription": "Caffeinate is built into macOS. Amphetamine hands the session to the app so its triggers and app rules apply.",
-          "engineDescriptionMissing": "Caffeinate is built into macOS. Install Amphetamine to hand the session to its triggers and app rules instead.",
+          "engineDescription": "Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and never replaces or ends a session you started yourself.",
+          "engineDescriptionMissing": "Caffeinate is built into macOS. Install Amphetamine to keep awake through an Amphetamine session instead.",
           "engineDescriptionDenied": "Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security \u203a Automation."
         },
         "shareSkills": {
