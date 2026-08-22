@@ -138,7 +138,20 @@ export function stripComments(source: string): string {
  * as a string closes the call early, so the options object -- and any flag in
  * it -- falls outside the matched range and reads as absent.
  */
-export function blankStringContents(source: string): string {
+/**
+ * True when the lexer could not keep its bearings through the file.
+ *
+ * Why callers must check this: three separate attempts to make the blanker
+ * exact all shipped with a desync that silently hid real calls, and each time
+ * the offender count went DOWN, which read as progress. A scanner that cannot
+ * say "I lost track here" will keep under-reporting. Treat a desync as an
+ * offender -- over-reporting is a nuisance, under-reporting is a false clean.
+ */
+export function blankStringContentsDesynced(source: string): boolean {
+  return blankStringContents(source, true) !== ''
+}
+
+export function blankStringContents(source: string, reportDesync = false): string {
   let out = ''
   let index = 0
   let quote: string | null = null
@@ -198,6 +211,12 @@ export function blankStringContents(source: string): string {
     }
     out += char
     index += 1
+  }
+  if (reportDesync) {
+    return quote !== null || templates.length > 0 ? 'desynced' : ''
+  }
+  if (reportDesync) {
+    return quote !== null || templates.length > 0 ? 'desynced' : ''
   }
   return out
 }

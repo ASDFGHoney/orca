@@ -459,12 +459,19 @@ export class WslCliInstaller {
 async function runWslCommand(distro: string, command: string): Promise<string> {
   // Why the probe lane fixes #14288: the prior login shell (`bash -lc`) sourced
   // ~/.profile, so one blocking line there ate the whole 10s timeout.
-  const result = await runWslProcess({
-    distro,
-    lane: 'probe',
-    script: command,
-    timeoutMs: WSL_COMMAND_TIMEOUT_MS
-  })
+  let result: Awaited<ReturnType<typeof runWslProcess>>
+  try {
+    result = await runWslProcess({
+      distro,
+      lane: 'probe',
+      script: command,
+      timeoutMs: WSL_COMMAND_TIMEOUT_MS
+    })
+  } catch {
+    // Why map: the runner's raw "guest environment is unavailable" otherwise
+    // reaches Settings verbatim through ipc/cli.ts -> toast.error.
+    throw new Error('Could not reach the WSL distro. Try again.')
+  }
   if (result.timedOut) {
     throw new Error(`WSL command timed out after ${WSL_COMMAND_TIMEOUT_MS}ms.`)
   }

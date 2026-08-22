@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path'
 import {
   blankStringContents,
+  blankStringContentsDesynced,
   readAllowlist,
   scanSourceTree,
   stripComments
@@ -28,7 +29,11 @@ const ALLOWLIST: readonly string[] = readAllowlist(
 
 const CHILD_PROCESS_IMPORT =
   /from\s+['"](?:node:)?child_process['"]|require\(\s*['"](?:node:)?child_process['"]/
-const SPAWN_CALL = /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync)\s*\(/g
+// Includes the promisified and renamed spellings -- `execAsync`, `spawnDetached`,
+// `execFileCb` -- because a plain-name regex misses a `promisify(exec)` or an
+// `import { spawn as sp }`, and those are real spawns.
+const SPAWN_CALL =
+  /\b(?:spawn|spawnSync|spawnDetached|execFile|execFileSync|execFileAsync|execFileCb|exec|execSync|execAsync)\s*\(/g
 const SOURCE_ROOT = resolve(__dirname, '../..')
 
 
@@ -57,6 +62,12 @@ function findOffenders(): string[] {
     // The import test needs the module name, which blanking would erase; the
     // call scan needs parens inside strings neutralised. Two views, one file.
     if (!CHILD_PROCESS_IMPORT.test(decommented)) {
+      continue
+    }
+    // Fail closed: if the lexer lost its bearings, the scan below cannot be
+    // trusted, so the file counts as an offender rather than as clean.
+    if (blankStringContentsDesynced(decommented)) {
+      offenders.add(file.relativePath)
       continue
     }
     const source = blankStringContents(decommented)

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { stripComments } from '../../shared/source-scan/source-tree-scan'
 
 /**
  * Every `wsl.exe` spawn must go through `runWslProcess`.
@@ -121,7 +122,7 @@ function findSpawnSites(): string[] {
  * they look like ordinary shell, and dash accepts neither.
  */
 const BASHISM =
-  /<\s*<\(|\[\[|\blocal\s+\w+=|\bdeclare\s+-|\bmapfile\b|set\s+-o\s+pipefail|read\s+(?:-\w+\s+)*-d\b|<<</
+  /<\s*<\(|\[\[|\blocal\s+\w+=|\bdeclare\s+-|\bmapfile\b|set\s+-[a-z]*o[a-z]*\s+pipefail|set\s+-euo\b|read\s+(?:-\w+\s+)*-d\b|<<</
 
 describe('bash-only payloads declare their interpreter', () => {
   const offenders: string[] = []
@@ -131,7 +132,10 @@ describe('bash-only payloads declare their interpreter', () => {
     if (isTestFile(relativePath) || relativePath.startsWith(OWNER_DIRECTORY)) {
       continue
     }
-    const source = readFileSync(path, 'utf8')
+    // Strip comments: a comment naming runWslProcess and quoting `set -euo
+    // pipefail` to explain why it was removed would otherwise flag the file,
+    // and a bash script written to a guest file is not a runner payload.
+    const source = stripComments(readFileSync(path, 'utf8'))
     if (!source.includes('runWslProcess') || !BASHISM.test(source)) {
       continue
     }
