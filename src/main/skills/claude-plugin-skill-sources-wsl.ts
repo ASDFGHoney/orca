@@ -68,6 +68,10 @@ async function executeWslMetadataRead(distro: string, script: string): Promise<s
     timeoutMs: WSL_METADATA_TIMEOUT_MS,
     maxOutputBytes: WSL_METADATA_MAX_OUTPUT_BYTES
   })
+  // Truncated-but-well-formed output would otherwise parse as real metadata.
+  if (result.code !== 0 || result.timedOut) {
+    throw new Error('claude-plugin-skill-sources-wsl-read-failed')
+  }
   return result.stdout
 }
 

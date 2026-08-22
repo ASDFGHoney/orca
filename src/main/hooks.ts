@@ -155,6 +155,10 @@ export function runHook(
       distro: wslInfo.distro ?? undefined,
       lane: 'probe',
       script,
+      // Why pinned: these are user-authored orca.yaml scripts and the native
+      // path runs /bin/bash. Defaulting to sh would fail bash-only hooks on WSL
+      // only -- a downgrade the user never asked for.
+      shell: 'bash',
       cwd: wslInfo.linuxPath,
       env: guestEnv,
       timeoutMs: HOOK_TIMEOUT

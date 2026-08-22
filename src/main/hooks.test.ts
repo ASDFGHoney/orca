@@ -141,7 +141,7 @@ describe('runHook', () => {
   it('runs WSL hooks through runWslProcess and translates env paths to Linux', async () => {
     execMock.mockReset()
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ code: 0, stdout: '', stderr: '', timedOut: false })
+    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: 0, stdout: '', stderr: '', timedOut: false })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -191,7 +191,7 @@ describe('runHook', () => {
   it('runs Windows-path hooks through WSL when the project runtime targets WSL', async () => {
     execMock.mockReset()
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ code: 0, stdout: '', stderr: '', timedOut: false })
+    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: 0, stdout: '', stderr: '', timedOut: false })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -296,7 +296,7 @@ describe('runHook', () => {
     // mocked runWslProcess -- there is nothing left in hooks.ts to advance.
     execMock.mockReset()
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ code: null, stdout: '', stderr: '', timedOut: true })
+    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: null, stdout: '', stderr: '', timedOut: true })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)

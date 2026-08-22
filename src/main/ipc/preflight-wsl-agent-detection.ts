@@ -36,13 +36,20 @@ export async function detectWslCommandsOnPath(
   try {
     // Why probe: the cached login PATH gives the user's real nvm/mise/asdf PATH
     // with no shell in the loop, so there is no rc/motd banner to land in stdout.
-    const { stdout } = await runWslProcess({
+    const result = await runWslProcess({
       distro: wslTarget.distro,
       lane: 'probe',
       script,
       timeoutMs: WSL_AGENT_DETECTION_TIMEOUT_MS
     })
-    return parseWslDetectedCommands(stdout)
+    // Why bail rather than parse: without the login PATH an nvm-installed agent
+    // is invisible, and reporting it absent is #9725. Same for a timeout or a
+    // non-zero exit -- runProcess resolves on both, so partial stdout would
+    // otherwise read as a complete answer.
+    if (!result.environmentResolved || result.timedOut || result.code !== 0) {
+      return new Set()
+    }
+    return parseWslDetectedCommands(result.stdout)
   } catch {
     return new Set()
   }

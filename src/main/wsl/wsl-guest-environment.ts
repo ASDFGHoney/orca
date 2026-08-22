@@ -6,16 +6,11 @@ import {
 import { resolveWslExecutablePath } from './wsl-executable-path'
 
 /**
- * The login-shell environment of a distro, probed once and cached.
+ * A distro's login-shell environment, probed once and cached.
  *
- * Why this exists: a probe needs the user's real PATH (nvm, mise and asdf all
- * install into rc files), but paying for a login shell on every probe is what
- * made `cli:getWslInstallStatus` time out behind a blocking `~/.profile`
- * (#14288) and what makes WSL git operations lag (#9768). Probe the login shell
- * exactly once per distro, then run everything else with no shell at all.
- *
- * Generalised from `src/main/git/wsl-git-read-environment.ts`, which is the one
- * WSL caller that already got this right.
+ * Probes need the user's real PATH, but paying a login shell per call is what
+ * stalls behind a blocking `~/.profile` (#14288) and lags WSL git (#9768).
+ * Generalised from `git/wsl-git-read-environment.ts`, which already got this right.
  */
 
 export type WslGuestEnvironment = {
@@ -28,12 +23,7 @@ export type WslGuestEnvironment = {
 
 const PROBE_TIMEOUT_MS = 10_000
 const PROBE_MAX_OUTPUT_BYTES = 64 * 1024
-/**
- * Why retry a timeout but not a malformed answer: a stopped distro or a
- * momentarily wedged `wsl.exe` recovers on its own, while a distro that cannot
- * produce a POSIX PATH will not start doing so. Retrying the second forever is
- * how a probe becomes a poller.
- */
+/** A stopped distro recovers; one that cannot produce a POSIX PATH will not. */
 const TRANSIENT_RETRY_MS = 30_000
 
 type ProbeOutcome =
@@ -63,9 +53,8 @@ function parseProbePayload(payload: string | null): WslGuestEnvironment | null {
 }
 
 async function probeGuestEnvironment(distro: string | undefined): Promise<ProbeOutcome> {
-  // Why resolve `env` rather than assume /usr/bin/env: it is /usr/bin/env on
-  // Debian, Ubuntu, Fedora and Arch, but the probe costs nothing extra here and
-  // a distro that puts it elsewhere would otherwise fail every later call.
+  // Resolve `env` rather than assume /usr/bin/env: a distro that moved it would
+  // otherwise fail every later call.
   const script = [
     '_orca_env=$(command -v env 2>/dev/null || true)',
     'case "$_orca_env" in /*) [ -x "$_orca_env" ] || exit 127 ;; *) exit 127 ;; esac',
@@ -94,12 +83,7 @@ function cacheKey(distro: string | undefined): string {
   return distro ?? ''
 }
 
-/**
- * The distro's login-shell environment, or null when it cannot be established.
- *
- * Null is "we could not ask", never "the distro has no PATH" — callers fall
- * back to the interactive lane rather than running with an empty environment.
- */
+/** Null means "could not ask", never "has no PATH" -- callers fall back. */
 export function getWslGuestEnvironment(
   distro: string | undefined
 ): Promise<WslGuestEnvironment | null> {
@@ -113,33 +97,32 @@ export function getWslGuestEnvironment(
   if (existing) {
     return existing
   }
-  // Why store the promise before awaiting: a 32-wide burst during teardown must
-  // collapse into one probe, not 32 login shells.
-  const probe = probeGuestEnvironment(distro).then((outcome) => {
-    if (inFlight.get(key) !== probe) {
-      return outcome.kind === 'resolved' ? outcome.environment : null
-    }
-    if (outcome.kind === 'resolved') {
-      resolved.set(key, outcome.environment)
-      retryAfter.delete(key)
-      return outcome.environment
-    }
-    if (outcome.kind === 'transient') {
-      retryAfter.set(key, Date.now() + TRANSIENT_RETRY_MS)
-    }
-    return null
-  })
+  // Store before awaiting so a burst collapses into one probe.
+  // Why catch: runProcess REJECTS when the child cannot be started (ENOENT on a
+  // host without System32\wsl.exe, EAGAIN under memory pressure). Uncaught, the
+  // rejected promise stays in `inFlight` and every later call re-throws it for
+  // the process lifetime -- all WSL features wedged until restart.
+  const probe = probeGuestEnvironment(distro)
+    .catch((): ProbeOutcome => ({ kind: 'transient' }))
+    .then((outcome) => {
+      if (inFlight.get(key) !== probe) {
+        return outcome.kind === 'resolved' ? outcome.environment : null
+      }
+      if (outcome.kind === 'resolved') {
+        resolved.set(key, outcome.environment)
+        retryAfter.delete(key)
+        return outcome.environment
+      }
+      if (outcome.kind === 'transient') {
+        retryAfter.set(key, Date.now() + TRANSIENT_RETRY_MS)
+      }
+        return null
+      })
   inFlight.set(key, probe)
   return probe
 }
 
-/**
- * Drop a distro's cached environment.
- *
- * Why callers need this: a user who installs nvm inside a running distro would
- * otherwise keep the pre-install PATH until Orca restarts, and read that as the
- * same detection bug this cache exists to fix.
- */
+/** Needed so a tool installed inside a running distro appears without a restart. */
 export function invalidateWslGuestEnvironment(distro?: string): void {
   if (distro === undefined) {
     inFlight.clear()

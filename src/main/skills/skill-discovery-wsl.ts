@@ -64,6 +64,12 @@ async function executeWslSkillDiscovery(distro: string, script: string): Promise
     timeoutMs: WSL_SCAN_TIMEOUT_MS,
     maxOutputBytes: WSL_SCAN_MAX_OUTPUT_BYTES
   })
+  // Why throw: runWslProcess resolves on a non-zero exit, and an empty stdout
+  // parses into a valid "zero skills" result -- which reads as "nothing is
+  // installed" and re-offers installs for skills that are present.
+  if (result.code !== 0 || result.timedOut) {
+    throw new Error('skill-discovery-wsl-scan-failed')
+  }
   return result.stdout
 }
 

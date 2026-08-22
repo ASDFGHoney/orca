@@ -17,7 +17,7 @@ function lastSpec(): RunWslProcessSpec {
 describe('detectWslCommandsOnPath', () => {
   beforeEach(() => {
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ code: 0, stdout: '', stderr: '', timedOut: false })
+    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: 0, stdout: '', stderr: '', timedOut: false })
   })
 
   afterEach(() => {
@@ -56,6 +56,7 @@ describe('detectWslCommandsOnPath', () => {
 
   it('parses detected commands from prefixed stdout', async () => {
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout:
         '__ORCA_AGENT_PATH__claude\t/usr/bin/claude\n' +
@@ -71,6 +72,7 @@ describe('detectWslCommandsOnPath', () => {
 
   it('ignores commands whose resolved path is not absolute', async () => {
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout: '__ORCA_AGENT_PATH__claude\tclaude\n' + '__ORCA_AGENT_PATH__codex\tC:\\spoof\n',
       stderr: '',
@@ -90,6 +92,7 @@ describe('detectWslCommandsOnPath', () => {
     // so a banner has no way to appear; this proves the payload line still
     // parses correctly even when banner-shaped text precedes it.
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout:
         'Welcome to Ubuntu! Run a command as administrator (user "root")...\n' +

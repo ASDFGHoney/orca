@@ -1,3 +1,4 @@
+import type { WslResult } from '../wsl/wsl-runner'
 import { posix as pathPosix } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,13 +13,8 @@ function record(...fields: string[]): string {
   return `${fields.join('\0')}\0`
 }
 
-function wslResult(stdout: string): {
-  code: number
-  stdout: string
-  stderr: string
-  timedOut: boolean
-} {
-  return { code: 0, stdout, stderr: '', timedOut: false }
+function wslResult(stdout: string): WslResult {
+  return { environmentResolved: true, code: 0, stdout, stderr: '', timedOut: false }
 }
 
 describe('WSL Claude plugin skill discovery', () => {

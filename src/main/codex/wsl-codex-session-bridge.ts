@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process'
 import { posix as pathPosix } from 'node:path'
-import { buildWslExecArgs } from '../../shared/wsl-login-shell-command'
+import {
+  buildWslExecArgs,
+  quotePosixShell as quoteBashString
+} from '../../shared/wsl-login-shell-command'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 
 export type WslCodexSessionBridgeTarget = {
@@ -129,9 +132,6 @@ function joinLinuxPath(basePath: string, ...segments: string[]): string {
   return pathPosix.join(basePath, ...segments)
 }
 
-function quoteBashString(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
 
 function execFileUtf8(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {

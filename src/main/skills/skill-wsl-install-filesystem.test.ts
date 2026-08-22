@@ -14,6 +14,7 @@ const WSL_ROOT = '\\\\wsl.localhost\\Ubuntu-24.04\\home\\jin\\.agents\\skills'
 
 beforeEach(() => {
   runWslProcessMock.mockReset().mockResolvedValue({
+    environmentResolved: true,
     code: 0,
     stdout: '',
     stderr: '',

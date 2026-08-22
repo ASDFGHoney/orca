@@ -55,6 +55,10 @@ async function probeWslGrokHome(distro: string): Promise<string> {
     timeoutMs: WSL_ENV_PROBE_TIMEOUT_MS,
     maxOutputBytes: WSL_ENV_PROBE_MAX_BYTES
   })
+  // A timeout mid-write can leave a truncated but shape-valid absolute path.
+  if (result.code !== 0 || result.timedOut) {
+    return ''
+  }
   return result.stdout
 }
 

@@ -22,6 +22,7 @@ describe('detectSkillProvidersInWsl', () => {
     // shell assembles from rc files -- resolved to nothing via `command -v`
     // and read as not installed.
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout: 'codex\n',
       stderr: '',
@@ -38,6 +39,7 @@ describe('detectSkillProvidersInWsl', () => {
 
   it('parses both providers when present', async () => {
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout: 'codex\nclaude\n',
       stderr: '',
@@ -51,6 +53,7 @@ describe('detectSkillProvidersInWsl', () => {
 
   it('ignores stray output that is not a recognized provider name', async () => {
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       stdout: 'codex\nsomething-else\n',
       stderr: '',
@@ -72,6 +75,7 @@ describe('detectSkillProvidersInWsl', () => {
 
   it('rejects on a non-zero exit', async () => {
     runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 1,
       stdout: '',
       stderr: 'distro is stopped',

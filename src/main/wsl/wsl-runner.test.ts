@@ -33,6 +33,7 @@ function fencedEcho(payload = ''): void {
     const begin = /__ORCA_WSL_CAPTURE_BEGIN_[a-z0-9]+__/.exec(script)?.[0] ?? ''
     const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
     return {
+      environmentResolved: true,
       code: 0,
       signal: null,
       stdout: begin ? `${begin}${payload}${end}` : payload,
@@ -90,25 +91,31 @@ describe('probe lane', () => {
     ])
   })
 
-  it('falls back to the interactive lane when the distro cannot be probed', async () => {
-    // "We could not ask" must not become "run with no PATH" -- that would turn
-    // an unknown into a wrong answer.
+  it('reports an unresolved environment rather than pretending the PATH is real', async () => {
+    // Falling back to the login shell here would re-run ~/.profile -- the very
+    // stall the probe lane exists to avoid, and most likely to bite exactly
+    // when the probe just failed. So the call proceeds on the default PATH and
+    // says so, and callers deciding "installed?" must treat that as unknown.
     let call = 0
     runProcessMock.mockImplementation(async (spec: { args: string[] }) => {
       call += 1
       if (call === 1) {
-        return { code: 1, signal: null, stdout: '', stderr: 'stopped', timedOut: false }
+        return { environmentResolved: true, code: 1, signal: null, stdout: '', stderr: 'stopped', timedOut: false }
       }
       const script = spec.args.at(-1) ?? ''
       const begin = /__ORCA_WSL_CAPTURE_BEGIN_[a-z0-9]+__/.exec(script)?.[0] ?? ''
       const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
-      return { code: 0, signal: null, stdout: `${begin}${end}`, stderr: '', timedOut: false }
+      return { environmentResolved: true, code: 0, signal: null, stdout: `${begin}${end}`, stderr: '', timedOut: false }
     })
-    await runWslProcess({ lane: 'probe', program: 'codex' })
-    const argv = lastArgv()
-    expect(argv).toContain('--exec')
-    expect(argv.slice(-2, -1)).toEqual(['-c'])
-    expect(argv.at(-1)).toContain('_orca_wsl_shell')
+    const result = await runWslProcess({ lane: 'probe', program: 'codex' })
+    expect(result.environmentResolved).toBe(false)
+    expect(lastArgv()).toEqual(['--exec', 'codex'])
+  })
+
+  it('reports a resolved environment on the happy path', async () => {
+    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
+    const result = await runWslProcess({ lane: 'probe', program: 'codex' })
+    expect(result.environmentResolved).toBe(true)
   })
 })
 
@@ -122,6 +129,7 @@ describe('interactive lane', () => {
       const begin = /__ORCA_WSL_CAPTURE_BEGIN_[a-z0-9]+__/.exec(script)?.[0] ?? ''
       const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
       return {
+        environmentResolved: true,
         code: 0,
         signal: null,
         stdout: `Ubuntu banner: run a command as administrator\n${begin}payload${end}`,
@@ -240,6 +248,7 @@ describe('a missing fence is a failure, not empty output', () => {
     // payload". An rc that redirects stdout would otherwise yield a silent
     // wrong answer.
     runProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 0,
       signal: null,
       stdout: 'banner only, no fence',
@@ -289,6 +298,7 @@ describe('a script never rides the interactive lane', () => {
     // consumed it, `sh -s` would read EOF, run nothing and exit 0 -- a silent
     // wrong answer, worse than the degraded PATH this avoids.
     runProcessMock.mockResolvedValue({
+      environmentResolved: true,
       code: 1,
       signal: null,
       stdout: '',
