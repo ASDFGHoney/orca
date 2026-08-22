@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   getSecretStore,
   hasSecretStore,
-  resetSecretStoreForTests,
+  _resetSecretStoreForTests,
   setSecretStore,
   type SecretStore
 } from './secret-store'
@@ -19,7 +19,7 @@ function fakeStore(overrides: Partial<SecretStore> = {}): SecretStore {
 
 describe('SecretStore registry', () => {
   beforeEach(() => {
-    resetSecretStoreForTests()
+    _resetSecretStoreForTests()
   })
 
   it('throws until a store is installed, rather than defaulting to one that cannot seal', () => {

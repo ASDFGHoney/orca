@@ -43,6 +43,6 @@ export function hasSecretStore(): boolean {
 }
 
 /** Test-only: drop the installed store so suites do not leak one across files. */
-export function resetSecretStoreForTests(): void {
+export function _resetSecretStoreForTests(): void {
   current = null
 }
