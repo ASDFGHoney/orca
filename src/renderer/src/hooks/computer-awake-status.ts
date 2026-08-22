@@ -12,15 +12,19 @@ export function useComputerAwakeStatus(): ComputerAwakeStatus {
 
   useEffect(() => {
     let mounted = true
+    // The startup Amphetamine probe publishes while getStatus() is still in
+    // flight, so the older snapshot would otherwise land last and win.
+    let receivedEvent = false
     const unsubscribe = window.api.agentAwake.onChanged((next) => {
       if (mounted) {
+        receivedEvent = true
         setStatus(next)
       }
     })
     void window.api.agentAwake
       .getStatus()
       .then((next) => {
-        if (mounted) {
+        if (mounted && !receivedEvent) {
           setStatus(next)
         }
       })

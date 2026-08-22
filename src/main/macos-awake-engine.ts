@@ -147,8 +147,18 @@ export class MacosAwakeEngineRouter {
   }
 
   dispose(): void {
-    this.caffeinateAssertion.dispose()
-    this.amphetamineAssertion.dispose()
+    // Isolated: a throwing caffeinate dispose must not skip Amphetamine's, which
+    // is the one that can outlive the process.
+    this.disposeAssertion(this.caffeinateAssertion, 'macOS system sleep')
+    this.disposeAssertion(this.amphetamineAssertion, 'Amphetamine')
+  }
+
+  private disposeAssertion(assertion: PlatformAwakeAssertion, label: string): void {
+    try {
+      assertion.dispose()
+    } catch (err) {
+      this.logger.warn(`[agent-awake] failed to dispose ${label} assertion`, { error: err })
+    }
   }
 
   statusFields(): MacosAwakeEngineStatusFields {
@@ -167,7 +177,14 @@ export class MacosAwakeEngineRouter {
 
   /** Amphetamine only when it is both chosen and proven usable; caffeinate is the always-available fallback. */
   private usesAmphetamine(): boolean {
-    return this.engine === 'amphetamine' && !this.amphetamineAssertion.isUnavailable()
+    return (
+      // The engine setting is writable on every platform, so gate on the host too.
+      this.platform === 'darwin' &&
+      this.engine === 'amphetamine' &&
+      // A known-missing app would otherwise cost a failed Apple event per refresh.
+      this.amphetamineInstalled !== false &&
+      !this.amphetamineAssertion.isUnavailable()
+    )
   }
 
   private stopAssertion(assertion: PlatformAwakeAssertion, label: string, reason: string): void {

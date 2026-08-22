@@ -37,7 +37,21 @@ else
 end if`)
 }
 
-function endAnySession(): void {
+/**
+ * Refuse to run against a machine that already has a session.
+ *
+ * Amphetamine's session is global, so a cleanup here would end a real one the
+ * developer started — exactly the thing this feature promises never to do.
+ */
+function requireIdleAmphetamine(): void {
+  const state = readSession()
+  expect(state, 'Amphetamine already has an active session; end it before running this suite').toBe(
+    'idle|-3|false|false'
+  )
+}
+
+/** Only ever ends a session this test created. */
+function endSessionCreatedByTest(): void {
   try {
     amphetamine(`tell application id "${BUNDLE_ID}" to end session`)
   } catch {
@@ -83,9 +97,17 @@ async function postCodexHookEvent(
 test.describe('Amphetamine keep-awake engine', () => {
   test.skip(() => !amphetamineInstalled(), 'requires Amphetamine to be installed on the test host')
 
+  /** Set by a test once it has created a session, so cleanup ends only that one. */
+  let createdSession = false
+
+  test.beforeEach(() => {
+    createdSession = false
+  })
+
   test.afterEach(() => {
-    // Never leave a session behind on a real machine.
-    endAnySession()
+    if (createdSession) {
+      endSessionCreatedByTest()
+    }
   })
 
   test('holds and releases a real Amphetamine session for a working agent', async ({
@@ -93,10 +115,11 @@ test.describe('Amphetamine keep-awake engine', () => {
     orcaPage
   }) => {
     await waitForSessionReady(orcaPage)
-    endAnySession()
+    requireIdleAmphetamine()
     await selectAmphetamineEngine(orcaPage)
 
     const paneKey = `e2e-amphetamine-tab:${randomUUID()}`
+    createdSession = true
     await postCodexHookEvent(electronApp, paneKey, 'UserPromptSubmit')
 
     // secondsRemaining 0 is Amphetamine's indefinite session: it cannot expire
@@ -122,10 +145,11 @@ test.describe('Amphetamine keep-awake engine', () => {
     orcaPage
   }) => {
     await waitForSessionReady(orcaPage)
-    endAnySession()
+    requireIdleAmphetamine()
     await selectAmphetamineEngine(orcaPage)
 
     // A hand-started 30-minute session that blocks display sleep.
+    createdSession = true
     amphetamine(
       `tell application id "${BUNDLE_ID}" to start new session with options {duration:30, interval:minutes, displaySleepAllowed:false}`
     )
@@ -135,7 +159,15 @@ test.describe('Amphetamine keep-awake engine', () => {
 
     const paneKey = `e2e-amphetamine-tab:${randomUUID()}`
     await postCodexHookEvent(electronApp, paneKey, 'UserPromptSubmit')
+    // Without this the assertions below could pass simply because Orca never
+    // processed the hook at all.
+    await expect(
+      orcaPage.getByRole('button', { name: /^Amphetamine, Agent · Active/ })
+    ).toBeVisible({ timeout: 15_000 })
     await postCodexHookEvent(electronApp, paneKey, 'Stop')
+    await expect(
+      orcaPage.getByRole('button', { name: /^Amphetamine, Agent · Inactive/ })
+    ).toBeVisible({ timeout: 15_000 })
 
     // Still the user's timed, display-sleep-blocking session: neither replaced
     // by Orca's indefinite one, nor ended when Orca stopped.

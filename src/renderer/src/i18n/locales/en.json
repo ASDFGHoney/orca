@@ -3745,6 +3745,19 @@
               }
             }
           },
+          "AwakeEnginePicker": {
+            "label": "Keep awake engine",
+            "caffeinate": "Caffeinate",
+            "caffeinateTitle": "Built into macOS",
+            "caffeinateBody": "Blocks idle and system sleep for as long as Orca needs it. Nothing to install.",
+            "amphetamine": "Amphetamine",
+            "amphetamineTitle": "Third-party app, does more",
+            "amphetamineBody": "Keeps awake through an Amphetamine session, so your Triggers, app rules and display options apply.",
+            "amphetamineMissingBody": "Adds Triggers, per-app rules, closed-display mode and screen-saver control that caffeinate cannot do.",
+            "amphetamineSafety": "Orca never replaces or ends a session you started yourself.",
+            "amphetamineGet": "Not installed \u2014 click to get it free on the Mac App Store.",
+            "amphetamineDenied": "Blocked \u2014 allow Orca under Privacy & Security \u203a Automation. Using Caffeinate meanwhile."
+          },
           "CaffeinateStatusSegment": {
             "on": "On",
             "auto": "Agent",
@@ -3754,13 +3767,8 @@
             "ariaLabel": "Caffeinate, {{status}}",
             "ariaLabelEngine": "{{engine}}, {{status}}",
             "title": "Caffeinate",
+            "keepAwake": "Keep awake",
             "amphetamine": "Amphetamine",
-            "engine": "Engine",
-            "caffeinateDescription": "Built into macOS \u2014 blocks idle and system sleep",
-            "amphetamineDescription": "Use an Amphetamine session \u2014 yours is never replaced or ended",
-            "amphetamineMissing": "Not installed \u2014 get Amphetamine from the Mac App Store",
-            "amphetamineDenied": "Blocked \u2014 allow Orca under Privacy & Security \u203a Automation",
-            "amphetamineFallback": "Using Caffeinate until Amphetamine is available.",
             "onDescription": "Keep this computer awake continuously",
             "autoDescription": "Stay awake while an agent is working",
             "offDescription": "Allow normal system sleep behavior"

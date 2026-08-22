@@ -6,7 +6,6 @@ import {
   AMPHETAMINE_START_SESSION_SCRIPT,
   classifyAmphetamineFailure,
   isOrcaShapedSession,
-  NO_AMPHETAMINE_SESSION,
   parseAmphetamineSession,
   runOsascriptSyncWithRunProcess,
   runOsascriptWithRunProcess,
@@ -114,8 +113,14 @@ export class MacosAmphetamineSleepAssertion {
       return
     }
     this.hold = null
-    // Why sync: quit tears the event loop down before an awaited osascript could
-    // report back, and a missed `end session` leaves the Mac awake indefinitely.
+    this.endSessionSync('dispose')
+  }
+
+  /**
+   * Why sync: quit tears the event loop down before an awaited osascript could
+   * report back, and a missed `end session` leaves the Mac awake indefinitely.
+   */
+  private endSessionSync(reason: string): void {
     try {
       const probe = this.runOsascriptSync(AMPHETAMINE_PROBE_SCRIPT)
       const state = probe.code === 0 ? parseAmphetamineSession(probe.stdout) : null
@@ -124,10 +129,10 @@ export class MacosAmphetamineSleepAssertion {
       }
       const result = this.runOsascriptSync(AMPHETAMINE_END_SESSION_SCRIPT)
       if (result.code !== 0) {
-        this.logger.warn('[agent-awake] failed to end Amphetamine session on dispose', { result })
+        this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, result })
       }
     } catch (error) {
-      this.logger.warn('[agent-awake] failed to end Amphetamine session on dispose', { error })
+      this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, error })
     }
   }
 
@@ -199,6 +204,11 @@ export class MacosAmphetamineSleepAssertion {
       this.handleScriptFailure('start', reason, result)
       return false
     }
+    if (this.disposed) {
+      // Quit landed while the Apple event was in flight; nothing runs after this.
+      this.endSessionSync('dispose-race')
+      return false
+    }
     this.hold = 'owned'
     this.backoff.reset()
     return true
@@ -251,9 +261,13 @@ export class MacosAmphetamineSleepAssertion {
       this.handleScriptFailure('probe', reason, result)
       return null
     }
-    // An unparseable read must not be treated as "no session" — that would start
-    // a session on top of the user's.
-    return parseAmphetamineSession(result.stdout) ?? NO_AMPHETAMINE_SESSION
+    const state = parseAmphetamineSession(result.stdout)
+    if (!state) {
+      // Reading it as "no session" would start one on top of the user's.
+      this.handleFailure('probe:unparseable', reason, { stdout: result.stdout.trim() })
+      return null
+    }
+    return state
   }
 
   private startReconcileTimer(): void {

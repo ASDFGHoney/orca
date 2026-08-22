@@ -199,6 +199,21 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     expect(assertion.getHold()).toBe('owned')
   })
 
+  it('does not start a session when the state read is unparseable', async () => {
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(async (script: string) =>
+      script.includes('session is active') ? ok('garbage') : ok()
+    )
+    const assertion = createAssertion(amphetamine)
+
+    assertion.start('agents-working')
+    await settle()
+
+    // Reading it as "no session" would start one on top of the user's.
+    expect(amphetamine.starts()).toBe(0)
+    expect(assertion.getHold()).toBeNull()
+  })
+
   it('does not start a session when the state read fails', async () => {
     const amphetamine = createFakeAmphetamine()
     amphetamine.run.mockImplementation(async (script: string) =>
@@ -315,6 +330,40 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
       false
     )
+  })
+
+  it('ends a session that started while quit was already in flight', async () => {
+    const amphetamine = createFakeAmphetamine()
+    let releaseStart = (): void => {}
+    const started = new Promise<void>((resolve) => {
+      releaseStart = resolve
+    })
+    amphetamine.run.mockImplementation(async (script: string) => {
+      if (script.includes('session is active')) {
+        return ok('idle|-3|false|false')
+      }
+      if (script.includes('start new session')) {
+        await started
+        return ok()
+      }
+      return ok()
+    })
+    const runOsascriptSync = vi.fn((script: string) =>
+      script.includes('session is active') ? ok('active|0|false|true') : ok()
+    )
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    // Quit lands while `start new session` is still in flight.
+    assertion.dispose()
+    releaseStart()
+    await settle()
+
+    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
+      true
+    )
+    expect(assertion.getHold()).toBeNull()
   })
 
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {

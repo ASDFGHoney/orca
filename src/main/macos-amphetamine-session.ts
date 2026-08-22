@@ -55,13 +55,6 @@ export type AmphetamineSessionState = {
   displaySleepAllowed: boolean
 }
 
-export const NO_AMPHETAMINE_SESSION: AmphetamineSessionState = {
-  presence: 'idle',
-  secondsRemaining: -3,
-  isTrigger: false,
-  displaySleepAllowed: false
-}
-
 export function runOsascriptWithRunProcess(script: string): Promise<OsascriptResult> {
   return runProcess({
     program: OSASCRIPT,

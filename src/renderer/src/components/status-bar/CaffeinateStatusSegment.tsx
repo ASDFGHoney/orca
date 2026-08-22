@@ -1,4 +1,4 @@
-import { Coffee, Zap } from 'lucide-react'
+import { Coffee, Pill } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +13,7 @@ import { useAppStore } from '@/store'
 import { isPairedWebClientWindow } from '@/lib/desktop-window-chrome'
 import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
 import { useComputerAwakeStatus } from '@/hooks/computer-awake-status'
+import { AwakeEnginePicker } from './AwakeEnginePicker'
 import { translate } from '@/i18n/i18n'
 import {
   computerAwakeSettingsForMacosEngine,
@@ -20,7 +21,6 @@ import {
   normalizeComputerAwakeMode,
   normalizeMacosAwakeEngine,
   type ComputerAwakeMode,
-  type ComputerAwakeStatus,
   type MacosAwakeEngine
 } from '../../../../shared/computer-awake-mode'
 import { STATUS_BAR_CONTEXT_MENU_EXEMPT_PROPS } from './status-bar-context-menu-policy'
@@ -41,35 +41,10 @@ function activityLabel(active: boolean): string {
     : translate('auto.components.status.bar.CaffeinateStatusSegment.inactive', 'Inactive')
 }
 
-/** Why a reserved height: availability resolves asynchronously, and this menu opens
- *  upward — a description growing a line would shift every item above it mid-click. */
-const ENGINE_DESCRIPTION_CLASS =
-  'block min-h-8 text-[11px] font-normal leading-4 text-muted-foreground'
-
 function engineLabel(engine: MacosAwakeEngine): string {
   return engine === 'amphetamine'
     ? translate('auto.components.status.bar.CaffeinateStatusSegment.amphetamine', 'Amphetamine')
     : translate('auto.components.status.bar.CaffeinateStatusSegment.title', 'Caffeinate')
-}
-
-/** Why not just "not installed": a refused Automation grant looks identical from the picker. */
-function amphetamineDescription(status: ComputerAwakeStatus): string {
-  if (status.amphetamineInstalled === false) {
-    return translate(
-      'auto.components.status.bar.CaffeinateStatusSegment.amphetamineMissing',
-      'Not installed — get Amphetamine from the Mac App Store'
-    )
-  }
-  if (status.amphetamineUnavailableReason === 'automation-denied') {
-    return translate(
-      'auto.components.status.bar.CaffeinateStatusSegment.amphetamineDenied',
-      'Blocked — allow Orca under Privacy & Security › Automation'
-    )
-  }
-  return translate(
-    'auto.components.status.bar.CaffeinateStatusSegment.amphetamineDescription',
-    'Use an Amphetamine session — yours is never replaced or ended'
-  )
 }
 
 export function CaffeinateStatusSegment({
@@ -96,23 +71,20 @@ export function CaffeinateStatusSegment({
     serviceStatus.mode === configuredMode ? serviceStatus.active : configuredMode === 'on'
   // Only macOS runs an engine; everywhere else the segment keeps its Caffeinate identity.
   const engine = isMac ? configuredEngine : 'caffeinate'
-  const amphetamineBlocked =
-    serviceStatus.amphetamineInstalled === false ||
-    serviceStatus.amphetamineUnavailableReason !== undefined
   const statusText = `${modeLabel(mode)} · ${activityLabel(active)}`
   const ariaLabel = translate(
     'auto.components.status.bar.CaffeinateStatusSegment.ariaLabelEngine',
     '{{engine}}, {{status}}',
     { engine: engineLabel(engine), status: statusText }
   )
-  const EngineIcon = engine === 'amphetamine' ? Zap : Coffee
+  const EngineIcon = engine === 'amphetamine' ? Pill : Coffee
 
   const setMode = (nextMode: string): void => {
     void updateSettings(computerAwakeSettingsForMode(normalizeComputerAwakeMode(nextMode)))
   }
 
-  const setEngine = (nextEngine: string): void => {
-    void updateSettings(computerAwakeSettingsForMacosEngine(normalizeMacosAwakeEngine(nextEngine)))
+  const setEngine = (nextEngine: MacosAwakeEngine): void => {
+    void updateSettings(computerAwakeSettingsForMacosEngine(nextEngine))
   }
 
   return (
@@ -151,9 +123,17 @@ export function CaffeinateStatusSegment({
         className="w-64"
       >
         <DropdownMenuLabel className="flex items-center justify-between gap-3">
-          <span>{engineLabel(engine)}</span>
+          <span>
+            {translate(
+              'auto.components.status.bar.CaffeinateStatusSegment.keepAwake',
+              'Keep awake'
+            )}
+          </span>
           <span className="font-normal text-muted-foreground">{statusText}</span>
         </DropdownMenuLabel>
+        {isMac ? (
+          <AwakeEnginePicker engine={engine} status={serviceStatus} onChange={setEngine} />
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup value={mode} onValueChange={setMode}>
           <DropdownMenuRadioItem value="on" className="py-1.5">
@@ -190,47 +170,6 @@ export function CaffeinateStatusSegment({
             </span>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
-        {isMac ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
-              {translate('auto.components.status.bar.CaffeinateStatusSegment.engine', 'Engine')}
-            </DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={engine} onValueChange={setEngine}>
-              <DropdownMenuRadioItem value="caffeinate" className="py-1.5">
-                <span className="flex flex-col">
-                  <span>{engineLabel('caffeinate')}</span>
-                  <span className={ENGINE_DESCRIPTION_CLASS}>
-                    {translate(
-                      'auto.components.status.bar.CaffeinateStatusSegment.caffeinateDescription',
-                      'Built into macOS — blocks idle and system sleep'
-                    )}
-                  </span>
-                </span>
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem
-                value="amphetamine"
-                className="py-1.5"
-                disabled={serviceStatus.amphetamineInstalled === false}
-              >
-                <span className="flex flex-col">
-                  <span>{engineLabel('amphetamine')}</span>
-                  <span className={ENGINE_DESCRIPTION_CLASS}>
-                    {amphetamineDescription(serviceStatus)}
-                  </span>
-                </span>
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            {engine === 'amphetamine' && amphetamineBlocked ? (
-              <p className="px-2 pt-1 pb-1.5 text-[11px] text-muted-foreground">
-                {translate(
-                  'auto.components.status.bar.CaffeinateStatusSegment.amphetamineFallback',
-                  'Using Caffeinate until Amphetamine is available.'
-                )}
-              </p>
-            ) : null}
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
