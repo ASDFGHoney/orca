@@ -31,8 +31,10 @@ import {
   normalizeMobilePairingCustomAddresses
 } from '../../shared/mobile-pairing-custom-address'
 import {
+  computerAwakeSettingsForMacosEngine,
   computerAwakeSettingsForMode,
-  normalizeComputerAwakeMode
+  normalizeComputerAwakeMode,
+  normalizeMacosAwakeEngine
 } from '../../shared/computer-awake-mode'
 
 // Why: the whitelist is the source-of-truth for which keys we emit on. Casting
@@ -142,6 +144,14 @@ export function registerSettingsHandlers(
         computerAwakeSettingsForMode(sanitizedArgs.keepComputerAwakeWhileAgentsRun ? 'auto' : 'off')
       )
     }
+    if ('computerAwakeMacosEngine' in sanitizedArgs) {
+      Object.assign(
+        sanitizedArgs,
+        computerAwakeSettingsForMacosEngine(
+          normalizeMacosAwakeEngine(sanitizedArgs.computerAwakeMacosEngine)
+        )
+      )
+    }
     if (typeof args.floatingTerminalCwd === 'string') {
       sanitizedArgs.floatingTerminalCwd = await sanitizeFloatingWorkspaceDirectorySetting(
         store,
@@ -201,6 +211,9 @@ export function registerSettingsHandlers(
       agentAwakeService?.setMode(
         normalizeComputerAwakeMode(result.computerAwakeMode, result.keepComputerAwakeWhileAgentsRun)
       )
+    }
+    if ('computerAwakeMacosEngine' in sanitizedArgs) {
+      agentAwakeService?.setMacosEngine(normalizeMacosAwakeEngine(result.computerAwakeMacosEngine))
     }
     const hookSettingChanged =
       ('agentStatusHooksEnabled' in sanitizedArgs &&

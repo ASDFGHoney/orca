@@ -50,3 +50,14 @@ export function getAgentAwakeSearchKeywords(
       ]
     : keywords
 }
+
+export function getAgentAwakeEngineSearchKeywords(): string[] {
+  return searchKeywords([
+    { key: 'auto.components.settings.agents.search.66b6b82eb4', fallback: 'awake' },
+    { key: 'auto.components.settings.agents.search.845ad9128a', fallback: 'power' },
+    { key: 'auto.components.settings.agents.search.caffeinate', fallback: 'caffeinate' },
+    { key: 'auto.components.settings.agents.search.amphetamine', fallback: 'amphetamine' },
+    { key: 'auto.components.settings.agents.search.engine', fallback: 'engine' },
+    { key: 'auto.components.settings.agents.search.macos', fallback: 'macos' }
+  ])
+}

@@ -85,6 +85,8 @@ function createService(
     linuxAssertion,
     macosAssertion,
     now,
+    // Pinned: the published status grows macOS engine fields on darwin only.
+    platform: 'linux',
     powerMonitor,
     logger: {
       debug: vi.fn(),

@@ -102,8 +102,10 @@ import { normalizeUiLanguage } from '../../../shared/ui-language'
 import { normalizeUsagePercentageDisplay } from '../../../shared/usage-percentage-display'
 import { normalizeStatusBarUsageMode } from '../../../shared/status-bar-usage-mode'
 import {
+  computerAwakeSettingsForMacosEngine,
   computerAwakeSettingsForMode,
-  normalizeComputerAwakeMode
+  normalizeComputerAwakeMode,
+  normalizeMacosAwakeEngine
 } from '../../../shared/computer-awake-mode'
 import { normalizeWorktreeVisibilityDefaults } from '../../../shared/external-worktree-visibility'
 import type { RateLimitState } from '../../../shared/rate-limit-types'
@@ -735,6 +737,14 @@ function createWebPreloadApi(): Partial<PreloadApi> {
             )
           )
         }
+        if ('computerAwakeMacosEngine' in sanitizedUpdates) {
+          Object.assign(
+            sanitizedUpdates,
+            computerAwakeSettingsForMacosEngine(
+              normalizeMacosAwakeEngine(sanitizedUpdates.computerAwakeMacosEngine)
+            )
+          )
+        }
         if ('autoRenameBranchFromWorkDefaultedOn' in sanitizedUpdates) {
           sanitizedUpdates.autoRenameBranchFromWorkDefaultedOn = true
         }
@@ -782,7 +792,8 @@ function createWebPreloadApi(): Partial<PreloadApi> {
             settings.computerAwakeMode,
             settings.keepComputerAwakeWhileAgentsRun
           ),
-          active: false
+          active: false,
+          macosEngine: normalizeMacosAwakeEngine(settings.computerAwakeMacosEngine)
         }
       },
       onChanged: () => noopUnsubscribe

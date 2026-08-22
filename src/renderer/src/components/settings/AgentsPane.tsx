@@ -20,6 +20,7 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { cn } from '@/lib/utils'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
+import { useComputerAwakeStatus } from '@/hooks/computer-awake-status'
 import { AgentCacheTimerSection } from './AgentCacheTimerSection'
 import { AgentRuntimeSetting } from './AgentRuntimeSetting'
 import {
@@ -689,6 +690,7 @@ export function AgentsPane({
   wslDistros,
   wslCapabilitiesLoading
 }: AgentsPaneProps): React.JSX.Element {
+  const awakeStatus = useComputerAwakeStatus()
   // Why: the Active Server routes agent launches and provider checks through
   // that server, so this pane must list what THAT host can launch — detecting
   // on the client showed a Windows machine's agents while paired to a Linux
@@ -870,7 +872,11 @@ export function AgentsPane({
       <AgentGeneratedTabTitlesSetting settings={settings} updateSettings={updateSettings} />
 
       {!isPairedWebClientWindow() ? (
-        <AgentAwakeSetting settings={settings} updateSettings={updateSettings} />
+        <AgentAwakeSetting
+          settings={settings}
+          updateSettings={updateSettings}
+          awakeStatus={awakeStatus}
+        />
       ) : null}
 
       <AgentCacheTimerSection settings={settings} updateSettings={updateSettings} />

@@ -43,7 +43,7 @@ test('shows Caffeinate mode and Agent activity in the status bar', async ({
   await expect(orcaPage.getByRole('menuitemradio', { name: /^Off/ })).toBeVisible()
   const menuProofPath = process.env.ORCA_CAFFEINATE_MENU_PROOF_PATH
   if (menuProofPath) {
-    await orcaPage.screenshot({ path: menuProofPath })
+    await orcaPage.getByRole('menu').screenshot({ path: menuProofPath, animations: 'disabled' })
   }
   await orcaPage.getByRole('menuitemradio', { name: /^Agent/ }).click()
 
@@ -67,4 +67,35 @@ test('shows Caffeinate mode and Agent activity in the status bar', async ({
 
   await postCodexHookEvent(electronApp, paneKey, 'Stop')
   await expect(agentInactiveStatus).toBeVisible()
+})
+
+// Amphetamine is a macOS-only engine, so the picker only exists there.
+test('offers the macOS keep-awake engine picker in the status bar', async ({ orcaPage }) => {
+  test.skip(process.platform !== 'darwin', 'the engine picker is macOS only')
+  await waitForSessionReady(orcaPage)
+
+  await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
+  const caffeinateEngine = orcaPage.getByRole('menuitemradio', { name: /^Caffeinate/ })
+  const amphetamineEngine = orcaPage.getByRole('menuitemradio', { name: /^Amphetamine/ })
+  await expect(caffeinateEngine).toBeVisible()
+  await expect(amphetamineEngine).toBeVisible()
+  await expect(caffeinateEngine).toHaveAttribute('aria-checked', 'true')
+
+  const enginePathProof = process.env.ORCA_AWAKE_ENGINE_MENU_PROOF_PATH
+  if (enginePathProof) {
+    // Screenshot the menu itself: it is taller than the viewport leaves room for.
+    await orcaPage.getByRole('menu').screenshot({ path: enginePathProof, animations: 'disabled' })
+  }
+
+  // A host without Amphetamine installed disables the option instead of offering a dead engine.
+  if ((await amphetamineEngine.getAttribute('aria-disabled')) === 'true') {
+    return
+  }
+  await amphetamineEngine.click()
+  await expect(orcaPage.getByRole('button', { name: /^Amphetamine, Off/ })).toBeVisible()
+
+  const engineSelectedProof = process.env.ORCA_AWAKE_ENGINE_SELECTED_PROOF_PATH
+  if (engineSelectedProof) {
+    await orcaPage.screenshot({ path: engineSelectedProof })
+  }
 })

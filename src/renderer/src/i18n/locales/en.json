@@ -3752,7 +3752,15 @@
             "active": "Active",
             "inactive": "Inactive",
             "ariaLabel": "Caffeinate, {{status}}",
+            "ariaLabelEngine": "{{engine}}, {{status}}",
             "title": "Caffeinate",
+            "amphetamine": "Amphetamine",
+            "engine": "Engine",
+            "caffeinateDescription": "Built into macOS \u2014 blocks idle and system sleep",
+            "amphetamineDescription": "Hand the session to Amphetamine so its triggers and app rules apply",
+            "amphetamineMissing": "Not installed \u2014 get Amphetamine from the Mac App Store",
+            "amphetamineDenied": "Blocked \u2014 allow Orca under Privacy & Security \u203a Automation",
+            "amphetamineFallback": "Using Caffeinate until Amphetamine is available.",
             "onDescription": "Keep this computer awake continuously",
             "autoDescription": "Stay awake while an agent is working",
             "offDescription": "Allow normal system sleep behavior"
@@ -8528,6 +8536,10 @@
             "719f53350c": "path",
             "839e82c81f": "detect",
             "f622b8eb2a": "linux",
+            "caffeinate": "caffeinate",
+            "amphetamine": "amphetamine",
+            "engine": "engine",
+            "macos": "macos",
             "d608654c03": "wsl",
             "77c02fa3c3": "windows",
             "d2952dfd74": "location",
@@ -11177,7 +11189,13 @@
         "AgentAwakeSetting": {
           "on": "On",
           "auto": "Agent",
-          "off": "Off"
+          "off": "Off",
+          "caffeinate": "Caffeinate",
+          "amphetamine": "Amphetamine",
+          "engineTitle": "Keep awake engine",
+          "engineDescription": "Caffeinate is built into macOS. Amphetamine hands the session to the app so its triggers and app rules apply.",
+          "engineDescriptionMissing": "Caffeinate is built into macOS. Install Amphetamine to hand the session to its triggers and app rules instead.",
+          "engineDescriptionDenied": "Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security \u203a Automation."
         },
         "shareSkills": {
           "title": "Share Skills",

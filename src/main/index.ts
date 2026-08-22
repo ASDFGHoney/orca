@@ -290,7 +290,10 @@ import { AutomationService } from './automations/service'
 import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/headless-dispatch'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { AgentAwakeService } from './agent-awake-service'
-import { normalizeComputerAwakeMode } from '../shared/computer-awake-mode'
+import {
+  normalizeComputerAwakeMode,
+  normalizeMacosAwakeEngine
+} from '../shared/computer-awake-mode'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
@@ -2353,6 +2356,12 @@ void app.whenReady().then(async () => {
       store.getSettings().keepComputerAwakeWhileAgentsRun
     )
   )
+  agentAwakeService.setMacosEngine(
+    normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine)
+  )
+  // Why eagerly: the status-bar picker has to know whether Amphetamine is installed
+  // before the user opens it, not after they pick an engine that cannot run.
+  void agentAwakeService.probeAmphetamine()
   // Why: start from empty — disk-hydrated status rows are UI continuity only; only this runtime's hook events keep the computer awake.
   agentAwakeService.setStatuses([])
   const collectChangedProviderSessionWorktrees = createHookProviderSessionInvalidator()

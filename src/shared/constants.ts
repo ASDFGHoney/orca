@@ -345,6 +345,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     tabAutoGenerateTitle: false,
     confirmClosePinnedTab: true,
     keepComputerAwakeWhileAgentsRun: false,
+    computerAwakeMacosEngine: 'caffeinate',
     // Why: 'auto' probes keyboard layout so non-US users can type Option chars like @/€/[ out of the box (issue #903). See src/renderer/src/lib/keyboard-layout/*.
     terminalMacOptionAsAlt: 'auto',
     terminalMacOptionAsAltMigrated: false,
