@@ -503,6 +503,10 @@ describe('skill discovery', () => {
         })
       ])
     )
+    expect(result.sources.find((source) => source.id === 'home-hermes')).toMatchObject({
+      owner: 'hermes',
+      exists: true
+    })
   })
 
   it('discovers worktree .agents skill symlinks from the requested cwd', async () => {
