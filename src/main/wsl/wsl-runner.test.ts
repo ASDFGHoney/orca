@@ -46,11 +46,11 @@ function fencedEcho(payload = ''): void {
 beforeEach(() => {
   runProcessMock.mockReset()
   fencedEcho()
-  invalidateWslGuestEnvironment()
+  invalidateWslGuestEnvironment(undefined, true)
 })
 
 afterEach(() => {
-  invalidateWslGuestEnvironment()
+  invalidateWslGuestEnvironment(undefined, true)
 })
 
 describe('separator', () => {

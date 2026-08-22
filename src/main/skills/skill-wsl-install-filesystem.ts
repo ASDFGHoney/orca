@@ -219,7 +219,7 @@ export class WslSkillInstallFilesystem implements SkillInstallFilesystem {
       timeoutMs: GUEST_COMMAND_TIMEOUT_MS,
       maxOutputBytes: GUEST_COMMAND_MAX_OUTPUT_BYTES
     })
-    if (result.code !== 0) {
+    if (result.code !== 0 || result.timedOut) {
       throw Object.assign(new Error('skill-install-wsl-guest-operation-failed'), {
         cause: new Error(`wsl exited ${result.code}: ${result.stderr}`)
       })

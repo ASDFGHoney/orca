@@ -93,6 +93,21 @@ export type WslResult = {
 
 export const DEFAULT_WSL_TIMEOUT_MS = 30_000
 
+/**
+ * The guest login PATH could not be established.
+ *
+ * Typed so a caller answering "is this installed?" can report unverifiable
+ * rather than absent -- reporting an nvm-installed tool absent is #9725, and a
+ * bare Error would just be swallowed by the same catch that handles real
+ * failures.
+ */
+export class WslGuestEnvironmentUnavailableError extends Error {
+  constructor(distro: string | undefined) {
+    super(`WSL guest environment for ${distro ?? 'the default distro'} is unavailable`)
+    this.name = 'WslGuestEnvironmentUnavailableError'
+  }
+}
+
 function assertGuestPath(cwd: string): void {
   // Why reject rather than convert: a caller passing a Windows path here has
   // usually made a different mistake further up, and silently translating it
@@ -191,9 +206,9 @@ function buildInteractiveArgv(spec: WslSpec): {
 /**
  * Run a program inside WSL.
  *
- * Falls back from the probe lane to the interactive lane when the distro's
- * environment cannot be probed — an unprobed distro is "we could not ask", and
- * running with no PATH at all would turn that into a wrong answer.
+ * Throws when the guest login PATH cannot be established, unless the caller
+ * passes `allowDegradedEnvironment`. Falling back to the login shell here would
+ * re-run ~/.profile -- the stall this exists to remove.
  */
 export async function runWslProcess(spec: WslSpec): Promise<WslResult> {
   if (spec.program !== undefined) {
@@ -222,9 +237,7 @@ export async function runWslProcess(spec: WslSpec): Promise<WslResult> {
   // would hit the hazard exactly when it is worst. Run shell-free with the
   // distro's default PATH instead: degraded, never blocking.
   if (wantsEnvironment && environment === null && !spec.allowDegradedEnvironment) {
-    throw new Error(
-      `WSL guest environment for ${spec.distro ?? 'the default distro'} is unavailable`
-    )
+    throw new WslGuestEnvironmentUnavailableError(spec.distro)
   }
 
   const lane =

@@ -43,7 +43,7 @@ function parseProbePayload(payload: string | null): WslGuestEnvironment | null {
   const [path = '', home = '', envBinary = ''] = payload.split('\0')
   const isCleanAbsolute = (value: string): boolean =>
     value.startsWith('/') && !value.includes('\n') && !value.includes('\r')
-  if (!path.includes('/') || path.length > 32_768 || path.includes('\n')) {
+  if (!path.includes('/') || path.length > 32_768 || /[\n\r]/.test(path)) {
     return null
   }
   if (!isCleanAbsolute(home) || !isCleanAbsolute(envBinary)) {
@@ -79,7 +79,11 @@ async function probeGuestEnvironment(
     return result.code === 127 ? { kind: 'rejected' } : { kind: 'transient' }
   }
   const environment = parseProbePayload(captured.readStdout(result.stdout))
-  return environment ? { kind: 'resolved', environment } : { kind: 'rejected' }
+  // Why transient and not rejected: an unparseable payload is usually a fence
+  // lost to a chatty rc truncated at PROBE_MAX_OUTPUT_BYTES, which recovers.
+  // Caching that permanently would disable every WSL feature on this distro
+  // for the process lifetime. Only exit 127 ("no usable env") is permanent.
+  return environment ? { kind: 'resolved', environment } : { kind: 'transient' }
 }
 
 function cacheKey(distro: string | undefined): string {
@@ -132,8 +136,11 @@ export function getWslGuestEnvironment(
 }
 
 /** Needed so a tool installed inside a running distro appears without a restart. */
-export function invalidateWslGuestEnvironment(distro?: string): void {
-  if (distro === undefined) {
+export function invalidateWslGuestEnvironment(distro?: string, all = false): void {
+  // Why an explicit flag: everywhere else in this module `undefined` means the
+  // default distro, so overloading it to mean "all" made a default-distro
+  // Refresh evict every distro and pay a login shell for each.
+  if (all) {
     inFlight.clear()
     resolved.clear()
     retryAfter.clear()

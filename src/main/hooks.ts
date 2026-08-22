@@ -159,6 +159,11 @@ export function runHook(
       // path runs /bin/bash. Defaulting to sh would fail bash-only hooks on WSL
       // only -- a downgrade the user never asked for.
       shell: 'bash',
+      // Why degrade rather than fail: a hook is an action, not an "is this
+      // installed?" question. Before the runner it ran on the default PATH when
+      // no login shell was available; refusing would turn worktree setup into a
+      // hard failure whenever WSL is briefly slow.
+      allowDegradedEnvironment: true,
       cwd: wslInfo.linuxPath,
       env: guestEnv,
       timeoutMs: HOOK_TIMEOUT

@@ -40,6 +40,13 @@ export async function detectWslCommandsOnPath(
       distro: wslTarget.distro,
       lane: 'probe',
       script,
+      // Why degrade rather than refuse: the Set has no room for "unverifiable",
+      // and refusing would turn a slow distro into "no agents" anyway -- via a
+      // throw instead of an empty result. Degrading at least finds anything on
+      // the default PATH. The residual gap (an nvm-only agent missed during the
+      // probe's retry window, #9725) is the pre-migration behaviour, not new,
+      // and Refresh now re-probes.
+      allowDegradedEnvironment: true,
       timeoutMs: WSL_AGENT_DETECTION_TIMEOUT_MS
     })
     // runProcess resolves on a timeout and on a non-zero exit, so partial

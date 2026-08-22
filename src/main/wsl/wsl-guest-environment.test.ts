@@ -30,9 +30,9 @@ const GOOD = ['/home/u/.nvm/bin:/usr/bin', '/home/u', '/usr/bin/env'].join('\0')
 
 beforeEach(() => {
   runProcessMock.mockReset()
-  invalidateWslGuestEnvironment()
+  invalidateWslGuestEnvironment(undefined, true)
 })
-afterEach(() => invalidateWslGuestEnvironment())
+afterEach(() => invalidateWslGuestEnvironment(undefined, true))
 
 describe('probing', () => {
   it('reads PATH, HOME and env out of a banner-polluted stdout', async () => {
