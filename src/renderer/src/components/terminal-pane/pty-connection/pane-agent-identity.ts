@@ -29,32 +29,29 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     const entry = state.agentStatusByPaneKey[session.cacheKey]
     return entry?.state !== 'done' && Boolean(agentTypeToIconAgent(entry?.agentType))
   }
-  session.paneExpectsLaunchAgent = (state: ReturnType<typeof useAppStore.getState>): boolean => {
+  // Why: one ladder for both launch-agent signals; a second copy could drift.
+  const resolveLaunchAgentCandidate = (
+    state: ReturnType<typeof useAppStore.getState>
+  ): string | undefined => {
     const tab = (state.tabsByWorktree[session.deps.worktreeId] ?? []).find(
       (candidate) => candidate.id === session.deps.tabId
     )
     const registeredLaunchAgent =
       state.agentLaunchConfigByPaneKey[session.cacheKey]?.identity.agentType
-    return Boolean(
+    return (
       tab?.launchAgent ??
       session.paneStartup?.launchAgent ??
       session.paneStartup?.initialAgentStatus?.agent ??
       (isTuiAgent(registeredLaunchAgent) ? registeredLaunchAgent : undefined)
     )
   }
+  session.paneExpectsLaunchAgent = (state: ReturnType<typeof useAppStore.getState>): boolean =>
+    Boolean(resolveLaunchAgentCandidate(state))
   // Why: the concrete TUI agent a fresh spawn is expected to launch, used to seed
   // a command-start confirmation on no-OSC shells (Git Bash/cmd) that never emit
   // one. Returns null when the expectation isn't a recognized TUI agent.
   session.resolveExpectedLaunchTuiAgent = (): TuiAgent | null => {
-    const state = useAppStore.getState()
-    const tab = (state.tabsByWorktree[session.deps.worktreeId] ?? []).find(
-      (candidate) => candidate.id === session.deps.tabId
-    )
-    const candidate =
-      tab?.launchAgent ??
-      session.paneStartup?.launchAgent ??
-      session.paneStartup?.initialAgentStatus?.agent ??
-      state.agentLaunchConfigByPaneKey[session.cacheKey]?.identity.agentType
+    const candidate = resolveLaunchAgentCandidate(useAppStore.getState())
     return isTuiAgent(candidate) ? candidate : null
   }
   // Why: a launched/hook-known agent pane must confirm — not trust — a 133;D so a
