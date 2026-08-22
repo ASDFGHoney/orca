@@ -430,7 +430,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..383df0c9c48355547c65e6c9bbba593d
  }
  #endif
 diff --git a/src/win/conpty.cc b/src/win/conpty.cc
-index 7b286d3d644c26141df516929703aa6e129df4b2..d63bf76070efae27043efbe1d2ccaafdc2ede037 100644
+index 7b286d3d644c26141df516929703aa6e129df4b2..ec6bf3932c65b89c013ff133dc6bf46a6a4082ce 100644
 --- a/src/win/conpty.cc
 +++ b/src/win/conpty.cc
 @@ -18,6 +18,7 @@
@@ -589,7 +589,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..d63bf76070efae27043efbe1d2ccaafd
  
    // Close the thread handle to avoid resource leak
    CloseHandle(piClient.hThread);
-@@ -567,6 +657,137 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
+@@ -567,6 +657,143 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
    return env.Undefined();
  }
  
@@ -700,7 +700,13 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..d63bf76070efae27043efbe1d2ccaafd
 +  Napi::Env env(info.Env());
 +  Napi::HandleScope scope(env);
 +
++  // Why locked: two callers racing here would each create a job, put the
++  // process in both, and leak the first handle -- and since the handle is what
++  // keeps a kill-on-close job alive, a leaked one is never released. A worker
++  // thread with its own N-API env shares these statics, so "only JS calls it"
++  // is not a guarantee.
 +  static HANDLE hHostJob = nullptr;
++  std::lock_guard<std::mutex> guard(ptyJobMutex);
 +  if (hHostJob != nullptr) {
 +    return Napi::Boolean::New(env, true);
 +  }
@@ -727,7 +733,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..d63bf76070efae27043efbe1d2ccaafd
  /**
  * Init
  */
-@@ -577,6 +798,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
+@@ -577,6 +804,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
    exports.Set("resize", Napi::Function::New(env, PtyResize));
    exports.Set("clear", Napi::Function::New(env, PtyClear));
    exports.Set("kill", Napi::Function::New(env, PtyKill));

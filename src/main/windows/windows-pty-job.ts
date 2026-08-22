@@ -137,6 +137,10 @@ export function listPtyJobProcessIds(proc: IPty): readonly number[] | null {
  * what a clean exit means. Children inherit membership, so the per-PTY jobs
  * nest inside it and every pty is covered.
  *
+ * Call it BEFORE the first pty. `AssignProcessToJobObject` adds only the named
+ * process; children inherit membership, but a pty that already exists does not
+ * join retroactively and would not be reaped.
+ *
  * Call it from the terminal daemon, not from the app: an app-main crash must
  * still leave sessions alive, which is what win-crash-survival-e2e asserts. A
  * daemon death reaping its shells is the intended change (#9195, #10415).
