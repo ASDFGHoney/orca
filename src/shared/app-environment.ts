@@ -45,14 +45,31 @@ export type AppProcessMetric = {
   [key: string]: unknown
 }
 
-let current: AppEnvironment | null = null
+/**
+ * Why a global symbol and not a module-level `let`: `vi.resetModules()` gives the
+ * re-imported graph a fresh copy of this module, so an environment installed before the
+ * reset would silently read back as uninstalled. Anchoring to the realm keeps one
+ * instance per process however often the module registry is rebuilt.
+ */
+const SLOT = Symbol.for('orca.host.appEnvironment')
+
+type Slot = { [SLOT]?: AppEnvironment | null }
+
+function slot(): Slot {
+  return globalThis as unknown as Slot
+}
+
+function read(): AppEnvironment | null {
+  return slot()[SLOT] ?? null
+}
 
 /** Install the active environment. Each entrypoint calls this once, before any consumer resolves a path. */
 export function setAppEnvironment(environment: AppEnvironment): void {
-  current = environment
+  slot()[SLOT] = environment
 }
 
 export function getAppEnvironment(): AppEnvironment {
+  const current = read()
   if (!current) {
     // Why throw rather than fall back: a silent default answers `userData` with the
     // wrong directory, and the caller writes real user state there before anyone
