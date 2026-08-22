@@ -19,6 +19,7 @@ import { translate } from '@/i18n/i18n'
 import { getUiWeekdayNames } from '@/i18n/weekday-names'
 
 const FIELD_CONTROL_CLASS = 'border-input bg-input/30 shadow-xs dark:bg-input/30'
+const AUTOMATION_WEEKDAY_VALUES = ['0', '1', '2', '3', '4', '5', '6'] as const
 
 export const AUTOMATION_SCHEDULE_PRESET_OPTIONS = [
   ['hourly', 'Hourly', 'auto.components.automations.AutomationSchedulePicker.55b2ef82a4'],
@@ -74,6 +75,7 @@ export function AutomationSchedulePicker({
   onDraftChange: (updater: (current: AutomationDraft) => AutomationDraft) => void
 }): React.JSX.Element {
   const customSchedule = draft.customSchedule.trim()
+  const weekdayNames = getUiWeekdayNames()
   const customScheduleInvalid =
     draft.preset === 'custom' &&
     customSchedule.length > 0 &&
@@ -141,9 +143,9 @@ export function AutomationSchedulePicker({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
-                  {getUiWeekdayNames().map((dayLabel, index) => (
-                    <SelectItem key={dayLabel} value={String(index)}>
-                      {dayLabel}
+                  {AUTOMATION_WEEKDAY_VALUES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {weekdayNames[Number(value)]}
                     </SelectItem>
                   ))}
                 </SelectContent>
