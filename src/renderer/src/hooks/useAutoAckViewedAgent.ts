@@ -1,7 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/store'
-import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
-import { isFloatingWorkspacePanelVisible } from '@/lib/floating-workspace-terminal-actions'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import type { AgentStatusEntry } from '../../../shared/agent-status-types'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
@@ -183,7 +181,12 @@ export function resolveAutoAckTabTargets(
 
 // Auto-ack an agent row as "seen" when the user is already on its tab, so the dashboard/Dock don't stay bold for an event they watched happen.
 // Scans live + retained maps: Codex's title-revert (pty-connection.ts:onAgentExited) migrates `done` rows to retained mid-race — see docs/codex-agent-row-bold-stuck.md.
-export function useAutoAckViewedAgent(): void {
+export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
+  // Why a ref: the scan loop is mounted once, but panel visibility is React-local state that never
+  // reaches the store, and re-subscribing on every open/close would drop the accumulated diff refs.
+  const floatingPanelVisibleRef = useRef(floatingPanelVisible)
+  const rescanRef = useRef<(() => void) | null>(null)
+
   useEffect(() => {
     // Why: the store uses plain create() (no subscribeWithSelector), so manually track the slices we depend on to skip unrelated updates.
     // Init to undefined so the first maybeAck() (on mount) always passes the ref guard and scans.
@@ -224,9 +227,8 @@ export function useAutoAckViewedAgent(): void {
           return
         }
       }
-      // Why below the gates: resolving the floating target costs a DOM query, and most store writes never get here.
       const targets = resolveAutoAckTabTargets(s, {
-        floatingPanelVisible: typeof document !== 'undefined' && isFloatingWorkspacePanelVisible()
+        floatingPanelVisible: floatingPanelVisibleRef.current
       })
       if (targets.length === 0) {
         return
@@ -267,6 +269,7 @@ export function useAutoAckViewedAgent(): void {
         }
       }
     }
+    rescanRef.current = (): void => maybeAck({ force: true })
     // Why: run once on mount to catch a restored session that already has agents on the visible tab.
     maybeAck()
     // Subscribe to all store changes; the ref-equality guard above skips unrelated updates.
@@ -274,28 +277,22 @@ export function useAutoAckViewedAgent(): void {
     // Why: focus/visibility don't flow through zustand, so re-run the scan on these DOM events when focus returns.
     const onVisibility = (): void => maybeAck()
     const onFocus = (): void => maybeAck()
-    // Why the frame: the toggle event fires before React commits, so the panel's aria-hidden still reads stale.
-    let floatingToggleFrame: number | null = null
-    const onFloatingToggle = (): void => {
-      if (floatingToggleFrame !== null) {
-        cancelAnimationFrame(floatingToggleFrame)
-      }
-      floatingToggleFrame = requestAnimationFrame(() => {
-        floatingToggleFrame = null
-        maybeAck({ force: true })
-      })
-    }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
-    window.addEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, onFloatingToggle)
     return () => {
+      rescanRef.current = null
       unsubscribe()
-      if (floatingToggleFrame !== null) {
-        cancelAnimationFrame(floatingToggleFrame)
-      }
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onFocus)
-      window.removeEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, onFloatingToggle)
     }
   }, [])
+
+  // Why forced: opening the panel puts an already-active floating tab on screen without any store
+  // write, so the equality guard would skip the scan that clears its attention dot.
+  useEffect(() => {
+    floatingPanelVisibleRef.current = floatingPanelVisible
+    if (floatingPanelVisible) {
+      rescanRef.current?.()
+    }
+  }, [floatingPanelVisible])
 }
