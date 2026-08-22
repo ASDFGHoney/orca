@@ -64,6 +64,16 @@ export type WslSpec = WslCommand & {
   env?: Readonly<Record<string, string>>
   timeoutMs?: number
   maxOutputBytes?: number
+  /**
+   * Proceed when the login PATH could not be established.
+   *
+   * Default is to throw. Three separate reviews found the same class of bug --
+   * a call that answers "is this installed?" running on the bare default PATH
+   * and reporting an nvm-installed tool absent (#9725). Making degradation
+   * opt-in puts that decision in the one place a reader will look, instead of
+   * relying on every call site to remember to check `environmentResolved`.
+   */
+  allowDegradedEnvironment?: boolean
 }
 
 export type WslResult = {
@@ -199,13 +209,24 @@ export async function runWslProcess(spec: WslSpec): Promise<WslResult> {
   // login PATH at all -- strictly less than the probe lane, for a caller that
   // explicitly asked for the user's terminal PATH.
   const wantsEnvironment = spec.lane === 'probe' || spec.script !== undefined
-  const environment = wantsEnvironment ? await getWslGuestEnvironment(spec.distro) : null
+  // Leave the command at least a third of the budget: a probe that eats it all
+  // turns a healthy command into a spurious timeout.
+  const probeBudgetMs = Math.max(1, Math.floor((deadline - Date.now()) * (2 / 3)))
+  const environment = wantsEnvironment
+    ? await getWslGuestEnvironment(spec.distro, probeBudgetMs)
+    : null
 
   // Probe failure must NOT fall back to the login shell. That lane sources
   // ~/.profile, which is the stall this runner exists to remove (#14288) -- and
   // the probe most often fails *because* the distro is slow, so the fallback
   // would hit the hazard exactly when it is worst. Run shell-free with the
   // distro's default PATH instead: degraded, never blocking.
+  if (wantsEnvironment && environment === null && !spec.allowDegradedEnvironment) {
+    throw new Error(
+      `WSL guest environment for ${spec.distro ?? 'the default distro'} is unavailable`
+    )
+  }
+
   const lane =
     spec.lane === 'interactive' && spec.script === undefined
       ? ({ kind: 'interactive', ...buildInteractiveArgv(spec) } as const)

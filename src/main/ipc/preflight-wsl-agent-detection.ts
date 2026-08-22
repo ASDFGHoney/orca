@@ -42,11 +42,10 @@ export async function detectWslCommandsOnPath(
       script,
       timeoutMs: WSL_AGENT_DETECTION_TIMEOUT_MS
     })
-    // Why bail rather than parse: without the login PATH an nvm-installed agent
-    // is invisible, and reporting it absent is #9725. Same for a timeout or a
-    // non-zero exit -- runProcess resolves on both, so partial stdout would
-    // otherwise read as a complete answer.
-    if (!result.environmentResolved || result.timedOut || result.code !== 0) {
+    // runProcess resolves on a timeout and on a non-zero exit, so partial
+    // stdout would otherwise read as a complete answer. (An unresolved login
+    // PATH is refused by the runner itself.)
+    if (result.timedOut || result.code !== 0) {
       return new Set()
     }
     return parseWslDetectedCommands(result.stdout)

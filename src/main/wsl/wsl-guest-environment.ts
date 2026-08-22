@@ -52,7 +52,10 @@ function parseProbePayload(payload: string | null): WslGuestEnvironment | null {
   return { path, home, envBinary }
 }
 
-async function probeGuestEnvironment(distro: string | undefined): Promise<ProbeOutcome> {
+async function probeGuestEnvironment(
+  distro: string | undefined,
+  budgetMs: number
+): Promise<ProbeOutcome> {
   // Resolve `env` rather than assume /usr/bin/env: a distro that moved it would
   // otherwise fail every later call.
   const script = [
@@ -64,7 +67,7 @@ async function probeGuestEnvironment(distro: string | undefined): Promise<ProbeO
   const result = await runProcess({
     program: resolveWslExecutablePath(),
     args: buildWslExecArgs(distro, ['sh', '-c', captured.command]),
-    timeoutMs: PROBE_TIMEOUT_MS,
+    timeoutMs: Math.min(PROBE_TIMEOUT_MS, budgetMs),
     maxOutputBytes: PROBE_MAX_OUTPUT_BYTES
   })
   if (result.timedOut) {
@@ -85,7 +88,13 @@ function cacheKey(distro: string | undefined): string {
 
 /** Null means "could not ask", never "has no PATH" -- callers fall back. */
 export function getWslGuestEnvironment(
-  distro: string | undefined
+  distro: string | undefined,
+  /**
+   * The caller's remaining budget. Without it the probe ran on its own 10s
+   * timer, so a 5s caller could reach `runProcess` with 1ms left and report a
+   * timeout for a command that would have taken milliseconds.
+   */
+  budgetMs = PROBE_TIMEOUT_MS
 ): Promise<WslGuestEnvironment | null> {
   const key = cacheKey(distro)
   const retry = retryAfter.get(key)
@@ -102,7 +111,7 @@ export function getWslGuestEnvironment(
   // host without System32\wsl.exe, EAGAIN under memory pressure). Uncaught, the
   // rejected promise stays in `inFlight` and every later call re-throws it for
   // the process lifetime -- all WSL features wedged until restart.
-  const probe = probeGuestEnvironment(distro)
+  const probe = probeGuestEnvironment(distro, budgetMs)
     .catch((): ProbeOutcome => ({ kind: 'transient' }))
     .then((outcome) => {
       if (inFlight.get(key) !== probe) {

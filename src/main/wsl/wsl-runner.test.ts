@@ -107,8 +107,18 @@ describe('probe lane', () => {
       const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
       return { environmentResolved: true, code: 0, signal: null, stdout: `${begin}${end}`, stderr: '', timedOut: false }
     })
-    const result = await runWslProcess({ lane: 'probe', program: 'codex' })
-    expect(result.environmentResolved).toBe(false)
+    // Default is to refuse: answering "is codex installed?" on the bare default
+    // PATH reports an nvm install as absent, which is #9725.
+    await expect(runWslProcess({ lane: 'probe', program: 'codex' })).rejects.toThrow(
+      /guest environment/
+    )
+
+    const degraded = await runWslProcess({
+      lane: 'probe',
+      program: 'codex',
+      allowDegradedEnvironment: true
+    })
+    expect(degraded.environmentResolved).toBe(false)
     expect(lastArgv()).toEqual(['--exec', 'codex'])
   })
 
@@ -272,6 +282,19 @@ describe('program is not an assignment', () => {
   })
 })
 
+describe('timeout budget', () => {
+  it('leaves the command time after a slow probe', async () => {
+    // The probe used to run on its own 10s timer ahead of the timed leg, so a
+    // 5s caller could reach runProcess with 1ms left and report a timeout for a
+    // command that would have taken milliseconds.
+    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
+    await runWslProcess({ lane: 'probe', program: '/bin/true', timeoutMs: 5_000 })
+    const passed = runProcessMock.mock.calls.at(-1)?.[0].timeoutMs as number
+    expect(passed).toBeGreaterThan(1_000)
+    expect(passed).toBeLessThanOrEqual(5_000)
+  })
+})
+
 describe('script interpreter', () => {
   it('defaults to sh', async () => {
     seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
@@ -305,7 +328,7 @@ describe('a script never rides the interactive lane', () => {
       stderr: 'distro is stopped',
       timedOut: false
     })
-    await runWslProcess({ lane: 'probe', script: 'echo hi' })
+    await runWslProcess({ lane: 'probe', script: 'echo hi', allowDegradedEnvironment: true })
     expect(lastArgv()).toEqual(['--exec', 'sh', '-s', '--'])
     expect(runProcessMock.mock.calls.at(-1)?.[0].input).toBe('echo hi')
   })
