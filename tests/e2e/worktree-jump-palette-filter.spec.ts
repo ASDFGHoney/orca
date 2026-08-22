@@ -191,9 +191,9 @@ test.describe('Worktree jump-palette filters', () => {
 
     await input.press('Enter')
 
-    await expect(
-      orcaPage.getByRole('dialog', { name: /Create (Workspace|Worktree)/i })
-    ).toBeVisible()
+    const createDialog = orcaPage.getByRole('dialog', { name: /Create (Workspace|Worktree)/i })
+    await expect(createDialog).toBeVisible()
     await orcaPage.keyboard.press('Escape')
+    await expect(createDialog).toBeHidden()
   })
 })
