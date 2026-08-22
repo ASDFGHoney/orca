@@ -54,11 +54,7 @@ export function findCatalogOption(
   return model?.options.find((option) => option.id === optionId)
 }
 
-/** Merge live rows over the static seed while retaining cataloged option mappings.
- *  Why: for agents whose discovered rows carry their own option menus (Claude's
- *  per-model effort levels and fast-mode flag come from the CLI probe), the live
- *  options win; for agents whose discovery returns no options, the seed's menus
- *  are kept so the picker does not go blank. */
+/** Merge live rows over the static seed while retaining cataloged option mappings. */
 export function mergeCatalogModels(
   seed: readonly CatalogModel[],
   discovered: readonly CatalogModel[]
@@ -70,9 +66,26 @@ export function mergeCatalogModels(
       return model
     }
     discoveredById.delete(model.id)
-    return { ...model, ...live, options: live.options.length > 0 ? live.options : model.options }
+    return { ...model, ...live, options: model.options }
   })
   return [...merged, ...discoveredById.values()]
+}
+
+/** Prepend seed rows the probe is allowed to hide, keeping discovery authoritative for the rest.
+ *  Why: a probe that omits a consent-gated id is not evidence the host cannot run it, but every
+ *  other seed id it omits is — so only the gated rows survive, ahead of the discovered list. */
+export function withConsentGatedSeedModels(
+  catalog: AgentSessionOptionCatalog,
+  discovered: readonly CatalogModel[]
+): CatalogModel[] {
+  const gated = catalog.consentGatedModelIds
+  if (!gated || gated.length === 0) {
+    return [...discovered]
+  }
+  const missing = catalog.models.filter(
+    (model) => gated.includes(model.id) && !discovered.some((live) => live.id === model.id)
+  )
+  return [...missing, ...discovered]
 }
 
 /** Discovery decides membership; the seed keeps its option menus, which discovery never carries.

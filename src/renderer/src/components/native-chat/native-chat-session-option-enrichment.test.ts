@@ -98,7 +98,7 @@ describe('native chat session option enrichment', () => {
     )
   })
 
-  it('merges seed Claude rows with discovered capabilities per host', async () => {
+  it('keeps consent-gated Fable while dropping seed aliases the host never listed', async () => {
     mocks.discoverRuntimeCommitMessageModels.mockResolvedValue({
       success: true,
       catalogOrigin: 'probe',
@@ -135,10 +135,11 @@ describe('native chat session option enrichment', () => {
     await vi.waitFor(() => expect(listener).toHaveBeenCalledOnce())
 
     const models = readNativeChatEnrichedModels('claude', 'ssh:host')!
-    // Why: seed rows the CLI omits (e.g. fable, which needs a one-time consent
-    // before list_models advertises it) must stay selectable, so the merge keeps
-    // every seed id and overlays discovered rows on top.
-    expect(models.map(({ id }) => id)).toEqual(['fable', 'opus', 'sonnet', 'haiku', 'opus[1m]'])
+    // Why: list_models hides Fable until the one-time consent, so its absence is not
+    // evidence the host lacks it — every other omitted seed alias still disappears.
+    expect(models.map(({ id }) => id)).toEqual(['fable', 'opus[1m]', 'sonnet'])
+    expect(models.some(({ id }) => id === 'opus')).toBe(false)
+    expect(models.some(({ id }) => id === 'haiku')).toBe(false)
     const sonnetEffort = models.find(({ id }) => id === 'sonnet')?.options[0]
     expect(sonnetEffort?.kind).toMatchObject({
       type: 'select',
@@ -161,6 +162,34 @@ describe('native chat session option enrichment', () => {
       ]
     })
     expect(readNativeChatEnrichedModels('claude', 'local')).toBeNull()
+  })
+
+  it('does not duplicate Fable when the host already lists it', async () => {
+    mocks.discoverRuntimeCommitMessageModels.mockResolvedValue({
+      success: true,
+      catalogOrigin: 'probe',
+      models: [
+        { id: 'fable', label: 'Fable', thinkingLevels: [{ id: 'max', label: 'Max' }] },
+        { id: 'sonnet', label: 'Sonnet' }
+      ]
+    })
+    const discover = vi.fn(() =>
+      discoverNativeChatCatalogModels('claude', {
+        settings: {},
+        worktreeId: 'repo::/worktree',
+        worktreePath: '/worktree'
+      })
+    )
+    const listener = vi.fn()
+    subscribeNativeChatEnrichedModels('claude', 'ssh:host', listener)
+
+    ensureNativeChatModelEnrichment({ agent: 'claude', hostKey: 'ssh:host', discover })
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledOnce())
+
+    const models = readNativeChatEnrichedModels('claude', 'ssh:host')!
+    expect(models.map(({ id }) => id)).toEqual(['fable', 'sonnet'])
+    // The host's capabilities win over the seed's for a row it did list.
+    expect(models[0].options[0]?.kind).toMatchObject({ choices: [{ value: 'max', label: 'Max' }] })
   })
 
   it('carries grok’s probed default through discovery to the published rows', async () => {
