@@ -57,6 +57,35 @@ function createStore(
 }
 
 describe('pruneLineageForMissingRepoWorktrees', () => {
+  it('keeps lineage stored under another spelling of a live worktree path', () => {
+    const parentId = 'repo-1::/repo'
+    const childId = 'repo-1::/repo/./child'
+    const edge = lineage(childId, parentId)
+    const worktreeLineageById = { [childId]: edge }
+    const workspaceLineageByChildKey = {
+      [worktreeWorkspaceKey(childId)]: workspaceLineage(childId, parentId)
+    }
+    const metaById = {
+      [parentId]: { instanceId: edge.parentWorktreeInstanceId } as WorktreeMeta
+    }
+    const store = createStore(worktreeLineageById, workspaceLineageByChildKey, metaById)
+
+    pruneLineageForMissingRepoWorktrees(
+      store as never,
+      repo,
+      [
+        { path: '/repo', head: 'a', branch: 'main', isBare: false, isMainWorktree: true },
+        { path: '/repo/child/', head: 'b', branch: 'child', isBare: false, isMainWorktree: false }
+      ],
+      'linux'
+    )
+
+    expect(store.removeWorktreeLineage).not.toHaveBeenCalled()
+    expect(store.removeWorkspaceLineage).not.toHaveBeenCalled()
+    expect(store.setWorktreeMeta).not.toHaveBeenCalled()
+    expect(worktreeLineageById[childId]).toBe(edge)
+  })
+
   it('refuses an empty scan when the repo still has registered lineage', () => {
     const parentId = 'repo-1::/repo/parent'
     const childId = 'repo-1::/repo/child'
