@@ -640,6 +640,8 @@ jobs:
           src/main/wsl/wsl-guest-environment.test.ts
           src/main/wsl/wsl-invocation-boundary.test.ts
           src/main/wsl/wsl-executable-path.win32.test.ts
+          src/main/wsl/wsl-w1-w3-contract.test.ts
+          src/shared/source-scan/source-tree-scan.test.ts
           src/main/cli/wsl-cli-powershell-boundary.test.ts
           src/main/orca-profiles/profile-index-store.test.ts
           src/main/runtime/repo-worktree-admin-fingerprint.test.ts
