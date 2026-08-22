@@ -1100,6 +1100,9 @@ export class ClaudeAccountService {
         // the local callback server before the browser returns.
         stdio: [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         shell: spawnConfig.shell,
+        // On Windows this is wsl.exe or a cmd invocation; without the flag it
+        // opens a console and steals foreground on every managed login (#10488).
+        windowsHide: true,
         windowsVerbatimArguments: spawnConfig.windowsVerbatimArguments,
         env: spawnConfig.env,
         // Why: Claude auth can leave browser/login descendants alive after denial.

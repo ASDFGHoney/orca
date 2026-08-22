@@ -142,27 +142,43 @@ export function blankStringContents(source: string): string {
   let out = ''
   let index = 0
   let quote: string | null = null
-  // Why depth: `${`x`}` nests, and treating the inner backtick as the outer
-  // one's closer inverts the state for the rest of the file -- 116 lines of a
-  // child_process importer fell outside the ratchet that way.
-  let templateDepth = 0
+  // Brace depth per interpolation, so a `}` inside `${ { a: 1 } }` does not
+  // close it. A plain counter mistook the first `}` for the closer.
+  const templates: number[] = []
   while (index < source.length) {
     const char = source[index]!
     if (quote === '`' && char === '$' && source[index + 1] === '{') {
-      templateDepth += 1
+      templates.push(0)
+      quote = null
       out += '${'
       index += 2
-      quote = null
       continue
     }
-    if (quote === null && templateDepth > 0 && char === '}') {
-      templateDepth -= 1
-      quote = '`'
-      out += char
-      index += 1
-      continue
+    if (quote === null && templates.length > 0) {
+      const depth = templates.at(-1) ?? 0
+      if (char === '{') {
+        templates[templates.length - 1] = depth + 1
+      } else if (char === '}') {
+        if (depth === 0) {
+          templates.pop()
+          quote = '`'
+          out += char
+          index += 1
+          continue
+        }
+        templates[templates.length - 1] = depth - 1
+      }
     }
     if (quote) {
+      // Same rule stripComments uses: only a template may span lines, so an
+      // apostrophe in a regex literal cannot invert the rest of the file. That
+      // desync dropped a real unguarded spawn out of the ratchet.
+      if (char === '\n' && quote !== '`') {
+        quote = null
+        out += char
+        index += 1
+        continue
+      }
       if (char === '\\') {
         out += '  '
         index += 2

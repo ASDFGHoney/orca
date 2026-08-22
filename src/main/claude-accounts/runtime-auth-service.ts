@@ -14,6 +14,8 @@ import {
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { resolveLocalAccountRuntimeTarget } from '../../shared/local-account-runtime'
 import { getDefaultWslDistro, getWslHome, toWindowsWslPath } from '../wsl'
+const OWNERSHIP_PROBE_TIMEOUT = 'orca-wsl-ownership-probe-timeout'
+
 import { runWslProcess } from '../wsl/wsl-runner'
 import { hasLiveClaudePtys } from './live-pty-gate'
 import { isOauthTokenExpiring, refreshClaudeOauthCredentials } from './oauth-refresh'
@@ -1105,18 +1107,22 @@ export class ClaudeRuntimeAuthService {
             // wsl.exe supplies without the login PATH.
             allowDegradedEnvironment: true
           })
-          // Why timedOut throws: null means "not owned by Orca", and the
-          // caller persists that -- clearing the user's account selection. A
-          // slow distro must not make that decision.
           if (owned.timedOut) {
-            throw new Error('WSL ownership check timed out')
+            throw new Error(OWNERSHIP_PROBE_TIMEOUT)
           }
           if (owned.code !== 0) {
             return null
           }
           const canonicalLinuxPath = owned.stdout.trim()
           return canonicalLinuxPath ? toWindowsWslPath(canonicalLinuxPath, wslInfo.distro) : null
-        } catch {
+        } catch (error) {
+          // Why rethrow a timeout: null means "not owned by Orca", and the
+          // caller persists that -- clearing the user's account selection. A
+          // slow distro must not decide ownership. Swallowing it here is what
+          // made the previous guard dead code.
+          if (error instanceof Error && error.message === OWNERSHIP_PROBE_TIMEOUT) {
+            throw error
+          }
           return null
         }
       }
