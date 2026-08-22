@@ -230,6 +230,10 @@ describe('WorktreeJumpPalette', () => {
   it('renders the owning host badge on worktree and tab rows', async () => {
     await renderPalette({
       ...makeRecentTabState(),
+      worktreesByRepo: {
+        ...makeRecentTabState().worktreesByRepo,
+        folder: [makeWorktree('folder', 'Folder', { repoId: 'folder', hostId: 'ssh:ssh-1' })]
+      },
       repos: [makeRepo(), { ...makeRepo(), id: 'ssh-repo', connectionId: 'ssh-1' }],
       sshTargetLabels: new Map([['ssh-1', 'Builder']]),
       sshConnectionStates: new Map([
@@ -238,7 +242,9 @@ describe('WorktreeJumpPalette', () => {
     })
 
     const badge = `[aria-label="Host: ${getExecutionHostLabel('local')}"]`
-    expect(testContainer.querySelector(`[data-command-item*="worktree:"] ${badge}`)).not.toBeNull()
+    expect(
+      testContainer.querySelector('[data-command-item*="folder"] [aria-label="Host: Builder"]')
+    ).not.toBeNull()
     expect(
       testContainer.querySelector(`[data-command-item*="workspace-tab:"] ${badge}`)
     ).not.toBeNull()

@@ -154,7 +154,11 @@ import { buildPaletteListEntryRenderKeys } from '@/components/cmd-j/palette-list
 import { formatPaletteSessionAge } from '@/components/cmd-j/palette-session-age'
 import PaletteFilterMenu from '@/components/cmd-j/PaletteFilterMenu'
 import PaletteFilterChips from '@/components/cmd-j/PaletteFilterChips'
-import { buildPaletteFilterModel } from '@/components/cmd-j/palette-filter-options'
+import {
+  buildPaletteFilterModel,
+  resolveRepoFilterHostId,
+  resolveWorktreeFilterHostId
+} from '@/components/cmd-j/palette-filter-options'
 import { getProjectGroupExecutionHostIdForRows } from '@/components/sidebar/worktree-list/listing/host-filtering'
 import {
   buildPaletteFilterPredicate,
@@ -895,6 +899,17 @@ function WorktreeJumpPaletteContent({
   }, [filterModel])
   const filterActive = isPaletteFilterActive(filter)
   const hostFilterActive = filter.hostIds.length > 0
+  const getWorktreeHostBadge = useCallback(
+    (worktree: Worktree | undefined, fallbackHostId?: ExecutionHostId) =>
+      getPaletteHostBadge(
+        worktree
+          ? resolveWorktreeFilterHostId(worktree, filterModel.hostIdByRepoId, defaultHostId)
+          : fallbackHostId,
+        hostOptions,
+        hostFilterActive
+      ),
+    [defaultHostId, filterModel.hostIdByRepoId, hostFilterActive, hostOptions]
+  )
   const filterPredicate = useMemo(
     () => buildPaletteFilterPredicate(filter, filterModel),
     [filter, filterModel]
@@ -1102,17 +1117,13 @@ function WorktreeJumpPaletteContent({
   const hostLabelByWorktreeId = useMemo(() => {
     const labels = new Map<string, string>()
     for (const worktree of allWorktrees) {
-      const badge = getPaletteHostBadge(
-        resolveRepoForWorktree(worktree),
-        hostOptions,
-        hostFilterActive
-      )
+      const badge = getWorktreeHostBadge(worktree)
       if (badge) {
         labels.set(getWorktreeHostIdentity(worktree), badge.label)
       }
     }
     return labels
-  }, [allWorktrees, hostFilterActive, hostOptions, resolveRepoForWorktree])
+  }, [allWorktrees, getWorktreeHostBadge])
 
   // Why keyed on the unsorted list: normalized documents depend only on text
   // inputs, so re-sorting for recency re-ranks without re-normalizing anything.
@@ -3222,7 +3233,7 @@ function WorktreeJumpPaletteContent({
                   : null
                 const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
                 const sessionAge = formatPaletteSessionAge(worktree.lastActivityAt, paletteNowMs)
-                const hostBadge = getPaletteHostBadge(repo, hostOptions, hostFilterActive)
+                const hostBadge = getWorktreeHostBadge(worktree)
                 return (
                   <CommandItem
                     key={renderKey}
@@ -3354,7 +3365,15 @@ function WorktreeJumpPaletteContent({
                 const result = entry.result
                 const isProject = result.kind === 'project'
                 const hostBadge = isProject
-                  ? getPaletteHostBadge(result.repo, hostOptions, hostFilterActive)
+                  ? getPaletteHostBadge(
+                      resolveRepoFilterHostId(
+                        result.repo.id,
+                        filterModel.hostIdByRepoId,
+                        defaultHostId
+                      ),
+                      hostOptions,
+                      hostFilterActive
+                    )
                   : null
                 const badgeLabel = isProject
                   ? translate('auto.components.WorktreeJumpPalette.projectBadge', 'Project')
@@ -3441,10 +3460,9 @@ function WorktreeJumpPaletteContent({
                   ? resolveRepoForWorktree(workspaceTabWorktree)
                   : undefined
                 const workspaceTabRepoName = workspaceTabRepo?.displayName ?? result.repoName
-                const workspaceTabHostBadge = getPaletteHostBadge(
-                  workspaceTabRepo,
-                  hostOptions,
-                  hostFilterActive
+                const workspaceTabHostBadge = getWorktreeHostBadge(
+                  workspaceTabWorktree,
+                  result.executionHostId
                 )
                 const workspaceTabFallback =
                   result.contentType === 'terminal' && result.occupantAgent ? (
@@ -3542,10 +3560,9 @@ function WorktreeJumpPaletteContent({
                   ? resolveRepoForWorktree(simulatorWorktree)
                   : undefined
                 const simulatorRepoName = simulatorRepo?.displayName ?? result.repoName
-                const simulatorHostBadge = getPaletteHostBadge(
-                  simulatorRepo,
-                  hostOptions,
-                  hostFilterActive
+                const simulatorHostBadge = getWorktreeHostBadge(
+                  simulatorWorktree,
+                  result.executionHostId
                 )
                 const sessionAge = formatPaletteSessionAge(
                   result.lastActiveAt ?? null,
@@ -3629,11 +3646,7 @@ function WorktreeJumpPaletteContent({
                 ? resolveRepoForWorktree(browserWorktree)
                 : undefined
               const browserRepoName = browserRepo?.displayName ?? result.repoName
-              const browserHostBadge = getPaletteHostBadge(
-                browserRepo,
-                hostOptions,
-                hostFilterActive
-              )
+              const browserHostBadge = getWorktreeHostBadge(browserWorktree, result.executionHostId)
               const sessionAge = formatPaletteSessionAge(result.lastActiveAt ?? null, paletteNowMs)
 
               return (
