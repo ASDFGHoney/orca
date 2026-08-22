@@ -1,44 +1,61 @@
 import { extname } from 'node:path'
-import {
-  normalizeAgentProviderSession,
-  type AgentProviderSessionMetadata
-} from '../../shared/agent-session-resume'
-import { parseExecutionHostId } from '../../shared/execution-host'
+import type { AgentType } from '../../shared/native-chat-types'
+import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
+import { agentHookServer } from '../agent-hooks/server'
 
 export type NativeChatTranscriptOwner =
   | { kind: 'legacy-local' }
-  | { kind: 'local'; providerSession: AgentProviderSessionMetadata }
-  | {
-      kind: 'ssh'
-      connectionId: string
-      providerSession: AgentProviderSessionMetadata
-      transcriptPath: string | null
-    }
+  | { kind: 'local'; transcriptPath?: string }
+  | { kind: 'ssh'; connectionId: string; transcriptPath: string | null }
   | { kind: 'unknown' }
 
-export function resolveNativeChatTranscriptOwner(args: {
+type NativeChatOwnerArgs = {
+  agent?: AgentType
   sessionId: string
-  providerSession?: AgentProviderSessionMetadata
-}): NativeChatTranscriptOwner {
-  if (args.providerSession === undefined) {
-    return { kind: 'legacy-local' }
-  }
-  const providerSession = normalizeAgentProviderSession(args.providerSession)
-  if (!providerSession || providerSession.id !== args.sessionId) {
+  paneKey?: string
+  transcriptPath?: string
+}
+
+function exactTranscriptPath(value: string | undefined): string | undefined {
+  const transcriptPath = value?.trim()
+  return transcriptPath && extname(transcriptPath) === '.jsonl' ? transcriptPath : undefined
+}
+
+export function resolveNativeChatTranscriptOwner(
+  args: NativeChatOwnerArgs
+): NativeChatTranscriptOwner {
+  const sessionId = args.sessionId.trim()
+  if (!sessionId) {
     return { kind: 'unknown' }
   }
-  const host = parseExecutionHostId(providerSession.executionHostId)
-  if (host?.kind === 'local') {
-    return { kind: 'local', providerSession }
+  const rows = args.paneKey
+    ? agentHookServer.getStatusSnapshotForPane(args.paneKey)
+    : agentHookServer.getStatusSnapshot()
+  const matches = rows.filter(
+    (row) =>
+      row.providerSession?.id === sessionId &&
+      (!args.agent || !row.agentType || row.agentType === args.agent)
+  )
+  if (matches.length === 0) {
+    return args.paneKey ? { kind: 'unknown' } : { kind: 'legacy-local' }
   }
-  if (host?.kind === 'ssh') {
-    const transcriptPath = providerSession.transcriptPath?.trim()
-    return {
-      kind: 'ssh',
-      connectionId: host.targetId,
-      providerSession,
-      transcriptPath: transcriptPath && extname(transcriptPath) === '.jsonl' ? transcriptPath : null
-    }
+  const owners = new Map<string, (typeof matches)[number]>()
+  for (const row of matches) {
+    const connectionId = row.connectionId ?? null
+    const transcriptPath = exactTranscriptPath(row.providerSession?.transcriptPath) ?? null
+    owners.set(`${connectionId ?? 'local'}\0${transcriptPath ?? ''}`, row)
   }
-  return { kind: 'unknown' }
+  if (owners.size !== 1) {
+    return { kind: 'unknown' }
+  }
+  const row = owners.values().next().value
+  if (!row) {
+    return { kind: 'unknown' }
+  }
+  const transcriptPath = exactTranscriptPath(row.providerSession?.transcriptPath)
+  const connectionId = row.connectionId?.trim()
+  if (!connectionId || isWslHookRelayConnectionId(connectionId)) {
+    return { kind: 'local', ...(transcriptPath ? { transcriptPath } : {}) }
+  }
+  return { kind: 'ssh', connectionId, transcriptPath: transcriptPath ?? null }
 }

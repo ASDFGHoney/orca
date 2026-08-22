@@ -1,17 +1,7 @@
 import { z } from 'zod'
-import { normalizeAgentProviderSession } from '../../../../shared/agent-session-resume'
 import type { AgentType } from '../../../../shared/native-chat-types'
 
 export const MOBILE_NATIVE_CHAT_MAX_WINDOW = 2000
-
-const NativeChatProviderSession = z.unknown().transform((value, context) => {
-  const normalized = normalizeAgentProviderSession(value)
-  if (!normalized) {
-    context.addIssue({ code: 'custom', message: 'Invalid provider session' })
-    return z.NEVER
-  }
-  return normalized
-})
 
 export const NativeChatSession = z.object({
   agent: z
@@ -31,7 +21,7 @@ export const NativeChatSession = z.object({
     .optional(),
   subscriptionId: z.string().min(1).optional(),
   transcriptPath: z.string().min(1).optional(),
-  providerSession: NativeChatProviderSession.optional(),
+  paneKey: z.string().min(1).optional(),
   beforeOffset: z.number().int().nonnegative().optional()
 })
 

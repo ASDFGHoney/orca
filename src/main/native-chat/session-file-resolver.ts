@@ -1,7 +1,6 @@
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import type { AgentType } from '../../shared/native-chat-types'
-import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import {
   resolveNativeChatTranscriptAgent,
   type NativeChatTranscriptAgent
@@ -73,7 +72,8 @@ export type ResolveSessionFileOptions = {
    *  directly — recent Claude Code names the transcript with a UUID that differs
    *  from the hook session_id, so the id-based glob below would miss it. */
   transcriptPath?: string
-  providerSession?: AgentProviderSessionMetadata
+  /** Stable pane identity for server-owned transcript routing. */
+  paneKey?: string
 }
 
 /**

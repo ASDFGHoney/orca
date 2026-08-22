@@ -1,4 +1,5 @@
 import type { AgentType } from '../../shared/native-chat-types'
+import { isDefinitiveAbsenceFromRelay } from '../../shared/definitive-filesystem-absence'
 import type { ResolveSessionFileOptions } from './session-file-resolver'
 import type { NativeChatTranscriptOwner } from './native-chat-transcript-owner'
 import { createSshTranscriptRangeFs } from './ssh-transcript-range-fs'
@@ -80,7 +81,7 @@ export async function readOwnedSshNativeChatTranscriptTail(
     }
   } catch (error) {
     signal?.throwIfAborted()
-    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+    if (isDefinitiveAbsenceFromRelay(error)) {
       return { error: error instanceof Error ? error.message : String(error), notFound: true }
     }
     if (isTranscriptHostUnverifiableError(error)) {

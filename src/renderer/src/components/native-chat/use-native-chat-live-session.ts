@@ -20,7 +20,6 @@ import { useNativeChatHookStatus } from './use-native-chat-hook-status'
 import { useNativeChatAssembledMessages } from './use-native-chat-assembled-messages'
 import { createNativeChatReadRetryTimer } from './native-chat-read-retry-timer'
 import { openNativeChatTranscriptStream } from './native-chat-stream-teardown'
-import { useNativeChatProviderSessionLocator } from './use-native-chat-provider-session-locator'
 import {
   nextNativeChatSubscriptionId,
   NOTFOUND_RETRY_WINDOW_MS
@@ -58,21 +57,12 @@ const EMPTY_MESSAGES: readonly NativeChatMessage[] = []
 export function useNativeChatLiveSession(
   args: UseNativeChatLiveSessionArgs
 ): NativeChatLiveSession {
-  const {
-    paneKey,
-    agent,
-    sessionId,
-    transcriptPath,
-    providerSession,
-    runtimeEnvironmentId,
-    enabled = true
-  } = args
+  const { paneKey, agent, sessionId, transcriptPath, runtimeEnvironmentId, enabled = true } = args
   // Stable per owner id so a re-render without an owner flip keeps the same transport and doesn't re-subscribe.
   const transport = useMemo(
     () => getNativeChatSessionTransport(runtimeEnvironmentId ?? null),
     [runtimeEnvironmentId]
   )
-  const providerSessionLocator = useNativeChatProviderSessionLocator(providerSession)
   const [read, setRead] = useState<ReadState>({ phase: 'loading' })
   const [hasMore, setHasMore] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -98,7 +88,7 @@ export function useNativeChatLiveSession(
   const latestTransport = useRef(transport)
   latestTransport.current = transport
   const transcriptEpochRef = useRef(0)
-  const sourceKey = nativeChatLiveSourceKey(args, providerSessionLocator)
+  const sourceKey = nativeChatLiveSourceKey(args)
   const retainedSourceKeyRef = useRef(sourceKey)
 
   useEffect(() => {
@@ -131,8 +121,6 @@ export function useNativeChatLiveSession(
     let cancelled = false
     // Set by the first authoritative frame so the readSession seed below can't clobber a live snapshot.
     let frameArrived = false
-    // Prefer the recovery-owning stream error over concurrent seed-read errors.
-    let streamErrorShown = false
     const retryTimer = createNativeChatReadRetryTimer()
     const retryStartedAt = Date.now()
     // Re-bound as a const: TS drops the `!sessionId` narrowing inside the hoisted nested function.
@@ -152,13 +140,7 @@ export function useNativeChatLiveSession(
         return
       }
       void transport
-        .readSession(
-          agent,
-          activeSessionId,
-          limitRef.current,
-          transcriptPath ?? undefined,
-          providerSessionLocator ?? undefined
-        )
+        .readSession(agent, activeSessionId, limitRef.current, transcriptPath ?? undefined, paneKey)
         .then((result) => {
           if (cancelled || !latestEnabled.current || frameArrived) {
             return
@@ -167,9 +149,6 @@ export function useNativeChatLiveSession(
             // A not-yet-flushed transcript: stay in 'loading' and retry with backoff instead of a permanent error (#8401).
             if (result.notFound && Date.now() - retryStartedAt < NOTFOUND_RETRY_WINDOW_MS) {
               retryTimer.schedule(attempt, () => loadSession(attempt + 1))
-              return
-            }
-            if (streamErrorShown) {
               return
             }
             setRead({ phase: 'error', error: result.error })
@@ -181,7 +160,7 @@ export function useNativeChatLiveSession(
           setHasMore(hasMoreNativeChatHistory(messages.length, limitRef.current))
         })
         .catch((err: unknown) => {
-          if (!cancelled && latestEnabled.current && !frameArrived && !streamErrorShown) {
+          if (!cancelled && latestEnabled.current && !frameArrived) {
             setRead({ phase: 'error', error: err instanceof Error ? err.message : String(err) })
           }
         })
@@ -197,7 +176,7 @@ export function useNativeChatLiveSession(
         agent,
         sessionId,
         transcriptPath: transcriptPath ?? undefined,
-        providerSession: providerSessionLocator ?? undefined,
+        paneKey,
         limit: limitRef.current
       },
       (frame) => {
@@ -210,7 +189,6 @@ export function useNativeChatLiveSession(
           setLoadingEarlier(false)
           if ('error' in frame && frame.error) {
             // Why: an error frame carries no transcript, so it must not consume the seed — a healthy read still has to repair the pane.
-            streamErrorShown = true
             const error = frame.error
             // Retain existing transcript history after a stream error.
             setRead((prev) =>
@@ -241,7 +219,7 @@ export function useNativeChatLiveSession(
   }, [
     agent,
     enabled,
-    providerSessionLocator,
+    paneKey,
     sessionId,
     sourceKey,
     transcriptPath,
@@ -264,13 +242,7 @@ export function useNativeChatLiveSession(
     const lifecycleRevision = transcriptLifecycleControl.revision()
     setLoadingEarlier(true)
     void transport
-      .readSession(
-        agent,
-        sessionId,
-        nextLimit,
-        transcriptPath ?? undefined,
-        providerSessionLocator ?? undefined
-      )
+      .readSession(agent, sessionId, nextLimit, transcriptPath ?? undefined, paneKey)
       .then((result) => {
         // Ignore a stale resolve from a swapped session or flipped owner — either would paint the wrong host's history.
         if (
@@ -301,7 +273,7 @@ export function useNativeChatLiveSession(
       })
   }, [
     agent,
-    providerSessionLocator,
+    paneKey,
     sessionId,
     transcriptPath,
     transport,

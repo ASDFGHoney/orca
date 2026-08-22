@@ -1,6 +1,5 @@
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { NativeChatSession } from '../../../../shared/native-chat-types'
-import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import type { NativeChatContextMenuActions } from './use-native-chat-context-menu'
 
 export type NativeChatViewProps = {
@@ -28,7 +27,7 @@ export type NativeChatResolvedViewProps = {
   agent: NativeChatSession['agent']
   sessionId: string | null
   transcriptPath: string | null
-  providerSession: AgentProviderSessionMetadata | null
+  connectionId: string | null
   isVisible: boolean
   targetPtyId: string | null
   terminalTabId: string

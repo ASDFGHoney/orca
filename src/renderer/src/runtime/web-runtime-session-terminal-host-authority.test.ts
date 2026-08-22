@@ -169,8 +169,7 @@ describe('createWebRuntimeSessionTerminal', () => {
                 command: "codex resume 'session-1'",
                 providerSession: {
                   key: 'session_id' as const,
-                  id: 'session-1',
-                  executionHostId: 'ssh:builder' as const
+                  id: 'session-1'
                 }
               }
             : {}),

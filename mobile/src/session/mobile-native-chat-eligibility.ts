@@ -1,5 +1,4 @@
 import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
-import type { AgentProviderSessionMetadata } from '../../../src/shared/agent-session-resume'
 import { isRuntimeOwnedSshTargetId } from '../../../src/shared/execution-host'
 import {
   isNativeChatSupportedAgent,
@@ -24,7 +23,7 @@ export type MobileNativeChatResolution = {
   /** Hook-reported transcript path. Recent Claude sessions cannot always be
    *  resolved from the provider session id, so mobile forwards this to runtime. */
   transcriptPath: string | null
-  providerSession: AgentProviderSessionMetadata | null
+  paneKey: string | null
 }
 
 export type MobileNativeChatTab = {
@@ -63,7 +62,7 @@ export function resolveMobileNativeChat(
     agent,
     sessionId: tab.agentStatus?.providerSession?.id ?? null,
     transcriptPath: tab.agentStatus?.providerSession?.transcriptPath ?? null,
-    providerSession: tab.agentStatus?.providerSession ?? null
+    paneKey: tab.agentStatus?.paneKey ?? null
   }
 }
 

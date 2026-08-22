@@ -29,36 +29,6 @@ afterEach(() => {
 })
 
 describe('AgentHookServer listener replay', () => {
-  it('stamps authenticated loopback provider sessions as local', async () => {
-    const server = new AgentHookServer()
-    await server.start({ env: 'production' })
-    try {
-      const env = server.buildPtyEnv()
-      const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
-        },
-        body: JSON.stringify(
-          buildBody({
-            hook_event_name: 'UserPromptSubmit',
-            prompt: 'local owner',
-            session_id: 'local-session'
-          })
-        )
-      })
-
-      expect(response.status).toBe(204)
-      expect(server.getStatusSnapshot()[0]?.providerSession).toEqual({
-        key: 'session_id',
-        id: 'local-session',
-        executionHostId: 'local'
-      })
-    } finally {
-      server.stop()
-    }
-  })
   it('ignores local nested Claude Stop while a parent Codex hook status is active', async () => {
     const server = new AgentHookServer()
     await server.start({ env: 'production' })

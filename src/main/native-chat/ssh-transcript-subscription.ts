@@ -2,9 +2,7 @@ import { onSshFilesystemProviderChanged } from '../providers/ssh-filesystem-disp
 import type { NativeChatTranscriptOwner } from './native-chat-transcript-owner'
 import { createSshTranscriptRangeFs } from './ssh-transcript-range-fs'
 import {
-  DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS,
   isTranscriptHostUnverifiableError,
-  REMOTE_UNRESOLVED_TRANSCRIPT_MESSAGE,
   TRANSCRIPT_UNVERIFIABLE_MESSAGE
 } from './transcript-host-verdict'
 import { nativeChatLineDecoderForAgent } from './transcript-tail-reader'
@@ -27,6 +25,15 @@ export function subscribeSshNativeChatTranscript(
   if (!decode || setupSignal?.aborted) {
     return { unsubscribe: () => {}, watching: false }
   }
+  if (!owner.transcriptPath) {
+    try {
+      args.onInitialSnapshot?.([], false, 0, 'Transcript unavailable')
+    } catch {
+      // The server-owned locator will rebind if the hook later reports a path.
+    }
+    return { unsubscribe: () => {}, watching: true }
+  }
+  const transcriptPath = owner.transcriptPath
   const lineDecoder = decode
   let closed = false
   let installed: NativeChatTranscriptSubscription | null = null
@@ -37,10 +44,6 @@ export function subscribeSshNativeChatTranscript(
   let attemptInFlight = false
   let rerunRequested = false
   let unverifiableEmitted = false
-  let unresolvedNoticeEmitted = false
-  let missingPathEmitted = false
-  const startedAt = Date.now()
-  const unresolvedNoticeMs = args.unresolvedNoticeMs ?? DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS
 
   const stopProviderChanges = onSshFilesystemProviderChanged((connectionId) => {
     if (connectionId !== owner.connectionId || closed) {
@@ -76,23 +79,6 @@ export function subscribeSshNativeChatTranscript(
     }
   }
 
-  function emitUnresolvedNotice(): void {
-    if (
-      unverifiableEmitted ||
-      unresolvedNoticeEmitted ||
-      !args.onInitialSnapshot ||
-      Date.now() - startedAt < unresolvedNoticeMs
-    ) {
-      return
-    }
-    unresolvedNoticeEmitted = true
-    try {
-      args.onInitialSnapshot([], false, 0, REMOTE_UNRESOLVED_TRANSCRIPT_MESSAGE)
-    } catch {
-      // The advisory cannot own retry liveness when its subscriber is closing.
-    }
-  }
-
   function scheduleRetry(): void {
     if (closed || installed || retryTimer) {
       return
@@ -120,25 +106,14 @@ export function subscribeSshNativeChatTranscript(
     const controller = new AbortController()
     attemptController = controller
     try {
-      if (!owner.transcriptPath) {
-        if (!missingPathEmitted) {
-          missingPathEmitted = true
-          try {
-            args.onInitialSnapshot?.([], false, 0, 'Transcript unavailable')
-          } catch {
-            // A terminal missing-path result must not escape a closing subscriber.
-          }
-        }
-        return
-      }
       const rangeFs = await createSshTranscriptRangeFs(owner.connectionId, controller.signal)
       const result = await installTranscriptWatcher(
-        owner.transcriptPath,
+        transcriptPath,
         lineDecoder,
         {
           ...args,
-          filePath: owner.transcriptPath,
-          transcriptPath: owner.transcriptPath,
+          filePath: transcriptPath,
+          transcriptPath,
           rangeFs
         },
         controller.signal
@@ -154,14 +129,12 @@ export function subscribeSshNativeChatTranscript(
         return
       }
       scheduleRetry()
-      emitUnresolvedNotice()
     } catch (error) {
       if (!closed && !controller.signal.aborted) {
         if (isTranscriptHostUnverifiableError(error)) {
           emitUnverifiable()
         }
         scheduleRetry()
-        emitUnresolvedNotice()
       }
     } finally {
       if (attemptController === controller) {
@@ -190,6 +163,9 @@ export function subscribeSshNativeChatTranscript(
       installed?.unsubscribe()
       installed = null
     }
+  }
+  if (setupSignal?.aborted) {
+    subscription.unsubscribe()
   }
   void runAttempt()
   return subscription

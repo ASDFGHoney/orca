@@ -97,8 +97,6 @@ import {
   normalizeAgentProviderSession,
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
-import { LOCAL_EXECUTION_HOST_ID, toSshExecutionHostId } from '../../shared/execution-host'
-import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
 
 export type { AgentHookSource }
@@ -142,12 +140,6 @@ type PersistedAgentHookAuthorityCommitment = {
   tabId?: string
   worktreeId?: string
   observedAt: number
-}
-
-function agentHookExecutionHostId(connectionId: string | null | undefined) {
-  return connectionId && !isWslHookRelayConnectionId(connectionId)
-    ? toSshExecutionHostId(connectionId)
-    : LOCAL_EXECUTION_HOST_ID
 }
 
 export type AgentHookStatusChangeEntry = {
@@ -337,14 +329,7 @@ function sanitizeHydratedEntry(
   if (!payload) {
     return null
   }
-  const normalizedProviderSession =
-    normalizeAgentProviderSession(record.providerSession) ?? undefined
-  const providerSession: AgentProviderSessionMetadata | undefined = normalizedProviderSession
-    ? {
-        ...normalizedProviderSession,
-        executionHostId: agentHookExecutionHostId(connectionId)
-      }
-    : undefined
+  const providerSession = normalizeAgentProviderSession(record.providerSession) ?? undefined
   const providerSessionOnly = record.providerSessionOnly === true
   const retainedForLiveness = record.retainedForLiveness === true
   const validRetainedIdentity = Boolean(
@@ -1333,15 +1318,6 @@ export class AgentHookServer {
     onAccepted?: () => void,
     origin: AgentStatusObservationOrigin = 'hook'
   ): EnrichedAgentHookEventPayload {
-    if (payload.providerSession) {
-      payload = {
-        ...payload,
-        providerSession: {
-          ...payload.providerSession,
-          executionHostId: agentHookExecutionHostId(payload.connectionId)
-        }
-      }
-    }
     if (payload.hookEventName === 'UserPromptSubmit') {
       // Why: the prompt boundary is authoritative even when text is unchanged; its next OSC working row must not inherit the prior cron/background turn stamp.
       this.activeHookTurnCompletedAtByPaneKey.delete(payload.paneKey)
@@ -2310,14 +2286,7 @@ export class AgentHookServer {
       typeof envelope.toolAgentType === 'string' && envelope.toolAgentType.trim().length > 0
         ? envelope.toolAgentType.trim()
         : undefined
-    const normalizedProviderSession =
-      normalizeAgentProviderSession(envelope.providerSession) ?? undefined
-    const providerSession: AgentProviderSessionMetadata | undefined = normalizedProviderSession
-      ? {
-          ...normalizedProviderSession,
-          executionHostId: agentHookExecutionHostId(trimmedConnectionId)
-        }
-      : undefined
+    const providerSession = normalizeAgentProviderSession(envelope.providerSession) ?? undefined
     // Why: relay crosses a trust boundary — re-run the canonical normalizer to enforce caps/invariants (returns null on malformed).
     const validatedPayload = normalizeAgentStatusPayload(envelope.payload)
     if (!validatedPayload) {

@@ -7,7 +7,6 @@ import { AgentHookServer } from './server'
 
 const PANE = makePaneKey('external-live', '11111111-1111-4111-8111-111111111111')
 const PROVIDER_SESSION = { key: 'session_id' as const, id: 'session-live' }
-const LOCAL_PROVIDER_SESSION = { ...PROVIDER_SESSION, executionHostId: 'local' as const }
 
 function seedLocalIdentity(server: AgentHookServer): void {
   server.ingestRemote(
@@ -34,7 +33,7 @@ describe('AgentHookServer AI Vault liveness identity', () => {
     expect(server.getStatusSnapshot()).toEqual([
       expect.objectContaining({
         connectionId: null,
-        providerSession: LOCAL_PROVIDER_SESSION,
+        providerSession: PROVIDER_SESSION,
         providerSessionOnly: true
       })
     ])
@@ -56,7 +55,7 @@ describe('AgentHookServer AI Vault liveness identity', () => {
       try {
         expect(second.getStatusSnapshot()).toEqual([
           expect.objectContaining({
-            providerSession: LOCAL_PROVIDER_SESSION,
+            providerSession: PROVIDER_SESSION,
             providerSessionOnly: true,
             restoredUnconfirmed: true
           })

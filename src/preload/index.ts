@@ -4467,14 +4467,14 @@ const api = {
       sessionId: string,
       limit?: number,
       transcriptPath?: string,
-      providerSession?: AgentProviderSessionMetadata
+      paneKey?: string
     ): Promise<NativeChatReadSessionResult> =>
       ipcRenderer.invoke('nativeChat:readSession', {
         agent,
         sessionId,
         limit,
         transcriptPath,
-        providerSession
+        paneKey
       }),
     /** Start live tailing; `onFrame` receives snapshots, replacements, and appends. */
     subscribe: (
@@ -4483,7 +4483,7 @@ const api = {
         agent: AgentType
         sessionId: string
         transcriptPath?: string
-        providerSession?: AgentProviderSessionMetadata
+        paneKey?: string
         limit?: number
       },
       onFrame: (frame: NativeChatSubscriptionFrame) => void

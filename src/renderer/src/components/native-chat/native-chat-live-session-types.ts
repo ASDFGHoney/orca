@@ -1,4 +1,3 @@
-import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import type {
   AgentType,
   NativeChatMessage,
@@ -10,7 +9,8 @@ export type UseNativeChatLiveSessionArgs = {
   agent: AgentType
   sessionId: string | null
   transcriptPath?: string | null
-  providerSession?: AgentProviderSessionMetadata | null
+  /** Source-generation hint only; main/runtime resolves read authority from paneKey. */
+  transcriptConnectionId?: string | null
   runtimeEnvironmentId?: string | null
   enabled?: boolean
 }

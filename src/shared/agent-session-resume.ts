@@ -1,10 +1,5 @@
 import type { AgentHookSource } from './agent-hook-relay'
 import type { AgentStatusState } from './agent-status-types'
-import {
-  LOCAL_EXECUTION_HOST_ID,
-  normalizeExecutionHostId,
-  type ExecutionHostId
-} from './execution-host'
 import type { TuiAgent } from './tui-agent'
 
 export const RESUMABLE_TUI_AGENTS = [
@@ -31,8 +26,6 @@ export type AgentProviderSessionKey = 'session_id' | 'conversation_id'
 export type AgentProviderSessionMetadata = {
   key: AgentProviderSessionKey
   id: string
-  /** Execution host that owns the provider session and its transcript bytes. */
-  executionHostId?: ExecutionHostId
   /** Authoritative on-disk transcript/rollout path reported by the agent's hook
    *  (Claude/Codex `transcript_path`), when available. Native chat reads this
    *  directly because recent Claude Code versions name the transcript file with a
@@ -168,16 +161,7 @@ export function normalizeAgentProviderSession(raw: unknown): AgentProviderSessio
   // Why: persisted/relay metadata crosses a trust boundary too; apply the same
   // control-character rejection used for hook-reported transcript paths.
   const transcriptPath = readTranscriptPathFromKeys(record, ['transcriptPath'])
-  const executionHostId =
-    typeof record.executionHostId === 'string'
-      ? (normalizeExecutionHostId(record.executionHostId) ?? undefined)
-      : undefined
-  return {
-    key,
-    id,
-    ...(transcriptPath ? { transcriptPath } : {}),
-    ...(executionHostId ? { executionHostId } : {})
-  }
+  return transcriptPath ? { key, id, transcriptPath } : { key, id }
 }
 
 /** Compare the provider-owned values that identify the CLI resume target.
@@ -193,21 +177,8 @@ export function agentProviderSessionsEqual(
   return (
     left.key === right.key &&
     left.id === right.id &&
-    (left.executionHostId ?? LOCAL_EXECUTION_HOST_ID) ===
-      (right.executionHostId ?? LOCAL_EXECUTION_HOST_ID) &&
     ((agent !== 'pi' && agent !== 'prime-agent') || left.transcriptPath === right.transcriptPath)
   )
-}
-
-/** Older runtime resume schemas do not know transcript ownership metadata. */
-export function agentProviderSessionForResume(
-  providerSession: AgentProviderSessionMetadata
-): Omit<AgentProviderSessionMetadata, 'executionHostId'> {
-  return {
-    key: providerSession.key,
-    id: providerSession.id,
-    ...(providerSession.transcriptPath ? { transcriptPath: providerSession.transcriptPath } : {})
-  }
 }
 
 export function extractAgentProviderSession(

@@ -318,8 +318,7 @@ describe('createRemoteRuntimePtyTransport', () => {
       agentArgsOverride: '--permission-mode plan',
       resumeProviderSession: {
         key: 'session_id',
-        id: 'provider-session',
-        executionHostId: 'ssh:builder'
+        id: 'provider-session'
       },
       tabId: 'tab-1',
       leafId: '11111111-1111-4111-8111-111111111111'

@@ -2,7 +2,6 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import type { AgentProviderSessionMetadata } from '../../../src/shared/agent-session-resume'
 import type { RpcClient } from '../transport/rpc-client'
 import {
   useMobileNativeChatSession,
@@ -33,47 +32,33 @@ describe('useMobileNativeChatSession', () => {
     renderer = null
   })
 
-  function Harness({
-    client,
-    providerSession
-  }: {
-    client: RpcClient | null
-    providerSession?: AgentProviderSessionMetadata
-  }): null {
+  function Harness({ client, paneKey }: { client: RpcClient | null; paneKey?: string }): null {
     state = useMobileNativeChatSession({
       client,
       sourceIdentity: 'host-a\0workspace-a',
       agent: 'claude',
       sessionId: 'session',
       transcriptPath: null,
-      providerSession
+      paneKey: paneKey ?? null
     })
     return null
   }
 
-  async function mount(
-    client: RpcClient,
-    providerSession?: AgentProviderSessionMetadata
-  ): Promise<void> {
+  async function mount(client: RpcClient, paneKey?: string): Promise<void> {
     await act(async () => {
-      renderer = create(createElement(Harness, { client, providerSession }))
+      renderer = create(createElement(Harness, { client, paneKey }))
     })
   }
 
-  it('forwards SSH ownership through the mobile subscribe request', async () => {
-    const providerSession = {
-      key: 'session_id' as const,
-      id: 'session',
-      transcriptPath: '/tmp/session.jsonl',
-      executionHostId: 'ssh:builder' as const
-    }
+  it('forwards pane identity through the mobile subscribe request', async () => {
+    const paneKey = 'tab:leaf'
     const subscribe = vi.fn(() => () => {})
 
-    await mount({ subscribe } as unknown as RpcClient, providerSession)
+    await mount({ subscribe } as unknown as RpcClient, paneKey)
 
     expect(subscribe).toHaveBeenCalledWith(
       'nativeChat.subscribe',
-      expect.objectContaining({ providerSession }),
+      expect.objectContaining({ paneKey }),
       expect.any(Function)
     )
   })

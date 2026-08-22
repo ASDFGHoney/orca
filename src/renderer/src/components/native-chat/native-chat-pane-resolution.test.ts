@@ -26,10 +26,10 @@ describe('resolveNativeChatSession', () => {
         agentStatusEntry: entry({
           paneKey,
           agentType: 'claude',
+          connectionId: 'builder',
           providerSession: {
             key: 'session_id',
-            id: 'sess-abc',
-            executionHostId: 'ssh:builder'
+            id: 'sess-abc'
           }
         }),
         ptyId: 'pty-1'
@@ -38,11 +38,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'claude',
       sessionId: 'sess-abc',
       transcriptPath: null,
-      providerSession: {
-        key: 'session_id',
-        id: 'sess-abc',
-        executionHostId: 'ssh:builder'
-      },
+      connectionId: 'builder',
       ptyId: 'pty-1',
       paneKey
     })
@@ -69,11 +65,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'claude',
       sessionId: 'sess-abc',
       transcriptPath: '/home/u/.claude/projects/slug/real-uuid.jsonl',
-      providerSession: {
-        key: 'session_id',
-        id: 'sess-abc',
-        transcriptPath: '/home/u/.claude/projects/slug/real-uuid.jsonl'
-      },
+      connectionId: null,
       ptyId: 'pty-1',
       paneKey
     })
@@ -93,7 +85,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'claude',
       sessionId: null,
       transcriptPath: null,
-      providerSession: null,
+      connectionId: null,
       ptyId: 'pty-1',
       paneKey
     })
@@ -126,7 +118,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'claude',
       sessionId: 'left-sess',
       transcriptPath: null,
-      providerSession: { key: 'session_id', id: 'left-sess' },
+      connectionId: null,
       ptyId: 'pty-left',
       paneKey: leftKey
     })
@@ -134,7 +126,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'codex',
       sessionId: 'right-sess',
       transcriptPath: null,
-      providerSession: { key: 'session_id', id: 'right-sess' },
+      connectionId: null,
       ptyId: 'pty-right',
       paneKey: rightKey
     })
@@ -157,7 +149,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'codex',
       sessionId: 'codex-1',
       transcriptPath: null,
-      providerSession: { key: 'session_id', id: 'codex-1' },
+      connectionId: null,
       ptyId: 'pty-1',
       paneKey
     })
@@ -178,7 +170,7 @@ describe('resolveNativeChatSession', () => {
         agent: resolvedAgent,
         sessionId: null,
         transcriptPath: null,
-        providerSession: null,
+        connectionId: null,
         ptyId: 'pty-1',
         paneKey
       })
@@ -320,7 +312,7 @@ describe('resolveNativeChatSession', () => {
       agent: 'codex',
       sessionId: 'codex-live',
       transcriptPath: null,
-      providerSession: { key: 'session_id', id: 'codex-live' },
+      connectionId: null,
       ptyId: 'pty-1',
       paneKey
     })

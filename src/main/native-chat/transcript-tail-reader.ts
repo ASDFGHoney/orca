@@ -241,7 +241,7 @@ export type NativeChatTranscriptTailResult =
       hasMore: boolean
       beforeOffset: number
     }
-  | { error: string; notFound?: true; unverifiable?: true }
+  | { error: string; notFound?: true }
 
 export async function readNativeChatTranscriptTail(
   args: ResolveSessionFileOptions & {
@@ -268,9 +268,7 @@ export async function readNativeChatTranscriptTail(
     })
   }
   const localArgs =
-    owner.kind === 'local'
-      ? { ...args, transcriptPath: owner.providerSession.transcriptPath }
-      : args
+    owner.kind === 'local' ? { ...args, transcriptPath: owner.transcriptPath } : args
   const decode = nativeChatLineDecoderForAgent(args.agent)
   const decodeLifecycle = nativeChatTurnLifecycleDecoderForAgent(args.agent)
   if (!decode) {

@@ -53,8 +53,7 @@ export function parseRuntimeNativeChatReadSessionResult(
   if (typeof record.error === 'string') {
     return {
       error: record.error,
-      ...(record.notFound === true ? { notFound: true } : {}),
-      ...(record.unverifiable === true ? { unverifiable: true } : {})
+      ...(record.notFound === true ? { notFound: true } : {})
     }
   }
   return { error: RUNTIME_NATIVE_CHAT_READ_ERROR }

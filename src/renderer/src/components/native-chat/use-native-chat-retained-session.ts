@@ -20,7 +20,7 @@ export function useNativeChatRetainedSession(
     args.agent,
     args.sessionId,
     args.transcriptPath ?? null,
-    args.providerSession?.executionHostId ?? null
+    args.transcriptConnectionId ?? null
   ])
   const activeIdentityRef = useRef(identity)
   const retentionRef = useRef(createNativeChatTranscriptRetention())

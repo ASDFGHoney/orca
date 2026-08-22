@@ -2,14 +2,27 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import type { FileRangeReadResult, FileStat, IFilesystemProvider } from '../providers/types'
 import { MAX_FILE_RANGE_READ_BYTES } from '../../shared/file-range-read'
 
 const mocks = vi.hoisted(() => ({
   getProvider: vi.fn<(connectionId: string) => IFilesystemProvider | undefined>(),
   generation: 1,
-  changeListeners: new Set<(connectionId: string, generation: number) => void>()
+  changeListeners: new Set<(connectionId: string, generation: number) => void>(),
+  ownerListeners: new Set<() => void>(),
+  statusRows: [] as Record<string, unknown>[]
+}))
+
+vi.mock('../agent-hooks/server', () => ({
+  agentHookServer: {
+    getStatusSnapshot: () => mocks.statusRows,
+    getStatusSnapshotForPane: (paneKey: string) =>
+      mocks.statusRows.filter((row) => row.paneKey === paneKey),
+    subscribeProviderSessionChanges: (listener: () => void) => {
+      mocks.ownerListeners.add(listener)
+      return () => mocks.ownerListeners.delete(listener)
+    }
+  }
 }))
 
 vi.mock('../providers/ssh-filesystem-dispatch', () => ({
@@ -37,7 +50,7 @@ import { readIncrementalTranscriptMessages } from './transcript-incremental-read
 import { TranscriptRangeReadInvalidatedError, type TranscriptRangeFs } from './transcript-range-fs'
 
 const SESSION_ID = 'session-ssh-owner'
-const EXECUTION_HOST_ID = 'ssh:ssh-owner'
+const PANE_KEY = 'tab-owner:11111111-1111-4111-8111-111111111111'
 
 function claudeLine(id: string, text: string): string {
   return `${JSON.stringify({
@@ -86,18 +99,36 @@ function routedArgs(transcriptPath: string): {
   agent: 'claude'
   sessionId: string
   transcriptPath: string
-  providerSession: AgentProviderSessionMetadata
+  paneKey: string
 } {
+  setOwner('ssh-owner', transcriptPath)
   return {
     agent: 'claude' as const,
     sessionId: SESSION_ID,
     transcriptPath,
-    providerSession: {
-      key: 'session_id' as const,
-      id: SESSION_ID,
-      transcriptPath,
-      executionHostId: EXECUTION_HOST_ID
+    paneKey: PANE_KEY
+  }
+}
+
+function setOwner(connectionId: string | null, transcriptPath?: string): void {
+  setStatusRows([
+    {
+      paneKey: PANE_KEY,
+      agentType: 'claude',
+      connectionId,
+      providerSession: {
+        key: 'session_id',
+        id: SESSION_ID,
+        ...(transcriptPath ? { transcriptPath } : {})
+      }
     }
+  ])
+}
+
+function setStatusRows(rows: Record<string, unknown>[]): void {
+  mocks.statusRows = rows
+  for (const listener of mocks.ownerListeners) {
+    listener()
   }
 }
 
@@ -115,6 +146,8 @@ beforeEach(() => {
   mocks.getProvider.mockReset()
   mocks.generation = 1
   mocks.changeListeners.clear()
+  mocks.ownerListeners.clear()
+  mocks.statusRows = []
   tempRoots = []
 })
 
@@ -147,6 +180,31 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     expect(readFile).not.toHaveBeenCalled()
     expect(readFileRange).toHaveBeenCalled()
     expect(stat).toHaveBeenCalledWith(transcriptPath, { signal: controller.signal })
+  })
+
+  it('ignores a caller transcript path that contradicts the hook-owned path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-native-chat-path-authority-'))
+    tempRoots.push(root)
+    const callerPath = join(root, 'caller.jsonl')
+    const ownedPath = '/remote/owned.jsonl'
+    await writeFile(callerPath, claudeLine('caller-poison', 'wrong path'))
+    const remote = memoryProvider(
+      new Map([[ownedPath, Buffer.from(claudeLine('hook-owned', 'right path'))]])
+    )
+    mocks.getProvider.mockReturnValue(remote.provider)
+    setOwner('ssh-owner', ownedPath)
+
+    const result = await readNativeChatTranscriptTail({
+      agent: 'claude',
+      sessionId: SESSION_ID,
+      transcriptPath: callerPath,
+      paneKey: PANE_KEY,
+      limit: 40
+    })
+
+    expect(result).toMatchObject({ messages: [{ id: 'hook-owned' }] })
+    expect(remote.stat).toHaveBeenCalledWith(ownedPath, expect.anything())
+    expect(remote.stat).not.toHaveBeenCalledWith(callerPath, expect.anything())
   })
 
   it('retries consecutive ranged snapshots when the remote file is replaced mid-read', async () => {
@@ -302,14 +360,11 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       agent: 'claude',
       sessionId: SESSION_ID,
       transcriptPath,
-      providerSession: { key: 'session_id', id: SESSION_ID, transcriptPath },
+      paneKey: PANE_KEY,
       limit: 40
     })
 
-    expect(result).toEqual({
-      error: 'Transcript unverifiable on the remote host',
-      unverifiable: true
-    })
+    expect(result).toEqual({ error: 'Transcript unverifiable on the remote host' })
     expect(mocks.getProvider).not.toHaveBeenCalled()
   })
 
@@ -325,7 +380,7 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       agent: 'claude',
       sessionId: SESSION_ID,
       transcriptPath,
-      providerSession: { key: 'session_id', id: SESSION_ID, transcriptPath },
+      paneKey: PANE_KEY,
       onInitialSnapshot: (messages, _hasMore, _beforeOffset, error) =>
         snapshots.push({ ids: messages.map((message) => message.id), error }),
       onAppend: () => {}
@@ -342,21 +397,36 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     tempRoots.push(root)
     const transcriptPath = join(root, 'session.jsonl')
     await writeFile(transcriptPath, claudeLine('local-real', 'local host'))
+    setOwner(null, transcriptPath)
 
     const result = await readNativeChatTranscriptTail({
       agent: 'claude',
       sessionId: SESSION_ID,
       transcriptPath,
-      providerSession: {
-        key: 'session_id',
-        id: SESSION_ID,
-        transcriptPath,
-        executionHostId: 'local'
-      },
+      paneKey: PANE_KEY,
       limit: 40
     })
 
     expect(result).toMatchObject({ messages: [{ id: 'local-real' }] })
+    expect(mocks.getProvider).not.toHaveBeenCalled()
+  })
+
+  it('treats WSL hook provenance as local transcript ownership', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-native-chat-host-wsl-'))
+    tempRoots.push(root)
+    const transcriptPath = join(root, 'session.jsonl')
+    await writeFile(transcriptPath, claudeLine('wsl-local', 'local WSL bridge'))
+    setOwner('wsl:Ubuntu', transcriptPath)
+
+    const result = await readNativeChatTranscriptTail({
+      agent: 'claude',
+      sessionId: SESSION_ID,
+      transcriptPath,
+      paneKey: PANE_KEY,
+      limit: 40
+    })
+
+    expect(result).toMatchObject({ messages: [{ id: 'wsl-local' }] })
     expect(mocks.getProvider).not.toHaveBeenCalled()
   })
 
@@ -377,7 +447,7 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     expect(mocks.getProvider).not.toHaveBeenCalled()
   })
 
-  it('selects the exact owner when two hosts expose the same id and path', async () => {
+  it('selects the requested pane when two hosts expose the same session id and path', async () => {
     const transcriptPath = '/tmp/same-session.jsonl'
     const wrong = memoryProvider(
       new Map([[transcriptPath, Buffer.from(claudeLine('wrong-remote', 'wrong host'))]])
@@ -388,9 +458,26 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     mocks.getProvider.mockImplementation((connectionId) =>
       connectionId === 'ssh-owner' ? right.provider : wrong.provider
     )
+    setStatusRows([
+      {
+        paneKey: 'other-pane:11111111-1111-4111-8111-111111111111',
+        agentType: 'claude',
+        connectionId: 'wrong-owner',
+        providerSession: { key: 'session_id', id: SESSION_ID, transcriptPath }
+      },
+      {
+        paneKey: PANE_KEY,
+        agentType: 'claude',
+        connectionId: 'ssh-owner',
+        providerSession: { key: 'session_id', id: SESSION_ID, transcriptPath }
+      }
+    ])
 
     const result = await readNativeChatTranscriptTail({
-      ...routedArgs(transcriptPath),
+      agent: 'claude',
+      sessionId: SESSION_ID,
+      transcriptPath,
+      paneKey: PANE_KEY,
       limit: 40
     })
 
@@ -399,22 +486,51 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     expect(wrong.readFileRange).not.toHaveBeenCalled()
   })
 
+  it('does not use a caller path to disambiguate locator-free ownership', async () => {
+    const requestedPath = '/tmp/requested.jsonl'
+    setStatusRows([
+      {
+        paneKey: PANE_KEY,
+        agentType: 'claude',
+        connectionId: 'ssh-owner',
+        providerSession: { key: 'session_id', id: SESSION_ID, transcriptPath: requestedPath }
+      },
+      {
+        paneKey: 'other-pane:11111111-1111-4111-8111-111111111111',
+        agentType: 'claude',
+        connectionId: 'wrong-owner',
+        providerSession: {
+          key: 'session_id',
+          id: SESSION_ID,
+          transcriptPath: '/tmp/other.jsonl'
+        }
+      }
+    ])
+
+    const result = await readNativeChatTranscriptTail({
+      agent: 'claude',
+      sessionId: SESSION_ID,
+      transcriptPath: requestedPath,
+      limit: 40
+    })
+
+    expect(result).toEqual({ error: 'Transcript unverifiable on the remote host' })
+    expect(mocks.getProvider).not.toHaveBeenCalled()
+  })
+
   it('does not run desktop id discovery when an SSH locator has no transcript path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-native-chat-host-no-path-'))
     tempRoots.push(root)
     const projectDir = join(root, 'project')
     await mkdir(projectDir, { recursive: true })
     await writeFile(join(projectDir, `${SESSION_ID}.jsonl`), claudeLine('desktop-id-hit', 'wrong'))
+    setOwner('ssh-owner')
 
     const result = await readNativeChatTranscriptTail({
       agent: 'claude',
       sessionId: SESSION_ID,
       claudeProjectsDir: root,
-      providerSession: {
-        key: 'session_id',
-        id: SESSION_ID,
-        executionHostId: EXECUTION_HOST_ID
-      },
+      paneKey: PANE_KEY,
       limit: 40
     })
 
@@ -427,11 +543,7 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       agent: 'claude',
       sessionId: SESSION_ID,
       claudeProjectsDir: root,
-      providerSession: {
-        key: 'session_id',
-        id: SESSION_ID,
-        executionHostId: EXECUTION_HOST_ID
-      },
+      paneKey: PANE_KEY,
       onInitialSnapshot: (messages, _hasMore, _beforeOffset, error) =>
         snapshots.push({ ids: messages.map((message) => message.id), error }),
       onAppend: () => {}
@@ -467,6 +579,45 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       await vi.waitFor(() => expect(snapshots).toContainEqual(['after-reconnect']))
       expect(first.readFile).not.toHaveBeenCalled()
       expect(second.readFile).not.toHaveBeenCalled()
+    } finally {
+      subscription.unsubscribe()
+    }
+  })
+
+  it('fails closed when the owner row disappears and rebinds when it returns', async () => {
+    const transcriptPath = '/tmp/rebound-owner-session.jsonl'
+    const remote = memoryProvider(
+      new Map([[transcriptPath, Buffer.from(claudeLine('remote-owner', 'remote'))]])
+    )
+    mocks.getProvider.mockReturnValue(remote.provider)
+    const snapshots: { ids: string[]; error?: string }[] = []
+    const subscription = await subscribeNativeChatTranscript({
+      ...routedArgs(transcriptPath),
+      initialLimit: 40,
+      onInitialSnapshot: (messages, _hasMore, _beforeOffset, error) =>
+        snapshots.push({ ids: messages.map((message) => message.id), error }),
+      onAppend: () => {},
+      debounceMs: 0,
+      reconciliationIntervalMs: 20
+    })
+
+    try {
+      await vi.waitFor(() =>
+        expect(snapshots).toContainEqual({ ids: ['remote-owner'], error: undefined })
+      )
+      setStatusRows([])
+      await vi.waitFor(() =>
+        expect(snapshots).toContainEqual({
+          ids: [],
+          error: 'Transcript unverifiable on the remote host'
+        })
+      )
+      setOwner('ssh-owner', transcriptPath)
+      await vi.waitFor(() =>
+        expect(snapshots.filter((snapshot) => snapshot.ids.includes('remote-owner'))).toHaveLength(
+          2
+        )
+      )
     } finally {
       subscription.unsubscribe()
     }
@@ -579,33 +730,6 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     try {
       await vi.waitFor(() => expect(stat.mock.calls.length).toBeGreaterThanOrEqual(3))
       expect(errors).toEqual(['Transcript unverifiable on the remote host'])
-    } finally {
-      subscription.unsubscribe()
-    }
-  })
-
-  it('replaces an unverifiable advisory after the remote host becomes reachable', async () => {
-    const transcriptPath = '/tmp/not-yet-written.jsonl'
-    const { provider } = memoryProvider(new Map())
-    mocks.getProvider.mockReturnValue(undefined)
-    const errors: (string | undefined)[] = []
-    const subscription = await subscribeNativeChatTranscript({
-      ...routedArgs(transcriptPath),
-      onInitialSnapshot: (_messages, _hasMore, _beforeOffset, error) => errors.push(error),
-      onAppend: () => {},
-      resolvePollIntervalMs: 5,
-      unresolvedNoticeMs: 0
-    })
-
-    try {
-      await vi.waitFor(() => expect(errors).toEqual(['Transcript unverifiable on the remote host']))
-      changeProvider(provider)
-      await vi.waitFor(() =>
-        expect(errors).toEqual([
-          'Transcript unverifiable on the remote host',
-          'No transcript found for this session on its remote host. It may not have been written yet.'
-        ])
-      )
     } finally {
       subscription.unsubscribe()
     }
