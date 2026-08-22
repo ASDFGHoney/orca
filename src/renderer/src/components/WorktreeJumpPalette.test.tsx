@@ -48,11 +48,6 @@ vi.mock('@/components/repo/RepoBadgeLabel', () => ({
   RepoBadgeMark: () => <span data-repo-badge-mark="true" />
 }))
 
-const { getPaletteHostBadge } = vi.hoisted(() => ({
-  getPaletteHostBadge: vi.fn(() => null as { hostId: 'local'; label: string } | null)
-}))
-vi.mock('@/components/cmd-j/palette-host-badge', () => ({ getPaletteHostBadge }))
-
 // Why: activation reaches into window.api and the whole worktree-reveal path; the palette's own
 // contract is which result it hands over, so stub the boundary and assert on that.
 const { activateWorkspaceTabPaletteResult } = vi.hoisted(() => ({
@@ -192,7 +187,6 @@ describe('WorktreeJumpPalette', () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     setCommandQuery = null
     activateAndRevealWorktree.mockClear()
-    getPaletteHostBadge.mockReturnValue(null)
     useAppStore.setState(initialAppState, true)
     testContainer = document.createElement('div')
     document.body.appendChild(testContainer)
@@ -233,10 +227,16 @@ describe('WorktreeJumpPalette', () => {
   })
 
   it('renders the owning host badge on worktree and tab rows', async () => {
-    getPaletteHostBadge.mockReturnValue({ hostId: 'local', label: 'Local Mac' })
-    await renderPalette(makeRecentTabState())
+    await renderPalette({
+      ...makeRecentTabState(),
+      repos: [makeRepo(), { ...makeRepo(), id: 'ssh-repo', connectionId: 'ssh-1' }],
+      sshTargetLabels: new Map([['ssh-1', 'Builder']]),
+      sshConnectionStates: new Map([
+        ['ssh-1', { targetId: 'ssh-1', status: 'connected', error: null, reconnectAttempt: 0 }]
+      ])
+    })
 
-    const badge = '[aria-label="Host: Local Mac"]'
+    const badge = '[aria-label^="Host:"]'
     expect(testContainer.querySelector(`[data-command-item*="worktree:"] ${badge}`)).not.toBeNull()
     expect(
       testContainer.querySelector(`[data-command-item*="workspace-tab:"] ${badge}`)
