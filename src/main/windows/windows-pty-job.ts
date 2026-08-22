@@ -137,6 +137,10 @@ export function listPtyJobProcessIds(proc: IPty): readonly number[] | null {
  * what a clean exit means. Children inherit membership, so the per-PTY jobs
  * nest inside it and every pty is covered.
  *
+ * Call it from the pty spawn path, not from startup: resolving the native
+ * module loads the ConPTY addon, and paying that before the daemon publishes
+ * its endpoint delays readiness — the boot smoke test caught exactly that.
+ *
  * Call it BEFORE the first pty. `AssignProcessToJobObject` adds only the named
  * process; children inherit membership, but a pty that already exists does not
  * join retroactively and would not be reaped.
@@ -148,7 +152,17 @@ export function listPtyJobProcessIds(proc: IPty): readonly number[] | null {
  * Returns false when the OS refuses -- an outer job that forbids nesting -- in
  * which case orphan behaviour is simply what it was before.
  */
+let hostJobAssigned: boolean | null = null
+
 export function assignHostProcessToKillOnCloseJob(): boolean {
+  if (hostJobAssigned !== null) {
+    return hostJobAssigned
+  }
+  hostJobAssigned = assignHostProcessOnce()
+  return hostJobAssigned
+}
+
+function assignHostProcessOnce(): boolean {
   const native = nativeLoader()
   if (!native) {
     return false
@@ -169,4 +183,5 @@ export function isPtyJobOwnershipAvailable(): boolean {
 export function __setConptyJobNativeForTests(loader?: () => ConptyNative | null): void {
   nativeLoader = loader ?? loadConptyNative
   cachedNative = undefined
+  hostJobAssigned = null
 }
