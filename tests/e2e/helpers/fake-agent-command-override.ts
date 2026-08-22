@@ -1,12 +1,7 @@
 import { quoteStartupArg, resolveStartupShell } from '../../../src/shared/tui-agent-startup-shell'
 import { resolveLocalWindowsAgentStartupShell } from '../../../src/shared/windows-terminal-shell'
 
-/**
- * The Windows shell these fixtures pin through `updateSettings`. The override
- * built below is quoted for whichever shell the runtime will actually type it
- * into, so specs must apply this value alongside the override rather than
- * relying on the default happening to match.
- */
+/** Specs must apply this through `updateSettings`; the override below is quoted for it. */
 export const FAKE_AGENT_WINDOWS_SHELL = 'powershell.exe'
 
 export function buildFakeAgentCommandOverride(

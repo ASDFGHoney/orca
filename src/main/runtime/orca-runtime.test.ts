@@ -20661,6 +20661,14 @@ describe('OrcaRuntimeService', () => {
       runtime.waitForTerminal(terminal.handle, { condition: 'tui-idle', timeoutMs: 50 })
     ).rejects.toThrow('timeout')
     expect(serializeProviderBuffer).toHaveBeenCalledTimes(5)
+    // Why args, not counts: the one-shot responses above ignore their options,
+    // so only this asserts every idle probe asked for the visible grid alone.
+    expect(serializeProviderBuffer.mock.calls.slice(1)).toEqual([
+      ['pty-legacy', { scrollbackRows: 0 }],
+      ['pty-legacy', { scrollbackRows: 0 }],
+      ['pty-legacy', { scrollbackRows: 0 }],
+      ['pty-legacy', { scrollbackRows: 0 }]
+    ])
     await expect(runtime.readTerminal(terminal.handle)).resolves.toMatchObject({ tail: [] })
     expect(serializeProviderBuffer).toHaveBeenCalledTimes(5)
     expect(
