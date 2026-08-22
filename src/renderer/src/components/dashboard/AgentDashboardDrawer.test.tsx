@@ -90,6 +90,7 @@ describe('AgentDashboardDrawer', () => {
     expect(mocks.boardProps).toBeNull()
 
     act(() => useAppStore.setState({ agentDashboardDrawerOpen: true }))
+    expect(mocks.boardProps).not.toBeNull()
     expect(mocks.boardProps?.onOpenMap).toBeUndefined()
     expect(mocks.boardProps?.initialView).toBeUndefined()
   })
