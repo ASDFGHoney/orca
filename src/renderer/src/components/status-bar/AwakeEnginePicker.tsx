@@ -51,10 +51,13 @@ function EngineOption({
           <span className="text-[11px] font-medium">{label}</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6} className="max-w-64">
+      <TooltipContent side="top" sideOffset={6} className="max-w-64 py-2">
         <span className="block font-medium">{title}</span>
-        <span className="block text-muted-foreground">{body}</span>
-        {hint ? <span className="mt-1 block text-muted-foreground">{hint}</span> : null}
+        {/* Why not text-muted-foreground: the tooltip surface is inverted
+            (bg-foreground), so a light-surface grey renders unreadable on it.
+            De-emphasize with opacity of the inherited color instead. */}
+        <span className="mt-0.5 block text-background/75">{body}</span>
+        {hint ? <span className="mt-1.5 block text-background/75">{hint}</span> : null}
       </TooltipContent>
     </Tooltip>
   )
