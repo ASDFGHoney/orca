@@ -3397,6 +3397,7 @@ app.on('will-quit', (e) => {
     codexUsage?.flush(),
     openCodeUsage?.flush()
   ]).then(() => {})
+  const skillUploadShutdown = runtime?.disposeSkillUploadSessions() ?? Promise.resolve()
 
   // Why: capture pid/runtimeId synchronously (before any await) so a later teardown path can't null them out mid-chain.
   const ownedPid = process.pid
@@ -3431,6 +3432,7 @@ app.on('will-quit', (e) => {
     { name: 'emulator', promise: emulatorShutdown },
     { name: 'ssh', promise: sshShutdown },
     { name: 'plugin-hosts', promise: pluginHostShutdown },
+    { name: 'skill-uploads', promise: skillUploadShutdown },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },
     { name: 'usage-cache', promise: usageCacheFlush },
     { name: 'stats', promise: statsFlush },

@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import { normalizeTerminalPadding } from '../../../../shared/terminal-padding-settings'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { Button } from '../ui/button'
 import { Label } from '../ui/label'
@@ -141,15 +140,13 @@ export function TerminalWindowSection({
               'Horizontal Padding'
             )}
             description=""
-            value={normalizeTerminalPadding(settings.terminalPaddingX ?? 4)}
+            value={settings.terminalPaddingX ?? 4}
             defaultValue={4}
             min={0}
             max={512}
             step={1}
             suffix="px"
-            onChange={(value) =>
-              updateSettings({ terminalPaddingX: normalizeTerminalPadding(value) })
-            }
+            onChange={(value) => updateSettings({ terminalPaddingX: Math.max(0, value) })}
           />
         </SearchableSetting>
 
@@ -170,15 +167,13 @@ export function TerminalWindowSection({
               'Vertical Padding'
             )}
             description=""
-            value={normalizeTerminalPadding(settings.terminalPaddingY ?? 4)}
+            value={settings.terminalPaddingY ?? 4}
             defaultValue={4}
             min={0}
             max={512}
             step={1}
             suffix="px"
-            onChange={(value) =>
-              updateSettings({ terminalPaddingY: normalizeTerminalPadding(value) })
-            }
+            onChange={(value) => updateSettings({ terminalPaddingY: Math.max(0, value) })}
           />
         </SearchableSetting>
 
