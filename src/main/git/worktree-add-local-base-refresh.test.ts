@@ -99,6 +99,73 @@ describe('addWorktree', () => {
     expect(gitExecFileAsyncMock.mock.calls.find((call) => call[0][0] === 'reset')).toBeUndefined()
   })
 
+  it('surfaces a dirty owner worktree on the claim path (#15645)', async () => {
+    // Base is origin/main, so the local counterpart is `main` in the primary repo, not the claimed branch.
+    const worktreeListOutput = 'worktree /repo\nHEAD abc123\nbranch refs/heads/main\n'
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add /repo-feature feature
+      .mockResolvedValueOnce({ stdout: 'remote-main\n' }) // resolveWorktreeAddBaseRef existence probe
+      .mockResolvedValueOnce({ stdout: '0\t2\n' }) // rev-list --left-right --count (behind only)
+      .mockResolvedValueOnce({ stdout: 'old-main\n' }) // rev-parse refs/heads/main^{commit}
+      .mockResolvedValueOnce({ stdout: 'remote-main\n' }) // rev-parse remote tracking ref^{commit}
+      .mockResolvedValueOnce({ stdout: '' }) // merge-base --is-ancestor
+      .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list --porcelain
+      .mockResolvedValueOnce({ stdout: ' M package.json\n' }) // status --porcelain (in /repo, dirty)
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature',
+      'feature',
+      'origin/main',
+      true,
+      false,
+      {
+        checkoutExistingBranch: true
+      }
+    )
+
+    expect(result.localBaseRefRefresh).toEqual({
+      status: 'skipped_dirty_worktree',
+      baseRef: 'origin/main',
+      localBranch: 'main',
+      ownerWorktreePath: '/repo'
+    })
+    expect(gitExecFileAsyncMock.mock.calls.find((call) => call[0][0] === 'reset')).toBeUndefined()
+  })
+
+  it('surfaces a git error on the claim path (#15645)', async () => {
+    const worktreeListOutput =
+      'worktree /repo\nHEAD aaa111\nbranch refs/heads/main\n\nworktree /repo-feature\nHEAD old-tip\nbranch refs/heads/feature\n'
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add /repo-feature feature
+      .mockResolvedValueOnce({ stdout: 'remote-tip\n' }) // resolveWorktreeAddBaseRef existence probe
+      .mockResolvedValueOnce({ stdout: '0\t2\n' }) // rev-list --left-right --count (behind only)
+      .mockResolvedValueOnce({ stdout: 'old-tip\n' }) // rev-parse refs/heads/feature^{commit}
+      .mockResolvedValueOnce({ stdout: 'remote-tip\n' }) // rev-parse remote tracking ref^{commit}
+      .mockResolvedValueOnce({ stdout: '' }) // merge-base --is-ancestor
+      .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list --porcelain
+      .mockResolvedValueOnce({ stdout: '' }) // status --porcelain (clean)
+      .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list recheck
+      .mockResolvedValueOnce({ stdout: '' }) // status recheck (clean)
+      .mockRejectedValueOnce(new Error('cannot lock ref')) // reset --hard fails
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature',
+      'feature',
+      'origin/feature',
+      true,
+      false,
+      { checkoutExistingBranch: true }
+    )
+
+    expect(result.localBaseRefRefresh).toEqual({
+      status: 'skipped_error',
+      baseRef: 'origin/feature',
+      localBranch: 'feature'
+    })
+  })
+
   it('skips the claim-path refresh for sparse (--no-checkout) creates', async () => {
     gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add --no-checkout
 

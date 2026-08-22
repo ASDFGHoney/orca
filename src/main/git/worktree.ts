@@ -1020,7 +1020,7 @@ async function performAddWorktree(
   })
 
   if (options.checkoutExistingBranch) {
-    // Why (#15645): run after the add — the new worktree owns the branch now, so the refresh's owner path can reset --hard it in place.
+    // Why (#15645): run after the add so the refresh's owner path can reset --hard the base ref's local counterpart in place — that is the branch this worktree just claimed when the base is its own remote-tracking ref, otherwise whichever worktree already holds that local branch (often the primary repo).
     // Why !noCheckout: a sparse create's index is still empty here, so the clean-status probe would false-positive dirty.
     if (refreshLocalBaseRef && baseBranch && !noCheckout) {
       const effectiveExistingBase = await resolveWorktreeAddBaseRef(baseBranch, (qualifiedRef) =>
@@ -1033,8 +1033,9 @@ async function performAddWorktree(
         options.remoteTrackingBase,
         options
       )
-      // Why: the user deliberately claimed this branch — local-only commits are expected, so only report a successful fast-forward instead of an infinite "not refreshed" warning this path never used to raise.
-      localBaseRefRefresh = claimedRefresh?.status === 'updated' ? claimedRefresh : undefined
+      // Why: the user deliberately claimed this branch, so local-only commits are expected and stay silent; a dirty owner or a git error still warns, because there the new worktree is stuck on the stale commit for a fixable reason.
+      localBaseRefRefresh =
+        claimedRefresh?.status === 'skipped_not_fast_forward' ? undefined : claimedRefresh
     }
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
   }
