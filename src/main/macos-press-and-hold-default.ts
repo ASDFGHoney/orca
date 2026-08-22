@@ -19,8 +19,9 @@ import { writeFileAtomically } from './codex-accounts/fs-utils'
  * differs from the one recorded here, so a `defaults write` run *after* the toggle is still the
  * newer choice and survives the next launch. See docs/reference/macos-press-and-hold.md.
  *
- * AppKit reads the preference while the process starts, so a fresh write lands for the *next*
- * launch, not the current one.
+ * A fresh write is assumed to land for the *next* launch, not the current one: it goes out through
+ * a separate `defaults` process, so this app's own cached copy may not observe it. Whether AppKit
+ * re-reads sooner is untested, so the conservative assumption is the one encoded here.
  *
  * If this is ever reverted, delete the key as well — AppKit reads the plist, not this file, so
  * removing the code alone leaves press-and-hold disabled forever for everyone who ran an affected

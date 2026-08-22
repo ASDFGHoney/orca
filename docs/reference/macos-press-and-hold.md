@@ -11,7 +11,8 @@ Two properties are easy to break and worth stating plainly.
 Markdown editor and every input field, not only terminals. Anyone reasoning about this as a
 terminal setting will get the blast radius wrong.
 
-**The write lands for the *next* launch.** AppKit reads the preference as the process starts, so
+**The write is assumed to land for the *next* launch.** It goes out through a separate `defaults`
+process, so this app's cached copy may not observe it until relaunch — and
 nothing changes in the session that performs the write. Every user-facing control for it has to
 say so.
 

@@ -5,7 +5,7 @@
  * identifier from its Info.plist, records a decision, and stays completely inert off macOS.
  *
  * What it cannot prove: that held keys repeat. Key repeat versus the accent picker is decided by
- * AppKit from a preference it reads as the process starts, so observing it needs a relaunch and a
+ * AppKit from a preference this process does not re-read after writing, so observing it needs a relaunch and a
  * physically held key — neither of which Playwright's synthesized CDP key events go through.
  * The preference semantics the fix depends on are pinned against the real `/usr/bin/defaults` in
  * src/main/macos-press-and-hold-default.defaults-domain.test.ts.

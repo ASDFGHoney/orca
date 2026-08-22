@@ -68,7 +68,8 @@ describe('MacAccentMenuSetting', () => {
   })
 
   it('asks for a restart only once the value moves', () => {
-    // Why: AppKit reads the preference as the process starts, so the change cannot land until then
+    // Why: the write goes through a separate `defaults` process, so this app's cached copy may not
+    // see it until relaunch
     // — a toggle with no notice looks broken.
     render(undefined)
     expect(container.textContent).not.toContain(RESTART_NOTICE)

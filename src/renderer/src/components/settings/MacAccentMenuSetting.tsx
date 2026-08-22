@@ -21,7 +21,8 @@ export function MacAccentMenuSetting({
   updateSettings
 }: MacAccentMenuSettingProps): React.JSX.Element {
   const enabled = settings.macAccentMenuEnabled ?? false
-  // Why: AppKit reads the preference as the process starts, so the write lands for the next launch.
+  // Why: the write goes through a separate `defaults` process, so this app's own cached copy may
+  // not see it until relaunch. Whether AppKit itself re-reads sooner is untested.
   const enabledAtMountRef = useRef<boolean>(enabled)
   const pendingRestart = enabled !== enabledAtMountRef.current
 
