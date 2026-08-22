@@ -64,9 +64,7 @@ export async function commitPtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<PtySpawn
         }
       )
     } else if (typeof ctx.result.replay === 'string' && ctx.result.replay.length > 0) {
-      // Why: the relay reattach replay is the one restore main never ingests, so without
-      // this seed its model is a mere suffix of what the renderer painted — and a later
-      // park-reveal would outrank the fuller relay replay with that fragment.
+      // Why: relay reattach replay is the only restore main never ingests; skip this seed and park-reveal would replace it with a suffix fragment.
       ctx.deps.runtime.seedHeadlessTerminal(ctx.result.id, ctx.result.replay)
     }
   }
