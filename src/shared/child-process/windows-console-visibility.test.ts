@@ -35,6 +35,16 @@ const CHILD_PROCESS_IMPORT =
 const SPAWN_CALL =
   /\b(?:spawn|spawnSync|spawnDetached|execFile|execFileSync|execFileAsync|execFileCb|exec|execSync|execAsync)\s*\(/g
 const SOURCE_ROOT = resolve(__dirname, '../..')
+/**
+ * `run-process.ts` is the chokepoint: it sets windowsHide in `resolveSpawn`,
+ * not at the call, so scanning it flags its own implementation.
+ *
+ * `fork` is deliberately absent from SPAWN_CALL. Node forwards the option to
+ * spawn at runtime, but `ForkOptions` does not declare it, so the two live
+ * sites (`daemon/daemon-init.ts`, `plugins/plugin-host-process.ts`) cannot be
+ * fixed without a cast. Recorded here rather than silently unscanned.
+ */
+const OWNER_FILE = 'shared/child-process/run-process.ts'
 
 
 
@@ -58,7 +68,15 @@ function readCallArguments(source: string, openParenIndex: number): string {
 function findOffenders(): string[] {
   const offenders = new Set<string>()
   for (const file of scanSourceTree(SOURCE_ROOT)) {
+    if (file.relativePath === OWNER_FILE) {
+      continue
+    }
     const decommented = stripComments(file.source)
+    // Resolve `import { spawn as sp }` so a renamed binding is still a spawn.
+    // The previous comment claimed this; only three names were hardcoded.
+    const aliases = [...decommented.matchAll(/\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork)\s+as\s+(\w+)/g)].map(
+      (match) => match[1]
+    )
     // The import test needs the module name, which blanking would erase; the
     // call scan needs parens inside strings neutralised. Two views, one file.
     if (!CHILD_PROCESS_IMPORT.test(decommented)) {
@@ -71,13 +89,17 @@ function findOffenders(): string[] {
       continue
     }
     const source = blankStringContents(decommented)
-    for (const match of source.matchAll(SPAWN_CALL)) {
+    const calls = aliases.length
+      ? new RegExp(`${SPAWN_CALL.source}|\\b(?:${aliases.join('|')})\\s*\\(`, 'g')
+      : SPAWN_CALL
+    for (const match of source.matchAll(calls)) {
       const args = readCallArguments(source, match.index + match[0].length - 1)
-      // `exec(command: string, …)` is a method declaration, not a spawn.
-      if (/^\(\s*\w+\s*[:?]/.test(args)) {
+      // `exec(command: string, …)` is a declaration. Require a type after the
+      // colon: `exec(useAlt ? 'a' : 'b', …)` is a call and was being skipped.
+      if (/^\(\s*\w+\s*\??\s*:\s*[A-Za-z{[(]/.test(args)) {
         continue
       }
-      if (!args.includes('windowsHide')) {
+      if (!/windowsHide\s*:\s*true/.test(args)) {
         offenders.add(file.relativePath)
       }
     }

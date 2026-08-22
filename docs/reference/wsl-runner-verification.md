@@ -37,3 +37,15 @@ ORCA_REAL_WSL_RUNNER_TEST=1 ORCA_WSL_TEST_DISTRO=Ubuntu-24.04 \
 It appends `sleep 60` to the distro's `~/.profile` and asserts the probe lane still answers inside its budget — **#14288 reproduced, not simulated** — then restores the profile. Also covers banner stripping, a script carrying quotes and `$` arriving byte-identical, WSLENV crossing, and guest cwd.
 
 Run this before shipping a change to `src/main/wsl/`. It is the only evidence that the probe lane does what the workstream claims, and it has already gone stale once against a runner change while passing in CI, because CI skips it.
+
+## Known gaps in the windowsHide guard
+
+Recorded rather than implied, because a guard that looks complete is worse than one with a documented edge.
+
+- **`fork` is not scanned.** Node forwards `windowsHide` to spawn at runtime, but `ForkOptions` does not declare it, so the two live sites — `main/daemon/daemon-init.ts` and `main/plugins/plugin-host-process.ts` — cannot be fixed without a cast. Both are console-subsystem children on Windows.
+- **The allowlist is file-granular, so an allowlisted file is blind.** ~18 of its entries are false positives (`RegExp.prototype.exec`, `provider.exec`, and files the lexer desynced on), and each carries a standing pre-approval for a real regression in that file. Those entries also cannot be retired by fixing code, so the list cannot reach zero as written. Making it call-granular is the fix.
+- **`stripComments` has no desync report.** The fail-closed check runs on already-stripped text, so a regex literal containing a slash-star can still swallow code silently. No occurrence in `src/` today.
+
+### Verifying a guard change
+
+Plant a violation and watch it fail. Every guard fix in this workstream that was verified only by reading was wrong — three consecutive attempts at an exact lexer each shipped a desync that *reduced* the offender count, which read as progress. Plant at least: a plain call, one in a template-literal-heavy file, one in a regex-heavy file, `windowsHide: false`, a ternary first argument, and a renamed import.
