@@ -234,5 +234,34 @@ export const CODEX_SESSION_OPTION_CATALOG: AgentSessionOptionCatalog = {
     // command and let its own picker apply the account-supported model.
     midSession: { kind: 'agent-picker', command: '/model', delivery: 'type' }
   },
-  unknownModelOptions: [codexEffort('xhigh')]
+  // Why: an id absent from the seed means unknown host capability, so the menu stops
+  // at the last tier every supported Codex build accepts. The higher ceilings stay
+  // model-scoped because a Codex older than 0.147 cannot run gpt-5.6 at all, which is
+  // what keeps `max`/`ultra` from ever reaching a binary that would reject them.
+  unknownModelOptions: [codexEffort('xhigh')],
+  resolveModelId: resolveCodexCatalogModelId
+}
+
+/** Why: Codex effort validity is keyed on exact seed ids, so a dated id
+ * (`gpt-5.6-luna-2026-08-01`) or the bare family alias (`luna`) would silently fall back
+ * to the `xhigh` ceiling and reject `max`/`ultra` that the host actually supports.
+ * Validation only — launch args must keep the id the caller asked for. */
+function resolveCodexCatalogModelId(modelId: string): string | undefined {
+  const ids = CODEX_SESSION_OPTION_CATALOG.models.map((model) => model.id)
+  if (ids.includes(modelId)) {
+    return modelId
+  }
+  // Longest prefix wins so `gpt-5.6-luna-2026-08-01` resolves to Luna, not a shorter family.
+  const variantOf = ids
+    .filter((id) => modelId.startsWith(`${id}-`))
+    .reduce<string | undefined>(
+      (best, id) => (!best || id.length > best.length ? id : best),
+      undefined
+    )
+  if (variantOf) {
+    return variantOf
+  }
+  const aliasOf = ids.filter((id) => id.endsWith(`-${modelId}`))
+  // An ambiguous alias must not guess a family; leaving it unresolved keeps the safe ceiling.
+  return aliasOf.length === 1 ? aliasOf[0] : undefined
 }
