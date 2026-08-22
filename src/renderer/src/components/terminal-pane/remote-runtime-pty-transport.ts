@@ -9,7 +9,6 @@ import type {
   RuntimeCreateAgentSessionResult,
   RuntimeEnsureAgentSessionResult
 } from '../../../../shared/agent-session-host-authority'
-import { agentProviderSessionForResume } from '../../../../shared/agent-session-resume'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { TabActivationIntent } from '../../../../shared/tab-activation-intent'
 import type {
@@ -2011,11 +2010,7 @@ export function createRemoteRuntimePtyTransport(
         const envToSend = options.env ?? env
         const envToDeleteToSend = options.envToDelete ?? envToDelete
         const launchConfigToSend = options.launchConfig ?? launchConfig
-        const resumeProviderSessionCandidate =
-          options.resumeProviderSession ?? resumeProviderSession
-        const resumeProviderSessionToSend = resumeProviderSessionCandidate
-          ? agentProviderSessionForResume(resumeProviderSessionCandidate)
-          : undefined
+        const resumeProviderSessionToSend = options.resumeProviderSession ?? resumeProviderSession
         const launchTokenToSend = options.launchToken ?? launchToken
         const launchAgentToSend = options.launchAgent ?? launchAgent
         const legacyCreateParams = {

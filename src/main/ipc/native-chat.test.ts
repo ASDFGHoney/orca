@@ -2,12 +2,12 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import type { IFilesystemProvider } from '../providers/types'
 import {
   registerSshFilesystemProvider,
   unregisterSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
+import { agentHookServer } from '../agent-hooks/server'
 
 const { handlers, listeners } = vi.hoisted(() => ({
   handlers: new Map<string, (_event: unknown, args?: unknown) => unknown>(),
@@ -65,7 +65,7 @@ async function invokeReadSession(args: {
   sessionId: string
   limit?: number
   transcriptPath?: string
-  providerSession?: AgentProviderSessionMetadata
+  paneKey?: string
 }): Promise<unknown> {
   registerNativeChatHandlers()
   const handler = handlers.get('nativeChat:readSession')
@@ -107,24 +107,33 @@ describe('nativeChat:readSession handler', () => {
       },
       supportsFileRangeRead: async () => true
     } as unknown as IFilesystemProvider
+    const paneKey = 'ipc-tab:11111111-1111-4111-8111-111111111111'
+    agentHookServer.ingestRemote(
+      {
+        paneKey,
+        providerSession: {
+          key: 'session_id',
+          id: 'same-session',
+          transcriptPath
+        },
+        payload: { state: 'working', prompt: '', agentType: 'claude' }
+      },
+      'ipc-owner'
+    )
     registerSshFilesystemProvider('ipc-owner', provider)
     try {
       const result = await invokeReadSession({
         agent: 'claude',
         sessionId: 'same-session',
         transcriptPath,
-        providerSession: {
-          key: 'session_id',
-          id: 'same-session',
-          transcriptPath,
-          executionHostId: 'ssh:ipc-owner'
-        }
+        paneKey
       })
       expect(result).toMatchObject({ messages: [{ id: 'remote-real' }] })
       expect(result).not.toMatchObject({ messages: [{ id: 'desktop-poison' }] })
       expect(readFile).not.toHaveBeenCalled()
     } finally {
       unregisterSshFilesystemProvider('ipc-owner')
+      agentHookServer.dropStatusEntry(paneKey)
     }
   })
   it('preserves notFound so a just-created session stays in retry/loading', async () => {

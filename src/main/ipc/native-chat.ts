@@ -4,7 +4,6 @@ import type {
   NativeChatMessage,
   NativeChatTurnLifecycle
 } from '../../shared/native-chat-types'
-import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import { clearNativeChatTranscriptCache } from '../native-chat/transcript-read-cache'
 import type { ReadTranscriptResult } from '../native-chat/transcript-reader'
 import {
@@ -27,7 +26,7 @@ export type NativeChatReadSessionArgs = {
   /** Authoritative transcript path from the agent hook (providerSession), used to
    *  locate the file when the session id no longer names it (recent Claude Code). */
   transcriptPath?: string
-  providerSession?: AgentProviderSessionMetadata
+  paneKey?: string
 }
 
 // Why: render and parse only the recent window so long transcripts do not stall
@@ -42,7 +41,7 @@ async function readSession(args: NativeChatReadSessionArgs): Promise<ReadTranscr
     agent,
     sessionId,
     transcriptPath: args.transcriptPath,
-    providerSession: args.providerSession,
+    paneKey: args.paneKey,
     limit
   })
 }
@@ -55,7 +54,7 @@ export type NativeChatSubscribeArgs = {
   sessionId: string
   /** Authoritative transcript path from the agent hook (providerSession). */
   transcriptPath?: string
-  providerSession?: AgentProviderSessionMetadata
+  paneKey?: string
   limit?: number
 }
 
@@ -174,7 +173,7 @@ async function handleSubscribe(event: IpcMainEvent, args: NativeChatSubscribeArg
   if (sender.isDestroyed()) {
     return
   }
-  const { subscriptionId, agent, sessionId, transcriptPath, providerSession } = args
+  const { subscriptionId, agent, sessionId, transcriptPath, paneKey } = args
   const limit = args.limit && args.limit > 0 ? Math.floor(args.limit) : DESKTOP_READ_WINDOW
   // Replace any prior subscription under the same id (session change/resubscribe).
   const pending = beginPendingSubscription(sender.id, subscriptionId)
@@ -184,7 +183,7 @@ async function handleSubscribe(event: IpcMainEvent, args: NativeChatSubscribeArg
     agent,
     sessionId,
     transcriptPath,
-    providerSession,
+    paneKey,
     initialLimit: limit,
     onInitialSnapshot: (messages, hasMore, _beforeOffset, error, lifecycle) => {
       if (sender.isDestroyed()) {

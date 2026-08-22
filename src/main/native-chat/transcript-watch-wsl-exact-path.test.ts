@@ -63,12 +63,6 @@ describe('exact hook path install on a Windows host with WSL (#10326)', () => {
       agent: 'codex',
       sessionId: 'wsl-sess',
       transcriptPath: ROLLOUT_LINUX,
-      providerSession: {
-        key: 'session_id',
-        id: 'wsl-sess',
-        transcriptPath: ROLLOUT_LINUX,
-        executionHostId: 'local'
-      },
       resolvePollIntervalMs: 10,
       onAppend: () => {}
     })
@@ -90,12 +84,6 @@ describe('exact hook path install on a Windows host with WSL (#10326)', () => {
       agent: 'codex',
       sessionId: 'wsl-sess',
       transcriptPath: ROLLOUT_LINUX,
-      providerSession: {
-        key: 'session_id',
-        id: 'wsl-sess',
-        transcriptPath: ROLLOUT_LINUX,
-        executionHostId: 'local'
-      },
       resolvePollIntervalMs: 10,
       onAppend: () => {}
     })

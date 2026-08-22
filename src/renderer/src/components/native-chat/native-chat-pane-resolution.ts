@@ -1,5 +1,4 @@
 import type { AgentStatusEntry, AgentType } from '../../../../shared/agent-status-types'
-import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { isNativeChatSupportedAgent } from './native-chat-availability'
 
@@ -34,7 +33,7 @@ export type NativeChatPaneResolution = {
   /** Authoritative transcript path from the hook, when reported. Preferred over
    *  reconstructing the path from sessionId (recent Claude Code diverges them). */
   transcriptPath: string | null
-  providerSession: AgentProviderSessionMetadata | null
+  connectionId: string | null
   ptyId: string | null
   paneKey: string
 }
@@ -56,7 +55,7 @@ export function resolveNativeChatSession(
     agent,
     sessionId: input.agentStatusEntry?.providerSession?.id ?? null,
     transcriptPath: input.agentStatusEntry?.providerSession?.transcriptPath ?? null,
-    providerSession: input.agentStatusEntry?.providerSession ?? null,
+    connectionId: input.agentStatusEntry?.connectionId ?? null,
     ptyId: input.ptyId,
     paneKey: input.paneKey
   }

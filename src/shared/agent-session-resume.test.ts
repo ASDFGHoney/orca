@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  agentProviderSessionForResume,
   agentProviderSessionsEqual,
   extractAgentProviderSession,
   getAgentResumeArgv,
@@ -166,59 +165,5 @@ describe('agent session resume metadata', () => {
         transcriptPath: '/tmp/bad\npath.jsonl'
       })
     ).toEqual({ key: 'session_id', id: 'ok' })
-  })
-
-  it('normalizes host ownership and keeps it in identity comparisons', () => {
-    const local = normalizeAgentProviderSession({
-      key: 'session_id',
-      id: 'same',
-      executionHostId: 'local'
-    })
-    const remote = normalizeAgentProviderSession({
-      key: 'session_id',
-      id: 'same',
-      executionHostId: 'ssh:builder'
-    })
-
-    expect(local).toMatchObject({ executionHostId: 'local' })
-    expect(remote).toMatchObject({ executionHostId: 'ssh:builder' })
-    expect(agentProviderSessionsEqual('claude', local ?? undefined, remote ?? undefined)).toBe(
-      false
-    )
-    expect(
-      normalizeAgentProviderSession({
-        key: 'session_id',
-        id: 'same',
-        executionHostId: 'invalid-host'
-      })
-    ).toEqual({ key: 'session_id', id: 'same' })
-  })
-
-  it('treats omitted legacy ownership as local during identity comparison', () => {
-    expect(
-      agentProviderSessionsEqual(
-        'claude',
-        { key: 'session_id', id: 'same' },
-        { key: 'session_id', id: 'same', executionHostId: 'local' }
-      )
-    ).toBe(true)
-    expect(
-      agentProviderSessionsEqual(
-        'claude',
-        { key: 'session_id', id: 'same' },
-        { key: 'session_id', id: 'same', executionHostId: 'ssh:builder' }
-      )
-    ).toBe(false)
-  })
-
-  it('strips host ownership at strict legacy resume seams', () => {
-    expect(
-      agentProviderSessionForResume({
-        key: 'session_id',
-        id: 'same',
-        transcriptPath: '/tmp/same.jsonl',
-        executionHostId: 'ssh:builder'
-      })
-    ).toEqual({ key: 'session_id', id: 'same', transcriptPath: '/tmp/same.jsonl' })
   })
 })

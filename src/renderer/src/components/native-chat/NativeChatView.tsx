@@ -95,7 +95,7 @@ export default function NativeChatView({
           agent={resolution.agent}
           sessionId={resolution.sessionId}
           transcriptPath={resolution.transcriptPath}
-          providerSession={resolution.providerSession}
+          connectionId={resolution.connectionId}
           isVisible={isVisible}
           targetPtyId={targetPtyId}
           terminalTabId={terminalTabId}
@@ -113,7 +113,7 @@ function NativeChatResolvedView({
   agent,
   sessionId,
   transcriptPath,
-  providerSession,
+  connectionId,
   isVisible,
   targetPtyId,
   terminalTabId,
@@ -131,7 +131,7 @@ function NativeChatResolvedView({
     agent,
     sessionId,
     transcriptPath,
-    providerSession,
+    transcriptConnectionId: connectionId,
     runtimeEnvironmentId,
     enabled: isVisible
   })

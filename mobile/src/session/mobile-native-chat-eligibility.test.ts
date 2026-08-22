@@ -60,11 +60,7 @@ describe('resolveMobileNativeChat', () => {
       agent: 'claude',
       sessionId: 'sess-1',
       transcriptPath: '/tmp/claude-real-transcript.jsonl',
-      providerSession: {
-        key: 'session_id',
-        id: 'sess-1',
-        transcriptPath: '/tmp/claude-real-transcript.jsonl'
-      }
+      paneKey: 'tab:leaf'
     })
   })
 
@@ -74,7 +70,7 @@ describe('resolveMobileNativeChat', () => {
         type: 'terminal',
         agentStatus: status({ agentType: 'codex' })
       })
-    ).toEqual({ agent: 'codex', sessionId: null, transcriptPath: null, providerSession: null })
+    ).toEqual({ agent: 'codex', sessionId: null, transcriptPath: null, paneKey: 'tab:leaf' })
   })
 
   it('admits OpenClaude with its distinct agent identity', () => {
@@ -82,7 +78,7 @@ describe('resolveMobileNativeChat', () => {
       agent: 'openclaude',
       sessionId: null,
       transcriptPath: null,
-      providerSession: null
+      paneKey: null
     })
   })
 

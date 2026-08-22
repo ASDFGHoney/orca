@@ -27,12 +27,6 @@ test('routes native-chat ownership through a headless runtime', async () => {
       agent: 'claude',
       sessionId: 'headless-session',
       transcriptPath,
-      providerSession: {
-        key: 'session_id',
-        id: 'headless-session',
-        transcriptPath,
-        executionHostId: 'local'
-      },
       limit: 40
     })
     expect(owned.result).toMatchObject({
@@ -40,25 +34,15 @@ test('routes native-chat ownership through a headless runtime', async () => {
       hasMore: false
     })
 
-    // A located session with unknown ownership must not inherit the server's filesystem.
-    const unowned = await host.client.call<{
-      error: string
-      unverifiable: boolean
-    }>('nativeChat.readSession', {
+    // A pane-scoped request with unknown ownership must not inherit the server's filesystem.
+    const unowned = await host.client.call<{ error: string }>('nativeChat.readSession', {
       agent: 'claude',
       sessionId: 'headless-session',
       transcriptPath,
-      providerSession: {
-        key: 'session_id',
-        id: 'headless-session',
-        transcriptPath
-      },
+      paneKey: 'missing-pane:11111111-1111-4111-8111-111111111111',
       limit: 40
     })
-    expect(unowned.result).toEqual({
-      error: 'Transcript unverifiable on the remote host',
-      unverifiable: true
-    })
+    expect(unowned.result).toEqual({ error: 'Transcript unverifiable on the remote host' })
   } finally {
     if (transcriptPath) {
       rmSync(transcriptPath, { force: true })

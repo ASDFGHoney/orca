@@ -56,7 +56,7 @@ const watcher = vi.hoisted(() => ({
         timestamp: number | null
       }
     ) => void
-    providerSession?: unknown
+    paneKey?: string
   },
   watching: true,
   setupSignal: undefined as AbortSignal | undefined,
@@ -163,20 +163,12 @@ function activeWatcherArgs(): NonNullable<typeof watcher.args> {
 }
 
 describe('nativeChat.readSession clientKind truncation gating', () => {
-  it('forwards the provider-session locator through runtime RPC reads', async () => {
-    const providerSession = {
-      key: 'session_id',
-      id: 's',
-      transcriptPath: '/tmp/s.jsonl',
-      executionHostId: 'ssh:builder'
-    }
+  it('forwards pane identity through runtime RPC reads', async () => {
+    const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
 
-    await readSessionHandler()(
-      { agent: 'claude', sessionId: 's', providerSession },
-      ctxWith('mobile')
-    )
+    await readSessionHandler()({ agent: 'claude', sessionId: 's', paneKey }, ctxWith('mobile'))
 
-    expect(tailRead.args).toMatchObject({ providerSession })
+    expect(tailRead.args).toMatchObject({ paneKey })
   })
   it('passes request cancellation to transcript resolution', async () => {
     const controller = new AbortController()
@@ -437,23 +429,18 @@ describe('nativeChat.readSession clientKind truncation gating', () => {
 })
 
 describe('nativeChat.subscribe initial snapshot', () => {
-  it('forwards the provider-session locator through runtime RPC subscriptions', async () => {
+  it('forwards pane identity through runtime RPC subscriptions', async () => {
     watcher.watching = true
     watcher.args = null
-    const providerSession = {
-      key: 'session_id',
-      id: 's',
-      transcriptPath: '/tmp/s.jsonl',
-      executionHostId: 'ssh:builder'
-    }
+    const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
 
     await subscribeHandler()(
-      { agent: 'claude', sessionId: 's', providerSession },
+      { agent: 'claude', sessionId: 's', paneKey },
       streamingContext('mobile'),
       vi.fn()
     )
 
-    expect(activeWatcherArgs()).toMatchObject({ providerSession })
+    expect(activeWatcherArgs()).toMatchObject({ paneKey })
   })
 
   it('preserves long assistant text across mobile stream frame types', async () => {

@@ -43,9 +43,9 @@ export function toRuntimeNativeChatErrorMessage(err: unknown): string {
  *  using this adapter (R3). Preserves whatever `subscribe` returns (sync fn on
  *  desktop, promise on the web bridge) — the hook's teardown handles both (R6). */
 const localNativeChatTransport: NativeChatSessionTransport = {
-  readSession: (agent, sessionId, limit, transcriptPath, providerSession) =>
-    providerSession
-      ? window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath, providerSession)
+  readSession: (agent, sessionId, limit, transcriptPath, paneKey) =>
+    paneKey
+      ? window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath, paneKey)
       : window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath),
   subscribe: (args, onFrame) => window.api.nativeChat.subscribe(args, onFrame)
 }
@@ -54,7 +54,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
   const target: RuntimeClientTarget = { kind: 'environment', environmentId }
 
   return {
-    readSession: async (agent, sessionId, limit, transcriptPath, providerSession) => {
+    readSession: async (agent, sessionId, limit, transcriptPath, paneKey) => {
       try {
         const result = await callRuntimeRpc<unknown>(
           target,
@@ -64,7 +64,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
             sessionId,
             limit,
             transcriptPath,
-            ...(providerSession ? { providerSession } : {})
+            paneKey
           },
           { timeoutMs: 15_000 }
         )
@@ -74,7 +74,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
       }
     },
     subscribe: (args, onFrame) => {
-      const { subscriptionId, agent, sessionId, transcriptPath, providerSession, limit } = args
+      const { subscriptionId, agent, sessionId, transcriptPath, paneKey, limit } = args
       let cancelled = false
       let receivedInitial = false
       let handleUnsubscribe: (() => void) | null = null
@@ -118,7 +118,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
                 agent,
                 sessionId,
                 transcriptPath,
-                providerSession,
+                paneKey,
                 limit
               },
               timeoutMs: 15_000

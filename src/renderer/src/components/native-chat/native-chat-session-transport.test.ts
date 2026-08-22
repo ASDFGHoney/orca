@@ -82,30 +82,19 @@ describe('getNativeChatSessionTransport — selection', () => {
     expect(nativeChatReadSession).not.toHaveBeenCalled()
   })
 
-  it('forwards the whole provider-session locator through desktop IPC', async () => {
+  it('forwards pane identity through desktop IPC', async () => {
     nativeChatReadSession.mockResolvedValue({ messages: [] })
-    const providerSession = {
-      key: 'session_id' as const,
-      id: 'sess-1',
-      transcriptPath: '/t/path',
-      executionHostId: 'ssh:builder' as const
-    }
+    const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
 
     await getNativeChatSessionTransport(null).readSession(
       'claude',
       'sess-1',
       40,
       '/t/path',
-      providerSession
+      paneKey
     )
 
-    expect(nativeChatReadSession).toHaveBeenCalledWith(
-      'claude',
-      'sess-1',
-      40,
-      '/t/path',
-      providerSession
-    )
+    expect(nativeChatReadSession).toHaveBeenCalledWith('claude', 'sess-1', 40, '/t/path', paneKey)
   })
 
   it('validates lifecycle metadata on runtime read responses', async () => {
@@ -232,15 +221,10 @@ describe('runtime subscribe', () => {
     })
   })
 
-  it('forwards the whole provider-session locator through runtime subscriptions', async () => {
+  it('forwards pane identity through runtime subscriptions', async () => {
     markRuntimeEnvironmentCompatible(ENV)
     stubSubscribe()
-    const providerSession = {
-      key: 'session_id' as const,
-      id: 'sess-1',
-      transcriptPath: '/t/path',
-      executionHostId: 'ssh:builder' as const
-    }
+    const paneKey = 'tab-1:11111111-1111-4111-8111-111111111111'
 
     getNativeChatSessionTransport(ENV).subscribe(
       {
@@ -248,7 +232,7 @@ describe('runtime subscribe', () => {
         agent: 'claude',
         sessionId: 'sess-1',
         transcriptPath: '/t/path',
-        providerSession
+        paneKey
       },
       vi.fn()
     )
@@ -257,7 +241,7 @@ describe('runtime subscribe', () => {
     expect(runtimeEnvironmentsSubscribe).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'nativeChat.subscribe',
-        params: expect.objectContaining({ providerSession })
+        params: expect.objectContaining({ paneKey })
       }),
       expect.any(Object)
     )

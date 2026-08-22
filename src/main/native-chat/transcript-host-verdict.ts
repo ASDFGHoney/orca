@@ -3,15 +3,8 @@ import { SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE } from '../providers/ssh-fi
 import { WslTranscriptFsError } from './wsl-transcript-fs-gate'
 
 export const TRANSCRIPT_UNVERIFIABLE_MESSAGE = 'Transcript unverifiable on the remote host'
-export const DEFAULT_TRANSCRIPT_UNRESOLVED_NOTICE_MS = 60_000
-export const UNRESOLVED_TRANSCRIPT_MESSAGE =
-  'No transcript found for this session on this machine. If the agent runs on a remote host its transcript lives there; otherwise it may not have been written yet.'
-export const REMOTE_UNRESOLVED_TRANSCRIPT_MESSAGE =
-  'No transcript found for this session on its remote host. It may not have been written yet.'
 
 export class TranscriptHostUnverifiableError extends Error {
-  readonly verdict = 'unverifiable' as const
-
   constructor(message = TRANSCRIPT_UNVERIFIABLE_MESSAGE) {
     super(message)
     this.name = 'TranscriptHostUnverifiableError'
@@ -34,8 +27,8 @@ export function isTranscriptHostUnverifiableError(error: unknown): boolean {
   )
 }
 
-export function transcriptUnverifiableResult(): { error: string; unverifiable: true } {
-  return { error: TRANSCRIPT_UNVERIFIABLE_MESSAGE, unverifiable: true }
+export function transcriptUnverifiableResult(): { error: string } {
+  return { error: TRANSCRIPT_UNVERIFIABLE_MESSAGE }
 }
 
 export function transcriptInitialReadErrorMessage(error: unknown): string {

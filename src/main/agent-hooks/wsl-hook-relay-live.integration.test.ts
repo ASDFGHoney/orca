@@ -63,18 +63,12 @@ describe.skipIf(process.platform === 'win32')(
       const version = readFileSync(join(BUNDLE_DIR, '.version'), 'utf8').trim()
 
       orcaServer = new AgentHookServer()
-      const events: {
-        paneKey: string
-        payload: unknown
-        connectionId: string | null
-        providerSession: unknown
-      }[] = []
+      const events: { paneKey: string; payload: unknown; connectionId: string | null }[] = []
       orcaServer.setListener((event) => {
         events.push({
           paneKey: event.paneKey,
           payload: event.payload,
-          connectionId: event.connectionId,
-          providerSession: event.providerSession
+          connectionId: event.connectionId
         })
       })
       const server = orcaServer
@@ -180,9 +174,7 @@ describe.skipIf(process.platform === 'win32')(
 
       const promptRes = await postClaude({
         hook_event_name: 'UserPromptSubmit',
-        prompt: 'live roundtrip',
-        session_id: 'wsl-live-session',
-        transcript_path: '/home/dev/.claude/projects/repo/wsl-live-session.jsonl'
+        prompt: 'live roundtrip'
       })
       expect(promptRes.status).toBe(204)
       await vi.waitFor(() => expect(events.length).toBeGreaterThan(0), { timeout: 10_000 })
@@ -192,11 +184,6 @@ describe.skipIf(process.platform === 'win32')(
       expect(working.state).toBe('working')
       expect(working.prompt).toBe('live roundtrip')
       expect(working.agentType).toBe('claude')
-      expect(events[0].providerSession).toMatchObject({
-        id: 'wsl-live-session',
-        executionHostId: 'local'
-      })
-
       const stopRes = await postClaude({ hook_event_name: 'Stop' })
       expect(stopRes.status).toBe(204)
       await vi.waitFor(

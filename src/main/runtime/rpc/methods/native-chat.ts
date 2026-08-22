@@ -173,7 +173,7 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
           agent: params.agent,
           sessionId: params.sessionId,
           transcriptPath: params.transcriptPath,
-          providerSession: params.providerSession,
+          paneKey: params.paneKey,
           limit,
           beforeOffset: params.beforeOffset
         },
@@ -235,7 +235,7 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
         agent: params.agent,
         sessionId: params.sessionId,
         transcriptPath: params.transcriptPath,
-        providerSession: params.providerSession,
+        paneKey: params.paneKey,
         initialLimit: limit,
         onInitialSnapshot: (messages, hasMore, beforeOffset, error, lifecycle) => {
           if (closed) {
