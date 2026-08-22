@@ -1,5 +1,10 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import {
+  blankStringContents,
+  readAllowlist,
+  scanSourceTree,
+  stripComments
+} from '../source-scan/source-tree-scan'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -17,64 +22,17 @@ import { describe, expect, it } from 'vitest'
  * file from it means either adding the flag or, better, routing the call
  * through the chokepoint.
  */
-const ALLOWLIST: readonly string[] = readFileSync(
-  join(__dirname, '__fixtures__', 'windows-console-visibility-allowlist.txt'),
-  'utf8'
+const ALLOWLIST: readonly string[] = readAllowlist(
+  join(__dirname, '__fixtures__', 'windows-console-visibility-allowlist.txt')
 )
-  .split('\n')
-  .map((line) => line.trim())
-  .filter((line) => line.length > 0 && !line.startsWith('#'))
 
 const CHILD_PROCESS_IMPORT =
   /from\s+['"](?:node:)?child_process['"]|require\(\s*['"](?:node:)?child_process['"]/
 const SPAWN_CALL = /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync)\s*\(/g
-const IGNORED_DIRECTORIES = new Set([
-  'node_modules',
-  'dist',
-  'out',
-  'build',
-  '.git',
-  '__fixtures__'
-])
 const SOURCE_ROOT = resolve(__dirname, '../..')
 
-/**
- * Blank out comments before scanning.
- *
- * Why: `runner.ts` documents its wrapper as `execFileSync('git', args, {...})`
- * in a doc comment. Counted as a call it can never be satisfied, so the file
- * would sit on the allowlist forever and a genuine regression in it would be
- * pre-approved -- a ratchet that only looks like one.
- */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-}
 
-function isTestFile(path: string): boolean {
-  return (
-    /\.(?:test|spec)\.tsx?$/.test(path) ||
-    /(?:test-harness|test-utils|test-setup|test-fixture|repro)/.test(path) ||
-    path.includes('/__tests__/')
-  )
-}
 
-function collectSourceFiles(root: string): string[] {
-  const found: string[] = []
-  for (const entry of readdirSync(root)) {
-    if (IGNORED_DIRECTORIES.has(entry)) {
-      continue
-    }
-    const path = join(root, entry)
-    if (statSync(path).isDirectory()) {
-      found.push(...collectSourceFiles(path))
-      continue
-    }
-    if (/\.tsx?$/.test(entry)) {
-      found.push(path)
-    }
-  }
-  return found
-}
 
 /** The call's argument text, brace-matched so a nested options literal stays whole. */
 function readCallArguments(source: string, openParenIndex: number): string {
@@ -94,18 +52,22 @@ function readCallArguments(source: string, openParenIndex: number): string {
 
 function findOffenders(): string[] {
   const offenders = new Set<string>()
-  for (const path of collectSourceFiles(SOURCE_ROOT)) {
-    const relativePath = relative(SOURCE_ROOT, path).replace(/\\/g, '/')
-    if (isTestFile(relativePath)) {
+  for (const file of scanSourceTree(SOURCE_ROOT)) {
+    const decommented = stripComments(file.source)
+    // The import test needs the module name, which blanking would erase; the
+    // call scan needs parens inside strings neutralised. Two views, one file.
+    if (!CHILD_PROCESS_IMPORT.test(decommented)) {
       continue
     }
-    const source = stripComments(readFileSync(path, 'utf8'))
-    if (!CHILD_PROCESS_IMPORT.test(source)) {
-      continue
-    }
+    const source = blankStringContents(decommented)
     for (const match of source.matchAll(SPAWN_CALL)) {
-      if (!readCallArguments(source, match.index + match[0].length - 1).includes('windowsHide')) {
-        offenders.add(relativePath)
+      const args = readCallArguments(source, match.index + match[0].length - 1)
+      // `exec(command: string, …)` is a method declaration, not a spawn.
+      if (/^\(\s*\w+\s*[:?]/.test(args)) {
+        continue
+      }
+      if (!args.includes('windowsHide')) {
+        offenders.add(file.relativePath)
       }
     }
   }
