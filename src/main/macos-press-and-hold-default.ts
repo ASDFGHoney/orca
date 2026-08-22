@@ -14,6 +14,11 @@ import { writeFileAtomically } from './codex-accounts/fs-utils'
  * `defaults write com.stablyai.orca ApplePressAndHoldEnabled -bool true` (or deletes the key), and
  * the recorded decision below keeps a later launch from overwriting that choice.
  *
+ * The `macAccentMenuEnabled` setting is the discoverable form of that escape hatch, and outranks
+ * both: once the toggle is used Orca writes the value it asks for. It writes only when the choice
+ * differs from the one recorded here, so a `defaults write` run *after* the toggle is still the
+ * newer choice and survives the next launch. See docs/reference/macos-press-and-hold.md.
+ *
  * AppKit reads the preference while the process starts, so a fresh write lands for the *next*
  * launch, not the current one.
  *
@@ -55,15 +60,27 @@ export type PressAndHoldDecision =
   | 'kept-user-preference'
   /** The key was unset and we wrote `false`. */
   | 'applied'
+  /** The accent-menu toggle has never been used, so the one-time default above owns the key. */
+  | 'no-preference'
+  /** The toggle asks for what we last wrote; a hand-run `defaults write` since then stands. */
+  | 'setting-already-applied'
+  /** We wrote the value the accent-menu toggle asks for. */
+  | 'followed-setting'
 
 /** Decisions about the domain itself. Anything else is a condition that can change by next launch. */
-const TERMINAL_DECISIONS = new Set<PressAndHoldDecision>(['applied', 'kept-user-preference'])
+const TERMINAL_DECISIONS = new Set<PressAndHoldDecision>([
+  'applied',
+  'kept-user-preference',
+  'followed-setting'
+])
 
 export type PressAndHoldRecord = {
   version: number
   decision: PressAndHoldDecision
   domain: string | null
   decidedAt: string
+  /** The `macAccentMenuEnabled` value this write was made for, absent until the toggle is used. */
+  appliedSetting?: boolean
 }
 
 export type PressAndHoldHost = {
@@ -135,7 +152,7 @@ export function pressAndHoldRecordPath(userDataPath: string): string {
   return join(userDataPath, PRESS_AND_HOLD_RECORD_FILE)
 }
 
-function parseRecord(raw: string): PressAndHoldRecord | null {
+export function parsePressAndHoldRecord(raw: string): PressAndHoldRecord | null {
   const parsed = JSON.parse(raw) as Partial<PressAndHoldRecord>
   if (parsed.version !== PRESS_AND_HOLD_RECORD_VERSION || typeof parsed.decision !== 'string') {
     return null
@@ -144,7 +161,8 @@ function parseRecord(raw: string): PressAndHoldRecord | null {
     version: PRESS_AND_HOLD_RECORD_VERSION,
     decision: parsed.decision as PressAndHoldDecision,
     domain: typeof parsed.domain === 'string' ? parsed.domain : null,
-    decidedAt: typeof parsed.decidedAt === 'string' ? parsed.decidedAt : ''
+    decidedAt: typeof parsed.decidedAt === 'string' ? parsed.decidedAt : '',
+    ...(typeof parsed.appliedSetting === 'boolean' ? { appliedSetting: parsed.appliedSetting } : {})
   }
 }
 
@@ -195,23 +213,65 @@ export function ensureMacPressAndHoldDefault(host: PressAndHoldHost): PressAndHo
   return record('applied', domain)
 }
 
+/**
+ * Apply the `macAccentMenuEnabled` toggle, which outranks the one-time default above.
+ *
+ * `accentMenuEnabled` is `undefined` until the toggle is used; that is what keeps this out of the
+ * way of a user who only ever ran `defaults write` by hand.
+ */
+export function applyMacPressAndHoldPreference(
+  host: PressAndHoldHost,
+  accentMenuEnabled: boolean | undefined
+): PressAndHoldDecision {
+  if (host.platform !== 'darwin') {
+    return 'not-macos'
+  }
+  if (accentMenuEnabled === undefined) {
+    return 'no-preference'
+  }
+
+  const previous = host.readRecord()
+  // Why compare against what we last wrote rather than against the domain: a `defaults write` run
+  // after the toggle is the newer choice, and re-asserting the toggle every launch would eat it.
+  if (previous?.appliedSetting === accentMenuEnabled) {
+    return 'setting-already-applied'
+  }
+
+  const domain = host.resolveBundleIdentifier()
+  if (!domain || !isOrcaPreferencesDomain(domain)) {
+    return 'foreign-bundle'
+  }
+  // `ApplePressAndHoldEnabled` *is* the accent-menu switch, so the toggle maps straight through.
+  if (!host.writeDomainPreference(domain, accentMenuEnabled)) {
+    return 'write-failed'
+  }
+  host.writeRecord({
+    version: PRESS_AND_HOLD_RECORD_VERSION,
+    decision: 'followed-setting',
+    domain,
+    decidedAt: host.now(),
+    appliedSetting: accentMenuEnabled
+  })
+  return 'followed-setting'
+}
+
 /** Why log: silently rewriting a macOS default for the user's login account should leave a trace,
  *  and the failure paths are otherwise invisible. The quiet decisions are the steady state. */
 const REPORTED_DECISIONS: Partial<Record<PressAndHoldDecision, string>> = {
   applied: `set ${PRESS_AND_HOLD_KEY}=false so held keys repeat; takes effect next launch`,
   'probe-failed': `could not read ${PRESS_AND_HOLD_KEY}; leaving it alone`,
-  'write-failed': `could not write ${PRESS_AND_HOLD_KEY}; held keys will not repeat`
+  'write-failed': `could not write ${PRESS_AND_HOLD_KEY}; held keys will not repeat`,
+  'followed-setting': `wrote ${PRESS_AND_HOLD_KEY} for the accent-menu setting; takes effect next launch`
 }
 
-/** Wires {@link ensureMacPressAndHoldDefault} to the real bundle, `defaults`, and userData. */
-export function applyMacPressAndHoldDefaultAtStartup(userDataPath: string): PressAndHoldDecision {
+function createPressAndHoldHost(userDataPath: string): PressAndHoldHost {
   const recordPath = pressAndHoldRecordPath(userDataPath)
-  const decision = ensureMacPressAndHoldDefault({
+  return {
     platform: process.platform,
     resolveBundleIdentifier: () => readBundleIdentifierFromExecutablePath(process.execPath),
     readRecord: () => {
       try {
-        return parseRecord(readFileSync(recordPath, 'utf8'))
+        return parsePressAndHoldRecord(readFileSync(recordPath, 'utf8'))
       } catch {
         return null
       }
@@ -228,10 +288,28 @@ export function applyMacPressAndHoldDefaultAtStartup(userDataPath: string): Pres
     readDomainPreference: readDomainPressAndHoldPreference,
     writeDomainPreference: writeDomainPressAndHoldPreference,
     now: () => new Date().toISOString()
-  })
+  }
+}
+
+function report(decision: PressAndHoldDecision): PressAndHoldDecision {
   const reported = REPORTED_DECISIONS[decision]
   if (reported) {
     console.log(`[press-and-hold] ${reported}`)
   }
   return decision
+}
+
+/** Wires {@link ensureMacPressAndHoldDefault} to the real bundle, `defaults`, and userData. */
+export function applyMacPressAndHoldDefaultAtStartup(userDataPath: string): PressAndHoldDecision {
+  return report(ensureMacPressAndHoldDefault(createPressAndHoldHost(userDataPath)))
+}
+
+/** Wires {@link applyMacPressAndHoldPreference}; called once the store loads and on every change. */
+export function applyMacPressAndHoldPreferenceFromSettings(
+  userDataPath: string,
+  accentMenuEnabled: boolean | undefined
+): PressAndHoldDecision {
+  return report(
+    applyMacPressAndHoldPreference(createPressAndHoldHost(userDataPath), accentMenuEnabled)
+  )
 }

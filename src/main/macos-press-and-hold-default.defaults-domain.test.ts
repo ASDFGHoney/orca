@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   PRESS_AND_HOLD_KEY,
+  applyMacPressAndHoldPreference,
   ensureMacPressAndHoldDefault,
   interpretDefaultsReadFailure,
   readDomainPressAndHoldPreference,
@@ -133,6 +134,19 @@ describe.skipIf(process.platform !== 'darwin')(
       }
       expect((missingKeyFailure as { status?: number }).status).toBe(1)
       expect(interpretDefaultsReadFailure(missingKeyFailure)).toBe('unset')
+    })
+
+    it('lands the accent-menu setting in the domain, in either direction', () => {
+      // The toggle maps straight through, so `on` must leave a 1 in the plist. An inversion here
+      // would hand every user the opposite of the switch they flipped.
+      for (const accentMenuEnabled of [true, false]) {
+        const domain = throwawayDomain()
+
+        expect(applyMacPressAndHoldPreference(hostFor(domain), accentMenuEnabled)).toBe(
+          'followed-setting'
+        )
+        expect(rawRead(domain)).toBe(accentMenuEnabled ? '1' : '0')
+      }
     })
 
     it('sees the key disappear again after the user deletes it', () => {

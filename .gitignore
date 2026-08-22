@@ -102,6 +102,7 @@ docs/**
 !docs/reference/git-compatibility.md
 !docs/reference/headless-linux-server.md
 !docs/reference/linux-glibc-compatibility.md
+!docs/reference/macos-press-and-hold.md
 !docs/reference/relay-grace-time-reconfiguration.md
 !docs/reference/remote-wire-compatibility.md
 !docs/reference/renderer-agent-status-performance.md

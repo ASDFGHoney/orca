@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import { RotateCw } from 'lucide-react'
 import { normalizeTerminalPadding } from '../../../../shared/terminal-padding-settings'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { Button } from '../ui/button'
@@ -7,8 +6,8 @@ import { Label } from '../ui/label'
 import { Switch } from '../ui/switch'
 import { ColorField, NumberField } from './SettingsFormControls'
 import { SearchableSetting } from './SearchableSetting'
+import { SettingsRestartRequiredNotice } from './SettingsRestartRequiredNotice'
 import { clampNumber } from '@/lib/terminal-theme'
-import { useMountedRef } from '@/hooks/useMountedRef'
 import { translate } from '@/i18n/i18n'
 
 type TerminalWindowSectionProps = {
@@ -30,22 +29,6 @@ export function TerminalWindowSection({
   // show a "Restart required" banner only when they differ.
   const blurAtMountRef = useRef<boolean>(settings.windowBackgroundBlur ?? false)
   const blurPendingRestart = (settings.windowBackgroundBlur ?? false) !== blurAtMountRef.current
-  const [relaunchingBlur, setRelaunchingBlur] = useState(false)
-  const mountedRef = useMountedRef()
-
-  const handleRelaunch = async (): Promise<void> => {
-    if (relaunchingBlur) {
-      return
-    }
-    setRelaunchingBlur(true)
-    try {
-      await window.api.app.relaunch()
-    } catch {
-      if (mountedRef.current) {
-        setRelaunchingBlur(false)
-      }
-    }
-  }
 
   return (
     <section className="space-y-4">
@@ -132,40 +115,12 @@ export function TerminalWindowSection({
           </div>
 
           {blurPendingRestart ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-yellow-500/50 bg-yellow-500/10 px-3 py-2.5">
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
-                  {translate(
-                    'auto.components.settings.TerminalWindowSection.c65bb9ce63',
-                    'Restart required'
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {translate(
-                    'auto.components.settings.TerminalWindowSection.53ce336e15',
-                    'Restart Orca to apply the window blur change.'
-                  )}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="default"
-                className="shrink-0 gap-1.5"
-                disabled={relaunchingBlur}
-                onClick={() => void handleRelaunch()}
-              >
-                <RotateCw className={`size-3 ${relaunchingBlur ? 'animate-spin' : ''}`} />
-                {relaunchingBlur
-                  ? translate(
-                      'auto.components.settings.TerminalWindowSection.907131d741',
-                      'Restarting…'
-                    )
-                  : translate(
-                      'auto.components.settings.TerminalWindowSection.8abdab9f7c',
-                      'Restart now'
-                    )}
-              </Button>
-            </div>
+            <SettingsRestartRequiredNotice
+              description={translate(
+                'auto.components.settings.TerminalWindowSection.53ce336e15',
+                'Restart Orca to apply the window blur change.'
+              )}
+            />
           ) : null}
         </SearchableSetting>
 

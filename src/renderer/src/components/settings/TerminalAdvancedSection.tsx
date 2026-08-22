@@ -28,6 +28,8 @@ type TerminalAdvancedSectionProps = {
   showWindowsPowerShellImplementation: boolean
   pwshAvailable?: boolean
   isMac: boolean
+  /** macOS *and* the desktop app, which is the only client that can apply the accent-menu opt-out. */
+  isDesktopMac?: boolean
 }
 
 function formatScrollbackRowsLabel(rows: number): string {
@@ -42,7 +44,8 @@ export function TerminalAdvancedSection({
   searchQuery,
   showWindowsPowerShellImplementation,
   pwshAvailable,
-  isMac
+  isMac,
+  isDesktopMac = false
 }: TerminalAdvancedSectionProps): React.JSX.Element {
   const scrollbackRows = normalizeDesktopTerminalScrollbackRows(settings.terminalScrollbackRows)
   const [scrollbackRowsDraft, setScrollbackRowsDraft] = useState(String(scrollbackRows))
@@ -297,7 +300,11 @@ export function TerminalAdvancedSection({
         ) : null}
 
         {isMac ? (
-          <TerminalMacKeyboardSection settings={settings} updateSettings={updateSettings} />
+          <TerminalMacKeyboardSection
+            settings={settings}
+            updateSettings={updateSettings}
+            showAccentMenuSetting={isDesktopMac}
+          />
         ) : null}
       </div>
     </section>

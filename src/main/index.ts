@@ -3,7 +3,10 @@ import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, type Tray } from 'electron'
-import { applyMacPressAndHoldDefaultAtStartup } from './macos-press-and-hold-default'
+import {
+  applyMacPressAndHoldDefaultAtStartup,
+  applyMacPressAndHoldPreferenceFromSettings
+} from './macos-press-and-hold-default'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
 import { electronApp, is } from '@electron-toolkit/utils'
 import {
@@ -2255,6 +2258,20 @@ void app.whenReady().then(async () => {
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own
   // accept records on every launch.
   initSshHostKeyStoreFile(activeOrcaProfile.dataFile)
+  // Why here and not beside the pre-ready one-time default: the accent-menu toggle lives in the
+  // store, which does not exist that early. Either way the write only lands next launch.
+  applyMacPressAndHoldPreferenceFromSettings(
+    getCanonicalUserDataPath(),
+    store.getSettings().macAccentMenuEnabled
+  )
+  store.onSettingsChanged((updates) => {
+    if ('macAccentMenuEnabled' in updates) {
+      applyMacPressAndHoldPreferenceFromSettings(
+        getCanonicalUserDataPath(),
+        updates.macAccentMenuEnabled
+      )
+    }
+  })
   // Why: must precede PTY handler registration and run in headless serve too, which returns before openMainWindow.
   neutralizeLegacyTerminalShimDir(app.getPath('userData'))
   const windowsShellPathHydration = createWindowsShellPathHydration()
