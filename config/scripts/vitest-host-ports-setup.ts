@@ -1,7 +1,7 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach } from 'vitest'
+import { afterAll, beforeEach } from 'vitest'
 import { setAppEnvironment, type AppEnvironment } from '../../src/shared/app-environment'
 import { setSecretStore } from '../../src/shared/secret-store'
 
@@ -12,9 +12,15 @@ import { setSecretStore } from '../../src/shared/secret-store'
  * that asserts on host behaviour installs its own and wins, because this runs first.
  */
 
-// One directory per worker, not per test: suites that write a file in one step and
-// read it back in the next would otherwise lose it between them.
+// One directory per test environment, not per test: suites that write a file in one
+// step and read it back in the next would otherwise lose it between them. Removed on
+// teardown — vitest builds one environment per test file, so without this a full run
+// leaves thousands of directories behind.
 const userData = mkdtempSync(join(tmpdir(), 'orca-vitest-userdata-'))
+
+afterAll(() => {
+  rmSync(userData, { recursive: true, force: true })
+})
 
 // Deliberately not a plaintext passthrough: encryptString must return something a
 // test can tell apart from its input, or a test that forgot to seal would pass.
