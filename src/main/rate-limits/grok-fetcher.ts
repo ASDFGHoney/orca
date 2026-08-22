@@ -90,8 +90,8 @@ function timestampsMatch(left: string | undefined, right: string | undefined): b
 function hasConfirmedWeeklyPeriod(config: GrokBillingConfig): boolean {
   const period = config.currentPeriod
   // Why: matching billing bounds only prove the current period IS the billing
-  // period; they say nothing about consumption (#15740). The omission reads as
-  // zero only when the payload emits no usage scalars at all.
+  // period; they say nothing about consumption (#15740), so resolveWeeklyPercent
+  // rules out the other consumption evidence before trusting this.
   return (
     period?.type === 'USAGE_PERIOD_TYPE_WEEKLY' &&
     timestampsMatch(period.start, config.billingPeriodStart) &&
@@ -99,19 +99,27 @@ function hasConfirmedWeeklyPeriod(config: GrokBillingConfig): boolean {
   )
 }
 
-// Why: proto3 JSON drops default zeros, so an omitted percent can mean zero —
-// but only in a payload that emits no usage scalars at all. #15740 ships
-// `onDemandUsed: {val: 0}`, proving this encoder does keep zeros, so there the
-// omission means "not reported" and must never render as 0%.
-function emitsExplicitUsageScalar(config: GrokBillingConfig): boolean {
-  const scalars = [
+function usageScalars(config: GrokBillingConfig): (GrokMoneyVal | undefined)[] {
+  return [
     config.onDemandCap,
     config.onDemandUsed,
     config.prepaidBalance,
     config.monthlyLimit,
     config.used
   ]
-  return scalars.some((value) => parseMoneyVal(value) !== null)
+}
+
+// Why: proto3 JSON drops default zeros, so an omitted percent can mean zero —
+// but only an explicitly-emitted zero proves this encoder keeps them. #15740
+// ships `onDemandUsed: {val: 0}`, so there the omission means "not reported"
+// and must never render as 0%. Non-zero money fields prove nothing either way,
+// so #9214/#9219 accounts that carry only those keep their genuine 0%.
+function emitsExplicitZeroScalar(config: GrokBillingConfig): boolean {
+  return usageScalars(config).some((value) => parseMoneyVal(value) === 0)
+}
+
+function reportsAnyUsageScalar(config: GrokBillingConfig): boolean {
+  return usageScalars(config).some((value) => parseMoneyVal(value) !== null)
 }
 
 function resolveWeeklyPercent(config: GrokBillingConfig): number | null {
@@ -122,11 +130,13 @@ function resolveWeeklyPercent(config: GrokBillingConfig): number | null {
   if (reported !== undefined) {
     return null
   }
-  const computed = percentOfLimit(config.used, config.monthlyLimit)
-  if (computed !== null) {
-    return computed
+  // Why: infer the dropped zero only when nothing else in the payload speaks
+  // for consumption — an explicit zero proves the encoder keeps defaults, and a
+  // computable budget pair is a real monthly number this must not shadow.
+  if (emitsExplicitZeroScalar(config) || mapMonthlyUsage(config) !== null) {
+    return null
   }
-  return !emitsExplicitUsageScalar(config) && hasConfirmedWeeklyPeriod(config) ? 0 : null
+  return hasConfirmedWeeklyPeriod(config) ? 0 : null
 }
 
 function mapWeeklyCredits(config: GrokBillingConfig): RateLimitWindow | null {
@@ -150,25 +160,15 @@ function parseMoneyVal(value: GrokMoneyVal | undefined): number | null {
   return typeof num === 'number' && Number.isFinite(num) ? num : null
 }
 
-// Why: the fetcher's only division — a zero, missing or unparseable denominator
-// yields no percentage rather than NaN/Infinity or a fabricated 0%.
-function percentOfLimit(
-  usedVal: GrokMoneyVal | undefined,
-  limitVal: GrokMoneyVal | undefined
-): number | null {
-  const used = parseMoneyVal(usedVal)
-  const limit = parseMoneyVal(limitVal)
-  if (used === null || limit === null || limit <= 0) {
-    return null
-  }
-  return Math.min(100, Math.max(0, (used / limit) * 100))
-}
-
 function mapMonthlyUsage(config: GrokBillingConfig): RateLimitWindow | null {
-  const usedPercent = percentOfLimit(config.used, config.monthlyLimit)
-  if (usedPercent === null) {
+  const limit = parseMoneyVal(config.monthlyLimit)
+  const used = parseMoneyVal(config.used)
+  // Why: a zero, missing or unparseable denominator yields no window rather
+  // than NaN/Infinity or a fabricated 0%.
+  if (limit === null || used === null || limit <= 0) {
     return null
   }
+  const usedPercent = Math.min(100, Math.max(0, (used / limit) * 100))
   const periodEnd = config.currentPeriod?.end ?? config.billingPeriodEnd
   const resetsAt = periodEnd ? Date.parse(periodEnd) : null
   return {
@@ -330,6 +330,13 @@ export async function fetchGrokRateLimits(
     if (weekly) {
       return billingUsageResult({ weekly }, config, session)
     }
+    // Why: the credits view can already carry the monthly budget pair; that pair
+    // is a monthly window, so publish it as one rather than mislabelling it
+    // weekly — and skip the redundant second request.
+    const creditsMonthly = mapMonthlyUsage(config)
+    if (creditsMonthly) {
+      return billingUsageResult({ monthly: creditsMonthly }, config, session)
+    }
     // Why: some unified-billing accounts expose only a monthly included budget;
     // their credits view omits creditUsagePercent, so read the default view.
     const fallback = await fetchMonthlyUsageFallback(session, options.signal)
@@ -341,7 +348,7 @@ export async function fetchGrokRateLimits(
     }
     // Why: an account that reports spend fields but no computable percentage is
     // not a quota-less plan — say the usage is unknown instead of implying zero.
-    return emitsExplicitUsageScalar(config) || emitsExplicitUsageScalar(fallback.config)
+    return reportsAnyUsageScalar(config) || reportsAnyUsageScalar(fallback.config)
       ? result('unavailable', 'Grok did not report a usage percentage for this account')
       : result('unavailable', 'Grok billing response did not include credit usage')
   } catch (err) {

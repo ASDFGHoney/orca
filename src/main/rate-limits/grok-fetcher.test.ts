@@ -170,7 +170,9 @@ describe('fetchGrokRateLimits', () => {
     expect(netFetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('computes the weekly percentage from used and limit when the percent is omitted', async () => {
+  // Why: the monthly budget pair is a monthly window wherever it arrives — the
+  // credits view must not relabel it 'Weekly credits'.
+  it('publishes a credits-view monthly budget pair as a monthly window without a second request', async () => {
     authState.file = freshAuthJson()
     netFetchMock.mockResolvedValueOnce(
       jsonResponse({
@@ -190,7 +192,36 @@ describe('fetchGrokRateLimits', () => {
 
     const result = await fetchGrokRateLimits()
     expect(result.status).toBe('ok')
-    expect(result.weekly?.usedPercent).toBe(25)
+    expect(result.weekly).toBeNull()
+    expect(result.monthly?.usedPercent).toBe(25)
+    expect(result.monthly?.windowMinutes).toBe(43_200)
+    expect(netFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  // Why: #9214/#9219 — non-zero money fields never prove the encoder emits
+  // default zeros, so the omitted percent still reads as the dropped zero.
+  it('still reads an omitted percentage as zero when the payload carries only non-zero money fields', async () => {
+    authState.file = freshAuthJson()
+    netFetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-07-17T19:38:56.948570+00:00',
+            end: '2026-07-24T19:38:56.948570+00:00'
+          },
+          billingPeriodStart: '2026-07-17T19:38:56.948570+00:00',
+          billingPeriodEnd: '2026-07-24T19:38:56.948570+00:00',
+          onDemandCap: { val: 100 },
+          prepaidBalance: { val: 25 },
+          isUnifiedBillingUser: true
+        }
+      })
+    )
+
+    const result = await fetchGrokRateLimits()
+    expect(result.status).toBe('ok')
+    expect(result.weekly?.usedPercent).toBe(0)
     expect(result.weekly?.windowMinutes).toBe(10_080)
     expect(netFetchMock).toHaveBeenCalledTimes(1)
   })
@@ -223,7 +254,9 @@ describe('fetchGrokRateLimits', () => {
 
     const result = await fetchGrokRateLimits()
     expect(result.status).toBe('ok')
-    expect(result.weekly?.usedPercent).toBe(25)
+    expect(result.weekly).toBeNull()
+    expect(result.monthly?.usedPercent).toBe(25)
+    expect(result.monthly?.windowMinutes).toBe(43_200)
     expect(netFetchMock).toHaveBeenCalledTimes(1)
   })
 
