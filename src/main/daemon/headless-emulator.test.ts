@@ -723,5 +723,21 @@ describe('HeadlessEmulator', () => {
       emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
       expect(() => emulator.dispose()).not.toThrow()
     })
+
+    // Why this is load-bearing: main advances a PTY's snapshot sequence only for
+    // writes that actually parsed. A silent drop reported as applied would make
+    // pty:getMainBufferSnapshot claim bytes the model never saw, and the
+    // renderer's post-restore baseline drops their redelivery as duplicates —
+    // the revealed SSH tab then keeps a scrollback hole forever (STA-4999).
+    it('reports an unparsed write once disposed', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      expect(await emulator.write('applied')).toBe(true)
+      expect(emulator.isDisposed).toBe(false)
+
+      emulator.dispose()
+
+      expect(await emulator.write('dropped')).toBe(false)
+      expect(emulator.isDisposed).toBe(true)
+    })
   })
 })

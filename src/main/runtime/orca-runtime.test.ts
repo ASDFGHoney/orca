@@ -10970,10 +10970,10 @@ describe('OrcaRuntimeService', () => {
     const originalWrite = headless!.emulator.write.bind(headless!.emulator)
     const queuedWriteStarted = makeDeferred()
     const releaseQueuedWrite = makeDeferred()
-    headless!.emulator.write = async (data: string): Promise<void> => {
+    headless!.emulator.write = async (data: string): Promise<boolean> => {
       queuedWriteStarted.resolve()
       await releaseQueuedWrite.promise
-      await originalWrite(data)
+      return await originalWrite(data)
     }
 
     try {

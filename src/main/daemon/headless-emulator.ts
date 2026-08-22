@@ -151,7 +151,7 @@ export class HeadlessEmulator {
     if (!Number.isInteger(flags) || flags <= 0) {
       return Promise.resolve()
     }
-    return this.write(`\x1b[=${flags};1u`)
+    return this.write(`\x1b[=${flags};1u`).then(() => undefined)
   }
 
   private emitQueryReply(reply: string): void {
@@ -165,14 +165,15 @@ export class HeadlessEmulator {
     this.onQueryReply = null
   }
 
-  write(data: string, opts: HeadlessEmulatorWriteOptions = {}): Promise<void> {
+  /** Resolves true only when the bytes were parsed; a disposed emulator drops them. */
+  write(data: string, opts: HeadlessEmulatorWriteOptions = {}): Promise<boolean> {
     if (this.disposed) {
-      return Promise.resolve()
+      return Promise.resolve(false)
     }
 
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
-      return Promise.resolve()
+      return Promise.resolve(true)
     }
     this.oscText.scan(data)
     // Why the sentinel: xterm parses writes async, so its zero-byte callback fires in FIFO order to open the window at exactly this chunk.
@@ -181,7 +182,7 @@ export class HeadlessEmulator {
         this.queryReplyForwardingDepth += 1
       })
     }
-    return new Promise<void>((resolve) => {
+    return new Promise<boolean>((resolve) => {
       this.terminal.write(data, () => {
         if (forwardQueryReplies) {
           this.queryReplyForwardingDepth -= 1
@@ -189,7 +190,7 @@ export class HeadlessEmulator {
         // Why: commit the mouse-mode mirror only after xterm has parsed the same bytes (snapshots combine both).
         this.mouseModes.scan(data)
         this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
-        resolve()
+        resolve(true)
       })
     })
   }
@@ -331,6 +332,10 @@ export class HeadlessEmulator {
   clearScrollback(): void {
     this.restoredOscLinks = []
     this.terminal.clear()
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed
   }
 
   dispose(): void {

@@ -12970,8 +12970,14 @@ export class OrcaRuntimeService {
     const completion = state.writeChain.then(async () => {
       // Why: the ingestion-time ownership decision is closed over this
       // chain link; async scheduling cannot retroactively change it.
-      await state.emulator.write(data, { forwardQueryReplies })
-      state.outputSequence = outputSequence
+      const applied = await state.emulator.write(data, { forwardQueryReplies })
+      // Why gated: a disposed emulator drops the write silently. Advancing the
+      // sequence anyway makes the next snapshot claim bytes the model never
+      // parsed, and the renderer's restore baseline then drops their
+      // redelivery as duplicates — a permanent hole an idle shell never heals.
+      if (applied) {
+        state.outputSequence = outputSequence
+      }
     })
     // Legacy callers remain best-effort; bounded SSH admission observes the raw receipt.
     state.writeChain = completion.catch(() => {})
