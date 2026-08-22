@@ -23318,16 +23318,18 @@ export class OrcaRuntimeService {
   ): Promise<DetectedWorktreeListResult> {
     return this.listDetectedWorktreesForResolvedRepo(
       await this.resolveRepoSelectorForConnection(repoSelector, connectionId),
-      sourceDefaultsSupported
+      sourceDefaultsSupported,
+      true
     )
   }
 
   private async listDetectedWorktreesForResolvedRepo(
     repo: Repo,
-    sourceDefaultsSupported = true,
-    // Why opt-out: the terminal sweep judges "missing" against every spelling git reported, because
-    // a spelling the collapse drops still names a live directory and killing its PTYs is final.
-    collapsePathEqualRows = true
+    sourceDefaultsSupported: boolean,
+    // Why required, not defaulted: any caller that reasons about ABSENCE (the terminal sweep, a future
+    // orphan reaper) must pass false — a spelling the collapse drops still names a live directory, and
+    // killing its PTYs is final. A default would make that mistake compile.
+    collapsePathEqualRows: boolean
   ): Promise<DetectedWorktreeListResult> {
     const store = this.requireStore()
     const settings = store.getSettings()
