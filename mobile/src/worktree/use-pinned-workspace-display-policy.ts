@@ -17,9 +17,7 @@ export function usePinnedWorkspaceDisplayPolicy(
   const sourceClientRef = useRef<RpcClient | null>(null)
 
   useEffect(() => {
-    if (!client || connState !== 'connected') {
-      sourceClientRef.current = null
-      setPolicy('single-location')
+    if (!client) {
       return
     }
     if (sourceClientRef.current !== client) {
@@ -27,6 +25,11 @@ export function usePinnedWorkspaceDisplayPolicy(
       // policy while the replacement host is still loading.
       sourceClientRef.current = client
       setPolicy('single-location')
+    }
+    // Why keep the policy while not connected: the screen deliberately keeps rendering the
+    // pre-reconnect list, so a blip must not reflow it out of the opted-in shape (#15494).
+    if (connState !== 'connected') {
+      return
     }
     let stale = false
     void client

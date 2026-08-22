@@ -26,8 +26,9 @@ function mountPolicy(connState: ConnectionState = 'connected') {
     return null
   }
 
+  let renderer!: ReturnType<typeof create>
   act(() => {
-    create(createElement(Probe, { state: connState }))
+    renderer = create(createElement(Probe, { state: connState }))
   })
 
   return {
@@ -35,6 +36,11 @@ function mountPolicy(connState: ConnectionState = 'connected') {
       return latest
     },
     requests,
+    setConnState(next: ConnectionState) {
+      act(() => {
+        renderer.update(createElement(Probe, { state: next }))
+      })
+    },
     async settle(settings: unknown) {
       await act(async () => {
         pending[0]!.resolve({ ok: true, result: { settings } })
@@ -95,5 +101,19 @@ describe('usePinnedWorkspaceDisplayPolicy', () => {
 
   it('issues no request while disconnected', () => {
     expect(mountPolicy('reconnecting').requests).toEqual([])
+  })
+
+  // The host screen keeps rendering the pre-reconnect list while amber, so dropping back to the
+  // default here would silently reflow a frozen list for an opted-in user (#15494).
+  it('keeps the opted-in policy across a reconnect blip', async () => {
+    const probe = mountPolicy()
+    await probe.settle({ showPinnedWorktreesInGroups: true })
+
+    probe.setConnState('reconnecting')
+    expect(probe.policy).toBe('duplicate-in-groups')
+
+    probe.setConnState('disconnected')
+    expect(probe.policy).toBe('duplicate-in-groups')
+    expect(probe.requests).toEqual(['settings.get'])
   })
 })

@@ -3,6 +3,7 @@ import type { PinnedWorktreeDisplayPolicy } from '../../../src/shared/worktree/p
 import type { MobileGroupMode } from './workspace-view-settings'
 import { buildSections, type Section, type Worktree } from './workspace-list-sections'
 import { DEFAULT_MOBILE_WORKSPACE_STATUSES } from './mobile-workspace-statuses'
+import { getMobileWorkspaceLineageGroupKey } from './mobile-workspace-lineage'
 
 function worktree(overrides: Partial<Worktree> = {}): Worktree {
   return {
@@ -95,31 +96,65 @@ describe('buildSections pinned display policy', () => {
     ).toEqual(['host-b'])
   })
 
-  // Desktop pulls the pinned lineage subtree into Pinned via getPinnedSectionWorktrees; mobile's
-  // Pinned section is flat, so the child stays in its natural group at depth 0 — visible once.
-  it('keeps an unpinned child of a pinned parent visible exactly once', () => {
-    const parent = worktree({
-      worktreeId: 'parent',
-      displayName: 'parent',
-      isPinned: true,
-      worktreeInstanceId: 'parent-instance'
-    })
-    const child = worktree({
-      worktreeId: 'child',
-      displayName: 'child',
-      parentWorktreeId: 'parent',
-      worktreeInstanceId: 'child-instance',
-      lineageWorktreeInstanceId: 'child-instance',
-      parentWorktreeInstanceId: 'parent-instance'
+  const lineageParent = worktree({
+    worktreeId: 'parent',
+    displayName: 'parent',
+    isPinned: true,
+    worktreeInstanceId: 'parent-instance'
+  })
+  const lineageChild = worktree({
+    worktreeId: 'child',
+    displayName: 'child',
+    parentWorktreeId: 'parent',
+    worktreeInstanceId: 'child-instance',
+    lineageWorktreeInstanceId: 'child-instance',
+    parentWorktreeInstanceId: 'parent-instance'
+  })
+
+  // Desktop pulls the pinned lineage subtree into Pinned (getPinnedSectionWorktrees). Without
+  // that, single-location strips the parent out of its group and orphans the child there.
+  it('follows a pinned parent into Pinned and keeps the child nested under it', () => {
+    const sections = sectionsFor([lineageParent, lineageChild], 'none')
+
+    expect(sectionKeysContaining(sections, 'child')).toEqual(['pinned'])
+    expect(sectionKeysContaining(sections, 'parent')).toEqual(['pinned'])
+    const pinnedRows = sections.find((section) => section.key === 'pinned')?.data ?? []
+    expect(pinnedRows.map((row) => [row.worktreeId, row.lineageDepth])).toEqual([
+      ['parent', 0],
+      ['child', 1]
+    ])
+    expect(pinnedRows[0]?.lineageChildCount).toBe(1)
+    expect(sections.some((section) => section.key === 'all')).toBe(false)
+  })
+
+  it('collapses the pinned subtree when its lineage group is collapsed', () => {
+    const sections = buildSections(
+      [lineageParent, lineageChild],
+      'manual',
+      { filterRepoIds: new Set(), hideSleeping: false, hideDefaultBranch: false },
+      '',
+      'none',
+      new Set(),
+      new Map(),
+      DEFAULT_MOBILE_WORKSPACE_STATUSES,
+      new Set([getMobileWorkspaceLineageGroupKey(lineageParent)])
+    )
+
+    expect(sectionKeysContaining(sections, 'child')).toEqual([])
+    const pinnedRows = sections.find((section) => section.key === 'pinned')?.data ?? []
+    expect(pinnedRows.map((row) => row.worktreeId)).toEqual(['parent'])
+    expect(pinnedRows[0]?.lineageCollapsed).toBe(true)
+  })
+
+  it('leaves a stale-instance child in its natural group', () => {
+    const staleChild = worktree({
+      ...lineageChild,
+      parentWorktreeInstanceId: 'recycled-parent-instance'
     })
 
-    const sections = sectionsFor([parent, child], 'none')
+    const sections = sectionsFor([lineageParent, staleChild], 'none')
 
     expect(sectionKeysContaining(sections, 'child')).toEqual(['all'])
     expect(sectionKeysContaining(sections, 'parent')).toEqual(['pinned'])
-    const childRow = sections
-      .flatMap((section) => section.data)
-      .find((row) => row.worktreeId === 'child')
-    expect(childRow?.lineageDepth ?? 0).toBe(0)
   })
 })
