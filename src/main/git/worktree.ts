@@ -33,7 +33,7 @@ import {
 import { withLocalGitCapabilityCacheForExecution } from './git-capability-state'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
 import { resolveGitDir, runWithGitReadCacheInvalidation } from './status'
-import { hasWorktreeBaseCommitRef } from './worktree-base-ref-probe'
+import { hasWorktreeBaseCommitRef, probeWorktreeBaseRefPresence } from './worktree-base-ref-probe'
 
 export type AddWorktreeResult = {
   localBaseRefRefresh?: LocalBaseRefRefreshResult
@@ -267,7 +267,12 @@ async function evaluateLocalBaseRefRefreshability(
   } catch {
     // Why (#15331): the probes above also fail when refs/heads/<branch> is simply absent; a branch that
     // does not exist yet cannot be stale, so report nothing instead of a bogus divergence warning.
-    if (!(await hasWorktreeBaseCommitRef(repoPath, parsed.fullRef, options))) {
+    // Only a proven absence suppresses: an unusable repo leaves the warning alone.
+    const presence = await probeWorktreeBaseRefPresence(
+      (args) => gitExecFileAsync(args, gitExecOptions(repoPath, options)),
+      parsed.fullRef
+    )
+    if (presence === 'absent') {
       return undefined
     }
     return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }

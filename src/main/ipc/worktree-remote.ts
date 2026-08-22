@@ -35,6 +35,7 @@ import {
 } from '../git/repo'
 import { resolveLocalGitUsername, getSshGitUsername } from '../git/git-username'
 import { hasCommitObjectViaGitExec } from '../git/commit-object-ref'
+import { probeWorktreeBaseRefPresence } from '../git/worktree-base-ref-probe'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import { getHostedReviewForBranch } from '../source-control/hosted-review'
@@ -1394,8 +1395,13 @@ async function evaluateRemoteLocalBaseRefRefreshability(
     }
   } catch {
     // Why (#15331): the probes above also fail when refs/heads/<branch> is simply absent; the relay's
-    // `worktree add -b` is about to create it, so there is nothing stale to warn about.
-    if (!(await hasCommitRefSsh(provider, repoPath, fullRef))) {
+    // `worktree add -b` is about to create it, so there is nothing stale to warn about. Only a proven
+    // absence suppresses: a dropped relay connection is not evidence the branch is missing.
+    const presence = await probeWorktreeBaseRefPresence(
+      (args) => provider.exec(args, repoPath),
+      fullRef
+    )
+    if (presence === 'absent') {
       return { refreshable: false, result: undefined }
     }
     return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
