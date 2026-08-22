@@ -157,3 +157,27 @@ and falls back. The case that would not be benign is a recycled `HANDLE` value,
 where the call could reach a different job in the same process. Fixing it
 properly means synchronising node-pty's handle table rather than adding a lock
 around one accessor, so it is deliberately left alone here.
+
+### The patch must actually be compiled
+
+node-pty prefers its upstream prebuild and only builds from source when
+`npm_config_build_from_source` is set or no prebuild exists for the platform.
+The Windows prebuild does **not** contain this patch, so a plain `pnpm install`
+on Windows yields a node-pty without the job-object exports — and
+`terminatePtyJob` then reports `unavailable` on every call, which is
+indistinguishable from a correctly degraded build.
+
+Packaging is unaffected: `rebuild-native-deps.mjs` rebuilds node-pty from source
+for Electron and restores the ConPTY runtime files that a bare `node-gyp
+rebuild` skips. The gap is the **node-runtime test environment**, which is why
+the Windows CI job rebuilds from source before running the win32 suites.
+
+`isPtyJobOwnershipAvailable()` exists for exactly this: the win32 suite asserts
+it is true before asserting anything else, so an unpatched binary fails loudly
+instead of passing every case vacuously. That guard is what caught this.
+
+`requiresPatchedNodePtySourceBuild()` in `ensure-native-runtime.mjs` still
+exempts win32, on the premise that the patch is Unix-only. That premise is now
+false, but lifting the exemption also needs `pnpm rebuild` to force a source
+build — otherwise the assertion fires and the remedy does not fix it. Left as a
+follow-up rather than changed blind.

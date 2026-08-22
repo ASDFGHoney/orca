@@ -618,6 +618,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Why: node-pty prefers its upstream prebuild, which does not contain
+      # Orca's Windows patch, so the job-object exports would be absent and the
+      # suite below would test an unpatched binary. build_from_source removes
+      # the prebuild, and the package's postinstall restores the ConPTY runtime
+      # files that a bare node-gyp rebuild would miss.
+      - name: Rebuild node-pty from patched source
+        env:
+          npm_config_build_from_source: 'true'
+        run: pnpm rebuild node-pty
+
       - name: Test Windows-specific boundaries
         run: >-
           pnpm exec vitest run --config config/vitest.config.ts
