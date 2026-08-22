@@ -29,6 +29,22 @@ describe('dispatch failure idempotency', () => {
     db.close()
   })
 
+  it('ignores a straggler heartbeat after the dispatch failed', () => {
+    const db = new OrchestrationDb(':memory:')
+    const task = db.createTask({ spec: 'work' })
+    const dispatch = db.createDispatchContext(task.id, 'term_worker')
+    // Why: recordHeartbeat filters on status='dispatched' exactly, so a widened `status != 'completed'` guard would only surface here.
+    db.recordHeartbeat(dispatch.id, '2026-05-03T00:00:00.000Z')
+    db.failDispatch(dispatch.id, 'exit')
+
+    db.recordHeartbeat(dispatch.id, '2026-05-04T00:00:00.000Z')
+
+    expect(db.getDispatchContextById(dispatch.id)?.last_heartbeat_at).toBe(
+      '2026-05-03T00:00:00.000Z'
+    )
+    db.close()
+  })
+
   it('rolls back the dispatch when the task update fails', () => {
     const db = new OrchestrationDb(':memory:')
     const sqlite = (db as unknown as { db: Database.Database }).db
