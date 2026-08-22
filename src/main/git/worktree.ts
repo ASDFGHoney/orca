@@ -265,6 +265,11 @@ async function evaluateLocalBaseRefRefreshability(
     )
     drift = parsedDrift
   } catch {
+    // Why (#15331): the probes above also fail when refs/heads/<branch> is simply absent; a branch that
+    // does not exist yet cannot be stale, so report nothing instead of a bogus divergence warning.
+    if (!(await hasWorktreeBaseCommitRef(repoPath, parsed.fullRef, options))) {
+      return undefined
+    }
     return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
   }
 
@@ -1019,18 +1024,6 @@ async function performAddWorktree(
 
   if (options.checkoutExistingBranch) {
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
-  }
-
-  // #15331: `-b` refuses an existing branch, so reaching here proves git just created localBranch at
-  // the remote base; the pre-create rev-list only failed because refs/heads/<branch> did not exist yet.
-  // SHORTCUT: local path only. The SSH equivalent (refreshLocalBaseRefForRemoteWorktreeCreate in
-  // src/main/ipc/worktree-remote.ts) evaluates pre-create too; mirror this once the warning is
-  // reported against a remote repo.
-  if (
-    localBaseRefRefresh?.status === 'skipped_not_fast_forward' &&
-    localBaseRefRefresh.localBranch === branch
-  ) {
-    localBaseRefRefresh = { ...localBaseRefRefresh, status: 'updated' }
   }
 
   if (effectiveBase) {

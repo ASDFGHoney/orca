@@ -181,7 +181,8 @@ type RemoteLocalBaseRefRefreshability =
     }
   | {
       refreshable: false
-      result: LocalBaseRefRefreshResult
+      // undefined = nothing to refresh (no local branch yet), so the caller reports no status at all.
+      result: LocalBaseRefRefreshResult | undefined
     }
 
 function appendWorktreeCreateWarning(current: string | undefined, next: string): string {
@@ -698,8 +699,7 @@ async function hasRemoteWorktreeBaseRef(
   repoPath: string,
   baseRef: string
 ): Promise<boolean> {
-  const refExists = (qualifiedRef: string) =>
-    hasRemoteTrackingRefSsh(provider, repoPath, qualifiedRef)
+  const refExists = (qualifiedRef: string) => hasCommitRefSsh(provider, repoPath, qualifiedRef)
   const resolvedBaseRef = await resolveWorktreeAddBaseRef(baseRef, refExists)
   if (resolvedBaseRef !== baseRef) {
     return true
@@ -710,8 +710,8 @@ async function hasRemoteWorktreeBaseRef(
   return hasRemoteCommitObject(provider, repoPath, baseRef)
 }
 
-// Why: hasRemoteCommitObject resolves only SHAs, not symbolic remote-tracking refs; detect those directly for the fetch-failed local fallback.
-async function hasRemoteTrackingRefSsh(
+// Why: hasRemoteCommitObject resolves only SHAs, not symbolic refs; resolve any qualified ref (remote-tracking or local head) directly.
+async function hasCommitRefSsh(
   provider: SshGitProvider,
   repoPath: string,
   ref: string
@@ -1262,7 +1262,7 @@ async function resolveRemoteWorktreeCreateBasePlan(
         baseBranchCandidate
       )
       if (remoteTrackingBase) {
-        if (await hasRemoteTrackingRefSsh(provider, repo.path, remoteTrackingBase.ref)) {
+        if (await hasCommitRefSsh(provider, repo.path, remoteTrackingBase.ref)) {
           return true
         }
         return hasRemoteWorktreeBaseRef(provider, repo.path, baseBranchCandidate)
@@ -1313,7 +1313,7 @@ export async function prefetchRemoteWorktreeCreateBase(
   }
   if (basePlan.remoteTrackingBase) {
     if (
-      (await hasRemoteTrackingRefSsh(provider, repo.path, basePlan.remoteTrackingBase.ref)) ||
+      (await hasCommitRefSsh(provider, repo.path, basePlan.remoteTrackingBase.ref)) ||
       !(await hasRemoteWorktreeBaseRef(provider, repo.path, basePlan.baseBranch))
     ) {
       await refreshRemoteTrackingBaseForWorktreeCreate(provider, repo, basePlan.remoteTrackingBase)
@@ -1333,7 +1333,7 @@ async function refreshLocalBaseRefForRemoteWorktreeCreate(
   provider: SshGitProvider,
   repoPath: string,
   remoteTrackingBase: RemoteTrackingBase
-): Promise<LocalBaseRefRefreshResult> {
+): Promise<LocalBaseRefRefreshResult | undefined> {
   const evaluation = await evaluateRemoteLocalBaseRefRefreshability(
     provider,
     repoPath,
@@ -1393,6 +1393,11 @@ async function evaluateRemoteLocalBaseRefRefreshability(
       }
     }
   } catch {
+    // Why (#15331): the probes above also fail when refs/heads/<branch> is simply absent; the relay's
+    // `worktree add -b` is about to create it, so there is nothing stale to warn about.
+    if (!(await hasCommitRefSsh(provider, repoPath, fullRef))) {
+      return { refreshable: false, result: undefined }
+    }
     return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
   }
 
@@ -1550,7 +1555,7 @@ export async function createRemoteWorktree(
   let baseFallback: WorktreeCreateBaseFallback | undefined
 
   if (remoteTrackingBase) {
-    const hasRemoteTrackingBaseRef = await hasRemoteTrackingRefSsh(
+    const hasRemoteTrackingBaseRef = await hasCommitRefSsh(
       provider,
       repo.path,
       remoteTrackingBase.ref
@@ -1700,7 +1705,7 @@ export async function createRemoteWorktree(
       await refreshRemoteTrackingBaseForWorktreeCreate(provider, repo, remoteTrackingBase)
     } catch {
       // Why: a refresh failure shouldn't block create if a usable (stale) local base ref exists; probe after registerRoot and hard-fail only when none does.
-      if (!(await hasRemoteTrackingRefSsh(provider, repo.path, remoteTrackingBase.ref))) {
+      if (!(await hasCommitRefSsh(provider, repo.path, remoteTrackingBase.ref))) {
         throw new Error(
           `Could not refresh base ref "${baseBranch}" from "${remoteTrackingBase.remote}". Check your network and try again.`
         )
