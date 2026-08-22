@@ -1,7 +1,6 @@
 import React from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { getAgentCatalog } from '@/lib/agent-catalog'
-import { filterEnabledTuiAgents } from '../../../../shared/tui-agent-selection'
+import { useLocalAgentCatalog } from '@/hooks/useLocalAgentCatalog'
 import type {
   AutomationSchedulePreset,
   AutomationWorkspaceMode
@@ -19,6 +18,7 @@ import { AutomationEditorDialogHeader } from './AutomationEditorDialogHeader'
 import { getAutomationPromptEditorRoot } from './AutomationEditorPromptEditor'
 import { AutomationEditorPromptSection } from './AutomationEditorPromptSection'
 import { AutomationEditorSettingsSidebar } from './AutomationEditorSettingsSidebar'
+import { buildAutomationAgentOptions } from './automation-agent-options'
 import { getAutomationTemplates, type AutomationTemplate } from './automation-templates'
 
 export const AUTOMATION_EDITOR_PICKER_TRIGGER_CLASS =
@@ -106,17 +106,12 @@ export function AutomationEditorDialog({
   const isHermesTarget = createTarget === 'hermes'
   const isCreateMode = !isEditing && !isEditingExternal
   const isHermesCreate = isCreateMode && isHermesTarget
-  const visibleAgents = React.useMemo(() => {
-    const enabledIds = new Set(
-      filterEnabledTuiAgents(
-        getAgentCatalog().map((agent) => agent.id),
-        settings?.disabledTuiAgents
-      )
-    )
-    return getAgentCatalog().filter(
-      (agent) => enabledIds.has(agent.id) || agent.id === draft.agentId
-    )
-  }, [draft.agentId, settings?.disabledTuiAgents])
+  const { snapshot: localAgentCatalog } = useLocalAgentCatalog({ enabled: open })
+  const visibleAgents = React.useMemo(
+    () =>
+      buildAutomationAgentOptions(draft.agentId, settings?.disabledTuiAgents, localAgentCatalog),
+    [draft.agentId, settings?.disabledTuiAgents, localAgentCatalog]
+  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
