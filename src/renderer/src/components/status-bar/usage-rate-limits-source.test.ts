@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { ProviderRateLimits, RateLimitState } from '../../../../shared/rate-limit-types'
+import { getVisibleUsageProvider, isUsageEmptyState } from './status-bar-provider-visibility'
 import { latestUsageUpdatedAt, resolveStatusBarUsageRateLimits } from './usage-rate-limits-source'
 
 vi.mock('@/i18n/i18n', () => ({
@@ -134,6 +135,85 @@ describe('resolveStatusBarUsageRateLimits', () => {
       expect(provider?.session).toBeNull()
       expect(provider?.weekly).toBeNull()
     }
+  })
+
+  it('does not invent bars for providers the viewer never set up (#15804)', () => {
+    const local = localState()
+    local.minimax = null
+    local.opencodeGo = {
+      provider: 'opencode-go',
+      session: null,
+      weekly: null,
+      monthly: null,
+      updatedAt: 2_000,
+      error: 'Session cookie not configured',
+      status: 'unavailable'
+    }
+    local.minimaxCookieConfigured = false
+
+    const resolved = resolveStatusBarUsageRateLimits(local, {
+      kind: 'remote-unreachable',
+      ownerLabel: 'Mac Mini'
+    })
+    const settings = {
+      antigravityUsageConfigured: false,
+      minimaxCookieConfigured: resolved.minimaxCookieConfigured,
+      grokAuthConfigured: resolved.grokAuthConfigured
+    }
+
+    // Why: an 'error' snapshot reads as "configured" to the visibility gate, so
+    // stamping unconfigured providers pins bars the user never enabled.
+    expect(resolved.minimax).toBeNull()
+    expect(resolved.opencodeGo?.status).toBe('unavailable')
+    expect(getVisibleUsageProvider('minimax', resolved.minimax, settings)).toBeNull()
+    expect(getVisibleUsageProvider('opencode-go', resolved.opencodeGo, settings)).toBeNull()
+    // Grok is configured locally, so its bar survives carrying the honest verdict.
+    expect(getVisibleUsageProvider('grok', resolved.grok, settings)?.error).toBe(
+      'Usage unavailable — cannot reach Mac Mini'
+    )
+  })
+
+  it('leaves the usage setup CTA reachable when nothing is configured (#15804)', () => {
+    const unconfigured = localState()
+    for (const key of PROVIDER_KEYS) {
+      unconfigured[key] = {
+        provider: key === 'opencodeGo' ? 'opencode-go' : key,
+        session: null,
+        weekly: null,
+        updatedAt: 2_000,
+        error: 'Not signed in',
+        status: 'unavailable'
+      }
+    }
+    unconfigured.minimaxCookieConfigured = false
+    unconfigured.grokAuthConfigured = false
+
+    const resolved = resolveStatusBarUsageRateLimits(unconfigured, {
+      kind: 'remote-unreachable',
+      ownerLabel: 'Mac Mini'
+    })
+
+    // Why: synthesized 'error' snapshots count as configured providers, which
+    // would silently swallow the "connect an account" empty state.
+    expect(
+      isUsageEmptyState(
+        {
+          claude: resolved.claude,
+          codex: resolved.codex,
+          gemini: resolved.gemini,
+          opencodeGo: resolved.opencodeGo,
+          kimi: resolved.kimi,
+          antigravity: resolved.antigravity,
+          minimax: resolved.minimax,
+          grok: resolved.grok
+        },
+        {
+          antigravityUsageConfigured: false,
+          minimaxCookieConfigured: false,
+          grokAuthConfigured: false
+        }
+      )
+    ).toBe(true)
   })
 })
 

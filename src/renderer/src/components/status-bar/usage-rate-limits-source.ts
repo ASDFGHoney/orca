@@ -1,6 +1,10 @@
 import type { ProviderRateLimits, RateLimitState } from '../../../../shared/rate-limit-types'
 import { translate } from '@/i18n/i18n'
-import { createPendingProviderSnapshot } from './status-bar-provider-visibility'
+import {
+  createPendingProviderSnapshot,
+  hasUsageData,
+  isProviderConfigured
+} from './status-bar-provider-visibility'
 
 /**
  * Which machine's usage the status-bar badges describe (#15798).
@@ -71,6 +75,32 @@ function createUnreachableProviderSnapshot(
   }
 }
 
+/**
+ * Blank every bar the unreachable owner can no longer vouch for, without
+ * inventing bars it never had (#15804).
+ *
+ * Why the gate: a locally blank + unconfigured provider has no numbers to leak
+ * and is no evidence the *server* has it set up. Stamping it 'error' reads as
+ * "configured" to `isProviderConfigured`, which would pin MiniMax/OpenCode Go
+ * bars on users who never enabled them and suppress the usage setup CTA.
+ */
+function markProvidersUnreachable(
+  local: RateLimitState,
+  ownerLabel: string
+): Pick<RateLimitState, UsageProviderKey> {
+  const replaced = {} as Pick<RateLimitState, UsageProviderKey>
+  for (const key of USAGE_PROVIDER_KEYS) {
+    const localProvider = local[key]
+    const blankAndUnconfigured =
+      localProvider == null ||
+      (!isProviderConfigured(localProvider) && !hasUsageData(localProvider))
+    replaced[key] = blankAndUnconfigured
+      ? localProvider
+      : createUnreachableProviderSnapshot(USAGE_PROVIDER_IDS[key], ownerLabel)
+  }
+  return replaced
+}
+
 function normalizeFlag(remoteValue: boolean | undefined, localValue: boolean): boolean {
   return typeof remoteValue === 'boolean' ? remoteValue : localValue
 }
@@ -105,14 +135,12 @@ export function resolveStatusBarUsageRateLimits(
   if (remoteUsage.kind === 'remote') {
     return adoptRemoteRateLimits(localRateLimits, remoteUsage.rateLimits)
   }
-  // Why: never spread the local provider here. Keeping any local window would
-  // render the viewer's percentages under the server's name — the exact
-  // "looks correct, is wrong" failure #15798 reports.
+  // Why: never keep a local window here. Rendering the viewer's percentages
+  // under the server's name is the exact "looks correct, is wrong" failure
+  // #15798 reports.
   const providers =
     remoteUsage.kind === 'remote-unreachable'
-      ? replaceProviders((providerId) =>
-          createUnreachableProviderSnapshot(providerId, remoteUsage.ownerLabel)
-        )
+      ? markProvidersUnreachable(localRateLimits, remoteUsage.ownerLabel)
       : replaceProviders(createPendingProviderSnapshot)
   return { ...localRateLimits, ...providers }
 }

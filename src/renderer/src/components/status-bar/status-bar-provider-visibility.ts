@@ -32,7 +32,7 @@ type UsageProviderSnapshots = {
 
 type UsageProviderId = ProviderRateLimits['provider']
 
-function hasUsageData(provider: ProviderRateLimits): boolean {
+export function hasUsageData(provider: ProviderRateLimits): boolean {
   return Boolean(
     provider.session ||
     provider.weekly ||
