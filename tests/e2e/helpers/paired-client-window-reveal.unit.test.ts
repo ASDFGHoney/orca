@@ -32,8 +32,6 @@ describe('assertPairedClientWindowRevealed', () => {
     ).toThrow(/no BrowserWindow/)
   })
 
-  // Why: a window that stays hidden parks runtime subscriptions, so every later interaction fails
-  // with an unrelated actionability timeout unless the reveal itself is the failure.
   it('rejects a window that stays hidden after show()', () => {
     expect(() =>
       assertPairedClientWindowRevealed({

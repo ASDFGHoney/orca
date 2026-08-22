@@ -1,18 +1,8 @@
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 
 /**
- * Paired clients launch with ORCA_E2E_HEADLESS=1, so their main window is created with
- * `show: false` and never revealed. That is real product behaviour, not a harness artifact: a
- * never-shown window keeps `document.visibilityState` at 'hidden', so the renderer parks its
- * runtime subscriptions (`installWindowVisibilitySubscriptionParking`) and stops the runtime
- * heartbeat (`installWindowVisibilityInterval`), which leaves host-scoped UI such as the Add
- * Project dialog reporting a disconnected host with its actions disabled — exactly what a user who
- * cannot see the window gets.
- *
- * A spec that drives that window with Playwright is asserting against a state the product never
- * presents for interaction. Reveal the client first; leave it hidden only when the hidden state is
- * what the spec covers (parked panes, park/reveal interactivity). Revealing the Playwright-driven
- * client says nothing about the HUB, so hidden-window host topologies keep their coverage.
+ * Reveals a paired client's window so its renderer unparks runtime subscriptions. Leave the client
+ * hidden only when the hidden state is what the spec covers.
  */
 export type PairedClientWindowRevealReport = {
   isVisible: boolean
@@ -53,8 +43,8 @@ export async function revealPairedClientWindow(
     }
   })
   assertPairedClientWindowRevealed(report)
-  // Why: the renderer resumes parked work from `visibilitychange`, so a caller that clicks before
-  // the reveal reaches the document races a still-parked host list.
+  // Why: the renderer unparks on `visibilitychange`; clicking before it lands races a parked
+  // host list.
   await client.page.waitForFunction(() => document.visibilityState === 'visible', null, {
     timeout: 30_000
   })

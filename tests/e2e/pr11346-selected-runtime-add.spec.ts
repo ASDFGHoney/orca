@@ -21,6 +21,11 @@ import {
 } from './pr11346-selected-runtime-identity-oracle'
 
 async function selectRuntimeHost(page: Page, runtimeName: string): Promise<Locator> {
+  const crashDialog = page.getByRole('dialog', { name: /recoverable UI error/i })
+  if (await crashDialog.isVisible()) {
+    // Why: same-ID collision fixtures intentionally exceed terminal-workbench invariants.
+    await crashDialog.getByRole('button', { name: /Don't Send/i }).click()
+  }
   await page
     .getByRole('button', { name: /Add Project/i })
     .first()
@@ -102,10 +107,8 @@ async function runSelectedRuntimeAddJourney(
 
   try {
     const measurements: Record<string, number> = {}
-    // Why: the client is the Playwright-driven surface in both topologies. A never-shown client
-    // keeps document.visibilityState 'hidden', which parks its runtime subscriptions and leaves the
-    // Add Project host actions disabled — a state no user can click through. The hidden-window
-    // parity under test is the HUB's, asserted above and again after the journey.
+    // Why: the client is the Playwright-driven surface in both topologies; the hidden-window
+    // parity under test is the HUB's.
     expect(await revealPairedClientWindow(client)).toMatchObject({
       isVisible: true,
       wasVisible: false
@@ -730,8 +733,7 @@ async function runSelectedRuntimeAddJourney(
       await expect(client.page.getByText(projectName, { exact: false }).first()).toBeVisible()
     }
     expect(await client.getDirectSshAttemptTargetIds()).toEqual([])
-    // Why: revealing the client must not leak into the HUB; the hidden topology only earns its name
-    // while the runtime host serves every Add Project path from a window it never showed.
+    // Why: revealing the client must not leak into the HUB's window visibility.
     expect(
       await electronApp.evaluate(({ BrowserWindow }) =>
         BrowserWindow.getAllWindows().some((window) => window.isVisible())
