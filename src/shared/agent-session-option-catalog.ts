@@ -85,7 +85,9 @@ export function withConsentGatedSeedModels(
   const missing = catalog.models.filter(
     (model) => gated.includes(model.id) && !discovered.some((live) => live.id === model.id)
   )
-  return [...missing, ...discovered]
+  // Why: consumers read `isDefault` on an enriched list as the probe's answer, and a row the
+  // probe never listed cannot name the account's default.
+  return [...missing.map(({ isDefault: _seeded, ...model }) => model), ...discovered]
 }
 
 /** Discovery decides membership; the seed keeps its option menus, which discovery never carries.

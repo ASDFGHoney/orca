@@ -139,6 +139,19 @@ describe('agent session option catalog', () => {
     expect(merged.find(({ id }) => id === 'fable')?.options.map(({ id }) => id)).toEqual(['effort'])
   })
 
+  it('strips `isDefault` from a re-added gated row so it cannot pose as the probed default', () => {
+    const claude = getAgentSessionOptionCatalog('claude')!
+    const catalog = {
+      ...claude,
+      models: [{ id: 'fable', label: 'Fable', isDefault: true, options: [] }]
+    }
+    const merged = withConsentGatedSeedModels(catalog, [
+      { id: 'sonnet', label: 'Sonnet', options: [] }
+    ])
+    expect(merged.map(({ id }) => id)).toEqual(['fable', 'sonnet'])
+    expect(merged[0].isDefault).toBeUndefined()
+  })
+
   it('leaves a probe that already lists Fable untouched', () => {
     const catalog = getAgentSessionOptionCatalog('claude')!
     const discovered = [
