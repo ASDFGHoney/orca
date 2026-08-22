@@ -98,7 +98,7 @@ describe('pruneLineageForMissingRepoWorktrees', () => {
     }
     const store = createStore(worktreeLineageById, workspaceLineageByChildKey, metaById)
 
-    pruneLineageForMissingRepoWorktrees(store as never, repo, [])
+    pruneLineageForMissingRepoWorktrees(store as never, repo, [], 'linux')
 
     expect(store.removeWorktreeLineage).not.toHaveBeenCalled()
     expect(store.removeWorkspaceLineage).not.toHaveBeenCalled()
@@ -128,22 +128,27 @@ describe('pruneLineageForMissingRepoWorktrees', () => {
     }
     const store = createStore(worktreeLineageById, workspaceLineageByChildKey, metaById)
 
-    pruneLineageForMissingRepoWorktrees(store as never, repo, [
-      {
-        path: '/repo/live-parent',
-        head: 'a',
-        branch: 'main',
-        isBare: false,
-        isMainWorktree: false
-      },
-      {
-        path: '/repo/live-child',
-        head: 'b',
-        branch: 'child',
-        isBare: false,
-        isMainWorktree: false
-      }
-    ])
+    pruneLineageForMissingRepoWorktrees(
+      store as never,
+      repo,
+      [
+        {
+          path: '/repo/live-parent',
+          head: 'a',
+          branch: 'main',
+          isBare: false,
+          isMainWorktree: false
+        },
+        {
+          path: '/repo/live-child',
+          head: 'b',
+          branch: 'child',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ],
+      'linux'
+    )
 
     expect(store.removeWorktreeLineage).toHaveBeenCalledWith(missingChildId)
     expect(store.removeWorktreeLineage).not.toHaveBeenCalledWith(liveChildId)

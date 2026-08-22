@@ -40,7 +40,9 @@ export function pruneLineageForMissingRepoWorktrees(
   store: Store,
   repo: Repo,
   gitWorktrees: GitWorktreeInfo[],
-  platform: NodeJS.Platform = process.platform
+  // Why required: rows can come from an SSH or WSL host, and silently defaulting to the desktop's
+  // rules would apply macOS `/private/tmp` remapping to a remote host's paths.
+  platform: NodeJS.Platform
 ): void {
   if (
     typeof store.getAllWorktreeLineage !== 'function' ||
