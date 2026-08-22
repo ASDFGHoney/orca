@@ -97,6 +97,12 @@ describe('orchestration worker launch preferences', () => {
       rejected: ['future-effort']
     },
     {
+      // Bare version alias; OpenAI routes it to Sol.
+      model: 'gpt-5.6',
+      accepted: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      rejected: ['future-effort']
+    },
+    {
       // Dated variant published after this Orca build.
       model: 'gpt-5.6-luna-2026-08-01',
       accepted: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],

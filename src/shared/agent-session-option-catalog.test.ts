@@ -30,6 +30,8 @@ describe('agent session option catalog', () => {
     expect(findCatalogModelByRequestedId(codex, 'sol')?.id).toBe('gpt-5.6-sol')
     expect(findCatalogModelByRequestedId(codex, 'gpt-5.6-luna-2026-08-01')?.id).toBe('gpt-5.6-luna')
     expect(findCatalogModelByRequestedId(codex, 'gpt-5.6-sol')?.id).toBe('gpt-5.6-sol')
+    // The bare version routes to Sol, matching the usage pricing table.
+    expect(findCatalogModelByRequestedId(codex, 'gpt-5.6')?.id).toBe('gpt-5.6-sol')
     // An id that matches no family keeps the conservative unknown-model ceiling.
     expect(findCatalogModelByRequestedId(codex, 'future-codex-model')).toBeUndefined()
     // Exact matching must stay exact: it also gates launch-arg defaulting.

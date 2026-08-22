@@ -242,6 +242,11 @@ export const CODEX_SESSION_OPTION_CATALOG: AgentSessionOptionCatalog = {
   resolveModelId: resolveCodexCatalogModelId
 }
 
+// Why: a bare version routes to one tier of its family, which no prefix or suffix rule can
+// derive (`gpt-5.6` is a prefix of all three 5.6 rows). Same routing the usage pricing table
+// encodes; match exactly, since a `gpt-5.6-` prefix rule would swallow the tier ids.
+const CODEX_BARE_VERSION_ALIASES: Record<string, string> = { 'gpt-5.6': 'gpt-5.6-sol' }
+
 /** Why: Codex effort validity is keyed on exact seed ids, so a dated id
  * (`gpt-5.6-luna-2026-08-01`) or the bare family alias (`luna`) would silently fall back
  * to the `xhigh` ceiling and reject `max`/`ultra` that the host actually supports.
@@ -250,6 +255,10 @@ function resolveCodexCatalogModelId(modelId: string): string | undefined {
   const ids = CODEX_SESSION_OPTION_CATALOG.models.map((model) => model.id)
   if (ids.includes(modelId)) {
     return modelId
+  }
+  const bareVersionOf = CODEX_BARE_VERSION_ALIASES[modelId]
+  if (bareVersionOf) {
+    return bareVersionOf
   }
   // Longest prefix wins so `gpt-5.6-luna-2026-08-01` resolves to Luna, not a shorter family.
   const variantOf = ids
