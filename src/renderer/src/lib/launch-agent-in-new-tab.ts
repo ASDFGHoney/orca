@@ -157,11 +157,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       promptDelivery,
       pastePromptAfterReady: pasteDraftAfterLaunch,
       submitPastedPrompt,
-      // Why: the raw param is undefined on ordinary UI launches, and omitting it
-      // lets a headless host apply its own defaults — so a client configured for
-      // Manual gets the host's YOLO default (#15373). Send the client-resolved
-      // value, empty string included: the host treats present-but-empty as an
-      // explicit no-args override.
+      // Why: the raw param is undefined on ordinary UI launches, so omission let a headless host apply its
+      // own YOLO default (#15373). Send the resolved value — present-but-empty is an explicit no-args override.
       agentArgs: effectiveAgentArgs,
       // Why: omission means terminal locally, but would let a paired host apply
       // its own default; send the client's resolved terminal choice explicitly.
@@ -195,6 +192,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     ...(startupPlan.env ? { env: startupPlan.env } : {}),
     launchConfig: startupPlan.launchConfig,
     launchAgent: agent,
+    // Why: the local launch command already bakes in the resolved args, so this override only records explicit caller intent.
     ...(agentArgs !== undefined ? { agentArgsOverride: agentArgs } : {}),
     ...(startupPlan.sessionOptions ? { sessionOptions: startupPlan.sessionOptions } : {}),
     ...(startupPlan.startupCommandDelivery

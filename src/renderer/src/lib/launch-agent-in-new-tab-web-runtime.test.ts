@@ -93,8 +93,7 @@ describe('launchAgentInNewTab paired web runtime', () => {
       activate: true,
       agentSessionKind: 'fresh',
       agent: 'claude',
-      // Why: an unconfigured client still resolves the default explicitly, so
-      // the host applies this client's launch defaults rather than its own.
+      // Why: the client resolves its default explicitly so the host cannot apply its own.
       agentArgs: '--dangerously-skip-permissions',
       viewMode: 'terminal'
     })
