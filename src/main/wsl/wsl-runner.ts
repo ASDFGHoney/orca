@@ -226,7 +226,11 @@ export async function runWslProcess(spec: WslSpec): Promise<WslResult> {
   const wantsEnvironment = spec.lane === 'probe' || spec.script !== undefined
   // Leave the command at least a third of the budget: a probe that eats it all
   // turns a healthy command into a spurious timeout.
-  const probeBudgetMs = Math.max(1, Math.floor((deadline - Date.now()) * (2 / 3)))
+  // Cap the probe at half the budget and at 4s: a 5s caller was giving the
+  // probe 3333ms and its own command 1667ms, tighter than the 5s it had before
+  // the runner existed, which is how a cold distro read as "not installed".
+  const remainingForProbe = deadline - Date.now()
+  const probeBudgetMs = Math.max(1, Math.min(4_000, Math.floor(remainingForProbe / 2)))
   const environment = wantsEnvironment
     ? await getWslGuestEnvironment(spec.distro, probeBudgetMs)
     : null

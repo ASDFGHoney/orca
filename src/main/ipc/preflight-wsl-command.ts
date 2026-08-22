@@ -14,6 +14,11 @@ export async function runPreflightCommandInWsl(
     distro: target.distro,
     lane: 'probe',
     script: command,
+    // Why degrade: every caller collapses a throw into "not installed" or
+    // "not authenticated" (isCommandAvailable, isGhAuthenticated). Refusing
+    // here turns a slow distro into a confident wrong answer -- #9725 through
+    // the other door, on the branch built to close it.
+    allowDegradedEnvironment: true,
     timeoutMs
   })
   // runWslProcess resolves on a timeout and on a non-zero exit; the caller's

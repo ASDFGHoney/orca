@@ -49,6 +49,9 @@ export async function execLocalPreflightCommand(
   const commandPromise = execFileAsync(command, args, {
     encoding: 'utf-8',
     timeout: PREFLIGHT_COMMAND_TIMEOUT_MS,
+    // Preflight probes console-subsystem binaries (git, gh, node); without this
+    // each one flashes a console and steals foreground on Windows (#10488).
+    windowsHide: true,
     ...(env ? { env } : {})
   }) as Promise<PreflightCommandResult>
 

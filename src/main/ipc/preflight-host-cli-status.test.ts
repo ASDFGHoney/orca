@@ -152,11 +152,13 @@ describe('preflight', () => {
     })
     expect(execFileAsyncMock).toHaveBeenNthCalledWith(4, 'gh', ['auth', 'status'], {
       encoding: 'utf-8',
-      timeout: 5000
+      timeout: 5000,
+      windowsHide: true
     })
     expect(execFileAsyncMock).toHaveBeenNthCalledWith(5, 'glab', ['auth', 'status'], {
       encoding: 'utf-8',
-      timeout: 5000
+      timeout: 5000,
+      windowsHide: true
     })
   })
 
@@ -329,6 +331,7 @@ describe('preflight', () => {
     expect(execFileAsyncMock).toHaveBeenNthCalledWith(2, 'gh', ['--version'], {
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
       env: expect.objectContaining({
         Path: 'C:\\Windows\\System32;C:\\Program Files\\GitHub CLI'
       })
