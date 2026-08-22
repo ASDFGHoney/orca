@@ -60,7 +60,10 @@ export async function execCommandInWsl(
   command: string
 ): Promise<PreflightCommandResult> {
   const commandPromise = runPreflightCommandInWsl(target, command, PREFLIGHT_COMMAND_TIMEOUT_MS)
-  return withPreflightTimeout('wsl.exe', commandPromise)
+  // Label only (runPreflightCommandInWsl owns the actual wsl.exe invocation) —
+  // not the literal 'wsl.exe' so the wsl-invocation-boundary guard doesn't
+  // mistake this string for a spawn site.
+  return withPreflightTimeout('wsl command', commandPromise)
 }
 
 export async function isCommandAvailable(
