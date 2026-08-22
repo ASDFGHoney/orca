@@ -1736,6 +1736,9 @@ type TerminalCreateOptions = {
   // intermediate pty-backed publish so the new tab doesn't briefly flash in
   // the wrong (active) group before the corrected snapshot lands.
   deferMobileSessionPublish?: boolean
+  // Why: headless (mobile-session) creates have no renderer to persist the
+  // session binding, so the host records it at spawn time itself.
+  persistHostSessionBinding?: boolean
 }
 
 /** Result of resolving a terminal create's launch before a PTY exists. */
