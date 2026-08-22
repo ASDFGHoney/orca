@@ -1,4 +1,5 @@
 import type { WorkspaceStatusDefinition } from '../../../src/shared/worktree/types'
+import type { PinnedWorktreeDisplayPolicy } from '../../../src/shared/worktree/pinned-display-policy'
 import {
   DEFAULT_MOBILE_WORKSPACE_STATUSES,
   coerceMobileWorkspaceStatuses,
@@ -129,15 +130,21 @@ export function buildSections(
   pinnedIds: Set<string>,
   repoIdsByName: ReadonlyMap<string, string> = new Map(),
   workspaceStatuses: readonly WorkspaceStatusDefinition[] = DEFAULT_MOBILE_WORKSPACE_STATUSES,
-  collapsedGroups: ReadonlySet<string> = new Set()
+  collapsedGroups: ReadonlySet<string> = new Set(),
+  pinnedDisplayPolicy: PinnedWorktreeDisplayPolicy = 'single-location'
 ): Section[] {
   const filtered = filterWorktrees(worktrees, filters, search)
   const sorted = sortWorktrees(filtered, sortMode)
 
   const pinned = sorted.filter((w) => isWorktreePinned(w, pinnedIds))
-  // Why: desktop treats Pinned as an overlay. Keeping pinned rows in canonical
-  // groups preserves exact cross-surface order and literal section counts.
-  const canonicalGroupWorktrees = sorted
+  // Why single-location by default: hosts predating showPinnedWorktreesInGroups omit it (#15494).
+  // Why row identity and not pinnedIds: a device-local pin is keyed on the bare worktreeId, which
+  // would also strip a same-id workspace on another host out of its group.
+  const pinnedRowIdentities = new Set(pinned.map(getWorktreeRowIdentity))
+  const canonicalGroupWorktrees =
+    pinnedDisplayPolicy === 'duplicate-in-groups'
+      ? sorted
+      : sorted.filter((w) => !pinnedRowIdentities.has(getWorktreeRowIdentity(w)))
 
   const sections: Section[] = []
   if (pinned.length > 0) {

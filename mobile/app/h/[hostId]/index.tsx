@@ -94,6 +94,7 @@ import {
   type Worktree
 } from '../../../src/worktree/workspace-list-sections'
 import { useWorkspaceSections } from '../../../src/worktree/use-workspace-sections'
+import { usePinnedWorkspaceDisplayPolicy } from '../../../src/worktree/use-pinned-workspace-display-policy'
 import { getMobileWorkspaceLineageGroupKey } from '../../../src/worktree/mobile-workspace-lineage'
 import { areWorktreeListsEqual } from '../../../src/worktree/worktree-list-snapshot'
 import { WorktreeCatalogSnapshotClient } from '../../../src/worktree/worktree-catalog-snapshot-client'
@@ -757,6 +758,7 @@ export function HostScreen({
     (item: Worktree) => toggleCollapsed(getMobileWorkspaceLineageGroupKey(item)),
     [toggleCollapsed]
   )
+  const pinnedDisplayPolicy = usePinnedWorkspaceDisplayPolicy(client, connState)
   const { sections, rawSections, uniqueRepos, uniqueRepoColors } = useWorkspaceSections({
     displayWorktrees,
     sortMode,
@@ -767,7 +769,8 @@ export function HostScreen({
     repoIdsByName,
     repoColorsByName,
     collapsedGroups,
-    workspaceStatuses
+    workspaceStatuses,
+    pinnedDisplayPolicy
   })
   const existingWorktreePaths = useMemo(() => worktrees.map((w) => w.path), [worktrees])
 
