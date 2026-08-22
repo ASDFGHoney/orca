@@ -23,13 +23,31 @@ export type SecretStore = {
   describeUnavailable(): string | null
 }
 
-let current: SecretStore | null = null
+/**
+ * Why a global symbol and not a module-level `let`: `vi.resetModules()` gives the
+ * re-imported graph a fresh copy of this module, so a store installed before the reset
+ * would silently read back as uninstalled — and `getSecretStore()` throws on that.
+ * Anchoring to the realm keeps one instance per process however often the module
+ * registry is rebuilt.
+ */
+const SLOT = Symbol.for('orca.host.secretStore')
+
+type Slot = { [SLOT]?: SecretStore | null }
+
+function slot(): Slot {
+  return globalThis as unknown as Slot
+}
+
+function read(): SecretStore | null {
+  return slot()[SLOT] ?? null
+}
 
 export function setSecretStore(store: SecretStore): void {
-  current = store
+  slot()[SLOT] = store
 }
 
 export function getSecretStore(): SecretStore {
+  const current = read()
   if (!current) {
     throw new Error(
       'SecretStore not initialized — call setSecretStore() during startup before reading or writing secrets'
@@ -39,10 +57,10 @@ export function getSecretStore(): SecretStore {
 }
 
 export function hasSecretStore(): boolean {
-  return current !== null
+  return read() !== null
 }
 
 /** Test-only: drop the installed store so suites do not leak one across files. */
 export function _resetSecretStoreForTests(): void {
-  current = null
+  slot()[SLOT] = null
 }
