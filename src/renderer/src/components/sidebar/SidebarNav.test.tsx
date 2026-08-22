@@ -432,14 +432,17 @@ describe('SidebarNav', () => {
   it('places the worktree palette search above the sidebar nav rows', async () => {
     const container = await renderSidebarNav()
     const nav = container.querySelector('[data-contextual-tour-target="sidebar-navigation"]')
-    const searchButton = container.querySelector(
+    const searchButton = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Search worktrees and browser tabs"]'
     )
     const tasksButton = getButtonByText(container, 'Tasks')
 
     expect(nav?.firstElementChild).toBe(searchButton)
+    if (!searchButton) {
+      throw new Error('worktree palette search button not rendered')
+    }
     expect(
-      searchButton?.compareDocumentPosition(tasksButton) & Node.DOCUMENT_POSITION_FOLLOWING
+      searchButton.compareDocumentPosition(tasksButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
   })
 
