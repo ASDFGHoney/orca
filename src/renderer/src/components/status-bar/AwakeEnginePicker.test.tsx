@@ -72,7 +72,7 @@ describe('AwakeEnginePicker', () => {
   it('explains what Amphetamine adds when it is missing', () => {
     const { options } = render({ amphetamineInstalled: false })
 
-    expect(findOption(options, 'Amphetamine').props.body).toContain('Triggers')
+    expect(findOption(options, 'Amphetamine').props.body).toContain('lid shut')
   })
 
   it('promises not to touch a session the user started', () => {

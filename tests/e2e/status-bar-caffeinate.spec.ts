@@ -131,7 +131,8 @@ test('offers the macOS keep-awake engine picker in the status bar', async ({ orc
   await amphetamineEngine.hover()
   const amphetamineTip = orcaPage.getByRole('tooltip').filter({ hasText: 'Amphetamine' })
   await expect(amphetamineTip).toBeVisible()
-  await expect(amphetamineTip).toContainText('Triggers')
+  await expect(amphetamineTip).toContainText('Amphetamine Mac app')
+  await expect(amphetamineTip).toContainText('never replaces or ends')
 
   const tooltipProof = process.env.ORCA_AWAKE_ENGINE_TOOLTIP_PROOF_PATH
   if (tooltipProof) {

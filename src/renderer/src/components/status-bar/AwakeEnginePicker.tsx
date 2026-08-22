@@ -78,26 +78,26 @@ export function AwakeEnginePicker({
   const amphetamineBody = notInstalled
     ? translate(
         'auto.components.status.bar.AwakeEnginePicker.amphetamineMissingBody',
-        'Adds Triggers, per-app rules, closed-display mode and screen-saver control that caffeinate cannot do.'
+        'Keep running with the lid shut. Auto-start on power or an app. Control the display and screen saver.'
       )
     : translate(
         'auto.components.status.bar.AwakeEnginePicker.amphetamineBody',
-        'Keeps awake through an Amphetamine session, so your Triggers, app rules and display options apply.'
+        'Uses the Amphetamine Mac app. Control the display and screen saver, and auto-start on power or an app.'
       )
 
   const amphetamineHint = notInstalled
     ? translate(
         'auto.components.status.bar.AwakeEnginePicker.amphetamineGet',
-        'Not installed — click to get it free on the Mac App Store.'
+        "Click to open the Mac App Store. It's free."
       )
     : automationDenied
       ? translate(
           'auto.components.status.bar.AwakeEnginePicker.amphetamineDenied',
-          'Blocked — allow Orca under Privacy & Security › Automation. Using Caffeinate meanwhile.'
+          'Orca is using Caffeinate. Allow Orca in System Settings › Privacy & Security › Automation.'
         )
       : translate(
           'auto.components.status.bar.AwakeEnginePicker.amphetamineSafety',
-          'Orca never replaces or ends a session you started yourself.'
+          'Orca never replaces or ends a session you started.'
         )
 
   return (
@@ -118,7 +118,7 @@ export function AwakeEnginePicker({
         )}
         body={translate(
           'auto.components.status.bar.AwakeEnginePicker.caffeinateBody',
-          'Blocks idle and system sleep for as long as Orca needs it. Nothing to install.'
+          'A private macOS process Orca starts and stops. Nothing to install, and it touches nothing else.'
         )}
         selected={engine === 'caffeinate'}
         onSelect={() => onChange('caffeinate')}
@@ -128,7 +128,7 @@ export function AwakeEnginePicker({
         label={translate('auto.components.status.bar.AwakeEnginePicker.amphetamine', 'Amphetamine')}
         title={translate(
           'auto.components.status.bar.AwakeEnginePicker.amphetamineTitle',
-          'Third-party app, does more'
+          'Works with the lid shut'
         )}
         body={amphetamineBody}
         hint={amphetamineHint}

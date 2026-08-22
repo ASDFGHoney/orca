@@ -3749,14 +3749,14 @@
             "label": "Keep awake engine",
             "caffeinate": "Caffeinate",
             "caffeinateTitle": "Built into macOS",
-            "caffeinateBody": "Blocks idle and system sleep for as long as Orca needs it. Nothing to install.",
+            "caffeinateBody": "A private macOS process Orca starts and stops. Nothing to install, and it touches nothing else.",
             "amphetamine": "Amphetamine",
-            "amphetamineTitle": "Third-party app, does more",
-            "amphetamineBody": "Keeps awake through an Amphetamine session, so your Triggers, app rules and display options apply.",
-            "amphetamineMissingBody": "Adds Triggers, per-app rules, closed-display mode and screen-saver control that caffeinate cannot do.",
-            "amphetamineSafety": "Orca never replaces or ends a session you started yourself.",
-            "amphetamineGet": "Not installed \u2014 click to get it free on the Mac App Store.",
-            "amphetamineDenied": "Blocked \u2014 allow Orca under Privacy & Security \u203a Automation. Using Caffeinate meanwhile."
+            "amphetamineTitle": "Works with the lid shut",
+            "amphetamineBody": "Uses the Amphetamine Mac app. Control the display and screen saver, and auto-start on power or an app.",
+            "amphetamineMissingBody": "Keep running with the lid shut. Auto-start on power or an app. Control the display and screen saver.",
+            "amphetamineSafety": "Orca never replaces or ends a session you started.",
+            "amphetamineGet": "Click to open the Mac App Store. It's free.",
+            "amphetamineDenied": "Orca is using Caffeinate. Allow Orca in System Settings \u203a Privacy & Security \u203a Automation."
           },
           "CaffeinateStatusSegment": {
             "on": "On",
