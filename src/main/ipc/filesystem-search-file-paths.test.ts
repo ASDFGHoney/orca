@@ -246,6 +246,25 @@ describe('searchQuickOpenFilePaths', () => {
     expect(wslAwareSpawnMock).toHaveBeenCalledTimes(1)
   })
 
+  it('reports cancellation when the query is superseded after a transient spawn failure', async () => {
+    const child = createMockProcess(false)
+    wslAwareSpawnMock.mockReturnValue(child)
+    const controller = new AbortController()
+    const promise = searchQuickOpenFilePaths('/repo', {} as Store, {
+      query: 'target',
+      limit: 32,
+      signal: controller.signal
+    })
+    await flushMicrotasks()
+
+    // Abort lands after the scan rejected but before the retry decision resumes.
+    child.emit('error', createSpawnError('EAGAIN'))
+    controller.abort()
+
+    await expect(promise).rejects.toSatisfy(isFileListingCancellation)
+    expect(wslAwareSpawnMock).toHaveBeenCalledTimes(1)
+  })
+
   it('does not start a host scan for empty or oversized queries', async () => {
     await expect(
       searchQuickOpenFilePaths('/repo', {} as Store, { query: '   ', limit: 32 })
