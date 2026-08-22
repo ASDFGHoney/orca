@@ -1,62 +1,178 @@
-import { describe, expect, it } from 'vitest'
-import type { RateLimitState } from '../../../../shared/rate-limit-types'
-import { resolveStatusBarUsageRateLimits } from './usage-rate-limits-source'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import type { ProviderRateLimits, RateLimitState } from '../../../../shared/rate-limit-types'
+import { latestUsageUpdatedAt, resolveStatusBarUsageRateLimits } from './usage-rate-limits-source'
+
+vi.mock('@/i18n/i18n', () => ({
+  i18n: { language: 'en' },
+  translate: (_key: string, fallback: string, values?: Record<string, string>) => {
+    let result = fallback
+    for (const [key, value] of Object.entries(values ?? {})) {
+      result = result.replaceAll(`{{${key}}}`, value)
+    }
+    return result
+  }
+}))
+
+const PROVIDER_KEYS = [
+  'claude',
+  'codex',
+  'gemini',
+  'opencodeGo',
+  'kimi',
+  'antigravity',
+  'minimax',
+  'grok'
+] as const
+
+function providerWithUsage(
+  provider: ProviderRateLimits['provider'],
+  usedPercent: number,
+  updatedAt: number
+): ProviderRateLimits {
+  return {
+    provider,
+    session: { usedPercent, windowMinutes: 300, resetsAt: null, resetDescription: null },
+    weekly: null,
+    updatedAt,
+    // Why: the reported symptom is a *valid-looking* local snapshot leaking, so
+    // the fixture carries both real windows and a stale local error string.
+    error: 'Refresh failed',
+    status: 'error'
+  }
+}
 
 function localState(): RateLimitState {
   return {
-    claude: {
-      provider: 'claude',
-      session: null,
-      weekly: null,
-      updatedAt: 1,
-      error: 'Refresh failed',
-      status: 'error'
-    },
-    codex: null,
-    gemini: null,
-    opencodeGo: null,
-    kimi: null,
-    antigravity: null,
-    minimax: null,
-    grok: null,
+    claude: providerWithUsage('claude', 42, 1_000),
+    codex: providerWithUsage('codex', 43, 1_000),
+    gemini: providerWithUsage('gemini', 44, 1_000),
+    opencodeGo: providerWithUsage('opencode-go', 45, 1_000),
+    kimi: providerWithUsage('kimi', 46, 1_000),
+    antigravity: providerWithUsage('antigravity', 47, 1_000),
+    minimax: providerWithUsage('minimax', 48, 1_000),
+    grok: providerWithUsage('grok', 49, 1_000),
     minimaxCookieConfigured: true,
-    grokAuthConfigured: false,
+    grokAuthConfigured: true,
     claudeTarget: { runtime: 'host', wslDistro: null },
     codexTarget: { runtime: 'host', wslDistro: null },
     inactiveClaudeAccounts: [],
     inactiveCodexAccounts: []
-  } as RateLimitState
+  }
 }
 
 function remoteState(): RateLimitState {
-  return { ...localState(), minimaxCookieConfigured: false }
+  return {
+    ...localState(),
+    claude: providerWithUsage('claude', 71, 5_000),
+    minimaxCookieConfigured: false,
+    grokAuthConfigured: false
+  }
 }
 
 describe('resolveStatusBarUsageRateLimits', () => {
   it('shows local usage when no remote Active Server owns accounts', () => {
     const local = localState()
-    expect(resolveStatusBarUsageRateLimits(local, remoteState(), false)).toBe(local)
+    expect(resolveStatusBarUsageRateLimits(local, { kind: 'local' })).toBe(local)
   })
 
-  it('shows the remote snapshot when a remote Active Server owns accounts (#15798)', () => {
-    const local = localState()
-    const remote = remoteState()
-    const resolved = resolveStatusBarUsageRateLimits(local, remote, true)
-    expect(resolved).toBe(remote)
+  it("shows the owning server's numbers once its snapshot lands (#15798)", () => {
+    const resolved = resolveStatusBarUsageRateLimits(localState(), {
+      kind: 'remote',
+      rateLimits: remoteState()
+    })
+    expect(resolved.claude?.session?.usedPercent).toBe(71)
+    // Why: the server owns sign-in state too, so its flags win when it sends them.
+    expect(resolved.minimaxCookieConfigured).toBe(false)
+    expect(resolved.grokAuthConfigured).toBe(false)
   })
 
-  it('degrades to a fetching state rather than flashing local numbers before the first snapshot', () => {
-    const local = localState()
-    const resolved = resolveStatusBarUsageRateLimits(local, null, true)
-    expect(resolved.claude).toMatchObject({ status: 'fetching' })
-    // The stale local error must not read as the remote machine's state.
-    expect(resolved.claude).not.toMatchObject({ status: 'error' })
-    // Durability flags stay local so provider bars keep their visibility rules.
+  it('falls back to local durability flags when the host predates them', () => {
+    // Why: RateLimitState declares both flags as required, but an older remote
+    // Orca omits them entirely. Reading them raw would hide configured bars.
+    const preFlagHost = remoteState()
+    delete (preFlagHost as Partial<RateLimitState>).minimaxCookieConfigured
+    delete (preFlagHost as Partial<RateLimitState>).grokAuthConfigured
+
+    const resolved = resolveStatusBarUsageRateLimits(localState(), {
+      kind: 'remote',
+      rateLimits: preFlagHost
+    })
+
     expect(resolved.minimaxCookieConfigured).toBe(true)
+    expect(resolved.grokAuthConfigured).toBe(true)
   })
 
-  it('keeps a null provider null in the fetching degrade', () => {
-    const resolved = resolveStatusBarUsageRateLimits(localState(), null, true)
-    expect(resolved.codex).toBeNull()
+  it('never renders local percentages while the first remote snapshot is in flight', () => {
+    const resolved = resolveStatusBarUsageRateLimits(localState(), { kind: 'remote-pending' })
+
+    // Why: #15798 calls valid-looking local numbers "arguably worse than an
+    // error state". Every provider must be blank, not just the null ones.
+    for (const key of PROVIDER_KEYS) {
+      const provider = resolved[key]
+      expect(provider?.status).toBe('fetching')
+      expect(provider?.session).toBeNull()
+      expect(provider?.weekly).toBeNull()
+      expect(provider?.error).toBeNull()
+      expect(provider?.updatedAt).toBe(0)
+    }
+  })
+
+  it('reports an unreachable owner instead of a spinner or a healthy bar', () => {
+    const resolved = resolveStatusBarUsageRateLimits(localState(), {
+      kind: 'remote-unreachable',
+      ownerLabel: 'Mac Mini'
+    })
+
+    for (const key of PROVIDER_KEYS) {
+      const provider = resolved[key]
+      // docs/reference/ssh-execution-boundary.md: loss of contact is its own
+      // verdict — never 0%, never "still loading".
+      expect(provider?.status).toBe('error')
+      expect(provider?.error).toBe('Usage unavailable — cannot reach Mac Mini')
+      expect(provider?.session).toBeNull()
+      expect(provider?.weekly).toBeNull()
+    }
+  })
+})
+
+describe('latestUsageUpdatedAt', () => {
+  it('returns the newest provider timestamp', () => {
+    expect(latestUsageUpdatedAt(remoteState())).toBe(5_000)
+  })
+
+  it('returns 0 when nothing has landed', () => {
+    expect(latestUsageUpdatedAt(null)).toBe(0)
+  })
+})
+
+/**
+ * Why a source assertion: the resolver is pure, so reverting StatusBar back to
+ * the raw `rateLimits` store slice would leave every behavioural test above
+ * green while restoring the reported bug. This pins the one wiring line that
+ * decides which machine the badges describe.
+ */
+describe('StatusBar badge source wiring', () => {
+  const source = readFileSync(resolve(__dirname, 'StatusBar.tsx'), 'utf8')
+
+  it('destructures the rendered providers from the resolved state', () => {
+    expect(source).toMatch(
+      /const \{ claude, codex, gemini, opencodeGo, kimi, antigravity, minimax, grok \} =\s*\n?\s*effectiveRateLimits/
+    )
+  })
+
+  it('reads the durability flags from the resolved state', () => {
+    expect(source).toContain('minimaxCookieConfigured: effectiveRateLimits.minimaxCookieConfigured')
+    expect(source).toContain('grokAuthConfigured: effectiveRateLimits.grokAuthConfigured')
+  })
+
+  it('rebuilds the refresh callback when the owning server changes', () => {
+    // Why: refreshRateLimits/refreshDetectedAgents are stable store selectors,
+    // so without the hook's owner-keyed refresh in the deps the closure would
+    // keep refreshing the machine that was active when it was first created.
+    expect(source).toContain(
+      '}, [isRefreshing, remoteUsage.refresh, refreshRateLimits, refreshDetectedAgents])'
+    )
   })
 })

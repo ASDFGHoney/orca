@@ -115,7 +115,7 @@ export function hasUsageProviderSettingsForProvider(
   return false
 }
 
-function createPendingProviderSnapshot(providerId: UsageProviderId): ProviderRateLimits {
+export function createPendingProviderSnapshot(providerId: UsageProviderId): ProviderRateLimits {
   return {
     provider: providerId,
     session: null,

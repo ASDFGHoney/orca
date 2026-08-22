@@ -3756,6 +3756,9 @@
             "onDescription": "Keep this computer awake continuously",
             "autoDescription": "Stay awake while an agent is working",
             "offDescription": "Allow normal system sleep behavior"
+          },
+          "usage": {
+            "remoteOwnerUnreachable": "Usage unavailable — cannot reach {{server}}"
           }
         }
       },
