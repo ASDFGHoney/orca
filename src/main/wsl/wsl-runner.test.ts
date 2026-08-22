@@ -304,10 +304,17 @@ describe('the probe never starves the command', () => {
     // The probe used to take two thirds, so a 5s caller reached runProcess with
     // ~1667ms -- less than the 5s it had before the runner existed, which is
     // how a cold distro came back as "not installed".
-    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
-    await runWslProcess({ lane: 'probe', program: '/bin/true', timeoutMs })
-    const passed = runProcessMock.mock.calls.at(-1)?.[0].timeoutMs as number
-    expect(passed).toBeGreaterThanOrEqual(floor - 50)
+    // No seed: the probe must actually run, or this measures the command leg
+    // and passes for any split. allowDegradedEnvironment keeps the call alive
+    // once the probe fails.
+    await runWslProcess({
+      lane: 'probe',
+      program: '/bin/true',
+      timeoutMs,
+      allowDegradedEnvironment: true
+    })
+    const probeMs = runProcessMock.mock.calls[0]?.[0].timeoutMs as number
+    expect(probeMs).toBeLessThanOrEqual(timeoutMs - floor)
   })
 })
 
