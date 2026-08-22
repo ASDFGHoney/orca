@@ -15918,6 +15918,9 @@
       },
       "githubCheckDetailsTimeout": {
         "timedOut": "Timed out loading check details."
+      },
+      "gitlabIpcTimeout": {
+        "timedOut": "Timed out talking to GitLab."
       }
     },
     "ssh": {
