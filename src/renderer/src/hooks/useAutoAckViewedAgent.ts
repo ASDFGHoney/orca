@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from '@/store'
+import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
+import { isFloatingWorkspacePanelVisible } from '@/lib/floating-workspace-terminal-actions'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import type { AgentStatusEntry } from '../../../shared/agent-status-types'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
@@ -146,6 +148,39 @@ export function acknowledgeViewedAgentAttention(
   }
 }
 
+export type AutoAckTabTarget = { tabId: string; worktreeId: string | null }
+
+/**
+ * Tabs whose visible pane counts as "seen" right now, each paired with the worktree that owns it.
+ *
+ * Why the floating workspace is gated on panel visibility rather than `activeView`: the panel is an
+ * overlay that sits above every view and stays mounted while closed, and its active tab never
+ * becomes the global `activeTabId` — so neither the view nor the tab id can stand in for "on screen".
+ */
+export function resolveAutoAckTabTargets(
+  state: {
+    activeView: string
+    activeTabId: string | null
+    activeWorktreeId: string | null
+    activeTabIdByWorktree: Record<string, string | null>
+  },
+  options: { floatingPanelVisible: boolean }
+): AutoAckTabTarget[] {
+  const targets: AutoAckTabTarget[] = []
+  if (state.activeView === 'terminal' && state.activeTabId) {
+    targets.push({ tabId: state.activeTabId, worktreeId: state.activeWorktreeId })
+  }
+  if (options.floatingPanelVisible) {
+    const floatingTabId = state.activeTabIdByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? null
+    // Why first-wins on a tab-id collision: tab ids can be claimed by two worktrees
+    // (see active-tab-owner-worktree), and acking under the wrong one strands its unread dot.
+    if (floatingTabId && !targets.some((target) => target.tabId === floatingTabId)) {
+      targets.push({ tabId: floatingTabId, worktreeId: FLOATING_TERMINAL_WORKTREE_ID })
+    }
+  }
+  return targets
+}
+
 // Auto-ack an agent row as "seen" when the user is already on its tab, so the dashboard/Dock don't stay bold for an event they watched happen.
 // Scans live + retained maps: Codex's title-revert (pty-connection.ts:onAgentExited) migrates `done` rows to retained mid-race — see docs/codex-agent-row-bold-stuck.md.
 export function useAutoAckViewedAgent(): void {
@@ -161,11 +196,13 @@ export function useAutoAckViewedAgent(): void {
     let lastLayouts: unknown = undefined
     let lastUnreadAgentCompletionPanes: unknown = undefined
 
-    const maybeAck = (): void => {
+    // `force` re-scans after a signal the store never sees: panel open/closed is React-local state.
+    const maybeAck = (options?: { force?: boolean }): void => {
       const s = useAppStore.getState()
       const floatingWorkspaceActiveTabId =
         s.activeTabIdByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? null
       if (
+        !options?.force &&
         s.activeView === lastActiveView &&
         s.activeTabId === lastActiveTabId &&
         floatingWorkspaceActiveTabId === lastFloatingWorkspaceActiveTabId &&
@@ -178,9 +215,6 @@ export function useAutoAckViewedAgent(): void {
         return
       }
 
-      if (s.activeView !== 'terminal') {
-        return
-      }
       // Why: tab-active only proxies "seen"; gate on window visible+focused so away-time transitions don't silently clear the bold signal.
       if (typeof document !== 'undefined') {
         if (document.visibilityState !== 'visible') {
@@ -190,10 +224,11 @@ export function useAutoAckViewedAgent(): void {
           return
         }
       }
-      const activeTabId = s.activeTabId
-      // Why: also check Floating Workspace tab even if it's not the active worktree, so agents there get acknowledged when visible.
-      const ackTabIds = [activeTabId, floatingWorkspaceActiveTabId].filter(Boolean) as string[]
-      if (ackTabIds.length === 0) {
+      // Why below the gates: resolving the floating target costs a DOM query, and most store writes never get here.
+      const targets = resolveAutoAckTabTargets(s, {
+        floatingPanelVisible: typeof document !== 'undefined' && isFloatingWorkspacePanelVisible()
+      })
+      if (targets.length === 0) {
         return
       }
       // Why: advance refs only after gates pass, else the diff is consumed and a gated-out transition never re-acks when focus returns.
@@ -206,7 +241,8 @@ export function useAutoAckViewedAgent(): void {
       lastLayouts = s.terminalLayoutsByTabId
       lastUnreadAgentCompletionPanes = s.unreadAgentCompletionPanes
 
-      for (const tabId of ackTabIds) {
+      for (const target of targets) {
+        const tabId = target.tabId
         const activeLeafId = resolveActiveLeafId(s, tabId)
         const toAck = computeAutoAckTargets(s, tabId, activeLeafId)
         const activePaneKey = computeViewedAgentCompletionPaneKey(s, tabId, activeLeafId)
@@ -215,11 +251,7 @@ export function useAutoAckViewedAgent(): void {
           if (activePaneKey) {
             paneKeysToClear.add(activePaneKey)
           }
-          // Why: for Floating Workspace tabs, still use activeWorktreeId to avoid clearing unseen signals in other worktrees.
-          const worktreeId =
-            tabId === floatingWorkspaceActiveTabId
-              ? FLOATING_TERMINAL_WORKTREE_ID
-              : s.activeWorktreeId
+          const worktreeId = target.worktreeId
           acknowledgeViewedAgentAttention(s, {
             activeWorktreeId: shouldClearViewedAgentWorktreeUnread(s, {
               activeWorktreeId: worktreeId,
@@ -238,16 +270,32 @@ export function useAutoAckViewedAgent(): void {
     // Why: run once on mount to catch a restored session that already has agents on the visible tab.
     maybeAck()
     // Subscribe to all store changes; the ref-equality guard above skips unrelated updates.
-    const unsubscribe = useAppStore.subscribe(maybeAck)
+    const unsubscribe = useAppStore.subscribe(() => maybeAck())
     // Why: focus/visibility don't flow through zustand, so re-run the scan on these DOM events when focus returns.
     const onVisibility = (): void => maybeAck()
     const onFocus = (): void => maybeAck()
+    // Why the frame: the toggle event fires before React commits, so the panel's aria-hidden still reads stale.
+    let floatingToggleFrame: number | null = null
+    const onFloatingToggle = (): void => {
+      if (floatingToggleFrame !== null) {
+        cancelAnimationFrame(floatingToggleFrame)
+      }
+      floatingToggleFrame = requestAnimationFrame(() => {
+        floatingToggleFrame = null
+        maybeAck({ force: true })
+      })
+    }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
+    window.addEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, onFloatingToggle)
     return () => {
       unsubscribe()
+      if (floatingToggleFrame !== null) {
+        cancelAnimationFrame(floatingToggleFrame)
+      }
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, onFloatingToggle)
     }
   }, [])
 }
