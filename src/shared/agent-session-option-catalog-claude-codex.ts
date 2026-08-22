@@ -245,7 +245,9 @@ export const CODEX_SESSION_OPTION_CATALOG: AgentSessionOptionCatalog = {
 // Why: a bare version routes to one tier of its family, which no prefix or suffix rule can
 // derive (`gpt-5.6` is a prefix of all three 5.6 rows). Same routing the usage pricing table
 // encodes; match exactly, since a `gpt-5.6-` prefix rule would swallow the tier ids.
-const CODEX_BARE_VERSION_ALIASES: Record<string, string> = { 'gpt-5.6': 'gpt-5.6-sol' }
+// Map, not a plain object: the key is user-supplied, and `Object.prototype` keys would
+// otherwise resolve to inherited members.
+const CODEX_BARE_VERSION_ALIASES = new Map([['gpt-5.6', 'gpt-5.6-sol']])
 
 /** Why: Codex effort validity is keyed on exact seed ids, so a dated id
  * (`gpt-5.6-luna-2026-08-01`) or the bare family alias (`luna`) would silently fall back
@@ -256,7 +258,7 @@ function resolveCodexCatalogModelId(modelId: string): string | undefined {
   if (ids.includes(modelId)) {
     return modelId
   }
-  const bareVersionOf = CODEX_BARE_VERSION_ALIASES[modelId]
+  const bareVersionOf = CODEX_BARE_VERSION_ALIASES.get(modelId)
   if (bareVersionOf) {
     return bareVersionOf
   }
