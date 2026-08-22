@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { fireEvent } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReactI18Next from 'react-i18next'
+import { getExecutionHostLabel } from '../../../shared/execution-host'
 import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
 import WorktreeJumpPalette from './WorktreeJumpPalette'
@@ -236,7 +237,7 @@ describe('WorktreeJumpPalette', () => {
       ])
     })
 
-    const badge = '[aria-label^="Host:"]'
+    const badge = `[aria-label="Host: ${getExecutionHostLabel('local')}"]`
     expect(testContainer.querySelector(`[data-command-item*="worktree:"] ${badge}`)).not.toBeNull()
     expect(
       testContainer.querySelector(`[data-command-item*="workspace-tab:"] ${badge}`)
