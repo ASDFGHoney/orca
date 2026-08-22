@@ -1,18 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { setSecretStore } from '../shared/secret-store'
 
 const cipherState = { available: true }
-
-vi.mock('electron', () => ({
-  safeStorage: {
-    isEncryptionAvailable: () => cipherState.available,
-    encryptString: (plaintext: string) => Buffer.from(`encrypted:${plaintext}`),
-    decryptString: (ciphertext: Buffer) => ciphertext.toString().slice('encrypted:'.length)
-  }
-}))
 
 describe('ProtectedSecretPersistence', () => {
   beforeEach(() => {
     cipherState.available = true
+    setSecretStore({
+      isEncryptionAvailable: () => cipherState.available,
+      encryptString: (plaintext) => Buffer.from(`encrypted:${plaintext}`),
+      decryptString: (ciphertext) => ciphertext.toString().slice('encrypted:'.length),
+      describeUnavailable: () => null
+    })
   })
 
   it('evicts dynamic slots across repeated SSH recovery lifecycles', async () => {
