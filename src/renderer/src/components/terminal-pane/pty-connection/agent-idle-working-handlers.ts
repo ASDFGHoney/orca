@@ -138,17 +138,18 @@ export function installAgentIdleWorkingHandlers(session: ConnectPanePtySession):
     DirectSshPaneRetryAttempt,
     'attemptId' | 'authority' | 'tabGeneration'
   >
+  const pendingDirectSshRetry = session.state.directSshPaneRetryByTabId?.[session.deps.tabId]
+  session.followsDirectSshReconnect =
+    pendingDirectSshRetry?.authority.targetId === session.connectionId &&
+    pendingDirectSshRetry.tabGeneration === (session.tab?.generation ?? 0)
   session.directSshRetryAttempt = (() => {
-    const pendingAttempt = session.state.directSshPaneRetryByTabId?.[session.deps.tabId]
     const liveBinding = session.state.directSshLivePtyBindingByTabId?.[session.deps.tabId]
-    const attempt =
-      pendingAttempt?.authority.targetId === session.connectionId &&
-      pendingAttempt.tabGeneration === (session.tab?.generation ?? 0)
-        ? pendingAttempt
-        : liveBinding?.authority.targetId === session.connectionId &&
-            liveBinding.tabGeneration === (session.tab?.generation ?? 0)
-          ? liveBinding
-          : undefined
+    const attempt = session.followsDirectSshReconnect
+      ? pendingDirectSshRetry
+      : liveBinding?.authority.targetId === session.connectionId &&
+          liveBinding.tabGeneration === (session.tab?.generation ?? 0)
+        ? liveBinding
+        : undefined
     return attempt
   })()
   session.pendingSpawnKey = session.directSshRetryAttempt

@@ -282,6 +282,78 @@ describe('connectPanePty', () => {
     )
   })
 
+  it('restores a reconnect remount from the SSH model through pending retry classification', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const restoredPtyId = toAppSshPtyId('target-a', 'pty-restored-model')
+    const transport = createMockTransport(restoredPtyId)
+    transport.connect.mockResolvedValue({
+      id: restoredPtyId,
+      isReattach: true,
+      replay: 'RELAY-TAIL'
+    })
+    transportFactoryQueue.push(transport)
+    const pendingRetry = {
+      attemptId: 'attempt-model-restore',
+      authority: {
+        targetId: 'target-a',
+        providerEpoch: 'epoch-1',
+        connectionGeneration: 3
+      },
+      tabGeneration: 7,
+      startedAt: 1
+    }
+    vi.mocked(window.api.pty.getMainBufferSnapshot).mockResolvedValue({
+      data: 'MODEL-ALT-FRAME',
+      cols: 120,
+      rows: 40,
+      source: 'headless',
+      alternateScreen: true
+    })
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: restoredPtyId, generation: 7 }]
+      },
+      ptyIdsByTabId: { 'tab-1': [restoredPtyId] },
+      repos: [{ id: 'repo1', connectionId: 'target-a', displayName: 'orca' }],
+      sshConnectionStates: new Map([
+        [
+          'target-a',
+          {
+            targetId: 'target-a',
+            status: 'connected',
+            providerEpoch: 'epoch-1',
+            connectionGeneration: 3
+          }
+        ]
+      ]),
+      directSshPaneRetryByTabId: { 'tab-1': pendingRetry },
+      settleDirectSshPaneRetry: vi.fn()
+    }
+    const pane = createPane(1)
+    const writes: string[] = []
+    pane.terminal.write = vi.fn((data: string, callback?: () => void) => {
+      writes.push(data)
+      callback?.()
+    })
+
+    connectPanePty(
+      pane as never,
+      createManager(1) as never,
+      createDeps({
+        restoredLeafId: LEAF_1,
+        restoredPtyIdByLeafId: { [LEAF_1]: restoredPtyId }
+      }) as never
+    )
+    await flushAsyncTicks(20)
+
+    expect(window.api.pty.getMainBufferSnapshot).toHaveBeenCalledWith(restoredPtyId, {
+      scrollbackRows: 5000
+    })
+    expect(writes.join('')).toContain('MODEL-ALT-FRAME')
+    expect(writes.join('')).not.toContain('RELAY-TAIL')
+  })
+
   it('rejects expired reattach state after its direct SSH retry lease is revoked', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const restoredPtyId = toAppSshPtyId('target-a', 'pty-stale-reattach')
