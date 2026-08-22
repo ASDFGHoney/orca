@@ -19,9 +19,21 @@ export type RemoteUsageState =
   | { kind: 'local' }
   /** A remote server owns usage and its first snapshot has not landed yet. */
   | { kind: 'remote-pending' }
-  /** The server that owns usage cannot be reached, so its usage is unverifiable. */
-  | { kind: 'remote-unreachable'; ownerLabel: string }
+  /** The owning server's usage cannot be verified, so no bar may claim numbers. */
+  | {
+      kind: 'remote-unverifiable'
+      ownerLabel: string
+      reason: RemoteUsageFailureReason
+      /** Last snapshot that server vouched for, so its bars stay put instead of vanishing. */
+      lastKnown?: RateLimitState | null
+    }
   | { kind: 'remote'; rateLimits: RateLimitState }
+
+/**
+ * Why two reasons: a host that answers but publishes no usage is reachable, so
+ * telling the user we "cannot reach" it would be false.
+ */
+export type RemoteUsageFailureReason = 'unreachable' | 'usage-not-published'
 
 /**
  * Keys of RateLimitState that hold a provider snapshot. Derived rather than
@@ -60,43 +72,55 @@ function replaceProviders(
   return replaced
 }
 
-function createUnreachableProviderSnapshot(
+function describeUnverifiableOwner(ownerLabel: string, reason: RemoteUsageFailureReason): string {
+  return reason === 'usage-not-published'
+    ? translate(
+        'auto.components.status.bar.usage.remoteOwnerNoUsage',
+        'Usage unavailable — {{server}} does not report usage',
+        { server: ownerLabel }
+      )
+    : translate(
+        'auto.components.status.bar.usage.remoteOwnerUnreachable',
+        'Usage unavailable — cannot reach {{server}}',
+        { server: ownerLabel }
+      )
+}
+
+function createUnverifiableProviderSnapshot(
   providerId: ProviderRateLimits['provider'],
-  ownerLabel: string
+  message: string
 ): ProviderRateLimits {
   return {
     ...createPendingProviderSnapshot(providerId),
-    error: translate(
-      'auto.components.status.bar.usage.remoteOwnerUnreachable',
-      'Usage unavailable — cannot reach {{server}}',
-      { server: ownerLabel }
-    ),
+    error: message,
+    // Why: the badge label is provider-classified copy; this flag keeps it from
+    // reading "Refresh failed" for a failure no refresh can fix (#15798).
+    usageMetadata: { unverifiableUsageOwner: true },
     status: 'error'
   }
 }
 
 /**
- * Blank every bar the unreachable owner can no longer vouch for, without
- * inventing bars it never had (#15804).
+ * Blank every bar the owner can no longer vouch for, without inventing bars it
+ * never had (#15804).
  *
- * Why the gate: a locally blank + unconfigured provider has no numbers to leak
- * and is no evidence the *server* has it set up. Stamping it 'error' reads as
- * "configured" to `isProviderConfigured`, which would pin MiniMax/OpenCode Go
- * bars on users who never enabled them and suppress the usage setup CTA.
+ * Why the gate: a blank + unconfigured provider has no numbers to leak and is
+ * no evidence anyone has it set up. Stamping it 'error' reads as "configured"
+ * to `isProviderConfigured`, which would pin MiniMax/OpenCode Go bars on users
+ * who never enabled them and suppress the usage setup CTA.
  */
-function markProvidersUnreachable(
-  local: RateLimitState,
-  ownerLabel: string
+function markProvidersUnverifiable(
+  base: RateLimitState,
+  message: string
 ): Pick<RateLimitState, UsageProviderKey> {
   const replaced = {} as Pick<RateLimitState, UsageProviderKey>
   for (const key of USAGE_PROVIDER_KEYS) {
-    const localProvider = local[key]
+    const provider = base[key]
     const blankAndUnconfigured =
-      localProvider == null ||
-      (!isProviderConfigured(localProvider) && !hasUsageData(localProvider))
+      provider == null || (!isProviderConfigured(provider) && !hasUsageData(provider))
     replaced[key] = blankAndUnconfigured
-      ? localProvider
-      : createUnreachableProviderSnapshot(USAGE_PROVIDER_IDS[key], ownerLabel)
+      ? provider
+      : createUnverifiableProviderSnapshot(USAGE_PROVIDER_IDS[key], message)
   }
   return replaced
 }
@@ -138,10 +162,17 @@ export function resolveStatusBarUsageRateLimits(
   // Why: never keep a local window here. Rendering the viewer's percentages
   // under the server's name is the exact "looks correct, is wrong" failure
   // #15798 reports.
-  const providers =
-    remoteUsage.kind === 'remote-unreachable'
-      ? markProvidersUnreachable(localRateLimits, remoteUsage.ownerLabel)
-      : replaceProviders(createPendingProviderSnapshot)
+  if (remoteUsage.kind === 'remote-pending') {
+    return { ...localRateLimits, ...replaceProviders(createPendingProviderSnapshot) }
+  }
+  // Why the lastKnown base: the bars the server vouched for keep their slots
+  // carrying the verdict, instead of silently disappearing on a thin client
+  // that has none of those providers configured locally.
+  const base = remoteUsage.lastKnown ?? localRateLimits
+  const providers = markProvidersUnverifiable(
+    base,
+    describeUnverifiableOwner(remoteUsage.ownerLabel, remoteUsage.reason)
+  )
   return { ...localRateLimits, ...providers }
 }
 

@@ -144,13 +144,72 @@ describe('useRemoteUsageRateLimits', () => {
     // Why: swallowing this error left the badge spinning forever, which
     // docs/reference/ssh-execution-boundary.md forbids - loss of contact is
     // 'unverifiable', not 'in progress'.
-    expect(result.current.state).toEqual({ kind: 'remote-unreachable', ownerLabel: 'Mac Mini' })
+    expect(result.current.state).toEqual({
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable',
+      lastKnown: null
+    })
 
     act(() => {
       latestWatcher().onSnapshot({ rateLimits: rateLimits(12, 6_000) })
     })
 
     expect(result.current.state.kind).toBe('remote')
+  })
+
+  it('keeps the last snapshot the owner vouched for when contact is lost', () => {
+    const { result } = renderHook(() =>
+      useRemoteUsageRateLimits({ activeRuntimeEnvironmentId: 'env-a' })
+    )
+
+    act(() => {
+      latestWatcher().onSnapshot({ rateLimits: rateLimits(71, 5_000) })
+    })
+    act(() => {
+      latestWatcher().onError(new Error('Remote provider account subscription closed.'))
+    })
+
+    // Why: the badge blanks those numbers but keeps the server's bars in place;
+    // dropping them would make the bars silently disappear on a thin client.
+    expect(result.current.state).toEqual({
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable',
+      lastKnown: rateLimits(71, 5_000)
+    })
+  })
+
+  it('does not spin forever when the owner answers without usage (older host)', () => {
+    const { result } = renderHook(() =>
+      useRemoteUsageRateLimits({ activeRuntimeEnvironmentId: 'env-a' })
+    )
+
+    // Why: this snapshot disarms the client's first-snapshot timeout, so
+    // ignoring it left the badge on the pulsing placeholder with no recovery.
+    act(() => {
+      latestWatcher().onSnapshot({ rateLimits: null })
+    })
+
+    expect(result.current.state).toEqual({
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'usage-not-published',
+      lastKnown: null
+    })
+  })
+
+  it('reports a usage-less manual refresh instead of holding the spinner', async () => {
+    const { result } = renderHook(() =>
+      useRemoteUsageRateLimits({ activeRuntimeEnvironmentId: 'env-a' })
+    )
+    mocks.fetchSnapshot.mockResolvedValue({ rateLimits: null })
+
+    await act(async () => {
+      await result.current.refresh!()
+    })
+
+    expect(result.current.state.kind).toBe('remote-unverifiable')
   })
 
   it('falls back to a generic server label for an unknown environment id', () => {
@@ -164,8 +223,10 @@ describe('useRemoteUsageRateLimits', () => {
     })
 
     expect(result.current.state).toEqual({
-      kind: 'remote-unreachable',
-      ownerLabel: 'Remote server'
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Remote server',
+      reason: 'unreachable',
+      lastKnown: null
     })
   })
 
@@ -235,6 +296,11 @@ describe('useRemoteUsageRateLimits', () => {
       await result.current.refresh!()
     })
 
-    expect(result.current.state).toEqual({ kind: 'remote-unreachable', ownerLabel: 'Mac Mini' })
+    expect(result.current.state).toEqual({
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable',
+      lastKnown: null
+    })
   })
 })

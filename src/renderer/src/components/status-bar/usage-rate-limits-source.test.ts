@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { ProviderRateLimits, RateLimitState } from '../../../../shared/rate-limit-types'
 import { getVisibleUsageProvider, isUsageEmptyState } from './status-bar-provider-visibility'
+import { getProviderUsageStatusLabel } from './usage-error-copy'
 import { latestUsageUpdatedAt, resolveStatusBarUsageRateLimits } from './usage-rate-limits-source'
 
 vi.mock('@/i18n/i18n', () => ({
@@ -122,8 +123,9 @@ describe('resolveStatusBarUsageRateLimits', () => {
 
   it('reports an unreachable owner instead of a spinner or a healthy bar', () => {
     const resolved = resolveStatusBarUsageRateLimits(localState(), {
-      kind: 'remote-unreachable',
-      ownerLabel: 'Mac Mini'
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable'
     })
 
     for (const key of PROVIDER_KEYS) {
@@ -152,8 +154,9 @@ describe('resolveStatusBarUsageRateLimits', () => {
     local.minimaxCookieConfigured = false
 
     const resolved = resolveStatusBarUsageRateLimits(local, {
-      kind: 'remote-unreachable',
-      ownerLabel: 'Mac Mini'
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable'
     })
     const settings = {
       antigravityUsageConfigured: false,
@@ -173,6 +176,57 @@ describe('resolveStatusBarUsageRateLimits', () => {
     )
   })
 
+  it('says the owner does not report usage instead of claiming it is unreachable', () => {
+    // Why: a host too old to publish rateLimits answered us; "cannot reach" it
+    // would be a false statement about a server that is plainly live.
+    const resolved = resolveStatusBarUsageRateLimits(localState(), {
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'usage-not-published'
+    })
+
+    expect(resolved.claude?.error).toBe('Usage unavailable — Mac Mini does not report usage')
+    expect(resolved.claude?.status).toBe('error')
+    expect(resolved.claude?.session).toBeNull()
+  })
+
+  it('labels an unverifiable owner as unavailable rather than "Refresh failed"', () => {
+    const resolved = resolveStatusBarUsageRateLimits(localState(), {
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable'
+    })
+
+    // Why: the inline badge label is the string #15798 complains about; without
+    // the marker it reads "Refresh failed", blaming a fetch that never ran.
+    for (const key of PROVIDER_KEYS) {
+      expect(getProviderUsageStatusLabel(resolved[key]!)).toBe('Usage unavailable')
+    }
+  })
+
+  it('keeps the bars the unreachable server vouched for, blanked (#15798)', () => {
+    // Thin client: nothing configured locally, everything configured on the server.
+    const thinClient = localState()
+    for (const key of PROVIDER_KEYS) {
+      thinClient[key] = null
+    }
+    thinClient.minimaxCookieConfigured = false
+    thinClient.grokAuthConfigured = false
+
+    const resolved = resolveStatusBarUsageRateLimits(thinClient, {
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable',
+      lastKnown: localState()
+    })
+
+    // Why: dropping the last snapshot would make the server's bars vanish on a
+    // viewer that has none of those providers set up locally.
+    expect(resolved.claude?.status).toBe('error')
+    expect(resolved.claude?.session).toBeNull()
+    expect(resolved.claude?.error).toBe('Usage unavailable — cannot reach Mac Mini')
+  })
+
   it('leaves the usage setup CTA reachable when nothing is configured (#15804)', () => {
     const unconfigured = localState()
     for (const key of PROVIDER_KEYS) {
@@ -189,8 +243,9 @@ describe('resolveStatusBarUsageRateLimits', () => {
     unconfigured.grokAuthConfigured = false
 
     const resolved = resolveStatusBarUsageRateLimits(unconfigured, {
-      kind: 'remote-unreachable',
-      ownerLabel: 'Mac Mini'
+      kind: 'remote-unverifiable',
+      ownerLabel: 'Mac Mini',
+      reason: 'unreachable'
     })
 
     // Why: synthesized 'error' snapshots count as configured providers, which
@@ -245,6 +300,15 @@ describe('StatusBar badge source wiring', () => {
   it('reads the durability flags from the resolved state', () => {
     expect(source).toContain('minimaxCookieConfigured: effectiveRateLimits.minimaxCookieConfigured')
     expect(source).toContain('grokAuthConfigured: effectiveRateLimits.grokAuthConfigured')
+  })
+
+  it("does not hide the owning server's bars behind this laptop's PATH detection", () => {
+    // Why: detectedAgentIds is local-only, so gating a remote server's bars on
+    // it hides them entirely on the thin client #15798 is about.
+    expect(source).toContain(
+      "const usageDetectedAgentIds = remoteUsage.state.kind === 'local' ? detectedAgentIds : null"
+    )
+    expect(source).not.toMatch(/isStatusBarItemAvailable\('[a-z-]+', detectedAgentIds\)/)
   })
 
   it('rebuilds the refresh callback when the owning server changes', () => {

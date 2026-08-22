@@ -3758,7 +3758,8 @@
             "offDescription": "Allow normal system sleep behavior"
           },
           "usage": {
-            "remoteOwnerUnreachable": "Usage unavailable — cannot reach {{server}}"
+            "remoteOwnerUnreachable": "Usage unavailable — cannot reach {{server}}",
+            "remoteOwnerNoUsage": "Usage unavailable — {{server}} does not report usage"
           }
         }
       },

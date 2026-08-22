@@ -8,7 +8,11 @@ import {
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import type { RateLimitState } from '../../../../shared/rate-limit-types'
 import { useAppStore } from '../../store'
-import { latestUsageUpdatedAt, type RemoteUsageState } from './usage-rate-limits-source'
+import {
+  latestUsageUpdatedAt,
+  type RemoteUsageFailureReason,
+  type RemoteUsageState
+} from './usage-rate-limits-source'
 
 type RemoteUsageSettings = Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
 
@@ -29,7 +33,7 @@ export type RemoteUsageRateLimits = {
 type OwnedUsageSnapshot = {
   ownerId: string | null
   rateLimits: RateLimitState | null
-  unreachable: boolean
+  failure: RemoteUsageFailureReason | null
 }
 
 // Why: a fresh accounts.subscribe makes the host run refreshIfStale, but the
@@ -53,9 +57,10 @@ export function resolveRemoteUsageOwnerLabel(
  *
  * The provider-accounts snapshot the accounts roster already consumes carries
  * the server's full RateLimitState, so no new RPC or stream opcode is needed.
- * A watcher error resolves to `remote-unreachable` rather than an endless
- * spinner: per docs/reference/ssh-execution-boundary.md, losing contact with
- * the execution host is its own verdict and must not be rendered as progress.
+ * A watcher error - or a host that answers without usage - resolves to
+ * `remote-unverifiable` rather than an endless spinner: per
+ * docs/reference/ssh-execution-boundary.md, losing contact with the execution
+ * host is its own verdict and must not be rendered as progress.
  */
 export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteUsageRateLimits {
   const remoteUsageOwner = hasRemoteProviderAccountOwner(settings)
@@ -64,6 +69,13 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
   const [owned, setOwned] = useState<OwnedUsageSnapshot | null>(null)
   const ownedRef = useRef<OwnedUsageSnapshot | null>(null)
   const pendingRefreshRef = useRef<{ afterUpdatedAt: number; settle: () => void } | null>(null)
+
+  // Why: a failed watcher must not erase the numbers the server already vouched
+  // for; the bars keep their slots and carry the verdict instead of vanishing.
+  const lastKnownFor = useCallback((owner: string | null): RateLimitState | null => {
+    const current = ownedRef.current
+    return current && current.ownerId === owner ? current.rateLimits : null
+  }, [])
 
   const applyOwned = useCallback((next: OwnedUsageSnapshot) => {
     ownedRef.current = next
@@ -86,10 +98,21 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
       { activeRuntimeEnvironmentId: ownerId },
       {
         onSnapshot: (snapshot) => {
-          if (!active || !snapshot.rateLimits) {
+          if (!active) {
             return
           }
-          applyOwned({ ownerId, rateLimits: snapshot.rateLimits, unreachable: false })
+          if (!snapshot.rateLimits) {
+            // Why: a host too old to publish usage still counts as the watcher's
+            // first snapshot, disarming its timeout. Dropping it would pin the
+            // badge on a spinner with no error path and no recovery.
+            applyOwned({
+              ownerId,
+              rateLimits: lastKnownFor(ownerId),
+              failure: 'usage-not-published'
+            })
+            return
+          }
+          applyOwned({ ownerId, rateLimits: snapshot.rateLimits, failure: null })
         },
         onError: () => {
           if (!active) {
@@ -99,7 +122,7 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
           // subscription and RPC failures through this one channel. All of them
           // mean the same thing for the badge - the owner cannot be reached, so
           // its usage is unverifiable, not zero and not still loading.
-          applyOwned({ ownerId, rateLimits: null, unreachable: true })
+          applyOwned({ ownerId, rateLimits: lastKnownFor(ownerId), failure: 'unreachable' })
         }
       }
     )
@@ -108,7 +131,7 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
       watcher.close()
       pendingRefreshRef.current?.settle()
     }
-  }, [remoteUsageOwner, ownerId, applyOwned])
+  }, [remoteUsageOwner, ownerId, applyOwned, lastKnownFor])
 
   const refresh = useCallback(async () => {
     const current = ownedRef.current
@@ -135,14 +158,17 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
     try {
       const snapshot = await fetchProviderAccountsSnapshot({ activeRuntimeEnvironmentId: ownerId })
       if (snapshot.rateLimits) {
-        applyOwned({ ownerId, rateLimits: snapshot.rateLimits, unreachable: false })
+        applyOwned({ ownerId, rateLimits: snapshot.rateLimits, failure: null })
+      } else {
+        applyOwned({ ownerId, rateLimits: lastKnownFor(ownerId), failure: 'usage-not-published' })
+        entry.settle()
       }
     } catch {
-      applyOwned({ ownerId, rateLimits: null, unreachable: true })
+      applyOwned({ ownerId, rateLimits: lastKnownFor(ownerId), failure: 'unreachable' })
       entry.settle()
     }
     await settled
-  }, [ownerId, applyOwned])
+  }, [ownerId, applyOwned, lastKnownFor])
 
   const ownerLabel = useMemo(
     () => resolveRemoteUsageOwnerLabel(runtimeEnvironments, ownerId),
@@ -158,11 +184,16 @@ export function useRemoteUsageRateLimits(settings: RemoteUsageSettings): RemoteU
     if (!owned || owned.ownerId !== ownerId) {
       return { kind: 'remote-pending' }
     }
-    if (owned.rateLimits) {
-      return { kind: 'remote', rateLimits: owned.rateLimits }
+    if (owned.failure) {
+      return {
+        kind: 'remote-unverifiable',
+        ownerLabel,
+        reason: owned.failure,
+        lastKnown: owned.rateLimits
+      }
     }
-    return owned.unreachable
-      ? { kind: 'remote-unreachable', ownerLabel }
+    return owned.rateLimits
+      ? { kind: 'remote', rateLimits: owned.rateLimits }
       : { kind: 'remote-pending' }
   }, [remoteUsageOwner, owned, ownerId, ownerLabel])
 

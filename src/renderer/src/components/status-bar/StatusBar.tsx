@@ -2119,12 +2119,17 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   const { claude, codex, gemini, opencodeGo, kimi, antigravity, minimax, grok } =
     effectiveRateLimits
 
+  // Why (#15798): PATH detection describes *this* laptop. When a remote Active
+  // Server owns usage, its own snapshot is the availability signal, so falling
+  // back to the pre-detection value (null) keeps the server's bars from being
+  // hidden on a thin client that has no agent CLIs installed.
+  const usageDetectedAgentIds = remoteUsage.state.kind === 'local' ? detectedAgentIds : null
   // Why: a bar is earned by a live snapshot or durable Settings setup; detection-gating hides per-CLI bars when the agent isn't on PATH.
   // Why: Antigravity has no persisted credential, so a checked status item + detected CLI is the durable "show its slot" signal.
   // Why: Antigravity visibility also requires geminiCliOAuthEnabled because its usage snapshot mirrors the Gemini fetch.
   const antigravityUsageConfigured =
     statusBarItems.includes('antigravity') &&
-    isStatusBarItemAvailable('antigravity', detectedAgentIds)
+    isStatusBarItemAvailable('antigravity', usageDetectedAgentIds)
   // Why: thread non-GlobalSettings durability flags so bars stay visible across reloads and snapshot refreshes.
   const usageSettings = {
     ...settings,
@@ -2142,29 +2147,29 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   const showClaude =
     visibleClaude !== null &&
     statusBarItems.includes('claude') &&
-    isStatusBarItemAvailable('claude', detectedAgentIds)
+    isStatusBarItemAvailable('claude', usageDetectedAgentIds)
   const showCodex =
     visibleCodex !== null &&
     statusBarItems.includes('codex') &&
-    isStatusBarItemAvailable('codex', detectedAgentIds)
+    isStatusBarItemAvailable('codex', usageDetectedAgentIds)
   const showGemini =
     visibleGemini !== null &&
     statusBarItems.includes('gemini') &&
-    isStatusBarItemAvailable('gemini', detectedAgentIds)
+    isStatusBarItemAvailable('gemini', usageDetectedAgentIds)
   const showKimi =
     visibleKimi !== null &&
     statusBarItems.includes('kimi') &&
-    isStatusBarItemAvailable('kimi', detectedAgentIds)
+    isStatusBarItemAvailable('kimi', usageDetectedAgentIds)
   const showAntigravity =
     visibleAntigravity !== null &&
     statusBarItems.includes('antigravity') &&
-    isStatusBarItemAvailable('antigravity', detectedAgentIds)
+    isStatusBarItemAvailable('antigravity', usageDetectedAgentIds)
   // Why: MiniMax is cookie-auth, not a CLI on PATH, so detection-gating doesn't apply.
   const showMiniMax = visibleMiniMax !== null && statusBarItems.includes('minimax')
   const showGrok =
     visibleGrok !== null &&
     statusBarItems.includes('grok') &&
-    isStatusBarItemAvailable('grok', detectedAgentIds)
+    isStatusBarItemAvailable('grok', usageDetectedAgentIds)
   // Why: OpenCode Go is web/cookie-auth, not a CLI on PATH, so detection-gating doesn't apply.
   const visibleOpencodeGo = getVisibleUsageProvider('opencode-go', opencodeGo, usageSettings)
   const showOpencodeGo = visibleOpencodeGo !== null && statusBarItems.includes('opencode-go')
@@ -2462,7 +2467,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent className="min-w-0 w-fit" sideOffset={0} align="start">
-          {isStatusBarItemAvailable('claude', detectedAgentIds) && (
+          {isStatusBarItemAvailable('claude', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('claude')}
               onCheckedChange={() => {
@@ -2474,7 +2479,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
               {translate('auto.components.status.bar.StatusBar.3885eb74d8', 'Claude Usage')}
             </DropdownMenuCheckboxItem>
           )}
-          {isStatusBarItemAvailable('codex', detectedAgentIds) && (
+          {isStatusBarItemAvailable('codex', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('codex')}
               onCheckedChange={() => {
@@ -2486,7 +2491,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
               {translate('auto.components.status.bar.StatusBar.c0909c686e', 'Codex Usage')}
             </DropdownMenuCheckboxItem>
           )}
-          {isStatusBarItemAvailable('gemini', detectedAgentIds) && (
+          {isStatusBarItemAvailable('gemini', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('gemini')}
               onCheckedChange={() => {
@@ -2498,7 +2503,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
               {translate('auto.components.status.bar.StatusBar.c1df0d67ec', 'Gemini Usage')}
             </DropdownMenuCheckboxItem>
           )}
-          {isStatusBarItemAvailable('antigravity', detectedAgentIds) && (
+          {isStatusBarItemAvailable('antigravity', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('antigravity')}
               onCheckedChange={() => {
@@ -2523,7 +2528,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
             <OpenCodeGoIcon size={14} />
             {translate('auto.components.status.bar.StatusBar.8c86cd77b0', 'OpenCode Go Usage')}
           </DropdownMenuCheckboxItem>
-          {isStatusBarItemAvailable('kimi', detectedAgentIds) && (
+          {isStatusBarItemAvailable('kimi', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('kimi')}
               onCheckedChange={() => {
@@ -2545,7 +2550,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
             <MiniMaxIcon size={14} />
             {translate('auto.components.status.bar.StatusBar.3bbf140864', 'MiniMax Usage')}
           </DropdownMenuCheckboxItem>
-          {isStatusBarItemAvailable('grok', detectedAgentIds) && (
+          {isStatusBarItemAvailable('grok', usageDetectedAgentIds) && (
             <DropdownMenuCheckboxItem
               checked={statusBarItems.includes('grok')}
               onCheckedChange={() => {
