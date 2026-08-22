@@ -81,6 +81,44 @@ function findSpawnSites(): string[] {
   return [...offenders].sort()
 }
 
+/**
+ * A bash-only payload must say `shell: 'bash'`.
+ *
+ * Why: the runner's `script` runs under `sh`, which on Debian/Ubuntu is dash.
+ * A payload using process substitution, `local` or `[[ ]]` fails there with
+ * `Syntax error: word unexpected` -- the #14292 signature. A migration that
+ * swaps `bash -c` for the runner without saying so introduces exactly that,
+ * and no unit test catches it because the tests mock the runner.
+ */
+/**
+ * Bash-only constructs. `pipefail` and `read -d` are the easy ones to miss:
+ * they look like ordinary shell, and dash accepts neither.
+ */
+const BASHISM =
+  /<\s*<\(|\[\[|\blocal\s+\w+=|\bdeclare\s+-|\bmapfile\b|set\s+-o\s+pipefail|read\s+(?:-\w+\s+)*-d\b|<<</
+
+describe('bash-only payloads declare their interpreter', () => {
+  const offenders: string[] = []
+  for (const path of collectSourceFiles(SOURCE_ROOT)) {
+    const relativePath = relative(SOURCE_ROOT, path).replace(/\\/g, '/')
+    // The runner's own file documents these constructs; it does not run them.
+    if (isTestFile(relativePath) || relativePath.startsWith(OWNER_DIRECTORY)) {
+      continue
+    }
+    const source = readFileSync(path, 'utf8')
+    if (!source.includes('runWslProcess') || !BASHISM.test(source)) {
+      continue
+    }
+    if (!source.includes("shell: 'bash'")) {
+      offenders.push(relativePath)
+    }
+  }
+
+  it('every runner caller with a bash-only script pins bash', () => {
+    expect(offenders).toEqual([])
+  })
+})
+
 describe('wsl.exe is spawned through one runner', () => {
   const offenders = findSpawnSites()
 

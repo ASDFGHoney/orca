@@ -16,10 +16,6 @@ main/hooks.ts
 main/ipc/filesystem-watcher-wsl.ts
 main/ipc/preflight-wsl-command.ts
 main/local-worktree-filesystem.ts
-main/skills/claude-plugin-skill-sources-wsl.ts
-main/skills/skill-discovery-wsl.ts
-main/skills/skill-provider-runtime-roots.ts
-main/skills/skill-wsl-install-filesystem.ts
 main/wsl-availability.ts
 main/wsl-unc-delete.ts
 main/wsl.ts
