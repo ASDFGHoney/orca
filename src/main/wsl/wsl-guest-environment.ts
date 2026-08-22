@@ -23,8 +23,15 @@ export type WslGuestEnvironment = {
 
 const PROBE_TIMEOUT_MS = 10_000
 const PROBE_MAX_OUTPUT_BYTES = 64 * 1024
-/** A stopped distro recovers; one that cannot produce a POSIX PATH will not. */
-const TRANSIENT_RETRY_MS = 30_000
+/**
+ * A stopped distro recovers; one that cannot produce a POSIX PATH will not.
+ *
+ * Why 5s and not 30: four call sites surface "Try again" on a probe failure,
+ * and for the whole window that retry could not spawn wsl.exe at all -- the
+ * advice was guaranteed to fail. Long enough to stop a stampede, short enough
+ * that the user's next click reaches a distro that has since warmed up.
+ */
+const TRANSIENT_RETRY_MS = 5_000
 /**
  * Even a "permanent" verdict expires eventually.
  *
@@ -130,6 +137,14 @@ export function getWslGuestEnvironment(
     probedWithBudget.delete(key)
   }
 
+  // Why an explicit gate: dropping the in-flight entry on a transient failure
+  // means nothing else stops a re-probe inside the window, so the burst this
+  // cache exists to collapse would come straight back.
+  const cooldown = retryAfter.get(key)
+  if (cooldown !== undefined && Date.now() < cooldown && !inFlight.has(key)) {
+    return Promise.resolve(resolved.get(key) ?? null)
+  }
+
   const existing = inFlight.get(key)
   if (existing) {
     // Why race: joining an in-flight probe used to mean waiting out the
@@ -165,6 +180,12 @@ export function getWslGuestEnvironment(
         Date.now() + (outcome.kind === 'transient' ? TRANSIENT_RETRY_MS : REJECTED_RETRY_MS)
       )
       probedWithBudget.set(key, budgetMs)
+      // Why drop the entry: keeping a null-resolving promise in `inFlight` made
+      // `retryAfter` the only way back, and the probe cap left the 1.5x budget
+      // escape unreachable. Deleting it lets the window alone gate the re-probe.
+      if (outcome.kind === 'transient' && inFlight.get(key) === probe) {
+        inFlight.delete(key)
+      }
       return null
     })
   inFlight.set(key, probe)

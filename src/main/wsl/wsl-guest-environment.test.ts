@@ -112,9 +112,11 @@ describe('transient versus permanent failure', () => {
       })
       expect(await getWslGuestEnvironment('Ubuntu')).toBeNull()
       expect(await getWslGuestEnvironment('Ubuntu')).toBeNull()
+      // Still one probe inside the window: the retry timer gates it now that
+      // the in-flight entry is dropped.
       expect(runProcessMock).toHaveBeenCalledTimes(1)
 
-      vi.setSystemTime(Date.now() + 31_000)
+      vi.setSystemTime(Date.now() + 6_000)
       respondWithPayload(GOOD)
       expect(await getWslGuestEnvironment('Ubuntu')).not.toBeNull()
       expect(runProcessMock).toHaveBeenCalledTimes(2)
@@ -132,7 +134,7 @@ describe('a failed verdict does not outlive its usefulness', () => {
     try {
       respondWithPayload('garbage')
       expect(await getWslGuestEnvironment('Ubuntu')).toBeNull()
-      vi.setSystemTime(Date.now() + 31_000)
+      vi.setSystemTime(Date.now() + 6_000)
       respondWithPayload(GOOD)
       expect(await getWslGuestEnvironment('Ubuntu')).not.toBeNull()
     } finally {

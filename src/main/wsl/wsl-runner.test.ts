@@ -295,6 +295,22 @@ describe('timeout budget', () => {
   })
 })
 
+describe('the probe never starves the command', () => {
+  it.each([
+    [5_000, 2_500],
+    [8_000, 4_000],
+    [10_000, 6_000]
+  ])('leaves a %ims caller at least %ims', async (timeoutMs, floor) => {
+    // The probe used to take two thirds, so a 5s caller reached runProcess with
+    // ~1667ms -- less than the 5s it had before the runner existed, which is
+    // how a cold distro came back as "not installed".
+    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
+    await runWslProcess({ lane: 'probe', program: '/bin/true', timeoutMs })
+    const passed = runProcessMock.mock.calls.at(-1)?.[0].timeoutMs as number
+    expect(passed).toBeGreaterThanOrEqual(floor - 50)
+  })
+})
+
 describe('script interpreter', () => {
   it('defaults to sh', async () => {
     seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
