@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { setSecretStore } from '../shared/secret-store'
+import { _resetSecretStoreForTests, setSecretStore } from '../shared/secret-store'
 
 const cipherState = { available: true }
 
@@ -12,6 +12,18 @@ describe('ProtectedSecretPersistence', () => {
       decryptString: (ciphertext) => ciphertext.toString().slice('encrypted:'.length),
       describeUnavailable: () => null
     })
+  })
+
+  it('surfaces an uninstalled secret store instead of degrading silently', async () => {
+    // Why: a missing setSecretStore() is a startup bug. If the availability check
+    // swallows it, encrypt() hands back an empty blob and decryptWithStatus() reports
+    // 'unavailable' — a real secret silently not stored, which is the outcome the
+    // port throws to prevent.
+    const { ProtectedSecretPersistence } = await import('./protected-secret-persistence')
+    const secrets = new ProtectedSecretPersistence()
+    _resetSecretStoreForTests()
+
+    expect(() => secrets.encrypt('slot', 'token')).toThrow(/SecretStore not initialized/)
   })
 
   it('evicts dynamic slots across repeated SSH recovery lifecycles', async () => {

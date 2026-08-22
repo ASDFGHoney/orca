@@ -4,10 +4,10 @@
  * implementation so core modules never import `electron`.
  *
  * The contract mirrors safeStorage exactly, including the part that matters most:
- * `isEncryptionAvailable()` may return false, and every caller already handles
- * that by storing plaintext. A store that cannot seal must say so rather than
- * throw — but see `describeUnavailable()`, which exists so the reason reaches the
- * user instead of a console warning nobody reads.
+ * `isEncryptionAvailable()` may return false. A store that cannot seal must say so
+ * rather than throw; how a caller degrades is its own decision (persistence retains
+ * the prior sealed blob rather than writing plaintext). See `describeUnavailable()`,
+ * which exists so the reason reaches the user, not a console warning nobody reads.
  */
 
 export type SecretStore = {

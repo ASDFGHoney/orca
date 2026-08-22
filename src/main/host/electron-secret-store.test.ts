@@ -31,7 +31,10 @@ describe('ElectronSecretStore', () => {
     expect(safeStorageMock.decryptString).toHaveBeenCalledExactlyOnceWith(cipher)
   })
 
-  it('round-trips through the real safeStorage pair, so previously sealed credentials still open', () => {
+  // Why the narrower claim: safeStorage is mocked here, so this proves the adapter
+  // pairs encrypt/decrypt without mangling the buffer — NOT that credentials sealed by
+  // a previous build still open. Real-ciphertext compatibility needs a captured fixture.
+  it('pairs encryptString and decryptString without altering the payload', () => {
     const store = new ElectronSecretStore()
     expect(store.decryptString(store.encryptString('linear-token'))).toBe('linear-token')
   })

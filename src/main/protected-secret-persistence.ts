@@ -129,8 +129,13 @@ export class ProtectedSecretPersistence {
   }
 
   private encryptionAvailable(): boolean {
+    // Why getSecretStore() sits outside the try: an uninstalled store is a startup bug,
+    // not a keyring failure. Swallowing it would degrade to an empty blob and report
+    // 'unavailable' — the silent-wrong-state outcome the port throws to prevent. Only
+    // the backend probe itself may fail softly.
+    const store = getSecretStore()
     try {
-      return getSecretStore().isEncryptionAvailable()
+      return store.isEncryptionAvailable()
     } catch (err) {
       console.warn('[persistence] secret store availability check failed:', err)
       return false
