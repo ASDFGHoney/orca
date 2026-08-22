@@ -1,6 +1,9 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
 import {
   getAgentAwakeDescription,
+  getAgentAwakeEngineDescription,
+  getAgentAwakeEngineSearchKeywords,
+  getAgentAwakeEngineTitle,
   getAgentAwakeSearchKeywords,
   getAgentAwakeTitle
 } from './agent-awake-copy'
@@ -61,10 +64,12 @@ function expandAgentSearchText(value: string): string[] {
 
 type AgentsPaneSearchOptions = {
   includeAgentAwake?: boolean
+  includeAgentAwakeEngine?: boolean
   includeAgentRuntime?: boolean
 }
 
 const AGENT_AWAKE_SEARCH_ENTRY_ID = 'agent-awake'
+const AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID = 'agent-awake-engine'
 const AGENT_RUNTIME_SEARCH_ENTRY_ID = 'agent-runtime'
 
 const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
@@ -120,6 +125,12 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
     keywords: getAgentAwakeSearchKeywords()
   },
   {
+    title: getAgentAwakeEngineTitle(),
+    id: AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID,
+    description: getAgentAwakeEngineDescription(),
+    keywords: getAgentAwakeEngineSearchKeywords()
+  },
+  {
     title: translate(
       'auto.components.settings.agents.search.agentPermissions',
       'Agent Permissions'
@@ -145,12 +156,21 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
 
 export function getAgentsPaneSearchEntries({
   includeAgentAwake = true,
+  // The engine is a sub-setting of keep-awake: hiding the parent must hide it too.
+  includeAgentAwakeEngine = includeAgentAwake,
   includeAgentRuntime = true
 }: AgentsPaneSearchOptions = {}) {
-  const entries = getAllAgentsPaneSearchEntries()
-  return entries.filter(
-    (entry) =>
-      (!('id' in entry) || entry.id !== AGENT_RUNTIME_SEARCH_ENTRY_ID || includeAgentRuntime) &&
-      (!('id' in entry) || entry.id !== AGENT_AWAKE_SEARCH_ENTRY_ID || includeAgentAwake)
+  const excluded = new Set<string>()
+  if (!includeAgentRuntime) {
+    excluded.add(AGENT_RUNTIME_SEARCH_ENTRY_ID)
+  }
+  if (!includeAgentAwake) {
+    excluded.add(AGENT_AWAKE_SEARCH_ENTRY_ID)
+  }
+  if (!includeAgentAwakeEngine) {
+    excluded.add(AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID)
+  }
+  return getAllAgentsPaneSearchEntries().filter(
+    (entry) => !('id' in entry) || !excluded.has(entry.id)
   )
 }

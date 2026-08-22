@@ -1,4 +1,5 @@
 import { translate } from '@/i18n/i18n'
+import type { AmphetamineUnavailableReason } from '../../../../shared/computer-awake-mode'
 import { searchKeywords } from './settings-search-keywords'
 
 const AGENT_AWAKE_TITLE_KEY = 'auto.components.settings.agent-awake-copy.modeTitle'
@@ -49,6 +50,33 @@ export function getAgentAwakeSearchKeywords(
         ])
       ]
     : keywords
+}
+
+export function getAgentAwakeEngineTitle(): string {
+  return translate('auto.components.settings.AgentAwakeSetting.engineTitle', 'Keep awake engine')
+}
+
+/** Why not one string: a missing app and a refused Automation grant need different next steps. */
+export function getAgentAwakeEngineDescription(
+  amphetamineInstalled?: boolean,
+  unavailableReason?: AmphetamineUnavailableReason
+): string {
+  if (amphetamineInstalled === false) {
+    return translate(
+      'auto.components.settings.AgentAwakeSetting.engineDescriptionMissing',
+      'Caffeinate is built into macOS. Install Amphetamine to hand the session to its triggers and app rules instead.'
+    )
+  }
+  if (unavailableReason === 'automation-denied') {
+    return translate(
+      'auto.components.settings.AgentAwakeSetting.engineDescriptionDenied',
+      'Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security › Automation.'
+    )
+  }
+  return translate(
+    'auto.components.settings.AgentAwakeSetting.engineDescription',
+    'Caffeinate is built into macOS. Amphetamine hands the session to the app so its triggers and app rules apply.'
+  )
 }
 
 export function getAgentAwakeEngineSearchKeywords(): string[] {

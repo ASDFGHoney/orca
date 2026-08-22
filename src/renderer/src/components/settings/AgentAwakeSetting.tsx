@@ -2,7 +2,9 @@ import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { Label } from '../ui/label'
 import {
   getAgentAwakeDescription,
+  getAgentAwakeEngineDescription,
   getAgentAwakeEngineSearchKeywords,
+  getAgentAwakeEngineTitle,
   getAgentAwakeSearchKeywords,
   getAgentAwakeTitle
 } from './agent-awake-copy'
@@ -13,7 +15,6 @@ import {
   computerAwakeSettingsForMode,
   normalizeComputerAwakeMode,
   normalizeMacosAwakeEngine,
-  type AmphetamineUnavailableReason,
   type ComputerAwakeMode,
   type ComputerAwakeStatus,
   type MacosAwakeEngine
@@ -41,11 +42,8 @@ export function AgentAwakeSetting({
   )
   const isMac = getRendererAppPlatform() === 'darwin'
   const engine = normalizeMacosAwakeEngine(settings.computerAwakeMacosEngine)
-  const engineTitle = translate(
-    'auto.components.settings.AgentAwakeSetting.engineTitle',
-    'Keep awake engine'
-  )
-  const engineDescription = getEngineDescription(
+  const engineTitle = getAgentAwakeEngineTitle()
+  const engineDescription = getAgentAwakeEngineDescription(
     awakeStatus?.amphetamineInstalled,
     awakeStatus?.amphetamineUnavailableReason
   )
@@ -128,27 +126,5 @@ export function AgentAwakeSetting({
         </SearchableSetting>
       ) : null}
     </section>
-  )
-}
-
-function getEngineDescription(
-  amphetamineInstalled: boolean | undefined,
-  unavailableReason: AmphetamineUnavailableReason | undefined
-): string {
-  if (amphetamineInstalled === false) {
-    return translate(
-      'auto.components.settings.AgentAwakeSetting.engineDescriptionMissing',
-      'Caffeinate is built into macOS. Install Amphetamine to hand the session to its triggers and app rules instead.'
-    )
-  }
-  if (unavailableReason === 'automation-denied') {
-    return translate(
-      'auto.components.settings.AgentAwakeSetting.engineDescriptionDenied',
-      'Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security › Automation.'
-    )
-  }
-  return translate(
-    'auto.components.settings.AgentAwakeSetting.engineDescription',
-    'Caffeinate is built into macOS. Amphetamine hands the session to the app so its triggers and app rules apply.'
   )
 }

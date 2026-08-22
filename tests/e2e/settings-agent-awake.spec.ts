@@ -172,6 +172,40 @@ test.describe('Agent awake setting', () => {
       .toBe('off')
   })
 
+  // Amphetamine is a macOS-only engine, so the picker only exists there.
+  test('offers the macOS keep-awake engine picker', async ({ orcaPage }) => {
+    test.skip(process.platform !== 'darwin', 'the engine picker is macOS only')
+    await openSettings(orcaPage)
+    await dismissTransientAnnouncement(orcaPage)
+    await orcaPage.getByPlaceholder('Search settings').fill('amphetamine')
+
+    const engineModes = orcaPage.getByRole('radiogroup', { name: 'Keep awake engine' })
+    const caffeinate = engineModes.getByRole('radio', { name: 'Caffeinate' })
+    const amphetamine = engineModes.getByRole('radio', { name: 'Amphetamine' })
+    await expect(caffeinate).toHaveAttribute('aria-checked', 'true')
+    await expect(amphetamine).toBeVisible()
+
+    const proofPath = process.env.ORCA_AWAKE_ENGINE_SETTINGS_PROOF_PATH
+    if (proofPath) {
+      await engineModes.locator('xpath=ancestor::section[1]').screenshot({
+        path: proofPath,
+        animations: 'disabled'
+      })
+    }
+
+    // A host without Amphetamine installed disables the option instead of offering a dead engine.
+    if ((await amphetamine.getAttribute('aria-disabled')) === 'true') {
+      return
+    }
+    await amphetamine.click()
+    await expect
+      .poll(async () => (await getSettings(orcaPage)).computerAwakeMacosEngine, {
+        timeout: 5_000,
+        message: 'keep-awake engine did not persist after selecting Amphetamine'
+      })
+      .toBe('amphetamine')
+  })
+
   test('keeps the OS awake only while a hook-reported agent is working', async ({
     electronApp,
     orcaPage

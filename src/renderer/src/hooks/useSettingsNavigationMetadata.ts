@@ -175,6 +175,8 @@ export function buildSettingsNavigationMetadata({
       icon: Bot,
       searchEntries: getAgentsPaneSearchEntries({
         includeAgentAwake: !isWebClient,
+        // The engine choice is macOS-only, so it must not surface in search elsewhere.
+        includeAgentAwakeEngine: isMac && !isWebClient,
         includeAgentRuntime: isLocalWindowsHost
       }),
       group: 'capabilities'
