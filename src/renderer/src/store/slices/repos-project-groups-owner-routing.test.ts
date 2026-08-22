@@ -171,6 +171,27 @@ describe('project group mutations route to the owning host', () => {
     expect(projectGroupsDelete).toHaveBeenCalledWith({ groupId: folderScanGroup.id })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
+
+  // Why: a lost connection is unverifiable, not a refusal - the failure toast copy must stay non-asserting.
+  it('reports an unreachable owner as failure without touching local state', async () => {
+    const runtimeGroup: ProjectGroup = { ...folderScanGroup, executionHostId: 'runtime:env-1' }
+    runtimeEnvironmentCall.mockRejectedValue(new Error('runtime rpc timed out'))
+    const store = createTestStore()
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: null } as never,
+      projectGroups: [runtimeGroup],
+      folderWorkspaces: [baseFolderWorkspace]
+    })
+
+    await expect(
+      store.getState().updateProjectGroup(runtimeGroup.id, { name: 'Renamed' })
+    ).resolves.toBe(false)
+    await expect(store.getState().deleteProjectGroup(runtimeGroup.id)).resolves.toBe(false)
+
+    expect(projectGroupsUpdate).not.toHaveBeenCalled()
+    expect(store.getState().projectGroups).toEqual([runtimeGroup])
+    expect(store.getState().folderWorkspaces).toEqual([baseFolderWorkspace])
+  })
 })
 
 describe('project group state cascades stay scoped to the owner host', () => {

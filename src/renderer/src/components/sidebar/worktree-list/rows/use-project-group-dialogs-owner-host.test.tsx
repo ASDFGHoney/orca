@@ -103,7 +103,7 @@ describe('project group dialogs carry the owner host', () => {
     expect(mocks.toastError).not.toHaveBeenCalled()
   })
 
-  it('surfaces a toast when the owner host does not apply the rename', async () => {
+  it('surfaces an unconfirmed-rename toast when the owner host does not answer', async () => {
     mocks.updateProjectGroup.mockResolvedValue(false)
     await renderHookProbe()
     await act(async () => {
@@ -114,7 +114,8 @@ describe('project group dialogs carry the owner host', () => {
     })
 
     expect(mocks.toastError).toHaveBeenCalledWith('Failed to rename group', {
-      description: "The group's host did not apply the new name."
+      description:
+        "Orca could not confirm the new name with the group's host. Recheck the group after reconnecting."
     })
   })
 
