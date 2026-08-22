@@ -179,6 +179,20 @@ describe('PR E2E gate contract', () => {
     expect(changedInstall.run).toContain('openssh-client')
   })
 
+  it('maps Cmd-J source edits onto the headful performance oracle', () => {
+    const mappedSpec = 'tests/e2e/cmd-j-cold-open-performance.spec.ts'
+    for (const authority of [
+      'app-shell/AppRootSurfaces\\.tsx',
+      'components/WorktreeJumpPalette\\.tsx',
+      'components/cmd-j/',
+      'lib/palette-match/'
+    ]) {
+      expect(filterStep.run).toContain(authority)
+    }
+    expect(filterStep.run).toContain(`'${mappedSpec}'`)
+    expect(readFileSync(join(projectDir, mappedSpec), 'utf8')).toContain('@headful')
+  })
+
   it('scopes the VM rollback oracle to the PR range and recipe schema authorities', () => {
     expect(rollbackStep.run).toContain('--merge-base "$BASE_SHA" "$HEAD_SHA"')
     expect(rollbackStep.run).toContain('src/shared/ephemeral-vm-recipes.ts')
