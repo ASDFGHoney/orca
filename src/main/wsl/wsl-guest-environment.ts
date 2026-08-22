@@ -25,6 +25,15 @@ const PROBE_TIMEOUT_MS = 10_000
 const PROBE_MAX_OUTPUT_BYTES = 64 * 1024
 /** A stopped distro recovers; one that cannot produce a POSIX PATH will not. */
 const TRANSIENT_RETRY_MS = 30_000
+/**
+ * Even a "permanent" verdict expires eventually.
+ *
+ * Exit 127 means no usable `env` -- but that is also what an `apt` upgrade
+ * window looks like for a few seconds. With no expiry, one such moment disabled
+ * every WSL feature on the distro until the app restarted, recoverable only if
+ * the user happened to open Agents settings and press Refresh.
+ */
+const REJECTED_RETRY_MS = 10 * 60_000
 
 type ProbeOutcome =
   | { kind: 'resolved'; environment: WslGuestEnvironment }
@@ -34,6 +43,10 @@ type ProbeOutcome =
 const inFlight = new Map<string, Promise<WslGuestEnvironment | null>>()
 const resolved = new Map<string, WslGuestEnvironment>()
 const retryAfter = new Map<string, number>()
+// The budget the cached probe actually had. A caller with materially more time
+// deserves its own attempt rather than inheriting a verdict from a probe that
+// was starved -- an optional 5s read must not hard-fail the 10s scan behind it.
+const probedWithBudget = new Map<string, number>()
 
 /** A payload that is not three absolute, single-line POSIX values is a failed probe. */
 function parseProbePayload(payload: string | null): WslGuestEnvironment | null {
@@ -106,9 +119,28 @@ export function getWslGuestEnvironment(
     inFlight.delete(key)
     retryAfter.delete(key)
   }
+  // A failed verdict from a starved probe should not bind a caller who brought
+  // more time. 1.5x is the threshold: enough to matter, not so low that every
+  // caller re-probes.
+  const failedBudget = probedWithBudget.get(key)
+  if (failedBudget !== undefined && budgetMs > failedBudget * 1.5) {
+    inFlight.delete(key)
+    retryAfter.delete(key)
+    probedWithBudget.delete(key)
+  }
+
   const existing = inFlight.get(key)
   if (existing) {
-    return existing
+    // Why race: joining an in-flight probe used to mean waiting out the
+    // *starter's* budget, so a joiner could reach its own command with 1ms --
+    // the exact hazard the budget plumbing was added to remove.
+    return Promise.race([
+      existing,
+      new Promise<null>((resolve) => {
+        const timer = setTimeout(() => resolve(null), budgetMs)
+        timer.unref?.()
+      })
+    ])
   }
   // Store before awaiting so a burst collapses into one probe.
   // Why catch: runProcess REJECTS when the child cannot be started (ENOENT on a
@@ -126,11 +158,13 @@ export function getWslGuestEnvironment(
         retryAfter.delete(key)
         return outcome.environment
       }
-      if (outcome.kind === 'transient') {
-        retryAfter.set(key, Date.now() + TRANSIENT_RETRY_MS)
-      }
-        return null
-      })
+      retryAfter.set(
+        key,
+        Date.now() + (outcome.kind === 'transient' ? TRANSIENT_RETRY_MS : REJECTED_RETRY_MS)
+      )
+      probedWithBudget.set(key, budgetMs)
+      return null
+    })
   inFlight.set(key, probe)
   return probe
 }
@@ -144,12 +178,14 @@ export function invalidateWslGuestEnvironment(distro?: string, all = false): voi
     inFlight.clear()
     resolved.clear()
     retryAfter.clear()
+    probedWithBudget.clear()
     return
   }
   const key = cacheKey(distro)
   inFlight.delete(key)
   resolved.delete(key)
   retryAfter.delete(key)
+  probedWithBudget.delete(key)
 }
 
 /** Test-only: the cached value without probing. */

@@ -124,6 +124,49 @@ describe('transient versus permanent failure', () => {
   })
 })
 
+describe('a failed verdict does not outlive its usefulness', () => {
+  it('retries an unparseable payload rather than caching it forever', async () => {
+    // Before: any unparseable payload was permanent, so one fence lost to a
+    // truncated rc disabled every WSL feature on the distro until restart.
+    vi.useFakeTimers()
+    try {
+      respondWithPayload('garbage')
+      expect(await getWslGuestEnvironment('Ubuntu')).toBeNull()
+      vi.setSystemTime(Date.now() + 31_000)
+      respondWithPayload(GOOD)
+      expect(await getWslGuestEnvironment('Ubuntu')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets a caller with more budget re-probe past a starved failure', async () => {
+    // An optional 5s read must not hard-fail the 10s scan queued behind it.
+    runProcessMock.mockResolvedValue({
+      code: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: true
+    })
+    expect(await getWslGuestEnvironment('Ubuntu', 3_000)).toBeNull()
+    respondWithPayload(GOOD)
+    expect(await getWslGuestEnvironment('Ubuntu', 9_000)).not.toBeNull()
+  })
+
+  it('bounds a joiner by its own budget, not the starter\'s', async () => {
+    // Joining used to mean waiting out the starter's probe, so a joiner could
+    // reach its own command with 1ms left.
+    let release: (v: unknown) => void = () => {}
+    runProcessMock.mockImplementation(() => new Promise((r) => (release = r)))
+    const slow = getWslGuestEnvironment('Ubuntu', 60_000)
+    const joiner = getWslGuestEnvironment('Ubuntu', 30)
+    expect(await joiner).toBeNull()
+    release({ code: 0, signal: null, stdout: '', stderr: '', timedOut: false })
+    await slow
+  })
+})
+
 describe('invalidation', () => {
   it('re-probes after the caller invalidates, so a newly installed tool appears', async () => {
     // A user who installs nvm inside a running distro would otherwise keep the
