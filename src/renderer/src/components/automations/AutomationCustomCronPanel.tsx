@@ -3,9 +3,10 @@ import { CheckCircle2, CircleAlert } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
-  formatAutomationSchedule,
+  describeAutomationSchedule,
   getAutomationCronExpressionFields
 } from '../../../../shared/automation-schedules'
+import { formatUiAutomationScheduleDescriptor } from './automation-schedule-label'
 import type { AutomationDraft } from './AutomationEditorDialog'
 import { Field } from './automation-page-parts'
 import { translate } from '@/i18n/i18n'
@@ -37,8 +38,18 @@ export function getCronScheduleStatusLabel(
       )
     }
   }
-  const formatted = formatAutomationSchedule(trimmed)
-  return { kind: 'valid', label: formatted === 'Custom schedule' ? 'Valid custom cron' : formatted }
+  // Why: branch on the parsed kind, not on rendered copy — the label is localized.
+  const descriptor = describeAutomationSchedule(trimmed)
+  if (descriptor.kind === 'custom') {
+    return {
+      kind: 'valid',
+      label: translate(
+        'auto.components.automations.AutomationCustomCronPanel.f6ca30da23',
+        'Valid custom cron'
+      )
+    }
+  }
+  return { kind: 'valid', label: formatUiAutomationScheduleDescriptor(descriptor) }
 }
 
 export function getCronFieldValues(schedule: string): readonly string[] {

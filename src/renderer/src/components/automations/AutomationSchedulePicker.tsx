@@ -16,6 +16,7 @@ import { AutomationCustomCronPanel } from './AutomationCustomCronPanel'
 import { AutomationTimeField, parseAutomationTime } from './AutomationTimeField'
 import { Field } from './automation-page-parts'
 import { translate } from '@/i18n/i18n'
+import { getUiWeekdayNames } from '@/i18n/weekday-names'
 
 const FIELD_CONTROL_CLASS = 'border-input bg-input/30 shadow-xs dark:bg-input/30'
 
@@ -34,16 +35,6 @@ export function getAutomationSchedulePresetLabel([, fallbackLabel, labelKey]: re
 ]): string {
   return translate(labelKey, fallbackLabel)
 }
-
-const DAY_OPTIONS = [
-  ['0', 'Sunday'],
-  ['1', 'Monday'],
-  ['2', 'Tuesday'],
-  ['3', 'Wednesday'],
-  ['4', 'Thursday'],
-  ['5', 'Friday'],
-  ['6', 'Saturday']
-] as const
 
 function buildCustomScheduleSeed(draft: AutomationDraft): string {
   const existing = draft.customSchedule.trim()
@@ -150,8 +141,8 @@ export function AutomationSchedulePicker({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
-                  {DAY_OPTIONS.map(([value, dayLabel]) => (
-                    <SelectItem key={value} value={value}>
+                  {getUiWeekdayNames().map((dayLabel, index) => (
+                    <SelectItem key={dayLabel} value={String(index)}>
                       {dayLabel}
                     </SelectItem>
                   ))}
