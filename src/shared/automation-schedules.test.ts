@@ -23,6 +23,18 @@ function formatTimeForTest(hour: number, minute: number): string {
   }).format(date)
 }
 
+const CRON_ANCHOR = new Date('2026-05-01T00:00:00').getTime()
+
+function collectCronMinutes(cron: string, count: number): number[] {
+  const minutes: number[] = []
+  let cursor = CRON_ANCHOR
+  for (let index = 0; index < count; index += 1) {
+    cursor = nextAutomationOccurrenceAfter(cron, CRON_ANCHOR, cursor)
+    minutes.push(new Date(cursor).getMinutes())
+  }
+  return minutes
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -202,28 +214,47 @@ describe('automation schedules', () => {
 
   it('runs a bare start value with a step through the end of its field', () => {
     // Why: `5/15` means 5,20,35,50; dropping the step made the automation hourly.
-    const anchor = new Date('2026-05-01T00:00:00').getTime()
-    const runs: number[] = []
-    let cursor = anchor
-    for (let index = 0; index < 4; index += 1) {
-      const next = nextAutomationOccurrenceAfter('5/15 * * * *', anchor, cursor)
-      if (next === null) {
-        break
-      }
-      runs.push(new Date(next).getMinutes())
-      cursor = next
-    }
-
-    expect(runs).toEqual([5, 20, 35, 50])
-    // A bare value with no step still means exactly that value.
-    expect(new Date(nextAutomationOccurrenceAfter('5 * * * *', anchor, anchor)!).getMinutes()).toBe(
-      5
-    )
+    expect(collectCronMinutes('5/15 * * * *', 4)).toEqual([5, 20, 35, 50])
+    // A bare value with no step still means exactly that value, once per hour.
+    expect(collectCronMinutes('5 * * * *', 2)).toEqual([5, 5])
     // `1/2` in day-of-week is Mon/Wed/Fri/Sun, matching `1-7/2`.
     expect(isValidAutomationSchedule('0 9 * * 1/2')).toBe(true)
-    expect(nextAutomationOccurrenceAfter('0 9 * * 1/2', anchor, anchor)).toBe(
-      nextAutomationOccurrenceAfter('0 9 * * 1-7/2', anchor, anchor)
+    expect(nextAutomationOccurrenceAfter('0 9 * * 1/2', CRON_ANCHOR, CRON_ANCHOR)).toBe(
+      nextAutomationOccurrenceAfter('0 9 * * 1-7/2', CRON_ANCHOR, CRON_ANCHOR)
     )
+  })
+
+  it('classifies a stepped bare start as custom rather than hourly', () => {
+    // Why: with the step dropped, `5/15` collapsed to one minute and read as "Hourly at :05".
+    expect(classifyAutomationCronSchedule('5/15 * * * *').kind).toBe('custom')
+    expect(formatAutomationSchedule('5/15 * * * *')).toBe('Custom schedule')
+    expect(classifyAutomationCronSchedule('5 * * * *').kind).toBe('hourly')
+  })
+
+  it('treats a stepped bare start that spans every day as unrestricted', () => {
+    // Why: day restriction keys off set size, so `0/1` must widen to all seven days like `*`.
+    // Anchored past the 1st so a restricted day-of-week would switch match to OR and fire sooner.
+    const afterFirst = new Date('2026-05-01T10:00:00').getTime()
+    expect(nextAutomationOccurrenceAfter('0 9 1 * 0/1', CRON_ANCHOR, afterFirst)).toBe(
+      nextAutomationOccurrenceAfter('0 9 1 * *', CRON_ANCHOR, afterFirst)
+    )
+    expect(nextAutomationOccurrenceAfter('0 9 1 * 0/1', CRON_ANCHOR, afterFirst)).not.toBe(
+      nextAutomationOccurrenceAfter('0 9 1 * 0', CRON_ANCHOR, afterFirst)
+    )
+  })
+
+  it('keeps wildcard and range steps intact and applies steps per list element', () => {
+    expect(collectCronMinutes('*/15 * * * *', 4)).toEqual([15, 30, 45, 0])
+    expect(collectCronMinutes('5-30/10 * * * *', 3)).toEqual([5, 15, 25])
+    expect(collectCronMinutes('0,5/20 * * * *', 4)).toEqual([5, 25, 45, 0])
+  })
+
+  it('still rejects malformed steps instead of silently dropping them', () => {
+    expect(isValidAutomationSchedule('5/0 * * * *')).toBe(false)
+    expect(isValidAutomationSchedule('5/-1 * * * *')).toBe(false)
+    expect(isValidAutomationSchedule('5/abc * * * *')).toBe(false)
+    expect(isValidAutomationSchedule('5/ * * * *')).toBe(false)
+    expect(isValidAutomationSchedule('60/15 * * * *')).toBe(false)
   })
 
   it('rejects cron fields with malformed separators', () => {
