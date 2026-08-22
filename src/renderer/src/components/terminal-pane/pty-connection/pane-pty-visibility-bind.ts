@@ -47,6 +47,8 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     session.registerSideEffectFactConsumerForPty(ptyId)
     session.syncHiddenRendererPtyDelivery()
     session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+    // A live bind proves this pane is current again after detach/reattach.
+    useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
     notifyCodexPaneBoundForStaleSweep(ptyId)
     const tabPtyIds = useAppStore.getState().ptyIdsByTabId?.[session.deps.tabId] ?? []
     const directSshRetryAttemptId =
@@ -118,6 +120,12 @@ export function installPanePtyVisibilityBind(session: ConnectPanePtySession): vo
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
     session.bindActivePanePty(ptyId, { seedInitialAgentStatus: true })
+    // Spend queued startup only after this pane owns a concrete PTY.
+    try {
+      session.deps.onQueuedStartupSpawned?.()
+    } catch {
+      // Do not strand a successful spawn because a delivery callback failed.
+    }
   }
   session.onPtyRebind = (ptyId: string, replacedPtyId: string): void => {
     if (!session.canAdoptCapturedDirectSshRetryPty(ptyId)) {

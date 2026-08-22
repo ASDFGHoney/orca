@@ -35,6 +35,7 @@ import {
 import { DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS } from './pty-connect-limits'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { resolveLatestAgentDoneStartedAt } from './agent-done-started-at'
+import { rendererAgentStatusObservations } from '@/lib/renderer-agent-status-observations'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 import type { DirectSshRetryLease } from './direct-ssh-retry-lease'
@@ -170,6 +171,14 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
     const authoritativePaneAgent = session.getAuthoritativePaneAgent()
     const agentType = resolveCompatibleAgentTypeForOwner(payload.agentType, authoritativePaneAgent)
     const statusPayload = agentType === payload.agentType ? payload : { ...payload, agentType }
+    const observedStatusPayload = {
+      ...statusPayload,
+      observation: rendererAgentStatusObservations.observe(session.cacheKey, {
+        origin: 'osc',
+        observedAt: Date.now(),
+        kind: 'snapshot'
+      })
+    }
     const resolvedStatusTitle = resolveAgentStatusTerminalTitle(statusPayload, title)
     const statusTitle = resolvedStatusTitle
       ? normalizeCompatibleAgentTitleForOwner(
@@ -183,7 +192,7 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
     if (session.launchToken) {
       currentState.setAgentStatus(
         session.cacheKey,
-        statusPayload,
+        observedStatusPayload,
         statusTitle,
         undefined,
         routing,
@@ -192,7 +201,13 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
         }
       )
     } else {
-      currentState.setAgentStatus(session.cacheKey, statusPayload, statusTitle, undefined, routing)
+      currentState.setAgentStatus(
+        session.cacheKey,
+        observedStatusPayload,
+        statusTitle,
+        undefined,
+        routing
+      )
     }
     if (payload.state === 'working' && session.syncAgentTaskCompleteTrackingEnabled()) {
       session.requiresFreshWorkingForAgentTaskCompleteNotification = false
@@ -249,6 +264,7 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
     Boolean(session.connectionId) && !session.shouldDeliverStartupViaTerminalPaste
   session.hadExistingPaneTransportAtConnect = session.deps.paneTransportsRef.current.size > 0
   session.lastTerminalInputAt = Number.NEGATIVE_INFINITY
+  session.lastInteractiveRedrawInputAt = Number.NEGATIVE_INFINITY
   session.hasReceivedPtyOutput = false
   session.deferredReattachLiveData = null
   session.reattachLiveDataDeferralDepth = 0
@@ -256,6 +272,10 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
   session.transportStreamGeneration = 0
   session.markTerminalInputSent = (): void => {
     session.lastTerminalInputAt = performance.now()
+    session.markInteractiveRedrawInput()
+  }
+  session.markInteractiveRedrawInput = (): void => {
+    session.lastInteractiveRedrawInputAt = performance.now()
     // Why: input must probe a wedged xterm even when the PTY produces no renderer output.
     requestTerminalWritePipelineProbe(session.pane.terminal)
   }

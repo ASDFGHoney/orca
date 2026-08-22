@@ -167,6 +167,9 @@ export function installSessionReconcileDispose(session: ConnectPanePtySession): 
         session.sampleVisiblePaneForegroundAgent()
       }, SHIFT_ENTER_RECONFIRM_IDLE_MS)
     },
+    markShortcutTerminalInputSent() {
+      session.markInteractiveRedrawInput()
+    },
     reconcileIfSessionDead: session.reconcileIfSessionDead,
     reconcileIfSessionMissing: session.reconcileIfSessionMissing,
     dispose() {

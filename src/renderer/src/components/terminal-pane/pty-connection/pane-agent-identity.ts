@@ -3,7 +3,10 @@ import { useAppStore } from '@/store'
 import { getConnectionId } from '@/lib/connection-context'
 import { replayIntoTerminal } from '../replay-guard'
 import { POST_REPLAY_REATTACH_RESET } from '../../../../../shared/terminal-mode-reset-profiles'
-import { isLocalNativeWindowsConpty } from '@/lib/pane-manager/windows-pty-compatibility'
+import {
+  isLocalNativeWindowsConpty,
+  resolveWindowsShellOverride
+} from '@/lib/pane-manager/windows-pty-compatibility'
 import { createTerminalCommandLifecycle } from '../terminal-command-lifecycle'
 import { createPaneForegroundAgentTracker } from '../pane-foreground-agent-tracker'
 import { parseAppSshPtyId } from '../../../../../shared/ssh-pty-id'
@@ -112,7 +115,10 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
       userAgent: navigator.userAgent,
       connectionId: getConnectionId(session.deps.worktreeId) ?? null,
       cwd: session.deps.cwd,
-      shellOverride: tab?.shellOverride,
+      shellOverride: resolveWindowsShellOverride(
+        tab?.shellOverride,
+        state.settings?.terminalWindowsShell
+      ),
       executionHostId: getExecutionHostIdForWorktree(state, session.deps.worktreeId)
     })
   }
@@ -146,6 +152,18 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     onVisibleForegroundSettled: (outcome) => {
       session.visibleForegroundSamplePending = false
       session.visibleForegroundSampleSettled = outcome !== 'inconclusive'
+      if (outcome !== 'inconclusive') {
+        return
+      }
+      const foreground = useAppStore.getState().paneForegroundAgentByPaneKey[session.cacheKey]
+      if (foreground?.routingConfirmationPending !== true) {
+        return
+      }
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+        agent: foreground.agent,
+        routingRevoked: true,
+        shellForeground: foreground.shellForeground
+      })
     }
   })
   // Why: one command-finished policy whether the signal arrives as bytes
@@ -226,6 +244,7 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     // to an agent that already exited before confirmation ever ran.
     if (
       !foreground?.agent ||
+      foreground.routingTrusted !== true ||
       TUI_AGENT_CONFIG[foreground.agent].windowsShiftEnterEncoding !== 'csi-u'
     ) {
       return
@@ -242,6 +261,14 @@ export function installPaneAgentIdentity(session: ConnectPanePtySession): void {
     // Why: hook rows can suppress display-only sampling, but cannot restore
     // byte authority after this function explicitly revoked routing trust.
     session.sampleVisiblePaneForegroundAgent(true)
+    if (session.paneForegroundAgentTracker.hasReadInFlight()) {
+      useAppStore.getState().setPaneForegroundAgent(session.cacheKey, {
+        agent: foreground.agent,
+        routingRevoked: true,
+        shellForeground: false,
+        routingConfirmationPending: true
+      })
+    }
   }
   session.commandLifecycle = createTerminalCommandLifecycle({
     onCommandStarted: () => {

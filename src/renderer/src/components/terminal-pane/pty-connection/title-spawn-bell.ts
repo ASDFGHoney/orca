@@ -9,6 +9,7 @@ import {
 } from '../command-code-done-settle'
 import { canCommandCodeOutputOwnPane } from '../command-code-output-ownership'
 import { resolveCompatibleAgentTypeForOwner } from '../../../../../shared/agent-title-owner'
+import { rendererAgentStatusObservations } from '@/lib/renderer-agent-status-observations'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -91,7 +92,12 @@ export function installTitleSpawnBell(session: ConnectPanePtySession): void {
       agentType: resolveCompatibleAgentTypeForOwner(
         initialStatus.agent,
         session.getAuthoritativePaneAgent()
-      )
+      ),
+      observation: rendererAgentStatusObservations.observe(session.cacheKey, {
+        origin: 'launch',
+        observedAt: Date.now(),
+        kind: 'transition'
+      })
     }
     if (session.paneStartup.launchConfig) {
       useAppStore
@@ -144,7 +150,12 @@ export function installTitleSpawnBell(session: ConnectPanePtySession): void {
       {
         state: 'working',
         prompt: normalizedPrompt || (currentEntry?.state === 'working' ? currentEntry.prompt : ''),
-        agentType: 'command-code'
+        agentType: 'command-code',
+        observation: rendererAgentStatusObservations.observe(session.cacheKey, {
+          origin: 'process',
+          observedAt: Date.now(),
+          kind: 'transition'
+        })
       },
       currentTitle,
       undefined,
@@ -180,7 +191,12 @@ export function installTitleSpawnBell(session: ConnectPanePtySession): void {
         {
           state: 'done',
           prompt: currentPrompt || normalizedPrompt,
-          agentType: 'command-code'
+          agentType: 'command-code',
+          observation: rendererAgentStatusObservations.observe(session.cacheKey, {
+            origin: 'process',
+            observedAt: Date.now(),
+            kind: 'transition'
+          })
         },
         currentTitle,
         undefined,

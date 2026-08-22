@@ -27,6 +27,8 @@ export function bindCaptureTransportOutputCallbacks(session: ConnectPanePtySessi
         onConnect: (): void => {
           if (isCurrent()) {
             session.reportRemoteRendererSerializerReady()
+            // Re-derive the pause bit after a rebind; visibility can change while no PTY is bound.
+            session.syncHiddenRendererPtyDelivery()
           }
         },
         onStreamRecovered: (): void => {

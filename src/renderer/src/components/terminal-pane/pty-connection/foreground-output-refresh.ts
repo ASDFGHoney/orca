@@ -222,7 +222,8 @@ export function bindForegroundOutputRefresh(session: ConnectPanePtySession): voi
       return session.consumeForegroundImmediateBudget(data.length)
     }
     const recentInput =
-      performance.now() - session.lastTerminalInputAt <= FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
+      performance.now() - session.lastInteractiveRedrawInputAt <=
+      FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
     if (
       recentInput &&
       data.length <= FOREGROUND_INTERACTIVE_REDRAW_CHARS &&
@@ -263,7 +264,8 @@ export function bindForegroundOutputRefresh(session: ConnectPanePtySession): voi
     const rewriteOutputPrefersRenderRefresh =
       session.foregroundRewriteOutputPrefersRenderRefresh(data)
     const recentInput =
-      performance.now() - session.lastTerminalInputAt <= FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
+      performance.now() - session.lastInteractiveRedrawInputAt <=
+      FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
     if (session.foregroundRendererRiskOutputPrefersRenderRefresh(data)) {
       return {
         refresh: true,

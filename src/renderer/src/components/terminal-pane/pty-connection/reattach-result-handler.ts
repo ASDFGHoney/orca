@@ -4,6 +4,7 @@ import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 // Why: a restored pane's stale-account prompt can only be raised once a PTY is
 // actually attached — nothing is inspectable while the session hydrates.
 import { notifyCodexPaneBoundForStaleSweep } from '@/lib/codex-stale-pane-sweep'
+import { useAppStore } from '@/store'
 import { isPassiveCompletedHibernationEvidence } from '@/lib/sleeping-agent-pane-ownership'
 import { parseAppSshPtyId } from '../../../../../shared/ssh-pty-id'
 import { resolveHiddenRestoreScrollbackRows } from '../terminal-hidden-restore-scrollback'
@@ -23,6 +24,7 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'agentCompletionCoordinator'
     | 'authoritativeReattachGeneration'
     | 'capturedDirectSshRetryPtyAccepted'
+    | 'cacheKey'
     | 'deps'
     | 'directSshRetryAttempt'
     | 'disposed'
@@ -163,6 +165,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     session.registerSideEffectFactConsumerForPty(ptyId)
     session.syncHiddenRendererPtyDelivery()
     session.deps.syncPanePtyLayoutBinding(session.pane.id, ptyId)
+    useAppStore.getState().restoreAgentPaneAuthority?.(session.cacheKey)
     notifyCodexPaneBoundForStaleSweep(ptyId)
     if (session.capturedDirectSshRetryPtyAccepted && session.directSshRetryAttempt) {
       session.deps.updateTabPtyId(
