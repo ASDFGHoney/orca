@@ -37,6 +37,16 @@ export function resolveEnvironmentSkillProviderRoots(
   }
 }
 
+// Why: `HERMES_HOME` relocates a whole Hermes profile tree (`hermes -p coder`),
+// and the rest of Orca already treats it as authoritative. Hermes is not an
+// install provider, so it stays out of `SkillProviderRootOverrides`.
+export function resolveEnvironmentHermesSkillsRoot(
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  const hermesHome = normalizedRoot(env.HERMES_HOME)
+  return hermesHome ? join(hermesHome, 'skills') : null
+}
+
 export function withClaudeSkillProviderRoot(
   roots: SkillProviderRootOverrides,
   claudeConfigDirectory: string | null | undefined

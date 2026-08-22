@@ -53,6 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   unavailableRootPath = null
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 
@@ -505,6 +506,38 @@ describe('skill discovery', () => {
     )
     expect(result.sources.find((source) => source.id === 'home-hermes')).toMatchObject({
       owner: 'hermes',
+      exists: true
+    })
+  })
+
+  it('discovers Hermes Skills under a relocated HERMES_HOME profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-skills-'))
+    const home = join(root, 'home')
+    const hermesHome = join(root, 'profiles', 'coder')
+    const skillDir = join(hermesHome, 'skills', 'research')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      ['---', 'name: profile-research', 'description: Research sources.', '---', ''].join('\n')
+    )
+    vi.stubEnv('HERMES_HOME', hermesHome)
+
+    const result = await discoverSkills({
+      homeDir: home,
+      cwd: join(root, 'missing-cwd')
+    })
+
+    expect(result.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'profile-research',
+          sourceLabel: 'Hermes home',
+          directoryPath: skillDir
+        })
+      ])
+    )
+    expect(result.sources.find((source) => source.id === 'home-hermes')).toMatchObject({
+      path: join(hermesHome, 'skills'),
       exists: true
     })
   })

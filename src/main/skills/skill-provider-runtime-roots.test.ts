@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  resolveEnvironmentHermesSkillsRoot,
   resolveEnvironmentSkillProviderRoots,
   resolveWslGrokSkillProviderRoot,
   withClaudeSkillProviderRoot
@@ -28,6 +29,14 @@ describe('skill provider runtime roots', () => {
     expect(withClaudeSkillProviderRoot(roots, join('/managed', 'claude'))).toEqual({
       claude: join('/managed', 'claude', 'skills')
     })
+  })
+
+  it('maps a relocated HERMES_HOME to its skill root and ignores relative ones', () => {
+    expect(resolveEnvironmentHermesSkillsRoot({ HERMES_HOME: join('/srv', 'hermes') })).toBe(
+      join('/srv', 'hermes', 'skills')
+    )
+    expect(resolveEnvironmentHermesSkillsRoot({ HERMES_HOME: '../hermes' })).toBeNull()
+    expect(resolveEnvironmentHermesSkillsRoot({})).toBeNull()
   })
 
   it('maps the WSL login shell GROK_HOME to a host-readable skill root', async () => {
