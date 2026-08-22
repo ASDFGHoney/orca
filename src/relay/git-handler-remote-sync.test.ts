@@ -154,6 +154,75 @@ describe('GitHandler', () => {
       }
     })
 
+    it('rebases from the original fork point after a remote force-push', async () => {
+      const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-rebase-bare-'))
+      const producerParent = mkdtempSync(path.join(tmpdir(), 'relay-git-rebase-producer-'))
+      const producerDir = path.join(producerParent, 'repo')
+      try {
+        execFileSync('git', ['init', '--bare'], { cwd: bareDir, stdio: 'pipe' })
+        gitInit(tmpDir)
+        writeFileSync(path.join(tmpDir, 'base.txt'), 'base')
+        gitCommit(tmpDir, 'base')
+        const branch = execFileSync('git', ['branch', '--show-current'], {
+          cwd: tmpDir,
+          encoding: 'utf-8'
+        }).trim()
+        const forkPoint = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tmpDir,
+          encoding: 'utf-8'
+        }).trim()
+        execFileSync('git', ['remote', 'add', 'origin', bareDir], { cwd: tmpDir, stdio: 'pipe' })
+        execFileSync('git', ['push', '--set-upstream', 'origin', branch], {
+          cwd: tmpDir,
+          stdio: 'pipe'
+        })
+
+        execFileSync('git', ['clone', bareDir, producerDir], { stdio: 'pipe' })
+        execFileSync('git', ['checkout', branch], { cwd: producerDir, stdio: 'pipe' })
+        execFileSync('git', ['config', 'user.email', 'test@test.com'], {
+          cwd: producerDir,
+          stdio: 'pipe'
+        })
+        execFileSync('git', ['config', 'user.name', 'Test'], { cwd: producerDir, stdio: 'pipe' })
+        writeFileSync(path.join(producerDir, 'discarded.txt'), 'discarded')
+        gitCommit(producerDir, 'discarded remote commit')
+        execFileSync('git', ['push'], { cwd: producerDir, stdio: 'pipe' })
+        execFileSync('git', ['fetch', 'origin'], { cwd: tmpDir, stdio: 'pipe' })
+
+        execFileSync('git', ['checkout', '-b', 'feature', `origin/${branch}`], {
+          cwd: tmpDir,
+          stdio: 'pipe'
+        })
+        writeFileSync(path.join(tmpDir, 'topic.txt'), 'topic')
+        gitCommit(tmpDir, 'topic commit')
+
+        execFileSync('git', ['reset', '--hard', forkPoint], { cwd: producerDir, stdio: 'pipe' })
+        writeFileSync(path.join(producerDir, 'replacement.txt'), 'replacement')
+        gitCommit(producerDir, 'replacement remote commit')
+        execFileSync('git', ['push', '--force', 'origin', branch], { cwd: producerDir, stdio: 'pipe' })
+
+        await dispatcher.callRequest('git.rebaseFromBase', {
+          worktreePath: tmpDir,
+          baseRef: `origin/${branch}`
+        })
+
+        await expect(fs.access(path.join(tmpDir, 'replacement.txt'))).resolves.toBeUndefined()
+        await expect(fs.access(path.join(tmpDir, 'topic.txt'))).resolves.toBeUndefined()
+        await expect(fs.access(path.join(tmpDir, 'discarded.txt'))).rejects.toThrow()
+        expect(
+          execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/orca/rebase'], {
+            cwd: tmpDir,
+            encoding: 'utf-8'
+          }).trim()
+        ).toBe('')
+      } finally {
+        await Promise.all([
+          fs.rm(bareDir, { recursive: true, force: true }),
+          fs.rm(producerParent, { recursive: true, force: true })
+        ])
+      }
+    }, 15_000)
+
     it('fetches the explicit publish target remote', async () => {
       const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-fork-bare-'))
       try {

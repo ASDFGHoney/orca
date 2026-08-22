@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- Why: centralizes the git RPC protocol surface so local and SSH git behavior stay in one dispatch table. */
+import { randomUUID } from 'node:crypto'
 import { execFile, spawn, type ExecFileOptions } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as path from 'node:path'
@@ -1132,17 +1133,48 @@ export class GitHandler {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     const baseRef = params.baseRef as string
+    let rebaseRef: string | null = null
     try {
       try {
         const source = await resolveGitRemoteRebaseSource(
           ((args) => this.git(args, worktreePath)) as GitCommandRunner,
           baseRef
         )
-        await this.git(['pull', '--rebase', source.remoteName, source.branchName], worktreePath)
+        let forkPoint: string | null = null
+        try {
+          const { stdout } = await this.git(
+            ['merge-base', '--fork-point', `refs/remotes/${source.displayName}`, 'HEAD'],
+            worktreePath
+          )
+          forkPoint = stdout.trim() || null
+        } catch {
+          // A first fetch or an unhelpful reflog falls back to Git's merge-base behavior.
+        }
+        // Why: concurrent fetches can replace FETCH_HEAD and remote-tracking refs between fetch and rebase.
+        rebaseRef = `refs/orca/rebase/${randomUUID()}`
+        await this.git(
+          [
+            'fetch',
+            source.remoteName,
+            `+refs/heads/${source.branchName}:${rebaseRef}`
+          ],
+          worktreePath
+        )
+        await this.git(
+          forkPoint ? ['rebase', '--onto', rebaseRef, forkPoint] : ['rebase', rebaseRef],
+          worktreePath
+        )
       } catch (error) {
         throw new Error(normalizeGitErrorMessage(error, 'pull'))
       }
     } finally {
+      if (rebaseRef) {
+        try {
+          await this.git(['update-ref', '-d', rebaseRef], worktreePath)
+        } catch {
+          // Cleanup must not hide the fetch or rebase result.
+        }
+      }
       this.clearGitMutationReadCaches()
     }
   }

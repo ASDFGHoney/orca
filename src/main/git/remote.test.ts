@@ -511,9 +511,12 @@ describe('git remote operations', () => {
     ])
   })
 
-  it('rebases from the selected remote base ref', async () => {
+  it('fetches to a private ref then rebases from the selected remote base ref', async () => {
     gitExecFileAsyncMock
       .mockResolvedValueOnce({ stdout: 'origin\nupstream\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'fork-point\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
       .mockResolvedValueOnce({ stdout: '', stderr: '' })
       .mockResolvedValueOnce({ stdout: '', stderr: '' })
 
@@ -522,20 +525,86 @@ describe('git remote operations', () => {
     expect(gitExecFileAsyncMock.mock.calls).toEqual([
       [['remote'], { cwd: '/repo' }],
       [['check-ref-format', '--branch', 'main'], { cwd: '/repo' }],
-      [['pull', '--rebase', 'upstream', 'main'], { cwd: '/repo' }]
+      [['merge-base', '--fork-point', 'refs/remotes/upstream/main', 'HEAD'], { cwd: '/repo' }],
+      [
+        [
+          'fetch',
+          'upstream',
+          expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
+        ],
+        { cwd: '/repo' }
+      ],
+      [
+        ['rebase', '--onto', expect.stringMatching(/^refs\/orca\/rebase\//), 'fork-point'],
+        { cwd: '/repo' }
+      ],
+      [['update-ref', '-d', expect.stringMatching(/^refs\/orca\/rebase\//)], { cwd: '/repo' }]
     ])
+
+    const fetchRefspec = gitExecFileAsyncMock.mock.calls[3][0][2]
+    const rebasedRef = gitExecFileAsyncMock.mock.calls[4][0][2]
+    const deletedRef = gitExecFileAsyncMock.mock.calls[5][0][2]
+    expect(fetchRefspec).toBe(`+refs/heads/main:${rebasedRef}`)
+    expect(deletedRef).toBe(rebasedRef)
   })
 
   it('uses the longest configured remote name when rebasing from a base ref', async () => {
     gitExecFileAsyncMock
       .mockResolvedValueOnce({ stdout: 'fork\nfork/team\n', stderr: '' })
       .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'fork-point\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
       .mockResolvedValueOnce({ stdout: '', stderr: '' })
 
     await gitPullRebaseFromBase('/repo', 'fork/team/feature/base')
 
-    expect(gitExecFileAsyncMock).toHaveBeenLastCalledWith(
-      ['pull', '--rebase', 'fork/team', 'feature/base'],
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      5,
+      ['rebase', '--onto', expect.stringMatching(/^refs\/orca\/rebase\//), 'fork-point'],
+      { cwd: '/repo' }
+    )
+  })
+
+  it('rebases when the selected remote has not been fetched before', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'upstream\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(new Error('missing remote-tracking ref'))
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+
+    await expect(gitPullRebaseFromBase('/repo', 'upstream/main')).resolves.toBeUndefined()
+
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      4,
+      [
+        'fetch',
+        'upstream',
+        expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
+      ],
+      { cwd: '/repo' }
+    )
+  })
+
+  it('removes the private ref when rebase fails', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'upstream\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'fork-point\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(new Error('fatal: rebase conflict'))
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+
+    await expect(gitPullRebaseFromBase('/repo', 'upstream/main')).rejects.toThrow(
+      'fatal: rebase conflict'
+    )
+
+    const rebasedRef = gitExecFileAsyncMock.mock.calls[4][0][2]
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      6,
+      ['update-ref', '-d', rebasedRef],
       { cwd: '/repo' }
     )
   })
