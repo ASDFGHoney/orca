@@ -936,7 +936,9 @@ async function refreshLocalBaseRefForWorktreeCreate(
  * @param baseBranch - Optional base branch to create from (defaults to HEAD)
  * @remarks Side effects (best-effort, warn-only): passes `--no-track`, writes
  * `branch.<branch>.base` for new-branch worktrees with a base ref, and may
- * write `push.autoSetupRemote=true` to the repo's shared config.
+ * write `push.autoSetupRemote=true` to the repo's shared config. When
+ * `checkoutExistingBranch` and `refreshLocalBaseRef` are both set, the claimed
+ * branch itself may be fast-forwarded inside the new worktree after the add.
  */
 export async function addWorktree(
   repoPath: string,
@@ -1018,22 +1020,21 @@ async function performAddWorktree(
   })
 
   if (options.checkoutExistingBranch) {
-    // Why (#15645): the just-created worktree owns the branch now, so the
-    // refresh's owner path fast-forwards it in place (reset --hard inside the
-    // owning worktree is the one mutation git permits here). Skipping this
-    // left a pre-existing local branch checked out at its own stale commit —
-    // with no upstream, nothing ever signalled the staleness.
-    if (refreshLocalBaseRef && baseBranch) {
+    // Why (#15645): run after the add — the new worktree owns the branch now, so the refresh's owner path can reset --hard it in place.
+    // Why !noCheckout: a sparse create's index is still empty here, so the clean-status probe would false-positive dirty.
+    if (refreshLocalBaseRef && baseBranch && !noCheckout) {
       const effectiveExistingBase = await resolveWorktreeAddBaseRef(baseBranch, (qualifiedRef) =>
         hasWorktreeBaseCommitRef(repoPath, qualifiedRef, options)
       )
-      localBaseRefRefresh = await refreshLocalBaseRefForWorktreeCreate(
+      const claimedRefresh = await refreshLocalBaseRefForWorktreeCreate(
         repoPath,
         baseBranch,
         effectiveExistingBase,
         options.remoteTrackingBase,
         options
       )
+      // Why: the user deliberately claimed this branch — local-only commits are expected, so only report a successful fast-forward instead of an infinite "not refreshed" warning this path never used to raise.
+      localBaseRefRefresh = claimedRefresh?.status === 'updated' ? claimedRefresh : undefined
     }
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
   }

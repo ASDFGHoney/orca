@@ -42,7 +42,6 @@ describe('addWorktree', () => {
     translateWslOutputPathsMock.mockClear()
   })
 
-
   it('fast-forwards a checked-out existing branch inside the new worktree (#15645)', async () => {
     // The branch pre-exists locally, is behind origin, and the new worktree just
     // checked it out — so the branch is OWNED by /repo-feature now.
@@ -71,14 +70,56 @@ describe('addWorktree', () => {
       { checkoutExistingBranch: true }
     )
 
-    // eslint-disable-next-line no-console
-    console.log('CALLS', JSON.stringify(gitExecFileAsyncMock.mock.calls.map((c) => c[0])))
     expect(result.localBaseRefRefresh).toMatchObject({ status: 'updated' })
     const reset = gitExecFileAsyncMock.mock.calls.find(
       (call) => call[0][0] === 'reset'
     ) as unknown as [string[], { cwd?: string }]
     expect(reset[0]).toEqual(['reset', '--hard', 'remote-tip'])
     expect(reset[1].cwd).toBe('/repo-feature')
+  })
+
+  it('leaves a claimed branch with local-only commits silent (#15645)', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add /repo-feature feature
+      .mockResolvedValueOnce({ stdout: 'remote-tip\n' }) // resolveWorktreeAddBaseRef existence probe
+      .mockResolvedValueOnce({ stdout: '1\t2\n' }) // rev-list --left-right --count (ahead 1 -> not fast-forwardable)
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature',
+      'feature',
+      'origin/feature',
+      true,
+      false,
+      { checkoutExistingBranch: true }
+    )
+
+    // Claiming a branch you already have commits on is the normal case, not a warning worth an infinite toast.
+    expect(result.localBaseRefRefresh).toBeUndefined()
+    expect(gitExecFileAsyncMock.mock.calls.find((call) => call[0][0] === 'reset')).toBeUndefined()
+  })
+
+  it('skips the claim-path refresh for sparse (--no-checkout) creates', async () => {
+    gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add --no-checkout
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature',
+      'feature',
+      'origin/feature',
+      true,
+      true,
+      { checkoutExistingBranch: true }
+    )
+
+    // A --no-checkout worktree has an empty index, so probing it would report a bogus dirty status.
+    expect(result.localBaseRefRefresh).toBeUndefined()
+    expect(gitExecFileAsyncMock.mock.calls).toEqual([
+      [
+        ['worktree', 'add', '--no-checkout', '/repo-feature', 'feature'],
+        { cwd: '/repo', timeout: WORKTREE_ADD_TIMEOUT_MS }
+      ]
+    ])
   })
 
   it('fast-forwards with reset --hard when localBranch is checked out in primary worktree', async () => {
