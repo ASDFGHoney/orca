@@ -142,8 +142,26 @@ export function blankStringContents(source: string): string {
   let out = ''
   let index = 0
   let quote: string | null = null
+  // Why depth: `${`x`}` nests, and treating the inner backtick as the outer
+  // one's closer inverts the state for the rest of the file -- 116 lines of a
+  // child_process importer fell outside the ratchet that way.
+  let templateDepth = 0
   while (index < source.length) {
     const char = source[index]!
+    if (quote === '`' && char === '$' && source[index + 1] === '{') {
+      templateDepth += 1
+      out += '${'
+      index += 2
+      quote = null
+      continue
+    }
+    if (quote === null && templateDepth > 0 && char === '}') {
+      templateDepth -= 1
+      quote = '`'
+      out += char
+      index += 1
+      continue
+    }
     if (quote) {
       if (char === '\\') {
         out += '  '

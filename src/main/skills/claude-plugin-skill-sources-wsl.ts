@@ -62,6 +62,8 @@ async function executeWslMetadataRead(distro: string, script: string): Promise<s
   const result = await runWslProcess({
     distro,
     lane: 'probe',
+    // Degrade rather than refuse: a metadata read; no login PATH involved.
+    allowDegradedEnvironment: true,
     script,
     shell: 'bash',
 

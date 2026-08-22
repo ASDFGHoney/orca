@@ -10,7 +10,6 @@ main/automations/external-manager.ts
 main/automations/precheck-runner.ts
 main/browser/browser-cookie-import.ts
 main/claude-accounts/keychain.ts
-main/claude-accounts/service.ts
 main/cli/cli-installer.ts
 main/codex-accounts/runtime-home-service.ts
 main/computer/macos-computer-use-permission-status.ts
@@ -42,7 +41,6 @@ main/pty-descendant-termination.ts
 main/pty/posix-pty-foreground-group.ts
 main/pty/posix-pty-process-groups.ts
 main/pty/windows-environment-path.ts
-main/rate-limits/codex-fetcher.ts
 main/runtime/orca-runtime-files.ts
 main/runtime/tls-certificate.ts
 main/ssh/ssh-connection.ts

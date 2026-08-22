@@ -1105,7 +1105,13 @@ export class ClaudeRuntimeAuthService {
             // wsl.exe supplies without the login PATH.
             allowDegradedEnvironment: true
           })
-          if (owned.code !== 0 || owned.timedOut) {
+          // Why timedOut throws: null means "not owned by Orca", and the
+          // caller persists that -- clearing the user's account selection. A
+          // slow distro must not make that decision.
+          if (owned.timedOut) {
+            throw new Error('WSL ownership check timed out')
+          }
+          if (owned.code !== 0) {
             return null
           }
           const canonicalLinuxPath = owned.stdout.trim()

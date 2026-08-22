@@ -80,7 +80,10 @@ describe('direct child-process calls hide the Windows console', () => {
   it('scans a realistic number of files', () => {
     // Guards against an import-pattern change quietly emptying the scan, which
     // would make every assertion below pass without checking anything.
-    expect(offenders.length + ALLOWLIST.length).toBeGreaterThan(50)
+    // Naming a file that definitely offends: `offenders + allowlist > N`
+    // cannot fail while the allowlist alone exceeds N, so it passed even for a
+    // scanner that found nothing.
+    expect(offenders).toContain('main/wsl.ts')
   })
 
   it('adds no new file that spawns without windowsHide', () => {

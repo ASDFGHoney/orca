@@ -214,6 +214,8 @@ export class WslSkillInstallFilesystem implements SkillInstallFilesystem {
     const result = await runWslProcess({
       distro: this.distro,
       lane: 'probe',
+      // Degrade rather than refuse: mkdir/mv/chmod on the default PATH; no login shell before.
+      allowDegradedEnvironment: true,
       script,
       args,
       timeoutMs: GUEST_COMMAND_TIMEOUT_MS,

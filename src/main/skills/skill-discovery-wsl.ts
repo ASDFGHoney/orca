@@ -58,6 +58,8 @@ async function executeWslSkillDiscovery(distro: string, script: string): Promise
   const result = await runWslProcess({
     distro,
     lane: 'probe',
+    // Degrade rather than refuse: the scan reads the filesystem; it never needed the login PATH.
+    allowDegradedEnvironment: true,
     script,
     shell: 'bash',
 
