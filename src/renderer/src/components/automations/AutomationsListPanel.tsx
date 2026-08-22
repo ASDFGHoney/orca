@@ -154,15 +154,26 @@ export function AutomationsListPanel({
         return
       }
       pendingKeyboardScrollRef.current = true
+      // Why: arrows only move the highlight — detail is a full-page drill-in that
+      // unmounts this list, so opening it here would end navigation on first press.
       if (next.kind === 'local') {
         selectExternalKey(null)
         selectAutomationId(next.id)
       } else {
         selectAutomationId(null)
         selectExternalKey(next.id)
+        // External items have no runs tab; keep the pane tab valid for the next open.
+        setActivePaneTab('overview')
       }
     },
-    [selectAutomationId, selectExternalKey, selectedExternalKey, selectedId, visibleItems]
+    [
+      selectAutomationId,
+      selectExternalKey,
+      selectedExternalKey,
+      selectedId,
+      setActivePaneTab,
+      visibleItems
+    ]
   )
 
   React.useEffect(() => {
