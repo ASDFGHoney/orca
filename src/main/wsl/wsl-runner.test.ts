@@ -22,15 +22,29 @@ function lastArgv(): string[] {
   return runProcessMock.mock.calls.at(-1)?.[0].args as string[]
 }
 
+/**
+ * Default mock: echo the fence back. The interactive lane now treats a missing
+ * fence as a failure rather than as empty output, so a bare '' stdout would
+ * mean "the login shell never ran our command".
+ */
+function fencedEcho(payload = ''): void {
+  runProcessMock.mockImplementation(async (spec: { args: string[] }) => {
+    const script = spec.args.at(-1) ?? ''
+    const begin = /__ORCA_WSL_CAPTURE_BEGIN_[a-z0-9]+__/.exec(script)?.[0] ?? ''
+    const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
+    return {
+      code: 0,
+      signal: null,
+      stdout: begin ? `${begin}${payload}${end}` : payload,
+      stderr: '',
+      timedOut: false
+    }
+  })
+}
+
 beforeEach(() => {
   runProcessMock.mockReset()
-  runProcessMock.mockResolvedValue({
-    code: 0,
-    signal: null,
-    stdout: '',
-    stderr: '',
-    timedOut: false
-  })
+  fencedEcho()
   invalidateWslGuestEnvironment()
 })
 
@@ -79,12 +93,16 @@ describe('probe lane', () => {
   it('falls back to the interactive lane when the distro cannot be probed', async () => {
     // "We could not ask" must not become "run with no PATH" -- that would turn
     // an unknown into a wrong answer.
-    runProcessMock.mockResolvedValue({
-      code: 1,
-      signal: null,
-      stdout: '',
-      stderr: 'distro is stopped',
-      timedOut: false
+    let call = 0
+    runProcessMock.mockImplementation(async (spec: { args: string[] }) => {
+      call += 1
+      if (call === 1) {
+        return { code: 1, signal: null, stdout: '', stderr: 'stopped', timedOut: false }
+      }
+      const script = spec.args.at(-1) ?? ''
+      const begin = /__ORCA_WSL_CAPTURE_BEGIN_[a-z0-9]+__/.exec(script)?.[0] ?? ''
+      const end = /__ORCA_WSL_CAPTURE_END_[a-z0-9]+__/.exec(script)?.[0] ?? ''
+      return { code: 0, signal: null, stdout: `${begin}${end}`, stderr: '', timedOut: false }
     })
     await runWslProcess({ lane: 'probe', program: 'codex' })
     const argv = lastArgv()
@@ -194,6 +212,54 @@ describe('program is a binary, not a shell string', () => {
     await expect(
       runWslProcess({ lane: 'probe', program: '/home/u/my tools/codex' })
     ).resolves.toBeDefined()
+  })
+})
+
+describe('a script gets the cached environment on both lanes', () => {
+  it('applies the cached PATH even when the caller asked for interactive', async () => {
+    // A script never runs under the login shell (it owns stdin), so without
+    // this the interactive lane would give a script LESS PATH than the probe
+    // lane -- for a caller that explicitly asked for the user's terminal PATH.
+    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
+    await runWslProcess({ lane: 'interactive', script: 'command -v codex' })
+    expect(lastArgv()).toEqual([
+      '--exec',
+      '/usr/bin/env',
+      'PATH=/home/u/.nvm/bin:/usr/bin',
+      'HOME=/home/u',
+      'sh',
+      '-s',
+      '--'
+    ])
+  })
+})
+
+describe('a missing fence is a failure, not empty output', () => {
+  it('throws rather than returning a clean empty result', async () => {
+    // readStdout returns null precisely to distinguish "no fence" from "empty
+    // payload". An rc that redirects stdout would otherwise yield a silent
+    // wrong answer.
+    runProcessMock.mockResolvedValue({
+      code: 0,
+      signal: null,
+      stdout: 'banner only, no fence',
+      stderr: '',
+      timedOut: false
+    })
+    await expect(runWslProcess({ lane: 'interactive', program: 'claude' })).rejects.toThrow(
+      /no fenced output/
+    )
+  })
+})
+
+describe('program is not an assignment', () => {
+  it('rejects a name=value program that env would swallow', async () => {
+    // `env PATH=… HOME=… FOO=bar` has no command left: it prints the whole
+    // guest environment and exits 0 -- success, with the environment as stdout.
+    seedWslGuestEnvironmentForTests(undefined, ENVIRONMENT)
+    await expect(runWslProcess({ lane: 'probe', program: 'FOO=bar' })).rejects.toThrow(
+      /assignment/
+    )
   })
 })
 

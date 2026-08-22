@@ -112,6 +112,13 @@ function assertNotShellString(program: string): void {
   if (/[;&|<>$`\n\r]/.test(program) || /^\S+\s+-/.test(program)) {
     throw new Error(`WSL program must be a single binary, received ${program}`)
   }
+  // Why `=` specifically: on the probe lane the program follows `env PATH=…
+  // HOME=…`, so `env` reads a name=value program as a third assignment, finds
+  // no command left, prints the whole guest environment and exits 0 -- success,
+  // with the environment as stdout.
+  if (program.includes('=')) {
+    throw new Error(`WSL program must not look like an assignment, received ${program}`)
+  }
 }
 
 /** Host env plus the WSLENV entries that let it cross the boundary. */
@@ -136,6 +143,11 @@ function withGuestCwd(cwd: string | undefined, argv: readonly string[]): string[
     return [...argv]
   }
   assertGuestPath(cwd)
+  // Why: `exec` with no operands is a no-op, so the wrapper would cd and exit 0
+  // having run nothing -- the one shape that turns it into a silent success.
+  if (argv.length === 0) {
+    throw new Error('WSL invocation has no command to run')
+  }
   return ['sh', '-c', 'cd "$1" || exit 1; shift; exec "$@"', 'orca-wsl', cwd, ...argv]
 }
 
@@ -167,7 +179,17 @@ function buildInteractiveArgv(spec: WslSpec): {
   const captured = buildWslCapturedLoginShellCommand(body)
   return {
     argv: ['sh', '-c', captured.command],
-    readStdout: (stdout: string) => captured.readStdout(stdout) ?? ''
+    // Why throw rather than default to '': readStdout returns null precisely to
+    // distinguish "the fence never appeared" from "the payload was empty". An rc
+    // that redirects stdout, or output truncated before the begin marker, would
+    // otherwise return a clean, empty, wrong answer.
+    readStdout: (stdout: string) => {
+      const payload = captured.readStdout(stdout)
+      if (payload === null) {
+        throw new Error('WSL login shell produced no fenced output')
+      }
+      return payload
+    }
   }
 }
 
@@ -186,7 +208,12 @@ export async function runWslProcess(spec: WslSpec): Promise<WslResult> {
     assertGuestPath(spec.cwd)
   }
 
-  const environment = spec.lane === 'probe' ? await getWslGuestEnvironment(spec.distro) : null
+  // Why both lanes when there is a script: a script never runs under the login
+  // shell (see below), so on the interactive lane it would otherwise get no
+  // login PATH at all -- strictly less than the probe lane, for a caller that
+  // explicitly asked for the user's terminal PATH.
+  const wantsEnvironment = spec.lane === 'probe' || spec.script !== undefined
+  const environment = wantsEnvironment ? await getWslGuestEnvironment(spec.distro) : null
   // Why a script never takes the interactive lane: the login shell owns stdin,
   // and the script is delivered on stdin. If the shell consumes it first, the
   // inner `sh -s` reads EOF, runs nothing, and exits 0 -- a silent wrong answer,

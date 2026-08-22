@@ -29,12 +29,38 @@ const SOURCE_ROOT = resolve(__dirname, '../..')
 const OWNER_DIRECTORY = 'main/wsl/'
 const IGNORED = new Set(['node_modules', 'dist', 'out', 'build', '.git', '__fixtures__'])
 /**
- * A spawn site: the `wsl.exe` literal sits directly in a spawn-family call, or
- * in a `program:` field. A bare mention (a shell-name constant, a type, a
- * comment) is not a call and is not the guard's business.
+ * A spawn site: the `wsl.exe` literal reaches a child process.
+ *
+ * Why this is broader than "sits inside `spawn(`": the first draft only matched
+ * a named opener, and it missed the single largest wsl.exe spawner in the tree
+ * -- `git/runner.ts`, which assigns `binary: 'wsl.exe'` and spawns it four
+ * lines later. It also missed locally-aliased callers (`run(`, `execFileUtf8(`)
+ * and `command:` fields. A guard whose count is wrong is worse than no guard,
+ * because the count is the goalpost.
+ *
+ * Any identifier followed by `(` counts as an opener, and the assignment-style
+ * fields are matched by name. Indirection through a variable
+ * (`const f = cond ? 'wsl.exe' : x`) is still invisible; those files are listed
+ * explicitly below so the gap is recorded rather than implied.
  */
-const SPAWN_OPENER =
-  /(?:spawn|spawnSync|execFile|execFileSync|exec|fork|runProcess|spawnProcess|execFileAsync|execAsync)\s*\(\s*$|program:\s*$/
+const SPAWN_OPENER = /\b[A-Za-z_$][\w$]*\s*\(\s*$|(?:program|binary|command|file|shellPath):\s*$/
+
+/*
+ * Known blind spot, recorded rather than implied: these files assign
+ * `'wsl.exe'` to a variable and spawn it elsewhere, which no regex over the
+ * literal's neighbourhood can see. They are NOT in the allowlist, because the
+ * stale-entry check would reject an entry the scanner cannot find -- so the
+ * guard's count under-reports by these five, and this comment is the record.
+ *
+ *   main/rate-limits/claude-pty.ts
+ *   main/providers/local-pty-provider.ts
+ *   main/daemon/pty-subprocess.ts
+ *   relay/pty-shell-launch.ts
+ *   relay/pty-handler.ts
+ *
+ * All five are PTY-pane launches, which are out of W3's scope anyway: they go
+ * through node-pty, not a child-process wrapper.
+ */
 
 function isTestFile(path: string): boolean {
   return (
@@ -122,10 +148,13 @@ describe('bash-only payloads declare their interpreter', () => {
 describe('wsl.exe is spawned through one runner', () => {
   const offenders = findSpawnSites()
 
-  it('finds the call sites it is meant to guard', () => {
-    // Guards against a detection change quietly emptying the scan, which would
-    // make the assertions below pass without checking anything.
-    expect(offenders.length + ALLOWLIST.length).toBeGreaterThanOrEqual(20)
+
+  it('still detects a known spawn shape', () => {
+    // Why name a specific file rather than assert a total: `offenders.length +
+    // ALLOWLIST.length >= N` cannot fail while the allowlist alone exceeds N,
+    // so it passed even for a scanner that found nothing. This fails the moment
+    // detection stops seeing a call that is definitely there.
+    expect(offenders).toContain('main/git/runner.ts')
   })
 
   it('adds no new direct wsl.exe spawn', () => {
