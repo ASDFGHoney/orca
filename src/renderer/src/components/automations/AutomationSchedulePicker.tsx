@@ -142,7 +142,7 @@ export function AutomationSchedulePicker({
                 </SelectTrigger>
                 <SelectContent position="popper">
                   {getUiWeekdayNames().map((dayLabel, index) => (
-                    <SelectItem key={dayLabel} value={String(index)}>
+                    <SelectItem key={index} value={String(index)}>
                       {dayLabel}
                     </SelectItem>
                   ))}
