@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import path from 'node:path'
 import { buildPosixCommandPathLookupScript } from '../../shared/posix-command-path-lookup'
-import { buildWslExecArgs, buildWslLoginShellCommand } from '../../shared/wsl-login-shell-command'
+import { runWslProcess } from '../wsl/wsl-runner'
 
-const execFileAsync = promisify(execFile)
 const WSL_AGENT_DETECTION_TIMEOUT_MS = 10000
 const WSL_AGENT_DETECTION_PREFIX = '__ORCA_AGENT_PATH__'
 
@@ -26,7 +23,7 @@ export async function detectWslCommandsOnPath(
     kind: 'shell-variable',
     name: 'cmd'
   })
-  // Newlines keep the loop valid in zsh and every POSIX shell used here.
+  // Newlines keep the loop valid in every POSIX shell used here.
   const script = [
     `for cmd in ${commandList}; do`,
     lookupScript,
@@ -37,10 +34,14 @@ export async function detectWslCommandsOnPath(
   ].join('\n')
 
   try {
-    // Why: WSL cold-start plus many parallel wsl.exe probes can timeout and
-    // cache an empty result. One probe through the distro user's login shell
-    // matches zsh/bash PATH customizations from their normal terminals.
-    const { stdout } = await execWslAgentDetectionCommand(wslTarget, script)
+    // Why probe: the cached login PATH gives the user's real nvm/mise/asdf PATH
+    // with no shell in the loop, so there is no rc/motd banner to land in stdout.
+    const { stdout } = await runWslProcess({
+      distro: wslTarget.distro,
+      lane: 'probe',
+      script,
+      timeoutMs: WSL_AGENT_DETECTION_TIMEOUT_MS
+    })
     return parseWslDetectedCommands(stdout)
   } catch {
     return new Set()
@@ -49,45 +50,6 @@ export async function detectWslCommandsOnPath(
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
-}
-
-async function execWslAgentDetectionCommand(
-  target: WslPreflightTarget,
-  command: string
-): Promise<{ stdout: string; stderr: string }> {
-  const commandPromise = execFileAsync(
-    'wsl.exe',
-    buildWslExecArgs(target.distro, ['sh', '-c', buildWslLoginShellCommand(command)]),
-    {
-      encoding: 'utf-8',
-      timeout: WSL_AGENT_DETECTION_TIMEOUT_MS
-    }
-  ) as Promise<{ stdout: string; stderr: string }>
-  return withWslAgentDetectionTimeout(commandPromise)
-}
-
-async function withWslAgentDetectionTimeout<T>(commandPromise: Promise<T>): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null
-  try {
-    return await Promise.race([
-      commandPromise,
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          const error = Object.assign(new Error('Timed out running wsl.exe'), {
-            code: 'ETIMEDOUT'
-          })
-          reject(error)
-        }, WSL_AGENT_DETECTION_TIMEOUT_MS)
-        if (typeof timeout.unref === 'function') {
-          timeout.unref()
-        }
-      })
-    ])
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout)
-    }
-  }
 }
 
 function parseWslDetectedCommands(stdout: string): Set<string> {
