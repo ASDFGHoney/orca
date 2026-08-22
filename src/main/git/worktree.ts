@@ -937,8 +937,9 @@ async function refreshLocalBaseRefForWorktreeCreate(
  * @remarks Side effects (best-effort, warn-only): passes `--no-track`, writes
  * `branch.<branch>.base` for new-branch worktrees with a base ref, and may
  * write `push.autoSetupRemote=true` to the repo's shared config. When
- * `checkoutExistingBranch` and `refreshLocalBaseRef` are both set, the claimed
- * branch itself may be fast-forwarded inside the new worktree after the add.
+ * `checkoutExistingBranch` and `refreshLocalBaseRef` are both set, the base
+ * ref's local counterpart may be fast-forwarded after the add, inside whichever
+ * worktree owns it (the new one when the base is the claimed branch's remote).
  */
 export async function addWorktree(
   repoPath: string,
