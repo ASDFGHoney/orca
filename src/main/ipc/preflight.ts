@@ -1,4 +1,3 @@
-import { invalidateWslGuestEnvironment } from '../wsl/wsl-guest-environment'
 import { ipcMain } from 'electron'
 import {
   detectInstalledAgentsWithShellPathHydration,

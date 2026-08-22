@@ -44,6 +44,7 @@ import {
   KNOWN_TUI_AGENT_DETECTION_COMMANDS,
   resolveDetectedTuiAgentIds
 } from '../ipc/tui-agent-detection-commands'
+import { invalidateWslGuestEnvironment } from '../wsl/wsl-guest-environment'
 
 export type PreflightStatus = {
   git: { installed: boolean }
@@ -171,7 +172,13 @@ export type RefreshAgentsResult = {
 export async function refreshShellPathAndDetectAgents(
   context?: PreflightRuntimeContext
 ): Promise<RefreshAgentsResult> {
-  if (getPreflightWslTarget(context)) {
+  const wslTarget = getPreflightWslTarget(context)
+  if (wslTarget) {
+    // Why invalidate first: the guest PATH is cached per distro for the process
+    // lifetime, so Refresh would otherwise re-read the pre-install PATH and
+    // keep reporting a just-installed CLI as absent -- the exact case this
+    // function exists to handle.
+    invalidateWslGuestEnvironment(wslTarget.distro)
     const agents = await detectInstalledAgents(context)
     return {
       agents,
