@@ -53,6 +53,40 @@ describe('collapsePathEqualWorktreeRows', () => {
     ).toEqual([String.raw`C:\Work\Feature`])
   })
 
+  it.each<NodeJS.Platform>(['win32', 'linux', 'darwin'])(
+    'keeps case-different WSL UNC worktrees apart on %s',
+    (platform) => {
+      const rows = [
+        row(String.raw`\\wsl$\Ubuntu\home\me\wt\Feature`, { branch: 'refs/heads/Feature' }),
+        row(String.raw`\\wsl$\Ubuntu\home\me\wt\feature`, { branch: 'refs/heads/feature' }),
+        row(String.raw`\\wsl.localhost\Ubuntu\home\me\wt\Other`),
+        row(String.raw`\\wsl.localhost\Ubuntu\home\me\wt\other`)
+      ]
+
+      expect(
+        collapsePathEqualWorktreeRows(rows, {
+          repoPath: String.raw`\\wsl$\Ubuntu\home\me\repo`,
+          platform
+        }).map((entry) => entry.path)
+      ).toEqual(rows.map((entry) => entry.path))
+    }
+  )
+
+  it('collapses WSL UNC rows differing only by separator, dot segment or distro case', () => {
+    const rows = [
+      row(String.raw`\\wsl$\Ubuntu\home\me\wt\Feature`),
+      row('//wsl$/ubuntu/home/me/wt/./Feature/'),
+      row(String.raw`\\WSL$\Ubuntu\home\me\wt\Feature`)
+    ]
+
+    expect(
+      collapsePathEqualWorktreeRows(rows, {
+        repoPath: String.raw`\\wsl$\Ubuntu\home\me\repo`,
+        platform: 'win32'
+      }).map((entry) => entry.path)
+    ).toEqual([String.raw`\\wsl$\Ubuntu\home\me\wt\Feature`])
+  })
+
   it('keeps /tmp and /private/tmp apart for rows produced on a non-darwin host', () => {
     const rows = [row('/private/tmp/orca/feature'), row('/tmp/orca/feature')]
 

@@ -31,8 +31,9 @@ export function resolveRepoWorktreePathPlatform(repo: Repo): NodeJS.Platform {
  * metadata, else Git's first row) so the derived worktree id stays stable, and adopts the branch,
  * head and flags of the peers it absorbs.
  *
- * POSIX paths are never case-folded, including on macOS: APFS/HFSX can be formatted case-sensitive,
- * and silently dropping a real worktree row is worse than showing a duplicate one.
+ * Case-sensitive roots are never case-folded — POSIX paths (including on macOS, where APFS/HFSX can
+ * be formatted case-sensitive) and the WSL UNC aliases Windows hosts report worktrees under.
+ * Silently dropping a real worktree row is worse than showing a duplicate one.
  */
 export function collapsePathEqualWorktreeRows(
   rows: readonly GitWorktreeInfo[],
