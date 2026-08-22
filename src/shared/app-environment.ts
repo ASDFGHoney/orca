@@ -63,12 +63,3 @@ export function getAppEnvironment(): AppEnvironment {
   }
   return current
 }
-
-export function hasAppEnvironment(): boolean {
-  return current !== null
-}
-
-/** Test-only: drop the installed environment so suites do not leak one across files. */
-export function resetAppEnvironmentForTests(): void {
-  current = null
-}
