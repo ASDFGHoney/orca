@@ -87,6 +87,14 @@ function renderedWeekdayOptions(): { value: string; text: string }[] {
     .map((option) => ({ value: option.value, text: option.textContent ?? '' }))
 }
 
+function renderedCronFieldChips(): { text: string; title: string }[] {
+  const grid = container.querySelector('.grid-cols-5')
+  return Array.from(grid?.children ?? []).map((chip) => ({
+    text: chip.firstElementChild?.textContent ?? '',
+    title: chip.firstElementChild?.getAttribute('title') ?? ''
+  }))
+}
+
 describe('AutomationSchedulePicker rendered DOM (#14404)', () => {
   it.each([
     ['zh', ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']],
@@ -132,5 +140,33 @@ describe('AutomationSchedulePicker rendered DOM (#14404)', () => {
     renderPicker({ preset: 'custom', customSchedule: '*/30 9-17 * * 1-5' })
 
     expect(container.textContent).toContain('有效的自定义 cron')
+  })
+
+  it.each([
+    ['zh', ['分钟', '小时', '日', '月', '星期']],
+    ['ja', ['分', '時間', '日', '月', '曜日']],
+    ['ko', ['분', '시간', '일', '월', '요일']],
+    ['es', ['Minuto', 'Hora', 'Día', 'Mes', 'Día de la semana']]
+  ])('renders the custom-cron field chips in %s (#14404)', async (locale, expectedLabels) => {
+    await i18n.changeLanguage(locale)
+    renderPicker({ preset: 'custom', customSchedule: '0 9 * * 1-5' })
+
+    const chips = renderedCronFieldChips()
+    expect(chips.map((chip) => chip.text)).toEqual(expectedLabels)
+    // The chip is `truncate`d, so the full header has to stay reachable on hover.
+    expect(chips.map((chip) => chip.title)).toEqual(expectedLabels)
+    expect(container.textContent).not.toContain('Weekday')
+  })
+
+  it('renders English cron field chips when the UI language is English', () => {
+    renderPicker({ preset: 'custom', customSchedule: '0 9 * * 1-5' })
+
+    expect(renderedCronFieldChips().map((chip) => chip.text)).toEqual([
+      'Minute',
+      'Hour',
+      'Day',
+      'Month',
+      'Weekday'
+    ])
   })
 })

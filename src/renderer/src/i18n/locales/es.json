@@ -13592,7 +13592,12 @@
           "e81a02d61b": "Ingrese un cron válido de cinco campos antes de guardar.",
           "968e66d686": "Ingrese un cron de cinco campos.",
           "cadb7b0bc9": "inválido",
-          "f6ca30da23": "Cron personalizado válido"
+          "f6ca30da23": "Cron personalizado válido",
+          "a226dbdd40": "Minuto",
+          "ec9c1e35df": "Hora",
+          "2d82246d23": "Día",
+          "0e1de0358b": "Mes",
+          "77e96bded6": "Día de la semana"
         },
         "AutomationDetail": {
           "007c8ad874": "Inmediato",
