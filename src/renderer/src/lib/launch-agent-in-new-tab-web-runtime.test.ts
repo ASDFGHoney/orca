@@ -93,10 +93,11 @@ describe('launchAgentInNewTab paired web runtime', () => {
       activate: true,
       agentSessionKind: 'fresh',
       agent: 'claude',
-      // Why: the client resolves its default explicitly so the host cannot apply its own.
-      agentArgs: '--dangerously-skip-permissions',
       viewMode: 'terminal'
     })
+    // Why (#15373): an unconfigured client must not push the built-in YOLO default onto a host
+    // whose own Agent Permissions say Manual; omission keeps the host's choice.
+    expect(mocks.createWebRuntimeSessionTerminal.mock.calls[0]?.[0]).not.toHaveProperty('agentArgs')
     expect(mocks.createTab).not.toHaveBeenCalled()
     await Promise.resolve()
     expect(mocks.setActiveTabType).toHaveBeenCalledWith('terminal')
@@ -156,6 +157,24 @@ describe('launchAgentInNewTab paired web runtime', () => {
       expect.objectContaining({
         agent: 'claude',
         agentArgs: ''
+      })
+    )
+  })
+
+  it('forwards caller-supplied agent args even when the client has no configured default', async () => {
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    launchAgentInNewTab({
+      agent: 'claude',
+      worktreeId: 'wt-1',
+      groupId: 'group-1',
+      agentArgs: '--permission-mode plan'
+    })
+
+    expect(mocks.createWebRuntimeSessionTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: 'claude',
+        agentArgs: '--permission-mode plan'
       })
     )
   })
