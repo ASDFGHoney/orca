@@ -50,8 +50,7 @@ export async function detectWslCommandsOnPath(
       timeoutMs: WSL_AGENT_DETECTION_TIMEOUT_MS
     })
     // runProcess resolves on a timeout and on a non-zero exit, so partial
-    // stdout would otherwise read as a complete answer. (An unresolved login
-    // PATH is refused by the runner itself.)
+    // stdout would otherwise read as a complete answer.
     if (result.timedOut || result.code !== 0) {
       return new Set()
     }

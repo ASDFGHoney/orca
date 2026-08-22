@@ -1560,7 +1560,8 @@ export class CodexAccountService {
                 ].join('\n')
               )
             ],
-            { encoding: 'utf-8', timeout: 5000 }
+            { windowsHide: true,
+              encoding: 'utf-8', timeout: 5000 }
           ).trim()
           if (!canonicalLinuxPath) {
             throw new Error('Managed Codex home directory does not exist on disk.')

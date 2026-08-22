@@ -65,7 +65,105 @@ export function readAllowlist(fixturePath: string): string[] {
     .filter((line) => line.length > 0 && !line.startsWith('#'))
 }
 
-/** Comments blanked out, so a construct documented in prose is not counted as code. */
+/**
+ * Comments blanked out, so a construct documented in prose is not counted as code.
+ *
+ * Why a scanner and not two regexes: a POSIX glob inside a shell script written
+ * as a template literal contains a slash-star sequence, and the naive version
+ * read that as a comment opener, blanking everything to the next star-slash --
+ * 24,000 characters of live code in one file. A guard then read straight past a
+ * real unguarded spawn and reported the file clean, which is worse than no
+ * guard. Quote state is the difference, so it has to be tracked.
+ */
 export function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  let out = ''
+  let index = 0
+  let quote: string | null = null
+  while (index < source.length) {
+    const char = source[index]!
+    const next = source[index + 1]
+    if (quote) {
+      // Only a template literal may span lines. Resetting at a newline stops an
+      // apostrophe in prose, or a quote inside a regex literal, from swallowing
+      // the rest of the file and disabling comment stripping from there on.
+      if (char === '\n' && quote !== '`') {
+        quote = null
+        out += char
+        index += 1
+        continue
+      }
+      if (char === '\\') {
+        out += '  '
+        index += 2
+        continue
+      }
+      if (char === quote) {
+        quote = null
+      }
+      out += char
+      index += 1
+      continue
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char
+      out += char
+      index += 1
+      continue
+    }
+    if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', index + 2)
+      const stop = end === -1 ? source.length : end + 2
+      // Keep newlines so reported line numbers stay honest.
+      out += source.slice(index, stop).replace(/[^\n]/g, ' ')
+      index = stop
+      continue
+    }
+    if (char === '/' && next === '/') {
+      const end = source.indexOf('\n', index)
+      const stop = end === -1 ? source.length : end
+      out += ' '.repeat(stop - index)
+      index = stop
+      continue
+    }
+    out += char
+    index += 1
+  }
+  return out
+}
+
+/**
+ * String contents replaced by spaces, quotes kept.
+ *
+ * Why: a brace matcher that counts parentheses inside a shell script embedded
+ * as a string closes the call early, so the options object -- and any flag in
+ * it -- falls outside the matched range and reads as absent.
+ */
+export function blankStringContents(source: string): string {
+  let out = ''
+  let index = 0
+  let quote: string | null = null
+  while (index < source.length) {
+    const char = source[index]!
+    if (quote) {
+      if (char === '\\') {
+        out += '  '
+        index += 2
+        continue
+      }
+      if (char === quote) {
+        quote = null
+        out += char
+      } else {
+        out += char === '\n' ? char : ' '
+      }
+      index += 1
+      continue
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char
+    }
+    out += char
+    index += 1
+  }
+  return out
 }

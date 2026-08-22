@@ -1,5 +1,10 @@
 import { join, resolve } from 'node:path'
-import { readAllowlist, scanSourceTree, stripComments } from '../source-scan/source-tree-scan'
+import {
+  blankStringContents,
+  readAllowlist,
+  scanSourceTree,
+  stripComments
+} from '../source-scan/source-tree-scan'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -48,12 +53,20 @@ function readCallArguments(source: string, openParenIndex: number): string {
 function findOffenders(): string[] {
   const offenders = new Set<string>()
   for (const file of scanSourceTree(SOURCE_ROOT)) {
-    const source = stripComments(file.source)
-    if (!CHILD_PROCESS_IMPORT.test(source)) {
+    const decommented = stripComments(file.source)
+    // The import test needs the module name, which blanking would erase; the
+    // call scan needs parens inside strings neutralised. Two views, one file.
+    if (!CHILD_PROCESS_IMPORT.test(decommented)) {
       continue
     }
+    const source = blankStringContents(decommented)
     for (const match of source.matchAll(SPAWN_CALL)) {
-      if (!readCallArguments(source, match.index + match[0].length - 1).includes('windowsHide')) {
+      const args = readCallArguments(source, match.index + match[0].length - 1)
+      // `exec(command: string, …)` is a method declaration, not a spawn.
+      if (/^\(\s*\w+\s*[:?]/.test(args)) {
+        continue
+      }
+      if (!args.includes('windowsHide')) {
         offenders.add(file.relativePath)
       }
     }

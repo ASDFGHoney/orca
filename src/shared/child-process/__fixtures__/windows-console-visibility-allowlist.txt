@@ -30,7 +30,6 @@ main/ipc/app.ts
 main/ipc/developer-permissions.ts
 main/ipc/filesystem.ts
 main/ipc/macos-keyboard-layout-snapshot.ts
-main/ipc/notebook.ts
 main/ipc/notification-authorization-status.ts
 main/ipc/repos.ts
 main/ipc/worktree-apfs-clone.ts
@@ -38,7 +37,6 @@ main/local-builds/local-build-candidate.ts
 main/macos-tcc-prompt-watch.ts
 main/network/macos-system-resolver-health.ts
 main/network/macos-tailscale-dns-diagnostic.ts
-main/pi/agent-status-wsl-curl-source.ts
 main/providers/macos-login-session-pty-probe.ts
 main/pty-descendant-termination.ts
 main/pty/posix-pty-foreground-group.ts
@@ -59,7 +57,6 @@ main/wsl-availability.ts
 main/wsl-unc-delete.ts
 main/wsl.ts
 main/zsh-startup-hook-pty-harness.ts
-relay/agent-exec-handler.ts
 relay/external-automations-handler.ts
 relay/fs-handler-git-fallback.ts
 relay/fs-handler-utils.ts

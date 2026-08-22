@@ -118,6 +118,7 @@ export function getWslGuestEnvironment(
   if (retry !== undefined && Date.now() >= retry) {
     inFlight.delete(key)
     retryAfter.delete(key)
+    probedWithBudget.delete(key)
   }
   // A failed verdict from a starved probe should not bind a caller who brought
   // more time. 1.5x is the threshold: enough to matter, not so low that every
@@ -156,6 +157,7 @@ export function getWslGuestEnvironment(
       if (outcome.kind === 'resolved') {
         resolved.set(key, outcome.environment)
         retryAfter.delete(key)
+        probedWithBudget.delete(key)
         return outcome.environment
       }
       retryAfter.set(
