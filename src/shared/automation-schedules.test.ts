@@ -241,6 +241,15 @@ describe('automation schedules', () => {
     expect(nextAutomationOccurrenceAfter('0 9 1 * 0/1', CRON_ANCHOR, afterFirst)).not.toBe(
       nextAutomationOccurrenceAfter('0 9 1 * 0', CRON_ANCHOR, afterFirst)
     )
+    // Known divergence (#15896): vixie restricts off a literal `*`, so it ORs `1/1` with Mondays
+    // and fires Wed Jul 1 as well. Pinned so the follow-up has to flip it on purpose.
+    const beforeJulyFirst = new Date('2026-06-30T10:00:00').getTime()
+    expect(nextAutomationOccurrenceAfter('0 0 1/1 * 1', CRON_ANCHOR, beforeJulyFirst)).toBe(
+      nextAutomationOccurrenceAfter('0 0 * * 1', CRON_ANCHOR, beforeJulyFirst)
+    )
+    expect(nextAutomationOccurrenceAfter('0 0 1/1 * 1', CRON_ANCHOR, beforeJulyFirst)).not.toBe(
+      nextAutomationOccurrenceAfter('0 0 1 * 1', CRON_ANCHOR, beforeJulyFirst)
+    )
   })
 
   it('keeps wildcard and range steps intact and applies steps per list element', () => {
