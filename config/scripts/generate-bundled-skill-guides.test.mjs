@@ -233,8 +233,8 @@ describe('bundled skill guide generator', () => {
     await expect(verifyArtifacts(artifacts, root)).rejects.toThrow('skills/computer-use/SKILL.md')
   })
 
-  // Why: the stale-artifact assertions above only exercise the Windows separator on Windows,
-  // and this file is not in pr.yml's Windows test allowlist — inject path.win32 so CI covers it.
+  // Why: the stale-artifact assertions above only hit the Windows separator when the host is
+  // Windows; injecting path.win32 makes the Linux/macOS shards catch the regression too.
   it('formats contributor-facing paths with forward slashes on every platform', () => {
     expect(
       toPosixRelativePath('C:\\repo', 'C:\\repo\\src\\cli\\bundled-skill-guides.ts', path.win32)
