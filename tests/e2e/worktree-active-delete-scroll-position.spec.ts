@@ -4,11 +4,18 @@ import { waitForSessionReady } from './helpers/store'
 
 const TARGET_INDEX = 24
 const SYNTHETIC_COUNT = 40
+const VISUAL_PROOF_PAUSE_MS = 1_200
 
 type RowRemovalFrame = {
   belowTop: number | null
   scrollTop: number
   targetExists: boolean
+}
+
+async function pauseForVisualProof(page: Page): Promise<void> {
+  if (process.env.ORCA_E2E_RECORD_VIDEO === '1') {
+    await page.waitForTimeout(VISUAL_PROOF_PAUSE_MS)
+  }
 }
 
 async function seedActiveDeletionRows(page: Page): Promise<{
@@ -186,6 +193,7 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   const below = orcaPage.locator(
     `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(belowId)}]`
   )
+  await pauseForVisualProof(orcaPage)
   await target.evaluate((element) => {
     const scope = element.querySelector<HTMLElement>(
       '[data-worktree-context-menu-scope="worktree"]'
@@ -205,12 +213,14 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   })
   const deleteItem = orcaPage.getByRole('menuitem', { name: 'Delete', exact: true })
   await expect(deleteItem).toBeVisible()
+  await pauseForVisualProof(orcaPage)
   await startRowRemovalSampling(orcaPage, targetId, belowId)
   await deleteItem.click()
 
   await expect(target).toHaveCount(0)
   await expect(below).toBeVisible()
   const frames = await finishRowRemovalSampling(orcaPage)
+  await pauseForVisualProof(orcaPage)
   const mountedTops = frames.flatMap((frame) => (frame.belowTop === null ? [] : [frame.belowTop]))
   const distinctTops = new Set(mountedTops.map((top) => Math.round(top * 10) / 10))
 
