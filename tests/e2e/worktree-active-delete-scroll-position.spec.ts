@@ -9,6 +9,7 @@ const POST_REMOVAL_SAMPLE_FRAMES = 20
 const MAX_REMOVAL_WAIT_FRAMES = 300
 
 type RowRemovalFrame = {
+  animationCount: number
   belowTop: number | null
   scrollTop: number
   targetExists: boolean
@@ -179,7 +180,11 @@ async function startRowRemovalSampling(
               `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
             )
           )
+          const animationCount =
+            below?.closest('[data-worktree-virtual-row]')?.firstElementChild?.getAnimations()
+              .length ?? 0
           frames.push({
+            animationCount,
             belowTop: below?.getBoundingClientRect().top ?? null,
             scrollTop: scroller?.scrollTop ?? 0,
             targetExists
@@ -258,12 +263,11 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   const frames = await finishRowRemovalSampling(orcaPage)
   await pauseForVisualProof(orcaPage)
   const mountedTops = frames.flatMap((frame) => (frame.belowTop === null ? [] : [frame.belowTop]))
-  const distinctTops = new Set(mountedTops.map((top) => Math.round(top * 10) / 10))
   const firstRemovedFrame = frames.findIndex((frame) => !frame.targetExists)
 
   expect(firstRemovedFrame).toBeGreaterThan(0)
   expect(frames.slice(firstRemovedFrame).every((frame) => !frame.targetExists)).toBe(true)
-  expect(distinctTops.size).toBeGreaterThanOrEqual(4)
+  expect(Math.max(...frames.map((frame) => frame.animationCount))).toBeGreaterThan(0)
   expect(Math.max(...mountedTops) - Math.min(...mountedTops)).toBeGreaterThan(30)
   expect(Math.max(...frames.map((frame) => frame.scrollTop))).toBeLessThanOrEqual(
     initialScrollTop + 1
