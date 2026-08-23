@@ -139,12 +139,18 @@ function namesIn(text: string): TuiAgent[] {
   return [...found]
 }
 
+function stripBareNameDecoration(text: string): string {
+  return text
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .replace(/[^\p{L}\p{N}]+$/u, '')
+}
+
 function agentForBareName(text: string): TuiAgent | null {
-  const trimmed = text.trim()
-  if (!trimmed) {
+  if (!text.trim()) {
     return null
   }
-  const stripped = trimmed.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '')
+  const stripped = stripBareNameDecoration(text)
   // Why labels too: an agent may write its own display name as the entire title (`⠐ Claude Code`).
   // That is the same claim as a bare token, just spelled the way the vendor spells it.
   const label = DISPLAY_LABELS.find(([text]) => text === stripped.toLowerCase())
@@ -185,7 +191,12 @@ function collectVendorMarkers(segments: readonly string[]): TuiAgent[] {
     if (GEMINI_GLYPHS.some((glyph) => segment.startsWith(glyph))) {
       markers.add('gemini')
     }
-    if (segment.startsWith(`${CLAUDE_IDLE} `) || segment === CLAUDE_IDLE) {
+    if (
+      segment.startsWith(`${CLAUDE_IDLE} `) ||
+      segment === CLAUDE_IDLE ||
+      segment.startsWith('. ') ||
+      segment.startsWith('* ')
+    ) {
       markers.add('claude')
     }
     if (isCursorNativeAgentTitle(segment)) {
@@ -193,6 +204,24 @@ function collectVendorMarkers(segments: readonly string[]): TuiAgent[] {
     }
   }
   return [...markers]
+}
+
+function namesConsumedByAnchoredLabels(
+  segments: readonly string[],
+  anchoredNames: ReadonlySet<TuiAgent>
+): Set<TuiAgent> {
+  const consumed = new Set<TuiAgent>()
+  for (const segment of segments) {
+    const label = DISPLAY_LABELS.find(
+      ([text]) => text === stripBareNameDecoration(segment).toLowerCase()
+    )
+    if (label && anchoredNames.has(label[1])) {
+      for (const name of namesIn(label[0])) {
+        consumed.add(name)
+      }
+    }
+  }
+  return consumed
 }
 
 function collectAnchoredNames(segments: readonly string[]): TuiAgent[] {
@@ -261,7 +290,10 @@ export function collectAgentTitleEvidence(title: string): AgentTitleEvidence {
   const vendorMarkers = collectVendorMarkers(segments)
   const anchoredNames = collectAnchoredNames(segments)
   const anchoredSet = new Set(anchoredNames)
-  const freeTextNames = namesIn(title).filter((agent) => !anchoredSet.has(agent))
+  const anchoredLabelNames = namesConsumedByAnchoredLabels(segments, anchoredSet)
+  const freeTextNames = namesIn(title).filter(
+    (agent) => !anchoredSet.has(agent) && !anchoredLabelNames.has(agent)
+  )
   const evidence = { vendorMarkers, anchoredNames, freeTextNames } as const
 
   if (anchoredNames.length === 1) {

@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import {
+  GEMINI_IDLE,
+  GEMINI_PERMISSION,
+  GEMINI_SILENT_WORKING,
+  GEMINI_WORKING
+} from './agent-title-core'
 import { collectAgentTitleEvidence } from './agent-title-evidence'
 
 const agentFor = (title: string) => collectAgentTitleEvidence(title).agent
@@ -96,9 +102,12 @@ describe('collectAgentTitleEvidence', () => {
       expect(agentFor('Gemini 3.7 Flash · high')).toBeNull()
     })
 
-    it('still resolves a real Gemini glyph', () => {
-      expect(agentFor('✦ Refactor the parser')).toBe('gemini')
-    })
+    it.each([GEMINI_WORKING, GEMINI_SILENT_WORKING, GEMINI_IDLE, GEMINI_PERMISSION])(
+      'still resolves the real Gemini marker %s',
+      (marker) => {
+        expect(agentFor(`${marker} Refactor the parser`)).toBe('gemini')
+      }
+    )
 
     it('does not promote model names in task text', () => {
       expect(agentFor('Compare Antigravity with Gemini 3.7 Flash')).toBeNull()
@@ -147,6 +156,7 @@ describe('collectAgentTitleEvidence', () => {
 
   it('does not duplicate an anchored token as free text', () => {
     expect(collectAgentTitleEvidence('Codex').freeTextNames).toEqual([])
+    expect(collectAgentTitleEvidence('Claude Agent Teams').freeTextNames).toEqual([])
   })
 
   it.each([
@@ -177,6 +187,14 @@ describe('collectAgentTitleEvidence', () => {
     expect(agentFor('Fix the Claude Code ready-state parser')).toBeNull()
     expect(agentFor('Fix Claude Code ready behavior… - grok')).toBe('grok')
   })
+
+  it.each(['. Review the parser', '* Waiting for input'])(
+    'recognizes the established Claude status prefix in %s',
+    (title) => {
+      expect(agentFor(title)).toBe('claude')
+      expect(reasonFor(title)).toBe('vendor-marker')
+    }
+  )
 
   it.each([
     ['⠋ Cursor Agent', 'cursor'],
