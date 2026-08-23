@@ -64,13 +64,18 @@ describe('isClaudeProjectDirInScope', () => {
   // case-folding alias re-check could run (STA-4973 follow-up).
   it('matches a WSL drive-mount prefix whose Windows spelling differs in case', () => {
     const prefix = encodeClaudeProjectPath('/mnt/c/Users/Neil/orca')
-    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca', [prefix])).toBe(true)
-    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca-sub', [prefix])).toBe(true)
+    const caseInsensitive = new Set([prefix])
+    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca', [prefix], caseInsensitive)).toBe(
+      true
+    )
+    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca-sub', [prefix], caseInsensitive)).toBe(
+      true
+    )
   })
 
   it('matches a native Windows volume prefix whose spelling differs in case', () => {
     const prefix = encodeClaudeProjectPath('C:\\Users\\Neil\\orca')
-    expect(isClaudeProjectDirInScope('c--users-neil-orca', [prefix])).toBe(true)
+    expect(isClaudeProjectDirInScope('c--users-neil-orca', [prefix], new Set([prefix]))).toBe(true)
   })
 
   it('keeps POSIX paths case-sensitive', () => {
@@ -78,9 +83,19 @@ describe('isClaudeProjectDirInScope', () => {
     expect(isClaudeProjectDirInScope('-home-neil-orca', [prefix])).toBe(false)
   })
 
+  it('keeps a raw POSIX /mnt/c prefix case-sensitive', () => {
+    const prefix = encodeClaudeProjectPath('/mnt/c/Users/Neil/orca')
+    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca', [prefix])).toBe(false)
+  })
+
   it('still refuses a sibling prefix under case folding', () => {
     const prefix = encodeClaudeProjectPath('/mnt/c/Users/Neil/orca')
-    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orcadyne', [prefix])).toBe(false)
-    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orca-secret', [prefix])).toBe(true)
+    const caseInsensitive = new Set([prefix])
+    expect(isClaudeProjectDirInScope('-mnt-c-users-neil-orcadyne', [prefix], caseInsensitive)).toBe(
+      false
+    )
+    expect(
+      isClaudeProjectDirInScope('-mnt-c-users-neil-orca-secret', [prefix], caseInsensitive)
+    ).toBe(true)
   })
 })

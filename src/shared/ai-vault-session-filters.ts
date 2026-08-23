@@ -7,7 +7,7 @@ import {
   normalizeRuntimePathSeparators
 } from './cross-platform-path'
 import { isClipboardTextByteLengthOverLimit } from './clipboard-text'
-import { isWslAliasedPathInsideOrEqual } from './wsl-path-aliases'
+import { createWslAliasedPathInsideOrEqualScopeMatcher } from './wsl-path-aliases'
 import type {
   AiVaultAgent,
   AiVaultGroup,
@@ -78,6 +78,10 @@ export function filterAiVaultSessions(
 
   const agentSet = new Set(filters.agents)
   const parsedQuery = parseVaultQuery(filters.query)
+  const ownsWorkspaceCwd =
+    filters.scope === 'workspace'
+      ? createWslAliasedPathInsideOrEqualScopeMatcher(filters.activeWorktreePaths)
+      : null
 
   return sessions
     .filter((session) => {
@@ -98,12 +102,7 @@ export function filterAiVaultSessions(
       if (filters.scope === 'workspace') {
         const cwd = session.cwd
         // WSL transcripts record `/home/...` or `/mnt/c/...` for Windows worktrees.
-        if (
-          !cwd ||
-          !filters.activeWorktreePaths.some((pathValue) =>
-            isWslAliasedPathInsideOrEqual(pathValue, cwd)
-          )
-        ) {
+        if (!cwd || !ownsWorkspaceCwd?.(cwd)) {
           return false
         }
       }

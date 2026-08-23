@@ -250,6 +250,26 @@ describe('useAiVaultSessionWorktreeMap', () => {
     expect(result.current.get(session.id)).toMatchObject({ worktreeId: driveRoot.id })
   })
 
+  it('keeps first-wins ordering for equal-depth WSL aliases', () => {
+    const first = makeWorktree({
+      id: String.raw`repo-1::C:\Repo`,
+      path: String.raw`C:\Repo`,
+      displayName: 'first'
+    })
+    const second = makeWorktree({
+      id: 'repo-1::/mnt/c/repo',
+      path: '/mnt/c/repo',
+      displayName: 'second'
+    })
+    const session = makeSession({ id: 'claude:equal-depth', cwd: '/mnt/c/repo/src' })
+
+    const { result } = renderHook(() =>
+      useAiVaultSessionWorktreeMap({ sessions: [session], repos, worktrees: [first, second] })
+    )
+
+    expect(result.current.get(session.id)).toMatchObject({ worktreeId: first.id })
+  })
+
   it('keeps raw /mnt paths case-sensitive on SSH hosts', () => {
     const sshWorktree = makeWorktree({
       id: 'repo-1::/mnt/c/Users/Neil/repo',
@@ -303,6 +323,10 @@ describe('useAiVaultSessionWorktreeMap', () => {
       makeSession({ id: `codex:s${i}`, cwd: `/repo/w${i % manyWorktrees.length}/src` })
     )
 
+    // Isolate the production fanout from garbage retained by earlier renderHook cases.
+    const gc = (globalThis as { gc?: () => void }).gc
+    gc?.()
+    gc?.()
     const startedAt = performance.now()
     const { result } = renderHook(() =>
       useAiVaultSessionWorktreeMap({

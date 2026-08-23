@@ -177,9 +177,9 @@ describe('scanAiVaultSessions scope inclusion', () => {
     // Claude in WSL encodes the guest cwd, not the Windows drive spelling.
     await writeClaudeSession({
       claudeRoot,
-      dirName: '-mnt-c-Users-neil-orca-orca',
+      dirName: '-mnt-c-users-neil-orca-orca',
       sessionId: 'old-mnt-c-in-scope',
-      cwd: '/mnt/c/Users/neil/orca/orca',
+      cwd: '/mnt/c/users/neil/orca/orca',
       iso: '2026-01-01T00:00:00.000Z'
     })
     for (let index = 0; index < 4; index++) {
@@ -197,7 +197,7 @@ describe('scanAiVaultSessions scope inclusion', () => {
         wslHomeDirs: [wslHome],
         platform: 'win32',
         limit: 2,
-        scopePaths: [String.raw`C:\Users\neil\orca\orca`]
+        scopePaths: [String.raw`C:\Users\Neil\orca\orca`]
       })
     )
 
@@ -205,7 +205,7 @@ describe('scanAiVaultSessions scope inclusion', () => {
     expect(
       result.sessions.find((session) => session.sessionId === 'old-mnt-c-in-scope')
     ).toMatchObject({
-      cwd: '/mnt/c/Users/neil/orca/orca',
+      cwd: '/mnt/c/users/neil/orca/orca',
       agent: 'claude'
     })
   })

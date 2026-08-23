@@ -6,8 +6,11 @@ import {
   resolveMobileAgentHistorySessionWorktree
 } from './agent-history-session-worktree'
 
-function session(cwd: string | null): Pick<AiVaultSession, 'cwd'> {
-  return { cwd }
+function session(
+  cwd: string | null,
+  executionHostId: AiVaultSession['executionHostId'] = 'local'
+): Pick<AiVaultSession, 'cwd' | 'executionHostId'> {
+  return { cwd, executionHostId }
 }
 
 function worktree(overrides: Partial<Worktree> & { worktreeId: string; path: string }): Worktree {
@@ -82,6 +85,27 @@ describe('resolveMobileAgentHistorySessionWorktree', () => {
       activeWorktreeId: 'win-wsl'
     })
     expect(resolved).toMatchObject({ status: 'current', worktreeId: 'win-wsl' })
+  })
+
+  it('does not attribute a local WSL session to a same-path SSH worktree', () => {
+    const resolved = resolveMobileAgentHistorySessionWorktree({
+      session: session('/mnt/c/Users/neil/orca/orca/src'),
+      worktrees: [
+        worktree({
+          worktreeId: 'ssh-mount',
+          path: '/mnt/c/Users/neil/orca/orca',
+          hostId: 'ssh:builder'
+        }),
+        worktree({
+          worktreeId: 'local-drive',
+          path: String.raw`C:\Users\neil\orca\orca`,
+          hostId: 'local'
+        })
+      ],
+      activeWorktreeId: 'ssh-mount'
+    })
+
+    expect(resolved).toMatchObject({ status: 'active', worktreeId: 'local-drive' })
   })
 
   it('prefers the deepest worktree independently of its WSL alias spelling', () => {
