@@ -1,12 +1,16 @@
 import type { PtyReplayDataMeta } from '../pty-transport'
 import type { PtyTransportRecoveryState } from '../pty-transport-types'
 import type { PtyDataMeta } from '../pty-dispatcher'
+import type { PtyPaneStartup } from '../pty-connection-types'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 /** Per-generation transport output callbacks and the hidden-output restore state they reset. */
 export function bindCaptureTransportOutputCallbacks(session: ConnectPanePtySession): void {
-  session.captureTransportOutputCallbacks = (onError: (message: string) => void) => {
+  session.captureTransportOutputCallbacks = (
+    onError: (message: string) => void,
+    startup: PtyPaneStartup
+  ) => {
     // Why: a new stream generation cannot inherit an old replay's pending
     // destination-grid fit or keep its live-data waiter open.
     session.pendingHiddenSnapshotFit?.cancel()
@@ -14,6 +18,8 @@ export function bindCaptureTransportOutputCallbacks(session: ConnectPanePtySessi
     session.pendingReattachFit?.cancel()
     session.pendingReattachFit = null
     const generation = (session.transportStreamGeneration += 1)
+    const processExitState = session.createProcessExitState(startup)
+    session.currentProcessExitState = processExitState
     const isCurrent = (): boolean =>
       !session.disposed && generation === session.transportStreamGeneration
     return {
@@ -38,6 +44,7 @@ export function bindCaptureTransportOutputCallbacks(session: ConnectPanePtySessi
         },
         onData: (data: string, meta?: PtyDataMeta): void => {
           if (isCurrent()) {
+            processExitState.detector.observe(data)
             session.dataCallback(data, meta, generation)
           }
         },

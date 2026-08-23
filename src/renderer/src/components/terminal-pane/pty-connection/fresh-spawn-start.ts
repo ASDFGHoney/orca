@@ -6,6 +6,7 @@ import { STARTUP_CWD_FALLBACK_NOTICE } from './startup-cwd-fallback-notice'
 import { pendingSpawnByPaneKey } from './pty-connect-limits'
 import { shouldWritePtyOutputForeground } from './foreground-output-scan'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { toProcessExitStartup } from './process-exit-startup'
 import type {
   PendingStartupCommand,
   FreshSpawnOptions,
@@ -57,7 +58,11 @@ export function bindStartFreshSpawn(session: ConnectPanePtySession): void {
       : window.api.pty.declarePendingPaneSerializer(session.cacheKey).catch(() => null)
 
     session.transportConnectInFlightSince = Date.now()
-    const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError)
+    const effectiveStartup = startupOverride === undefined ? session.paneStartup : startupOverride
+    const outputCallbacks = session.captureTransportOutputCallbacks(
+      session.reportError,
+      toProcessExitStartup(coldRestoreOverride ?? effectiveStartup)
+    )
     const spawnedRaw = session.transport.connect({
       url: '',
       cols: session.cols,

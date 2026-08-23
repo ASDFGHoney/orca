@@ -133,7 +133,7 @@ export function runDeferredSessionReattachChoice(session: ConnectPanePtySession)
       try {
         session.clearPaneMode2031State()
         session.clearHiddenOutputRestoreState()
-        const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError)
+        const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError, null)
         session.transport.attach({
           existingPtyId: attachPtyId,
           cols: session.cols,
@@ -188,7 +188,7 @@ export function runDeferredSessionReattachChoice(session: ConnectPanePtySession)
           }
           session.clearPaneMode2031State()
           session.clearHiddenOutputRestoreState()
-          const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError)
+          const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError, null)
           session.transport.attach({
             existingPtyId: spawnedPtyId,
             cols: session.cols,

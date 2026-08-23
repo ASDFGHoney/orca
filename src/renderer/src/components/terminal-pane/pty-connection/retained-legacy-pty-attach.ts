@@ -8,7 +8,7 @@ export function bindAttachRetainedLegacyPty(session: ConnectPanePtySession): voi
       session.authoritativeReattachGeneration += 1
       session.clearPaneMode2031State()
       session.clearHiddenOutputRestoreState()
-      const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError)
+      const outputCallbacks = session.captureTransportOutputCallbacks(session.reportError, null)
       session.transport.attach({
         existingPtyId: ptyId,
         callbacks: outputCallbacks.callbacks

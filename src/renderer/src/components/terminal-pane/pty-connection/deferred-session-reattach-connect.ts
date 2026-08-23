@@ -2,6 +2,7 @@ import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 import { recordPtyConnectDiagnostic } from './pty-connect-limits'
 import { isSshSessionExpiredError } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { toProcessExitStartup } from './process-exit-startup'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -22,16 +23,19 @@ export function startDeferredSessionReattach(
 
   let expiredReattachError = false
   const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
-  const outputCallbacks = session.captureTransportOutputCallbacks((message) => {
-    if (isSshSessionExpiredError(message)) {
-      expiredReattachError = true
-      return
-    }
-    if (!session.isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
-      return
-    }
-    session.reportError(message)
-  })
+  const outputCallbacks = session.captureTransportOutputCallbacks(
+    (message) => {
+      if (isSshSessionExpiredError(message)) {
+        expiredReattachError = true
+        return
+      }
+      if (!session.isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
+        return
+      }
+      session.reportError(message)
+    },
+    toProcessExitStartup(coldRestoreStartup ?? session.paneStartup)
+  )
   session.beginReattachLiveDataDeferral(outputCallbacks.generation)
   session.transportConnectInFlightSince = Date.now()
   const reattachPromise = session.transport.connect({

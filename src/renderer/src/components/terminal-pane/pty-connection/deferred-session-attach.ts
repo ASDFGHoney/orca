@@ -9,6 +9,7 @@ import {
   waitForSshConnection
 } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { toProcessExitStartup } from './process-exit-startup'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -143,16 +144,19 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
           const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
           session.clearPaneMode2031State()
           session.clearHiddenOutputRestoreState()
-          const outputCallbacks = session.captureTransportOutputCallbacks((message) => {
-            if (isSshSessionExpiredError(message)) {
-              expiredReattachError = true
-              return
-            }
-            if (!session.isCapturedDirectSshReattachCurrent(pendingSessionId)) {
-              return
-            }
-            session.reportError(message)
-          })
+          const outputCallbacks = session.captureTransportOutputCallbacks(
+            (message) => {
+              if (isSshSessionExpiredError(message)) {
+                expiredReattachError = true
+                return
+              }
+              if (!session.isCapturedDirectSshReattachCurrent(pendingSessionId)) {
+                return
+              }
+              session.reportError(message)
+            },
+            toProcessExitStartup(coldRestoreStartup ?? session.paneStartup)
+          )
           session.beginReattachLiveDataDeferral(outputCallbacks.generation)
           session.transportConnectInFlightSince = Date.now()
           const reattachPromise = session.transport.connect({

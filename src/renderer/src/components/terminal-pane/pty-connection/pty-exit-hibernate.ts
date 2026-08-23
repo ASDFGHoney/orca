@@ -12,11 +12,35 @@ import {
   getProviderSessionClaimKey,
   isPassiveCompletedHibernationEvidence
 } from '@/lib/sleeping-agent-pane-ownership'
+import {
+  createGitBashConsoleCapacityDetector,
+  type GitBashConsoleCapacityDetector
+} from '../git-bash-console-capacity'
+import type { PtyPaneStartup } from '../pty-connection-types'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 /** PTY exit handling, hibernated-pane wake targets, and post-exit focus transfer. */
 export function installPtyExitHibernate(session: ConnectPanePtySession): void {
+  type ProcessExitState = {
+    startup: PtyPaneStartup
+    detector: GitBashConsoleCapacityDetector
+  }
+  session.createProcessExitState = (startup: PtyPaneStartup): ProcessExitState => ({
+    startup,
+    detector: createGitBashConsoleCapacityDetector()
+  })
+  session.currentProcessExitState = session.createProcessExitState(session.paneStartup)
+  session.processExitStateByPtyId = new Map<string, ProcessExitState>()
+  session.bindProcessExitState = (ptyId: string, replacedPtyId?: string): void => {
+    const state =
+      (replacedPtyId ? session.processExitStateByPtyId.get(replacedPtyId) : undefined) ??
+      session.currentProcessExitState
+    session.processExitStateByPtyId.set(ptyId, state)
+    if (replacedPtyId && replacedPtyId !== ptyId) {
+      session.processExitStateByPtyId.delete(replacedPtyId)
+    }
+  }
   session.focusSurvivingPtyPaneAfterKeptExit = (): void => {
     if (session.manager.getActivePane()?.id !== session.pane.id) {
       return
@@ -139,7 +163,11 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       })
     return claimKey
   }
-  session.onExit = (ptyId: string, opts: { preserveRendererBinding?: boolean } = {}): void => {
+  session.onExit = (
+    ptyId: string,
+    exitCode = 0,
+    opts: { preserveRendererBinding?: boolean } = {}
+  ): void => {
     if (session.handledExitPtyId === ptyId) {
       return
     }
@@ -150,7 +178,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       // Why: the transport emits exit once; replay it only after a verified commit so rollback keeps renderer state retryable.
       deferPtyShutdownExit(ptyId, (settlement) => {
         if (settlement === 'committed') {
-          session.onExit(ptyId, { preserveRendererBinding: true })
+          session.onExit(ptyId, exitCode, { preserveRendererBinding: true })
         }
       })
       return
@@ -164,6 +192,7 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       // Why: an old transport can deliver a late exit after this pane has
       // rebound to a replacement PTY; only clear ownership for the exited id.
       session.handledExitPtyId = ptyId
+      session.processExitStateByPtyId.delete(ptyId)
       if (!preserveRendererBinding) {
         session.deps.clearTabPtyId(session.deps.tabId, ptyId)
       }
@@ -172,6 +201,9 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       return
     }
     session.handledExitPtyId = ptyId
+    const processExitState =
+      session.processExitStateByPtyId.get(ptyId) ?? session.currentProcessExitState
+    session.processExitStateByPtyId.delete(ptyId)
     session.agentCompletionCoordinator.dispose()
     session.dropSideEffectFactConsumer()
     // Why: main clears gate state on PTY exit too; this only resets the
@@ -248,6 +280,18 @@ export function installPtyExitHibernate(session: ConnectPanePtySession): void {
       return
     }
     session.manager.setPaneGpuRendering(session.pane.id, true)
+    const failedLocalProcess =
+      !session.connectionId && session.runtimeEnvironmentId === null && exitCode !== 0
+    if (failedLocalProcess && session.deps.onPaneProcessDied) {
+      const gitBashConsoleCapacityFailure = processExitState.detector.detected()
+      session.deps.onPaneProcessDied({
+        paneId: session.pane.id,
+        exitCode,
+        startup: gitBashConsoleCapacityFailure ? processExitState.startup : null,
+        reason: gitBashConsoleCapacityFailure ? 'git-bash-console-capacity' : 'process-failed'
+      })
+      return
+    }
     const panes = session.manager.getPanes()
     if (panes.length <= 1) {
       // Why: a worktree's sole newborn terminal can die on shell startup — e.g.
