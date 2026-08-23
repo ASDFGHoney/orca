@@ -23,7 +23,7 @@ const PACKAGE_RECOVERY: LinuxPackageInstallRecovery = {
   version: '1.4.200'
 }
 
-function renderAfterAvailableStatus(): RenderResult {
+function renderAfterAvailableStatus(updateReassuranceSeen = true): RenderResult {
   useAppStore.setState({
     updateStatus: {
       state: 'available',
@@ -33,7 +33,7 @@ function renderAfterAvailableStatus(): RenderResult {
     updateChangelog: null,
     dismissedUpdateVersion: null,
     updateCardCollapsed: false,
-    updateReassuranceSeen: true
+    updateReassuranceSeen
   })
   return render(<UpdateCard />)
 }
@@ -88,6 +88,16 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   useAppStore.setState(useAppStore.getInitialState(), true)
+})
+
+describe('UpdateCard available copy', () => {
+  it('makes no promise about terminal sessions', () => {
+    renderAfterAvailableStatus(false)
+
+    expect(screen.getByText('Update Available')).toBeTruthy()
+    expect(screen.queryByText(/terminal sessions/i)).toBeNull()
+    expect(screen.queryByText(/sessions won't be interrupted/i)).toBeNull()
+  })
 })
 
 describe('UpdateCard Windows signature failures', () => {

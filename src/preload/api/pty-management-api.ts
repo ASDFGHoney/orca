@@ -27,6 +27,4 @@ export type PtyManagementApi = {
   killOne: (args: { sessionId: string }) => Promise<{ success: boolean }>
   restart: () => Promise<{ success: boolean }>
   macTccAttribution: () => Promise<{ health: PtyManagementMacTccAttributionHealth }>
-  // `false`: terminals run on local PTYs that die with the app, so no session survives quit/update. `null`: unverifiable here.
-  sessionPersistence: () => Promise<{ available: boolean | null }>
 }

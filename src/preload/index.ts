@@ -1347,8 +1347,7 @@ const api = {
       killAll: () => ipcRenderer.invoke('pty:management:killAll'),
       killOne: (args: { sessionId: string }) => ipcRenderer.invoke('pty:management:killOne', args),
       restart: () => ipcRenderer.invoke('pty:management:restart'),
-      macTccAttribution: () => ipcRenderer.invoke('pty:management:macTccAttribution'),
-      sessionPersistence: () => ipcRenderer.invoke('pty:management:sessionPersistence')
+      macTccAttribution: () => ipcRenderer.invoke('pty:management:macTccAttribution')
     }
   },
 
