@@ -235,6 +235,28 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     expect(assertion.getHold()).toBeNull()
   })
 
+  it('takes cleanup responsibility when a re-acquire over an adopted hold is indeterminate', async () => {
+    vi.useFakeTimers()
+    const amphetamine = createFakeAmphetamine('foreign')
+    const assertion = createAssertion(amphetamine, { now: () => 1_000, reconcileMs: 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.getHold()).toBe('adopted')
+
+    // The adopted session expires, the re-acquire starts one of Orca's, and the
+    // command then fails to report what it did.
+    amphetamine.setSession('none')
+    amphetamine.run.mockImplementation(async (_script: string) => ok('unreadable'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await settle()
+
+    // Staying 'adopted' would make every later release skip the command and
+    // strand the session Orca just created.
+    expect(assertion.getHold()).toBe('owned')
+    expect(assertion.hasLiveHold()).toBe(false)
+  })
+
   it('stops vouching for its hold while a release is in flight', async () => {
     const amphetamine = createFakeAmphetamine()
     let finishRelease = (): void => {}
@@ -413,9 +435,11 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     await vi.advanceTimersByTimeAsync(1_000)
     await settle()
 
-    // The classification survives so a later stop can clean up...
-    expect(assertion.getHold()).toBe('adopted')
-    // ...but it is no longer evidence that anything is holding.
+    // A failed re-acquire may have created a session before failing to report
+    // it, so responsibility is claimed rather than left as 'adopted' — which
+    // would make every later release skip the command.
+    expect(assertion.getHold()).toBe('owned')
+    // It is still not evidence that anything is holding.
     expect(assertion.hasLiveHold()).toBe(false)
   })
 

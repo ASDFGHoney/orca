@@ -315,9 +315,13 @@ export class MacosAmphetamineSleepAssertion {
    * marked stale so it never counts as coverage.
    */
   private claimIndeterminateAcquire(): void {
-    if (this.hold.get() !== null) {
-      return
-    }
+    // Unconditionally, including over an existing 'adopted' classification. A
+    // periodic re-acquire runs against a live adopted hold, and the foreign
+    // session it adopted may have expired just before the script looked — so the
+    // command can create a session of Orca's and then fail to report it. Leaving
+    // the hold 'adopted' would make every later release skip the command and
+    // strand that session. Claiming it costs nothing if the foreign session did
+    // survive: the release script re-checks the shape and ends nothing.
     this.hold.own()
     this.hold.markStale()
   }
