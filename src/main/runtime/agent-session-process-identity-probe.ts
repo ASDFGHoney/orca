@@ -8,16 +8,13 @@
  * closed to manual recovery rather than minting a second writer.
  */
 
-import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { promisify } from 'node:util'
 import type {
   AgentSessionIdentityMatchField,
   AgentSessionOwnerProbe
 } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
-
-const execFileAsync = promisify(execFile)
+import { runProcess } from '../../shared/child-process/run-process'
 
 /** Start times drift by scheduler granularity and clock reads; compare with a tolerance. */
 export const PROCESS_START_TIME_TOLERANCE_MS = 2_000
@@ -64,10 +61,15 @@ async function readLinuxProcessStartTimeMs(pid: number): Promise<number | null> 
 
 async function readDarwinProcessStartTimeMs(pid: number): Promise<number | null> {
   try {
-    const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      timeout: PROCESS_START_TIME_TIMEOUT_MS
+    const result = await runProcess({
+      program: 'ps',
+      args: ['-o', 'lstart=', '-p', String(pid)],
+      timeoutMs: PROCESS_START_TIME_TIMEOUT_MS
     })
-    const parsed = Date.parse(stdout.trim())
+    if (result.timedOut || result.code !== 0) {
+      return null
+    }
+    const parsed = Date.parse(result.stdout.trim())
     return Number.isFinite(parsed) ? parsed : null
   } catch {
     return null
@@ -79,12 +81,15 @@ async function readWindowsProcessStartTimeMs(pid: number): Promise<number | null
     const script =
       `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; ` +
       'if ($p) { $p.CreationDate.ToUniversalTime().ToString("o") }'
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { timeout: PROCESS_START_TIME_TIMEOUT_MS, windowsHide: true }
-    )
-    const parsed = Date.parse(stdout.trim())
+    const result = await runProcess({
+      program: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', script],
+      timeoutMs: PROCESS_START_TIME_TIMEOUT_MS
+    })
+    if (result.timedOut || result.code !== 0) {
+      return null
+    }
+    const parsed = Date.parse(result.stdout.trim())
     return Number.isFinite(parsed) ? parsed : null
   } catch {
     return null
