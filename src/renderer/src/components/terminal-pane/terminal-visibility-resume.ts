@@ -226,6 +226,13 @@ function resumeTerminalVisibilityHeavy(manager: PaneManager, isActive: boolean):
   // Windows (ANGLE -> D3D11) it can be 100-500 ms but a deferred resume
   // would paint a stretched DOM-fallback flash, which is worse UX.
   manager.resumeRendering()
+  // Why: unchanged grid geometry can skip the reveal fit, but a retained WebGL
+  // canvas may still carry the previous display's backing-store DPR.
+  for (const pane of manager.getPanes()) {
+    if (repairPaneWebglCanvasDprMismatch(pane)) {
+      presentPaneViewport(pane)
+    }
+  }
   // Why: resumeRendering just re-attached WebGL, whose cell metrics briefly differ
   // from the DOM renderer's; a raw fit here reflows on a transient one-column-off
   // grid and garbles diff-painting inline TUIs (grok minimize→restore).

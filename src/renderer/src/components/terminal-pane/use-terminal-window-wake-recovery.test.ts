@@ -2,14 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
+import type { PaneWebglCanvasDprRepairState } from '@/lib/pane-manager/terminal-canvas-dpr-repair'
 
 const {
   recoverVisibleTerminalWindowWakeMock,
-  repairPaneWebglCanvasDprMismatchMock,
+  repairPaneWebglCanvasDprMock,
   presentPaneViewportMock
 } = vi.hoisted(() => ({
   recoverVisibleTerminalWindowWakeMock: vi.fn(),
-  repairPaneWebglCanvasDprMismatchMock: vi.fn(() => false),
+  repairPaneWebglCanvasDprMock: vi.fn<() => PaneWebglCanvasDprRepairState>(() => 'current'),
   presentPaneViewportMock: vi.fn()
 }))
 
@@ -18,7 +19,7 @@ vi.mock('./terminal-visibility-resume', () => ({
 }))
 
 vi.mock('@/lib/pane-manager/terminal-canvas-dpr-repair', () => ({
-  repairPaneWebglCanvasDprMismatch: repairPaneWebglCanvasDprMismatchMock
+  repairPaneWebglCanvasDpr: repairPaneWebglCanvasDprMock
 }))
 
 vi.mock('@/lib/pane-manager/pane-webgl-renderer', () => ({
@@ -43,9 +44,9 @@ describe('useTerminalWindowWakeRecovery', () => {
   beforeEach(() => {
     systemResumedCallback = null
     recoverVisibleTerminalWindowWakeMock.mockClear()
-    repairPaneWebglCanvasDprMismatchMock.mockClear()
+    repairPaneWebglCanvasDprMock.mockClear()
     presentPaneViewportMock.mockClear()
-    repairPaneWebglCanvasDprMismatchMock.mockReturnValue(false)
+    repairPaneWebglCanvasDprMock.mockReturnValue('current')
     unsubscribeSystemResumed.mockClear()
     onSystemResumed.mockClear()
     resetTerminalFreezeBreadcrumbsForTesting()
@@ -203,7 +204,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     // move) even if the CSS box is unchanged.
     const pane = { id: 1, terminal: {} }
     const resizeManager = { getPanes: () => [pane] } as unknown as PaneManager
-    repairPaneWebglCanvasDprMismatchMock.mockReturnValue(true)
+    repairPaneWebglCanvasDprMock.mockReturnValue('repaired')
     vi.stubGlobal('devicePixelRatio', 1)
     const { unmount } = renderHook(() =>
       useTerminalWindowWakeRecovery({
@@ -215,19 +216,19 @@ describe('useTerminalWindowWakeRecovery', () => {
     )
 
     window.dispatchEvent(new Event('resize'))
-    expect(repairPaneWebglCanvasDprMismatchMock).not.toHaveBeenCalled()
+    expect(repairPaneWebglCanvasDprMock).not.toHaveBeenCalled()
 
     vi.stubGlobal('devicePixelRatio', 2)
     window.dispatchEvent(new Event('resize'))
 
-    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledWith(pane)
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledWith(pane)
     expect(presentPaneViewportMock).toHaveBeenCalledWith(pane)
     expect(recoverVisibleTerminalWindowWakeMock).not.toHaveBeenCalled()
 
     unmount()
     vi.stubGlobal('devicePixelRatio', 3)
     window.dispatchEvent(new Event('resize'))
-    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledTimes(1)
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledTimes(1)
   })
 
   it('retains a dpr transition until the visible manager is available', () => {
@@ -245,10 +246,70 @@ describe('useTerminalWindowWakeRecovery', () => {
 
     vi.stubGlobal('devicePixelRatio', 2)
     window.dispatchEvent(new Event('resize'))
-    expect(repairPaneWebglCanvasDprMismatchMock).not.toHaveBeenCalled()
+    expect(repairPaneWebglCanvasDprMock).not.toHaveBeenCalled()
 
     managerRef.current = { getPanes: () => [pane] } as unknown as PaneManager
     window.dispatchEvent(new Event('resize'))
-    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledWith(pane)
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledWith(pane)
+  })
+
+  it('deduplicates a deferred dpr retry and consumes it after repair succeeds', () => {
+    const pane = { id: 1, terminal: {} }
+    const callbacks: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
+    vi.stubGlobal('devicePixelRatio', 1)
+    repairPaneWebglCanvasDprMock.mockReturnValueOnce('deferred').mockReturnValue('repaired')
+    renderHook(() =>
+      useTerminalWindowWakeRecovery({
+        isVisible: true,
+        managerRef: { current: { getPanes: () => [pane] } as unknown as PaneManager },
+        isActiveRef: { current: true },
+        isVisibleRef: { current: true }
+      })
+    )
+
+    vi.stubGlobal('devicePixelRatio', 2)
+    window.dispatchEvent(new Event('resize'))
+    window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledTimes(1)
+    expect(callbacks).toHaveLength(1)
+
+    callbacks.shift()?.(performance.now())
+    expect(presentPaneViewportMock).toHaveBeenCalledWith(pane)
+    window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('caps a deferred dpr transition at sixteen animation-frame retries', () => {
+    const pane = { id: 1, terminal: {} }
+    const callbacks: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
+    vi.stubGlobal('devicePixelRatio', 1)
+    repairPaneWebglCanvasDprMock.mockReturnValue('deferred')
+    renderHook(() =>
+      useTerminalWindowWakeRecovery({
+        isVisible: true,
+        managerRef: { current: { getPanes: () => [pane] } as unknown as PaneManager },
+        isActiveRef: { current: true },
+        isVisibleRef: { current: true }
+      })
+    )
+
+    vi.stubGlobal('devicePixelRatio', 2)
+    window.dispatchEvent(new Event('resize'))
+    let callbackCount = 0
+    while (callbacks.length > 0) {
+      callbacks.shift()?.(performance.now())
+      callbackCount += 1
+    }
+
+    expect(callbackCount).toBe(16)
+    expect(repairPaneWebglCanvasDprMock).toHaveBeenCalledTimes(17)
   })
 })

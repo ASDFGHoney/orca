@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ManagedPane } from './pane-manager-types'
-import { repairPaneWebglCanvasDprMismatch } from './terminal-canvas-dpr-repair'
+import {
+  repairPaneWebglCanvasDpr,
+  repairPaneWebglCanvasDprMismatch
+} from './terminal-canvas-dpr-repair'
 
 function makePane(args: {
   backingWidth: number
@@ -149,6 +152,24 @@ describe('repairPaneWebglCanvasDprMismatch', () => {
       hasRenderer: false
     })
     expect(repairPaneWebglCanvasDprMismatch(noRenderer.pane)).toBe(false)
+  })
+
+  it('defers an unmeasurable WebGL canvas but accepts a renderer-less pane', () => {
+    const detached = makePane({
+      backingWidth: 2160,
+      expectedWidth: 1080,
+      dpr: 1,
+      connected: false
+    })
+    const noRenderer = makePane({
+      backingWidth: 2160,
+      expectedWidth: 1080,
+      dpr: 1,
+      hasRenderer: false
+    })
+
+    expect(repairPaneWebglCanvasDpr(detached.pane)).toBe('deferred')
+    expect(repairPaneWebglCanvasDpr(noRenderer.pane)).toBe('current')
   })
 
   it('reports failure without throwing when the repair path throws mid-teardown', () => {

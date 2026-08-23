@@ -148,6 +148,16 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     expect(flushDeferredPaneMetricOptionsIfMeasurable).not.toHaveBeenCalled()
   })
 
+  it('checks dpr after a heavy reveal even when the stable fit skips geometry work', () => {
+    const pane = { terminal: {} }
+    const manager = createManager()
+    manager.getPanes.mockReturnValue([pane])
+
+    resumeTerminalVisibility(resumeArgs(manager, false))
+
+    expect(repairPaneWebglCanvasDprMismatch).toHaveBeenCalledWith(pane)
+  })
+
   it('does not fit on a light tab reveal', () => {
     const manager = createManager()
     resumeTerminalVisibility(resumeArgs(manager, true))

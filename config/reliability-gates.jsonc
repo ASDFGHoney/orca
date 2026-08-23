@@ -12307,10 +12307,40 @@
       "oracle": "Screenshot the revealed pane, force a model-invalidating full repaint, screenshot again, and assert the bounded pixel diff is immaterial; pair with a JS-level render-model-vs-buffer comparison. Compositor screenshots only, because WebGL canvas readback is blank with preserveDrawingBuffer disabled.",
       "commands": [
         "pnpm run ensure:electron-runtime && pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection-hidden-backlog-snapshot.test.ts src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts src/renderer/src/components/terminal-pane/use-terminal-window-wake-recovery.test.ts src/renderer/src/lib/pane-manager/pane-manager-registry.test.ts src/renderer/src/lib/pane-manager/pane-webgl-renderer.test.ts src/renderer/src/lib/pane-manager/terminal-canvas-dpr-repair.test.ts src/renderer/src/lib/pane-manager/terminal-render-pause-release.test.ts",
         "ORCA_E2E_RECORD_VIDEO=1 pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --repeat-each=3"
       ],
-      "testFiles": ["tests/e2e/terminal-reveal-paused-render-repro.spec.ts"],
+      "testFiles": [
+        "src/renderer/src/components/terminal-pane/pty-connection-hidden-backlog-snapshot.test.ts",
+        "src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+        "src/renderer/src/components/terminal-pane/use-terminal-window-wake-recovery.test.ts",
+        "src/renderer/src/lib/pane-manager/pane-manager-registry.test.ts",
+        "src/renderer/src/lib/pane-manager/pane-webgl-renderer.test.ts",
+        "src/renderer/src/lib/pane-manager/terminal-canvas-dpr-repair.test.ts",
+        "src/renderer/src/lib/pane-manager/terminal-render-pause-release.test.ts",
+        "tests/e2e/terminal-reveal-paused-render-repro.spec.ts"
+      ],
       "assertionRefs": [
+        {
+          "file": "src/renderer/src/components/terminal-pane/use-terminal-window-wake-recovery.test.ts",
+          "assertions": [
+            "deduplicates a deferred dpr retry and consumes it after repair succeeds",
+            "caps a deferred dpr transition at sixteen animation-frame retries"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+          "assertions": [
+            "checks dpr after a heavy reveal even when the stable fit skips geometry work"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/pane-manager/terminal-canvas-dpr-repair.test.ts",
+          "assertions": [
+            "repairs when the canvas and renderer dimensions share a stale dpr cache",
+            "defers an unmeasurable WebGL canvas but accepts a renderer-less pane"
+          ]
+        },
         {
           "file": "tests/e2e/terminal-reveal-paused-render-repro.spec.ts",
           "assertions": ["@headful tab reveal presents a synchronized-output WebGL frame"]
@@ -12318,13 +12348,22 @@
       ],
       "evidenceRuns": [
         {
-          "date": "2026-08-22",
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection-hidden-backlog-snapshot.test.ts src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts src/renderer/src/components/terminal-pane/use-terminal-window-wake-recovery.test.ts src/renderer/src/lib/pane-manager/pane-manager-registry.test.ts src/renderer/src/lib/pane-manager/pane-webgl-renderer.test.ts src/renderer/src/lib/pane-manager/terminal-canvas-dpr-repair.test.ts src/renderer/src/lib/pane-manager/terminal-render-pause-release.test.ts",
+          "result": "passed",
+          "durationSeconds": 2,
+          "summary": "All 98 renderer contracts passed, including same-DPR zero-scan behavior, visible-only fanout, tri-state DPR repair, deduplicated bounded retry, heavy-reveal repair, and listener cleanup."
+        },
+        {
+          "date": "2026-08-23",
           "runner": "local",
           "platform": "macos",
           "command": "pnpm run ensure:electron-runtime && pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
           "result": "passed",
-          "durationSeconds": 16,
-          "summary": "A real WebGL tab reveal matched the current serialized synchronized-output frame with zero changed pixels after a direct renderer present. The test persists and attaches the exact before/after screenshots and pixel-diff metadata."
+          "durationSeconds": 15,
+          "summary": "The final branch state passed: a real WebGL tab reveal matched the current serialized synchronized-output frame with zero changed pixels after a direct renderer present. The test persists and attaches the exact before/after screenshots and pixel-diff metadata."
         },
         {
           "date": "2026-08-22",
@@ -12342,7 +12381,7 @@
       },
       "flakeHistory": {
         "status": "unknown",
-        "evidence": "Four local macOS headed runs passed, including three consecutive video-recorded repeats; CI soak history and cross-platform GPU runs are not yet available."
+        "evidence": "Five local macOS headed runs passed, including one on the final branch state and three consecutive video-recorded repeats; CI soak history and cross-platform GPU runs are not yet available."
       },
       "redGreenEvidence": {
         "status": "complete",
@@ -12350,7 +12389,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The tab-reveal present path runs only at event-driven recovery boundaries and adds no polling, provider calls, PTY scans, or background output work. The shared terminal-render.atlas-recovery-fanout contracts separately prove zero hidden-manager atlas clears or presents and a per-pane display:none retry deduped and capped at 16 animation frames."
+        "evidence": "The tab-reveal present path runs only at event-driven recovery boundaries and adds no polling, provider calls, PTY inventory scans, or background output work. Gate-local contracts prove ordinary same-DPR resize performs zero pane scans; a true transition scans only the visible manager; unavailable canvas retry is deduplicated and capped at 16 frames; and heavy reveal adds one bounded visible-pane scan. The shared terminal-render.atlas-recovery-fanout contracts separately prove zero hidden-manager atlas clears or presents and a per-pane display:none retry capped at 16 frames."
       },
       "promotionCriteria": [
         "Establish a stable material-diff threshold across platforms via nightly runs.",
