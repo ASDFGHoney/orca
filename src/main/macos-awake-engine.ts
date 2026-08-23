@@ -140,13 +140,6 @@ export class MacosAwakeEngineRouter {
 
   start(reason: string): void {
     const useAmphetamine = this.usesAmphetamine()
-    // Stop the engine we are not using before starting the one we are, so a
-    // mid-session engine switch never leaves two assertions held.
-    this.stopAssertion(
-      useAmphetamine ? this.caffeinateAssertion : this.amphetamineAssertion,
-      useAmphetamine ? 'macOS system sleep' : 'Amphetamine',
-      reason
-    )
     try {
       if (useAmphetamine) {
         this.amphetamineAssertion.start(reason)
@@ -159,6 +152,20 @@ export class MacosAwakeEngineRouter {
         engine: useAmphetamine ? 'amphetamine' : 'caffeinate',
         error: err
       })
+    }
+    if (!useAmphetamine) {
+      this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      return
+    }
+    // Why caffeinate stays up until Amphetamine reports a hold: acquiring one is
+    // asynchronous and its first Apple event can block on the macOS Automation
+    // consent dialog for as long as the user takes to answer. Releasing
+    // caffeinate first would leave that whole window with no assertion that
+    // survives a lid close. Holding both is harmless; holding neither is not.
+    if (this.amphetamineAssertion.getHold() !== null) {
+      this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+    } else {
+      this.caffeinateAssertion.start(reason)
     }
   }
 

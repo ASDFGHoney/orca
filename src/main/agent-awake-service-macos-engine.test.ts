@@ -31,17 +31,38 @@ function createCaffeinate() {
   return { start: vi.fn(), stop: vi.fn(), dispose: vi.fn() }
 }
 
+/**
+ * Models the real assertion's ASYNCHRONOUS acquisition.
+ *
+ * A fake that takes the hold synchronously inside start() hides the window this
+ * engine has to cover: the first Apple event can block on the macOS Automation
+ * consent dialog. Call `settleHold()` to represent that event completing.
+ */
 function createAmphetamine(unavailable = false) {
   let hold: 'owned' | 'adopted' | null = null
-  return {
-    // Acquiring is synchronous here; the real one resolves a hold asynchronously.
+  let pending = false
+  const listeners: (() => void)[] = []
+  const fake = {
     start: vi.fn(() => {
       if (!unavailable) {
-        hold = 'owned'
+        pending = true
       }
     }),
+    /** The acquire Apple event finally returns. */
+    settleHold: (next: 'owned' | 'adopted' = 'owned') => {
+      if (!pending) {
+        return
+      }
+      pending = false
+      hold = next
+      for (const listener of listeners) {
+        listener()
+      }
+    },
+    onHoldChanged: (listener: () => void) => listeners.push(listener),
     stop: vi.fn(() => {
       hold = null
+      pending = false
     }),
     dispose: vi.fn(),
     isUnavailable: vi.fn(() => unavailable),
@@ -51,6 +72,7 @@ function createAmphetamine(unavailable = false) {
     clearUnavailable: vi.fn(),
     getHold: vi.fn(() => hold)
   }
+  return fake
 }
 
 function createService(overrides: AgentAwakeServiceOptions = {}): {
@@ -97,7 +119,13 @@ describe('AgentAwakeService macOS engine selection', () => {
     service.setMacosEngine('amphetamine')
 
     expect(amphetamine.start).toHaveBeenCalled()
-    // caffeinate is only released once Amphetamine reports a hold.
+    // The Apple event has not returned yet: releasing caffeinate here would
+    // leave nothing holding a lid-close-proof assertion.
+    expect(caffeinate.stop).not.toHaveBeenCalled()
+
+    amphetamine.settleHold()
+    service.setStatuses([])
+
     expect(caffeinate.stop).toHaveBeenCalled()
   })
 
@@ -108,6 +136,10 @@ describe('AgentAwakeService macOS engine selection', () => {
     service.setMode('on')
 
     expect(amphetamine.start).toHaveBeenCalled()
+    // caffeinate stands in until the hold lands, then steps down.
+    expect(caffeinate.start).toHaveBeenCalled()
+    amphetamine.settleHold()
+    service.setStatuses([])
     expect(caffeinate.stop).toHaveBeenCalled()
   })
 
