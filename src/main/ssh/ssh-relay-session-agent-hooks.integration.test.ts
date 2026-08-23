@@ -504,7 +504,7 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
         baselineAgentType: 'opencode',
         intent: 'ctrl-c'
       })
-    ).toBe(false)
+    ).toBe(true)
 
     relay.notifyAgentHook(
       makeEnvelope({
@@ -670,24 +670,7 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
         baselineAgentType: 'opencode',
         intent: 'ctrl-c'
       })
-    ).toBe(false)
-
-    relay.notifyAgentHook(
-      makeEnvelope({
-        hasExplicitPrompt: true,
-        payload: {
-          state: 'done',
-          prompt: 'replayed prompt',
-          agentType: 'opencode'
-        }
-      })
-    )
-    await vi.waitFor(() =>
-      expect(agentHookServer.getStatusSnapshot()[0]).toMatchObject({
-        state: 'done',
-        interrupted: true
-      })
-    )
+    ).toBe(true)
 
     relay.notifyAgentHook(
       makeEnvelope({

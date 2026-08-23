@@ -19,6 +19,7 @@ import {
   hasPendingAgentResultText,
   HOOK_REQUEST_SLOWLORIS_MS,
   isNewTurnEvent,
+  markClaudeLeadTurnInterrupted,
   markCodexLeadTurnInterrupted,
   MAX_PANE_KEY_LEN,
   movePaneCacheState,
@@ -85,10 +86,6 @@ import {
   isAgentInterruptInputIntent,
   type AgentInterruptInferenceRequest
 } from '../../shared/agent-interrupt-intent'
-import {
-  reconcileAgentInterruptHint,
-  type AgentInterruptHint
-} from '../../shared/agent-interrupt-hint'
 import {
   isAskUserQuestionTool,
   type AgentQuestionAnsweredInferenceRequest
@@ -741,9 +738,6 @@ export class AgentHookServer {
   private codexSubagentPollTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private promptSentDedupeByPaneKey = new Map<string, AgentPromptSentDedupeEntry>()
   private activeHookTurnCompletedAtByPaneKey = new Map<string, number>()
-  // Why: inference is a hint, not a terminal rewrite. Bounded per pane; cleared on
-  // status delete, live work, expiry, or a confirming lead `done`.
-  private interruptHintsByPaneKey = new Map<string, AgentInterruptHint>()
   private promptSentHashSalt = randomBytes(16).toString('hex')
   private closedAgentStatusTabIds = new Set<string>()
   private closedAgentStatusPaneKeys = new Set<string>()
@@ -946,6 +940,10 @@ export class AgentHookServer {
     if (dismissesClaudeQuestion) {
       return this.inferQuestionAnswered(request)
     }
+    // Why: Claude owns Escape routing and its Stop hook reports whether the turn was interrupted.
+    if (agentType === 'claude' && request.intent === 'plain-escape') {
+      return false
+    }
     // Why: inference is a fallback for a missing final hook; a strict baseline match keeps a delayed timer from clobbering any newer hook.
     if (
       payload.state !== 'working' ||
@@ -970,15 +968,35 @@ export class AgentHookServer {
       return false
     }
 
-    // Why: silence is not an interrupt; stamp a later lead done only for agents that omit is_interrupt.
-    this.interruptHintsByPaneKey.set(existing.paneKey, {
+    // Why: keep the Claude lead-turn record in sync, or a later child event re-emits the stale 'working' state and resurrects the cancelled pane.
+    if (agentType === 'claude') {
+      markClaudeLeadTurnInterrupted(this.state, existing.paneKey)
+    }
+    if (agentType === 'codex') {
+      markCodexLeadTurnInterrupted(this.state, existing.paneKey)
+    }
+    const inferred = this.applyNormalizedStatus({
       paneKey: existing.paneKey,
-      prompt: payload.prompt,
-      stateStartedAt: existing.stateStartedAt,
-      agentType,
-      recordedAt: Date.now()
+      tabId: existing.tabId,
+      worktreeId: existing.worktreeId,
+      connectionId: existing.connectionId,
+      providerSession: existing.providerSession,
+      payload: {
+        state: 'done',
+        prompt: payload.prompt,
+        agentType,
+        ...(payload.model ? { model: payload.model } : {}),
+        interrupted: true,
+        // Why: idle children are display state; dropping them on an inferred interrupt blanks rows a later hook would restore.
+        ...(payload.subagents ? { subagents: payload.subagents } : {})
+      }
     })
-    return false
+    console.debug('[agent-hooks] inferred interrupted agent status', {
+      paneKey: inferred.paneKey,
+      agentType,
+      intent: request.intent
+    })
+    return true
   }
 
   /** Guarded fallback for the hook Claude omits after answering or dismissing AskUserQuestion. */
@@ -1299,37 +1317,6 @@ export class AgentHookServer {
     })
   }
 
-  // Why: a later lead done may confirm the hint; live working expires it instead of painting red.
-  private applyInterruptHint(
-    previous: EnrichedAgentHookEventPayload | undefined,
-    next: AgentHookEventPayload
-  ): AgentHookEventPayload {
-    const reconciled = reconcileAgentInterruptHint({
-      hint: this.interruptHintsByPaneKey.get(next.paneKey),
-      now: Date.now(),
-      incoming: next,
-      previousStateStartedAt: previous?.stateStartedAt
-    })
-    if (reconciled.hint) {
-      this.interruptHintsByPaneKey.set(next.paneKey, reconciled.hint)
-    } else {
-      this.interruptHintsByPaneKey.delete(next.paneKey)
-    }
-    if (!reconciled.stampInterrupted || next.payload.interrupted === true) {
-      return next
-    }
-    if (next.payload.agentType === 'codex') {
-      markCodexLeadTurnInterrupted(this.state, next.paneKey)
-    }
-    return {
-      ...next,
-      payload: {
-        ...next.payload,
-        interrupted: true
-      }
-    }
-  }
-
   private applyNormalizedStatus(
     payload: AgentHookEventPayload,
     onAccepted?: () => void,
@@ -1397,8 +1384,7 @@ export class AgentHookServer {
       ? previousCodexRoot?.payload.model
       : undefined
     // Why: an SSH relay restart forgets root-only fields; child hooks must not erase durable resume/model identity.
-    const rootContextPreservingPayload = this.applyInterruptHint(
-      previous,
+    const rootContextPreservingPayload =
       preservedProviderSession || preservedRootModel
         ? {
             ...stateReconciledPayload,
@@ -1408,7 +1394,6 @@ export class AgentHookServer {
               : stateReconciledPayload.payload
           }
         : stateReconciledPayload
-    )
     const boundaryReconciledPrevious = invalidateClaudeChildOnlyBoundary(
       previous,
       rootContextPreservingPayload
@@ -1885,7 +1870,6 @@ export class AgentHookServer {
       this.clearCodexSubagentPoll(key)
       clearPaneCacheState(this.state, key)
       this.activeHookTurnCompletedAtByPaneKey.delete(key)
-      this.interruptHintsByPaneKey.delete(key)
       this.runtimeObservedStatusPaneKeys.delete(key)
       this.currentAuthorityObservations.delete(key)
       this.promptSentDedupeByPaneKey.delete(key)
@@ -2675,7 +2659,6 @@ export class AgentHookServer {
     }
     this.state.lastStatusByPaneKey.delete(resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
-    this.interruptHintsByPaneKey.delete(resolvedPaneKey)
     if (!options?.preserveAuthority) {
       this.hydratedLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
       this.persistedAuthorityCommitmentsByPaneKey.delete(resolvedPaneKey)
@@ -3251,10 +3234,6 @@ export class AgentHookServer {
   _resetConnectionTimestampWatermarksForTests(): void {
     this.connectionTimestampWatermarkById.clear()
   }
-
-  _resetInterruptHintsForTests(): void {
-    this.interruptHintsByPaneKey.clear()
-  }
 }
 
 export const agentHookServer = new AgentHookServer()
@@ -3273,6 +3252,5 @@ export const _internals = {
     clearAllListenerCaches(agentHookServer._getStateForTests())
     agentHookServer._resetPromptSentDedupeForTests()
     agentHookServer._resetConnectionTimestampWatermarksForTests()
-    agentHookServer._resetInterruptHintsForTests()
   }
 }

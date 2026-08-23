@@ -30,7 +30,7 @@ function ingestWorking(
   server: AgentHookServer,
   payload: {
     prompt: string
-    agentType: 'claude' | 'codex' | 'opencode'
+    agentType: 'claude'
     hookEventName?: string
   }
 ): ReturnType<AgentHookServer['getStatusSnapshot']>[0] {
@@ -52,10 +52,6 @@ function ingestWorking(
   return server.getStatusSnapshot()[0]!
 }
 
-// Why: take the snapshot row type itself rather than a hand-written structural
-// shape - the payload's fields are optional, so a narrower literal type does not
-// accept it and typecheck fails (tests are excluded from the mobile tsconfig but
-// not from this one).
 function inferEscape(
   server: AgentHookServer,
   baseline: ReturnType<AgentHookServer['getStatusSnapshot']>[0]
@@ -79,6 +75,8 @@ describe('interrupt inference yields to a live working hook row', () => {
       const baseline = ingestWorking(server, { prompt: 'long tool call', agentType: 'claude' })
 
       vi.setSystemTime(1_500)
+      expect(inferEscape(server, baseline)).toBe(false)
+      vi.setSystemTime(1_600)
       expect(inferEscape(server, baseline)).toBe(false)
       expect(server.getStatusSnapshot()[0]).toMatchObject({
         state: 'working',
@@ -242,52 +240,6 @@ describe('interrupt inference yields to a live working hook row', () => {
         agentType: 'claude',
         interrupted: true,
         receivedAt: 1_300
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('stamps interrupted onto a lead done for agents that omit is_interrupt', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(1_000)
-    try {
-      const server = new AgentHookServer()
-      const baseline = ingestWorking(server, { prompt: 'long task', agentType: 'opencode' })
-
-      vi.setSystemTime(1_500)
-      expect(
-        server.inferInterrupt({
-          paneKey: PANE,
-          baselineUpdatedAt: baseline.receivedAt,
-          baselineStateStartedAt: baseline.stateStartedAt,
-          baselinePrompt: 'long task',
-          baselineAgentType: 'opencode',
-          intent: 'plain-escape',
-          inputCount: 2
-        })
-      ).toBe(false)
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'working',
-        interrupted: undefined
-      })
-
-      vi.setSystemTime(1_501)
-      server.ingestRemote(
-        {
-          paneKey: PANE,
-          tabId: 'tab-1',
-          worktreeId: 'wt-1',
-          payload: { state: 'done', prompt: 'long task', agentType: 'opencode' }
-        },
-        'conn-1'
-      )
-
-      expect(server.getStatusSnapshot()[0]).toMatchObject({
-        state: 'done',
-        prompt: 'long task',
-        agentType: 'opencode',
-        interrupted: true
       })
     } finally {
       vi.useRealTimers()

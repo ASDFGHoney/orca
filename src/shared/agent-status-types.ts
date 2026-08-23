@@ -1,7 +1,6 @@
 // ─── Explicit agent status (reported via native agent hooks → IPC) ──────────
 // Why: status comes from hooks (Claude, Codex, etc.) — never inferred from terminal titles;
-// a keystroke may record an interrupt hint that stamps a later authoritative `done`, but it
-// never retires a live `working` row.
+// a narrow interrupt fallback synthesizes a final `done` when an agent misses its cancellation hook.
 
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { WithAgentStatusObservation } from './agent-status-observation'
