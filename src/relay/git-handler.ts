@@ -61,7 +61,10 @@ import {
 import { upstreamOnlyCommitsArePatchEquivalent } from '../shared/git-upstream-status'
 import { assertGitPushTargetShape } from '../shared/git-push-target-validation'
 import { getPublishTargetStatus, type GitCommandRunner } from '../shared/git-publish-target-status'
-import { resolveGitRemoteRebaseSource } from '../shared/git-rebase-source'
+import {
+  REBASE_SOURCE_FETCH_TIMEOUT_MS,
+  resolveGitRemoteRebaseSource
+} from '../shared/git-rebase-source'
 import type { GitPushTarget } from '../shared/worktree/types'
 import {
   getEffectiveGitUpstreamStatus,
@@ -1153,12 +1156,9 @@ export class GitHandler {
         // Why: concurrent fetches can replace FETCH_HEAD and remote-tracking refs between fetch and rebase.
         rebaseRef = `refs/orca/rebase/${randomUUID()}`
         await this.git(
-          [
-            'fetch',
-            source.remoteName,
-            `+refs/heads/${source.branchName}:${rebaseRef}`
-          ],
-          worktreePath
+          ['fetch', source.remoteName, `+refs/heads/${source.branchName}:${rebaseRef}`],
+          worktreePath,
+          { timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
         )
         await this.git(
           forkPoint ? ['rebase', '--onto', rebaseRef, forkPoint] : ['rebase', rebaseRef],

@@ -8,6 +8,7 @@ vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock
 }))
 
+import { REBASE_SOURCE_FETCH_TIMEOUT_MS } from '../../shared/git-rebase-source'
 import { gitFastForward, gitFetch, gitPull, gitPullRebaseFromBase, gitPush } from './remote'
 
 describe('git remote operations', () => {
@@ -527,12 +528,8 @@ describe('git remote operations', () => {
       [['check-ref-format', '--branch', 'main'], { cwd: '/repo' }],
       [['merge-base', '--fork-point', 'refs/remotes/upstream/main', 'HEAD'], { cwd: '/repo' }],
       [
-        [
-          'fetch',
-          'upstream',
-          expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
-        ],
-        { cwd: '/repo' }
+        ['fetch', 'upstream', expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)],
+        { cwd: '/repo', timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
       ],
       [
         ['rebase', '--onto', expect.stringMatching(/^refs\/orca\/rebase\//), 'fork-point'],
@@ -579,12 +576,8 @@ describe('git remote operations', () => {
 
     expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
       4,
-      [
-        'fetch',
-        'upstream',
-        expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
-      ],
-      { cwd: '/repo' }
+      ['fetch', 'upstream', expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)],
+      { cwd: '/repo', timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
     )
   })
 
@@ -602,11 +595,9 @@ describe('git remote operations', () => {
     )
 
     const rebasedRef = gitExecFileAsyncMock.mock.calls[4][0][2]
-    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
-      6,
-      ['update-ref', '-d', rebasedRef],
-      { cwd: '/repo' }
-    )
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(6, ['update-ref', '-d', rebasedRef], {
+      cwd: '/repo'
+    })
   })
 
   it('normalizes pull authentication errors to a friendly message', async () => {
