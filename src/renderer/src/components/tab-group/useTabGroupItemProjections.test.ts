@@ -111,4 +111,19 @@ describe('useTabGroupItemProjections', () => {
 
     expect(terminalTabs[0]?.aiVaultTitle).toBeNull()
   })
+
+  it('uses a terminal clear when the unified tab still has stale title metadata', () => {
+    const { terminalTabs } = useTabGroupItemProjections({
+      groupId: GROUP_ID,
+      worktreeId: WORKTREE_ID,
+      worktreeState: makeState({
+        terminalTab: makeTerminalTab({ aiVaultTitle: null }),
+        unifiedTab: makeUnifiedTab()
+      })
+    })
+
+    expect(terminalTabs[0]?.aiVaultTitle).toBeNull()
+    expect(terminalTabs[0]?.title).toBe('✳ pull again')
+    expect(resolveTerminalTabTitle(terminalTabs[0]!, true)).toBe('✳ pull again')
+  })
 })

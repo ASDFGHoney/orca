@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import type { Tab } from '../../../shared/tab-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 import {
@@ -123,18 +124,34 @@ describe('applyWebSessionTabsSnapshot', () => {
       id: toWebTerminalSurfaceTabId('host-tab-1'),
       ptyId: 'remote:web-env-1@@terminal-1',
       worktreeId: WT,
-      title: 'Claude working',
-      defaultTitle: 'Terminal',
+      title: 'Claude',
+      defaultTitle: 'Claude',
       customTitle: null,
       color: null,
       sortOrder: 0,
       createdAt: NOW,
       aiVaultTitle: null
     }
+    const existingUnifiedTab: Tab = {
+      id: existingTab.id,
+      entityId: existingTab.id,
+      groupId: 'host-group-1',
+      worktreeId: WT,
+      executionHostId: 'runtime:web-env-1',
+      contentType: 'terminal',
+      label: 'Claude',
+      customLabel: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: NOW,
+      isPreview: false,
+      isPinned: false
+    }
 
     const patch = applyWebSessionTabsSnapshot(
       makeState({
         tabsByWorktree: { [WT]: [existingTab] },
+        unifiedTabsByWorktree: { [WT]: [existingUnifiedTab] },
         ptyIdsByTabId: { [existingTab.id]: ['remote:web-env-1@@terminal-1'] }
       }),
       makeSnapshot([
@@ -153,7 +170,6 @@ describe('applyWebSessionTabsSnapshot', () => {
       NOW + 1
     ) as Partial<WebSessionTabsSyncState>
 
-    expect(patch.tabsByWorktree?.[WT]?.[0]?.aiVaultTitle).toBeNull()
     expect(patch.unifiedTabsByWorktree?.[WT]?.[0]?.aiVaultTitle).toBeNull()
   })
 

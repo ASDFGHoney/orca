@@ -47,7 +47,10 @@ import type { SessionOptionValue } from '../../../../shared/native-chat-session-
 import { resolveLocalWindowsTerminalShellOverrideForTab } from '../../../../shared/local-windows-terminal-runtime'
 import { WINDOWS_GIT_BASH_SHELL } from '../../../../shared/windows-terminal-shell'
 import type { AgentStartedTelemetry } from '../../lib/worktree-startup-payload'
-import type { AiVaultSessionTitle } from '../../../../shared/ai-vault-session-title'
+import {
+  aiVaultSessionTitlesEqual,
+  type AiVaultSessionTitle
+} from '../../../../shared/ai-vault-session-title'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
 import { sweepRetiredTerminalTabState } from './retired-terminal-tab-state-sweep'
@@ -1987,10 +1990,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       }
       const tabs = s.tabsByWorktree[ownerWorktreeId] ?? []
       const current = tabs.find((tab) => tab.id === tabId)
-      const sameTitle =
-        current?.aiVaultTitle?.agent === aiVaultTitle?.agent &&
-        current?.aiVaultTitle?.sessionId === aiVaultTitle?.sessionId &&
-        current?.aiVaultTitle?.title === aiVaultTitle?.title
+      const sameTitle = aiVaultSessionTitlesEqual(current?.aiVaultTitle, aiVaultTitle)
       if (!current || sameTitle) {
         return s
       }

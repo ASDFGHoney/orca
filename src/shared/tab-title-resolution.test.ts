@@ -108,6 +108,31 @@ describe('tab title resolution', () => {
     ).toBe('Housekeeping')
   })
 
+  it('treats an explicit Vault clear as suppressing only the generated fallback', () => {
+    expect(
+      resolveTerminalTabTitle(
+        {
+          customTitle: null,
+          aiVaultTitle: null,
+          generatedTitle: 'Pull again',
+          title: 'Claude working'
+        },
+        true
+      )
+    ).toBe('Claude working')
+    expect(
+      resolveUnifiedTabLabel(
+        {
+          customLabel: null,
+          aiVaultTitle: null,
+          generatedLabel: 'Pull again',
+          label: 'Claude working'
+        },
+        true
+      )
+    ).toBe('Claude working')
+  })
+
   it('keeps manual and quick-command labels ahead of AI Vault titles', () => {
     const aiVaultTitle = {
       agent: 'claude' as const,

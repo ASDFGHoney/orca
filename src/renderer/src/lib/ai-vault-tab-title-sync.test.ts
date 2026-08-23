@@ -292,6 +292,20 @@ describe('AI Vault tab title sync', () => {
     stop()
   })
 
+  it('leaves a fresh unnamed session absent when the Vault has no title', async () => {
+    const store = makeState({
+      executionHostId: 'ssh:dev-box',
+      worktreeId: 'worktree-1',
+      path: '/workspace/albacore'
+    })
+    const resolveSessionTitles = vi.fn(async () => ({ titles: [] }))
+    const stop = startAiVaultTabTitleSync({ ...store, resolveSessionTitles })
+
+    await vi.waitFor(() => expect(resolveSessionTitles).toHaveBeenCalledTimes(1))
+    expect(store.getState().tabsByWorktree['worktree-1'][0].aiVaultTitle).toBeUndefined()
+    stop()
+  })
+
   it('defers title reads through the configured background scheduler', async () => {
     const store = makeState({
       executionHostId: 'ssh:dev-box',

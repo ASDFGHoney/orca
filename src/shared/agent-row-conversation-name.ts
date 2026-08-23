@@ -138,7 +138,8 @@ export function getAgentRowConversationName(
   if (aiVaultTitle) {
     return aiVaultTitle
   }
-  const generatedTitle = generatedTitlesEnabled ? tab.generatedTitle?.trim() : ''
+  const generatedTitle =
+    generatedTitlesEnabled && tab.aiVaultTitle !== null ? tab.generatedTitle?.trim() : ''
   if (generatedTitle) {
     return generatedTitle
   }

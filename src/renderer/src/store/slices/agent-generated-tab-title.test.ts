@@ -523,4 +523,53 @@ Implement task B worker instructions for the next dispatch`,
     expect(resolveTerminalTabTitle(tab, true)).not.toBe('Pull again')
     expect(getAgentRowConversationName(tab, 'claude', true)).not.toBe('Pull again')
   })
+
+  it('persists an explicit clear from an absent Vault title and blocks later generation', () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    const tabId = seedWorktree(store, true)
+
+    store.setState({
+      tabsByWorktree: {
+        ...store.getState().tabsByWorktree,
+        [WORKTREE_ID]: store
+          .getState()
+          .tabsByWorktree[WORKTREE_ID].map((tab) =>
+            tab.id === tabId ? { ...tab, generatedTitle: 'Pull again' } : tab
+          )
+      }
+    })
+    store.getState().setAiVaultTabTitle(tabId, null)
+    store.getState().setAgentStatus(makePaneKey(tabId, LEAF_ID), {
+      state: 'working',
+      prompt: 'Restore the stale title',
+      agentType: 'claude'
+    })
+
+    const tab = store.getState().tabsByWorktree[WORKTREE_ID][0]
+    expect(tab.aiVaultTitle).toBeNull()
+    expect(tab.generatedTitle).toBe('Pull again')
+    expect(resolveTerminalTabTitle(tab, true)).not.toBe('Pull again')
+  })
+
+  it('treats repeated clears as equal and accepts the next resolved title', () => {
+    const store = createTestStore()
+    const tabId = seedWorktree(store, true)
+    store.getState().setAiVaultTabTitle(tabId, null)
+    const clearedTabs = store.getState().tabsByWorktree
+
+    store.getState().setAiVaultTabTitle(tabId, null)
+    expect(store.getState().tabsByWorktree).toBe(clearedTabs)
+
+    store.getState().setAiVaultTabTitle(tabId, {
+      agent: 'claude',
+      sessionId: 'claude-session-2',
+      title: 'Housekeeping'
+    })
+    expect(store.getState().tabsByWorktree[WORKTREE_ID][0].aiVaultTitle).toEqual({
+      agent: 'claude',
+      sessionId: 'claude-session-2',
+      title: 'Housekeeping'
+    })
+  })
 })

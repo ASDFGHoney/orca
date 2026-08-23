@@ -56,6 +56,8 @@ export function useTabGroupItemProjections({
         .filter((item) => item.contentType === 'terminal')
         .map((item) => {
           const terminalTab = terminalTabById.get(item.entityId)
+          const aiVaultTitle =
+            terminalTab?.aiVaultTitle !== undefined ? terminalTab.aiVaultTitle : item.aiVaultTitle
           return {
             id: item.entityId,
             unifiedTabId: item.id,
@@ -65,7 +67,8 @@ export function useTabGroupItemProjections({
               {
                 ...item,
                 quickCommandLabel: item.quickCommandLabel ?? terminalTab?.quickCommandLabel,
-                generatedLabel: item.generatedLabel ?? terminalTab?.generatedTitle
+                generatedLabel: item.generatedLabel ?? terminalTab?.generatedTitle,
+                aiVaultTitle
               },
               worktreeState.generatedTabTitlesEnabled,
               item.label
@@ -74,11 +77,7 @@ export function useTabGroupItemProjections({
             quickCommandLabel: terminalTab?.quickCommandLabel ?? item.quickCommandLabel ?? null,
             generatedTitle: terminalTab?.generatedTitle ?? item.generatedLabel ?? null,
             // Why: TabBar re-resolves this projection; dropping vault lets first-bind generated win.
-            ...(terminalTab?.aiVaultTitle !== undefined
-              ? { aiVaultTitle: terminalTab.aiVaultTitle }
-              : item.aiVaultTitle !== undefined
-                ? { aiVaultTitle: item.aiVaultTitle }
-                : {}),
+            ...(aiVaultTitle !== undefined ? { aiVaultTitle } : {}),
             customTitle: item.customLabel ?? terminalTab?.customTitle ?? null,
             color: item.color ?? terminalTab?.color ?? null,
             sortOrder: item.sortOrder,

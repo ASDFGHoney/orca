@@ -66,6 +66,16 @@ describe('getAgentRowConversationName', () => {
     )
   })
 
+  it('does not restore a generated name while the AI Vault title is explicitly cleared', () => {
+    const tab = makeTab({
+      aiVaultTitle: null,
+      generatedTitle: 'Pull again',
+      title: '✳ Housekeeping'
+    })
+    expect(getAgentRowConversationName(tab, 'claude', true)).toBe('Housekeeping')
+    expect(getAgentRowConversationName(tab, 'claude', true, null)).toBeNull()
+  })
+
   it('names a split pane from its own live title, not the tab title', () => {
     // Why: the tab title is the FOCUSED pane's, so the sibling must not read it.
     const tab = makeTab({ title: '\u2733 Linear work log' })
