@@ -15,20 +15,6 @@ export type TerminalViewportTarget = {
   webTabId: string
 }
 
-export type TerminalWireFrame = {
-  direction: 'in' | 'out'
-  opcode?: number
-  payload?: unknown
-  held?: boolean
-}
-
-type WireProbeState = {
-  cleanup: () => void
-  held: { channel: string; args: unknown[] }[]
-  release: () => void
-  trace: TerminalWireFrame[]
-}
-
 export function createViewportFixture(): {
   command: string
   dispose: () => void
@@ -169,6 +155,48 @@ export async function openTerminalTab(
   await page.waitForFunction((id) => window.__paneManagers?.has(id) ?? false, tabId, {
     timeout: 60_000
   })
+  await page.waitForFunction(
+    (id) => {
+      const state = window.__store?.getState()
+      const manager = window.__paneManagers?.get(id)
+      const pane = manager?.getActivePane?.() ?? manager?.getPanes?.()[0]
+      const screen = pane?.container.querySelector<HTMLElement>('.xterm-screen')
+      if (state?.activeTabId !== id || !pane?.container.isConnected || !screen) {
+        return false
+      }
+      const style = getComputedStyle(pane.container)
+      const rect = screen.getBoundingClientRect()
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        rect.width > 0 &&
+        rect.height > 0
+      )
+    },
+    tabId,
+    { timeout: 60_000 }
+  )
+}
+
+export async function waitForTerminalText(page: Page, tabId: string, text: string): Promise<void> {
+  await page.waitForFunction(
+    ({ tabId, text }) => {
+      const manager = window.__paneManagers?.get(tabId)
+      const pane = manager?.getActivePane?.() ?? manager?.getPanes?.()[0]
+      if (!pane) {
+        return false
+      }
+      const buffer = pane.terminal.buffer.active
+      for (let index = 0; index < buffer.length; index += 1) {
+        if (buffer.getLine(index)?.translateToString(true).includes(text)) {
+          return true
+        }
+      }
+      return false
+    },
+    { tabId, text },
+    { timeout: 30_000 }
+  )
 }
 
 export async function readPaneGrid(
@@ -217,95 +245,6 @@ export async function configureElectronWindow(
     },
     { focus, height, width }
   )
-}
-
-export async function installTerminalWireProbe(
-  app: ElectronApplication,
-  options: { holdFitEvents?: boolean; legacyViewportClient?: boolean } = {}
-): Promise<void> {
-  await app.evaluate(({ BrowserWindow, ipcMain }, probeOptions) => {
-    const target = globalThis as typeof globalThis & { __sta5050WireProbe?: WireProbeState }
-    target.__sta5050WireProbe?.cleanup()
-    const trace: TerminalWireFrame[] = []
-    const listener = (_event: unknown, message: { bytes?: Uint8Array }) => {
-      const bytes = message.bytes
-      if (!bytes || bytes.byteLength < 16) {
-        return
-      }
-      const opcode = bytes[2]
-      if (probeOptions.legacyViewportClient && opcode === 9) {
-        const text = new TextDecoder().decode(bytes.slice(16))
-        const key = 'desktopViewportClaims'
-        const offset = text.indexOf(key)
-        if (offset !== -1) {
-          bytes[16 + offset + key.length - 1] = 'x'.charCodeAt(0)
-        }
-      }
-      if (probeOptions.legacyViewportClient && opcode === 14) {
-        bytes[2] = 8
-      }
-      let payload: unknown
-      try {
-        payload = JSON.parse(new TextDecoder().decode(bytes.slice(16)))
-      } catch {
-        payload = undefined
-      }
-      trace.push({ direction: 'out', opcode: bytes[2], payload })
-    }
-    ipcMain.prependListener('runtimeEnvironments:subscriptionBinary', listener)
-    const window = BrowserWindow.getAllWindows()[0]
-    if (!window) {
-      throw new Error('Electron window unavailable')
-    }
-    const originalSend = window.webContents.send.bind(window.webContents)
-    const held: { channel: string; args: unknown[] }[] = []
-    window.webContents.send = ((channel: string, ...args: unknown[]) => {
-      const isFit =
-        channel === 'runtimeEnvironments:subscriptionEvent' &&
-        JSON.stringify(args).includes('fit-override-changed')
-      trace.push({ direction: 'in', held: isFit && probeOptions.holdFitEvents, payload: args })
-      if (isFit && probeOptions.holdFitEvents) {
-        held.push({ channel, args })
-        return
-      }
-      originalSend(channel, ...args)
-    }) as typeof window.webContents.send
-    const release = () => {
-      for (const event of held.splice(0)) {
-        originalSend(event.channel, ...event.args)
-      }
-    }
-    const cleanup = () => {
-      release()
-      ipcMain.removeListener('runtimeEnvironments:subscriptionBinary', listener)
-      window.webContents.send = originalSend
-      delete target.__sta5050WireProbe
-    }
-    target.__sta5050WireProbe = { cleanup, held, release, trace }
-  }, options)
-}
-
-export async function readTerminalWireProbe(
-  app: ElectronApplication
-): Promise<TerminalWireFrame[]> {
-  return app.evaluate(() => {
-    const target = globalThis as typeof globalThis & { __sta5050WireProbe?: WireProbeState }
-    return target.__sta5050WireProbe?.trace ?? []
-  })
-}
-
-export async function releaseTerminalFitEvents(app: ElectronApplication): Promise<void> {
-  await app.evaluate(() => {
-    const target = globalThis as typeof globalThis & { __sta5050WireProbe?: WireProbeState }
-    target.__sta5050WireProbe?.release()
-  })
-}
-
-export async function disposeTerminalWireProbe(app: ElectronApplication): Promise<void> {
-  await app.evaluate(() => {
-    const target = globalThis as typeof globalThis & { __sta5050WireProbe?: WireProbeState }
-    target.__sta5050WireProbe?.cleanup()
-  })
 }
 
 export function lastFixtureGrid(text: string): { cols: number; rows: number } | null {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   isRemoteDesktopViewportClaimEligible,
-  shouldClaimRemoteDesktopViewport
+  shouldClaimRemoteDesktopViewport,
+  shouldClaimDesktopViewportForUserActivity
 } from './remote-desktop-viewport-claim'
 
 describe('isRemoteDesktopViewportClaimEligible', () => {
@@ -77,6 +78,26 @@ describe('shouldClaimRemoteDesktopViewport', () => {
         paneVisible: true,
         documentVisible: true,
         documentFocused: true
+      })
+    ).toBe(true)
+  })
+})
+
+describe('shouldClaimDesktopViewportForUserActivity', () => {
+  it.each([
+    { initialRemoteFitPending: true, holdMode: null, expected: true },
+    { initialRemoteFitPending: false, holdMode: null, expected: false },
+    { initialRemoteFitPending: false, holdMode: 'remote-desktop-fit' as const, expected: true },
+    { initialRemoteFitPending: true, holdMode: 'mobile-fit' as const, expected: false }
+  ])('handles connection-local and authoritative fit state: %o', (input) => {
+    expect(shouldClaimDesktopViewportForUserActivity(input)).toBe(input.expected)
+  })
+
+  it('preserves known host reclaim', () => {
+    expect(
+      shouldClaimDesktopViewportForUserActivity({
+        initialRemoteFitPending: false,
+        holdMode: 'remote-desktop-fit'
       })
     ).toBe(true)
   })

@@ -10,6 +10,27 @@ export function isRemoteDesktopViewportClaimEligible(args: {
   return args.paneVisible && args.documentVisible && args.documentFocused
 }
 
+export function getRemoteDesktopViewportClaimDocumentState(): {
+  documentVisible: boolean
+  documentFocused: boolean
+} {
+  const available = typeof document !== 'undefined'
+  return {
+    documentVisible: available && document.visibilityState !== 'hidden',
+    documentFocused: available && typeof document.hasFocus === 'function' && document.hasFocus()
+  }
+}
+
+export function shouldClaimDesktopViewportForUserActivity(args: {
+  initialRemoteFitPending: boolean
+  holdMode: FitHoldMode | null
+}): boolean {
+  return (
+    args.holdMode === 'remote-desktop-fit' ||
+    (args.initialRemoteFitPending && args.holdMode === null)
+  )
+}
+
 export function shouldClaimRemoteDesktopViewport(args: {
   holdMode: FitHoldMode
   prior: TerminalGrid | null
