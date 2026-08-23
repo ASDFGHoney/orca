@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-20",
+  "updatedAt": "2026-08-23",
   "policy": {
     "maturityLevels": ["experimental", "soak", "blocking", "accepted-gap", "deprecated"],
     "blockingPromotion": {
@@ -14089,6 +14089,120 @@
         "The legacy remote-uploads root is intentionally not reclaimed while a mixed-version relay may still own bytes there; eventual legacy-root retirement requires a separate compatibility decision."
       ],
       "demotionRule": "Demote if one live owner can remove another owner's bytes, cleanup exceeds 64 inspected entries per attempt, a lifecycle path retains its exact owned archive after settlement, or the process oracle flakes without an identified harness or product defect."
+    },
+    {
+      "id": "skill-setup.execution-host-platform",
+      "title": "Skill setup commands follow execution-host platform authority",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "renderer-skill-runtime",
+      "layer": "renderer-runtime-authority",
+      "surfaces": [
+        "skill install and update command builders",
+        "skill setup terminal",
+        "paired web settings dialog",
+        "saved remote runtime environments"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "remote-runtime"],
+      "coveredPlatforms": ["macos", "linux"],
+      "coveredProviders": ["local", "remote-runtime"],
+      "coverageNotes": "Renderer contracts simulate mismatched viewer and host platforms, exact remote-environment selection, local desktop behavior, and a legacy host with no published platform. A Windows-user-agent web viewer paired to a real Linux Orca host passes the same visible command oracle with both headed desktop-server and headless serve topologies. Physical Windows-host and mixed-version binary journeys remain uncollected.",
+      "motivatingLinks": [
+        "https://linear.app/stably/issue/STA-3279",
+        "https://github.com/stablyai/orca/issues/12252"
+      ],
+      "invariant": "For a terminal owned by runtime R, skill command and setup-shell selection use R's published RuntimeStatus.hostPlatform; changing only the viewer user agent cannot change those commands. Viewer-local keyboard and UI platform behavior remains viewer-owned.",
+      "oracle": "Pair a Windows-user-agent web viewer to a Linux Orca host, independently require runtime status to publish linux, open the real Orchestration settings copy dialog, and require the visible install command to remain the bare POSIX npx command rather than a cmd.exe wrapper. Repeat against headed desktop-server and headless serve hosts. Renderer contracts separately pin exact environment selection, Windows-host inversion, local desktop behavior, and viewer-platform fallback when an old host omits hostPlatform.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/hooks/useActiveProjectSkillRuntime.test.tsx src/renderer/src/lib/project-skill-runtime.test.ts src/renderer/src/components/settings/CliSkillRuntimeSetup.test.tsx",
+        "ORCA_E2E_WEB_CLIENT=1 pnpm exec playwright test tests/e2e/paired-web-skill-command-host-platform.spec.ts --config tests/playwright.config.ts --project electron-headful --project electron-headless --workers=1 --reporter=line",
+        "docker exec sta3279-linux-e2e bash -lc \"cd /workspace && xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 ORCA_E2E_WEB_CLIENT=1 pnpm exec playwright test tests/e2e/paired-web-skill-command-host-platform.spec.ts --config tests/playwright.config.ts --project electron-headful --project electron-headless --workers=1 --reporter=line\""
+      ],
+      "testFiles": [
+        "src/renderer/src/hooks/useActiveProjectSkillRuntime.test.tsx",
+        "src/renderer/src/lib/project-skill-runtime.test.ts",
+        "src/renderer/src/components/settings/CliSkillRuntimeSetup.test.tsx",
+        "tests/e2e/paired-web-skill-command-host-platform.spec.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/hooks/useActiveProjectSkillRuntime.test.tsx",
+          "assertions": [
+            "paired web and saved remote runtimes prefer the exact host status platform over viewer platform",
+            "local desktop retains viewer-platform behavior and old hosts fall back compatibly",
+            "non-Windows execution hosts do not trigger the Windows setup-shell override"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/project-skill-runtime.test.ts",
+          "assertions": [
+            "host runtime metadata carries the resolved execution-host platform"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/settings/CliSkillRuntimeSetup.test.tsx",
+          "assertions": [
+            "skill command and setup-terminal builders prefer runtime hostPlatform",
+            "Windows and WSL command behavior remains unchanged"
+          ]
+        },
+        {
+          "file": "tests/e2e/paired-web-skill-command-host-platform.spec.ts",
+          "assertions": [
+            "host status and viewer platform disagree by construction",
+            "the real visible copy dialog uses the Linux host command in headed and headless paired topologies"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/hooks/useActiveProjectSkillRuntime.test.tsx src/renderer/src/lib/project-skill-runtime.test.ts src/renderer/src/components/settings/CliSkillRuntimeSetup.test.tsx",
+          "durationSeconds": 2.8,
+          "summary": "Three focused files passed 44 tests covering host/viewer inversion, exact environment selection, legacy fallback, command construction, setup-shell behavior, WSL, and local desktop preservation."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "linux",
+          "result": "passed",
+          "command": "docker exec sta3279-linux-e2e bash -lc \"cd /workspace && xvfb-run --auto-servernum env SKIP_BUILD=1 ORCA_E2E_FORWARD_APP_LOGS=1 ORCA_E2E_WEB_CLIENT=1 pnpm exec playwright test tests/e2e/paired-web-skill-command-host-platform.spec.ts --config tests/playwright.config.ts --project electron-headful --project electron-headless --workers=1 --reporter=line\"",
+          "durationSeconds": 24.1,
+          "summary": "Both live paired Linux-host journeys passed: runtime status reported linux while the Windows-UA viewer reported win32, and the visible Orchestration dialog showed the bare npx install command."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 45,
+        "scope": "focused renderer contracts plus sequential headed and headless paired web journeys"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "The unit contracts and live journeys use status and UI readiness barriers rather than timing as the oracle; CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "On current main, the byte-identical headed and headless Linux-host oracle observed hostPlatform linux but rendered a cmd.exe install command from the Windows viewer UA. The candidate passed both topologies. Reversing only the three product-source changes, rebuilding the same E2E artifacts, and rerunning the identical headed oracle restored the cmd.exe failure; restoring the candidate returned both journeys to green."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "The hook selects one scalar from the already-mirrored runtimeStatusByEnvironmentId map. It adds no RPC, polling, timer, subprocess, whole-map subscription, or remote fanout. Windows capability discovery remains gated to a Windows execution platform with local skill authority, so a Linux paired host causes no Windows probe."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
+        "Run a physical Windows execution host with a non-Windows viewer and retain the inverse command oracle.",
+        "Exercise an old viewer against a new host and a new viewer against an old host binary.",
+        "Keep the no-RPC and no-Windows-probe budget plus local desktop viewer behavior green."
+      ],
+      "knownGaps": [
+        "The live cross-OS topology used a Linux container for the paired Orca host; physical Windows-host inversion remains uncollected.",
+        "Legacy omission is covered as a renderer contract, but mixed-version packaged binaries were not paired live.",
+        "The regression protects skill command and setup-terminal consumers only; viewer-local platform consumers intentionally remain UA-owned."
+      ],
+      "demotionRule": "Demote if viewer UA can alter an execution-host skill command, exact runtime selection borrows another host's platform, old-host omission stops falling back compatibly, or the boundary adds runtime-status RPC or Windows capability fanout."
     }
   ]
 }

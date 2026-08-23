@@ -229,6 +229,25 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
     ).toBe('npx skills update orchestration --global')
   })
 
+  it('uses the selected host platform instead of the viewer platform', () => {
+    const installCommand = buildAgentFeatureSkillInstallCommand(['orchestration'])
+
+    expect(
+      buildSkillCommandForRuntime(installCommand, {
+        runtime: 'host',
+        hostPlatform: 'linux',
+        label: 'This device'
+      })
+    ).toBe(installCommand)
+    expect(
+      buildSkillCommandForRuntime(installCommand, {
+        runtime: 'host',
+        hostPlatform: 'win32',
+        label: 'Windows'
+      })
+    ).toBe(`${windowsNpxPreflightPrefix}${windowsNpxGuidance}) else (${installCommand})"`)
+  })
+
   it('skips the Windows preflight while a remote runtime environment is focused', () => {
     const installCommand = buildAgentFeatureSkillInstallCommand(['orchestration'])
     const windowsHost = { runtime: 'host', label: 'Windows' } as const

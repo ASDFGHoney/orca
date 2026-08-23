@@ -7,6 +7,7 @@ import { translate } from '@/i18n/i18n'
 export type ProjectAgentSkillRuntime = {
   runtime: 'host' | 'wsl'
   wslDistro?: string | null
+  hostPlatform?: NodeJS.Platform
   label: string
 }
 
@@ -34,7 +35,16 @@ export function getProjectAgentSkillRuntime(
 
   return {
     runtime: 'host',
+    hostPlatform: currentPlatform,
     label: currentPlatform === 'win32' ? 'Windows' : 'This device'
+  }
+}
+
+export function getHostAgentSkillRuntime(hostPlatform: NodeJS.Platform): ProjectAgentSkillRuntime {
+  return {
+    runtime: 'host',
+    hostPlatform,
+    label: hostPlatform === 'win32' ? 'Windows' : 'This device'
   }
 }
 

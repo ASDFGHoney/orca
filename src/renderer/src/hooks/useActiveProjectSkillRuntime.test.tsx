@@ -5,6 +5,7 @@ import { getDefaultSettings } from '../../../shared/constants'
 import { useAppStore } from '@/store'
 import {
   hasLocalSkillRuntimeAuthority,
+  resolveSkillExecutionHostPlatform,
   shouldUseLocalSkillFreshness,
   useActiveProjectSkillRuntime
 } from './useActiveProjectSkillRuntime'
@@ -34,7 +35,11 @@ describe('useActiveProjectSkillRuntime', () => {
   beforeEach(() => {
     setPlatform('win32')
     setWindowsShell('git-bash')
-    useAppStore.setState({ runtimeEnvironmentCatalogSettled: true, runtimeEnvironments: [] })
+    useAppStore.setState({
+      runtimeEnvironmentCatalogSettled: true,
+      runtimeEnvironments: [],
+      runtimeStatusByEnvironmentId: new Map()
+    })
   })
 
   afterEach(() => {
@@ -68,6 +73,96 @@ describe('useActiveProjectSkillRuntime', () => {
     expect(result.current.discoveryTarget).toBeUndefined()
   })
 
+  it('uses a remote Linux host instead of the Windows viewer platform', () => {
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings!,
+        activeRuntimeEnvironmentId: 'linux-host'
+      },
+      runtimeEnvironments: [{ id: 'linux-host' }] as never,
+      runtimeStatusByEnvironmentId: new Map([
+        ['linux-host', { checkedAt: 1, status: { hostPlatform: 'linux' } as never }]
+      ])
+    })
+    const { result } = renderHook(() => useActiveProjectSkillRuntime())
+
+    expect(result.current.agentRuntime).toMatchObject({ runtime: 'host', hostPlatform: 'linux' })
+    expect(result.current.terminalShellOverride).toBeUndefined()
+  })
+
+  it('uses a remote Windows host instead of the non-Windows viewer platform', () => {
+    setPlatform('darwin')
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings!,
+        activeRuntimeEnvironmentId: 'windows-host'
+      },
+      runtimeEnvironments: [{ id: 'windows-host' }] as never,
+      runtimeStatusByEnvironmentId: new Map([
+        ['windows-host', { checkedAt: 1, status: { hostPlatform: 'win32' } as never }]
+      ])
+    })
+    const { result } = renderHook(() => useActiveProjectSkillRuntime())
+
+    expect(result.current.agentRuntime).toMatchObject({ runtime: 'host', hostPlatform: 'win32' })
+  })
+
+  it('falls back to the viewer platform when an old remote host omits hostPlatform', () => {
+    setPlatform('darwin')
+    useAppStore.setState({
+      settings: {
+        ...useAppStore.getState().settings!,
+        activeRuntimeEnvironmentId: 'old-host'
+      },
+      runtimeEnvironments: [{ id: 'old-host' }] as never,
+      runtimeStatusByEnvironmentId: new Map([['old-host', { checkedAt: 1, status: {} as never }]])
+    })
+    const { result } = renderHook(() => useActiveProjectSkillRuntime())
+
+    expect(result.current.agentRuntime).toMatchObject({ runtime: 'host', hostPlatform: 'darwin' })
+  })
+
+  it('isolates the platform to the exact selected remote host', () => {
+    expect(
+      resolveSkillExecutionHostPlatform({
+        viewerPlatform: 'darwin',
+        runtimeTarget: { kind: 'environment', environmentId: 'linux-host' },
+        executionHostPlatform: 'linux',
+        isWebClient: false
+      })
+    ).toBe('linux')
+    expect(
+      resolveSkillExecutionHostPlatform({
+        viewerPlatform: 'darwin',
+        runtimeTarget: { kind: 'environment', environmentId: 'windows-host' },
+        executionHostPlatform: 'win32',
+        isWebClient: false
+      })
+    ).toBe('win32')
+  })
+
+  it('keeps local desktop behavior on the viewer platform', () => {
+    expect(
+      resolveSkillExecutionHostPlatform({
+        viewerPlatform: 'darwin',
+        runtimeTarget: { kind: 'local' },
+        executionHostPlatform: 'linux',
+        isWebClient: false
+      })
+    ).toBe('darwin')
+  })
+
+  it('uses the paired web host platform instead of the viewer platform', () => {
+    expect(
+      resolveSkillExecutionHostPlatform({
+        viewerPlatform: 'win32',
+        runtimeTarget: { kind: 'local' },
+        executionHostPlatform: 'linux',
+        isWebClient: true
+      })
+    ).toBe('linux')
+  })
+
   it('does not adopt the global default once a project is active', () => {
     setGlobalWslDefault('Ubuntu')
     useAppStore.setState({ activeRepoId: 'repo-1' })
@@ -88,7 +183,7 @@ describe('useActiveProjectSkillRuntime', () => {
     })
     const { result } = renderHook(() => useActiveProjectSkillRuntime())
 
-    expect(result.current.agentRuntime).toBeUndefined()
+    expect(result.current.agentRuntime).toMatchObject({ runtime: 'host', hostPlatform: 'win32' })
     expect(result.current.terminalShellOverride).toBeUndefined()
   })
 

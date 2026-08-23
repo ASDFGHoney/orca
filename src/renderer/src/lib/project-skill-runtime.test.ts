@@ -50,6 +50,7 @@ describe('project skill runtime helpers', () => {
   it('maps resolved host and WSL project runtimes into setup runtimes', () => {
     expect(getProjectAgentSkillRuntime(hostRuntime, 'win32')).toEqual({
       runtime: 'host',
+      hostPlatform: 'win32',
       label: 'Windows'
     })
     expect(getProjectAgentSkillRuntime(wslRuntime, 'win32')).toEqual({

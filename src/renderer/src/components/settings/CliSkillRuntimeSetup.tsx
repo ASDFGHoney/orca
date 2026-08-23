@@ -24,6 +24,7 @@ import { translate } from '@/i18n/i18n'
 export type LocalAgentRuntime = {
   runtime: 'host' | 'wsl'
   wslDistro?: string | null
+  hostPlatform?: NodeJS.Platform
   label: string
 }
 
@@ -81,7 +82,7 @@ export function getWslCliDistroRequest(
 export function buildSkillCommandForRuntime(
   command: string,
   runtime?: LocalAgentRuntime,
-  currentPlatform = getSkillCommandPlatform()
+  currentPlatform = getRuntimeHostPlatform(runtime)
 ): string {
   const resolvedRuntime = runtime ?? LOCAL_HOST_AGENT_RUNTIME
   const normalizedCommand = normalizeWindowsSkillUpdateCommand(
@@ -135,7 +136,7 @@ export function buildSkillSetupTerminalCommand(
   copiedCommand: string,
   effectiveShell: string | undefined,
   runtime?: LocalAgentRuntime,
-  currentPlatform = getSkillCommandPlatform()
+  currentPlatform = getRuntimeHostPlatform(runtime)
 ): string {
   // Why: the created tab is authoritative when project runtime replaces the requested shell.
   const wslNative = isWslShellName(effectiveShell)
@@ -210,6 +211,12 @@ function isSetupTerminalForcedToPowerShell(terminalShellOverride: string | undef
   return (
     Boolean(trimmedOverride) && resolveWindowsShellStartupFamily(trimmedOverride) === 'powershell'
   )
+}
+
+function getRuntimeHostPlatform(runtime?: LocalAgentRuntime): NodeJS.Platform {
+  return runtime?.runtime === 'host' && runtime.hostPlatform
+    ? runtime.hostPlatform
+    : getSkillCommandPlatform()
 }
 
 function wrapWindowsSkillCommandWithNpxPrerequisite(

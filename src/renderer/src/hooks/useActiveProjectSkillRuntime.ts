@@ -9,6 +9,7 @@ import {
   getLocalProjectExecutionRuntimeContext
 } from '@/lib/local-preflight-context'
 import {
+  getHostAgentSkillRuntime,
   getProjectAgentSkillRuntime,
   getProjectAgentSkillTerminalShellOverride,
   getProjectSkillDiscoveryTarget,
@@ -16,6 +17,7 @@ import {
   type ProjectAgentSkillRuntime
 } from '@/lib/project-skill-runtime'
 import { useWindowsTerminalCapabilities } from '@/lib/windows-terminal-capabilities'
+import { isWebClientLocation } from '@/lib/web-client-location'
 import { useAppStore } from '@/store'
 
 type ActiveProjectSkillRuntime = {
@@ -27,11 +29,6 @@ type ActiveProjectSkillRuntime = {
   canUseLocalSkillFreshness: boolean
 }
 
-const EMPTY_ACTIVE_PROJECT_SKILL_RUNTIME: ActiveProjectSkillRuntime = Object.freeze({
-  installDisabledReason: null,
-  canUseLocalSkillFreshness: false
-})
-
 export function shouldUseLocalSkillFreshness(
   runtimeTarget: RuntimeClientTarget | null,
   agentRuntime?: ProjectAgentSkillRuntime
@@ -41,6 +38,21 @@ export function shouldUseLocalSkillFreshness(
 
 export function hasLocalSkillRuntimeAuthority(runtimeTarget: RuntimeClientTarget | null): boolean {
   return runtimeTarget?.kind === 'local'
+}
+
+export function resolveSkillExecutionHostPlatform(args: {
+  viewerPlatform: NodeJS.Platform
+  runtimeTarget: RuntimeClientTarget | null
+  executionHostPlatform?: NodeJS.Platform
+  isWebClient: boolean
+}): NodeJS.Platform {
+  if (args.runtimeTarget?.kind === 'environment') {
+    return args.executionHostPlatform ?? args.viewerPlatform
+  }
+  if (args.runtimeTarget?.kind === 'local' && args.isWebClient) {
+    return args.executionHostPlatform ?? args.viewerPlatform
+  }
+  return args.viewerPlatform
 }
 
 // Why: on Windows the runtime resolution is rebuilt from scratch on every
@@ -75,9 +87,29 @@ export function useActiveProjectSkillRuntime(): ActiveProjectSkillRuntime {
       worktreesByRepo: state.worktreesByRepo
     }))
   )
-  const currentPlatform = getCurrentPlatform()
-  const windowsCapabilities = useWindowsTerminalCapabilities(currentPlatform === 'win32')
   const runtimeTarget = useActiveSkillDiscoveryRuntimeTarget()
+  const viewerPlatform = getCurrentPlatform()
+  const isWebClient = isWebClientLocation()
+  const executionHostPlatform = useAppStore((state) => {
+    const environmentId =
+      runtimeTarget?.kind === 'environment'
+        ? runtimeTarget.environmentId
+        : isWebClient
+          ? state.runtimeEnvironments[0]?.id
+          : undefined
+    return environmentId
+      ? state.runtimeStatusByEnvironmentId.get(environmentId)?.status?.hostPlatform
+      : undefined
+  })
+  const currentPlatform = resolveSkillExecutionHostPlatform({
+    viewerPlatform,
+    runtimeTarget,
+    executionHostPlatform,
+    isWebClient
+  })
+  const windowsCapabilities = useWindowsTerminalCapabilities(
+    currentPlatform === 'win32' && hasLocalSkillRuntimeAuthority(runtimeTarget)
+  )
 
   const resolved = useMemo(() => {
     const wslContext = {
@@ -113,10 +145,15 @@ export function useActiveProjectSkillRuntime(): ActiveProjectSkillRuntime {
           )
         : undefined
       const canUseLocalSkillFreshness = shouldUseLocalSkillFreshness(runtimeTarget)
-      if (!terminalShellOverride && !canUseLocalSkillFreshness) {
-        return EMPTY_ACTIVE_PROJECT_SKILL_RUNTIME
+      return {
+        installDisabledReason: null,
+        agentRuntime:
+          runtimeTarget?.kind === 'environment' || isWebClient
+            ? getHostAgentSkillRuntime(currentPlatform)
+            : undefined,
+        terminalShellOverride,
+        canUseLocalSkillFreshness
       }
-      return { installDisabledReason: null, terminalShellOverride, canUseLocalSkillFreshness }
     }
 
     const agentRuntime = getProjectAgentSkillRuntime(projectRuntime, currentPlatform)
