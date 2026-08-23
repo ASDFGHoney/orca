@@ -378,6 +378,17 @@ describe('DaemonSessionOwnerResolver', () => {
     await expect(resolver.probe('session')).resolves.toBe(true)
   })
 
+  it('does not let a replacement daemon report a historical owner session exited', async () => {
+    const replacement = provider(async () => [])
+    replacement.probePtyLiveness = vi.fn(async () => false)
+    const resolver = new DaemonSessionOwnerResolver([replacement], new Map())
+
+    await expect(resolver.probe('session-owned-by-unregistered-daemon')).resolves.toBe(null)
+    expect(replacement.probePtyLiveness).toHaveBeenCalledExactlyOnceWith(
+      'session-owned-by-unregistered-daemon'
+    )
+  })
+
   it('fails closed when duplicate owners cannot be disambiguated', async () => {
     const first = provider(async () => [{ id: 'session', cwd: '', title: 'first' }])
     const second = provider(async () => [{ id: 'session', cwd: '', title: 'second' }])
