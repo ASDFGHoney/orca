@@ -84,7 +84,10 @@ export async function createSshTranscriptRangeFs(
       const identityChanged = closingStamp.identity !== openingStamp.identity
       const unpinnedVersionChanged =
         !openingStamp.identityReliable && closingStamp.mtimeMs !== openingStamp.mtimeMs
-      if (identityChanged || unpinnedVersionChanged) {
+      const nonAppendSnapshotChanged =
+        closingStamp.size < openingStamp.size ||
+        (closingStamp.size === openingStamp.size && closingStamp.mtimeMs !== openingStamp.mtimeMs)
+      if (identityChanged || unpinnedVersionChanged || nonAppendSnapshotChanged) {
         throw new TranscriptRangeReadInvalidatedError()
       }
     }
