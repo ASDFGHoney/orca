@@ -5,9 +5,17 @@ import { buildWslExecArgs } from '../../../src/shared/wsl-login-shell-command'
 /** A WSL-only path makes the stub marker proof that the pane ran in the distro. */
 const WSL_STUB_PATH = '/usr/local/bin/golden-stub-agent'
 const WSL_STUB_AGENT_LINK = '/usr/local/bin/codex'
+const WSL_STUB_BACKUP_PATH = '/usr/local/bin/golden-stub-agent.orca-e2e-backup'
 
-// Why printf and not a heredoc: the whole script crosses to wsl.exe as one argv
-// element, and keeping it newline-free avoids Windows argv-encoding surprises.
+// Keep the cross-boundary script newline-free to avoid Windows argv-encoding surprises.
+// Moving the entry avoids following and overwriting a pre-existing symlink.
+const BACKUP_EXISTING_STUB_SCRIPT =
+  `mkdir -p /usr/local/bin && ` +
+  `if [ -e ${WSL_STUB_BACKUP_PATH} ] || [ -L ${WSL_STUB_BACKUP_PATH} ]; then exit 1; fi && ` +
+  `if [ -e ${WSL_STUB_PATH} ] || [ -L ${WSL_STUB_PATH} ]; then ` +
+  `mv ${WSL_STUB_PATH} ${WSL_STUB_BACKUP_PATH} && ` +
+  `printf backed-up; else printf none; fi`
+
 const STAGE_SCRIPT =
   `mkdir -p /usr/local/bin && ` +
   `printf '#!/bin/sh\\necho GOLDEN_STUB_AGENT_READY\\nexec sleep 3600\\n' > ${WSL_STUB_PATH} && ` +
@@ -17,11 +25,13 @@ const STAGE_CODEX_LINK_IF_MISSING_SCRIPT =
   `if [ -e ${WSL_STUB_AGENT_LINK} ] || [ -L ${WSL_STUB_AGENT_LINK} ]; then ` +
   `printf existing; else ln -s ${WSL_STUB_PATH} ${WSL_STUB_AGENT_LINK} && printf created; fi`
 
-const REMOVE_STUB_SCRIPT = `rm -f ${WSL_STUB_PATH}`
-const REMOVE_CODEX_LINK_AND_STUB_SCRIPT = `rm -f ${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}`
+function buildRestoreScript(stage: WslGoldenStubAgentStage): string {
+  const removed = stage.createdCodexLink ? `${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}` : WSL_STUB_PATH
+  const restore = stage.backedUpStub ? ` && mv ${WSL_STUB_BACKUP_PATH} ${WSL_STUB_PATH}` : ''
+  return `rm -f ${removed}${restore}`
+}
 
-// Why --exec (via buildWslExecArgs): under `--`, wsl.exe expands `$name` in
-// every argument and silently rewrites the script.
+// --exec prevents wsl.exe from expanding shell variables in argv.
 function runInWslAsRoot(distro: string, script: string): string {
   return execFileSync(
     'wsl.exe',
@@ -40,35 +50,42 @@ export async function getFirstWslDistro(page: Page): Promise<string | null> {
 
 export type WslGoldenStubAgentStage = {
   createdCodexLink: boolean
+  backedUpStub: boolean
+  ownsStubPath: boolean
 }
 
 /** Returns null when the distro cannot stage the stub. */
 export function stageWslGoldenStubAgent(distro: string): WslGoldenStubAgentStage | null {
+  const stage: WslGoldenStubAgentStage = {
+    createdCodexLink: false,
+    backedUpStub: false,
+    ownsStubPath: false
+  }
   try {
+    stage.backedUpStub = runInWslAsRoot(distro, BACKUP_EXISTING_STUB_SCRIPT).trim() === 'backed-up'
+    stage.ownsStubPath = true
     runInWslAsRoot(distro, STAGE_SCRIPT)
-    return {
-      createdCodexLink:
-        runInWslAsRoot(distro, STAGE_CODEX_LINK_IF_MISSING_SCRIPT).trim() === 'created'
-    }
+    stage.createdCodexLink =
+      runInWslAsRoot(distro, STAGE_CODEX_LINK_IF_MISSING_SCRIPT).trim() === 'created'
+    return stage
   } catch {
-    removeWslGoldenStubAgent(distro, { createdCodexLink: false })
+    removeWslGoldenStubAgent(distro, stage)
     return null
   }
 }
 
 export function removeWslGoldenStubAgent(distro: string, stage: WslGoldenStubAgentStage): void {
+  if (!stage.ownsStubPath) {
+    return
+  }
   try {
-    runInWslAsRoot(
-      distro,
-      stage.createdCodexLink ? REMOVE_CODEX_LINK_AND_STUB_SCRIPT : REMOVE_STUB_SCRIPT
-    )
+    runInWslAsRoot(distro, buildRestoreScript(stage))
   } catch {
     // Best-effort cleanup; a leftover stub only affects this fixture's own name.
   }
 }
 
-/** Points the active worktree's project at the WSL runtime, so agent detection
- *  and terminal spawn both target the distro instead of the Windows host. */
+/** Retargets project agent detection and terminal spawning to WSL. */
 export async function useWslRuntimeForActiveProject(page: Page, distro: string): Promise<void> {
   await page.evaluate(async (wslDistro) => {
     const store = window.__store

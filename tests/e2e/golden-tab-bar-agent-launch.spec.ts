@@ -43,14 +43,12 @@ for (const { id, menuItemName } of GOLDEN_STUB_AGENTS) {
 
     const activeTab = orcaPage.locator('[data-testid="sortable-tab"][data-active="true"]')
     await expect(activeTab).toHaveAttribute('data-tab-title', /Golden Stub Agent|Codex|Claude/i)
-    // Why the banner and not just the tab: a tab that spawned a bare shell
-    // instead of the agent looks identical at the store/tab layer.
+    // The marker distinguishes an agent launch from an identical bare-shell tab.
     expect(await getTerminalContent(orcaPage)).toContain(GOLDEN_STUB_READY_MARKER)
   })
 }
 
-// Why describe-scoped and not a body-level skip: `orcaPage` builds before the
-// test body, so a body-level skip still pays a full Electron launch per case.
+// Suite-level skipping avoids launching Electron for each unsupported case.
 test.describe('Windows runtimes', () => {
   test.skip(process.platform !== 'win32', 'Windows agent launch matrix is Windows-only')
 
@@ -59,9 +57,7 @@ test.describe('Windows runtimes', () => {
       orcaPage
     }) => {
       await openWorkspaceTerminal(orcaPage)
-      // Why each shell: the queued launch command is quoted for the shell family
-      // the tab actually spawns (posix for Git Bash, cmd, PowerShell). A mismatch
-      // injects a command the shell rejects, and the agent never starts.
+      // Each shell family requires different launch-command quoting.
       await configureGoldenStubAgent(orcaPage, { agent: 'codex', windowsShell: shell })
       await launchGoldenStubAgentFromNewTab(orcaPage)
 
@@ -80,15 +76,12 @@ test.describe('Windows runtimes', () => {
     test.skip(!stage, 'WSL distro would not accept the staged stub agent')
 
     try {
-      // Why the runtime switch and not terminalWindowsShell: WSL is a project
-      // runtime, so it must retarget agent detection into the distro as well as
-      // the PTY. A launch quoted for a Windows shell never starts there.
+      // WSL must retarget both agent detection and the PTY.
       await useWslRuntimeForActiveProject(orcaPage, distro!)
       await configureGoldenStubAgent(orcaPage, { agent: 'codex' })
       await launchGoldenStubAgentFromNewTab(orcaPage)
 
-      // The stub only exists inside the distro, so its marker proves the agent
-      // ran in WSL rather than on the Windows host.
+      // The distro-only marker proves the agent ran in WSL.
       expect(await getTerminalContent(orcaPage)).toContain(GOLDEN_STUB_READY_MARKER)
     } finally {
       removeWslGoldenStubAgent(distro!, stage!)
