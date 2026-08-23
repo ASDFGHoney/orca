@@ -30,6 +30,10 @@ describe('wslRootPathAliases', () => {
       '/mnt/c/Users/neil/orca',
       String.raw`C:\Users\neil\orca`
     ])
+    expect(wslRootPathAliases(String.raw`\\wsl.localhost\Ubuntu\mnt\C\Repo`)).toEqual([
+      String.raw`\\wsl.localhost\Ubuntu\mnt\C\Repo`,
+      '/mnt/C/Repo'
+    ])
   })
 
   it('does not invent aliases for an ordinary POSIX path', () => {
@@ -77,6 +81,10 @@ describe('isWslAliasedPathInsideOrEqual', () => {
     ).toBe(false)
   })
 
+  it('does not reinterpret a case-variant /mnt/C directory as a drive mount', () => {
+    expect(isWslAliasedPathInsideOrEqual(String.raw`C:\Repo`, '/mnt/C/Repo/src')).toBe(false)
+  })
+
   it('preserves the distro identity of UNC candidates', () => {
     const ubuntuRoot = String.raw`\\wsl.localhost\Ubuntu\home\ada\repo`
     expect(isWslAliasedPathInsideOrEqual(ubuntuRoot, '/home/ada/repo/src')).toBe(true)
@@ -95,6 +103,10 @@ describe('normalizedWslPathCandidateAliases', () => {
       '/mnt/c/Users/neil/orca/orca',
       'c:/users/neil/orca/orca'
     ])
+  })
+
+  it('keeps a case-variant /mnt/C candidate as a case-sensitive Linux path', () => {
+    expect(normalizedWslPathCandidateAliases('/mnt/C/Repo')).toEqual(['/mnt/C/Repo'])
   })
 })
 

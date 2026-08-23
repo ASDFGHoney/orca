@@ -84,7 +84,7 @@ function wslMountPathFromWindowsDrive(pathValue: string): string | null {
 }
 
 function windowsDrivePathFromWslMount(pathValue: string): string | null {
-  const match = pathValue.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/)
+  const match = pathValue.match(/^\/mnt\/([a-z])(\/.*)?$/)
   if (!match) {
     return null
   }
