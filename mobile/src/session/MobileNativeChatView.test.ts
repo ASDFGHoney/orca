@@ -440,22 +440,36 @@ describe('MobileNativeChatView', () => {
     expect(rootPaddingBottom()).toBe(KEYBOARD_HEIGHT)
   })
 
-  it('does not yank the list back to the tail when the keyboard is swiped away', async () => {
-    // Dismissing by drag scrolls the transcript, and the viewport grows as the
-    // keyboard leaves — so `atBottom` survives the swipe and the tail-follow
-    // effect would undo exactly the scroll the user just made.
+  it('does not follow either growth path after the user leaves the tail', async () => {
     vi.useFakeTimers()
     try {
       const folded = [assistantTurn('a1', 'The tests pass.')]
-      mocks.keyboardState = KEYBOARD_OPEN
-      mocks.keyboardHeight = KEYBOARD_HEIGHT
-      await render({ folded, keyboardInset: ROUTE_INSET })
+      await render({ folded })
       await act(async () => vi.advanceTimersByTime(200))
       listInstance.scrollToEnd.mockClear()
 
-      mocks.keyboardState = KEYBOARD_CLOSED
-      mocks.keyboardHeight = 0
-      await update({ folded, keyboardInset: 0 })
+      await act(async () => {
+        const onScroll = listProps().onScroll as (event: {
+          nativeEvent: {
+            contentOffset: { y: number }
+            contentSize: { height: number }
+            layoutMeasurement: { height: number }
+          }
+        }) => void
+        onScroll({
+          nativeEvent: {
+            contentOffset: { y: 0 },
+            contentSize: { height: 1_000 },
+            layoutMeasurement: { height: 300 }
+          }
+        })
+      })
+
+      await update({ folded: [...folded, assistantTurn('a2', 'And again.')] })
+      await act(async () => {
+        const onContentSizeChange = listProps().onContentSizeChange as () => void
+        onContentSizeChange()
+      })
       await act(async () => vi.advanceTimersByTime(200))
 
       expect(listInstance.scrollToEnd).not.toHaveBeenCalled()
@@ -556,6 +570,24 @@ describe('MobileNativeChatView', () => {
 
     expect(listIds()).toEqual(['pending-1'])
     expect(renderedRow('pending-1').props).not.toHaveProperty('queued')
+  })
+
+  it.each(['waiting', 'disconnected'] as const)(
+    'locks the composer immediately when the input is %s',
+    async (inputLockReason) => {
+      await render({ inputLockReason })
+
+      expect(composer().props.disabled).toBe(true)
+    }
+  )
+
+  it('applies a new input lock without waiting for the settle timer', async () => {
+    await render()
+    expect(composer().props.disabled).toBe(false)
+
+    await update({ inputLockReason: 'waiting' })
+
+    expect(composer().props.disabled).toBe(true)
   })
 
   it('keeps a visible lock through a subscribed-end lease blip', async () => {

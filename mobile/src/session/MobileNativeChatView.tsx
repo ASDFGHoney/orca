@@ -188,12 +188,8 @@ export function MobileNativeChatView({
   )
 
   // Follow growth and keyboard opening only while the user remains at the tail.
-  const previousKeyboardInset = useRef(keyboardInset)
   useEffect(() => {
-    // Only a zero transition is dismissal; shorter keyboards still follow the tail.
-    const keyboardLeaving = keyboardInset === 0 && previousKeyboardInset.current > 0
-    previousKeyboardInset.current = keyboardInset
-    if (data.length === 0 || !atBottom || keyboardLeaving) {
+    if (data.length === 0 || !atBottom) {
       return
     }
     const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60)
