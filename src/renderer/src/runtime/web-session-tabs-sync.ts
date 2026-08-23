@@ -3734,7 +3734,9 @@ export function applyWebSessionTabsStorePatch(
   buildPatch: (state: AppState) => WebSessionTabsSyncState | Partial<WebSessionTabsSyncState>,
   hostMirrorVerdict: HostSessionMirrorPatchVerdict,
   agentStatusSnapshots?: RuntimeMobileSessionTabsResult | readonly RuntimeMobileSessionTabsResult[],
-  allowCompletionNotification = false
+  allowCompletionNotification:
+    | boolean
+    | ((snapshot: RuntimeMobileSessionTabsResult) => boolean) = false
 ): HostSessionMirrorSettle {
   let mirroredAgentStatusChanged = false
   // Why: zustand commits before notifying subscribers, so a producer that ran
@@ -3760,6 +3762,10 @@ export function applyWebSessionTabsStorePatch(
         ? agentStatusSnapshots
         : [agentStatusSnapshots]
       for (const snapshot of snapshots) {
+        const notificationAllowed =
+          typeof allowCompletionNotification === 'function'
+            ? allowCompletionNotification(snapshot)
+            : allowCompletionNotification
         for (const surface of snapshot.tabs) {
           if (surface.type !== 'terminal') {
             continue
@@ -3840,7 +3846,7 @@ export function applyWebSessionTabsStorePatch(
           acceptedNotificationStatuses.push({
             paneKey: notificationStatus.paneKey,
             worktreeId: notificationStatus.worktreeId ?? snapshot.worktree,
-            ...(!allowCompletionNotification ? { seedOnly: true as const } : {}),
+            ...(!notificationAllowed ? { seedOnly: true as const } : {}),
             payload: {
               ...pickParsedAgentStatusPayload({
                 ...notificationStatus,
@@ -4021,6 +4027,7 @@ export function useWebSessionTabsSync(): void {
     ) => boolean
   >(() => true)
   const visibilityResumeOmissionsByKeyRef = useRef(new Map<string, VisibilityResumeOmission>())
+  const visibilityResumeNotificationBaselinesRef = useRef(new Map<string, ReadonlySet<string>>())
   const mirroredSessionTabsOwnerRevisionByEnvironmentRef = useRef(
     new Map<string, number | undefined>()
   )
@@ -4069,6 +4076,7 @@ export function useWebSessionTabsSync(): void {
       }
       mirroredSessionTabsOwnerRevisionByEnvironmentRef.current.clear()
       visibilityResumeOmissionsByKeyRef.current.clear()
+      visibilityResumeNotificationBaselinesRef.current.clear()
     },
     []
   )
@@ -4119,6 +4127,12 @@ export function useWebSessionTabsSync(): void {
     if (!workspaceSessionReady || environments.length === 0) {
       return
     }
+    const notificationBaselinesByEnvironment = new Map(
+      environments.map(({ environmentId }) => [
+        environmentId,
+        new Set(getTrackedWebSessionTabsWorktrees(environmentId).map(({ worktree }) => worktree))
+      ])
+    )
 
     type VisibilityResumeEnvironment = {
       trackedWorktrees: readonly TrackedWebSessionTabsWorktree[]
@@ -4457,6 +4471,7 @@ export function useWebSessionTabsSync(): void {
         }
       }
       const resumedEnvironments = new Map<string, VisibilityResumeEnvironment>()
+      const notificationBaselines = new Map<string, ReadonlySet<string>>()
       const trackedWorktreeIds = new Set<string>()
       for (const index of restartingSpecIndexes) {
         const environmentId = environmentIdBySubscriptionSpec[index]
@@ -4468,6 +4483,10 @@ export function useWebSessionTabsSync(): void {
           for (const { worktree } of trackedWorktrees) {
             trackedWorktreeIds.add(worktree)
           }
+          notificationBaselines.set(
+            environmentId,
+            new Set(trackedWorktrees.map(({ worktree }) => worktree))
+          )
           resumedEnvironments.set(environmentId, {
             trackedWorktrees,
             inventoryReceived: false,
@@ -4476,6 +4495,7 @@ export function useWebSessionTabsSync(): void {
           })
         }
       }
+      visibilityResumeNotificationBaselinesRef.current = notificationBaselines
       visibilityResumeBatch =
         resumedEnvironments.size > 0
           ? {
@@ -4640,8 +4660,17 @@ export function useWebSessionTabsSync(): void {
                               ).length
                             }
                           },
-                          freshSnapshots
+                          freshSnapshots,
+                          (snapshot) =>
+                            notificationBaselinesByEnvironment
+                              .get(environmentId)
+                              ?.has(snapshot.worktree) === true
                         )
+                        const notificationBaselines =
+                          notificationBaselinesByEnvironment.get(environmentId)
+                        for (const snapshot of freshSnapshots) {
+                          notificationBaselines?.add(snapshot.worktree)
+                        }
                         const freshSnapshotSet = new Set(freshSnapshots)
                         for (const { index, snapshot } of applicable) {
                           if (unchangedVisibilityResumeSnapshots[index]) {
@@ -4726,6 +4755,9 @@ export function useWebSessionTabsSync(): void {
                           recovered,
                           event.type === 'updated' && !replayed
                         )
+                        notificationBaselinesByEnvironment
+                          .get(environmentId)
+                          ?.add(recovered.worktree)
                         recordVisibilityResumeSnapshot(environmentId, recovered, receivedFrame)
                       } else {
                         settleHydration = hostSessionMirrorSettleForPatchlessFrame(
@@ -4812,13 +4844,17 @@ export function useWebSessionTabsSync(): void {
 
     let requestedInitialTerminal = false
     let requestedRespawnAfterWake = false
+    let notificationBaselineEstablished = getTrackedWebSessionTabsWorktrees(environmentId).some(
+      ({ worktree }) => worktree === activeWorktreeId
+    )
     /** Resolves the settle receipt of the evidence this frame put (or already
      *  had) in the store, or null when the frame was discarded undecided. */
     const applyActiveSnapshot = async (
       event: RuntimeMobileSessionTabsResult & { type: 'snapshot' | 'updated' },
       response: RuntimeRpcResponse<unknown>,
       isCurrent: () => boolean,
-      receivedFrame: number
+      receivedFrame: number,
+      allowCompletionNotification: boolean
     ): Promise<HostSessionMirrorSettle | null> => {
       const recovered = await recoverWebSessionTerminalOrphansBeforeApply(
         useAppStore.getState(),
@@ -4873,8 +4909,9 @@ export function useWebSessionTabsSync(): void {
             (state) => applyWebSessionTabsSnapshot(state, recovered, environmentId),
             { frames: [{ environmentId, worktreeId: recovered.worktree, decision }] },
             recovered,
-            event.type === 'updated' && !replayed
+            allowCompletionNotification || (event.type === 'updated' && !replayed)
           )
+          notificationBaselineEstablished = true
           recordVisibilityResumeSnapshotRef.current(environmentId, recovered, receivedFrame)
         }
         if (isCurrent() && shouldBootstrapInitialTerminal) {
@@ -4950,7 +4987,16 @@ export function useWebSessionTabsSync(): void {
                   event.worktree,
                   receivedFrame
                 )
-                void applyActiveSnapshot(event, response, isCurrent, receivedFrame)
+                void applyActiveSnapshot(
+                  event,
+                  response,
+                  isCurrent,
+                  receivedFrame,
+                  notificationBaselineEstablished ||
+                    visibilityResumeNotificationBaselinesRef.current
+                      .get(environmentId)
+                      ?.has(activeWorktreeId) === true
+                )
                   .catch((error) => {
                     if (isCurrent()) {
                       console.warn(

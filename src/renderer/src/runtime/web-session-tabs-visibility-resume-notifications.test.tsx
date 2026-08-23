@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import { tagRuntimeSubscriptionReplayResponse } from '../../../shared/runtime-subscription-replay'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
 import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
@@ -58,8 +59,11 @@ import {
 import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS } from './window-visibility-subscription-parking'
 
 const ENVIRONMENT_ID = 'env-a'
+const ENVIRONMENT_B = 'env-b'
 const RUNTIME_ID = 'runtime-a'
+const RUNTIME_B = 'runtime-b'
 const REVISION = 101
+const REVISION_B = 202
 const REPO_ID = 'repo-a'
 const WORKTREE_ID = `${REPO_ID}::/worktree-a`
 const OTHER_WORKTREE_ID = `${REPO_ID}::/other`
@@ -68,6 +72,8 @@ const LEAF_ID = '11111111-1111-4111-8111-111111111111'
 const PANE_KEY = makePaneKey(toWebTerminalSurfaceTabId(HOST_TAB_ID), LEAF_ID)
 const NOW = 1_700_000_000_000
 const MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00011\u0001${REVISION}`
+const RECONNECTED_MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00012\u0001${REVISION}`
+const TWO_ENVIRONMENT_MIRROR_KEY = `${MIRROR_KEY}\u0000${ENVIRONMENT_B}\u0001${RUNTIME_B}\u00011\u0001${REVISION_B}`
 const initialState = useAppStore.getInitialState()
 
 type RuntimeSubscribe = typeof window.api.runtimeEnvironments.subscribe
@@ -79,12 +85,14 @@ type RuntimeSubscription = {
 type TerminalState = 'working' | 'done' | 'blocked' | 'waiting'
 
 const subscriptions: RuntimeSubscription[] = []
-const runtimeCall = vi.fn(async () => ({
-  id: 'list-all',
-  ok: true as const,
-  result: { snapshots: [] },
-  _meta: { runtimeId: RUNTIME_ID }
-}))
+const runtimeCall = vi.fn(
+  async (): Promise<RuntimeRpcResponse<unknown>> => ({
+    id: 'list-all',
+    ok: true as const,
+    result: { snapshots: [] },
+    _meta: { runtimeId: RUNTIME_ID }
+  })
+)
 const runtimeSubscribe = vi.fn<RuntimeSubscribe>(async (request, callbacks) => {
   const unsubscribe = vi.fn()
   subscriptions.push({ request, callbacks, unsubscribe })
@@ -154,6 +162,20 @@ function findSubscription(
   const subscription = subscriptions.filter(({ request }) => request.method === method)[occurrence]
   if (!subscription) {
     throw new Error(`Missing ${method} subscription ${occurrence}`)
+  }
+  return subscription
+}
+
+function findEnvironmentSubscription(
+  method: 'session.tabs.subscribeAll' | 'session.tabs.subscribe',
+  environmentId: string,
+  occurrence = 0
+): RuntimeSubscription {
+  const subscription = subscriptions.filter(
+    ({ request }) => request.method === method && request.selector === environmentId
+  )[occurrence]
+  if (!subscription) {
+    throw new Error(`Missing ${environmentId} ${method} subscription ${occurrence}`)
   }
   return subscription
 }
@@ -229,7 +251,6 @@ async function parkAndReveal(): Promise<void> {
 describe('paired session-tab visibility-resume notifications', () => {
   let notificationDispatch: Mock<(kind: 'done' | 'attention') => void>
   let disposeCoordinator: () => void
-  let hasNotificationBaseline: boolean
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -249,8 +270,6 @@ describe('paired session-tab visibility-resume notifications', () => {
     resetWebSessionTabsSnapshotFreshnessForTests()
     resetRendererOwnedAgentStatusPanesForTests()
     seedRemoteMirrorState()
-    hasNotificationBaseline = false
-
     notificationDispatch = vi.fn()
     const coordinator = createAgentCompletionCoordinator({
       paneKey: PANE_KEY,
@@ -270,12 +289,11 @@ describe('paired session-tab visibility-resume notifications', () => {
     })
     disposeCoordinator = () => coordinator.dispose()
     mocks.observeAgentHookCompletionForNotification.mockImplementation(({ payload, seedOnly }) => {
-      if (seedOnly && !hasNotificationBaseline) {
+      if (seedOnly) {
         coordinator.seedHookStatus(payload)
       } else {
         coordinator.observeHookStatus(payload)
       }
-      hasNotificationBaseline = true
     })
   })
 
@@ -330,6 +348,26 @@ describe('paired session-tab visibility-resume notifications', () => {
     hook.unmount()
   })
 
+  it('keeps ordered listAll and subscription cold inventories silent', async () => {
+    runtimeCall.mockResolvedValueOnce({
+      id: 'list-all',
+      ok: true,
+      result: { snapshots: [snapshot(1, 'working', NOW)] },
+      _meta: { runtimeId: RUNTIME_ID }
+    })
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
+
   it.each(['done', 'blocked'] as const)(
     'keeps cold %s inventory silent when first mounted hidden',
     async (state) => {
@@ -350,6 +388,65 @@ describe('paired session-tab visibility-resume notifications', () => {
       hook.unmount()
     }
   )
+
+  it.each(['done', 'blocked'] as const)(
+    'keeps a cold active-worktree %s snapshot silent after first hidden mount',
+    async (state) => {
+      seedRemoteMirrorState(true)
+      mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+      setDocumentVisibility('hidden')
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+
+      act(() => setDocumentVisibility('visible'))
+      await act(settle)
+      await publish(findSubscription('session.tabs.subscribe'), {
+        type: 'snapshot',
+        ...snapshot(1, state, NOW)
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).not.toHaveBeenCalled()
+      expect(badgeCount()).toBe(0)
+      hook.unmount()
+    }
+  )
+
+  it('does not borrow another environment same-id worktree notification baseline', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findEnvironmentSubscription('session.tabs.subscribeAll', ENVIRONMENT_ID), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    const runtimeEnvironments = [
+      { id: ENVIRONMENT_ID, createdAt: 100, pairingRevision: REVISION },
+      { id: ENVIRONMENT_B, createdAt: 200, pairingRevision: REVISION_B }
+    ] as PublicKnownRuntimeEnvironment[]
+    replaceRuntimeEnvironmentRevisions(runtimeEnvironments)
+    useAppStore.setState({
+      runtimeEnvironments,
+      runtimeStatusByEnvironmentId: new Map([
+        [ENVIRONMENT_ID, { status: { runtimeId: RUNTIME_ID }, connectionGeneration: 1 }],
+        [ENVIRONMENT_B, { status: { runtimeId: RUNTIME_B }, connectionGeneration: 1 }]
+      ]) as AppState['runtimeStatusByEnvironmentId']
+    })
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(TWO_ENVIRONMENT_MIRROR_KEY)
+    hook.rerender()
+    await act(settle)
+
+    await publish(findEnvironmentSubscription('session.tabs.subscribeAll', ENVIRONMENT_B), {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
 
   it.each(['done', 'blocked'] as const)(
     'keeps a metadata-only %s inventory refresh silent',
@@ -420,15 +517,14 @@ describe('paired session-tab visibility-resume notifications', () => {
   })
 
   it('alerts after a transport resubscription preserves the prior baseline', async () => {
-    const firstHook = renderHook(() => useWebSessionTabsSync())
+    const hook = renderHook(() => useWebSessionTabsSync())
     await act(settle)
     await publish(findSubscription('session.tabs.subscribeAll'), {
       type: 'updated',
       ...snapshot(1, 'working', NOW)
     })
-    firstHook.unmount()
-
-    const reconnectedHook = renderHook(() => useWebSessionTabsSync())
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
+    hook.rerender()
     await act(settle)
     await publish(findSubscription('session.tabs.subscribeAll', 1), {
       type: 'snapshots',
@@ -438,7 +534,7 @@ describe('paired session-tab visibility-resume notifications', () => {
 
     expect(notificationDispatch).toHaveBeenCalledTimes(1)
     expect(badgeCount()).toBe(1)
-    reconnectedHook.unmount()
+    hook.unmount()
   })
 
   it('alerts for a Claude stamped completion while the host row stays working', async () => {

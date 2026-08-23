@@ -1159,6 +1159,11 @@ export function createAgentCompletionCoordinator(
       return
     }
     recordPaneActivity()
+    if (options.shouldSuppressHookCompletion?.(payload)) {
+      clearPendingHookDone()
+      clearPendingCodexAttention()
+      return
+    }
     if (isRecognizedAgentType(payload.agentType)) {
       establishAgentEvidence()
     }
@@ -1166,6 +1171,9 @@ export function createAgentCompletionCoordinator(
     clearPendingCodexAttention()
     if (isAttentionHookState(payload.state)) {
       lastAttentionToken = hookAttentionToken(payload)
+      return
+    }
+    if (payload.state === 'done' && payload.sessionBoundary === true) {
       return
     }
     const identity = hookCompletionIdentity(payload)

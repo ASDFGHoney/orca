@@ -310,7 +310,6 @@ export function observeAgentHookCompletionForNotification({
   }
 
   let entry = coordinatorsByPaneKey.get(paneKey)
-  const shouldSeed = seedOnly === true && (!entry || entry.worktreeId !== worktreeId)
   if (!entry || entry.worktreeId !== worktreeId) {
     entry?.coordinator.dispose()
     entry = {
@@ -327,7 +326,7 @@ export function observeAgentHookCompletionForNotification({
   if (payload.state === 'working' && payload.turnCompletedAt === undefined && trackingEnabled) {
     paneKeysRequiringFreshWorking.delete(paneKey)
   }
-  if (shouldSeed) {
+  if (seedOnly === true) {
     entry.coordinator.seedHookStatus(payload)
   } else {
     entry.coordinator.observeHookStatus(payload)

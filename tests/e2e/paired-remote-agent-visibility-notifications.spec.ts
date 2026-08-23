@@ -1,6 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
+import { CLAUDE_EVENTS } from '../../src/main/claude/hook-settings'
 import type { AgentHookEndpoint } from '../../src/shared/agent-hook-endpoint-file'
 import type { RuntimeMobileSessionTabsResult } from '../../src/shared/runtime-types'
 import { makePaneKey } from '../../src/shared/stable-pane-id'
@@ -18,9 +19,19 @@ import {
 } from './helpers/paired-electron-client'
 import { revealPairedClientWindow } from './helpers/paired-client-window-reveal'
 
+const REQUIRED_CLAUDE_EVENTS = ['UserPromptSubmit', 'Stop', 'PermissionRequest'] as const
+const NOTIFICATION_BARRIER_SOURCE = 'sta-5244-barrier'
 type NotificationDispatch = { source?: string; agentState?: string; worktreeId?: string }
-type AgentStatusSummary = { state: string; prompt: string; agentType?: string }
+type AgentStatusSummary = {
+  state: string
+  prompt: string
+  agentType?: string
+  toolInput?: unknown
+}
 type TerminalSurface = Extract<RuntimeMobileSessionTabsResult['tabs'][number], { type: 'terminal' }>
+type ClaudeSettings = {
+  hooks?: Record<string, { hooks?: { command?: unknown }[] }[]>
+}
 
 async function callEnvironment<TResult>(
   page: Page,
@@ -45,15 +56,18 @@ async function callEnvironment<TResult>(
 }
 
 async function installNotificationDispatchSpy(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ ipcMain }) => {
+  await app.evaluate(({ ipcMain }, barrierSource) => {
     const state = globalThis as unknown as { __sta5244Dispatches?: NotificationDispatch[] }
     state.__sta5244Dispatches = []
     ipcMain.removeHandler('notifications:dispatch')
     ipcMain.handle('notifications:dispatch', (_event: unknown, input: NotificationDispatch) => {
+      if (input.source === barrierSource) {
+        return { delivered: true }
+      }
       state.__sta5244Dispatches!.push(input)
       return { delivered: true }
     })
-  })
+  }, NOTIFICATION_BARRIER_SOURCE)
 }
 
 async function notificationDispatches(app: ElectronApplication): Promise<NotificationDispatch[]> {
@@ -61,6 +75,35 @@ async function notificationDispatches(app: ElectronApplication): Promise<Notific
     const state = globalThis as unknown as { __sta5244Dispatches?: NotificationDispatch[] }
     return state.__sta5244Dispatches ?? []
   })
+}
+
+async function flushNotificationDispatches(page: Page): Promise<void> {
+  await page.evaluate(async (source) => {
+    const dispatch = window.api.notifications.dispatch as (input: unknown) => Promise<unknown>
+    await dispatch({ source })
+  }, NOTIFICATION_BARRIER_SOURCE)
+}
+
+async function hasManagedClaudeHooks(host: HeadlessPairedRuntimeHost): Promise<boolean> {
+  const home = await host.app.evaluate(({ app }) => app.getPath('home'))
+  const scriptName = process.platform === 'win32' ? 'claude-hook.cmd' : 'claude-hook.sh'
+  const scriptPath = path.join(home, '.orca', 'agent-hooks', scriptName)
+  const settingsPath = path.join(home, '.claude', 'settings.json')
+  if (!existsSync(scriptPath) || !existsSync(settingsPath)) {
+    return false
+  }
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as ClaudeSettings
+  const requiredEvents = new Set<string>([
+    ...REQUIRED_CLAUDE_EVENTS,
+    ...CLAUDE_EVENTS.map(({ eventName }) => eventName)
+  ])
+  return [...requiredEvents].every((eventName) =>
+    settings.hooks?.[eventName]?.some((definition) =>
+      definition.hooks?.some(
+        ({ command }) => typeof command === 'string' && command.includes('claude-hook')
+      )
+    )
+  )
 }
 
 async function postClaudeHook(
@@ -109,7 +152,12 @@ async function clientStatus(page: Page, paneKey: string): Promise<AgentStatusSum
   return page.evaluate((key) => {
     const status = window.__store?.getState().agentStatusByPaneKey[key]
     return status
-      ? { state: status.state, prompt: status.prompt, agentType: status.agentType }
+      ? {
+          state: status.state,
+          prompt: status.prompt,
+          agentType: status.agentType,
+          toolInput: status.toolInput
+        }
       : null
   }, paneKey)
 }
@@ -165,10 +213,34 @@ async function revealAfterSubscriptionsPark(client: PairedElectronClient): Promi
   await revealPairedClientWindow(client)
 }
 
-async function reconnect(client: PairedElectronClient): Promise<void> {
+async function reconnectAndAwaitReplay(
+  client: PairedElectronClient,
+  paneKey: string,
+  expectedState: string
+): Promise<void> {
+  const previousGeneration = await client.page.evaluate(
+    (environmentId) =>
+      window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)
+        ?.connectionGeneration ?? 0,
+    client.environmentId
+  )
   await client.page.evaluate(async (selector) => {
     await window.api.runtimeEnvironments.disconnect({ selector })
   }, client.environmentId)
+  await expect
+    .poll(async () => {
+      await client.page.evaluate(
+        async (environmentId) =>
+          window.__store?.getState().refreshRuntimeEnvironmentStatus(environmentId, 1_000),
+        client.environmentId
+      )
+      return client.page.evaluate((environmentId) => {
+        const entry = window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)
+        return entry === undefined || entry.status === null
+      }, client.environmentId)
+    })
+    .toBe(true)
+  await clearClientStatus(client.page, paneKey)
   await expect
     .poll(
       () =>
@@ -179,6 +251,41 @@ async function reconnect(client: PairedElectronClient): Promise<void> {
       { timeout: 60_000, message: 'paired client did not reconnect' }
     )
     .toBe(true)
+  await expect
+    .poll(async () => {
+      await client.page.evaluate(
+        async (environmentId) =>
+          window.__store?.getState().refreshRuntimeEnvironmentStatus(environmentId, 1_000),
+        client.environmentId
+      )
+      return client.page.evaluate(
+        ({ environmentId, previousGeneration }) => {
+          const status = window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)
+          return status?.status && (status.connectionGeneration ?? 0) > previousGeneration
+        },
+        { environmentId: client.environmentId, previousGeneration }
+      )
+    })
+    .toBeTruthy()
+  await expect
+    .poll(() => clientStatus(client.page, paneKey), {
+      timeout: 30_000,
+      message: 'paired client did not apply the reconnect replay'
+    })
+    .toMatchObject({ state: expectedState })
+  await flushNotificationDispatches(client.page)
+}
+
+async function clearClientStatus(page: Page, paneKey: string): Promise<void> {
+  await page.evaluate((key) => {
+    const store = window.__store
+    if (!store) {
+      return
+    }
+    const next = { ...store.getState().agentStatusByPaneKey }
+    delete next[key]
+    store.setState({ agentStatusByPaneKey: next })
+  }, paneKey)
 }
 
 async function clearUnread(page: Page, worktreeId: string): Promise<void> {
@@ -197,6 +304,7 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
   let client: PairedElectronClient | null = null
   let coldClient: PairedElectronClient | null = null
   let terminal: string | null = null
+  let testError: unknown
 
   try {
     await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
@@ -241,6 +349,18 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
     )
     const endpoint = await readHookEndpoint(host.app)
     expect(Number(endpoint.port)).toBeGreaterThan(0)
+    await expect
+      .poll(() => hasManagedClaudeHooks(host), {
+        timeout: 30_000,
+        message: 'isolated host did not install every managed Claude hook'
+      })
+      .toBe(true)
+    await revealPairedClientWindow(client)
+    await expect
+      .poll(() =>
+        client!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())
+      )
+      .toBe(true)
 
     const completionPrompt = `STA-5244 completion ${Date.now()}`
     await postClaudeHook(endpoint, hostPaneKey, worktreeId, {
@@ -364,10 +484,26 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
     await client.page.screenshot({ path: path.join(screenshots, '03-hidden-permission-pass.png') })
 
     await hideUntilSubscriptionsPark(client)
+    await postClaudeHook(endpoint, hostPaneKey, worktreeId, {
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'Bash',
+      tool_input: { command: 'git status --short' }
+    })
+    await expect
+      .poll(() => hostSurface(host, worktreeId, surface.parentTabId))
+      .toMatchObject({
+        agentStatus: { state: 'waiting', toolInput: 'git status --short' }
+      })
     await revealAfterSubscriptionsPark(client)
-    await expect.poll(() => notificationDispatches(client!.app)).toHaveLength(2)
-    await reconnect(client)
-    await expect.poll(() => notificationDispatches(client!.app)).toHaveLength(2)
+    await expect
+      .poll(() => clientStatus(client!.page, clientPaneKey), {
+        message: 'same-turn reveal replay did not settle'
+      })
+      .toMatchObject({ state: 'waiting', toolInput: 'git status --short' })
+    await flushNotificationDispatches(client.page)
+    expect(await notificationDispatches(client.app)).toHaveLength(2)
+    await reconnectAndAwaitReplay(client, clientPaneKey, 'waiting')
+    expect(await notificationDispatches(client.app)).toHaveLength(2)
 
     await clearUnread(client.page, worktreeId)
     await expect
@@ -377,30 +513,54 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
         unreadCount: 0,
         dock: process.platform === 'darwin' ? '' : null
       })
-    coldClient = await launchPairedElectronClient(host.offer, testInfo, 'STA-5244 cold replay')
+    coldClient = await launchPairedElectronClient(host.offer, testInfo, 'STA-5244 cold replay', {
+      beforeRendererReady: installNotificationDispatchSpy
+    })
     await expect
       .poll(() => clientStatus(coldClient!.page, clientPaneKey), {
         timeout: 30_000,
         message: 'cold client did not hydrate terminal permission state'
       })
       .toMatchObject({ state: 'waiting' })
+    await flushNotificationDispatches(coldClient.page)
     expect(await unreadBadgeState(coldClient, worktreeId)).toMatchObject({
       unread: false,
       unreadCount: 0,
       dock: process.platform === 'darwin' ? '' : null
     })
-    await installNotificationDispatchSpy(coldClient.app)
-    await reconnect(coldClient)
-    await expect.poll(() => notificationDispatches(coldClient!.app)).toHaveLength(0)
+    expect(await notificationDispatches(coldClient.app)).toHaveLength(0)
+    await reconnectAndAwaitReplay(coldClient, clientPaneKey, 'waiting')
+    expect(await notificationDispatches(coldClient.app)).toHaveLength(0)
     await coldClient.page.screenshot({
       path: path.join(screenshots, '02-cold-permission-silent.png')
     })
-  } finally {
-    await coldClient?.dispose()
-    if (terminal) {
-      await host.client.call('terminal.closeTab', { terminal }).catch(() => undefined)
+  } catch (error) {
+    testError = error
+  }
+  const cleanupErrors: unknown[] = []
+  const cleanupStages = [
+    () => coldClient?.dispose() ?? Promise.resolve(),
+    () =>
+      terminal
+        ? host.client.call('terminal.closeTab', { terminal }).then(() => undefined)
+        : Promise.resolve(),
+    () => client?.dispose() ?? Promise.resolve(),
+    () => host.dispose()
+  ]
+  for (const cleanup of cleanupStages) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupErrors.push(error)
     }
-    await client?.dispose()
-    await host.dispose()
+  }
+  if (testError !== undefined && cleanupErrors.length > 0) {
+    throw new AggregateError([testError, ...cleanupErrors], 'STA-5244 test and cleanup failed')
+  }
+  if (testError !== undefined) {
+    throw testError
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'STA-5244 fixture cleanup failed')
   }
 })

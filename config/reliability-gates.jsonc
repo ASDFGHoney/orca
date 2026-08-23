@@ -4845,7 +4845,7 @@
         "pnpm exec playwright test tests/e2e/paired-remote-agent-visibility-notifications.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/terminal-orphan-owner.test.ts src/main/runtime/terminal-orphan-topology.test.ts src/renderer/src/runtime/web-session-terminal-orphan-recovery.test.ts src/renderer/src/runtime/web-session-terminal-orphan-mixed-version.test.ts src/renderer/src/runtime/web-session-tabs-sync.test.ts --maxWorkers=1",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/pty-process-inspection.test.ts src/main/daemon/terminal-host.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts src/relay/pty-handler-spawn-admission.test.ts src/main/daemon/daemon-pty-adapter.test.ts src/main/runtime/orca-runtime.test.ts tests/e2e/remote-agent-completion-authority.unit.test.ts src/renderer/src/runtime/runtime-terminal-inspection.test.ts src/renderer/src/components/terminal-pane/agent-completion-coordinator-process-cadence.test.ts src/renderer/src/components/terminal-pane/agent-completion-coordinator-pending-title-inspection.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/web-session-tabs-visibility-resume-notifications.test.tsx",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/runtime/web-session-tabs-visibility-resume-notifications.test.tsx src/renderer/src/hooks/agent-hook-completion-notifications-inventory.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/remote-agent-completion-authority.unit.test.ts src/main/providers/pty-process-inspection.test.ts src/main/daemon/terminal-host.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts src/relay/pty-handler-spawn-admission.test.ts src/main/daemon/daemon-pty-adapter.test.ts src/renderer/src/runtime/runtime-terminal-inspection.test.ts src/renderer/src/components/terminal-pane/agent-completion-coordinator-process-cadence.test.ts src/renderer/src/components/terminal-pane/agent-completion-coordinator-pending-title-inspection.test.ts src/renderer/src/components/terminal-pane/pty-connection-task-complete-dispatch.test.ts src/renderer/src/lib/codex-session-restart.test.ts"
       ],
       "testFiles": [
@@ -4858,6 +4858,7 @@
         "tests/e2e/remote-agent-completion-authority.unit.test.ts",
         "tests/e2e/paired-remote-agent-visibility-notifications.spec.ts",
         "src/renderer/src/runtime/web-session-tabs-visibility-resume-notifications.test.tsx",
+        "src/renderer/src/hooks/agent-hook-completion-notifications-inventory.test.ts",
         "src/renderer/src/runtime/runtime-terminal-inspection.test.ts",
         "src/renderer/src/components/terminal-pane/agent-completion-coordinator-process-cadence.test.ts",
         "src/renderer/src/components/terminal-pane/agent-completion-coordinator-pending-title-inspection.test.ts",
@@ -4930,6 +4931,13 @@
             "a hidden paired mirror recovers done, blocked, and waiting exactly once through notification dispatch and unread badge state",
             "cold inventory, same-turn reconnect replay, and duplicate frames remain silent",
             "the active scoped stream may win resume ordering without losing or duplicating attention"
+          ]
+        },
+        {
+          "file": "src/renderer/src/hooks/agent-hook-completion-notifications-inventory.test.ts",
+          "assertions": [
+            "cold done and blocked inventory seeds notification identity without dispatching",
+            "later done, blocked, and stamped Claude completion identities dispatch once"
           ]
         },
         {

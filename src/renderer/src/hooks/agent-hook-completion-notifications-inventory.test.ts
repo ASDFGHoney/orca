@@ -60,8 +60,7 @@ describe('agent hook inventory notification baselines', () => {
     observe({
       paneKey: PANE_KEY,
       worktreeId: 'wt-1',
-      payload: status('done', 200),
-      seedOnly: true
+      payload: status('done', 200)
     })
     expect(dispatchTerminalNotification).toHaveBeenCalledTimes(1)
   })
@@ -79,8 +78,7 @@ describe('agent hook inventory notification baselines', () => {
     observe({
       paneKey: PANE_KEY,
       worktreeId: 'wt-1',
-      payload: status('blocked', 200),
-      seedOnly: true
+      payload: status('blocked', 200)
     })
     vi.advanceTimersByTime(1_500)
     expect(dispatchTerminalNotification).toHaveBeenCalledTimes(1)
@@ -99,8 +97,7 @@ describe('agent hook inventory notification baselines', () => {
     observe({
       paneKey: PANE_KEY,
       worktreeId: 'wt-1',
-      payload: { ...status('working', 100, 'claude'), turnCompletedAt: 200 },
-      seedOnly: true
+      payload: { ...status('working', 100, 'claude'), turnCompletedAt: 200 }
     })
 
     expect(dispatchTerminalNotification).toHaveBeenCalledTimes(1)
