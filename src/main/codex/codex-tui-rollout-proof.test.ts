@@ -21,7 +21,7 @@ describe('Codex TUI rollout proof', () => {
     expect(parseCodexTuiStatusSessionId('Session: not-a-session')).toBeNull()
   })
 
-  it('parses the Codex 0.148 status screen and future thread labels', () => {
+  it('parses the Codex 0.148 status screen and semantic thread labels', () => {
     const status = [
       '\u001b[2m│  >_ OpenAI Codex (v0.148.0)                                                  │',
       '│  Model:                       gpt-5.6-sol (reasoning high, summaries auto)   │',

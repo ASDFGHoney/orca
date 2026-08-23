@@ -94,6 +94,7 @@ import {
   type StructuredTuiOwner
 } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
 import {
   agentSessionOwnerBindingsEqual,
   cloneAgentSessionOwnerBinding,
@@ -9472,7 +9473,17 @@ export class OrcaRuntimeService {
       await this.closeHeadlessMobileBrowserTab(worktreeId, snapshot, tab)
     } else if (tab.type === 'agent-session') {
       if (this.notifier?.closeSessionTab) {
-        await this.notifier.closeSessionTab(structuredAgentSessionTabId(tab.sessionId), worktreeId)
+        try {
+          await this.notifier.closeSessionTab(
+            structuredAgentSessionTabId(tab.sessionId),
+            worktreeId
+          )
+        } catch (error) {
+          // The renderer already having removed the tab is an idempotent close, not a veto.
+          if (!(error instanceof Error && error.message === SESSION_TAB_NOT_FOUND_ERROR)) {
+            throw error
+          }
+        }
       }
       this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
     } else {

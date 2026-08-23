@@ -161,7 +161,7 @@ describe('structured session cold restoration', () => {
     expect(closed.tabGroups?.[0]?.tabOrder).toEqual(['terminal-tab'])
   })
 
-  it('keeps the host tab when the renderer rejects a structured close', async () => {
+  it('commits the host close when the renderer already removed the structured tab', async () => {
     const runtime = new OrcaRuntimeService()
     runtime.setNotifier({
       closeSessionTab: vi.fn(async () => {
@@ -175,15 +175,11 @@ describe('structured session cold restoration', () => {
       activate: true
     })
 
-    await expect(
-      runtime.closeMobileSessionTab('id:workspace-1', 'agent-session:session-1', {
-        reason: 'user'
-      })
-    ).rejects.toThrow('session_tab_not_found')
+    await runtime.closeMobileSessionTab('id:workspace-1', 'agent-session:session-1', {
+      reason: 'user'
+    })
 
     const snapshot = await runtime.listMobileSessionTabs('id:workspace-1')
-    expect(snapshot.tabs).toEqual([
-      expect.objectContaining({ id: 'agent-session:session-1', type: 'agent-session' })
-    ])
+    expect(snapshot.tabs).toEqual([])
   })
 })
