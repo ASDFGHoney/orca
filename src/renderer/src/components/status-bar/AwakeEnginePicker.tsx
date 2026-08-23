@@ -90,7 +90,7 @@ export function AwakeEnginePicker({
       )
     : translate(
         'auto.components.status.bar.AwakeEnginePicker.amphetamineBody',
-        'Uses the Amphetamine Mac app. Control the display and screen saver, and auto-start on power or an app.'
+        'Adds the Amphetamine Mac app on top: control the display and screen saver, and auto-start on power or an app.'
       )
 
   const amphetamineHint = notInstalled

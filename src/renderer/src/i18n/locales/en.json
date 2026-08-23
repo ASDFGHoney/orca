@@ -3752,7 +3752,7 @@
             "caffeinateBody": "A private macOS process Orca starts and stops. Nothing to install, and it touches nothing else.",
             "amphetamine": "Amphetamine",
             "amphetamineTitle": "Works with the lid shut",
-            "amphetamineBody": "Uses the Amphetamine Mac app. Control the display and screen saver, and auto-start on power or an app.",
+            "amphetamineBody": "Adds the Amphetamine Mac app on top: control the display and screen saver, and auto-start on power or an app.",
             "amphetamineMissingBody": "Keep running with the lid shut. Auto-start on power or an app. Control the display and screen saver.",
             "amphetamineSafety": "Orca uses a session you already started rather than replacing it.",
             "amphetamineGet": "Click to open the Mac App Store. It's free.",

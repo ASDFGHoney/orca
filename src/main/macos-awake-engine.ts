@@ -16,11 +16,6 @@ export type PlatformAwakeAssertion = {
   dispose: () => void
 }
 
-/** An assertion that can report whether it is actually holding right now. */
-export type ObservableAwakeAssertion = PlatformAwakeAssertion & {
-  isHolding: () => boolean
-}
-
 export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
   isUnavailable: () => boolean
   getUnavailableReason: () => AmphetamineUnavailableReason | null
@@ -37,7 +32,7 @@ export type MacosAwakeEngineStatusFields = {
 
 export type MacosAwakeEngineRouterOptions = {
   amphetamineAssertion?: AmphetamineAwakeAssertion
-  caffeinateAssertion?: ObservableAwakeAssertion
+  caffeinateAssertion?: PlatformAwakeAssertion
   detectAmphetamine?: () => Promise<boolean | undefined>
   logger?: Logger
   now?: () => number
@@ -47,16 +42,17 @@ export type MacosAwakeEngineRouterOptions = {
 }
 
 /**
- * Picks which macOS tool holds the wake assertion. Caffeinate needs no install
- * and is the fallback; Amphetamine is opt-in and can be missing or refused. The
- * two overlap deliberately while Amphetamine is acquiring — see start() — so a
- * handover does not open a gap. Neither engine is guaranteed to start: a failure
- * is logged and the Electron power-save blocker, held elsewhere for the whole
- * session, is what remains.
+ * Runs the macOS wake assertions.
+ *
+ * Caffeinate is unconditional whenever Orca wants the Mac awake; Amphetamine is
+ * additive on top of it when selected. Deliberately not a handover — see start()
+ * for why one cannot be made safe. Neither engine is guaranteed to start: a
+ * failure is logged, and the Electron power-save blocker held elsewhere for the
+ * whole session is what remains.
  */
 export class MacosAwakeEngineRouter {
   private readonly amphetamineAssertion: AmphetamineAwakeAssertion
-  private readonly caffeinateAssertion: ObservableAwakeAssertion
+  private readonly caffeinateAssertion: PlatformAwakeAssertion
   private readonly detectAmphetamine: () => Promise<boolean | undefined>
   private readonly logger: Logger
   private readonly onNeedsRefresh: (reason: string) => void
@@ -168,59 +164,26 @@ export class MacosAwakeEngineRouter {
   }
 
   start(reason: string): void {
-    const useAmphetamine = this.usesAmphetamine()
-    if (useAmphetamine) {
+    // Caffeinate always runs. There is no handover, because a handover cannot be
+    // made safe: any liveness answer about caffeinate is stale the instant it is
+    // read — the spawn can fail asynchronously and the child can exit at any
+    // moment — so releasing the other engine on it is always a gamble. Three
+    // separate review rounds each found a different sequence ending with nothing
+    // held, and each fix produced another. Holding both costs one small child
+    // process; holding neither is the bug this exists to prevent.
+    this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+    if (this.usesAmphetamine()) {
       this.startAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
-    }
-    // One predicate decides everything, because the alternative — a stop here and
-    // another there — is what repeatedly left the machine with nothing holding.
-    //
-    // Amphetamine counts as covering only when it owns a live hold. Owned means
-    // the indefinite session Orca creates, which cannot expire; an adopted one is
-    // the user's and may be a timer that runs out before the next re-check. Live
-    // excludes a classification retained after a failure, and is cleared before a
-    // release is issued. Acquiring is asynchronous and its first Apple event can
-    // block on the Automation consent dialog for as long as the user takes to
-    // answer, so until it lands the answer is no.
-    const amphetamineCovers =
-      useAmphetamine &&
-      this.amphetamineAssertion.getHold() === 'owned' &&
-      this.amphetamineAssertion.hasLiveHold()
-
-    // Caffeinate is the floor: it runs whenever Amphetamine is not covering.
-    // isHolding, not the start call's return: a start that did not throw is not
-    // an assertion, because the spawn can fail asynchronously and the child can
-    // exit at any time. Releasing the other engine on "did not throw" is exactly
-    // how the machine ends up holding nothing.
-    let caffeinateHolds = false
-    if (!amphetamineCovers) {
-      this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
-      caffeinateHolds = this.caffeinateAssertion.isHolding()
-    }
-
-    if (amphetamineCovers) {
-      this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
-    }
-    // Release Amphetamine only once caffeinate is observed holding — not merely
-    // asked to start. Stopping it otherwise ends the last assertion and holds
-    // nothing.
-    if (!useAmphetamine && caffeinateHolds) {
+    } else {
       this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
     }
   }
 
-  /** Returns whether the assertion was asked to start without throwing. */
-  private startAssertion(
-    assertion: PlatformAwakeAssertion,
-    label: string,
-    reason: string
-  ): boolean {
+  private startAssertion(assertion: PlatformAwakeAssertion, label: string, reason: string): void {
     try {
       assertion.start(reason)
-      return true
     } catch (err) {
       this.logger.warn(`[agent-awake] failed to start ${label} assertion`, { reason, error: err })
-      return false
     }
   }
 

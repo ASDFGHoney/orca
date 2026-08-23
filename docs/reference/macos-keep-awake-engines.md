@@ -3,12 +3,12 @@
 Orca can hold its macOS wake assertion two ways. The engine is a user setting
 (`computerAwakeMacosEngine`), exposed in the status-bar segment and in
 Settings → Agents. It is independent of the On / Agent / Off mode, which decides
-*whether* Orca wants the Mac awake at all.
+_whether_ Orca wants the Mac awake at all.
 
-| Engine | Mechanism | Ownership model |
-| --- | --- | --- |
+| Engine                 | Mechanism                                 | Ownership model                                                                         |
+| ---------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
 | `caffeinate` (default) | `/usr/bin/caffeinate -i -s` child process | Private to Orca. Refcounted by the kernel; other processes' assertions are independent. |
-| `amphetamine` | Apple events to `com.if.Amphetamine` | **Shared and singular.** One global session for the whole machine. |
+| `amphetamine`          | Apple events to `com.if.Amphetamine`      | **Shared and singular.** One global session for the whole machine.                      |
 
 Orca always also holds Electron's `powerSaveBlocker`, on every platform and with
 either engine. The engine is an addition, never a replacement.
@@ -45,7 +45,7 @@ Orca is a co-tenant of the session, never its owner by default.
   Orca-shaped it returns `foreign`, having issued no command. Orca records an
   `adopted` hold; its goal is already met and the user's session is untouched.
 - **Reclaim, don't adopt, what looks like Orca's.** An Orca-shaped session found
-  at acquire time is recorded as `owned`, not `adopted` — after a crash it *is*
+  at acquire time is recorded as `owned`, not `adopted` — after a crash it _is_
   Orca's leaked session, and adopting it would mean never cleaning it up.
 - **End only what still looks like its own.** An `adopted` hold is dropped
   without a command. The release script re-tests the shape and ends the session
@@ -57,7 +57,7 @@ Orca is a co-tenant of the session, never its owner by default.
   visible nor reliably recoverable.
 - **Never touch global preferences.** `allow/prevent display sleep`,
   `allow/prevent screen saver`, `enable/disable closed display mode` and the
-  Trigger and Drive Alive commands all mutate the user's *preferences* when no
+  Trigger and Drive Alive commands all mutate the user's _preferences_ when no
   session is active. Orca calls none of them.
 
 ### What this cannot guarantee
@@ -88,7 +88,7 @@ nothing.
 ### Quit racing an in-flight acquire
 
 If quit lands while an acquire is in flight, Orca aborts it and then runs the
-synchronous release. Neither step is ordering: aborting only *requests* a kill,
+synchronous release. Neither step is ordering: aborting only _requests_ a kill,
 and an Apple event the acquire already sent is processed by Amphetamine on its
 own schedule. So a session can appear immediately after a release that found
 nothing to end.
@@ -114,13 +114,27 @@ verdict is not permanent: re-picking Amphetamine in the picker clears it and
 retries. That matters because the automation-denied hint tells the user to grant
 the permission, and without a retry path nothing would change until relaunch.
 
-### Handing over without a gap
+### No handover: caffeinate always runs
 
-Switching engines does not release the outgoing one first. Amphetamine's first
-Apple event can block on the macOS Automation consent dialog for as long as the
-user takes to answer, and caffeinate is what covers a lid close in that window.
-Caffeinate is therefore kept until the Amphetamine assertion reports a hold,
-which it announces so the handover is prompt.
+Caffeinate is held whenever Orca wants the Mac awake, whatever the engine
+setting. Amphetamine is additive on top of it, not a replacement.
+
+This is deliberate, and it replaced an earlier design that released caffeinate
+once Amphetamine reported a hold. Three review rounds each found a different
+sequence in which that handover left nothing held, and each fix produced
+another. The reason is structural: any liveness answer about caffeinate is stale
+the instant it is read — `spawn()` returns before an asynchronous failure is
+delivered, and the child can exit at any moment — so releasing the other engine
+on it is always a gamble. Removing the handover removes the whole class.
+
+The cost is one extra small child process while Amphetamine is selected. It buys
+nothing back for the user in lost behaviour, because macOS power assertions are
+additive and never subtractive: both tools assert through IOKit, the system stays
+awake while any assertion is held, and neither can cancel the other's. Orca's
+caffeinate is `-i -s` with no `-d`, so it asserts idle and system sleep only and
+does not override Amphetamine's display-sleep or screen-saver policy. Holding
+both is what several other tools do deliberately — VS Code's tunnel holds two
+assertions simultaneously rather than choosing between them.
 
 ### Session shape, not session identity
 
@@ -144,7 +158,7 @@ second route.
 
 ### Duration must be explicit
 
-`start new session` without options inherits the user's *default duration*
+`start new session` without options inherits the user's _default duration_
 preference. A user whose default is one hour would get a wake assertion that
 expires after an hour while agents are still working. Orca always passes
 `{duration:0, interval:0, displaySleepAllowed:true}` — Amphetamine's documented
