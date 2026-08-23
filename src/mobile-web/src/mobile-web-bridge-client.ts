@@ -163,15 +163,17 @@ export class MobileWebBridgeClient {
     for (const grant of options.grants) {
       this.grants.set(mobileWebBridgeOperationKey(grant.capability, grant.operation), grant)
     }
+    const envelope = () =>
+      ({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        shellSessionId: options.context.shellSessionId,
+        buildId: options.context.buildId
+      }) as const
     this.requests = new MobileWebOneShotRequestClient({
       getGrant: (capability, operation) =>
         this.grants.get(mobileWebBridgeOperationKey(capability, operation)),
       postMessage: options.postMessage,
-      envelope: () => ({
-        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-        shellSessionId: this.options.context.shellSessionId,
-        buildId: this.options.context.buildId
-      }),
+      envelope,
       createRequestId: () => this.uniqueMessageId(),
       otherPendingCount: () => this.subscriptions.pendingCount(),
       requestTimeoutMs: options.requestTimeoutMs
@@ -203,7 +205,7 @@ export class MobileWebBridgeClient {
       getGrant: (capability) =>
         this.grants.get(mobileWebBridgeOperationKey(capability, 'subscribe')),
       postMessage: options.postMessage,
-      envelope: () => this.envelope(),
+      envelope,
       createMessageId: (excluded) => this.uniqueMessageId(excluded),
       otherPendingCount: () => this.requests.pendingCount(),
       requestTimeoutMs: options.requestTimeoutMs
