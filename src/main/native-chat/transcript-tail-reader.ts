@@ -268,7 +268,9 @@ export async function readNativeChatTranscriptTail(
     })
   }
   const localArgs =
-    owner.kind === 'local' ? { ...args, transcriptPath: owner.transcriptPath } : args
+    owner.kind === 'local'
+      ? { ...args, transcriptPath: owner.transcriptPath, wslDistro: owner.wslDistro }
+      : args
   const decode = nativeChatLineDecoderForAgent(args.agent)
   const decodeLifecycle = nativeChatTurnLifecycleDecoderForAgent(args.agent)
   if (!decode) {

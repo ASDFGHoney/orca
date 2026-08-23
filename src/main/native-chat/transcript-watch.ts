@@ -246,7 +246,7 @@ async function subscribeHostResolvedNativeChatTranscript(
       owner.kind === 'ssh'
         ? `ssh:${owner.connectionId}:${owner.transcriptPath ?? ''}`
         : owner.kind === 'local'
-          ? `local:${owner.transcriptPath ?? ''}`
+          ? `local:${owner.wslDistro ?? ''}:${owner.transcriptPath ?? ''}`
           : owner.kind
     if (nextOwnerKey === ownerKey && installed) {
       return
@@ -268,7 +268,13 @@ async function subscribeHostResolvedNativeChatTranscript(
         owner.kind === 'ssh'
           ? subscribeSshNativeChatTranscript(owner, args, controller.signal)
           : await subscribeLocalNativeChatTranscript(
-              owner.kind === 'local' ? { ...args, transcriptPath: owner.transcriptPath } : args,
+              owner.kind === 'local'
+                ? {
+                    ...args,
+                    transcriptPath: owner.transcriptPath,
+                    wslDistro: owner.wslDistro
+                  }
+                : args,
               decode,
               controller.signal
             )

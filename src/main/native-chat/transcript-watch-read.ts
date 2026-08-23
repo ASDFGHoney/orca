@@ -1,4 +1,5 @@
 import type { NativeChatMessage, NativeChatTurnLifecycle } from '../../shared/native-chat-types'
+import { MAX_FILE_RANGE_READ_BYTES } from '../../shared/file-range-read'
 import {
   readIncrementalTranscriptMessages,
   type IncrementalTranscriptState
@@ -9,6 +10,7 @@ import {
   type NativeChatLineDecoder
 } from './transcript-tail-reader'
 import type { NativeChatTurnLifecycleDecoder } from './transcript-turn-lifecycle'
+import type { SubscribeNativeChatTranscriptArgs } from './transcript-watch-contract'
 
 type TranscriptWatchReadContext = {
   filePath: string
@@ -17,6 +19,20 @@ type TranscriptWatchReadContext = {
   decodeLifecycle: NativeChatTurnLifecycleDecoder | null
   signal: AbortSignal
   rangeFs?: TranscriptRangeFs
+}
+
+export function replaceRemoteCatchup(
+  unreadBytes: number,
+  initialDrain: boolean,
+  args: SubscribeNativeChatTranscriptArgs
+): boolean {
+  return (
+    args.rangeFs !== undefined &&
+    !initialDrain &&
+    args.onReplace !== undefined &&
+    args.initialLimit !== undefined &&
+    unreadBytes > MAX_FILE_RANGE_READ_BYTES
+  )
 }
 
 export async function emitTranscriptWatchAppends(
