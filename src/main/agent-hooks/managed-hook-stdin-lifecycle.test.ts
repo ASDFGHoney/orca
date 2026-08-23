@@ -62,7 +62,7 @@ import { GrokHookService } from '../grok/hook-service'
 import { KimiHookService } from '../kimi/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
 import { wrapPosixHookCommand, wrapWindowsHookCommand } from './installer-utils'
-import { POSIX_HOOK_STDIN_READER } from './hook-stdin-contract'
+import { POSIX_HOOK_STDIN_READER, POSIX_HOOK_STDIN_READER_COMMAND } from './hook-stdin-contract'
 import { wrapRuntimeHomeHookCommand } from './runtime-home-hook-command'
 import { createAgentHookMemorySftp } from './agent-hook-memory-sftp.test-fixture'
 import { findGitBash } from './windows-git-bash-path.test-fixture'
@@ -479,7 +479,16 @@ describe.skipIf(process.platform === 'win32')('managed hook stdin lifecycle', ()
         const captureIndex = script.indexOf('exec 3<&0')
         expect(guardIndex, `${agent} env guard`).toBeGreaterThanOrEqual(0)
         expect(captureIndex, `${agent} bounded capture`).toBeGreaterThan(guardIndex)
-        expect(script, `${agent} watchdog`).toContain('kill -9 "$_orca_cat"')
+        expect(script, `${agent} reader probe`).toContain(
+          `if ${POSIX_HOOK_STDIN_READER_COMMAND} </dev/null >/dev/null 2>&1; then`
+        )
+        expect(script, `${agent} qualified reader`).toContain(
+          `${POSIX_HOOK_STDIN_READER_COMMAND} <&3 2>/dev/null &`
+        )
+        expect(script, `${agent} fallback reader`).toContain('command cat <&3 2>/dev/null &')
+        expect(script, `${agent} grouped reader`).not.toContain(`${POSIX_HOOK_STDIN_READER} <&3 &`)
+        expect(script, `${agent} watchdog`).toContain('kill -9 "$_orca_reader"')
+        expect(script, `${agent} reader wait`).toContain('wait "$_orca_reader" 2>/dev/null || :')
         continue
       }
       const captureIndex = script.indexOf(`payload=$(${POSIX_HOOK_STDIN_READER})`)

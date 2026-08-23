@@ -1,7 +1,7 @@
 import {
   buildWindowsHookEnvironmentGuardLines,
   buildWindowsHookStdinDrainEpilogue,
-  POSIX_HOOK_STDIN_READER,
+  POSIX_HOOK_STDIN_READER_COMMAND,
   WINDOWS_HOOK_STDIN_DRAIN_COMMAND
 } from '../agent-hooks/hook-stdin-contract'
 import { buildWindowsAgentHookPostCommand } from '../agent-hooks/installer-utils'
@@ -68,13 +68,17 @@ export function getManagedScript(target: 'local' | 'posix' = 'local'): string {
     // Detach the sleeper from this capture so closed-stdin events do not wait the bound.
     'exec 3<&0',
     'payload=$(',
-    `  ${POSIX_HOOK_STDIN_READER} <&3 &`,
-    '  _orca_cat=$!',
-    `  ( command -p sleep ${ANTIGRAVITY_POSIX_STDIN_WATCHDOG_SECONDS} && kill -9 "$_orca_cat" 2>/dev/null ) >/dev/null 2>&1 &`,
+    `  if ${POSIX_HOOK_STDIN_READER_COMMAND} </dev/null >/dev/null 2>&1; then`,
+    `    ${POSIX_HOOK_STDIN_READER_COMMAND} <&3 2>/dev/null &`,
+    '  else',
+    '    command cat <&3 2>/dev/null &',
+    '  fi',
+    '  _orca_reader=$!',
+    `  ( command -p sleep ${ANTIGRAVITY_POSIX_STDIN_WATCHDOG_SECONDS} && kill -9 "$_orca_reader" 2>/dev/null ) >/dev/null 2>&1 &`,
     '  _orca_watch=$!',
-    '  wait "$_orca_cat"',
+    '  wait "$_orca_reader" 2>/dev/null || :',
     '  kill -9 "$_orca_watch" 2>/dev/null',
-    '  wait "$_orca_watch" 2>/dev/null',
+    '  wait "$_orca_watch" 2>/dev/null || :',
     ')',
     'exec 3<&-',
     'if [ -z "$payload" ]; then',

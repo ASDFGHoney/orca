@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as osModule from 'node:os'
@@ -38,7 +38,7 @@ const CLOSED_PAYLOAD = `${JSON.stringify({
   toolCall: { name: 'run_command', args: { CommandLine: 'pwd' } },
   transcriptPath: '/tmp/antigravity-transcript.jsonl'
 })}\n`
-const ABANDONED_LINE_PAYLOAD = `${JSON.stringify({ fullyIdle: false })}\n`
+const ABANDONED_LINE_PAYLOAD = `${JSON.stringify({ fullyIdle: false })}  \n`
 
 type HookPost = {
   payload: string | null
@@ -81,11 +81,13 @@ async function startHookListener(): Promise<{
 type HookRun = {
   exitCode: number | null
   stdout: string
+  stderr: string
   timedOut: boolean
   elapsedMs: number
 }
 
-const EXIT_BUDGET_MS = (ANTIGRAVITY_POSIX_STDIN_WATCHDOG_SECONDS + 2) * 1000
+// Includes curl's 1.5s bound and the listener settle delay.
+const EXIT_BUDGET_MS = (ANTIGRAVITY_POSIX_STDIN_WATCHDOG_SECONDS + 3) * 1000
 
 function runScript(
   scriptPath: string,
@@ -97,11 +99,12 @@ function runScript(
     const startedAt = Date.now()
     const child = spawn('/bin/sh', [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'], env })
     let stdout = ''
+    let stderr = ''
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
       child.kill('SIGKILL')
-    }, EXIT_BUDGET_MS + 1000)
+    }, EXIT_BUDGET_MS)
     child.on('error', (error) => {
       clearTimeout(timer)
       reject(error)
@@ -109,7 +112,9 @@ function runScript(
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
     })
-    child.stderr.on('data', () => {})
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
     child.on('close', (exitCode) => {
       clearTimeout(timer)
       setTimeout(
@@ -117,6 +122,7 @@ function runScript(
           resolve({
             exitCode,
             stdout,
+            stderr,
             timedOut,
             elapsedMs: Date.now() - startedAt
           }),
@@ -206,17 +212,23 @@ describe.skipIf(process.platform === 'win32')('Antigravity POSIX hook payload de
       expect(result.exitCode).toBe(0)
       expect(result.elapsedMs).toBeLessThan(EXIT_BUDGET_MS)
       expect(result.stdout.trim()).toBe(expectedStdout(eventName))
-      expect(
-        posts.some((post) => post.hookEventName === eventName && post.token === HOOK_TOKEN)
-      ).toBe(true)
+      expect(result.stderr).toBe('')
+      expect(posts).toEqual([{ payload: '{}', hookEventName: eventName, token: HOOK_TOKEN }])
     }
   )
 
   it('exits when a payload line is written but stdin is never closed', async () => {
     const { scriptPath, port, posts } = await installAndListen()
+    const endpointPath = join(home!, 'empty-path-endpoint.sh')
+    writeFileSync(endpointPath, 'curl() { /usr/bin/curl "$@"; }\n')
     const result = await runScript(
       scriptPath,
-      { ...orcaEnv(port), ORCA_ANTIGRAVITY_EVENT: 'Stop' },
+      {
+        ...orcaEnv(port),
+        PATH: '',
+        ORCA_AGENT_HOOK_ENDPOINT: endpointPath,
+        ORCA_ANTIGRAVITY_EVENT: 'Stop'
+      },
       ABANDONED_LINE_PAYLOAD,
       false
     )
@@ -225,9 +237,14 @@ describe.skipIf(process.platform === 'win32')('Antigravity POSIX hook payload de
     expect(result.exitCode).toBe(0)
     expect(result.elapsedMs).toBeLessThan(EXIT_BUDGET_MS)
     expect(result.stdout.trim()).toBe('{"decision":""}')
-    expect(posts.some((post) => post.hookEventName === 'Stop' && post.token === HOOK_TOKEN)).toBe(
-      true
-    )
+    expect(result.stderr).toBe('')
+    expect(posts).toEqual([
+      {
+        payload: ABANDONED_LINE_PAYLOAD.slice(0, -1),
+        hookEventName: 'Stop',
+        token: HOOK_TOKEN
+      }
+    ])
   })
 
   it('posts a closed-stdin Stop payload byte-exact', async () => {
@@ -242,9 +259,10 @@ describe.skipIf(process.platform === 'win32')('Antigravity POSIX hook payload de
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBe(0)
     expect(result.stdout.trim()).toBe('{"decision":""}')
+    expect(result.stderr).toBe('')
     expect(posts).toHaveLength(1)
     expect(posts[0]?.hookEventName).toBe('Stop')
-    expect(posts[0]?.payload).toBe(CLOSED_PAYLOAD.trimEnd())
+    expect(posts[0]?.payload).toBe(CLOSED_PAYLOAD.slice(0, -1))
   })
 
   it('exits without waiting the watchdog when Orca env is missing', async () => {
@@ -265,5 +283,6 @@ describe.skipIf(process.platform === 'win32')('Antigravity POSIX hook payload de
     expect(result.exitCode).toBe(0)
     expect(result.elapsedMs).toBeLessThan(500)
     expect(result.stdout.trim()).toBe(ANTIGRAVITY_PRE_TOOL_USE_DECISION)
+    expect(result.stderr).toBe('')
   })
 })
