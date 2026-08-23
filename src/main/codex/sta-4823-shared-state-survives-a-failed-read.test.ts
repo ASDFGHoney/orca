@@ -4,6 +4,7 @@ import type * as NodeOs from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { syncSystemConfigIntoManagedCodexHome } from './codex-config-mirror'
+import { listStaleCodexPanes } from './codex-stale-pane-accounts'
 import type { CodexTrustEntry } from './config-toml-trust'
 
 // STA-4823: six shared Codex state files were rebuilt, erased or reported as
@@ -455,7 +456,7 @@ describe('STA-4823 D31 — an unreadable pane registry must not erase every attr
     paneRegistry._internals.resetCache()
   }
 
-  it('does not persist an empty registry over the real one', () => {
+  it('preserves existing records and retries the one-shot spawn mutation', () => {
     seedTwoAttributedPanes()
     const before = realFs.readFileSync(registryPath(), 'utf-8')
     denials.denyReads(registryPath())
@@ -469,6 +470,12 @@ describe('STA-4823 D31 — an unreadable pane registry must not erase every attr
     // Before the fix the read degraded to an empty registry and this write
     // persisted it, dropping every other pane's account attribution on disk.
     expect(realFs.readFileSync(registryPath(), 'utf-8')).toBe(before)
+
+    denials.release(registryPath())
+    expect(paneRegistry.getCodexPaneAccount('pty-3')).toMatchObject({ accountId: 'account-3' })
+    paneRegistry._internals.resetCache()
+    expect(paneRegistry.getCodexPaneAccount(PANE)).toMatchObject({ accountId: 'account-1' })
+    expect(paneRegistry.getCodexPaneAccount('pty-3')).toMatchObject({ accountId: 'account-3' })
   })
 
   it('does not cache the erasure, so attribution returns when the file does', () => {
@@ -476,6 +483,12 @@ describe('STA-4823 D31 — an unreadable pane registry must not erase every attr
     denials.denyReads(registryPath())
 
     expect(paneRegistry.getCodexPaneAccount(PANE)).toBeNull()
+    expect(() =>
+      listStaleCodexPanes({
+        ptyIds: [PANE],
+        settings: { activeCodexManagedAccountId: 'account-2' } as never
+      })
+    ).toThrow('registry could not be read')
 
     denials.release(registryPath())
 
