@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef } from 'react'
 import type React from 'react'
 import type { VirtualItem } from '@tanstack/react-virtual'
 import type { RenderRow } from '../listing/render-row'
@@ -35,10 +35,17 @@ export function buildVirtualRowRemovalMotions(args: {
   rekeyedRowKeys: ReadonlyMap<string, string>
 }): VirtualRowRemovalMotion[] {
   const { previous, current, rekeyedRowKeys } = args
-  if (
-    previous === null ||
-    ![...previous.rowIdentityKeys].some((key) => !current.rowIdentityKeys.has(key))
-  ) {
+  if (previous === null || previous.rowIdentityKeys === current.rowIdentityKeys) {
+    return []
+  }
+  let removedRow = false
+  for (const key of previous.rowIdentityKeys) {
+    if (!current.rowIdentityKeys.has(key)) {
+      removedRow = true
+      break
+    }
+  }
+  if (!removedRow) {
     return []
   }
 
@@ -67,22 +74,24 @@ export function useVirtualRowRemovalAnimation(args: {
   scrollRef: React.RefObject<HTMLDivElement | null>
   virtualItems: readonly VirtualItem[]
 }): void {
+  const { renderRows, rekeyedRowKeys, scrollRef, virtualItems } = args
   const previousSnapshotRef = useRef<VirtualRowLayoutSnapshot | null>(null)
+  const rowIdentityKeys = useMemo(() => getSidebarRowIdentityKeys(renderRows), [renderRows])
 
   useLayoutEffect(() => {
-    const scrollElement = args.scrollRef.current
+    const scrollElement = scrollRef.current
     if (!scrollElement) {
       return
     }
     const current: VirtualRowLayoutSnapshot = {
-      rowIdentityKeys: getSidebarRowIdentityKeys(args.renderRows),
+      rowIdentityKeys,
       scrollTop: scrollElement.scrollTop,
-      startsByKey: new Map(args.virtualItems.map((item) => [String(item.key), item.start]))
+      startsByKey: new Map(virtualItems.map((item) => [String(item.key), item.start]))
     }
     const motions = buildVirtualRowRemovalMotions({
       previous: previousSnapshotRef.current,
       current,
-      rekeyedRowKeys: args.rekeyedRowKeys
+      rekeyedRowKeys
     })
     previousSnapshotRef.current = current
     if (motions.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -108,5 +117,5 @@ export function useVirtualRowRemovalAnimation(args: {
         easing: 'cubic-bezier(0.16, 1, 0.3, 1)'
       })
     }
-  }, [args.rekeyedRowKeys, args.renderRows, args.scrollRef, args.virtualItems])
+  }, [rekeyedRowKeys, rowIdentityKeys, scrollRef, virtualItems])
 }

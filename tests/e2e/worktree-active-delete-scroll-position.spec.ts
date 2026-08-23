@@ -5,6 +5,8 @@ import { waitForSessionReady } from './helpers/store'
 const TARGET_INDEX = 24
 const SYNTHETIC_COUNT = 40
 const VISUAL_PROOF_PAUSE_MS = 1_200
+const POST_REMOVAL_SAMPLE_FRAMES = 20
+const MAX_REMOVAL_WAIT_FRAMES = 300
 
 type RowRemovalFrame = {
   belowTop: number | null
@@ -32,8 +34,8 @@ async function seedActiveDeletionRows(page: Page): Promise<{
       const state = store.getState()
       const repo = state.repos[0]
       const source = repo ? state.worktreesByRepo[repo.id]?.[0] : null
-      if (!repo || !source) {
-        throw new Error('Expected a seeded e2e worktree')
+      if (!repo || !source || !state.settings) {
+        throw new Error('Expected a seeded e2e worktree and hydrated settings')
       }
 
       const now = Date.now()
@@ -57,9 +59,15 @@ async function seedActiveDeletionRows(page: Page): Promise<{
           lineage: null
         }
       })
-      const targetId = worktrees[targetIndex]!.id
-      const belowId = worktrees[targetIndex + 1]!.id
-      const successorId = worktrees[0]!.id
+      const target = worktrees[targetIndex]
+      const below = worktrees[targetIndex + 1]
+      const successor = worktrees[0]
+      if (!target || !below || !successor) {
+        throw new Error('Synthetic worktree fixture is too small')
+      }
+      const targetId = target.id
+      const belowId = below.id
+      const successorId = successor.id
 
       store.setState({
         activeRepoId: repo.id,
@@ -77,8 +85,12 @@ async function seedActiveDeletionRows(page: Page): Promise<{
             ? {
                 ...candidate,
                 hookSettings: {
+                  mode: candidate.hookSettings?.mode ?? 'auto',
                   ...candidate.hookSettings,
-                  scripts: { ...candidate.hookSettings?.scripts, setup: 'true' }
+                  scripts: {
+                    archive: candidate.hookSettings?.scripts.archive ?? '',
+                    setup: 'true'
+                  }
                 }
               }
             : candidate
@@ -132,6 +144,15 @@ async function prepareScrolledActiveRow(page: Page, targetId: string): Promise<n
     })
     .toBe(true)
   await target.evaluate((element) => element.scrollIntoView({ block: 'center' }))
+  await target.evaluate((element) => {
+    const scroller = element.closest<HTMLElement>('[data-worktree-sidebar]')
+    if (!scroller) {
+      throw new Error('Worktree sidebar is unavailable')
+    }
+    const targetOffset = element.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    scroller.scrollTop += targetOffset - 160
+    scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
+  })
   await expect(target).toBeVisible()
   await expect(target).toHaveAttribute('aria-current', 'page')
   return scroller.evaluate((element) => element.scrollTop)
@@ -143,30 +164,41 @@ async function startRowRemovalSampling(
   belowId: string
 ): Promise<void> {
   await page.evaluate(
-    ({ belowId, targetId }) => {
+    ({ belowId, maxRemovalWaitFrames, postRemovalSampleFrames, targetId }) => {
       const sample = async (): Promise<RowRemovalFrame[]> => {
         const frames: RowRemovalFrame[] = []
-        for (let index = 0; index < 50; index += 1) {
+        let framesAfterRemoval = 0
+        for (let index = 0; index < maxRemovalWaitFrames + postRemovalSampleFrames; index += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
           const scroller = document.querySelector<HTMLElement>('[data-worktree-sidebar]')
           const below = document.querySelector<HTMLElement>(
             `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(belowId)}]`
           )
+          const targetExists = Boolean(
+            document.querySelector(
+              `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
+            )
+          )
           frames.push({
             belowTop: below?.getBoundingClientRect().top ?? null,
             scrollTop: scroller?.scrollTop ?? 0,
-            targetExists: Boolean(
-              document.querySelector(
-                `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
-              )
-            )
+            targetExists
           })
+          framesAfterRemoval = targetExists ? 0 : framesAfterRemoval + 1
+          if (framesAfterRemoval >= postRemovalSampleFrames) {
+            break
+          }
         }
         return frames
       }
       Reflect.set(window, '__activeDeleteRowRemovalFrames', sample())
     },
-    { belowId, targetId }
+    {
+      belowId,
+      maxRemovalWaitFrames: MAX_REMOVAL_WAIT_FRAMES,
+      postRemovalSampleFrames: POST_REMOVAL_SAMPLE_FRAMES,
+      targetId
+    }
   )
 }
 
@@ -213,17 +245,24 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   })
   const deleteItem = orcaPage.getByRole('menuitem', { name: 'Delete', exact: true })
   await expect(deleteItem).toBeVisible()
+  await expect(deleteItem).toBeInViewport()
   await pauseForVisualProof(orcaPage)
   await startRowRemovalSampling(orcaPage, targetId, belowId)
   await deleteItem.click()
 
   await expect(target).toHaveCount(0)
   await expect(below).toBeVisible()
+  await expect
+    .poll(() => orcaPage.evaluate(() => window.__store?.getState().activeWorktreeId ?? null))
+    .toBe(successorId)
   const frames = await finishRowRemovalSampling(orcaPage)
   await pauseForVisualProof(orcaPage)
   const mountedTops = frames.flatMap((frame) => (frame.belowTop === null ? [] : [frame.belowTop]))
   const distinctTops = new Set(mountedTops.map((top) => Math.round(top * 10) / 10))
+  const firstRemovedFrame = frames.findIndex((frame) => !frame.targetExists)
 
+  expect(firstRemovedFrame).toBeGreaterThan(0)
+  expect(frames.slice(firstRemovedFrame).every((frame) => !frame.targetExists)).toBe(true)
   expect(distinctTops.size).toBeGreaterThanOrEqual(4)
   expect(Math.max(...mountedTops) - Math.min(...mountedTops)).toBeGreaterThan(30)
   expect(Math.max(...frames.map((frame) => frame.scrollTop))).toBeLessThanOrEqual(
@@ -247,15 +286,26 @@ test('reduced motion removes the active row without animating its neighbor', asy
 
   const animationCount = await orcaPage.evaluate(
     async ({ belowId, targetId }) => {
-      const store = window.__store!
+      const store = window.__store
+      if (!store) {
+        throw new Error('window.__store is not available')
+      }
       const state = store.getState()
-      const repoId = state.repos[0]!.id
+      const repo = state.repos[0]
+      if (!repo) {
+        throw new Error('Expected a seeded e2e repo')
+      }
+      const repoId = repo.id
+      const worktrees = state.worktreesByRepo[repoId]
+      if (!worktrees) {
+        throw new Error('Expected seeded e2e worktrees')
+      }
       store.setState({
         activeWorktreeId: null,
         activeWorkspaceKey: null,
         worktreesByRepo: {
           ...state.worktreesByRepo,
-          [repoId]: state.worktreesByRepo[repoId]!.filter((worktree) => worktree.id !== targetId)
+          [repoId]: worktrees.filter((worktree) => worktree.id !== targetId)
         }
       })
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
