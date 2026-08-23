@@ -25,6 +25,9 @@ import { getCmdExePath, getSpawnArgsForWindows } from '../win32-utils'
 import { cleanupHiddenRateLimitPty, registerHiddenRateLimitPty } from './hidden-pty-cleanup'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { extractCodexAuthError, isCodexAuthError } from '../../shared/codex-auth-errors'
+import { stripAnsiControlSequences } from '../../shared/commit-message-agent-output'
+import { sanitizeCrashReportString } from '../../shared/crash-reporting'
+import { redactString } from '../observability/redactor'
 import { buildWslExecArgs, buildWslLoginShellCommand } from '../../shared/wsl-login-shell-command'
 import {
   getHiddenRateLimitWslCwdSetupCommands,
@@ -63,6 +66,8 @@ const BACKEND_TIMEOUT_MS = 10_000
 // Why: redeeming a reset credit is an explicit user action, not a poll — allow more time for a slow backend.
 const REDEEM_BACKEND_TIMEOUT_MS = 30_000
 const MAX_DIAGNOSTIC_OUTPUT_LENGTH = 100_000
+// Why: one surfaced line, not a log dump — the full capture stays in-process.
+const MAX_EXIT_DETAIL_LENGTH = 200
 
 export type FetchCodexRateLimitsOptions = {
   codexHomePath?: string | null
@@ -863,17 +868,64 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
       child.stdin.off('error', onStdinError)
     }
 
-    function onClose(): void {
+    function onClose(code: number | null, signal: NodeJS.Signals | null): void {
       settle({
         provider: 'codex',
         session: null,
         weekly: null,
         updatedAt: Date.now(),
-        error: withMacTailscaleDnsHint('RPC process exited unexpectedly', stderr),
+        error: describeCodexRpcExit(code, signal, stderr),
         status: 'error'
       })
     }
   })
+}
+
+// Why: this string is the whole diagnosis the user gets, and a hardcoded one
+// hid both the exit status and the child's own auth complaint — so an
+// app-server that quit on a dead refresh token never classified as
+// re-authenticable and never prompted sign-in (worst on Windows, which has no
+// PTY fallback to recover the reason).
+function describeCodexRpcExit(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string
+): string {
+  const authError = extractCodexAuthError(stderr)
+  if (authError) {
+    return redactCodexChildOutput(authError)
+  }
+  const reason =
+    code !== null ? `exit code ${code}` : signal ? `signal ${signal}` : 'no exit status'
+  const detail = firstReportedStderrLine(stderr)
+  return withMacTailscaleDnsHint(
+    detail
+      ? `Codex RPC process exited (${reason}): ${detail}`
+      : `Codex RPC process exited (${reason})`,
+    stderr
+  )
+}
+
+function firstReportedStderrLine(stderr: string): string | null {
+  for (const rawLine of stripAnsiControlSequences(stderr).split(/\r\n|\n|\r/)) {
+    const line = rawLine.trim()
+    if (line) {
+      return redactCodexChildOutput(line)
+    }
+  }
+  return null
+}
+
+// Why: redactString kills token shapes without eating prose, while the
+// crash-report pass adds path scrubbing but is greedy enough to swallow the
+// rest of a line — so it is dropped when it would erase the auth phrase the
+// re-auth warning classifies on.
+function redactCodexChildOutput(text: string): string {
+  const withoutSecrets = redactString(text)
+  const withoutPaths = sanitizeCrashReportString(withoutSecrets, MAX_EXIT_DETAIL_LENGTH)
+  return isCodexAuthError(withoutSecrets) && !isCodexAuthError(withoutPaths)
+    ? withoutSecrets.slice(0, MAX_EXIT_DETAIL_LENGTH)
+    : withoutPaths
 }
 
 // ---------------------------------------------------------------------------

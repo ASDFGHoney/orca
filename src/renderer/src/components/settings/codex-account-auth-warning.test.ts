@@ -38,6 +38,36 @@ describe('codex account auth warning', () => {
     ).toBe(false)
   })
 
+  // Strings produced verbatim by the RPC-exit path in
+  // codex-fetcher-rpc-exit-diagnostics.test.ts.
+  it('warns re-auth when the app-server quits over a dead refresh token', () => {
+    expect(
+      getCodexAccountAuthWarning({
+        limits: codexLimits(
+          'ERROR: The ChatGPT access token could not be refreshed; please sign in again.'
+        ),
+        target: { runtime: 'host', wslDistro: null },
+        runtime: { runtime: 'host' },
+        activeAccountId: 'account-1',
+        accountId: 'account-1'
+      })
+    ).toBe('stale-sign-in')
+  })
+
+  it('does not warn re-auth when the app-server quits over bad argv', () => {
+    expect(
+      getCodexAccountAuthWarning({
+        limits: codexLimits(
+          "Codex RPC process exited (exit code 2): error: invalid value 'untrusted' for '--ask-for-approval <APPROVAL_POLICY>'"
+        ),
+        target: { runtime: 'host', wslDistro: null },
+        runtime: { runtime: 'host' },
+        activeAccountId: 'account-1',
+        accountId: 'account-1'
+      })
+    ).toBeNull()
+  })
+
   it('matches the active host account on the current rate-limit target', () => {
     expect(
       getCodexAccountAuthWarning({
