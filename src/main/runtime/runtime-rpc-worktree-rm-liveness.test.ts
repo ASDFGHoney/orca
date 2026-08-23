@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from './orca-runtime'
 import { readRuntimeMetadata } from './runtime-metadata'
-import { openFramedSession, waitFor } from './runtime-rpc-test-harness'
+import { openFramedSession, sleep, waitFor } from './runtime-rpc-test-harness'
 import { OrcaRuntimeRpcServer } from './runtime-rpc'
 
 function createRemovalGate(runtime: OrcaRuntimeService) {
@@ -49,9 +49,9 @@ describe('worktree.rm runtime RPC liveness', () => {
     const server = new OrcaRuntimeRpcServer({
       runtime,
       userDataPath,
-      socketIdleTimeoutMs: 50,
+      socketIdleTimeoutMs: 100,
       keepaliveIntervalMs: 10,
-      worktreeRemoveKeepaliveMaxMs: 200
+      worktreeRemoveKeepaliveMaxMs: 400
     })
     await server.start()
 
@@ -62,7 +62,15 @@ describe('worktree.rm runtime RPC liveness', () => {
       }
       expect(metadata.transports[0].kind).toBe(process.platform === 'win32' ? 'named-pipe' : 'unix')
       const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
-      await waitFor(() => session.frames.filter((frame) => frame._keepalive === true).length >= 2)
+      await waitFor(() => session.frames.some((frame) => frame._keepalive === true))
+      const keepalivesBeforeIdleWindow = session.frames.filter(
+        (frame) => frame._keepalive === true
+      ).length
+      await sleep(150)
+      expect(session.frames.filter((frame) => frame.ok !== undefined)).toHaveLength(0)
+      expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(
+        keepalivesBeforeIdleWindow
+      )
       removal.release()
       await session.done
 
@@ -97,6 +105,7 @@ describe('worktree.rm runtime RPC liveness', () => {
         throw new Error('runtime metadata was not written')
       }
       const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
+      await waitFor(() => session.frames.filter((frame) => frame.ok !== undefined).length === 1)
       await session.done
 
       expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)

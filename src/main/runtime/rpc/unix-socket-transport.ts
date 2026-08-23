@@ -6,7 +6,7 @@
 // away. See design doc §3.1.
 import { createServer, type Server, type Socket } from 'node:net'
 import { chmodSync, existsSync, rmSync } from 'node:fs'
-import type { RpcMessageContext, RpcTransport } from './transport'
+import type { RpcKeepaliveBound, RpcMessageContext, RpcTransport } from './transport'
 
 const MAX_RUNTIME_RPC_MESSAGE_BYTES = 1024 * 1024
 export const RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS = 30_000
@@ -167,19 +167,6 @@ export class UnixSocketTransport implements RpcTransport {
     let replied = false
     let keepaliveTimer: NodeJS.Timeout | null = null
     let keepaliveExpiryTimer: NodeJS.Timeout | null = null
-    let requestId = 'unknown'
-    let requestMethod = 'unknown'
-    try {
-      const request = JSON.parse(rawMessage) as { id?: unknown; method?: unknown }
-      if (typeof request.id === 'string' && request.id.length > 0) {
-        requestId = request.id
-      }
-      if (typeof request.method === 'string' && request.method.length > 0) {
-        requestMethod = request.method
-      }
-    } catch {
-      // Request validation remains owned by the RPC server.
-    }
     // Why: each dispatch needs its own abort signal and keepalive timer
     // cleanup. Socket close runs every cleanup without touching sibling
     // dispatches that already replied on the same connection.
@@ -217,7 +204,7 @@ export class UnixSocketTransport implements RpcTransport {
       }
     }
 
-    const startKeepalive = (maxDurationMs?: number): void => {
+    const startKeepalive = (bounded?: RpcKeepaliveBound): void => {
       if (keepaliveTimer || replied) {
         return
       }
@@ -232,21 +219,11 @@ export class UnixSocketTransport implements RpcTransport {
       if (typeof keepaliveTimer.unref === 'function') {
         keepaliveTimer.unref()
       }
-      if (maxDurationMs !== undefined) {
+      if (bounded) {
         keepaliveExpiryTimer = setTimeout(() => {
           keepaliveExpiryTimer = null
-          reply(
-            JSON.stringify({
-              id: requestId,
-              ok: false,
-              error: {
-                code: 'runtime_timeout',
-                message: `The runtime stopped waiting for ${requestMethod} before it completed.`,
-                data: { requestPhase: 'awaiting_response', method: requestMethod }
-              }
-            })
-          )
-        }, maxDurationMs)
+          reply(bounded.timeoutResponse)
+        }, bounded.maxDurationMs)
         keepaliveExpiryTimer.unref?.()
       }
     }

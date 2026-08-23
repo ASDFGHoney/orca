@@ -75,7 +75,7 @@ type OrcaRuntimeRpcServerOptions = {
   // Only `orca serve` (explicit remote opt-in) and E2E set this; the desktop app widens lazily on pairing.
   exposeNetworkByDefault?: boolean
   webClientRoot?: string
-  // Why: test-only overrides for the two constants below; production must not pass these (defaults set by §3.1).
+  // Why: test-only timing overrides; production uses the bounded policy defaults.
   keepaliveIntervalMs?: number
   socketIdleTimeoutMs?: number
   worktreeRemoveKeepaliveMaxMs?: number
@@ -1550,7 +1550,6 @@ export class OrcaRuntimeRpcServer {
       return this.buildError(request.id, 'runtime_busy', rejection)
     }
     if (longPoll) {
-      // Why: arm keepalive only for long-polls; short RPCs never create the setInterval. See §3.1.
       context?.startKeepalive()
     } else {
       const maxKeepaliveMs = boundedDispatchKeepaliveMs(
@@ -1558,7 +1557,17 @@ export class OrcaRuntimeRpcServer {
         this.worktreeRemoveKeepaliveMaxMs
       )
       if (maxKeepaliveMs !== null) {
-        context?.startKeepalive(maxKeepaliveMs)
+        context?.startKeepalive({
+          maxDurationMs: maxKeepaliveMs,
+          timeoutResponse: JSON.stringify(
+            this.buildError(
+              request.id,
+              'runtime_timeout',
+              `The runtime stopped waiting for ${request.method} before it completed.`,
+              { requestPhase: 'awaiting_response', method: request.method }
+            )
+          )
+        })
       }
     }
 
@@ -1751,8 +1760,8 @@ export class OrcaRuntimeRpcServer {
     }
   }
 
-  private buildError(id: string, code: string, message: string): RpcResponse {
-    return errorResponse(id, { runtimeId: this.runtime.getRuntimeId() }, code, message)
+  private buildError(id: string, code: string, message: string, data?: unknown): RpcResponse {
+    return errorResponse(id, { runtimeId: this.runtime.getRuntimeId() }, code, message, data)
   }
 
   private writeMetadata(): void {
