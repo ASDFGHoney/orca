@@ -156,14 +156,17 @@ describe('orca claude-teams CLI handler', () => {
   })
 
   it('degrades an unsupported pane authority to in-process Claude', async () => {
+    const shimDir = process.platform === 'win32' ? 'C:\\shim' : '/shim'
+    const systemDir = process.platform === 'win32' ? 'C:\\Windows\\System32' : '/usr/bin'
+    const pathDelimiter = process.platform === 'win32' ? ';' : ':'
     const previousTmux = process.env.TMUX
     const previousTmuxPane = process.env.TMUX_PANE
     const previousShimDir = process.env.ORCA_AGENT_TEAMS_SHIM_DIR
     const previousPath = process.env.PATH
     process.env.TMUX = '/tmp/orca/team,0,1'
     process.env.TMUX_PANE = '%1'
-    process.env.ORCA_AGENT_TEAMS_SHIM_DIR = 'C:\\shim'
-    process.env.PATH = 'C:\\shim;C:\\Windows\\System32'
+    process.env.ORCA_AGENT_TEAMS_SHIM_DIR = shimDir
+    process.env.PATH = `${shimDir}${pathDelimiter}${systemDir}`
     callMock.mockResolvedValueOnce({
       result: {
         launch: {
@@ -206,7 +209,7 @@ describe('orca claude-teams CLI handler', () => {
     const spawnEnv = spawnMock.mock.calls.at(-1)?.[0].env as SpawnEnv
     expect(spawnEnv.TMUX).toBeUndefined()
     expect(spawnEnv.TMUX_PANE).toBeUndefined()
-    expect(spawnEnv.PATH).toBe('C:\\Windows\\System32')
+    expect(spawnEnv.PATH).toBe(systemDir)
   })
 
   it.skipIf(process.platform !== 'win32')(
