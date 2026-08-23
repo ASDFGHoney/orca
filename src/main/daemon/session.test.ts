@@ -233,6 +233,53 @@ describe('Session', () => {
       expect(session.getSnapshot()?.snapshotAnsi).not.toContain(']10;rgb')
     })
 
+    it('keeps armed POSIX startup authority across the renderer visibility handoff', () => {
+      createSession({
+        ownerBackend: 'posix-pty',
+        startupIngress: {
+          colors: { foreground: '#2e3434', background: '#ffffff' },
+          deadlineMs: 5_000
+        }
+      })
+      const onData = vi.fn()
+      session.attachClient({ onData, onExit: () => {} })
+      session.closeStartupQueryAuthority()
+
+      const foregroundQuery = '\x1b]10;?\x07'
+      const backgroundQuery = '\x1b]11;?\x07'
+      const foregroundReply = '\x1b]10;rgb:2e2e/3434/3434\x1b\\'
+      const backgroundReply = '\x1b]11;rgb:ffff/ffff/ffff\x1b\\'
+      const foregroundPtyEcho = foregroundReply.replaceAll('\x1b', '^[')
+      const backgroundPtyEcho = backgroundReply.replaceAll('\x1b', '^[')
+      const foregroundEcho = '\x071\b10;rgb:2e2e/3434/3434\x07'
+      const backgroundEcho = '\x0711;rgb:ffff/ffff/ffff\x07'
+      const suppressedStartupData = [
+        foregroundQuery,
+        backgroundQuery,
+        foregroundPtyEcho,
+        backgroundPtyEcho,
+        foregroundEcho,
+        backgroundEcho
+      ]
+      for (const data of [...suppressedStartupData, 'prompt']) {
+        subprocess.simulateData(data)
+      }
+
+      expect(subprocess.written).toEqual([foregroundReply, backgroundReply])
+      let rawEndSeq = 0
+      expect(onData.mock.calls).toEqual([
+        ...suppressedStartupData.map((data) => {
+          rawEndSeq += data.length
+          return ['', data.length, true, rawEndSeq]
+        }),
+        ['prompt']
+      ])
+
+      subprocess.simulateData(foregroundQuery)
+      expect(subprocess.written).toEqual([foregroundReply, backgroundReply])
+      expect(onData).toHaveBeenLastCalledWith(foregroundQuery)
+    })
+
     it('releases a held cooked-echo prefix before taking a snapshot', () => {
       createSession({
         ownerBackend: 'windows-conpty',

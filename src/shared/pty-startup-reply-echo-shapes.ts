@@ -14,10 +14,14 @@ import type { PtyOwnerBackend } from './pty-owner-backend'
  * the query parser, and an expired hold releases it raw — so a query torn at its own ESC
  * would never be answered. Such a shape is matched only when it arrives complete.
  */
-export type EchoProjection = { needle: string; holdPartial: boolean }
+export type EchoProjection = {
+  needle: string
+  holdPartial: boolean
+  source: 'pty' | 'line-editor'
+}
 
 export type PtyStartupReplyEchoMatch =
-  | { kind: 'complete'; offset: number; length: number }
+  | { kind: 'complete'; offset: number; length: number; source: EchoProjection['source'] }
   | { kind: 'partial'; offset: number }
   | { kind: 'none' }
 
@@ -27,24 +31,45 @@ export function replyEchoProjections(
 ): readonly EchoProjection[] {
   if (ownerBackend === 'windows-conpty') {
     // Why: ConPTY's projection is the documented, deterministic ESC-stripped form.
-    return [{ needle: reply.replaceAll('\x1b', ''), holdPartial: true }]
+    return [{ needle: reply.replaceAll('\x1b', ''), holdPartial: true, source: 'pty' }]
   }
   if (ownerBackend !== 'posix-pty') {
     // wsl.exe is ConPTY-hosted but its echo shape is unverified; suppress nothing.
     return []
   }
+  const oscPayload =
+    reply.startsWith('\x1b]') && reply.endsWith('\x1b\\') ? reply.slice(2, -2) : null
   return [
     // The kernel's ECHOCTL caret form — the POSIX default.
-    { needle: reply.replaceAll('\x1b', '^['), holdPartial: true },
+    { needle: reply.replaceAll('\x1b', '^['), holdPartial: true, source: 'pty' },
+    ...(oscPayload
+      ? [
+          // zsh ZLE rings the bell around OSC input; its first insertion also redraws the leading byte.
+          {
+            needle: `\x07${oscPayload[0]}\b${oscPayload}\x07`,
+            holdPartial: true,
+            source: 'line-editor' as const
+          }
+        ]
+      : []),
     // Readline rewrites OSC, and echoes it even while the kernel reports ECHO clear.
     ...(reply.includes('\x1b]')
-      ? [{ needle: reply.replaceAll('\x1b]', '\x07').replaceAll('\x1b\\', ''), holdPartial: true }]
+      ? [
+          {
+            needle: reply.replaceAll('\x1b]', '\x07').replaceAll('\x1b\\', ''),
+            holdPartial: true,
+            source: 'line-editor' as const
+          }
+        ]
+      : []),
+    ...(oscPayload
+      ? [{ needle: `\x07${oscPayload}\x07`, holdPartial: true, source: 'line-editor' as const }]
       : []),
     // A `stty -echoctl` tty echoes the reply verbatim. Complete-match-only, because it
     // starts with ESC — see `holdPartial`. We just wrote these exact bytes, and we are
     // the terminal, so a child emitting the identical span in the same window is not a
     // case worth trading a stolen query for.
-    { needle: reply, holdPartial: false }
+    { needle: reply, holdPartial: false, source: 'pty' }
   ]
 }
 
@@ -66,15 +91,26 @@ function suffixPrefixOffset(needle: string, data: string): number {
 // program wrote around it, so anchoring at offset 0 recognizes almost no real echo.
 export function locateEcho(
   projections: readonly EchoProjection[],
-  data: string
+  data: string,
+  preferLongestAtSameOffset = false
 ): PtyStartupReplyEchoMatch {
-  let complete: { offset: number; length: number } | null = null
+  let complete: {
+    offset: number
+    length: number
+    source: EchoProjection['source']
+  } | null = null
   let partialOffset = -1
   for (const projection of projections) {
     const at = data.indexOf(projection.needle)
     if (at !== -1) {
-      if (!complete || at < complete.offset) {
-        complete = { offset: at, length: projection.needle.length }
+      if (
+        !complete ||
+        at < complete.offset ||
+        (preferLongestAtSameOffset &&
+          at === complete.offset &&
+          projection.needle.length > complete.length)
+      ) {
+        complete = { offset: at, length: projection.needle.length, source: projection.source }
       }
       continue
     }
