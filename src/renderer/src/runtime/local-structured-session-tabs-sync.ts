@@ -39,20 +39,23 @@ export function applyStructuredSessionTabSnapshots(
   snapshots: readonly RuntimeMobileSessionTabsResult[],
   owner = LOCAL_STRUCTURED_SESSION_OWNER
 ): void {
-  applyWebSessionTabsStorePatch((state) => {
-    let next = state
-    for (const snapshot of snapshots) {
-      const patch = applyWebSessionTabsSnapshot(
-        next,
-        projectLocalStructuredSessionTabs(snapshot),
-        owner,
-        Date.now(),
-        { preserveLocalLayout: true }
-      )
-      next = patch === next ? next : ({ ...next, ...patch } as typeof state)
-    }
-    return next
-  })
+  applyWebSessionTabsStorePatch(
+    (state) => {
+      let next = state
+      for (const snapshot of snapshots) {
+        const patch = applyWebSessionTabsSnapshot(
+          next,
+          projectLocalStructuredSessionTabs(snapshot),
+          owner,
+          Date.now(),
+          { preserveLocalLayout: true }
+        )
+        next = patch === next ? next : ({ ...next, ...patch } as typeof state)
+      }
+      return next
+    },
+    { frames: [] }
+  )()
 }
 
 export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
