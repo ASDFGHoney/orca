@@ -134,6 +134,14 @@ identically shaped indefinite session is indistinguishable from Orca's own, and
 Orca may end it on stop. That is accepted deliberately; the alternative is never
 cleaning up, which leaves the Mac awake forever after a crash.
 
+An acquire whose outcome is unknown widens that slightly. The command may have
+started a session before failing to report it, so Orca claims responsibility for
+one even when it had previously adopted the user's — otherwise a session it just
+created would never be released. If the user's session is timed, Trigger-driven
+or display-sleep-blocking the shape check still protects it; only an identically
+shaped indefinite one is at risk, which is the same limit as above reached by a
+second route.
+
 ### Duration must be explicit
 
 `start new session` without options inherits the user's *default duration*
