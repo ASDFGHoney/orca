@@ -37,7 +37,7 @@ type WslCliInstallerOptions = {
   platform?: NodeJS.Platform
   distro?: string | null
   hostInstaller?: Pick<CliInstaller, 'getStatus'>
-  wslRunner?: (distro: string, command: string) => Promise<string>
+  wslRunner?: (distro: string, command: string, requiresLoginPath?: boolean) => Promise<string>
 }
 
 export type ManagedWslCliRepairResult = {
@@ -50,7 +50,11 @@ export class WslCliInstaller {
   private readonly platform: NodeJS.Platform
   private readonly distro: string | null
   private readonly hostInstaller: Pick<CliInstaller, 'getStatus'>
-  private readonly wslRunner: (distro: string, command: string) => Promise<string>
+  private readonly wslRunner: (
+    distro: string,
+    command: string,
+    requiresLoginPath?: boolean
+  ) => Promise<string>
 
   constructor(options: WslCliInstallerOptions = {}) {
     this.platform = options.platform ?? process.platform
@@ -363,7 +367,8 @@ export class WslCliInstaller {
       (
         await this.run(
           this.distro,
-          `case ":$PATH:" in *:${quoteShell(pathDirectory)}:*) printf yes ;; *) printf no ;; esac`
+          `case ":$PATH:" in *:${quoteShell(pathDirectory)}:*) printf yes ;; *) printf no ;; esac`,
+          true
         )
       ).trim() === 'yes'
 
@@ -451,12 +456,23 @@ export class WslCliInstaller {
     }
   }
 
-  private async run(distro: string, command: string): Promise<string> {
-    return this.wslRunner(distro, command)
+  /**
+   * `requiresLoginPath` marks the commands whose ANSWER depends on the user's
+   * login PATH. Only those may be failed closed when the probe cannot resolve
+   * it; `printf %s "$HOME"` and the file-writing commands are correct on the
+   * distro default PATH and must keep working on a distro whose login shell is
+   * slow or blocked.
+   */
+  private async run(distro: string, command: string, requiresLoginPath = false): Promise<string> {
+    return this.wslRunner(distro, command, requiresLoginPath)
   }
 }
 
-async function runWslCommand(distro: string, command: string): Promise<string> {
+async function runWslCommand(
+  distro: string,
+  command: string,
+  requiresLoginPath = false
+): Promise<string> {
   // Why the probe lane fixes #14288: the prior login shell (`bash -lc`) sourced
   // ~/.profile, so one blocking line there ate the whole 10s timeout.
   const result = await runWslProcess({
@@ -473,11 +489,15 @@ async function runWslCommand(distro: string, command: string): Promise<string> {
   if (result.timedOut) {
     throw new Error(`WSL command timed out after ${WSL_COMMAND_TIMEOUT_MS}ms.`)
   }
-  // Every command here reads the login PATH -- the `case ":$PATH:"` probe most
-  // of all. Without it that probe answers from the distro default PATH, which
+  // Only for commands whose answer depends on the login PATH. The `case
+  // ":$PATH:"` probe otherwise answers from the distro default PATH, which
   // never has ~/.local/bin, and Settings states as fact that the CLI is not on
-  // PATH while the user's own terminal finds it. Unverifiable, not negative.
-  if (!result.environmentResolved) {
+  // PATH while the user's own terminal finds it -- unverifiable, not negative.
+  //
+  // Scoped, because failing every command closed took the whole installer down
+  // on a distro with a slow login shell: `printf %s "$HOME"` needs no login
+  // PATH and used to answer fine.
+  if (requiresLoginPath && !result.environmentResolved) {
     throw new Error('Could not reach the WSL distro. Try again.')
   }
   if (result.code !== 0) {

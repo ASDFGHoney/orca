@@ -155,6 +155,17 @@ function createWslRunner(
   }
 }
 
+/** What a healthy distro answers for the commands that need no login PATH. */
+function answerWithoutLoginPath(script: string): string {
+  if (script.includes('printf %s "$HOME"')) {
+    return '/home/alice'
+  }
+  if (script.includes('command -v powershell.exe')) {
+    return 'yes'
+  }
+  return ''
+}
+
 describe('WslCliInstaller', () => {
   beforeEach(() => {
     runWslProcessMock.mockReset()
@@ -790,12 +801,12 @@ describe('WslCliInstaller', () => {
     // login PATH never resolved, and ~/.local/bin is never on that. Settings
     // would then state as fact that the CLI is not on PATH while the user's
     // own terminal finds it -- #14288 turning into a confident wrong verdict.
-    runWslProcessMock.mockResolvedValue({
-      environmentResolved: false,
-      code: 0,
-      stdout: 'no',
-      stderr: '',
-      timedOut: false
+    // Answer the earlier commands normally: they do not need the login PATH and
+    // must keep working, so the run has to reach the `case ":$PATH:"` probe.
+    runWslProcessMock.mockImplementation(async (spec: { script?: unknown }) => {
+      const script = String(spec.script)
+      const stdout = answerWithoutLoginPath(script)
+      return { environmentResolved: false, code: 0, stdout, stderr: '', timedOut: false }
     })
     const installer = new WslCliInstaller({
       platform: 'win32',
@@ -804,6 +815,35 @@ describe('WslCliInstaller', () => {
     })
 
     await expect(installer.getStatus()).rejects.toThrow('Could not reach the WSL distro')
+  })
+
+  it('still answers commands that do not need the login PATH', async () => {
+    // Failing every command closed took the whole installer down on a distro
+    // with a slow login shell: `printf %s "$HOME"` is correct on the default
+    // PATH and used to answer fine.
+    const seen: string[] = []
+    runWslProcessMock.mockImplementation(async (spec: { script?: unknown }) => {
+      const script = String(spec.script)
+      seen.push(script)
+      return {
+        environmentResolved: false,
+        code: 0,
+        stdout: answerWithoutLoginPath(script),
+        stderr: '',
+        timedOut: false
+      }
+    })
+    const installer = new WslCliInstaller({
+      platform: 'win32',
+      distro: 'Ubuntu',
+      hostInstaller: { getStatus: async () => makeHostStatus() }
+    })
+
+    await expect(installer.getStatus()).rejects.toThrow('Could not reach the WSL distro')
+    // Assert on a LATER command: the interop probe only runs if the HOME read
+    // returned a value instead of throwing. Asserting that HOME was attempted
+    // proves nothing -- it is attempted either way.
+    expect(seen.some((script) => script.includes('command -v powershell.exe'))).toBe(true)
   })
 
   it('refuses to remove an old managed launcher when the bridge path is user-owned', async () => {
