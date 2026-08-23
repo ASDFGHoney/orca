@@ -3754,7 +3754,7 @@
             "amphetamineTitle": "Works with the lid shut",
             "amphetamineBody": "Uses the Amphetamine Mac app. Control the display and screen saver, and auto-start on power or an app.",
             "amphetamineMissingBody": "Keep running with the lid shut. Auto-start on power or an app. Control the display and screen saver.",
-            "amphetamineSafety": "Orca never replaces or ends a session you started.",
+            "amphetamineSafety": "Orca uses a session you already started rather than replacing it.",
             "amphetamineGet": "Click to open the Mac App Store. It's free.",
             "amphetamineDenied": "Orca is using Caffeinate. Allow Orca in System Settings \u203a Privacy & Security \u203a Automation."
           },
@@ -11201,7 +11201,7 @@
           "caffeinate": "Caffeinate",
           "amphetamine": "Amphetamine",
           "engineTitle": "Keep awake engine",
-          "engineDescription": "Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and never replaces or ends a session you started yourself.",
+          "engineDescription": "Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and uses one you already started rather than replacing it.",
           "engineDescriptionMissing": "Caffeinate is built into macOS. Install Amphetamine to keep awake through an Amphetamine session instead.",
           "engineDescriptionDenied": "Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security \u203a Automation."
         },

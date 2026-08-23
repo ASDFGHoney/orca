@@ -105,7 +105,7 @@ export function AwakeEnginePicker({
         )
       : translate(
           'auto.components.status.bar.AwakeEnginePicker.amphetamineSafety',
-          'Orca never replaces or ends a session you started.'
+          'Orca uses a session you already started rather than replacing it.'
         )
 
   return (

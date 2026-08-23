@@ -13,9 +13,9 @@ function failure(stderr: string, code = 1): OsascriptResult {
 /**
  * Stands in for Amphetamine's single global session.
  *
- * Acquire and release are modelled as the atomic scripts they are: the fake
- * decides adopted/started and ended/foreign/gone in one step, so a test cannot
- * accidentally depend on a check and a write being separable.
+ * Acquire and release resolve to one outcome each, matching the scripts' shape.
+ * That is a modelling convenience, not a claim of atomicity — the real commands
+ * are consecutive Apple events (see macos-keep-awake-engines.md).
  */
 function createFakeAmphetamine(initial: 'none' | 'orca' | 'foreign' = 'none') {
   let session = initial
@@ -258,6 +258,58 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     expect(amphetamine.calls() - before).toBeLessThanOrEqual(2)
   })
 
+  it('keeps the hold when Automation is revoked, since the session still runs', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    // Revoking the grant does not end Amphetamine's session; forgetting it here
+    // would strand an indefinite session with no path left to clean it up.
+    amphetamine.run.mockImplementation(async (_script: string) =>
+      failure('Not authorized to send Apple events to Amphetamine. (-1743)')
+    )
+    assertion.stop('agents-idle')
+    await settle()
+
+    expect(assertion.getHold()).toBe('owned')
+  })
+
+  it('forgets the hold when the app is gone, since no session can remain', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    amphetamine.run.mockImplementation(async (_script: string) =>
+      failure('execution error: (-1728)')
+    )
+    assertion.stop('agents-idle')
+    await settle()
+
+    expect(assertion.getHold()).toBeNull()
+  })
+
+  it('stops vouching for a hold once an attempt fails', async () => {
+    // Fake timers must be installed before the reconcile interval is created.
+    vi.useFakeTimers()
+    const amphetamine = createFakeAmphetamine('foreign')
+    const assertion = createAssertion(amphetamine, { now: () => 1_000, reconcileMs: 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.hasLiveHold()).toBe(true)
+
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await settle()
+
+    // The classification survives so a later stop can clean up...
+    expect(assertion.getHold()).toBe('adopted')
+    // ...but it is no longer evidence that anything is holding.
+    expect(assertion.hasLiveHold()).toBe(false)
+  })
+
   it('keeps the hold when a release fails so a later stop retries', async () => {
     const amphetamine = createFakeAmphetamine()
     const assertion = createAssertion(amphetamine, { now: () => 1_000 })
@@ -334,6 +386,36 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
       if (script.includes('start new session')) {
         await acquired
         return ok('started')
+      }
+      return ok('ended')
+    })
+    const runOsascriptSync = vi.fn((_script: string) => ok('ended'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+    releaseAcquire()
+    await settle()
+
+    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
+      true
+    )
+    expect(assertion.getHold()).toBeNull()
+  })
+
+  it('ends a reclaimed session that resolved after quit began', async () => {
+    // A crash-leaked session reclaimed mid-quit leaks again unless dispose
+    // covers the reclaim path too, not just a fresh start.
+    const amphetamine = createFakeAmphetamine('orca')
+    let releaseAcquire = (): void => {}
+    const acquired = new Promise<void>((resolve) => {
+      releaseAcquire = resolve
+    })
+    amphetamine.run.mockImplementation(async (script: string) => {
+      if (script.includes('start new session')) {
+        await acquired
+        return ok('orca-shaped')
       }
       return ok('ended')
     })

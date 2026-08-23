@@ -75,10 +75,13 @@ describe('AwakeEnginePicker', () => {
     expect(findOption(options, 'Amphetamine').props.body).toContain('lid shut')
   })
 
-  it('promises not to touch a session the user started', () => {
+  it('describes adoption without promising a guarantee the API cannot make', () => {
     const { options } = render({ amphetamineInstalled: true })
 
-    expect(findOption(options, 'Amphetamine').props.hint).toContain('never replaces or ends')
+    const hint = findOption(options, 'Amphetamine').props.hint as string
+    expect(hint).toContain('rather than replacing it')
+    // Amphetamine offers no compare-and-swap, so "never" would overclaim.
+    expect(hint).not.toContain('never')
   })
 
   it('names the caffeinate fallback when the Automation grant was refused', () => {

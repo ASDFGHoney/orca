@@ -41,6 +41,7 @@ function createCaffeinate() {
 function createAmphetamine(unavailable = false) {
   let hold: 'owned' | 'adopted' | null = null
   let pending = false
+  let degraded = false
   const listeners: (() => void)[] = []
   const fake = {
     start: vi.fn(() => {
@@ -54,6 +55,7 @@ function createAmphetamine(unavailable = false) {
         return
       }
       pending = false
+      degraded = false
       hold = next
       for (const listener of listeners) {
         listener()
@@ -70,7 +72,12 @@ function createAmphetamine(unavailable = false) {
     // A no-op here: recovery is re-discovered by the next real attempt, so the
     // double must not decide the engine became usable on its own.
     clearUnavailable: vi.fn(),
-    getHold: vi.fn(() => hold)
+    getHold: vi.fn(() => hold),
+    hasLiveHold: vi.fn(() => hold !== null && !degraded),
+    /** A failed attempt: the classification survives but is no longer proof. */
+    degrade: () => {
+      degraded = true
+    }
   }
   return fake
 }
@@ -164,6 +171,25 @@ describe('AgentAwakeService macOS engine selection', () => {
     service.setMacosEngine('amphetamine')
 
     expect(amphetamine.clearUnavailable).toHaveBeenCalled()
+  })
+
+  it('keeps caffeinate up when a hold classification is no longer proof', () => {
+    const amphetamine = createAmphetamine()
+    const { service, caffeinate } = createService({ macosAmphetamineAssertion: amphetamine })
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    amphetamine.settleHold('adopted')
+    service.setStatuses([])
+    expect(caffeinate.stop).toHaveBeenCalled()
+
+    // A failed re-check retains the classification so a later stop can clean
+    // up, but it no longer proves anything is holding.
+    caffeinate.start.mockClear()
+    amphetamine.degrade()
+    service.setStatuses([])
+
+    expect(caffeinate.start).toHaveBeenCalled()
   })
 
   it('publishes the engine and its availability to subscribers', async () => {

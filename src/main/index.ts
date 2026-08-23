@@ -2359,12 +2359,9 @@ void app.whenReady().then(async () => {
   agentAwakeService.setMacosEngine(
     normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine)
   )
-  // Only when it is already the engine: otherwise the probe is a per-launch
-  // osascript spawn for UI that may never render, and getStatus() triggers it
-  // lazily when the picker first asks.
-  if (normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine) === 'amphetamine') {
-    void agentAwakeService.probeAmphetamine()
-  }
+  // No probe here: setMacosEngine already starts one when Amphetamine is the
+  // configured engine, and getStatus() triggers it lazily otherwise. Calling it
+  // again would spawn a second concurrent osascript.
   // Why: start from empty — disk-hydrated status rows are UI continuity only; only this runtime's hook events keep the computer awake.
   agentAwakeService.setStatuses([])
   const collectChangedProviderSessionWorktrees = createHookProviderSessionInvalidator()

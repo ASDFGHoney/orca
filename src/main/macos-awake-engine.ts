@@ -21,6 +21,7 @@ export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
   getUnavailableReason: () => AmphetamineUnavailableReason | null
   clearUnavailable: () => void
   getHold: () => 'owned' | 'adopted' | null
+  hasLiveHold: () => boolean
 }
 
 export type MacosAwakeEngineStatusFields = {
@@ -41,9 +42,10 @@ export type MacosAwakeEngineRouterOptions = {
 }
 
 /**
- * Picks which macOS tool holds the wake assertion and guarantees only one holds
- * it at a time. Caffeinate is always available; Amphetamine is opt-in, can be
- * missing or refused, and falls back to caffeinate when it is.
+ * Picks which macOS tool holds the wake assertion. Caffeinate is always
+ * available; Amphetamine is opt-in, can be missing or refused, and falls back to
+ * caffeinate when it is. The two overlap deliberately while Amphetamine is
+ * acquiring — see start() — so the machine is never left uncovered.
  */
 export class MacosAwakeEngineRouter {
   private readonly amphetamineAssertion: AmphetamineAwakeAssertion
@@ -108,15 +110,10 @@ export class MacosAwakeEngineRouter {
 
   /** Probe once, lazily, the first time anything asks for status. */
   async probeInstalledIfUnknown(): Promise<boolean | undefined> {
-    if (this.platform !== 'darwin' || this.amphetamineInstalled !== undefined || this.probing) {
+    if (this.amphetamineInstalled !== undefined) {
       return this.amphetamineInstalled
     }
-    this.probing = true
-    try {
-      return await this.probeInstalled()
-    } finally {
-      this.probing = false
-    }
+    return this.probeInstalled()
   }
 
   /** Refresh the installed probe so the picker can disable Amphetamine before it is ever selected. */
@@ -124,6 +121,19 @@ export class MacosAwakeEngineRouter {
     if (this.platform !== 'darwin') {
       return undefined
     }
+    if (this.probing) {
+      // Concurrent probes can resolve out of order and clobber each other.
+      return this.amphetamineInstalled
+    }
+    this.probing = true
+    try {
+      return await this.runInstalledProbe()
+    } finally {
+      this.probing = false
+    }
+  }
+
+  private async runInstalledProbe(): Promise<boolean | undefined> {
     try {
       const installed = await this.detectAmphetamine()
       if (this.amphetamineInstalled === installed) {
@@ -162,7 +172,11 @@ export class MacosAwakeEngineRouter {
     // consent dialog for as long as the user takes to answer. Releasing
     // caffeinate first would leave that whole window with no assertion that
     // survives a lid close. Holding both is harmless; holding neither is not.
-    if (this.amphetamineAssertion.getHold() !== null) {
+    // hasLiveHold, not getHold: after a failed attempt the classification is
+    // retained so a later stop can still clean up, but it is not proof that
+    // anything is holding, and dropping the stand-in on it would uncover a lid
+    // close until the retry lands.
+    if (this.amphetamineAssertion.hasLiveHold()) {
       this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
     } else {
       this.caffeinateAssertion.start(reason)

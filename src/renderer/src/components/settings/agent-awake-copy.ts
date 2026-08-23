@@ -75,7 +75,7 @@ export function getAgentAwakeEngineDescription(
   }
   return translate(
     'auto.components.settings.AgentAwakeSetting.engineDescription',
-    'Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and never replaces or ends a session you started yourself.'
+    'Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and uses one you already started rather than replacing it.'
   )
 }
 
