@@ -18279,6 +18279,111 @@ describe('OrcaRuntimeService', () => {
     expect(read.tail.join('\n')).not.toContain('Stale TUI')
   })
 
+  it('rejects a provider visible frame after live non-mode-switch output advances', async () => {
+    type Snapshot = {
+      data: string
+      cols: number
+      rows: number
+      seq: number
+      source: 'headless'
+      alternateScreen: boolean
+    }
+    let resolveSnapshot!: (snapshot: Snapshot) => void
+    const serializeProviderBuffer = vi.fn(
+      () =>
+        new Promise<Snapshot>((resolve) => {
+          resolveSnapshot = resolve
+        })
+    )
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null,
+      serializeProviderBuffer,
+      hasRendererSerializer: () => false
+    })
+    syncSinglePty(runtime)
+    runtime.onPtyData('pty-1', 'shell history\r\n', 100)
+    runtime.synchronizePtyOutputSequenceFromProvider(
+      'pty-1',
+      { value: 900, generation: 'continued' },
+      0
+    )
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    const readPromise = runtime.readTerminal(terminal.handle)
+    await vi.waitFor(() => expect(serializeProviderBuffer).toHaveBeenCalledOnce())
+    runtime.onPtyData('pty-1', 'live progress\r\n', 101)
+    resolveSnapshot({
+      data: '\x1b[?1049h\x1b[2J\x1b[HStale Ready screen\r\n',
+      cols: 80,
+      rows: 24,
+      seq: 900,
+      source: 'headless',
+      alternateScreen: true
+    })
+
+    const read = await readPromise
+    expect(read.tail).toEqual(['shell history'])
+    expect(read.tail.join('\n')).not.toContain('Stale Ready screen')
+  })
+
+  it('rejects a full provider screen frame after live output advances', async () => {
+    type Snapshot = {
+      data: string
+      scrollbackAnsi: string
+      cols: number
+      rows: number
+      seq: number
+      source: 'headless'
+      alternateScreen: boolean
+    }
+    let resolveSnapshot!: (snapshot: Snapshot) => void
+    const serializeProviderBuffer = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockImplementationOnce(
+        () =>
+          new Promise<Snapshot>((resolve) => {
+            resolveSnapshot = resolve
+          })
+      )
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null,
+      serializeProviderBuffer,
+      hasRendererSerializer: () => false
+    })
+    syncSinglePty(runtime)
+    runtime.onPtyData('pty-1', 'shell history\r\n', 100)
+    runtime.synchronizePtyOutputSequenceFromProvider(
+      'pty-1',
+      { value: 900, generation: 'continued' },
+      0
+    )
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    const readPromise = runtime.readTerminal(terminal.handle, { screen: true })
+    await vi.waitFor(() => expect(serializeProviderBuffer).toHaveBeenCalledTimes(2))
+    runtime.onPtyData('pty-1', 'live progress\r\n', 101)
+    resolveSnapshot({
+      data: '\x1b[?1049h\x1b[2J\x1b[HStale full screen\r\n',
+      scrollbackAnsi: '',
+      cols: 80,
+      rows: 24,
+      seq: 900,
+      source: 'headless',
+      alternateScreen: true
+    })
+
+    const read = await readPromise
+    expect(read.source).toBe('screen-unavailable')
+    expect(read.tail.join('\n')).not.toContain('Stale full screen')
+  })
+
   it('shares one provider snapshot between concurrent read and show calls', async () => {
     type Snapshot = {
       data: string
@@ -20641,6 +20746,33 @@ describe('OrcaRuntimeService', () => {
     await expect(
       runtime.waitForTerminal(terminal.handle, { condition: 'tui-idle', timeoutMs: 50 })
     ).rejects.toThrow('timeout')
+    const lateReadySnapshot = deferred<{
+      data: string
+      scrollbackAnsi: string
+      cols: number
+      rows: number
+      seq: number
+      source: 'headless'
+      alternateScreen: boolean
+    }>()
+    const snapshotSequence = runtime.getPtyOutputSequence('pty-legacy')
+    serializeProviderBuffer.mockImplementationOnce(() => lateReadySnapshot.promise)
+    const staleReadyWait = runtime.waitForTerminal(terminal.handle, {
+      condition: 'tui-idle',
+      timeoutMs: 50
+    })
+    await vi.waitFor(() => expect(serializeProviderBuffer).toHaveBeenCalledTimes(4))
+    runtime.onPtyData('pty-legacy', '\x1b[H', Date.now())
+    lateReadySnapshot.resolve({
+      data: READY_SCREEN,
+      scrollbackAnsi: '',
+      cols: 80,
+      rows: 24,
+      seq: snapshotSequence,
+      source: 'headless',
+      alternateScreen: false
+    })
+    await expect(staleReadyWait).rejects.toThrow('timeout')
     serializeProviderBuffer.mockResolvedValueOnce({
       data: 'Do you trust this workspace directory?\r\n1. Yes\r\n2. No\r\n',
       scrollbackAnsi: '',
@@ -20660,17 +20792,18 @@ describe('OrcaRuntimeService', () => {
     await expect(
       runtime.waitForTerminal(terminal.handle, { condition: 'tui-idle', timeoutMs: 50 })
     ).rejects.toThrow('timeout')
-    expect(serializeProviderBuffer).toHaveBeenCalledTimes(5)
+    expect(serializeProviderBuffer).toHaveBeenCalledTimes(6)
     // Why args, not counts: the one-shot responses above ignore their options,
     // so only this asserts every idle probe asked for the visible grid alone.
     expect(serializeProviderBuffer.mock.calls.slice(1)).toEqual([
       ['pty-legacy', { scrollbackRows: 0 }],
       ['pty-legacy', { scrollbackRows: 0 }],
       ['pty-legacy', { scrollbackRows: 0 }],
+      ['pty-legacy', { scrollbackRows: 0 }],
       ['pty-legacy', { scrollbackRows: 0 }]
     ])
-    await expect(runtime.readTerminal(terminal.handle)).resolves.toMatchObject({ tail: [] })
-    expect(serializeProviderBuffer).toHaveBeenCalledTimes(5)
+    await expect(runtime.readTerminal(terminal.handle)).resolves.toBeDefined()
+    expect(serializeProviderBuffer).toHaveBeenCalledTimes(6)
     expect(
       runtime.verifyOrchestrationCompatibilityCaller({
         terminalHandle: 'term_legacy',

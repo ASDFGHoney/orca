@@ -49,7 +49,7 @@ function appendLedger(envName, event) {
     appendFileSync(ledgerPath, JSON.stringify({ pid: process.pid, at: Date.now(), ...event }) + '\\n')
   } catch {}
 }
-async function emitAuthorityHook() {
+async function emitAuthorityHook(hookEventName) {
   const port = process.env.ORCA_AGENT_HOOK_PORT
   const token = process.env.ORCA_AGENT_HOOK_TOKEN
   const launchToken = process.env.ORCA_AGENT_LAUNCH_TOKEN
@@ -69,12 +69,16 @@ async function emitAuthorityHook() {
         version: process.env.ORCA_AGENT_HOOK_VERSION,
         launchToken,
         payload: {
-          hook_event_name: 'UserPromptSubmit',
+          hook_event_name: hookEventName,
           prompt: 'Respond ACK and remain idle'
         }
       })
     })
-    appendLedger('ORCA_E2E_AUTHORITY_LEDGER', { event: 'authority-hook', status: response.status })
+    appendLedger('ORCA_E2E_AUTHORITY_LEDGER', {
+      event: 'authority-hook',
+      hookEventName,
+      status: response.status
+    })
   } catch (error) {
     appendLedger('ORCA_E2E_AUTHORITY_LEDGER', {
       event: 'authority-hook-error',
@@ -88,7 +92,7 @@ if (process.argv.slice(2).includes('app-server')) {
 }
 appendLedger('ORCA_E2E_SPAWN_LEDGER', { event: 'spawn', argv: process.argv.slice(2) })
 process.stdout.write('\\u001b]0;Codex Ready\\u0007OpenAI Codex\\nmodel: e2e\\ndirectory: e2e\\n')
-void emitAuthorityHook()
+const sessionStartHook = emitAuthorityHook('SessionStart')
 let acknowledged = false
 let lifecycleSent = false
 ${FAKE_AGENT_PASTE_END_SCANNER_SOURCE}
@@ -105,6 +109,7 @@ process.stdin.on('data', (chunk) => {
   if (!acknowledged) {
     fakeAgentMaybeAck(pasteEndScan, input, (mode) => {
       acknowledged = true
+      void sessionStartHook.then(() => emitAuthorityHook('UserPromptSubmit'))
       const message = mode === 'bracketed' ? 'ACK' : 'PASTE_PROTOCOL_ERROR'
       process.stdout.write('\\u001b]0;Codex Working\\u0007' + message + '\\n')
       setTimeout(() => process.stdout.write('\\u001b]0;Codex Ready\\u0007'), 10)
@@ -182,6 +187,7 @@ type LedgerEvent = {
   stdout?: string
   stderr?: string
   error?: string
+  hookEventName?: string
 }
 
 type PersistedWorkspaceSession = {
@@ -539,7 +545,18 @@ for (const contractVersion of [LEGACY_CONTRACT_VERSION, CURRENT_CONTRACT_VERSION
       expect(readLedger(interruptionLedgerPath)).toEqual([])
       await expect
         .poll(() => readLedger(authorityLedgerPath))
-        .toEqual([expect.objectContaining({ event: 'authority-hook', status: 204 })])
+        .toEqual([
+          expect.objectContaining({
+            event: 'authority-hook',
+            hookEventName: 'SessionStart',
+            status: 204
+          }),
+          expect.objectContaining({
+            event: 'authority-hook',
+            hookEventName: 'UserPromptSubmit',
+            status: 204
+          })
+        ])
 
       const transcriptPath = session.seedCodexResumeRollout(PROVIDER_SESSION_ID, repoPath)
       await first.page.evaluate(

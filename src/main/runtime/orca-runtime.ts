@@ -13414,6 +13414,7 @@ export class OrcaRuntimeService {
     limit: number | undefined,
     snapshotOptions: ProviderSnapshotReadOptions = {}
   ): Promise<string[]> {
+    const generation = this.getPtyLifecycleGeneration(ptyId)
     const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
     const snapshot = await this.serializeProviderTerminalBuffer(
       ptyId,
@@ -13426,7 +13427,12 @@ export class OrcaRuntimeService {
     // Why: a cached acquisition can carry scrollback this caller did not ask for,
     // so visible-only reads parse the grid itself rather than trusting the request.
     if (snapshotOptions.visibleScreenOnly) {
-      return await this.parseVisibleSnapshotLines(snapshot)
+      const lines = await this.parseVisibleSnapshotLines(snapshot)
+      // Live bytes ordered after the provider frame make that frame stale.
+      return this.getPtyLifecycleGeneration(ptyId) === generation &&
+        this.getPtyOutputSequence(ptyId) <= snapshot.seq
+        ? lines
+        : []
     }
     const data = `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
     if (data.length === 0) {
@@ -13439,7 +13445,11 @@ export class OrcaRuntimeService {
     })
     try {
       await emulator.write(data)
-      return visibleNonBlankTerminalLines(emulator.getBufferTailLines(lineLimit))
+      const lines = visibleNonBlankTerminalLines(emulator.getBufferTailLines(lineLimit))
+      return this.getPtyLifecycleGeneration(ptyId) === generation &&
+        this.getPtyOutputSequence(ptyId) <= snapshot.seq
+        ? lines
+        : []
     } finally {
       emulator.dispose()
     }
@@ -13515,7 +13525,10 @@ export class OrcaRuntimeService {
       }
     }
     const lines = await this.parseVisibleSnapshotLines(snapshot)
-    if (this.getPtyLifecycleGeneration(ptyId) !== generation) {
+    if (
+      this.getPtyLifecycleGeneration(ptyId) !== generation ||
+      this.getPtyOutputSequence(ptyId) > snapshot.seq
+    ) {
       return null
     }
     const visibleState: RuntimeVisibleTerminalState = {
@@ -13524,9 +13537,7 @@ export class OrcaRuntimeService {
       sequence: snapshot.seq,
       generation
     }
-    if (this.getPtyOutputSequence(ptyId) <= snapshot.seq) {
-      this.providerVisibleStateByPtyId.set(ptyId, visibleState)
-    }
+    this.providerVisibleStateByPtyId.set(ptyId, visibleState)
     return visibleState
   }
 
