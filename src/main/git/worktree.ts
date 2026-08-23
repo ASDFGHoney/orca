@@ -240,7 +240,7 @@ async function evaluateLocalBaseRefRefreshability(
       return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
     }
     if (!shouldInspectOwner(parsedDrift.behind)) {
-      // Why: a current local ref yields no update suggestion, so the advisory path skips OID resolution and owner inspection.
+      // Why: a current local ref has nothing to fast-forward, so skip OID resolution, owner inspection, and the no-op reset entirely.
       return undefined
     }
     const { stdout: localOidOutput } = await gitExecFileAsync(
@@ -875,7 +875,8 @@ async function refreshLocalBaseRefForWorktreeCreate(
     baseBranch,
     remoteTrackingRef,
     remoteTrackingBase,
-    options
+    options,
+    (behind) => behind > 0
   )
   if (!evaluation) {
     return undefined

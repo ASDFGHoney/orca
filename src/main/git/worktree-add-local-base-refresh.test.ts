@@ -78,6 +78,31 @@ describe('addWorktree', () => {
     expect(reset[1].cwd).toBe('/repo-feature')
   })
 
+  it('skips the no-op reset when the claimed branch is already up to date (#15645)', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add /repo-feature feature
+      .mockResolvedValueOnce({ stdout: 'remote-tip\n' }) // resolveWorktreeAddBaseRef existence probe
+      .mockResolvedValueOnce({ stdout: '0\t0\n' }) // rev-list --left-right --count (already current)
+
+    const result = await addWorktree(
+      '/repo',
+      '/repo-feature',
+      'feature',
+      'origin/feature',
+      true,
+      false,
+      { checkoutExistingBranch: true }
+    )
+
+    expect(result.localBaseRefRefresh).toBeUndefined()
+    // The common claim: nothing to fast-forward, so no OID resolution, owner probes, or reset --hard.
+    expect(gitExecFileAsyncMock.mock.calls.map(([args]) => args)).toEqual([
+      ['worktree', 'add', '/repo-feature', 'feature'],
+      ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/feature^{commit}'],
+      ['rev-list', '--left-right', '--count', 'refs/heads/feature...refs/remotes/origin/feature']
+    ])
+  })
+
   it('leaves a claimed branch with local-only commits silent (#15645)', async () => {
     gitExecFileAsyncMock
       .mockResolvedValueOnce({ stdout: '' }) // worktree add /repo-feature feature
