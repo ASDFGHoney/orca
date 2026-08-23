@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { shouldClaimRemoteDesktopViewport } from './remote-desktop-viewport-claim'
+import {
+  isRemoteDesktopViewportClaimEligible,
+  shouldClaimRemoteDesktopViewport
+} from './remote-desktop-viewport-claim'
+
+describe('isRemoteDesktopViewportClaimEligible', () => {
+  it.each([
+    { paneVisible: false, documentVisible: true, documentFocused: true },
+    { paneVisible: true, documentVisible: false, documentFocused: true },
+    { paneVisible: true, documentVisible: true, documentFocused: false }
+  ])('rejects passive background geometry: %o', (visibility) => {
+    expect(isRemoteDesktopViewportClaimEligible(visibility)).toBe(false)
+  })
+
+  it('accepts a focused visible pane', () => {
+    expect(
+      isRemoteDesktopViewportClaimEligible({
+        paneVisible: true,
+        documentVisible: true,
+        documentFocused: true
+      })
+    ).toBe(true)
+  })
+})
 
 describe('shouldClaimRemoteDesktopViewport', () => {
   it('requires a second, changed measurement from a focused visible pane', () => {
