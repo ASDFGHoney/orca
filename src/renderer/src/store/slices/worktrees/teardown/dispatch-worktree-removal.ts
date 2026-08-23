@@ -1,4 +1,4 @@
-import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import { parseExecutionHostId, type ExecutionHostId } from '../../../../../../shared/execution-host'
 import type { RemoveWorktreeResult } from '../../../../../../shared/worktree/create-types'
 import { callRuntimeRpc, type getActiveRuntimeTarget } from '../../../../runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '../../../../runtime/runtime-worktree-selector'
@@ -40,16 +40,30 @@ export async function dispatchWorktreeRemoval(args: {
       ...snapshotPruneBatch
     })
   }
+  const effectiveHostId = qualifyRuntimeCallHost(target, hostId)
   return callRuntimeRpc<RemoveWorktreeResult>(
     target,
     'worktree.rm',
     {
       worktree: toRuntimeWorktreeSelector(worktreeId),
-      ...(hostId ? { hostId } : {}),
+      ...(effectiveHostId ? { hostId: effectiveHostId } : {}),
       force,
       allowUnverifiedPtyStop: options?.allowUnverifiedPtyStop === true,
       runHooks: !skipArchive
     },
     { timeoutMs: 60_000 }
   )
+}
+
+function qualifyRuntimeCallHost(
+  target: ReturnType<typeof getActiveRuntimeTarget>,
+  hostId: ExecutionHostId | undefined
+): ExecutionHostId | undefined {
+  if (
+    target.kind === 'environment' &&
+    parseExecutionHostId(hostId)?.environmentId === target.environmentId
+  ) {
+    return undefined
+  }
+  return hostId
 }
