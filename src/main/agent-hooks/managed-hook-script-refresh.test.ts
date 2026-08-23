@@ -18,6 +18,29 @@ import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as osModule from 'node:os'
+import type * as fsPromisesModule from 'node:fs/promises'
+
+const fsInterception = vi.hoisted(() => ({ removeBeforeOpen: '', denyRenameTo: '' }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof fsPromisesModule>()
+  return {
+    ...actual,
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (String(args[1]) === fsInterception.denyRenameTo) {
+        throw Object.assign(new Error('simulated blocked replace'), { code: 'EPERM' })
+      }
+      return actual.rename(...args)
+    },
+    open: async (...args: Parameters<typeof actual.open>) => {
+      if (String(args[0]) === fsInterception.removeBeforeOpen) {
+        fsInterception.removeBeforeOpen = ''
+        await actual.rm(args[0], { force: true })
+      }
+      return actual.open(...args)
+    }
+  }
+})
 
 let isolatedUserDataDir = ''
 let previousUserDataPath: string | undefined
@@ -29,6 +52,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fsInterception.removeBeforeOpen = ''
+  fsInterception.denyRenameTo = ''
   if (previousUserDataPath === undefined) {
     delete process.env.ORCA_USER_DATA_PATH
   } else {
@@ -134,6 +159,22 @@ describe('refreshManagedScriptIfPresent', () => {
       }
     }
   )
+
+  it('does not recreate a hook removed immediately before the Windows write', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-removed-'))
+    const scriptPath = join(dir, 'grok-hook.cmd')
+    writeFileSync(scriptPath, 'stale')
+    fsInterception.denyRenameTo = scriptPath
+    fsInterception.removeBeforeOpen = scriptPath
+    try {
+      await withPlatform('win32', async () => {
+        expect(await refreshManagedScriptIfPresent(scriptPath, 'fresh')).toBe(false)
+      })
+      expect(readdirSync(dir)).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 
   it.skipIf(process.platform !== 'win32')(
     'leaves no temp files behind when the atomic replace is blocked',
