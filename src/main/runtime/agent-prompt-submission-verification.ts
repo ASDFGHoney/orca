@@ -1,3 +1,5 @@
+import { waitForAgentPromptDelay } from './agent-prompt-request-delay'
+
 export const AGENT_PROMPT_EFFECT_TIMEOUT_MS = 5_000
 const AGENT_PROMPT_EFFECT_POLL_MS = 50
 
@@ -28,7 +30,7 @@ export async function verifyAgentPromptSubmission(
     if (agentPromptLifecycleChanged(options.baseline, current)) {
       return
     }
-    await waitForAgentPromptPoll(options.signal)
+    await waitForAgentPromptDelay(AGENT_PROMPT_EFFECT_POLL_MS, options.signal)
   }
 
   const current = options.readActivity()
@@ -66,25 +68,4 @@ function throwIfAgentPromptAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new Error('request_aborted')
   }
-}
-
-async function waitForAgentPromptPoll(signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_EFFECT_POLL_MS))
-    return
-  }
-  await new Promise<void>((resolve, reject) => {
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(new Error('request_aborted'))
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, AGENT_PROMPT_EFFECT_POLL_MS)
-    signal.addEventListener('abort', onAbort, { once: true })
-    if (signal.aborted) {
-      onAbort()
-    }
-  })
 }

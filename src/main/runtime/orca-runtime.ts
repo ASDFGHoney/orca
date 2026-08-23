@@ -105,6 +105,7 @@ import {
   type AgentPromptActivity,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
+import { waitForAgentPromptDelay } from './agent-prompt-request-delay'
 import {
   awaitWindowsHostGitEnvironmentReady,
   gitExecFileAsync,
@@ -2065,28 +2066,6 @@ async function waitForAgentPromptPromise<T>(promise: Promise<T>, signal?: AbortS
       (value) => finish({ value }),
       (error: unknown) => finish({ error })
     )
-  })
-}
-
-async function waitForAgentPromptDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
-  if (!signal) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs))
-    return
-  }
-  assertAgentPromptRequestActive(signal)
-  await new Promise<void>((resolve, reject) => {
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(new Error('request_aborted'))
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, delayMs)
-    signal.addEventListener('abort', onAbort, { once: true })
-    if (signal.aborted) {
-      onAbort()
-    }
   })
 }
 
@@ -19455,6 +19434,7 @@ export class OrcaRuntimeService {
         renderGate.dispose()
       }
     } else {
+      assertAgentPromptRequestActive(options.signal)
       await waitForAgentPromptDelay(AGENT_PROMPT_SUBMIT_DELAY_MS, options.signal)
     }
     assertAgentPromptRequestActive(options.signal)
