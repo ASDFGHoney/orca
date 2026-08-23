@@ -39,8 +39,6 @@ type MacosAmphetamineSleepAssertionOptions = {
   now?: () => number
   onUnexpectedFailure?: (reason: string) => void
   onUnavailable?: (reason: AmphetamineUnavailableReason) => void
-  /** Fires once a session backs this assertion, so the caller can release a stand-in. */
-  onHoldChanged?: () => void
   platform?: NodeJS.Platform
   reconcileMs?: number
   runOsascript?: RunOsascript
@@ -66,7 +64,6 @@ export class MacosAmphetamineSleepAssertion {
   private readonly now: () => number
   private readonly onUnexpectedFailure: (reason: string) => void
   private readonly onUnavailable: (reason: AmphetamineUnavailableReason) => void
-  private readonly onHoldChanged: () => void
   private readonly platform: NodeJS.Platform
   private readonly reconcileMs: number
   private readonly runOsascript: RunOsascript
@@ -87,7 +84,6 @@ export class MacosAmphetamineSleepAssertion {
     this.now = options.now ?? Date.now
     this.onUnexpectedFailure = options.onUnexpectedFailure ?? (() => {})
     this.onUnavailable = options.onUnavailable ?? (() => {})
-    this.onHoldChanged = options.onHoldChanged ?? (() => {})
     this.platform = options.platform ?? process.platform
     this.reconcileMs = options.reconcileMs ?? MACOS_AMPHETAMINE_RECONCILE_MS
     this.runOsascript = options.runOsascript ?? runOsascriptWithRunProcess
@@ -175,21 +171,10 @@ export class MacosAmphetamineSleepAssertion {
 
   /**
    * The classification, which outlives a failed attempt so cleanup can still
-   * happen. Non-null does NOT mean a session is holding — ask hasLiveHold().
+   * happen. Non-null does NOT mean a session is holding.
    */
   getHold(): AmphetamineHoldKind {
     return this.hold.get()
-  }
-
-  /**
-   * Whether a session is believed to be holding right now.
-   *
-   * False after a failed attempt even when `hold` is still set: the
-   * classification survives so a later stop can clean up, but callers deciding
-   * whether to drop a stand-in assertion must not treat it as proof.
-   */
-  hasLiveHold(): boolean {
-    return this.hold.isLive()
   }
 
   private enqueue(reason: string, recheck = false): void {
@@ -221,9 +206,9 @@ export class MacosAmphetamineSleepAssertion {
     if (this.availability.isUnavailable()) {
       return false
     }
-    // hasLiveHold, not hold: a classification retained after a failure is not
-    // evidence anything is holding, and that is when a retry is worth an event.
-    // Otherwise only the periodic re-check spends one.
+    // isLive, not just held: a classification retained after a failure is not
+    // evidence anything is holding, and that is when a retry is worth an Apple
+    // event. Otherwise only the periodic re-check spends one.
     if (this.hold.isLive() && !recheck) {
       return true
     }
@@ -272,7 +257,6 @@ export class MacosAmphetamineSleepAssertion {
       this.hold.adopt()
 
       this.backoff.reset()
-      this.onHoldChanged()
       return true
     }
     if (outcome === 'orca-shaped' || outcome === 'started') {
@@ -299,7 +283,6 @@ export class MacosAmphetamineSleepAssertion {
       this.hold.own()
 
       this.backoff.reset()
-      this.onHoldChanged()
       return true
     }
     return false

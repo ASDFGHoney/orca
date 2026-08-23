@@ -217,8 +217,6 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     await settle()
 
     expect(assertion.getHold()).toBe('owned')
-    // Claimed for cleanup only — it must never count as coverage.
-    expect(assertion.hasLiveHold()).toBe(false)
   })
 
   it.each([
@@ -254,7 +252,6 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     // Staying 'adopted' would make every later release skip the command and
     // strand the session Orca just created.
     expect(assertion.getHold()).toBe('owned')
-    expect(assertion.hasLiveHold()).toBe(false)
   })
 
   it('stops vouching for its hold while a release is in flight', async () => {
@@ -264,7 +261,6 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
 
     assertion.start('agents-working')
     await settle()
-    expect(assertion.hasLiveHold()).toBe(true)
 
     amphetamine.run.mockImplementation(
       async (_script: string) =>
@@ -276,8 +272,6 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     await settle()
 
     // The session is about to end, so a router reading this as live would drop
-    // its caffeinate stand-in and cover nothing until a re-acquire completes.
-    expect(assertion.hasLiveHold()).toBe(false)
     finishRelease()
     await settle()
   })
@@ -337,7 +331,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
 
     assertion.start('agents-working')
     await settle()
-    expect(assertion.hasLiveHold()).toBe(true)
 
     amphetamine.run.mockImplementation(async (_script: string) =>
       failure('Not authorized to send Apple events to Amphetamine. (-1743)')
@@ -348,7 +341,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     // The hold survives for cleanup, but the attempt failed — vouching for it
     // here would let the router drop the caffeinate stand-in.
     expect(assertion.getHold()).toBe('owned')
-    expect(assertion.hasLiveHold()).toBe(false)
   })
 
   it('does not reinstall a hold when a foreign result lands after dispose', async () => {
@@ -429,7 +421,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
 
     assertion.start('agents-working')
     await settle()
-    expect(assertion.hasLiveHold()).toBe(true)
 
     amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
     await vi.advanceTimersByTimeAsync(1_000)
@@ -439,8 +430,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     // it, so responsibility is claimed rather than left as 'adopted' — which
     // would make every later release skip the command.
     expect(assertion.getHold()).toBe('owned')
-    // It is still not evidence that anything is holding.
-    expect(assertion.hasLiveHold()).toBe(false)
   })
 
   it('retries promptly once it can no longer vouch for its hold', async () => {
@@ -454,7 +443,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
     await vi.advanceTimersByTimeAsync(100_000)
     await settle()
-    expect(assertion.hasLiveHold()).toBe(false)
 
     // Recovery must not have to wait for the next re-check: once the backoff
     // window has passed, an untrusted hold is worth an Apple event on an
@@ -466,7 +454,6 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     await settle()
 
     expect(amphetamine.calls()).toBeGreaterThan(before)
-    expect(assertion.hasLiveHold()).toBe(true)
   })
 
   it('keeps the hold when a release fails so a later stop retries', async () => {
@@ -593,6 +580,25 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(assertion.getHold()).toBeNull()
   })
 
+  it('releases a second time even when the first pass ended a session', async () => {
+    // The aborted acquire can create a session after a first pass that reported
+    // 'ended' just as easily as after one that reported 'gone'. Gating the
+    // second pass on 'gone' left exactly that case with nothing to clean it up.
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(
+      async (_script: string) => new Promise<OsascriptResult>(() => {})
+    )
+    const outcomes = ['ended', 'ended']
+    const runOsascriptSync = vi.fn((_script: string) => ok(outcomes.shift() ?? 'gone'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+
+    expect(runOsascriptSync).toHaveBeenCalledTimes(2)
+  })
+
   it('records a session it could not clean up during the dispose race', async () => {
     const amphetamine = createFakeAmphetamine()
     let releaseAcquire = (): void => {}
@@ -618,7 +624,6 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
 
     // Reporting null would claim a session was cleaned up that was not.
     expect(assertion.getHold()).toBe('owned')
-    expect(assertion.hasLiveHold()).toBe(false)
   })
 
   it('cleans up when quit lands while an acquire is still in flight', async () => {

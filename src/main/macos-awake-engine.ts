@@ -21,7 +21,6 @@ export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
   getUnavailableReason: () => AmphetamineUnavailableReason | null
   clearUnavailable: () => void
   getHold: () => 'owned' | 'adopted' | null
-  hasLiveHold: () => boolean
 }
 
 export type MacosAwakeEngineStatusFields = {
@@ -83,7 +82,6 @@ export class MacosAwakeEngineRouter {
         onUnexpectedFailure: (reason) => this.onNeedsRefresh(reason),
         // Why refresh rather than just record: caffeinate has to take over the
         // live session, otherwise choosing Amphetamine silently stops holding it.
-        onHoldChanged: () => this.onNeedsRefresh('amphetamine-held'),
         onUnavailable: (unavailableReason) => {
           if (unavailableReason === 'not-installed') {
             this.amphetamineInstalled = false

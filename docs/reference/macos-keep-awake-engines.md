@@ -93,9 +93,10 @@ and an Apple event the acquire already sent is processed by Amphetamine on its
 own schedule. So a session can appear immediately after a release that found
 nothing to end.
 
-A second release runs in that specific case — an acquire was in flight and the
-first pass reported `gone` — with the spawn itself supplying the delay. That
-covers the realistic window. It is still not a proof: a sufficiently late Apple
+A second release runs whenever an acquire was in flight, whatever the first pass
+reported, with the spawn itself supplying the delay. Gating it on `gone` was
+wrong: the first pass can end the existing session and the acquire can then
+create another, which is the same leak by a different route. It is still not a proof: a sufficiently late Apple
 event outlives both passes, and nothing can retry once the process has exited.
 
 ### A session held when the grant is revoked

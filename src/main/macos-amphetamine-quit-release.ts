@@ -65,12 +65,15 @@ export function disposeAmphetamineSession(options: {
     return
   }
   let outcome = releaseAmphetamineSessionSync({ logger, reason: 'dispose', runOsascriptSync })
-  if (hadAcquireInFlight && outcome === 'gone') {
-    // Aborting an in-flight acquire only *requests* a kill, and the Apple event
-    // it may already have sent is processed asynchronously by Amphetamine. So a
-    // session can appear just after this release reported nothing to end. One
-    // more pass catches that; the spawn itself supplies the delay, and the
-    // script ends nothing when there is nothing of Orca's to end.
+  if (hadAcquireInFlight) {
+    // Whatever the first pass did. Aborting an in-flight acquire only *requests*
+    // a kill, and the Apple event it may already have sent is processed
+    // asynchronously by Amphetamine — so a new session can appear after a first
+    // pass that reported 'ended' just as easily as after one that reported
+    // 'gone'. Gating on 'gone' missed exactly that: end the existing session,
+    // then have the acquire create another with nothing left to clean it up.
+    // The spawn supplies the delay, and the script ends nothing when there is
+    // nothing of Orca's to end.
     outcome = releaseAmphetamineSessionSync({
       logger,
       reason: 'dispose-acquire-race',
