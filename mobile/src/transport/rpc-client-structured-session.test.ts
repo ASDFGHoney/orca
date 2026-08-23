@@ -11,7 +11,10 @@ import type { RpcRequest } from '../../../src/main/runtime/rpc/core'
 import { RpcDispatcher } from '../../../src/main/runtime/rpc/dispatcher'
 import { STRUCTURED_AGENT_SESSION_METHODS } from '../../../src/main/runtime/rpc/methods/structured-agent-session'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../src/shared/protocol-version'
+import type { AgentJournalRenderItem } from '../../../src/shared/agent-session-journal-types'
+import { projectStructuredAgentSessionMessages } from '../../../src/renderer/src/components/native-chat/structured-agent-session-message-projection'
 import { createMobileStructuredOutboxEntry } from '../session/mobile-structured-outbox-entry'
+import { buildMobileStructuredTimeline } from '../session/mobile-structured-session-timeline'
 import {
   createMobileStructuredOperationId,
   mobileStructuredSendRequest
@@ -155,7 +158,7 @@ describe('structured session RPC transport', () => {
     client.close()
   })
 
-  it('creates then sends through the paired mobile transport and durable host', async () => {
+  it('creates, sends, and projects one shared journal row through the paired mobile transport', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-mobile-paired-structured-'))
     const store = await AgentSessionRecordStore.open({
       directory: join(root, 'store'),
@@ -269,6 +272,32 @@ describe('structured session RPC transport', () => {
           body: expect.objectContaining({ kind: 'message' })
         })
       )
+      const historyPromise = client.sendRequest('agentSession.history', {
+        sessionId,
+        direction: 'tail'
+      })
+      await Promise.resolve()
+      await relayPairedRequest(socket, dispatcher, 'agentSession.history')
+      const history = await historyPromise
+      expect(history).toMatchObject({ ok: true, result: { ok: true } })
+      const items = (
+        history as {
+          result: { page: { items: AgentJournalRenderItem[]; submissions: [] } }
+        }
+      ).result.page.items
+      const desktopMessages = projectStructuredAgentSessionMessages(items, [], [])
+      const mobileMessages = buildMobileStructuredTimeline(items, []).flatMap((row) =>
+        row.kind === 'message' ? [row.message] : []
+      )
+
+      expect(mobileMessages).toEqual(desktopMessages)
+      expect(
+        mobileMessages.filter(
+          (message) =>
+            message.role === 'user' &&
+            message.blocks.some((block) => block.type === 'text' && block.text === 'paired hello')
+        )
+      ).toHaveLength(1)
     } finally {
       client.close()
       await host.flushAllStreamedEvents()
