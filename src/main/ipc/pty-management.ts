@@ -38,6 +38,11 @@ function isDaemonDegraded(): boolean {
   )
 }
 
+// Why: no daemon provider means terminals run on fallback local PTYs that die with the app, so nothing survives a quit-and-install.
+function isSessionPersistenceAvailable(): boolean {
+  return getDaemonProvider() !== null && !isDaemonDegraded()
+}
+
 async function collectSessions(adapters: DaemonPtyAdapter[]): Promise<DaemonSessionInfo[]> {
   const results = await Promise.allSettled(
     adapters.map(async (adapter) => {
@@ -57,6 +62,13 @@ export function registerDaemonManagementHandlers(): void {
   ipcMain.removeHandler('pty:management:killOne')
   ipcMain.removeHandler('pty:management:restart')
   ipcMain.removeHandler('pty:management:macTccAttribution')
+  ipcMain.removeHandler('pty:management:sessionPersistence')
+
+  // Why: lets the update card stop promising sessions survive an install it has no mechanism to keep them through.
+  ipcMain.handle(
+    'pty:management:sessionPersistence',
+    async (): Promise<{ available: boolean }> => ({ available: isSessionPersistenceAvailable() })
+  )
 
   // Why: lets Settings warn that macOS privacy grants no longer reach daemon terminals (STA-3491).
   ipcMain.handle(

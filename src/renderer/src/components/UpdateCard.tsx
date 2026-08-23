@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Why: keeps the updater state machine and its presentation variants in one file. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
+import { useTerminalSessionPersistence } from '@/hooks/useTerminalSessionPersistence'
 import { useAppStore } from '../store'
 import { Card } from './ui/card'
 import { Button } from './ui/button'
@@ -168,6 +169,11 @@ export function UpdateCard() {
 
   // ── Prefers-reduced-motion ──────────────────────────────────────────
   const prefersReducedMotion = usePrefersReducedMotion()
+
+  // Why: the card must not promise sessions survive the install unless the daemon that preserves them is serving this app.
+  const sessionsPreserved = useTerminalSessionPersistence(
+    status.state === 'available' || status.state === 'downloading'
+  )
 
   const clearAnimationTimers = useCallback(() => {
     if (dismissAnimationTimerRef.current !== null) {
@@ -597,15 +603,18 @@ export function UpdateCard() {
       <SimpleCardContent
         version={status.version}
         releaseUrl={releaseUrl}
+        sessionsPreserved={sessionsPreserved}
         onUpdate={handleUpdate}
         onClose={handleDismissWithAnimation}
       />
     )
   })()
 
-  // One-time reassurance tip that updating won't kill running terminals; persisted once seen.
+  // One-time tip about what the update does to running terminals; persisted once seen, and silent while persistence is unknown.
   const showReassurance =
-    !reassuranceSeen && (status.state === 'available' || status.state === 'downloading')
+    !reassuranceSeen &&
+    sessionsPreserved !== null &&
+    (status.state === 'available' || status.state === 'downloading')
 
   return (
     <div
@@ -618,10 +627,15 @@ export function UpdateCard() {
           <div className="flex items-center gap-3 p-3">
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground">
-                {translate(
-                  'auto.components.UpdateCard.b1d867f4fb',
-                  "Your terminal sessions won't be interrupted during the update."
-                )}
+                {sessionsPreserved
+                  ? translate(
+                      'auto.components.UpdateCard.b1d867f4fb',
+                      "Your terminal sessions won't be interrupted during the update."
+                    )
+                  : translate(
+                      'auto.components.UpdateCard.6bcb39fd76',
+                      'Terminal sessions may not be preserved during this update.'
+                    )}
               </p>
             </div>
             <Button
@@ -751,11 +765,14 @@ function RichCardContent({
 function SimpleCardContent({
   version,
   releaseUrl,
+  sessionsPreserved,
   onUpdate,
   onClose
 }: {
   version: string
   releaseUrl?: string
+  /** null = daemon persistence unverified; say nothing rather than guess. */
+  sessionsPreserved: boolean | null
   onUpdate: () => void
   onClose: () => void
 }) {
@@ -782,9 +799,13 @@ function SimpleCardContent({
         })}
       </p>
 
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {translate('auto.components.UpdateCard.fdd4a364fa', "Sessions won't be interrupted.")}
-      </p>
+      {sessionsPreserved !== null && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {sessionsPreserved
+            ? translate('auto.components.UpdateCard.fdd4a364fa', "Sessions won't be interrupted.")
+            : translate('auto.components.UpdateCard.6930f48207', 'Sessions may not be preserved.')}
+        </p>
+      )}
 
       {releaseUrl && (
         <button

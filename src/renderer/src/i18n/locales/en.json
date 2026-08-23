@@ -2121,6 +2121,8 @@
         "ec8fe71cfc": "Update",
         "44324ef542": "Release notes",
         "fdd4a364fa": "Sessions won't be interrupted.",
+        "6930f48207": "Sessions may not be preserved.",
+        "6bcb39fd76": "Terminal sessions may not be preserved during this update.",
         "05ad78a6d1": "Orca v{{value0}} is ready.",
         "318d3b4bc7": "Dismiss update",
         "9abc59f814": "Update Available",

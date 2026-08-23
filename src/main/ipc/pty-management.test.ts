@@ -239,6 +239,35 @@ describe('pty:management IPC handlers', () => {
     })
   })
 
+  describe('sessionPersistence', () => {
+    async function readAvailability(): Promise<boolean> {
+      const { registerDaemonManagementHandlers } = await importFresh()
+      registerDaemonManagementHandlers()
+      const result = (await buildHandlerMap()['pty:management:sessionPersistence']({})) as {
+        available: boolean
+      }
+      return result.available
+    }
+
+    it('reports preservation while the daemon owns terminals', async () => {
+      getDaemonProviderMock.mockReturnValue(await makeRouter(makeAdapter(5, [])))
+
+      await expect(readAvailability()).resolves.toBe(true)
+    })
+
+    it('reports no preservation when terminals fell back to local PTYs', async () => {
+      getDaemonProviderMock.mockReturnValue(null)
+
+      await expect(readAvailability()).resolves.toBe(false)
+    })
+
+    it('reports no preservation while fresh spawns bypass the daemon', async () => {
+      getDaemonProviderMock.mockReturnValue(await makeDegradedProvider(makeAdapter(5, [])))
+
+      await expect(readAvailability()).resolves.toBe(false)
+    })
+  })
+
   describe('killAll', () => {
     // Why: the handler sleeps POLL_INTERVAL_MS between listSessions polls.
     // Fake timers let the tests drive that loop deterministically — without
