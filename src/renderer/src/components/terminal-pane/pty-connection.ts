@@ -187,11 +187,7 @@ import {
   getProviderSessionClaimKey,
   isPassiveCompletedHibernationEvidence
 } from '@/lib/sleeping-agent-pane-ownership'
-import {
-  bindConfirmedAgentExitResumePane,
-  retireConfirmedAgentExitResumeRecord,
-  scheduleUnbindConfirmedAgentExitResumePane
-} from '@/lib/confirmed-agent-exit-resume-retirement'
+import { retireConfirmedAgentExitResumeRecord } from '@/lib/confirmed-agent-exit-resume-retirement'
 import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
 import { createPaneForegroundAgentTracker } from './pane-foreground-agent-tracker'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
@@ -2647,7 +2643,6 @@ export function connectPanePty(
     handledExitPtyId = ptyId
     agentCompletionCoordinator.dispose()
     dropSideEffectFactConsumer()
-    scheduleUnbindConfirmedAgentExitResumePane(ptyId)
     // Why: main clears gate state on PTY exit too; this only resets the
     // pane-local marker so a reused pane cannot skip re-marking a new PTY.
     releaseHiddenRendererPtyDelivery()
@@ -3006,9 +3001,7 @@ export function connectPanePty(
   ): void => {
     if (activePanePtyBinding && activePanePtyBinding !== ptyId) {
       reportPanePtyVisibility(activePanePtyBinding, false)
-      scheduleUnbindConfirmedAgentExitResumePane(activePanePtyBinding)
     }
-    bindConfirmedAgentExitResumePane(ptyId, cacheKey)
     setPanePtyFitBinding(ptyId)
     activePanePtyBinding = ptyId
     reportPanePtyVisibility(ptyId, deps.isVisibleRef.current)
