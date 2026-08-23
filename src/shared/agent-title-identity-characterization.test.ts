@@ -38,12 +38,20 @@ describe('getAgentLabel — characterization (pre-refactor)', () => {
       )
     })
 
-    it('reads a Grok pane as Gemini CLI when its task text names two other agents', () => {
-      // DEFECT, and the inverse of the reported Antigravity bug: the pane is Grok, the task
-      // text mentions Antigravity and Gemini, and Gemini CLI is checked earliest of the three.
+    it('resolves a Grok pane naming two other agents, but only by a targeted exception', () => {
+      // Fixed by #15535, which teaches the Gemini token branch to decline when an Antigravity
+      // name is present. Correct here only because that exception happens to clear the path to
+      // Grok — drop the word "Antigravity" and it reads as Gemini CLI again (next case).
       expect(
         getAgentLabel(ownerSuffix('Electron QA: Antigravity tab vs Gemini label', 'grok'))
-      ).toBe('Gemini CLI')
+      ).toBe('Grok')
+    })
+
+    it('still reads a Grok pane as Gemini CLI when no exception covers the pair', () => {
+      // DEFECT, and the general form of the case above: one narrowing fixes one collision.
+      expect(getAgentLabel(ownerSuffix('Electron QA: check the Gemini label', 'grok'))).toBe(
+        'Gemini CLI'
+      )
     })
 
     it('resolves the owner suffix correctly only when no earlier agent is named', () => {
@@ -69,8 +77,8 @@ describe('getAgentLabel — characterization (pre-refactor)', () => {
     it.each([
       ['codex', 'grok', 'Codex'],
       ['grok', 'codex', 'Codex'],
-      ['gemini', 'antigravity', 'Gemini CLI'],
-      ['antigravity', 'gemini', 'Gemini CLI'],
+      ['gemini', 'antigravity', 'Antigravity'],
+      ['antigravity', 'gemini', 'Antigravity'],
       ['copilot', 'devin', 'GitHub Copilot'],
       ['devin', 'copilot', 'GitHub Copilot']
     ])('%s + %s both resolve to %s', (first, second, winner) => {
@@ -94,19 +102,18 @@ describe('getAgentLabel — characterization (pre-refactor)', () => {
     })
   })
 
-  describe('Antigravity model names are read as Gemini CLI', () => {
-    it('reads an Antigravity model title as Gemini CLI', () => {
+  describe('Antigravity model names', () => {
+    it('reads a bare Antigravity model title as Gemini CLI', () => {
       // DEFECT. Antigravity models are named `Gemini <n.n> <Name>`, so an agy pane's own title
       // carries a whole `gemini` token, and Gemini CLI is checked first.
       expect(getAgentLabel('Gemini 3.7 Flash · high')).toBe('Gemini CLI')
     })
 
-    it('still reads Gemini CLI even when the Antigravity name is also present', () => {
-      // DEFECT. `AGY_AGENT_NAME_RE` is checked in the Antigravity branch at position 12, so an
-      // explicit `agy` identity segment cannot outrank the model name at position 4. This is the
-      // case PR #15535 patches by teaching the Gemini detector to decline; the resolver instead
-      // treats the agy segment as the anchored identity and `Gemini <n.n> <Name>` as metadata.
-      expect(getAgentLabel('agy · Gemini 3.7 Flash')).toBe('Gemini CLI')
+    it('resolves once the Antigravity name is also present', () => {
+      // Fixed by #15535. The resolver reaches the same answer structurally — the agy segment is
+      // the anchored identity and `Gemini <n.n> <Name>` is model metadata — rather than by
+      // teaching one detector about one competitor.
+      expect(getAgentLabel('agy · Gemini 3.7 Flash')).toBe('Antigravity')
     })
   })
 })
