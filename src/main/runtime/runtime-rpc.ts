@@ -18,6 +18,7 @@ import { errorResponse } from './rpc/errors'
 import { fingerprintAuthenticatedPairingCredential } from './rpc/orchestration-mutation-executor'
 import type { RpcMessageContext, RpcTransport } from './rpc/transport'
 import { UnixSocketTransport } from './rpc/unix-socket-transport'
+import { boundedDispatchKeepaliveMs } from './rpc/dispatch-liveness-policy'
 import { WebSocketTransport } from './rpc/ws-transport'
 import { readWsFallbackPort, writeWsFallbackPort } from './rpc/ws-fallback-port-store'
 import type { WebSocket } from 'ws'
@@ -76,6 +77,8 @@ type OrcaRuntimeRpcServerOptions = {
   webClientRoot?: string
   // Why: test-only overrides for the two constants below; production must not pass these (defaults set by §3.1).
   keepaliveIntervalMs?: number
+  socketIdleTimeoutMs?: number
+  worktreeRemoveKeepaliveMaxMs?: number
   longPollCap?: number
   // Why: test-only override for the ownership reclaim cadence.
   metadataOwnershipPollMs?: number
@@ -498,6 +501,8 @@ export class OrcaRuntimeRpcServer {
   private stopping = false
   private readonly authToken = randomBytes(24).toString('hex')
   private readonly keepaliveIntervalMs: number
+  private readonly socketIdleTimeoutMs: number | undefined
+  private readonly worktreeRemoveKeepaliveMaxMs: number | undefined
   private readonly longPollCap: number
   private readonly metadataOwnershipPollMs: number
   private readonly askLongPollCap: number
@@ -548,6 +553,8 @@ export class OrcaRuntimeRpcServer {
     exposeNetworkByDefault = false,
     webClientRoot,
     keepaliveIntervalMs = KEEPALIVE_INTERVAL_MS,
+    socketIdleTimeoutMs,
+    worktreeRemoveKeepaliveMaxMs,
     longPollCap = LONG_POLL_CAP,
     metadataOwnershipPollMs = RUNTIME_METADATA_OWNERSHIP_POLL_MS
   }: OrcaRuntimeRpcServerOptions) {
@@ -562,6 +569,8 @@ export class OrcaRuntimeRpcServer {
     this.exposeNetworkByDefault = exposeNetworkByDefault
     this.webClientRoot = webClientRoot
     this.keepaliveIntervalMs = keepaliveIntervalMs
+    this.socketIdleTimeoutMs = socketIdleTimeoutMs
+    this.worktreeRemoveKeepaliveMaxMs = worktreeRemoveKeepaliveMaxMs
     this.longPollCap = longPollCap
     this.metadataOwnershipPollMs = metadataOwnershipPollMs
     // Why: derived, not configurable — the reservation must hold for whatever cap a caller picks.
@@ -1140,7 +1149,8 @@ export class OrcaRuntimeRpcServer {
     const socketTransport = new UnixSocketTransport({
       endpoint: transportMeta.endpoint,
       kind: transportMeta.kind as 'unix' | 'named-pipe',
-      keepaliveIntervalMs: this.keepaliveIntervalMs
+      keepaliveIntervalMs: this.keepaliveIntervalMs,
+      idleTimeoutMs: this.socketIdleTimeoutMs
     })
 
     // Why: the `.catch` guarantees reply() always fires so a throw can't strand the client or leak the AbortController.
@@ -1542,6 +1552,14 @@ export class OrcaRuntimeRpcServer {
     if (longPoll) {
       // Why: arm keepalive only for long-polls; short RPCs never create the setInterval. See §3.1.
       context?.startKeepalive()
+    } else {
+      const maxKeepaliveMs = boundedDispatchKeepaliveMs(
+        request.method,
+        this.worktreeRemoveKeepaliveMaxMs
+      )
+      if (maxKeepaliveMs !== null) {
+        context?.startKeepalive(maxKeepaliveMs)
+      }
     }
 
     try {

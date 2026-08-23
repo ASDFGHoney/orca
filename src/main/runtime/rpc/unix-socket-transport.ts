@@ -9,7 +9,7 @@ import { chmodSync, existsSync, rmSync } from 'node:fs'
 import type { RpcMessageContext, RpcTransport } from './transport'
 
 const MAX_RUNTIME_RPC_MESSAGE_BYTES = 1024 * 1024
-const RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS = 30_000
+export const RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS = 30_000
 const MAX_RUNTIME_RPC_CONNECTIONS = 32
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 10_000
 
@@ -21,6 +21,7 @@ export type UnixSocketTransportOptions = {
   // the client honours them, the client-side idle timer. Tests override this
   // to avoid waiting 10 s for a frame.
   keepaliveIntervalMs?: number
+  idleTimeoutMs?: number
 }
 
 type MessageHandler = (
@@ -33,14 +34,16 @@ export class UnixSocketTransport implements RpcTransport {
   private readonly endpoint: string
   private readonly kind: 'unix' | 'named-pipe'
   private readonly keepaliveIntervalMs: number
+  private readonly idleTimeoutMs: number
   private server: Server | null = null
   private messageHandler: MessageHandler | null = null
   private readonly activeSockets = new Set<Socket>()
 
-  constructor({ endpoint, kind, keepaliveIntervalMs }: UnixSocketTransportOptions) {
+  constructor({ endpoint, kind, keepaliveIntervalMs, idleTimeoutMs }: UnixSocketTransportOptions) {
     this.endpoint = endpoint
     this.kind = kind
     this.keepaliveIntervalMs = keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS
+    this.idleTimeoutMs = idleTimeoutMs ?? RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS
   }
 
   onMessage(handler: MessageHandler): void {
@@ -116,7 +119,7 @@ export class UnixSocketTransport implements RpcTransport {
 
     socket.setEncoding('utf8')
     socket.setNoDelay(true)
-    socket.setTimeout(RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS, () => {
+    socket.setTimeout(this.idleTimeoutMs, () => {
       socket.destroy()
     })
     socket.on('error', () => {
@@ -163,6 +166,20 @@ export class UnixSocketTransport implements RpcTransport {
   private dispatchMessage(socket: Socket, rawMessage: string, inflight: Set<() => void>): void {
     let replied = false
     let keepaliveTimer: NodeJS.Timeout | null = null
+    let keepaliveExpiryTimer: NodeJS.Timeout | null = null
+    let requestId = 'unknown'
+    let requestMethod = 'unknown'
+    try {
+      const request = JSON.parse(rawMessage) as { id?: unknown; method?: unknown }
+      if (typeof request.id === 'string' && request.id.length > 0) {
+        requestId = request.id
+      }
+      if (typeof request.method === 'string' && request.method.length > 0) {
+        requestMethod = request.method
+      }
+    } catch {
+      // Request validation remains owned by the RPC server.
+    }
     // Why: each dispatch needs its own abort signal and keepalive timer
     // cleanup. Socket close runs every cleanup without touching sibling
     // dispatches that already replied on the same connection.
@@ -176,6 +193,10 @@ export class UnixSocketTransport implements RpcTransport {
       if (keepaliveTimer) {
         clearInterval(keepaliveTimer)
         keepaliveTimer = null
+      }
+      if (keepaliveExpiryTimer) {
+        clearTimeout(keepaliveExpiryTimer)
+        keepaliveExpiryTimer = null
       }
       if (abort) {
         abortController.abort()
@@ -196,7 +217,7 @@ export class UnixSocketTransport implements RpcTransport {
       }
     }
 
-    const startKeepalive = (): void => {
+    const startKeepalive = (maxDurationMs?: number): void => {
       if (keepaliveTimer || replied) {
         return
       }
@@ -210,6 +231,23 @@ export class UnixSocketTransport implements RpcTransport {
       // Why: don't hold the process open solely on the keepalive interval.
       if (typeof keepaliveTimer.unref === 'function') {
         keepaliveTimer.unref()
+      }
+      if (maxDurationMs !== undefined) {
+        keepaliveExpiryTimer = setTimeout(() => {
+          keepaliveExpiryTimer = null
+          reply(
+            JSON.stringify({
+              id: requestId,
+              ok: false,
+              error: {
+                code: 'runtime_timeout',
+                message: `The runtime stopped waiting for ${requestMethod} before it completed.`,
+                data: { requestPhase: 'awaiting_response', method: requestMethod }
+              }
+            })
+          )
+        }, maxDurationMs)
+        keepaliveExpiryTimer.unref?.()
       }
     }
 

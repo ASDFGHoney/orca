@@ -1,0 +1,122 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import { OrcaRuntimeService } from './orca-runtime'
+import { readRuntimeMetadata } from './runtime-metadata'
+import { openFramedSession, waitFor } from './runtime-rpc-test-harness'
+import { OrcaRuntimeRpcServer } from './runtime-rpc'
+
+function createRemovalGate(runtime: OrcaRuntimeService) {
+  let release: (() => void) | null = null
+  let completed = false
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const removeManagedWorktree = vi
+    .spyOn(runtime, 'removeManagedWorktree')
+    .mockImplementation(async () => {
+      await gate
+      completed = true
+      return {}
+    })
+  return {
+    release: () => release?.(),
+    completed: () => completed,
+    removeManagedWorktree
+  }
+}
+
+function startRemoval(endpoint: string, authToken: string) {
+  return openFramedSession(endpoint, {
+    id: 'slow-rm',
+    authToken,
+    method: 'worktree.rm',
+    params: {
+      worktree: 'path:/workspace/slow-rm',
+      hostId: 'local',
+      force: true,
+      allowUnverifiedPtyStop: true
+    }
+  })
+}
+
+describe('worktree.rm runtime RPC liveness', () => {
+  it('keeps the local response channel alive until removal returns', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-slow-rm-'))
+    const runtime = new OrcaRuntimeService()
+    const removal = createRemovalGate(runtime)
+    const server = new OrcaRuntimeRpcServer({
+      runtime,
+      userDataPath,
+      socketIdleTimeoutMs: 50,
+      keepaliveIntervalMs: 10,
+      worktreeRemoveKeepaliveMaxMs: 200
+    })
+    await server.start()
+
+    try {
+      const metadata = readRuntimeMetadata(userDataPath)
+      if (!metadata?.authToken || !metadata.transports[0]) {
+        throw new Error('runtime metadata was not written')
+      }
+      expect(metadata.transports[0].kind).toBe(process.platform === 'win32' ? 'named-pipe' : 'unix')
+      const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
+      await waitFor(() => session.frames.filter((frame) => frame._keepalive === true).length >= 2)
+      removal.release()
+      await session.done
+
+      expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)
+      expect(session.frames.filter((frame) => frame.ok !== undefined)).toEqual([
+        expect.objectContaining({ id: 'slow-rm', ok: true })
+      ])
+      expect(removal.completed()).toBe(true)
+      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
+    } finally {
+      removal.release()
+      await server.stop()
+    }
+  })
+
+  it('returns one ambiguous-outcome failure when bounded liveness expires', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-slow-rm-'))
+    const runtime = new OrcaRuntimeService()
+    const removal = createRemovalGate(runtime)
+    const server = new OrcaRuntimeRpcServer({
+      runtime,
+      userDataPath,
+      socketIdleTimeoutMs: 50,
+      keepaliveIntervalMs: 10,
+      worktreeRemoveKeepaliveMaxMs: 60
+    })
+    await server.start()
+
+    try {
+      const metadata = readRuntimeMetadata(userDataPath)
+      if (!metadata?.authToken || !metadata.transports[0]) {
+        throw new Error('runtime metadata was not written')
+      }
+      const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
+      await session.done
+
+      expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)
+      expect(session.frames.filter((frame) => frame.ok !== undefined)).toEqual([
+        expect.objectContaining({
+          id: 'slow-rm',
+          ok: false,
+          error: expect.objectContaining({
+            code: 'runtime_timeout',
+            data: { requestPhase: 'awaiting_response', method: 'worktree.rm' }
+          })
+        })
+      ])
+
+      removal.release()
+      await waitFor(removal.completed)
+      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
+    } finally {
+      removal.release()
+      await server.stop()
+    }
+  })
+})
