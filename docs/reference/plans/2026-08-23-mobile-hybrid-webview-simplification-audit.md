@@ -1,126 +1,180 @@
 # Mobile Hybrid WebView Simplification Audit
 
-- **Status:** Proposed
-- **Scope:** Reduce and validate the hybrid migration before release without
-  changing the existing mobile UI or weakening its security boundaries.
+- **Date:** 2026-08-23
+- **Status:** Reviewed; bounded follow-ups remain
+- **Candidate checkpoint:** `e931b2db07`
+- **Base and `origin/main` checkpoint:** `4c984d4c1b`
+- **Decision record:** [migration record](2026-07-22-mobile-hybrid-webview-single-pr-migration.md)
+- **Release gates:** [remaining-work tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
 
-## Goal
+## Outcome
 
-Determine whether the current implementation is the smallest maintainable
-version of the chosen architecture. Remove proven dead or duplicate code,
-consolidate validation infrastructure, and compare the handwritten bridge with
-smaller designs before completing release certification.
+The chosen stable-shell/Desktop-served-RNW architecture remains justified. The
+audit validated removals and test consolidation opportunities, but did not find
+a safe replacement for the explicit capability and authorization boundary.
 
-The current comparison against `origin/main` contains 1,391 changed files,
-139,997 additions, and 8,427 deletions. Approximately 68,000 additions are
-production or configuration code; tests, validation scripts, and documentation
-account for most of the remainder.
+The proposed generic RPC adapter is rejected. A declarative operation registry
+is approved only as a follow-up that generates mechanical wiring around the
+existing explicit domain adapters and authorization. It is not a prerequisite
+for documentation condensation or release-gate execution.
 
-## Non-Negotiable Constraints
+## Scope and Method
 
-- Preserve the current mobile presentation and user-facing behavior from
-  `main`.
-- Keep the WebView origin isolated and the native bridge capability-based.
-- Do not replace narrow authorization with an unrestricted RPC tunnel.
-- Preserve Direct, Relay, SSH, WSL, folder workspace, mixed-version, iOS, and
-  Android behavior.
-- Do not remove tests until equivalent coverage exists in a consolidated form.
-- Optimize concepts and attack surface, not an arbitrary line-count target.
+The audit reviewed the migration differential, production entry points, package
+and native origin implementations, shared bridge contracts, native broker and
+Desktop execution adapters, route adapters, validation infrastructure, and
+security/lifecycle tests. The checkpoint comparison was 81 commits, 1,396
+files, 140,153 additions, and 8,772 deletions. Those counts describe
+`4c984d4c1b...e931b2db07`; they are not current-main release metrics.
 
-## Parallel Review
+The non-negotiable constraints were:
 
-Use `$orca-cli` to launch headed Codex CLI reviewers with `gpt-5.6-sol`. Review
-workers must be read-only and return file/line evidence, deletion candidates,
-risks, and proposed validation. The primary agent independently verifies every
-finding before changing code.
+- Preserve the existing React Native presentation and behavior.
+- Keep page authority opaque and the private origin network/storage isolated.
+- Preserve exact named operations, per-operation schemas/bounds,
+  reauthorization, gesture mediation, result correlation, and cleanup.
+- Preserve native, folder-workspace, WSL, SSH, Relay, provider-neutral, and
+  mixed-version ownership even where their final matrices remain open.
+- Remove tests only when equivalent or stronger coverage remains.
+- Prefer fewer concepts and a smaller trusted surface over a line-count target.
 
-Run these workstreams in parallel:
+## Reviewed Commit Groups
 
-1. **Reachability and dead code:** cover native-shell and hosted-web entry
-   points currently excluded by the repository Knip configuration.
-2. **Bridge architecture:** review contracts, grants, broker dispatch, request
-   clients, and subscriptions for generated or declarative replacements.
-3. **Duplication and validation infrastructure:** find repeated production
-   logic, fixtures, device launchers, and E2E scenario code that can become
-   shared or table-driven.
-4. **UI and runtime parity:** identify dual-runtime scaffolding and compatibility
-   paths that can be removed without changing presentation or behavior.
-5. **Native and security boundary:** minimize Swift/Kotlin and package-store
-   code while retaining package verification, origin isolation, lifecycle, and
-   rollback guarantees.
+| Area                            | Representative commits                                                             | Review conclusion                                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Initial migration               | `9834f65552`                                                                       | Established package, private-origin, bridge, hosted route, and shared-UI direction; later hardening was required     |
+| Route and presentation parity   | `3feb8bf332`, `abaa3e59bf`, `8cec2462d8`, `ab97f84485`, `d2fbda1d2f`, `e253d13a48` | Shared source and explicit adapters are the durable design; no parallel presentation should return                   |
+| Native authority and privacy    | `328617b8e8`, `8ee4fcdac1`, `d6b8b14c82`, `f2a6a5d8b6`                             | Opaque shell authority and removal of page-owned credentials/package persistence are mandatory                       |
+| Package/cache hardening         | `417197f109` through `0a247f9743`                                                  | Exact parsing, pre-allocation bounds, symlink/path defense, atomic activation, and native parity remain required     |
+| Compatibility and cleanup       | `a7dcd591b9`, `548d8d64aa`, `b1e067a321`, `0a91c04a49`                             | Duplicate UI/prototype removal, bridge v2 policy, corrected rollback, and gated cutover are durable                  |
+| Lifecycle and adversarial proof | `e526780848`, `b2068661f7`, `ed31999634`, `279a1ff68e`                             | Request/subscription lifecycle, response binding, automatic rollback, and hostile-content tests cover distinct risks |
+| Latest-base revival/cutover     | `4a4aaf91b6`, `ce43d114be`                                                         | Production entry remains hybrid-only while native connection/device routes stay owned by the shell                   |
+| Audit and merge checkpoint      | `06f23ec818`, `e931b2db07`                                                         | Audit proposal and latest-main merge are the baseline for the findings below                                         |
 
-### Orca CLI Launch Pattern
+The ranges above are review groupings, not assertions that every intermediate
+commit is independently releasable.
 
-Resolve the session's Orca executable according to the `$orca-cli` skill, then
-load its version-matched guide with `orca skills get orca-cli`. On this macOS
-worktree the current executable is `orca`.
+## Validated Findings
 
-For parallel read-only reviewers in the active checkout:
+### Keep
 
-```text
-orca status --json
-orca terminal create --worktree active --title "Bridge review" --command 'codex --model gpt-5.6-sol' --json
-orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
-orca terminal send --terminal <handle> --text "<bounded read-only review prompt>" --enter --json
-```
+- One shared React Native presentation with native and hosted adapters. The
+  duplicate web presentation and prototype route/contracts are correctly gone.
+- Native-owned pairing, credentials, transport, package verification/cache,
+  private origin, recovery, permissions, device capabilities, settings, and
+  diagnostics.
+- Desktop-owned execution and reauthorization for native, WSL, SSH, Relay,
+  folder/git workspace, filesystem, Git/provider, terminal, and session work.
+- Exact bridge v2, capability negotiation for additive changes/new stream
+  opcodes, and the two-stable-mobile-release floor-retention policy.
+- Content-addressed authenticated packages, independent native verification,
+  atomic host-scoped active/previous generations, strict CSP/navigation/storage
+  isolation, and bounded exact parsing.
+- Explicit domain adapters and cleanup paths for workspace, session, terminal,
+  files, source control/review, tasks, accounts, browser, native chat, and native
+  capabilities.
 
-Repeat with distinct titles and prompts for each workstream. Read results with
-cursor-based `orca terminal read` calls. Do not send the same task to multiple
-handles accidentally.
+### Confirmed simplifications
 
-For approved implementation tasks, create isolated child worktrees and launch
-the requested model explicitly because `worktree create --agent codex` cannot
-select a Codex-specific model:
+- Hosted code no longer imports native authority implementations; platform
+  modules are aliased to disabled page stubs where required by bundling.
+- Prototype and retired route/contract names are guarded from production roots.
+- Duplicate React Native Web presentation code was removed instead of retained
+  behind a switch.
+- Bridge request/envelope limits and native-source assertions are aligned.
+- Cache symlink, path, exact-JSON, scalar, Unicode, size, and parser hardening
+  closes concrete native divergence rather than adding generic abstraction.
+- Android root-route/session/handshake fixes, SSH transcript execution-owner
+  repair, and packaged resource lookup validation address real boundary defects.
+- Repeated roundtrip test setup and confirmed unreachable exports/files can be
+  consolidated or removed without weakening production behavior when their
+  focused validation remains.
 
-```text
-orca worktree create --name <task-name> --parent-worktree active --json
-orca terminal create --worktree id:<repoId>::<newWorktreePath> --title <task-name> --command 'codex --model gpt-5.6-sol' --json
-orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
-orca terminal send --terminal <handle> --text "<bounded implementation prompt>" --enter --json
-```
+### Do not collapse
 
-Only implementation workstreams with disjoint ownership may edit in parallel.
-The primary agent reviews diffs, resolves shared-contract decisions, and runs
-the integrated validation matrix.
+- Native capability execution and Desktop workspace execution are different
+  trust boundaries even when both use the same page transport envelope.
+- Package delivery RPC is separate from page capability dispatch.
+- Terminal streaming, native-chat subscriptions, ordinary request/response,
+  and gesture-bound native actions have different lifecycle rules.
+- iOS and Android origin/cache implementations may share contracts and corpora,
+  but their platform enforcement remains explicit.
+- Desktop package rollback and native-shell/store correction are independent
+  operational procedures.
 
-## Architecture Comparison
+## Rejected Generic-RPC Design
 
-Evaluate representative Tasks, Files, and Session slices under three designs:
+The proposed smaller adapter would preserve more of `RpcClient` behind a method
+allowlist. It is rejected because the allowlist proves only a method name. It
+does not, by itself, preserve:
 
-1. The current handwritten capability bridge.
-2. The same authorization model driven by one declarative operation registry
-   that generates clients, grants, schemas, and dispatch wiring.
-3. A smaller transport adapter that preserves more of the existing `RpcClient`
-   interface behind a strict method allowlist.
+- operation-specific page request and result schemas;
+- pre-allocation collection, string, binary, and envelope limits;
+- opaque host/build/shell/workspace/stream authority binding;
+- destructive mutation reauthorization after asynchronous host resolution;
+- foreground, route, permission, and recent-gesture mediation;
+- request/result identity and delayed-response correlation;
+- subscription ownership, cancellation, invalid-event retirement, and
+  reconnect resnapshot;
+- provider, Git, filesystem, terminal, WSL, SSH, and Relay execution ownership.
 
-Compare production lines, manually synchronized declarations, trusted code
-size, failure handling, compatibility, test burden, and security properties.
-Reject a smaller design if it broadens page authority or moves credentials into
-the WebView.
+Wrapping arbitrary `sendRequest(method, params)` would broaden page authority
+and the trusted parsing surface. Generic `rpc.call`, native `invoke`, and raw
+transport/stream passthrough remain forbidden even if their method names are
+allowlisted.
 
-## Execution Checklist
+## Declarative Registry Decision
 
-- [ ] Record exact `main` and candidate commits and regenerate the diff
-      breakdown.
-- [ ] Add migration entry points to a dead-code/reachability audit.
-- [ ] Run and independently validate the parallel reviews.
-- [ ] Remove confirmed dead files, exports, routes, and compatibility paths.
-- [ ] Consolidate duplicate contracts, clients, dispatch, fixtures, and device
-      scenarios where behavior remains explicit.
-- [ ] Prototype the best smaller bridge design on representative feature
-      slices and record the decision.
-- [ ] Apply approved reductions in bounded, reviewable commits.
-- [ ] Re-run typechecks, lint, unit/integration tests, package verification,
-      emulator parity, security probes, and release gates.
-- [ ] Publish before/after measurements and residual risks in the PR.
+A declarative registry is an approved non-blocking follow-up if it reduces
+manual synchronization without changing authority. It may define or generate
+mechanical operation metadata, typed page clients, grant/schema associations,
+dispatch tables, compatibility declarations, and invariant tests.
 
-## Completion Criteria
+It must not generate or hide authorization decisions. Each domain retains an
+explicit adapter that resolves opaque authority, checks the current execution
+host and provider/workspace context, reauthorizes mutations, mediates native
+gesture/permission state, applies result-specific bounds, and owns cleanup.
+Generated output must remain reviewable, deterministic, exact-v2 compatible,
+and covered by the existing malformed/lifecycle corpora. Prototype this on
+Tasks, Files, and Session before any broad conversion.
 
-- Every retained subsystem has a reachable production entry point or a
-  documented release-validation purpose.
-- One source of truth defines each bridge operation and its schemas, limits,
-  authorization, and compatibility behavior.
-- No unexplained duplicate production implementations remain.
-- The current-main differential parity and security suites pass unchanged.
-- The PR records why the resulting architecture was chosen over the smaller
-  alternatives, not merely that CI passed.
+## Sibling Workstreams
+
+Sibling refs are evidence under review, not changes in this worktree:
+
+| Workstream                  | Current ref at audit update | Finding or defect being addressed                                                                                                                                   | Integration state                                                |
+| --------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `mobile_dead_code`          | `d9f1f11c24`                | Missing mobile reachability audit plus confirmed unreachable provider types, SSH artifact writer, duplicate terminal-file alias, unused exports, and stale fixtures | Commit exists on sibling ref; not integrated here                |
+| `mobile_validation_cleanup` | `05ca72d1a9`                | Ten bridge roundtrip tests duplicate broker/client parsing and lifecycle setup                                                                                      | Shared fixture commit exists on sibling ref; not integrated here |
+| `mobile_security_boundary`  | `288653ff41`                | iOS host-cache root symlinks could redirect cleanup, staging, session, or removal work outside the cache; add an exact tree boundary and adversarial Swift coverage | Fix exists on sibling ref; not integrated here                   |
+| `mobile_parity_cutover`     | `e931b2db07`                | Audit remaining dual-runtime/cutover scaffolding and parity defects without changing presentation                                                                   | No sibling commit observed; outcome pending                      |
+
+Integration must review each sibling diff from this worktree's base, preserve
+SSH/folder/provider compatibility, run its declared validation, and avoid
+double-applying overlapping contract changes. This audit does not claim sibling
+fixes landed in the candidate.
+
+## Living Checklist
+
+- [x] Record exact audit base, candidate, differential, and representative
+      commits.
+- [x] Preserve durable architecture, security, compatibility, ownership, and
+      rollback decisions in the migration record.
+- [x] Reject the generic-RPC/native-invocation design.
+- [x] Approve declarative mechanical wiring only as an explicit-domain-adapter
+      follow-up.
+- [x] Identify confirmed dead-code and repeated-test-fixture reductions on
+      sibling refs without claiming integration.
+- [ ] Review and integrate approved sibling commits with focused tests and
+      current-base conflict analysis.
+- [ ] Review the iOS host-root boundary fix, complete the remaining security
+      and parity-cutover sibling audits, and record accepted/rejected findings
+      with file/commit evidence.
+- [ ] Prototype the declarative registry on Tasks, Files, and Session; compare
+      trusted code, declarations, compatibility, lifecycle behavior, and tests.
+- [ ] Rerun package verification, typecheck/lint, bridge/cache/security suites,
+      Direct/SSH hosted E2E, emulator parity, and diff hygiene after integrated
+      simplifications.
+- [ ] Keep the [release-gate tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
+      current; do not promote simulator/local evidence into physical, store,
+      production cloud Relay, mixed-version, performance, or App Review proof.
