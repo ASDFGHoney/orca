@@ -25,6 +25,9 @@ export type StructuredAgentSessionHostDeps = {
   journalRoot: string
   claimKeyId: string
   probeOwner?: (record: AgentSessionRecord) => Promise<AgentSessionOwnerProbe>
+  probeOwners?: (
+    records: readonly AgentSessionRecord[]
+  ) => Promise<Map<string, AgentSessionOwnerProbe>>
   /** Recovery-exit stop requests only; a lease moves only on a later proven-absent probe. */
   stopOwnerProcess?: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void
   /** Host spawn-token process scan; null means the platform cannot enumerate, never "none". */

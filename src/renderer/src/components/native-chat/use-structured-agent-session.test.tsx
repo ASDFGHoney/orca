@@ -97,7 +97,8 @@ describe('useStructuredAgentSession options', () => {
       useStructuredAgentSession({
         sessionId: 'session-1',
         target: LOCAL_TARGET,
-        agent: 'codex'
+        agent: 'codex',
+        isVisible: true
       })
     )
     await waitFor(() => expect(result.current.optionSnapshot).toHaveLength(2))
@@ -128,7 +129,8 @@ describe('useStructuredAgentSession options', () => {
       useStructuredAgentSession({
         sessionId: 'session-1',
         target: LOCAL_TARGET,
-        agent: 'codex'
+        agent: 'codex',
+        isVisible: true
       })
     )
     await waitFor(() => expect(result.current.optionSnapshot).toHaveLength(2))
@@ -174,7 +176,8 @@ describe('useStructuredAgentSession options', () => {
       useStructuredAgentSession({
         sessionId: 'session-1',
         target: LOCAL_TARGET,
-        agent: 'codex'
+        agent: 'codex',
+        isVisible: true
       })
     )
     await waitFor(() => expect(result.current.optionSnapshot).toHaveLength(2))
@@ -228,7 +231,8 @@ describe('useStructuredAgentSession options', () => {
       useStructuredAgentSession({
         sessionId: 'session-1',
         target: LOCAL_TARGET,
-        agent: 'codex'
+        agent: 'codex',
+        isVisible: true
       })
     )
     await waitFor(() => expect(result.current.optionSnapshot).toHaveLength(2))
@@ -273,7 +277,8 @@ describe('useStructuredAgentSession options', () => {
       useStructuredAgentSession({
         sessionId: 'session-1',
         target: LOCAL_TARGET,
-        agent: 'codex'
+        agent: 'codex',
+        isVisible: true
       })
     )
     await waitFor(() => expect(result.current.optionSnapshot).toHaveLength(2))
