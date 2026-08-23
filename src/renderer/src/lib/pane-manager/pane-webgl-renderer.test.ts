@@ -5,6 +5,7 @@ import {
   attachWebgl,
   clearTerminalWebglAttachBackoff,
   presentPaneViewport,
+  presentPaneViewportPreservingSynchronizedOutput,
   resetTerminalWebglSuggestion,
   resetWebglTextureAtlas
 } from './pane-webgl-renderer'
@@ -202,6 +203,31 @@ describe('terminal WebGL addon lifecycle', () => {
     expect(pane.terminal.refresh).toHaveBeenCalledWith(0, 23)
     expect(refreshRows).not.toHaveBeenCalled()
     expect(renderRows).not.toHaveBeenCalled()
+  })
+
+  it('preserves a synchronized frame on an ordinary reveal present', () => {
+    const refreshRows = vi.fn()
+    const renderRows = vi.fn()
+    const pane = createPane()
+    pane.terminal = {
+      ...pane.terminal,
+      refresh: vi.fn(),
+      _core: {
+        _renderService: {
+          _isPaused: false,
+          _needsFullRefresh: false,
+          refreshRows,
+          _renderer: { value: { renderRows } }
+        },
+        coreService: { decPrivateModes: { synchronizedOutput: true } }
+      }
+    } as never
+
+    presentPaneViewportPreservingSynchronizedOutput(pane)
+
+    expect(refreshRows).toHaveBeenCalledWith(0, 23, true)
+    expect(renderRows).not.toHaveBeenCalled()
+    expect(pane.terminal.refresh).not.toHaveBeenCalled()
   })
 
   it('keeps the render pause latched when resetting a pane that has no layout box', () => {

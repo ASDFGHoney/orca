@@ -54,7 +54,12 @@ type RevealProbeWindow = Window & {
   __syncRevealProbe?: {
     paintFrame: (marker: string, background: number, release: boolean) => Promise<void>
     forceRendererPresent: () => void
-    read: () => { atlasClears: number; screen: string; synchronizedOutput: boolean }
+    read: () => {
+      atlasClears: number
+      fullViewportRenderRows: number
+      screen: string
+      synchronizedOutput: boolean
+    }
   }
 }
 
@@ -246,10 +251,18 @@ async function installSynchronizedRevealProbe(page: Page, tabId: string): Promis
     }
 
     let atlasClears = 0
+    let fullViewportRenderRows = 0
     const originalClear = addon.clearTextureAtlas.bind(addon)
     addon.clearTextureAtlas = () => {
       atlasClears += 1
       originalClear()
+    }
+    const originalRenderRows = renderer.renderRows.bind(renderer)
+    renderer.renderRows = (start: number, end: number) => {
+      if (start === 0 && end >= terminal.rows - 1) {
+        fullViewportRenderRows += 1
+      }
+      originalRenderRows(start, end)
     }
 
     const paintFrame = (marker: string, background: number, release: boolean): Promise<void> => {
@@ -279,6 +292,7 @@ async function installSynchronizedRevealProbe(page: Page, tabId: string): Promis
       forceRendererPresent: () => renderer.renderRows?.(0, terminal.rows - 1),
       read: () => ({
         atlasClears,
+        fullViewportRenderRows,
         screen: pane.serializeAddon?.serialize?.() ?? '',
         synchronizedOutput: modes.synchronizedOutput === true
       })
@@ -319,6 +333,12 @@ async function readSynchronizedRevealProbe(page: Page) {
     }
     return probe.read()
   })
+}
+
+async function captureFirstRevealedFrame(page: Page, tabId: string): Promise<Buffer> {
+  const screen = page.locator(`[data-terminal-tab-id="${tabId}"] .xterm-screen`).first()
+  await expect(screen).toBeVisible()
+  return screen.screenshot({ animations: 'disabled' })
 }
 
 test.describe('terminal reveal paused-render recovery', () => {
@@ -405,13 +425,12 @@ test.describe('terminal reveal paused-render recovery', () => {
     ).toBe(true)
   })
 
-  test('@headful tab reveal presents a synchronized-output WebGL frame', async ({
+  test('@headful atlas recovery presents a synchronized-output WebGL frame', async ({
     orcaPage
   }, testInfo) => {
     await waitForSessionReady(orcaPage)
     await waitForActiveTerminalManager(orcaPage)
     const tabId = (await getActiveTabId(orcaPage))!
-    const worktreeId = (await getActiveWorktreeId(orcaPage))!
     await forceWebglOn(orcaPage, tabId)
     const webglAttached = await orcaPage
       .waitForFunction(
@@ -436,19 +455,6 @@ test.describe('terminal reveal paused-render recovery', () => {
       background: 17,
       release: true
     })
-    const siblingTabId = await orcaPage.evaluate((worktreeId) => {
-      const state = window.__store?.getState()
-      if (!state) {
-        throw new Error('Renderer store unavailable')
-      }
-      return state.createTab(worktreeId, undefined, undefined, { activate: false }).id
-    }, worktreeId)
-    await orcaPage.evaluate(
-      (siblingTabId) => window.__store?.getState().setActiveTab(siblingTabId),
-      siblingTabId
-    )
-    await expect(orcaPage.locator(`[data-terminal-tab-id="${tabId}"]`)).toBeHidden()
-
     await callSynchronizedRevealProbe(orcaPage, 'paintFrame', {
       marker: 'REVEALED_FRAME',
       background: 52,
@@ -458,8 +464,9 @@ test.describe('terminal reveal paused-render recovery', () => {
     expect(held.synchronizedOutput).toBe(true)
     expect(held.screen).toContain('REVEALED_FRAME')
 
-    await orcaPage.evaluate((tabId) => window.__store?.getState().setActiveTab(tabId), tabId)
-    await expect.poll(() => getActiveTabId(orcaPage)).toBe(tabId)
+    await orcaPage.evaluate((tabId) => {
+      window.__paneManagers?.get(tabId)?.scheduleRevealRepaint?.()
+    }, tabId)
     await expect
       .poll(async () => (await readSynchronizedRevealProbe(orcaPage)).atlasClears)
       .toBeGreaterThan(0)
@@ -493,6 +500,157 @@ test.describe('terminal reveal paused-render recovery', () => {
     expect(
       diff.matches,
       `revealed pixels already match a forced buffer present (diffRatio=${diff.diffRatio})`
+    ).toBe(true)
+  })
+
+  test('@headful reveal preserves the coherent frame until synchronized output releases', async ({
+    orcaPage
+  }, testInfo) => {
+    await waitForSessionReady(orcaPage)
+    await waitForActiveTerminalManager(orcaPage)
+    const tabId = (await getActiveTabId(orcaPage))!
+    const worktreeId = (await getActiveWorktreeId(orcaPage))!
+    await forceWebglOn(orcaPage, tabId)
+    const webglAttached = await orcaPage
+      .waitForFunction(
+        (tabId) =>
+          (window.__paneManagers?.get(tabId)?.getRenderingDiagnostics?.() ?? []).some(
+            (diagnostic) => diagnostic.hasWebgl
+          ),
+        tabId,
+        { timeout: 15_000 }
+      )
+      .then(() => true)
+      .catch(() => false)
+    test.skip(!webglAttached, 'WebGL renderer is unavailable')
+    if (!webglAttached) {
+      return
+    }
+    expect(await installSynchronizedRevealProbe(orcaPage, tabId)).toBe(true)
+
+    await callSynchronizedRevealProbe(orcaPage, 'paintFrame', {
+      marker: 'COHERENT_FRAME',
+      background: 17,
+      release: true
+    })
+    const coherent = await captureStableTabScreenshot(orcaPage, tabId)
+    const beforeHide = await readSynchronizedRevealProbe(orcaPage)
+    const siblingTabId = await orcaPage.evaluate((worktreeId) => {
+      const state = window.__store?.getState()
+      if (!state) {
+        throw new Error('Renderer store unavailable')
+      }
+      return state.createTab(worktreeId, undefined, undefined, { activate: false }).id
+    }, worktreeId)
+    await orcaPage.evaluate(
+      (siblingTabId) => window.__store?.getState().setActiveTab(siblingTabId),
+      siblingTabId
+    )
+    await expect(orcaPage.locator(`[data-terminal-tab-id="${tabId}"]`)).toBeHidden()
+
+    await callSynchronizedRevealProbe(orcaPage, 'paintFrame', {
+      marker: 'PENDING_FRAME',
+      background: 52,
+      release: false
+    })
+    await orcaPage.evaluate((tabId) => window.__store?.getState().setActiveTab(tabId), tabId)
+    await expect.poll(() => getActiveTabId(orcaPage)).toBe(tabId)
+    const held = await captureFirstRevealedFrame(orcaPage, tabId)
+    const heldState = await readSynchronizedRevealProbe(orcaPage)
+    const heldDiff = compareTerminalScreenshots(coherent, held)
+
+    expect(heldState.synchronizedOutput).toBe(true)
+    expect(heldState.screen).toContain('PENDING_FRAME')
+    expect(heldState.atlasClears - beforeHide.atlasClears, 'ordinary reveal atlas clears').toBe(0)
+    expect(
+      heldDiff.matches,
+      `held reveal preserves the coherent frame (diffRatio=${heldDiff.diffRatio})`
+    ).toBe(true)
+
+    await callSynchronizedRevealProbe(orcaPage, 'paintFrame', {
+      marker: 'PENDING_FRAME',
+      background: 52,
+      release: true
+    })
+    const released = await captureStableTabScreenshot(orcaPage, tabId)
+    const releaseState = await readSynchronizedRevealProbe(orcaPage)
+    await callSynchronizedRevealProbe(orcaPage, 'forceRendererPresent')
+    const direct = await captureStableTabScreenshot(orcaPage, tabId)
+    const releasedDiff = compareTerminalScreenshots(released, direct)
+
+    await callSynchronizedRevealProbe(orcaPage, 'paintFrame', {
+      marker: 'WATCHDOG_FRAME',
+      background: 88,
+      release: false
+    })
+    const beforeWatchdog = await readSynchronizedRevealProbe(orcaPage)
+    await orcaPage.evaluate((tabId) => {
+      window.__paneManagers?.get(tabId)?.scheduleRevealPresent?.()
+    }, tabId)
+    await expect
+      .poll(async () => (await readSynchronizedRevealProbe(orcaPage)).synchronizedOutput, {
+        timeout: 2_500
+      })
+      .toBe(false)
+    const watchdog = await captureStableTabScreenshot(orcaPage, tabId)
+    const watchdogState = await readSynchronizedRevealProbe(orcaPage)
+    await callSynchronizedRevealProbe(orcaPage, 'forceRendererPresent')
+    const watchdogDirect = await captureStableTabScreenshot(orcaPage, tabId)
+    const watchdogDiff = compareTerminalScreenshots(watchdog, watchdogDirect)
+    const coherentPath = testInfo.outputPath('synchronized-coherent-before-hide.png')
+    const heldPath = testInfo.outputPath('synchronized-coherent-while-held.png')
+    const releasedPath = testInfo.outputPath('synchronized-new-frame-after-release.png')
+    const watchdogPath = testInfo.outputPath('synchronized-new-frame-after-watchdog.png')
+    const metricsPath = testInfo.outputPath('synchronized-prevention-metrics.json')
+    const counts = (state: Awaited<ReturnType<typeof readSynchronizedRevealProbe>>) => ({
+      atlasClears: state.atlasClears,
+      fullViewportRenderRows: state.fullViewportRenderRows,
+      synchronizedOutput: state.synchronizedOutput
+    })
+    await Promise.all([
+      writeFile(coherentPath, coherent),
+      writeFile(heldPath, held),
+      writeFile(releasedPath, released),
+      writeFile(watchdogPath, watchdog),
+      writeFile(
+        metricsPath,
+        JSON.stringify(
+          {
+            beforeHide: counts(beforeHide),
+            heldState: counts(heldState),
+            releaseState: counts(releaseState),
+            beforeWatchdog: counts(beforeWatchdog),
+            watchdogState: counts(watchdogState),
+            heldDiff,
+            releasedDiff,
+            watchdogDiff
+          },
+          null,
+          2
+        )
+      )
+    ])
+    for (const [name, path] of [
+      ['synchronized-coherent-before-hide.png', coherentPath],
+      ['synchronized-coherent-while-held.png', heldPath],
+      ['synchronized-new-frame-after-release.png', releasedPath],
+      ['synchronized-new-frame-after-watchdog.png', watchdogPath],
+      ['synchronized-prevention-metrics.json', metricsPath]
+    ] as const) {
+      await testInfo.attach(name, {
+        path,
+        contentType: name.endsWith('.json') ? 'application/json' : 'image/png'
+      })
+    }
+    expect(releaseState.synchronizedOutput).toBe(false)
+    expect(
+      releasedDiff.matches,
+      `released frame matches a direct renderer present (diffRatio=${releasedDiff.diffRatio})`
+    ).toBe(true)
+    expect(watchdogState.atlasClears - beforeWatchdog.atlasClears).toBe(0)
+    expect(
+      watchdogDiff.matches,
+      `watchdog frame matches a direct renderer present (diffRatio=${watchdogDiff.diffRatio})`
     ).toBe(true)
   })
 })

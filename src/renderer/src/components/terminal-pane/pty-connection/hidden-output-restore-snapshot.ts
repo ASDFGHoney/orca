@@ -11,7 +11,7 @@ import {
   writeTerminalOutput
 } from '@/lib/pane-manager/pane-terminal-output-scheduler'
 import { recordTerminalOutput } from '@/lib/pane-manager/pane-scroll'
-import { presentPaneViewport } from '@/lib/pane-manager/pane-webgl-renderer'
+import { presentPaneViewportPreservingSynchronizedOutput } from '@/lib/pane-manager/pane-webgl-renderer'
 import {
   buildMainModelSnapshotReplayWrites,
   hasPositiveTerminalDimensions,
@@ -155,7 +155,7 @@ export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession):
           recordTerminalOutput(session.pane.terminal)
           await waitForTerminalReplayWritesParsed(session.pane.terminal)
           if (session.deps.isVisibleRef.current) {
-            presentPaneViewport(session.pane)
+            presentPaneViewportPreservingSynchronizedOutput(session.pane)
             recordTerminalFreezeBreadcrumb('stale-pixel-restore-present', {
               paneId: session.pane.id
             })

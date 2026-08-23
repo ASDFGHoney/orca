@@ -306,8 +306,7 @@ export class PaneManager {
   }
 
   scheduleRevealPresent(): void {
-    // Why: same destroy guard as scheduleRevealRepaint, but presents without
-    // clearing the shared glyph atlas — used by the plain-refocus recovery.
+    // Why: ordinary reveal keeps the coherent canvas until DEC 2026 releases.
     schedulePaneRevealPresent(() => (this.destroyed ? [] : this.panes.values()))
   }
 

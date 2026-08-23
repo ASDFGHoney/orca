@@ -25,10 +25,6 @@ vi.mock('./pane-helpers', () => ({
   fitPanes: vi.fn(),
   focusActivePane: vi.fn()
 }))
-const scheduleTabRevealWebglAtlasRecovery = vi.fn()
-vi.mock('./terminal-webgl-atlas-recovery', () => ({
-  scheduleTabRevealWebglAtlasRecovery: () => scheduleTabRevealWebglAtlasRecovery()
-}))
 const flushDeferredPaneMetricOptionsIfMeasurable = vi.fn((_pane: unknown) => false)
 vi.mock('@/lib/pane-manager/pane-fit', () => ({
   flushDeferredPaneMetricOptionsIfMeasurable: (pane: unknown) =>
@@ -84,17 +80,16 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     repairPaneWebglCanvasDprMismatch.mockReturnValue(false)
   })
 
-  it('schedules a pane-scoped repaint on a light tab reveal', () => {
+  it('schedules an atlas-preserving present on a light tab reveal', () => {
     // The light path is the "click the tab that was not open" gesture: it has
     // no rendering resume or fit, so without this repaint a hidden-while-
     // working pane keeps compositing pre-hide pixels.
     const manager = createManager()
     resumeTerminalVisibility(resumeArgs(manager, true))
 
-    expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealRepaint).not.toHaveBeenCalled()
     expect(manager.scheduleRevealPresent).toHaveBeenCalledTimes(1)
     expect(manager.resumeRendering).not.toHaveBeenCalled()
-    expect(scheduleTabRevealWebglAtlasRecovery).toHaveBeenCalledTimes(1)
   })
 
   it('captures native trim movement before enforcing viewport intent', async () => {

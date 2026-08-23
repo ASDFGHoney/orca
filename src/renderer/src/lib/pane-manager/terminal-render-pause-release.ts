@@ -79,6 +79,41 @@ export function forceRepaintThroughRenderPause(terminal: unknown): boolean {
   }
 }
 
+/**
+ * Requests a full viewport while preserving a TUI's synchronized-output frame.
+ *
+ * Why: ordinary reveal must not publish a half-built DEC 2026 frame. Routing
+ * through RenderService keeps the previous canvas coherent and arms xterm's
+ * bounded safety timeout if the TUI never closes the frame.
+ */
+export function requestFullViewportPresent(terminal: unknown): boolean {
+  const service = getRenderService(terminal)
+  if (!service) {
+    return false
+  }
+  const rows = (terminal as TerminalWithRenderService).rows
+  if (typeof rows !== 'number' || rows < 1) {
+    return false
+  }
+
+  const paused = service._isPaused === true
+  if (!paused && !isSynchronizedOutputHeld(terminal)) {
+    return false
+  }
+
+  if (paused) {
+    service._isPaused = false
+    service._needsFullRefresh = false
+  }
+
+  try {
+    service.refreshRows(0, rows - 1, true)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function getRenderer(service: MaybePausableRenderService): MaybeWebglRenderer | null {
   const holder = service._renderer
   if (!holder) {
@@ -110,8 +145,11 @@ function isSynchronizedOutputHeld(terminal: unknown): boolean {
  */
 export function forceFullViewportPresent(terminal: unknown): boolean {
   const service = getRenderService(terminal)
+  if (!service) {
+    return false
+  }
   const rows = (terminal as TerminalWithRenderService).rows
-  if (!service || typeof rows !== 'number' || rows < 1) {
+  if (typeof rows !== 'number' || rows < 1) {
     return false
   }
 

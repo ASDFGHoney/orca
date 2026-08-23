@@ -14,7 +14,6 @@ import {
   resetTerminalLinkifierHoverState
 } from '@/lib/pane-manager/terminal-linkifier-hover-reset'
 import { focusActivePane } from './pane-helpers'
-import { scheduleTabRevealWebglAtlasRecovery } from './terminal-webgl-atlas-recovery'
 import { flushDeferredPaneMetricOptionsIfMeasurable } from '@/lib/pane-manager/pane-fit'
 import { repairPaneWebglCanvasDprMismatch } from '@/lib/pane-manager/terminal-canvas-dpr-repair'
 import { presentPaneViewport } from '@/lib/pane-manager/pane-webgl-renderer'
@@ -89,12 +88,6 @@ export function resumeTerminalVisibility({
       // overlay's delayed geometry fit. Still request hidden-output recovery:
       // agent TUIs can suppress hidden bytes until the pane is foregrounded.
       requestLightTabBacklogRecovery(manager)
-      // Why: reveal is the lifecycle boundary that owns hidden renderer repair.
-      scheduleTabRevealWebglAtlasRecovery()
-      // Why: the atlas burst often runs while this tab is still display:none
-      // (paused=true needFull=true in the field trace). A present-only pass after
-      // overlay layout rebuilds the WebGL model without a second atlas wipe.
-      manager.scheduleRevealPresent()
       if (flushedDeferredMetrics) {
         // Why: the light path normally skips fitting, but flushed metrics changed
         // cell size — refit so cols/rows match before the overlay settles.
@@ -114,10 +107,15 @@ export function resumeTerminalVisibility({
       // terminals; refresh after reset so rebuilt atlases repaint from xterm.
       resetAndRefreshAllTerminalWebglAtlases('visibility-resume')
     }
-    // Why: the synchronous recovery above can fire before the revealed pane is
-    // attached and laid out. Follow up after layout with one shared-atlas-safe
-    // recovery covering every visible terminal manager.
-    manager.scheduleRevealRepaint()
+    if (shouldUseLightTabResume) {
+      // Why: preserve the last coherent frame while a TUI holds DEC 2026. The
+      // settled refresh arms xterm's watchdog without clearing shared GPU data.
+      manager.scheduleRevealPresent()
+    } else {
+      // Why: rendering was recreated, so the heavy path still needs the proven
+      // shared-atlas recovery after layout settles.
+      manager.scheduleRevealRepaint()
+    }
   })
 }
 

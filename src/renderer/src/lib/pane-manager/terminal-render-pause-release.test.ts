@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   forceFullViewportPresent,
-  forceRepaintThroughRenderPause
+  forceRepaintThroughRenderPause,
+  requestFullViewportPresent
 } from './terminal-render-pause-release'
 
 type FakeRenderService = {
@@ -97,6 +98,10 @@ describe('forceRepaintThroughRenderPause', () => {
 })
 
 describe('forceFullViewportPresent', () => {
+  it('fails closed when xterm internals are unavailable', () => {
+    expect(forceFullViewportPresent(null)).toBe(false)
+  })
+
   it('leaves an unpaused, unsynchronized terminal to the normal refresh path', () => {
     // A forced sync renderRows on first splash paints before cell metrics
     // settle and shows a 1px black gutter under the TUI composer.
@@ -168,5 +173,54 @@ describe('forceFullViewportPresent', () => {
     expect(forceFullViewportPresent(terminal)).toBe(false)
     expect(renderService._isPaused).toBe(false)
     expect(renderService._needsFullRefresh).toBe(false)
+  })
+})
+
+describe('requestFullViewportPresent', () => {
+  it('fails closed when xterm internals are unavailable', () => {
+    expect(requestFullViewportPresent(null)).toBe(false)
+  })
+
+  it('leaves a normal visible terminal on the debounced refresh path', () => {
+    const refreshRows = vi.fn()
+    const terminal = createTerminal({
+      renderService: { _isPaused: false, refreshRows }
+    })
+
+    expect(requestFullViewportPresent(terminal)).toBe(false)
+    expect(refreshRows).not.toHaveBeenCalled()
+  })
+
+  it('routes synchronized output through RenderService instead of the renderer', () => {
+    const refreshRows = vi.fn()
+    const renderRows = vi.fn()
+    const terminal = createTerminal({
+      rows: 24,
+      synchronizedOutput: true,
+      renderService: {
+        _isPaused: false,
+        refreshRows,
+        _renderer: { value: { renderRows } }
+      }
+    })
+
+    expect(requestFullViewportPresent(terminal)).toBe(true)
+    expect(refreshRows).toHaveBeenCalledWith(0, 23, true)
+    expect(renderRows).not.toHaveBeenCalled()
+  })
+
+  it('releases observer pause before requesting the synchronized frame', () => {
+    const refreshRows = vi.fn()
+    const renderService = {
+      _isPaused: true,
+      _needsFullRefresh: true,
+      refreshRows
+    }
+    const terminal = createTerminal({ rows: 30, renderService, synchronizedOutput: true })
+
+    expect(requestFullViewportPresent(terminal)).toBe(true)
+    expect(renderService._isPaused).toBe(false)
+    expect(renderService._needsFullRefresh).toBe(false)
+    expect(refreshRows).toHaveBeenCalledWith(0, 29, true)
   })
 })
