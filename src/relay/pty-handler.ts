@@ -1663,8 +1663,7 @@ export class PtyHandler {
           ...spawnEnv,
           [SHELL_STARTUP_FEATURE_ENV]: '',
           ...shellLaunch.env
-        },
-        ...(process.platform === 'win32' ? { useConptyDll: true } : {})
+        }
       })
     } catch (error) {
       // Why: Windows loads conpty.node only on first spawn, so handle that late binding failure here.
@@ -2261,8 +2260,7 @@ export class PtyHandler {
           ...spawnEnv,
           [SHELL_STARTUP_FEATURE_ENV]: '',
           ...shellLaunch.env
-        },
-        ...(process.platform === 'win32' ? { useConptyDll: true } : {})
+        }
       })
     } catch (error) {
       // Why skip rather than retry the host default shell: the stored override

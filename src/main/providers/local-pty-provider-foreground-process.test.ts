@@ -245,7 +245,6 @@ describe('LocalPtyProvider', () => {
       // agent — no second whole-table scan.
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
       expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(1)
-      expect(readWindowsConptyProcessIdsMock).toHaveBeenCalledWith(12345, { owner: mockProc })
     })
 
     it('falls through to the scan when the ConPTY console shows only the shell', async () => {

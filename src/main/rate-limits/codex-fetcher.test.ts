@@ -266,7 +266,11 @@ describe('fetchCodexRateLimits', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const spawnCwd = ptySpawnMock.mock.calls[0]?.[2]?.cwd as string
-    expect(ptySpawnMock.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true })
+    if (process.platform === 'win32') {
+      expect(ptySpawnMock.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true })
+    } else {
+      expect(ptySpawnMock.mock.calls[0]?.[2]).not.toHaveProperty('useConptyDll')
+    }
     expect(spawnCwd).toContain('rate-limit-pty-cwd')
     expect(spawnCwd).not.toBe('/')
     expect(spawnCwd).not.toMatch(/^[A-Za-z]:\\?$/)

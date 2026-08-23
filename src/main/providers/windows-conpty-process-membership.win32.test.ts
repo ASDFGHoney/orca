@@ -1,6 +1,6 @@
 import type { IPty } from 'node-pty'
 import { afterEach, describe, expect, it } from 'vitest'
-import { WindowsConptyProcessMembershipReader } from './windows-conpty-process-membership'
+import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
 
 const ptys: IPty[] = []
 const detachedPids: number[] = []
@@ -19,14 +19,15 @@ afterEach(() => {
 })
 
 describe.runIf(process.platform === 'win32')('Windows ConPTY process membership', () => {
-  it('keeps results console-scoped across attached and detached children', async () => {
+  it('fails closed for the bundled ConPTY production topology', async () => {
     const nodePty = await import('node-pty')
     const pty = nodePty.spawn('cmd.exe', ['/q', '/d'], {
       cols: 120,
       cwd: process.cwd(),
       env: process.env,
       name: 'xterm-256color',
-      rows: 24
+      rows: 24,
+      useConptyDll: true
     })
     ptys.push(pty)
     const output = waitForOutput(pty, /ATTACHED_PID=(\d+)\s+DETACHED_PID=(\d+)/)
@@ -40,18 +41,9 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY process membership'
     const attachedPid = Number(match[1])
     const detachedPid = Number(match[2])
     detachedPids.push(detachedPid)
-    const reader = new WindowsConptyProcessMembershipReader()
-
-    try {
-      const processIds = await reader.read(pty.pid)
-
-      expect(processIds).not.toBeNull()
-      expect(processIds).toContain(pty.pid)
-      expect(processIds).toContain(attachedPid)
-      expect(processIds).not.toContain(detachedPid)
-    } finally {
-      reader.dispose()
-    }
+    expect(attachedPid).toBeGreaterThan(0)
+    expect(detachedPid).toBeGreaterThan(0)
+    await expect(readWindowsConptyProcessIds(pty.pid)).resolves.toBeNull()
   }, 15_000)
 })
 

@@ -1120,16 +1120,14 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
           return
         }
         if (!processName || !recognizeAgentProcess(processName)) {
-          // Why: a Windows snapshot can omit a live agent; only verified shell-only console membership may retire cached identity.
+          // Why: a Windows snapshot can omit a live agent; only verified shell-only membership may retire cached identity.
           if (process.platform === 'win32' && fallbackIsShell && cachedAgentForeground !== null) {
-            return readWindowsConptyProcessIds(proc.pid, { owner: proc }).then(
-              (consoleProcessIds) => {
-                if (dead || consoleProcessIds === null || consoleProcessIds.size > 1) {
-                  return
-                }
-                retireStaleForegroundIdentity()
+            return readWindowsConptyProcessIds(proc.pid).then((consoleProcessIds) => {
+              if (dead || consoleProcessIds === null || consoleProcessIds.size > 1) {
+                return
               }
-            )
+              retireStaleForegroundIdentity()
+            })
           }
           retireStaleForegroundIdentity()
           return
@@ -1234,8 +1232,7 @@ export async function createPtySubprocess(opts: PtySubprocessOptions): Promise<S
             ...(process.platform === 'win32'
               ? {
                   forceProcessScan: true,
-                  readWindowsConptyProcessIds: () =>
-                    readWindowsConptyProcessIds(proc.pid, { owner: proc })
+                  readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc.pid)
                 }
               : {})
           }

@@ -1408,13 +1408,13 @@ export class LocalPtyProvider implements IPtyProvider {
     )
     const cachedAgent = ptyLastRecognizedForeground.get(id) ?? null
     let consoleMembershipUnavailable = false
-    // Why: console membership preserves a live cached agent without the whole-table scan.
+    // Why: console membership preserves a live cached agent without the whole-table scan (incomplete under Windows load).
     if (
       process.platform === 'win32' &&
       canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
     ) {
       try {
-        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid, { owner: proc })
+        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid)
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
@@ -1480,8 +1480,7 @@ export class LocalPtyProvider implements IPtyProvider {
           ...(process.platform === 'win32'
             ? {
                 forceProcessScan: true,
-                readWindowsConptyProcessIds: () =>
-                  readWindowsConptyProcessIds(proc.pid, { owner: proc })
+                readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc.pid)
               }
             : {})
         }

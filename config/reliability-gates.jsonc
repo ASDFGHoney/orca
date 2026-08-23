@@ -6175,14 +6175,15 @@
         "https://github.com/stablyai/orca/issues/8048",
         "https://github.com/stablyai/orca/issues/10857"
       ],
-      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size. Each PTY host admits at most one foreground-membership conpty_console_list_agent at a time, and it admits no replacement until the prior helper closes.",
-      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. The issue #10857 slice injects 32 distinct stalled membership probes, asserts one real OS helper PID and one fork, then proves timeout and force-terminated-host cleanup leave no helper behind; units independently assert same-owner single-flight, PTY-incarnation isolation, close-before-replacement, bounded pending work, failed-reap admission closure, async spawn recovery, and fail-closed malformed results. All production Windows node-pty spawns select the bundled ConPTY path, removing node-pty's dependency-internal console-list fork. The Electron/CDP golden independently proves rendered shell input/output and Windows environment expansion. Resize, cursor, and CJK/wide-glyph pixel evidence remain broader-gate work.",
+      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size. Bundled-ConPTY foreground reads never fork conpty_console_list_agent and publish no unproved membership. Hidden bundled-ConPTY cleanup terminates the exact PTY job before closing the root, while Windows relay teardown retains node-pty's console reap under the 50-session relay admission bound.",
+      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. The issue #10857 slice injects 32 distinct stalled membership reads and asserts zero forks and zero live OS helpers; disabling the no-fork path creates 32 of each and fails the same assertion. A real bundled-ConPTY probe returns unverifiable rather than publishing stale membership. Hidden PTY units select bundled ConPTY only with native job ownership, and a physical cancellation kills the root plus attached and detached descendants. Relay fresh/revive units retain node-pty's system-ConPTY teardown owner. The Electron/CDP golden independently proves rendered shell input/output and Windows environment expansion. Resize, cursor, and CJK/wide-glyph pixel evidence remain broader-gate work.",
       "commands": [
         "pnpm vitest run src/main/daemon/pty-subprocess.test.ts src/main/daemon/daemon-pty-adapter.test.ts",
         "pnpm build:electron-vite && node config/scripts/windows-daemon-workspace-close-repro.mjs",
         "node config/scripts/windows-daemon-workspace-close-repro.mjs",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/claude-pty.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/hidden-pty-cleanup.test.ts src/main/rate-limits/hidden-pty-cleanup.win32.test.ts src/main/rate-limits/claude-pty.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/rate-limits/codex-pty-spawn-options.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/windows/windows-pty-job.win32.test.ts",
         "pnpm exec playwright test tests/e2e/golden-shell-command.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1"
       ],
@@ -6196,6 +6197,9 @@
         "src/main/providers/local-pty-provider-foreground-process.test.ts",
         "src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts",
         "src/main/rate-limits/claude-pty.test.ts",
+        "src/main/rate-limits/codex-pty-spawn-options.test.ts",
+        "src/main/rate-limits/hidden-pty-cleanup.test.ts",
+        "src/main/rate-limits/hidden-pty-cleanup.win32.test.ts",
         "src/relay/pty-handler-spawn-environment.test.ts",
         "src/relay/pty-handler-revive.test.ts",
         "src/main/windows/windows-pty-job.win32.test.ts",
@@ -6223,23 +6227,19 @@
         },
         {
           "file": "src/main/providers/windows-conpty-process-membership.test.ts",
-          "assertions": [
-            "same-PTY requests single-flight, reused PIDs remain incarnation-scoped, and distinct owners wait for confirmed helper close",
-            "timeouts, async spawn failures, failed reaps, queue pressure, malformed results, and disposal preserve one active plus one queued request and fail closed"
-          ]
+          "assertions": ["foreground membership fails closed without invoking a supplied fork"]
         },
         {
           "file": "src/main/providers/windows-conpty-process-membership.repro.test.ts",
           "assertions": [
-            "32 concurrent distinct-root stalls create exactly one live OS helper process",
-            "all reads settle and the supervised helper is absent after cleanup",
-            "force-terminating a host with an active stalled helper leaves no live helper PID"
+            "32 concurrent distinct-root reads create zero forks and zero live OS helper processes",
+            "the identical disabled arm creates 32 forks and 32 live helpers, then cleans up to zero"
           ]
         },
         {
           "file": "src/main/providers/windows-conpty-process-membership.win32.test.ts",
           "assertions": [
-            "real ConPTY membership includes the attached child and excludes a child launched into another console"
+            "the real bundled-ConPTY topology fails closed instead of publishing unproved attached or detached membership"
           ]
         },
         {
@@ -6247,12 +6247,33 @@
           "assertions": ["the Windows hidden Claude PTY selects bundled ConPTY"]
         },
         {
+          "file": "src/main/rate-limits/codex-pty-spawn-options.test.ts",
+          "assertions": ["the Windows hidden Codex fallback PTY selects bundled ConPTY"]
+        },
+        {
+          "file": "src/main/rate-limits/hidden-pty-cleanup.test.ts",
+          "assertions": [
+            "bundled ConPTY is selected only when native PTY job termination is available",
+            "Windows cleanup terminates the exact PTY job before closing the root"
+          ]
+        },
+        {
+          "file": "src/main/rate-limits/hidden-pty-cleanup.win32.test.ts",
+          "assertions": [
+            "physical cleanup terminates the bundled-ConPTY root plus attached and detached descendants"
+          ]
+        },
+        {
           "file": "src/relay/pty-handler-spawn-environment.test.ts",
-          "assertions": ["a fresh Windows relay PTY selects bundled ConPTY"]
+          "assertions": [
+            "a fresh Windows relay PTY retains node-pty's system-ConPTY teardown owner"
+          ]
         },
         {
           "file": "src/relay/pty-handler-revive.test.ts",
-          "assertions": ["a revived Windows relay PTY selects bundled ConPTY"]
+          "assertions": [
+            "a revived Windows relay PTY retains node-pty's system-ConPTY teardown owner"
+          ]
         },
         {
           "file": "src/main/windows/windows-pty-job.win32.test.ts",
@@ -6283,17 +6304,17 @@
           "platform": "windows",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
           "result": "passed",
-          "durationSeconds": 1.21,
-          "summary": "The physical Windows stall injection observed one live node.exe helper for 32 concurrent distinct roots and zero leftovers after settlement or force-terminated host ownership; ownership units and a real ConPTY attached-versus-detached membership probe also passed."
+          "durationSeconds": 0.46,
+          "summary": "The physical Windows injection observed zero forks and zero helpers for 32 concurrent foreground reads; the real bundled-ConPTY topology returned unverifiable instead of stale membership."
         },
         {
           "date": "2026-08-23",
           "runner": "local",
           "platform": "windows",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/claude-pty.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/hidden-pty-cleanup.test.ts src/main/rate-limits/hidden-pty-cleanup.win32.test.ts src/main/rate-limits/claude-pty.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
           "result": "passed",
-          "durationSeconds": 1.39,
-          "summary": "The local, daemon, Claude, and relay fresh/revive ownership paths passed 81 tests."
+          "durationSeconds": 3.46,
+          "summary": "The local, daemon, hidden cleanup, Claude, and relay fresh/revive ownership paths passed; physical hidden cleanup reaped the root plus attached and detached descendants."
         },
         {
           "date": "2026-08-23",
@@ -6324,11 +6345,11 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. The identical helper-bound oracle observed 32 live helpers on v1.4.158/current main, one on the candidate, and 32 with the candidate's admission owner disabled; cleanup reached zero in every arm. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
+        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. The identical helper oracle observed 32 live helpers on v1.4.158/current main, zero on the candidate, and 32 with the candidate's no-fork behavior disabled; cleanup reached zero in the forking arms. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The membership owner single-flights same-PTY reads, caps distinct-owner subprocess concurrency at one, and retains at most one queued owner; all production Windows node-pty spawns select the bundled ConPTY path so teardown does not fork its own console-list agent. The physical Windows fault injection records fork and live-process counts. Input latency and no broad session listing while typing or switching terminals remain required."
+        "evidence": "Bundled-ConPTY foreground reads create no subprocess. Packaged hidden PTYs use native job ownership and create no teardown helper; the system-ConPTY relay retains node-pty's teardown helper under its fixed 50-session admission bound. Physical Windows injections record foreground fork/live counts and hidden root/descendant cleanup. Input latency and no broad session listing while typing or switching terminals remain required."
       },
       "promotionCriteria": [
         "Start as Windows nightly/soak because Windows Electron E2E has been flaky.",

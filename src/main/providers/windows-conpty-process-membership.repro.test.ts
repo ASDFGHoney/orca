@@ -1,4 +1,4 @@
-import { fork, spawn, type ForkOptions } from 'node:child_process'
+import { fork, type ForkOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import * as membership from './windows-conpty-process-membership'
@@ -6,7 +6,7 @@ import * as membership from './windows-conpty-process-membership'
 const requireFromTest = createRequire(import.meta.url)
 
 describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout reproduction', () => {
-  it('records concurrent OS helpers created before the first timeout', async () => {
+  it('creates no OS helpers for concurrent foreground reads', async () => {
     const fixturePath = requireFromTest.resolve('./fixtures/conpty-console-list-stall.cjs')
     const children: ReturnType<typeof fork>[] = []
     const exits: Promise<void>[] = []
@@ -68,8 +68,8 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout repro
         }
       })
       console.log(JSON.stringify({ osLiveProcessCountAfterSettlement: liveAfterSettlement.length }))
-      expect(children).toHaveLength(1)
-      expect(liveChildren).toHaveLength(1)
+      expect(children).toHaveLength(0)
+      expect(liveChildren).toHaveLength(0)
       expect(liveAfterSettlement).toHaveLength(0)
     } finally {
       reader.dispose()
@@ -78,68 +78,7 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout repro
       }
     }
   }, 10_000)
-
-  it('reaps a stalled helper when its owning host is force-terminated', async () => {
-    const hostPath = requireFromTest.resolve('./fixtures/conpty-console-list-host.cjs')
-    const fixturePath = requireFromTest.resolve('./fixtures/conpty-console-list-stall.cjs')
-    const host = spawn(process.execPath, [hostPath, fixturePath], {
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    let helperPid: number | undefined
-
-    try {
-      helperPid = await readHelperPid(host.stdout)
-      expect(isProcessAlive(helperPid)).toBe(true)
-      process.kill(host.pid!)
-      await waitForProcessExit(helperPid, 3_000)
-      expect(isProcessAlive(helperPid)).toBe(false)
-    } finally {
-      host.kill()
-      if (helperPid && isProcessAlive(helperPid)) {
-        process.kill(helperPid)
-      }
-    }
-  }, 10_000)
 })
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function readHelperPid(stdout: NodeJS.ReadableStream): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let output = ''
-    const timeout = setTimeout(
-      () => reject(new Error(`Host helper PID timed out: ${output}`)),
-      3_000
-    )
-    stdout.on('data', (chunk) => {
-      output += String(chunk)
-      const line = output.split(/\r?\n/, 1)[0]
-      try {
-        const helperPid = JSON.parse(line).helperPid
-        if (Number.isSafeInteger(helperPid) && helperPid > 0) {
-          clearTimeout(timeout)
-          resolve(helperPid)
-        }
-      } catch {
-        // Wait for a complete line.
-      }
-    })
-  })
-}
-
-async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (isProcessAlive(pid) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-}
 
 type Reader = {
   dispose(): void
@@ -153,13 +92,14 @@ type ReaderDeps = {
 }
 
 function createReader(deps: ReaderDeps): Reader {
+  if (process.env.ORCA_TEST_DISABLE_CONPTY_MEMBERSHIP_BOUND === '1') {
+    return createUnboundedReader(deps)
+  }
   const ReaderClass = Reflect.get(membership, 'WindowsConptyProcessMembershipReader') as
     | (new (deps: ReaderDeps) => Reader)
     | undefined
   if (ReaderClass) {
-    return process.env.ORCA_TEST_DISABLE_CONPTY_MEMBERSHIP_BOUND === '1'
-      ? createUnboundedReader(deps)
-      : new ReaderClass(deps)
+    return new ReaderClass(deps)
   }
   const baselineRead = membership.readWindowsConptyProcessIds as unknown as (
     rootPid: number,
