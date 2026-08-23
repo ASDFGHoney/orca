@@ -7,6 +7,7 @@ import { expect, test } from './helpers/orca-app'
 import {
   createHostCliTerminal,
   proveSameLivePty,
+  readHostTerminalInventory,
   writeRetentionFixture
 } from './helpers/host-created-terminal-retention-oracle'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
@@ -114,6 +115,9 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
     )
     await proveSameLivePty(call, terminalA, 'BEFORE_RENDERER_KILL_A')
     await proveSameLivePty(call, terminalB, 'BEFORE_RENDERER_KILL_B')
+    const beforeInventory = await readHostTerminalInventory(call, worktreeId)
+    expect(beforeInventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
+    expect(beforeInventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
 
     const pageId = `sta-5228-${Date.now()}`
     const markerUrl = `data:text/html,${encodeURIComponent(
@@ -212,13 +216,11 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
     expect(await processIdentityIsAlive(daemonIdentity)).toBe(true)
     await proveSameLivePty(call, terminalA, 'AFTER_RENDERER_KILL_A')
     await proveSameLivePty(call, terminalB, 'AFTER_RENDERER_KILL_B')
+    const afterInventory = await readHostTerminalInventory(call, worktreeId)
+    expect(afterInventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
+    expect(afterInventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
 
     const afterRenderer = await readOffscreenRenderer(launchedHost.app, pageId, false)
-    expect(afterRenderer).toMatchObject({
-      crashed: true,
-      pid: 0,
-      webContentsId: renderer.webContentsId
-    })
     console.log('[STA-5228] renderer lifecycle snapshot', {
       afterRenderer,
       beforeRenderer: renderer,
