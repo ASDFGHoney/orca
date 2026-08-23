@@ -338,8 +338,8 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     assertion.stop('agents-idle')
     await settle()
 
-    // The hold survives for cleanup, but the attempt failed — vouching for it
-    // here would let the router drop the caffeinate stand-in.
+    // The session is about to end, so the classification must stop counting as
+    // evidence that anything is holding.
     expect(assertion.getHold()).toBe('owned')
   })
 

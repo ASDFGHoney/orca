@@ -326,9 +326,9 @@ export class MacosAmphetamineSleepAssertion {
       // the user has started a session of their own.
       return false
     }
-    // Stop vouching before the command goes out. The session is about to end, so
-    // a router that still read this hold as live would drop its caffeinate
-    // stand-in and cover nothing until a re-acquire completes.
+    // Stop vouching before the command goes out: the session is about to end, so
+    // the classification is no longer evidence anything is holding. That is what
+    // makes the next start re-attempt rather than short-circuit.
     this.hold.markStale()
     let result: OsascriptResult
     try {

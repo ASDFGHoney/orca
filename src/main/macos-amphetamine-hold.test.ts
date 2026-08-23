@@ -33,8 +33,8 @@ describe('AmphetamineHold', () => {
 
     hold.markStale()
 
-    // The distinction exists because conflating the two let the router drop its
-    // caffeinate stand-in on a hold that had just failed.
+    // The distinction is what lets a failed attempt stay eligible for cleanup
+    // while still being retried rather than treated as settled.
     expect(hold.get()).toBe('owned')
     expect(hold.isOwned()).toBe(true)
     expect(hold.isLive()).toBe(false)

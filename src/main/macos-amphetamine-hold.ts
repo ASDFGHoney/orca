@@ -4,8 +4,8 @@
  * Two questions that look like one and are not, which is why they live together
  * here: *is there something to clean up* (the classification, which survives a
  * failed attempt) and *is anything actually holding right now* (liveness, which
- * does not). Conflating them once let the router drop its caffeinate stand-in on
- * the strength of a hold that had just failed.
+ * does not). Keeping them apart is what lets a failed attempt stay eligible for
+ * cleanup while still being retried rather than treated as settled.
  */
 export type AmphetamineHoldKind = 'owned' | 'adopted' | null
 
