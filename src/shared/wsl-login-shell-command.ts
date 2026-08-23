@@ -42,6 +42,11 @@ export type WslCapturedLoginShellCommand = {
   command: string
   /** Payload the command wrote, or null when the fence never appeared. */
   readStdout: (stdout: string) => string | null
+  // Why exposed: binary reads (`git show` blob content) must slice bytes rather
+  // than decode to a string first, and this module is bundled for the renderer,
+  // so it cannot reference Buffer itself.
+  beginMarker: string
+  endMarker: string
 }
 
 // Why: the fence has to be absent from both the rc output ahead of it and the
@@ -70,6 +75,8 @@ export function buildWslCapturedLoginShellCommand(
   const begin = `__ORCA_WSL_CAPTURE_BEGIN_${nonce}__`
   const end = `__ORCA_WSL_CAPTURE_END_${nonce}__`
   return {
+    beginMarker: begin,
+    endMarker: end,
     command: buildWslLoginShellCommand(
       [
         `printf %s ${quotePosixShell(begin)}`,
@@ -107,7 +114,13 @@ export function buildWslInteractiveLoginShellCommand(): string {
     '  _orca_wsl_shell=/bin/sh',
     'fi',
     '_orca_shell_ready_root=""',
-    'if [ -n "${ORCA_USER_DATA_PATH:-}" ]; then',
+    // Why the explicit root first: the wrapper tree is content-addressed, so its
+    // path carries a hash the guest cannot derive. The host publishes the
+    // resolved root and WSLENV /p-translates it. The ORCA_USER_DATA_PATH branch
+    // stays as the fallback for an older host that exports only that.
+    'if [ -n "${ORCA_SHELL_READY_ROOT:-}" ]; then',
+    '  _orca_shell_ready_root="${ORCA_SHELL_READY_ROOT%/}"',
+    'elif [ -n "${ORCA_USER_DATA_PATH:-}" ]; then',
     '  _orca_shell_ready_root="${ORCA_USER_DATA_PATH%/}/shell-ready"',
     'fi',
     '_orca_wsl_shell_name=$(basename "$_orca_wsl_shell" | tr "[:upper:]" "[:lower:]")',
