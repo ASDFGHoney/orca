@@ -17,6 +17,7 @@
     "audit:code-quality:type-aware": "oxlint --type-aware --config config/oxlint-code-quality-type-aware.json src config tests --deny-warnings",
     "audit:react-doctor": "pnpm dlx react-doctor@0.9.1 . --yes --no-supply-chain --no-telemetry --blocking none",
     "audit:dead-code": "pnpm dlx knip@5.88.1 --config config/knip.json",
+    "audit:dead-code:mobile": "pnpm dlx knip@5.88.1 --directory mobile --config ../config/knip.mobile.json",
     "check:code-quality:changed": "node config/scripts/check-changed-code-quality.mjs",
     "check:react-doctor:changed": "node config/scripts/check-react-doctor-changed.mjs",
     "check:zustand-selector-fanout": "node config/scripts/zustand-selector-fanout-benchmark.mjs --check",

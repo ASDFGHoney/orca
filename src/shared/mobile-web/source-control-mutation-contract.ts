@@ -125,6 +125,3 @@ function validateUniquePaths(
     paths.add(entry.relativePath)
   })
 }
-
-export type MobileWebSourceControlMutationStatus = MobileWebSourceControlMutationEntry['status']
-export type MobileWebSourceControlMutationArea = MobileWebSourceControlMutationEntry['area']

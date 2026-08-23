@@ -193,49 +193,8 @@ export function taskRoundtripHostResponse(method: string): { ok: true; result: u
       }
     }
   }
-  if (method === 'github.prChecks') {
-    return {
-      ok: true,
-      result: [
-        {
-          name: 'Mobile checks',
-          status: 'completed',
-          conclusion: 'success',
-          url: 'https://github.com/stablyai/orca/actions/runs/1'
-        }
-      ]
-    }
-  }
   if (method === 'github.rerunPRChecks') {
     return { ok: true, result: { ok: true } }
-  }
-  if (method === 'github.setPRFileViewed') {
-    return { ok: true, result: true }
-  }
-  if (method === 'github.prFileContents') {
-    return {
-      ok: true,
-      result: {
-        original: 'before\n',
-        modified: 'after\n',
-        originalIsBinary: false,
-        modifiedIsBinary: false
-      }
-    }
-  }
-  if (method === 'github.addPRReviewComment') {
-    return {
-      ok: true,
-      result: {
-        ok: true,
-        comment: {
-          id: 24,
-          body: 'Inline comment',
-          path: 'src/file.ts',
-          line: 7
-        }
-      }
-    }
   }
   if (method === 'gitlab.workItemDetails') {
     return {

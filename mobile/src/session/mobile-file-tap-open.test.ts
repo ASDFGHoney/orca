@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { HostSessionTerminalFileTarget } from './host-session-terminal-file-operations'
-import { openMobileTerminalFileTap } from './mobile-terminal-file-tap-open'
+import { openMobileFileTap as openMobileTerminalFileTap } from './mobile-file-tap-open'
 
 function createOperations(targets: (HostSessionTerminalFileTarget | null)[]) {
   return {
