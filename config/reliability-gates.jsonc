@@ -2418,7 +2418,7 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The byte-identical oracle passes on reported v1.4.184 and current main: renderer-only death did not reproduce runtime or session loss in the isolated host topology. The process or event that ended the reported unit remains unidentified. The candidate adds characterization coverage only; reverting it removes the oracle without changing product behavior."
+        "evidence": "The earlier immediate-containment oracle passed on reported v1.4.184 and current main: renderer-only death did not reproduce runtime or session loss in the isolated host topology. The final candidate adds repeated checks through a 12-second stability window; that extension has candidate evidence only. The process or event that ended the reported unit remains unidentified. Reverting the candidate removes the characterization coverage without changing product behavior."
       },
       "performanceBudget": {
         "required": false,
