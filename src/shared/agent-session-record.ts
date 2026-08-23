@@ -118,6 +118,7 @@ export type AgentSessionRecord = {
   accountHome: AgentSessionAccountHome
   /** Provider options acknowledged for the next turn, restored across owner replacement. */
   options?: Record<string, string>
+  /** Legacy read-compatible field; current stores scrub and omit it. */
   launchEnv?: AgentSessionLaunchEnv
   lease: AgentSessionLease
   createdAt: number

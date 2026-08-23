@@ -21,8 +21,10 @@ export type CodexStructuredLaunchResolverDeps = {
   /** Absolute path of a workspace on this host. Rejects when the workspace no
    *  longer resolves, which is the case a stale mobile client hits. */
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
-  /** Overridden in tests; production scans PATH and version-manager dirs. */
-  resolveCommand?: () => string
+  /** Overridden in tests; production scans the boot-cached PATH and version-manager dirs. */
+  resolveCommand?: (options?: { pathEnv?: string | null; homePath?: string }) => string
+  /** Fresh shell/configured environment for this spawn; never written to the session record. */
+  resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
 }
 
 export function createCodexStructuredLaunchResolver(
@@ -48,7 +50,13 @@ export function createCodexStructuredLaunchResolver(
     if (accountHome.variable !== 'CODEX_HOME') {
       throw new Error(`codex sessions pin CODEX_HOME, not ${accountHome.variable}`)
     }
-    const command = (deps.resolveCommand ?? resolveCodexCommand)()
+    const environment = await deps.resolveEnvironment?.()
+    const pathEnv = environment?.PATH ?? environment?.Path ?? null
+    const homePath = environment?.HOME ?? environment?.USERPROFILE
+    const command = (deps.resolveCommand ?? resolveCodexCommand)({
+      pathEnv,
+      ...(homePath ? { homePath } : {})
+    })
     const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, CODEX_APP_SERVER_ARGS)
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     return {
@@ -56,7 +64,7 @@ export function createCodexStructuredLaunchResolver(
       args: spawnArgs,
       cwd: await deps.resolveWorkspacePath(location.workspaceId),
       codexHome: accountHome.path,
-      ...(record.launchEnv ? { env: { ...record.launchEnv } } : {}),
+      ...(environment ? { env: { ...environment } as Record<string, string> } : {}),
       // An empty chain is a session that has never proved a thread, so it
       // starts one; anything else resumes the last link this session proved.
       resumeThreadId: head?.handle.provider === 'codex' ? head.handle.threadId : null

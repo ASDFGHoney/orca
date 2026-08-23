@@ -8,13 +8,14 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   agentSessionOperationKey,
   isAgentSessionOperationRow,
   type AgentSessionOperationRow
 } from '../../shared/agent-session-operation-ledger'
+import { scrubAgentSessionRecordLaunchEnv } from '../../shared/agent-session-launch-env-scrub'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { loadAgentSessionRecord } from '../../shared/agent-session-record-load'
 import {
@@ -134,14 +135,16 @@ function parseState(
   let needsRewrite = schemaVersion < AGENT_SESSION_STORE_SCHEMA_VERSION
   if (typeof file.records === 'object' && file.records !== null) {
     for (const [sessionId, value] of Object.entries(file.records)) {
-      const loaded = loadAgentSessionRecord(value)
+      const scrubbed = scrubAgentSessionRecordLaunchEnv(value)
+      const loaded = loadAgentSessionRecord(scrubbed.value)
+      needsRewrite ||= scrubbed.changed
       if (loaded.status !== 'unusable' && loaded.record.sessionId === sessionId) {
         state.records.set(sessionId, loaded.record)
         needsRewrite ||= loaded.status === 'upgraded'
       } else {
         state.unreadableRecords.set(sessionId, {
           reason: loaded.status === 'unusable' ? loaded.reason : 'record_key_session_id_mismatch',
-          raw: value
+          raw: scrubbed.value
         })
         needsRewrite ||= schemaVersion <= AGENT_SESSION_STORE_SCHEMA_VERSION
       }
@@ -162,7 +165,9 @@ function parseState(
         }
         continue
       }
-      state.unreadableRecords.set(sessionId, { reason: unusable.reason, raw: unusable.raw })
+      const scrubbed = scrubAgentSessionRecordLaunchEnv(unusable.raw)
+      needsRewrite ||= scrubbed.changed
+      state.unreadableRecords.set(sessionId, { reason: unusable.reason, raw: scrubbed.value })
     }
   }
   if (typeof file.operations === 'object' && file.operations !== null) {
@@ -314,10 +319,12 @@ export async function saveAgentSessionStore(
   filePath: string,
   state: AgentSessionStoreState
 ): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true })
+  const directory = dirname(filePath)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  await chmod(directory, 0o700)
   const tmpPath = durableWriteTempPath(filePath)
   try {
-    await writeTempFileDurable(tmpPath, serializeState(state))
+    await writeTempFileDurable(tmpPath, serializeState(state), 0o600)
     // A failed rotation aborts the save. Recovery's fence floor assumes the backup is at most one
     // committed generation behind; letting the primary advance past a stale backup breaks that.
     await copyFileDurable(filePath, backupPath(filePath))
