@@ -282,18 +282,18 @@ describe('connectPanePty', () => {
     )
   })
 
-  it('restores a reconnect remount from the SSH model through pending retry classification', async () => {
+  it('uses the SSH relay replay for a reconnect even when main has an alt-screen model', async () => {
     const { connectPanePty } = await import('./pty-connection')
-    const restoredPtyId = toAppSshPtyId('target-a', 'pty-restored-model')
+    const restoredPtyId = toAppSshPtyId('target-a', 'pty-restored-relay')
     const transport = createMockTransport(restoredPtyId)
     transport.connect.mockResolvedValue({
       id: restoredPtyId,
       isReattach: true,
-      replay: 'RELAY-TAIL'
+      replay: '9l\r\n$ real-shell-output'
     })
     transportFactoryQueue.push(transport)
     const pendingRetry = {
-      attemptId: 'attempt-model-restore',
+      attemptId: 'attempt-relay-restore',
       authority: {
         targetId: 'target-a',
         providerEpoch: 'epoch-1',
@@ -307,7 +307,8 @@ describe('connectPanePty', () => {
       cols: 120,
       rows: 40,
       source: 'headless',
-      alternateScreen: true
+      alternateScreen: true,
+      pendingEscapeTailAnsi: '\x1b[?104'
     })
     mockStoreState = {
       ...mockStoreState,
@@ -347,11 +348,10 @@ describe('connectPanePty', () => {
     )
     await flushAsyncTicks(20)
 
-    expect(window.api.pty.getMainBufferSnapshot).toHaveBeenCalledWith(restoredPtyId, {
-      scrollbackRows: 5000
-    })
-    expect(writes.join('')).toContain('MODEL-ALT-FRAME')
-    expect(writes.join('')).not.toContain('RELAY-TAIL')
+    expect(window.api.pty.getMainBufferSnapshot).not.toHaveBeenCalled()
+    expect(writes.join('')).toContain('real-shell-output')
+    expect(writes.join('')).not.toContain('MODEL-ALT-FRAME')
+    expect(transport.resize).not.toHaveBeenCalledWith(119, 40)
   })
 
   it('rejects expired reattach state after its direct SSH retry lease is revoked', async () => {

@@ -17,6 +17,7 @@ import type { ConnectPanePtySession } from './connect-pane-pty-session'
 import type { ReattachPayloadContext } from './reattach-payload-context'
 import { createReattachPayloadHandlers } from './apply-reattach-payload'
 import type { ReattachPayloadSession } from './reattach-payload-session'
+import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
 
 type ReattachResultSession = ReattachPayloadSession &
   Pick<
@@ -25,10 +26,10 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'authoritativeReattachGeneration'
     | 'capturedDirectSshRetryPtyAccepted'
     | 'cacheKey'
+    | 'connectionId'
     | 'deps'
     | 'directSshRetryAttempt'
     | 'disposed'
-    | 'followsDirectSshReconnect'
     | 'getSshMainModelSnapshotProbe'
     | 'handleReattachResult'
     | 'mountFollowsTerminalPark'
@@ -89,6 +90,10 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
         paneId: session.pane.id,
         ptyId: staleSessionId ?? null
       })
+      if (session.connectionId) {
+        recoverUnverifiableDirectSshReattach(sessionBag, staleSessionId)
+        return false
+      }
       // Why: a stale restored session can fail reattach after mount; don't leave xterm alive without a backing PTY.
       if (staleSessionId) {
         session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, staleSessionId)
@@ -200,8 +205,6 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     const revealFollowsTerminalPark =
       session.mountFollowsTerminalPark &&
       (connectResult?.isReattach === true || isRemoteRuntimePtyId(ptyId))
-    const reconnectMayUseModel =
-      Boolean(session.followsDirectSshReconnect) && !revealFollowsTerminalPark
     session.mountFollowsTerminalPark = false
     // Why: ordinary parking destroys xterm. Rebuild from the authoritative
     // host snapshot before releasing queued live bytes; null falls back to
@@ -233,7 +236,6 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       attemptGeneration,
       prefetchedParkModelSnapshot,
       revealFollowsTerminalPark,
-      reconnectMayUseModel,
       fetchSshMainModelReattachSnapshot,
       hasStructuralReplay,
       coldRestoreStartup,

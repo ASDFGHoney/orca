@@ -13,6 +13,7 @@ import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 import { runDeferredSessionReattachChoice } from './deferred-session-reattach-choice'
+import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
 
 export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
   // Why: trigger the deferred SSH connect per-tab (not per-target) so multiple tabs for one target reattach independently.
@@ -32,21 +33,29 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
       session.deps.restoredLeafId && session.deps.restoredPtyIdByLeafId
         ? (session.deps.restoredPtyIdByLeafId[session.deps.restoredLeafId] ?? null)
         : null
+    const deferredTabSessionId = storeState.deferredSshSessionIdsByTabId[session.deps.tabId]
+    const tabPtyId = storeState.tabsByWorktree[session.deps.worktreeId]?.find(
+      (t) => t.id === session.deps.tabId
+    )?.ptyId
     const gate = resolveSshPaneConnectGate({
       connectionId: session.connectionId,
       sshStatus: storeState.sshConnectionStates.get(session.connectionId)?.status,
       isDeferredTarget: storeState.deferredSshReconnectTargets.includes(session.connectionId),
       restoredLeafSessionId,
-      deferredTabSessionId: storeState.deferredSshSessionIdsByTabId[session.deps.tabId],
-      tabPtyId: storeState.tabsByWorktree[session.deps.worktreeId]?.find(
-        (t) => t.id === session.deps.tabId
-      )?.ptyId,
+      deferredTabSessionId,
+      tabPtyId,
       hasLeafSessionMap: Boolean(
         session.deps.restoredPtyIdByLeafId &&
         Object.keys(session.deps.restoredPtyIdByLeafId).length > 0
       )
     })
     const pendingSessionId = gate.pendingSessionId
+    const deferredSessionIsOnlyRetryBinding = Boolean(
+      pendingSessionId &&
+      pendingSessionId === deferredTabSessionId &&
+      restoredLeafSessionId == null &&
+      tabPtyId !== pendingSessionId
+    )
     console.warn(
       `[pty-connection] SSH tab=${session.deps.tabId} connectionId=${session.connectionId} pendingSessionId=${pendingSessionId} sshConnected=${gate.sshConnected}`
     )
@@ -114,8 +123,10 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
           console.warn(
             `[pty-connection] Attempting reattach for tab=${session.deps.tabId} sessionId=${pendingSessionId}`
           )
-          // Why: the saved remote PTY id is single-use restore metadata; clear it before attach so remounts don't keep retrying an expired session.
-          useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
+          // Why: consume redundant restore metadata before attach, but keep a sole deferred ID until the host gives a conclusive result.
+          if (!deferredSessionIsOnlyRetryBinding) {
+            useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
+          }
           // Why: pre-signal SSH-deferred reattach too so the cooperation gate applies uniformly to remote sessions (Electron preserves the declare→connect order).
           // See docs/mobile-prefer-renderer-scrollback.md.
           const preSignalPromise =
@@ -199,6 +210,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 if (session.rejectObsoleteDirectSshReattach(pendingSessionId)) {
                   return
                 }
+                useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
                 session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
                 session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
                 session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
@@ -213,6 +225,19 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 outputCallbacks.generation
               )
               session.finishReattachLiveDataDeferral(accepted, outputCallbacks.generation)
+              const sessionExpired = Boolean(
+                result &&
+                typeof result === 'object' &&
+                'sessionExpired' in result &&
+                result.sessionExpired
+              )
+              if (
+                deferredSessionIsOnlyRetryBinding &&
+                (accepted || sessionExpired) &&
+                session.isCapturedDirectSshReattachCurrent(pendingSessionId)
+              ) {
+                useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
+              }
               const gen = await preSignalPromise
               if (typeof gen === 'number') {
                 if (!accepted) {
@@ -248,6 +273,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 return
               }
               if (isSshSessionExpiredError(err)) {
+                useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
                 session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, pendingSessionId)
                 session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
                 session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
@@ -255,9 +281,8 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 })
                 return
               }
-              session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-                forceBlankRestoredViewport: true
-              })
+              session.reportError(err instanceof Error ? err.message : String(err))
+              recoverUnverifiableDirectSshReattach(session, pendingSessionId)
             })
           session.armDirectSshPaneRetryTimeout(
             trackedReattachPromise,

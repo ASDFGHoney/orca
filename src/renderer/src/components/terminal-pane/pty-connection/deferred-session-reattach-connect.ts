@@ -2,6 +2,7 @@ import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 import { recordPtyConnectDiagnostic } from './pty-connect-limits'
 import { isSshSessionExpiredError } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 export function startDeferredSessionReattach(
@@ -136,15 +137,21 @@ export function startDeferredSessionReattach(
         ptyId: deferredReattachSessionId,
         reason: message
       })
-      session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
-      session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
       if (session.connectionId && isSshSessionExpiredError(err)) {
+        session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
+        session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
         session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
           forceBlankRestoredViewport: true
         })
         return
       }
       session.reportError(message)
+      if (session.connectionId) {
+        recoverUnverifiableDirectSshReattach(session, deferredReattachSessionId)
+        return
+      }
+      session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
+      session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
       session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
         forceBlankRestoredViewport: true
       })
