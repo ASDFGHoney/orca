@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   cursorProjectSlugFromTranscriptPath,
   cursorWorkspaceSlug,
-  decodeCursorProjectSlug,
   isCursorTranscriptInWorkspace
 } from './cursor-workspace-slug'
 
@@ -35,23 +34,11 @@ describe('cursorProjectSlugFromTranscriptPath', () => {
     expect(
       cursorProjectSlugFromTranscriptPath('/tmp/unrelated/agent-transcripts/sid.jsonl')
     ).toBeNull()
-  })
-})
-
-describe('decodeCursorProjectSlug', () => {
-  it('reconstructs Windows drive paths, including a drive root', () => {
-    expect(decodeCursorProjectSlug('c-Dev-simulations-opc')).toBe('C:\\Dev\\simulations\\opc')
-    expect(decodeCursorProjectSlug('c-')).toBe('C:\\')
-  })
-
-  it('reconstructs POSIX paths with the leading slash restored', () => {
-    expect(decodeCursorProjectSlug('Users-ada-code-orca')).toBe('/Users/ada/code/orca')
-  })
-
-  it('rejects empty, relative, and parent-segment slugs', () => {
-    expect(decodeCursorProjectSlug('')).toBeNull()
-    expect(decodeCursorProjectSlug('..')).toBeNull()
-    expect(decodeCursorProjectSlug('foo-..-bar')).toBeNull()
+    expect(
+      cursorProjectSlugFromTranscriptPath(
+        '/home/u/.cursor/projects/repo\\agent-transcripts/sid.jsonl'
+      )
+    ).toBeNull()
   })
 })
 
@@ -89,4 +76,16 @@ describe('isCursorTranscriptInWorkspace', () => {
       )
     ).toBe(true)
   })
+
+  it.each(['/a/Repo', '/A/repo'])(
+    'does not case-fold a one-letter POSIX workspace root: %s',
+    (workspacePath) => {
+      expect(
+        isCursorTranscriptInWorkspace(
+          workspacePath,
+          '/home/ada/.cursor/projects/a-repo/agent-transcripts/sid.jsonl'
+        )
+      ).toBe(false)
+    }
+  )
 })

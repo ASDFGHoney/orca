@@ -267,6 +267,28 @@ describe('/shared ai-vault-session-filters (lifted core)', () => {
     ).toEqual(['cursor:opc'])
   })
 
+  it('does not override an authoritative cwd with a colliding Cursor project slug', () => {
+    const cursorSession: AiVaultSession = {
+      ...baseSession,
+      id: 'cursor:authoritative-cwd',
+      agent: 'cursor',
+      sessionId: 'sid',
+      cwd: 'C:\\Dev\\other',
+      filePath:
+        'C:\\Users\\ada\\.cursor\\projects\\c-Dev-simulations-opc\\agent-transcripts\\sid.jsonl'
+    }
+    expect(
+      filterAiVaultSessions([cursorSession], {
+        query: '',
+        agents: ['cursor'],
+        scope: 'workspace',
+        sort: 'updated',
+        activeWorktreePaths: ['C:\\Dev\\simulations\\opc'],
+        hideEmptySessions: true
+      })
+    ).toEqual([])
+  })
+
   it('does not guess a genuinely unlocated session into the active workspace', () => {
     const unlocated: AiVaultSession = {
       ...baseSession,

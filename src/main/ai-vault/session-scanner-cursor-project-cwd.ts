@@ -1,10 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { posix, win32 } from 'node:path'
 import type { AiVaultAgent, AiVaultSession } from '../../shared/ai-vault-types'
 import {
   cursorProjectSlugFromTranscriptPath,
-  decodeCursorProjectSlug
+  isCursorTranscriptInWorkspace
 } from '../../shared/cursor-workspace-slug'
+import { isRuntimePathAbsolute, isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { isWslUncPath } from '../../shared/wsl-paths'
 import { extractString, parseJsonObject } from './session-scanner-values'
 
@@ -39,39 +40,53 @@ export function resolveCursorTranscriptCwd(
   if (!slug) {
     return null
   }
-  const projectDir = cursorProjectDirFromTranscriptPath(filePath)
-  // Why: never raw-read WSL UNC 9P or a remote host path as if it were local.
-  if (options.readTrustFile !== false && projectDir && !isWslUncPath(filePath)) {
-    const trusted = readCachedTrustedWorkspacePath(projectDir)
-    if (trusted) {
-      return trusted
-    }
-  }
-  // Why: inverse slug decode is lossy for hyphenated folder names. Only publish
-  // it as cwd when the reconstructed path actually exists on this host.
   if (options.readTrustFile === false || isWslUncPath(filePath)) {
     return null
   }
-  const decoded = decodeCursorProjectSlug(slug)
-  return decoded && existsSync(decoded) ? decoded : null
+  const projectDir = cursorProjectDirFromTranscriptPath(filePath)
+  if (!projectDir) {
+    return null
+  }
+  return readCachedTrustedWorkspacePath(projectDir, filePath, slug)
 }
 
 export function cursorProjectDirFromTranscriptPath(filePath: string): string | null {
   if (!cursorProjectSlugFromTranscriptPath(filePath)) {
     return null
   }
-  const segments = filePath.split(/[\\/]+/).filter(Boolean)
-  const marker = segments.lastIndexOf('agent-transcripts')
-  return joinPathSegments(segments.slice(0, marker), filePath)
+  const pathApi = pathImplementation(filePath)
+  let current = pathApi.normalize(filePath)
+  while (true) {
+    if (pathApi.basename(current) === 'agent-transcripts') {
+      return pathApi.dirname(current)
+    }
+    const parent = pathApi.dirname(current)
+    if (parent === current) {
+      return null
+    }
+    current = parent
+  }
 }
 
-function readCachedTrustedWorkspacePath(projectDir: string): string | null {
+function readCachedTrustedWorkspacePath(
+  projectDir: string,
+  filePath: string,
+  slug: string
+): string | null {
   if (trustedCwdCache.has(projectDir)) {
     return trustedCwdCache.get(projectDir) ?? null
   }
-  const cwd =
-    readCursorWorkspaceTrustedPath(projectDir) ??
-    readCursorWorkspaceTrustedPath(driveCaseSiblingProjectDir(projectDir))
+  const primary = readCursorWorkspaceTrustedPath(projectDir)
+  let cwd = isTrustedWorkspacePath(primary, projectDir, filePath) ? primary : null
+  if (!cwd) {
+    const siblingProjectDir = driveCaseSiblingProjectDir(projectDir)
+    const siblingWorkspacePath = siblingProjectDir
+      ? readCursorWorkspaceTrustedPath(siblingProjectDir)
+      : null
+    cwd = isTrustedDriveSiblingWorkspacePath(siblingWorkspacePath, projectDir, filePath, slug)
+      ? siblingWorkspacePath
+      : null
+  }
   if (trustedCwdCache.size >= TRUSTED_CWD_CACHE_MAX) {
     const oldest = trustedCwdCache.keys().next()
     if (!oldest.done) {
@@ -87,7 +102,9 @@ function readCursorWorkspaceTrustedPath(projectDir: string | null): string | nul
     return null
   }
   try {
-    const record = parseJsonObject(readFileSync(join(projectDir, '.workspace-trusted'), 'utf-8'))
+    const record = parseJsonObject(
+      readFileSync(pathImplementation(projectDir).join(projectDir, '.workspace-trusted'), 'utf-8')
+    )
     return extractString(record?.workspacePath)?.trim() || null
   } catch {
     return null
@@ -95,30 +112,55 @@ function readCursorWorkspaceTrustedPath(projectDir: string | null): string | nul
 }
 
 function driveCaseSiblingProjectDir(projectDir: string): string | null {
-  const segments = projectDir.split(/[\\/]+/).filter(Boolean)
-  const slug = segments.at(-1)
-  if (!slug) {
+  if (!isWindowsAbsolutePathLike(projectDir) || isWslUncPath(projectDir)) {
     return null
   }
-  const flipped = slug.replace(/^([A-Za-z])-/, (_, drive: string) => {
-    const next = drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase()
-    return `${next}-`
-  })
-  if (flipped === slug) {
+  const slug = win32.basename(projectDir)
+  const driveMatch = slug.match(/^([A-Za-z])-/)
+  if (!driveMatch) {
     return null
   }
-  segments[segments.length - 1] = flipped
-  return joinPathSegments(segments, projectDir)
+  const drive = driveMatch[1]
+  const flippedDrive = drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase()
+  return win32.join(win32.dirname(projectDir), `${flippedDrive}${slug.slice(1)}`)
 }
 
-function joinPathSegments(segments: string[], originalPath: string): string {
-  if (segments.length === 0) {
-    return originalPath.startsWith('/') ? '/' : ''
+function isTrustedWorkspacePath(
+  workspacePath: string | null,
+  projectDir: string,
+  filePath: string
+): workspacePath is string {
+  if (!workspacePath) {
+    return false
   }
-  const useBackslash = originalPath.includes('\\') && !originalPath.includes('/')
-  const joined = segments.join(useBackslash ? '\\' : '/')
-  if (originalPath.startsWith('/') && !/^[A-Za-z]:/.test(segments[0] ?? '')) {
-    return `/${joined}`
+  const projectIsWindows = isWindowsAbsolutePathLike(projectDir)
+  const workspaceIsWindows = isWindowsAbsolutePathLike(workspacePath)
+  if (projectIsWindows !== workspaceIsWindows) {
+    return false
   }
-  return joined
+  const pathFlavor = workspaceIsWindows ? 'windows' : 'posix'
+  return (
+    isRuntimePathAbsolute(workspacePath, pathFlavor) &&
+    isCursorTranscriptInWorkspace(workspacePath, filePath)
+  )
+}
+
+function isTrustedDriveSiblingWorkspacePath(
+  workspacePath: string | null,
+  projectDir: string,
+  filePath: string,
+  slug: string
+): workspacePath is string {
+  if (!isTrustedWorkspacePath(workspacePath, projectDir, filePath)) {
+    return false
+  }
+  const slugDrive = slug.match(/^([A-Za-z])-/)?.[1]
+  const workspaceDrive = workspacePath.match(/^([A-Za-z]):[\\/]/)?.[1]
+  return Boolean(
+    slugDrive && workspaceDrive && slugDrive.toLowerCase() === workspaceDrive.toLowerCase()
+  )
+}
+
+function pathImplementation(value: string): typeof posix {
+  return isWindowsAbsolutePathLike(value) ? win32 : posix
 }

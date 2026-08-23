@@ -276,11 +276,11 @@ export function isAiVaultSessionInWorkspace(
   session: Pick<AiVaultSession, 'agent' | 'cwd' | 'filePath'>,
   workspacePath: string
 ): boolean {
-  if (session.cwd && isAiVaultSessionInWorkspacePath(workspacePath, session.cwd)) {
-    return true
+  if (session.cwd) {
+    return isAiVaultSessionInWorkspacePath(workspacePath, session.cwd)
   }
-  // Why: Cursor JSONL has no cwd and slug decode is lossy for hyphenated
-  // folder workspaces. Matching the encoded project bucket is lossless.
+  // Why: Cursor JSONL has no cwd, so forward-match the workspace instead of
+  // reverse-decoding a non-injective project slug.
   return (
     session.agent === 'cursor' && isCursorTranscriptInWorkspace(workspacePath, session.filePath)
   )

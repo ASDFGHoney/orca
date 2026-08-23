@@ -1,4 +1,4 @@
-import { isWindowsAbsolutePathLike } from './cross-platform-path'
+import { isCaseInsensitiveRuntimeRoot, isWindowsAbsolutePathLike } from './cross-platform-path'
 import { parseWslUncPath } from './wsl-paths'
 
 /**
@@ -28,21 +28,6 @@ export function cursorProjectSlugFromTranscriptPath(filePath: string): string | 
   return segments[marker - 1] ?? null
 }
 
-export function decodeCursorProjectSlug(slug: string): string | null {
-  const trimmed = slug.trim()
-  if (!trimmed || trimmed === '.' || trimmed === '..') {
-    return null
-  }
-  const windowsDrive = trimmed.match(/^([A-Za-z])-(.*)$/)
-  const decoded = windowsDrive
-    ? `${windowsDrive[1].toUpperCase()}:\\${windowsDrive[2].replace(/-/g, '\\')}`
-    : `/${trimmed.replace(/-/g, '/')}`
-  if (splitPathSegments(decoded).includes('..')) {
-    return null
-  }
-  return decoded
-}
-
 export function isCursorTranscriptInWorkspace(
   workspacePath: string,
   transcriptPath: string
@@ -68,17 +53,20 @@ function cursorWorkspaceSlugCandidates(absPath: string): string[] {
   if (!slug) {
     return []
   }
+  if (!isCaseInsensitiveRuntimeRoot(absPath)) {
+    return [slug]
+  }
   const driveFolded = slug.replace(/^([A-Za-z])-/, (_, drive: string) => `${drive.toLowerCase()}-`)
   return driveFolded === slug ? [slug] : [slug, driveFolded]
 }
 
 function slugsMatch(workspacePath: string, encoded: string, transcriptSlug: string): boolean {
-  if (isWindowsAbsolutePathLike(workspacePath) || /^[A-Za-z]-/.test(transcriptSlug)) {
+  if (isCaseInsensitiveRuntimeRoot(workspacePath)) {
     return encoded.toLowerCase() === transcriptSlug.toLowerCase()
   }
   return encoded === transcriptSlug
 }
 
 function splitPathSegments(filePath: string): string[] {
-  return filePath.split(/[\\/]+/).filter(Boolean)
+  return filePath.split(isWindowsAbsolutePathLike(filePath) ? /[\\/]+/ : /\/+/).filter(Boolean)
 }

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { cursorWorkspaceSlug } from '../../shared/cursor-workspace-slug'
 import { folderLabel, groupAiVaultSessions } from '../../shared/ai-vault-session-filters'
 import { parseCursorSessionContent, parseCursorSessionFile } from './session-scanner-cursor-parser'
 import { resetCursorTrustedCwdCacheForTests } from './session-scanner-cursor-project-cwd'
@@ -32,15 +33,18 @@ const jsonl = [
 ].join('\n')
 
 describe('parseCursorSessionFile cwd attribution', () => {
-  it('sets cwd from an existing workspace decoded from the Cursor project slug', async () => {
+  it('sets cwd from a matching workspace trust marker', async () => {
     const root = mkdtempSync(join(tmpdir(), 'orca-cursor-parse-'))
     tempDirs.push(root)
-    const workspace = join(tmpdir(), 'orcacwdparseopc')
+    const workspace = join(root, 'orcacwdparseopc')
     mkdirSync(workspace, { recursive: true })
-    tempDirs.push(workspace)
-    const slug = workspace.replace(/^[\\/]+/, '').replace(/[\\/:*?"<>|]+/g, '-')
+    const slug = cursorWorkspaceSlug(workspace)
     const transcripts = join(root, '.cursor', 'projects', slug, 'agent-transcripts')
     mkdirSync(transcripts, { recursive: true })
+    writeFileSync(
+      join(root, '.cursor', 'projects', slug, '.workspace-trusted'),
+      JSON.stringify({ workspacePath: workspace })
+    )
     const filePath = join(transcripts, 'cursor-session.jsonl')
     writeFileSync(filePath, jsonl)
 
