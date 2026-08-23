@@ -99,6 +99,17 @@ describe('collectAgentTitleEvidence', () => {
     it('still resolves a real Gemini glyph', () => {
       expect(agentFor('✦ Refactor the parser')).toBe('gemini')
     })
+
+    it('does not promote model names in task text', () => {
+      expect(agentFor('Compare Antigravity with Gemini 3.7 Flash')).toBeNull()
+      expect(agentFor('Compare Antigravity with Gemini 3.7 Flash… - grok')).toBe('grok')
+    })
+
+    it('does not treat a Gemini glyph inside task text as a vendor marker', () => {
+      const evidence = collectAgentTitleEvidence('Explain the ✦ marker… - grok')
+      expect(evidence.agent).toBe('grok')
+      expect(evidence.vendorMarkers).toEqual([])
+    })
   })
 
   describe('a name in free text alone is never identity', () => {
@@ -150,6 +161,21 @@ describe('collectAgentTitleEvidence', () => {
   ] as const)('recognizes Orca-controlled synthetic title %s', (title, agent) => {
     expect(agentFor(title)).toBe(agent)
     expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it.each([
+    'Claude Code ready',
+    'Claude thinking',
+    '. Claude Code working',
+    'zsh | ⠋ Claude Code - action required'
+  ])('recognizes the explicit Claude identity frame %s', (title) => {
+    expect(agentFor(title)).toBe('claude')
+    expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it('does not promote Claude status words in task text', () => {
+    expect(agentFor('Fix the Claude Code ready-state parser')).toBeNull()
+    expect(agentFor('Fix Claude Code ready behavior… - grok')).toBe('grok')
   })
 
   it.each([
@@ -248,7 +274,7 @@ describe('collectAgentTitleEvidence', () => {
     })
 
     it('declines two vendor markers', () => {
-      const evidence = collectAgentTitleEvidence('✳ ✦ two sigils')
+      const evidence = collectAgentTitleEvidence('✳ | ✦ two sigils')
       expect(evidence.agent).toBeNull()
       expect(evidence.reason).toBe('conflicting-vendor-markers')
       expect([...evidence.vendorMarkers].sort()).toEqual(['claude', 'gemini'])

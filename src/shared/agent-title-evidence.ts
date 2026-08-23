@@ -7,11 +7,13 @@ import {
   GEMINI_SILENT_WORKING,
   GEMINI_WORKING,
   HERMES_AGENT_NAME_RE,
+  isClaudeIdentityFrameSegment,
   isClaudeManagementTitle,
   isCursorNativeAgentTitle,
   titleHasAgentName
 } from './agent-title-core'
 import { isOpenCodeNativeTitle } from './opencode-terminal-title'
+import { stripLeadingAgentTitleDecorationOrEmpty } from './agent-title-decoration'
 import { getPiCompatibleSyntheticAgentLabel } from './pi-compatible-synthetic-title'
 import {
   SYNTHETIC_AGENT_TITLE_AGENTS,
@@ -97,6 +99,7 @@ const DISPLAY_LABELS = [
 ] satisfies readonly (readonly [string, TuiAgent])[]
 
 const GEMINI_GLYPHS = [GEMINI_WORKING, GEMINI_SILENT_WORKING, GEMINI_IDLE, GEMINI_PERMISSION]
+const ANTIGRAVITY_MODEL_TITLE_RE = /^(?:agy|antigravity)(?:\s*[·—:-]\s*|\s+)gemini\s+\d/i
 
 /**
  * Orca renders `<task text>… - <agent>` and owns the suffix; task text cannot reach past it.
@@ -174,14 +177,14 @@ function agentForSyntheticTitle(text: string): TuiAgent | null {
   return null
 }
 
-function collectVendorMarkers(title: string, segments: readonly string[]): TuiAgent[] {
+function collectVendorMarkers(segments: readonly string[]): TuiAgent[] {
   const markers = new Set<TuiAgent>()
-  // Why prefix-only for Claude: the sigil marks the pane's own status line. The same character
-  // inside task text is decoration, not a vendor emission.
-  if (GEMINI_GLYPHS.some((glyph) => title.includes(glyph))) {
-    markers.add('gemini')
-  }
   for (const segment of segments) {
+    // Why prefix-only: a sigil marks the pane's own status line only in the identity position.
+    // The same character inside task text is decoration, not a vendor emission.
+    if (GEMINI_GLYPHS.some((glyph) => segment.startsWith(glyph))) {
+      markers.add('gemini')
+    }
     if (segment.startsWith(`${CLAUDE_IDLE} `) || segment === CLAUDE_IDLE) {
       markers.add('claude')
     }
@@ -223,14 +226,15 @@ function collectAnchoredNames(segments: readonly string[]): TuiAgent[] {
     if (synthetic) {
       anchored.add(synthetic)
     }
+    if (isClaudeIdentityFrameSegment(segment)) {
+      anchored.add('claude')
+    }
 
     // Why Antigravity gets a grammar: its models are named `Gemini <n.n> <Name>`, so an agy pane's
     // own title carries a whole `gemini` token. Read as identity-plus-model, the gemini token is
     // metadata — which is the general rule, not an exception inside the Gemini detector.
-    if (
-      (AGY_AGENT_NAME_RE.test(segment) || titleHasAgentName(segment, 'antigravity')) &&
-      /\bgemini\s+\d/i.test(segment)
-    ) {
+    const undecorated = stripLeadingAgentTitleDecorationOrEmpty(segment).trim()
+    if (ANTIGRAVITY_MODEL_TITLE_RE.test(undecorated)) {
       anchored.add('antigravity')
     }
 
@@ -254,7 +258,7 @@ export function collectAgentTitleEvidence(title: string): AgentTitleEvidence {
   }
 
   const segments = getEvidenceTitleSegments(title)
-  const vendorMarkers = collectVendorMarkers(title, segments)
+  const vendorMarkers = collectVendorMarkers(segments)
   const anchoredNames = collectAnchoredNames(segments)
   const anchoredSet = new Set(anchoredNames)
   const freeTextNames = namesIn(title).filter((agent) => !anchoredSet.has(agent))
