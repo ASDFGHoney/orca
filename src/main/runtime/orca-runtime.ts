@@ -9471,7 +9471,9 @@ export class OrcaRuntimeService {
       // snapshot so paired clients stop showing it.
       await this.closeHeadlessMobileBrowserTab(worktreeId, snapshot, tab)
     } else if (tab.type === 'agent-session') {
-      this.notifier?.closeSessionTab?.(tab.id, worktreeId)
+      if (this.notifier?.closeSessionTab) {
+        await this.notifier.closeSessionTab(structuredAgentSessionTabId(tab.sessionId), worktreeId)
+      }
       this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
     } else {
       if (!this.notifier?.closeSessionTab) {
@@ -11614,7 +11616,7 @@ export class OrcaRuntimeService {
           spawnToken
         }) ?? false
     }
-    let transcriptPath: string
+    let transcriptPath: string | undefined
     if (threadId) {
       const proof = await proveCodexTuiRollout({ ...proofInput, threadId })
       transcriptPath = proof.transcriptPath
@@ -11649,7 +11651,7 @@ export class OrcaRuntimeService {
         fence,
         observedAt: Date.now()
       }),
-      transcriptPath,
+      ...(transcriptPath ? { transcriptPath } : {}),
       historySource: 'provider-resume',
       adoptedTerminal: true
     }
