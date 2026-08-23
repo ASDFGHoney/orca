@@ -3,6 +3,7 @@ import type { MobileWebSessionRequestClient } from './mobile-web-session-request
 export function mobileWebSessionClientBindings(client: MobileWebSessionRequestClient) {
   return {
     sessionCapabilities: client.capabilities.bind(client),
+    sessionHostGates: client.hostGates.bind(client),
     sessionSnapshot: client.snapshot.bind(client),
     sessionActivate: client.activate.bind(client),
     sessionAgentOptions: client.agentOptions.bind(client),

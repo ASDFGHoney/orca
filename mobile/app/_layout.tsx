@@ -14,7 +14,12 @@ import {
   loadMobileWebColdResumeRoute,
   mobileWebColdResumeStartupPath
 } from '../src/mobile-web/mobile-web-cold-resume-route'
-import { isRetiredNativeWorkspaceRoute } from '../src/mobile-web/mobile-web-production-route'
+import {
+  isRetiredNativeWorkspaceRoute,
+  retiredNativeWorkspaceHostId
+} from '../src/mobile-web/mobile-web-production-route'
+import { MOBILE_NATIVE_BASELINE_MODE } from '../src/mobile-web/mobile-native-baseline-mode'
+import { mobileHostWorkspaceEntry } from '../src/mobile-web/mobile-web-home-navigation'
 import { loadHosts } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
@@ -53,8 +58,9 @@ export default function RootLayout() {
   }, [pathname])
 
   useEffect(() => {
-    if (isRetiredNativeWorkspaceRoute(pathname)) {
-      router.replace('/hybrid')
+    if (isRetiredNativeWorkspaceRoute(pathname, MOBILE_NATIVE_BASELINE_MODE)) {
+      const hostId = retiredNativeWorkspaceHostId(pathname)
+      router.replace(hostId ? mobileHostWorkspaceEntry(hostId, false) : '/hybrid')
     }
   }, [pathname, router])
 
@@ -99,7 +105,12 @@ export default function RootLayout() {
       if (disposed || startupNavigationClaimed) {
         return
       }
-      const destination = mobileWebColdResumeStartupPath(route, hosts, pathnameRef.current)
+      const destination = mobileWebColdResumeStartupPath(
+        route,
+        hosts,
+        pathnameRef.current,
+        MOBILE_NATIVE_BASELINE_MODE
+      )
       if (destination) {
         router.replace(destination)
       }
@@ -168,7 +179,7 @@ export default function RootLayout() {
       if (navigation) {
         MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)
         if (pathnameRef.current !== '/hybrid') {
-          router.push('/hybrid')
+          router.push(mobileHostWorkspaceEntry(navigation.target.hostId, false))
         }
       }
     }

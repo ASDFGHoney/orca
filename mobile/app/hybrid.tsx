@@ -39,6 +39,7 @@ import {
   useReconnectAttempt
 } from '../src/transport/client-context-connection-metrics'
 import { removeHostAndCloseClient } from '../src/transport/host-removal-lifecycle'
+import { leaveHostRoute } from '../src/host-route-exit'
 
 export default function HybridScreen() {
   const router = useRouter()
@@ -95,6 +96,14 @@ export default function HybridScreen() {
     shellSessionId: session?.sessionId,
     selectHost
   })
+
+  useEffect(() => {
+    if (hostsLoading || selectedHost || e2eHostId) {
+      return
+    }
+    coldResumeRoute.clearRoute()
+    leaveHostRoute(router)
+  }, [coldResumeRoute.clearRoute, e2eHostId, hostsLoading, router, selectedHost])
 
   useEffect(() => {
     activeSessionIdRef.current = session?.sessionId
@@ -173,9 +182,8 @@ export default function HybridScreen() {
             return
           }
           coldResumeRoute.clearRoute()
-          setSelectedHostId(undefined)
           if (destination === 'hostPicker') {
-            void refreshHosts()
+            leaveHostRoute(router)
           } else {
             router.push('/pair-scan')
           }
@@ -362,32 +370,24 @@ export default function HybridScreen() {
   })
 
   const handleBack = useCallback(() => {
-    if (selectedHostId) {
-      coldResumeRoute.clearRoute()
-      setSelectedHostId(undefined)
-      return
-    }
-    router.back()
-  }, [coldResumeRoute.clearRoute, router, selectedHostId])
+    coldResumeRoute.clearRoute()
+    leaveHostRoute(router)
+  }, [coldResumeRoute.clearRoute, router])
 
   return (
     <MobileWebHybridShellPresentation
       viewRef={viewRef}
-      hosts={hosts}
-      hostsLoading={hostsLoading}
-      hostLoadFailed={hostLoadError}
       selectedHost={selectedHost}
       session={session}
       viewEpoch={viewEpoch}
-      packageLoading={packageLoading}
+      packageLoading={packageLoading || !selectedHost}
       packageWarning={packageWarning}
       hostedViewActive={hostedViewActive}
       onBack={handleBack}
       onShowHosts={() => {
         coldResumeRoute.clearRoute()
-        setSelectedHostId(undefined)
+        leaveHostRoute(router)
       }}
-      onRetryHosts={() => void refreshHosts()}
       onRetryRecovery={async () => {
         if (selectedHost && state !== 'connected') {
           await forceReconnectHost(selectedHost.id)
@@ -399,7 +399,6 @@ export default function HybridScreen() {
       onRecoveryFailure={() =>
         showWarning('The workspace interface recovery action could not be completed.')
       }
-      onSelectHost={setSelectedHostId}
       onTouch={() => {
         recentWebGestureAtRef.current = Date.now()
       }}

@@ -12,10 +12,14 @@ export type MobileWebColdResumeRoute = {
 export function mobileWebColdResumeStartupPath(
   route: MobileWebColdResumeRoute | null,
   hosts: readonly { id: string }[],
-  pathname: string
-): '/hybrid' | null {
-  return route && pathname === '/' && hosts.some((host) => host.id === route.hostIdentity)
-    ? '/hybrid'
+  pathname: string,
+  nativeBaselineEnabled = false
+): `/hybrid?hostId=${string}` | null {
+  return !nativeBaselineEnabled &&
+    route &&
+    pathname === '/' &&
+    hosts.some((host) => host.id === route.hostIdentity)
+    ? `/hybrid?hostId=${encodeURIComponent(route.hostIdentity)}`
     : null
 }
 

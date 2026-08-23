@@ -9,6 +9,8 @@ import {
   MobileWebSessionCreateAgentPayloadSchema,
   MobileWebSessionCreatePayloadSchema,
   MobileWebSessionCreateResultSchema,
+  MobileWebSessionHostGatesPayloadSchema,
+  MobileWebSessionHostGatesResultSchema,
   MobileWebSessionSnapshotPayloadSchema,
   MobileWebSessionTabActionPayloadSchema,
   type MobileWebSessionBrowserCreateResult,
@@ -57,6 +59,27 @@ export async function executeMobileWebSessionOperation(args: {
     })
   }
   if (args.operation === 'capabilities') {
+    const hostGatesRequest = MobileWebSessionHostGatesPayloadSchema.safeParse(args.payload)
+    if (hostGatesRequest.success) {
+      const response = await args.client.sendRequest('status.get')
+      if (!response.ok) {
+        throw new MobileWebBrokerError('host_error')
+      }
+      const status = response.result as {
+        capabilities?: unknown
+        floatingWorkspaceEnabled?: unknown
+      }
+      const hostCapabilities = Array.isArray(status.capabilities)
+        ? status.capabilities.filter(
+            (value): value is string =>
+              typeof value === 'string' && value.length > 0 && value.length <= 120
+          )
+        : []
+      return MobileWebSessionHostGatesResultSchema.parse({
+        hostCapabilities: hostCapabilities.slice(0, 256),
+        floatingWorkspaceEnabled: status.floatingWorkspaceEnabled === true
+      })
+    }
     MobileWebSessionCapabilitiesPayloadSchema.parse(args.payload)
     const response = await args.client.sendRequest('status.get')
     if (!response.ok) {

@@ -1,7 +1,11 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import type { MobileWebNavigationIntent } from './mobile-web-navigation-intent-buffer'
 import { MOBILE_WEB_NAVIGATION_INTENTS } from './mobile-web-navigation-intent-buffer'
-import { mobileHostWorkspaceEntry, navigateFromMobileHome } from './mobile-web-home-navigation'
+import {
+  mobileHomeDestination,
+  mobileHostWorkspaceEntry,
+  navigateFromMobileHome
+} from './mobile-web-home-navigation'
 
 let latestIntent: MobileWebNavigationIntent | null = null
 const unsubscribe = MOBILE_WEB_NAVIGATION_INTENTS.subscribe((intent) => {
@@ -25,7 +29,7 @@ describe('mobile web Home navigation', () => {
       target: { kind: 'tasks', taskSource: 'linear' }
     })
 
-    expect(router.push).toHaveBeenCalledWith('/hybrid')
+    expect(router.push).toHaveBeenCalledWith('/hybrid?hostId=host')
     expect(latestIntent).toMatchObject({
       source: 'home',
       hostId: 'host',
@@ -34,7 +38,28 @@ describe('mobile web Home navigation', () => {
   })
 
   it('encodes the post-pairing hosted route identity', () => {
-    expect(mobileHostWorkspaceEntry('host/key?')).toBe('/hybrid?hostId=host%2Fkey%3F')
+    expect(mobileHostWorkspaceEntry('host/key?', false)).toBe('/hybrid?hostId=host%2Fkey%3F')
+    expect(mobileHostWorkspaceEntry('host/key?', true)).toBe('/h/host%2Fkey%3F')
+  })
+
+  it('routes every parity baseline target through native presentation source', () => {
+    expect(mobileHomeDestination('host/key', { kind: 'workspaceList' }, true)).toBe('/h/host%2Fkey')
+    expect(
+      mobileHomeDestination(
+        'host/key',
+        { kind: 'session', hostWorkspaceId: 'repo::/workspace' },
+        true
+      )
+    ).toBe('/h/host%2Fkey/session/repo%3A%3A%2Fworkspace')
+    expect(mobileHomeDestination('host/key', { kind: 'tasks', taskSource: 'linear' }, true)).toBe(
+      '/h/host%2Fkey/tasks?taskSource=linear'
+    )
+    expect(mobileHomeDestination('host/key', { kind: 'accounts' }, true)).toBe(
+      '/h/host%2Fkey/accounts'
+    )
+    expect(mobileHomeDestination('host/key', { kind: 'newWorkspace' }, true)).toBe(
+      '/h/host%2Fkey?action=newWorktree'
+    )
   })
 })
 

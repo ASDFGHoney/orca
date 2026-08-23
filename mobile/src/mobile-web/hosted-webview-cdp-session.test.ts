@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   activateHostedWebViewControl,
+  assertNoHostedMobileWebCdpTarget,
   isHostedMobileWebUrl,
   readHostedWebViewState,
   readHostedWebViewTextPoint,
@@ -13,6 +14,7 @@ import {
   verifyHostedWebViewNavigationIsolation,
   verifyHostedWebViewNetworkIsolation
 } from '../../scripts/hosted-webview-cdp-session.mjs'
+import { createHostedIosNativeBaselineStep } from '../../scripts/hosted-ios-native-baseline-step.mjs'
 import { verifyHostedWebViewExecutableIsolation } from '../../scripts/hosted-webview-executable-isolation.mjs'
 
 const iosShellSource = readFileSync(
@@ -57,6 +59,10 @@ const simulatorAppPreparationSource = readFileSync(
   new URL('../../scripts/hosted-ios-simulator-app-preparation.mjs', import.meta.url),
   'utf8'
 )
+const simulatorLauncherSource = readFileSync(
+  new URL('../../scripts/hosted-ios-mobile-launcher.mjs', import.meta.url),
+  'utf8'
+)
 const androidSecurityHarnessSource = readFileSync(
   new URL('../../scripts/run-hosted-android-webview-security-e2e.mjs', import.meta.url),
   'utf8'
@@ -89,6 +95,87 @@ describe('hosted WebView CDP target selection', () => {
     expect(isHostedMobileWebUrl('https://orca-mobile-web.invalid/#session-a')).toBe(true)
     expect(isHostedMobileWebUrl('https://orca-mobile-web.invalid.evil.test/')).toBe(false)
     expect(isHostedMobileWebUrl('http://orca-mobile-web.invalid/')).toBe(false)
+  })
+
+  it('proves native baselines have no hosted private-origin CDP target', async () => {
+    const target = (url: string) => ({
+      id: 'target',
+      type: 'page',
+      url,
+      webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/page/target'
+    })
+    const fetchTargets = (urls: string[]) => async () =>
+      new Response(JSON.stringify(urls.map(target)))
+
+    await expect(
+      assertNoHostedMobileWebCdpTarget({
+        discoveryUrl: 'http://127.0.0.1:9222',
+        fetchImpl: fetchTargets(['about:blank', 'file:///native-terminal.html'])
+      })
+    ).resolves.toBeUndefined()
+    for (const url of [
+      'orca-mobile-web://session-a/',
+      'https://orca-mobile-web.invalid/#session-a'
+    ]) {
+      await expect(
+        assertNoHostedMobileWebCdpTarget({
+          discoveryUrl: 'http://127.0.0.1:9222',
+          fetchImpl: fetchTargets([url])
+        })
+      ).rejects.toThrow('Native baseline has a hosted mobile WebView CDP target')
+    }
+    await expect(
+      assertNoHostedMobileWebCdpTarget({
+        discoveryUrl: 'http://127.0.0.1:9222',
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: 'uninspectable-hosted-target',
+                type: 'page',
+                url: 'orca-mobile-web://session-a/'
+              }
+            ])
+          )
+      })
+    ).rejects.toThrow('Native baseline has a hosted mobile WebView CDP target')
+    const staleDiscoverySocket = new FakeCdpSocket([JSON.stringify(probe())])
+    await expect(
+      assertNoHostedMobileWebCdpTarget({
+        discoveryUrl: 'http://127.0.0.1:9222',
+        fetchImpl: fetchTargets(['about:blank']),
+        WebSocketCtor: fakeCdpConstructor(staleDiscoverySocket)
+      })
+    ).rejects.toThrow('Native baseline has a hosted mobile WebView CDP target')
+  })
+
+  it('asserts target exclusion around every native baseline capture', async () => {
+    const events: string[] = []
+    const nativeBaselineStep = createHostedIosNativeBaselineStep({
+      assertNoHostedMobileWebCdpTarget: async () => {
+        events.push('assert')
+      },
+      discoveryUrl: 'http://127.0.0.1:9222',
+      evidenceStep: async (label: string, run: () => Promise<string>) => {
+        events.push(label)
+        return run()
+      }
+    })
+
+    await expect(
+      nativeBaselineStep('native workspace baseline', async () => {
+        events.push('capture')
+        return 'captured'
+      })
+    ).resolves.toBe('captured')
+    expect(events).toEqual([
+      'native workspace baseline hosted target exclusion',
+      'assert',
+      'native workspace baseline',
+      'capture',
+      'native workspace baseline hosted target exclusion after capture',
+      'assert'
+    ])
   })
 
   it('selects only a visible interactive hosted document with expected UI text', () => {
@@ -621,6 +708,20 @@ describe('hosted WebView CDP target selection', () => {
     expect(simulatorAppBuildSource).toContain("'xcodebuild'")
     expect(simulatorAppBuildSource).toContain("'simctl', 'install', deviceUdid, appPath")
     expect(simulatorAppBuildSource).not.toContain('CODE_SIGNING_ALLOWED=NO')
+    expect(simulatorLauncherSource).toContain("EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE: '1'")
+    const inspectorStart = simulatorHarnessSource.indexOf('inspector = await startCdpServer')
+    const nativeCapture = simulatorHarnessSource.indexOf("'native workspace baseline'")
+    const exclusion = simulatorHarnessSource.indexOf(
+      'assertNoHostedMobileWebCdpTarget',
+      inspectorStart
+    )
+    const handoff = simulatorHarnessSource.indexOf("'native hybrid route handoff'")
+    const hostedWait = simulatorHarnessSource.indexOf('let workspaceDocument = await')
+    expect(inspectorStart).toBeGreaterThanOrEqual(0)
+    expect(exclusion).toBeGreaterThan(inspectorStart)
+    expect(nativeCapture).toBeGreaterThan(exclusion)
+    expect(handoff).toBeGreaterThan(nativeCapture)
+    expect(hostedWait).toBeGreaterThan(handoff)
   })
 
   it('installs and launches the exact Android shell with a proven sentinel', () => {

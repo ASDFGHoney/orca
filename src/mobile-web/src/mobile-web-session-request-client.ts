@@ -9,6 +9,8 @@ import {
   MobileWebSessionCreateAgentPayloadSchema,
   MobileWebSessionCreatePayloadSchema,
   MobileWebSessionCreateResultSchema,
+  MobileWebSessionHostGatesPayloadSchema,
+  MobileWebSessionHostGatesResultSchema,
   MobileWebSessionSnapshotPayloadSchema,
   MobileWebSessionSnapshotResultSchema,
   MobileWebSessionTabActionPayloadSchema,
@@ -22,6 +24,8 @@ import {
   type MobileWebSessionCreateAgentPayload,
   type MobileWebSessionCreatePayload,
   type MobileWebSessionCreateResult,
+  type MobileWebSessionHostGatesPayload,
+  type MobileWebSessionHostGatesResult,
   type MobileWebSessionSnapshotPayload,
   type MobileWebSessionSnapshotResult,
   type MobileWebSessionTabActionPayload
@@ -53,6 +57,16 @@ export class MobileWebSessionRequestClient {
       payload,
       MobileWebSessionCapabilitiesPayloadSchema,
       MobileWebSessionCapabilitiesResultSchema
+    )
+  }
+
+  hostGates(payload: MobileWebSessionHostGatesPayload): Promise<MobileWebSessionHostGatesResult> {
+    return this.requests.request(
+      'session',
+      'capabilities',
+      payload,
+      MobileWebSessionHostGatesPayloadSchema,
+      MobileWebSessionHostGatesResultSchema
     )
   }
 

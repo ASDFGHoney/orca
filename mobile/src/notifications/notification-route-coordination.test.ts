@@ -28,7 +28,9 @@ describe('notification route coordination', () => {
 
     const notificationEffect = rootLayoutSource.slice(start, end)
     expect(notificationEffect).toContain('MOBILE_WEB_NAVIGATION_INTENTS.publish(navigation.target)')
-    expect(notificationEffect).toContain("router.push('/hybrid')")
+    expect(notificationEffect).toContain(
+      'router.push(mobileHostWorkspaceEntry(navigation.target.hostId, false))'
+    )
     expect(notificationEffect).not.toContain('navigateToHostStackRoute(')
   })
 })

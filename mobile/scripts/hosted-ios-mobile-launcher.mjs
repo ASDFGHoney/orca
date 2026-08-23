@@ -26,6 +26,7 @@ export function startHostedIosMobileLauncher({
         ...process.env,
         ...environment,
         ORCA_CLI: orcaCli,
+        EXPO_PUBLIC_ORCA_E2E_MOBILE_NATIVE_BASELINE: '1',
         ORCA_E2E_MOBILE_AUTO_SELECT_PAIRED_HOST: '1',
         ORCA_E2E_MOBILE_AGENT_HISTORY_FIXTURE: '1',
         ORCA_E2E_MOBILE_RUN_DIRECTORY: path.join(runtimeDirectory, 'paired-host'),

@@ -10,7 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { colors } from '../theme/mobile-theme'
 import type { HostProfile } from '../transport/types'
 import { hybridShellStyles as styles } from './hybrid-shell-styles'
-import { MobileWebHostPicker } from './MobileWebHostPicker'
 import { MobileWebRecoveryActions } from './MobileWebRecoveryActions'
 import {
   mobileWebShellPresentationState,
@@ -19,9 +18,6 @@ import {
 
 type MobileWebHybridShellPresentationProps = {
   viewRef: RefObject<MobileWebShellViewRef | null>
-  hosts: HostProfile[]
-  hostsLoading: boolean
-  hostLoadFailed: boolean
   selectedHost: HostProfile | undefined
   session: MobileWebShellSession | null
   viewEpoch: number
@@ -30,12 +26,10 @@ type MobileWebHybridShellPresentationProps = {
   hostedViewActive: boolean
   onBack: () => void
   onShowHosts: () => void
-  onRetryHosts: () => void
   onRetryRecovery: () => void | Promise<void>
   onUsePrevious: () => void | Promise<void>
   onClearCache: () => void | Promise<void>
   onRecoveryFailure: () => void
-  onSelectHost: (hostId: string) => void
   onTouch: () => void
   onBridgeMessage: (message: string) => void
   onPageLoaded: () => void
@@ -45,9 +39,6 @@ type MobileWebHybridShellPresentationProps = {
 
 export function MobileWebHybridShellPresentation({
   viewRef,
-  hosts,
-  hostsLoading,
-  hostLoadFailed,
   selectedHost,
   session,
   viewEpoch,
@@ -56,12 +47,10 @@ export function MobileWebHybridShellPresentation({
   hostedViewActive,
   onBack,
   onShowHosts,
-  onRetryHosts,
   onRetryRecovery,
   onUsePrevious,
   onClearCache,
   onRecoveryFailure,
-  onSelectHost,
   onTouch,
   onBridgeMessage,
   onPageLoaded,
@@ -108,15 +97,7 @@ export function MobileWebHybridShellPresentation({
         </View>
       ) : null}
 
-      {presentationState === 'host-picker' ? (
-        <MobileWebHostPicker
-          hosts={hosts}
-          loading={hostsLoading}
-          failed={hostLoadFailed}
-          onRetry={onRetryHosts}
-          onSelect={onSelectHost}
-        />
-      ) : presentationState === 'hosted-interface' && session ? (
+      {presentationState === 'hosted-interface' && session ? (
         <View style={styles.webContainer} onTouchStart={onTouch}>
           {packageWarning ? (
             <>

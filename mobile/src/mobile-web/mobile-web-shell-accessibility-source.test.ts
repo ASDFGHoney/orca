@@ -5,7 +5,6 @@ const shellSource = readFileSync(
   new URL('./MobileWebHybridShellPresentation.tsx', import.meta.url),
   'utf8'
 )
-const hostPickerSource = readFileSync(new URL('./MobileWebHostPicker.tsx', import.meta.url), 'utf8')
 const recoveryActionsSource = readFileSync(
   new URL('./MobileWebRecoveryActions.tsx', import.meta.url),
   'utf8'
@@ -28,14 +27,7 @@ describe('mobile web shell accessibility', () => {
     expect(shellSource.match(/accessibilityRole="alert"/g)).toHaveLength(2)
   })
 
-  it('names host selection and recovery controls', () => {
-    expect(hostPickerSource).toContain('accessibilityLabel="Retry loading paired hosts"')
-    expect(hostPickerSource).toContain('accessibilityLabel={`Open ${host.name}`}')
-    expect(hostPickerSource.match(/accessibilityRole="button"/g)).toHaveLength(2)
-    expect(hostPickerSource).toContain('accessibilityLiveRegion="polite"')
-    expect(hostPickerSource).toContain(
-      "accessibilityRole={presentationState === 'failed' ? 'alert' : undefined}"
-    )
+  it('names recovery controls', () => {
     expect(recoveryActionsSource).toContain('accessibilityRole="toolbar"')
     expect(recoveryActionsSource).toContain(
       'accessibilityLabel={`${action.label} workspace interface`}'

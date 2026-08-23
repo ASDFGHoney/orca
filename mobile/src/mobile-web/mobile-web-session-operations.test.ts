@@ -39,6 +39,61 @@ describe('mobile web session operations', () => {
     expect(sendRequest).toHaveBeenCalledWith('status.get')
   })
 
+  it('returns host gates only for the request-gated projection', async () => {
+    const sendRequest = vi.fn<RpcClient['sendRequest']>().mockResolvedValue({
+      ok: true,
+      result: {
+        capabilities: ['aiVault.v1', 'terminal.quick-commands.v1', 42, 'x'.repeat(121)],
+        floatingWorkspaceEnabled: true,
+        pairedDeviceId: 'secret-device',
+        deviceToken: 'secret-token',
+        protocolVersion: 99
+      }
+    })
+
+    await expect(
+      executeMobileWebSessionOperation({
+        operation: 'capabilities',
+        payload: { includeHostGates: true },
+        requestId: 'R'.repeat(22),
+        client: { sendRequest } as unknown as RpcClient,
+        workspaceAuthority: createWorkspaceAuthority(),
+        browserAuthority: createBrowserAuthority(),
+        nativeChatAuthority: createNativeChatAuthority()
+      })
+    ).resolves.toEqual({
+      hostCapabilities: ['aiVault.v1', 'terminal.quick-commands.v1'],
+      floatingWorkspaceEnabled: true
+    })
+  })
+
+  it('keeps the legacy capability response unchanged for old pages', async () => {
+    const sendRequest = vi.fn<RpcClient['sendRequest']>().mockResolvedValue({
+      ok: true,
+      result: {
+        capabilities: ['browser.screencast.v1', 'aiVault.v1'],
+        floatingWorkspaceEnabled: true
+      }
+    })
+
+    await expect(
+      executeMobileWebSessionOperation({
+        operation: 'capabilities',
+        payload: {},
+        requestId: 'R'.repeat(22),
+        client: { sendRequest } as unknown as RpcClient,
+        workspaceAuthority: createWorkspaceAuthority(),
+        browserAuthority: createBrowserAuthority(),
+        nativeChatAuthority: createNativeChatAuthority()
+      })
+    ).resolves.toEqual({
+      browserScreencastSupported: true,
+      agentHistorySupported: true,
+      quickCommandsSupported: false,
+      terminalQueryReplyInputSupported: false
+    })
+  })
+
   it('exposes a typed refusal without leaking host close metadata', async () => {
     const sendRequest = vi.fn<RpcClient['sendRequest']>().mockResolvedValue({
       ok: true,

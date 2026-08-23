@@ -3,6 +3,8 @@ import {
   MobileWebSessionAgentOptionsResultSchema,
   MobileWebSessionCapabilitiesPayloadSchema,
   MobileWebSessionCapabilitiesResultSchema,
+  MobileWebSessionHostGatesPayloadSchema,
+  MobileWebSessionHostGatesResultSchema,
   MobileWebSessionCreateAgentPayloadSchema
 } from './session-operation-contract'
 
@@ -24,6 +26,34 @@ describe('mobile web session operation contract', () => {
       MobileWebSessionCapabilitiesResultSchema.safeParse({
         ...projection,
         capabilities: ['secret.v1']
+      }).success
+    ).toBe(false)
+  })
+
+  it('gates the bounded host projection behind a distinct strict payload', () => {
+    expect(
+      MobileWebSessionCapabilitiesPayloadSchema.safeParse({ includeHostGates: true }).success
+    ).toBe(false)
+    expect(MobileWebSessionHostGatesPayloadSchema.parse({ includeHostGates: true })).toEqual({
+      includeHostGates: true
+    })
+    expect(MobileWebSessionHostGatesPayloadSchema.safeParse({}).success).toBe(false)
+
+    const projection = {
+      hostCapabilities: ['aiVault.v1', 'terminal.quick-commands.v1'],
+      floatingWorkspaceEnabled: true
+    }
+    expect(MobileWebSessionHostGatesResultSchema.parse(projection)).toEqual(projection)
+    for (const leaked of ['deviceToken', 'pairedDeviceId', 'protocolVersion', 'rawStatus']) {
+      expect(
+        MobileWebSessionHostGatesResultSchema.safeParse({ ...projection, [leaked]: 'secret' })
+          .success
+      ).toBe(false)
+    }
+    expect(
+      MobileWebSessionHostGatesResultSchema.safeParse({
+        ...projection,
+        hostCapabilities: ['x'.repeat(121)]
       }).success
     ).toBe(false)
   })

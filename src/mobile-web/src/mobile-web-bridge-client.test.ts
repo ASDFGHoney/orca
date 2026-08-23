@@ -61,6 +61,48 @@ describe('mobile web bridge client', () => {
     await expect(result).rejects.toEqual(new MobileWebBridgeClientError('not_connected', true))
   })
 
+  it('requests host gates through the existing capability grant', async () => {
+    const messages: MobileWebBridgePageMessage[] = []
+    const client = new MobileWebBridgeClient({
+      context: CONTEXT,
+      grants: [
+        {
+          capability: 'session',
+          operation: 'capabilities',
+          limits: {
+            maxRequestBytes: 256,
+            maxResponseBytes: 16 * 1024,
+            maxConcurrent: 1,
+            rateCapacity: 4,
+            rateRefillPerSecond: 1
+          }
+        }
+      ],
+      postMessage: (message) => {
+        messages.push(message)
+        return true
+      },
+      createRequestId: () => REQUEST_ID
+    })
+    const result = client.sessionHostGates({ includeHostGates: true })
+    client.receive(
+      response({
+        status: 'success',
+        payload: { hostCapabilities: ['aiVault.v1'], floatingWorkspaceEnabled: true }
+      })
+    )
+
+    await expect(result).resolves.toEqual({
+      hostCapabilities: ['aiVault.v1'],
+      floatingWorkspaceEnabled: true
+    })
+    expect(messages[0]).toMatchObject({
+      capability: 'session',
+      operation: 'capabilities',
+      payload: { includeHostGates: true }
+    })
+  })
+
   it('times out with cancellation and cancels all pending work on dispose', async () => {
     vi.useFakeTimers()
     const timeoutHarness = createHarness({ timeout: 100 })

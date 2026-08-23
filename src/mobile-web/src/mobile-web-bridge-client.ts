@@ -123,6 +123,7 @@ export class MobileWebBridgeClient {
   readonly navigationReconnect!: MobileWebNavigationRequestClient['reconnect']
   readonly navigationRemoveHost!: MobileWebNavigationRequestClient['removeHost']
   readonly sessionCapabilities!: MobileWebSessionRequestClient['capabilities']
+  readonly sessionHostGates!: MobileWebSessionRequestClient['hostGates']
   readonly sessionSnapshot!: MobileWebSessionRequestClient['snapshot']
   readonly sessionActivate!: MobileWebSessionRequestClient['activate']
   readonly sessionAgentOptions!: MobileWebSessionRequestClient['agentOptions']
@@ -166,7 +167,11 @@ export class MobileWebBridgeClient {
       getGrant: (capability, operation) =>
         this.grants.get(mobileWebBridgeOperationKey(capability, operation)),
       postMessage: options.postMessage,
-      envelope: () => this.envelope(),
+      envelope: () => ({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        shellSessionId: this.options.context.shellSessionId,
+        buildId: this.options.context.buildId
+      }),
       createRequestId: () => this.uniqueMessageId(),
       otherPendingCount: () => this.subscriptions.pendingCount(),
       requestTimeoutMs: options.requestTimeoutMs
@@ -303,13 +308,5 @@ export class MobileWebBridgeClient {
       }
     }
     throw new MobileWebBridgeClientError('conflict', true)
-  }
-
-  private envelope() {
-    return {
-      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-      shellSessionId: this.options.context.shellSessionId,
-      buildId: this.options.context.buildId
-    } as const
   }
 }

@@ -83,7 +83,10 @@ describe('mobile web cold resume route', () => {
       hostIdentity: 'paired-host',
       hostWorkspaceIdentity: 'workspace'
     }
-    expect(mobileWebColdResumeStartupPath(route, [{ id: 'paired-host' }], '/')).toBe('/hybrid')
+    expect(mobileWebColdResumeStartupPath(route, [{ id: 'paired-host' }], '/')).toBe(
+      '/hybrid?hostId=paired-host'
+    )
+    expect(mobileWebColdResumeStartupPath(route, [{ id: 'paired-host' }], '/', true)).toBeNull()
     expect(mobileWebColdResumeStartupPath(route, [{ id: 'other-host' }], '/')).toBeNull()
     for (const nativePath of [
       '/settings',

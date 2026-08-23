@@ -7,6 +7,7 @@ export type MobileOnboardingStep = (typeof MOBILE_ONBOARDING_STEPS)[number]
 export type MobileOnboardingDestination =
   | '/'
   | `/hybrid?hostId=${string}`
+  | `/h/${string}`
   | {
       pathname: '/mobile-onboarding'
       params: { steps: string; hostId?: string }

@@ -8,6 +8,7 @@ import { webHostWorkspaceCreationOperations } from '../src/worktree/web-host-wor
 import { webHostScreenHostState } from '../src/worktree/web-host-screen-host-state'
 import { navigateFromHostScreenList } from '../src/worktree/host-screen-route-navigation'
 import { webHostScreenShellOperations } from '../src/worktree/web-host-screen-shell-operations'
+import { useWebHostStatusGates } from '../src/transport/web-host-status-gates'
 
 const HOSTED_PAGE_HOST_ID = 'paired-orca-desktop'
 
@@ -51,15 +52,12 @@ export default function HostMobileWebRoute() {
       : shell.connection === 'recovering'
         ? 'reconnecting'
         : shell.connection
+  const hostStatusGates = useWebHostStatusGates({
+    client: shell.client,
+    connection: shell.connection
+  })
   return (
-    <HostProtocolGatesProvider
-      value={{
-        hostCapabilities: [],
-        floatingWorkspaceEnabled: false,
-        compatVerdict: { kind: 'ok' },
-        statusPending: false
-      }}
-    >
+    <HostProtocolGatesProvider value={hostStatusGates}>
       <HostScreen
         hostId={HOSTED_PAGE_HOST_ID}
         nativeHostBinding={false}

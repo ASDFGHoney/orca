@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 const nativeLayout = readFileSync(new URL('../../app/_layout.tsx', import.meta.url), 'utf8')
 const nativeSettings = readFileSync(new URL('../../app/settings.tsx', import.meta.url), 'utf8')
+const nativeHome = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 const hybridShell = readFileSync(new URL('../../app/hybrid.tsx', import.meta.url), 'utf8')
 const hybridPresentation = readFileSync(
   new URL('./MobileWebHybridShellPresentation.tsx', import.meta.url),
@@ -40,6 +41,11 @@ describe('mobile native shell route ownership', () => {
     expect(nativeSettings).not.toContain('Hybrid workspace UI')
     expect(nativeSettings).not.toContain('Experimental')
     expect(nativeLayout).not.toContain('<Stack.Screen name="h"')
+  })
+
+  it('keeps host selection on the existing native Home presentation', () => {
+    expect(nativeHome).toContain('<MobileHostCard')
+    expect(hybridPresentation).not.toContain('MobileWebHostPicker')
   })
 
   it('does not add native-shell screens to the desktop-served route graph', () => {

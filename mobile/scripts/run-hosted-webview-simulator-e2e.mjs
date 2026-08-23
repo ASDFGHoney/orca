@@ -21,8 +21,10 @@ import {
   captureNativeAccountsBaseline
 } from './hosted-ios-accounts-parity.mjs'
 import { startHostedIosEmulatorController } from './hosted-ios-emulator-controller.mjs'
+import { createHostedIosNativeBaselineStep } from './hosted-ios-native-baseline-step.mjs'
 import {
   activateHostedWebViewControl,
+  assertNoHostedMobileWebCdpTarget,
   verifyHostedWebViewNavigationIsolation,
   verifyHostedWebViewNetworkIsolation,
   waitForVisibleHostedWebView
@@ -145,6 +147,14 @@ async function main() {
       userDataDir: emulatorController.userData,
       worktree
     }
+    const inspectorPort = await findAvailableHostedLoopbackPort()
+    const discoveryUrl = `http://127.0.0.1:${inspectorPort}`
+    inspector = await startCdpServer({ port: inspectorPort })
+    const nativeBaselineStep = createHostedIosNativeBaselineStep({
+      assertNoHostedMobileWebCdpTarget,
+      discoveryUrl,
+      evidenceStep
+    })
     const expectedWorkspace = path.basename(worktree)
     const nativeOnboarding = await evidenceStep('native onboarding', () =>
       completeHostedIosNativeOnboarding(emulator, expectedWorkspace, options.timeoutMs)
@@ -171,7 +181,7 @@ async function main() {
       options.nativeSettingsOnly ||
       options.sourceControlOnly
         ? null
-        : await evidenceStep('native workspace baseline', () =>
+        : await nativeBaselineStep('native workspace baseline', () =>
             captureNativeWorkspaceBaseline({
               deviceUdid,
               emulator,
@@ -185,7 +195,7 @@ async function main() {
       options.nativeSettingsOnly ||
       options.sourceControlOnly
         ? null
-        : await evidenceStep('native Accounts baseline', () =>
+        : await nativeBaselineStep('native Accounts baseline', () =>
             captureNativeAccountsBaseline({
               deviceUdid,
               emulator,
@@ -202,7 +212,7 @@ async function main() {
       options.nativeSettingsOnly ||
       options.sourceControlOnly
         ? null
-        : await evidenceStep('native Tasks and Session baselines', () =>
+        : await nativeBaselineStep('native Tasks and Session baselines', () =>
             captureNativeCoreRouteBaselines({
               deviceUdid,
               emulator,
@@ -217,7 +227,7 @@ async function main() {
       options.nativeSettingsOnly ||
       options.sourceControlOnly
         ? null
-        : await evidenceStep('native Files and Preview baselines', () =>
+        : await nativeBaselineStep('native Files and Preview baselines', () =>
             captureNativeFilesPreviewBaselines({
               deviceUdid,
               emulator,
@@ -233,7 +243,7 @@ async function main() {
       options.filesPreviewOnly ||
       options.nativeSettingsOnly
         ? null
-        : await evidenceStep('native Source Control and Review baselines', () =>
+        : await nativeBaselineStep('native Source Control and Review baselines', () =>
             captureNativeSourceControlReviewBaselines({
               deviceUdid,
               emulator,
@@ -249,7 +259,7 @@ async function main() {
       options.nativeSettingsOnly ||
       options.sourceControlOnly
         ? null
-        : await evidenceStep('native Agent History baseline', () =>
+        : await nativeBaselineStep('native Agent History baseline', () =>
             captureNativeAgentHistoryBaseline({
               deviceUdid,
               emulator,
@@ -261,9 +271,6 @@ async function main() {
     await evidenceStep('native hybrid route handoff', () =>
       openHostedIosHybridRoute(emulator, options.timeoutMs)
     )
-    const inspectorPort = await findAvailableHostedLoopbackPort()
-    const discoveryUrl = `http://127.0.0.1:${inspectorPort}`
-    inspector = await startCdpServer({ port: inspectorPort })
     let workspaceDocument = await waitForVisibleHostedWebView({
       discoveryUrl,
       expectedText: 'Orca Desktop',

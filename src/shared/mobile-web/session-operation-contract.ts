@@ -30,6 +30,9 @@ export const MobileWebSessionCreateAgentPayloadSchema = z
   })
   .strict()
 export const MobileWebSessionCapabilitiesPayloadSchema = z.object({}).strict()
+export const MobileWebSessionHostGatesPayloadSchema = z
+  .object({ includeHostGates: z.literal(true) })
+  .strict()
 export const MobileWebSessionBrowserCreatePayloadSchema = z
   .object({
     workspaceId: MobileWebWorkspaceIdSchema,
@@ -160,6 +163,13 @@ export const MobileWebSessionCapabilitiesResultSchema = z
   })
   .strict()
 
+export const MobileWebSessionHostGatesResultSchema = z
+  .object({
+    hostCapabilities: z.array(z.string().min(1).max(120)).max(256),
+    floatingWorkspaceEnabled: z.boolean()
+  })
+  .strict()
+
 export type MobileWebSessionSnapshotPayload = z.infer<typeof MobileWebSessionSnapshotPayloadSchema>
 export type MobileWebSessionSubscribePayload = z.infer<
   typeof MobileWebSessionSubscribePayloadSchema
@@ -173,6 +183,9 @@ export type MobileWebSessionCreateAgentPayload = z.infer<
 >
 export type MobileWebSessionCapabilitiesPayload = z.infer<
   typeof MobileWebSessionCapabilitiesPayloadSchema
+>
+export type MobileWebSessionHostGatesPayload = z.infer<
+  typeof MobileWebSessionHostGatesPayloadSchema
 >
 export type MobileWebSessionBrowserCreatePayload = z.infer<
   typeof MobileWebSessionBrowserCreatePayloadSchema
@@ -194,6 +207,7 @@ export type MobileWebSessionCloseResult = z.infer<typeof MobileWebSessionCloseRe
 export type MobileWebSessionCapabilitiesResult = z.infer<
   typeof MobileWebSessionCapabilitiesResultSchema
 >
+export type MobileWebSessionHostGatesResult = z.infer<typeof MobileWebSessionHostGatesResultSchema>
 
 function isAllowedBrowserUrl(value: string): boolean {
   if (value === 'about:blank') {
