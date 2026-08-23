@@ -119,6 +119,8 @@ import {
 import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
 import { stopAdoptedCodexTui } from './adopted-codex-tui-stop'
 import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
+import { StructuredTuiAdoptionInflight } from './structured-tui-adoption-inflight'
+import { releaseStructuredTuiAdoptionReservation } from './structured-tui-adoption-reservation-release'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
 import { evaluateStructuredTuiRecoveryClaim } from './structured-tui-recovery-claim-match'
 import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
@@ -3191,6 +3193,9 @@ export class OrcaRuntimeService {
   private structuredAgentSessionTabRestorePromise: Promise<void> | null = null
   private structuredAgentSessionStartupRestorePromise: Promise<void> | null = null
   private readonly adoptedStructuredTuiOwners = new Map<string, StructuredTuiOwner>()
+  private readonly structuredTuiAdoptionInflight = new StructuredTuiAdoptionInflight<
+    AgentSessionMutationResult<AgentSessionAttachResult>
+  >()
   private leaves = new Map<string, RuntimeLeafRecord>()
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
@@ -11426,7 +11431,7 @@ export class OrcaRuntimeService {
     }
   }
 
-  async adoptStructuredAgentSessionTerminal(
+  adoptStructuredAgentSessionTerminal(
     input: {
       envelope: {
         sessionId: string
@@ -11440,6 +11445,20 @@ export class OrcaRuntimeService {
       ptyId: string
       threadId?: string
     },
+    caller: StructuredAgentSessionCaller
+  ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
+    return this.structuredTuiAdoptionInflight.run(
+      {
+        callerKey: caller.callerKey,
+        operationId: input.envelope.clientOperationId,
+        fingerprint: input.envelope.payloadFingerprint
+      },
+      () => this.adoptStructuredAgentSessionTerminalOnce(input, caller)
+    )
+  }
+
+  private async adoptStructuredAgentSessionTerminalOnce(
+    input: Parameters<OrcaRuntimeService['adoptStructuredAgentSessionTerminal']>[0],
     caller: StructuredAgentSessionCaller
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
     const pty = this.ptysById.get(input.ptyId)
@@ -11504,7 +11523,7 @@ export class OrcaRuntimeService {
     }
     const { fence, spawnToken } = reserved
     agentSessionPtyWriteGate.bindPtyForAttempt(input.ptyId, sessionId, spawnToken)
-    let owned = false
+    let ownerProven = false
     try {
       return await this.attachAdoptedStructuredTui({
         input,
@@ -11515,32 +11534,38 @@ export class OrcaRuntimeService {
         spawnToken,
         rootProcessId,
         pty,
-        onOwned: () => {
-          owned = true
+        onOwnerProven: (owner) => {
+          if (ownerProven) {
+            return
+          }
+          ownerProven = true
+          this.adoptedStructuredTuiOwners.set(sessionId, owner)
+          const settled = agentSessionPtyWriteGate.settlePtyAttempt(input.ptyId, spawnToken)
+          const currentPty = this.ptysById.get(input.ptyId)
+          if (
+            !settled &&
+            currentPty?.connected &&
+            currentPty.paneKey === input.paneKey &&
+            agentSessionPtyWriteGate.boundSessionId(input.ptyId) === null
+          ) {
+            agentSessionPtyWriteGate.bindPty(input.ptyId, sessionId)
+          }
         }
       })
     } finally {
-      if (owned) {
-        agentSessionPtyWriteGate.settlePtyAttempt(input.ptyId, spawnToken)
-      } else {
-        // A failed proof must leave nothing behind: an unreleased reservation is exactly the
-        // latched lease that makes the next attempt refuse itself. Both releases are scoped to this
-        // attempt's own spawn token, because a second adoption of the same pane carries the same
-        // sessionId — clearing by pty alone unbinds the pane the attempt that superseded us is
-        // proving on, and then neither can finish.
-        agentSessionPtyWriteGate.releasePtyAttempt(input.ptyId, spawnToken)
-        await host
-          .releaseAdoptedTuiReservation({ sessionId, fence, spawnToken })
-          .catch((error: unknown) => {
-            // Swallowed on purpose: the proof error below is the one the user must see. But a
-            // release that never persisted leaves the lease latched, so it cannot also be silent.
-            console.warn('[native-chat] adopted TUI reservation release failed', {
-              sessionId,
-              fence,
-              spawnToken,
-              error
-            })
+      if (!ownerProven) {
+        const error = await releaseStructuredTuiAdoptionReservation(
+          () => host.releaseAdoptedTuiReservation({ sessionId, fence, spawnToken }),
+          () => agentSessionPtyWriteGate.releasePtyAttempt(input.ptyId, spawnToken)
+        )
+        if (error !== null) {
+          console.warn('[native-chat] adopted TUI reservation release failed', {
+            sessionId,
+            fence,
+            spawnToken,
+            error
           })
+        }
       }
     }
   }
@@ -11554,7 +11579,7 @@ export class OrcaRuntimeService {
     spawnToken: string
     rootProcessId: number
     pty: RuntimePtyWorktreeRecord
-    onOwned: () => void
+    onOwnerProven: (owner: StructuredTuiOwner) => void
   }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
     const { input, caller, host, intent, fence, spawnToken, rootProcessId, pty } = args
     const readPty = (): RuntimePtyWorktreeRecord => {
@@ -11649,11 +11674,14 @@ export class OrcaRuntimeService {
       runtimeKind: 'tui',
       providerHandle: { kind: 'codex', threadId }
     }
-    const adopted = await host.adoptTuiOwner({ caller, params, owner })
+    const adopted = await host.adoptTuiOwner({
+      caller,
+      params,
+      owner,
+      onOwnerProven: () => args.onOwnerProven(owner)
+    })
     if (adopted.ok) {
-      // The pane stays bound to the reservation this call already made; only the owner is new.
-      this.adoptedStructuredTuiOwners.set(input.envelope.sessionId, owner)
-      args.onOwned()
+      args.onOwnerProven(owner)
     }
     return adopted
   }

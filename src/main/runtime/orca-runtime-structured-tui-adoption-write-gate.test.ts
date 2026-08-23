@@ -40,6 +40,7 @@ type ProofRig = {
   proofWrites: string[]
   refusedWrites: string[]
   codexHome: string
+  historyFilePath: ReturnType<typeof vi.fn>
 }
 
 let root: string
@@ -90,6 +91,7 @@ async function buildRig(): Promise<ProofRig> {
     hostId: 'local'
   })
   agentSessionPtyWriteGate.attachRecordLookup((sessionId) => store.getRecord(sessionId))
+  const historyFilePath = vi.fn(async () => null)
   const host = new StructuredAgentSessionHost({
     store,
     adapter: {
@@ -97,7 +99,8 @@ async function buildRig(): Promise<ProofRig> {
       dispatch: vi.fn(),
       cancelTurn: vi.fn(),
       answerPrompt: vi.fn(),
-      setOption: vi.fn()
+      setOption: vi.fn(),
+      historyFilePath
     },
     journalRoot: join(root, 'journals'),
     claimKeyId: 'key-1',
@@ -110,7 +113,15 @@ async function buildRig(): Promise<ProofRig> {
   setStructuredAgentSessionHost(host)
 
   const runtime = new OrcaRuntimeService({ getSettings: () => ({ agentDefaultEnv: {} }) } as never)
-  const state: ProofRig = { runtime, store, host, proofWrites: [], refusedWrites: [], codexHome }
+  const state: ProofRig = {
+    runtime,
+    store,
+    host,
+    proofWrites: [],
+    refusedWrites: [],
+    codexHome,
+    historyFilePath
+  }
   const ptyRecord = {
     ptyId: PTY_ID,
     connected: true,
@@ -255,8 +266,7 @@ describe('structured Codex adoption against the real PTY write gate', () => {
     })
   }, 30_000)
 
-  it('lets the attempt holding the reservation win when two adoptions overlap', async () => {
-    // Both attempts park here: reservation taken and pane bound, proof not yet written.
+  it('deduplicates a replay while a third fresh operation supersedes it', async () => {
     const arrived: string[] = []
     let releaseBoth: () => void = () => {}
     const bothArrived = new Promise<void>((resolve) => {
@@ -280,13 +290,17 @@ describe('structured Codex adoption against the real PTY write gate', () => {
       }
     )
 
-    const superseded = rig.runtime.adoptStructuredAgentSessionTerminal(
-      { ...adoptInput(), threadId: THREAD_ID },
-      { callerKey: 'renderer-1' }
-    )
+    const replayedInput = { ...adoptInput(), threadId: THREAD_ID }
+    const superseded = rig.runtime.adoptStructuredAgentSessionTerminal(replayedInput, {
+      callerKey: 'renderer-1'
+    })
     superseded.catch(() => undefined)
+    const replay = rig.runtime.adoptStructuredAgentSessionTerminal(replayedInput, {
+      callerKey: 'renderer-1'
+    })
+    expect(replay).toBe(superseded)
     await vi.waitFor(() => expect(arrived).toHaveLength(1))
-    // The second attempt carries the same sessionId and supersedes the first one's reservation.
+    // A fresh operation is independent and supersedes the shared delivery's reservation.
     const winner = rig.runtime.adoptStructuredAgentSessionTerminal(
       { ...adoptInput(), threadId: THREAD_ID },
       { callerKey: 'renderer-1' }
@@ -294,11 +308,146 @@ describe('structured Codex adoption against the real PTY write gate', () => {
 
     await expect(winner).resolves.toMatchObject({ ok: true })
     await expect(superseded).rejects.toThrow('could not verify its Codex session')
+    await expect(replay).rejects.toThrow('could not verify its Codex session')
     // The loser's cleanup ran against a pane and a reservation that were no longer its own.
     expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
     expect(rig.store.getRecord(SESSION_ID)).toMatchObject({
       lease: { runtimeKind: 'tui', claimStatus: 'live', handoffStage: null }
     })
+  }, 30_000)
+
+  it('rolls back a process identity when proving the owner fails', async () => {
+    vi.spyOn(rig.store, 'proveOwner').mockRejectedValueOnce(new Error('fault after process commit'))
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('fault after process commit')
+    expect(rig.store.getRecord(SESSION_ID)?.lease).toMatchObject({
+      claimStatus: 'reserved',
+      ownerProcess: null,
+      processlessAt: expect.any(Number)
+    })
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).resolves.toMatchObject({ ok: true })
+  }, 30_000)
+
+  it('preserves a just-proved owner when the next runtime step fails', async () => {
+    const settlePtyAttempt =
+      agentSessionPtyWriteGate.settlePtyAttempt.bind(agentSessionPtyWriteGate)
+    const settle = vi.spyOn(agentSessionPtyWriteGate, 'settlePtyAttempt')
+    settle.mockImplementationOnce((ptyId, attemptToken) => {
+      const settled = settlePtyAttempt(ptyId, attemptToken)
+      expect(settled).toBe(true)
+      throw new Error('fault after owner proof')
+    })
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('fault after owner proof')
+    expect(rig.store.getRecord(SESSION_ID)?.lease.claimStatus).toBe('live')
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
+  }, 30_000)
+
+  it('keeps the pane settled when journal attachment fails after owner proof', async () => {
+    rig.historyFilePath.mockRejectedValueOnce(new Error('journal attach fault'))
+    const input = { ...adoptInput(), threadId: THREAD_ID }
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(input, { callerKey: 'renderer-1' })
+    ).rejects.toThrow('journal attach fault')
+    expect(rig.store.getRecord(SESSION_ID)?.lease).toMatchObject({
+      claimStatus: 'live',
+      ownerProcess: { pid: 4242 }
+    })
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
+    expect(agentSessionPtyWriteGate.admit(PTY_ID)).toMatchObject({
+      admitted: true,
+      sessionId: SESSION_ID
+    })
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(input, { callerKey: 'renderer-1' })
+    ).resolves.toMatchObject({ ok: true, replayed: true })
+  }, 30_000)
+
+  it('keeps the pane settled when outcome persistence fails', async () => {
+    vi.spyOn(rig.store, 'recordOperationOutcome').mockRejectedValueOnce(
+      new Error('outcome persistence fault')
+    )
+    const input = { ...adoptInput(), threadId: THREAD_ID }
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(input, { callerKey: 'renderer-1' })
+    ).rejects.toThrow('outcome persistence fault')
+    expect(rig.store.getRecord(SESSION_ID)?.lease.claimStatus).toBe('live')
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(input, { callerKey: 'renderer-1' })
+    ).resolves.toMatchObject({ ok: true, replayed: true })
+  }, 30_000)
+
+  it('retries a transient real-store reservation release without masking the proof error', async () => {
+    await rm(join(rig.codexHome, 'sessions'), { recursive: true, force: true })
+    const release = vi
+      .spyOn(rig.store, 'transitionHandoff')
+      .mockRejectedValueOnce(new Error('transient store write fault'))
+      .mockRejectedValueOnce(new Error('transient store write fault'))
+      .mockRejectedValueOnce(new Error('transient store write fault'))
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('did not prove the expected Codex rollout')
+    expect(release).toHaveBeenCalledTimes(3)
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBe(SESSION_ID)
+    await vi.waitFor(
+      () => {
+        expect(release).toHaveBeenCalledTimes(4)
+        expect(rig.store.getRecord(SESSION_ID)?.lease).toMatchObject({
+          claimStatus: 'reserved',
+          ownerProcess: null,
+          processlessAt: expect.any(Number)
+        })
+        expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
+      },
+      { timeout: 3_000 }
+    )
+  }, 30_000)
+
+  it('does not recreate a pane binding when the pane exits during settlement', async () => {
+    const settle = vi.spyOn(agentSessionPtyWriteGate, 'settlePtyAttempt')
+    settle.mockImplementationOnce((ptyId) => {
+      const internal = rig.runtime as unknown as {
+        ptysById: Map<string, { connected: boolean }>
+      }
+      internal.ptysById.get(ptyId)!.connected = false
+      agentSessionPtyWriteGate.unbindPty(ptyId)
+      return false
+    })
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).resolves.toMatchObject({ ok: true })
+    expect(rig.store.getRecord(SESSION_ID)?.lease.claimStatus).toBe('live')
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
   }, 30_000)
 
   it('refuses a pane another structured session already owns', async () => {
