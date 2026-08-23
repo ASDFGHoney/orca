@@ -40,7 +40,7 @@ function makeAgentSnapshot(
   snapshotVersion: number,
   updatedAt: number,
   turnCompletedAt?: number,
-  state: 'working' | 'done' = 'working'
+  state: 'working' | 'done' | 'blocked' = 'working'
 ): RuntimeMobileSessionTabsResult {
   return {
     worktree: WORKTREE_ID,
