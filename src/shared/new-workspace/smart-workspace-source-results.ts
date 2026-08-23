@@ -5,12 +5,11 @@ import type { LinearIssue } from '../linear/issue-types'
 import type { LinearCollectionResult } from '../linear/workspace-types'
 import type { BaseRefSearchResult } from '../repo-types'
 import { JIRA_ISSUE_KEY_PATTERN, parseJiraIssueUrl } from '../jira-issue-url'
-import { parseGitHubIssueOrPRLink, type GitHubIssueOrPRLink } from '../github/links'
-import { githubRepoIdentityKey } from '../github/repository-identity-key'
+import type { GitHubIssueOrPRLink } from '../github/links'
 import {
-  isSmartWorkspaceLinearIssueIntentMatch,
-  parseBoundedSmartWorkspaceLinearIssueUrlIntent
-} from './smart-workspace-linear-intent'
+  buildSmartWorkspaceUrlSourceRows,
+  type SmartWorkspaceGitLabUrlIntent
+} from './smart-workspace-url-source-results'
 import { isSmartWorkspaceSourceQueryWithinLimit } from './smart-workspace-source-query'
 
 export {
@@ -63,16 +62,6 @@ export function isBlockingJiraUrlIntent(mode: SmartNameMode, value: string): boo
 
 function toJiraSourceRow(issue: JiraIssue): SmartWorkspaceSourceRow {
   return { kind: 'jira', value: `jira-${issue.siteId ?? ''}-${issue.key}`, issue }
-}
-
-function isGitHubLinkIntentMatch(intent: GitHubIssueOrPRLink, item: GitHubWorkItem): boolean {
-  const itemLink = parseGitHubIssueOrPRLink(item.url)
-  return (
-    itemLink !== null &&
-    itemLink.type === intent.type &&
-    itemLink.number === intent.number &&
-    githubRepoIdentityKey(itemLink.slug) === githubRepoIdentityKey(intent.slug)
-  )
 }
 
 export function getBranchSearchRequest({
@@ -201,6 +190,7 @@ export function buildSmartWorkspaceSourceRows({
   githubUrlIntent,
   gitlabAvailable,
   gitlabItems,
+  gitlabUrlIntent,
   jiraIntent = false,
   jiraIssue,
   jiraIssues = [],
@@ -216,6 +206,7 @@ export function buildSmartWorkspaceSourceRows({
   githubUrlIntent?: GitHubIssueOrPRLink | null
   gitlabAvailable: boolean
   gitlabItems: GitLabWorkItem[]
+  gitlabUrlIntent?: SmartWorkspaceGitLabUrlIntent | null
   jiraIntent?: boolean
   jiraIssue?: JiraIssue | null
   jiraIssues?: JiraIssue[]
@@ -233,48 +224,30 @@ export function buildSmartWorkspaceSourceRows({
   if (!isSmartWorkspaceSourceQueryWithinLimit(value)) {
     return []
   }
-  const trimmed = value.trim()
-  if (githubUrlIntent && (mode === 'smart' || mode === 'github')) {
-    const githubRows = githubItems
-      .filter((item) => isGitHubLinkIntentMatch(githubUrlIntent, item))
-      .map((item) => ({
-        kind: 'github' as const,
-        value: `github-${item.repoId}-${item.type}-${item.number}`,
-        item
-      }))
-      .slice(0, resultLimit)
-    // Why: the full URL is unambiguous, so unrelated held provider rows must never become selectable.
-    return trimmed && mode === 'smart'
-      ? [{ kind: 'use-name' as const, value: 'use-name', name: trimmed }, ...githubRows]
-      : githubRows
-  }
-  const nextRows: SmartWorkspaceSourceRow[] = []
   const resolvedLinearIssues = Array.isArray(linearIssues)
     ? linearIssues
     : Array.isArray(linearIssues?.items)
       ? linearIssues.items
       : []
-  const linearUrlIntent = parseBoundedSmartWorkspaceLinearIssueUrlIntent(trimmed)
-  if (
-    linearUrlIntentOwnsResults &&
-    linearAvailable &&
-    linearUrlIntent &&
-    (mode === 'smart' || mode === 'linear')
-  ) {
-    const linearRows = resolvedLinearIssues
-      .filter((issue) => isSmartWorkspaceLinearIssueIntentMatch(linearUrlIntent, issue))
-      .map((issue) => ({
-        kind: 'linear' as const,
-        value: `linear-${issue.id}`,
-        issue
-      }))
-      .slice(0, resultLimit)
-    // Why: keep "use as workspace name" available; sourceIntent focuses the issue.
-    if (trimmed && mode === 'smart') {
-      return [{ kind: 'use-name' as const, value: 'use-name', name: trimmed }, ...linearRows]
-    }
-    return linearRows
+  // Why: a full task URL is unambiguous, so unrelated held rows must never remain selectable.
+  const urlSourceRows = buildSmartWorkspaceUrlSourceRows({
+    githubItems,
+    githubUrlIntent,
+    gitlabAvailable,
+    gitlabItems,
+    gitlabUrlIntent,
+    linearAvailable,
+    linearIssues: resolvedLinearIssues,
+    linearUrlIntentOwnsResults,
+    mode,
+    resultLimit,
+    value
+  })
+  if (urlSourceRows !== null) {
+    return urlSourceRows
   }
+  const trimmed = value.trim()
+  const nextRows: SmartWorkspaceSourceRow[] = []
   if (trimmed && mode === 'smart') {
     // Why: stable cmdk value — embedding the query remounted the row every keystroke.
     nextRows.push({ kind: 'use-name', value: 'use-name', name: trimmed })
