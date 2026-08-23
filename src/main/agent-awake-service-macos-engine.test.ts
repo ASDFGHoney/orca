@@ -108,6 +108,67 @@ function createService(overrides: AgentAwakeServiceOptions = {}): {
   }
 }
 
+/**
+ * The invariant three separate review rounds each found a hole in: while Orca
+ * wants the Mac awake, at least one native assertion must be held. Table-driven
+ * so a new edge case fails here rather than needing someone to spot it.
+ */
+describe('AgentAwakeService macOS coverage invariant', () => {
+  it.each([
+    ['caffeinate engine', 'caffeinate' as const, null, false],
+    ['Amphetamine still acquiring', 'amphetamine' as const, null, false],
+    ['Amphetamine owning a live session', 'amphetamine' as const, 'owned' as const, false],
+    ['Amphetamine only adopting', 'amphetamine' as const, 'adopted' as const, false],
+    ['Amphetamine hold no longer live', 'amphetamine' as const, 'owned' as const, true]
+  ])('holds something with %s', (_label, engine, hold, degraded) => {
+    const amphetamine = createAmphetamine()
+    const caffeinate = createCaffeinate()
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      macosAssertion: caffeinate
+    })
+
+    service.setMacosEngine(engine)
+    service.setMode('on')
+    if (hold) {
+      amphetamine.settleHold(hold)
+    }
+    if (degraded) {
+      amphetamine.degrade()
+    }
+    service.setStatuses([])
+
+    const amphetamineHolding =
+      amphetamine.start.mock.calls.length > 0 && amphetamine.getHold() !== null && !degraded
+    const caffeinateHolding = caffeinate.start.mock.calls.length > caffeinate.stop.mock.calls.length
+    expect(amphetamineHolding || caffeinateHolding).toBe(true)
+  })
+
+  it('holds something even when the incoming engine cannot start', () => {
+    const amphetamine = createAmphetamine()
+    const caffeinate = createCaffeinate()
+    caffeinate.start.mockImplementation(() => {
+      throw new Error('caffeinate spawn failed')
+    })
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      macosAssertion: caffeinate
+    })
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    amphetamine.settleHold('owned')
+    service.setStatuses([])
+    // Ignore the legitimate stop from the first engine change, which happened
+    // while the mode was still off.
+    amphetamine.stop.mockClear()
+    service.setMacosEngine('caffeinate')
+
+    // caffeinate never took over, so Amphetamine must not have been released.
+    expect(amphetamine.stop).not.toHaveBeenCalled()
+  })
+})
+
 describe('AgentAwakeService macOS engine selection', () => {
   it('holds the session with caffeinate by default', () => {
     const { service, caffeinate, amphetamine } = createService()

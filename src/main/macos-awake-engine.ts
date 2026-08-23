@@ -164,37 +164,36 @@ export class MacosAwakeEngineRouter {
 
   start(reason: string): void {
     const useAmphetamine = this.usesAmphetamine()
-    const startedIncoming = useAmphetamine
-      ? this.startAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
-      : this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
-    if (!useAmphetamine) {
-      // Only release Amphetamine if caffeinate actually took over. Stopping it
-      // after a throw would end the last native assertion and hold nothing.
-      if (startedIncoming) {
-        this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
-      }
-      return
+    if (useAmphetamine) {
+      this.startAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
     }
-    // Why caffeinate stays up until Amphetamine reports a hold: acquiring one is
-    // asynchronous and its first Apple event can block on the macOS Automation
-    // consent dialog for as long as the user takes to answer. Releasing
-    // caffeinate first would leave that whole window with no assertion that
-    // survives a lid close. Holding both is harmless; holding neither is not.
-    // Only an owned hold releases caffeinate. Owned means the indefinite session
-    // Orca creates, which cannot expire; an adopted one is the user's and may be
-    // a timer that runs out at any moment, and the next re-check could be up to
-    // a full reconcile interval away. hasLiveHold too, because a classification
-    // retained after a failed attempt is not proof that anything is holding.
-    if (
+    // One predicate decides everything, because the alternative — a stop here and
+    // another there — is what repeatedly left the machine with nothing holding.
+    //
+    // Amphetamine counts as covering only when it owns a live hold. Owned means
+    // the indefinite session Orca creates, which cannot expire; an adopted one is
+    // the user's and may be a timer that runs out before the next re-check. Live
+    // excludes a classification retained after a failure, and is cleared before a
+    // release is issued. Acquiring is asynchronous and its first Apple event can
+    // block on the Automation consent dialog for as long as the user takes to
+    // answer, so until it lands the answer is no.
+    const amphetamineCovers =
+      useAmphetamine &&
       this.amphetamineAssertion.getHold() === 'owned' &&
       this.amphetamineAssertion.hasLiveHold()
-    ) {
+
+    // Caffeinate is the floor: it runs whenever Amphetamine is not covering.
+    const caffeinateHolds = amphetamineCovers
+      ? false
+      : this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+
+    if (amphetamineCovers) {
       this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
-    } else {
-      // Also guarded: an unguarded throw here escapes start(), and refresh() is
-      // called from setMode/setStatuses, so a failed caffeinate spawn would
-      // propagate out of an ordinary settings change.
-      this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+    }
+    // Release Amphetamine only once caffeinate has actually taken over; stopping
+    // it after a failed spawn would end the last assertion and hold nothing.
+    if (!useAmphetamine && caffeinateHolds) {
+      this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
     }
   }
 
