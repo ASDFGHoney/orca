@@ -1745,7 +1745,6 @@ export class CodexAccountService {
         windowsHide: spawnConfig.interactiveLogin?.windowsHide ?? true,
         env: spawnConfig.env
       })
-      spawnConfig.interactiveLogin?.dispose()
 
       let settled = false
       let output = ''

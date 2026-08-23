@@ -1106,8 +1106,7 @@ export class ClaudeAccountService {
           ? interactiveLogin.stdio
           : [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         shell: spawnConfig.shell,
-        // Hide noninteractive commands and the fallback wrapper; direct console
-        // login handles need the owning window to remain visible.
+        // Why: hide only the outer wrapper; start creates the visible login console.
         windowsHide: interactiveLogin?.windowsHide ?? true,
         windowsVerbatimArguments: spawnConfig.windowsVerbatimArguments,
         env: spawnConfig.env,
@@ -1115,7 +1114,6 @@ export class ClaudeAccountService {
         // A process group lets cancellation terminate the whole POSIX login tree.
         detached: process.platform !== 'win32'
       })
-      interactiveLogin?.dispose()
       const stdout = child.stdout
       const stderr = child.stderr
       if (!interactiveLogin && (!stdout || !stderr)) {

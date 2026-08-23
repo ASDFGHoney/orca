@@ -39,6 +39,12 @@ function hasUnsafeWindowsBatchSyntax(value: string): boolean {
   return UNSAFE_WINDOWS_BATCH_SYNTAX.test(value)
 }
 
+function assertWindowsCmdSafeTokens(values: readonly string[]): void {
+  if (values.some(hasUnsafeWindowsBatchSyntax)) {
+    throw new UnsafeWindowsBatchArgumentsError()
+  }
+}
+
 export type GetSpawnArgsForWindowsOptions = {
   /**
    * GUI launchers (Open In apps) should not leave a lingering Command Prompt.
@@ -58,11 +64,7 @@ export function getSpawnArgsForWindows(
   options: GetSpawnArgsForWindowsOptions = {}
 ): { spawnCmd: string; spawnArgs: string[] } {
   if (isWindowsBatchScript(command)) {
-    for (const value of [command, ...args]) {
-      if (hasUnsafeWindowsBatchSyntax(value)) {
-        throw new UnsafeWindowsBatchArgumentsError()
-      }
-    }
+    assertWindowsCmdSafeTokens([command, ...args])
 
     // Why: separate argv entries let Node quote spaces without breaking cmd.
     if (options.detachedGui) {
@@ -96,6 +98,8 @@ export function wrapWindowsStartWait(
   spawnCmd: string,
   spawnArgs: string[]
 ): { spawnCmd: string; spawnArgs: string[] } {
+  // Why: `start` reparses every target through cmd.exe, including .exe paths.
+  assertWindowsCmdSafeTokens([spawnCmd, ...spawnArgs])
   const cmdExePath = getCmdExePath()
   return {
     spawnCmd: cmdExePath,

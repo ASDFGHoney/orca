@@ -50,8 +50,7 @@ describe('Codex Windows host interactive login', () => {
       command: getCmdExePath(),
       args: ['/d', '/c', 'start', '', '/wait', 'C:\\Tools\\codex.cmd', 'login'],
       stdio: 'ignore' as const,
-      windowsHide: true,
-      dispose: vi.fn()
+      windowsHide: true
     }))
     vi.doMock('node:child_process', () => ({
       execFileSync: vi.fn(),

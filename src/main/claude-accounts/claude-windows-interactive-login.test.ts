@@ -49,8 +49,7 @@ describe('Claude Windows host interactive login', () => {
         '--claudeai'
       ],
       stdio: 'ignore' as const,
-      windowsHide: true,
-      dispose: vi.fn()
+      windowsHide: true
     }))
     vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
     vi.doMock('../../shared/windows-interactive-login-spawn', () => ({
@@ -95,6 +94,55 @@ describe('Claude Windows host interactive login', () => {
     } finally {
       vi.doUnmock('node:child_process')
       vi.doUnmock('../../shared/windows-interactive-login-spawn')
+    }
+  })
+
+  it('times out a denied Windows login that stays alive without piped output', async () => {
+    setPlatform('win32')
+    vi.resetModules()
+    vi.useFakeTimers()
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: null
+      stderr: null
+      kill: ReturnType<typeof vi.fn>
+      pid: number
+    }
+    child.stdout = null
+    child.stderr = null
+    child.kill = vi.fn()
+    child.pid = 0
+    const spawnMock = vi.fn(() => child)
+    vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
+
+    try {
+      const { ClaudeAccountService } = await import('./service')
+      const service = new ClaudeAccountService(
+        createService() as never,
+        createService() as never,
+        createService() as never
+      )
+      const login = (
+        service as unknown as {
+          runClaudeCommand(
+            args: string[],
+            configDir: { windowsPath: string; linuxPath: string | null; wslDistro: string | null },
+            timeoutMs: number
+          ): Promise<string>
+        }
+      ).runClaudeCommand(
+        ['auth', 'login', '--claudeai'],
+        { windowsPath: 'C:\\tmp\\claude-auth', linuxPath: null, wslDistro: null },
+        1000
+      )
+      const rejection = expect(login).rejects.toThrow('Claude sign-in took too long to finish.')
+
+      await vi.advanceTimersByTimeAsync(1000)
+
+      await rejection
+      expect(child.kill).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+      vi.doUnmock('node:child_process')
     }
   })
 })

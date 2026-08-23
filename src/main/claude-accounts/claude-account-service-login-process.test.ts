@@ -521,8 +521,7 @@ describe('ClaudeAccountService credential capture', () => {
       command: getCmdExePath(),
       args: ['/d', '/c', 'start', '', '/wait', 'claude', 'auth', 'login', '--claudeai'],
       stdio: 'ignore' as const,
-      windowsHide: true,
-      dispose: vi.fn()
+      windowsHide: true
     }))
     vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
     vi.doMock('../../shared/windows-interactive-login-spawn', () => ({

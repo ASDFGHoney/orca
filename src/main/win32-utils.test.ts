@@ -10,6 +10,7 @@ import {
   isPermissionError,
   isWindowsBatchScript,
   resolveWindowsCommand,
+  UnsafeWindowsBatchArgumentsError,
   WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
 } from './win32-utils'
 
@@ -149,6 +150,15 @@ describe('getSpawnArgsForWindows', () => {
       expect(spawnArgs).not.toContain('/B')
       expect(spawnArgs).not.toContain('""')
     })
+  })
+
+  it('rejects cmd metacharacters in executable paths passed through start /wait', () => {
+    expect(() => wrapWindowsStartWait('C:\\Users\\A%B\\codex.exe', ['login'])).toThrow(
+      UnsafeWindowsBatchArgumentsError
+    )
+    expect(() => wrapWindowsStartWait('C:\\Tools\\codex.exe', ['log&in'])).toThrow(
+      UnsafeWindowsBatchArgumentsError
+    )
   })
 
   it('leaves .exe GUI launches alone even when detachedGui is requested', () => {

@@ -8,22 +8,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   deleteKeychainMock,
   getVersionManagerBinPathsMock,
-  openWindowsInteractiveStdioMock,
   readKeychainMock,
   resolveCliCommandMock,
   rmSyncMock,
   spawnMock,
+  stdioForWindowsInteractiveChildMock,
   writeKeychainMock
 } = vi.hoisted(() => ({
   deleteKeychainMock: vi.fn(),
   getVersionManagerBinPathsMock: vi.fn(),
-  openWindowsInteractiveStdioMock: vi.fn(
-    (): { stdio: [number, number, number]; dispose: () => void } | 'inherit' => 'inherit'
-  ),
   readKeychainMock: vi.fn(),
   resolveCliCommandMock: vi.fn(),
   rmSyncMock: vi.fn(),
   spawnMock: vi.fn(),
+  stdioForWindowsInteractiveChildMock: vi.fn(),
   writeKeychainMock: vi.fn()
 }))
 
@@ -49,21 +47,8 @@ vi.mock('../../shared/node-cli-command-resolution', () => ({
   getVersionManagerBinPaths: getVersionManagerBinPathsMock,
   resolveCliCommand: resolveCliCommandMock
 }))
-vi.mock('../../shared/windows-console-stdio', () => ({
-  openWindowsInteractiveStdio: openWindowsInteractiveStdioMock,
-  stdioForWindowsInteractiveChild: (json: boolean) => {
-    const opened = openWindowsInteractiveStdioMock()
-    if (opened === 'inherit') {
-      return {
-        stdio: ['inherit', json ? process.stderr : 'inherit', 'inherit'],
-        dispose: () => {}
-      }
-    }
-    return {
-      stdio: [opened.stdio[0], json ? process.stderr : opened.stdio[1], opened.stdio[2]],
-      dispose: opened.dispose
-    }
-  }
+vi.mock('../../shared/windows-console-input', () => ({
+  stdioForWindowsInteractiveChild: stdioForWindowsInteractiveChildMock
 }))
 
 import { ACCOUNT_HANDLERS } from './account'
@@ -125,7 +110,10 @@ describe('account CLI handlers', () => {
   beforeEach(() => {
     Object.defineProperty(process, 'platform', originalPlatform)
     spawnMock.mockReset().mockImplementation(() => successfulChild())
-    openWindowsInteractiveStdioMock.mockReset().mockReturnValue('inherit')
+    stdioForWindowsInteractiveChildMock.mockReset().mockImplementation((json: boolean) => ({
+      stdio: ['inherit', json ? process.stderr : 'inherit', 'inherit'],
+      dispose: vi.fn()
+    }))
     resolveCliCommandMock.mockReset().mockImplementation((command: string) => command)
     getVersionManagerBinPathsMock.mockReset().mockReturnValue([])
     readKeychainMock.mockReset().mockResolvedValue(null)
@@ -183,8 +171,8 @@ describe('account CLI handlers', () => {
   it('passes Windows console device handles to the login child instead of inheriting Electron stdio', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const dispose = vi.fn()
-    openWindowsInteractiveStdioMock.mockReturnValue({
-      stdio: [11, 12, 12],
+    stdioForWindowsInteractiveChildMock.mockReturnValue({
+      stdio: [11, 'inherit', 'inherit'],
       dispose
     })
 
@@ -193,15 +181,31 @@ describe('account CLI handlers', () => {
     expect(spawnMock).toHaveBeenCalledWith(
       'codex',
       ['login', '--device-auth'],
-      expect.objectContaining({ stdio: [11, 12, 12] })
+      expect.objectContaining({ stdio: [11, 'inherit', 'inherit'] })
     )
     expect(dispose).toHaveBeenCalledTimes(1)
   })
 
+  it('disposes the Windows console input fd when spawn throws synchronously', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const dispose = vi.fn()
+    stdioForWindowsInteractiveChildMock.mockReturnValue({
+      stdio: [11, 'inherit', 'inherit'],
+      dispose
+    })
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error('invalid stdio')
+    })
+
+    await expect(ACCOUNT_HANDLERS['account add'](context('codex'))).rejects.toThrow('invalid stdio')
+
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
   it('keeps JSON login prompts off the CLI stdout envelope when console fds are attached', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
-    openWindowsInteractiveStdioMock.mockReturnValue({
-      stdio: [11, 12, 12],
+    stdioForWindowsInteractiveChildMock.mockReturnValue({
+      stdio: [11, process.stderr, 'inherit'],
       dispose: vi.fn()
     })
 
@@ -210,7 +214,7 @@ describe('account CLI handlers', () => {
     expect(spawnMock).toHaveBeenCalledWith(
       'codex',
       ['login', '--device-auth'],
-      expect.objectContaining({ stdio: [11, process.stderr, 12] })
+      expect.objectContaining({ stdio: [11, process.stderr, 'inherit'] })
     )
   })
 
