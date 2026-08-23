@@ -209,6 +209,34 @@ describe('mobile AI Vault resume target guards', () => {
     })
   })
 
+  it('uses repo ownership when legacy worktree rows omit hostId', () => {
+    const target = resolveMobileAiVaultSessionResumeTarget({
+      session: session({ cwd: '/mnt/c/Users/ada/orca/feature/src' }),
+      activeWorktreeId: 'route-wt',
+      worktrees: [
+        worktree({
+          worktreeId: 'ssh-lookalike',
+          repoId: 'ssh-repo',
+          path: '/mnt/c/Users/ada/orca/feature'
+        }),
+        worktree({
+          worktreeId: 'local-wsl',
+          path: String.raw`C:\Users\ada\orca\feature`
+        }),
+        worktree({ worktreeId: 'route-wt', path: String.raw`C:\Users\ada\orca\main` })
+      ],
+      repos
+    })
+
+    expect(target).toEqual({
+      status: 'ready',
+      worktreeId: 'local-wsl',
+      targetStatus: 'local',
+      workspacePath: String.raw`C:\Users\ada\orca\feature`,
+      terminalPlatform: null
+    })
+  })
+
   it('falls back to the active route worktree when the session worktree is archived', () => {
     const target = resolveMobileAiVaultSessionResumeTarget({
       session: session({ cwd: '/Users/ada/repo/archive/src' }),
