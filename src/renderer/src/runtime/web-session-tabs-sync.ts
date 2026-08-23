@@ -4109,6 +4109,7 @@ export function useWebSessionTabsSync(): void {
         mirroredEnvironmentOwnerRevisions.get(environmentId) !== previousRevision
       ) {
         clearWebSessionTabsTrackingForEnvironment(environmentId)
+        visibilityResumeNotificationBaselinesRef.current.delete(environmentId)
       }
     }
     mirroredSessionTabsOwnerRevisionByEnvironmentRef.current = mirroredEnvironmentOwnerRevisions

@@ -63,6 +63,7 @@ const ENVIRONMENT_B = 'env-b'
 const RUNTIME_ID = 'runtime-a'
 const RUNTIME_B = 'runtime-b'
 const REVISION = 101
+const NEXT_REVISION = 102
 const REVISION_B = 202
 const REPO_ID = 'repo-a'
 const WORKTREE_ID = `${REPO_ID}::/worktree-a`
@@ -73,6 +74,7 @@ const PANE_KEY = makePaneKey(toWebTerminalSurfaceTabId(HOST_TAB_ID), LEAF_ID)
 const NOW = 1_700_000_000_000
 const MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00011\u0001${REVISION}`
 const RECONNECTED_MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00012\u0001${REVISION}`
+const REPAIRED_MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00011\u0001${NEXT_REVISION}`
 const TWO_ENVIRONMENT_MIRROR_KEY = `${MIRROR_KEY}\u0000${ENVIRONMENT_B}\u0001${RUNTIME_B}\u00011\u0001${REVISION_B}`
 const initialState = useAppStore.getInitialState()
 
@@ -440,6 +442,37 @@ describe('paired session-tab visibility-resume notifications', () => {
     await publish(findEnvironmentSubscription('session.tabs.subscribeAll', ENVIRONMENT_B), {
       type: 'snapshots',
       snapshots: [snapshot(1, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
+
+  it('does not borrow a replaced owner notification baseline', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    const runtimeEnvironments = [
+      { id: ENVIRONMENT_ID, createdAt: 100, pairingRevision: NEXT_REVISION }
+    ] as PublicKnownRuntimeEnvironment[]
+    replaceRuntimeEnvironmentRevisions(runtimeEnvironments)
+    useAppStore.setState({ runtimeEnvironments })
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(REPAIRED_MIRROR_KEY)
+    hook.rerender()
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribe', 2), {
+      type: 'snapshot',
+      ...snapshot(1, 'done', NOW + 1_000, NOW + 1_000, undefined, 'epoch-2')
     })
     vi.advanceTimersByTime(1_500)
 
