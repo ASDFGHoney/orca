@@ -21,7 +21,12 @@ import { revealPairedClientWindow } from './helpers/paired-client-window-reveal'
 
 const REQUIRED_CLAUDE_EVENTS = ['UserPromptSubmit', 'Stop', 'PermissionRequest'] as const
 const NOTIFICATION_BARRIER_SOURCE = 'sta-5244-barrier'
-type NotificationDispatch = { source?: string; agentState?: string; worktreeId?: string }
+type NotificationDispatch = {
+  source?: string
+  agentState?: string
+  worktreeId?: string
+  attentionRequired?: boolean
+}
 type AgentStatusSummary = {
   state: string
   prompt: string
@@ -199,7 +204,17 @@ async function hideUntilSubscriptionsPark(client: PairedElectronClient): Promise
 }
 
 async function revealAfterSubscriptionsPark(client: PairedElectronClient): Promise<void> {
-  await client.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.show())
+  await client.app.evaluate(({ app, BrowserWindow }) => {
+    app.focus({ steal: true })
+    const window = BrowserWindow.getAllWindows()[0]
+    window?.show()
+    window?.focus()
+  })
+  await expect
+    .poll(() =>
+      client.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFocused())
+    )
+    .toBe(true)
   await client.page.evaluate(() => {
     if (document.visibilityState === 'visible') {
       return
@@ -355,12 +370,49 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
         message: 'isolated host did not install every managed Claude hook'
       })
       .toBe(true)
+    const clientTabId = toWebTerminalSurfaceTabId(surface.parentTabId)
+    await expect
+      .poll(() =>
+        client!.page.evaluate(
+          ({ worktreeId, tabId }) => {
+            const state = window.__store?.getState()
+            const tabs = state?.tabsByWorktree[worktreeId] ?? []
+            return tabs.some((tab) => tab.id === tabId)
+          },
+          { worktreeId, tabId: clientTabId }
+        )
+      )
+      .toBe(true)
+    await client.page.evaluate(
+      ({ worktreeId, tabId }) => {
+        const state = window.__store?.getState()
+        state?.setActiveWorktree(worktreeId)
+        state?.setActiveTab(tabId)
+        state?.setActiveTabType('terminal')
+      },
+      { worktreeId, tabId: clientTabId }
+    )
     await revealPairedClientWindow(client)
     await expect
       .poll(() =>
         client!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible())
       )
       .toBe(true)
+    await expect
+      .poll(() =>
+        client!.page.evaluate(
+          ({ tabId }) => {
+            const state = window.__store?.getState()
+            return {
+              worktreeId: state?.activeWorktreeId,
+              tabId: state?.activeTabId,
+              leafId: state?.terminalLayoutsByTabId[tabId]?.activeLeafId
+            }
+          },
+          { tabId: clientTabId }
+        )
+      )
+      .toEqual({ worktreeId, tabId: clientTabId, leafId: surface.leafId })
 
     const completionPrompt = `STA-5244 completion ${Date.now()}`
     await postClaudeHook(endpoint, hostPaneKey, worktreeId, {
@@ -409,7 +461,8 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
         expect.objectContaining({
           source: 'agent-task-complete',
           agentState: 'done',
-          worktreeId
+          worktreeId,
+          attentionRequired: true
         })
       ])
     await expect
@@ -469,7 +522,7 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
       .poll(() => notificationDispatches(client!.app), { timeout: 30_000 })
       .toEqual([
         expect.objectContaining({ agentState: 'done', worktreeId }),
-        expect.objectContaining({ agentState: 'waiting', worktreeId })
+        expect.objectContaining({ agentState: 'waiting', worktreeId, attentionRequired: true })
       ])
     await expect
       .poll(() => unreadBadgeState(client!, worktreeId))

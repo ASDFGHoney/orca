@@ -115,6 +115,11 @@ import {
   buildWebSessionExistingTabIndex,
   type WebSessionExistingTabIndex
 } from './web-session-existing-tab-index'
+import {
+  createWebSessionTabsNotificationReconciler,
+  type WebSessionTabsNotificationObservation,
+  type WebSessionTabsNotificationReconciler
+} from './web-session-tabs-notification-reconciler'
 
 const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
 export const WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS = 100
@@ -356,14 +361,14 @@ function untrackWebSessionTabsWorktree(environmentId: string, worktreeId: string
 export function recordReceivedWebSessionTabsSnapshot(
   environmentId: string,
   snapshot: RuntimeMobileSessionTabsResult,
-  armAfter = true
+  options: { observeNotification?: boolean; attentionRequired?: boolean } = {}
 ): number {
   const receivedFrame = (receivedSessionTabsFrameSequence += 1)
-  getWebSessionTabsNotificationLifecycle(environmentId).registerSnapshot(
-    receivedFrame,
-    snapshot,
-    armAfter
-  )
+  if (options.observeNotification !== false) {
+    getWebSessionTabsNotificationLifecycle(environmentId).observeSnapshot(snapshot, {
+      attentionRequired: options.attentionRequired
+    })
+  }
   const key = sessionTabsFreshnessKey(environmentId, snapshot.worktree)
   latestReceivedSessionTabsSnapshotByWorktree.set(key, {
     receivedFrame,
@@ -379,14 +384,10 @@ export function recordReceivedWebSessionTabsSnapshot(
 function recordReceivedWebSessionTabsInventory(
   environmentId: string,
   snapshots: readonly RuntimeMobileSessionTabsResult[],
-  armAfter: boolean
+  options: { armPublished: boolean; attentionRequired?: boolean }
 ): number {
   const receivedFrame = (receivedSessionTabsFrameSequence += 1)
-  getWebSessionTabsNotificationLifecycle(environmentId).registerInventory(
-    receivedFrame,
-    snapshots.map((snapshot) => snapshot.worktree),
-    armAfter
-  )
+  getWebSessionTabsNotificationLifecycle(environmentId).observeInventory(snapshots, options)
   return receivedFrame
 }
 
@@ -406,11 +407,6 @@ function beginWebSessionTabsSnapshotRecovery(
       return
     }
     settled = true
-    getWebSessionTabsNotificationLifecycle(environmentId).settleSnapshot(receivedFrame, {
-      snapshot,
-      validPresence: true,
-      statuses: []
-    })
     recoveryState.pendingCount -= 1
     if (
       recoveryState.pendingCount === 0 &&
@@ -759,60 +755,9 @@ export function shouldSyncAllRuntimeSessionTabs(args: {
   return Boolean(environmentId && args.workspaceSessionReady)
 }
 
-type WebSessionTabsPendingNotificationStatus = {
-  paneKey: string
-  worktreeId: string
-  payload: ReturnType<typeof pickParsedAgentStatusPayload> & {
-    stateStartedAt: number
-    localStateStartedAt?: number
-  }
-}
-
-type WebSessionTabsNotificationSnapshotOutcome = {
-  snapshot: RuntimeMobileSessionTabsResult
-  validPresence: boolean
-  statuses: readonly WebSessionTabsPendingNotificationStatus[]
-}
-
-type WebSessionTabsNotificationReceipt =
-  | {
-      type: 'snapshot'
-      receivedFrame: number
-      snapshot: RuntimeMobileSessionTabsResult
-      armAfter: boolean
-      outcome?: WebSessionTabsNotificationSnapshotOutcome
-    }
-  | {
-      type: 'inventory'
-      receivedFrame: number
-      publishedWorktrees: ReadonlySet<string>
-      armAfter: boolean
-      settled: boolean
-    }
-
-type WebSessionTabsNotificationLifecycle = {
-  registerSnapshot: (
-    receivedFrame: number,
-    snapshot: RuntimeMobileSessionTabsResult,
-    armAfter: boolean
-  ) => void
-  registerInventory: (
-    receivedFrame: number,
-    publishedWorktreeIds: readonly string[],
-    armAfter: boolean
-  ) => void
-  settleSnapshot: (
-    receivedFrame: number,
-    outcome: WebSessionTabsNotificationSnapshotOutcome
-  ) => void
-  settleInventory: (receivedFrame: number) => void
-  applyUnsequencedSnapshot: (outcome: WebSessionTabsNotificationSnapshotOutcome) => void
-  armPresentWorktrees: () => void
-}
-
 type WebSessionTabsNotificationLifecycleOwner = {
   pairingRevision: number | undefined
-  lifecycle: WebSessionTabsNotificationLifecycle
+  lifecycle: WebSessionTabsNotificationReconciler
 }
 
 const webSessionTabsNotificationLifecyclesByEnvironment = new Map<
@@ -822,129 +767,18 @@ const webSessionTabsNotificationLifecyclesByEnvironment = new Map<
 
 function createWebSessionTabsNotificationLifecycle(
   environmentId: string
-): WebSessionTabsNotificationLifecycle {
-  const eligibleWorktrees = new Set(
-    getTrackedWebSessionTabsWorktrees(environmentId).map(({ worktree }) => worktree)
-  )
-  const presentWorktrees = new Set(eligibleWorktrees)
-  const receipts: WebSessionTabsNotificationReceipt[] = []
-  const receiptByFrame = new Map<number, WebSessionTabsNotificationReceipt>()
-  let receiptIndex = 0
-  const applySnapshot = (outcome: WebSessionTabsNotificationSnapshotOutcome): void => {
-    if (!outcome.validPresence) {
-      return
-    }
-    const notificationAllowed = eligibleWorktrees.has(outcome.snapshot.worktree)
-    if (isWebSessionTabsWorktreeRemovalFrame(outcome.snapshot)) {
-      eligibleWorktrees.delete(outcome.snapshot.worktree)
-      presentWorktrees.delete(outcome.snapshot.worktree)
-    } else {
-      presentWorktrees.add(outcome.snapshot.worktree)
-    }
-    for (const status of outcome.statuses) {
-      try {
-        observeAgentHookCompletionForNotification({
-          ...status,
-          ...(!notificationAllowed ? { seedOnly: true as const } : {})
-        })
-      } catch (error) {
-        console.warn('[web-session-tabs-sync] notification receipt failed:', error)
-      }
-    }
-  }
-  const drain = (): void => {
-    while (receiptIndex < receipts.length) {
-      const receipt = receipts[receiptIndex]!
-      if (receipt.type === 'snapshot') {
-        if (!receipt.outcome) {
-          break
-        }
-        applySnapshot(receipt.outcome)
-        if (receipt.armAfter && !isWebSessionTabsWorktreeRemovalFrame(receipt.outcome.snapshot)) {
-          eligibleWorktrees.add(receipt.outcome.snapshot.worktree)
-        }
-      } else {
-        if (!receipt.settled) {
-          break
-        }
-        for (const worktree of eligibleWorktrees) {
-          if (!receipt.publishedWorktrees.has(worktree)) {
-            eligibleWorktrees.delete(worktree)
-          }
-        }
-        for (const worktree of presentWorktrees) {
-          if (!receipt.publishedWorktrees.has(worktree)) {
-            presentWorktrees.delete(worktree)
-          }
-        }
-        for (const worktree of receipt.publishedWorktrees) {
-          presentWorktrees.add(worktree)
-        }
-        if (receipt.armAfter) {
-          for (const worktree of receipt.publishedWorktrees) {
-            eligibleWorktrees.add(worktree)
-          }
-        }
-      }
-      receiptByFrame.delete(receipt.receivedFrame)
-      receiptIndex += 1
-    }
-    if (receiptIndex > 64 && receiptIndex * 2 > receipts.length) {
-      receipts.splice(0, receiptIndex)
-      receiptIndex = 0
-    }
-  }
-  return {
-    registerSnapshot: (receivedFrame, snapshot, armAfter) => {
-      const receipt = { type: 'snapshot', receivedFrame, snapshot, armAfter } as const
-      receipts.push(receipt)
-      receiptByFrame.set(receivedFrame, receipt)
-    },
-    registerInventory: (receivedFrame, publishedWorktreeIds, armAfter) => {
-      const receipt: WebSessionTabsNotificationReceipt = {
-        type: 'inventory',
-        receivedFrame,
-        publishedWorktrees: new Set(publishedWorktreeIds),
-        armAfter,
-        settled: false
-      }
-      receipts.push(receipt)
-      receiptByFrame.set(receivedFrame, receipt)
-    },
-    settleSnapshot: (receivedFrame, outcome) => {
-      const receipt = receiptByFrame.get(receivedFrame)
-      if (receipt?.type !== 'snapshot' || receipt.outcome) {
-        return
-      }
-      receipt.outcome = outcome
-      drain()
-    },
-    settleInventory: (receivedFrame) => {
-      const receipt = receiptByFrame.get(receivedFrame)
-      if (receipt?.type !== 'inventory' || receipt.settled) {
-        return
-      }
-      receipt.settled = true
-      drain()
-    },
-    applyUnsequencedSnapshot: (outcome) => {
-      applySnapshot(outcome)
-      if (outcome.validPresence && !isWebSessionTabsWorktreeRemovalFrame(outcome.snapshot)) {
-        eligibleWorktrees.add(outcome.snapshot.worktree)
-      }
-    },
-    armPresentWorktrees: () => {
-      for (const worktree of presentWorktrees) {
-        eligibleWorktrees.add(worktree)
-      }
-    }
-  }
+): WebSessionTabsNotificationReconciler {
+  return createWebSessionTabsNotificationReconciler({
+    trackedWorktrees: getTrackedWebSessionTabsWorktrees(environmentId),
+    observeAcceptedSnapshot: (snapshot, observation) =>
+      observeWebSessionTabsNotificationSnapshot(snapshot, observation)
+  })
 }
 
 function getWebSessionTabsNotificationLifecycle(
   environmentId: string,
   pairingRevision = getRuntimeEnvironmentRevision(environmentId)
-): WebSessionTabsNotificationLifecycle {
+): WebSessionTabsNotificationReconciler {
   const existing = webSessionTabsNotificationLifecyclesByEnvironment.get(environmentId)
   if (existing && existing.pairingRevision === pairingRevision) {
     return existing.lifecycle
@@ -955,13 +789,6 @@ function getWebSessionTabsNotificationLifecycle(
     lifecycle
   })
   return lifecycle
-}
-
-function settleWebSessionTabsNotificationInventory(
-  environmentId: string,
-  receivedFrame: number
-): void {
-  getWebSessionTabsNotificationLifecycle(environmentId).settleInventory(receivedFrame)
 }
 
 function armWebSessionTabsNotificationPresence(
@@ -1454,6 +1281,96 @@ function isMirroredAgentPaneKeyForTabs(paneKey: string, tabIds: ReadonlySet<stri
  *  through PTY bytes, so they must pierce the client-authority fence. */
 function hostAgentStatusPiercesClientAuthority(entry: AgentStatusEntry): boolean {
   return entry.state === 'blocked' || entry.interactivePrompt != null
+}
+
+function observeWebSessionTabsNotificationSnapshot(
+  snapshot: RuntimeMobileSessionTabsResult,
+  observation: WebSessionTabsNotificationObservation
+): void {
+  const state = useAppStore.getState()
+  for (const surface of snapshot.tabs) {
+    if (surface.type !== 'terminal') {
+      continue
+    }
+    const remapped = remapHostAgentStatus(surface)
+    if (!remapped) {
+      continue
+    }
+    const turnCompletedAt = normalizeTurnCompletedAtField(surface.turnCompletedAt, remapped.state)
+    if (remapped.state === 'done' && turnCompletedAt === undefined) {
+      hostWorkingClientBoundaryByPaneKey.delete(remapped.paneKey)
+    }
+    const clientAuthority = isClientAuthoritativeAgentStatusPane(remapped.paneKey)
+    const clientOwnedNotification =
+      clientAuthority && (remapped.state === 'working' || turnCompletedAt !== undefined)
+    if (
+      clientAuthority &&
+      !clientOwnedNotification &&
+      !hostAgentStatusPiercesClientAuthority(remapped)
+    ) {
+      continue
+    }
+    const currentClientStateStartedAt = clientOwnedNotification
+      ? state.agentStatusByPaneKey[remapped.paneKey]?.stateStartedAt
+      : undefined
+    let localStateStartedAt = currentClientStateStartedAt
+    if (
+      clientOwnedNotification &&
+      remapped.state === 'working' &&
+      currentClientStateStartedAt !== undefined
+    ) {
+      if (turnCompletedAt === undefined) {
+        const retainedBoundary = hostWorkingClientBoundaryByPaneKey.get(remapped.paneKey)
+        if (
+          !retainedBoundary ||
+          retainedBoundary.hostStateStartedAt !== remapped.stateStartedAt ||
+          retainedBoundary.hostPrompt !== remapped.prompt ||
+          retainedBoundary.stamped
+        ) {
+          hostWorkingClientBoundaryByPaneKey.delete(remapped.paneKey)
+          hostWorkingClientBoundaryByPaneKey.set(remapped.paneKey, {
+            hostStateStartedAt: remapped.stateStartedAt,
+            hostPrompt: remapped.prompt,
+            clientStateStartedAt: currentClientStateStartedAt,
+            stamped: false
+          })
+          if (hostWorkingClientBoundaryByPaneKey.size > HOST_WORKING_CLIENT_BOUNDARY_LIMIT) {
+            const oldestPaneKey = hostWorkingClientBoundaryByPaneKey.keys().next().value
+            if (oldestPaneKey !== undefined) {
+              hostWorkingClientBoundaryByPaneKey.delete(oldestPaneKey)
+            }
+          }
+        }
+      } else {
+        const retainedBoundary = hostWorkingClientBoundaryByPaneKey.get(remapped.paneKey)
+        if (
+          retainedBoundary?.hostStateStartedAt === remapped.stateStartedAt &&
+          retainedBoundary.hostPrompt === remapped.prompt
+        ) {
+          localStateStartedAt = retainedBoundary.clientStateStartedAt
+          retainedBoundary.stamped = true
+        }
+      }
+    }
+    try {
+      observeAgentHookCompletionForNotification({
+        paneKey: remapped.paneKey,
+        worktreeId: remapped.worktreeId ?? snapshot.worktree,
+        ...(observation.seedOnly ? { seedOnly: true as const } : {}),
+        payload: {
+          ...pickParsedAgentStatusPayload({
+            ...remapped,
+            ...(turnCompletedAt !== undefined ? { turnCompletedAt } : {})
+          }),
+          stateStartedAt: remapped.stateStartedAt,
+          ...(clientOwnedNotification ? { localStateStartedAt } : {}),
+          ...(observation.attentionRequired ? { attentionRequired: true as const } : {})
+        }
+      })
+    } catch (error) {
+      console.warn('[web-session-tabs-sync] notification reconciliation failed:', error)
+    }
+  }
 }
 
 /** True while this renderer's own byte-derived status owns the pane: it claimed
@@ -3955,11 +3872,6 @@ export type HostSessionMirrorPatchFrame = {
 export type HostSessionMirrorPatchVerdict = {
   frames: readonly HostSessionMirrorPatchFrame[]
   fullInventory?: { environmentId: string; publishedSnapshotCount: number }
-  notificationInventory?: {
-    environmentId: string
-    publishedWorktreeIds: readonly string[]
-    receivedFrame: number
-  }
 }
 
 function createHostSessionMirrorSettle(
@@ -4002,120 +3914,11 @@ export function applyWebSessionTabsStorePatch(
   // Why: zustand commits before notifying subscribers, so a producer that ran
   // to completion has landed even when a subscriber throws afterwards.
   let patchCommitted = false
-  const acceptedNotificationStatusesByFrame = new Map<
-    HostSessionMirrorPatchFrame,
-    WebSessionTabsPendingNotificationStatus[]
-  >()
   const runStorePatch = (
     state: AppState
   ): WebSessionTabsSyncState | Partial<WebSessionTabsSyncState> => {
     const patch = buildPatch(state)
     mirroredAgentStatusChanged = patch !== state && Object.hasOwn(patch, 'agentStatusByPaneKey')
-    if (hostMirrorVerdict.frames.length > 0) {
-      const nextAgentStatuses = patch.agentStatusByPaneKey ?? state.agentStatusByPaneKey
-      for (const frame of hostMirrorVerdict.frames) {
-        const { snapshot, decision } = frame
-        if (!decision.apply) {
-          continue
-        }
-        const acceptedNotificationStatuses: WebSessionTabsPendingNotificationStatus[] = []
-        acceptedNotificationStatusesByFrame.set(frame, acceptedNotificationStatuses)
-        for (const surface of snapshot.tabs) {
-          if (surface.type !== 'terminal') {
-            continue
-          }
-          const remapped = remapHostAgentStatus(surface)
-          const accepted = remapped ? nextAgentStatuses[remapped.paneKey] : undefined
-          const turnCompletedAt = remapped
-            ? normalizeTurnCompletedAtField(surface.turnCompletedAt, remapped.state)
-            : undefined
-          if (remapped?.state === 'done' && turnCompletedAt === undefined) {
-            hostWorkingClientBoundaryByPaneKey.delete(remapped.paneKey)
-          }
-          // Why: client OSC owns display state, but only the host hook stream carries background-turn stamps.
-          const clientOwnedNotification = Boolean(
-            remapped &&
-            isClientAuthoritativeAgentStatusPane(remapped.paneKey) &&
-            (remapped.state === 'working' || turnCompletedAt !== undefined)
-          )
-          if (
-            !remapped ||
-            (!clientOwnedNotification &&
-              (!accepted ||
-                accepted === state.agentStatusByPaneKey[remapped.paneKey] ||
-                !agentStatusEntryEqual(accepted, remapped)))
-          ) {
-            continue
-          }
-          const notificationStatus = clientOwnedNotification ? remapped : accepted
-          if (!notificationStatus) {
-            continue
-          }
-          const currentClientStateStartedAt = clientOwnedNotification
-            ? state.agentStatusByPaneKey[notificationStatus.paneKey]?.stateStartedAt
-            : undefined
-          let localStateStartedAt = currentClientStateStartedAt
-          if (
-            clientOwnedNotification &&
-            notificationStatus.state === 'working' &&
-            currentClientStateStartedAt !== undefined
-          ) {
-            if (turnCompletedAt === undefined) {
-              const retainedBoundary = hostWorkingClientBoundaryByPaneKey.get(
-                notificationStatus.paneKey
-              )
-              if (
-                !retainedBoundary ||
-                retainedBoundary.hostStateStartedAt !== notificationStatus.stateStartedAt ||
-                retainedBoundary.hostPrompt !== notificationStatus.prompt ||
-                retainedBoundary.stamped
-              ) {
-                hostWorkingClientBoundaryByPaneKey.delete(notificationStatus.paneKey)
-                hostWorkingClientBoundaryByPaneKey.set(notificationStatus.paneKey, {
-                  hostStateStartedAt: notificationStatus.stateStartedAt,
-                  hostPrompt: notificationStatus.prompt,
-                  clientStateStartedAt: currentClientStateStartedAt,
-                  stamped: false
-                })
-                if (hostWorkingClientBoundaryByPaneKey.size > HOST_WORKING_CLIENT_BOUNDARY_LIMIT) {
-                  const oldestPaneKey = hostWorkingClientBoundaryByPaneKey.keys().next().value
-                  if (oldestPaneKey !== undefined) {
-                    hostWorkingClientBoundaryByPaneKey.delete(oldestPaneKey)
-                  }
-                }
-              }
-            } else {
-              const retainedBoundary = hostWorkingClientBoundaryByPaneKey.get(
-                notificationStatus.paneKey
-              )
-              if (
-                retainedBoundary?.hostStateStartedAt === notificationStatus.stateStartedAt &&
-                retainedBoundary.hostPrompt === notificationStatus.prompt
-              ) {
-                localStateStartedAt = retainedBoundary.clientStateStartedAt
-                retainedBoundary.stamped = true
-              }
-            }
-          }
-          acceptedNotificationStatuses.push({
-            paneKey: notificationStatus.paneKey,
-            worktreeId: notificationStatus.worktreeId ?? snapshot.worktree,
-            payload: {
-              ...pickParsedAgentStatusPayload({
-                ...notificationStatus,
-                ...(turnCompletedAt !== undefined ? { turnCompletedAt } : {})
-              }),
-              stateStartedAt: notificationStatus.stateStartedAt,
-              ...(clientOwnedNotification
-                ? {
-                    localStateStartedAt
-                  }
-                : {})
-            }
-          })
-        }
-      }
-    }
     patchCommitted = true
     return patch
   }
@@ -4126,28 +3929,6 @@ export function applyWebSessionTabsStorePatch(
       throw error
     }
     console.warn('[web-session-tabs-sync] a store subscriber failed after the patch landed:', error)
-  }
-  for (const frame of hostMirrorVerdict.frames) {
-    const { environmentId, snapshot, decision, receivedFrame } = frame
-    const outcome = {
-      snapshot,
-      validPresence:
-        decision.apply ||
-        (hostMirrorVerdict.notificationInventory?.environmentId === environmentId &&
-          decision.settlesHostMirror &&
-          !isWebSessionTabsWorktreeRemovalFrame(snapshot)),
-      statuses: acceptedNotificationStatusesByFrame.get(frame) ?? []
-    }
-    const lifecycle = getWebSessionTabsNotificationLifecycle(environmentId)
-    if (receivedFrame === undefined) {
-      lifecycle.applyUnsequencedSnapshot(outcome)
-    } else {
-      lifecycle.settleSnapshot(receivedFrame, outcome)
-    }
-  }
-  if (hostMirrorVerdict.notificationInventory) {
-    const { environmentId, receivedFrame } = hostMirrorVerdict.notificationInventory
-    settleWebSessionTabsNotificationInventory(environmentId, receivedFrame)
   }
   // Why: the receipt exists exactly from the commit on, so no caller can settle
   // evidence the store does not hold, and none can lose one it does.
@@ -4198,13 +3979,13 @@ function loadInitialWebSessionTabs(
         return
       }
       const receivedFrames = result.snapshots.map((snapshot) =>
-        recordReceivedWebSessionTabsSnapshot(environmentId, snapshot, false)
+        recordReceivedWebSessionTabsSnapshot(environmentId, snapshot, {
+          observeNotification: false
+        })
       )
-      const inventoryReceivedFrame = recordReceivedWebSessionTabsInventory(
-        environmentId,
-        result.snapshots,
-        false
-      )
+      recordReceivedWebSessionTabsInventory(environmentId, result.snapshots, {
+        armPublished: false
+      })
       const finishRecoveries = result.snapshots.map((snapshot, index) =>
         beginWebSessionTabsSnapshotRecovery(environmentId, snapshot, receivedFrames[index]!)
       )
@@ -4256,11 +4037,6 @@ function loadInitialWebSessionTabs(
               publishedSnapshotCount: result.snapshots.filter((snapshot) =>
                 isHostMirroredWorktree(snapshot.worktree)
               ).length
-            },
-            notificationInventory: {
-              environmentId,
-              publishedWorktreeIds: result.snapshots.map((snapshot) => snapshot.worktree),
-              receivedFrame: inventoryReceivedFrame
             }
           }
         )
@@ -4268,7 +4044,6 @@ function loadInitialWebSessionTabs(
         for (const finishRecovery of finishRecoveries) {
           finishRecovery()
         }
-        settleWebSessionTabsNotificationInventory(environmentId, inventoryReceivedFrame)
       }
     })
     .catch((error) => {
@@ -4851,6 +4626,7 @@ export function useWebSessionTabsSync(): void {
                 const event = response.result as SessionTabsStreamEvent
                 const replayed = isRuntimeSubscriptionReplayResponse(response)
                 if (event.type === 'snapshots') {
+                  const attentionRequired = awaitingVisibilityResumeInventory
                   const skipUnchangedResumeWork = awaitingVisibilityResumeInventory && !replayed
                   awaitingVisibilityResumeInventory = false
                   // Why: an unchanged epoch/version proves the host published nothing while parked, so there is no missed frame to recover or replay.
@@ -4869,7 +4645,7 @@ export function useWebSessionTabsSync(): void {
                     const receivedFrame = recordReceivedWebSessionTabsSnapshot(
                       environmentId,
                       snapshot,
-                      false
+                      { observeNotification: false }
                     )
                     recordVisibilityResumeSnapshotReceipt(environmentId, snapshot, receivedFrame)
                     return receivedFrame
@@ -4877,7 +4653,7 @@ export function useWebSessionTabsSync(): void {
                   const inventoryReceivedFrame = recordReceivedWebSessionTabsInventory(
                     environmentId,
                     event.snapshots,
-                    true
+                    { armPublished: true, attentionRequired }
                   )
                   const missingWorktrees = recordVisibilityResumeInventoryReceipt(
                     environmentId,
@@ -4958,13 +4734,6 @@ export function useWebSessionTabsSync(): void {
                               publishedSnapshotCount: event.snapshots.filter((snapshot) =>
                                 isHostMirroredWorktree(snapshot.worktree)
                               ).length
-                            },
-                            notificationInventory: {
-                              environmentId,
-                              publishedWorktreeIds: event.snapshots.map(
-                                (snapshot) => snapshot.worktree
-                              ),
-                              receivedFrame: inventoryReceivedFrame
                             }
                           }
                         )
@@ -4998,24 +4767,9 @@ export function useWebSessionTabsSync(): void {
                       }
                     })
                     .finally(() => {
-                      for (const [index, finishRecovery] of finishRecoveries.entries()) {
-                        if (finishRecovery) {
-                          finishRecovery()
-                        } else {
-                          getWebSessionTabsNotificationLifecycle(environmentId).settleSnapshot(
-                            receivedFrames[index]!,
-                            {
-                              snapshot: event.snapshots[index]!,
-                              validPresence: true,
-                              statuses: []
-                            }
-                          )
-                        }
+                      for (const finishRecovery of finishRecoveries) {
+                        finishRecovery?.()
                       }
-                      settleWebSessionTabsNotificationInventory(
-                        environmentId,
-                        inventoryReceivedFrame
-                      )
                       // Why: an inventory speaks only once its patch is in the
                       // store — settling earlier, or on snapshots recovery
                       // discarded, drains parked work against state nobody wrote.
@@ -5030,7 +4784,9 @@ export function useWebSessionTabsSync(): void {
                   // talking has not reported a single PTY dead.
                   return
                 }
-                const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event)
+                const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event, {
+                  attentionRequired: awaitingVisibilityResumeInventory
+                })
                 recordVisibilityResumeSnapshotReceipt(environmentId, event, receivedFrame)
                 const finishRecovery = beginWebSessionTabsSnapshotRecovery(
                   environmentId,
@@ -5257,8 +5013,9 @@ export function useWebSessionTabsSync(): void {
     }
     const disposeSubscription = installWindowVisibilitySubscriptionParking([
       {
-        subscribe: (isCurrent) =>
-          window.api.runtimeEnvironments.subscribe(
+        subscribe: (isCurrent, { visibilityGeneration }) => {
+          let awaitingVisibilityResumeSnapshot = visibilityGeneration > 0
+          return window.api.runtimeEnvironments.subscribe(
             {
               selector: environmentId,
               method: 'session.tabs.subscribe',
@@ -5288,7 +5045,11 @@ export function useWebSessionTabsSync(): void {
                   // this worktree — let alone about the whole environment.
                   return
                 }
-                const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event)
+                const attentionRequired = awaitingVisibilityResumeSnapshot
+                awaitingVisibilityResumeSnapshot = false
+                const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event, {
+                  attentionRequired
+                })
                 recordVisibilityResumeSnapshotReceiptRef.current(
                   environmentId,
                   event,
@@ -5324,7 +5085,8 @@ export function useWebSessionTabsSync(): void {
                 }
               }
             }
-          ),
+          )
+        },
         onSubscribeError: (error) => {
           console.warn(
             '[web-session-tabs-sync] failed to subscribe:',

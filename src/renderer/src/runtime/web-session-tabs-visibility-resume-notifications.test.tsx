@@ -372,6 +372,11 @@ describe('paired session-tab visibility-resume notifications', () => {
       vi.advanceTimersByTime(1_500)
 
       expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ attentionRequired: true })
+        })
+      )
       expect(badgeCount()).toBe(1)
       hook.unmount()
     }
@@ -818,7 +823,7 @@ describe('paired session-tab visibility-resume notifications', () => {
     hook.unmount()
   })
 
-  it('alerts once when the resumed active stream wins the inventory race', async () => {
+  it('alerts once when the active replay precedes the hidden transition and inventory', async () => {
     seedRemoteMirrorState(true)
     mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
     const hook = renderHook(() => useWebSessionTabsSync())
@@ -830,10 +835,9 @@ describe('paired session-tab visibility-resume notifications', () => {
     notificationDispatch.mockClear()
 
     await parkAndReveal()
-    await publish(findSubscription('session.tabs.subscribe', 1), {
-      type: 'snapshot',
-      ...snapshot(2, 'done', NOW + 1_000)
-    })
+    const active = findSubscription('session.tabs.subscribe', 1)
+    await publish(active, { type: 'snapshot', ...snapshot(1, 'working', NOW) })
+    await publish(active, { type: 'updated', ...snapshot(2, 'done', NOW + 1_000) })
     vi.advanceTimersByTime(1_500)
     await publish(findSubscription('session.tabs.subscribeAll', 1), {
       type: 'snapshots',
@@ -841,6 +845,9 @@ describe('paired session-tab visibility-resume notifications', () => {
     })
 
     expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ attentionRequired: true }) })
+    )
     expect(badgeCount()).toBe(1)
     hook.unmount()
   })

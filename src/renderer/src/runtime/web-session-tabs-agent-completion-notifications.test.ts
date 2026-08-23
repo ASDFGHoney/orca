@@ -26,6 +26,7 @@ import {
   applyWebSessionTabsSnapshot,
   applyWebSessionTabsStorePatch,
   decideWebSessionTabsSnapshot,
+  recordReceivedWebSessionTabsSnapshot,
   resetWebSessionTabsSnapshotFreshnessForTests
 } from './web-session-tabs-sync'
 
@@ -77,6 +78,7 @@ function makeAgentSnapshot(
 }
 
 function applySnapshot(snapshot: RuntimeMobileSessionTabsResult, _live: boolean): void {
+  recordReceivedWebSessionTabsSnapshot(ENVIRONMENT_ID, snapshot)
   const decision = decideWebSessionTabsSnapshot(snapshot, ENVIRONMENT_ID)
   applyWebSessionTabsStorePatch(
     (state) => applyWebSessionTabsSnapshot(state, snapshot, ENVIRONMENT_ID, NOW),

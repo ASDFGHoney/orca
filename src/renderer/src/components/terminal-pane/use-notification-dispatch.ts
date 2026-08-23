@@ -59,6 +59,7 @@ export type TerminalNotificationEvent = {
   agentStatusSnapshot?: AgentCompletionStatusSnapshot
   agentCompletionSource?: AgentCompletionDispatchMeta['source']
   suppressOsNotification?: boolean
+  attentionRequired?: boolean
 }
 
 /**
@@ -157,14 +158,16 @@ export function dispatchTerminalNotification(
 
     // Why: a focused worktree can still hide other terminal tabs/split panes;
     // only the exact active pane counts as already viewed.
-    const shouldMarkUnread = event.paneKey
-      ? !isVisibleForegroundPaneKey(state, worktreeId, event.paneKey)
-      : state.activeWorktreeId !== worktreeId || !isOrcaWindowForegroundFocused()
+    const shouldMarkUnread =
+      event.attentionRequired === true ||
+      (event.paneKey
+        ? !isVisibleForegroundPaneKey(state, worktreeId, event.paneKey)
+        : state.activeWorktreeId !== worktreeId || !isOrcaWindowForegroundFocused())
     if (shouldMarkUnread) {
       // Why: activeWorktreeId is only in-app selection. If Orca is backgrounded,
       // a selected chat finishing still needs unread/Dock attention.
       state.markWorktreeUnread(worktreeId)
-      if (event.paneKey) {
+      if (event.paneKey && !event.attentionRequired) {
         // Why: focus-return auto-ack needs an agent-specific source marker;
         // generic pane unread also covers BEL and must still show until interact.
         state.markAgentCompletionPaneUnread(event.paneKey)
@@ -225,6 +228,7 @@ export function dispatchTerminalNotification(
       hasMultipleActiveRepos: countReposNeedingNotificationDisambiguation(state) > 1,
       terminalTitle: event.terminalTitle,
       isActiveWorktree: state.activeWorktreeId === worktreeId,
+      ...(event.attentionRequired ? { attentionRequired: true } : {}),
       ...agentSnapshot
     })
     .then((result) => {

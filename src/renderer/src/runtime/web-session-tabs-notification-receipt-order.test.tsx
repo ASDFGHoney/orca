@@ -306,7 +306,7 @@ describe('paired session-tab notification receipt ordering', () => {
     hook.unmount()
   })
 
-  it('orders a live completion after slow initial inventory recovery', async () => {
+  it('delivers a live completion without waiting for slow terminal recovery', async () => {
     const hook = renderHook(() => useWebSessionTabsSync())
     await act(settle)
     const global = findSubscription('session.tabs.subscribeAll')
@@ -315,13 +315,44 @@ describe('paired session-tab notification receipt ordering', () => {
 
     await publish(global, { type: 'snapshots', snapshots: [snapshot(1, 'working', NOW)] })
     await publish(global, { type: 'updated', ...snapshot(2, 'done', NOW + 1_000) })
-    expect(notificationDispatch).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1_500)
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       slowWorkingRecovery.resolve(snapshot(1, 'working', NOW))
       await settle()
       await settle()
     })
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(getUnreadBadgeCount(useAppStore.getState())).toBe(1)
+    hook.unmount()
+  })
+
+  it('keeps a failed cold recovery seeded and its later duplicate silent', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    const global = findSubscription('session.tabs.subscribeAll')
+    mocks.recoverSnapshot.mockResolvedValueOnce(null)
+
+    await publish(global, {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'done', NOW)]
+    })
+    await publish(global, { type: 'updated', ...snapshot(2, 'done', NOW) })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(getUnreadBadgeCount(useAppStore.getState())).toBe(0)
+    hook.unmount()
+  })
+
+  it('delivers a transition even when that frame terminal recovery failed', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    const global = findSubscription('session.tabs.subscribeAll')
+    await publish(global, { type: 'updated', ...snapshot(1, 'working', NOW) })
+    mocks.recoverSnapshot.mockResolvedValueOnce(null)
+    await publish(global, { type: 'updated', ...snapshot(2, 'done', NOW + 1_000) })
     vi.advanceTimersByTime(1_500)
 
     expect(notificationDispatch).toHaveBeenCalledTimes(1)

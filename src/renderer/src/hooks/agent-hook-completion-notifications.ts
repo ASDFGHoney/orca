@@ -261,6 +261,7 @@ function createCoordinator(paneKey: string, worktreeId: string): AgentCompletion
         terminalTitle: title,
         paneKey,
         suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
+        ...(meta?.agentStatus?.attentionRequired ? { attentionRequired: true } : {}),
         ...(meta?.agentStatus ? { agentStatusSnapshot: meta.agentStatus } : {})
       })
     },
@@ -275,6 +276,7 @@ function createCoordinator(paneKey: string, worktreeId: string): AgentCompletion
         terminalTitle: title,
         paneKey,
         suppressOsNotification: !isAgentTaskCompleteNotificationEnabled(),
+        ...(meta.agentStatus.attentionRequired ? { attentionRequired: true } : {}),
         agentStatusSnapshot: meta.agentStatus
       })
     },

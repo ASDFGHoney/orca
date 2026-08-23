@@ -7,6 +7,8 @@ export type AgentCompletionStatusSnapshot = ParsedAgentStatusPayload & {
   stateStartedAt?: number
   /** Renderer-local boundary used only to reject a delayed cross-host completion. */
   localStateStartedAt?: number
+  /** The transition was recovered after hidden subscription parking. */
+  attentionRequired?: boolean
 }
 
 export type AgentCompletionDispatchMeta = {
