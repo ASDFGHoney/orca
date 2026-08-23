@@ -1,4 +1,3 @@
-import type { StdioOptions } from 'node:child_process'
 import { closeSync as fsCloseSync, openSync as fsOpenSync } from 'node:fs'
 
 export const WINDOWS_CONSOLE_INPUT_DEVICE = '\\\\.\\CONIN$'
@@ -13,6 +12,12 @@ type OpenWindowsConsoleInputDeps = {
   openSync?: (path: string, flags: string) => number
   closeSync?: (fd: number) => void
 }
+
+type WindowsInteractiveChildStdio = [
+  number | 'inherit',
+  typeof process.stderr | 'inherit',
+  'inherit'
+]
 
 /** Opens the real Windows console input device instead of Electron's inherited stdin. */
 export function openWindowsConsoleInput(
@@ -49,7 +54,7 @@ export function openWindowsConsoleInput(
 export function stdioForWindowsInteractiveChild(
   json: boolean,
   deps: OpenWindowsConsoleInputDeps = {}
-): { stdio: StdioOptions; dispose: () => void } {
+): { stdio: WindowsInteractiveChildStdio; dispose: () => void } {
   const opened = openWindowsConsoleInput(deps)
   return opened === 'inherit'
     ? {

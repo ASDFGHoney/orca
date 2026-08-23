@@ -11,7 +11,11 @@ export type WindowsHostInteractiveLoginSpawn = {
   windowsHide: boolean
   cleanup: () => void
   getTerminationPid: () => number | null
+  waitForTerminationPid: () => Promise<number | null>
 }
+
+const PID_RELAY_WAIT_TIMEOUT_MS = 2_000
+const PID_RELAY_POLL_INTERVAL_MS = 25
 
 function encodeUtf8(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64')
@@ -39,6 +43,25 @@ function readPidFile(pidFilePath: string): number | null {
   } catch {
     return null
   }
+}
+
+function waitForPidFile(pidFilePath: string): Promise<number | null> {
+  const current = readPidFile(pidFilePath)
+  if (current !== null) {
+    return Promise.resolve(current)
+  }
+  const deadline = Date.now() + PID_RELAY_WAIT_TIMEOUT_MS
+  return new Promise((resolve) => {
+    const poll = (): void => {
+      const pid = readPidFile(pidFilePath)
+      if (pid !== null || Date.now() >= deadline) {
+        resolve(pid)
+        return
+      }
+      setTimeout(poll, PID_RELAY_POLL_INTERVAL_MS)
+    }
+    setTimeout(poll, PID_RELAY_POLL_INTERVAL_MS)
+  })
 }
 
 export function buildWindowsHostInteractiveLoginSpawn(
@@ -69,6 +92,7 @@ export function buildWindowsHostInteractiveLoginSpawn(
     stdio: 'ignore',
     windowsHide: true,
     cleanup: () => rmSync(pidFilePath, { force: true }),
-    getTerminationPid: () => readPidFile(pidFilePath)
+    getTerminationPid: () => readPidFile(pidFilePath),
+    waitForTerminationPid: () => waitForPidFile(pidFilePath)
   }
 }

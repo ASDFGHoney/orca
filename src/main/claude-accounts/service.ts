@@ -1107,7 +1107,7 @@ export class ClaudeAccountService {
           : [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         shell: spawnConfig.shell,
         // Why: hide only the outer wrapper; start creates the visible login console.
-        windowsHide: interactiveLogin?.windowsHide ?? true,
+        windowsHide: true,
         windowsVerbatimArguments: spawnConfig.windowsVerbatimArguments,
         env: spawnConfig.env,
         // Why: Claude auth can leave browser/login descendants alive after denial.
@@ -1181,8 +1181,7 @@ export class ClaudeAccountService {
           return
         }
         terminationPending = true
-        const windowsTerminationPid = interactiveLogin?.getTerminationPid?.() ?? child.pid
-        if (process.platform === 'win32' && windowsTerminationPid) {
+        const killWindowsTree = (windowsTerminationPid: number): void => {
           const taskkill = spawn(
             'taskkill.exe',
             ['/pid', String(windowsTerminationPid), '/t', '/f'],
@@ -1209,9 +1208,27 @@ export class ClaudeAccountService {
           }, WINDOWS_TASKKILL_TIMEOUT_MS)
           taskkill.once('error', () => finishTaskkill(false))
           taskkill.once('close', (code) => finishTaskkill(code === 0))
+        }
+        if (process.platform === 'win32') {
+          const resolveTerminationPid = interactiveLogin?.waitForTerminationPid
+            ? interactiveLogin.waitForTerminationPid()
+            : Promise.resolve(interactiveLogin?.getTerminationPid?.() ?? child.pid ?? null)
+          void resolveTerminationPid
+            .then((windowsTerminationPid) => {
+              if (windowsTerminationPid) {
+                killWindowsTree(windowsTerminationPid)
+                return
+              }
+              child.kill()
+              afterKill()
+            })
+            .catch(() => {
+              child.kill()
+              afterKill()
+            })
           return
         }
-        if (process.platform !== 'win32' && child.pid) {
+        if (child.pid) {
           try {
             process.kill(-child.pid)
             afterKill()

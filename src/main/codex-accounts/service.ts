@@ -1749,7 +1749,7 @@ export class CodexAccountService {
           ? spawnConfig.interactiveLogin.stdio
           : ['ignore', 'pipe', 'pipe'],
         // Why: hide the outer wrapper only. A dedicated login console stays visible.
-        windowsHide: spawnConfig.interactiveLogin?.windowsHide ?? true,
+        windowsHide: true,
         env: spawnConfig.env
       })
 

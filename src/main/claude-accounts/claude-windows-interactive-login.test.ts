@@ -136,7 +136,7 @@ describe('Claude Windows host interactive login', () => {
       )
       const rejection = expect(login).rejects.toThrow('Claude sign-in took too long to finish.')
 
-      await vi.advanceTimersByTimeAsync(1000)
+      await vi.advanceTimersByTimeAsync(3_000)
 
       await rejection
       expect(child.kill).toHaveBeenCalledOnce()
