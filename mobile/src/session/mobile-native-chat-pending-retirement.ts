@@ -157,17 +157,62 @@ export function retireLandedMobileNativeChatPending(
     if (item.images?.length || !item.baselineResolved) {
       continue
     }
+    // Normalized, not `trim()`: a send is caption-less only once control bytes
+    // are off it too, which is how the baseline pass classifies the same item.
+    const text = normalizeReconcileText(item.text)
     const landed =
-      item.text.trim() === ''
+      text === ''
         ? countImageSourceTurnsAfter(messages, item.baselineTailMessageId) >=
           item.expectedOccurrence
-        : (landedCounts.get(normalizeReconcileText(item.text)) ?? 0) >= item.expectedOccurrence
+        : (landedCounts.get(text) ?? 0) >= item.expectedOccurrence
     if (landed) {
       landedPendingIds.add(item.id)
     }
   }
   const glued = selectGluedPendingIds(messages, current, landedPendingIds)
-  return landedPendingIds.size === 0 && glued.size === 0
+  const stranded = selectStrandedPendingIds(current, landedPendingIds, glued)
+  return landedPendingIds.size === 0 && glued.size === 0 && stranded.size === 0
     ? current
-    : current.filter((item) => !landedPendingIds.has(item.id) && !glued.has(item.id))
+    : current.filter(
+        (item) => !landedPendingIds.has(item.id) && !glued.has(item.id) && !stranded.has(item.id)
+      )
+}
+
+/** Pending ids the queue has drained past, which therefore can never land.
+ *
+ * Why: Claude Code takes a mid-turn send off its queue through a
+ * `queued_command` attachment and writes no user record for it at all, so that
+ * send has no row to match — ever. Pending renders at the tail, so the echo then
+ * replays below every turn that follows and the conversation reads as re-ordered.
+ *
+ * The evidence is drainage, not a timer: an echo is stranded only once every send
+ * issued after it has been accounted for. While any later send is still
+ * outstanding the queue has not caught up, and this one's row may yet arrive —
+ * including the glue case, where a later send deliberately stays pending because
+ * a barrier blocked its run. That keeps the rule from ever dropping a send whose
+ * row is merely slow. A trailing unlandable send waits for the next send, and
+ * until then it is still the newest bubble, so it is not yet out of order.
+ */
+function selectStrandedPendingIds(
+  pending: readonly MobileNativeChatPendingMessage[],
+  landed: ReadonlySet<string>,
+  glued: ReadonlySet<string>
+): ReadonlySet<string> {
+  const stranded = new Set<string>()
+  let accountedAfter = true
+  let hasLater = false
+  for (let index = pending.length - 1; index >= 0; index--) {
+    const item = pending[index]!
+    if (!landed.has(item.id) && !glued.has(item.id)) {
+      // An unresolved baseline was captured against a transcript not known to be
+      // this session's, so drainage around it proves nothing about it.
+      if (accountedAfter && hasLater && item.baselineResolved) {
+        stranded.add(item.id)
+      } else {
+        accountedAfter = false
+      }
+    }
+    hasLater = true
+  }
+  return stranded.size === 0 ? NO_PENDING_IDS : stranded
 }

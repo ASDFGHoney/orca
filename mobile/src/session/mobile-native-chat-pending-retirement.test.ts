@@ -345,3 +345,137 @@ describe('retireLandedMobileNativeChatPending on a PTY-typed send', () => {
     expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual(pending)
   })
 })
+
+// Remote sends reach the agent TUI with a leading Ctrl+U (kill-input-line) on the
+// same write as the body, and Claude Code records it verbatim: live session JSONL
+// rows read '\x15If this is an orca bug...'. U+0015 is not whitespace, so trim()
+// and /\s/ both leave it in place and the echo never matches its own landing.
+const CTRL_U = '\u0015'
+
+describe('retireLandedMobileNativeChatPending - control characters in landed rows', () => {
+  it('retires when the echoed send itself carries the control character', () => {
+    const messages = [assistantTurn('m1', 'ready', 1000), userTurn('m2', 'run the tests', 5000)]
+    const pending = [pendingSend('p1', `${CTRL_U}run the tests`, 'm1')]
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('glues control-character-prefixed sends that collapsed into one row', () => {
+    const messages = [
+      assistantTurn('m1', 'ready', 1000),
+      userTurn('m2', `${CTRL_U}run the tests again`, 5000)
+    ]
+    const pending = [
+      pendingSend('p1', `${CTRL_U}run the tests`, 'm1'),
+      pendingSend('p2', `${CTRL_U}again`, 'm1')
+    ]
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('still separates sends that differ only outside the control characters', () => {
+    const messages = [
+      assistantTurn('m1', 'ready', 1000),
+      userTurn('m2', `${CTRL_U}keep this one`, 5000)
+    ]
+    const pending = [pendingSend('p1', 'a different message', 'm1')]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1'])
+  })
+})
+
+// Claude Code consumes a mid-turn send through a `queued_command` attachment and
+// logs only `queue-operation` records for it - never a `type:"user"` row (proven
+// against the live JSONL: enqueue+remove, no user record). The decoder publishes
+// nothing for those records, so the echo has no landing to match, ever.
+describe('retireLandedMobileNativeChatPending - sends that can never land', () => {
+  it('drops an unlandable send once a later send from the same batch lands', () => {
+    const messages = [
+      assistantTurn('m1', 'working', 1000),
+      userTurn('m2', 'the newest question', 9000)
+    ]
+    const pending = [
+      pendingSend('p1', 'Also if you run out of space on my machine', 'm1'),
+      pendingSend('p2', 'the newest question', 'm1')
+    ]
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('keeps every send while none of them has landed yet', () => {
+    const messages = [assistantTurn('m1', 'working', 1000)]
+    const pending = [
+      pendingSend('p1', 'first', 'm1'),
+      pendingSend('p2', 'second', 'm1'),
+      pendingSend('p3', 'third', 'm1')
+    ]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1', 'p2', 'p3'])
+  })
+
+  it('keeps sends issued after the one that landed', () => {
+    const messages = [assistantTurn('m1', 'working', 1000), userTurn('m2', 'landed one', 5000)]
+    const pending = [
+      pendingSend('p1', 'landed one', 'm1'),
+      pendingSend('p2', 'still in flight', 'm2')
+    ]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p2'])
+  })
+
+  it('leaves an unresolved baseline alone - it has nothing to count against yet', () => {
+    const messages = [
+      assistantTurn('m1', 'working', 1000),
+      userTurn('m2', 'the newest question', 9000)
+    ]
+    const pending = [
+      pendingSend('p1', 'never recorded', null, 1, false),
+      pendingSend('p2', 'the newest question', 'm1')
+    ]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1'])
+  })
+
+  it('reproduces the reported replay: three stale echoes below the newest turn', () => {
+    const messages = [
+      userTurn('m1', `${CTRL_U}If this is an orca bug please spawn a new worktree`, 1000),
+      assistantTurn('m2', 'on it', 2000),
+      userTurn('m3', `${CTRL_U}Actually scratch that about deleting worktrees`, 3000),
+      assistantTurn('m4', 'understood', 4000),
+      userTurn('m5', 'and the newest turn', 9000)
+    ]
+    const pending = [
+      pendingSend('p1', 'If this is an orca bug please spawn a new worktree', null),
+      pendingSend('p2', 'Also if you run out of space on my machine', 'm2'),
+      pendingSend('p3', 'Actually scratch that about deleting worktrees', 'm2'),
+      pendingSend('p4', 'and the newest turn', 'm4')
+    ]
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('drops a whole run of unlandable sends once the queue drains past them', () => {
+    const messages = [
+      assistantTurn('m1', 'working', 1000),
+      userTurn('m2', 'the one that landed', 9000)
+    ]
+    const pending = [
+      pendingSend('p1', 'first mid-turn send', 'm1'),
+      pendingSend('p2', 'second mid-turn send', 'm1'),
+      pendingSend('p3', 'the one that landed', 'm1')
+    ]
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('keeps an earlier send while a later one is still outstanding', () => {
+    const messages = [assistantTurn('m1', 'working', 1000), userTurn('m2', 'the middle one', 5000)]
+    const pending = [
+      pendingSend('p1', 'never recorded', 'm1'),
+      pendingSend('p2', 'the middle one', 'm1'),
+      pendingSend('p3', 'still in flight', 'm1')
+    ]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1', 'p3'])
+  })
+})

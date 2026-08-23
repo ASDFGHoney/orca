@@ -180,3 +180,30 @@ describe('buildMobileNativeChatTransientData', () => {
     expect(data.some((message) => message.id === 'streaming')).toBe(false)
   })
 })
+
+// The send path's leading Ctrl+U is recorded as part of the prompt, so the raw
+// row reaches the bubble as invisible text the user never typed - and Copy,
+// which reads the same blocks, would put the control byte on the clipboard.
+describe('foldMobileNativeChatMessages control characters', () => {
+  function turn(id: string, role: 'user' | 'assistant', text: string): NativeChatMessage {
+    return { id, role, blocks: [{ type: 'text', text }], timestamp: 1, source: 'transcript' }
+  }
+
+  it('takes the send path Ctrl+U back out of the rendered user turn', () => {
+    const folded = foldMobileNativeChatMessages([
+      turn('m1', 'user', '\u0015If this is an orca bug')
+    ])
+    expect(folded[0]?.blocks).toEqual([{ type: 'text', text: 'If this is an orca bug' }])
+  })
+
+  it('leaves assistant prose alone', () => {
+    const text = 'escape\u001B[31m sequence'
+    const folded = foldMobileNativeChatMessages([turn('m1', 'assistant', text)])
+    expect(folded[0]?.blocks).toEqual([{ type: 'text', text }])
+  })
+
+  it('returns the same messages when there is nothing to strip', () => {
+    const messages = [turn('m1', 'user', 'a clean message')]
+    expect(foldMobileNativeChatMessages(messages)[0]).toBe(messages[0])
+  })
+})

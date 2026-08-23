@@ -3,6 +3,7 @@ import {
   formatNativeChatEmptyStateCopy,
   type NativeChatEmptyStateCopy
 } from '../../../src/shared/native-chat-empty-state'
+import { stripControlBytesFromUserTurns } from '../../../src/shared/native-chat-user-turn-control-bytes'
 import { stripNoiseMessages } from '../../../src/shared/native-chat-noise'
 import { foldToolMessages } from '../../../src/shared/native-chat-tool-fold'
 import { isImageRefBlock, type NativeChatMessage } from '../../../src/shared/native-chat-types'
@@ -46,8 +47,12 @@ export type MobileNativeChatPendingItem = {
 
 export function foldMobileNativeChatMessages(messages: NativeChatMessage[]): NativeChatMessage[] {
   // Normalize first (desktop assembler parity): image marker turns fold into
-  // image-ref blocks instead of rendering as raw `[Image: …]` text.
-  return foldToolMessages(stripNoiseMessages(normalizeImageTranscriptMessages(messages)))
+  // image-ref blocks instead of rendering as raw `[Image: …]` text. The control
+  // bytes come off before that: the send path's leading Ctrl+U is recorded as
+  // part of the prompt, and it is neither the user's text nor a visible glyph.
+  return foldToolMessages(
+    stripNoiseMessages(normalizeImageTranscriptMessages(stripControlBytesFromUserTurns(messages)))
+  )
 }
 
 /** Assemble the list data the chat renders: the folded transcript, then a
