@@ -45,6 +45,7 @@ import {
   nativeChatLineDecoderForAgent,
   readNativeChatTranscriptTail
 } from './transcript-tail-reader'
+import { createSshTranscriptRangeFs } from './ssh-transcript-range-fs'
 import { getActiveNativeChatWatcherCount, subscribeNativeChatTranscript } from './transcript-watch'
 import { readIncrementalTranscriptMessages } from './transcript-incremental-reader'
 import { TranscriptRangeReadInvalidatedError, type TranscriptRangeFs } from './transcript-range-fs'
@@ -264,6 +265,61 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     expect(result).toMatchObject({ messages: [{ id: 'new-large' }, { id: 'new-tail' }] })
     expect(result).not.toMatchObject({ messages: [{ id: 'old-large' }, { id: 'old-tail' }] })
     expect(readFileRange.mock.calls.length).toBeGreaterThan(7)
+  })
+
+  it('invalidates a same-inode ranged snapshot rewritten in place', async () => {
+    const transcriptPath = '/tmp/same-inode-rewrite.jsonl'
+    const files = new Map([[transcriptPath, Buffer.from('old generation')]])
+    const remote = memoryProvider(files)
+    let mtimeMs = 1
+    remote.stat.mockImplementation(
+      async (filePath: string): Promise<FileStat> => ({
+        size: files.get(filePath)!.length,
+        type: 'file',
+        mtime: mtimeMs,
+        mtimeMs,
+        dev: 7,
+        ino: 11
+      })
+    )
+    mocks.getProvider.mockReturnValue(remote.provider)
+    const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
+    const openingStamp = await rangeFs.stat(transcriptPath)
+
+    await rangeFs.read(transcriptPath, 0, 3)
+    files.set(transcriptPath, Buffer.from('new generation'))
+    mtimeMs = 2
+    await rangeFs.read(transcriptPath, 3, 3)
+
+    await expect(rangeFs.assertStable(transcriptPath, openingStamp)).rejects.toBeInstanceOf(
+      TranscriptRangeReadInvalidatedError
+    )
+  })
+
+  it('keeps a ranged snapshot valid across an ordinary append', async () => {
+    const transcriptPath = '/tmp/concurrent-append.jsonl'
+    const files = new Map([[transcriptPath, Buffer.from('opening')]])
+    const remote = memoryProvider(files)
+    let mtimeMs = 1
+    remote.stat.mockImplementation(
+      async (filePath: string): Promise<FileStat> => ({
+        size: files.get(filePath)!.length,
+        type: 'file',
+        mtime: mtimeMs,
+        mtimeMs,
+        dev: 7,
+        ino: 11
+      })
+    )
+    mocks.getProvider.mockReturnValue(remote.provider)
+    const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
+    const openingStamp = await rangeFs.stat(transcriptPath)
+
+    await rangeFs.read(transcriptPath, 0, openingStamp.size)
+    files.set(transcriptPath, Buffer.from('opening append'))
+    mtimeMs = 2
+
+    await expect(rangeFs.assertStable(transcriptPath, openingStamp)).resolves.toBeUndefined()
   })
 
   it('withholds remote append batches and restores the cursor after invalidation', async () => {
