@@ -568,6 +568,24 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     )
   })
 
+  it('releases a second time when an aborted acquire may still create a session', async () => {
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(
+      async (_script: string) => new Promise<OsascriptResult>(() => {})
+    )
+    // The first release finds nothing; the acquire's Apple event lands after.
+    const outcomes = ['gone', 'ended']
+    const runOsascriptSync = vi.fn((_script: string) => ok(outcomes.shift() ?? 'gone'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+
+    expect(runOsascriptSync).toHaveBeenCalledTimes(2)
+    expect(assertion.getHold()).toBeNull()
+  })
+
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {
     const amphetamine = createFakeAmphetamine()
     const runOsascriptSync = vi.fn((_script: string) => ok('gone'))

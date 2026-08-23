@@ -257,12 +257,12 @@ export class MacosAmphetamineSleepAssertion {
         // Quit landed while the Apple event was in flight; nothing runs after
         // this, so the session has to go now. Reclaims need this as much as
         // fresh starts — both leave an indefinite session behind otherwise.
-        const released = releaseAmphetamineSessionSync({
+        const outcome = releaseAmphetamineSessionSync({
           logger: this.logger,
           reason: 'dispose-race',
           runOsascriptSync: this.runOsascriptSync
         })
-        if (!released) {
+        if (outcome === null) {
           // Record it rather than reporting null: nothing can retry, and a
           // silent null would claim a session was cleaned up that was not.
           this.hold.own()

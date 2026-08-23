@@ -85,6 +85,19 @@ need an API Amphetamine does not offer. Callers who cannot tolerate the residual
 race should use the caffeinate engine, which is private to Orca and shares
 nothing.
 
+### Quit racing an in-flight acquire
+
+If quit lands while an acquire is in flight, Orca aborts it and then runs the
+synchronous release. Neither step is ordering: aborting only *requests* a kill,
+and an Apple event the acquire already sent is processed by Amphetamine on its
+own schedule. So a session can appear immediately after a release that found
+nothing to end.
+
+A second release runs in that specific case — an acquire was in flight and the
+first pass reported `gone` — with the spawn itself supplying the delay. That
+covers the realistic window. It is still not a proof: a sufficiently late Apple
+event outlives both passes, and nothing can retry once the process has exited.
+
 ### A session held when the grant is revoked
 
 Revoking Automation does not end a running Amphetamine session, so Orca keeps

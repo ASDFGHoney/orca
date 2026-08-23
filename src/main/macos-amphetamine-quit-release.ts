@@ -1,5 +1,10 @@
 import type { AmphetamineHold } from './macos-amphetamine-hold'
-import { AMPHETAMINE_RELEASE_SCRIPT, type RunOsascriptSync } from './macos-amphetamine-session'
+import {
+  AMPHETAMINE_RELEASE_SCRIPT,
+  parseReleaseOutcome,
+  type AmphetamineReleaseOutcome,
+  type RunOsascriptSync
+} from './macos-amphetamine-session'
 
 type Logger = Pick<Console, 'debug' | 'warn'>
 
@@ -13,25 +18,26 @@ type Logger = Pick<Console, 'debug' | 'warn'>
  * API allows; it is not a transaction (see
  * docs/reference/macos-keep-awake-engines.md).
  *
- * Returns whether the session is known to be gone. False means it may still be
- * running and nothing will retry, because the caller is being disposed.
+ * Returns what the script did, or null when the command itself failed — in which
+ * case the session may still be running and nothing will retry, because the
+ * caller is being disposed.
  */
 export function releaseAmphetamineSessionSync(options: {
   logger: Logger
   reason: string
   runOsascriptSync: RunOsascriptSync
-}): boolean {
+}): AmphetamineReleaseOutcome | null {
   const { logger, reason, runOsascriptSync } = options
   try {
     const result = runOsascriptSync(AMPHETAMINE_RELEASE_SCRIPT)
     if (result.code !== 0) {
       logger.warn('[agent-awake] failed to end Amphetamine session', { reason, result })
-      return false
+      return null
     }
-    return true
+    return parseReleaseOutcome(result.stdout)
   } catch (error) {
     logger.warn('[agent-awake] failed to end Amphetamine session', { reason, error })
-    return false
+    return null
   }
 }
 
@@ -58,7 +64,20 @@ export function disposeAmphetamineSession(options: {
     hold.release()
     return
   }
-  if (releaseAmphetamineSessionSync({ logger, reason: 'dispose', runOsascriptSync })) {
+  let outcome = releaseAmphetamineSessionSync({ logger, reason: 'dispose', runOsascriptSync })
+  if (hadAcquireInFlight && outcome === 'gone') {
+    // Aborting an in-flight acquire only *requests* a kill, and the Apple event
+    // it may already have sent is processed asynchronously by Amphetamine. So a
+    // session can appear just after this release reported nothing to end. One
+    // more pass catches that; the spawn itself supplies the delay, and the
+    // script ends nothing when there is nothing of Orca's to end.
+    outcome = releaseAmphetamineSessionSync({
+      logger,
+      reason: 'dispose-acquire-race',
+      runOsascriptSync
+    })
+  }
+  if (outcome !== null) {
     hold.release()
     return
   }
