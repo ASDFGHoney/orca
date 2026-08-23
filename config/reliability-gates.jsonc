@@ -10293,7 +10293,7 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
         "cd mobile && pnpm exec vitest run src/worktree/agent-row-display.test.ts src/transport/stable-logical-rpc-client.test.ts",
         "pnpm run test:e2e -- tests/e2e/orchestration-worker-terminal-visibility.spec.ts --workers=1",
         "pnpm run test:e2e -- tests/e2e/orchestration-legacy-worker-restart-recovery.spec.ts --workers=1",
@@ -10305,6 +10305,7 @@
         "src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
         "src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
+        "src/main/runtime/pty-process-liveness-broker.test.ts",
         "src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts",
         "src/cli/handlers/orchestration.test.ts",
         "src/cli/handlers/orchestration-lifecycle-rejection.test.ts",
@@ -10356,7 +10357,10 @@
             "retained renderer output remains readable through the recovered terminal",
             "capable worktree inventory projects restored live and unverifiable identities but omits exited shell-only agents",
             "a connected live PTY remains inventoried when its user-visible tab is missing",
-            "legacy clients retain the exact restored-row suppression without a process inspection"
+            "legacy clients retain the exact restored-row suppression",
+            "inspection timeout, transport loss, missing bindings, and stale incarnations remain unverifiable",
+            "terminal_gone is the only inspection rejection that retires the exact restored row",
+            "sequential inventory clients reuse bounded process evidence instead of polling each restored row"
           ]
         },
         {
@@ -10504,10 +10508,10 @@
           "date": "2026-08-23",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
           "result": "passed",
           "durationSeconds": 15.33,
-          "summary": "Seven files passed 1,264 tests with one skip, covering live, unverifiable, exited, hidden-tab, legacy and request-level capability projection plus every encrypted desktop/CLI client capability advertisement. Mobile typecheck and 25 focused mobile tests separately passed."
+          "summary": "Eight focused runtime and wire files passed 1,273 tests with one skip, including bounded inspection timeout, exact terminal_gone absence, cold persisted binding, incarnation and hook replacement races, sequential-client call counts, live/unverifiable/exited/hidden-tab/legacy projection, and encrypted desktop/CLI capability advertisement. Mobile typecheck and 25 focused mobile tests passed separately."
         },
         {
           "date": "2026-08-13",
@@ -10686,7 +10690,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Worker-start reuses the existing one-shot renderer reveal and adds no polling, provider listing, or output work. Startup recovery performs one bounded controller inventory per legacy candidate, exact owner/identity checks, one background reveal, and a provider/renderer snapshot only when an adopted worker's in-memory tail is empty and terminal.read is explicitly requested. Capable worktree.ps requests inspect only restored-unconfirmed candidates, deduplicate concurrent and same-request reads by PTY, and do no inspection for legacy clients, confirmed rows, unrelated PTYs, or restored rows without a retained PTY. Check adds one optional pane-key field and reuses the existing Run scan or bounded active-Dispatch lookup. Federation replay keeps the existing per-Dispatch polling cadence and existing transport queue limit, retaining a terminal Dispatch only while its imported cursor exceeds one persisted acknowledgment watermark. Each successful ACK adds one primary-key SQLite update; exact eligibility is a primary-key lookup, and identical pending terminal lookup is bounded by the existing 256-item per-Dispatch relay quota and pending-relay index. A version-aware schema sentinel keeps valid v26 databases on the direct v26-to-v27 migration path."
+        "evidence": "Worker-start reuses the existing one-shot renderer reveal and adds no polling, provider listing, or output work. Startup recovery performs one bounded controller inventory per legacy candidate, exact owner/identity checks, one background reveal, and a provider/renderer snapshot only when an adopted worker's in-memory tail is empty and terminal.read is explicitly requested. One incarnation-scoped process-evidence broker now serves both the incumbent foreground-agent refresh and capable restored-row projection: concurrent callers deduplicate, sequential live reads reuse a 10-second TTL, unavailable reads back off from 3 to 30 seconds, a hung provider retains at most one unresolved probe per identity, and every catalog read shares the existing three-second controller budget. Lifecycle, incarnation, reconnect, and controller changes invalidate evidence. Check adds one optional pane-key field and reuses the existing Run scan or bounded active-Dispatch lookup. Federation replay keeps the existing per-Dispatch polling cadence and existing transport queue limit, retaining a terminal Dispatch only while its imported cursor exceeds one persisted acknowledgment watermark. Each successful ACK adds one primary-key SQLite update; exact eligibility is a primary-key lookup, and identical pending terminal lookup is bounded by the existing 256-item per-Dispatch relay quota and pending-relay index. A version-aware schema sentinel keeps valid v26 databases on the direct v26-to-v27 migration path."
       },
       "promotionCriteria": [
         "Collect 100 consecutive passes or 14 days of stable CI history on macOS, Linux, and Windows.",
