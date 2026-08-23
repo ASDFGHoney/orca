@@ -42,10 +42,12 @@ export type MacosAwakeEngineRouterOptions = {
 }
 
 /**
- * Picks which macOS tool holds the wake assertion. Caffeinate is always
- * available; Amphetamine is opt-in, can be missing or refused, and falls back to
- * caffeinate when it is. The two overlap deliberately while Amphetamine is
- * acquiring — see start() — so the machine is never left uncovered.
+ * Picks which macOS tool holds the wake assertion. Caffeinate needs no install
+ * and is the fallback; Amphetamine is opt-in and can be missing or refused. The
+ * two overlap deliberately while Amphetamine is acquiring — see start() — so a
+ * handover does not open a gap. Neither engine is guaranteed to start: a failure
+ * is logged and the Electron power-save blocker, held elsewhere for the whole
+ * session, is what remains.
  */
 export class MacosAwakeEngineRouter {
   private readonly amphetamineAssertion: AmphetamineAwakeAssertion

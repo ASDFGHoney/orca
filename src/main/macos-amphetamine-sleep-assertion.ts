@@ -43,10 +43,15 @@ type MacosAmphetamineSleepAssertionOptions = {
  * Holds a wake assertion through Amphetamine instead of `caffeinate`.
  *
  * Amphetamine's session is global and singular — `start new session` ends whatever
- * was running, including the user's Triggers — so this class never writes before
- * it reads. If a session already exists it is adopted, not replaced; a session
- * Orca started is only ended while it still matches the shape Orca created. The
- * user's intent always outranks Orca's.
+ * was running, including the user's Triggers — so every write here is preceded by
+ * a read in the same script. A session that is not Orca-shaped is adopted rather
+ * than replaced, and a session is only ended after it was seen to match the shape
+ * Orca creates.
+ *
+ * Those are checks, not guarantees: the read and the write are separate Apple
+ * events and Amphetamine offers no compare-and-swap, so a change landing between
+ * them can still be destroyed. See docs/reference/macos-keep-awake-engines.md for
+ * what this design can and cannot promise.
  */
 export class MacosAmphetamineSleepAssertion {
   private readonly logger: Logger
