@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import type { Tab } from '../../../shared/tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-unified-tabs'
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
-import { projectLocalStructuredSessionTabs } from './local-structured-session-tabs-sync'
+import {
+  projectLocalStructuredSessionTabs,
+  restoreLocalStructuredSessionTabsOnce
+} from './local-structured-session-tabs-sync'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 
 const WORKTREE_ID = 'repo-1::worktree-1'
@@ -132,6 +135,22 @@ function expectExactSplit(state: {
 }
 
 describe('local structured session tab projection', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not restore local structured-session inventory in paired web clients', async () => {
+    const call = vi.fn()
+    vi.stubGlobal('window', {
+      __ORCA_WEB_CLIENT__: true,
+      api: { runtime: { call } }
+    })
+
+    await restoreLocalStructuredSessionTabsOnce()
+
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('drops terminal topology while retaining structured tabs', () => {
     const snapshot = {
       worktree: 'workspace-1',

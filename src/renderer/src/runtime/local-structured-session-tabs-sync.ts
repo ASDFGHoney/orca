@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import { useAppStore } from '../store'
+import { isWebClientLocation } from '../lib/web-client-location'
 import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
 
 const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
@@ -59,6 +60,9 @@ export function applyStructuredSessionTabSnapshots(
 }
 
 export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
+  if (isWebClientLocation()) {
+    return Promise.resolve()
+  }
   localStructuredSessionTabsRestorePromise ??= window.api.runtime
     .call({ method: 'session.tabs.listAll', params: {} })
     .then((response) => {
@@ -113,8 +117,9 @@ async function startLocalStructuredSessionTabsSync(args: {
 }
 
 export function useLocalStructuredSessionTabsSync(): void {
+  const enabled = !isWebClientLocation()
   const ready = useAppStore(
-    (state) => state.workspaceSessionReady && state.terminalStartupRestorationReady
+    (state) => enabled && state.workspaceSessionReady && state.terminalStartupRestorationReady
   )
   useEffect(() => {
     if (!ready) {
