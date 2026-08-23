@@ -22,6 +22,7 @@ try {
     join(mobileRoot, 'packages/expo-mobile-web-shell/ios/MobileWebExactJson.swift'),
     join(mobileRoot, 'packages/expo-mobile-web-shell/ios/MobileWebActivationMetadata.swift'),
     join(mobileRoot, 'packages/expo-mobile-web-shell/ios/MobileWebCacheFileBoundary.swift'),
+    join(mobileRoot, 'packages/expo-mobile-web-shell/ios/MobileWebCacheTreeBoundary.swift'),
     join(mobileRoot, 'packages/expo-mobile-web-shell/ios/MobileWebPackageStore.swift'),
     join(mobileRoot, 'packages/expo-mobile-web-shell/ios-tests/MobileWebExactJsonTests.swift'),
     join(
@@ -39,6 +40,10 @@ try {
     join(
       mobileRoot,
       'packages/expo-mobile-web-shell/ios-tests/MobileWebCacheWriteBoundaryTests.swift'
+    ),
+    join(
+      mobileRoot,
+      'packages/expo-mobile-web-shell/ios-tests/MobileWebHostRootBoundaryTests.swift'
     ),
     join(
       mobileRoot,

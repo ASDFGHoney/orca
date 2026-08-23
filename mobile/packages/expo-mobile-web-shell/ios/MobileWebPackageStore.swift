@@ -134,7 +134,13 @@ final class MobileWebPackageStore {
         .appendingPathComponent("staging", isDirectory: true)
         .appendingPathComponent(stageId, isDirectory: true)
       do {
+        guard isMobileWebUnlinkedPath(stageRoot, within: root) else {
+          throw MobileWebStoreError("mobile_web_stage_create_failed")
+        }
         try fileManager.createDirectory(at: stageRoot, withIntermediateDirectories: true)
+        guard isMobileWebUnlinkedPath(stageRoot, within: root) else {
+          throw MobileWebStoreError("mobile_web_stage_create_failed")
+        }
         try Data(manifestJson.utf8).write(
           to: stageRoot.appendingPathComponent("manifest.json"),
           options: .atomic
@@ -154,7 +160,7 @@ final class MobileWebPackageStore {
           }
         }
       } catch {
-        try? fileManager.removeItem(at: stageRoot)
+        try? removeMobileWebCacheTree(stageRoot, within: root)
         throw storageError(error, fallback: "mobile_web_stage_create_failed")
       }
       stages[stageId] = MobileWebStageRecord(
@@ -244,17 +250,29 @@ final class MobileWebPackageStore {
       guard stage.finishedPaths.count == stage.manifest.assets.count else {
         throw MobileWebStoreError("mobile_web_stage_incomplete")
       }
-      let hostRoot = try cacheRoot().appendingPathComponent(stage.hostKey, isDirectory: true)
+      let root = try cacheRoot()
+      let hostRoot = root.appendingPathComponent(stage.hostKey, isDirectory: true)
       let generations = hostRoot.appendingPathComponent("generations", isDirectory: true)
-      try fileManager.createDirectory(at: generations, withIntermediateDirectories: true)
       let destination = generations.appendingPathComponent(
         stage.manifest.buildId,
         isDirectory: true
       )
+      guard
+        isMobileWebUnlinkedPath(hostRoot, within: root),
+        isMobileWebUnlinkedPath(generations, within: root),
+        isMobileWebUnlinkedPath(stage.root, within: root),
+        isMobileWebUnlinkedPath(destination, within: root)
+      else {
+        throw MobileWebStoreError("mobile_web_generation_commit_failed")
+      }
+      try fileManager.createDirectory(at: generations, withIntermediateDirectories: true)
+      guard isMobileWebUnlinkedPath(generations, within: root) else {
+        throw MobileWebStoreError("mobile_web_generation_commit_failed")
+      }
       do {
         if fileManager.fileExists(atPath: destination.path) {
           try verifyCommittedGeneration(destination, manifest: stage.manifest)
-          try fileManager.removeItem(at: stage.root)
+          try removeMobileWebCacheTree(stage.root, within: root)
         } else {
           try fileManager.moveItem(at: stage.root, to: destination)
         }
@@ -269,7 +287,8 @@ final class MobileWebPackageStore {
   func abortStage(stageId: String) {
     locked {
       guard let stage = stages.removeValue(forKey: stageId) else { return }
-      try? fileManager.removeItem(at: stage.root)
+      guard let root = try? cacheRoot() else { return }
+      try? removeMobileWebCacheTree(stage.root, within: root)
     }
   }
 
@@ -280,9 +299,13 @@ final class MobileWebPackageStore {
   ) throws -> [String: String] {
     try locked {
       let hostKey = try validatedHostKey(hostIdentity)
-      let hostRoot = try cacheRoot().appendingPathComponent(hostKey, isDirectory: true)
+      let root = try cacheRoot()
+      let hostRoot = root.appendingPathComponent(hostKey, isDirectory: true)
       if let buildId {
         guard isMobileWebSha256(buildId) else {
+          throw MobileWebStoreError("mobile_web_generation_invalid")
+        }
+        guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
           throw MobileWebStoreError("mobile_web_generation_invalid")
         }
         return try openVerifiedSession(
@@ -291,6 +314,9 @@ final class MobileWebPackageStore {
           buildId: buildId,
           bridgeVersion: bridgeVersion
         )
+      }
+      guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
+        throw MobileWebStoreError("mobile_web_activation_invalid")
       }
       let activation = try readActivation(hostRoot: hostRoot)
       do {
@@ -322,6 +348,10 @@ final class MobileWebPackageStore {
     bridgeVersion: Int,
     activateFallback: Bool = false
   ) throws -> [String: String] {
+    let cacheRoot = try cacheRoot()
+    guard isMobileWebUnlinkedPath(hostRoot, within: cacheRoot) else {
+      throw MobileWebStoreError("mobile_web_generation_invalid")
+    }
     let selectedBuildId = buildId
     let generationRoot =
       hostRoot
@@ -332,6 +362,9 @@ final class MobileWebPackageStore {
       throw MobileWebStoreError("mobile_web_generation_invalid")
     }
     try requireCompatibleBridge(manifest: manifest, bridgeVersion: bridgeVersion)
+    guard isMobileWebUnlinkedPath(generationRoot, within: cacheRoot) else {
+      throw MobileWebStoreError("mobile_web_generation_invalid")
+    }
     if activateFallback {
       try writeActivation(
         MobileWebActivationRecord(active: selectedBuildId, previous: nil),
@@ -365,7 +398,11 @@ final class MobileWebPackageStore {
       guard let failed = sessions[sessionId] else {
         throw MobileWebStoreError("mobile_web_session_unknown")
       }
-      let hostRoot = try cacheRoot().appendingPathComponent(failed.hostKey, isDirectory: true)
+      let root = try cacheRoot()
+      let hostRoot = root.appendingPathComponent(failed.hostKey, isDirectory: true)
+      guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
+        throw MobileWebStoreError("mobile_web_activation_invalid")
+      }
       let activation = try readActivation(hostRoot: hostRoot)
       let fallbackBuildId: String
       let fallbackPrevious: String?
@@ -421,7 +458,11 @@ final class MobileWebPackageStore {
       guard let session = sessions[sessionId] else {
         throw MobileWebStoreError("mobile_web_session_unknown")
       }
-      let hostRoot = try cacheRoot().appendingPathComponent(session.hostKey, isDirectory: true)
+      let root = try cacheRoot()
+      let hostRoot = root.appendingPathComponent(session.hostKey, isDirectory: true)
+      guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
+        throw MobileWebStoreError("mobile_web_activation_write_failed")
+      }
       let current = try? readActivation(hostRoot: hostRoot)
       let previous = current?.active == session.buildId ? current?.previous : current?.active
       try writeActivation(
@@ -485,10 +526,12 @@ final class MobileWebPackageStore {
       for sessionId in matchingSessionIds {
         sessions.removeValue(forKey: sessionId)
       }
-      let root = try cacheRoot().appendingPathComponent(hostKey, isDirectory: true)
-      let isSymbolicLink = (try? fileManager.destinationOfSymbolicLink(atPath: root.path)) != nil
-      if fileManager.fileExists(atPath: root.path) || isSymbolicLink {
-        try fileManager.removeItem(at: root)
+      let cacheRoot = try cacheRoot()
+      let hostRoot = cacheRoot.appendingPathComponent(hostKey, isDirectory: true)
+      do {
+        try removeMobileWebCacheTree(hostRoot, within: cacheRoot)
+      } catch {
+        throw MobileWebStoreError("mobile_web_host_cleanup_failed")
       }
     }
   }
@@ -652,9 +695,13 @@ final class MobileWebPackageStore {
 
   private func readActivation(hostRoot: URL) throws -> MobileWebActivationRecord {
     do {
+      let root = try cacheRoot()
+      guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
+        throw MobileWebStoreError("mobile_web_activation_invalid")
+      }
       let data = try readMobileWebFile(
         hostRoot.appendingPathComponent("activation.json"),
-        within: try cacheRoot(),
+        within: root,
         byteLimit: activationJsonByteLimit,
         overflowCode: "mobile_web_activation_invalid"
       )
@@ -694,6 +741,10 @@ final class MobileWebPackageStore {
     )
     let retained = sessionBuilds.union([active, previous].compactMap { $0 })
     let generations = hostRoot.appendingPathComponent("generations", isDirectory: true)
+    let root = try cacheRoot()
+    guard isMobileWebUnlinkedPath(hostRoot, within: root) else {
+      throw MobileWebStoreError("mobile_web_generation_cleanup_failed")
+    }
     guard
       let children = try? fileManager.contentsOfDirectory(
         at: generations,
@@ -701,7 +752,11 @@ final class MobileWebPackageStore {
       )
     else { return }
     for child in children where !retained.contains(child.lastPathComponent) {
-      try fileManager.removeItem(at: child)
+      do {
+        try removeMobileWebCacheTree(child, within: root)
+      } catch {
+        throw MobileWebStoreError("mobile_web_generation_cleanup_failed")
+      }
     }
   }
 
@@ -743,7 +798,7 @@ final class MobileWebPackageStore {
     }
     for candidate in plan {
       do {
-        try fileManager.removeItem(at: candidate.root)
+        try removeMobileWebCacheTree(candidate.root, within: cacheRoot)
       } catch {
         throw MobileWebStoreError("mobile_web_cache_quota_exceeded")
       }
@@ -762,7 +817,11 @@ final class MobileWebPackageStore {
     let hostRoots = try fileManager.contentsOfDirectory(
       at: cacheRoot,
       includingPropertiesForKeys: [.isDirectoryKey]
-    ).filter { isMobileWebSha256($0.lastPathComponent) }
+    ).filter {
+      isMobileWebSha256($0.lastPathComponent)
+        && isMobileWebUnlinkedPath($0, within: cacheRoot)
+        && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
     var candidates = [MobileWebCacheGenerationCandidate]()
     for hostRoot in hostRoots {
       let generationsRoot = hostRoot.appendingPathComponent("generations", isDirectory: true)
@@ -770,7 +829,11 @@ final class MobileWebPackageStore {
         let generationRoots = try? fileManager.contentsOfDirectory(
           at: generationsRoot,
           includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey]
-        ).filter({ isMobileWebSha256($0.lastPathComponent) })
+        ).filter({
+          isMobileWebSha256($0.lastPathComponent)
+            && isMobileWebUnlinkedPath($0, within: cacheRoot)
+            && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        })
       else { continue }
       let buildIds = Set(generationRoots.map(\.lastPathComponent))
       var protected = Set(
@@ -814,6 +877,10 @@ final class MobileWebPackageStore {
     else { return }
     do {
       for hostRoot in hostRoots where isMobileWebSha256(hostRoot.lastPathComponent) {
+        if !isMobileWebUnlinkedPath(hostRoot, within: cacheRoot) {
+          try removeMobileWebCacheTree(hostRoot, within: cacheRoot)
+          continue
+        }
         let stagingRoot = hostRoot.appendingPathComponent("staging", isDirectory: true)
         if let stagedRoots = try? fileManager.contentsOfDirectory(
           at: stagingRoot,
@@ -823,7 +890,7 @@ final class MobileWebPackageStore {
           where !liveStageRoots.contains(stagedRoot.standardizedFileURL.path)
             || !isMobileWebUnlinkedPath(stagedRoot, within: cacheRoot)
           {
-            try fileManager.removeItem(at: stagedRoot)
+            try removeMobileWebCacheTree(stagedRoot, within: cacheRoot)
           }
         }
         let hostChildren = try fileManager.contentsOfDirectory(
@@ -834,7 +901,7 @@ final class MobileWebPackageStore {
         where child.lastPathComponent.hasPrefix("activation-")
           && child.pathExtension == "tmp"
         {
-          try fileManager.removeItem(at: child)
+          try removeMobileWebCacheTree(child, within: cacheRoot)
         }
       }
     } catch {
@@ -843,22 +910,7 @@ final class MobileWebPackageStore {
   }
 
   private func logicalByteLength(of root: URL) throws -> Int64 {
-    guard fileManager.fileExists(atPath: root.path) else { return 0 }
-    let rootValues = try root.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-    if rootValues.isRegularFile == true { return Int64(rootValues.fileSize ?? 0) }
-    guard
-      let enumerator = fileManager.enumerator(
-        at: root,
-        includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-        options: [.skipsPackageDescendants]
-      )
-    else { return 0 }
-    var total: Int64 = 0
-    for case let child as URL in enumerator {
-      let values = try child.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-      if values.isRegularFile == true { total += Int64(values.fileSize ?? 0) }
-    }
-    return total
+    try mobileWebCacheLogicalByteLength(root, within: cacheRoot())
   }
 
   private func validatedHostKey(_ hostIdentity: String) throws -> String {

@@ -38,6 +38,9 @@ enum MobileWebPackageStoreTests {
     try MobileWebCacheWriteBoundaryTests.run(
       root: root.appendingPathComponent("cache-write-boundary")
     )
+    try MobileWebHostRootBoundaryTests.run(
+      root: root.appendingPathComponent("host-root-boundary")
+    )
     try MobileWebPackageStoreGeneratedMutationTests.run(
       root: root.appendingPathComponent("generated-mutation")
     )

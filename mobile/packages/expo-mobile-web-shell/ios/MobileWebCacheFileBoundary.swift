@@ -51,10 +51,13 @@ func requireMobileWebRegularFile(
 func isMobileWebUnlinkedPath(_ url: URL, within cacheRoot: URL) -> Bool {
   let root = cacheRoot.standardizedFileURL
   let file = url.standardizedFileURL
+  let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+  if file.path == root.path {
+    return file.resolvingSymlinksInPath().standardizedFileURL.path == resolvedRoot.path
+  }
   let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
   guard file.path.hasPrefix(prefix) else { return false }
   let relativePath = String(file.path.dropFirst(prefix.count))
-  let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
   let expected = relativePath.split(separator: "/").reduce(resolvedRoot) { parent, component in
     parent.appendingPathComponent(String(component), isDirectory: false)
   }
