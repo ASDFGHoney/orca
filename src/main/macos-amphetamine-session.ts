@@ -17,12 +17,14 @@ const OSASCRIPT = '/usr/bin/osascript'
  * docs/reference/macos-keep-awake-engines.md.
  */
 /**
- * Check and start in ONE Apple event.
+ * Check and start from ONE osascript invocation.
  *
- * Split across two osascript invocations, a user could start a session between
- * the read and the write, and `start new session` would then destroy it. One
- * script closes that window: Amphetamine executes the whole tell block before
- * it handles anything else.
+ * NOT a transaction. `tell` is client-side routing: AppleScript sends every
+ * property read and every command as its own Apple event, and Amphetamine
+ * offers no compare-and-swap, so an interleaving write is still possible. What
+ * this buys is a much smaller window — the check and the start are consecutive
+ * Apple events rather than separate process spawns tens of milliseconds apart.
+ * The residual race is documented in docs/reference/macos-keep-awake-engines.md.
  *
  * duration 0 + interval 0 is the documented indefinite session. Omitting options
  * instead inherits the user's default duration, which silently expires.
@@ -39,13 +41,15 @@ export const AMPHETAMINE_ACQUIRE_SCRIPT = `tell application id "${AMPHETAMINE_BU
 end tell`
 
 /**
- * Verify and end in ONE Apple event.
+ * Verify and end from ONE osascript invocation.
  *
- * The shape test lives here rather than in TypeScript for the same reason: between
- * a separate read and `end session`, the user could replace the session and Orca
- * would end theirs. "foreign" means the live session is not the one Orca started
- * — timed, Trigger-driven, app/date-based, or blocking display sleep — so it is
- * left alone. Guarded by `is running` so releasing never launches the app.
+ * Same caveat as the acquire script: consecutive Apple events, not a
+ * transaction. The shape test lives here rather than in TypeScript so the last
+ * check is the Apple event immediately before `end session`, which is the
+ * smallest window this API allows. "foreign" means the live session is not the
+ * one Orca started — timed, Trigger-driven, app/date-based, or blocking display
+ * sleep — so it is left alone. Guarded by `is running` so releasing never
+ * launches the app.
  */
 export const AMPHETAMINE_RELEASE_SCRIPT = `if application id "${AMPHETAMINE_BUNDLE_ID}" is running then
 	tell application id "${AMPHETAMINE_BUNDLE_ID}"

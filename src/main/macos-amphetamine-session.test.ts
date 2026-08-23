@@ -18,8 +18,9 @@ function failure(stderr: string, code = 1): OsascriptResult {
 }
 
 describe('Amphetamine scripts', () => {
-  it('checks and starts in a single Apple event', () => {
-    // Two invocations would let a user session appear between them and be destroyed.
+  it('checks and starts from a single osascript invocation', () => {
+    // Not a transaction — AppleScript sends each read and command as its own
+    // Apple event — but it removes the process-spawn gap between check and write.
     expect(AMPHETAMINE_ACQUIRE_SCRIPT.match(/tell application id/g)).toHaveLength(1)
     expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('if session is active then')
     // The shape test must sit inside the same tell block as the start.
@@ -34,7 +35,7 @@ describe('Amphetamine scripts', () => {
     expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('interval:0')
   })
 
-  it('verifies every foreign-session shape before ending', () => {
+  it('verifies every foreign-session shape immediately before ending', () => {
     for (const guard of [
       'if not (session is active) then return "gone"',
       'if session is Trigger then return "foreign"',
@@ -43,7 +44,8 @@ describe('Amphetamine scripts', () => {
     ]) {
       expect(AMPHETAMINE_RELEASE_SCRIPT).toContain(guard)
     }
-    // Every guard must precede the destructive command.
+    // The last shape check must be the Apple event right before the destructive
+    // one; that ordering is the smallest window this API allows.
     expect(AMPHETAMINE_RELEASE_SCRIPT.indexOf('display sleep allowed')).toBeLessThan(
       AMPHETAMINE_RELEASE_SCRIPT.indexOf('end session')
     )
