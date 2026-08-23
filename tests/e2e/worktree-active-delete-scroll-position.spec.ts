@@ -34,7 +34,9 @@ async function seedActiveDeletionRows(page: Page): Promise<{
       }
       const state = store.getState()
       const repo = state.repos[0]
-      const source = repo ? state.worktreesByRepo[repo.id]?.[0] : null
+      const source = repo
+        ? state.worktreesByRepo[repo.id]?.find((worktree) => worktree.isMainWorktree)
+        : null
       if (!repo || !source || !state.settings) {
         throw new Error('Expected a seeded e2e worktree and hydrated settings')
       }
