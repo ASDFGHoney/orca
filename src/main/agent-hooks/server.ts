@@ -1125,9 +1125,11 @@ export class AgentHookServer {
   private getAgentStatusDisposition(
     paneKey: string,
     event?: {
+      source?: AgentHookSource
+      /** Raw wire value, so the gate can tell "field absent" from "field present but unknown". */
+      rawSource?: unknown
       hookEventName?: string
       isReplay?: boolean
-      source?: AgentHookSource
       hasExplicitPrompt?: boolean
       launchToken?: string
     }
@@ -1166,22 +1168,42 @@ export class AgentHookServer {
       }
       return 'accept'
     }
-    // Why: a new session boundary or explicit prompt proves a live lifecycle, while its
-    // token fences follow-up status without restoring retired orchestration authority.
-    // OpenCode-family vendors carry that boundary in an explicit-prompt MessagePart —
-    // mimo-code emits no SessionStart at all, so excluding it strands its retired panes.
+    // Why: command completion retires launch authority but leaves its shell pane reusable.
+    // A live new-turn event proves a new agent process owns the retired pane just like a
+    // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
+    // Why the classifier, not literals: only 5 of 18 sources name their boundary
+    // `UserPromptSubmit`/`SessionStart`; the rest stayed retired forever.
+    // Why four branches: `source` collapses to undefined when an older relay omits the field,
+    // when a newer host sends an unknown string, and when the wire value is malformed. Only an
+    // unknown string is valid future-provider evidence. Unreachable from the local path, which
+    // 404s an unresolvable source.
+    const isNewTurn =
+      event?.source !== undefined
+        ? isNewTurnEvent(event.source, event.hookEventName)
+        : typeof event?.rawSource === 'string' && event.rawSource.trim().length > 0
+          ? // Why fail OPEN for an unknown provider: its boundary event is unknowable here, and
+            // the costs are asymmetric — a stranded pane is invisible and permanent with no user
+            // recovery, while a spurious revive decays after AGENT_STATUS_STALE_AFTER_MS.
+            true
+          : event?.rawSource === undefined
+            ? // Why literals here: an older relay omits `source` entirely. Legacy shim only — it
+              // cannot revive a provider whose boundary event is named anything else.
+              event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart'
+            : false
+    // Why in addition to the classifier: the OpenCode family carries its mid-session boundary in
+    // an explicit-prompt MessagePart, which isNewTurnEvent cannot name — and mimo-code has no
+    // SessionStart at all, so without this its retired panes never come back.
     const freshOpenCodeFamilyPrompt =
       (event?.source === 'opencode' || event?.source === 'mimo-code') &&
       event.hookEventName === 'MessagePart' &&
       event.hasExplicitPrompt === true
-    const isRestartBoundary =
-      event?.hookEventName === 'UserPromptSubmit' ||
-      event?.hookEventName === 'SessionStart' ||
-      freshOpenCodeFamilyPrompt
-    if (isRestartBoundary && event?.isReplay !== true) {
+    // Why the token is minted here: a revive proves a live lifecycle, and fencing follow-up
+    // status on that launch token stops a stale process reclaiming the pane's row without
+    // restoring retired orchestration authority.
+    if ((isNewTurn || freshOpenCodeFamilyPrompt) && event?.isReplay !== true) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
-      const launchToken = event.launchToken?.trim()
+      const launchToken = event?.launchToken?.trim()
       if (launchToken) {
         this.restartedStatusLaunchTokenHashByPaneKey.set(
           ownerPaneKey,
@@ -2302,9 +2324,10 @@ export class AgentHookServer {
         ? envelope.compactTrigger
         : undefined
     const statusDisposition = this.getAgentStatusDisposition(paneKey, {
+      source,
+      rawSource: envelope.source,
       hookEventName,
       isReplay: envelope.isReplay === true,
-      source,
       hasExplicitPrompt: envelope.hasExplicitPrompt === true,
       launchToken: envelope.launchToken
     })
@@ -2523,9 +2546,9 @@ export class AgentHookServer {
         const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
+              source,
               hookEventName: normalized.event.hookEventName,
               isReplay: normalized.event.isReplay,
-              source: normalized.event.source,
               hasExplicitPrompt: normalized.event.hasExplicitPrompt,
               launchToken: normalized.event.launchToken
             })
