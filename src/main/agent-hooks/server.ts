@@ -169,6 +169,12 @@ export type AgentHookAuthorityAttestation = Readonly<{
   source: 'current_hook' | 'hydrated_commitment'
 }>
 
+export type AgentHookPaneAuthorityStateReceipt = Readonly<{
+  paneKey: string
+  revision: number
+  state: 'present' | 'absent'
+}>
+
 type StatusChangeListener = (statuses: AgentHookStatusChangeEntry[]) => void
 type ProviderSessionChangeListener = (providerSessions: AgentHookProviderSessionIdentity[]) => void
 type PaneStatusClearListener = (clear: AgentStatusClearIpcPayload) => void
@@ -209,6 +215,7 @@ export const CLOSED_AGENT_STATUS_TAB_IDS_MAX = 1024
 export const CLOSED_AGENT_STATUS_PANE_KEYS_MAX = 1024
 export const PANE_KEY_ALIASES_MAX = 1024
 export const RETIRED_PANE_FENCES_MAX = 1024
+export const PANE_AUTHORITY_STATE_RECEIPTS_MAX = 1024
 
 type LastStatusFile = {
   version: number
@@ -724,6 +731,8 @@ export class AgentHookServer {
   private persistedAuthorityCommitmentsByPaneKey = new Map<string, AgentHookAuthorityEvidence>()
   private revokedHydratedAuthorityCommitments = new WeakSet<AgentHookAuthorityEvidence>()
   private currentAuthorityObservations = new Map<string, AgentHookAuthorityEvidence>()
+  private paneAuthorityStateByPaneKey = new Map<string, AgentHookPaneAuthorityStateReceipt>()
+  private nextPaneAuthorityStateRevision = 1
   private legacyPaneKeyAliases = new Map<string, PaneKeyAliasEntry>()
   // Why: indexed by every key the retirement fenced, so a re-attach on any of them
   // (owner, physical, or a deleted alias) finds the same record. Bounded like the maps
@@ -897,6 +906,30 @@ export class AgentHookServer {
       return null
     }
     return Object.freeze({ paneKey, source: 'current_hook' })
+  }
+
+  capturePaneAuthorityState(paneKey: string): AgentHookPaneAuthorityStateReceipt | null {
+    if (!isValidPaneKey(paneKey)) {
+      return null
+    }
+    const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
+    return (
+      this.paneAuthorityStateByPaneKey.get(resolvedPaneKey) ??
+      this.recordPaneAuthorityState(resolvedPaneKey, 'absent')
+    )
+  }
+
+  retirePaneAuthorityIfCurrent(receipt: AgentHookPaneAuthorityStateReceipt): boolean {
+    if (!isValidPaneKey(receipt.paneKey)) {
+      return false
+    }
+    const resolvedPaneKey = this.resolvePaneKeyAlias(receipt.paneKey)
+    const current = this.paneAuthorityStateByPaneKey.get(resolvedPaneKey)
+    if (!current || current.revision !== receipt.revision || current.state !== receipt.state) {
+      return false
+    }
+    this.retirePaneAuthority(resolvedPaneKey)
+    return true
   }
 
   inferInterrupt(request: AgentInterruptInferenceRequest): boolean {
@@ -1740,6 +1773,45 @@ export class AgentHookServer {
     }
   }
 
+  private recordPaneAuthorityState(
+    paneKey: string,
+    state: AgentHookPaneAuthorityStateReceipt['state']
+  ): AgentHookPaneAuthorityStateReceipt {
+    const receipt = Object.freeze({
+      paneKey,
+      revision: this.nextPaneAuthorityStateRevision++,
+      state
+    })
+    this.paneAuthorityStateByPaneKey.delete(paneKey)
+    this.paneAuthorityStateByPaneKey.set(paneKey, receipt)
+    while (this.paneAuthorityStateByPaneKey.size > PANE_AUTHORITY_STATE_RECEIPTS_MAX) {
+      const oldestKey = this.paneAuthorityStateByPaneKey.keys().next().value
+      if (!oldestKey) {
+        break
+      }
+      this.paneAuthorityStateByPaneKey.delete(oldestKey)
+    }
+    return receipt
+  }
+
+  private markPaneAuthorityAbsent(paneKey: string): void {
+    if (isValidPaneKey(paneKey)) {
+      this.recordPaneAuthorityState(paneKey, 'absent')
+    }
+  }
+
+  private recordPaneAuthorityStateFromStoredEvidence(paneKey: string): void {
+    if (!isValidPaneKey(paneKey)) {
+      return
+    }
+    const state =
+      this.currentAuthorityObservations.has(paneKey) ||
+      this.persistedAuthorityCommitmentsByPaneKey.has(paneKey)
+        ? 'present'
+        : 'absent'
+    this.recordPaneAuthorityState(paneKey, state)
+  }
+
   private getPhysicalPaneKeyForAuthority(paneKey: string, ptyId?: string): string {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
     let fallbackPaneKey = paneKey
@@ -1832,6 +1904,7 @@ export class AgentHookServer {
       return
     }
     const previousOwnerPaneKey = this.resolvePaneKeyAlias(fromPaneKey)
+    const previousAuthorityState = this.capturePaneAuthorityState(previousOwnerPaneKey)
     const physicalPaneKey = this.getPhysicalPaneKeyForAuthority(fromPaneKey, ptyId)
     const existing = this.legacyPaneKeyAliases.get(physicalPaneKey)
     const normalizedPtyId = ptyId?.trim() || existing?.ptyId || null
@@ -1894,6 +1967,8 @@ export class AgentHookServer {
         })
       )
     }
+    this.paneAuthorityStateByPaneKey.delete(previousOwnerPaneKey)
+    this.recordPaneAuthorityState(toPaneKey, previousAuthorityState?.state ?? 'absent')
     const promptDedupe = this.promptSentDedupeByPaneKey.get(previousOwnerPaneKey)
     if (promptDedupe !== undefined) {
       this.promptSentDedupeByPaneKey.delete(previousOwnerPaneKey)
@@ -1946,6 +2021,7 @@ export class AgentHookServer {
       this.promptSentDedupeByPaneKey.delete(key)
       this.observations.forget(key)
     }
+    this.markPaneAuthorityAbsent(ownerPaneKey)
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
     }
@@ -2010,6 +2086,9 @@ export class AgentHookServer {
     if (fence) {
       this.restoreRetiredPaneFence(fence)
     }
+    if (restored || fence) {
+      this.markPaneAuthorityAbsent(ownerPaneKey)
+    }
     return restored
   }
 
@@ -2046,6 +2125,7 @@ export class AgentHookServer {
           this.activeHookTurnCompletedAtByPaneKey.delete(entry.stablePaneKey)
           this.runtimeObservedStatusPaneKeys.delete(entry.stablePaneKey)
           this.currentAuthorityObservations.delete(entry.stablePaneKey)
+          this.markPaneAuthorityAbsent(entry.stablePaneKey)
           this.promptSentDedupeByPaneKey.delete(entry.stablePaneKey)
         }
         aliasChanged = true
@@ -2641,6 +2721,7 @@ export class AgentHookServer {
     this.persistedAuthorityCommitmentsByPaneKey.clear()
     this.revokedHydratedAuthorityCommitments = new WeakSet()
     this.currentAuthorityObservations.clear()
+    this.paneAuthorityStateByPaneKey.clear()
     this.promptSentDedupeByPaneKey.clear()
     this.closedAgentStatusTabIds.clear()
     this.closedAgentStatusPaneKeys.clear()
@@ -2710,6 +2791,7 @@ export class AgentHookServer {
     for (const [paneKey, evidence] of this.currentAuthorityObservations) {
       if (evidence.connectionId === normalizedConnectionId) {
         this.currentAuthorityObservations.delete(paneKey)
+        this.recordPaneAuthorityStateFromStoredEvidence(paneKey)
       }
     }
     if (statusChanged) {
@@ -2746,6 +2828,7 @@ export class AgentHookServer {
     this.clearCodexSubagentPoll(resolvedPaneKey)
     this.runtimeObservedStatusPaneKeys.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
+    this.recordPaneAuthorityStateFromStoredEvidence(resolvedPaneKey)
     if (existing.payload.state === 'done') {
       this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
     }
@@ -2821,6 +2904,7 @@ export class AgentHookServer {
       this.activeHookTurnCompletedAtByPaneKey.delete(paneKey)
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
       this.currentAuthorityObservations.delete(paneKey)
+      this.markPaneAuthorityAbsent(paneKey)
       this.promptSentDedupeByPaneKey.delete(paneKey)
       this.restartedStatusLaunchTokenHashByPaneKey.delete(paneKey)
     }
@@ -2843,6 +2927,7 @@ export class AgentHookServer {
     clearPaneCacheState(this.state, resolvedPaneKey)
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
+    this.markPaneAuthorityAbsent(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
     this.restartedStatusLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
     let clearedAlias = false
@@ -3157,6 +3242,9 @@ export class AgentHookServer {
     this.hydratedAuthorityCommitments = Object.freeze(
       Array.from(this.persistedAuthorityCommitmentsByPaneKey.values())
     )
+    for (const commitment of this.hydratedAuthorityCommitments) {
+      this.recordPaneAuthorityState(this.resolvePaneKeyAlias(commitment.paneKey), 'present')
+    }
   }
 
   private recordCurrentAuthorityObservation(payload: AgentHookEventPayload): void {
@@ -3165,6 +3253,7 @@ export class AgentHookServer {
       this.currentAuthorityObservations.set(evidence.paneKey, evidence)
       this.persistedAuthorityCommitmentsByPaneKey.set(evidence.paneKey, evidence)
       this.hydratedLaunchTokenHashByPaneKey.set(evidence.paneKey, evidence.launchTokenHash)
+      this.recordPaneAuthorityState(evidence.paneKey, 'present')
     }
   }
 

@@ -138,6 +138,7 @@ import {
 } from './terminal-view-attribute-store'
 import { clearConfiguredWorktreeSharedDirectoriesCacheForTests } from '../git/worktree-shared-directories'
 import { setWorktreeWatcherRemoval } from '../ipc/worktree-watcher-removal'
+import { AgentHookServer } from '../agent-hooks/server'
 
 const ORIGINAL_PLATFORM = process.platform
 const ORIGINAL_PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -1414,6 +1415,17 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+function commandFinishedAuthorityDeps(retireAuthority: (paneKey: string) => void) {
+  return {
+    captureAgentHookPaneAuthorityState: (paneKey: string) =>
+      Object.freeze({ paneKey, revision: 1, state: 'absent' as const }),
+    retireAgentHookPaneAuthorityIfCurrent: (receipt: { paneKey: string }) => {
+      retireAuthority(receipt.paneKey)
+      return true
+    }
+  }
+}
+
 function createStaleRuntimeWorktreeStore(
   worktreeId: string,
   metaOverrides: Partial<WorktreeMeta> = {}
@@ -1491,6 +1503,62 @@ const store = {
     branchPrefixCustom: ''
   }),
   getProjects: () => []
+}
+
+async function createCommandFinishedRuntimeHarness(options: {
+  ptyId: string
+  confirmForegroundProcess: (ptyId: string) => Promise<string | null>
+  authorityDeps?: NonNullable<ConstructorParameters<typeof OrcaRuntimeService>[2]>
+}) {
+  const spawn = vi
+    .fn()
+    .mockResolvedValue({ id: options.ptyId, incarnationId: `${options.ptyId}-incarnation` })
+  const retireAuthority = vi.fn()
+  const runtime = new OrcaRuntimeService(store, undefined, {
+    retireAgentHookCompatibilityAuthority: retireAuthority,
+    ...commandFinishedAuthorityDeps(retireAuthority),
+    ...options.authorityDeps
+  })
+  const getForegroundProcess = vi.fn(async () => 'omp')
+  const confirmForegroundProcess = vi.fn(options.confirmForegroundProcess)
+  runtime.setPtyController({
+    spawn,
+    write: () => true,
+    kill: () => true,
+    getForegroundProcess,
+    confirmForegroundProcess
+  })
+  runtime.setNotifier({
+    worktreesChanged: vi.fn(),
+    reposChanged: vi.fn(),
+    activateWorktree: vi.fn(),
+    createTerminal: vi.fn(),
+    revealTerminalSession: vi.fn().mockResolvedValue({ tabId: `tab-${options.ptyId}` }),
+    splitTerminal: vi.fn(),
+    renameTerminal: vi.fn(),
+    focusTerminal: vi.fn(),
+    closeTerminal: vi.fn(),
+    sleepWorktree: vi.fn(),
+    terminalFitOverrideChanged: vi.fn(),
+    terminalDriverChanged: vi.fn()
+  })
+  runtime.attachWindow(1)
+  runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+  const terminal = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+    command: 'omp',
+    launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+  })
+  const spawnEnv =
+    (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
+  return {
+    runtime,
+    terminal,
+    paneKey: spawnEnv.ORCA_PANE_KEY,
+    launchToken: spawnEnv.ORCA_AGENT_LAUNCH_TOKEN,
+    retireAuthority,
+    getForegroundProcess,
+    confirmForegroundProcess
+  }
 }
 
 function createRuntimeWithSshLease(
@@ -13172,19 +13240,22 @@ describe('OrcaRuntimeService', () => {
   it('retires inherited launch authority when the agent command exits', async () => {
     const spawn = vi.fn().mockResolvedValue({ id: 'pty-authority', incarnationId: 'process-1' })
     const retireAuthority = vi.fn()
+    const getForegroundProcess = vi.fn(async () => 'omp')
+    const confirmForegroundProcess = vi.fn(async () => 'zsh')
     const runtime = new OrcaRuntimeService(store, undefined, {
       attestAgentHookCompatibilityAuthority: (candidate) => ({
         paneKey: candidate.paneKey,
         source: 'current_hook'
       }),
-      retireAgentHookCompatibilityAuthority: retireAuthority
+      retireAgentHookCompatibilityAuthority: retireAuthority,
+      ...commandFinishedAuthorityDeps(retireAuthority)
     })
     runtime.setPtyController({
       spawn,
       write: () => true,
       kill: () => true,
-      getForegroundProcess: async () => 'zsh',
-      confirmForegroundProcess: async () => 'zsh'
+      getForegroundProcess,
+      confirmForegroundProcess
     })
     runtime.setNotifier({
       worktreesChanged: vi.fn(),
@@ -13232,6 +13303,9 @@ describe('OrcaRuntimeService', () => {
     }
 
     expect(retireAuthority).toHaveBeenCalledWith(spawnEnv.ORCA_PANE_KEY)
+    expect(confirmForegroundProcess).toHaveBeenCalledOnce()
+    expect(confirmForegroundProcess).toHaveBeenCalledWith('pty-authority')
+    expect(getForegroundProcess).not.toHaveBeenCalled()
     expect(runtime.verifyOrchestrationCompatibilityCaller(evidence)).toBeNull()
     expect(
       runtime.getAgentStatusLaunchConfigForPaneKey(spawnEnv.ORCA_PANE_KEY, {
@@ -13240,22 +13314,421 @@ describe('OrcaRuntimeService', () => {
     ).toBeUndefined()
   })
 
-  it('keeps launched-agent authority when command-finished still shows OMP foreground', async () => {
-    const spawn = vi.fn().mockResolvedValue({ id: 'pty-omp-nested', incarnationId: 'process-omp' })
-    const retireAuthority = vi.fn()
+  it('conditionally retires canonical AgentHookServer authority before clearing runtime launch authority', async () => {
+    const spawn = vi
+      .fn()
+      .mockResolvedValue({ id: 'pty-server-authority', incarnationId: 'process-1' })
+    const server = new AgentHookServer()
+    const retireIfCurrent = vi.spyOn(server, 'retirePaneAuthorityIfCurrent')
     const runtime = new OrcaRuntimeService(store, undefined, {
-      attestAgentHookCompatibilityAuthority: (candidate) => ({
-        paneKey: candidate.paneKey,
-        source: 'current_hook'
-      }),
-      retireAgentHookCompatibilityAuthority: retireAuthority
+      retireAgentHookCompatibilityAuthority: (paneKey) => server.retirePaneAuthority(paneKey),
+      captureAgentHookPaneAuthorityState: (paneKey) => server.capturePaneAuthorityState(paneKey),
+      retireAgentHookPaneAuthorityIfCurrent: (receipt) =>
+        server.retirePaneAuthorityIfCurrent(receipt)
     })
     runtime.setPtyController({
       spawn,
       write: () => true,
       kill: () => true,
       getForegroundProcess: async () => 'omp',
-      confirmForegroundProcess: async () => 'omp'
+      confirmForegroundProcess: async () => 'zsh'
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-server-authority' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'omp',
+      launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+    })
+    const spawnEnv =
+      (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
+    const sourcePaneKey = spawnEnv.ORCA_PANE_KEY
+    const targetPaneKey = makePaneKey('tab-server-target', '99999999-9999-4999-8999-999999999999')
+    server.transferPaneAuthority(sourcePaneKey, targetPaneKey, 'pty-server-authority')
+
+    vi.useFakeTimers()
+    try {
+      runtime.onPtyData('pty-server-authority', '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(retireIfCurrent).toHaveBeenCalledWith(
+      expect.objectContaining({ paneKey: targetPaneKey, state: 'absent' })
+    )
+    expect(
+      runtime.getAgentStatusLaunchConfigForPaneKey(sourcePaneKey, {
+        launchToken: spawnEnv.ORCA_AGENT_LAUNCH_TOKEN
+      })
+    ).toBeUndefined()
+  })
+
+  it.each(['delay', 'confirmation'] as const)(
+    'preserves launch authority when the first OMP hook lands during command-finished %s',
+    async (phase) => {
+      const server = new AgentHookServer()
+      const foreground = deferred<string | null>()
+      const ptyId = `pty-first-hook-${phase}`
+      const harness = await createCommandFinishedRuntimeHarness({
+        ptyId,
+        confirmForegroundProcess: () => foreground.promise,
+        authorityDeps: {
+          captureAgentHookPaneAuthorityState: (paneKey) =>
+            server.capturePaneAuthorityState(paneKey),
+          retireAgentHookPaneAuthorityIfCurrent: (receipt) =>
+            server.retirePaneAuthorityIfCurrent(receipt)
+        }
+      })
+
+      vi.useFakeTimers()
+      try {
+        harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+        if (phase === 'confirmation') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).toHaveBeenCalledOnce()
+        }
+        server.ingestRemote(
+          {
+            paneKey: harness.paneKey,
+            source: 'pi',
+            launchToken: harness.launchToken,
+            hookEventName: 'before_agent_start',
+            payload: { state: 'working', prompt: 'first turn', agentType: 'omp' }
+          },
+          'ssh-1'
+        )
+        if (phase === 'delay') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).not.toHaveBeenCalled()
+        } else {
+          foreground.resolve('zsh')
+          await Promise.resolve()
+          await Promise.resolve()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+
+      expect(
+        harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+          launchToken: harness.launchToken
+        })
+      ).toBeDefined()
+    }
+  )
+
+  it.each(['delay', 'confirmation'] as const)(
+    'ignores command-finished when the provider generation resets during %s',
+    async (phase) => {
+      const foreground = deferred<string | null>()
+      const ptyId = `pty-generation-reset-${phase}`
+      const harness = await createCommandFinishedRuntimeHarness({
+        ptyId,
+        confirmForegroundProcess: () => foreground.promise
+      })
+
+      vi.useFakeTimers()
+      try {
+        harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+        if (phase === 'confirmation') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).toHaveBeenCalledOnce()
+        }
+        harness.runtime.synchronizePtyOutputSequenceFromProvider(
+          ptyId,
+          { value: 0, generation: 'reset' },
+          0
+        )
+        if (phase === 'delay') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).not.toHaveBeenCalled()
+        } else {
+          foreground.resolve('zsh')
+          await Promise.resolve()
+          await Promise.resolve()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+
+      expect(
+        harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+          launchToken: harness.launchToken
+        })
+      ).toBeDefined()
+    }
+  )
+
+  it.each(['delay', 'confirmation'] as const)(
+    'preserves replacement runtime authority installed during command-finished %s',
+    async (phase) => {
+      const foreground = deferred<string | null>()
+      const ptyId = `pty-runtime-replacement-${phase}`
+      const harness = await createCommandFinishedRuntimeHarness({
+        ptyId,
+        confirmForegroundProcess: () => foreground.promise
+      })
+      const pty = (
+        harness.runtime as unknown as {
+          ptysById: Map<
+            string,
+            {
+              launchToken: string | null
+              launchIncarnationId: string | null
+              incarnationId: string | null
+            }
+          >
+        }
+      ).ptysById.get(ptyId)!
+
+      vi.useFakeTimers()
+      try {
+        harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+        if (phase === 'confirmation') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).toHaveBeenCalledOnce()
+        }
+        pty.launchToken = 'replacement-token'
+        pty.launchIncarnationId = pty.incarnationId
+        if (phase === 'delay') {
+          await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+          expect(harness.confirmForegroundProcess).not.toHaveBeenCalled()
+        } else {
+          foreground.resolve('zsh')
+          await Promise.resolve()
+          await Promise.resolve()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+
+      expect(
+        harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+          launchToken: 'replacement-token'
+        })
+      ).toBeDefined()
+    }
+  )
+
+  it('requires exact restored-authority receipt identity after foreground confirmation', async () => {
+    const foreground = deferred<string | null>()
+    const ptyId = 'pty-restored-receipt-replacement'
+    const harness = await createCommandFinishedRuntimeHarness({
+      ptyId,
+      confirmForegroundProcess: () => foreground.promise
+    })
+    const receipts = (
+      harness.runtime as unknown as {
+        restoredOrchestrationAuthorityByPtyId: Map<string, Record<string, unknown>>
+      }
+    ).restoredOrchestrationAuthorityByPtyId
+    const receipt = {
+      ptyId,
+      worktreeId: TEST_WORKTREE_ID,
+      terminalHandle: harness.terminal.handle,
+      paneKey: harness.paneKey,
+      processIncarnation: `${ptyId}:${ptyId}-incarnation`,
+      hostScope: { kind: 'local', hostId: 'local' }
+    }
+    receipts.set(ptyId, receipt)
+
+    vi.useFakeTimers()
+    try {
+      harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+      receipts.set(ptyId, { ...receipt })
+      foreground.resolve('zsh')
+      await Promise.resolve()
+      await Promise.resolve()
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(
+      harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+        launchToken: harness.launchToken
+      })
+    ).toBeDefined()
+  })
+
+  it('does not let a stale same-id attempt retire replacement launch authority', async () => {
+    const firstForeground = deferred<string | null>()
+    const secondForeground = deferred<string | null>()
+    const ptyId = 'pty-command-finished-aba'
+    let confirmationIndex = 0
+    const harness = await createCommandFinishedRuntimeHarness({
+      ptyId,
+      confirmForegroundProcess: () =>
+        confirmationIndex++ === 0 ? firstForeground.promise : secondForeground.promise
+    })
+    const pty = (
+      harness.runtime as unknown as {
+        ptysById: Map<string, { incarnationId: string | null }>
+      }
+    ).ptysById.get(ptyId)!
+
+    vi.useFakeTimers()
+    try {
+      harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+      harness.runtime.onPtyExit(ptyId, 0, pty.incarnationId ?? undefined)
+      const replacement = await harness.runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        command: 'omp',
+        launchConfig: { agentCommand: 'omp', agentArgs: '', agentEnv: {} }
+      })
+      const replacementAuthority = harness.runtime.getOrchestrationDispatchAuthority(
+        replacement.handle
+      )!
+      harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 200)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+
+      firstForeground.resolve('zsh')
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(
+        harness.runtime.getOrchestrationDispatchAuthority(replacement.handle)?.launchTokenHash
+      ).toBe(replacementAuthority.launchTokenHash)
+
+      secondForeground.resolve('omp')
+      await Promise.resolve()
+      await Promise.resolve()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { kind: 'ordinary exit', exitCode: 0, ssh: false, expectedAuthority: false },
+    { kind: 'unconfirmed SSH loss', exitCode: -1, ssh: true, expectedAuthority: true }
+  ])(
+    'fences a late foreground result after $kind',
+    async ({ exitCode, ssh, expectedAuthority }) => {
+      const foreground = deferred<string | null>()
+      const ptyId = ssh ? 'ssh:ssh-1@@pty-command-loss' : 'pty-command-exit'
+      const harness = await createCommandFinishedRuntimeHarness({
+        ptyId,
+        confirmForegroundProcess: () => foreground.promise
+      })
+      const pty = (
+        harness.runtime as unknown as {
+          ptysById: Map<string, { connectionId: string | null; incarnationId: string | null }>
+        }
+      ).ptysById.get(ptyId)!
+      if (ssh) {
+        pty.connectionId = 'ssh-1'
+      }
+
+      vi.useFakeTimers()
+      try {
+        harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+        await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+        harness.runtime.onPtyExit(ptyId, exitCode, pty.incarnationId ?? undefined)
+        foreground.resolve('zsh')
+        await Promise.resolve()
+        await Promise.resolve()
+      } finally {
+        vi.useRealTimers()
+      }
+
+      const launchConfig = harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+        launchToken: harness.launchToken
+      })
+      expect(Boolean(launchConfig)).toBe(expectedAuthority)
+    }
+  )
+
+  it('preserves authority when fresh foreground confirmation rejects', async () => {
+    const ptyId = 'pty-confirm-rejects'
+    const harness = await createCommandFinishedRuntimeHarness({
+      ptyId,
+      confirmForegroundProcess: async () => {
+        throw new Error('provider unavailable')
+      }
+    })
+
+    vi.useFakeTimers()
+    try {
+      harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(harness.confirmForegroundProcess).toHaveBeenCalledOnce()
+    expect(harness.getForegroundProcess).not.toHaveBeenCalled()
+    expect(
+      harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+        launchToken: harness.launchToken
+      })
+    ).toBeDefined()
+  })
+
+  it('sinks conditional-retirement failures from raw and daemon command-finished callers', async () => {
+    const retireIfCurrent = vi.fn(() => {
+      throw new Error('retirement failed')
+    })
+    const ptyId = 'pty-retirement-rejection'
+    const harness = await createCommandFinishedRuntimeHarness({
+      ptyId,
+      confirmForegroundProcess: async () => 'zsh',
+      authorityDeps: { retireAgentHookPaneAuthorityIfCurrent: retireIfCurrent }
+    })
+
+    vi.useFakeTimers()
+    try {
+      harness.runtime.onPtyData(ptyId, '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+      harness.runtime.emitDaemonPtyTransientFact(ptyId, {
+        kind: 'command-finished',
+        exitCode: 0
+      })
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(retireIfCurrent).toHaveBeenCalledTimes(2)
+    expect(
+      harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+        launchToken: harness.launchToken
+      })
+    ).toBeDefined()
+  })
+
+  it('keeps launched-agent authority when command-finished still shows OMP foreground', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-omp-nested', incarnationId: 'process-omp' })
+    const retireAuthority = vi.fn()
+    const getForegroundProcess = vi.fn(async () => 'zsh')
+    const confirmForegroundProcess = vi.fn(async () => 'omp')
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      attestAgentHookCompatibilityAuthority: (candidate) => ({
+        paneKey: candidate.paneKey,
+        source: 'current_hook'
+      }),
+      retireAgentHookCompatibilityAuthority: retireAuthority,
+      ...commandFinishedAuthorityDeps(retireAuthority)
+    })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess,
+      confirmForegroundProcess
     })
     runtime.setNotifier({
       worktreesChanged: vi.fn(),
@@ -13288,6 +13761,9 @@ describe('OrcaRuntimeService', () => {
     }
 
     expect(retireAuthority).not.toHaveBeenCalled()
+    expect(confirmForegroundProcess).toHaveBeenCalledOnce()
+    expect(confirmForegroundProcess).toHaveBeenCalledWith('pty-omp-nested')
+    expect(getForegroundProcess).not.toHaveBeenCalled()
   })
 
   it('ignores a stale command-finished settle after a later nested 133;D', async () => {
@@ -13300,7 +13776,8 @@ describe('OrcaRuntimeService', () => {
         paneKey: candidate.paneKey,
         source: 'current_hook'
       }),
-      retireAgentHookCompatibilityAuthority: retireAuthority
+      retireAgentHookCompatibilityAuthority: retireAuthority,
+      ...commandFinishedAuthorityDeps(retireAuthority)
     })
     runtime.setPtyController({
       spawn,
@@ -13351,19 +13828,22 @@ describe('OrcaRuntimeService', () => {
   it('does not treat an unverifiable command-finished foreground read as agent exit', async () => {
     const spawn = vi.fn().mockResolvedValue({ id: 'pty-unverified', incarnationId: 'process-u' })
     const retireAuthority = vi.fn()
+    const getForegroundProcess = vi.fn(async () => 'zsh')
+    const confirmForegroundProcess = vi.fn(async () => null)
     const runtime = new OrcaRuntimeService(store, undefined, {
       attestAgentHookCompatibilityAuthority: (candidate) => ({
         paneKey: candidate.paneKey,
         source: 'current_hook'
       }),
-      retireAgentHookCompatibilityAuthority: retireAuthority
+      retireAgentHookCompatibilityAuthority: retireAuthority,
+      ...commandFinishedAuthorityDeps(retireAuthority)
     })
     runtime.setPtyController({
       spawn,
       write: () => true,
       kill: () => true,
-      getForegroundProcess: async () => null,
-      confirmForegroundProcess: async () => null
+      getForegroundProcess,
+      confirmForegroundProcess
     })
     runtime.setNotifier({
       worktreesChanged: vi.fn(),
@@ -13396,12 +13876,16 @@ describe('OrcaRuntimeService', () => {
     }
 
     expect(retireAuthority).not.toHaveBeenCalled()
+    expect(confirmForegroundProcess).toHaveBeenCalledOnce()
+    expect(confirmForegroundProcess).toHaveBeenCalledWith('pty-unverified')
+    expect(getForegroundProcess).not.toHaveBeenCalled()
   })
 
   it('retires only receipted restored PTY authority on command completion and exit', async () => {
     const retireAuthority = vi.fn()
     const runtime = new OrcaRuntimeService(store, undefined, {
-      retireAgentHookCompatibilityAuthority: retireAuthority
+      retireAgentHookCompatibilityAuthority: retireAuthority,
+      ...commandFinishedAuthorityDeps(retireAuthority)
     })
     runtime.setPtyController({
       spawn: vi.fn(),
@@ -13561,19 +14045,19 @@ describe('OrcaRuntimeService', () => {
       issuePtyHandle: (pty: unknown) => string
       dropDisconnectedPtyRecord: (ptyId: string) => void
       syntheticTerminalHandles: Set<string>
-      launchAuthorityCommandFinishedGenerationByPtyId: Map<string, number>
+      launchAuthorityCommandFinishedAttemptByPtyId: Map<string, object>
     }
     const pty = internals.recordPtyWorktree('pty-pruned', TEST_WORKTREE_ID, {
       connected: false
     })
     const handle = internals.issuePtyHandle(pty)
-    internals.launchAuthorityCommandFinishedGenerationByPtyId.set('pty-pruned', 3)
+    internals.launchAuthorityCommandFinishedAttemptByPtyId.set('pty-pruned', {})
     expect(internals.syntheticTerminalHandles.has(handle)).toBe(true)
 
     internals.dropDisconnectedPtyRecord('pty-pruned')
 
     expect(internals.syntheticTerminalHandles.has(handle)).toBe(false)
-    expect(internals.launchAuthorityCommandFinishedGenerationByPtyId.has('pty-pruned')).toBe(false)
+    expect(internals.launchAuthorityCommandFinishedAttemptByPtyId.has('pty-pruned')).toBe(false)
   })
 
   it('drops an out-of-order aggregate inventory after a newer SSH inventory', async () => {
@@ -13800,7 +14284,8 @@ describe('OrcaRuntimeService', () => {
           connectionId === targetId
             ? { paneKey: candidate, source: 'hydrated_commitment' }
             : null,
-        retireAgentHookCompatibilityAuthority: retireAuthority
+        retireAgentHookCompatibilityAuthority: retireAuthority,
+        ...commandFinishedAuthorityDeps(retireAuthority)
       }
     )
     runtime.setOrchestrationDb({

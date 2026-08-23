@@ -60,7 +60,10 @@ import {
   type AgentStatusEntry
 } from '../../shared/agent-status-types'
 import { indexAgentStatusRowsByPaneKey } from '../agent-hooks/agent-status-pane-index'
-import type { AgentHookAuthorityAttestation } from '../agent-hooks/server'
+import type {
+  AgentHookAuthorityAttestation,
+  AgentHookPaneAuthorityStateReceipt
+} from '../agent-hooks/server'
 import type {
   AgentSessionClaimedSpawnResult,
   AgentSessionExecutionClaim,
@@ -2318,6 +2321,16 @@ type RestoredOrchestrationAuthorityReceipt = Readonly<{
   hostScope: OrchestrationCompatibilityTerminalAuthority['hostScope']
 }>
 
+type CommandFinishedLaunchAuthorityAttempt = Readonly<{
+  pty: RuntimePtyWorktreeRecord
+  lifecycleGeneration: number
+  launchToken: string | null
+  launchIncarnationId: PtyIncarnationId | null
+  incarnationId: PtyIncarnationId | null
+  restoredReceipt: RestoredOrchestrationAuthorityReceipt | null
+  hookAuthorityState: AgentHookPaneAuthorityStateReceipt
+}>
+
 type OrchestrationCompatibilitySshAttachmentAuthority = Extract<
   OrchestrationCompatibilityHostStamp,
   { kind: 'ssh' }
@@ -3636,6 +3649,12 @@ export class OrcaRuntimeService {
       }) => AgentHookAuthorityAttestation | null)
     | null
   private readonly retireAgentHookCompatibilityAuthorityFn: ((paneKey: string) => void) | null
+  private readonly captureAgentHookPaneAuthorityStateFn:
+    | ((paneKey: string) => AgentHookPaneAuthorityStateReceipt | null)
+    | null
+  private readonly retireAgentHookPaneAuthorityIfCurrentFn:
+    | ((receipt: AgentHookPaneAuthorityStateReceipt) => boolean)
+    | null
   private readonly canRecoverPersistentLocalPtysFn: () => boolean
   private readonly buildAgentHookPtyEnv: (() => Record<string, string>) | null
   private readonly getDesktopWindowStatusFn: () => RuntimeDesktopWindowStatus
@@ -3665,7 +3684,10 @@ export class OrcaRuntimeService {
     string,
     RestoredOrchestrationAuthorityReceipt
   >()
-  private launchAuthorityCommandFinishedGenerationByPtyId = new Map<string, number>()
+  private launchAuthorityCommandFinishedAttemptByPtyId = new Map<
+    string,
+    CommandFinishedLaunchAuthorityAttempt | object
+  >()
   private ptyControllerInventorySequence = 0
   private ptyControllerAggregateInventoryGeneration = 0
   private ptyControllerInventoryGenerationByProvider = new Map<string, number>()
@@ -3718,6 +3740,12 @@ export class OrcaRuntimeService {
         terminalProvenance: 'current_runtime' | 'restored'
       }) => AgentHookAuthorityAttestation | null
       retireAgentHookCompatibilityAuthority?: (paneKey: string) => void
+      captureAgentHookPaneAuthorityState?: (
+        paneKey: string
+      ) => AgentHookPaneAuthorityStateReceipt | null
+      retireAgentHookPaneAuthorityIfCurrent?: (
+        receipt: AgentHookPaneAuthorityStateReceipt
+      ) => boolean
       canRecoverPersistentLocalPtys?: () => boolean
       // Why: codex-home paths for the Agent Session History scan must be sourced
       // here, not via the window-only registerCoreHandlers path — that path never
@@ -3760,6 +3788,9 @@ export class OrcaRuntimeService {
       deps?.attestAgentHookCompatibilityAuthority ?? null
     this.retireAgentHookCompatibilityAuthorityFn =
       deps?.retireAgentHookCompatibilityAuthority ?? null
+    this.captureAgentHookPaneAuthorityStateFn = deps?.captureAgentHookPaneAuthorityState ?? null
+    this.retireAgentHookPaneAuthorityIfCurrentFn =
+      deps?.retireAgentHookPaneAuthorityIfCurrent ?? null
     this.canRecoverPersistentLocalPtysFn = deps?.canRecoverPersistentLocalPtys ?? (() => true)
     // Why: configure the shared AiVault scan cache from a serve-mode-reachable
     // seam so the aiVault.listSessions RPC includes managed-Codex + WSL sessions
@@ -11464,7 +11495,7 @@ export class OrcaRuntimeService {
         this.recordTerminalSideEffectFact(ptyId, { kind: 'bell' })
         return
       case 'command-finished':
-        void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId)
+        void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId).catch(() => {})
         this.recordTerminalSideEffectFact(ptyId, {
           kind: 'command-finished',
           exitCode: fact.exitCode
@@ -11753,7 +11784,7 @@ export class OrcaRuntimeService {
           this.confirmPtyAgentExit(ptyId)
         },
         onCommandFinished: (exitCode: number | null) => {
-          void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId)
+          void this.maybeRetireLaunchAuthorityAfterCommandFinished(ptyId).catch(() => {})
           this.recordTerminalSideEffectFact(ptyId, { kind: 'command-finished', exitCode })
         },
         onBell: () => {
@@ -13967,8 +13998,11 @@ export class OrcaRuntimeService {
     }
   }
 
-  private retirePtyAgentLaunchAuthority(ptyId: string): void {
-    this.launchAuthorityCommandFinishedGenerationByPtyId.delete(ptyId)
+  private retirePtyAgentLaunchAuthority(
+    ptyId: string,
+    options?: { hookAuthorityAlreadyRetired?: boolean }
+  ): void {
+    this.launchAuthorityCommandFinishedAttemptByPtyId.delete(ptyId)
     const pty = this.ptysById.get(ptyId)
     if (!pty) {
       return
@@ -13992,44 +14026,98 @@ export class OrcaRuntimeService {
         paneKeys.add(makePaneKey(leaf.tabId, leaf.leafId))
       }
     }
-    for (const paneKey of paneKeys) {
-      this.retireAgentHookCompatibilityAuthorityFn?.(paneKey)
+    if (!options?.hookAuthorityAlreadyRetired) {
+      for (const paneKey of paneKeys) {
+        this.retireAgentHookCompatibilityAuthorityFn?.(paneKey)
+      }
     }
+  }
+
+  private isCommandFinishedLaunchAuthorityAttemptCurrent(
+    ptyId: string,
+    attempt: CommandFinishedLaunchAuthorityAttempt
+  ): boolean {
+    const pty = this.ptysById.get(ptyId)
+    return (
+      this.launchAuthorityCommandFinishedAttemptByPtyId.get(ptyId) === attempt &&
+      pty === attempt.pty &&
+      this.getPtyLifecycleGeneration(ptyId) === attempt.lifecycleGeneration &&
+      pty.launchToken === attempt.launchToken &&
+      pty.launchIncarnationId === attempt.launchIncarnationId &&
+      pty.incarnationId === attempt.incarnationId &&
+      (this.restoredOrchestrationAuthorityByPtyId.get(ptyId) ?? null) === attempt.restoredReceipt
+    )
+  }
+
+  private isAgentHookPaneAuthorityStateCurrent(
+    receipt: AgentHookPaneAuthorityStateReceipt
+  ): boolean {
+    const current = this.captureAgentHookPaneAuthorityStateFn?.(receipt.paneKey)
+    return (
+      current?.paneKey === receipt.paneKey &&
+      current.revision === receipt.revision &&
+      current.state === receipt.state
+    )
   }
 
   // Why: full-screen agents leak nested-shell OSC 133;D onto the main PTY.
   // Retire launched-agent hook authority only after the execution host shows
   // a shell in the foreground; a failed/null read is unverifiable, not exited.
   private async maybeRetireLaunchAuthorityAfterCommandFinished(ptyId: string): Promise<void> {
-    const generation = (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) ?? 0) + 1
-    this.launchAuthorityCommandFinishedGenerationByPtyId.set(ptyId, generation)
+    const attemptToken = Object.freeze({})
+    this.launchAuthorityCommandFinishedAttemptByPtyId.set(ptyId, attemptToken)
+    const pty = this.ptysById.get(ptyId)
+    const restoredReceipt = this.restoredOrchestrationAuthorityByPtyId.get(ptyId) ?? null
+    if (!pty || (!pty.launchToken && !restoredReceipt)) {
+      return
+    }
+    const paneKey =
+      (pty.paneKey && parsePaneKey(pty.paneKey) ? pty.paneKey : null) ?? restoredReceipt?.paneKey
+    const hookAuthorityState = paneKey ? this.captureAgentHookPaneAuthorityStateFn?.(paneKey) : null
+    if (!hookAuthorityState) {
+      return
+    }
+    const attempt: CommandFinishedLaunchAuthorityAttempt = Object.freeze({
+      pty,
+      lifecycleGeneration: this.getPtyLifecycleGeneration(ptyId),
+      launchToken: pty.launchToken,
+      launchIncarnationId: pty.launchIncarnationId,
+      incarnationId: pty.incarnationId,
+      restoredReceipt,
+      hookAuthorityState
+    })
+    this.launchAuthorityCommandFinishedAttemptByPtyId.set(ptyId, attempt)
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
       if (typeof timer.unref === 'function') {
         timer.unref()
       }
     })
-    if (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) !== generation) {
-      return
-    }
-    if (!this.ptysById.get(ptyId)) {
+    if (
+      !this.isCommandFinishedLaunchAuthorityAttemptCurrent(ptyId, attempt) ||
+      !this.isAgentHookPaneAuthorityStateCurrent(attempt.hookAuthorityState)
+    ) {
       return
     }
     let foregroundProcess: string | null = null
     try {
-      foregroundProcess =
-        (await (this.ptyController?.confirmForegroundProcess?.(ptyId) ??
-          this.ptyController?.getForegroundProcess(ptyId))) ?? null
+      foregroundProcess = (await this.ptyController?.confirmForegroundProcess?.(ptyId)) ?? null
     } catch {
       return
     }
-    if (this.launchAuthorityCommandFinishedGenerationByPtyId.get(ptyId) !== generation) {
+    if (!this.isCommandFinishedLaunchAuthorityAttemptCurrent(ptyId, attempt)) {
       return
     }
     if (!shouldRetireLaunchAuthorityOnCommandFinished(foregroundProcess)) {
       return
     }
-    this.retirePtyAgentLaunchAuthority(ptyId)
+    if (!this.retireAgentHookPaneAuthorityIfCurrentFn?.(attempt.hookAuthorityState)) {
+      return
+    }
+    if (!this.isCommandFinishedLaunchAuthorityAttemptCurrent(ptyId, attempt)) {
+      return
+    }
+    this.retirePtyAgentLaunchAuthority(ptyId, { hookAuthorityAlreadyRetired: true })
   }
 
   async resolveTerminalCwd(handle: string): Promise<string | null> {
@@ -15274,9 +15362,9 @@ export class OrcaRuntimeService {
       }
       this.restoredOrchestrationAuthorityByPtyId.delete(ptyId)
       // Why: launch authority is deliberately preserved here (unverifiable, not
-      // exited), but the settle-generation counter is bookkeeping for an
+      // exited), but the settle attempt is bookkeeping for an
       // in-flight command-finished check that can no longer land.
-      this.launchAuthorityCommandFinishedGenerationByPtyId.delete(ptyId)
+      this.launchAuthorityCommandFinishedAttemptByPtyId.delete(ptyId)
     } else {
       this.retirePtyAgentLaunchAuthority(ptyId)
     }
@@ -32946,7 +33034,7 @@ export class OrcaRuntimeService {
   private dropDisconnectedPtyRecord(ptyId: string): void {
     // Why: pruning can remove a PTY without the normal exit callback.
     this.advancePtyLifecycleGeneration(ptyId)
-    this.launchAuthorityCommandFinishedGenerationByPtyId.delete(ptyId)
+    this.launchAuthorityCommandFinishedAttemptByPtyId.delete(ptyId)
     this.pairedRendererSessionOwnedPtyIds.delete(ptyId)
     this.ptysById.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)

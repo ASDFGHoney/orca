@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makePaneKey } from '../../shared/stable-pane-id'
-import { AgentHookServer, PANE_KEY_ALIASES_MAX } from './server'
+import { AgentHookServer, PANE_AUTHORITY_STATE_RECEIPTS_MAX, PANE_KEY_ALIASES_MAX } from './server'
 
 const SOURCE = makePaneKey('tab-source', '11111111-1111-4111-8111-111111111111')
 const TARGET = makePaneKey('tab-target', '22222222-2222-4222-8222-222222222222')
@@ -8,6 +8,87 @@ const FINAL = makePaneKey('tab-final', '33333333-3333-4333-8333-333333333333')
 const SIBLING = makePaneKey('tab-target', '44444444-4444-4444-8444-444444444444')
 
 describe('AgentHookServer pane authority', () => {
+  it('versions every present and absent authority transition', () => {
+    const server = new AgentHookServer()
+    const initialAbsence = server.capturePaneAuthorityState(SOURCE)!
+
+    server.ingestRemote(
+      {
+        paneKey: SOURCE,
+        tabId: 'tab-source',
+        source: 'pi',
+        launchToken: 'launch-token',
+        hookEventName: 'before_agent_start',
+        payload: { state: 'working', agentType: 'pi' }
+      },
+      'ssh-1'
+    )
+    const present = server.capturePaneAuthorityState(SOURCE)!
+    server.clearPaneState(SOURCE)
+    const clearedAbsence = server.capturePaneAuthorityState(SOURCE)!
+    server.retirePaneAuthority(SOURCE)
+    const retiredAbsence = server.capturePaneAuthorityState(SOURCE)!
+    server.restorePaneAuthority(SOURCE)
+    const restoredAbsence = server.capturePaneAuthorityState(SOURCE)!
+
+    expect(initialAbsence.state).toBe('absent')
+    expect(present.state).toBe('present')
+    expect(clearedAbsence.state).toBe('absent')
+    expect(retiredAbsence.state).toBe('absent')
+    expect(restoredAbsence.state).toBe('absent')
+    expect(
+      new Set([
+        initialAbsence.revision,
+        present.revision,
+        clearedAbsence.revision,
+        retiredAbsence.revision,
+        restoredAbsence.revision
+      ])
+    ).toHaveLength(5)
+    expect(server.retirePaneAuthorityIfCurrent(initialAbsence)).toBe(false)
+    expect(server.retirePaneAuthorityIfCurrent(restoredAbsence)).toBe(true)
+  })
+
+  it('invalidates a receipt when pane authority moves through an alias', () => {
+    const server = new AgentHookServer()
+    server.ingestRemote(
+      {
+        paneKey: SOURCE,
+        tabId: 'tab-source',
+        source: 'pi',
+        launchToken: 'launch-token',
+        hookEventName: 'before_agent_start',
+        payload: { state: 'working', agentType: 'pi' }
+      },
+      'ssh-1'
+    )
+    const beforeMove = server.capturePaneAuthorityState(SOURCE)!
+
+    server.transferPaneAuthority(SOURCE, TARGET, 'pty-1')
+
+    const afterMove = server.capturePaneAuthorityState(SOURCE)!
+    expect(afterMove).toMatchObject({ paneKey: TARGET, state: 'present' })
+    expect(afterMove.revision).not.toBe(beforeMove.revision)
+    expect(server.retirePaneAuthorityIfCurrent(beforeMove)).toBe(false)
+    expect(server.retirePaneAuthorityIfCurrent(afterMove)).toBe(true)
+  })
+
+  it('bounds absence receipts without allowing an evicted receipt to match again', () => {
+    const server = new AgentHookServer()
+    const first = server.capturePaneAuthorityState(SOURCE)!
+    for (let index = 0; index < PANE_AUTHORITY_STATE_RECEIPTS_MAX; index += 1) {
+      const suffix = index.toString(16).padStart(12, '0')
+      server.capturePaneAuthorityState(
+        makePaneKey(`authority-${index}`, `50000000-0000-4000-8000-${suffix}`)
+      )
+    }
+
+    const replacement = server.capturePaneAuthorityState(SOURCE)!
+
+    expect(replacement.revision).not.toBe(first.revision)
+    expect(server.retirePaneAuthorityIfCurrent(first)).toBe(false)
+  })
+
   it('keeps physical hooks routed after the source tab closes and suppresses them after owner retire', () => {
     const server = new AgentHookServer()
     server.ingestTerminalStatus({

@@ -260,6 +260,11 @@ export class SshPtyProvider implements IPtyProvider {
     return result as string | null
   }
 
+  async confirmForegroundProcess(id: string): Promise<string | null> {
+    const result = await this.mux.request('pty.getForegroundProcess', { id: this.toRelayPtyId(id) })
+    return result as string | null
+  }
+
   async inspectProcess(id: string): Promise<PtyProcessInspection> {
     return (await this.mux.request('pty.inspectProcess', {
       id: this.toRelayPtyId(id)

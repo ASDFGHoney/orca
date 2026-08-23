@@ -34,6 +34,7 @@ describe('AgentHookServer authority evidence', () => {
 
     await server.start()
     const commitments = server.getHydratedAuthorityCommitments()
+    const hydratedState = server.capturePaneAuthorityState(PANE_KEY)!
 
     expect(commitments).toEqual([
       {
@@ -48,6 +49,7 @@ describe('AgentHookServer authority evidence', () => {
     expect(Object.isFrozen(commitments)).toBe(true)
     expect(Object.isFrozen(commitments[0])).toBe(true)
     expect(server.getCurrentAuthorityObservations()).toEqual([])
+    expect(hydratedState.state).toBe('present')
     expect(
       server.attestCompatibilityAuthority({
         paneKey: PANE_KEY,
@@ -81,6 +83,9 @@ describe('AgentHookServer authority evidence', () => {
     expect(JSON.stringify(server.getCurrentAuthorityObservations())).not.toContain(
       'launch-after-restart'
     )
+    const currentState = server.capturePaneAuthorityState(PANE_KEY)!
+    expect(currentState.state).toBe('present')
+    expect(currentState.revision).not.toBe(hydratedState.revision)
     expect(
       server.attestCompatibilityAuthority({
         paneKey: PANE_KEY,
@@ -158,6 +163,9 @@ describe('AgentHookServer authority evidence', () => {
 
     expect(server.getHydratedAuthorityCommitments()).toBe(commitments)
     expect(server.getCurrentAuthorityObservations()).toEqual([])
+    const disconnectedState = server.capturePaneAuthorityState(PANE_KEY)!
+    expect(disconnectedState.state).toBe('present')
+    expect(disconnectedState.revision).not.toBe(currentState.revision)
     expect(
       server.attestCompatibilityAuthority({
         paneKey: PANE_KEY,
@@ -168,6 +176,10 @@ describe('AgentHookServer authority evidence', () => {
     ).toEqual({ paneKey: PANE_KEY, source: 'hydrated_commitment' })
 
     server.clearPaneState(PANE_KEY)
+
+    const clearedState = server.capturePaneAuthorityState(PANE_KEY)!
+    expect(clearedState.state).toBe('absent')
+    expect(clearedState.revision).not.toBe(disconnectedState.revision)
 
     expect(server.getHydratedAuthorityCommitments()).toBe(commitments)
     expect(

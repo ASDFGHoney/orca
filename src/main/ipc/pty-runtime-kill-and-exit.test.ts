@@ -77,6 +77,28 @@ describe('registerPtyHandlers', () => {
     expect(confirmForegroundProcess).toHaveBeenCalledWith('remote-pty')
     deletePtyOwnership('remote-pty')
   })
+  it('preserves unavailable SSH confirmation without falling back to weaker evidence', async () => {
+    const confirmForegroundProcess = vi.fn(async () => {
+      throw new Error('relay unavailable')
+    })
+    const getForegroundProcess = vi.fn(async () => 'zsh')
+    registerSshPtyProvider('ssh-1', {
+      confirmForegroundProcess,
+      getForegroundProcess
+    } as never)
+    setPtyOwnership('remote-unavailable', 'ssh-1')
+    const runtime = { setPtyController: vi.fn() }
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+      confirmForegroundProcess: (ptyId: string) => Promise<string | null>
+    }
+
+    await expect(controller.confirmForegroundProcess('remote-unavailable')).resolves.toBeNull()
+    expect(confirmForegroundProcess).toHaveBeenCalledWith('remote-unavailable')
+    expect(getForegroundProcess).not.toHaveBeenCalled()
+    deletePtyOwnership('remote-unavailable')
+  })
   it('routes runtime exact liveness without enumerating provider sessions', () => {
     const provider = getLocalPtyProvider()
     const hasPty = vi.spyOn(provider, 'hasPty').mockImplementation((id) => id === 'live-pty')
