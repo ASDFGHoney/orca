@@ -64,10 +64,19 @@ Orca is a co-tenant of the session, never its owner by default.
 
 A `tell` block is not a transaction. `tell` is client-side routing, and
 AppleScript sends every property read and every command as a separate Apple
-event; Amphetamine exposes no session identity and no compare-and-swap. So an
-Amphetamine-side or UI-driven change can still interleave between the last shape
-check and the write, and in that case Orca can start a session over one the user
-just created, or end one that is no longer its own.
+event; Amphetamine exposes no session identity and no compare-and-swap. A change
+can therefore interleave between the last check and the write, in both
+directions:
+
+- Acquire reads no session, the user starts one, and Orca's `start new session`
+  then ends it.
+- Release confirms Orca's shape, the user replaces the session, and Orca's
+  `end session` then ends theirs.
+
+Every shape test in these scripts is a check, not a guarantee. The invariant
+"Orca never destroys a session the user started" is therefore not something this
+integration can promise — only something it can make very unlikely, which is why
+no comment, doc or piece of UI copy here states it as a promise.
 
 The window is sub-millisecond rather than the tens of milliseconds a second
 process spawn would cost, and every check sits as close to its write as the API

@@ -311,8 +311,10 @@ export class MacosAmphetamineSleepAssertion {
       this.handleFailure('release:unparseable', reason, { stdout: result.stdout.trim() })
       return false
     }
-    // 'ended', 'foreign' and 'gone' all mean Orca no longer holds anything, and
-    // the script only ever ended a session matching the shape Orca creates.
+    // 'ended', 'foreign' and 'gone' all mean Orca no longer holds anything. The
+    // script ended a session only after seeing Orca's shape — which is a check,
+    // not a guarantee: without a compare-and-swap a replacement landing in
+    // between is still possible. See macos-keep-awake-engines.md.
     this.hold.release()
     this.backoff.reset()
     return true
