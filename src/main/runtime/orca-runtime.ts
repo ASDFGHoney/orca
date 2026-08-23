@@ -1637,6 +1637,20 @@ type PtyForegroundProcessReadEntry = {
   promise: Promise<PtyForegroundProcessRead>
 }
 
+type RestoredAgentPtyInspection = {
+  controller: RuntimePtyController
+  foregroundProcess: string | null
+  hasChildProcesses: boolean
+  unavailable: boolean
+}
+
+type RestoredAgentPtyInspectionEntry = {
+  controller: RuntimePtyController
+  promise: Promise<RestoredAgentPtyInspection>
+}
+
+type RestoredAgentLiveness = 'live' | 'unverifiable' | 'exited'
+
 function copySleepingAgentLaunchConfig(
   config: SleepingAgentLaunchConfig
 ): SleepingAgentLaunchConfig {
@@ -3171,6 +3185,7 @@ export class OrcaRuntimeService {
   private cloneInFlightByPath = new Map<string, Promise<void>>()
   private ptyForegroundAgentRefreshes = new Map<string, PtyForegroundAgentRefresh>()
   private ptyForegroundProcessReads = new Map<string, PtyForegroundProcessReadEntry>()
+  private restoredAgentPtyInspections = new Map<string, RestoredAgentPtyInspectionEntry>()
   private ptyDelayedForegroundSnapshotTitleObservations = new Map<string, number>()
   // Why a set and not a timer: the intent is retired by the exit it explains, or
   // by the next lifecycle generation on that id (advancePtyLifecycleGeneration),
@@ -19950,7 +19965,8 @@ export class OrcaRuntimeService {
 
   async getWorktreePs(
     limit = DEFAULT_WORKTREE_PS_LIMIT,
-    sourceDefaultsSupported = true
+    sourceDefaultsSupported = true,
+    restoredAgentPresenceSupported = true
   ): Promise<{
     worktrees: RuntimeWorktreePsSummary[]
     totalCount: number
@@ -20333,12 +20349,13 @@ export class OrcaRuntimeService {
       }
     }
 
-    this.attachAgentRowsToSummaries(
+    await this.attachAgentRowsToSummaries(
       summaries,
       runtimeWorktreeSummaryPathIndex,
       missingRuntimeWorktreeIds,
       mirroredWorktreeIdByTabId,
-      connectedPtyEvidence
+      connectedPtyEvidence,
+      restoredAgentPresenceSupported
     )
 
     const sorted = [...summaries.values()].sort(compareWorktreePs)
@@ -20353,7 +20370,7 @@ export class OrcaRuntimeService {
   // agent list, mirroring the desktop sidebar. Lineage parent is resolved from
   // the orchestration db (paneKey-keyed), not the OSC payload, since spawn
   // hierarchy is pane-level state tracked separately from terminal output.
-  private attachAgentRowsToSummaries(
+  private async attachAgentRowsToSummaries(
     summaries: Map<string, RuntimeWorktreePsSummary>,
     runtimeWorktreeSummaryPathIndex: RuntimeWorktreeSummaryPathIndex,
     missingRuntimeWorktreeIds: Set<string>,
@@ -20362,8 +20379,9 @@ export class OrcaRuntimeService {
       tabIds: ReadonlySet<string>
       paneKeys: ReadonlySet<string>
       ptyIds: ReadonlySet<string>
-    }
-  ): void {
+    },
+    restoredAgentPresenceSupported: boolean
+  ): Promise<void> {
     // Why: most agents report via hooks (agent-hooks/server), not OSC, so the
     // hook snapshot is the primary source — same one the desktop sidebar reads.
     // OSC-only entries (no hook) are merged in as a fallback, keyed by paneKey.
@@ -20384,6 +20402,8 @@ export class OrcaRuntimeService {
         interrupted: boolean
         stateStartedAt: number
         updatedAt: number
+        restoredUnconfirmed?: boolean
+        agentLiveness?: Exclude<RestoredAgentLiveness, 'exited'>
       }
     >()
     for (const snapshot of this.latestAgentStatusByPaneKey.values()) {
@@ -20405,9 +20425,18 @@ export class OrcaRuntimeService {
         updatedAt: snapshot.updatedAt
       })
     }
-    for (const entry of this.getAgentStatusSnapshotFn?.() ?? []) {
-      // Why: old mobile clients ignore this provenance bit, so publishing the row would turn an explicitly unconfirmed restore into fresh activity under version skew.
-      if (entry.restoredUnconfirmed === true) {
+    const hookEntries = this.getAgentStatusSnapshotFn?.() ?? []
+    const restoredAgentLiveness = restoredAgentPresenceSupported
+      ? await this.resolveRestoredAgentLiveness(hookEntries)
+      : new Map<string, RestoredAgentLiveness>()
+    for (const entry of hookEntries) {
+      const liveness =
+        entry.restoredUnconfirmed === true ? restoredAgentLiveness.get(entry.paneKey) : undefined
+      // Why: legacy clients ignore restored provenance, while a confirmed shell proves the old agent exited.
+      if (
+        entry.restoredUnconfirmed === true &&
+        (!restoredAgentPresenceSupported || liveness === undefined || liveness === 'exited')
+      ) {
         continue
       }
       const existing = rowSources.get(entry.paneKey)
@@ -20432,7 +20461,13 @@ export class OrcaRuntimeService {
         toolInput: entry.toolInput ?? null,
         interrupted: entry.interrupted ?? false,
         stateStartedAt: entry.stateStartedAt,
-        updatedAt: entry.receivedAt
+        updatedAt: entry.receivedAt,
+        ...(entry.restoredUnconfirmed === true
+          ? {
+              restoredUnconfirmed: true,
+              agentLiveness: liveness as Exclude<RestoredAgentLiveness, 'exited'>
+            }
+          : {})
       })
     }
     if (rowSources.size === 0) {
@@ -20496,7 +20531,9 @@ export class OrcaRuntimeService {
         toolInput: src.toolInput,
         interrupted: src.interrupted,
         stateStartedAt: src.stateStartedAt,
-        updatedAt: src.updatedAt
+        updatedAt: src.updatedAt,
+        ...(src.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
+        ...(src.agentLiveness ? { agentLiveness: src.agentLiveness } : {})
       }
       // Why: SSH/runtime projections can spell an equivalent path differently;
       // bucket by the canonical summary id so mobile keeps the agent activity.
@@ -20527,6 +20564,83 @@ export class OrcaRuntimeService {
         }
       }
     }
+  }
+
+  private inspectRestoredAgentPtyOnce(ptyId: string): Promise<RestoredAgentPtyInspection> | null {
+    const controller = this.ptyController
+    if (!controller?.inspectProcess) {
+      return null
+    }
+    const pending = this.restoredAgentPtyInspections.get(ptyId)
+    if (pending?.controller === controller) {
+      return pending.promise
+    }
+    const unavailable: RestoredAgentPtyInspection = {
+      controller,
+      foregroundProcess: null,
+      hasChildProcesses: false,
+      unavailable: true
+    }
+    let entry: RestoredAgentPtyInspectionEntry
+    const promise = Promise.resolve()
+      .then(() => controller.inspectProcess!(ptyId))
+      .then((inspection) => ({
+        controller,
+        foregroundProcess: inspection.foregroundProcess,
+        hasChildProcesses: inspection.hasChildProcesses,
+        unavailable: inspection.unavailable === true
+      }))
+      .catch(() => unavailable)
+      .finally(() => {
+        if (this.restoredAgentPtyInspections.get(ptyId) === entry) {
+          this.restoredAgentPtyInspections.delete(ptyId)
+        }
+      })
+    entry = { controller, promise }
+    this.restoredAgentPtyInspections.set(ptyId, entry)
+    return promise
+  }
+
+  private async resolveRestoredAgentLiveness(
+    entries: readonly AgentStatusIpcPayload[]
+  ): Promise<Map<string, RestoredAgentLiveness>> {
+    const restoredEntries = entries.filter((entry) => entry.restoredUnconfirmed === true)
+    const resolved = await Promise.all(
+      restoredEntries.map(async (entry): Promise<[string, RestoredAgentLiveness]> => {
+        const pty = this.getPtyRecordForPaneKey(entry.paneKey)
+        if (!pty || this.isPtyKnownExited(pty.ptyId)) {
+          return [entry.paneKey, 'exited']
+        }
+        const inspectionRead = this.inspectRestoredAgentPtyOnce(pty.ptyId)
+        if (!inspectionRead) {
+          return [entry.paneKey, 'unverifiable']
+        }
+        const inspection = await inspectionRead
+        const currentPty = this.getPtyRecordForPaneKey(entry.paneKey)
+        if (
+          inspection.controller !== this.ptyController ||
+          currentPty?.ptyId !== pty.ptyId ||
+          currentPty.incarnationId !== pty.incarnationId ||
+          inspection.unavailable
+        ) {
+          return [entry.paneKey, 'unverifiable']
+        }
+        const recognized = recognizeAgentProcess(inspection.foregroundProcess)
+        if (recognized) {
+          return [
+            entry.paneKey,
+            isTuiAgent(entry.agentType) && recognized.agent !== entry.agentType ? 'exited' : 'live'
+          ]
+        }
+        return [
+          entry.paneKey,
+          inspection.foregroundProcess !== null && !inspection.hasChildProcesses
+            ? 'exited'
+            : 'unverifiable'
+        ]
+      })
+    )
+    return new Map(resolved)
   }
 
   listRepos(): Repo[] {
