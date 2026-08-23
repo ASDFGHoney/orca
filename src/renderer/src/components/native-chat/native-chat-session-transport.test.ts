@@ -9,6 +9,7 @@ import { RUNTIME_COMPAT_BLOCK_CODE } from '@/runtime/runtime-protocol-compat'
 import {
   getNativeChatSessionTransport,
   RUNTIME_NATIVE_CHAT_RECONNECT_MS,
+  toNativeChatHostPaneKey,
   toRuntimeNativeChatErrorMessage
 } from './native-chat-session-transport'
 
@@ -56,6 +57,15 @@ beforeEach(() => {
 })
 
 describe('getNativeChatSessionTransport — selection', () => {
+  it('restores mirrored web pane keys to host identity', () => {
+    expect(
+      toNativeChatHostPaneKey('web-terminal-host-tab:11111111-1111-4111-8111-111111111111')
+    ).toBe('host-tab:11111111-1111-4111-8111-111111111111')
+    expect(toNativeChatHostPaneKey('host-tab:11111111-1111-4111-8111-111111111111')).toBe(
+      'host-tab:11111111-1111-4111-8111-111111111111'
+    )
+  })
+
   it('returns the local adapter for a null owner and forwards readSession args', async () => {
     nativeChatReadSession.mockResolvedValue({ messages: [] })
     const transport = getNativeChatSessionTransport(null)

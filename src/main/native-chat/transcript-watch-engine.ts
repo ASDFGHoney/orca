@@ -15,7 +15,7 @@ import {
   createTranscriptNativeWatcher
 } from './transcript-native-watcher'
 import { nativeChatTurnLifecycleDecoderForAgent } from './transcript-turn-lifecycle'
-import { emitTranscriptWatchAppends, readTranscriptWatchSnapshot } from './transcript-watch-read'
+import * as watchRead from './transcript-watch-read'
 import type {
   NativeChatTranscriptSubscription,
   SubscribeNativeChatTranscriptArgs
@@ -37,18 +37,12 @@ export function getActiveNativeChatWatcherCount(): number {
   return activeWatcherCount
 }
 
-/**
- * Install the live-tail engine on an already-resolved file path. Returns null
- * when the file doesn't exist yet, so the caller falls back to resolve-polling.
- * A failed native watch still installs a reconciliation-only subscription: some
- * remote filesystems allow stat/read while rejecting fs.watch entirely.
- */
+/** Installs a live tail on an already-resolved path; missing files return null. */
 export async function installTranscriptWatcher(
   filePath: string,
   decode: (line: string, fallbackId: string) => NativeChatMessage | null,
   args: SubscribeNativeChatTranscriptArgs,
-  /** Cancels the install probe so an unsubscribe during it detaches the gate
-   *  waiter immediately instead of at the 30s deadline. */
+  /** Cancels an in-flight install probe when the subscriber leaves. */
   signal?: AbortSignal
 ): Promise<NativeChatTranscriptSubscription | null> {
   const rangeFs = args.rangeFs
@@ -112,7 +106,7 @@ export async function installTranscriptWatcher(
   }
 
   function readAndEmitAppends(): Promise<void> {
-    return emitTranscriptWatchAppends(watchReadContext, onAppend, () => closed)
+    return watchRead.emitTranscriptWatchAppends(watchReadContext, onAppend, () => closed)
   }
 
   async function readInitialTranscript(): Promise<{
@@ -184,14 +178,14 @@ export async function installTranscriptWatcher(
     if (contentReplaced) {
       resetIncrementalTranscriptState(state)
     }
-    // Why: subscriber callbacks may replace the path before the drain can finish.
     watchedVersion ??= current
-
     const replacementSnapshot =
-      // Why: 0 is a valid window — an explicit undefined check keeps an empty
-      // snapshot empty instead of falling back to an unbounded incremental read.
-      contentReplaced && !initialDrain && onReplace && initialLimit !== undefined
-        ? await readTranscriptWatchSnapshot(watchReadContext, initialLimit)
+      (contentReplaced ||
+        watchRead.replaceRemoteCatchup(current.size - state.offset, initialDrain, args)) &&
+      !initialDrain &&
+      onReplace &&
+      initialLimit !== undefined
+        ? await watchRead.readTranscriptWatchSnapshot(watchReadContext, initialLimit)
         : null
     if (closed) {
       return
@@ -212,7 +206,7 @@ export async function installTranscriptWatcher(
 
     const initialSnapshot =
       initialDrain && onInitialSnapshot && initialLimit !== undefined
-        ? await readTranscriptWatchSnapshot(watchReadContext, initialLimit)
+        ? await watchRead.readTranscriptWatchSnapshot(watchReadContext, initialLimit)
         : null
     if (closed) {
       return

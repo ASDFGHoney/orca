@@ -1,11 +1,14 @@
 import { extname } from 'node:path'
 import type { AgentType } from '../../shared/native-chat-types'
-import { isWslHookRelayConnectionId } from '../../shared/wsl-hook-relay-contract'
+import {
+  isWslHookRelayConnectionId,
+  WSL_HOOK_RELAY_CONNECTION_PREFIX
+} from '../../shared/wsl-hook-relay-contract'
 import { agentHookServer } from '../agent-hooks/server'
 
 export type NativeChatTranscriptOwner =
   | { kind: 'legacy-local' }
-  | { kind: 'local'; transcriptPath?: string }
+  | { kind: 'local'; transcriptPath?: string; wslDistro?: string }
   | { kind: 'ssh'; connectionId: string; transcriptPath: string | null }
   | { kind: 'unknown' }
 
@@ -54,8 +57,16 @@ export function resolveNativeChatTranscriptOwner(
   }
   const transcriptPath = exactTranscriptPath(row.providerSession?.transcriptPath)
   const connectionId = row.connectionId?.trim()
-  if (!connectionId || isWslHookRelayConnectionId(connectionId)) {
+  if (!connectionId) {
     return { kind: 'local', ...(transcriptPath ? { transcriptPath } : {}) }
+  }
+  if (isWslHookRelayConnectionId(connectionId)) {
+    const wslDistro = connectionId.slice(WSL_HOOK_RELAY_CONNECTION_PREFIX.length).trim()
+    return {
+      kind: 'local',
+      ...(transcriptPath ? { transcriptPath } : {}),
+      ...(wslDistro ? { wslDistro } : {})
+    }
   }
   return { kind: 'ssh', connectionId, transcriptPath: transcriptPath ?? null }
 }

@@ -1,4 +1,6 @@
 import type { NativeChatApi, NativeChatAppendedMessages } from '../../../../preload/api-types'
+import { makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
+import { toHostSessionTabId } from '../../../../shared/terminal-surface-id'
 import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   callRuntimeRpc,
@@ -23,6 +25,18 @@ const RUNTIME_TOO_OLD =
 /** Backoff before re-opening a dropped runtime chat stream. Exported for tests. */
 export const RUNTIME_NATIVE_CHAT_RECONNECT_MS = 2_000
 
+export function toNativeChatHostPaneKey(paneKey: string | undefined): string | undefined {
+  if (!paneKey) {
+    return undefined
+  }
+  const pane = parsePaneKey(paneKey)
+  if (!pane) {
+    return paneKey
+  }
+  const hostTabId = toHostSessionTabId(pane.tabId)
+  return hostTabId === pane.tabId ? paneKey : makePaneKey(hostTabId, pane.leafId)
+}
+
 /** Map a runtime read failure to the message the read-error state renders. A
  *  version block (old runtime lacking the method, or the protocol-compat gate)
  *  gets the explicit "update the remote runtime" copy (R4); anything else — a
@@ -43,11 +57,17 @@ export function toRuntimeNativeChatErrorMessage(err: unknown): string {
  *  using this adapter (R3). Preserves whatever `subscribe` returns (sync fn on
  *  desktop, promise on the web bridge) — the hook's teardown handles both (R6). */
 const localNativeChatTransport: NativeChatSessionTransport = {
-  readSession: (agent, sessionId, limit, transcriptPath, paneKey) =>
-    paneKey
-      ? window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath, paneKey)
-      : window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath),
-  subscribe: (args, onFrame) => window.api.nativeChat.subscribe(args, onFrame)
+  readSession: (agent, sessionId, limit, transcriptPath, paneKey) => {
+    const hostPaneKey = toNativeChatHostPaneKey(paneKey)
+    return hostPaneKey
+      ? window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath, hostPaneKey)
+      : window.api.nativeChat.readSession(agent, sessionId, limit, transcriptPath)
+  },
+  subscribe: (args, onFrame) =>
+    window.api.nativeChat.subscribe(
+      { ...args, paneKey: toNativeChatHostPaneKey(args.paneKey) },
+      onFrame
+    )
 }
 
 function createRuntimeNativeChatTransport(environmentId: string): NativeChatSessionTransport {
@@ -64,7 +84,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
             sessionId,
             limit,
             transcriptPath,
-            paneKey
+            paneKey: toNativeChatHostPaneKey(paneKey)
           },
           { timeoutMs: 15_000 }
         )
@@ -75,6 +95,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
     },
     subscribe: (args, onFrame) => {
       const { subscriptionId, agent, sessionId, transcriptPath, paneKey, limit } = args
+      const hostPaneKey = toNativeChatHostPaneKey(paneKey)
       let cancelled = false
       let receivedInitial = false
       let handleUnsubscribe: (() => void) | null = null
@@ -118,7 +139,7 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
                 agent,
                 sessionId,
                 transcriptPath,
-                paneKey,
+                paneKey: hostPaneKey,
                 limit
               },
               timeoutMs: 15_000
