@@ -1787,6 +1787,17 @@ function extractAmpToolFields(
   return {}
 }
 
+/**
+ * Retires any cached tool fields. PermissionRequest is the only OpenCode-family event that
+ * carries them, and isNewTurnEvent is false for this family, so nothing else ever resets the
+ * cache — without an explicit retire, resolveToolState inherits one answered permission onto
+ * every later frame in the pane and the row reads a resolved command as the live tool.
+ */
+const OPENCODE_TOOL_FIELDS_RETIRED: ToolSnapshot = {
+  hasToolUpdate: true,
+  hasToolInputField: true
+}
+
 function extractOpenCodeToolFields(
   eventName: unknown,
   hookPayload: Record<string, unknown>
@@ -1794,7 +1805,7 @@ function extractOpenCodeToolFields(
   if (eventName === 'MessagePart' && hookPayload.role === 'assistant') {
     const text = readString(hookPayload, 'text')
     if (text) {
-      return { lastAssistantMessage: capOpenCodeHookText(text) }
+      return { ...OPENCODE_TOOL_FIELDS_RETIRED, lastAssistantMessage: capOpenCodeHookText(text) }
     }
   }
   if (eventName === 'AskUserQuestion') {
@@ -1803,11 +1814,43 @@ function extractOpenCodeToolFields(
       ? hookPayload.tool_input
       : stripHookEnvelopeKeys(hookPayload)
     return {
-      hasToolUpdate: true,
+      ...OPENCODE_TOOL_FIELDS_RETIRED,
       interactivePrompt: deriveInteractivePrompt('AskUserQuestion', toolInputSource)
     }
   }
-  return {}
+  if (eventName === 'PermissionRequest') {
+    // Why: the payload is permission.asked's event.properties — `permission` names what is
+    // being requested and `metadata`/`patterns` say which command or path it covers. Without
+    // them the row is a bare 'waiting' that cannot tell the user what to approve.
+    // The SDK types `metadata` as Record<string, unknown>, so these keys come from the tools
+    // themselves: bash sends `command`, edit sends `filepath`, webfetch sends `url` (verified
+    // against opencode 1.18.18). `file_path`/`path` cover tools that spell it the common way.
+    // `diff` is deliberately absent — edit ships the whole patch and it would swamp the row.
+    const metadata = hookPayload.metadata
+    const metadataInput =
+      metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? readFirstString(metadata as Record<string, unknown>, [
+            'command',
+            'filepath',
+            'file_path',
+            'path',
+            'url'
+          ])
+        : undefined
+    const patterns = Array.isArray(hookPayload.patterns)
+      ? hookPayload.patterns.filter(
+          (pattern): pattern is string => typeof pattern === 'string' && pattern.length > 0
+        )
+      : []
+    return toolUpdate(
+      {
+        toolName: readString(hookPayload, 'permission'),
+        toolInput: metadataInput ?? (patterns.length > 0 ? patterns.join(', ') : undefined)
+      },
+      { hasToolInputField: hasAnyOwnField(hookPayload, ['metadata', 'patterns']) }
+    )
+  }
+  return OPENCODE_TOOL_FIELDS_RETIRED
 }
 
 function extractCursorToolFields(
@@ -2431,7 +2474,9 @@ function isGrokIdleNotification(message: string | undefined): boolean {
   )
 }
 
-function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boolean {
+/** The per-provider answer to "is this event a user-initiated new turn?". Exported so the
+ *  observation stamp reuses it instead of minting a second list of event-name literals. */
+export function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boolean {
   // Why: exhaustive switch so a new AgentHookSource fails typecheck here instead of falling through to false.
   switch (source) {
     case 'claude':
@@ -4321,8 +4366,16 @@ export function normalizeHookPayload(
   const paneKey = typeof record.paneKey === 'string' ? record.paneKey.trim() : ''
   const parsedPaneKey = parsePaneKey(paneKey)
   const rawPayload = record.payload
-  const hookPayload =
-    typeof rawPayload === 'string'
+  // Why (#15117): some Antigravity events fire with no stdin at all, yet still carry a status
+  // transition in `hook_event_name`. The POSIX script substitutes `{}` before posting; on
+  // Windows curl omits the form field entirely when stdin is empty, so the event arrives with
+  // no `payload` key at all. Accept both shapes rather than dropping the transition.
+  const antigravityPayloadAbsent =
+    source === 'antigravity' &&
+    (rawPayload === undefined || (typeof rawPayload === 'string' && rawPayload.trim() === ''))
+  const hookPayload = antigravityPayloadAbsent
+    ? {}
+    : typeof rawPayload === 'string'
       ? (() => {
           try {
             return parseAgentHookJson(rawPayload)

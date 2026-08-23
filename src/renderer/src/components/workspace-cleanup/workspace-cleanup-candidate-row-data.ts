@@ -165,11 +165,7 @@ export function getReviewPillTone(reviewInfo: WorkspaceCleanupReviewInfo): Statu
   return 'neutral'
 }
 
-/**
- * Why the breakdown and not a total: the count sums five unrelated things
- * (terminals, editor tabs, browser tabs, diff notes, finished agents), so a
- * bare "Context: 2" tells a reader nothing about what deleting would discard.
- */
+// A total conflates unlike resources and obscures what deletion discards.
 export function getContextPillLabel(candidate: WorkspaceCleanupCandidate): string | null {
   if (!hasWorkspaceCleanupLocalContext(candidate)) {
     return null

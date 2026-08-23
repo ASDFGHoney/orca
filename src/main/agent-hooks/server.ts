@@ -18,6 +18,7 @@ import {
   hasCodexTranscriptSubagents,
   hasPendingAgentResultText,
   HOOK_REQUEST_SLOWLORIS_MS,
+  isNewTurnEvent,
   markClaudeLeadTurnInterrupted,
   markCodexLeadTurnInterrupted,
   MAX_PANE_KEY_LEN,
@@ -72,6 +73,12 @@ import {
   normalizeAgentStatusPayload
 } from '../../shared/agent-status-types'
 import {
+  AgentStatusObservationSequencer,
+  createAgentStatusAuthorityId,
+  type AgentStatusObservation,
+  type AgentStatusObservationOrigin
+} from '../../shared/agent-status-observation'
+import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
 } from '../../shared/agent-status-identity'
@@ -98,6 +105,8 @@ export type { AgentHookSource }
 type EnrichedAgentHookEventPayload = AgentHookEventPayload & {
   receivedAt: number
   stateStartedAt: number
+  /** Provenance/ordering stamped by this server as the pane authority (STA-4293). Read by nothing yet. */
+  observation?: AgentStatusObservation
   /** Stamped at hydrate for nonterminal states; never persisted (hydrate re-stamps) and cleared by any accepted live event replacing the entry. */
   restoredUnconfirmed?: true
   /** User-hidden resume identity retained solely for destructive liveness checks. */
@@ -113,7 +122,13 @@ type NormalizedLocalHook = {
 
 type PersistedAgentHookEventPayload = Omit<
   EnrichedAgentHookEventPayload,
-  'claudeRunningNonAgentTask' | 'launchToken' | 'promptInteractionKey' | 'restoredUnconfirmed'
+  | 'claudeRunningNonAgentTask'
+  | 'launchToken'
+  | 'promptInteractionKey'
+  | 'restoredUnconfirmed'
+  // Why: revision counters are in-memory and the authority id is regenerated per process, so
+  // a stored observation could only rehydrate as a stale ordering claim from a dead authority.
+  | 'observation'
 > & {
   launchTokenHash?: string
 }
@@ -428,6 +443,7 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),
     ...(entry.promptInteractionKey ? { promptInteractionKey: entry.promptInteractionKey } : {}),
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
+    ...(entry.observation ? { observation: entry.observation } : {}),
     ...entry.payload
   }
 }
@@ -728,6 +744,11 @@ export class AgentHookServer {
   private connectionTimestampWatermarkById = new Map<string, number>()
   // Why: skip disk writes when the JSON exactly matches the last write; guards against re-firing trailing timers when nothing changed.
   private lastWrittenJson: string | null = null
+  // Why: main is the pane authority for local/WSL/SSH panes — hook HTTP, relay, and its own
+  // OSC parse all converge on applyNormalizedStatus, so one sequencer covers every ingress here.
+  private readonly observations = new AgentStatusObservationSequencer(
+    createAgentStatusAuthorityId('main-agent-hooks')
+  )
 
   /**
    * Notified once per process when repeated hook POSTs are cut off mid-body (#11217).
@@ -1102,7 +1123,13 @@ export class AgentHookServer {
 
   private getAgentStatusDisposition(
     paneKey: string,
-    event?: { hookEventName?: string; isReplay?: boolean }
+    event?: {
+      source?: AgentHookSource
+      /** Raw wire value, so the gate can tell "field absent" from "field present but unknown". */
+      rawSource?: unknown
+      hookEventName?: string
+      isReplay?: boolean
+    }
   ): 'accept' | 'restart' | 'suppress' {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
     const paneRetired =
@@ -1116,12 +1143,28 @@ export class AgentHookServer {
       return 'accept'
     }
     // Why: command completion retires launch authority but leaves its shell pane reusable.
-    // A live SessionStart proves a new agent process owns the retired pane just like a
+    // A live new-turn event proves a new agent process owns the retired pane just like a
     // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
-    if (
-      (event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart') &&
-      event.isReplay !== true
-    ) {
+    // Why the classifier, not literals: only 5 of 18 sources name their boundary
+    // `UserPromptSubmit`/`SessionStart`; the rest stayed retired forever.
+    // Why four branches: `source` collapses to undefined when an older relay omits the field,
+    // when a newer host sends an unknown string, and when the wire value is malformed. Only an
+    // unknown string is valid future-provider evidence. Unreachable from the local path, which
+    // 404s an unresolvable source.
+    const isNewTurn =
+      event?.source !== undefined
+        ? isNewTurnEvent(event.source, event.hookEventName)
+        : typeof event?.rawSource === 'string' && event.rawSource.trim().length > 0
+          ? // Why fail OPEN for an unknown provider: its boundary event is unknowable here, and
+            // the costs are asymmetric — a stranded pane is invisible and permanent with no user
+            // recovery, while a spurious revive decays after AGENT_STATUS_STALE_AFTER_MS.
+            true
+          : event?.rawSource === undefined
+            ? // Why literals here: an older relay omits `source` entirely. Legacy shim only — it
+              // cannot revive a provider whose boundary event is named anything else.
+              event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart'
+            : false
+    if (isNewTurn && event?.isReplay !== true) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
       return 'restart'
@@ -1267,9 +1310,35 @@ export class AgentHookServer {
     }
   }
 
+  /** Stamp who observed this event, in what order, on main's clock. Nothing reads it yet
+   *  (STA-4293) — it is stamped here because every main-side ingress funnels through
+   *  applyNormalizedStatus, so no origin can silently arrive untagged. */
+  private stampObservation(
+    payload: AgentHookEventPayload,
+    origin: AgentStatusObservationOrigin,
+    observedAt: number
+  ): AgentStatusObservation {
+    return this.observations.observe(payload.paneKey, {
+      origin,
+      observedAt,
+      // Why: reuse the listener's own per-provider classifier; a second list of raw event-name
+      // literals here would strand the providers whose boundary event is named anything else.
+      boundary:
+        payload.source !== undefined && isNewTurnEvent(payload.source, payload.hookEventName),
+      kind: payload.providerSessionOnly
+        ? 'identity-only'
+        : // Why: a replay restates a turn that already happened, and OSC 9999 repaints the
+          // current state rather than announcing a change — neither is a fresh transition.
+          payload.isReplay === true || origin === 'osc'
+          ? 'snapshot'
+          : 'transition'
+    })
+  }
+
   private applyNormalizedStatus(
     payload: AgentHookEventPayload,
-    onAccepted?: () => void
+    onAccepted?: () => void,
+    origin: AgentStatusObservationOrigin = 'hook'
   ): EnrichedAgentHookEventPayload {
     if (payload.hookEventName === 'UserPromptSubmit') {
       // Why: the prompt boundary is authoritative even when text is unchanged; its next OSC working row must not inherit the prior cron/background turn stamp.
@@ -1294,7 +1363,10 @@ export class AgentHookServer {
     if (payload.providerSessionOnly) {
       // Why: identity-only rows survive replay but must not emit prompt telemetry or a fabricated status.
       onAccepted?.()
-      const enriched = this.attachStatusTiming(payload, now)
+      const enriched = {
+        ...this.attachStatusTiming(payload, now),
+        observation: this.stampObservation(payload, origin, now)
+      }
       this.clearAssistantMessageRetry(enriched.paneKey)
       this.runtimeObservedStatusPaneKeys.delete(enriched.paneKey)
       this.state.lastStatusByPaneKey.set(enriched.paneKey, enriched)
@@ -1425,7 +1497,10 @@ export class AgentHookServer {
       this.maybeTrackAgentPromptSent(effectivePayload, previous)
     }
     const cachedPayload = resolveCachedClaudeCompactOwnership(previous, boundaryAwarePayload)
-    const enriched = this.attachStatusTiming(cachedPayload, now)
+    const enriched = {
+      ...this.attachStatusTiming(cachedPayload, now),
+      observation: this.stampObservation(cachedPayload, origin, now)
+    }
     if (
       typeof enriched.payload.turnCompletedAt === 'number' &&
       Number.isFinite(enriched.payload.turnCompletedAt)
@@ -1816,6 +1891,7 @@ export class AgentHookServer {
       this.runtimeObservedStatusPaneKeys.delete(key)
       this.currentAuthorityObservations.delete(key)
       this.promptSentDedupeByPaneKey.delete(key)
+      this.observations.forget(key)
     }
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
@@ -2095,14 +2171,18 @@ export class AgentHookServer {
         ? previous.providerSession
         : undefined
     // Why: OSC status is a runtime observation, not a prompt boundary; keep prompt-sent telemetry tied to native hooks.
-    this.applyNormalizedStatus({
-      paneKey,
-      tabId,
-      worktreeId,
-      connectionId,
-      ...(preservedProviderSession ? { providerSession: preservedProviderSession } : {}),
-      payload: event.payload
-    })
+    this.applyNormalizedStatus(
+      {
+        paneKey,
+        tabId,
+        worktreeId,
+        connectionId,
+        ...(preservedProviderSession ? { providerSession: preservedProviderSession } : {}),
+        payload: event.payload
+      },
+      undefined,
+      'osc'
+    )
   }
 
   /** Ingest a payload from the relay JSON-RPC channel (not the local HTTP server); connectionId is stamped here. Main is still the SSH trust boundary, so re-run the canonical normalizer before caching. */
@@ -2191,11 +2271,19 @@ export class AgentHookServer {
         ? envelope.compactTrigger
         : undefined
     const statusDisposition = this.getAgentStatusDisposition(paneKey, {
+      source,
+      rawSource: envelope.source,
       hookEventName,
       isReplay: envelope.isReplay === true
     })
     if (statusDisposition === 'suppress') {
       return
+    }
+    if (statusDisposition === 'restart') {
+      // Why: same rebind as the HTTP path — a retired pane taking a new turn is a new session.
+      // Why paneKey, not envelope.paneKey: alias resolution already mapped it to the
+      // stable pane, so the rebind cannot land on a legacy key.
+      this.observations.rebind(paneKey)
     }
     const worktreeId =
       envelope.worktreeId !== undefined && envelope.worktreeId.trim().length > 0
@@ -2403,6 +2491,7 @@ export class AgentHookServer {
         const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
+              source,
               hookEventName: normalized.event.hookEventName,
               isReplay: normalized.event.isReplay
             })
@@ -2412,6 +2501,11 @@ export class AgentHookServer {
             statusDisposition === 'restart'
               ? { ...normalized.event, launchToken: undefined }
               : normalized.event
+          if (statusDisposition === 'restart') {
+            // Why: a retired pane accepting a new turn is a different agent session behind the
+            // same key — later observations must not be ordered against the retired one.
+            this.observations.rebind(event.paneKey)
+          }
           this.recordCurrentAuthorityObservation(event)
           const enriched = this.applyNormalizedStatus(event, normalized.onAccepted)
           this.scheduleAssistantMessageRetry(source, aliasedBody, enriched)
@@ -3053,6 +3147,8 @@ export class AgentHookServer {
         promptInteractionKey: _promptInteractionKey,
         // Why: never persisted — hydrate re-stamps it, so a stored copy could only drift.
         restoredUnconfirmed: _restoredUnconfirmed,
+        // Why: same — the sequencer that issued it dies with the process (see PersistedAgentHookEventPayload).
+        observation: _observation,
         launchToken,
         ...persistedPayload
       } = enrichedPayload

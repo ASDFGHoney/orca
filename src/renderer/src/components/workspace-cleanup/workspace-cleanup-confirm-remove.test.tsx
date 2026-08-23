@@ -112,8 +112,6 @@ describe('WorkspaceCleanupConfirmRemove', () => {
       )
     })
 
-    // Why: "Context: 2" summed terminals, editor/browser tabs, diff notes and
-    // finished agents into one number that told the reader nothing.
     expect(container.textContent).toContain('Terminal tabs: 1')
     expect(container.textContent).toContain('Browser tabs: 1')
     expect(container.textContent).not.toContain('Context: ')
