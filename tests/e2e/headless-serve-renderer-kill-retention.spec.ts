@@ -25,6 +25,9 @@ type RendererIdentity = {
   webContentsId: number
 }
 
+const INCIDENT_OBSERVATION_MS = 12_000
+const INCIDENT_CHECKPOINT_MS = 3_000
+
 function readDaemonPid(userDataDir: string): number {
   const raw = readFileSync(
     path.join(userDataDir, 'daemon', `daemon-v${PROTOCOL_VERSION}.pid`),
@@ -113,11 +116,20 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       fixturePath,
       path.join(scratch, 'pty-b.log')
     )
-    await proveSameLivePty(call, terminalA, 'BEFORE_RENDERER_KILL_A')
-    await proveSameLivePty(call, terminalB, 'BEFORE_RENDERER_KILL_B')
-    const beforeInventory = await readHostTerminalInventory(call, worktreeId)
-    expect(beforeInventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
-    expect(beforeInventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
+    const proveHostState = async (marker: string): Promise<void> => {
+      const status = await launchedHost.client.call<RuntimeStatus>('status.get')
+      expect(await launchedHost.app.evaluate(() => process.pid)).toBe(mainPid)
+      expect(await processIdentityIsAlive(mainIdentity)).toBe(true)
+      expect(status.result.runtimeId).toBe(beforeStatus.result.runtimeId)
+      expect(readDaemonPid(userDataDir)).toBe(daemonPid)
+      expect(await processIdentityIsAlive(daemonIdentity)).toBe(true)
+      const inventory = await readHostTerminalInventory(call, worktreeId)
+      expect(inventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
+      expect(inventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
+      await proveSameLivePty(call, terminalA, `${marker}_A`)
+      await proveSameLivePty(call, terminalB, `${marker}_B`)
+    }
+    await proveHostState('BEFORE_RENDERER_KILL')
 
     const pageId = `sta-5228-${Date.now()}`
     const markerUrl = `data:text/html,${encodeURIComponent(
@@ -161,6 +173,10 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
         '--type=renderer'
       )
     }
+    let hostClosed = false
+    launchedHost.app.once('close', () => {
+      hostClosed = true
+    })
     await launchedHost.app.evaluate(
       ({ BrowserWindow }, expected) => {
         const win = BrowserWindow.getAllWindows().find(
@@ -208,17 +224,17 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       })
       .toBe(false)
 
-    const afterStatus = await launchedHost.client.call<RuntimeStatus>('status.get')
-    expect(await launchedHost.app.evaluate(() => process.pid)).toBe(mainPid)
-    expect(await processIdentityIsAlive(mainIdentity)).toBe(true)
-    expect(afterStatus.result.runtimeId).toBe(beforeStatus.result.runtimeId)
-    expect(readDaemonPid(userDataDir)).toBe(daemonPid)
-    expect(await processIdentityIsAlive(daemonIdentity)).toBe(true)
-    await proveSameLivePty(call, terminalA, 'AFTER_RENDERER_KILL_A')
-    await proveSameLivePty(call, terminalB, 'AFTER_RENDERER_KILL_B')
-    const afterInventory = await readHostTerminalInventory(call, worktreeId)
-    expect(afterInventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
-    expect(afterInventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
+    await proveHostState('AFTER_RENDERER_KILL')
+    const observationDeadline = Date.now() + INCIDENT_OBSERVATION_MS
+    let checkpoint = 0
+    do {
+      await new Promise((resolve) => setTimeout(resolve, INCIDENT_CHECKPOINT_MS))
+      expect(
+        hostClosed,
+        'headless main exited during the incident-derived observation window'
+      ).toBe(false)
+      await proveHostState(`STABILITY_${checkpoint++}`)
+    } while (Date.now() < observationDeadline)
 
     const afterRenderer = await readOffscreenRenderer(launchedHost.app, pageId, false)
     console.log('[STA-5228] renderer lifecycle snapshot', {
@@ -227,7 +243,8 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       daemonPid,
       mainPid,
       ptyIds: [terminalA.ptyId, terminalB.ptyId],
-      runtimeId: beforeStatus.result.runtimeId
+      runtimeId: beforeStatus.result.runtimeId,
+      stabilityCheckpoints: checkpoint
     })
   } finally {
     try {

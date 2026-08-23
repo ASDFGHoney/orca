@@ -2370,17 +2370,17 @@
       "layer": "electron-process-containment",
       "surfaces": ["headless orca serve", "offscreen browser page", "daemon-backed PTYs"],
       "platforms": ["macos", "linux", "windows"],
-      "providers": ["local", "daemon"],
+      "providers": ["daemon"],
       "coveredPlatforms": ["macos"],
-      "coveredProviders": ["local", "daemon"],
+      "coveredProviders": ["daemon"],
       "coverageNotes": "An isolated headless serve host creates two daemon-backed terminal sessions and one offscreen browser renderer. Exact WebContents and OS-process fencing prevents a fault from reaching an unrelated process. The oracle is host-local and does not claim paired-viewer continuity, renderer reload, systemd cgroup restart persistence, SSH or WSL coverage, or aggregate memory policy.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-5228",
         "https://github.com/stablyai/orca/issues/16084",
         "https://github.com/stablyai/orca/pull/16120"
       ],
-      "invariant": "Killing one exact offscreen Chromium renderer cannot replace or terminate the headless main process, runtime, daemon, or unrelated daemon-backed PTYs. The host session inventory retains each original tab-to-PTY binding, and both original PTY processes continue accepting input.",
-      "oracle": "Start an isolated headless serve runtime with zero initial BrowserWindows, create two daemon-backed terminal fixtures, and record main, runtime, daemon, tab, PTY, fixture-process, WebContents, and renderer-process identities. Fence one marked offscreen page by WebContents, URL, and OS process, force that renderer to crash, and require its original process to die while main/runtime/daemon identities, both host tab-to-PTY bindings, and I/O through both original fixture processes remain unchanged.",
+      "invariant": "Killing one exact offscreen Chromium renderer cannot replace or terminate the headless main process, runtime, daemon, or unrelated daemon-backed PTYs during the immediate fault or the reported nine-second incident interval. The host session inventory retains each original tab-to-PTY binding, and both original PTY processes continue accepting input.",
+      "oracle": "Start an isolated headless serve runtime with zero initial BrowserWindows, create two daemon-backed terminal fixtures, and record main, runtime, daemon, tab, PTY, fixture-process, WebContents, and renderer-process identities. Fence one marked offscreen page by WebContents, URL, and OS process, force that renderer to crash, and require its original process to die. Observe beyond the reported nine-second renderer-victim-to-unit-failure interval while repeatedly requiring no main-process close, unchanged main/runtime/daemon identities, both host tab-to-PTY bindings, and I/O through both original fixture processes.",
       "commands": [
         "pnpm exec electron-vite build --mode e2e",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-serve-renderer-kill-retention.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
@@ -2404,13 +2404,13 @@
           "platform": "macos",
           "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-serve-renderer-kill-retention.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 31,
-          "summary": "The exact offscreen renderer process died while the headless main process, runtime, daemon, both original host tab-to-PTY bindings, and both original PTY processes remained live; both PTYs accepted post-fault input."
+          "durationSeconds": 33,
+          "summary": "The exact offscreen renderer process died while the headless main process, runtime, daemon, both original host tab-to-PTY bindings, and both original PTY processes remained live; repeated stability checkpoints beyond the reported nine-second interval retained post-fault I/O."
         }
       ],
       "runtimeBudget": {
         "p95Seconds": 60,
-        "scope": "one isolated headless Electron host, one offscreen renderer fault, and two daemon-backed PTY fixtures"
+        "scope": "one isolated headless Electron host, one offscreen renderer fault, two daemon-backed PTY fixtures, and a 12-second stability window"
       },
       "flakeHistory": {
         "status": "unknown",
@@ -2418,7 +2418,7 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The byte-identical oracle passes on reported v1.4.184 and current main, falsifying renderer-only death as the cause of runtime/session loss. The candidate adds characterization coverage only; reverting it removes the oracle without changing product behavior."
+        "evidence": "The byte-identical oracle passes on reported v1.4.184 and current main: renderer-only death did not reproduce runtime or session loss in the isolated host topology. The process or event that ended the reported unit remains unidentified. The candidate adds characterization coverage only; reverting it removes the oracle without changing product behavior."
       },
       "performanceBudget": {
         "required": false,
