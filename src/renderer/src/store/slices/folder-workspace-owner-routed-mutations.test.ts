@@ -7,6 +7,7 @@ import {
 } from '../../runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '../../runtime/runtime-rpc-client'
 import { createTestStore } from './store-test-helpers'
+import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 
 const folderWorkspacesUpdate = vi.fn()
 const folderWorkspacesDelete = vi.fn()
@@ -236,6 +237,48 @@ describe('folder workspace owner-routed mutations', () => {
 
     expect(store.getState().folderWorkspaces[0]?.isUnread).toBe(true)
     expect(store.getState().folderWorkspaces[0]?.updatedAt).toBe(2)
+  })
+
+  it('does not apply a stale catalog response after an unread update settles', async () => {
+    const folderWorkspace = makeFolderWorkspace()
+    let resolveUpdate!: (workspace: FolderWorkspace) => void
+    folderWorkspacesUpdate.mockImplementation(
+      () =>
+        new Promise<FolderWorkspace>((resolve) => {
+          resolveUpdate = resolve
+        })
+    )
+    let resolveListing!: (workspaces: FolderWorkspace[]) => void
+    folderWorkspacesList.mockImplementation(
+      () =>
+        new Promise<FolderWorkspace[]>((resolve) => {
+          resolveListing = resolve
+        })
+    )
+    const store = createTestStore()
+    store.setState({
+      projectGroups: [{ ...projectGroup, executionHostId: 'local' }],
+      folderWorkspaces: [folderWorkspace]
+    })
+
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10)
+    try {
+      store.getState().markWorktreeUnread(folderWorkspaceKey(folderWorkspace.id))
+    } finally {
+      now.mockRestore()
+    }
+    const pendingCatalog = store.getState().fetchFolderWorkspaces()
+    await vi.waitFor(() => expect(folderWorkspacesList).toHaveBeenCalledTimes(1))
+    resolveUpdate({ ...folderWorkspace, isUnread: true, lastActivityAt: 10, updatedAt: 2 })
+    await vi.waitFor(() => expect(store.getState().folderWorkspaces[0]?.updatedAt).toBe(2))
+    resolveListing([folderWorkspace])
+    await pendingCatalog
+
+    expect(store.getState().folderWorkspaces[0]).toMatchObject({
+      isUnread: true,
+      lastActivityAt: 10,
+      updatedAt: 2
+    })
   })
 
   it('does not fence a runtime update when the local same-ID catalog refreshes', async () => {

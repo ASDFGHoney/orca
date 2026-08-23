@@ -425,7 +425,7 @@ export function createAgentCompletionCoordinator(
     if (requiresFreshWorking || lastCompletedTurn === currentTurn) {
       return false
     }
-    if (!options.isLive() || !hasAgentRunEvidence) {
+    if (!options.isLive(optionsOverride.agentStatus) || !hasAgentRunEvidence) {
       return false
     }
     const now = Date.now()
@@ -475,6 +475,13 @@ export function createAgentCompletionCoordinator(
         quietedHookDone: false,
         agentStatus: optionsOverride.agentStatus
       })
+    } else if (optionsOverride.agentStatus?.remotePaneEvidence) {
+      // Why: a raw remote frame may precede store hydration, so its pane proof must reach the dispatch gate.
+      options.dispatchCompletion(title, {
+        source,
+        quietedHookDone: false,
+        agentStatus: optionsOverride.agentStatus
+      })
     } else {
       options.dispatchCompletion(title)
     }
@@ -489,7 +496,7 @@ export function createAgentCompletionCoordinator(
   }
 
   function dispatchAttention(payload: AgentCompletionStatusSnapshot): void {
-    if (!options.dispatchAttention || !options.isLive() || !hasAgentRunEvidence) {
+    if (!options.dispatchAttention || !options.isLive(payload) || !hasAgentRunEvidence) {
       return
     }
     const token = hookAttentionToken(payload)
@@ -504,7 +511,7 @@ export function createAgentCompletionCoordinator(
       clearPendingCodexAttention()
       pendingCodexAttentionTimer = setTimeout(() => {
         pendingCodexAttentionTimer = null
-        if (!options.isLive() || !hasAgentRunEvidence) {
+        if (!options.isLive(payload) || !hasAgentRunEvidence) {
           return
         }
         dispatchAttentionNotification(payload)

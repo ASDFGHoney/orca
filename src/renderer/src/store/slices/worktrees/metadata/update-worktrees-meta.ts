@@ -4,7 +4,7 @@ import { applyWorktreeUpdates, getRepoIdFromWorktreeId } from '../../worktree-he
 import { applyDetectedWorktreeUpdates } from '../listing/detected-worktree-meta'
 import { persistWorktreeMeta } from './worktree-meta-persist'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
-import { settingsForWorktreeOwner } from '../listing/worktree-owner-settings'
+import { worktreeMetaPersistenceOwner } from '../listing/worktree-owner-settings'
 
 export function createUpdateWorktreesMeta(
   set: WorktreeSliceSet,
@@ -43,7 +43,7 @@ export function createUpdateWorktreesMeta(
       Array.from(updatesByWorktreeId, async ([worktreeId, updates]) => {
         try {
           await persistWorktreeMeta(
-            settingsForWorktreeOwner(get(), worktreeId),
+            worktreeMetaPersistenceOwner(get(), worktreeId),
             worktreeId,
             updates
           )

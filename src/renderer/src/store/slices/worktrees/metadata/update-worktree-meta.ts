@@ -24,8 +24,8 @@ import {
 import { persistWorktreeMeta } from './worktree-meta-persist'
 import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
 import {
-  settingsForWorktreeOwner,
-  trySettingsForWorktreeOwner
+  trySettingsForWorktreeOwner,
+  worktreeMetaPersistenceOwner
 } from '../listing/worktree-owner-settings'
 
 export function createUpdateWorktreeMeta(
@@ -231,7 +231,11 @@ export function createUpdateWorktreeMeta(
     }
 
     try {
-      await persistWorktreeMeta(settingsForWorktreeOwner(get(), worktreeId), worktreeId, enriched)
+      await persistWorktreeMeta(
+        worktreeMetaPersistenceOwner(get(), worktreeId),
+        worktreeId,
+        enriched
+      )
       if (
         !options?.suppressHostedReviewRefresh &&
         reviewRepo &&

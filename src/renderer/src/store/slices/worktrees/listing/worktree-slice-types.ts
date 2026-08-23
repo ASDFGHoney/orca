@@ -13,6 +13,7 @@ import type { HostQualifiedDetectedWorktreeResult } from '../../../../../../shar
 import type { ProjectHostSetup } from '../../../../../../shared/project-types'
 import type { WorktreeLineage } from '../../../../../../shared/worktree/lineage-types'
 import type { getActiveRuntimeTarget } from '../../../../runtime/runtime-rpc-client'
+import type { PassiveWorktreeMetaRequestFence } from '../metadata/passive-worktree-meta-mutation'
 
 export type WorktreeSliceGet = Parameters<StateCreator<AppState>>[1]
 export type WorktreeSliceSet = Parameters<StateCreator<AppState, [], [], WorktreeSlice>>[0]
@@ -91,6 +92,8 @@ export type FencedWorktreeMergeArgs = {
   ownerWasMissingAtStart: boolean
   missingDirectSshOwnerReposSnapshot?: AppState['repos']
   requestStartedWorktrees: readonly Worktree[] | undefined
+  requestStartedDetectedWorktrees: readonly Worktree[] | undefined
+  requestStartedPassiveMetaFences: ReadonlyMap<string, PassiveWorktreeMetaRequestFence>
   setup?: ProjectHostSetup
   refresh: AdmittedDetectedWorktreeRefresh
   purgeRemovedWorktrees?: boolean

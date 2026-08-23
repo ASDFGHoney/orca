@@ -25,6 +25,11 @@ import {
   rememberAuthoritativelyRemovedWorktrees
 } from './authoritative-worktree-removal-memory'
 import type { FencedWorktreeMergeArgs } from './worktree-slice-types'
+import {
+  forgetPassiveWorktreeMetaMutations,
+  shouldPreservePassiveWorktreeMetaField,
+  type PassiveWorktreeMetaRequestFence
+} from '../metadata/passive-worktree-meta-mutation'
 
 export function preserveConcurrentManualOrder<T extends Worktree>(
   incoming: readonly T[],
@@ -52,6 +57,51 @@ export function preserveConcurrentManualOrder<T extends Worktree>(
   })
 }
 
+export function preserveConcurrentWorktreeActivity<T extends Worktree>(
+  incoming: readonly T[],
+  requestStarted: readonly Worktree[] | undefined,
+  current: readonly Worktree[] | undefined,
+  executionHostId: FencedWorktreeMergeArgs['hostId'],
+  requestStartedFences: ReadonlyMap<string, PassiveWorktreeMetaRequestFence>,
+  matchesRefreshHost: (worktree: Worktree) => boolean
+): T[] {
+  if (!requestStarted || !current) {
+    return [...incoming]
+  }
+  const startedById = new Map(
+    requestStarted.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
+  )
+  const currentById = new Map(
+    current.filter(matchesRefreshHost).map((worktree) => [worktree.id, worktree])
+  )
+  return incoming.map((worktree) => {
+    const started = startedById.get(worktree.id)
+    const latest = currentById.get(worktree.id)
+    if (!started || !latest) {
+      return worktree
+    }
+    const requestFence = requestStartedFences.get(worktree.id)
+    const unreadChanged =
+      started.isUnread !== latest.isUnread ||
+      shouldPreservePassiveWorktreeMetaField(executionHostId, worktree.id, 'isUnread', requestFence)
+    const activityChanged =
+      started.lastActivityAt !== latest.lastActivityAt ||
+      shouldPreservePassiveWorktreeMetaField(
+        executionHostId,
+        worktree.id,
+        'lastActivityAt',
+        requestFence
+      )
+    return unreadChanged || activityChanged
+      ? {
+          ...worktree,
+          ...(unreadChanged ? { isUnread: latest.isUnread } : {}),
+          ...(activityChanged ? { lastActivityAt: latest.lastActivityAt } : {})
+        }
+      : worktree
+  })
+}
+
 export function mergeFetchedWorktrees(
   set: Parameters<StateCreator<AppState, [], [], WorktreeSlice>>[0],
   args: FencedWorktreeMergeArgs
@@ -75,13 +125,31 @@ export function mergeFetchedWorktrees(
     admitted = true
     const matchOptions = worktreeHostMatchOptions(s, args.repoId, args.hostId)
     const currentWorktrees = s.worktreesByRepo[args.repoId]
+    const requestStartedKnownWorktrees = [
+      ...(args.requestStartedDetectedWorktrees ?? []),
+      ...(args.requestStartedWorktrees ?? [])
+    ]
+    const currentKnownWorktrees = [
+      ...(s.detectedWorktreesByRepo[args.repoId]?.worktrees ?? []),
+      ...(currentWorktrees ?? [])
+    ]
+    const matchesRefreshHost = (worktree: Worktree): boolean =>
+      worktreeMatchesHost(worktree, args.hostId, matchOptions)
+    const orderedWorktrees = preserveConcurrentManualOrder(
+      args.refresh.result.worktrees,
+      args.requestStartedWorktrees,
+      currentWorktrees,
+      matchesRefreshHost
+    )
     const refreshResult = {
       ...args.refresh.result,
-      worktrees: preserveConcurrentManualOrder(
-        args.refresh.result.worktrees,
-        args.requestStartedWorktrees,
-        currentWorktrees,
-        (worktree) => worktreeMatchesHost(worktree, args.hostId, matchOptions)
+      worktrees: preserveConcurrentWorktreeActivity(
+        orderedWorktrees,
+        requestStartedKnownWorktrees,
+        currentKnownWorktrees,
+        args.hostId,
+        args.requestStartedPassiveMetaFences,
+        matchesRefreshHost
       )
     }
     let incoming = toVisibleWorktrees(refreshResult, args.hostId, args.setup)
@@ -170,6 +238,7 @@ export function mergeFetchedWorktrees(
     forgetAuthoritativelyRemovedWorktrees(args.hostId, authoritativelySeenIds)
     rememberAuthoritativelyRemovedWorktrees(args.hostId, authoritativelyRemovedIds)
     forgetPersistedWorktreeMetaForRemovals(args.repoId, args.hostId, authoritativelyRemovedIds)
+    forgetPassiveWorktreeMetaMutations(args.hostId, authoritativelyRemovedIds)
   }
   return admitted
 }

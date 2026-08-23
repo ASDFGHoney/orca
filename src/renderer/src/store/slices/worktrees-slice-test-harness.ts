@@ -29,6 +29,7 @@ import {
   TEST_SSH_AUTHORITY
 } from './worktrees-detected-listing-fixtures'
 import { makeWorktree } from './worktrees-slice-test-fixtures'
+import { resetPassiveWorktreeMetaMutationsForTests } from './worktrees/metadata/passive-worktree-meta-mutation'
 
 /** Bare `vi.fn()` infers @vitest/spy's un-nameable `Procedure`, which breaks declaration emit. */
 export type StubMock<TArgs extends unknown[] = never[]> = Mock<(...args: TArgs) => unknown>
@@ -218,6 +219,7 @@ export function createLocalLineageTestStore(lineage: WorktreeLineage) {
 // Why: both the metadata fallback and removeWorktree write this module-level memory, so a leaked entry from an
 // earlier describe would silently suppress a row here. Reset for every case, not just the fetch suites.
 export function resetWorktreeSliceModuleMemory() {
+  resetPassiveWorktreeMetaMutationsForTests()
   resetAuthoritativelyRemovedWorktreeMemoryForTests()
   mockApi.worktrees.create.mockReset()
   mockApi.worktrees.adoptProvisionedRoot.mockReset()

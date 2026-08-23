@@ -15,6 +15,7 @@ import {
 import { WORKTREE_REMOVAL_AMBIGUOUS_ERROR } from './worktree-slice-constants'
 import { isRuntimeSelectorNotFoundError } from './runtime-worktree-rpc-errors'
 import { persistWorktreeMeta } from '../metadata/worktree-meta-persist'
+import type { WorktreeMetaPersistenceOwner } from '../metadata/worktree-meta-persist'
 import type { WorktreeSliceGet } from './worktree-slice-types'
 
 export function replaceWorktreeInRepoLists(
@@ -99,11 +100,7 @@ export function trySettingsForWorktreeOwner(
   >,
   worktreeId: string
 ): AppState['settings'] | null {
-  const route = resolveWorktreeOperationRoute(state, worktreeId)
-  if (!route) {
-    return null
-  }
-  return settingsForWorktreeOperationRoute(state.settings, route)
+  return tryWorktreeMetaPersistenceOwner(state, worktreeId)?.settings ?? null
 }
 
 export function settingsForWorktreeOwner(
@@ -115,6 +112,31 @@ export function settingsForWorktreeOwner(
     throw new Error(WORKTREE_REMOVAL_AMBIGUOUS_ERROR)
   }
   return settings
+}
+
+export function tryWorktreeMetaPersistenceOwner(
+  state: Parameters<typeof trySettingsForWorktreeOwner>[0],
+  worktreeId: string
+): WorktreeMetaPersistenceOwner | null {
+  const route = resolveWorktreeOperationRoute(state, worktreeId)
+  if (!route) {
+    return null
+  }
+  return {
+    settings: settingsForWorktreeOperationRoute(state.settings, route),
+    executionHostId: route.executionHostId ?? 'local'
+  }
+}
+
+export function worktreeMetaPersistenceOwner(
+  state: Parameters<typeof trySettingsForWorktreeOwner>[0],
+  worktreeId: string
+): WorktreeMetaPersistenceOwner {
+  const owner = tryWorktreeMetaPersistenceOwner(state, worktreeId)
+  if (!owner) {
+    throw new Error(WORKTREE_REMOVAL_AMBIGUOUS_ERROR)
+  }
+  return owner
 }
 
 // Why: activity bumps fire on every PTY event, so an ambiguous workspace would warn continuously.
@@ -133,16 +155,19 @@ export function persistPassiveWorktreeMetaForOwner(
   get: WorktreeSliceGet,
   worktreeId: string,
   updates: Partial<WorktreeMeta>,
-  errorLabel: string
+  errorLabel: string,
+  options: { refreshOnSelectorMiss?: boolean } = {}
 ): void {
-  const ownerSettings = trySettingsForWorktreeOwner(get(), worktreeId)
-  if (!ownerSettings) {
+  const owner = tryWorktreeMetaPersistenceOwner(get(), worktreeId)
+  if (!owner) {
     warnAmbiguousOwnerOnce(worktreeId, errorLabel)
     return
   }
-  void persistWorktreeMeta(ownerSettings, worktreeId, updates).catch((err) => {
+  void persistWorktreeMeta(owner, worktreeId, updates).catch((err) => {
     if (isRuntimeSelectorNotFoundError(err)) {
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      if (options.refreshOnSelectorMiss !== false) {
+        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      }
       return
     }
     console.error(`Failed to ${errorLabel}:`, err)

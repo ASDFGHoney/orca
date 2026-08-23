@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
-import { createWebSessionTabsNotificationReconciler } from './web-session-tabs-notification-reconciler'
+import {
+  createWebSessionTabsNotificationReconciler,
+  getWebSessionTabsNotificationPaneEvidenceState
+} from './web-session-tabs-notification-reconciler'
 
 function snapshot(
   worktree: string,
@@ -23,6 +26,7 @@ describe('web session-tabs notification reconciler', () => {
     const observeAcceptedSnapshot = vi.fn()
     const reconciler = createWebSessionTabsNotificationReconciler({
       trackedWorktrees: [],
+      getPaneKeys: () => [],
       observeAcceptedSnapshot
     })
 
@@ -32,11 +36,13 @@ describe('web session-tabs notification reconciler', () => {
 
     expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(1, expect.anything(), {
       seedOnly: true,
-      attentionRequired: false
+      attentionRequired: false,
+      paneEvidenceByKey: expect.any(Map)
     })
     expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(2, expect.anything(), {
       seedOnly: false,
-      attentionRequired: false
+      attentionRequired: false,
+      paneEvidenceByKey: expect.any(Map)
     })
     expect(observeAcceptedSnapshot).toHaveBeenCalledTimes(2)
   })
@@ -45,25 +51,23 @@ describe('web session-tabs notification reconciler', () => {
     const observeAcceptedSnapshot = vi.fn()
     const reconciler = createWebSessionTabsNotificationReconciler({
       trackedWorktrees: [],
+      getPaneKeys: () => [],
       observeAcceptedSnapshot
     })
 
-    reconciler.observeInventory([snapshot('wt-a', 1)], {
-      armPublished: true,
-      attentionRequired: true
-    })
-    reconciler.observeInventory([snapshot('wt-a', 2)], {
-      armPublished: true,
-      attentionRequired: true
-    })
+    reconciler.observeInventory([snapshot('wt-a', 1)], { armPublished: true })
+    reconciler.beginVisibilityResume()
+    reconciler.observeInventory([snapshot('wt-a', 2)], { armPublished: true })
 
     expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(1, expect.anything(), {
       seedOnly: true,
-      attentionRequired: false
+      attentionRequired: false,
+      paneEvidenceByKey: expect.any(Map)
     })
     expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(2, expect.anything(), {
       seedOnly: false,
-      attentionRequired: true
+      attentionRequired: true,
+      paneEvidenceByKey: expect.any(Map)
     })
   })
 
@@ -71,6 +75,7 @@ describe('web session-tabs notification reconciler', () => {
     const observeAcceptedSnapshot = vi.fn()
     const reconciler = createWebSessionTabsNotificationReconciler({
       trackedWorktrees: [{ worktree: 'wt-a', freshness: snapshot('wt-a', 1) }],
+      getPaneKeys: () => [],
       observeAcceptedSnapshot
     })
 
@@ -79,7 +84,8 @@ describe('web session-tabs notification reconciler', () => {
 
     expect(observeAcceptedSnapshot).toHaveBeenCalledWith(expect.anything(), {
       seedOnly: true,
-      attentionRequired: false
+      attentionRequired: false,
+      paneEvidenceByKey: expect.any(Map)
     })
   })
 
@@ -90,11 +96,89 @@ describe('web session-tabs notification reconciler', () => {
         { worktree: 'wt-a', freshness: snapshot('wt-a', 1) },
         { worktree: 'wt-b', freshness: snapshot('wt-b', 1) }
       ],
+      getPaneKeys: () => [],
       observeAcceptedSnapshot: (value) => observed.push(value.worktree)
     })
 
     reconciler.observeSnapshot(snapshot('wt-b', 2))
 
     expect(observed).toEqual(['wt-b'])
+  })
+
+  it('treats a new worktree during a warm resume as recovered attention', () => {
+    const observeAcceptedSnapshot = vi.fn()
+    const reconciler = createWebSessionTabsNotificationReconciler({
+      trackedWorktrees: [],
+      getPaneKeys: () => [],
+      observeAcceptedSnapshot
+    })
+
+    reconciler.beginVisibilityResume()
+    reconciler.observeInventory([snapshot('wt-new', 1)], { armPublished: true })
+
+    expect(observeAcceptedSnapshot).toHaveBeenCalledWith(expect.anything(), {
+      seedOnly: false,
+      attentionRequired: true,
+      paneEvidenceByKey: expect.any(Map)
+    })
+  })
+
+  it('keeps rejected worktrees outside notification ownership', () => {
+    const observeAcceptedSnapshot = vi.fn()
+    const reconciler = createWebSessionTabsNotificationReconciler({
+      trackedWorktrees: [],
+      acceptsSnapshot: (value) => value.worktree !== 'unmirrored',
+      getPaneKeys: () => [],
+      observeAcceptedSnapshot
+    })
+
+    reconciler.observeSnapshot(snapshot('unmirrored', 1))
+    reconciler.observeInventory([snapshot('unmirrored', 2)], { armPublished: true })
+
+    expect(observeAcceptedSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('requires store liveness after pane evidence commits', () => {
+    let evidence: Parameters<typeof getWebSessionTabsNotificationPaneEvidenceState>[0] | undefined
+    const value = snapshot('wt-a', 1)
+    const reconciler = createWebSessionTabsNotificationReconciler({
+      trackedWorktrees: [],
+      getPaneKeys: () => ['pane-a'],
+      observeAcceptedSnapshot: (_snapshot, observation) => {
+        evidence = observation.paneEvidenceByKey.get('pane-a')
+      }
+    })
+
+    reconciler.observeSnapshot(value)
+    expect(evidence).toBeDefined()
+    expect(getWebSessionTabsNotificationPaneEvidenceState(evidence!, 'pane-a')).toBe('uncommitted')
+
+    reconciler.markSnapshotCommitted(value)
+    expect(getWebSessionTabsNotificationPaneEvidenceState(evidence!, 'pane-a')).toBe('committed')
+  })
+
+  it('arms inventory that arrives after subscription failure without notifying its cold state', () => {
+    const observeAcceptedSnapshot = vi.fn()
+    const reconciler = createWebSessionTabsNotificationReconciler({
+      trackedWorktrees: [],
+      getPaneKeys: () => [],
+      observeAcceptedSnapshot
+    })
+
+    reconciler.armPresentWorktrees()
+    reconciler.observeInventory([snapshot('wt-a', 1)], { armPublished: false })
+    reconciler.beginVisibilityResume()
+    reconciler.observeInventory([snapshot('wt-a', 2)], { armPublished: true })
+
+    expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(1, expect.anything(), {
+      seedOnly: true,
+      attentionRequired: false,
+      paneEvidenceByKey: expect.any(Map)
+    })
+    expect(observeAcceptedSnapshot).toHaveBeenNthCalledWith(2, expect.anything(), {
+      seedOnly: false,
+      attentionRequired: true,
+      paneEvidenceByKey: expect.any(Map)
+    })
   })
 })

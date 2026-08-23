@@ -23,6 +23,7 @@ import { mergeFetchedWorktrees } from './fetched-worktree-merge'
 import { notifyRuntimeScopeForbiddenIfNeeded } from './runtime-scope-forbidden-toast'
 import { refreshRemoteWorktreeLineageBestEffort } from '../metadata/worktree-lineage-refresh'
 import { settingsForRepoOwner } from './worktree-owner-settings'
+import { capturePassiveWorktreeMetaRequestFences } from '../metadata/passive-worktree-meta-mutation'
 
 export function createFetchWorktrees(
   set: WorktreeSliceSet,
@@ -37,6 +38,7 @@ export function createFetchWorktrees(
     try {
       const ownerState = get()
       const requestStartedWorktrees = ownerState.worktreesByRepo[repoId]
+      const requestStartedDetectedWorktrees = ownerState.detectedWorktreesByRepo[repoId]?.worktrees
       const repoOwners = ownerState.repos.filter((repo) => repo.id === repoId)
       const ownerWasMissingAtStart = repoOwners.length === 0
       const hasLocalOwner = repoOwners.some(
@@ -49,6 +51,12 @@ export function createFetchWorktrees(
       const hostId = useLocalOwner
         ? LOCAL_EXECUTION_HOST_ID
         : repoHostId(ownerState, repoId, options?.executionHostId)
+      const requestStartedPassiveMetaFences = capturePassiveWorktreeMetaRequestFences(
+        hostId,
+        [...(requestStartedDetectedWorktrees ?? []), ...(requestStartedWorktrees ?? [])].map(
+          (worktree) => worktree.id
+        )
+      )
       const setup = getProjectHostSetupForRepoHost(ownerState, repoId, hostId)
       const repoOwner = findRepoForHost(ownerState.repos, repoId, {
         hostId,
@@ -99,6 +107,8 @@ export function createFetchWorktrees(
             ? ownerState.repos
             : undefined,
         requestStartedWorktrees,
+        requestStartedDetectedWorktrees,
+        requestStartedPassiveMetaFences,
         setup,
         refresh
       })

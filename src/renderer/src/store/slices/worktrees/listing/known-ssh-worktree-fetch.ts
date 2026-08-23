@@ -29,6 +29,7 @@ import {
 import { isDetectedWorktreeListResult } from './detected-worktree-provider-request'
 import { staleDetectedWorktreeProviderResult } from './detected-worktree-refresh-admission'
 import { mergeFetchedWorktrees } from './fetched-worktree-merge'
+import { capturePassiveWorktreeMetaRequestFences } from '../metadata/passive-worktree-meta-mutation'
 import { getAuthoritativelyRemovedWorktreeIds } from './authoritative-worktree-removal-memory'
 import type {
   AdmittedDetectedWorktreeRefresh,
@@ -202,6 +203,14 @@ export function acquireDirectSshDetectedWorktreeRefresh(
 ): DirectSshDetectedWorktreeRefresh {
   const requestStartedState = store.getState()
   const requestStartedWorktrees = requestStartedState.worktreesByRepo[request.repoId]
+  const requestStartedDetectedWorktrees =
+    requestStartedState.detectedWorktreesByRepo[request.repoId]?.worktrees
+  const requestStartedPassiveMetaFences = capturePassiveWorktreeMetaRequestFences(
+    request.executionHostId,
+    [...(requestStartedDetectedWorktrees ?? []), ...(requestStartedWorktrees ?? [])].map(
+      (worktree) => worktree.id
+    )
+  )
   const ownerWasMissingAtStart = !requestStartedState.repos.some(
     (repo) => repo.id === request.repoId
   )
@@ -265,6 +274,8 @@ export function acquireDirectSshDetectedWorktreeRefresh(
           hostId: request.executionHostId,
           ownerWasMissingAtStart,
           requestStartedWorktrees,
+          requestStartedDetectedWorktrees,
+          requestStartedPassiveMetaFences,
           setup,
           refresh
         }

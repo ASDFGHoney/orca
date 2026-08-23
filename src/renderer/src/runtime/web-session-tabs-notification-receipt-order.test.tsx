@@ -513,4 +513,110 @@ describe('paired session-tab notification receipt ordering', () => {
     expect(getUnreadBadgeCount(useAppStore.getState())).toBe(0)
     hook.unmount()
   })
+
+  it('closes recovered attention after unchanged active and global resume frames', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribe', 1), {
+      type: 'snapshot',
+      ...snapshot(1, 'working', NOW)
+    })
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'working', NOW)]
+    })
+    notificationDispatch.mockClear()
+    mocks.observeAgentHookCompletionForNotification.mockClear()
+
+    await publish(findSubscription('session.tabs.subscribe', 1), {
+      type: 'updated',
+      ...snapshot(2, 'done', NOW + 1_000)
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.not.objectContaining({ attentionRequired: true })
+      })
+    )
+    hook.unmount()
+  })
+
+  it('preserves recovered attention when reconnect listAll wins the resume race', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    act(() => {
+      setDocumentVisibility('hidden')
+      vi.advanceTimersByTime(WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS)
+    })
+    runtimeCall.mockResolvedValueOnce({
+      id: 'resume-list-all',
+      ok: true,
+      result: { snapshots: [snapshot(2, 'done', NOW + 1_000)] },
+      _meta: { runtimeId: RUNTIME_ID }
+    })
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
+    hook.rerender()
+    act(() => setDocumentVisibility('visible'))
+    await act(settle)
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ attentionRequired: true })
+      })
+    )
+    hook.unmount()
+  })
+
+  it('keeps hidden attention when global resume fails before the active frame', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await act(async () => {
+      findSubscription('session.tabs.subscribeAll', 1).callbacks.onResponse({
+        id: 'failed-global-resume',
+        ok: false,
+        error: { code: 'disconnected', message: 'global resume failed' },
+        _meta: { runtimeId: RUNTIME_ID }
+      })
+      await settle()
+    })
+    await publish(findSubscription('session.tabs.subscribe', 1), {
+      type: 'snapshot',
+      ...snapshot(2, 'done', NOW + 1_000)
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ attentionRequired: true }) })
+    )
+    expect(getUnreadBadgeCount(useAppStore.getState())).toBe(1)
+    hook.unmount()
+  })
 })

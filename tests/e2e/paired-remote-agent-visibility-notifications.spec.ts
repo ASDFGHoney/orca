@@ -6,8 +6,10 @@ import type { AgentHookEndpoint } from '../../src/shared/agent-hook-endpoint-fil
 import type { RuntimeMobileSessionTabsResult } from '../../src/shared/runtime-types'
 import { makePaneKey } from '../../src/shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
-import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS } from '../../src/renderer/src/runtime/window-visibility-subscription-parking'
-import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_BACKOFF_LIMIT } from '../../src/renderer/src/runtime/window-visibility-subscription-parking'
+import {
+  WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_BACKOFF_LIMIT,
+  WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS
+} from '../../src/renderer/src/runtime/window-visibility-subscription-parking'
 import { expect, test } from './helpers/orca-app'
 import { readHookEndpoint } from './helpers/agent-hook-endpoint'
 import {
@@ -183,6 +185,20 @@ async function unreadBadgeState(
   }, worktreeId)
   const dock = await client.app.evaluate(({ app }) => app.dock?.getBadge() ?? null)
   return { ...renderer, dock }
+}
+
+async function expectUnreadBadgeRetained(
+  client: PairedElectronClient,
+  worktreeId: string
+): Promise<void> {
+  const expected = {
+    unread: true,
+    unreadCount: 1,
+    dock: process.platform === 'darwin' ? '1' : null
+  }
+  await expect.poll(() => unreadBadgeState(client, worktreeId)).toMatchObject(expected)
+  await client.page.waitForTimeout(1_000)
+  expect(await unreadBadgeState(client, worktreeId)).toMatchObject(expected)
 }
 
 async function hideUntilSubscriptionsPark(client: PairedElectronClient): Promise<void> {
@@ -472,13 +488,7 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
           attentionRequired: true
         })
       ])
-    await expect
-      .poll(() => unreadBadgeState(client!, worktreeId))
-      .toMatchObject({
-        unread: true,
-        unreadCount: 1,
-        dock: process.platform === 'darwin' ? '1' : null
-      })
+    await expectUnreadBadgeRetained(client, worktreeId)
     await expect(
       client.page.locator(`[data-worktree-id=${JSON.stringify(worktreeId)}]`).first()
     ).toContainText('Done')
@@ -531,13 +541,7 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
         expect.objectContaining({ agentState: 'done', worktreeId }),
         expect.objectContaining({ agentState: 'waiting', worktreeId, attentionRequired: true })
       ])
-    await expect
-      .poll(() => unreadBadgeState(client!, worktreeId))
-      .toMatchObject({
-        unread: true,
-        unreadCount: 1,
-        dock: process.platform === 'darwin' ? '1' : null
-      })
+    await expectUnreadBadgeRetained(client, worktreeId)
     await expect(
       client.page.locator(`[data-worktree-id=${JSON.stringify(worktreeId)}]`).first()
     ).toContainText('Needs permission')

@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../types'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { clearHugeRepoWarningDismissalsForTests } from '@/lib/source-control-huge-repo-warning-dismissals'
-import { makeDetectedResult } from './worktrees-detected-listing-fixtures'
+import { makeDetectedResult, qualifyDetectedResult } from './worktrees-detected-listing-fixtures'
 import { makeWorktree } from './worktrees-slice-test-fixtures'
 import {
   createTestStore,
+  listDetectedMock,
   mockApi,
   resetRemoteRuntimeMocks,
   resetWorktreeSliceModuleMemory,
@@ -301,6 +302,207 @@ describe('fetchWorktrees', () => {
         .detectedWorktreesByRepo.repo1.worktrees.map((worktree) => worktree.manualOrder)
     ).toEqual([100, 200])
     expect(store.getState().worktreesByRepo.repo1[0]?.head).toBe('def456')
+  })
+
+  it('does not merge stale unread activity over a notification received during refresh', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/path/attention',
+      repoId: 'repo1',
+      path: '/path/attention',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+    const detected = makeDetectedResult('repo1', [worktree])
+    let resolveListing!: (worktrees: Worktree[]) => void
+    const listing = new Promise<Worktree[]>((resolve) => {
+      resolveListing = resolve
+    })
+    worktreeListMock.mockReturnValueOnce(listing)
+    store.setState({
+      worktreesByRepo: { repo1: [worktree] },
+      detectedWorktreesByRepo: { repo1: detected }
+    } as Partial<AppState>)
+
+    const refresh = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(1))
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      store.getState().markWorktreeUnread(worktree.id)
+      resolveListing([{ ...worktree, head: 'fresh-head' }])
+      await refresh
+    } finally {
+      now.mockRestore()
+    }
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      head: 'fresh-head',
+      isUnread: true,
+      lastActivityAt: 1_000
+    })
+    expect(store.getState().detectedWorktreesByRepo.repo1.worktrees[0]).toMatchObject({
+      head: 'fresh-head',
+      isUnread: true,
+      lastActivityAt: 1_000
+    })
+  })
+
+  it('fences a listing started while unread persistence is still in flight', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/path/pending-attention',
+      repoId: 'repo1',
+      path: '/path/pending-attention',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+    let settlePersistence!: () => void
+    mockApi.worktrees.updateMeta.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        settlePersistence = resolve
+      })
+    )
+    store.setState({
+      worktreesByRepo: { repo1: [worktree] },
+      detectedWorktreesByRepo: { repo1: makeDetectedResult('repo1', [worktree]) }
+    } as Partial<AppState>)
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      store.getState().markWorktreeUnread(worktree.id)
+    } finally {
+      now.mockRestore()
+    }
+    worktreeListMock.mockResolvedValueOnce([{ ...worktree, head: 'pending-head' }])
+
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      head: 'pending-head',
+      isUnread: true,
+      lastActivityAt: 1_000
+    })
+    settlePersistence()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    worktreeListMock.mockResolvedValueOnce([{ ...worktree, head: 'settled-head' }])
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      head: 'settled-head',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+  })
+
+  it('fences a stale listing that resolves after unread persistence settles', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/path/settled-attention',
+      repoId: 'repo1',
+      path: '/path/settled-attention',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+    let settlePersistence!: () => void
+    mockApi.worktrees.updateMeta.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        settlePersistence = resolve
+      })
+    )
+    let resolveListing!: (worktrees: Worktree[]) => void
+    worktreeListMock.mockReturnValueOnce(
+      new Promise<Worktree[]>((resolve) => {
+        resolveListing = resolve
+      })
+    )
+    store.setState({
+      worktreesByRepo: { repo1: [worktree] },
+      detectedWorktreesByRepo: { repo1: makeDetectedResult('repo1', [worktree]) }
+    } as Partial<AppState>)
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      store.getState().markWorktreeUnread(worktree.id)
+    } finally {
+      now.mockRestore()
+    }
+
+    const refresh = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(worktreeListMock).toHaveBeenCalledTimes(1))
+    settlePersistence()
+    await Promise.resolve()
+    await Promise.resolve()
+    resolveListing([{ ...worktree, head: 'stale-head' }])
+    await refresh
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      head: 'stale-head',
+      isUnread: true,
+      lastActivityAt: 1_000
+    })
+  })
+
+  it('does not merge stale unread activity over a hidden detected row', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/path/hidden-attention',
+      repoId: 'repo1',
+      path: '/path/hidden-attention',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+    let releaseListing!: () => void
+    const listingGate = new Promise<void>((resolve) => {
+      releaseListing = resolve
+    })
+    listDetectedMock.mockImplementationOnce(async (args) => {
+      await listingGate
+      const result = makeDetectedResult('repo1', [worktree])
+      result.worktrees = [{ ...result.worktrees[0]!, visible: false, head: 'fresh-head' }]
+      return qualifyDetectedResult(args, result)
+    })
+    store.setState({
+      worktreesByRepo: { repo1: [] },
+      detectedWorktreesByRepo: { repo1: makeDetectedResult('repo1', [worktree]) }
+    } as Partial<AppState>)
+
+    const refresh = store.getState().fetchWorktrees('repo1')
+    await vi.waitFor(() => expect(listDetectedMock).toHaveBeenCalledTimes(1))
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      store.getState().markWorktreeUnread(worktree.id)
+      releaseListing()
+      await refresh
+    } finally {
+      now.mockRestore()
+    }
+
+    expect(store.getState().worktreesByRepo.repo1).toEqual([])
+    expect(store.getState().detectedWorktreesByRepo.repo1.worktrees[0]).toMatchObject({
+      head: 'fresh-head',
+      isUnread: true,
+      lastActivityAt: 1_000
+    })
+  })
+
+  it('accepts unread activity from a refresh when no local activity raced it', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/path/attention',
+      repoId: 'repo1',
+      path: '/path/attention',
+      isUnread: false,
+      lastActivityAt: 10
+    })
+    store.setState({ worktreesByRepo: { repo1: [worktree] } } as Partial<AppState>)
+    worktreeListMock.mockResolvedValueOnce([{ ...worktree, isUnread: true, lastActivityAt: 20 }])
+
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1[0]).toMatchObject({
+      isUnread: true,
+      lastActivityAt: 20
+    })
   })
 
   it('updates the repo entry when only the persisted base ref changes', async () => {

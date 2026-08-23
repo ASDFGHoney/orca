@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
 
@@ -29,6 +31,7 @@ import {
   recordReceivedWebSessionTabsSnapshot,
   resetWebSessionTabsSnapshotFreshnessForTests
 } from './web-session-tabs-sync'
+import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
 const ENVIRONMENT_ID = 'web-env-1'
 const WORKTREE_ID = 'repo::/worktree'
@@ -93,12 +96,14 @@ describe('paired session-tab agent completion notifications', () => {
     resetAgentCompletionCoordinatorIdentitiesForTest()
     resetWebSessionTabsSnapshotFreshnessForTests()
     resetRendererOwnedAgentStatusPanesForTests()
+    replaceRuntimeEnvironmentRevisions([])
     resetAgentCompletionCoordinatorIdentitiesForTest()
     useAppStore.setState(initialState, true)
   })
 
   afterEach(() => {
     useAppStore.setState(initialState, true)
+    replaceRuntimeEnvironmentRevisions([])
     resetWebSessionTabsSnapshotFreshnessForTests()
     resetRendererOwnedAgentStatusPanesForTests()
     vi.unstubAllGlobals()
@@ -157,6 +162,34 @@ describe('paired session-tab agent completion notifications', () => {
     applySnapshot(makeAgentSnapshot(2, NOW + 1_000, NOW + 1_000), true)
 
     expect(dispatchCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('seeds the first frame from a replacement pairing silently', () => {
+    replaceRuntimeEnvironmentRevisions([
+      { id: ENVIRONMENT_ID, createdAt: 100, pairingRevision: 101 }
+    ] as PublicKnownRuntimeEnvironment[])
+    applySnapshot(makeAgentSnapshot(1, NOW), false)
+
+    replaceRuntimeEnvironmentRevisions([
+      { id: ENVIRONMENT_ID, createdAt: 100, pairingRevision: 102 }
+    ] as PublicKnownRuntimeEnvironment[])
+    recordReceivedWebSessionTabsSnapshot(ENVIRONMENT_ID, {
+      ...makeAgentSnapshot(1, NOW + 1_000, undefined, 'done'),
+      publicationEpoch: 'replacement-epoch'
+    })
+
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ seedOnly: true })
+    )
+  })
+
+  it('does not admit an unmirrored floating workspace to notification derivation', () => {
+    recordReceivedWebSessionTabsSnapshot(ENVIRONMENT_ID, {
+      ...makeAgentSnapshot(1, NOW, undefined, 'done'),
+      worktree: FLOATING_TERMINAL_WORKTREE_ID
+    })
+
+    expect(mocks.observeAgentHookCompletionForNotification).not.toHaveBeenCalled()
   })
 
   it('announces a host-stamped turn while client OSC status owns the pane', () => {

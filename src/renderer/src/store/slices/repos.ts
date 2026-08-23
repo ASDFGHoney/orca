@@ -1230,8 +1230,23 @@ function mergeFetchedFolderWorkspacesForHost({
   projectGroups: readonly ProjectGroup[]
   hostId: string
 }): readonly FolderWorkspace[] {
+  const previousByIdentity = new Map(
+    previous.map((workspace) => [
+      getFolderWorkspaceHostIdentity(workspace, projectGroups),
+      workspace
+    ])
+  )
+  const newestFetched = fetched.map((workspace) => {
+    const previousWorkspace = previousByIdentity.get(
+      getFolderWorkspaceHostIdentity(workspace, projectGroups)
+    )
+    // Why: concurrent one-shot RPCs can return an older list after a newer update acknowledgement.
+    return previousWorkspace && previousWorkspace.updatedAt > workspace.updatedAt
+      ? previousWorkspace
+      : workspace
+  })
   const fetchedIdentities = new Set(
-    fetched.map((workspace) => getFolderWorkspaceHostIdentity(workspace, projectGroups))
+    newestFetched.map((workspace) => getFolderWorkspaceHostIdentity(workspace, projectGroups))
   )
   const preserved = previous.filter((workspace) => {
     const existingHostId = getFolderWorkspaceHostId(workspace, projectGroups)
@@ -1243,7 +1258,7 @@ function mergeFetchedFolderWorkspacesForHost({
   return unchangedMergeSource(
     previous,
     preserved,
-    mergeByIdentity(preserved, fetched, (workspace) =>
+    mergeByIdentity(preserved, newestFetched, (workspace) =>
       getFolderWorkspaceHostIdentity(workspace, projectGroups)
     )
   )

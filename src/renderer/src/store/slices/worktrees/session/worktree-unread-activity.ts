@@ -1,7 +1,7 @@
 import type { WorktreeSlice } from '../../worktree-helpers'
 import type { WorktreeSliceGet, WorktreeSliceSet } from '../listing/worktree-slice-types'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
-import { applyWorktreeUpdates, getRepoIdFromWorktreeId } from '../../worktree-helpers'
+import { applyWorktreeUpdates } from '../../worktree-helpers'
 import { branchName } from '@/lib/git-utils'
 import { refreshHostedReviewCard } from '../../hosted-review'
 import {
@@ -9,13 +9,7 @@ import {
   findKnownWorktreeById
 } from '../listing/detected-worktree-meta'
 import { getFolderWorkspaceActivityPersistence } from './folder-workspace-activity'
-import {
-  persistPassiveWorktreeMetaForOwner,
-  trySettingsForWorktreeOwner,
-  warnAmbiguousOwnerOnce
-} from '../listing/worktree-owner-settings'
-import { persistWorktreeMeta } from '../metadata/worktree-meta-persist'
-import { isRuntimeSelectorNotFoundError } from '../listing/runtime-worktree-rpc-errors'
+import { persistPassiveWorktreeMetaForOwner } from '../listing/worktree-owner-settings'
 
 export function createMarkWorktreeUnread(
   set: WorktreeSliceSet,
@@ -293,19 +287,12 @@ export function createBumpWorktreeActivity(
       return
     }
 
-    const ownerSettings = trySettingsForWorktreeOwner(get(), worktreeId)
-    if (!ownerSettings) {
-      warnAmbiguousOwnerOnce(worktreeId, 'persist worktree activity timestamp')
-      return
-    }
-    void persistWorktreeMeta(ownerSettings, worktreeId, {
-      lastActivityAt: now
-    }).catch((err) => {
-      if (isRuntimeSelectorNotFoundError(err)) {
-        return
-      }
-      console.error('Failed to persist worktree activity timestamp:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
-    })
+    persistPassiveWorktreeMetaForOwner(
+      get,
+      worktreeId,
+      { lastActivityAt: now },
+      'persist worktree activity timestamp',
+      { refreshOnSelectorMiss: false }
+    )
   }
 }

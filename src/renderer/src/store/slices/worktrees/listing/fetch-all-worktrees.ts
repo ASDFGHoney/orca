@@ -18,6 +18,7 @@ import { mergeFetchedWorktrees } from './fetched-worktree-merge'
 import { notifyRuntimeScopeForbiddenIfNeeded } from './runtime-scope-forbidden-toast'
 import { mapReposForWorktreeRefresh } from './worktree-refresh-pool'
 import { settingsForKnownRepoOwner } from './worktree-owner-settings'
+import { capturePassiveWorktreeMetaRequestFences } from '../metadata/passive-worktree-meta-mutation'
 
 export function createFetchAllWorktrees(
   set: WorktreeSliceSet,
@@ -40,7 +41,15 @@ export function createFetchAllWorktrees(
         try {
           const requestStartedState = get()
           const requestStartedWorktrees = requestStartedState.worktreesByRepo[r.id]
+          const requestStartedDetectedWorktrees =
+            requestStartedState.detectedWorktreesByRepo[r.id]?.worktrees
           const hostId = getRepoExecutionHostId(r)
+          const requestStartedPassiveMetaFences = capturePassiveWorktreeMetaRequestFences(
+            hostId,
+            [...(requestStartedDetectedWorktrees ?? []), ...(requestStartedWorktrees ?? [])].map(
+              (worktree) => worktree.id
+            )
+          )
           const setup = getProjectHostSetupForRepoHost(requestStartedState, r.id, hostId)
           const settings = settingsForKnownRepoOwner(requestStartedState.settings, r)
           const parsedHost = parseExecutionHostId(hostId)
@@ -67,6 +76,8 @@ export function createFetchAllWorktrees(
             hostId,
             ownerWasMissingAtStart: false,
             requestStartedWorktrees,
+            requestStartedDetectedWorktrees,
+            requestStartedPassiveMetaFences,
             setup,
             refresh
           })
@@ -93,7 +104,15 @@ export function createFetchAllWorktrees(
         try {
           const requestStartedState = get()
           const requestStartedWorktrees = requestStartedState.worktreesByRepo[r.id]
+          const requestStartedDetectedWorktrees =
+            requestStartedState.detectedWorktreesByRepo[r.id]?.worktrees
           const hostId = getRepoExecutionHostId(r)
+          const requestStartedPassiveMetaFences = capturePassiveWorktreeMetaRequestFences(
+            hostId,
+            [...(requestStartedDetectedWorktrees ?? []), ...(requestStartedWorktrees ?? [])].map(
+              (worktree) => worktree.id
+            )
+          )
           const setup = getProjectHostSetupForRepoHost(requestStartedState, r.id, hostId)
           const parsedHost = parseExecutionHostId(hostId)
           const directSshAuthority =
@@ -123,6 +142,8 @@ export function createFetchAllWorktrees(
             hostId,
             ownerWasMissingAtStart: false,
             requestStartedWorktrees,
+            requestStartedDetectedWorktrees,
+            requestStartedPassiveMetaFences,
             setup,
             refresh,
             purgeRemovedWorktrees: false
