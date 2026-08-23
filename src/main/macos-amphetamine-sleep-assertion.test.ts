@@ -201,15 +201,63 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     expect(amphetamine.session).toBe('orca')
   })
 
-  it('does not claim a hold when the acquire output is unrecognized', async () => {
+  it.each([
+    ['output it cannot read', ok('garbage')],
+    ['a timeout', { code: null, stdout: '', stderr: '', timedOut: true }],
+    ['an unclassified error', failure('AppleEvent failed')]
+  ])('keeps cleanup responsibility when an acquire ends in %s', async (_label, result) => {
+    // `start new session` may have taken effect before the command failed.
+    // Forgetting it here would strand an indefinite session: a later stop would
+    // do nothing and quit would skip its release.
     const amphetamine = createFakeAmphetamine()
-    amphetamine.run.mockImplementation(async (_script: string) => ok('garbage'))
-    const assertion = createAssertion(amphetamine)
+    amphetamine.run.mockImplementation(async (_script: string) => result as OsascriptResult)
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+
+    expect(assertion.getHold()).toBe('owned')
+    // Claimed for cleanup only — it must never count as coverage.
+    expect(assertion.hasLiveHold()).toBe(false)
+  })
+
+  it.each([
+    ['the app is missing', failure('execution error: (-1728)')],
+    ['the grant is refused', failure('Not authorized to send Apple events. (-1743)')]
+  ])('claims nothing when %s, since no session can have started', async (_label, result) => {
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(async (_script: string) => result)
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
 
     assertion.start('agents-working')
     await settle()
 
     expect(assertion.getHold()).toBeNull()
+  })
+
+  it('stops vouching for its hold while a release is in flight', async () => {
+    const amphetamine = createFakeAmphetamine()
+    let finishRelease = (): void => {}
+    const assertion = createAssertion(amphetamine)
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.hasLiveHold()).toBe(true)
+
+    amphetamine.run.mockImplementation(
+      async (_script: string) =>
+        new Promise<OsascriptResult>((resolve) => {
+          finishRelease = () => resolve(ok('ended'))
+        })
+    )
+    assertion.stop('agents-idle')
+    await settle()
+
+    // The session is about to end, so a router reading this as live would drop
+    // its caffeinate stand-in and cover nothing until a re-acquire completes.
+    expect(assertion.hasLiveHold()).toBe(false)
+    finishRelease()
+    await settle()
   })
 
   it('does nothing off macOS', async () => {
