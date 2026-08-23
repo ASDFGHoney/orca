@@ -481,6 +481,35 @@ describe('paired session-tab visibility-resume notifications', () => {
     hook.unmount()
   })
 
+  it('forgets notification eligibility when a worktree is removed', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    const global = findSubscription('session.tabs.subscribeAll')
+    await publish(global, { type: 'updated', ...snapshot(1, 'working', NOW) })
+    notificationDispatch.mockClear()
+
+    await publish(global, {
+      type: 'updated',
+      worktree: WORKTREE_ID,
+      publicationEpoch: 'epoch-1',
+      snapshotVersion: 2,
+      removed: true,
+      activeGroupId: null,
+      activeTabId: null,
+      activeTabType: null,
+      tabs: []
+    })
+    await publish(global, {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'done', NOW + 1_000, NOW + 1_000, undefined, 'epoch-2')]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
+
   it.each(['done', 'blocked'] as const)(
     'keeps a metadata-only %s inventory refresh silent',
     async (state) => {
@@ -569,6 +598,43 @@ describe('paired session-tab visibility-resume notifications', () => {
     expect(badgeCount()).toBe(1)
     hook.unmount()
   })
+
+  it.each(['done', 'blocked', 'waiting'] as const)(
+    'alerts once when reconnect listAll wins with a new %s transition',
+    async (state) => {
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+      await publish(findSubscription('session.tabs.subscribeAll'), {
+        type: 'updated',
+        ...snapshot(1, 'working', NOW)
+      })
+      notificationDispatch.mockClear()
+
+      runtimeCall.mockResolvedValueOnce({
+        id: 'list-all-reconnect',
+        ok: true,
+        result: { snapshots: [snapshot(2, state, NOW + 1_000)] },
+        _meta: { runtimeId: RUNTIME_ID }
+      })
+      mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
+      hook.rerender()
+      await act(settle)
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(badgeCount()).toBe(1)
+
+      await publish(findSubscription('session.tabs.subscribeAll', 1), {
+        type: 'snapshots',
+        snapshots: [snapshot(2, state, NOW + 1_000)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(badgeCount()).toBe(1)
+      hook.unmount()
+    }
+  )
 
   it('alerts for a Claude stamped completion while the host row stays working', async () => {
     const hook = renderHook(() => useWebSessionTabsSync())
