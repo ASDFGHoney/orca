@@ -56,6 +56,8 @@ import {
   resetWebSessionTabsSnapshotFreshnessForTests,
   useWebSessionTabsSync
 } from './web-session-tabs-sync'
+import { refreshWebRuntimeSessionTabsSnapshot } from './web-runtime-session'
+import { registerWebSessionTabsNotificationLifecycleCases } from './web-session-tabs-notification-lifecycle-cases'
 import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS } from './window-visibility-subscription-parking'
 
 const ENVIRONMENT_ID = 'env-a'
@@ -309,6 +311,36 @@ describe('paired session-tab visibility-resume notifications', () => {
     resetRendererOwnedAgentStatusPanesForTests()
     setDocumentVisibility('visible')
     vi.useRealTimers()
+  })
+
+  registerWebSessionTabsNotificationLifecycleCases({
+    mount: () => renderHook(() => useWebSessionTabsSync()),
+    settle,
+    findGlobalSubscription: (occurrence = 0) =>
+      findSubscription('session.tabs.subscribeAll', occurrence),
+    publish,
+    snapshot,
+    reconnect: async (hook) => {
+      mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
+      hook.rerender()
+      await act(settle)
+    },
+    refreshEager: async (eagerSnapshot) => {
+      runtimeCall.mockResolvedValueOnce({
+        id: 'eager-list',
+        ok: true,
+        result: eagerSnapshot,
+        _meta: { runtimeId: RUNTIME_ID }
+      })
+      await act(async () => {
+        await refreshWebRuntimeSessionTabsSnapshot(ENVIRONMENT_ID, WORKTREE_ID)
+        await settle()
+      })
+    },
+    notificationDispatch: () => notificationDispatch,
+    badgeCount,
+    advanceNotificationTimers: () => vi.advanceTimersByTime(1_500),
+    now: NOW
   })
 
   it.each(['done', 'blocked', 'waiting'] as const)(
@@ -676,27 +708,6 @@ describe('paired session-tab visibility-resume notifications', () => {
       { type: 'snapshots', snapshots: [snapshot(2, 'blocked', NOW + 1_000)] },
       true
     )
-
-    expect(notificationDispatch).toHaveBeenCalledTimes(1)
-    expect(badgeCount()).toBe(1)
-    hook.unmount()
-  })
-
-  it('alerts after a transport resubscription preserves the prior baseline', async () => {
-    const hook = renderHook(() => useWebSessionTabsSync())
-    await act(settle)
-    await publish(findSubscription('session.tabs.subscribeAll'), {
-      type: 'updated',
-      ...snapshot(1, 'working', NOW)
-    })
-    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
-    hook.rerender()
-    await act(settle)
-    await publish(findSubscription('session.tabs.subscribeAll', 1), {
-      type: 'snapshots',
-      snapshots: [snapshot(2, 'done', NOW + 1_000)]
-    })
-    vi.advanceTimersByTime(1_500)
 
     expect(notificationDispatch).toHaveBeenCalledTimes(1)
     expect(badgeCount()).toBe(1)

@@ -623,6 +623,7 @@ export function decideWebSessionTabsSnapshot(
   snapshot: RuntimeMobileSessionTabsResult,
   environmentId: string
 ): WebSessionTabsSnapshotDecision {
+  getWebSessionTabsNotificationBaseline(environmentId)
   const key = sessionTabsFreshnessKey(environmentId, snapshot.worktree)
   if ((snapshot as { removed?: unknown }).removed === true) {
     // Why: removed worktrees can stop publishing, so clean up their tracking now instead of waiting for a replacement snapshot that may never arrive.
@@ -729,6 +730,85 @@ export function shouldSyncAllRuntimeSessionTabs(args: {
   return Boolean(environmentId && args.workspaceSessionReady)
 }
 
+type WebSessionTabsNotificationBaseline = {
+  allowsSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => boolean
+  recordSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => void
+  recordInventoryAbsence: (publishedWorktrees: ReadonlySet<string>) => void
+  completeInitialSubscription: () => void
+}
+
+export function completeWebSessionTabsInitialNotificationSubscription(
+  environmentId: string,
+  pairingRevision = getRuntimeEnvironmentRevision(environmentId)
+): void {
+  getWebSessionTabsNotificationBaseline(
+    environmentId,
+    pairingRevision
+  ).completeInitialSubscription()
+}
+
+type WebSessionTabsNotificationBaselineOwner = {
+  pairingRevision: number | undefined
+  baseline: WebSessionTabsNotificationBaseline
+}
+
+const webSessionTabsNotificationBaselinesByEnvironment = new Map<
+  string,
+  WebSessionTabsNotificationBaselineOwner
+>()
+
+function createWebSessionTabsNotificationBaseline(
+  environmentId: string
+): WebSessionTabsNotificationBaseline {
+  const knownAtOwnerStart = new Set(
+    getTrackedWebSessionTabsWorktrees(environmentId).map(({ worktree }) => worktree)
+  )
+  const knownWorktrees = new Set(knownAtOwnerStart)
+  let awaitingInitialSubscription = true
+  const removeAbsent = (worktrees: Set<string>, publishedWorktrees: ReadonlySet<string>): void => {
+    for (const worktree of worktrees) {
+      if (!publishedWorktrees.has(worktree)) {
+        worktrees.delete(worktree)
+      }
+    }
+  }
+  return {
+    allowsSnapshot: (snapshot) =>
+      (awaitingInitialSubscription ? knownAtOwnerStart : knownWorktrees).has(snapshot.worktree),
+    recordSnapshot: (snapshot) => {
+      if (isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
+        knownAtOwnerStart.delete(snapshot.worktree)
+        knownWorktrees.delete(snapshot.worktree)
+      } else {
+        knownWorktrees.add(snapshot.worktree)
+      }
+    },
+    recordInventoryAbsence: (publishedWorktrees) => {
+      removeAbsent(knownAtOwnerStart, publishedWorktrees)
+      removeAbsent(knownWorktrees, publishedWorktrees)
+    },
+    completeInitialSubscription: () => {
+      awaitingInitialSubscription = false
+    }
+  }
+}
+
+function getWebSessionTabsNotificationBaseline(
+  environmentId: string,
+  pairingRevision = getRuntimeEnvironmentRevision(environmentId)
+): WebSessionTabsNotificationBaseline {
+  const existing = webSessionTabsNotificationBaselinesByEnvironment.get(environmentId)
+  if (existing && existing.pairingRevision === pairingRevision) {
+    return existing.baseline
+  }
+  const baseline = createWebSessionTabsNotificationBaseline(environmentId)
+  webSessionTabsNotificationBaselinesByEnvironment.set(environmentId, {
+    pairingRevision,
+    baseline
+  })
+  return baseline
+}
+
 export function resetWebSessionTabsSnapshotFreshnessForTests(): void {
   latestSessionTabsSnapshotByWorktree.clear()
   replayableSessionTabsSnapshotByWorktree.clear()
@@ -742,6 +822,7 @@ export function resetWebSessionTabsSnapshotFreshnessForTests(): void {
   hostSessionTabIdByLocalKey.clear()
   hostSessionTabMappingKeysByEnvironmentAndWorktree.clear()
   hostWorkingClientBoundaryByPaneKey.clear()
+  webSessionTabsNotificationBaselinesByEnvironment.clear()
   resetWebSessionBrowserPlacementsForTests()
 }
 
@@ -793,6 +874,7 @@ export function clearWebSessionTabsTrackingForEnvironment(environmentId: string)
   if (!trimmedEnvironmentId) {
     return
   }
+  webSessionTabsNotificationBaselinesByEnvironment.delete(trimmedEnvironmentId)
   const keyPrefix = `${trimmedEnvironmentId}:`
   for (const key of latestSessionTabsSnapshotByWorktree.keys()) {
     if (key.startsWith(keyPrefix)) {
@@ -3679,7 +3761,7 @@ export type HostSessionMirrorSettle = () => void
  *  pair whose frame was never decided, so no site can overstate its evidence. */
 export type HostSessionMirrorPatchFrame = {
   environmentId: string
-  worktreeId: string
+  snapshot: RuntimeMobileSessionTabsResult
   decision: WebSessionTabsSnapshotDecision
 }
 
@@ -3696,6 +3778,7 @@ export type HostSessionMirrorPatchFrame = {
 export type HostSessionMirrorPatchVerdict = {
   frames: readonly HostSessionMirrorPatchFrame[]
   fullInventory?: { environmentId: string; publishedSnapshotCount: number }
+  notificationInventory?: { environmentId: string; publishedWorktreeIds: readonly string[] }
 }
 
 function createHostSessionMirrorSettle(
@@ -3708,8 +3791,8 @@ function createHostSessionMirrorSettle(
       markHostSessionMirrorHydrated(fullInventory.environmentId)
       return
     }
-    for (const { environmentId, worktreeId } of settles) {
-      markHostSessionMirrorWorktreeHydrated(environmentId, worktreeId)
+    for (const { environmentId, snapshot } of settles) {
+      markHostSessionMirrorWorktreeHydrated(environmentId, snapshot.worktree)
     }
   }
 }
@@ -3732,11 +3815,7 @@ function hostSessionMirrorSettleForPatchlessFrame(
 
 export function applyWebSessionTabsStorePatch(
   buildPatch: (state: AppState) => WebSessionTabsSyncState | Partial<WebSessionTabsSyncState>,
-  hostMirrorVerdict: HostSessionMirrorPatchVerdict,
-  agentStatusSnapshots?: RuntimeMobileSessionTabsResult | readonly RuntimeMobileSessionTabsResult[],
-  allowCompletionNotification:
-    | boolean
-    | ((snapshot: RuntimeMobileSessionTabsResult) => boolean) = false
+  hostMirrorVerdict: HostSessionMirrorPatchVerdict
 ): HostSessionMirrorSettle {
   let mirroredAgentStatusChanged = false
   // Why: zustand commits before notifying subscribers, so a producer that ran
@@ -3756,16 +3835,14 @@ export function applyWebSessionTabsStorePatch(
   ): WebSessionTabsSyncState | Partial<WebSessionTabsSyncState> => {
     const patch = buildPatch(state)
     mirroredAgentStatusChanged = patch !== state && Object.hasOwn(patch, 'agentStatusByPaneKey')
-    if (agentStatusSnapshots) {
+    if (hostMirrorVerdict.frames.length > 0) {
       const nextAgentStatuses = patch.agentStatusByPaneKey ?? state.agentStatusByPaneKey
-      const snapshots = Array.isArray(agentStatusSnapshots)
-        ? agentStatusSnapshots
-        : [agentStatusSnapshots]
-      for (const snapshot of snapshots) {
+      for (const { environmentId, snapshot, decision } of hostMirrorVerdict.frames) {
+        if (!decision.apply) {
+          continue
+        }
         const notificationAllowed =
-          typeof allowCompletionNotification === 'function'
-            ? allowCompletionNotification(snapshot)
-            : allowCompletionNotification
+          getWebSessionTabsNotificationBaseline(environmentId).allowsSnapshot(snapshot)
         for (const surface of snapshot.tabs) {
           if (surface.type !== 'terminal') {
             continue
@@ -3874,6 +3951,23 @@ export function applyWebSessionTabsStorePatch(
     }
     console.warn('[web-session-tabs-sync] a store subscriber failed after the patch landed:', error)
   }
+  for (const { environmentId, snapshot, decision } of hostMirrorVerdict.frames) {
+    const baseline = getWebSessionTabsNotificationBaseline(environmentId)
+    if (
+      decision.apply ||
+      (hostMirrorVerdict.notificationInventory?.environmentId === environmentId &&
+        decision.settlesHostMirror &&
+        !isWebSessionTabsWorktreeRemovalFrame(snapshot))
+    ) {
+      baseline.recordSnapshot(snapshot)
+    }
+  }
+  if (hostMirrorVerdict.notificationInventory) {
+    const { environmentId, publishedWorktreeIds } = hostMirrorVerdict.notificationInventory
+    getWebSessionTabsNotificationBaseline(environmentId).recordInventoryAbsence(
+      new Set(publishedWorktreeIds)
+    )
+  }
   // Why: the receipt exists exactly from the commit on, so no caller can settle
   // evidence the store does not hold, and none can lose one it does.
   const settleHostMirror = createHostSessionMirrorSettle(hostMirrorVerdict)
@@ -3896,8 +3990,7 @@ export function applyWebSessionTabsStorePatch(
 function loadInitialWebSessionTabs(
   environmentId: string,
   expectedEnvironmentPairingRevision: number | undefined,
-  isCurrent: () => boolean,
-  notificationBaseline: WebSessionTabsNotificationBaseline
+  isCurrent: () => boolean
 ): void {
   // Why: only a conclusion that reached the store may settle the mirror, so
   // this stays null on every failure exit below.
@@ -3972,7 +4065,7 @@ function loadInitialWebSessionTabs(
           {
             frames: applicable.map((snapshot, position) => ({
               environmentId,
-              worktreeId: snapshot.worktree,
+              snapshot,
               decision: decisions[position]!
             })),
             fullInventory: {
@@ -3983,13 +4076,8 @@ function loadInitialWebSessionTabs(
                 isHostMirroredWorktree(snapshot.worktree)
               ).length
             }
-          },
-          freshSnapshots,
-          notificationBaseline.allowsSnapshot
+          }
         )
-        for (const snapshot of freshSnapshots) {
-          notificationBaseline.recordSnapshot(snapshot)
-        }
       } finally {
         for (const finishRecovery of finishRecoveries) {
           finishRecovery()
@@ -4017,56 +4105,6 @@ function loadInitialWebSessionTabs(
     })
 }
 
-type WebSessionTabsNotificationBaseline = {
-  allowsSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => boolean
-  recordSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => void
-  completeInitialSubscription: () => void
-}
-
-type WebSessionTabsNotificationBaselineOwner = {
-  pairingRevision: number | undefined
-  baseline: WebSessionTabsNotificationBaseline
-}
-
-function createWebSessionTabsNotificationBaseline(
-  environmentId: string
-): WebSessionTabsNotificationBaseline {
-  const knownAtOwnerStart = new Set(
-    getTrackedWebSessionTabsWorktrees(environmentId).map(({ worktree }) => worktree)
-  )
-  const knownWorktrees = new Set(knownAtOwnerStart)
-  let awaitingInitialSubscription = true
-  return {
-    allowsSnapshot: (snapshot) =>
-      (awaitingInitialSubscription ? knownAtOwnerStart : knownWorktrees).has(snapshot.worktree),
-    recordSnapshot: (snapshot) => {
-      if (isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
-        knownAtOwnerStart.delete(snapshot.worktree)
-        knownWorktrees.delete(snapshot.worktree)
-      } else {
-        knownWorktrees.add(snapshot.worktree)
-      }
-    },
-    completeInitialSubscription: () => {
-      awaitingInitialSubscription = false
-    }
-  }
-}
-
-function getWebSessionTabsNotificationBaseline(
-  baselines: Map<string, WebSessionTabsNotificationBaselineOwner>,
-  environmentId: string,
-  pairingRevision: number | undefined
-): WebSessionTabsNotificationBaseline {
-  const existing = baselines.get(environmentId)
-  if (existing && existing.pairingRevision === pairingRevision) {
-    return existing.baseline
-  }
-  const baseline = createWebSessionTabsNotificationBaseline(environmentId)
-  baselines.set(environmentId, { pairingRevision, baseline })
-  return baseline
-}
-
 export function useWebSessionTabsSync(): void {
   const recordVisibilityResumeSnapshotRef = useRef<
     (environmentId: string, snapshot: RuntimeMobileSessionTabsResult, receivedFrame: number) => void
@@ -4082,9 +4120,6 @@ export function useWebSessionTabsSync(): void {
     ) => boolean
   >(() => true)
   const visibilityResumeOmissionsByKeyRef = useRef(new Map<string, VisibilityResumeOmission>())
-  const notificationBaselinesByEnvironmentRef = useRef(
-    new Map<string, WebSessionTabsNotificationBaselineOwner>()
-  )
   const mirroredSessionTabsOwnerRevisionByEnvironmentRef = useRef(
     new Map<string, number | undefined>()
   )
@@ -4133,7 +4168,6 @@ export function useWebSessionTabsSync(): void {
       }
       mirroredSessionTabsOwnerRevisionByEnvironmentRef.current.clear()
       visibilityResumeOmissionsByKeyRef.current.clear()
-      notificationBaselinesByEnvironmentRef.current.clear()
     },
     []
   )
@@ -4166,7 +4200,6 @@ export function useWebSessionTabsSync(): void {
         mirroredEnvironmentOwnerRevisions.get(environmentId) !== previousRevision
       ) {
         clearWebSessionTabsTrackingForEnvironment(environmentId)
-        notificationBaselinesByEnvironmentRef.current.delete(environmentId)
       }
     }
     mirroredSessionTabsOwnerRevisionByEnvironmentRef.current = mirroredEnvironmentOwnerRevisions
@@ -4185,19 +4218,9 @@ export function useWebSessionTabsSync(): void {
     if (!workspaceSessionReady || environments.length === 0) {
       return
     }
-    const notificationBaselinesByEnvironment = new Map(
-      environments.map(
-        ({ environmentId, expectedEnvironmentPairingRevision }) =>
-          [
-            environmentId,
-            getWebSessionTabsNotificationBaseline(
-              notificationBaselinesByEnvironmentRef.current,
-              environmentId,
-              expectedEnvironmentPairingRevision
-            )
-          ] as const
-      )
-    )
+    for (const { environmentId, expectedEnvironmentPairingRevision } of environments) {
+      getWebSessionTabsNotificationBaseline(environmentId, expectedEnvironmentPairingRevision)
+    }
 
     type VisibilityResumeEnvironment = {
       trackedWorktrees: readonly TrackedWebSessionTabsWorktree[]
@@ -4380,15 +4403,11 @@ export function useWebSessionTabsSync(): void {
           {
             frames: decided.map(({ environmentId, snapshot, decision }) => ({
               environmentId,
-              worktreeId: snapshot.worktree,
+              snapshot,
               decision
             }))
-          },
-          operations.map(({ snapshot }) => snapshot)
+          }
         )
-        for (const { environmentId, snapshot } of operations) {
-          notificationBaselinesByEnvironment.get(environmentId)?.recordSnapshot(snapshot)
-        }
         // Why: every operation is post-recovery or inventory-absence evidence
         // with no finishRecovery of its own pending, so settle now — a deferred
         // tombstone otherwise leaves its worktree parked on a healthy host.
@@ -4543,7 +4562,7 @@ export function useWebSessionTabsSync(): void {
       for (const index of restartingSpecIndexes) {
         const environmentId = environmentIdBySubscriptionSpec[index]
         if (environmentId) {
-          notificationBaselinesByEnvironment.get(environmentId)?.completeInitialSubscription()
+          completeWebSessionTabsInitialNotificationSubscription(environmentId)
           const trackedWorktrees = getTrackedWebSessionTabsWorktrees(environmentId)
           if (trackedWorktrees.length === 0) {
             continue
@@ -4583,10 +4602,6 @@ export function useWebSessionTabsSync(): void {
       ) {
         continue
       }
-      const notificationBaseline = notificationBaselinesByEnvironment.get(environmentId)
-      if (!notificationBaseline) {
-        continue
-      }
       let requestedInitialLoad = false
       environmentIdBySubscriptionSpec.push(environmentId)
       subscriptionSpecs.push({
@@ -4595,12 +4610,7 @@ export function useWebSessionTabsSync(): void {
           let awaitingVisibilityResumeInventory = isVisibilityRestart
           if (!requestedInitialLoad) {
             requestedInitialLoad = true
-            loadInitialWebSessionTabs(
-              environmentId,
-              expectedEnvironmentPairingRevision,
-              isCurrent,
-              notificationBaseline
-            )
+            loadInitialWebSessionTabs(environmentId, expectedEnvironmentPairingRevision, isCurrent)
           }
           return window.api.runtimeEnvironments.subscribe(
             {
@@ -4620,7 +4630,10 @@ export function useWebSessionTabsSync(): void {
                   return
                 }
                 if (response.ok === false) {
-                  notificationBaseline.completeInitialSubscription()
+                  completeWebSessionTabsInitialNotificationSubscription(
+                    environmentId,
+                    expectedEnvironmentPairingRevision
+                  )
                   console.warn(
                     '[web-session-tabs-sync] global subscription failed:',
                     response.error.message
@@ -4721,7 +4734,7 @@ export function useWebSessionTabsSync(): void {
                           {
                             frames: applicable.map(({ snapshot }, position) => ({
                               environmentId,
-                              worktreeId: snapshot.worktree,
+                              snapshot,
                               decision: decisions[position]!
                             })),
                             fullInventory: {
@@ -4731,19 +4744,15 @@ export function useWebSessionTabsSync(): void {
                               publishedSnapshotCount: event.snapshots.filter((snapshot) =>
                                 isHostMirroredWorktree(snapshot.worktree)
                               ).length
+                            },
+                            notificationInventory: {
+                              environmentId,
+                              publishedWorktreeIds: event.snapshots.map(
+                                (snapshot) => snapshot.worktree
+                              )
                             }
-                          },
-                          freshSnapshots,
-                          notificationBaseline.allowsSnapshot
-                        )
-                        for (const snapshot of freshSnapshots) {
-                          notificationBaseline.recordSnapshot(snapshot)
-                        }
-                        for (const { snapshot } of applicable) {
-                          if (!isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
-                            notificationBaseline.recordSnapshot(snapshot)
                           }
-                        }
+                        )
                         const freshSnapshotSet = new Set(freshSnapshots)
                         for (const { index, snapshot } of applicable) {
                           if (unchangedVisibilityResumeSnapshots[index]) {
@@ -4775,7 +4784,10 @@ export function useWebSessionTabsSync(): void {
                     })
                     .finally(() => {
                       if (isCurrent()) {
-                        notificationBaseline.completeInitialSubscription()
+                        completeWebSessionTabsInitialNotificationSubscription(
+                          environmentId,
+                          expectedEnvironmentPairingRevision
+                        )
                       }
                       for (const finishRecovery of finishRecoveries) {
                         finishRecovery?.()
@@ -4794,7 +4806,10 @@ export function useWebSessionTabsSync(): void {
                   // talking has not reported a single PTY dead.
                   return
                 }
-                notificationBaseline.completeInitialSubscription()
+                completeWebSessionTabsInitialNotificationSubscription(
+                  environmentId,
+                  expectedEnvironmentPairingRevision
+                )
                 const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event)
                 recordVisibilityResumeSnapshotReceipt(environmentId, event, receivedFrame)
                 const finishRecovery = beginWebSessionTabsSnapshotRecovery(
@@ -4827,12 +4842,9 @@ export function useWebSessionTabsSync(): void {
                         settleHydration = applyWebSessionTabsStorePatch(
                           (state) => applyWebSessionTabsSnapshot(state, recovered, environmentId),
                           {
-                            frames: [{ environmentId, worktreeId: recovered.worktree, decision }]
-                          },
-                          recovered,
-                          event.type === 'updated' && !replayed
+                            frames: [{ environmentId, snapshot: recovered, decision }]
+                          }
                         )
-                        notificationBaseline.recordSnapshot(recovered)
                         recordVisibilityResumeSnapshot(environmentId, recovered, receivedFrame)
                       } else {
                         settleHydration = hostSessionMirrorSettleForPatchlessFrame(
@@ -4860,7 +4872,10 @@ export function useWebSessionTabsSync(): void {
               },
               onError: (error) => {
                 if (isCurrent()) {
-                  notificationBaseline.completeInitialSubscription()
+                  completeWebSessionTabsInitialNotificationSubscription(
+                    environmentId,
+                    expectedEnvironmentPairingRevision
+                  )
                   console.warn('[web-session-tabs-sync] global subscription error:', error.message)
                 }
               }
@@ -4868,7 +4883,10 @@ export function useWebSessionTabsSync(): void {
           )
         },
         onSubscribeError: (error) => {
-          notificationBaseline.completeInitialSubscription()
+          completeWebSessionTabsInitialNotificationSubscription(
+            environmentId,
+            expectedEnvironmentPairingRevision
+          )
           console.warn(
             '[web-session-tabs-sync] failed to subscribe globally:',
             error instanceof Error ? error.message : String(error)
@@ -4891,6 +4909,12 @@ export function useWebSessionTabsSync(): void {
       recordVisibilityResumeSnapshotRef.current = () => {}
       recordVisibilityResumeSnapshotReceiptRef.current = () => {}
       shouldApplyVisibilityResumeSnapshotRef.current = () => true
+      for (const { environmentId, expectedEnvironmentPairingRevision } of environments) {
+        completeWebSessionTabsInitialNotificationSubscription(
+          environmentId,
+          expectedEnvironmentPairingRevision
+        )
+      }
       disposeSubscriptions()
       for (const { environmentId, expectedEnvironmentPairingRevision } of environments) {
         const owner = {
@@ -4921,19 +4945,13 @@ export function useWebSessionTabsSync(): void {
 
     let requestedInitialTerminal = false
     let requestedRespawnAfterWake = false
-    const notificationBaseline = getWebSessionTabsNotificationBaseline(
-      notificationBaselinesByEnvironmentRef.current,
-      environmentId,
-      expectedEnvironmentPairingRevision
-    )
     /** Resolves the settle receipt of the evidence this frame put (or already
      *  had) in the store, or null when the frame was discarded undecided. */
     const applyActiveSnapshot = async (
       event: RuntimeMobileSessionTabsResult & { type: 'snapshot' | 'updated' },
       response: RuntimeRpcResponse<unknown>,
       isCurrent: () => boolean,
-      receivedFrame: number,
-      allowCompletionNotification: boolean
+      receivedFrame: number
     ): Promise<HostSessionMirrorSettle | null> => {
       const recovered = await recoverWebSessionTerminalOrphansBeforeApply(
         useAppStore.getState(),
@@ -4983,14 +5001,10 @@ export function useWebSessionTabsSync(): void {
         : hostSessionMirrorSettleForPatchlessFrame(decision, environmentId, recovered.worktree)
       try {
         if (fresh) {
-          const replayed = isRuntimeSubscriptionReplayResponse(response)
           settleMirror = applyWebSessionTabsStorePatch(
             (state) => applyWebSessionTabsSnapshot(state, recovered, environmentId),
-            { frames: [{ environmentId, worktreeId: recovered.worktree, decision }] },
-            recovered,
-            allowCompletionNotification || (event.type === 'updated' && !replayed)
+            { frames: [{ environmentId, snapshot: recovered, decision }] }
           )
-          notificationBaseline.recordSnapshot(recovered)
           recordVisibilityResumeSnapshotRef.current(environmentId, recovered, receivedFrame)
         }
         if (isCurrent() && shouldBootstrapInitialTerminal) {
@@ -5066,13 +5080,7 @@ export function useWebSessionTabsSync(): void {
                   event.worktree,
                   receivedFrame
                 )
-                void applyActiveSnapshot(
-                  event,
-                  response,
-                  isCurrent,
-                  receivedFrame,
-                  notificationBaseline.allowsSnapshot(event)
-                )
+                void applyActiveSnapshot(event, response, isCurrent, receivedFrame)
                   .catch((error) => {
                     if (isCurrent()) {
                       console.warn(

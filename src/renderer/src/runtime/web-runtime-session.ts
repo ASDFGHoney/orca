@@ -868,8 +868,7 @@ export async function refreshWebRuntimeSessionTabsSnapshot(
           : state
         return patch === state ? state : patch
       },
-      { frames: [{ environmentId, worktreeId: snapshot.worktree, decision }] },
-      snapshot
+      { frames: [{ environmentId, snapshot, decision }] }
     )
     settleMirror()
   } catch (error) {
