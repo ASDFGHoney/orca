@@ -183,6 +183,27 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     expect(amphetamine.session).toMatchObject(USER_TIMED_SESSION)
   })
 
+  it('does not end a session it cannot verify is still its own', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine)
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.getHold()).toBe('owned')
+
+    // The user replaces Orca's session, and the read that would reveal it fails.
+    amphetamine.setSession(USER_TIMED_SESSION)
+    amphetamine.run.mockImplementation(async (script: string) =>
+      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
+    )
+    assertion.stop('agents-idle')
+    await settle()
+
+    // Ending blind here would kill the user's 20-minute session.
+    expect(amphetamine.ends()).toBe(0)
+    expect(assertion.getHold()).toBe('owned')
+  })
+
   it('takes over when an adopted session expires', async () => {
     const amphetamine = createFakeAmphetamine(USER_TIMED_SESSION)
     const assertion = createAssertion(amphetamine)
@@ -381,6 +402,24 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
       true
     )
     expect(assertion.getHold()).toBeNull()
+  })
+
+  it('does not end a session on dispose when the verifying read fails', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const runOsascriptSync = vi.fn((script: string) =>
+      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
+    )
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+
+    // A leaked Orca session is one click away in Amphetamine's menu bar;
+    // silently ending the user's is not recoverable.
+    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
+      false
+    )
   })
 
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {

@@ -124,7 +124,14 @@ export class MacosAmphetamineSleepAssertion {
     try {
       const probe = this.runOsascriptSync(AMPHETAMINE_PROBE_SCRIPT)
       const state = probe.code === 0 ? parseAmphetamineSession(probe.stdout) : null
-      if (state && !isOrcaShapedSession(state)) {
+      // Same rule as the async path, and the trade is deliberate: a leaked Orca
+      // session is visible in Amphetamine's menu bar and ends in one click,
+      // whereas silently ending the user's session is neither.
+      if (!state || !isOrcaShapedSession(state)) {
+        this.logger.warn('[agent-awake] leaving the Amphetamine session alone on dispose', {
+          reason,
+          verified: Boolean(state)
+        })
         return
       }
       const result = this.runOsascriptSync(AMPHETAMINE_END_SESSION_SCRIPT)
@@ -228,7 +235,13 @@ export class MacosAmphetamineSleepAssertion {
       return true
     }
     const state = await this.probeSession(reason)
-    if (state && !isOrcaShapedSession(state)) {
+    if (!state) {
+      // Unverifiable. Ending blind would destroy a session the user may have
+      // started in the meantime, which is the whole thing this engine promises
+      // not to do. Keep the hold so the backoff retries.
+      return false
+    }
+    if (!isOrcaShapedSession(state)) {
       // Replaced while we held it; the replacement is the user's to end.
       this.hold = null
       return true
