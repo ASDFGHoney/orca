@@ -96,7 +96,9 @@ export class MacosAmphetamineSleepAssertion {
     }
     this.desired = 'stopped'
     this.stopReconcileTimer()
-    this.backoff.reset()
+    // Deliberately not resetting the backoff: a failed release refreshes the
+    // service, which stops again, so resetting here would re-arm an unthrottled
+    // probe loop. The retry timer drives the next attempt instead.
     this.enqueue(reason)
   }
 
@@ -233,6 +235,9 @@ export class MacosAmphetamineSleepAssertion {
       // Never end a session Orca did not start.
       this.hold = null
       return true
+    }
+    if (this.backoff.isSuppressed()) {
+      return false
     }
     const state = await this.probeSession(reason)
     if (!state) {

@@ -295,6 +295,30 @@ describe('MacosAmphetamineSleepAssertion availability', () => {
     expect(assertion.getUnavailableReason()).toBe('automation-denied')
   })
 
+  it('does not spawn osascript in a loop when the probe keeps failing on release', async () => {
+    const amphetamine = createFakeAmphetamine()
+    let assertion: MacosAmphetamineSleepAssertion | null = null
+    // Mirrors AgentAwakeService: an unexpected failure refreshes, and with the
+    // mode off that refresh stops the assertion again.
+    const onUnexpectedFailure = vi.fn(() => {
+      assertion?.stop('refresh')
+    })
+    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.getHold()).toBe('owned')
+
+    amphetamine.run.mockImplementation(async (script: string) =>
+      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
+    )
+    const before = amphetamine.run.mock.calls.length
+    assertion.stop('agents-idle')
+    await settle()
+
+    expect(amphetamine.run.mock.calls.length - before).toBeLessThanOrEqual(2)
+  })
+
   it('does not spawn osascript in a loop when the probe keeps failing', async () => {
     const amphetamine = createFakeAmphetamine()
     amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
