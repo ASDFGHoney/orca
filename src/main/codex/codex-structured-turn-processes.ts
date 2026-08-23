@@ -11,9 +11,9 @@ function windowsIdentity(row: {
   ppid: number
   name: string
   command: string
-  executablePath: string
+  executablePath?: string
 }): string {
-  return [row.ppid, row.name, row.command, row.executablePath].join('\0')
+  return [row.ppid, row.name, row.command, row.executablePath ?? ''].join('\0')
 }
 
 export async function captureCodexTurnProcesses(
