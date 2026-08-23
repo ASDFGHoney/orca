@@ -160,7 +160,8 @@ export class MacosAmphetamineSleepAssertion {
     }
   }
 
-  /** True once Amphetamine proved unusable, so callers can fall back to caffeinate. */
+  /** True once Amphetamine proved unusable, so callers stop attempting it. Nothing
+   *  falls back: caffeinate is already running regardless of the engine. */
   isUnavailable(): boolean {
     return this.availability.isUnavailable()
   }
