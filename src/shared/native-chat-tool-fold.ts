@@ -14,46 +14,32 @@ function isToolOnlyMessage(message: NativeChatMessage): boolean {
   )
 }
 
-/** A tool result carries no call id, so it can only be attributed to a tool call
- *  that is loaded alongside it. A windowed transcript read starts wherever the
- *  window falls — often between an assistant's `tool_use` and the result that
- *  answers it — and Claude re-emits already-answered result records at a
- *  `/compact` boundary, long after their call scrolled out. Either way the
- *  result renders as a bare, unowned block that reads as a message from nowhere,
- *  so drop it here; it comes back attached once the owning turn pages in. */
-function dropUnattributableToolResults(
-  messages: readonly NativeChatMessage[]
-): NativeChatMessage[] {
-  const output: NativeChatMessage[] = []
+/** Drop tool results the renderer cannot pair within their folded message. */
+function dropUnattributableToolResults(message: NativeChatMessage): NativeChatMessage | null {
+  const blocks: NativeChatBlock[] = []
   let unansweredCalls = 0
-  for (const message of messages) {
-    const blocks: NativeChatBlock[] = []
-    for (const block of message.blocks) {
-      if (isToolCallBlock(block)) {
-        unansweredCalls += 1
-      } else if (isToolResultBlock(block)) {
-        if (unansweredCalls === 0) {
-          continue
-        }
-        unansweredCalls -= 1
+  for (const block of message.blocks) {
+    if (isToolCallBlock(block)) {
+      unansweredCalls += 1
+    } else if (isToolResultBlock(block)) {
+      if (unansweredCalls === 0) {
+        continue
       }
-      blocks.push(block)
+      unansweredCalls -= 1
     }
-    if (blocks.length === message.blocks.length) {
-      output.push(message)
-    } else if (blocks.length > 0) {
-      output.push({ ...message, blocks })
-    }
+    blocks.push(block)
   }
-  return output
+  if (blocks.length === message.blocks.length) {
+    return message
+  }
+  return blocks.length > 0 ? { ...message, blocks } : null
 }
 
-/** Fold consecutive tool-only messages into their preceding assistant turn,
- *  after dropping results no loaded call can own. */
+/** Fold consecutive tool-only messages into their preceding assistant turn. */
 export function foldToolMessages(messages: readonly NativeChatMessage[]): NativeChatMessage[] {
   const output: NativeChatMessage[] = []
   let mutableAssistantIndex = -1
-  for (const message of dropUnattributableToolResults(messages)) {
+  for (const message of messages) {
     const previous = output.at(-1)
     if (isToolOnlyMessage(message) && previous?.role === 'assistant') {
       const index = output.length - 1
@@ -67,7 +53,14 @@ export function foldToolMessages(messages: readonly NativeChatMessage[]): Native
       mutableAssistantIndex = -1
     }
   }
-  return output
+  const attributedOutput: NativeChatMessage[] = []
+  for (const message of output) {
+    const attributed = dropUnattributableToolResults(message)
+    if (attributed) {
+      attributedOutput.push(attributed)
+    }
+  }
+  return attributedOutput
 }
 
 export type NativeChatToolPair = {

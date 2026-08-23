@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
+import { stripNoiseMessages } from './native-chat-noise'
 import { foldToolMessages, splitNativeChatBlocks } from './native-chat-tool-fold'
 
 function msg(
@@ -54,13 +55,49 @@ describe('foldToolMessages', () => {
     expect(folded.map((m) => m.id)).toEqual(['u'])
   })
 
-  it('keeps a result answering a call that a user turn interrupted', () => {
+  it('drops a result after a user turn abandons the pending call', () => {
     const folded = foldToolMessages([
       msg({ id: 'c', role: 'assistant', blocks: [{ type: 'tool-call', name: 'Bash', input: {} }] }),
       msg({ id: 'u', role: 'user', blocks: [{ type: 'text', text: 'stop' }] }),
       msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'x' }] })
     ])
-    expect(folded.map((m) => m.id)).toEqual(['c', 'u', 't'])
+    expect(folded.map((m) => m.id)).toEqual(['c', 'u'])
+  })
+
+  it('keeps a hidden interruption as an attribution boundary', () => {
+    const folded = stripNoiseMessages(
+      foldToolMessages([
+        msg({
+          id: 'c',
+          role: 'assistant',
+          blocks: [{ type: 'tool-call', name: 'Bash', input: {} }]
+        }),
+        msg({
+          id: 'i',
+          role: 'user',
+          blocks: [{ type: 'text', text: '[Request interrupted by user]' }]
+        }),
+        msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'stale' }] })
+      ])
+    )
+
+    expect(folded.map((message) => message.id)).toEqual(['c'])
+  })
+
+  it('removes a result folded into assistant prose without mutating the source', () => {
+    const assistant = msg({
+      id: 'a',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: 'continuing' }]
+    })
+
+    const folded = foldToolMessages([
+      assistant,
+      msg({ id: 't', role: 'tool', blocks: [{ type: 'tool-result', output: 'stale' }] })
+    ])
+
+    expect(folded).toEqual([assistant])
+    expect(folded[0]).not.toBe(assistant)
   })
 
   it('does not fold a message carrying prose alongside a tool block', () => {

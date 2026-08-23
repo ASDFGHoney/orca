@@ -221,4 +221,20 @@ describe('foldMobileNativeChatMessages', () => {
       'tool-result'
     ])
   })
+
+  it('keeps a hidden interruption from authorizing a later result', () => {
+    const folded = foldMobileNativeChatMessages([
+      toolCall('c1'),
+      {
+        id: 'interrupt',
+        role: 'user',
+        blocks: [{ type: 'text', text: '[Request interrupted by user]' }],
+        timestamp: 1,
+        source: 'transcript'
+      },
+      toolResult('orphan', 'stale output')
+    ])
+
+    expect(folded.map((message) => message.id)).toEqual(['c1'])
+  })
 })

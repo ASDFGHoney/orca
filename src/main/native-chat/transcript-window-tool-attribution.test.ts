@@ -76,7 +76,7 @@ async function renderedMessages(filePath: string, limit: number): Promise<Native
     decodeClaudeTranscriptLine,
     true
   )
-  return foldToolMessages(stripNoiseMessages(page.messages))
+  return stripNoiseMessages(foldToolMessages(page.messages))
 }
 
 describe('windowed transcript tool attribution', () => {
@@ -132,5 +132,25 @@ describe('windowed transcript tool attribution', () => {
         message.blocks.filter(isToolResultBlock).map((block) => block.output)
       )
     ).toEqual(['output 1'])
+  })
+
+  it('keeps a hidden interruption from authorizing a later result', async () => {
+    const [abandonedCall] = toolTurn(1)
+    const [, laterResult] = toolTurn(2)
+    const filePath = await writeTranscript([
+      abandonedCall,
+      {
+        type: 'user',
+        uuid: 'interrupt',
+        timestamp: '2026-08-20T10:01:00.000Z',
+        message: { role: 'user', content: '[Request interrupted by user]' }
+      },
+      laterResult
+    ])
+
+    const messages = await renderedMessages(filePath, 100)
+
+    expect(unattributedResults(messages)).toEqual([])
+    expect(messages.map((message) => message.id)).toEqual(['call-1'])
   })
 })

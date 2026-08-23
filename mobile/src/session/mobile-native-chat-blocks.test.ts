@@ -136,7 +136,7 @@ describe('foldToolMessages', () => {
       msg('user', [{ type: 'text', text: 'q' }], 'u'),
       msg('tool', [{ type: 'tool-result', output: 'r' }], 't')
     ])
-    expect(folded.map((m) => m.role)).toEqual(['assistant', 'user', 'tool'])
+    expect(folded.map((m) => m.role)).toEqual(['assistant', 'user'])
   })
 
   it('folds a long tool run without mutating the source assistant', () => {
