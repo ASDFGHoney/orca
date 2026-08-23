@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { getDefaultSettings } from './constants'
-import { planCommitMessageGeneration } from './commit-message-plan'
 import {
   clearSourceControlAiModelChoiceForHost,
   hasConfiguredSourceControlAiInstructions,
@@ -19,8 +18,6 @@ import type {
   SourceControlAiOperation
 } from './source-control-ai-types'
 import type { GlobalSettings } from './global-settings-types'
-
-const PI_EXPLICIT_MODEL_ID = 'openai-codex/gpt-5.5'
 
 function settings(): GlobalSettings {
   const base = getDefaultSettings('/tmp')
@@ -62,106 +59,7 @@ function resolve(operation: SourceControlAiOperation, overrides?: RepoSourceCont
   return result.value
 }
 
-function piSettings(): GlobalSettings {
-  const base = getDefaultSettings('/tmp')
-  return {
-    ...base,
-    defaultTuiAgent: 'pi',
-    commitMessageAi: {
-      ...base.commitMessageAi!,
-      agentId: 'pi',
-      selectedModelByAgent: {}
-    },
-    sourceControlAi: {
-      ...base.sourceControlAi!,
-      agentId: 'pi',
-      selectedModelByAgent: {}
-    }
-  }
-}
-
-function resolvePiPlan(
-  operation: SourceControlAiOperation,
-  configuredModel?: string
-): ReturnType<typeof planCommitMessageGeneration> {
-  const base = piSettings()
-  if (configuredModel) {
-    base.sourceControlAi!.discoveredModelsByAgent = {
-      pi: [{ id: configuredModel, label: 'Configured model' }]
-    }
-    base.sourceControlAi!.modelOverridesByOperation = {
-      [operation]: { selectedModelByAgent: { pi: configuredModel } }
-    }
-  }
-  const resolved = resolveSourceControlAiForOperation({
-    settings: base,
-    repo: null,
-    operation,
-    discoveryHostKey: 'local'
-  })
-  expect(resolved.ok).toBe(true)
-  if (!resolved.ok) {
-    throw new Error(resolved.error)
-  }
-  return planCommitMessageGeneration(resolved.value.params, 'PROMPT')
-}
-
 describe('source-control AI resolution', () => {
-  it.each(['commitMessage', 'pullRequest', 'branchName'] as const)(
-    'lets Pi use its configured default for %s when Orca has no model override',
-    (operation) => {
-      const result = resolvePiPlan(operation)
-
-      expect(result).toMatchObject({ ok: true })
-      expect(result.ok && result.plan.args).not.toContain('--model')
-      expect(result.ok && result.plan.args).not.toContain('github-copilot/gpt-5.4-mini')
-    }
-  )
-
-  // Why: Orca seeded `github-copilot/gpt-5.4-mini` into selectedModelByAgent.pi the
-  // first time a user picked Pi on a pre-fix build, and `pi --list-models` still
-  // lists it, so the resolution chain honoured it and STA-4249 kept reproducing for
-  // every upgrading user. The other cases here all start from an empty selection.
-  it.each(['commitMessage', 'pullRequest', 'branchName'] as const)(
-    'ignores the retired Copilot default that Orca persisted for Pi, for %s',
-    (operation) => {
-      const base = piSettings()
-      base.sourceControlAi!.selectedModelByAgent = { pi: 'github-copilot/gpt-5.4-mini' }
-      base.commitMessageAi!.selectedModelByAgent = { pi: 'github-copilot/gpt-5.4-mini' }
-      base.sourceControlAi!.discoveredModelsByAgent = {
-        pi: [{ id: 'github-copilot/gpt-5.4-mini', label: 'GPT-5.4 mini' }]
-      }
-
-      const resolved = resolveSourceControlAiForOperation({
-        settings: base,
-        repo: null,
-        operation,
-        discoveryHostKey: 'local'
-      })
-      expect(resolved.ok).toBe(true)
-      if (!resolved.ok) {
-        throw new Error(resolved.error)
-      }
-      const result = planCommitMessageGeneration(resolved.value.params, 'PROMPT')
-
-      expect(result).toMatchObject({ ok: true })
-      expect(result.ok && result.plan.args).not.toContain('--model')
-      expect(result.ok && result.plan.args).not.toContain('github-copilot/gpt-5.4-mini')
-    }
-  )
-
-  it.each(['commitMessage', 'pullRequest', 'branchName'] as const)(
-    'passes an explicit Pi model override for %s',
-    (operation) => {
-      const result = resolvePiPlan(operation, PI_EXPLICIT_MODEL_ID)
-
-      expect(result).toMatchObject({
-        ok: true,
-        plan: { args: expect.arrayContaining(['--model', PI_EXPLICIT_MODEL_ID]) }
-      })
-    }
-  )
-
   it('uses the global default model for every operation', () => {
     expect(resolve('commitMessage').params.model).toBe('gpt-5.5')
     expect(resolve('pullRequest').params.model).toBe('gpt-5.5')

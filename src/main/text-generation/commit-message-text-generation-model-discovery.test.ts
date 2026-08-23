@@ -266,12 +266,12 @@ describe('discoverCommitMessageModelsLocal', () => {
 
     await expect(pending).resolves.toMatchObject({
       success: true,
-      defaultModelId: 'default',
-      models: [{ id: 'default', label: 'Pi default', isDefault: true }]
+      defaultModelId: 'github-copilot/gpt-5.4-mini',
+      models: [{ id: 'github-copilot/gpt-5.4-mini' }]
     })
   })
 
-  it('keeps Pi default when discovery finds only a configured non-Copilot provider', async () => {
+  it('publishes only concrete Pi models from host discovery', async () => {
     const listeners = new Map<string, (value: unknown) => void>()
     const child = {
       pid: 123,
@@ -297,11 +297,8 @@ describe('discoverCommitMessageModelsLocal', () => {
 
     await expect(pending).resolves.toMatchObject({
       success: true,
-      defaultModelId: 'default',
-      models: [
-        { id: 'default', label: 'Pi default', isDefault: true },
-        { id: 'openai-codex/gpt-5.5' }
-      ]
+      defaultModelId: 'openai-codex/gpt-5.5',
+      models: [{ id: 'openai-codex/gpt-5.5' }]
     })
   })
 

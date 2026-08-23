@@ -107,7 +107,7 @@ const CLAUDE_THINKING_LEVELS: ThinkingLevel[] = [
   { id: 'max', label: 'Max' }
 ]
 
-const PI_DEFAULT_MODEL_ID = 'default'
+export const PI_DEFAULT_MODEL_ID = 'default'
 
 /**
  * The model id Orca used to persist for Pi before `Pi default` existed. Orca itself
@@ -155,6 +155,12 @@ function withOpenAiThinking(
   return /(?:gpt-5|codex)/i.test(id)
     ? { thinkingLevels: OPENAI_THINKING_LEVELS, defaultThinkingLevel: 'low' }
     : {}
+}
+
+export const PI_COMPATIBILITY_MODEL: CommitMessageModel = {
+  id: PI_RETIRED_COPILOT_DEFAULT_MODEL_ID,
+  label: 'Github Copilot GPT 5.4 Mini',
+  ...withOpenAiThinking('gpt-5.4-mini')
 }
 
 export function parseClaudeModels(stdout: string): CommitMessageModel[] {
