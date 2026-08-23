@@ -293,6 +293,55 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // The CLI round-trips a client-supplied uuid on the replay (measured), so a
+  // dispatch can be matched to its OWN echo instead of to whatever is at the
+  // head of the queue.
+  it('stamps a uuid on the outgoing frame', async () => {
+    const session = sessionFor()
+    void dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+
+    expect(session.connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: session.dispatchWaiters[0]!.sentUuid })
+    )
+  })
+
+  it('settles the dispatch whose uuid was echoed, not the queue head', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    const second = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(2))
+    const firstUuid = session.dispatchWaiters[0]!.sentUuid
+    const secondUuid = session.dispatchWaiters[1]!.sentUuid
+
+    // Out of order: the second send's echo arrives while the first is still head.
+    resolveClaudeReplayWaiter(session, userReplayFrame(secondUuid, 'two'))
+    await expect(second).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: secondUuid }
+    })
+    expect(session.dispatchWaiters.map((waiter) => waiter.sentUuid)).toEqual([firstUuid])
+
+    resolveClaudeReplayWaiter(session, userReplayFrame(firstUuid, 'one'))
+    await expect(first).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: firstUuid }
+    })
+  })
+
   // The waiter queue is positional, so shifting the head on a send failure
   // resolves whichever dispatch happens to be first - reporting a delivered
   // message as unconfirmed while the send that actually failed keeps waiting.

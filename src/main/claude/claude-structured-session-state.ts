@@ -56,6 +56,13 @@ export type ClaudeDispatchWaiter = {
   resolve: (uuid: string | null) => void
   timer: ReturnType<typeof setTimeout>
   acceptsResult: boolean
+  /** The uuid stamped on this dispatch's outgoing frame. The CLI echoes a
+   *  client-supplied uuid verbatim, so a replay carrying it belongs to THIS
+   *  send - no queue-position guessing. */
+  sentUuid: string
+  /** Set when this waiter was actually settled, so a caller can tell "my replay
+   *  arrived" from "something removed me from the queue". */
+  settledUuid?: string
 }
 
 export type ClaudeSession = {

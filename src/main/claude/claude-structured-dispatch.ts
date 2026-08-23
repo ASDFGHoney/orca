@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { extname } from 'node:path'
 import { open } from 'node:fs/promises'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
@@ -101,28 +102,44 @@ function isClaudeUserMessageReplay(message: Record<string, unknown>): boolean {
   return !isKnownHarnessInjectedUserTurnText(claudeUserFrameText(message))
 }
 
+function settleWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter, uuid: string): void {
+  dropWaiter(session, waiter)
+  clearTimeout(waiter.timer)
+  waiter.settledUuid = uuid
+  waiter.resolve(uuid)
+}
+
 export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const isUserReplay = isClaudeUserMessageReplay(message)
-  const isCompletedCommand = message.type === 'result'
-  if (
-    (!isUserReplay && !isCompletedCommand) ||
-    readClaudeFrameString(message, 'session_id') !== session.providerSessionId
-  ) {
+  if (readClaudeFrameString(message, 'session_id') !== session.providerSessionId) {
     return
   }
   const uuid = readClaudeFrameString(message, 'uuid')
-  const current = session.dispatchWaiters[0]
-  if (isCompletedCommand && !current?.acceptsResult) {
+  if (!uuid) {
     return
   }
-  const waiter = uuid ? session.dispatchWaiters.shift() : undefined
-  if (waiter && uuid) {
-    clearTimeout(waiter.timer)
-    waiter.resolve(uuid)
+  // Exact correlation: the CLI echoes the uuid we stamped on the outgoing frame,
+  // so this replay belongs to that dispatch whatever its queue position - which
+  // is what keeps a late replay from settling somebody else's send.
+  const owner = session.dispatchWaiters.find((candidate) => candidate.sentUuid === uuid)
+  if (owner) {
+    settleWaiter(session, owner, uuid)
+    return
   }
+  // Compat path for a CLI that mints its own uuid instead of echoing ours. The
+  // frame then carries no correlation at all, so the head is the only candidate
+  // and the shape gates have to carry the weight.
+  const isCompletedCommand = message.type === 'result'
+  if (!isClaudeUserMessageReplay(message) && !isCompletedCommand) {
+    return
+  }
+  const head = session.dispatchWaiters[0]
+  if (!head || (isCompletedCommand && !head.acceptsResult)) {
+    return
+  }
+  settleWaiter(session, head, uuid)
 }
 
 async function imageContent(
@@ -190,12 +207,14 @@ function dropWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void 
 function waitForReplay(
   session: ClaudeSession,
   timeoutMs: number,
-  acceptsResult: boolean
+  acceptsResult: boolean,
+  sentUuid: string
 ): { waiter: ClaudeDispatchWaiter; replayed: Promise<string | null> } {
   let waiter!: ClaudeDispatchWaiter
   const replayed = new Promise<string | null>((resolve) => {
     waiter = {
       acceptsResult,
+      sentUuid,
       resolve,
       timer: setTimeout(() => {
         dropWaiter(session, waiter)
@@ -253,10 +272,15 @@ export async function dispatchClaudeTurn(
   const acceptsResult = input.body.blocks.some(
     (block) => block.type === 'text' && isSlashCommandText(block.text)
   )
-  const { waiter, replayed } = waitForReplay(session, timeoutMs, acceptsResult)
+  // Stamped so the echo can be matched to THIS dispatch: the CLI round-trips a
+  // client-supplied uuid verbatim (measured), and it also dedupes on it, so a
+  // resend of the same frame cannot land twice.
+  const sentUuid = randomUUID()
+  const { waiter, replayed } = waitForReplay(session, timeoutMs, acceptsResult, sentUuid)
   try {
     await session.connection.send({
       type: 'user',
+      uuid: sentUuid,
       message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: session.providerSessionId
@@ -265,7 +289,7 @@ export async function dispatchClaudeTurn(
     // A write can reach Claude and still reject on the flush that follows, so the
     // replay may already have claimed this waiter. Reporting `unknown` then
     // strands an identity nothing else can adopt, and the echo duplicates.
-    if (!session.dispatchWaiters.includes(waiter)) {
+    if (waiter.settledUuid) {
       const settled = await replayed
       if (settled) {
         return {
