@@ -54,8 +54,12 @@ export function isLinearMcpIssueListResult(result: unknown): result is LinearMcp
     isRecord(result) &&
     Array.isArray(result.issues) &&
     isRecord(result.meta) &&
-    typeof result.meta.orderBy === 'string' &&
-    Array.isArray(result.meta.workspaceErrors)
+    (typeof result.meta.limit === 'number' || result.meta.limit === null) &&
+    typeof result.meta.hasMore === 'boolean' &&
+    (result.meta.orderBy === 'createdAt' || result.meta.orderBy === 'updatedAt') &&
+    typeof result.meta.partial === 'boolean' &&
+    Array.isArray(result.meta.workspaceErrors) &&
+    result.meta.workspaceErrors.every(isLinearWorkspaceError)
   )
 }
 
