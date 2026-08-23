@@ -122,11 +122,11 @@ export function useTerminalWindowWakeRecovery({
       if (devicePixelRatio === observedDevicePixelRatio) {
         return
       }
-      observedDevicePixelRatio = devicePixelRatio
       const manager = managerRef.current
       if (!manager || !isVisibleRef.current) {
         return
       }
+      observedDevicePixelRatio = devicePixelRatio
       for (const pane of manager.getPanes?.() ?? []) {
         if (repairPaneWebglCanvasDprMismatch(pane)) {
           presentPaneViewport(pane)

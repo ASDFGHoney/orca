@@ -229,4 +229,26 @@ describe('useTerminalWindowWakeRecovery', () => {
     window.dispatchEvent(new Event('resize'))
     expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('retains a dpr transition until the visible manager is available', () => {
+    const pane = { id: 1, terminal: {} }
+    const managerRef: { current: PaneManager | null } = { current: null }
+    vi.stubGlobal('devicePixelRatio', 1)
+    renderHook(() =>
+      useTerminalWindowWakeRecovery({
+        isVisible: true,
+        managerRef,
+        isActiveRef: { current: true },
+        isVisibleRef: { current: true }
+      })
+    )
+
+    vi.stubGlobal('devicePixelRatio', 2)
+    window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMismatchMock).not.toHaveBeenCalled()
+
+    managerRef.current = { getPanes: () => [pane] } as unknown as PaneManager
+    window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledWith(pane)
+  })
 })
