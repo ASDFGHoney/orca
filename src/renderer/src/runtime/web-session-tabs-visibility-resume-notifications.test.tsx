@@ -89,14 +89,18 @@ type RuntimeSubscription = {
 type TerminalState = 'working' | 'done' | 'blocked' | 'waiting'
 
 const subscriptions: RuntimeSubscription[] = []
-const runtimeCall = vi.fn(
-  async (): Promise<RuntimeRpcResponse<unknown>> => ({
+function listAllResponse(
+  snapshots: readonly RuntimeMobileSessionTabsResult[]
+): RuntimeRpcResponse<unknown> {
+  return {
     id: 'list-all',
-    ok: true as const,
-    result: { snapshots: [] },
+    ok: true,
+    result: { snapshots },
     _meta: { runtimeId: RUNTIME_ID }
-  })
-)
+  }
+}
+
+const runtimeCall = vi.fn(async (): Promise<RuntimeRpcResponse<unknown>> => listAllResponse([]))
 const runtimeSubscribe = vi.fn<RuntimeSubscribe>(async (request, callbacks) => {
   const unsubscribe = vi.fn()
   subscriptions.push({ request, callbacks, unsubscribe })
@@ -219,7 +223,12 @@ function seedRemoteMirrorState(activeRemoteWorktree = false): void {
       ]) as AppState['runtimeStatusByEnvironmentId'],
       worktreesByRepo: {
         [REPO_ID]: [
-          makeWorktree({ id: WORKTREE_ID, repoId: REPO_ID, path: '/worktree-a' }),
+          makeWorktree({
+            id: WORKTREE_ID,
+            repoId: REPO_ID,
+            path: '/worktree-a',
+            runtimeOwnerEnvironmentId: ENVIRONMENT_ID
+          }),
           makeWorktree({ id: OTHER_WORKTREE_ID, repoId: REPO_ID, path: '/other' })
         ]
       }
@@ -320,7 +329,8 @@ describe('paired session-tab visibility-resume notifications', () => {
       findSubscription('session.tabs.subscribeAll', occurrence),
     publish,
     snapshot,
-    reconnect: async (hook) => {
+    reconnect: async (hook, knownSnapshots = []) => {
+      runtimeCall.mockResolvedValueOnce(listAllResponse(knownSnapshots))
       mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
       hook.rerender()
       await act(settle)
@@ -383,12 +393,7 @@ describe('paired session-tab visibility-resume notifications', () => {
   })
 
   it('keeps ordered listAll and subscription cold inventories silent', async () => {
-    runtimeCall.mockResolvedValueOnce({
-      id: 'list-all',
-      ok: true,
-      result: { snapshots: [snapshot(1, 'working', NOW)] },
-      _meta: { runtimeId: RUNTIME_ID }
-    })
+    runtimeCall.mockResolvedValueOnce(listAllResponse([snapshot(1, 'working', NOW)]))
     const hook = renderHook(() => useWebSessionTabsSync())
     await act(settle)
     await publish(findSubscription('session.tabs.subscribeAll'), {
@@ -405,12 +410,7 @@ describe('paired session-tab visibility-resume notifications', () => {
   it.each(['done', 'blocked', 'waiting'] as const)(
     'arms later %s resumes after duplicate cold listAll and subscription inventories',
     async (state) => {
-      runtimeCall.mockResolvedValueOnce({
-        id: 'list-all',
-        ok: true,
-        result: { snapshots: [snapshot(1, 'working', NOW)] },
-        _meta: { runtimeId: RUNTIME_ID }
-      })
+      runtimeCall.mockResolvedValueOnce(listAllResponse([snapshot(1, 'working', NOW)]))
       const hook = renderHook(() => useWebSessionTabsSync())
       await act(settle)
       await publish(findSubscription('session.tabs.subscribeAll'), {
@@ -435,12 +435,7 @@ describe('paired session-tab visibility-resume notifications', () => {
   it.each(['done', 'blocked', 'waiting'] as const)(
     'recovers %s after listAll succeeds and the initial subscription fails',
     async (state) => {
-      runtimeCall.mockResolvedValueOnce({
-        id: 'list-all',
-        ok: true,
-        result: { snapshots: [snapshot(1, 'working', NOW)] },
-        _meta: { runtimeId: RUNTIME_ID }
-      })
+      runtimeCall.mockResolvedValueOnce(listAllResponse([snapshot(1, 'working', NOW)]))
       const hook = renderHook(() => useWebSessionTabsSync())
       await act(settle)
       await act(async () => {
@@ -725,12 +720,7 @@ describe('paired session-tab visibility-resume notifications', () => {
       })
       notificationDispatch.mockClear()
 
-      runtimeCall.mockResolvedValueOnce({
-        id: 'list-all-reconnect',
-        ok: true,
-        result: { snapshots: [snapshot(2, state, NOW + 1_000)] },
-        _meta: { runtimeId: RUNTIME_ID }
-      })
+      runtimeCall.mockResolvedValueOnce(listAllResponse([snapshot(2, state, NOW + 1_000)]))
       mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
       hook.rerender()
       await act(settle)

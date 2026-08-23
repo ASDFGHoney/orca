@@ -14,7 +14,10 @@ type NotificationLifecycleCaseHarness<TSubscription, THook extends { unmount: ()
     turnCompletedAt?: number,
     publicationEpoch?: string
   ) => RuntimeMobileSessionTabsResult
-  reconnect: (hook: THook) => Promise<void>
+  reconnect: (
+    hook: THook,
+    knownSnapshots?: readonly RuntimeMobileSessionTabsResult[]
+  ) => Promise<void>
   refreshEager: (snapshot: RuntimeMobileSessionTabsResult) => Promise<void>
   notificationDispatch: () => Mock
   badgeCount: () => number
@@ -83,7 +86,7 @@ export function registerWebSessionTabsNotificationLifecycleCases<
     })
     harness.notificationDispatch().mockClear()
 
-    await harness.reconnect(hook)
+    await harness.reconnect(hook, [harness.snapshot(1, 'working', harness.now)])
     const reconnected = harness.findGlobalSubscription(1)
     await harness.publish(reconnected, { type: 'snapshots', snapshots: [] })
     await harness.publish(reconnected, {
@@ -106,7 +109,7 @@ export function registerWebSessionTabsNotificationLifecycleCases<
       type: 'updated',
       ...harness.snapshot(1, 'working', harness.now)
     })
-    await harness.reconnect(hook)
+    await harness.reconnect(hook, [harness.snapshot(1, 'working', harness.now)])
     await harness.publish(harness.findGlobalSubscription(1), {
       type: 'snapshots',
       snapshots: [harness.snapshot(2, 'done', harness.now + 1_000)]

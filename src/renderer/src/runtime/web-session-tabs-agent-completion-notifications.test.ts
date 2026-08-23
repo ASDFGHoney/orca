@@ -25,7 +25,6 @@ import {
 import {
   applyWebSessionTabsSnapshot,
   applyWebSessionTabsStorePatch,
-  completeWebSessionTabsInitialNotificationSubscription,
   decideWebSessionTabsSnapshot,
   resetWebSessionTabsSnapshotFreshnessForTests
 } from './web-session-tabs-sync'
@@ -77,10 +76,7 @@ function makeAgentSnapshot(
   }
 }
 
-function applySnapshot(snapshot: RuntimeMobileSessionTabsResult, live: boolean): void {
-  if (live) {
-    completeWebSessionTabsInitialNotificationSubscription(ENVIRONMENT_ID)
-  }
+function applySnapshot(snapshot: RuntimeMobileSessionTabsResult, _live: boolean): void {
   const decision = decideWebSessionTabsSnapshot(snapshot, ENVIRONMENT_ID)
   applyWebSessionTabsStorePatch(
     (state) => applyWebSessionTabsSnapshot(state, snapshot, ENVIRONMENT_ID, NOW),
