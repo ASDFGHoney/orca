@@ -60,11 +60,16 @@ function readdirCountUnder(path: string): number {
 beforeEach(() => {
   clearSkillRootScanCache()
   readdirPaths.length = 0
+  // Why: the Hermes root is the one home root an env var can move outside the
+  // fixture, so a developer with a real Hermes install would score it `present`.
+  vi.stubEnv('HERMES_HOME', '')
+  vi.stubEnv('LOCALAPPDATA', '')
   vi.spyOn(console, 'info').mockImplementation(() => undefined)
 })
 
 afterEach(() => {
   clearSkillRootScanCache()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 

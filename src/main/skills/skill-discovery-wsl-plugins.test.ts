@@ -1,5 +1,5 @@
 import { posix as pathPosix } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execFileMock = vi.hoisted(() => vi.fn())
 
@@ -21,10 +21,15 @@ function completeExecFileCall(callIndex: number, stdout: string): void {
 
 describe('WSL Claude plugin skill discovery', () => {
   beforeEach(() => execFileMock.mockReset())
+  afterEach(() => vi.unstubAllEnvs())
 
   it('reads enabled plugin metadata and scans the selected install inside the distro', async () => {
     const homeDir = '/home/alice'
     const cwd = '/work/orca'
+    // Why: a Windows host's own Hermes location says nothing about the distro's,
+    // so neither variable may reach the posix scan script.
+    vi.stubEnv('HERMES_HOME', 'C:\\Users\\alice\\hermes')
+    vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\alice\\AppData\\Local')
     const pluginId = 'compound-engineering@compound-engineering-plugin'
     const installPath = '/home/alice/.claude/plugins/cache/compound/3.14.3'
     const installed = JSON.stringify({
@@ -67,6 +72,7 @@ describe('WSL Claude plugin skill discovery', () => {
     const encoded = /printf %s '([^']+)'/.exec(scanArgs[5] ?? '')?.[1]
     const scanScript = Buffer.from(encoded ?? '', 'base64').toString('utf8')
     expect(scanScript).toContain('/home/alice/.hermes/skills')
+    expect(scanScript).not.toContain('AppData')
     expect(scanScript).toContain(`${installPath}/skills`)
     expect(result.skills).toEqual([
       expect.objectContaining({

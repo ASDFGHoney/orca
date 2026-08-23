@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { toWindowsWslPath } from '../../shared/wsl-paths'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
@@ -45,6 +46,38 @@ export function resolveEnvironmentHermesSkillsRoot(
 ): string | null {
   const hermesHome = normalizedRoot(env.HERMES_HOME)
   return hermesHome ? join(hermesHome, 'skills') : null
+}
+
+function isExistingDirectory(candidate: string): boolean {
+  return statSync(candidate, { throwIfNoEntry: false })?.isDirectory() === true
+}
+
+/**
+ * The Hermes home when `HERMES_HOME` is unset. Windows installs land in
+ * `%LOCALAPPDATA%\hermes`, not a dotfolder in the user profile, so the POSIX
+ * `~/.hermes` default discovers nothing there. The dotfolder still wins on
+ * Windows when it exists and the LOCALAPPDATA tree does not, which is the
+ * pre-LOCALAPPDATA install Hermes itself keeps honouring rather than orphaning.
+ */
+export function resolveDefaultHermesSkillsRoot(input: {
+  homeDir: string
+  env?: NodeJS.ProcessEnv
+  platform?: NodeJS.Platform
+  directoryExists?: (candidate: string) => boolean
+}): string {
+  const dotfolderHome = join(input.homeDir, '.hermes')
+  if ((input.platform ?? process.platform) !== 'win32') {
+    return join(dotfolderHome, 'skills')
+  }
+  const localAppData = normalizedRoot((input.env ?? process.env).LOCALAPPDATA)
+  if (!localAppData) {
+    return join(dotfolderHome, 'skills')
+  }
+  const localAppDataHome = join(localAppData, 'hermes')
+  const directoryExists = input.directoryExists ?? isExistingDirectory
+  return !directoryExists(localAppDataHome) && directoryExists(dotfolderHome)
+    ? join(dotfolderHome, 'skills')
+    : join(localAppDataHome, 'skills')
 }
 
 export function withClaudeSkillProviderRoot(

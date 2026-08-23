@@ -48,6 +48,10 @@ function makeRepo(path: string, connectionId: string | null = null): Repo {
 beforeEach(() => {
   // Roots are shared between scans for a few seconds; each case owns its own tree.
   clearSkillRootScanCache()
+  // Why: the Hermes root is the only home root that env vars can move outside the
+  // per-case tree, so a developer's real install must not leak into these scans.
+  vi.stubEnv('HERMES_HOME', '')
+  vi.stubEnv('LOCALAPPDATA', '')
   vi.spyOn(console, 'info').mockImplementation(() => undefined)
 })
 

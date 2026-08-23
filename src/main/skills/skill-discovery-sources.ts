@@ -12,6 +12,7 @@ import type { Repo } from '../../shared/repo-types'
 import { getRepoExecutionHostId, LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
 import {
+  resolveDefaultHermesSkillsRoot,
   resolveEnvironmentHermesSkillsRoot,
   resolveEnvironmentSkillProviderRoots
 } from './skill-provider-runtime-roots'
@@ -82,10 +83,11 @@ export function buildSkillDiscoverySources(
     args.providerRootOverrides ?? (args.pathApi ? {} : resolveEnvironmentSkillProviderRoots())
   // Why: HERMES_HOME moves the whole profile tree, so the default home path
   // finds nothing for `hermes -p <profile>`. Only this process's own host can
-  // read it — a custom pathApi means the home belongs to another host.
-  const hermesSkillsRoot =
-    (args.pathApi ? null : resolveEnvironmentHermesSkillsRoot()) ??
-    pathApi.join(home, '.hermes', 'skills')
+  // read it — a custom pathApi means the home belongs to another host, whose
+  // Hermes install is POSIX-shaped even when this process runs on Windows.
+  const hermesSkillsRoot = args.pathApi
+    ? pathApi.join(home, '.hermes', 'skills')
+    : (resolveEnvironmentHermesSkillsRoot() ?? resolveDefaultHermesSkillsRoot({ homeDir: home }))
   const roots: SkillScanRoot[] = [
     source(
       'home-codex',
