@@ -93,4 +93,17 @@ describe('SSH transcript range stability', () => {
       TranscriptRangeReadInvalidatedError
     )
   })
+
+  it('rejects a same-length rewrite even when remote mtime is coarse', async () => {
+    const remote = mutableProvider('old generation')
+    mocks.provider = remote.provider
+    const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
+    const openingStamp = await rangeFs.stat(TRANSCRIPT_PATH, undefined, true)
+
+    remote.replace('new generation', false)
+
+    await expect(rangeFs.assertStable(TRANSCRIPT_PATH, openingStamp)).rejects.toBeInstanceOf(
+      TranscriptRangeReadInvalidatedError
+    )
+  })
 })

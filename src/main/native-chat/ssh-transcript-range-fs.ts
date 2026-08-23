@@ -109,7 +109,9 @@ export async function createSshTranscriptRangeFs(
         if (versionChanged) {
           throw new TranscriptRangeReadInvalidatedError()
         }
-        return
+        if (openingStamp.size === 0) {
+          return
+        }
       }
       if (!openingStamp.boundaryFingerprint) {
         throw new TranscriptRangeReadInvalidatedError()
