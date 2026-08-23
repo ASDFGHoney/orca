@@ -56,8 +56,12 @@ export async function renameDurable(tmpPath: string, finalPath: string): Promise
  * other work between "the new content is durable" and "the new content is visible" — a backup
  * rotation that has to happen while the old file is still in place, for instance.
  */
-export async function writeTempFileDurable(tmpPath: string, payload: string): Promise<void> {
-  const handle = await open(tmpPath, 'w')
+export async function writeTempFileDurable(
+  tmpPath: string,
+  payload: string,
+  mode?: number
+): Promise<void> {
+  const handle = await open(tmpPath, 'w', mode)
   try {
     await handle.writeFile(payload, 'utf-8')
     await handle.sync()

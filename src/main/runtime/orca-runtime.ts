@@ -10627,6 +10627,8 @@ export class OrcaRuntimeService {
       // in a plain folder lands in the folder rather than failing to resolve.
       resolveWorkspacePath: async (workspaceId) =>
         (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
+      resolveCodexOverrides: () =>
+        resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }

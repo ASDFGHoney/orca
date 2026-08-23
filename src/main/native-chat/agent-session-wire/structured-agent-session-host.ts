@@ -166,7 +166,9 @@ export class StructuredAgentSessionHost {
       runtimeState: this.runtimeState,
       sessions: this.sessions,
       subscribers: this.subscribers,
+      tasks: this.tasks,
       reconcileLeases: (sessionId) => this.reconcileLeases(sessionId),
+      serialize: (sessionId, task) => this.serialize(sessionId, task),
       now: () => this.now()
     }
   }
@@ -207,12 +209,7 @@ export class StructuredAgentSessionHost {
     caller: StructuredAgentSessionCaller,
     params: AgentSessionAttachParams
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
-    // Why here and not in the orchestration: the host owns per-session serialization and the
-    // in-flight attach set, so the module stays testable without a task queue.
-    const attaching = this.serialize(params.envelope.sessionId, () =>
-      attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
-    )
-    return this.tasks.trackAttach(attaching)
+    return attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
   }
 
   /** Reserve the lease an adopted TUI must hold before the write gate will admit its proof. */

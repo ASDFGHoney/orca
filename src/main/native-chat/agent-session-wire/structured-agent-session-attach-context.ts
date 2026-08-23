@@ -11,6 +11,7 @@ import type {
   StructuredAgentSessionHostSession
 } from './structured-agent-session-host-types'
 import type { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
+import type { StructuredAgentSessionTaskQueue } from './structured-agent-session-task-queue'
 
 export type StructuredAgentSessionAttachContext = {
   deps: StructuredAgentSessionHostDeps
@@ -26,6 +27,8 @@ export type StructuredAgentSessionAttachContext = {
     snapshot: (sessionId: string, journal: AgentSessionJournal, fence: number) => void
     publish: (sessionId: string, journal: AgentSessionJournal) => void
   }
+  tasks: StructuredAgentSessionTaskQueue
   reconcileLeases: (sessionId: string) => Promise<AgentSessionWireRefusal | null>
+  serialize: <T>(sessionId: string, task: () => Promise<T>) => Promise<T>
   now: () => number
 }

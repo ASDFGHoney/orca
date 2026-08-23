@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -45,14 +45,17 @@ afterEach(async () => {
 })
 
 describe('legacy agent session launch environment', () => {
-  it('durably pins the first environment resolved by a current reservation', async () => {
+  it('does not persist ambient launch variables', async () => {
     const store = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
     await store.reserveOwner(request())
     await store.reserveOwner(
       request({
         expectedFence: 1,
         spawnToken: 'spawn-b',
-        launchEnv: { ANTHROPIC_AUTH_TOKEN: 'pinned-token' },
+        launchEnv: {
+          PATH: '/custom/bin:/usr/bin',
+          ANTHROPIC_AUTH_TOKEN: 'fixture-token'
+        },
         operation: {
           callerKey: 'client-1',
           operationId: `${NOW}-00000000000000000000000000000002`,
@@ -61,10 +64,11 @@ describe('legacy agent session launch environment', () => {
       })
     )
 
+    const raw = await readFile(join(directory, 'agent-sessions.json'), 'utf-8')
+    expect(raw).not.toContain('ANTHROPIC_AUTH_TOKEN')
+    expect(raw).not.toContain('"PATH"')
     const reopened = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
-    expect(reopened.getRecord(SESSION)?.launchEnv).toEqual({
-      ANTHROPIC_AUTH_TOKEN: 'pinned-token'
-    })
+    expect(reopened.getRecord(SESSION)).not.toHaveProperty('launchEnv')
   })
 
   it('rejects an environment that could not be reloaded before writing it', async () => {
