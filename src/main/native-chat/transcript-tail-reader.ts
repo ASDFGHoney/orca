@@ -73,7 +73,7 @@ export async function readNativeChatTranscriptTailFile(
   oversizedRecordCount?: number
 }> {
   signal?.throwIfAborted()
-  const openingStamp = rangeFs ? await rangeFs.stat(filePath, signal) : null
+  const openingStamp = rangeFs ? await rangeFs.stat(filePath, signal, true) : null
   const end = Math.min(
     openingStamp?.size ?? (await wslGatedStat(filePath, 'exact', signal)).size,
     endOffset ?? Number.MAX_SAFE_INTEGER

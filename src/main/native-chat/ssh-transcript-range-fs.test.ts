@@ -39,9 +39,11 @@ function mutableProvider(initial: string) {
   } as unknown as IFilesystemProvider
   return {
     provider,
-    replace(next: string) {
+    replace(next: string, touch = true) {
       bytes = Buffer.from(next)
-      mtimeMs++
+      if (touch) {
+        mtimeMs++
+      }
     }
   }
 }
@@ -53,16 +55,39 @@ beforeEach(() => {
 describe('SSH transcript range stability', () => {
   it.each([
     ['same-length rewrite', 'new generation'],
-    ['growing rewrite', 'new generation with more bytes'],
-    ['concurrent append', 'old generation append']
+    ['growing rewrite', 'new generation with more bytes']
   ])('invalidates a %s', async (_label, replacement) => {
     const remote = mutableProvider('old generation')
     mocks.provider = remote.provider
     const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
-    const openingStamp = await rangeFs.stat(TRANSCRIPT_PATH)
+    const openingStamp = await rangeFs.stat(TRANSCRIPT_PATH, undefined, true)
 
     await rangeFs.read(TRANSCRIPT_PATH, 0, 3)
     remote.replace(replacement)
+
+    await expect(rangeFs.assertStable(TRANSCRIPT_PATH, openingStamp)).rejects.toBeInstanceOf(
+      TranscriptRangeReadInvalidatedError
+    )
+  })
+
+  it('accepts a concurrent append that preserves the opening boundary', async () => {
+    const remote = mutableProvider('old generation')
+    mocks.provider = remote.provider
+    const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
+    const openingStamp = await rangeFs.stat(TRANSCRIPT_PATH, undefined, true)
+
+    remote.replace('old generation append')
+
+    await expect(rangeFs.assertStable(TRANSCRIPT_PATH, openingStamp)).resolves.toBeUndefined()
+  })
+
+  it('rejects a growing rewrite even when remote mtime is coarse', async () => {
+    const remote = mutableProvider('old generation')
+    mocks.provider = remote.provider
+    const rangeFs = await createSshTranscriptRangeFs('ssh-owner')
+    const openingStamp = await rangeFs.stat(TRANSCRIPT_PATH, undefined, true)
+
+    remote.replace('new generation with more bytes', false)
 
     await expect(rangeFs.assertStable(TRANSCRIPT_PATH, openingStamp)).rejects.toBeInstanceOf(
       TranscriptRangeReadInvalidatedError

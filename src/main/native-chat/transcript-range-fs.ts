@@ -1,9 +1,9 @@
 export type TranscriptFileStamp = {
   size: number
   identity: string
-  identityReliable: boolean
   mtimeMs: number
   ctimeMs: number
+  boundaryFingerprint?: string
 }
 
 export class TranscriptRangeReadInvalidatedError extends Error {
@@ -14,7 +14,11 @@ export class TranscriptRangeReadInvalidatedError extends Error {
 }
 
 export type TranscriptRangeFs = {
-  stat(filePath: string, signal?: AbortSignal): Promise<TranscriptFileStamp>
+  stat(
+    filePath: string,
+    signal?: AbortSignal,
+    captureBoundary?: boolean
+  ): Promise<TranscriptFileStamp>
   read(filePath: string, position: number, length: number, signal?: AbortSignal): Promise<Buffer>
   assertStable(
     filePath: string,
