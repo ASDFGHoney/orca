@@ -213,8 +213,8 @@ describe('STA-4919 Codex resume home snapshot', () => {
   })
 
   it('deduplicates equivalent Windows home spellings while preserving the first path', () => {
-    const selectedHome = 'c:/users/brennan/.codex/'
-    const discoveredHome = String.raw`C:\Users\Brennan\.codex`
+    const selectedHome = 'c:/users/test-user/.codex/'
+    const discoveredHome = String.raw`C:\Users\Test-User\.codex`
 
     expect(
       snapshotCodexResumeHomes({
