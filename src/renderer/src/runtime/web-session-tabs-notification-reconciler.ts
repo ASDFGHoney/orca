@@ -23,7 +23,7 @@ export type WebSessionTabsNotificationReconciler = {
   observeSnapshot: (
     snapshot: RuntimeMobileSessionTabsResult,
     options?: { attentionRequired?: boolean }
-  ) => void
+  ) => boolean
   observeInventory: (
     snapshots: readonly RuntimeMobileSessionTabsResult[],
     options: { armPublished: boolean; attentionRequired?: boolean }
@@ -62,14 +62,14 @@ export function createWebSessionTabsNotificationReconciler(args: {
   const observeAcceptedSnapshot = (
     snapshot: RuntimeMobileSessionTabsResult,
     attentionRequired: boolean
-  ): void => {
+  ): boolean => {
     const current = worktrees.get(snapshot.worktree)
     if (isRemoval(snapshot)) {
       worktrees.delete(snapshot.worktree)
-      return
+      return current !== undefined
     }
     if (current && !advancesFreshness(snapshot, current)) {
-      return
+      return false
     }
     const eligible = current?.eligible === true
     worktrees.set(snapshot.worktree, {
@@ -81,15 +81,17 @@ export function createWebSessionTabsNotificationReconciler(args: {
       seedOnly: !eligible,
       attentionRequired: eligible && attentionRequired
     })
+    return true
   }
 
   return {
     observeSnapshot: (snapshot, options) => {
-      observeAcceptedSnapshot(snapshot, options?.attentionRequired === true)
+      const accepted = observeAcceptedSnapshot(snapshot, options?.attentionRequired === true)
       const state = worktrees.get(snapshot.worktree)
       if (state) {
         state.eligible = true
       }
+      return accepted
     },
     observeInventory: (snapshots, options) => {
       const publishedWorktrees = new Set<string>()

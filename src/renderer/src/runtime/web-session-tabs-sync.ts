@@ -361,13 +361,21 @@ function untrackWebSessionTabsWorktree(environmentId: string, worktreeId: string
 export function recordReceivedWebSessionTabsSnapshot(
   environmentId: string,
   snapshot: RuntimeMobileSessionTabsResult,
-  options: { observeNotification?: boolean; attentionRequired?: boolean } = {}
+  options: {
+    observeNotification?: boolean
+    attentionRequired?: boolean
+    onNotificationAccepted?: () => void
+  } = {}
 ): number {
   const receivedFrame = (receivedSessionTabsFrameSequence += 1)
   if (options.observeNotification !== false) {
-    getWebSessionTabsNotificationLifecycle(environmentId).observeSnapshot(snapshot, {
-      attentionRequired: options.attentionRequired
-    })
+    const accepted = getWebSessionTabsNotificationLifecycle(environmentId).observeSnapshot(
+      snapshot,
+      { attentionRequired: options.attentionRequired }
+    )
+    if (accepted) {
+      options.onNotificationAccepted?.()
+    }
   }
   const key = sessionTabsFreshnessKey(environmentId, snapshot.worktree)
   latestReceivedSessionTabsSnapshotByWorktree.set(key, {
@@ -5046,9 +5054,11 @@ export function useWebSessionTabsSync(): void {
                   return
                 }
                 const attentionRequired = awaitingVisibilityResumeSnapshot
-                awaitingVisibilityResumeSnapshot = false
                 const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event, {
-                  attentionRequired
+                  attentionRequired,
+                  onNotificationAccepted: () => {
+                    awaitingVisibilityResumeSnapshot = false
+                  }
                 })
                 recordVisibilityResumeSnapshotReceiptRef.current(
                   environmentId,

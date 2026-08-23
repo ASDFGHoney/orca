@@ -7,6 +7,7 @@ import type { RuntimeMobileSessionTabsResult } from '../../src/shared/runtime-ty
 import { makePaneKey } from '../../src/shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS } from '../../src/renderer/src/runtime/window-visibility-subscription-parking'
+import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_BACKOFF_LIMIT } from '../../src/renderer/src/runtime/window-visibility-subscription-parking'
 import { expect, test } from './helpers/orca-app'
 import { readHookEndpoint } from './helpers/agent-hook-endpoint'
 import {
@@ -21,6 +22,7 @@ import { revealPairedClientWindow } from './helpers/paired-client-window-reveal'
 
 const REQUIRED_CLAUDE_EVENTS = ['UserPromptSubmit', 'Stop', 'PermissionRequest'] as const
 const NOTIFICATION_BARRIER_SOURCE = 'sta-5244-barrier'
+let completedHideCycles = 0
 type NotificationDispatch = {
   source?: string
   agentState?: string
@@ -200,7 +202,11 @@ async function hideUntilSubscriptionsPark(client: PairedElectronClient): Promise
     })
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await client.page.waitForTimeout(WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS + 100)
+  const parkDelay =
+    WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS *
+    Math.min(2 ** completedHideCycles, WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_BACKOFF_LIMIT)
+  await client.page.waitForTimeout(parkDelay + 100)
+  completedHideCycles += 1
 }
 
 async function revealAfterSubscriptionsPark(client: PairedElectronClient): Promise<void> {
@@ -320,6 +326,7 @@ test('recovers hidden remote completion and permission alerts exactly once', asy
   let coldClient: PairedElectronClient | null = null
   let terminal: string | null = null
   let testError: unknown
+  completedHideCycles = 0
 
   try {
     await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
