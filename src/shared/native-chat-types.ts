@@ -158,13 +158,7 @@ export function isInterruptedStatusMessage(message: NativeChatMessage): boolean 
 /** Provider-authored system notice that Native Chat must render as a banner,
  *  not as quiet status or an assistant bubble. */
 export function isAgentNoticeMessage(message: NativeChatMessage): boolean {
-  return (
-    message.role === 'system' &&
-    message.notice !== undefined &&
-    !message.blocks.some(
-      (block) => block.type === 'text' && block.text === NATIVE_CHAT_INTERRUPTED_STATUS_TEXT
-    )
-  )
+  return message.role === 'system' && message.notice !== undefined
 }
 
 export function isImageRefBlock(block: NativeChatBlock): block is NativeChatImageRefBlock {

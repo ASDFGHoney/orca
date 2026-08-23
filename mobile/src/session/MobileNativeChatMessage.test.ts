@@ -45,7 +45,7 @@ describe('MobileNativeChatMessage', () => {
 
   function render(
     message: NativeChatMessage,
-    props: { toolsExpanded?: boolean } = {}
+    props: { toolsExpanded?: boolean; fontScale?: number } = {}
   ): ReactTestRenderer {
     act(() => {
       renderer = create(createElement(MobileNativeChatMessage, { message, ...props }))
@@ -187,5 +187,25 @@ describe('MobileNativeChatMessage', () => {
     expect(notice, 'notice text node').toBeDefined()
     expect(notice!.props.selectable).toBe(true)
     expect(notice!.props.style).toContainEqual({ fontSize: 25.5, lineHeight: 34.5 })
+  })
+
+  it('renders a metadata-absent system row through the ordinary message fallback', () => {
+    const tree = render({
+      id: 'legacy-system-1',
+      role: 'system',
+      blocks: [{ type: 'text', text: 'Provider status from an older host.' }],
+      timestamp: null,
+      source: 'transcript'
+    })
+
+    expect(tree.root.findByType('MobileMarkdown' as never).props.content).toBe(
+      'Provider status from an older host.'
+    )
+    expect(tree.root.findAllByType('Pressable' as never)).not.toHaveLength(0)
+    expect(
+      tree.root
+        .findAllByType('View' as never)
+        .some((node) => node.props.accessibilityRole === 'alert')
+    ).toBe(false)
   })
 })

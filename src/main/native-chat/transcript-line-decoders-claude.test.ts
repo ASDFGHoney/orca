@@ -31,65 +31,125 @@ describe('decodeClaudeTranscriptLine — system notices', () => {
     expect(isAgentNoticeMessage(decoded!)).toBe(true)
   })
 
-  it.each([
-    ['informational', 'Device enrollment required', 'warning', 'warning'],
-    ['model_refusal_fallback', 'Switched to a fallback model', 'error', 'error'],
-    ['compact_boundary', 'Conversation compacted', 'suggestion', 'info']
-  ])('surfaces supported %s copy as an agent notice', (subtype, content, level, expectedLevel) => {
-    expect(decode({ type: 'system', subtype, content, level, uuid: `${subtype}-1` })).toMatchObject(
-      {
-        role: 'system',
-        blocks: [{ type: 'text', text: content }],
-        notice: { level: expectedLevel }
-      }
-    )
-  })
-
-  it.each([
-    {
-      type: 'system',
-      subtype: 'away_summary',
-      content: 'While you were away, Claude completed the requested implementation.',
-      uuid: 'away-1'
-    },
-    {
-      type: 'system',
-      subtype: 'api_error',
-      level: 'error',
-      error: { message: 'Connection error.', formatted: 'Unable to connect to API' },
-      retryAttempt: 2,
-      retryInMs: 1_000,
-      source: 'request_retry',
-      uuid: 'api-retry-1'
-    },
-    {
-      type: 'system',
-      subtype: 'stop_hook_summary',
-      content: 'Stop hook completed',
-      level: 'suggestion',
-      hookCount: 3,
-      uuid: 'stop-hook-1'
-    },
-    {
-      type: 'system',
-      subtype: 'bridge_status',
-      content: 'Bridge connected',
-      uuid: 'unknown-1'
-    }
-  ])('keeps non-message system records silent', (record) => {
-    expect(decode(record)).toBeNull()
-  })
-
-  it('drops an informational notice with no extractable copy instead of a blank banner', () => {
+  it('surfaces an unknown future subtype when it contains user-facing copy', () => {
     expect(
       decode({
         type: 'system',
-        subtype: 'informational',
-        timestamp: '2026-08-13T13:00:00.000Z',
-        uuid: 'notice-empty'
+        subtype: 'workspace_policy_notice',
+        content: 'This workspace now requires approval.',
+        uuid: 'future-1'
+      })
+    ).toMatchObject({
+      role: 'system',
+      blocks: [{ type: 'text', text: 'This workspace now requires approval.' }],
+      notice: { level: 'info' }
+    })
+  })
+
+  it('does not apply API retry suppression to an unknown subtype', () => {
+    expect(
+      decode({
+        type: 'system',
+        subtype: 'workspace_policy_notice',
+        source: 'request_retry',
+        content: 'Approval is still required.',
+        uuid: 'future-retry-source-1'
+      })
+    ).toMatchObject({
+      blocks: [{ type: 'text', text: 'Approval is still required.' }],
+      notice: { level: 'info' }
+    })
+  })
+
+  it.each([
+    'stop_hook_summary',
+    'turn_duration',
+    'away_summary',
+    'local_command',
+    'hook_callback',
+    'init',
+    'compact_boundary'
+  ])('keeps known noise subtype %s silent', (subtype) => {
+    expect(
+      decode({
+        type: 'system',
+        subtype,
+        content: subtype === 'compact_boundary' ? 'Conversation compacted' : 'System detail',
+        uuid: `${subtype}-1`
       })
     ).toBeNull()
   })
+
+  it.each([
+    {
+      source: 'request_retry',
+      retryAttempt: 2,
+      retryInMs: 1_000,
+      maxRetries: 10,
+      error: { message: 'Connection error.', formatted: 'Unable to connect to API' }
+    },
+    {
+      source: 'connection_retry',
+      retryAttempt: 5,
+      retryInMs: 8_000,
+      maxRetries: 10,
+      error: 'Connection failed; retrying'
+    }
+  ])('keeps $source API retry progress silent', (retry) => {
+    expect(
+      decode({
+        type: 'system',
+        subtype: 'api_error',
+        level: 'error',
+        uuid: `api-${retry.source}-1`,
+        ...retry
+      })
+    ).toBeNull()
+  })
+
+  it('surfaces a source-less API error using formatted error copy', () => {
+    expect(
+      decode({
+        type: 'system',
+        subtype: 'api_error',
+        level: 'error',
+        error: { message: 'Connection error.', formatted: 'Unable to connect to API' },
+        uuid: 'api-error-1'
+      })
+    ).toMatchObject({
+      blocks: [{ type: 'text', text: 'Unable to connect to API' }],
+      notice: { level: 'error' }
+    })
+  })
+
+  it('surfaces model refusal fallback copy', () => {
+    expect(
+      decode({
+        type: 'system',
+        subtype: 'model_refusal_fallback',
+        content: 'Switched to a fallback model',
+        level: 'warning',
+        uuid: 'model-fallback-1'
+      })
+    ).toMatchObject({
+      blocks: [{ type: 'text', text: 'Switched to a fallback model' }],
+      notice: { level: 'warning' }
+    })
+  })
+
+  it.each(['informational', 'future_notice', 'api_error'])(
+    'drops %s records with no extractable copy instead of a blank banner',
+    (subtype) => {
+      expect(
+        decode({
+          type: 'system',
+          subtype,
+          timestamp: '2026-08-13T13:00:00.000Z',
+          uuid: 'notice-empty'
+        })
+      ).toBeNull()
+    }
+  )
 
   it('does not mark ordinary assistant turns or interrupt status as agent notices', () => {
     const assistant = decode({

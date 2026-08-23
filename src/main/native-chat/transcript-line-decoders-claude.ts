@@ -87,21 +87,35 @@ function parseTimestamp(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const CLAUDE_NOTICE_SUBTYPES = new Set([
-  'informational',
-  'model_refusal_fallback',
+const CLAUDE_SYSTEM_NOISE_SUBTYPES = new Set([
+  'stop_hook_summary',
+  'turn_duration',
+  'away_summary',
+  'local_command',
+  'hook_callback',
+  'init',
   'compact_boundary'
 ])
+
+const CLAUDE_API_RETRY_SOURCES = new Set(['request_retry', 'connection_retry'])
 
 function decodeClaudeSystemNotice(
   record: Record<string, unknown>,
   fallbackId: string
 ): NativeChatMessage | null {
   const subtype = extractString(record.subtype)
-  if (!subtype || !CLAUDE_NOTICE_SUBTYPES.has(subtype)) {
+  if (!subtype || CLAUDE_SYSTEM_NOISE_SUBTYPES.has(subtype)) {
     return null
   }
-  const text = extractString(record.content)
+  if (subtype === 'api_error' && CLAUDE_API_RETRY_SOURCES.has(extractString(record.source) ?? '')) {
+    return null
+  }
+  const error = asRecord(record.error)
+  const text =
+    extractString(record.content) ??
+    extractString(record.error) ??
+    extractString(error?.formatted) ??
+    extractString(error?.message)
   if (!text) {
     return null
   }

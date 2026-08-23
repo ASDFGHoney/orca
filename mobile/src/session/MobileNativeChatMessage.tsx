@@ -323,8 +323,7 @@ function MobileNativeChatMessageImpl({
     return (
       <View style={styles.row}>
         <View accessibilityRole={needsAttention ? 'alert' : 'summary'} style={styles.notice}>
-          {/* Why: notice copy is what users paste into bug reports, so it must be
-              long-press selectable like every other bubble (STA-4983). */}
+          {/* Why: provider diagnostics must remain selectable for support reports. */}
           <Text
             selectable
             style={[

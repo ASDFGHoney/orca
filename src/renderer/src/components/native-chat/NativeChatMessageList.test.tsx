@@ -77,4 +77,28 @@ describe('NativeChatMessageList — agent notices', () => {
     expect(screen.getByText(NATIVE_CHAT_INTERRUPTED_STATUS_TEXT)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Switch to terminal view/i })).toBeNull()
   })
+
+  it('renders a metadata-absent system row through the quiet fallback', () => {
+    render(
+      <NativeChatMessageList
+        session={sessionWith([
+          {
+            id: 'legacy-system-1',
+            role: 'system',
+            blocks: [{ type: 'text', text: 'Provider status from an older host.' }],
+            timestamp: null,
+            source: 'transcript'
+          }
+        ])}
+        isWorking={false}
+        expandSignal={false}
+        fontScale={1}
+        onSwitchToTerminal={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Provider status from an older host.')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Switch to terminal view/i })).toBeNull()
+  })
 })

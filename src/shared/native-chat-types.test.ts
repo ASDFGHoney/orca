@@ -76,7 +76,7 @@ describe('agent notice vs interrupt status', () => {
     expect(isAgentNoticeMessage(message)).toBe(false)
   })
 
-  it('rejects malformed rows that mix notice metadata with interrupt copy', () => {
+  it('treats notice metadata as authoritative when copy matches interrupt status', () => {
     const message: NativeChatMessage = {
       ...base,
       role: 'system',
@@ -84,6 +84,6 @@ describe('agent notice vs interrupt status', () => {
       notice: { level: 'warning' }
     }
     expect(isInterruptedStatusMessage(message)).toBe(false)
-    expect(isAgentNoticeMessage(message)).toBe(false)
+    expect(isAgentNoticeMessage(message)).toBe(true)
   })
 })

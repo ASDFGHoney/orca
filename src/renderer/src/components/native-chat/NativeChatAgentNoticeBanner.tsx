@@ -9,8 +9,7 @@ export type NativeChatAgentNoticeBannerProps = {
   onSwitchToTerminal?: () => void
 }
 
-/** Inline banner for a provider system notice. Matches the native-chat card
- *  chrome (approval/question), not an assistant bubble. */
+/** Inline card for a provider-authored system notice. */
 export function NativeChatAgentNoticeBanner({
   message,
   text,
@@ -23,7 +22,7 @@ export function NativeChatAgentNoticeBanner({
   return (
     <div
       role={needsAttention ? 'alert' : 'status'}
-      className="flex w-full flex-col gap-2 rounded-lg border border-input bg-card px-4 py-3 text-sm shadow-xs"
+      className="flex w-full flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm shadow-xs"
     >
       <div className="flex items-start gap-2">
         <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
