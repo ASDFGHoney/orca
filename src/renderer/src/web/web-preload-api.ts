@@ -1286,7 +1286,8 @@ function createNativeChatApi(): NativeChatApi {
           agent,
           sessionId,
           limit,
-          transcriptPath
+          transcriptPath,
+          preservesTranscriptOrder: true
         })
       ),
     subscribe: (args, onFrame) => {
@@ -1315,7 +1316,8 @@ function createNativeChatApi(): NativeChatApi {
             sessionId: args.sessionId,
             subscriptionId: args.subscriptionId,
             transcriptPath: args.transcriptPath,
-            limit: args.limit
+            limit: args.limit,
+            preservesTranscriptOrder: true
           },
           {
             onResponse: (response) => {

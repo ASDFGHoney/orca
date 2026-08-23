@@ -145,6 +145,7 @@ export function useMobileNativeChatSession(args: {
         sessionId,
         limit: limitRef.current,
         subscriptionId: buildNativeChatSubscriptionId(agent, sessionId),
+        preservesTranscriptOrder: true,
         ...(transcriptPath ? { transcriptPath } : {})
       },
       (raw) => {
@@ -231,6 +232,7 @@ export function useMobileNativeChatSession(args: {
           agent,
           sessionId,
           limit: beforeOffset === null ? nextLimit : pageLimit,
+          preservesTranscriptOrder: true,
           ...(beforeOffset === null ? {} : { beforeOffset }),
           ...(transcriptPath ? { transcriptPath } : {})
         })

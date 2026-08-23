@@ -48,7 +48,8 @@ const NativeChatSession = z.object({
   // locate the file directly when the session id no longer names it (recent
   // Claude Code). Optional for back-compat with older clients.
   transcriptPath: z.string().min(1).optional(),
-  beforeOffset: z.number().int().nonnegative().optional()
+  beforeOffset: z.number().int().nonnegative().optional(),
+  preservesTranscriptOrder: z.literal(true).optional()
 })
 
 const NativeChatUnsubscribe = z.object({
@@ -212,7 +213,8 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
           sessionId: params.sessionId,
           transcriptPath: params.transcriptPath,
           limit,
-          beforeOffset: params.beforeOffset
+          beforeOffset: params.beforeOffset,
+          includeQueuedPrompts: params.preservesTranscriptOrder === true
         },
         signal
       )
@@ -273,6 +275,7 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
         sessionId: params.sessionId,
         transcriptPath: params.transcriptPath,
         initialLimit: limit,
+        includeQueuedPrompts: params.preservesTranscriptOrder === true,
         onInitialSnapshot: (messages, hasMore, beforeOffset, error, lifecycle) => {
           if (closed) {
             return
