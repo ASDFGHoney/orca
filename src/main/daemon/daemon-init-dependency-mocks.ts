@@ -44,6 +44,7 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
     adoptionLeaseReleases,
     lifecycleLeaseErrors,
     disconnectOnlyErrors,
+    retireIfIdleOutcomes,
     routerSubscriptionError,
     adapterInstances,
     defaultListSessionsSessions,
@@ -111,7 +112,7 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
     readonly getActiveSessionIds: Mock
     readonly fanoutSyntheticExits: Mock
     readonly listProcesses: Mock
-    readonly inspectProcess: Mock
+    readonly retireIfIdle: Mock
     readonly listSessions: Mock
     readonly establishLifecycleLease: Mock
     readonly shutdown: Mock
@@ -131,10 +132,13 @@ export function createDaemonInitModuleFactories(state: DaemonInitMockState) {
       this.listProcesses = vi.fn(async () =>
         listProcessesControl.current ? listProcessesControl.current() : []
       )
-      this.inspectProcess = vi.fn(async () => ({
-        foregroundProcess: 'zsh',
-        hasChildProcesses: false
-      }))
+      this.retireIfIdle = vi.fn(async () => {
+        const outcome = retireIfIdleOutcomes.shift()
+        if (outcome instanceof Error) {
+          throw outcome
+        }
+        return outcome ?? false
+      })
       this.listSessions = vi.fn(async () => [...defaultListSessionsSessions])
       const lifecycleLeaseError = lifecycleLeaseErrors.shift()
       this.establishLifecycleLease = vi.fn(async () => {

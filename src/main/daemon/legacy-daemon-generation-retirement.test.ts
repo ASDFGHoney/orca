@@ -1,197 +1,78 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CLEAN_DISCONNECT_PROTOCOL_VERSION } from './types'
 import {
   retireIdleLegacyDaemonGenerations,
   type LegacyGenerationRetirementAdapter
 } from './legacy-daemon-generation-retirement'
-import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 
-function createAdapter(options: {
-  protocolVersion?: number
-  sessions?: {
-    id: string
-    agentSessionOwners?: unknown[]
-    inspection?: PtyProcessInspection | Error
-  }[]
-  listError?: Error
-}): LegacyGenerationRetirementAdapter & {
-  disconnectOnly: ReturnType<typeof vi.fn>
-  shutdown: ReturnType<typeof vi.fn>
-} {
-  const disconnectOnly = vi.fn(async () => {})
-  const shutdown = vi.fn(async () => {})
+function createAdapter(
+  protocolVersion: number,
+  retireIfIdle: () => Promise<boolean>
+): LegacyGenerationRetirementAdapter & { retireIfIdle: ReturnType<typeof vi.fn> } {
   return {
-    protocolVersion: options.protocolVersion ?? CLEAN_DISCONNECT_PROTOCOL_VERSION,
-    listProcesses: vi.fn(async () => {
-      if (options.listError) {
-        throw options.listError
-      }
-      return (options.sessions ?? []).map((session) => ({
-        id: session.id,
-        ...(session.agentSessionOwners ? { agentSessionOwners: session.agentSessionOwners } : {})
-      }))
-    }),
-    inspectProcess: vi.fn(async (id: string) => {
-      const session = options.sessions?.find((candidate) => candidate.id === id)
-      if (session?.inspection instanceof Error) {
-        throw session.inspection
-      }
-      if (session?.inspection) {
-        return session.inspection
-      }
-      return { foregroundProcess: 'zsh', hasChildProcesses: false }
-    }),
-    disconnectOnly,
-    shutdown
+    protocolVersion,
+    retireIfIdle: vi.fn(retireIfIdle)
   }
 }
 
-const matchingIdentity = vi.fn(async () => 'match' as const)
-const otherInstallIdentity = vi.fn(async () => 'mismatch' as const)
-const unknownIdentity = vi.fn(async () => 'unknown' as const)
-
 describe('retireIdleLegacyDaemonGenerations', () => {
-  it('retires an old-generation daemon whose sessions are all provably idle', async () => {
-    const idle = createAdapter({ sessions: [] })
+  it('removes only generations whose daemon acknowledges retirement', async () => {
+    const retired = createAdapter(24, async () => true)
+    const kept = createAdapter(25, async () => false)
 
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [idle],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: matchingIdentity
-    })
+    const result = await retireIdleLegacyDaemonGenerations([retired, kept])
 
-    expect(idle.disconnectOnly).toHaveBeenCalledOnce()
-    expect(idle.shutdown).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([])
-    expect(result.retiredProtocolVersions).toEqual([CLEAN_DISCONNECT_PROTOCOL_VERSION])
+    expect(retired.retireIfIdle).toHaveBeenCalledOnce()
+    expect(kept.retireIfIdle).toHaveBeenCalledOnce()
+    expect(result.kept).toEqual([kept])
+    expect(result.retiredProtocolVersions).toEqual([24])
     expect(result.leaks).toEqual([])
   })
 
-  it('does not retire an old-generation daemon hosting a session with recent activity', async () => {
-    const live = createAdapter({
-      sessions: [
-        {
-          id: 'pty-agent',
-          agentSessionOwners: [{ provider: 'claude' }],
-          inspection: { foregroundProcess: 'zsh', hasChildProcesses: false }
-        }
-      ]
+  it('keeps and reports a generation whose retirement is unverifiable', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unverifiable = createAdapter(26, async () => {
+      throw new Error('retirement timed out')
     })
 
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [live],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: matchingIdentity
-    })
+    const result = await retireIdleLegacyDaemonGenerations([unverifiable])
 
-    expect(live.disconnectOnly).not.toHaveBeenCalled()
-    expect(live.shutdown).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([live])
-    expect(result.retiredProtocolVersions).toEqual([])
-    expect(result.leaks).toEqual([])
-  })
-
-  it('does not retire an unverifiable session and reports the leak', async () => {
-    const unverifiable = createAdapter({
-      listError: new Error('inventory timed out')
-    })
-
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [unverifiable],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: matchingIdentity
-    })
-
-    expect(unverifiable.disconnectOnly).not.toHaveBeenCalled()
     expect(result.kept).toEqual([unverifiable])
     expect(result.retiredProtocolVersions).toEqual([])
-    expect(result.leaks).toEqual([
-      {
-        protocolVersion: CLEAN_DISCONNECT_PROTOCOL_VERSION,
-        reason: 'inventory timed out'
-      }
-    ])
+    expect(result.leaks).toEqual([{ protocolVersion: 26, reason: 'retirement timed out' }])
+    expect(warning).toHaveBeenCalledWith(
+      '[daemon] Keeping previous-generation daemon v26; retirement timed out'
+    )
+    warning.mockRestore()
   })
 
-  it('does not retire when process inspection is unavailable', async () => {
-    const unverifiable = createAdapter({
-      sessions: [
-        {
-          id: 'pty-gap',
-          inspection: { foregroundProcess: null, hasChildProcesses: true, unavailable: true }
-        }
-      ]
-    })
+  it('preserves adapter order across mixed outcomes', async () => {
+    const first = createAdapter(24, async () => false)
+    const retired = createAdapter(25, async () => true)
+    const last = createAdapter(26, async () => false)
 
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [unverifiable],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: matchingIdentity
-    })
+    const result = await retireIdleLegacyDaemonGenerations([first, retired, last])
 
-    expect(unverifiable.disconnectOnly).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([unverifiable])
-    expect(result.leaks).toEqual([
-      {
-        protocolVersion: CLEAN_DISCONNECT_PROTOCOL_VERSION,
-        reason: 'liveness unverifiable for pty-gap'
-      }
-    ])
+    expect(result.kept).toEqual([first, last])
+    expect(result.retiredProtocolVersions).toEqual([25])
   })
 
-  it('does not touch a daemon from a different install', async () => {
-    const foreign = createAdapter({ sessions: [] })
+  it('starts every retirement probe before waiting for any one generation', async () => {
+    const releases: ((retired: boolean) => void)[] = []
+    const adapters = [24, 25].map((protocolVersion) =>
+      createAdapter(
+        protocolVersion,
+        () =>
+          new Promise<boolean>((resolve) => {
+            releases.push(resolve)
+          })
+      )
+    )
 
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [foreign],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: otherInstallIdentity
-    })
+    const retirement = retireIdleLegacyDaemonGenerations(adapters)
+    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    releases[0](false)
+    releases[1](false)
 
-    expect(foreign.disconnectOnly).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([foreign])
-    expect(result.retiredProtocolVersions).toEqual([])
-  })
-
-  it('does not retire when install identity cannot be established', async () => {
-    const unknown = createAdapter({ sessions: [] })
-
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [unknown],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: unknownIdentity
-    })
-
-    expect(unknown.disconnectOnly).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([unknown])
-  })
-
-  it('does not kill idle sessions still hosted on the generation', async () => {
-    const idleShell = createAdapter({
-      sessions: [
-        {
-          id: 'pty-idle',
-          inspection: { foregroundProcess: 'zsh', hasChildProcesses: false }
-        }
-      ]
-    })
-
-    const result = await retireIdleLegacyDaemonGenerations({
-      adapters: [idleShell],
-      runtimeDir: '/tmp/orca-daemon',
-      currentEntryPath: '/Applications/Orca.app/Contents/out/main/daemon-entry.js',
-      getDaemonLaunchIdentity: matchingIdentity
-    })
-
-    expect(idleShell.shutdown).not.toHaveBeenCalled()
-    expect(idleShell.disconnectOnly).not.toHaveBeenCalled()
-    expect(result.kept).toEqual([idleShell])
-    expect(result.retiredProtocolVersions).toEqual([])
+    await expect(retirement).resolves.toMatchObject({ kept: adapters })
   })
 })
