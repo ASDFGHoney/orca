@@ -35,7 +35,8 @@ type RemoteContentParser = (
 
 export function remoteSessionSources(
   remoteHome: string,
-  hostPlatform: RemoteHostPlatform
+  hostPlatform: RemoteHostPlatform,
+  devinTranscriptsDir?: string
 ): RemoteSessionSource[] {
   return [
     ...remoteCodexSources(remoteHome, hostPlatform),
@@ -86,14 +87,7 @@ export function remoteSessionSources(
       ['.json'],
       parseHermesSessionContent
     ),
-    source(
-      'devin',
-      remoteHome,
-      hostPlatform,
-      defaultDevinTranscriptsSegments(hostPlatform.os),
-      ['.json'],
-      parseDevinSessionContent
-    ),
+    remoteDevinSource(remoteHome, hostPlatform, devinTranscriptsDir),
     jsonlSource('pi', remoteHome, hostPlatform, remotePiSessionsSegments(), piParser),
     {
       ...jsonlSource('omp', remoteHome, hostPlatform, remoteOmpSessionsSegments(), ompParser),
@@ -125,6 +119,24 @@ export function remoteSessionSources(
     ),
     ...remoteOpenClawSources(remoteHome, hostPlatform)
   ]
+}
+
+function remoteDevinSource(
+  remoteHome: string,
+  hostPlatform: RemoteHostPlatform,
+  transcriptsDir: string | undefined
+): RemoteSessionSource {
+  const fallback = source(
+    'devin',
+    remoteHome,
+    hostPlatform,
+    defaultDevinTranscriptsSegments(hostPlatform.os),
+    ['.json'],
+    parseDevinSessionContent
+  )
+  return transcriptsDir === undefined
+    ? fallback
+    : { ...fallback, rootDir: joinRemotePath(hostPlatform, transcriptsDir) }
 }
 
 function remoteAntigravitySource(

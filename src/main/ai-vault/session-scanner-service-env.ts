@@ -36,9 +36,6 @@ const AGENT_ROOT_ENV_ALLOWLIST = [
   'CODEX_HOME',
   'COPILOT_HOME',
   'DEVIN_HOME',
-  // Why: Devin's Windows CLI writes transcripts under %APPDATA%; without this
-  // the forked scanner child falls back to ~/.local/share and finds nothing.
-  'APPDATA',
   'GROK_HOME',
   'KIMI_CODE_HOME',
   'OMP_CODING_AGENT_DIR',
@@ -52,6 +49,10 @@ const AGENT_ROOT_ENV_ALLOWLIST = [
   // so this one is an agent root here rather than generic runtime state.
   'XDG_DATA_HOME'
 ] as const
+
+// Why: without redirected APPDATA, the Windows child falls back to the
+// standard-profile AppData/Roaming path and misses relocated Devin transcripts.
+const WINDOWS_AGENT_ROOT_ENV_ALLOWLIST = ['APPDATA'] as const
 
 export function pickAllowedEnv(
   keys: readonly string[],
@@ -85,7 +86,11 @@ export function buildAiVaultServiceEnv(
   platform: NodeJS.Platform = process.platform
 ): NodeJS.ProcessEnv {
   const env = pickAllowedEnv(
-    [...RUNTIME_ENV_ALLOWLIST, ...AGENT_ROOT_ENV_ALLOWLIST],
+    [
+      ...RUNTIME_ENV_ALLOWLIST,
+      ...AGENT_ROOT_ENV_ALLOWLIST,
+      ...(platform === 'win32' ? WINDOWS_AGENT_ROOT_ENV_ALLOWLIST : [])
+    ],
     baseEnv,
     platform
   )

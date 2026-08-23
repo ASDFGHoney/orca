@@ -26,9 +26,8 @@ export function resolveDevinTranscriptsDir(
     platform?: NodeJS.Platform
   } = {}
 ): string {
-  const override = args.override?.trim()
-  if (override) {
-    return override
+  if (args.override !== undefined) {
+    return args.override
   }
   const env = args.env ?? process.env
   const homeDir = args.homeDir ?? homedir()

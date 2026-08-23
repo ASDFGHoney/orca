@@ -35,7 +35,6 @@ describe('buildAiVaultServiceEnv', () => {
         CODEX_HOME: '/home/dev/.codex',
         COPILOT_HOME: '/home/dev/.copilot',
         DEVIN_HOME: '/home/dev/.devin',
-        APPDATA: 'C:\\Users\\dev\\AppData\\Roaming',
         GROK_HOME: '/home/dev/.grok',
         KIMI_CODE_HOME: '/home/dev/.kimi-code',
         OMP_CODING_AGENT_DIR: '/home/dev/.omp/agent/sessions',
@@ -52,7 +51,6 @@ describe('buildAiVaultServiceEnv', () => {
       CODEX_HOME: '/home/dev/.codex',
       COPILOT_HOME: '/home/dev/.copilot',
       DEVIN_HOME: '/home/dev/.devin',
-      APPDATA: 'C:\\Users\\dev\\AppData\\Roaming',
       GROK_HOME: '/home/dev/.grok',
       KIMI_CODE_HOME: '/home/dev/.kimi-code',
       OMP_CODING_AGENT_DIR: '/home/dev/.omp/agent/sessions',
@@ -73,6 +71,13 @@ describe('buildAiVaultServiceEnv', () => {
 
     expect(env.XDG_DATA_HOME).toBe('/home/dev/data')
     expect(env.OPENCODE_DB).toBe('opencode-alt.db')
+  })
+
+  it('forwards APPDATA only to Windows desktop children', () => {
+    const baseEnv = { APPDATA: 'D:\\Profiles\\Ada\\Roaming' }
+
+    expect(buildAiVaultServiceEnv(baseEnv, 'win32').APPDATA).toBe('D:\\Profiles\\Ada\\Roaming')
+    expect(buildAiVaultServiceEnv(baseEnv, 'linux').APPDATA).toBeUndefined()
   })
 
   it('runs the forked Electron binary as plain Node', () => {
@@ -118,14 +123,15 @@ describe('buildRelayAiVaultServiceEnv', () => {
     expect(env.HOME).toBe('/home/ada')
   })
 
-  // The sidecar takes remoteHome and hostPlatform from its init message, so an
-  // agent-home override on the remote host is not part of how it finds roots.
+  // The relay parent resolves env-backed roots before init, so the sidecar
+  // never needs the remote login's agent-home variables.
   it('withholds the agent-home variables the desktop child needs', () => {
     const env = buildRelayAiVaultServiceEnv(
-      { CODEX_HOME: '/remote/.codex', PATH: '/usr/bin' },
+      { APPDATA: 'D:\\Profiles\\Ada\\Roaming', CODEX_HOME: '/remote/.codex', PATH: '/usr/bin' },
       'linux'
     )
 
+    expect(env.APPDATA).toBeUndefined()
     expect(env.CODEX_HOME).toBeUndefined()
     expect(env.PATH).toBe('/usr/bin')
   })

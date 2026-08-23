@@ -20,11 +20,14 @@ function stubPlatform(platform: NodeJS.Platform): () => void {
 
 function devinRemoteRoot(
   remoteHome: string,
-  relayPlatform: 'win32-x64' | 'linux-x64' | 'darwin-arm64'
+  relayPlatform: 'win32-x64' | 'linux-x64' | 'darwin-arm64',
+  devinTranscriptsDir?: string
 ): string {
-  const source = remoteSessionSources(remoteHome, getRemoteHostPlatform(relayPlatform)).find(
-    (entry) => entry.agent === 'devin'
-  )
+  const source = remoteSessionSources(
+    remoteHome,
+    getRemoteHostPlatform(relayPlatform),
+    devinTranscriptsDir
+  ).find((entry) => entry.agent === 'devin')
   if (!source) {
     throw new Error('missing Devin remote source')
   }
@@ -78,7 +81,10 @@ describe('Devin transcript roots on Windows', () => {
     const restore = stubPlatform('win32')
     try {
       const roots = AI_VAULT_AGENT_SOURCES.devin.rootDirs({}, ['/home/ada'])
-      expect(roots).toContain(join('/home/ada', '.local', 'share', 'devin', 'cli', 'transcripts'))
+      expect(roots).toEqual([
+        join('C:\\Users\\Ada\\AppData\\Roaming', 'devin', 'cli', 'transcripts'),
+        join('/home/ada', '.local', 'share', 'devin', 'cli', 'transcripts')
+      ])
     } finally {
       restore()
     }
@@ -123,16 +129,29 @@ describe('Devin remote transcript roots', () => {
       '/Users/ada/.local/share/devin/cli/transcripts'
     )
   })
+
+  it('uses a relay-resolved root instead of the home fallback', () => {
+    expect(
+      devinRemoteRoot(
+        'C:/Users/Ada',
+        'win32-x64',
+        'D:\\Profiles\\Ada\\Roaming\\devin\\cli\\transcripts'
+      )
+    ).toBe('D:/Profiles/Ada/Roaming/devin/cli/transcripts')
+  })
 })
 
 describe('AI Vault scanner child env for Devin on Windows', () => {
-  it('forwards APPDATA so the child can resolve the Windows transcript default', () => {
-    const env = buildAiVaultServiceEnv(
-      { APPDATA: 'C:\\Users\\Ada\\AppData\\Roaming', DEVIN_HOME: 'D:\\devin-home' },
-      'win32'
-    )
-    expect(env.APPDATA).toBe('C:\\Users\\Ada\\AppData\\Roaming')
-    expect(env.DEVIN_HOME).toBe('D:\\devin-home')
+  it('preserves redirected APPDATA through child env and root resolution', () => {
+    const env = buildAiVaultServiceEnv({ APPDATA: 'D:\\Profiles\\Ada\\Roaming' }, 'win32')
+
+    expect(
+      resolveDevinTranscriptsDir({
+        env,
+        homeDir: 'C:\\Users\\Ada',
+        platform: 'win32'
+      })
+    ).toBe(join('D:\\Profiles\\Ada\\Roaming', 'devin', 'cli', 'transcripts'))
   })
 })
 
@@ -175,6 +194,12 @@ describe('resolveDevinTranscriptsDir', () => {
         env: { DEVIN_HOME: 'D:\\devin-home' }
       })
     ).toBe('/tmp/custom-devin')
+  })
+
+  it.each(['', '  '])('preserves a defined explicit override verbatim: %j', (override) => {
+    expect(AI_VAULT_AGENT_SOURCES.devin.rootDirs({ devinTranscriptsDir: override }, [])).toEqual([
+      override
+    ])
   })
 
   it('keeps the XDG layout on POSIX hosts', () => {
