@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { subscribeViaWatcherProcess } from './parcel-watcher-process'
 import { isWatcherProcessFailure } from './parcel-watcher-process-failure'
 import type { WorktreeBaseWatchTarget } from './worktree-base-directory-event-filter'
@@ -26,6 +26,11 @@ import { startGitCommonPrimaryPolling } from './worktree-git-common-primary-poll
 // process when unsubscribe overlaps in-flight callbacks (issue #8732), and
 // root deletion via `git worktree prune` makes that overlap routine here.
 
+// The native stream is still the fast path. A scheduled 15-tick reconciliation
+// bounds silent watcher loss at the existing 30-second backstop without joining
+// the per-repo 2-second timer fleet.
+const NARROW_WATCH_RECONCILIATION_TICKS = 15
+
 async function startGitCommonNarrowWatch(
   target: WorktreeBaseWatchTarget,
   onEvents: (events: WorktreeBasePollEvent[]) => void,
@@ -41,6 +46,19 @@ async function startGitCommonNarrowWatch(
   let pollingFallbackPromise: Promise<void> | null = null
   let subscribing = false
   let parkedWhileHidden = false
+  let reconciliationSubscription: WorktreeBaseSubscription | null = null
+  let usingPollingFallback = false
+  let nativeSubscriptionGeneration = 0
+  const reconciliationVisibilityListeners = new Set<() => void>()
+  const reconciliationVisibility: WorktreePollerWindowVisibility = {
+    isWindowVisible: visibility.isWindowVisible,
+    onWindowBecameVisible: (listener) => {
+      reconciliationVisibilityListeners.add(listener)
+      return () => {
+        reconciliationVisibilityListeners.delete(listener)
+      }
+    }
+  }
 
   const stopExistencePoll = (): void => {
     if (existenceTimer) {
@@ -58,20 +76,31 @@ async function startGitCommonNarrowWatch(
       return pollingFallbackPromise
     }
     stopExistencePoll()
-    const pending = startGitCommonPolling(
-      target.path,
-      onEvents,
-      pollIntervalMs,
-      visibility,
-      onFullScan,
-      false
-    ).then(async (fallback) => {
-      if (disposed || subscription) {
-        await fallback.unsubscribe()
-        return
-      }
-      subscription = fallback
-    })
+    usingPollingFallback = true
+    const previousReconciliation = reconciliationSubscription
+    reconciliationSubscription = null
+    const pending = (
+      previousReconciliation
+        ? previousReconciliation.unsubscribe().catch(() => {})
+        : Promise.resolve()
+    )
+      .then(() =>
+        startGitCommonPolling(
+          target.path,
+          onEvents,
+          pollIntervalMs,
+          visibility,
+          onFullScan,
+          false
+        )
+      )
+      .then(async (fallback) => {
+        if (disposed || subscription) {
+          await fallback.unsubscribe()
+          return
+        }
+        subscription = fallback
+      })
     const tracked = pending.finally(() => {
       if (pollingFallbackPromise === tracked) {
         pollingFallbackPromise = null
@@ -79,6 +108,59 @@ async function startGitCommonNarrowWatch(
     })
     pollingFallbackPromise = tracked
     return pollingFallbackPromise
+  }
+
+  // Reconciliation also repairs a stream whose root was deleted and recreated
+  // between scans. In that coarse race the signature is present at both samples;
+  // a newly listed direct child is the evidence that consumers need a root-create
+  // signal and the native subscription needs to be re-armed.
+  const ensureReconciliation = async (): Promise<void> => {
+    if (disposed || usingPollingFallback || reconciliationSubscription || !subscription) {
+      return
+    }
+    const reconciliation = await startGitCommonPolling(
+      target.path,
+      (events) => {
+        const rootWasReplaced =
+          events.some((event) => event.type === 'delete' && event.path === worktreesDir) &&
+          events.some((event) => event.type === 'create' && event.path === worktreesDir)
+        const coarseRootReplacement = events.some(
+          (event) =>
+            event.type === 'create' &&
+            event.path !== worktreesDir &&
+            dirname(event.path) === worktreesDir
+        )
+        if (rootWasReplaced || coarseRootReplacement) {
+          nativeSubscriptionGeneration++
+          const current = subscription
+          subscription = null
+          if (current) {
+            void current.unsubscribe().catch(() => {})
+          }
+          armExistencePoll()
+        }
+        onEvents(
+          coarseRootReplacement
+            ? events.map((event) =>
+                event.type === 'update' && event.path === worktreesDir
+                  ? { ...event, type: 'create' }
+                  : event
+              )
+            : events
+        )
+      },
+      pollIntervalMs * NARROW_WATCH_RECONCILIATION_TICKS,
+      reconciliationVisibility,
+      undefined,
+      false,
+      () => [],
+      { forceFullScanEveryTick: true }
+    )
+    if (disposed || usingPollingFallback) {
+      await reconciliation.unsubscribe()
+    } else {
+      reconciliationSubscription = reconciliation
+    }
   }
 
   const tryUpgradeToNarrowWatch = async (): Promise<void> => {
@@ -90,6 +172,7 @@ async function startGitCommonNarrowWatch(
       const installed = await trySubscribe()
       if (installed && !disposed) {
         stopExistencePoll()
+        await ensureReconciliation()
         // The dir appearing means a first linked worktree was just
         // registered; surface it so the repo's worktree list refreshes.
         onEvents([{ type: 'create', path: worktreesDir }])
@@ -111,8 +194,6 @@ async function startGitCommonNarrowWatch(
       if (disposed) {
         return
       }
-      // Why: a hidden window has nothing to refresh, so stop stat'ing the dir
-      // entirely instead of burning a syscall per repo per tick in the background.
       if (!visibility.isWindowVisible()) {
         parkedWhileHidden = true
         stopExistencePoll()
@@ -124,15 +205,15 @@ async function startGitCommonNarrowWatch(
   }
 
   const unsubscribeVisibility = visibility.onWindowBecameVisible(() => {
-    if (disposed || !parkedWhileHidden) {
-      return
+    if (!disposed && parkedWhileHidden) {
+      parkedWhileHidden = false
+      void tryUpgradeToNarrowWatch().finally(() => {
+        armExistencePoll()
+      })
     }
-    parkedWhileHidden = false
-    // Why: the first linked worktree may have been registered while hidden — check
-    // now (emitting the create) rather than losing it for a full interval.
-    void tryUpgradeToNarrowWatch().finally(() => {
-      armExistencePoll()
-    })
+    for (const listener of reconciliationVisibilityListeners) {
+      listener()
+    }
   })
 
   const trySubscribe = async (): Promise<boolean> => {
@@ -144,6 +225,7 @@ async function startGitCommonNarrowWatch(
     } catch {
       return false
     }
+    const generation = ++nativeSubscriptionGeneration
     let errored = false
     let active = true
     // Why: parcel tears its native stream down when the watched root is
@@ -154,6 +236,9 @@ async function startGitCommonNarrowWatch(
     const teardown = (): void => {
       active = false
       errored = true
+      if (generation === nativeSubscriptionGeneration) {
+        nativeSubscriptionGeneration++
+      }
       const current = subscription
       subscription = null
       if (current) {
@@ -168,7 +253,11 @@ async function startGitCommonNarrowWatch(
       const sub = await subscribeViaWatcherProcess(
         worktreesDir,
         (error, events) => {
-          if (disposed || !active) {
+          if (
+            disposed ||
+            !active ||
+            generation !== nativeSubscriptionGeneration
+          ) {
             return
           }
           if (error) {
@@ -204,7 +293,11 @@ async function startGitCommonNarrowWatch(
           // Why: a watcher-child crash drops events during the automatic
           // resubscribe gap; report a structural change so worktrees re-sync.
           onInterruption: () => {
-            if (!disposed && active) {
+            if (
+              !disposed &&
+              active &&
+              generation === nativeSubscriptionGeneration
+            ) {
               if (onWatchError) {
                 onWatchError(new Error('Git common watcher interrupted'))
               } else {
@@ -214,6 +307,10 @@ async function startGitCommonNarrowWatch(
           }
         }
       )
+      if (generation !== nativeSubscriptionGeneration) {
+        void sub.unsubscribe().catch(() => {})
+        return false
+      }
       if (disposed || errored) {
         void sub.unsubscribe().catch(() => {})
         await pollingFallbackPromise?.catch(() => {})
@@ -222,6 +319,9 @@ async function startGitCommonNarrowWatch(
       subscription = { unsubscribe: () => sub.unsubscribe() }
       return true
     } catch (error) {
+      if (disposed || generation !== nativeSubscriptionGeneration) {
+        return false
+      }
       if (shouldUsePollingFallback(error)) {
         await ensurePollingFallback()
         return subscription !== null
@@ -235,6 +335,7 @@ async function startGitCommonNarrowWatch(
     // subscription lets macOS upgrade to native events when the directory appears.
     armExistencePoll()
   }
+  await ensureReconciliation()
 
   return {
     unsubscribe: async () => {
@@ -242,11 +343,15 @@ async function startGitCommonNarrowWatch(
       stopExistencePoll()
       unsubscribeVisibility()
       await pollingFallbackPromise?.catch(() => {})
+      nativeSubscriptionGeneration++
       const current = subscription
+      const reconciliation = reconciliationSubscription
       subscription = null
-      if (current) {
-        await current.unsubscribe().catch(() => {})
-      }
+      reconciliationSubscription = null
+      await Promise.all([
+        current?.unsubscribe().catch(() => {}),
+        reconciliation?.unsubscribe().catch(() => {})
+      ])
     }
   }
 }

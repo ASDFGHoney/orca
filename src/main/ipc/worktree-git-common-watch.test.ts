@@ -16,6 +16,7 @@ import type {
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
 import { startGitCommonWatch } from './worktree-git-common-watch'
+import { startGitCommonPolling } from './worktree-git-common-polling'
 
 vi.mock('./parcel-watcher-process', () => ({
   subscribeViaWatcherProcess: vi.fn()
@@ -78,7 +79,7 @@ type ChildSubscription = {
   dir: string
   callback: WatcherProcessCallback
   hooks: WatcherProcessHooks
-  unsubscribe: ReturnType<typeof vi.fn>
+  unsubscribe: ReturnType<typeof vi.fn<() => Promise<void>>>
 }
 
 describe('worktree git-common narrow watch (darwin)', () => {
@@ -509,6 +510,88 @@ describe('worktree git-common narrow watch (darwin)', () => {
     })
   })
 
+  it('re-arms the native stream when the root is replaced with the same child names', async () => {
+    installSubscribeMock()
+    const commonDir = await makeCommonDir(true)
+    const worktreesDir = join(commonDir, 'worktrees')
+    const retainedEntry = join(worktreesDir, 'same-child')
+    await mkdir(retainedEntry)
+    const received: WorktreeBasePollEvent[][] = []
+    await startWatch(commonDir, received)
+    const staleSubscription = childSubscriptions[0]
+
+    await rm(worktreesDir, { recursive: true })
+    await mkdir(retainedEntry, { recursive: true })
+    await vi.waitFor(() => {
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+    })
+    expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
+
+    const beforeStaleEvent = received.length
+    staleSubscription.callback(null, [{ type: 'update', path: retainedEntry }])
+    expect(received).toHaveLength(beforeStaleEvent)
+
+    const immediateEntry = join(worktreesDir, 'after-rearm')
+    childSubscriptions[1].callback(null, [{ type: 'create', path: immediateEntry }])
+    expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+  })
+
+  it('disposes an in-flight stale resubscribe and fences its interruption hook', async () => {
+    const deferredSubscribe = Promise.withResolvers<{
+      unsubscribe: () => Promise<void>
+    }>()
+    subscribeMock.mockImplementation(async (dir, callback, _opts, hooks = {}) => {
+      const unsubscribe = vi.fn(async () => {})
+      childSubscriptions.push({ dir, callback, hooks, unsubscribe })
+      return childSubscriptions.length === 2
+        ? deferredSubscribe.promise
+        : { unsubscribe }
+    })
+    const commonDir = await makeCommonDir(true)
+    const worktreesDir = join(commonDir, 'worktrees')
+    const retainedEntry = join(worktreesDir, 'same-child')
+    await mkdir(retainedEntry)
+    const received: WorktreeBasePollEvent[][] = []
+    const onWatchError = vi.fn()
+    await startWatch(commonDir, received, () => [], onWatchError)
+
+    await rm(worktreesDir, { recursive: true })
+    await mkdir(retainedEntry, { recursive: true })
+    await vi.waitFor(() => {
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+    })
+    const stalePendingSubscription = childSubscriptions[1]
+
+    await rm(worktreesDir, { recursive: true })
+    await mkdir(retainedEntry, { recursive: true })
+    await vi.waitFor(() => {
+      expect(
+        received
+          .flat()
+          .filter((event) => event.type === 'create' && event.path === worktreesDir)
+      ).toHaveLength(2)
+    }, { timeout: 2_000 })
+
+    const beforeStaleInterruption = received.length
+    stalePendingSubscription.hooks.onInterruption?.()
+    expect(received).toHaveLength(beforeStaleInterruption)
+    expect(onWatchError).not.toHaveBeenCalled()
+
+    deferredSubscribe.resolve({
+      unsubscribe: async () => {
+        await stalePendingSubscription.unsubscribe()
+      }
+    })
+    await vi.waitFor(() => {
+      expect(subscribeMock).toHaveBeenCalledTimes(3)
+    })
+    expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
+
+    const immediateEntry = join(worktreesDir, 'current-generation')
+    childSubscriptions[2].callback(null, [{ type: 'create', path: immediateEntry }])
+    expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+  })
+
   it('stops forwarding events and unsubscribes the child on dispose', async () => {
     installSubscribeMock()
     const commonDir = await makeCommonDir(true)
@@ -591,6 +674,32 @@ describe('worktree git-common polling gate (non-darwin)', () => {
 
     expect(fullScans).not.toHaveBeenCalled()
     expect(received.flat()).toHaveLength(0)
+  })
+
+  it('forces the linked-index scan on every reconciliation tick', async () => {
+    const commonDir = await makePollingCommonDir()
+    const entry = join(commonDir, 'worktrees', 'reconciliation')
+    await mkdir(entry)
+    await writeFile(join(entry, 'HEAD'), 'ref: refs/heads/main')
+    await writeFile(join(entry, 'index'), 'baseline')
+    const fullScans = vi.fn()
+    const watch = await startGitCommonPolling(
+      commonDir,
+      () => {},
+      50,
+      alwaysVisible,
+      fullScans,
+      false,
+      () => [],
+      { forceFullScanEveryTick: true }
+    )
+    cleanups.push(() => watch.unsubscribe())
+
+    // Real filesystem stats cannot be flushed by a fake clock. Two scans must
+    // arrive before the ordinary 15-tick (750ms) index backstop could fire.
+    await vi.waitFor(() => {
+      expect(fullScans.mock.calls.length).toBeGreaterThanOrEqual(2)
+    }, { timeout: 500 })
   })
 
   it('detects linked worktree add and remove from the every-tick readdir', async () => {
