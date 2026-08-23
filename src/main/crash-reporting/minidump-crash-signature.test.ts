@@ -89,6 +89,8 @@ function buildDump(options: {
   simpleAnnotations?: Record<string, string>
   exception?: { code: number; address: bigint }
   modules?: { base: bigint; size: number; name: string }[]
+  /** Module Crashpad registered Chromium's annotations against. */
+  annotatedModuleIndex?: number
 }): BuiltDump {
   const streamCount =
     1 + (options.exception ? 1 : 0) + (options.modules && options.modules.length > 0 ? 1 : 0)
@@ -141,7 +143,7 @@ function buildDump(options: {
 
   const moduleLinkBuf = Buffer.alloc(4 + 12)
   moduleLinkBuf.writeUInt32LE(1, 0)
-  moduleLinkBuf.writeUInt32LE(0, 4) // minidump module index
+  moduleLinkBuf.writeUInt32LE(options.annotatedModuleIndex ?? 0, 4) // minidump module index
   moduleLinkBuf.writeUInt32LE(moduleInfoBuf.length, 8)
   moduleLinkBuf.writeUInt32LE(moduleInfoRva, 12)
   const moduleLinkRva = builder.append(moduleLinkBuf)
@@ -340,6 +342,186 @@ describe('parseMinidumpCrashSignature', () => {
     expect(signature?.faultingModuleOffset).toBe('0x1234')
   })
 
+  it('marks a fault inside the main executable image as non-localizing', () => {
+    const { dump } = buildDump({
+      // 1.4.188: exception address in the Orca.exe band, image base 0x7ff775510000.
+      exception: { code: 0x80000003, address: 0x7ff7_7bfd_606an },
+      modules: [
+        {
+          base: 0x7ff7_7551_0000n,
+          size: 0x0c00_0000,
+          name: 'C:\\Program Files\\Orca\\Orca.exe'
+        },
+        {
+          base: 0x7ff8_0000_0000n,
+          size: 0x10_0000,
+          name: 'C:\\Windows\\System32\\KERNELBASE.dll'
+        }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('Orca.exe')
+    expect(signature?.faultingModuleOffset).toBe('0x6ac606a')
+    expect(signature?.faultingModuleKind).toBe('product-image')
+  })
+
+  it('keeps a separately loaded module as a localizing fault', () => {
+    const { dump } = buildDump({
+      exception: { code: 0xe06d_7363, address: 0x7ff8_0005_813cn },
+      modules: [
+        {
+          base: 0x7ff7_7551_0000n,
+          size: 0x0c00_0000,
+          name: 'C:\\Program Files\\Orca\\Orca.exe'
+        },
+        {
+          base: 0x7ff8_0000_0000n,
+          size: 0x10_0000,
+          name: 'C:\\Windows\\System32\\KERNELBASE.dll'
+        }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('KERNELBASE.dll')
+    expect(signature?.faultingModuleKind).toBe('loaded-module')
+  })
+
+  it('marks the macOS Electron Framework, not helper module 0, as non-localizing', () => {
+    // On macOS module 0 is the ~10 KiB helper stub; Chromium is in the framework.
+    const macModules = [
+      {
+        base: 0x1_0000_0000n,
+        size: 0x4000,
+        name: '/Applications/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/MacOS/Orca Helper (Renderer)'
+      },
+      {
+        base: 0x1_1000_0000n,
+        size: 0x0d00_0000,
+        name: '/Applications/Orca.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework'
+      }
+    ]
+
+    const framework = parseMinidumpCrashSignature(
+      buildDump({
+        exception: { code: 5, address: 0x1_13a1_b2c3n },
+        modules: macModules,
+        annotatedModuleIndex: 1
+      }).dump
+    )
+    const stub = parseMinidumpCrashSignature(
+      buildDump({
+        exception: { code: 5, address: 0x1_0000_0100n },
+        modules: macModules,
+        annotatedModuleIndex: 1
+      }).dump
+    )
+
+    expect(framework?.faultingModule).toBe('Electron Framework')
+    expect(framework?.faultingModuleKind).toBe('product-image')
+    expect(stub?.faultingModule).toBe('Orca Helper (Renderer)')
+    expect(stub?.faultingModuleKind).toBe('loaded-module')
+  })
+
+  it('marks the Linux main executable as non-localizing', () => {
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x5555_5666_7777n },
+      modules: [
+        { base: 0x5555_5555_5000n, size: 0x0c00_0000, name: '/opt/Orca/orca' },
+        { base: 0x7f00_0000_0000n, size: 0x20_0000, name: '/usr/lib/x86_64-linux-gnu/libc.so.6' }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('orca')
+    expect(signature?.faultingModuleKind).toBe('product-image')
+  })
+
+  it('keeps a large GPU driver localizing instead of calling it the product image', () => {
+    // Mesa's radeonsi_dri.so clears the Chromium-image size floor on its own.
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x7f2a_0123_4567n },
+      modules: [
+        { base: 0x5555_5555_5000n, size: 0x0c00_0000, name: '/opt/Orca/orca' },
+        {
+          base: 0x7f2a_0000_0000n,
+          size: 0x05a0_0000,
+          name: '/usr/lib/x86_64-linux-gnu/dri/radeonsi_dri.so'
+        }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('radeonsi_dri.so')
+    expect(signature?.faultingModuleKind).toBe('loaded-module')
+  })
+
+  it('keeps a large Windows display driver localizing', () => {
+    const { dump } = buildDump({
+      exception: { code: 0xc000_0005, address: 0x7ff8_0234_5678n },
+      modules: [
+        {
+          base: 0x7ff7_7551_0000n,
+          size: 0x0c00_0000,
+          name: 'C:\\Program Files\\Orca\\Orca.exe'
+        },
+        {
+          base: 0x7ff8_0000_0000n,
+          size: 0x0480_0000,
+          name: 'C:\\Windows\\System32\\DriverStore\\nvoglv64.dll'
+        }
+      ]
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('nvoglv64.dll')
+    expect(signature?.faultingModuleKind).toBe('loaded-module')
+  })
+
+  it('leaves the kind unknown when no Crashpad link names a module we read', () => {
+    // Non-Chromium/corrupt dumps: unqualified beats a size guess.
+    const { dump } = buildDump({
+      exception: { code: 11, address: 0x5555_5666_7777n },
+      modules: [{ base: 0x5555_5555_5000n, size: 0x0c00_0000, name: '/opt/Orca/orca' }],
+      annotatedModuleIndex: 7
+    })
+
+    const signature = parseMinidumpCrashSignature(dump)
+
+    expect(signature?.faultingModule).toBe('orca')
+    expect(signature?.faultingModuleKind).toBeUndefined()
+  })
+
+  it('leaves the kind unknown when the Crashpad info stream is missing', () => {
+    // Crashpad may still be writing the dump we polled; no link is not "loaded-module".
+    const { dump } = buildDump({
+      exception: { code: 0x80000003, address: 0x7ff7_7bfd_606an },
+      modules: [
+        {
+          base: 0x7ff7_7551_0000n,
+          size: 0x0c00_0000,
+          name: 'C:\\Program Files\\Orca\\Orca.exe'
+        }
+      ]
+    })
+    // Directory entry 0 is the Crashpad info stream; retype it so nothing finds it.
+    const withoutCrashpadInfo = Buffer.from(dump)
+    withoutCrashpadInfo.writeUInt32LE(0xffff, 32)
+
+    const signature = parseMinidumpCrashSignature(withoutCrashpadInfo)
+
+    expect(signature?.faultingModule).toBe('Orca.exe')
+    expect(signature?.faultingModuleOffset).toBe('0x6ac606a')
+    expect(signature?.faultingModuleKind).toBeUndefined()
+    expect(minidumpSignatureDetails(signature!).minidumpFaultingModuleKind).toBeUndefined()
+  })
+
   it('omits the faulting module when no image range covers the address', () => {
     const { dump } = buildDump({
       exception: { code: 11, address: 0x10n },
@@ -397,6 +579,7 @@ describe('minidumpSignatureDetails', () => {
       minidumpProcessType: 'renderer',
       minidumpExceptionCode: '0x80000003',
       minidumpFaultingModule: 'chrome_elf.dll',
+      minidumpFaultingModuleKind: 'loaded-module',
       minidumpAnnotation_channel: 'stable'
     })
   })

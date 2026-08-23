@@ -23,6 +23,11 @@ const POSIX_INVARIANT_SIGNAL_NAMES: Record<number, string> = {
   15: 'SIGTERM'
 }
 
+/** Name for a signal number that means the same thing on Linux and macOS; null otherwise. */
+export function posixSignalName(signal: number): string | null {
+  return POSIX_INVARIANT_SIGNAL_NAMES[signal] ?? null
+}
+
 const WAIT_STATUS_SIGNAL_MASK = 0x7f
 const WAIT_STATUS_CORE_DUMP_FLAG = 0x80
 const WAIT_STATUS_STOPPED_MARKER = 0x7f
@@ -42,7 +47,7 @@ export function decodePosixWaitStatus(status: number): PosixWaitStatusDecode | n
   return {
     kind: 'signaled',
     signal,
-    signalName: POSIX_INVARIANT_SIGNAL_NAMES[signal] ?? null,
+    signalName: posixSignalName(signal),
     coreDumped: (status & WAIT_STATUS_CORE_DUMP_FLAG) !== 0
   }
 }

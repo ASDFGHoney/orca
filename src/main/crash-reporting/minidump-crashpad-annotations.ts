@@ -1,4 +1,5 @@
-// Reads Chromium's crash keys out of a Crashpad minidump's annotation streams.
+// Reads the MinidumpCrashpadInfo stream: Chromium's crash keys, plus which
+// minidump module Crashpad hung them on.
 //
 // Some Chromium builds expose the fatal log line as `LOG_FATAL`; the signature
 // parser also handles builds that carry it only in captured process memory.
@@ -134,11 +135,22 @@ function readAnnotationObjects(
   }
 }
 
-export function readCrashpadAnnotations(view: MinidumpView): Record<string, string> {
+export type CrashpadInfo = {
+  readonly annotations: Readonly<Record<string, string>>
+  /**
+   * MINIDUMP_MODULE_LIST indices Crashpad registered annotations against. In a
+   * Chromium process that is the image Chromium is linked into — the
+   * executable on Windows/Linux, `Electron Framework` on macOS.
+   */
+  readonly annotatedModuleIndices: ReadonlySet<number>
+}
+
+export function readCrashpadInfo(view: MinidumpView): CrashpadInfo {
   const annotations: Record<string, string> = {}
+  const annotatedModuleIndices = new Set<number>()
   const info = findStream(view, STREAM_TYPE_CRASHPAD_INFO)
   if (!info || info.size < CRASHPAD_INFO_MIN_SIZE) {
-    return annotations
+    return { annotations, annotatedModuleIndices }
   }
 
   readSimpleAnnotations(
@@ -149,17 +161,21 @@ export function readCrashpadAnnotations(view: MinidumpView): Record<string, stri
 
   const moduleList = view.location(info.rva + CRASHPAD_INFO_MODULE_LIST_OFFSET)
   if (!moduleList) {
-    return annotations
+    return { annotations, annotatedModuleIndices }
   }
   const moduleCount = view.u32(moduleList.rva)
   if (moduleCount === null || moduleCount > MAX_MODULES) {
-    return annotations
+    return { annotations, annotatedModuleIndices }
   }
   for (let index = 0; index < moduleCount; index += 1) {
     const link = moduleList.rva + 4 + index * MODULE_CRASHPAD_INFO_LINK_SIZE
+    const minidumpModuleIndex = view.u32(link)
     const moduleInfo = view.location(link + 4)
     if (!moduleInfo || moduleInfo.size < MODULE_CRASHPAD_INFO_MIN_SIZE) {
       continue
+    }
+    if (minidumpModuleIndex !== null && minidumpModuleIndex < MAX_MODULES) {
+      annotatedModuleIndices.add(minidumpModuleIndex)
     }
     // Why: Chromium's crash keys land in annotation_objects on current
     // Crashpad, but older modules still populate the two legacy shapes.
@@ -174,5 +190,5 @@ export function readCrashpadAnnotations(view: MinidumpView): Record<string, stri
       annotations
     )
   }
-  return annotations
+  return { annotations, annotatedModuleIndices }
 }

@@ -12,7 +12,7 @@
 // reporting.
 
 import { findStream, isMinidump, MAX_MODULES, MinidumpView } from './minidump-stream-reader'
-import { readCrashpadAnnotations } from './minidump-crashpad-annotations'
+import { readCrashpadInfo } from './minidump-crashpad-annotations'
 
 const STREAM_TYPE_MODULE_LIST = 4
 const STREAM_TYPE_EXCEPTION = 6
@@ -54,6 +54,15 @@ export type MinidumpCrashSignature = {
   /** Module whose image range contains `exceptionAddress`. */
   readonly faultingModule?: string
   readonly faultingModuleOffset?: string
+  /**
+   * Whether `faultingModule` localizes the fault. Electron statically links
+   * Chromium, V8 and Blink into one image — the executable on Windows/Linux,
+   * `Electron Framework` on macOS — so a Chromium-side fault lands there and
+   * the name says nothing beyond "in-process"; a separately loaded module (a
+   * GPU driver, KERNELBASE.dll) does localize it. Absent when the dump carries
+   * no usable Crashpad module link, which is unknown rather than either kind.
+   */
+  readonly faultingModuleKind?: 'product-image' | 'loaded-module'
   /** Allowlisted Crashpad annotations, verbatim. */
   readonly annotations: Readonly<Record<string, string>>
 }
@@ -171,17 +180,63 @@ function parseCheckLocation(checkMessage: string): {
   return { file: match[1], line: Number.isFinite(line) ? line : undefined }
 }
 
+// Chromium + V8 + Blink linked into one image runs >150 MiB on every platform.
+const CHROMIUM_IMAGE_MIN_BYTES = 64 * 1024 * 1024
+
+/**
+ * Whether the image is the one Chromium is statically linked into.
+ *
+ * Crashpad already answers this per platform: it registers Chromium's
+ * annotations against the linked-in image (the executable on Windows/Linux,
+ * `Electron Framework` on macOS, never the ~10 KiB macOS helper stub), so the
+ * recorded module index is the answer and neither size nor index 0 is a guess.
+ * The size floor only rejects a small satellite module that also registers
+ * annotations; on its own it would swallow big GPU driver images, which are
+ * exactly the modules whose name does localize a fault.
+ */
+function isProductImage(
+  module: ModuleRecord,
+  index: number,
+  annotatedModuleIndices: ReadonlySet<number>
+): boolean {
+  return annotatedModuleIndices.has(index) && module.size >= CHROMIUM_IMAGE_MIN_BYTES
+}
+
+/**
+ * Whether Crashpad's module link can classify anything at all: a dump read
+ * before the Crashpad info stream landed, or one whose link names an index the
+ * module list does not contain, gives no reference point for the product
+ * image. Without it every module is unknown, not "separately loaded".
+ */
+function hasUsableModuleLink(
+  modules: ModuleRecord[],
+  annotatedModuleIndices: ReadonlySet<number>
+): boolean {
+  for (const index of annotatedModuleIndices) {
+    if (index < modules.length) {
+      return true
+    }
+  }
+  return false
+}
+
 function findFaultingModule(
   modules: ModuleRecord[],
-  address: bigint
-): { name: string; offset: string } | undefined {
-  for (const module of modules) {
-    if (address >= module.base && address < module.base + BigInt(module.size)) {
-      return {
-        name: moduleBasename(module.name),
-        offset: toHex(address - module.base)
-      }
+  address: bigint,
+  annotatedModuleIndices: ReadonlySet<number>
+): { name: string; offset: string; kind?: 'product-image' | 'loaded-module' } | undefined {
+  const classifiable = hasUsableModuleLink(modules, annotatedModuleIndices)
+  for (const [index, module] of modules.entries()) {
+    if (address < module.base || address >= module.base + BigInt(module.size)) {
+      continue
     }
+    let kind: 'product-image' | 'loaded-module' | undefined
+    if (classifiable) {
+      kind = isProductImage(module, index, annotatedModuleIndices)
+        ? 'product-image'
+        : 'loaded-module'
+    }
+    return { name: moduleBasename(module.name), offset: toHex(address - module.base), kind }
   }
   return undefined
 }
@@ -208,7 +263,7 @@ export function parseMinidumpCrashSignature(
     return null
   }
   const view = new MinidumpView(dump)
-  const annotations = readCrashpadAnnotations(view)
+  const { annotations, annotatedModuleIndices } = readCrashpadInfo(view)
 
   const signature: {
     -readonly [K in keyof MinidumpCrashSignature]: MinidumpCrashSignature[K]
@@ -246,10 +301,13 @@ export function parseMinidumpCrashSignature(
     }
     if (address !== null) {
       signature.exceptionAddress = toHex(address)
-      const faulting = findFaultingModule(readModules(view), address)
+      const faulting = findFaultingModule(readModules(view), address, annotatedModuleIndices)
       if (faulting) {
         signature.faultingModule = faulting.name
         signature.faultingModuleOffset = faulting.offset
+        if (faulting.kind) {
+          signature.faultingModuleKind = faulting.kind
+        }
       }
     }
   }
@@ -285,6 +343,9 @@ export function minidumpSignatureDetails(
   }
   if (signature.faultingModuleOffset) {
     details.minidumpFaultingModuleOffset = signature.faultingModuleOffset
+  }
+  if (signature.faultingModuleKind) {
+    details.minidumpFaultingModuleKind = signature.faultingModuleKind
   }
   for (const [key, value] of Object.entries(signature.annotations)) {
     if (key === 'LOG_FATAL' || key === 'abort-message' || key === 'ptype') {

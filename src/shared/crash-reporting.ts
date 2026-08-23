@@ -253,7 +253,7 @@ export function formatCrashReportText(
     `Chrome: ${report.chromeVersion}`
   ]
 
-  appendMinidumpSignatureLines(lines, report.details)
+  appendMinidumpSignatureLines(lines, report.details, report.platform)
   appendDiagnosticBundleLines(lines, diagnosticBundle, sanitizeCrashReportString)
 
   const details = Object.entries(report.details)

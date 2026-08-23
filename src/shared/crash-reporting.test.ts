@@ -179,6 +179,117 @@ describe('crash-reporting shared helpers', () => {
     expect(text.indexOf('Check failure:')).toBeLessThan(text.indexOf('Details:'))
   })
 
+  it('does not present a fault inside the product executable as an Orca-code fault', () => {
+    // Verbatim shape of the 1.4.188 Windows report: STATUS_BREAKPOINT at an
+    // address inside Orca.exe, which statically links Chromium on Windows.
+    const report: CrashReportRecord = {
+      id: 'crash-exe-band',
+      createdAt: '2026-08-18T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: -2147483645,
+      appVersion: '1.4.188',
+      platform: 'win32',
+      osRelease: '10.0.19045',
+      arch: 'x64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionCode: '0x80000003',
+        minidumpExceptionAddress: '0x7ff77bfd606a',
+        minidumpFaultingModule: 'Orca.exe',
+        minidumpFaultingModuleOffset: '0x6ac606a',
+        minidumpFaultingModuleKind: 'product-image'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain(
+      'Faulting module: Orca.exe+0x6ac606a (Electron image with Chromium statically linked in'
+    )
+    expect(text).toContain('does not localize the fault')
+    expect(text).toContain('Exception: 0x80000003 (STATUS_BREAKPOINT)')
+    expect(text.indexOf('Exception: 0x80000003')).toBeLessThan(text.indexOf('Details:'))
+  })
+
+  it('keeps a fault in a separately loaded module as a located fault', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-kernelbase',
+      createdAt: '2026-08-18T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: -529697949,
+      appVersion: '1.4.188',
+      platform: 'win32',
+      osRelease: '10.0.19045',
+      arch: 'x64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionCode: '0xe06d7363',
+        minidumpFaultingModule: 'KERNELBASE.dll',
+        minidumpFaultingModuleOffset: '0x5813c',
+        minidumpFaultingModuleKind: 'loaded-module'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    // KERNELBASE means a C++ exception / RaiseException passed through Win32:
+    // real localization, so it must not pick up the product-image caveat.
+    expect(text).toContain('Faulting module: KERNELBASE.dll+0x5813c\n')
+    expect(text).toContain('Exception: 0xe06d7363 (C++ exception)')
+  })
+
+  it('names the exception code off the platform table Crashpad wrote it from', () => {
+    const posixReport = (
+      platform: NodeJS.Platform,
+      exceptionCode: string,
+      faultingModule: string
+    ): CrashReportRecord => ({
+      id: 'crash-posix-exception',
+      createdAt: '2026-08-18T01:00:00.000Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 139,
+      appVersion: '1.4.188',
+      platform,
+      osRelease: '6.8.0',
+      arch: 'x64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionCode: exceptionCode,
+        minidumpFaultingModule: faultingModule,
+        minidumpFaultingModuleOffset: '0x11122777',
+        minidumpFaultingModuleKind: 'product-image'
+      },
+      breadcrumbs: []
+    })
+
+    // The caveat sends the triager to the exception code, so it must be named
+    // there too: a signal on linux, a Mach exception type on darwin.
+    expect(formatCrashReportText(posixReport('linux', '0xb', 'orca'))).toContain(
+      'Exception: 0xb (SIGSEGV)'
+    )
+    expect(formatCrashReportText(posixReport('darwin', '0xa', 'Electron Framework'))).toContain(
+      'Exception: 0xa (EXC_CRASH)'
+    )
+    // An NTSTATUS-shaped name must never be borrowed for a POSIX code.
+    expect(formatCrashReportText(posixReport('linux', '0x80000003', 'orca'))).toContain(
+      'Exception: 0x80000003\n'
+    )
+  })
+
   it('decodes POSIX wait statuses in the exit code line and leaves Windows codes raw', () => {
     const report = (overrides: Partial<CrashReportRecord>): CrashReportRecord => ({
       id: 'crash-wait-status',
