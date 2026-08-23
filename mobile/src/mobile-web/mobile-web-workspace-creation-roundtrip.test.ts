@@ -1,23 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  parseMobileWebBridgePageMessage,
-  parseMobileWebBridgeShellMessage,
-  type MobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
 import { MOBILE_WORKTREE_CREATE_IDEMPOTENCY_CAPABILITY } from '../tasks/worktree-create-capability'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 import { MOBILE_WEB_PRODUCTION_WORKSPACE_CREATION_GRANTS } from './mobile-web-production-workspace-creation-grants'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
 
 describe('mobile web workspace creation round trip', () => {
   it('carries page requests through schemas and resolves host authority only in native', async () => {
-    const shellMessages: MobileWebBridgeShellMessage[] = []
     const consumeRecentUserGesture = vi.fn(() => true)
     const sendRequest = vi.fn(async (method: string) => {
       if (method === 'repo.list') {
@@ -47,48 +35,17 @@ describe('mobile web workspace creation round trip', () => {
       throw new Error(`Unexpected method ${method}`)
     })
     const hostClient = { sendRequest } as unknown as RpcClient
-    let broker: MobileWebCapabilityBroker
     let requestIndex = 0
-    const pageClient = new MobileWebBridgeClient({
-      context: CONTEXT,
+    const { client: pageClient, shellMessages } = createMobileWebBridgeRoundtripFixture({
       grants: [...MOBILE_WEB_PRODUCTION_WORKSPACE_CREATION_GRANTS],
+      rpcClient: hostClient,
       createRequestId: () => String.fromCharCode(65 + requestIndex++).repeat(22),
-      postMessage(message) {
-        const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          return false
-        }
-        void broker.handle(parsed.value)
-        return true
-      }
-    })
-    broker = new MobileWebCapabilityBroker({
-      context: CONTEXT,
-      getClient: () => hostClient,
-      isConnected: () => true,
-      isActive: () => true,
-      nativeAuthority: {
-        hapticFeedback: vi.fn(),
-        clipboardWrite: vi.fn(),
-        openExternal: vi.fn(),
-        terminalPreferences: vi.fn(),
-        terminalTextScaleUpdate: vi.fn()
-      },
-      terminalClientId: 'native-device-secret',
       randomBytes: (length) => new Uint8Array(length).fill(5),
       navigationAuthority: {
         route: vi.fn(),
         reconnect: vi.fn(),
         removeHost: vi.fn(),
         consumeRecentUserGesture
-      },
-      postMessage(message) {
-        shellMessages.push(message)
-        const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          throw new Error(parsed.error)
-        }
-        pageClient.receive(parsed.value)
       }
     })
 
@@ -132,8 +89,5 @@ describe('mobile web workspace creation round trip', () => {
     expect(createParams).not.toHaveProperty('startupCommand')
     expect(sendRequest).not.toHaveBeenCalledWith('settings.get')
     expect(JSON.stringify(shellMessages)).not.toMatch(/repo-secret|worktree-secret|ssh-private-id/)
-
-    pageClient.dispose()
-    broker.dispose()
   })
 })

@@ -1,15 +1,10 @@
 import { expect, it, vi } from 'vitest'
-import {
-  parseMobileWebBridgePageMessage,
-  parseMobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import { webHostTaskProjectFileOperations } from '../tasks/web-host-task-project-file-operations'
 import { webHostTaskProjectMutationOperations } from '../tasks/web-host-task-project-mutation-operations'
 import { webHostTaskProjectReadOperations } from '../tasks/web-host-task-project-read-operations'
 import { webHostTaskReadOperations } from '../tasks/web-host-task-read-operations'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 import { taskRoundtripHostResponse } from './mobile-web-task-roundtrip-host-fixtures'
 
 const CONTEXT = {
@@ -18,11 +13,10 @@ const CONTEXT = {
 }
 
 it('revalidates opaque GitHub Project mutation targets before every write', async () => {
-  let broker: MobileWebCapabilityBroker
   const sendRequest = vi.fn(async (method: string) => taskRoundtripHostResponse(method))
   const rpcClient = { sendRequest } as unknown as RpcClient
   let requestIndex = 0
-  const client = new MobileWebBridgeClient({
+  const { broker, client } = createMobileWebBridgeRoundtripFixture({
     context: CONTEXT,
     grants: [
       taskGrant('repositories'),
@@ -45,35 +39,8 @@ it('revalidates opaque GitHub Project mutation targets before every write', asyn
       taskGrant('loadProjectFileContents'),
       taskGrant('addProjectInlineComment')
     ],
+    rpcClient,
     createRequestId: () => String.fromCharCode(65 + requestIndex++).repeat(22),
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        return false
-      }
-      void broker.handle(parsed.value)
-      return true
-    }
-  })
-  broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
-    getClient: () => rpcClient,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        throw new Error(parsed.error)
-      }
-      client.receive(parsed.value)
-    },
-    nativeAuthority: {
-      hapticFeedback: vi.fn(),
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
     terminalClientId: 'device-token',
     randomBytes: (length) => new Uint8Array(length).fill(3)
   })

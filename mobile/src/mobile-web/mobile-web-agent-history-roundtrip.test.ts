@@ -1,19 +1,8 @@
 import { expect, it, vi } from 'vitest'
-import {
-  parseMobileWebBridgePageMessage,
-  parseMobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 
 it('round trips opaque agent history and gesture-gates resume through the production bridge', async () => {
-  let broker: MobileWebCapabilityBroker
   const sendRequest = vi.fn(async (method: string) => {
     if (method === 'status.get') {
       return {
@@ -35,49 +24,20 @@ it('round trips opaque agent history and gesture-gates resume through the produc
   const rpcClient = { sendRequest } as unknown as RpcClient
   const requestIds = ['A', 'B', 'C']
   let requestIndex = 0
-  const client = new MobileWebBridgeClient({
-    context: CONTEXT,
+  const { broker, client } = createMobileWebBridgeRoundtripFixture({
     grants: [
       agentHistoryGrant('snapshot'),
       agentHistoryGrant('preview'),
       agentHistoryGrant('resume')
     ],
+    rpcClient,
     createRequestId: () => requestIds[requestIndex++]!.repeat(22),
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        return false
-      }
-      void broker.handle(parsed.value)
-      return true
-    }
-  })
-  broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
-    getClient: () => rpcClient,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        throw new Error(parsed.error)
-      }
-      client.receive(parsed.value)
-    },
-    nativeAuthority: {
-      hapticFeedback: vi.fn(),
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
       consumeRecentUserGesture: () => false
     },
-    terminalClientId: 'device-token',
     randomBytes: (length) => new Uint8Array(length).fill(5)
   })
   const route = await broker.resolveNavigationRoute('host-workspace')

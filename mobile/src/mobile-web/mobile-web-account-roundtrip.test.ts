@@ -1,19 +1,8 @@
 import { expect, it, vi } from 'vitest'
-import {
-  parseMobileWebBridgePageMessage,
-  parseMobileWebBridgeShellMessage
-} from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
-import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
-
-const CONTEXT = {
-  shellSessionId: 'S'.repeat(43),
-  buildId: 'a'.repeat(64)
-}
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 
 it('round trips typed account reads, selection, and snapshots through the production bridge', async () => {
-  let broker: MobileWebCapabilityBroker
   let hostListener: ((event: unknown) => void) | null = null
   const hostUnsubscribe = vi.fn()
   const sendRequest = vi.fn(async (method: string) => {
@@ -31,46 +20,16 @@ it('round trips typed account reads, selection, and snapshots through the produc
   } as unknown as RpcClient
   const requestIds = ['A', 'B', 'C', 'D', 'E']
   let requestIndex = 0
-  const client = new MobileWebBridgeClient({
-    context: CONTEXT,
+  const { client, pageMessages, shellMessages } = createMobileWebBridgeRoundtripFixture({
     grants: [accountGrant('snapshot'), accountGrant('select'), accountGrant('subscribe')],
+    rpcClient,
     createRequestId: () => requestIds[requestIndex++]!.repeat(22),
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        return false
-      }
-      void broker.handle(parsed.value)
-      return true
-    }
-  })
-  broker = new MobileWebCapabilityBroker({
-    context: CONTEXT,
-    getClient: () => rpcClient,
-    isConnected: () => true,
-    isActive: () => true,
-    postMessage: (message) => {
-      const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-      if (!parsed.ok) {
-        throw new Error(parsed.error)
-      }
-      client.receive(parsed.value)
-    },
-    nativeAuthority: {
-      hapticFeedback: vi.fn(),
-      clipboardWrite: vi.fn(),
-      openExternal: vi.fn(),
-      terminalPreferences: vi.fn(),
-      terminalTextScaleUpdate: vi.fn()
-    },
     navigationAuthority: {
       route: vi.fn(),
       reconnect: vi.fn(),
       removeHost: vi.fn(),
       consumeRecentUserGesture: () => true
-    },
-    terminalClientId: 'device-token',
-    randomBytes: (length) => new Uint8Array(length).fill(1)
+    }
   })
 
   await expect(client.account.snapshot()).resolves.toMatchObject({
@@ -78,6 +37,17 @@ it('round trips typed account reads, selection, and snapshots through the produc
       accounts: [{ id: 'claude-1', email: 'claude@example.com' }],
       activeAccountId: 'claude-1'
     }
+  })
+  expect(pageMessages[0]).toMatchObject({
+    type: 'request',
+    requestId: 'A'.repeat(22),
+    capability: 'account',
+    operation: 'snapshot'
+  })
+  expect(shellMessages[0]).toMatchObject({
+    type: 'response',
+    requestId: 'A'.repeat(22),
+    status: 'success'
   })
   await expect(
     client.account.select({ provider: 'codex', accountId: 'codex-1' })

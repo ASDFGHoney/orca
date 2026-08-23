@@ -1,15 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-  parseMobileWebBridgePageMessage,
   parseMobileWebBridgeShellMessage
 } from '../../../src/shared/mobile-web/bridge-contract'
-import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
-import {
-  MOBILE_WEB_PRODUCTION_GRANTS,
-  MobileWebCapabilityBroker
-} from './mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-capability-broker'
+import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 
 const CONTEXT = {
   shellSessionId: 'S'.repeat(43),
@@ -149,7 +145,6 @@ describe('mobile web bridge round trip', () => {
       .mockResolvedValueOnce({ ok: true, result: { browserPageId: 'browser-2' } })
       .mockResolvedValueOnce({ ok: true, result: { closed: true } })
       .mockResolvedValueOnce({ ok: true, result: { opened: true } })
-    let broker: MobileWebCapabilityBroker
     let hostSubscriptionListener: ((event: unknown) => void) | undefined
     const hostUnsubscribe = vi.fn()
     const subscribe = vi
@@ -160,41 +155,13 @@ describe('mobile web bridge round trip', () => {
       })
     const requestIds = ['R', 'Q', 'T', 'U', 'V', 'W', 'X', 'Y', 'A', 'B']
     let requestIndex = 0
-    const client = new MobileWebBridgeClient({
+    const rpcClient = { sendRequest, subscribe } as unknown as RpcClient
+    const { client } = createMobileWebBridgeRoundtripFixture({
       context: CONTEXT,
       grants: [...MOBILE_WEB_PRODUCTION_GRANTS],
+      rpcClient,
       createRequestId: () => (requestIds[requestIndex++] ?? 'Z').repeat(22),
-      postMessage: (message) => {
-        const parsed = parseMobileWebBridgePageMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          return false
-        }
-        void broker.handle(parsed.value)
-        return true
-      }
-    })
-    const rpcClient = { sendRequest, subscribe } as unknown as RpcClient
-    broker = new MobileWebCapabilityBroker({
-      context: CONTEXT,
-      getClient: () => rpcClient,
-      isConnected: () => true,
-      isActive: () => true,
-      nativeAuthority: {
-        hapticFeedback: vi.fn(),
-        clipboardWrite: vi.fn(),
-        openExternal: vi.fn(),
-        terminalPreferences: vi.fn(),
-        terminalTextScaleUpdate: vi.fn()
-      },
-      terminalClientId: 'device-token',
-      randomBytes: (length) => new Uint8Array(length).fill(1),
-      postMessage: (message) => {
-        const parsed = parseMobileWebBridgeShellMessage(JSON.stringify(message), CONTEXT)
-        if (!parsed.ok) {
-          throw new Error(parsed.error)
-        }
-        client.receive(parsed.value)
-      }
+      terminalClientId: 'device-token'
     })
 
     const firstWorkspacePage = await client.workspaceSnapshot({ limit: 1 })
@@ -422,8 +389,5 @@ describe('mobile web bridge round trip', () => {
     expect(liveErrors).toEqual([])
     subscription.unsubscribe()
     expect(hostUnsubscribe).toHaveBeenCalledOnce()
-
-    client.dispose()
-    broker.dispose()
   })
 })
