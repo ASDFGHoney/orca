@@ -33,9 +33,7 @@ const ROTATION_RETRY_MS = 25
 const MAX_ROTATION_RETRY_MS = 2_000
 let activeWatcherCount = 0
 
-export function getActiveNativeChatWatcherCount(): number {
-  return activeWatcherCount
-}
+export const getActiveNativeChatWatcherCount = (): number => activeWatcherCount
 
 /** Installs a live tail on an already-resolved path; missing files return null. */
 export async function installTranscriptWatcher(
@@ -191,6 +189,7 @@ export async function installTranscriptWatcher(
       return
     }
     if (replacementSnapshot && onReplace) {
+      resetIncrementalTranscriptState(state)
       state.offset = replacementSnapshot.consumedTo
       state.pendingStart = state.offset
       onReplace(

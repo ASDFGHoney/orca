@@ -285,7 +285,6 @@ describe('native chat SSH transcript host routing (#13663)', () => {
         return {
           size: bytes.length,
           identity: '1:7:11',
-          identityReliable: true,
           mtimeMs: 1,
           ctimeMs: 1
         }
@@ -770,7 +769,18 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     const transcriptPath = '/tmp/large-append-session.jsonl'
     const initial = Buffer.from(claudeLine('initial', 'first'))
     const files = new Map([[transcriptPath, initial]])
-    const { provider, readFile, readFileRange } = memoryProvider(files)
+    const { provider, readFile, readFileRange, stat } = memoryProvider(files)
+    stat.mockImplementation(async (filePath: string): Promise<FileStat> => {
+      const bytes = files.get(filePath)!
+      return {
+        size: bytes.length,
+        type: 'file',
+        mtime: bytes.length,
+        mtimeMs: bytes.length,
+        dev: 7,
+        ino: 11
+      }
+    })
     mocks.getProvider.mockReturnValue(provider)
     const appended: string[] = []
     const replacements: string[][] = []
@@ -787,13 +797,24 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     try {
       await vi.waitFor(() => expect(readFileRange).toHaveBeenCalled())
       readFileRange.mockClear()
+      const partial = Buffer.from('{"type":')
+      files.set(transcriptPath, Buffer.concat([initial, partial]))
+      await vi.waitFor(() =>
+        expect(readFileRange).toHaveBeenCalledWith(
+          transcriptPath,
+          initial.length,
+          partial.length,
+          expect.anything()
+        )
+      )
+      readFileRange.mockClear()
       const append = Buffer.from(
         Array.from({ length: 3_000 }, (_, index) =>
           claudeLine(`append-${index}`, `bounded remote append ${index}`)
         ).join('')
       )
       expect(append.length).toBeGreaterThan(MAX_FILE_RANGE_READ_BYTES)
-      files.set(transcriptPath, Buffer.concat([initial, append]))
+      files.set(transcriptPath, Buffer.concat([initial, partial, append]))
 
       await vi.waitFor(() => expect(replacements.at(-1)).toContain('append-2999'))
       expect(replacements.at(-1)).toHaveLength(40)
@@ -803,6 +824,9 @@ describe('native chat SSH transcript host routing (#13663)', () => {
       expect(requestedLengths.reduce((sum, length) => sum + length, 0)).toBeLessThanOrEqual(
         append.length + 256
       )
+      const afterReplacement = Buffer.from(claudeLine('after-replacement', 'still live'))
+      files.set(transcriptPath, Buffer.concat([initial, partial, append, afterReplacement]))
+      await vi.waitFor(() => expect(appended).toContain('after-replacement'), { timeout: 3_000 })
       expect(readFile).not.toHaveBeenCalled()
     } finally {
       subscription.unsubscribe()

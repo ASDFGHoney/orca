@@ -13,6 +13,8 @@ type ProviderGeneration = {
   generation: number
 }
 
+const STABILITY_BOUNDARY_BYTES = 64
+
 function requireSameProvider(connectionId: string, expected: ProviderGeneration): void {
   const current = getSshFilesystemProviderSnapshot(connectionId)
   if (
@@ -41,49 +43,85 @@ export async function createSshTranscriptRangeFs(
   const providerSnapshot: ProviderGeneration = snapshot
   requireSameProvider(connectionId, providerSnapshot)
   const provider = providerSnapshot.provider
-  async function stat(filePath: string, statSignal?: AbortSignal): Promise<TranscriptFileStamp> {
+  async function read(
+    filePath: string,
+    position: number,
+    length: number,
+    readSignal?: AbortSignal
+  ) {
+    readSignal?.throwIfAborted()
+    const parts: Buffer[] = []
+    let remaining = length
+    let cursor = position
+    while (remaining > 0) {
+      requireSameProvider(connectionId, providerSnapshot)
+      const window = Math.min(remaining, MAX_FILE_RANGE_READ_BYTES)
+      const result = await provider.readFileRange!(filePath, cursor, window, {
+        signal: readSignal
+      })
+      requireSameProvider(connectionId, providerSnapshot)
+      const bytes = result.bytes.subarray(0, result.bytesRead)
+      parts.push(bytes)
+      cursor += bytes.length
+      remaining -= bytes.length
+      if (bytes.length < window) {
+        break
+      }
+    }
+    return parts.length === 1 ? parts[0]! : Buffer.concat(parts)
+  }
+  async function stat(
+    filePath: string,
+    statSignal?: AbortSignal,
+    captureBoundary = false
+  ): Promise<TranscriptFileStamp> {
     statSignal?.throwIfAborted()
     requireSameProvider(connectionId, providerSnapshot)
     const stamp = await provider.stat(filePath, { signal: statSignal })
     requireSameProvider(connectionId, providerSnapshot)
     const mtimeMs = stamp.mtimeMs ?? stamp.mtime
+    const boundaryLength = Math.min(stamp.size, STABILITY_BOUNDARY_BYTES)
+    const boundaryFingerprint =
+      captureBoundary && boundaryLength > 0
+        ? (await read(filePath, stamp.size - boundaryLength, boundaryLength, statSignal)).toString(
+            'base64'
+          )
+        : undefined
     return {
       size: stamp.size,
       identity: `${providerSnapshot.generation}:${stamp.dev ?? 0}:${stamp.ino ?? 0}`,
-      identityReliable: stamp.dev !== undefined && stamp.ino !== undefined,
       mtimeMs,
-      ctimeMs: mtimeMs
+      ctimeMs: mtimeMs,
+      ...(boundaryFingerprint ? { boundaryFingerprint } : {})
     }
   }
   const rangeFs: TranscriptRangeFs = {
     stat,
-    async read(filePath, position, length, readSignal) {
-      readSignal?.throwIfAborted()
-      const parts: Buffer[] = []
-      let remaining = length
-      let cursor = position
-      while (remaining > 0) {
-        requireSameProvider(connectionId, providerSnapshot)
-        const window = Math.min(remaining, MAX_FILE_RANGE_READ_BYTES)
-        const result = await provider.readFileRange!(filePath, cursor, window, {
-          signal: readSignal
-        })
-        requireSameProvider(connectionId, providerSnapshot)
-        const bytes = result.bytes.subarray(0, result.bytesRead)
-        parts.push(bytes)
-        cursor += bytes.length
-        remaining -= bytes.length
-        if (bytes.length < window) {
-          break
-        }
-      }
-      return parts.length === 1 ? parts[0]! : Buffer.concat(parts)
-    },
+    read,
     async assertStable(filePath, openingStamp, stableSignal) {
       const closingStamp = await stat(filePath, stableSignal)
       const identityChanged = closingStamp.identity !== openingStamp.identity
       const versionChanged = closingStamp.mtimeMs !== openingStamp.mtimeMs
-      if (identityChanged || versionChanged) {
+      if (identityChanged || closingStamp.size < openingStamp.size) {
+        throw new TranscriptRangeReadInvalidatedError()
+      }
+      if (closingStamp.size === openingStamp.size) {
+        if (versionChanged) {
+          throw new TranscriptRangeReadInvalidatedError()
+        }
+        return
+      }
+      if (!openingStamp.boundaryFingerprint) {
+        throw new TranscriptRangeReadInvalidatedError()
+      }
+      const boundaryLength = Math.min(openingStamp.size, STABILITY_BOUNDARY_BYTES)
+      const boundary = await read(
+        filePath,
+        openingStamp.size - boundaryLength,
+        boundaryLength,
+        stableSignal
+      )
+      if (boundary.toString('base64') !== openingStamp.boundaryFingerprint) {
         throw new TranscriptRangeReadInvalidatedError()
       }
     }

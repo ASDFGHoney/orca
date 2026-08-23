@@ -40,7 +40,7 @@ export async function readIncrementalTranscriptMessages(
   signal?: AbortSignal,
   rangeFs?: TranscriptRangeFs
 ): Promise<NativeChatMessage[]> {
-  const openingStamp = rangeFs ? await rangeFs.stat(filePath, signal) : null
+  const openingStamp = rangeFs ? await rangeFs.stat(filePath, signal, true) : null
   const end = openingStamp?.size ?? (await wslGatedStat(filePath, 'exact', signal)).size
   if (end <= state.offset) {
     return []
