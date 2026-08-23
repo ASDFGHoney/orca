@@ -8,7 +8,7 @@ export function listLiveTerminalHostSessions(
 ): SessionInfo[] {
   const result: SessionInfo[] = []
   for (const session of sessions.values()) {
-    if (!session.isAlive) {
+    if (!session.isAlive || session.isTerminating) {
       continue
     }
     const size = session.getAppliedSize()

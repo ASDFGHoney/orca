@@ -129,6 +129,8 @@ async function spawnAndPublishSession(
   })
 
   if (opts.isCanceled?.()) {
+    // Make the canceled spawn non-advertisable before cleanup ownership enters the host map.
+    session.beginTermination()
     // Retain cleanup ownership if the native child refuses to exit.
     deps.sessions.set(opts.sessionId, session)
     await session.forceKillAndDisposeSubprocess()
