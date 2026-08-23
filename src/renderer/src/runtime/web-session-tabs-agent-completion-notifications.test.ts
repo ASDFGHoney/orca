@@ -128,6 +128,17 @@ describe('paired session-tab agent completion notifications', () => {
     expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenCalledTimes(4)
   })
 
+  it.each(['done', 'blocked'] as const)('forwards cold %s inventory as a silent seed', (state) => {
+    applySnapshot(makeAgentSnapshot(1, NOW, undefined, state), false)
+
+    expect(mocks.observeAgentHookCompletionForNotification).toHaveBeenCalledWith({
+      paneKey: makePaneKey(toWebTerminalSurfaceTabId(HOST_TAB_ID), LEAF_ID),
+      worktreeId: WORKTREE_ID,
+      seedOnly: true,
+      payload: expect.objectContaining({ state, stateStartedAt: NOW })
+    })
+  })
+
   it('announces one live stamped completion after a late-pair working seed', () => {
     const dispatchCompletion = vi.fn()
     const coordinator = createAgentCompletionCoordinator({

@@ -1,0 +1,574 @@
+// @vitest-environment happy-dom
+
+import { act, cleanup, renderHook } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
+import { tagRuntimeSubscriptionReplayResponse } from '../../../shared/runtime-subscription-replay'
+import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
+import { makePaneKey } from '../../../shared/stable-pane-id'
+import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import type { PublicKnownRuntimeEnvironment } from '../../../shared/runtime-environments'
+import { getUnreadBadgeCount } from '@/lib/unread-badge-count'
+import { makeWorktree } from '@/store/slices/worktrees-slice-test-fixtures'
+import type { AppState } from '@/store/types'
+import type * as WorktreeRuntimeOwnerModule from '@/lib/worktree-runtime-owner'
+
+const mocks = vi.hoisted(() => ({
+  getExplicitRuntimeEnvironmentIdForWorktree: vi.fn(),
+  observeAgentHookCompletionForNotification: vi.fn(),
+  recoverSnapshot: vi.fn(),
+  runtimeSessionMirrorEnvironmentKey: vi.fn()
+}))
+
+vi.mock('./use-runtime-session-mirror-environment-key', () => ({
+  useRuntimeSessionMirrorEnvironmentKey: mocks.runtimeSessionMirrorEnvironmentKey
+}))
+
+vi.mock('@/lib/worktree-runtime-owner', async (importOriginal) => {
+  const actual = await importOriginal<typeof WorktreeRuntimeOwnerModule>()
+  return {
+    ...actual,
+    getExplicitRuntimeEnvironmentIdForWorktree: mocks.getExplicitRuntimeEnvironmentIdForWorktree
+  }
+})
+
+vi.mock('./web-session-terminal-orphan-recovery', () => ({
+  recoverWebSessionTerminalOrphansBeforeApply: mocks.recoverSnapshot
+}))
+
+vi.mock('@/hooks/agent-hook-completion-notifications', () => ({
+  observeAgentHookCompletionForNotification: mocks.observeAgentHookCompletionForNotification
+}))
+
+import { useAppStore } from '@/store'
+import {
+  createAgentCompletionCoordinator,
+  resetAgentCompletionCoordinatorIdentitiesForTest
+} from '@/components/terminal-pane/agent-completion-coordinator'
+import {
+  markRendererOwnedAgentStatusWrite,
+  registerRendererOwnedAgentStatusPane,
+  resetRendererOwnedAgentStatusPanesForTests
+} from '@/components/terminal-pane/renderer-owned-agent-status-registry'
+import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
+import {
+  resetWebSessionTabsSnapshotFreshnessForTests,
+  useWebSessionTabsSync
+} from './web-session-tabs-sync'
+import { WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS } from './window-visibility-subscription-parking'
+
+const ENVIRONMENT_ID = 'env-a'
+const RUNTIME_ID = 'runtime-a'
+const REVISION = 101
+const REPO_ID = 'repo-a'
+const WORKTREE_ID = `${REPO_ID}::/worktree-a`
+const OTHER_WORKTREE_ID = `${REPO_ID}::/other`
+const HOST_TAB_ID = 'host-tab-1'
+const LEAF_ID = '11111111-1111-4111-8111-111111111111'
+const PANE_KEY = makePaneKey(toWebTerminalSurfaceTabId(HOST_TAB_ID), LEAF_ID)
+const NOW = 1_700_000_000_000
+const MIRROR_KEY = `${ENVIRONMENT_ID}\u0001${RUNTIME_ID}\u00011\u0001${REVISION}`
+const initialState = useAppStore.getInitialState()
+
+type RuntimeSubscribe = typeof window.api.runtimeEnvironments.subscribe
+type RuntimeSubscription = {
+  request: Parameters<RuntimeSubscribe>[0]
+  callbacks: Parameters<RuntimeSubscribe>[1]
+  unsubscribe: ReturnType<typeof vi.fn>
+}
+type TerminalState = 'working' | 'done' | 'blocked' | 'waiting'
+
+const subscriptions: RuntimeSubscription[] = []
+const runtimeCall = vi.fn(async () => ({
+  id: 'list-all',
+  ok: true as const,
+  result: { snapshots: [] },
+  _meta: { runtimeId: RUNTIME_ID }
+}))
+const runtimeSubscribe = vi.fn<RuntimeSubscribe>(async (request, callbacks) => {
+  const unsubscribe = vi.fn()
+  subscriptions.push({ request, callbacks, unsubscribe })
+  return { unsubscribe, sendBinary: vi.fn() }
+})
+
+function snapshot(
+  snapshotVersion: number,
+  state: TerminalState,
+  stateStartedAt: number,
+  updatedAt = stateStartedAt,
+  turnCompletedAt?: number,
+  publicationEpoch = 'epoch-1'
+): RuntimeMobileSessionTabsResult {
+  return {
+    worktree: WORKTREE_ID,
+    publicationEpoch,
+    snapshotVersion,
+    activeGroupId: 'host-group-1',
+    activeTabId: HOST_TAB_ID,
+    activeTabType: 'terminal',
+    tabs: [
+      {
+        type: 'terminal',
+        id: `${HOST_TAB_ID}::${LEAF_ID}`,
+        title: 'Claude',
+        parentTabId: HOST_TAB_ID,
+        leafId: LEAF_ID,
+        isActive: true,
+        status: 'ready',
+        terminal: 'terminal-1',
+        ...(turnCompletedAt !== undefined ? { turnCompletedAt } : {}),
+        agentStatus: {
+          state,
+          prompt: 'review the PR',
+          updatedAt,
+          stateStartedAt,
+          agentType: 'claude',
+          paneKey: makePaneKey(HOST_TAB_ID, LEAF_ID),
+          tabId: HOST_TAB_ID,
+          worktreeId: WORKTREE_ID,
+          stateHistory: []
+        }
+      }
+    ]
+  } as RuntimeMobileSessionTabsResult
+}
+
+function setDocumentVisibility(state: 'visible' | 'hidden'): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => state
+  })
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+function findSubscription(
+  method: 'session.tabs.subscribeAll' | 'session.tabs.subscribe',
+  occurrence = 0
+): RuntimeSubscription {
+  const subscription = subscriptions.filter(({ request }) => request.method === method)[occurrence]
+  if (!subscription) {
+    throw new Error(`Missing ${method} subscription ${occurrence}`)
+  }
+  return subscription
+}
+
+async function publish(
+  subscription: RuntimeSubscription,
+  result: unknown,
+  replayed = false
+): Promise<void> {
+  await act(async () => {
+    const response = {
+      id: 'subscription-event',
+      ok: true as const,
+      result,
+      _meta: { runtimeId: RUNTIME_ID }
+    }
+    subscription.callbacks.onResponse(
+      replayed ? tagRuntimeSubscriptionReplayResponse(response) : response
+    )
+    await settle()
+  })
+}
+
+function seedRemoteMirrorState(activeRemoteWorktree = false): void {
+  const runtimeEnvironments = [
+    { id: ENVIRONMENT_ID, createdAt: 100, pairingRevision: REVISION }
+  ] as PublicKnownRuntimeEnvironment[]
+  replaceRuntimeEnvironmentRevisions(runtimeEnvironments)
+  useAppStore.setState(
+    {
+      ...initialState,
+      activeWorktreeId: activeRemoteWorktree ? WORKTREE_ID : OTHER_WORKTREE_ID,
+      workspaceSessionReady: true,
+      runtimeEnvironments,
+      runtimeStatusByEnvironmentId: new Map([
+        [ENVIRONMENT_ID, { status: { runtimeId: RUNTIME_ID }, connectionGeneration: 1 }]
+      ]) as AppState['runtimeStatusByEnvironmentId'],
+      worktreesByRepo: {
+        [REPO_ID]: [
+          makeWorktree({ id: WORKTREE_ID, repoId: REPO_ID, path: '/worktree-a' }),
+          makeWorktree({ id: OTHER_WORKTREE_ID, repoId: REPO_ID, path: '/other' })
+        ]
+      }
+    },
+    true
+  )
+}
+
+function markUnread(): void {
+  useAppStore.setState((state) => ({
+    worktreesByRepo: {
+      ...state.worktreesByRepo,
+      [REPO_ID]: state.worktreesByRepo[REPO_ID].map((worktree) =>
+        worktree.id === WORKTREE_ID ? { ...worktree, isUnread: true } : worktree
+      )
+    }
+  }))
+}
+
+function badgeCount(): number {
+  return getUnreadBadgeCount(useAppStore.getState())
+}
+
+async function parkAndReveal(): Promise<void> {
+  act(() => {
+    setDocumentVisibility('hidden')
+    vi.advanceTimersByTime(WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS)
+    setDocumentVisibility('visible')
+  })
+  await act(settle)
+}
+
+describe('paired session-tab visibility-resume notifications', () => {
+  let notificationDispatch: Mock<(kind: 'done' | 'attention') => void>
+  let disposeCoordinator: () => void
+  let hasNotificationBaseline: boolean
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    subscriptions.length = 0
+    runtimeCall.mockClear()
+    runtimeSubscribe.mockClear()
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReset().mockReturnValue(null)
+    mocks.recoverSnapshot.mockReset().mockImplementation(async (_state, value) => value)
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReset().mockReturnValue(MIRROR_KEY)
+    mocks.observeAgentHookCompletionForNotification.mockReset()
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { runtimeEnvironments: { call: runtimeCall, subscribe: runtimeSubscribe } }
+    })
+    setDocumentVisibility('visible')
+    resetAgentCompletionCoordinatorIdentitiesForTest()
+    resetWebSessionTabsSnapshotFreshnessForTests()
+    resetRendererOwnedAgentStatusPanesForTests()
+    seedRemoteMirrorState()
+    hasNotificationBaseline = false
+
+    notificationDispatch = vi.fn()
+    const coordinator = createAgentCompletionCoordinator({
+      paneKey: PANE_KEY,
+      statusLane: 'hook',
+      getPtyId: () => 'pty-1',
+      getSettings: () => null,
+      inspectProcess: vi.fn(),
+      dispatchCompletion: () => {
+        notificationDispatch('done')
+        markUnread()
+      },
+      dispatchAttention: () => {
+        notificationDispatch('attention')
+        markUnread()
+      },
+      isLive: () => true
+    })
+    disposeCoordinator = () => coordinator.dispose()
+    mocks.observeAgentHookCompletionForNotification.mockImplementation(({ payload, seedOnly }) => {
+      if (seedOnly && !hasNotificationBaseline) {
+        coordinator.seedHookStatus(payload)
+      } else {
+        coordinator.observeHookStatus(payload)
+      }
+      hasNotificationBaseline = true
+    })
+  })
+
+  afterEach(() => {
+    disposeCoordinator()
+    cleanup()
+    useAppStore.setState(initialState, true)
+    replaceRuntimeEnvironmentRevisions([])
+    resetAgentCompletionCoordinatorIdentitiesForTest()
+    resetWebSessionTabsSnapshotFreshnessForTests()
+    resetRendererOwnedAgentStatusPanesForTests()
+    setDocumentVisibility('visible')
+    vi.useRealTimers()
+  })
+
+  it.each(['done', 'blocked', 'waiting'] as const)(
+    'alerts once for %s reached while the hidden mirror is parked',
+    async (state) => {
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+      await publish(findSubscription('session.tabs.subscribeAll'), {
+        type: 'updated',
+        ...snapshot(1, 'working', NOW)
+      })
+      notificationDispatch.mockClear()
+
+      await parkAndReveal()
+      await publish(findSubscription('session.tabs.subscribeAll', 1), {
+        type: 'snapshots',
+        snapshots: [snapshot(2, state, NOW + 1_000)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(badgeCount()).toBe(1)
+      hook.unmount()
+    }
+  )
+
+  it('keeps cold inventory silent', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'done', NOW)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
+
+  it.each(['done', 'blocked'] as const)(
+    'keeps cold %s inventory silent when first mounted hidden',
+    async (state) => {
+      setDocumentVisibility('hidden')
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+
+      act(() => setDocumentVisibility('visible'))
+      await act(settle)
+      await publish(findSubscription('session.tabs.subscribeAll'), {
+        type: 'snapshots',
+        snapshots: [snapshot(1, state, NOW)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).not.toHaveBeenCalled()
+      expect(badgeCount()).toBe(0)
+      hook.unmount()
+    }
+  )
+
+  it.each(['done', 'blocked'] as const)(
+    'keeps a metadata-only %s inventory refresh silent',
+    async (state) => {
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+      const global = findSubscription('session.tabs.subscribeAll')
+      await publish(global, {
+        type: 'snapshots',
+        snapshots: [snapshot(1, state, NOW)]
+      })
+      await publish(global, {
+        type: 'snapshots',
+        snapshots: [snapshot(2, state, NOW, NOW + 5_000)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).not.toHaveBeenCalled()
+      expect(badgeCount()).toBe(0)
+      hook.unmount()
+    }
+  )
+
+  it('keeps same-turn reconnect replay and duplicate frames silent', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    const global = findSubscription('session.tabs.subscribeAll')
+    await publish(global, { type: 'updated', ...snapshot(1, 'working', NOW) })
+    await publish(global, { type: 'updated', ...snapshot(2, 'done', NOW + 1_000) })
+    vi.advanceTimersByTime(1_500)
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+
+    await publish(
+      global,
+      { type: 'snapshots', snapshots: [snapshot(2, 'done', NOW + 1_000)] },
+      true
+    )
+    await publish(global, {
+      type: 'snapshots',
+      snapshots: [snapshot(3, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('alerts for a new transition even when the first resume frame is replay-tagged', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(
+      findSubscription('session.tabs.subscribeAll', 1),
+      { type: 'snapshots', snapshots: [snapshot(2, 'blocked', NOW + 1_000)] },
+      true
+    )
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('alerts after a transport resubscription preserves the prior baseline', async () => {
+    const firstHook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    firstHook.unmount()
+
+    const reconnectedHook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    reconnectedHook.unmount()
+  })
+
+  it('alerts for a Claude stamped completion while the host row stays working', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'working', NOW, NOW + 1_000, NOW + 1_000)]
+    })
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('alerts across a restarted host publication epoch without comparing clocks', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(10, 'working', NOW, NOW, undefined, 'epoch-1')
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(1, 'blocked', NOW - 100_000, NOW, undefined, 'epoch-2')]
+    })
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('recovers a blocked prompt when the client and host clocks disagree', async () => {
+    registerRendererOwnedAgentStatusPane(PANE_KEY, ENVIRONMENT_ID)
+    markRendererOwnedAgentStatusWrite(PANE_KEY)
+    useAppStore.setState({
+      agentStatusByPaneKey: {
+        [PANE_KEY]: {
+          state: 'working',
+          prompt: 'review the PR',
+          updatedAt: NOW + 100_000,
+          stateStartedAt: NOW + 100_000,
+          agentType: 'claude',
+          paneKey: PANE_KEY,
+          tabId: toWebTerminalSurfaceTabId(HOST_TAB_ID),
+          worktreeId: WORKTREE_ID,
+          stateHistory: []
+        }
+      }
+    })
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'blocked', NOW + 1_000, NOW + 200_000)]
+    })
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('alerts once when the resumed active stream wins the inventory race', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribe', 1), {
+      type: 'snapshot',
+      ...snapshot(2, 'done', NOW + 1_000)
+    })
+    vi.advanceTimersByTime(1_500)
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'done', NOW + 1_000)]
+    })
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+
+  it('alerts once when the resumed inventory wins the active-stream race', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    await publish(findSubscription('session.tabs.subscribeAll', 1), {
+      type: 'snapshots',
+      snapshots: [snapshot(2, 'done', NOW + 1_000)]
+    })
+    vi.advanceTimersByTime(1_500)
+    await publish(findSubscription('session.tabs.subscribe', 1), {
+      type: 'snapshot',
+      ...snapshot(2, 'done', NOW + 1_000)
+    })
+
+    expect(notificationDispatch).toHaveBeenCalledTimes(1)
+    expect(badgeCount()).toBe(1)
+    hook.unmount()
+  })
+})

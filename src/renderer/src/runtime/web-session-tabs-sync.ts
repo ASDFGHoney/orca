@@ -3837,9 +3837,6 @@ export function applyWebSessionTabsStorePatch(
               }
             }
           }
-          if (!allowCompletionNotification && notificationStatus.state !== 'working') {
-            continue
-          }
           acceptedNotificationStatuses.push({
             paneKey: notificationStatus.paneKey,
             worktreeId: notificationStatus.worktreeId ?? snapshot.worktree,

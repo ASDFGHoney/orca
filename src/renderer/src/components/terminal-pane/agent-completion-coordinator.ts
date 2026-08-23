@@ -1154,7 +1154,33 @@ export function createAgentCompletionCoordinator(
     if (isFiniteTurnCompletedAt(turnCompletedAt)) {
       rememberHandledTurnCompletedAt(turnCompletedAt)
     }
-    observeHookStatus(unstampedPayload)
+    if (payload.state === 'working') {
+      observeHookStatus(unstampedPayload)
+      return
+    }
+    recordPaneActivity()
+    if (isRecognizedAgentType(payload.agentType)) {
+      establishAgentEvidence()
+    }
+    clearPendingHookDone()
+    clearPendingCodexAttention()
+    if (isAttentionHookState(payload.state)) {
+      lastAttentionToken = hookAttentionToken(payload)
+      return
+    }
+    const identity = hookCompletionIdentity(payload)
+    if (!identity) {
+      return
+    }
+    lastCompletionIdentity = {
+      source: 'hook',
+      identity,
+      agentIdentity: hookCompletionAgentIdentity(payload),
+      ...(isFiniteTurnCompletedAt(turnCompletedAt)
+        ? { lastTurnCompletedAtNotified: turnCompletedAt }
+        : {})
+    }
+    lastCompletionIdentityByPaneKey.set(options.paneKey, lastCompletionIdentity)
   }
 
   function markTitleCompletionNotified(title: string): void {
