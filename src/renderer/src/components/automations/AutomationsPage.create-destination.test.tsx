@@ -11,10 +11,10 @@
  */
 
 import { act } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Automation } from '../../../../shared/automations-types'
 import { hostStableKey } from '../../../../shared/automation-owner-key'
-import { unscopedAutomationListRows, type AutomationListRow } from './automation-list-row-identity'
+import type { AutomationListRow } from './automation-list-row-identity'
 import {
   api,
   installAutomationsPageHarness,
@@ -51,6 +51,10 @@ const RUNTIME_SELF_KEY = hostStableKey({
   authority: { kind: 'runtime', environmentId: RUNTIME_ID },
   selector: { kind: 'self' }
 })
+const RUNTIME_SSH_KEY = hostStableKey({
+  authority: { kind: 'runtime', environmentId: RUNTIME_ID },
+  selector: { kind: 'ssh', targetId: SSH_TARGET_ID }
+})
 
 /**
  * A project the runtime owns. It carries no `connectionId`, so a flat repo
@@ -72,8 +76,11 @@ function addRuntimeProject(): void {
     repoId: RUNTIME_REPO_ID,
     displayName: 'main',
     path: '/repos/gpu-orca',
-    branch: 'main'
-  } as Worktree
+    branch: 'main',
+    hostId: `runtime:${RUNTIME_ID}`,
+    runtimeOwnerEnvironmentId: RUNTIME_ID,
+    projectHostSetupId: 'setup-2'
+  } as unknown as Worktree
   const setup: ProjectHostSetup = {
     id: 'setup-2',
     projectId: 'project-2',
@@ -81,6 +88,7 @@ function addRuntimeProject(): void {
     repoId: RUNTIME_REPO_ID,
     path: '/repos/gpu-orca',
     displayName: 'gpu-orca',
+    runtimeOwnerEnvironmentId: RUNTIME_ID,
     setupState: 'ready',
     setupMethod: 'legacy-repo',
     createdAt: 1,
@@ -116,6 +124,47 @@ function addSshProject(): void {
   } as Repo
   mocks.state.repos = [...(mocks.state.repos as Repo[]), repo]
   mocks.repoMap.set(SSH_REPO_ID, repo)
+}
+
+function addRuntimeSshProject(): void {
+  const repo = {
+    id: 'repo-runtime-ssh',
+    displayName: 'runtime-builder',
+    path: '/repos/runtime-builder',
+    badgeColor: '#333333',
+    addedAt: 1,
+    connectionId: SSH_TARGET_ID,
+    executionHostId: `runtime:${RUNTIME_ID}`
+  } as Repo
+  const worktree = {
+    id: 'workspace-runtime-ssh',
+    repoId: repo.id,
+    displayName: 'main',
+    path: repo.path,
+    branch: 'main',
+    hostId: `ssh:${SSH_TARGET_ID}`,
+    runtimeOwnerEnvironmentId: RUNTIME_ID
+  } as unknown as Worktree
+  mocks.state.repos = [...(mocks.state.repos as Repo[]), repo]
+  mocks.state.worktreesByRepo = {
+    ...(mocks.state.worktreesByRepo as Record<string, Worktree[]>),
+    [repo.id]: [worktree]
+  }
+  mocks.state.sshStateByEnvironment = new Map([
+    [
+      RUNTIME_ID,
+      {
+        connectionStates: new Map([[SSH_TARGET_ID, { status: 'connected' }]]),
+        targetLabels: new Map([[SSH_TARGET_ID, 'runtime builder']]),
+        targetGenerations: new Map([[SSH_TARGET_ID, 2]]),
+        removedTargetLabels: new Map(),
+        targetsHydrated: true
+      }
+    ]
+  ])
+  mocks.state.activeWorktreeId = worktree.id
+  mocks.repoMap.set(repo.id, repo)
+  mocks.worktreeMap.set(worktree.id, worktree)
 }
 
 /** The runtime answers a create; without this the RPC double returns an empty result. */
@@ -163,11 +212,12 @@ describe('AutomationsPage create destination', () => {
     scopedList([])
     runtimeHost([], [])
     runtimeCreateReturns(makeAutomation({ id: 'a-new', name: 'Sweep' }))
+    addRuntimeProject()
     mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
 
     await renderPage()
     await settleHostQueries()
-    await openCreateDialogFor(REPO_ID, WORKSPACE_ID)
+    await openCreateDialogFor(RUNTIME_REPO_ID, RUNTIME_WORKSPACE_ID)
     await save()
 
     // The desktop is the client's own authority, never the selected host.
@@ -200,6 +250,7 @@ describe('AutomationsPage create destination', () => {
     scopedList([])
     runtimeHost([], [])
     runtimeCreateReturns(makeAutomation({ id: 'a-new', name: 'Sweep' }))
+    addRuntimeProject()
 
     await renderPage()
     await settleHostQueries()
@@ -217,10 +268,29 @@ describe('AutomationsPage create destination', () => {
       mocks.editorDialog?.createDestination?.onSelect(RUNTIME_SELF_KEY)
     })
     expect(mocks.editorDialog?.createDestination?.resolution.status).toBe('ready')
+    await openCreateDialogFor(RUNTIME_REPO_ID, RUNTIME_WORKSPACE_ID)
     await save()
 
     expect(runtimeCreateCalls()).toHaveLength(1)
     expect(api.automations.create).not.toHaveBeenCalled()
+  })
+
+  it('prefills Runtime + SSH from the active qualified workspace', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([], [])
+    addSshHost()
+    addRuntimeSshProject()
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      mocks.listPanel?.openCreateDialog()
+    })
+
+    const resolution = mocks.editorDialog?.createDestination?.resolution
+    expect(resolution?.status === 'ready' && resolution.entry.stableKey).toBe(RUNTIME_SSH_KEY)
+    expect(resolution?.status === 'ready' && resolution.entry.stableKey).not.toBe(SSH_HOST_KEY)
   })
 
   it('offers only the projects the chosen host actually has', async () => {
@@ -241,6 +311,76 @@ describe('AutomationsPage create destination', () => {
     // The local project shares this one's name, so offering both leaves the user
     // no way to tell which is the one on that host.
     expect(mocks.editorDialog?.repos?.map((repo) => repo.id)).toEqual([SSH_REPO_ID])
+  })
+
+  it('offers only workspaces verified on the chosen runtime', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([], [])
+    addRuntimeProject()
+    mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
+    const bucket = (mocks.state.worktreesByRepo as Record<string, Worktree[]>)[RUNTIME_REPO_ID]!
+    const foreign = {
+      ...bucket[0],
+      id: 'foreign-workspace',
+      displayName: 'foreign',
+      hostId: 'local',
+      runtimeOwnerEnvironmentId: undefined
+    } as Worktree
+    bucket.push(foreign)
+
+    await renderPage()
+    await settleHostQueries()
+    await openCreateDialogFor(RUNTIME_REPO_ID, RUNTIME_WORKSPACE_ID)
+    await settleHostQueries()
+
+    expect(mocks.editorDialog?.worktrees?.map((worktree) => worktree.id)).toEqual([
+      RUNTIME_WORKSPACE_ID
+    ])
+  })
+
+  it('rejects an injected workspace from another host before runtime create', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([], [])
+    addRuntimeProject()
+    mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
+    const bucket = (mocks.state.worktreesByRepo as Record<string, Worktree[]>)[RUNTIME_REPO_ID]!
+    const foreign = {
+      ...bucket[0],
+      id: 'foreign-workspace',
+      displayName: 'foreign',
+      hostId: 'local',
+      runtimeOwnerEnvironmentId: undefined
+    } as Worktree
+    bucket.push(foreign)
+
+    await renderPage()
+    await settleHostQueries()
+    await openCreateDialogFor(RUNTIME_REPO_ID, foreign.id)
+    await save()
+
+    expect(runtimeCreateCalls()).toHaveLength(0)
+    expect(mocks.toastError).toHaveBeenCalledWith('Choose an available workspace before saving.')
+  })
+
+  it('does not offer or save remembered workspaces when the host cannot verify them', async () => {
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([], [])
+    addRuntimeProject()
+    mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
+    mocks.state.fetchWorktrees = vi.fn(async () => false)
+
+    await renderPage()
+    await settleHostQueries()
+    await openCreateDialogFor(RUNTIME_REPO_ID, RUNTIME_WORKSPACE_ID)
+    await settleHostQueries()
+
+    expect(mocks.editorDialog?.worktrees).toEqual([])
+    await save()
+    expect(runtimeCreateCalls()).toHaveLength(0)
+    expect(mocks.editorDialog?.notice?.message).toContain("couldn't verify workspaces")
   })
 
   it('moves a stranded project to one the newly chosen host has', async () => {
@@ -349,6 +489,40 @@ describe('AutomationsPage edit fencing', () => {
     )
   }
 
+  it('offers only workspaces verified on the edited automation’s runtime', async () => {
+    const automation = makeAutomation({
+      id: 'a-runtime',
+      projectId: RUNTIME_REPO_ID,
+      workspaceId: RUNTIME_WORKSPACE_ID,
+      workspaceMode: 'existing'
+    })
+    api.automations.list.mockResolvedValue([])
+    scopedList([])
+    runtimeHost([automation], [])
+    addRuntimeProject()
+    mocks.state.automationHostFilter = RUNTIME_SELF_FILTER
+    const bucket = (mocks.state.worktreesByRepo as Record<string, Worktree[]>)[RUNTIME_REPO_ID]!
+    bucket.push({
+      ...bucket[0],
+      id: 'foreign-workspace',
+      displayName: 'foreign',
+      hostId: 'local',
+      runtimeOwnerEnvironmentId: undefined
+    } as Worktree)
+
+    await renderPage()
+    await settleHostQueries()
+    await act(async () => {
+      void mocks.listPanel?.openEditDialog(listedRow(automation.id))
+    })
+    await settleHostQueries()
+
+    expect(mocks.editorDialog?.repos?.map((repo) => repo.id)).toEqual([RUNTIME_REPO_ID])
+    expect(mocks.editorDialog?.worktrees?.map((worktree) => worktree.id)).toEqual([
+      RUNTIME_WORKSPACE_ID
+    ])
+  })
+
   it('fences the save even when the record cannot be re-read', async () => {
     const automation = makeAutomation({ id: 'a-1' })
     api.automations.list.mockResolvedValue([])
@@ -362,22 +536,5 @@ describe('AutomationsPage edit fencing', () => {
 
     expect(api.automations.update).toHaveBeenCalled()
     expect(updatePreconditions()).not.toContain(undefined)
-  })
-
-  it('refuses the save when nothing names the record’s host', async () => {
-    const automation = makeAutomation({ id: 'a-1' })
-    // No host answered, so no owner was ever captured, and the record is gone
-    // from the one list the client can still address.
-    api.automations.listScoped.mockRejectedValue(new Error('offline'))
-    api.automations.list.mockResolvedValue([])
-
-    await renderPage()
-    await settleHostQueries()
-    // No host answered, so the page never listed a row for it; the pre-catalog
-    // projection is the only key the user could have clicked.
-    await editAndSave(unscopedAutomationListRows([automation])[0]!)
-
-    expect(api.automations.update).not.toHaveBeenCalled()
-    expect(mocks.editorDialog?.notice?.message).toBeTruthy()
   })
 })

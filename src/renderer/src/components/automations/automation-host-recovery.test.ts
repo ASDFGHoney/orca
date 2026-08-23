@@ -44,23 +44,30 @@ const RUNTIME_SSH = entry({
 })
 
 describe('automation host recovery', () => {
-  it('retries the host rather than the whole page', () => {
+  it('retries the host rather than the whole page', async () => {
     const target = deps()
-    runAutomationHostRecovery('retry', DESKTOP_SSH, target)
+    await runAutomationHostRecovery('retry', DESKTOP_SSH, target)
     expect(target.retry).toHaveBeenCalledWith(DESKTOP_SSH)
   })
 
-  it('dials the SSH target when the authority is fine', () => {
+  it('dials the SSH target when the authority is fine', async () => {
     const target = deps()
-    runAutomationHostRecovery('reconnect', DESKTOP_SSH, target)
-    expect(target.connectSshTarget).toHaveBeenCalledWith('t1')
+    await runAutomationHostRecovery('reconnect', DESKTOP_SSH, target)
+    expect(target.connectSshTarget).toHaveBeenCalledWith('t1', undefined)
     expect(target.connectRuntimeEnvironment).not.toHaveBeenCalled()
   })
 
-  it('dials the runtime first when the server itself is unreachable', () => {
+  it('dials a reachable runtime SSH target on that server, not the local SSH API', async () => {
+    const target = deps()
+    await runAutomationHostRecovery('reconnect', RUNTIME_SSH, target)
+    expect(target.connectSshTarget).toHaveBeenCalledWith('t1', 'gpu')
+    expect(target.connectRuntimeEnvironment).not.toHaveBeenCalled()
+  })
+
+  it('dials the runtime first when the server itself is unreachable', async () => {
     const target = deps()
     // Why: an unreachable server cannot be asked to dial its own SSH target.
-    runAutomationHostRecovery(
+    await runAutomationHostRecovery(
       'reconnect',
       { ...RUNTIME_SSH, authorityHealth: 'unavailable' },
       target
@@ -69,30 +76,30 @@ describe('automation host recovery', () => {
     expect(target.connectSshTarget).not.toHaveBeenCalled()
   })
 
-  it('re-asks a desktop Self host, which has no transport to dial', () => {
+  it('re-asks a desktop Self host, which has no transport to dial', async () => {
     const target = deps()
     const desktopSelf = entry({
       stableRef: { authority: { kind: 'desktop' }, selector: { kind: 'self' } }
     })
-    runAutomationHostRecovery('reconnect', desktopSelf, target)
+    await runAutomationHostRecovery('reconnect', desktopSelf, target)
     expect(target.retry).toHaveBeenCalledWith(desktopSelf)
   })
 
-  it('sends a runtime to the servers pane, since nothing here updates a host', () => {
+  it('sends a runtime to the servers pane, since nothing here updates a host', async () => {
     const target = deps()
-    runAutomationHostRecovery('update-server', RUNTIME_SSH, target)
+    await runAutomationHostRecovery('update-server', RUNTIME_SSH, target)
     expect(target.openSettings).toHaveBeenCalledWith({ pane: 'servers', repoId: null })
   })
 
-  it('sends a stale desktop SSH registration to the SSH pane instead', () => {
+  it('sends a stale desktop SSH registration to the SSH pane instead', async () => {
     const target = deps()
-    runAutomationHostRecovery('update-server', DESKTOP_SSH, target)
+    await runAutomationHostRecovery('update-server', DESKTOP_SSH, target)
     expect(target.openSettings).toHaveBeenCalledWith({ pane: 'ssh', repoId: null })
   })
 
-  it('does nothing without an entry to act on', () => {
+  it('does nothing without an entry to act on', async () => {
     const target = deps()
-    runAutomationHostRecovery('retry', null, target)
+    await runAutomationHostRecovery('retry', null, target)
     expect(target.retry).not.toHaveBeenCalled()
   })
 })

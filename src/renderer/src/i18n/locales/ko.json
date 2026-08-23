@@ -13851,7 +13851,11 @@
           "tableStatus": "상태",
           "tableActions": "작업",
           "newAutomation": "새 자동화",
-          "rowActions": "자동화 작업"
+          "rowActions": "자동화 작업",
+          "tableLastRun": "마지막 실행",
+          "noListMatches": "일치하는 자동화가 없습니다.",
+          "tableHost": "호스트",
+          "refreshAutomations": "자동화 새로고침"
         },
         "CreateFromPicker": {
           "f061f49e3f": "repo 브랜치 검색...",

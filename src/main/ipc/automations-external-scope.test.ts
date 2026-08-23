@@ -87,7 +87,11 @@ describe('scoped external-manager IPC', () => {
       provider: 'hermes'
     })) as { manager: { id: string; target: unknown } | null; error: string | null }
 
-    expect(relay.request).toHaveBeenCalledWith('externalAutomations.list', { provider: 'hermes' })
+    expect(relay.request).toHaveBeenCalledWith(
+      'externalAutomations.list',
+      { provider: 'hermes' },
+      { signal: expect.any(AbortSignal) }
+    )
     expect(entry.manager?.id).toBe('hermes:ssh:t1')
     expect(entry.manager?.target).toEqual({ type: 'ssh', connectionId: 't1' })
     expect(entry.error).toBeNull()

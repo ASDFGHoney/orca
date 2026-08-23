@@ -230,7 +230,7 @@ describe('reconciling retained runs against a graph that has not published yet',
     service.stop()
   })
 
-  it('still closes out a run the ready surface cannot find after the settle window', async () => {
+  it('keeps a run unverifiable when the ready surface cannot find it', async () => {
     const store = await createStore()
     const automation = createAutomation(store)
     const retained = retainDispatchedRun(store, automation)
@@ -241,10 +241,8 @@ describe('reconciling retained runs against a graph that has not published yet',
     service.setRendererReady()
     await vi.advanceTimersByTimeAsync(AFTER_SETTLE_MS)
 
-    expect(readRun(store, automation.id, retained.id).status).toBe('dispatch_failed')
-    expect(readRun(store, automation.id, retained.id).error).toBe(
-      'Orca lost the terminal for this run before it reported completion.'
-    )
+    expect(readRun(store, automation.id, retained.id).status).toBe('dispatched')
+    expect(readRun(store, automation.id, retained.id).error).toBeNull()
     service.stop()
   })
 })

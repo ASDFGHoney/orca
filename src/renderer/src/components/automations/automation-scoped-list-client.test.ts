@@ -28,6 +28,7 @@ const SSH_OWNER = {
   authority: RUNTIME,
   selector: { kind: 'ssh', targetId: 'ssh-1', targetGeneration: 7 }
 } as const
+const SELF_OWNER = { authority: RUNTIME, selector: { kind: 'self' } } as const
 
 const ALL_CAPABILITIES = {
   capabilities: [
@@ -135,6 +136,53 @@ describe('listScopedAutomations', () => {
   })
 })
 
+describe('listAutomationsForOwner', () => {
+  // Rule: never trust a scoped list from a server that ignored the selector.
+  // The Self read degrades to the unscoped list plus a client-side partition.
+  it('falls back to an unscoped Self read on a host without host scoping', async () => {
+    const { listAutomationsForOwner } = await client()
+    getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: [] })
+    callRuntimeRpc.mockResolvedValue({
+      automations: [
+        { id: 'a1', executionTargetType: 'local' },
+        { id: 'a2', executionTargetType: 'ssh', executionTargetId: 't1' },
+        { id: 'a3', executionTargetType: 'local', schedulerOwner: 'remote_host_service' }
+      ]
+    })
+    const result = await listAutomationsForOwner(SELF_OWNER)
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'automation.list',
+      null,
+      expect.objectContaining({ expectedEnvironmentPairingRevision: 4 })
+    )
+    expect(result.automations.map((automation) => automation.id)).toEqual(['a1'])
+    expect(result.items).toEqual([{ automationId: 'a1', selector: { kind: 'self' } }])
+  })
+
+  it('keeps failing closed for an SSH owner on a host without host scoping', async () => {
+    const { listAutomationsForOwner, AutomationHostScopeUnsupportedError } = await client()
+    getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: [] })
+    await expect(listAutomationsForOwner(SSH_OWNER)).rejects.toBeInstanceOf(
+      AutomationHostScopeUnsupportedError
+    )
+    expect(callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('keeps the scoped read on a capable host', async () => {
+    const { listAutomationsForOwner } = await client()
+    getRuntimeEnvironmentStatus.mockResolvedValue(ALL_CAPABILITIES)
+    callRuntimeRpc.mockResolvedValue({ automations: [], items: [], orphanCount: 0 })
+    await listAutomationsForOwner(SELF_OWNER)
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'automation.list',
+      { selector: { kind: 'self' } },
+      expect.objectContaining({ expectedEnvironmentPairingRevision: 4 })
+    )
+  })
+})
+
 describe('owner-fenced mutations', () => {
   it('sends the captured owner with the mutation', async () => {
     const { updateAutomationForOwner } = await client()
@@ -158,6 +206,104 @@ describe('owner-fenced mutations', () => {
       updateAutomationForOwner(SSH_OWNER, 'a1', { enabled: false })
     ).rejects.toBeInstanceOf(AutomationHostScopeUnsupportedError)
     expect(callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  // Self records live on the answering authority and mutate by id under the
+  // pairing-revision fence, so a pre-fencing server stays fully usable for them.
+  it('mutates Self on a runtime without owner fencing instead of failing closed', async () => {
+    const { deleteAutomationForOwner, runAutomationNowForOwner, updateAutomationForOwner } =
+      await client()
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' }, run: { id: 'r1' } })
+    await updateAutomationForOwner(SELF_OWNER, 'a1', { enabled: false })
+    await deleteAutomationForOwner(SELF_OWNER, 'a1')
+    await runAutomationNowForOwner(SELF_OWNER, 'a1')
+    expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
+    expect(callRuntimeRpc.mock.calls[0]?.[2]).toEqual({
+      id: 'a1',
+      updates: { enabled: false },
+      expectedOwner: { selector: { kind: 'self' } },
+      destination: undefined
+    })
+    expect(callRuntimeRpc.mock.calls.map((call) => call[3])).toEqual(
+      Array.from({ length: 3 }, () =>
+        expect.objectContaining({ expectedEnvironmentPairingRevision: 4 })
+      )
+    )
+  })
+
+  // An old server ignores `destination` and would silently leave the record in
+  // place, so a Self move still needs the fenced contract.
+  it('still fails a Self destination move closed on a host without owner fencing', async () => {
+    const { updateAutomationForOwner, AutomationHostScopeUnsupportedError } = await client()
+    getRuntimeEnvironmentStatus.mockResolvedValue({
+      capabilities: [AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY]
+    })
+    await expect(
+      updateAutomationForOwner(SELF_OWNER, 'a1', { enabled: false }, { selector: { kind: 'self' } })
+    ).rejects.toBeInstanceOf(AutomationHostScopeUnsupportedError)
+    expect(callRuntimeRpc).not.toHaveBeenCalled()
+  })
+
+  it('creates at a Self destination without probing for owner fencing', async () => {
+    const { createAutomationForDestination } = await client()
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
+    await createAutomationForDestination(
+      RUNTIME,
+      { name: 'n', prompt: 'p', projectId: 'repo-1' } as never,
+      { selector: { kind: 'self' } }
+    )
+    expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
+    expect(callRuntimeRpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends an existing workspace as an id: selector on the runtime', async () => {
+    const { createAutomationForDestination } = await client()
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
+    await createAutomationForDestination(
+      RUNTIME,
+      {
+        name: 'n',
+        prompt: 'p',
+        projectId: 'repo-1',
+        workspaceMode: 'existing',
+        workspaceId: 'repo-1::/tmp/orca/feature'
+      } as never,
+      { selector: { kind: 'self' } }
+    )
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'automation.create',
+      expect.objectContaining({
+        repo: 'repo-1',
+        workspace: 'id:repo-1::/tmp/orca/feature',
+        destination: { selector: { kind: 'self' } }
+      }),
+      expect.anything()
+    )
+  })
+
+  it('translates edited project and workspace fields for the runtime RPC', async () => {
+    const { updateAutomationForOwner } = await client()
+    callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
+
+    await updateAutomationForOwner(SELF_OWNER, 'a1', {
+      projectId: 'repo-2',
+      workspaceMode: 'existing',
+      workspaceId: 'repo-2::/tmp/orca/other'
+    })
+
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'automation.update',
+      expect.objectContaining({
+        updates: {
+          repo: 'repo-2',
+          workspaceMode: 'existing',
+          workspace: 'id:repo-2::/tmp/orca/other'
+        }
+      }),
+      expect.anything()
+    )
   })
 
   it('fences a desktop mutation through IPC with the same precondition', async () => {

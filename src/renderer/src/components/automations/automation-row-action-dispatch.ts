@@ -1,12 +1,5 @@
 /**
- * One place where a row action decides between its fenced path and its legacy
- * one, so the page's handlers stay three lines each.
- *
- * The order is deliberate. A captured owner always wins. A row the authority
- * qualified but could not make executable is refused with the reason. Only a
- * row with no owner metadata at all falls back to the unfenced call, and that
- * arm exists solely so mixed-version clients keep working until the inference
- * is removed — it is the legacy path, not a default.
+ * One place where every row action applies its captured owner or fails closed.
  */
 
 import type {
@@ -14,7 +7,6 @@ import type {
   AutomationRun,
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
-import type { AutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
 import {
   automationActionAvailability,
   capturedAutomationOwner,
@@ -46,7 +38,6 @@ export type AutomationActionNotice = {
 export type AutomationDispatchContext = {
   /** Keyed by `AutomationListRow.key`; see {@link AutomationDispatchRow}. */
   capturedOwners: ReadonlyMap<string, AutomationCapturedOwner>
-  authority: AutomationAuthorityRef
 }
 
 /**
@@ -69,7 +60,7 @@ export function dispatched<TValue>(value: TValue): AutomationDispatchResult<TVal
 }
 
 export function toDispatchResult<TValue>(
-  outcome: Exclude<AutomationActionResult<TValue>, { status: 'uncaptured' }>
+  outcome: AutomationActionResult<TValue>
 ): AutomationDispatchResult<TValue> {
   switch (outcome.status) {
     case 'ok':
@@ -92,100 +83,58 @@ async function dispatch<TValue>(
   action: AutomationRowAction,
   fenced: (
     availability: ReturnType<typeof automationActionAvailability>
-  ) => Promise<AutomationActionResult<TValue>>,
-  legacy: () => Promise<TValue>
+  ) => Promise<AutomationActionResult<TValue>>
 ): Promise<AutomationDispatchResult<TValue>> {
   const availability = automationActionAvailability(
     capturedAutomationOwner(context.capturedOwners, row.rowKey),
     action
   )
-  const outcome = await fenced(availability)
-  if (outcome.status !== 'uncaptured') {
-    return toDispatchResult(outcome)
-  }
-  try {
-    return { ok: true, value: await legacy() }
-  } catch (error) {
-    return {
-      ok: false,
-      notice: {
-        message: error instanceof Error ? error.message : String(error),
-        recovery: 'retry',
-        severity: 'failure'
-      }
-    }
-  }
+  return toDispatchResult(await fenced(availability))
 }
 
 export async function dispatchAutomationUpdate(
   context: AutomationDispatchContext,
   row: AutomationDispatchRow,
   updates: AutomationUpdateInput,
-  legacy: () => Promise<Automation>,
   action: AutomationRowAction = 'toggle'
 ): Promise<AutomationDispatchResult<Automation>> {
-  return await dispatch(
-    context,
-    row,
-    action,
-    (availability) =>
-      updateOwnedAutomation(availability, context.authority, row.automationId, updates),
-    legacy
+  return await dispatch(context, row, action, (availability) =>
+    updateOwnedAutomation(availability, row.automationId, updates)
   )
 }
 
 export async function dispatchAutomationDelete(
   context: AutomationDispatchContext,
-  row: AutomationDispatchRow,
-  legacy: () => Promise<void>
+  row: AutomationDispatchRow
 ): Promise<AutomationDispatchResult<void>> {
-  return await dispatch(
-    context,
-    row,
-    'delete',
-    (availability) => deleteOwnedAutomation(availability, context.authority, row.automationId),
-    legacy
+  return await dispatch(context, row, 'delete', (availability) =>
+    deleteOwnedAutomation(availability, row.automationId)
   )
 }
 
 export async function dispatchAutomationRunNow(
   context: AutomationDispatchContext,
-  row: AutomationDispatchRow,
-  legacy: () => Promise<AutomationRun>
+  row: AutomationDispatchRow
 ): Promise<AutomationDispatchResult<AutomationRun>> {
-  return await dispatch(
-    context,
-    row,
-    'run',
-    (availability) => runOwnedAutomationNow(availability, row.automationId),
-    legacy
+  return await dispatch(context, row, 'run', (availability) =>
+    runOwnedAutomationNow(availability, row.automationId)
   )
 }
 
 export async function dispatchAutomationReread(
   context: AutomationDispatchContext,
-  row: AutomationDispatchRow,
-  legacy: () => Promise<Automation | null>
+  row: AutomationDispatchRow
 ): Promise<AutomationDispatchResult<Automation | null>> {
-  return await dispatch(
-    context,
-    row,
-    'edit',
-    (availability) => showOwnedAutomation(availability, row.automationId),
-    legacy
+  return await dispatch(context, row, 'edit', (availability) =>
+    showOwnedAutomation(availability, row.automationId)
   )
 }
 
 export async function dispatchAutomationRunHistory(
   context: AutomationDispatchContext,
-  row: AutomationDispatchRow,
-  legacy: () => Promise<AutomationRun[]>
+  row: AutomationDispatchRow
 ): Promise<AutomationDispatchResult<AutomationRun[]>> {
-  return await dispatch(
-    context,
-    row,
-    'history',
-    (availability) => listOwnedAutomationRuns(availability, context.authority, row.automationId),
-    legacy
+  return await dispatch(context, row, 'history', (availability) =>
+    listOwnedAutomationRuns(availability, row.automationId)
   )
 }

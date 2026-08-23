@@ -95,6 +95,10 @@ import {
   toPersistedAutomationHostFilter,
   type AutomationHostFilter
 } from '../../../../shared/automation-host-filter'
+import type {
+  StableAutomationAuthorityRef,
+  StableAutomationCatalogRef
+} from '../../../../shared/automation-owner-ref'
 import {
   normalizeExecutionHostOrder,
   normalizeExecutionHostScope,
@@ -760,9 +764,17 @@ export type UISlice = {
     automationId: string
     runId: string | null
     hostId?: ExecutionHostId
+    authority?: StableAutomationAuthorityRef
+    catalogRef?: StableAutomationCatalogRef
   } | null
   setPendingAutomationRunNavigation: (
-    navigation: { automationId: string; runId: string | null; hostId?: ExecutionHostId } | null
+    navigation: {
+      automationId: string
+      runId: string | null
+      hostId?: ExecutionHostId
+      authority?: StableAutomationAuthorityRef
+      catalogRef?: StableAutomationCatalogRef
+    } | null
   ) => void
   openAutomationsPage: () => void
   closeAutomationsPage: () => void

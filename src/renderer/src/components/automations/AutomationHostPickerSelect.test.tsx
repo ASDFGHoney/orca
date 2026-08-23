@@ -54,14 +54,15 @@ function runtimeSelf(environmentId: string, label: string): AutomationHostCatalo
 
 function render(
   entries: readonly AutomationHostCatalogEntry[],
-  onSelect: (filter: AutomationHostFilter) => void = () => undefined
+  onSelect: (filter: AutomationHostFilter) => void = () => undefined,
+  selectedStableKey: string | null = null
 ): void {
   act(() => {
     root.render(
       <TooltipProvider>
         <AutomationHostPickerSelect
           entries={entries}
-          selectedStableKey={null}
+          selectedStableKey={selectedStableKey}
           triggerLabel="All hosts"
           pickerLabel="Filter by host"
           onSelect={onSelect}
@@ -138,6 +139,24 @@ describe('AutomationHostPickerSelect authority grouping', () => {
     ).length
     expect(authorityMentions).toBe(0)
     expect(groups().map(accessibleGroupName)).toEqual(['This computer'])
+  })
+
+  it('opens below the trigger instead of aligning the selected host', () => {
+    render(
+      [sshEntry('t0', 'web-00'), runtimeSelf('env-1', 'Build box')],
+      () => undefined,
+      'host:runtime:env-1:self'
+    )
+    openWithKeyboard()
+
+    const content = document.querySelector('[data-slot="select-content"]')
+    expect(content).not.toBeNull()
+    expect(content?.getAttribute('data-side')).toBe('bottom')
+    expect(content?.getAttribute('data-align')).toBe('start')
+    const firstItem = document.querySelector(
+      '[data-slot="select-content"] [data-slot="select-item"]'
+    )
+    expect(firstItem?.textContent).toContain('All hosts')
   })
 
   it('reports the chosen host as a stable filter', () => {

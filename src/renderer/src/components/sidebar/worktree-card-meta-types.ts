@@ -4,6 +4,7 @@ import type {
   CliWorkspaceProvenance
 } from '../../../../shared/worktree/types'
 import type { WorktreeCardPrDisplay } from './worktree-card-pr-display'
+import type { StableAutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
 import type { WorktreeCardDetailsHoverControl } from './worktree-card-details-hover-state'
 
 export type WorktreeCardIssueDisplay =
@@ -37,6 +38,7 @@ export type WorktreeCardMetaBadgesProps = {
   review: WorktreeCardPrDisplay | null
   comment: string | null
   automationProvenance?: AutomationWorkspaceProvenance | null
+  automationAuthority?: StableAutomationAuthorityRef | null
   cliProvenance?: CliWorkspaceProvenance | null
 }
 

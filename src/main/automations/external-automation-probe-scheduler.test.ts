@@ -71,6 +71,42 @@ describe('ExternalAutomationProbeScheduler', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
+  it('releases a priority hold that its holder never releases', async () => {
+    vi.useFakeTimers()
+    try {
+      const scheduler = new ExternalAutomationProbeScheduler({ priorityHoldMaxMs: 1_000 })
+      const run = vi.fn(() => Promise.resolve('manager'))
+
+      // The lease of a dispatch that never settles. Without the deadline this
+      // probe — and every later one — waits for the rest of the process.
+      scheduler.beginPriorityWork()
+      const probe = scheduler.schedule({ key: 'hermes@self', scopeKey: 'owner:desktop:self', run })
+      expect(run).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      await expect(probe).resolves.toBe('manager')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps parking probes while a hold is still within its deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const scheduler = new ExternalAutomationProbeScheduler({ priorityHoldMaxMs: 1_000 })
+      const run = vi.fn(() => Promise.resolve('manager'))
+
+      scheduler.beginPriorityWork()
+      scheduler.schedule({ key: 'hermes@self', scopeKey: 'owner:desktop:self', run })
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(run).not.toHaveBeenCalled()
+      expect(scheduler.queued).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('cancels queued and in-flight probes whose scope is no longer selected', async () => {
     const scheduler = new ExternalAutomationProbeScheduler({ concurrency: 1 })
     const never = deferred<string>()

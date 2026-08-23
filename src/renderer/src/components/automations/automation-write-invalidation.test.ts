@@ -30,6 +30,7 @@ describe('automation write invalidation', () => {
 
   it('takes the host from the row owner, not the active authority', () => {
     const captured: AutomationCapturedOwner = {
+      authority: RUNTIME,
       owner: {
         authority: RUNTIME,
         selector: { kind: 'ssh', targetId: 'target-1', targetGeneration: 3 }
@@ -45,18 +46,21 @@ describe('automation write invalidation', () => {
 
   it('falls back to the captured selector under the acting authority', () => {
     const captured: AutomationCapturedOwner = {
+      authority: RUNTIME,
       owner: null,
       selector: { kind: 'orphan', issue: 'target-missing' }
     }
 
     expect(automationRowCatalogRef(captured, DESKTOP)).toEqual({
-      authority: { kind: 'desktop' },
+      authority: { kind: 'runtime', environmentId: 'env-1' },
       selector: { kind: 'orphan' }
     })
   })
 
   it('names no host for a row that carried no metadata', () => {
-    expect(automationRowCatalogRef({ owner: null, selector: null }, DESKTOP)).toBeNull()
+    expect(
+      automationRowCatalogRef({ authority: null, owner: null, selector: null }, DESKTOP)
+    ).toBeNull()
   })
 
   it('widens to the whole authority rather than guessing a selector', () => {

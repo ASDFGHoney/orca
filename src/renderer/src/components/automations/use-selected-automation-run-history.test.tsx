@@ -46,8 +46,7 @@ function makeInput(
 ): SelectedAutomationRunHistoryInput {
   return {
     selected: DESKTOP_ROW,
-    context: { capturedOwners: new Map(), authority: { kind: 'desktop' } },
-    legacyTarget: () => ({ kind: 'local' }),
+    context: { capturedOwners: new Map() },
     navigation: null,
     reloadToken: 0,
     onSettled: vi.fn(),
@@ -168,8 +167,9 @@ describe('useSelectedAutomationRunHistory', () => {
     }
     const input = makeInput({
       context: {
-        capturedOwners: new Map([[DESKTOP_ROW.key, { owner, selector: { kind: 'self' } }]]),
-        authority: { kind: 'desktop' }
+        capturedOwners: new Map([
+          [DESKTOP_ROW.key, { authority: owner.authority, owner, selector: { kind: 'self' } }]
+        ])
       }
     })
 

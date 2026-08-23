@@ -8,10 +8,11 @@ import type { AutomationHostStatusDescriptor } from './automation-host-status-de
 /**
  * Copy for the query-contract axis.
  *
- * Every degraded entry shares one consequence — view only — but not one cause.
- * A removed target, a target we have not verified since the connection dropped,
- * and a server that advertises no host scoping each get their own sentence, so
- * the badge never claims a server is old on the strength of missing evidence.
+ * Every recorded scope gap shares one consequence — view only — but not one
+ * cause. A removed target, a target we have not verified since the connection
+ * dropped, and a server that advertises no host scoping each get their own
+ * sentence, so the badge never claims a server is old on the strength of
+ * missing evidence. A degraded transport alone earns no badge: only a gap does.
  */
 
 const VIEW_ONLY_LABEL = (): string =>
@@ -67,13 +68,10 @@ function scopeGapDescriptor(gap: AutomationHostScopeGap): AutomationHostStatusDe
   }
 }
 
-/** Null for `scoped`; the degraded contracts stay distinct rather than sharing one badge. */
+/** Null when nothing is view-only; the degraded contracts stay distinct rather than sharing one badge. */
 export function hostScopeDescriptor(
   entry: Pick<AutomationHostCatalogEntry, 'querySupport' | 'scopeGap'>
 ): AutomationHostStatusDescriptor | null {
-  if (entry.querySupport === 'scoped') {
-    return null
-  }
   if (entry.querySupport === 'incompatible') {
     return {
       id: 'query-incompatible',
@@ -89,6 +87,7 @@ export function hostScopeDescriptor(
       isDefault: false
     }
   }
-  // An unscoped contract with no recorded cause can only be the authority's own.
-  return scopeGapDescriptor(entry.scopeGap ?? 'authority-unscoped')
+  // A degraded list transport with no recorded gap has no view-only consequence:
+  // Runtime + Self on a legacy server still mutates by id under the pairing fence.
+  return entry.scopeGap ? scopeGapDescriptor(entry.scopeGap) : null
 }

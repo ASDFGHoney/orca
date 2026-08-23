@@ -149,7 +149,7 @@ Catalog projection rules:
 
 - Project Desktop + Self and desktop-owned saved SSH targets from the existing execution-host registry.
 - Project Runtime + Self from saved runtime environments, even while a runtime is offline.
-- Project Runtime + SSH from that environment's `sshStateByEnvironment` bucket. Combine parent runtime health/compatibility with nested SSH state; never copy nested targets into desktop SSH maps. That bucket gains a per-target registration-generation map alongside `targetLabels`, populated from the extended `SshTargetSummary` and cleared with the other bucket fields when the environment's SSH state goes stale. A runtime that does not advertise `automation.list-host-scope.v1` supplies no generations: its entries key on target ID alone and are view-only.
+- Project Runtime + SSH from that environment's `sshStateByEnvironment` bucket. Combine parent runtime health/compatibility with nested SSH state; never copy nested targets into desktop SSH maps. That bucket gains a per-target registration-generation map alongside `targetLabels`, populated from the extended `SshTargetSummary` and cleared with the other bucket fields when the environment's SSH state goes stale. A runtime that does not advertise `automation.list-host-scope.v1` supplies no generations: its SSH entries key on target ID alone and are view-only. Its Self entry is not — see the owner-fencing section.
 - Preserve labels from saved environments, `targetLabels`, and `removedTargetLabels` during outages.
 - Hide runtime-owned ephemeral SSH targets under the existing visibility rule.
 - Preserve a ghost/orphan entry when referenced by a stored automation, cached row, persisted filter, or removal/re-adoption tombstone.
@@ -164,9 +164,7 @@ Deterministic order is: All hosts, Desktop + Self, desktop SSH targets by locale
 Persist this optional UI value:
 
 ```ts
-type AutomationHostFilter =
-  | { kind: 'all' }
-  | { kind: 'host'; host: StableAutomationCatalogRef }
+type AutomationHostFilter = { kind: 'all' } | { kind: 'host'; host: StableAutomationCatalogRef }
 ```
 
 Only the stable form is persisted. Restore it after the relevant catalogs settle:
@@ -190,8 +188,7 @@ Add two string capability constants to `src/shared/protocol-version.ts`:
 export const AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY =
   'automation.list-host-scope.v1' as const
 
-export const AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY =
-  'automation.owner-fencing.v1' as const
+export const AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY = 'automation.owner-fencing.v1' as const
 ```
 
 The first capability guarantees scoped list parameters, runtime response validation fields, bounded usage summaries, and expected SSH-generation checking for list reads. The second covers mutation and secondary-read owner preconditions.
@@ -249,7 +246,7 @@ Legacy partitioning is explicit:
 
 The legacy response has no bounded usage projection. Do not compensate by downloading all run histories. Render neutral `Usage unavailable` copy until the selected automation's lazy history is loaded.
 
-If a runtime lacks owner fencing, all of its rows stay readable and none are mutable. Runtime + Self and Runtime + SSH are both view-only until the server advertises `automation.owner-fencing.v1`; show an Update server action rather than performing an unfenced Run Now, edit, or delete. Pairing-revision freshness authenticates the connection, not the record's selector, so it is not a substitute — a record whose target changed server-side since the last refresh would still run on a host the user never saw. This mirrors the fail-closed capability assertion the codebase already applies to remote file mutations.
+If a runtime lacks owner fencing, its rows split by what the fence actually protects. Runtime + Self stays fully usable — list, edit, pause, delete, Run Now — because a Self record lives on the answering authority itself, needs no registration generation, and mutates by id exactly as a pre-fencing server does today; pairing-revision freshness pins the request to the runtime incarnation the user saw, which is the only identity a Self record has. Runtime + SSH stays view-only until the server advertises `automation.owner-fencing.v1`; show an Update server action rather than performing an unfenced Run Now, edit, or delete. For SSH, pairing-revision freshness is not a substitute for the selector fence — a same-id remove/re-add or a record whose target changed server-side since the last refresh would still run on a machine the user never saw. A destination move (re-attaching a record to another host) always requires the fenced contract, even from Self: an old server would ignore the field and silently leave the record in place. The SSH arm mirrors the fail-closed capability assertion the codebase already applies to remote file mutations.
 
 ### Owner-fenced operation contract
 
@@ -257,9 +254,7 @@ For capable runtimes, add this optional precondition to `automation.show`, `auto
 
 ```ts
 type AutomationOwnerPrecondition = {
-  selector:
-    | { kind: 'self' }
-    | { kind: 'ssh'; targetId: string; targetGeneration: number }
+  selector: { kind: 'self' } | { kind: 'ssh'; targetId: string; targetGeneration: number }
 }
 
 type AutomationOwnedIdParams = {
@@ -432,14 +427,12 @@ Existing desktop-stored records whose `schedulerOwner` or run context points at 
 
 Desktop/runtime version matrix:
 
-
-| Desktop                          | Runtime | Behavior                                                                                                                                                                                                                                                                                             |
-| -------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Old                              | New     | Parameterless list still returns the complete authority list; new optional fields/events are ignored.                                                                                                                                                                                                |
-| New                              | Old     | One unscoped list per authority, defensive partition, neutral usage, all runtime rows view-only without owner fencing. Runs dispatched by that server are reconciled only by it, so they stay `dispatched` until it updates; the row surfaces Update server rather than hanging with no explanation. |
-| New                              | New     | Scoped lists, bounded usage summaries, owner-fenced actions, scoped invalidation.                                                                                                                                                                                                                    |
-| New before/after same-ID re-pair | Any     | Old cache/actions are evicted by pairing revision; stable display selection may remain.                                                                                                                                                                                                              |
-
+| Desktop                          | Runtime | Behavior                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Old                              | New     | Parameterless list still returns the complete authority list; new optional fields/events are ignored.                                                                                                                                                                                                                                                                        |
+| New                              | Old     | One unscoped list per authority, defensive partition, neutral usage. Self rows stay fully actionable by id under the pairing-revision fence; SSH rows are view-only without owner fencing. Runs dispatched by that server are reconciled only by it, so they stay `dispatched` until it updates; the SSH row surfaces Update server rather than hanging with no explanation. |
+| New                              | New     | Scoped lists, bounded usage summaries, owner-fenced actions, scoped invalidation.                                                                                                                                                                                                                                                                                            |
+| New before/after same-ID re-pair | Any     | Old cache/actions are evicted by pairing revision; stable display selection may remain.                                                                                                                                                                                                                                                                                      |
 
 No mobile-facing route, schema, RPC, handshake, protocol minimum, recommended app version, pairing file, E2EE, or relay surface changes. Automation RPC/event additions remain runtime-scoped, additive, and optional. No platform-specific path, shell, keyboard, native-module, filesystem, or Git behavior is introduced; the design applies equally on macOS, Windows, Linux, WSL, SSH, relay, git worktrees, and folder workspaces.
 

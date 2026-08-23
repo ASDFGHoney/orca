@@ -181,13 +181,13 @@ describe('createRuntimeAutomationRunTerminalObserver', () => {
     await run.promise
   })
 
-  it('stops re-arming the tui-idle wait instead of looping for the process lifetime', async () => {
+  it('makes observation unverifiable after its bounded watch window', async () => {
     const runtime = createFakeRuntime({ lastAgentStatus: 'working' })
     const run = observe(runtime)
 
     await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000 + RUNTIME_TUI_IDLE_TIMEOUT_MS)
-    expect(run.settled[0]?.status).toBe('dispatch_failed')
-    expect(run.settled[0]?.error).toContain('without a completion signal')
+    expect(run.settled).toEqual([])
+    expect(run.errors.map(String)).toContain('Error: automation_run_observation_unverifiable')
     // 6h of 5-minute waits, not an unbounded re-arm.
     expect(runtime.waitCalls()).toBeLessThanOrEqual(80)
     await run.promise

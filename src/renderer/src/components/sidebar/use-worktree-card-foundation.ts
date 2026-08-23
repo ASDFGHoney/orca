@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 
 import { DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE } from '../../../../shared/constants'
+import { automationWorkspaceStorageCatalogRef } from '../../../../shared/automation-workspace-provenance'
 import {
   isRuntimeOwnedSshTargetId,
   parseExecutionHostId,
@@ -79,14 +80,19 @@ export function useWorktreeCardFoundation({
   const handleOpenAutomation = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      const automationId = worktree.automationProvenance?.automationId
-      if (!automationId) {
+      const provenance = worktree.automationProvenance
+      if (!provenance) {
         return
       }
-      const hostId = worktree.automationProvenance?.hostId ?? worktree.hostId
+      const hostId = provenance.hostId ?? worktree.hostId
+      const catalogRef = automationWorkspaceStorageCatalogRef(
+        provenance,
+        worktree.runtimeOwnerEnvironmentId
+      )
       setPendingAutomationRunNavigation({
-        automationId,
+        automationId: provenance.automationId,
         runId: null,
+        ...(catalogRef ? { authority: catalogRef.authority, catalogRef } : {}),
         ...(hostId ? { hostId } : {})
       })
       openAutomationsPage()
@@ -94,9 +100,9 @@ export function useWorktreeCardFoundation({
     [
       openAutomationsPage,
       setPendingAutomationRunNavigation,
-      worktree.automationProvenance?.automationId,
-      worktree.automationProvenance?.hostId,
-      worktree.hostId
+      worktree.automationProvenance,
+      worktree.hostId,
+      worktree.runtimeOwnerEnvironmentId
     ]
   )
 
@@ -108,9 +114,14 @@ export function useWorktreeCardFoundation({
         return
       }
       const hostId = provenance.hostId ?? worktree.hostId
+      const catalogRef = automationWorkspaceStorageCatalogRef(
+        provenance,
+        worktree.runtimeOwnerEnvironmentId
+      )
       setPendingAutomationRunNavigation({
         automationId: provenance.automationId,
         runId: provenance.automationRunId,
+        ...(catalogRef ? { authority: catalogRef.authority, catalogRef } : {}),
         ...(hostId ? { hostId } : {})
       })
       openAutomationsPage()
@@ -119,7 +130,8 @@ export function useWorktreeCardFoundation({
       openAutomationsPage,
       setPendingAutomationRunNavigation,
       worktree.automationProvenance,
-      worktree.hostId
+      worktree.hostId,
+      worktree.runtimeOwnerEnvironmentId
     ]
   )
 

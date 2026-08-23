@@ -84,7 +84,8 @@ export const WORKTREE_METHODS: RpcMethod[] = [
           authority: runtime,
           repoSelector: params.repo,
           repo,
-          request: params.automationProvenanceRequest
+          request: params.automationProvenanceRequest,
+          storageAuthority: 'runtime'
         })
         // Why: provenance tokens are reserved before creation so retries can recover,
         // but failed create attempts must release the reservation for a safe retry.

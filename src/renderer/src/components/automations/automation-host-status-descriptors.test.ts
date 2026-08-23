@@ -92,10 +92,9 @@ describe('automation host status descriptors', () => {
     expect(new Set(gapIds).size).toBe(SCOPE_GAPS.length)
   })
 
-  it('falls back to the authority contract when no cause was recorded', () => {
-    expect(hostScopeDescriptor(entry({ querySupport: 'legacy-unscoped' }))?.id).toBe(
-      'query-legacy-unscoped'
-    )
+  it('shows no view-only badge for a degraded transport with no recorded gap', () => {
+    // Runtime + Self on a legacy server: the list is unscoped but access is not.
+    expect(hostScopeDescriptor(entry({ querySupport: 'legacy-unscoped' }))).toBeNull()
   })
 
   it('blames the server only when the server itself answered without host scoping', () => {
@@ -166,6 +165,17 @@ describe('automation host recovery actions', () => {
         entry({ querySupport: 'legacy-unscoped', scopeGap: 'target-unregistered' })
       ).authority
     ).toBeNull()
+  })
+
+  it('keeps normal recovery verbs for a legacy authority entry with no scope gap', () => {
+    expect(
+      automationHostRecoveryActions(entry({ querySupport: 'legacy-unscoped' })).authority
+    ).toBeNull()
+    expect(
+      automationHostRecoveryActions(
+        entry({ querySupport: 'legacy-unscoped', authorityHealth: 'stale-error' })
+      ).authority
+    ).toBe('retry')
   })
 
   it('reconnects rather than retries when the authority itself is unreachable', () => {

@@ -247,6 +247,9 @@ export function AutomationListLocalRows({
                 <span className="min-w-0 truncate text-muted-foreground" title={projectLabel}>
                   {projectLabel}
                 </span>
+                <span className="min-w-0 truncate text-muted-foreground" title={hostLabel}>
+                  {hostLabel}
+                </span>
                 <span className="min-w-0 truncate text-muted-foreground" title={nextRunLabel}>
                   {nextRunLabel}
                 </span>

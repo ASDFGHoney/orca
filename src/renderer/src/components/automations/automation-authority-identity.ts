@@ -30,7 +30,7 @@ export function repoConnectionIdIn(
 
 const EMPTY_REPO_TABLE: ReadonlyMap<string, RepoConnection> = new Map()
 
-function repoOwningAuthority(repo: Repo): StableAutomationAuthorityRef {
+export function automationRepoOwningAuthority(repo: Repo): StableAutomationAuthorityRef {
   const host = parseExecutionHostId(getRepoExecutionHostId(repo))
   // A desktop SSH repo is still desktop-stored; only a runtime host owns its own registry.
   return host?.kind === 'runtime'
@@ -44,7 +44,7 @@ export function groupReposByAutomationAuthority(
 ): AutomationAuthorityRepoTables {
   const tables = new Map<string, Map<string, RepoConnection>>()
   for (const repo of repos) {
-    const key = automationAuthorityCatalogKey(repoOwningAuthority(repo))
+    const key = automationAuthorityCatalogKey(automationRepoOwningAuthority(repo))
     let table = tables.get(key)
     if (!table) {
       table = new Map<string, RepoConnection>()

@@ -10,6 +10,8 @@
 
 import { useEffect, useRef } from 'react'
 import type { AutomationRun } from '../../../../shared/automations-types'
+import type { StableAutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
+import { automationAuthorityCatalogKey } from './automation-host-catalog-types'
 import { capturedAutomationOwner, capturedAutomationOwnerKey } from './automation-captured-owner'
 import type { AutomationListRow } from './automation-list-row-identity'
 import {
@@ -17,15 +19,11 @@ import {
   type AutomationDispatchContext,
   dispatchAutomationRunHistory
 } from './automation-row-action-dispatch'
-import {
-  getAutomationTargetFromHostId,
-  listAutomationRunsForTarget,
-  type AutomationHostTarget
-} from './automation-host-client'
 
 export type SelectedAutomationRunNavigation = {
   automationId: string
   hostId?: string | null
+  authority?: StableAutomationAuthorityRef
 } | null
 
 export type SelectedAutomationRunHistoryOutcome = {
@@ -45,8 +43,6 @@ export type SelectedAutomationRunHistoryOutcome = {
 export type SelectedAutomationRunHistoryInput = {
   selected: AutomationListRow | null
   context: AutomationDispatchContext
-  /** The row's own host, used only when no owner was captured for it. */
-  legacyTarget: (row: AutomationListRow) => AutomationHostTarget | null
   navigation: SelectedAutomationRunNavigation
   /** Changing this re-asks the host; it is how a failed read offers Retry. */
   reloadToken: number
@@ -60,6 +56,13 @@ function navigationHostId(
   return navigation?.automationId === automationId ? (navigation.hostId ?? null) : null
 }
 
+function navigationAuthority(
+  navigation: SelectedAutomationRunNavigation,
+  automationId: string
+): StableAutomationAuthorityRef | null {
+  return navigation?.automationId === automationId ? (navigation.authority ?? null) : null
+}
+
 export function useSelectedAutomationRunHistory(input: SelectedAutomationRunHistoryInput): void {
   const inputRef = useRef(input)
   inputRef.current = input
@@ -67,17 +70,23 @@ export function useSelectedAutomationRunHistory(input: SelectedAutomationRunHist
   const automationId = input.selected?.automation.id ?? null
   const rowKey = input.selected?.key ?? null
   const reloadToken = input.reloadToken
+  const selectedNavigationAuthority = automationId
+    ? navigationAuthority(input.navigation, automationId)
+    : null
   const fetchKey =
     automationId && rowKey
       ? [
           rowKey,
           capturedAutomationOwnerKey(capturedAutomationOwner(input.context.capturedOwners, rowKey)),
+          selectedNavigationAuthority
+            ? automationAuthorityCatalogKey(selectedNavigationAuthority)
+            : '',
           navigationHostId(input.navigation, automationId) ?? ''
         ].join('|')
       : ''
 
   useEffect(() => {
-    const { selected, context, legacyTarget, navigation, onSettled } = inputRef.current
+    const { selected, context, onSettled } = inputRef.current
     if (!selected || !automationId || !rowKey) {
       onSettled({ automationId: null, rowKey: null, ownerKey: null, runs: [], notice: null })
       return
@@ -86,13 +95,7 @@ export function useSelectedAutomationRunHistory(input: SelectedAutomationRunHist
     const owner = capturedAutomationOwnerKey(
       capturedAutomationOwner(context.capturedOwners, rowKey)
     )
-    const navigationHost = navigationHostId(navigation, automationId)
-    const target = navigationHost
-      ? getAutomationTargetFromHostId(navigationHost)
-      : (legacyTarget(selected) ?? { kind: 'local' })
-    void dispatchAutomationRunHistory(context, { rowKey, automationId }, () =>
-      listAutomationRunsForTarget(target, automationId)
-    ).then((result) => {
+    void dispatchAutomationRunHistory(context, { rowKey, automationId }).then((result) => {
       if (cancelled) {
         return
       }
@@ -107,6 +110,5 @@ export function useSelectedAutomationRunHistory(input: SelectedAutomationRunHist
     return () => {
       cancelled = true
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- fetchKey is the refetch policy; see the module docblock for why the context object is deliberately not a dependency.
   }, [automationId, rowKey, fetchKey, reloadToken])
 }

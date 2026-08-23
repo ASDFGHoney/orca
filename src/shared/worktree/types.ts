@@ -165,6 +165,8 @@ export type AutomationWorkspaceProvenance = {
   projectId: string
   repoId?: string
   hostId?: ExecutionHostId
+  /** Storage lives on this process role; runtime environment IDs are client-relative. */
+  storageAuthority?: 'desktop' | 'runtime'
 }
 
 export type AutomationWorkspaceProvenanceRequest = {

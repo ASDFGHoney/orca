@@ -14,9 +14,10 @@ import type { AutomationHostRecoveryAction } from './automation-host-status-desc
 
 export type AutomationHostRecoveryDeps = {
   /** Forces one fresh query for this host, bypassing TTL and retry cooldown. */
-  retry: (entry: AutomationHostCatalogEntry) => void
-  connectSshTarget: (targetId: string) => void
-  connectRuntimeEnvironment: (environmentId: string) => void
+  retry: (entry: AutomationHostCatalogEntry) => void | Promise<void>
+  /** `environmentId` is the owning runtime; omit it for a desktop SSH target. */
+  connectSshTarget: (targetId: string, environmentId?: string) => void | Promise<void>
+  connectRuntimeEnvironment: (environmentId: string) => void | Promise<void>
   openSettings: (target: SettingsNavigationTarget) => void
 }
 
@@ -30,39 +31,45 @@ function versionSettingsTarget(entry: AutomationHostCatalogEntry): SettingsNavig
   return { pane: entry.stableRef.selector.kind === 'ssh' ? 'ssh' : 'automations', repoId: null }
 }
 
-function reconnect(entry: AutomationHostCatalogEntry, deps: AutomationHostRecoveryDeps): void {
+async function reconnect(
+  entry: AutomationHostCatalogEntry,
+  deps: AutomationHostRecoveryDeps
+): Promise<void> {
   const authority = entry.stableRef.authority
   // Authority first: an unreachable server cannot be asked to dial its own targets.
   if (authority.kind === 'runtime' && entry.authorityHealth === 'unavailable') {
-    deps.connectRuntimeEnvironment(authority.environmentId)
+    await deps.connectRuntimeEnvironment(authority.environmentId)
     return
   }
   if (entry.stableRef.selector.kind === 'ssh') {
-    deps.connectSshTarget(entry.stableRef.selector.targetId)
+    await deps.connectSshTarget(
+      entry.stableRef.selector.targetId,
+      authority.kind === 'runtime' ? authority.environmentId : undefined
+    )
     return
   }
   if (authority.kind === 'runtime') {
-    deps.connectRuntimeEnvironment(authority.environmentId)
+    await deps.connectRuntimeEnvironment(authority.environmentId)
     return
   }
   // Desktop Self has no transport to dial, so the only honest fallback is to re-ask.
-  deps.retry(entry)
+  await deps.retry(entry)
 }
 
-export function runAutomationHostRecovery(
+export async function runAutomationHostRecovery(
   action: AutomationHostRecoveryAction,
   entry: AutomationHostCatalogEntry | null,
   deps: AutomationHostRecoveryDeps
-): void {
+): Promise<void> {
   if (!entry) {
     return
   }
   switch (action) {
     case 'retry':
-      deps.retry(entry)
+      await deps.retry(entry)
       return
     case 'reconnect':
-      reconnect(entry, deps)
+      await reconnect(entry, deps)
       return
     case 'update-server':
       deps.openSettings(versionSettingsTarget(entry))

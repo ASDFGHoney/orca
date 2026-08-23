@@ -626,6 +626,7 @@ import {
   resolveCustomWorktreeVisibilitySources,
   type WorktreeVisibilitySourceMatcher
 } from '../../shared/worktree/visibility-sources'
+import { resolveConfiguredWorktreeBasePaths } from '../../shared/worktree/configured-worktree-base-path'
 import {
   BROWSER_HEADLESS_RUNTIME_CAPABILITY,
   BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY,
@@ -3682,6 +3683,7 @@ export class OrcaRuntimeService {
   private skillCloudService: SkillCloudService | null = null
   private agentSkillShareInProgress = false
   private skillUploadSessions: SkillUploadSessionService | null = null
+  private skillUploadSessionsDisposed = false
   private readonly skillTransactionRecovery: Promise<unknown>
   private readonly skillInstallOperations = new Map<string, AbortController>()
   private readonly skillInstallProgress = new Map<string, SkillBundleInstallProgress>()
@@ -5796,10 +5798,20 @@ export class OrcaRuntimeService {
   }
 
   private requireSkillUploadSessions(): SkillUploadSessionService {
+    if (this.skillUploadSessionsDisposed) {
+      throw new Error('skill-upload-service-disposed')
+    }
     this.skillUploadSessions ??= new SkillUploadSessionService(
       join(app.getPath('userData'), 'skill-installs', 'remote-uploads')
     )
     return this.skillUploadSessions
+  }
+
+  async disposeSkillUploadSessions(): Promise<void> {
+    this.skillUploadSessionsDisposed = true
+    const sessions = this.skillUploadSessions
+    this.skillUploadSessions = null
+    await sessions?.dispose()
   }
 
   getRuntimeId(): string {
@@ -23434,7 +23446,8 @@ export class OrcaRuntimeService {
       const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
       const matcher = createWorktreeVisibilitySourceMatcher(
         [repo.path, ...worktrees.map((worktree) => worktree.path)],
-        resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults)
+        resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults),
+        resolveConfiguredWorktreeBasePaths(repo)
       )
       const detected = worktrees.map((worktree) =>
         this.toRuntimeDetectedWorktree(
@@ -23463,7 +23476,8 @@ export class OrcaRuntimeService {
     }
     const worktreeVisibilitySourceMatcher = createWorktreeVisibilitySourceMatcher(
       [repo.path, ...scan.worktrees.map((worktree) => worktree.path)],
-      resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults)
+      resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults),
+      resolveConfiguredWorktreeBasePaths(repo)
     )
     const expectedHostId = getRepoExecutionHostId(repo)
     const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
@@ -23575,7 +23589,8 @@ export class OrcaRuntimeService {
           repo.id,
           createWorktreeVisibilitySourceMatcher(
             [repo.path, ...(checkoutPathsByRepoId.get(repo.id) ?? [])],
-            resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults)
+            resolveCustomWorktreeVisibilitySources(repo, visibilityDefaults),
+            resolveConfiguredWorktreeBasePaths(repo)
           )
         ])
     )

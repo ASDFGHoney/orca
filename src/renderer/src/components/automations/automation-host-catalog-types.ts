@@ -26,7 +26,11 @@ export type AutomationExecutionHealth =
   | 'unavailable'
   | 'unknown'
 
-/** What list/fencing contract this entry can use. `legacy-unscoped` entries are view-only. */
+/**
+ * What list contract this entry can use. `legacy-unscoped` picks the one
+ * unscoped-list-per-authority transport; whether the entry is view-only is
+ * `scopeGap`'s call — Self stays fully usable on a legacy authority.
+ */
 export type AutomationHostQuerySupport = 'scoped' | 'legacy-unscoped' | 'incompatible'
 
 /**
@@ -52,7 +56,7 @@ export type AutomationHostCatalogState = 'authoritative' | 'unhydrated' | 'remov
 
 export type AutomationHostCatalogEntry = {
   stableRef: StableAutomationCatalogRef
-  /** Null whenever no executable, fully fenced owner exists (ghost, unhydrated, orphan, legacy). */
+  /** Null whenever no executable, fully fenced owner exists (ghost, unhydrated, orphan, legacy SSH). */
   owner: AutomationOwnerRef | null
   stableKey: string
   label: string
@@ -62,7 +66,7 @@ export type AutomationHostCatalogEntry = {
   authorityHealth: AutomationAuthorityHealth
   executionHealth: AutomationExecutionHealth
   querySupport: AutomationHostQuerySupport
-  /** Present only while `querySupport` is degraded; explains which repair, if any, applies. */
+  /** The reason this entry is view-only, and which repair applies; absent when it is not. */
   scopeGap?: AutomationHostScopeGap
 }
 

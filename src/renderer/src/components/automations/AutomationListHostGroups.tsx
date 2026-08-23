@@ -1,6 +1,6 @@
 import React from 'react'
-import { Button } from '@/components/ui/button'
 import { AutomationHostLabel, AutomationHostStatusBadges } from './AutomationHostBadges'
+import { AutomationHostRecoverButton } from './AutomationHostRecoverButton'
 import {
   AutomationListLocalRows,
   type AutomationListLocalRowsProps
@@ -13,7 +13,6 @@ import {
 import { externalManagersListedForEntry } from './external-automation-scope-gating'
 import {
   automationHostRecoveryActions,
-  recoveryActionLabel,
   type AutomationHostRecoveryAction
 } from './automation-host-status-descriptors'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
@@ -31,7 +30,10 @@ import type { AutomationHostCatalogEntry } from './automation-host-catalog-types
 export type AutomationListHostGroupsProps = Omit<AutomationListLocalRowsProps, 'rows'> & {
   groups: readonly AutomationHostVisibleGroup[]
   searchActive: boolean
-  onRecover: (action: AutomationHostRecoveryAction, entry: AutomationHostCatalogEntry) => void
+  onRecover: (
+    action: AutomationHostRecoveryAction,
+    entry: AutomationHostCatalogEntry
+  ) => void | Promise<void>
 }
 
 function hostRecoveryAction(
@@ -48,7 +50,7 @@ function AutomationHostGroupState({
 }: {
   state: AutomationListEmptyState
   recovery: AutomationHostRecoveryAction | null
-  onRecover: (action: AutomationHostRecoveryAction) => void
+  onRecover: (action: AutomationHostRecoveryAction) => void | Promise<void>
 }): React.JSX.Element {
   return (
     <div className="px-3 pb-1 text-xs text-muted-foreground" data-empty-state={state.kind}>
@@ -60,15 +62,7 @@ function AutomationHostGroupState({
         </div>
       ) : null}
       {recovery ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          className="mt-1"
-          onClick={() => onRecover(recovery)}
-        >
-          {recoveryActionLabel(recovery)}
-        </Button>
+        <AutomationHostRecoverButton action={recovery} onRecover={onRecover} className="mt-1" />
       ) : null}
     </div>
   )
@@ -102,14 +96,10 @@ export function AutomationListHostGroups({
                   <AutomationHostLabel entry={entry} className="min-w-0 flex-1" />
                   <AutomationHostStatusBadges entry={entry} />
                   {action ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => onRecover(action, entry)}
-                    >
-                      {recoveryActionLabel(action)}
-                    </Button>
+                    <AutomationHostRecoverButton
+                      action={action}
+                      onRecover={(recovery) => onRecover(recovery, entry)}
+                    />
                   ) : null}
                 </div>
                 {state.kind === 'rows' ? (

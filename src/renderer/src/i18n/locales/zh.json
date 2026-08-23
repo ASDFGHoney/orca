@@ -13842,7 +13842,11 @@
           "tableStatus": "状态",
           "tableActions": "操作",
           "newAutomation": "新建自动化",
-          "rowActions": "自动化操作"
+          "rowActions": "自动化操作",
+          "tableLastRun": "上次运行",
+          "noListMatches": "没有匹配的自动化。",
+          "tableHost": "主机",
+          "refreshAutomations": "刷新自动化"
         },
         "CreateFromPicker": {
           "f061f49e3f": "搜索仓库分支...",

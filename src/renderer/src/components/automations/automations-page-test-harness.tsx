@@ -25,6 +25,7 @@ import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 import type { AutomationCreateDestinationControl } from './use-automation-create-destination'
 import type { ExternalAutomationListEntry } from './external-automation-list-entries'
 import type { AutomationListRow } from './automation-list-row-identity'
+import type { Worktree } from '../../../../shared/worktree/types'
 
 export type ListPanelProps = {
   filteredAutomations: Automation[]
@@ -88,6 +89,7 @@ export type EditorDialogProps = {
   createDestination?: AutomationCreateDestinationControl
   notice?: { message: string } | null
   repos?: { id: string }[]
+  worktrees?: Worktree[]
   draft?: { projectId: string; workspaceId: string }
   onSave: () => void
   onDraftChange: (updater: (current: unknown) => unknown) => void

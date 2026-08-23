@@ -10,15 +10,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { translate } from '@/i18n/i18n'
+import type { ProjectHostSetup } from '../../../../shared/project-types'
 import type { Repo } from '../../../../shared/repo-types'
 import type {
   AutomationHostCatalog,
   AutomationHostCatalogEntry
 } from './automation-host-catalog-types'
-import type { AutomationAuthorityRepoTables } from './automation-authority-identity'
 import {
   automationCreateEligibleProjects,
-  automationCreateProjectMismatch,
   preselectAutomationCreateHost,
   resolveAutomationCreateDestination,
   revalidateAutomationCreateDestination,
@@ -49,8 +48,8 @@ export type AutomationCreateDestinationInput = {
   /** Non-null only when the list is filtered to one concrete host. */
   filterStableKey: string | null
   activeWorkspaceStableKey: string | null
-  repoTables: AutomationAuthorityRepoTables
   projects: readonly Repo[]
+  projectHostSetups: readonly ProjectHostSetup[]
 }
 
 export type AutomationCreateDestinationState = {
@@ -90,16 +89,20 @@ export function useAutomationCreateDestination(
     entries,
     filterStableKey,
     activeWorkspaceStableKey,
-    repoTables,
-    projects
+    projects,
+    projectHostSetups
   } = input
   const [captured, setCaptured] = useState<AutomationCreateDestination | null>(null)
   const [reason, setReason] = useState<AutomationCreateDestinationChoiceReason>('unselected')
+  const [previousOpen, setPreviousOpen] = useState(open)
+  if (previousOpen !== open) {
+    setPreviousOpen(open)
+    setCaptured(null)
+    setReason('unselected')
+  }
 
   useEffect(() => {
     if (!open) {
-      setCaptured(null)
-      setReason('unselected')
       return
     }
     if (captured) {
@@ -141,8 +144,10 @@ export function useAutomationCreateDestination(
   // when the handler was created could be an incarnation old.
   const entriesRef = useRef(entries)
   entriesRef.current = entries
-  const repoTablesRef = useRef(repoTables)
-  repoTablesRef.current = repoTables
+  const projectsRef = useRef(projects)
+  projectsRef.current = projects
+  const projectHostSetupsRef = useRef(projectHostSetups)
+  projectHostSetupsRef.current = projectHostSetups
 
   const check = useCallback(
     (projectId: string): AutomationCreateDestinationCheck => {
@@ -166,7 +171,12 @@ export function useAutomationCreateDestination(
       if (revalidated.status !== 'ready') {
         return { ok: false, notice: ownerNotice(choiceMessage(revalidated.reason)) }
       }
-      if (automationCreateProjectMismatch(repoTablesRef.current, revalidated, projectId)) {
+      const project = automationCreateEligibleProjects(
+        revalidated,
+        projectsRef.current,
+        projectHostSetupsRef.current
+      ).find((candidate) => candidate.id === projectId)
+      if (!project) {
         return {
           ok: false,
           notice: ownerNotice(
@@ -185,9 +195,9 @@ export function useAutomationCreateDestination(
   const eligibleProjects = useMemo(
     () =>
       resolution.status === 'ready'
-        ? automationCreateEligibleProjects(repoTables, resolution, projects)
+        ? automationCreateEligibleProjects(resolution, projects, projectHostSetups)
         : projects,
-    [projects, repoTables, resolution]
+    [projectHostSetups, projects, resolution]
   )
 
   return {

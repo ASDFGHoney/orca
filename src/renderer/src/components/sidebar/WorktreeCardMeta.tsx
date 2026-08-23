@@ -56,6 +56,7 @@ export function WorktreeCardDetailsHover({
   review,
   comment,
   automationProvenance,
+  automationAuthority,
   cliProvenance,
   children,
   branchName,
@@ -313,6 +314,7 @@ export function WorktreeCardDetailsHover({
           {automationProvenance && (
             <WorktreeCardAutomationDetailSection
               provenance={automationProvenance}
+              authority={automationAuthority ?? null}
               onOpenAutomation={onOpenAutomation ? dismissAndRun(onOpenAutomation) : undefined}
               onOpenAutomationRun={
                 onOpenAutomationRun ? dismissAndRun(onOpenAutomationRun) : undefined

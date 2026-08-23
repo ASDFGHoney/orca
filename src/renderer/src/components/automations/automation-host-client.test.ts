@@ -1,11 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { Automation } from '../../../../shared/automations-types'
-import {
-  listAutomationRunsForTarget,
-  listAutomationsForTarget,
-  runAutomationNowForTarget,
-  updateAutomationForTarget
-} from './automation-host-client'
+import { listAutomationRunsForTarget, listAutomationsForTarget } from './automation-host-client'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 
 vi.mock('@/runtime/runtime-rpc-client', () => ({
@@ -101,59 +96,5 @@ describe('automation host client', () => {
       { timeoutMs: 15_000 }
     )
     expect(mockApi.automations.listRuns).toHaveBeenCalledWith({ automationId: 'auto-1' })
-  })
-
-  it('manually runs runtime-host automations through that server', async () => {
-    const automation = makeAutomation()
-    vi.mocked(callRuntimeRpc).mockResolvedValueOnce({
-      run: { id: 'run-1', automationId: automation.id }
-    })
-
-    await runAutomationNowForTarget(automation)
-
-    expect(mockApi.automations.runNow).not.toHaveBeenCalled()
-    expect(callRuntimeRpc).toHaveBeenCalledWith(
-      { kind: 'environment', environmentId: 'gpu' },
-      'automation.runNow',
-      { id: automation.id },
-      { timeoutMs: 15_000 }
-    )
-  })
-
-  it('updates and manually runs SSH-host automations through the remote server that listed them', async () => {
-    const automation = makeAutomation({
-      runContext: {
-        kind: 'workspace-run',
-        projectId: 'github:stablyai/orca',
-        hostId: 'ssh:devbox',
-        projectHostSetupId: 'setup-devbox',
-        repoId: 'repo-1',
-        path: '/srv/orca'
-      }
-    })
-    const sourceTarget = { kind: 'environment' as const, environmentId: 'gpu' }
-    vi.mocked(callRuntimeRpc)
-      .mockResolvedValueOnce({ automation: { ...automation, name: 'Updated' } })
-      .mockResolvedValueOnce({ run: { id: 'run-1', automationId: automation.id } })
-
-    await updateAutomationForTarget(automation, { name: 'Updated' }, sourceTarget)
-    await runAutomationNowForTarget(automation, sourceTarget)
-
-    expect(mockApi.automations.update).not.toHaveBeenCalled()
-    expect(mockApi.automations.runNow).not.toHaveBeenCalled()
-    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
-      1,
-      sourceTarget,
-      'automation.update',
-      { id: automation.id, updates: { name: 'Updated' } },
-      { timeoutMs: 15_000 }
-    )
-    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
-      2,
-      sourceTarget,
-      'automation.runNow',
-      { id: automation.id },
-      { timeoutMs: 15_000 }
-    )
   })
 })

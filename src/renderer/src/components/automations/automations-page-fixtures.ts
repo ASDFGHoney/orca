@@ -200,6 +200,7 @@ export function makeStoreState(): AutomationsPageStoreFixtures {
   const repo = makeRepo()
   const worktree = makeWorktree()
   const noop = (): void => undefined
+  const fetchWorktrees = async (): Promise<boolean> => true
   return {
     state: {
       repos: [repo],
@@ -209,7 +210,7 @@ export function makeStoreState(): AutomationsPageStoreFixtures {
       terminalLayoutsByTabId: {},
       ptyIdsByTabId: {},
       activeWorktreeId: null,
-      fetchWorktrees: noop,
+      fetchWorktrees,
       fetchAllWorktrees: noop,
       startupWorktreeRefreshCompleted: true,
       updateSettings: noop,

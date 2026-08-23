@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectHostSetup } from '../../../../shared/project-types'
 import type { Repo } from '../../../../shared/repo-types'
-import { buildAutomationRunContextForRepo } from './automation-run-context'
+import {
+  buildAutomationRunContextForDestination,
+  buildAutomationRunContextForRepo
+} from './automation-run-context'
+import type { AutomationCreateDestination } from './automation-create-destination'
 
 function repo(id: string, path = `/repos/${id}`): Repo {
   return {
@@ -71,5 +75,41 @@ describe('buildAutomationRunContextForRepo', () => {
         projectHostSetups: [setup()]
       })
     ).toBeNull()
+  })
+})
+
+describe('buildAutomationRunContextForDestination', () => {
+  const destination = {
+    authority: { kind: 'runtime' as const, environmentId: 'gpu', pairingRevision: 4 },
+    destination: { selector: { kind: 'self' as const } },
+    entry: {} as AutomationCreateDestination['entry']
+  }
+
+  it('does not borrow a same-repo setup from another host', () => {
+    const local = setup({
+      id: 'setup-local',
+      hostId: 'local',
+      repoId: 'repo-builder',
+      path: '/local/orca'
+    })
+    const runtime = setup({
+      id: 'setup-runtime',
+      hostId: 'runtime:gpu',
+      executionHostId: 'runtime:gpu',
+      runtimeOwnerEnvironmentId: 'gpu',
+      repoId: 'repo-builder',
+      path: '/runtime/orca'
+    })
+    expect(
+      buildAutomationRunContextForDestination({
+        repoId: 'repo-builder',
+        destination,
+        projectHostSetups: [local, runtime]
+      })
+    ).toMatchObject({
+      hostId: 'runtime:gpu',
+      projectHostSetupId: 'setup-runtime',
+      path: '/runtime/orca'
+    })
   })
 })

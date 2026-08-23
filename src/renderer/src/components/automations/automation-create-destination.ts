@@ -15,17 +15,30 @@
 
 import type {
   AutomationAuthorityRef,
-  AutomationOwnerRef
+  AutomationOwnerRef,
+  StableAutomationAuthorityRef
 } from '../../../../shared/automation-owner-ref'
 import type { AutomationDestination } from '../../../../shared/automation-owner-precondition'
 import { hostStableKey, isSameAutomationOwner } from '../../../../shared/automation-owner-key'
-import { parseExecutionHostId } from '../../../../shared/execution-host'
+import {
+  getWorktreeExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
+  normalizeExecutionHostId,
+  parseExecutionHostId,
+  toRuntimeExecutionHostId,
+  toSshExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
+import type { ProjectHostSetup } from '../../../../shared/project-types'
+import type { Repo } from '../../../../shared/repo-types'
+import type { Worktree } from '../../../../shared/worktree/types'
 import type {
   AutomationCatalogHydrationEvidence,
   AutomationHostCatalogEntry
 } from './automation-host-catalog-types'
 import { automationAuthorityCatalogKey } from './automation-host-catalog-types'
 import {
+  automationRepoOwningAuthority,
   repoConnectionIdIn,
   type AutomationAuthorityRepoTables
 } from './automation-authority-identity'
@@ -121,21 +134,26 @@ export function soleAutomationCreateHost(
 }
 
 /** The catalog host a workspace's execution host names, for the All-hosts pre-fill. */
-export function automationCreateHostStableKey(hostId: string | null | undefined): string | null {
+export function automationCreateHostStableKey(
+  hostId: string | null | undefined,
+  runtimeOwnerEnvironmentId?: string | null
+): string | null {
   const host = parseExecutionHostId(hostId)
-  if (!host) {
+  const runtimeOwner = runtimeOwnerEnvironmentId?.trim()
+  if (!host && !runtimeOwner) {
     return null
   }
-  if (host.kind === 'runtime') {
+  if (runtimeOwner || host?.kind === 'runtime') {
+    const environmentId = runtimeOwner || (host?.kind === 'runtime' ? host.environmentId : '')
     return hostStableKey({
-      authority: { kind: 'runtime', environmentId: host.environmentId },
-      selector: { kind: 'self' }
+      authority: { kind: 'runtime', environmentId },
+      selector: host?.kind === 'ssh' ? { kind: 'ssh', targetId: host.targetId } : { kind: 'self' }
     })
   }
   // A desktop SSH workspace is still desktop-stored; only the selector differs.
   return hostStableKey({
     authority: { kind: 'desktop' },
-    selector: host.kind === 'ssh' ? { kind: 'ssh', targetId: host.targetId } : { kind: 'self' }
+    selector: host?.kind === 'ssh' ? { kind: 'ssh', targetId: host.targetId } : { kind: 'self' }
   })
 }
 
@@ -162,17 +180,143 @@ export function automationCreateProjectMismatch(
   return selector.kind === 'ssh' ? connectionId !== selector.targetId : connectionId !== null
 }
 
+function authoritiesMatch(
+  left: StableAutomationAuthorityRef,
+  right: StableAutomationAuthorityRef
+): boolean {
+  return (
+    left.kind === right.kind &&
+    (left.kind === 'desktop' ||
+      (right.kind === 'runtime' && left.environmentId === right.environmentId))
+  )
+}
+
+function connectionMatchesDestination(
+  connectionId: string | null | undefined,
+  destination: AutomationCreateDestination
+): boolean {
+  const normalized = connectionId?.trim() || null
+  const selector = destination.destination.selector
+  return selector.kind === 'ssh' ? normalized === selector.targetId : normalized === null
+}
+
+export function automationCreateRepoMatchesDestination(
+  repo: Repo,
+  destination: AutomationCreateDestination
+): boolean {
+  return (
+    authoritiesMatch(automationRepoOwningAuthority(repo), destination.authority) &&
+    connectionMatchesDestination(repo.connectionId, destination)
+  )
+}
+
 /**
  * The projects a destination can hold, filtered by the rule submit already
  * enforces, so the form cannot offer a pairing its own check will refuse.
  */
-export function automationCreateEligibleProjects<TProject extends { id: string }>(
-  tables: AutomationAuthorityRepoTables,
+export function automationCreateEligibleProjects(
   destination: AutomationCreateDestination,
-  projects: readonly TProject[]
-): TProject[] {
+  projects: readonly Repo[],
+  projectHostSetups: readonly ProjectHostSetup[]
+): Repo[] {
   return projects.filter(
-    (project) => !automationCreateProjectMismatch(tables, destination, project.id)
+    (project) =>
+      automationCreateRepoMatchesDestination(project, destination) ||
+      projectHostSetups.some(
+        (setup) =>
+          setup.repoId === project.id &&
+          setup.setupState === 'ready' &&
+          automationCreateSetupMatchesDestination(setup, destination)
+      )
+  )
+}
+
+function destinationExecutionHostId(destination: AutomationCreateDestination): ExecutionHostId {
+  const selector = destination.destination.selector
+  if (selector.kind === 'ssh') {
+    return toSshExecutionHostId(selector.targetId)
+  }
+  return destination.authority.kind === 'runtime'
+    ? toRuntimeExecutionHostId(destination.authority.environmentId)
+    : LOCAL_EXECUTION_HOST_ID
+}
+
+/** The host whose workspace catalog the client can authoritatively refresh. */
+export function automationCreateWorkspaceRefreshHostId(
+  destination: AutomationCreateDestination
+): ExecutionHostId {
+  return destination.authority.kind === 'runtime'
+    ? toRuntimeExecutionHostId(destination.authority.environmentId)
+    : destinationExecutionHostId(destination)
+}
+
+function runtimeOwnerMatches(
+  runtimeOwnerEnvironmentId: string | null | undefined,
+  hostId: ExecutionHostId | null,
+  destination: AutomationCreateDestination
+): boolean {
+  if (destination.authority.kind === 'desktop') {
+    return !runtimeOwnerEnvironmentId && parseExecutionHostId(hostId)?.kind !== 'runtime'
+  }
+  if (runtimeOwnerEnvironmentId) {
+    return runtimeOwnerEnvironmentId === destination.authority.environmentId
+  }
+  const host = parseExecutionHostId(hostId)
+  return host?.kind === 'runtime' && host.environmentId === destination.authority.environmentId
+}
+
+export function automationCreateWorktreeMatchesDestination(
+  worktree: Worktree,
+  repo: Repo,
+  destination: AutomationCreateDestination,
+  projectHostSetups: readonly ProjectHostSetup[] = []
+): boolean {
+  if (worktree.repoId !== repo.id) {
+    return false
+  }
+  const setup = worktree.projectHostSetupId
+    ? projectHostSetups.find(
+        (candidate) =>
+          candidate.id === worktree.projectHostSetupId &&
+          automationCreateSetupMatchesDestination(candidate, destination)
+      )
+    : undefined
+  const hostId =
+    normalizeExecutionHostId(worktree.hostId) ??
+    normalizeExecutionHostId(setup?.executionHostId) ??
+    normalizeExecutionHostId(setup?.hostId) ??
+    getWorktreeExecutionHostId(worktree, repo)
+  return (
+    runtimeOwnerMatches(
+      worktree.runtimeOwnerEnvironmentId ?? setup?.runtimeOwnerEnvironmentId,
+      hostId,
+      destination
+    ) && hostId === destinationExecutionHostId(destination)
+  )
+}
+
+export function automationCreateEligibleWorktrees(
+  destination: AutomationCreateDestination,
+  repo: Repo | null | undefined,
+  worktrees: readonly Worktree[],
+  projectHostSetups: readonly ProjectHostSetup[] = []
+): Worktree[] {
+  return repo
+    ? worktrees.filter((worktree) =>
+        automationCreateWorktreeMatchesDestination(worktree, repo, destination, projectHostSetups)
+      )
+    : []
+}
+
+export function automationCreateSetupMatchesDestination(
+  setup: ProjectHostSetup,
+  destination: AutomationCreateDestination
+): boolean {
+  const transportHostId = normalizeExecutionHostId(setup.hostId)
+  const executionHostId = normalizeExecutionHostId(setup.executionHostId) ?? transportHostId
+  return (
+    runtimeOwnerMatches(setup.runtimeOwnerEnvironmentId, transportHostId, destination) &&
+    executionHostId === destinationExecutionHostId(destination)
   )
 }
 

@@ -37,8 +37,9 @@ export function resolveAutomationWorkspaceProvenance(args: {
   repoSelector: string
   repo: Repo
   request: AutomationWorkspaceProvenanceRequest | undefined
+  storageAuthority: AutomationWorkspaceProvenance['storageAuthority']
 }): AutomationWorkspaceProvenance | undefined {
-  const { authority, repoSelector, repo, request } = args
+  const { authority, repoSelector, repo, request, storageAuthority } = args
   if (!request) {
     return undefined
   }
@@ -75,7 +76,7 @@ export function resolveAutomationWorkspaceProvenance(args: {
     invalidAutomationProvenanceRequest()
   }
 
-  return buildAutomationWorkspaceProvenance(automation, run, repo)
+  return buildAutomationWorkspaceProvenance(automation, run, repo, Date.now(), storageAuthority)
 }
 
 export function releaseAutomationWorkspaceProvenanceRequest(

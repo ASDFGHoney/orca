@@ -252,4 +252,14 @@ describe('Automation list row selection', () => {
     expect(onRequestAction).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
   })
+
+  it('renders the host label in the Host column for local rows', () => {
+    renderLocalRows({ onSelect: vi.fn() })
+    expect(screen.getByText('Local')).toBeTruthy()
+  })
+
+  it('renders the host label in the Host column for external rows', () => {
+    renderExternalRows({ onSelect: vi.fn() })
+    expect(screen.getByText('Local')).toBeTruthy()
+  })
 })

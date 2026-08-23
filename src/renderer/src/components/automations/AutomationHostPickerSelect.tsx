@@ -64,13 +64,22 @@ export function AutomationHostPickerSelect({
       <SelectTrigger
         aria-label={pickerLabel}
         data-picker-variant="select"
-        className={cn('h-8 text-xs', className)}
+        className={cn('h-8 w-full text-xs', className)}
       >
         {/* Without children Radix names the trigger from the matching item, and a
             retained-but-unhydrated selection matches only the All hosts item. */}
         <SelectValue>{selectedStableKey === null ? triggerLabel : undefined}</SelectValue>
       </SelectTrigger>
-      <SelectContent>
+      {/* Why: item-aligned lines the selected host up with the trigger, so a
+          mid-list pick (and the group label above it) clips under the titlebar. */}
+      <SelectContent
+        position="popper"
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        collisionPadding={8}
+        className="min-w-[20rem]"
+      >
         <SelectItem value={ALL_HOSTS_OPTION_VALUE} className="text-xs">
           {translate('auto.components.automations.hostPicker.allHosts', 'All hosts')}
         </SelectItem>

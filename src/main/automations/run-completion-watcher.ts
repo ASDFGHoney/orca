@@ -30,12 +30,9 @@ export function describeStrandedAutomationRun(run: AutomationRun): string {
   return 'Orca lost the terminal for this run before it reported completion.'
 }
 
-/** Why a fixed sentence: the throws here carry internal transport tokens
- *  (`terminal_handle_stale`, `terminal_not_found`, `request_aborted`), and a run
- *  history row is user copy. The token stays in the log, where it is useful. */
-function describeObservationError(error: unknown): string {
+/** Observation failures are transport evidence, so they stay in logs and never finalize a run. */
+function logObservationError(error: unknown): void {
   console.error('[automations] run completion observation failed:', error)
-  return 'Orca stopped watching this run before it reported completion.'
 }
 
 export class AutomationRunCompletionWatcher {
@@ -60,13 +57,11 @@ export class AutomationRunCompletionWatcher {
         const current = this.readRun(run.automationId, run.id)
         return Boolean(current && !isFinalAutomationRunStatus(current.status))
       },
-      strand: (run) => {
-        void this.finalize(run, {
-          status: 'dispatch_failed',
-          error: describeStrandedAutomationRun(run)
-        }).catch((error) => {
-          console.error('[automations] failed to reconcile stranded run:', error)
-        })
+      unverifiable: (run) => {
+        console.warn(
+          '[automations] run completion is unverifiable:',
+          describeStrandedAutomationRun(run)
+        )
       }
     })
   }
@@ -101,9 +96,12 @@ export class AutomationRunCompletionWatcher {
   private startWatch(run: AutomationRun, handle: string): void {
     const controller = new AbortController()
     this.watching.set(run.id, controller)
-    void this.observeUntilTerminal(run, handle, controller).finally(() => {
+    void this.observeUntilTerminal(run, handle, controller).then((retry) => {
       if (this.watching.get(run.id) === controller) {
         this.watching.delete(run.id)
+      }
+      if (retry) {
+        this.reconciler.defer(run)
       }
     })
   }
@@ -112,21 +110,23 @@ export class AutomationRunCompletionWatcher {
     run: AutomationRun,
     handle: string,
     controller: AbortController
-  ): Promise<void> {
+  ): Promise<boolean> {
     let observation: AutomationRunCompletionObservation
     try {
       observation = await this.observer.observeCompletion(handle, { signal: controller.signal })
     } catch (error) {
       if (controller.signal.aborted) {
-        return
+        return false
       }
-      observation = { status: 'dispatch_failed', error: describeObservationError(error) }
+      logObservationError(error)
+      return true
     }
     try {
       await this.finalize(run, observation)
     } catch (error) {
       console.error('[automations] failed to persist watched run completion:', error)
     }
+    return false
   }
 
   forget(runId: string): void {

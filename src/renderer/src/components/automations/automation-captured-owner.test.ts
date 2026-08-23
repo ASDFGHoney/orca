@@ -63,7 +63,7 @@ function row(overrides: Partial<AutomationHostRow>): AutomationHostRow {
 describe('captured owner availability', () => {
   it('lets every action through on an owned row and repeats its precondition', () => {
     const availability = automationActionAvailability(
-      { owner: DESKTOP_SELF, selector: { kind: 'self' } },
+      { authority: DESKTOP_SELF.authority, owner: DESKTOP_SELF, selector: { kind: 'self' } },
       'run'
     )
     expect(availability).toEqual({
@@ -74,9 +74,14 @@ describe('captured owner availability', () => {
   })
 
   it('keeps delete and pause fenceable on an orphan while refusing to run it', () => {
-    const orphan = { owner: null, selector: { kind: 'orphan' as const, issue: 'gone' } }
+    const orphan = {
+      authority: RUNTIME_SELF.authority,
+      owner: null,
+      selector: { kind: 'orphan' as const, issue: 'gone' }
+    }
     expect(automationActionAvailability(orphan, 'delete')).toEqual({
       kind: 'orphan-fenced',
+      authority: RUNTIME_SELF.authority,
       precondition: { selector: { kind: 'orphan' } }
     })
     expect(automationActionAvailability(orphan, 'toggle').kind).toBe('orphan-fenced')
@@ -86,25 +91,52 @@ describe('captured owner availability', () => {
     expect(isAutomationActionEnabled(orphan, 'delete')).toBe(true)
   })
 
-  it('blocks every action on a legacy row and asks for a server update', () => {
+  it('blocks every action on a legacy SSH row and asks for a server update', () => {
     // A qualified selector with no owner means the authority never sent a generation.
-    const legacy = { owner: null, selector: { kind: 'ssh' as const, targetId: 'box' } }
+    const legacy = {
+      authority: RUNTIME_SELF.authority,
+      owner: null,
+      selector: { kind: 'ssh' as const, targetId: 'box' }
+    }
     const availability = automationActionAvailability(legacy, 'delete')
     expect(availability.kind).toBe('blocked')
     expect(availability.kind === 'blocked' && availability.block.recovery).toBe('update-server')
   })
 
-  it('reports a row with no metadata as uncaptured rather than blocked', () => {
-    expect(automationActionAvailability(UNCAPTURED_AUTOMATION_OWNER, 'run').kind).toBe('uncaptured')
+  it('keeps a legacy Self row fully actionable through its captured authority', () => {
+    // The legacy partition captures the answering authority as the Self owner,
+    // so an old server never leaves Runtime + Self view-only.
+    const legacySelf = {
+      authority: RUNTIME_SELF.authority,
+      owner: RUNTIME_SELF,
+      selector: { kind: 'self' as const }
+    }
+    for (const action of ['edit', 'save', 'toggle', 'delete', 'run', 'history'] as const) {
+      expect(isAutomationActionEnabled(legacySelf, action)).toBe(true)
+    }
+    expect(automationActionAvailability(legacySelf, 'run')).toEqual({
+      kind: 'owned',
+      owner: RUNTIME_SELF,
+      precondition: { selector: { kind: 'self' } }
+    })
+  })
+
+  it('blocks a row with no captured authority', () => {
+    expect(automationActionAvailability(UNCAPTURED_AUTOMATION_OWNER, 'run').kind).toBe('blocked')
     expect(capturedAutomationOwner(new Map(), 'missing')).toBe(UNCAPTURED_AUTOMATION_OWNER)
     expect(capturedAutomationOwner(null, 'missing')).toBe(UNCAPTURED_AUTOMATION_OWNER)
   })
 
   it('keys captured owners by row key', () => {
     const captured = captureAutomationOwners([
-      { rowKey: 'row|desktop|a-1', row: row({ automation: automation({ id: 'a-1' }) }) },
+      {
+        rowKey: 'row|desktop|a-1',
+        authority: DESKTOP_SELF.authority,
+        row: row({ automation: automation({ id: 'a-1' }) })
+      },
       {
         rowKey: 'row|desktop|a-2',
+        authority: DESKTOP_SELF.authority,
         row: row({
           automation: automation({ id: 'a-2' }),
           owner: null,
@@ -118,9 +150,14 @@ describe('captured owner availability', () => {
 
   it("keeps both authorities' owners when they hold the same automation ID", () => {
     const captured = captureAutomationOwners([
-      { rowKey: 'row|desktop|a-1', row: row({ automation: automation({ id: 'a-1' }) }) },
+      {
+        rowKey: 'row|desktop|a-1',
+        authority: DESKTOP_SELF.authority,
+        row: row({ automation: automation({ id: 'a-1' }) })
+      },
       {
         rowKey: 'row|runtime|a-1',
+        authority: RUNTIME_SELF.authority,
         row: row({ automation: automation({ id: 'a-1' }), owner: RUNTIME_SELF })
       }
     ])

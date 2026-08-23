@@ -47,6 +47,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
     metaReview,
     metaComment,
     metaAutomationProvenance,
+    automationAuthority,
     metaCliProvenance,
     hoverIssue,
     hoverLinearIssue,
@@ -152,6 +153,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
             review={metaReview}
             comment={metaComment}
             automationProvenance={metaAutomationProvenance}
+            automationAuthority={automationAuthority}
             cliProvenance={metaCliProvenance}
             branchName={showBranchIdentityHover ? branch : undefined}
             workspaceTitle={worktree.displayName}
@@ -223,6 +225,7 @@ export function buildWorktreeCardPresentation(card: WorktreeCardController) {
         review={metaReview}
         comment={metaComment}
         automationProvenance={metaAutomationProvenance}
+        automationAuthority={automationAuthority}
         cliProvenance={metaCliProvenance}
         detailsAfter={hasPorts ? <WorktreeCardPortsDetails ports={workspacePorts} /> : null}
         hoverControl={detailsHoverControl}

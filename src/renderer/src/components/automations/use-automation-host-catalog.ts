@@ -35,6 +35,10 @@ import {
   runAutomationHostRecovery,
   type AutomationHostRecoveryDeps
 } from './automation-host-recovery'
+import {
+  connectAutomationHostRuntime,
+  connectAutomationHostSshTarget
+} from './automation-host-recovery-connect'
 import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
 import {
   automationAuthorityPartitionContext,
@@ -61,7 +65,10 @@ export type AutomationHostCatalogView = {
   loadCounts: AutomationHostLoadCounts
   selectHost: (filter: AutomationHostFilter) => void
   /** Runs the recovery verb the notice or empty state offered for a host. */
-  recover: (action: AutomationHostRecoveryAction, entry?: AutomationHostCatalogEntry | null) => void
+  recover: (
+    action: AutomationHostRecoveryAction,
+    entry?: AutomationHostCatalogEntry | null
+  ) => Promise<void>
   /** Manual refresh of every host in view, bypassing TTL where reachable. */
   refreshHosts: () => void
   /**
@@ -217,12 +224,9 @@ export function useAutomationHostCatalog(
       retry: (entry) => {
         void controller.scheduler.retry(automationHostFetchTarget(entry, pairingRevision))
       },
-      connectSshTarget: (targetId) => {
-        void window.api.ssh.connect({ targetId })
-      },
-      connectRuntimeEnvironment: (environmentId) => {
-        void window.api.runtimeEnvironments.connect({ selector: environmentId })
-      },
+      connectSshTarget: (targetId, environmentId) =>
+        connectAutomationHostSshTarget({ targetId, environmentId }),
+      connectRuntimeEnvironment: (environmentId) => connectAutomationHostRuntime(environmentId),
       openSettings: (target) => {
         openSettingsPage()
         openSettingsTarget(target)
@@ -232,9 +236,8 @@ export function useAutomationHostCatalog(
   )
 
   const recover = useCallback(
-    (action: AutomationHostRecoveryAction, entry?: AutomationHostCatalogEntry | null) => {
-      runAutomationHostRecovery(action, entry ?? resolution.entry, recoveryDeps)
-    },
+    (action: AutomationHostRecoveryAction, entry?: AutomationHostCatalogEntry | null) =>
+      runAutomationHostRecovery(action, entry ?? resolution.entry, recoveryDeps),
     [recoveryDeps, resolution.entry]
   )
   const refreshHosts = useCallback(() => {

@@ -54,15 +54,13 @@ describe('AutomationsPage list rendering', () => {
     expect(rows(container, 'automation-row')).toEqual(['Nightly', 'Weekly'])
   })
 
-  it('falls back to the unscoped list until a host has answered', async () => {
+  it('does not expose unscoped bootstrap rows when no host has answered', async () => {
     api.automations.list.mockResolvedValue([makeAutomation({ id: 'a-9', name: 'Unscoped' })])
     api.automations.listScoped.mockRejectedValue(new Error('offline'))
 
     const { container } = await renderPage()
 
-    // Why: a host that never answered is not an empty host, and the rows the
-    // page already had are better than none. Step 9 removes this arm.
-    expect(rows(container, 'automation-row')).toEqual(['Unscoped'])
+    expect(rows(container, 'automation-row')).toEqual([])
   })
 
   it('renders the empty state when the host has no automations', async () => {
@@ -111,7 +109,7 @@ describe('AutomationsPage list rendering', () => {
     const entry = mocks.listPanel?.hostCatalog.entries[0]
     api.automations.listScoped.mockClear()
     await act(async () => {
-      mocks.listPanel?.hostCatalog.recover('retry', entry)
+      await mocks.listPanel?.hostCatalog.recover('retry', entry)
     })
 
     // Retry re-queries that host rather than reloading the page.
@@ -164,6 +162,40 @@ describe('AutomationsPage list rendering', () => {
     // first row and the user's edit appears to open someone else's automation.
     expect(api.automations.updateExternalForOwner).toHaveBeenCalled()
     expect(mocks.listPanel?.selectedExternal?.key).toBe(entry.key)
+  })
+
+  it('finishes an external save while a manager probe is still hanging', async () => {
+    api.automations.list.mockResolvedValue([])
+    api.automations.listExternalManagerForOwner.mockImplementation(
+      async ({ provider }: { provider: string }) =>
+        provider === 'hermes'
+          ? { manager: makeExternalManager(), error: null, updatedAt: 1 }
+          : { manager: null, error: null, updatedAt: 1 }
+    )
+    api.automations.updateExternalForOwner.mockResolvedValue(undefined)
+
+    await renderPage()
+    const entry = mocks.listPanel?.filteredExternalAutomationEntries[0]
+    if (!entry) {
+      throw new Error('no external entry to edit')
+    }
+
+    // The re-read this save triggers never answers. It must still close its
+    // dialog and report the result, exactly as the Orca save does: the managers
+    // catch up when the probe lands.
+    api.automations.listExternalManagerForOwner.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    await act(async () => {
+      mocks.listPanel?.openEditExternalDialog(entry.manager, entry.job, entry.scope)
+    })
+    await act(async () => {
+      await mocks.editorDialog?.onSave()
+    })
+
+    expect(api.automations.updateExternalForOwner).toHaveBeenCalled()
+    expect(mocks.editorDialog?.open).toBe(false)
+    expect(mocks.toastSuccess).toHaveBeenCalled()
   })
 
   it('routes each authority’s action to its own host when both report hermes:local', async () => {
@@ -302,6 +334,32 @@ describe('AutomationsPage host filter', () => {
 })
 
 describe('AutomationsPage run navigation', () => {
+  it('selects the exact Runtime + SSH storage bucket from workspace provenance', async () => {
+    const catalogRef = {
+      authority: { kind: 'runtime' as const, environmentId: 'gpu' },
+      selector: { kind: 'ssh' as const, targetId: 'builder' }
+    }
+    mocks.state.pendingAutomationRunNavigation = {
+      automationId: 'a-1',
+      runId: null,
+      hostId: 'ssh:builder',
+      authority: catalogRef.authority,
+      catalogRef
+    }
+    mocks.state.setPendingAutomationRunNavigation = mocks.setPendingRunNavigation
+    mocks.callRuntimeRpc.mockResolvedValue({ automations: [] })
+
+    await renderPage()
+
+    expect(mocks.setAutomationHostFilter).toHaveBeenCalledWith({ kind: 'host', host: catalogRef })
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'gpu' },
+      'automation.list',
+      undefined,
+      { timeoutMs: 15_000 }
+    )
+  })
+
   it('does not leave a run navigation pending when the history read fails', async () => {
     api.automations.list.mockResolvedValue([
       makeAutomation({ id: 'a-1' }),
@@ -569,23 +627,14 @@ describe('AutomationsPage owner conflicts', () => {
     expect(mocks.editorDialog?.isEditing).toBe(true)
   })
 
-  it('keeps the unfenced call for a row no host read has answered for', async () => {
-    // The host never answered, so no row carries an owner and none may be
-    // invented; the request goes out unfenced rather than against a guess.
+  it('offers no unfenced action when no host read has answered', async () => {
     const automation = makeAutomation({ id: 'a-1', enabled: true })
     api.automations.list.mockResolvedValue([automation])
     api.automations.listScoped.mockRejectedValue(new Error('offline'))
 
     await renderPage()
-    await act(async () => {
-      mocks.listPanel?.toggleAutomation(listedRow(automation.id))
-    })
-
-    // Why: Step 9 removes this legacy arm once every row carries a captured owner.
-    expect(api.automations.update).toHaveBeenCalledWith({
-      id: 'a-1',
-      updates: { enabled: false }
-    })
+    expect(mocks.listPanel?.filteredRows).toEqual([])
+    expect(api.automations.update).not.toHaveBeenCalled()
   })
 
   // A mixed-host folder workspace is the path that reaches this without a host
@@ -621,16 +670,5 @@ describe('AutomationsPage owner conflicts', () => {
     const orphanedRow = listedRow(orphaned.id)
     expect(mocks.listPanel?.isActionEnabled(orphanedRow, 'history')).toBe(true)
     expect(mocks.listPanel?.isActionEnabled(orphanedRow, 'run-now')).toBe(false)
-  })
-
-  it('greys out the actions on a row no owner could be captured for', async () => {
-    const automation = makeAutomation({ id: 'a-1' })
-    api.automations.list.mockResolvedValue([automation])
-    api.automations.listScoped.mockRejectedValue(new Error('offline'))
-
-    await renderPage()
-
-    // Uncaptured is not blocked: the legacy arm still works, so nothing is greyed.
-    expect(mocks.listPanel?.isActionEnabled(listedRow(automation.id), 'delete')).toBe(true)
   })
 })

@@ -12,6 +12,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { AutomationWorkspaceProvenance } from '../../../../shared/worktree/types'
+import type { StableAutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
 import type * as AutomationHostClient from '@/components/automations/automation-host-client'
 import { WorktreeCardAutomationDetailSection } from './WorktreeCardAutomationDetailSection'
 
@@ -50,7 +51,12 @@ async function render(
   handlers: {
     onOpenAutomation?: (event: React.MouseEvent) => void
     onOpenAutomationRun?: (event: React.MouseEvent) => void
-  } = {}
+  } = {},
+  authority: StableAutomationAuthorityRef | null = record.hostId
+    ? record.hostId.startsWith('runtime:')
+      ? { kind: 'runtime', environmentId: record.hostId.slice('runtime:'.length) }
+      : { kind: 'desktop' }
+    : null
 ): Promise<HTMLDivElement> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -59,7 +65,11 @@ async function render(
   await act(async () => {
     root.render(
       <TooltipProvider>
-        <WorktreeCardAutomationDetailSection provenance={record} {...handlers} />
+        <WorktreeCardAutomationDetailSection
+          provenance={record}
+          authority={authority}
+          {...handlers}
+        />
       </TooltipProvider>
     )
   })
@@ -93,6 +103,25 @@ describe('WorktreeCardAutomationDetailSection host resolution', () => {
     })
   })
 
+  it('asks the runtime authority for a runtime-owned SSH workspace', async () => {
+    mocks.listAutomationsForTarget.mockResolvedValue([{ id: 'a-1' }])
+    mocks.listAutomationRunsForTarget.mockResolvedValue([{ id: 'run-1' }])
+
+    await render(
+      provenance({ hostId: 'ssh:builder' }),
+      {},
+      {
+        kind: 'runtime',
+        environmentId: 'gpu'
+      }
+    )
+
+    expect(mocks.listAutomationsForTarget).toHaveBeenCalledWith({
+      kind: 'environment',
+      environmentId: 'gpu'
+    })
+  })
+
   it('reports a miss as uncheckable when no host was ever recorded', async () => {
     const container = await render(provenance())
 
@@ -106,21 +135,5 @@ describe('WorktreeCardAutomationDetailSection host resolution', () => {
     const container = await render(provenance({ hostId: 'local' }))
 
     expect(container.textContent).toContain('Automation no longer available.')
-  })
-
-  it('offers both affordances when a record with no recorded host is found anyway', async () => {
-    // The missing host degrades the *miss*, never the find: an automation the
-    // desktop positively returned is evidence, whatever the read was aimed by.
-    mocks.listAutomationsForTarget.mockResolvedValue([{ id: 'a-1' }])
-    mocks.listAutomationRunsForTarget.mockResolvedValue([{ id: 'run-1' }])
-
-    const container = await render(provenance(), {
-      onOpenAutomation: vi.fn(),
-      onOpenAutomationRun: vi.fn()
-    })
-
-    expect(container.querySelector('[aria-label="Open automation"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label="Open run"]')).not.toBeNull()
-    expect(container.textContent).not.toContain('could not be checked')
   })
 })

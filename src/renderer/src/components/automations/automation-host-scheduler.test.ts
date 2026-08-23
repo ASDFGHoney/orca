@@ -360,21 +360,31 @@ describe('automation host scheduler legacy path', () => {
     expect(listRuns).not.toHaveBeenCalled()
   })
 
-  it('leaves legacy rows unfenced and their usage unavailable', async () => {
+  it('fences legacy Self rows on the answering authority and leaves SSH rows unfenced', async () => {
     const cache = createCache()
     const scheduler = createAutomationHostScheduler({
       cache,
       legacyPartitionContext: () => LOCAL_REPO,
       isVisible: () => true,
-      transport: { listLegacy: () => Promise.resolve([automation('a')]) }
+      transport: {
+        listLegacy: () =>
+          Promise.resolve([
+            automation('a'),
+            automation('b', { executionTargetType: 'ssh', executionTargetId: 't1' })
+          ])
+      }
     })
+    const legacy = { querySupport: 'legacy-unscoped' as const }
     await scheduler.refresh([
-      target(selfRef(RUNTIME_AUTHORITY), { querySupport: 'legacy-unscoped' })
+      target(selfRef(RUNTIME_AUTHORITY), legacy),
+      target(sshRef(RUNTIME_AUTHORITY, 't1'), legacy)
     ])
-    const row = cache.get(selfRef(RUNTIME_AUTHORITY))?.data[0]
-    expect(row?.owner).toBeNull()
-    expect(row?.usageKnown).toBe(false)
-    expect(row?.usageSummary).toBeNull()
+    const selfRow = cache.get(selfRef(RUNTIME_AUTHORITY))?.data[0]
+    // Self mutates by id on its own authority, so the unscoped answer still fences it.
+    expect(selfRow?.owner).toEqual({ authority: RUNTIME_AUTHORITY, selector: { kind: 'self' } })
+    expect(selfRow?.usageKnown).toBe(false)
+    expect(selfRow?.usageSummary).toBeNull()
+    expect(cache.get(sshRef(RUNTIME_AUTHORITY, 't1'))?.data[0]?.owner).toBeNull()
   })
 
   it('records an incompatible host without sending anything', async () => {

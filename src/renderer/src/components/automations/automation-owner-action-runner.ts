@@ -23,6 +23,7 @@ import {
   stripAutomationOwnerConflictCode,
   type AutomationOwnerConflictCode
 } from '../../../../shared/automation-owner-conflict'
+import { hasRuntimeRpcErrorCode } from '../../../../shared/runtime-rpc-error-code'
 import type {
   AutomationAuthorityRef,
   AutomationOwnerRef
@@ -96,6 +97,15 @@ function classify(error: unknown): AutomationActionOutcome<never> {
       }
     }
   }
+  if (hasRuntimeRpcErrorCode(error, 'selector_not_found')) {
+    return {
+      status: 'failed',
+      message: translate(
+        'auto.components.automations.ownerAction.workspaceNotFound',
+        "We couldn't find that workspace on this host. Choose a workspace that exists here and try again."
+      )
+    }
+  }
   return {
     status: 'failed',
     message:
@@ -117,12 +127,9 @@ async function attempt<TValue>(
   availability: AutomationActionAvailability,
   owned: (owner: AutomationOwnerRef) => Promise<TValue>,
   orphanFenced?: () => Promise<TValue>
-): Promise<AutomationActionOutcome<TValue> | { status: 'uncaptured' }> {
+): Promise<AutomationActionOutcome<TValue>> {
   if (availability.kind === 'blocked') {
     return { status: 'blocked', block: availability.block }
-  }
-  if (availability.kind === 'uncaptured') {
-    return { status: 'uncaptured' }
   }
   try {
     if (availability.kind === 'owned') {
@@ -148,14 +155,10 @@ function orphanUnsupported(): AutomationActionBlock {
   }
 }
 
-export type AutomationActionResult<TValue> =
-  | AutomationActionOutcome<TValue>
-  /** The caller must fall back to its unfenced path; Step 9 deletes this arm. */
-  | { status: 'uncaptured' }
+export type AutomationActionResult<TValue> = AutomationActionOutcome<TValue>
 
 export async function updateOwnedAutomation(
   availability: AutomationActionAvailability,
-  authority: AutomationAuthorityRef,
   id: string,
   updates: AutomationUpdateInput,
   destination?: AutomationDestination
@@ -163,19 +166,24 @@ export async function updateOwnedAutomation(
   return await attempt(
     availability,
     (owner) => updateAutomationForOwner(owner, id, updates, destination),
-    () => updateOrphanAutomation(authority, id, updates)
+    () =>
+      availability.kind === 'orphan-fenced'
+        ? updateOrphanAutomation(availability.authority, id, updates)
+        : Promise.reject(new Error('automation_owner_uncaptured'))
   )
 }
 
 export async function deleteOwnedAutomation(
   availability: AutomationActionAvailability,
-  authority: AutomationAuthorityRef,
   id: string
 ): Promise<AutomationActionResult<void>> {
   return await attempt(
     availability,
     (owner) => deleteAutomationForOwner(owner, id),
-    () => deleteOrphanAutomation(authority, id)
+    () =>
+      availability.kind === 'orphan-fenced'
+        ? deleteOrphanAutomation(availability.authority, id)
+        : Promise.reject(new Error('automation_owner_uncaptured'))
   )
 }
 
@@ -203,13 +211,15 @@ export async function showOwnedAutomation(
 
 export async function listOwnedAutomationRuns(
   availability: AutomationActionAvailability,
-  authority: AutomationAuthorityRef,
   automationId: string
 ): Promise<AutomationActionResult<AutomationRun[]>> {
   return await attempt(
     availability,
     (owner) => listAutomationRunsForOwner(owner, automationId),
-    () => listOrphanAutomationRuns(authority, automationId)
+    () =>
+      availability.kind === 'orphan-fenced'
+        ? listOrphanAutomationRuns(availability.authority, automationId)
+        : Promise.reject(new Error('automation_owner_uncaptured'))
   )
 }
 

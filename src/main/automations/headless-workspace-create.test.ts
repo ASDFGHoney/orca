@@ -85,7 +85,8 @@ describe('headless automation workspace create args', () => {
         executionTargetId: 'ssh-target-1',
         projectId: 'project-1',
         repoId: 'repo-1',
-        hostId: 'ssh:ssh-target-1'
+        hostId: 'ssh:ssh-target-1',
+        storageAuthority: 'runtime'
       }
     })
   })

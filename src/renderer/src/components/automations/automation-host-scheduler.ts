@@ -218,6 +218,7 @@ export function createAutomationHostScheduler(
       // Attributed to the authority alone: one answer serves every entry in the group.
       instrument.response(live[0].fence, null, startedAt, automations.length, automations)
       const partition = partitionLegacyAutomationHostRows(
+        authority,
         automations,
         live.map((target) => target.ref),
         options.legacyPartitionContext(live[0].ref.authority),

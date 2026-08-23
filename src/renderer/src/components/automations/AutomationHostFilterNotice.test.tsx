@@ -19,6 +19,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -141,12 +142,22 @@ describe('AutomationHostFilterNotice', () => {
     expect(onRecover).toHaveBeenCalledWith('reconnect')
   })
 
-  it('offers Update server for a legacy-unscoped contract', () => {
+  it('offers Update server for an entry the unscoped contract leaves view-only', () => {
     renderNotice(
-      resolution('ghost', { entry: entry({ querySupport: 'legacy-unscoped' }) }),
+      resolution('ghost', {
+        entry: entry({ querySupport: 'legacy-unscoped', scopeGap: 'authority-unscoped' })
+      }),
       () => undefined
     )
     expect(container.querySelector('button')?.textContent).toBe('Update server')
+  })
+
+  it('offers no Update server for a legacy Self entry with no scope gap', () => {
+    renderNotice(
+      resolution('ready', { entry: entry({ querySupport: 'legacy-unscoped' }) }),
+      () => undefined
+    )
+    expect(container.querySelector('button')).toBeNull()
   })
 
   it('does not move focus when the notice appears', () => {

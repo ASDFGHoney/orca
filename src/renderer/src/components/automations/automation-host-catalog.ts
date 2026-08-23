@@ -119,8 +119,10 @@ function projectSelfEntry(ctx: AuthorityProjectionContext): AutomationHostCatalo
       catalogState: 'authoritative',
       authorityHealth: ctx.authorityHealth,
       executionHealth: resolveSelfExecutionHealth(ctx.authorityHealth),
-      querySupport: ctx.querySupport,
-      ...withScopeGap(authorityScopeGap(ctx.querySupport))
+      // No scope gap even on a legacy authority: Self records live on the
+      // answering authority and mutate by id under the pairing-revision fence,
+      // so the unscoped contract degrades the list transport, not access.
+      querySupport: ctx.querySupport
     }
   )
 }

@@ -13822,7 +13822,11 @@
           "tableStatus": "Estado",
           "tableActions": "Acciones",
           "newAutomation": "Nueva automatización",
-          "rowActions": "Acciones de automatización"
+          "rowActions": "Acciones de automatización",
+          "tableLastRun": "Última ejecución",
+          "noListMatches": "Ninguna automatización coincide.",
+          "tableHost": "Host",
+          "refreshAutomations": "Actualizar automatizaciones"
         },
         "CreateFromPicker": {
           "f061f49e3f": "Buscar ramas del repositorio...",

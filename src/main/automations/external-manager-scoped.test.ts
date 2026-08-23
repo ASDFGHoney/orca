@@ -129,10 +129,9 @@ describe('scoped external automations', () => {
   })
 
   it('probes only the selected SSH host', async () => {
+    const mux = relay({ jobs: [], hermesAvailable: true })
     vi.mocked(getActiveMultiplexer).mockReturnValue(
-      relay({ jobs: [], hermesAvailable: true }) as unknown as ReturnType<
-        typeof getActiveMultiplexer
-      >
+      mux as unknown as ReturnType<typeof getActiveMultiplexer>
     )
     const engine = buildEngine([sshTarget(), sshTarget({ id: 'target-b', generation: 1 })])
 
@@ -144,6 +143,11 @@ describe('scoped external automations', () => {
     expect(entry.manager?.id).toBe('hermes:ssh:target-a')
     expect(getActiveMultiplexer).toHaveBeenCalledTimes(1)
     expect(getActiveMultiplexer).toHaveBeenCalledWith('target-a')
+    expect(mux.request).toHaveBeenCalledWith(
+      'externalAutomations.list',
+      { provider: 'hermes' },
+      { signal: expect.any(AbortSignal) }
+    )
   })
 
   it('fails closed on a stale generation without probing', async () => {

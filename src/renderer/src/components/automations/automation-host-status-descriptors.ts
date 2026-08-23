@@ -212,25 +212,23 @@ function authorityRecoveryAction(
     // The transport to the authority is down, so retrying the query alone cannot help.
     return 'reconnect'
   }
-  if (entry.querySupport !== 'scoped') {
+  // A degraded transport with no gap needs no repair: Runtime + Self on a
+  // legacy server stays fully usable, so its recovery verbs are the normal ones.
+  if (entry.scopeGap) {
     return scopeGapRecoveryAction(entry.scopeGap)
   }
   return entry.authorityHealth === 'stale-error' ? 'retry' : null
 }
 
 /** Updating a server only repairs a server that actually answered without host scoping. */
-function scopeGapRecoveryAction(
-  gap: AutomationHostScopeGap | undefined
-): AutomationHostRecoveryAction | null {
+function scopeGapRecoveryAction(gap: AutomationHostScopeGap): AutomationHostRecoveryAction | null {
   switch (gap) {
     case 'target-unverified':
       return 'reconnect'
     case 'target-removed':
     case 'target-unregistered':
       return null
-    // An unscoped contract with no recorded cause can only be the authority's own.
     case 'authority-unscoped':
-    case undefined:
       return 'update-server'
   }
 }

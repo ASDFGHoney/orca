@@ -177,26 +177,26 @@ describe('CLI automation writes fence the host they land on', () => {
     })
   })
 
-  // A host that predates SSH generations has no incarnation to capture, so the
-  // write must still land — failing closed there would break a host that is only old.
-  it('omits the destination when the authority registers the target without a generation', async () => {
+  it('refuses an SSH destination that the authority cannot generation-fence', async () => {
     const { call, writes } = authority({
       registered: [{ id: 'box-1', label: 'box 1' }],
       repoConnectionId: 'box-1'
     })
     vi.spyOn(console, 'log').mockImplementation(() => undefined)
 
-    await AUTOMATION_HANDLERS['automations edit']!({
-      client: { call } as never,
-      cwd: '/tmp',
-      flags: new Map([
-        ['id', 'a1'],
-        ['repo', 'repo-on-box-1']
-      ]),
-      json: true
-    })
+    await expect(
+      AUTOMATION_HANDLERS['automations edit']!({
+        client: { call } as never,
+        cwd: '/tmp',
+        flags: new Map([
+          ['id', 'a1'],
+          ['repo', 'repo-on-box-1']
+        ]),
+        json: true
+      })
+    ).rejects.toThrow('Editing automations on this host requires a newer Orca server')
 
-    expect(writes[0]?.params).not.toHaveProperty('destination')
+    expect(writes).toEqual([])
   })
 
   it('sends a self destination for a local project', async () => {

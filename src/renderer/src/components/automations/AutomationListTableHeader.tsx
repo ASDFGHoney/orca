@@ -27,6 +27,7 @@ export function AutomationListTableHeader({
       <span>
         {translate('auto.components.automations.AutomationsPage.tableProject', 'Project')}
       </span>
+      <span>{translate('auto.components.automations.AutomationsPage.tableHost', 'Host')}</span>
       <span>
         {translate('auto.components.automations.AutomationDetail.578ff46987', 'Next run')}
       </span>

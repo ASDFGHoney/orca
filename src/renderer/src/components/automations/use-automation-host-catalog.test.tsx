@@ -21,7 +21,9 @@ import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 const mocks = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   callRuntimeRpc: vi.fn(),
-  getRuntimeEnvironmentStatus: vi.fn()
+  getRuntimeEnvironmentStatus: vi.fn(),
+  connectAutomationHostSshTarget: vi.fn(),
+  connectAutomationHostRuntime: vi.fn()
 }))
 
 vi.mock('@/store', () => {
@@ -35,6 +37,12 @@ vi.mock('@/runtime/runtime-rpc-client', () => ({
   callRuntimeRpc: (...args: unknown[]) => mocks.callRuntimeRpc(...args),
   getRuntimeEnvironmentStatus: (...args: unknown[]) => mocks.getRuntimeEnvironmentStatus(...args),
   hasRuntimeRpcErrorCode: () => false
+}))
+
+vi.mock('./automation-host-recovery-connect', () => ({
+  connectAutomationHostSshTarget: (...args: unknown[]) =>
+    mocks.connectAutomationHostSshTarget(...args),
+  connectAutomationHostRuntime: (...args: unknown[]) => mocks.connectAutomationHostRuntime(...args)
 }))
 
 import { useAutomationHostCatalog } from './use-automation-host-catalog'
@@ -140,6 +148,10 @@ beforeEach(() => {
   view = null
   mocks.callRuntimeRpc.mockReset()
   mocks.getRuntimeEnvironmentStatus.mockReset()
+  mocks.connectAutomationHostSshTarget.mockReset()
+  mocks.connectAutomationHostRuntime.mockReset()
+  mocks.connectAutomationHostSshTarget.mockResolvedValue(undefined)
+  mocks.connectAutomationHostRuntime.mockResolvedValue(undefined)
   mocks.callRuntimeRpc.mockResolvedValue({ automations: [legacyAutomation()] })
   mocks.getRuntimeEnvironmentStatus.mockResolvedValue({ capabilities: [] })
   Object.assign(window, {
@@ -195,5 +207,63 @@ describe('useAutomationHostCatalog legacy partitioning', () => {
     ])
 
     expect(runtimeSelfAutomationIds()).toEqual(['a-legacy'])
+  })
+})
+
+describe('useAutomationHostCatalog recover', () => {
+  it('reconnects an unreachable runtime through the status-recording helper', async () => {
+    await renderCatalog([])
+    const runtimeSelf = view?.catalog.entries.find(
+      (entry) =>
+        entry.stableRef.authority.kind === 'runtime' && entry.stableRef.selector.kind === 'self'
+    )
+    expect(runtimeSelf).toBeDefined()
+
+    await act(async () => {
+      await view?.recover('reconnect', {
+        ...runtimeSelf!,
+        authorityHealth: 'unavailable'
+      })
+    })
+
+    expect(mocks.connectAutomationHostRuntime).toHaveBeenCalledWith(ENVIRONMENT_ID)
+    expect(mocks.connectAutomationHostSshTarget).not.toHaveBeenCalled()
+    expect(window.api.runtimeEnvironments.connect).not.toHaveBeenCalled()
+  })
+
+  it('reconnects a desktop SSH target through the SSH helper, not a raw ssh.connect', async () => {
+    mocks.state = {
+      ...storeState([]),
+      sshTargetLabels: new Map([['t1', 'Linux']]),
+      sshTargetGenerations: new Map([['t1', 1]]),
+      sshConnectionStates: new Map([['t1', { status: 'disconnected' }]])
+    }
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    roots.push(root)
+    await act(async () => {
+      root.render(<Harness />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const sshEntry = view?.catalog.entries.find(
+      (entry) =>
+        entry.stableRef.selector.kind === 'ssh' && entry.stableRef.selector.targetId === 't1'
+    )
+    expect(sshEntry).toBeDefined()
+
+    await act(async () => {
+      await view?.recover('reconnect', sshEntry)
+    })
+
+    expect(mocks.connectAutomationHostSshTarget).toHaveBeenCalledWith({
+      targetId: 't1',
+      environmentId: undefined
+    })
+    expect(window.api.ssh.connect).not.toHaveBeenCalled()
   })
 })

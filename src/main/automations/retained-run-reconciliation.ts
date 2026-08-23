@@ -12,7 +12,7 @@ export type RetainedRunReconcilerDeps = {
   attach: (run: AutomationRun) => boolean
   /** False once the run reached a terminal status by some other path. */
   stillRetained: (run: AutomationRun) => boolean
-  strand: (run: AutomationRun) => void
+  unverifiable: (run: AutomationRun) => void
 }
 
 /**
@@ -47,6 +47,15 @@ export class RetainedRunReconciler {
     this.sweep()
   }
 
+  /** Rechecks an observation-lost run on the cadence, avoiding a tight stale-handle loop. */
+  defer(run: AutomationRun): void {
+    if (this.disposed) {
+      return
+    }
+    this.pending.set(run.id, run)
+    this.arm()
+  }
+
   /** The authority's terminal surface can now answer pane lookups. */
   markSurfaceReady(): void {
     if (this.disposed) {
@@ -73,7 +82,7 @@ export class RetainedRunReconciler {
       }
       if (strandAt !== null && Date.now() >= strandAt) {
         this.pending.delete(runId)
-        this.deps.strand(run)
+        this.deps.unverifiable(run)
       }
     }
     if (this.pending.size === 0) {

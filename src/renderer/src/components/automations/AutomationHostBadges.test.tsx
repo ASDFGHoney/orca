@@ -81,12 +81,32 @@ describe('AutomationHostStatusBadges', () => {
   it('distinguishes an incompatible authority from a legacy-unscoped contract', () => {
     render(<AutomationHostStatusBadges entry={entry({ authorityHealth: 'incompatible' })} />)
     const incompatible = statusIds()
-    render(<AutomationHostStatusBadges entry={entry({ querySupport: 'legacy-unscoped' })} />)
+    render(
+      <AutomationHostStatusBadges
+        entry={entry({ querySupport: 'legacy-unscoped', scopeGap: 'authority-unscoped' })}
+      />
+    )
     const legacy = statusIds()
 
     expect(incompatible).toContain('authority-incompatible')
     expect(legacy).toContain('query-legacy-unscoped')
     expect(incompatible).not.toEqual(legacy)
+  })
+
+  it('shows no View only badge for a connected legacy Runtime + Self entry', () => {
+    render(
+      <AutomationHostStatusBadges
+        entry={entry({
+          stableRef: {
+            authority: { kind: 'runtime', environmentId: 'env-1' },
+            selector: { kind: 'self' }
+          },
+          kind: 'self',
+          querySupport: 'legacy-unscoped'
+        })}
+      />
+    )
+    expect(statusIds()).toEqual([])
   })
 
   it('separates the incompatible query contract from the incompatible authority', () => {

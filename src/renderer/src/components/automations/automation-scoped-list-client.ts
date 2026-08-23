@@ -9,11 +9,7 @@
  * that would attribute other hosts' automations to the selected one.
  */
 
-import {
-  callRuntimeRpc,
-  getRuntimeEnvironmentStatus,
-  type RuntimeClientTarget
-} from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import type {
   Automation,
   AutomationCreateInput,
@@ -25,6 +21,7 @@ import type {
   AutomationListScopeSelector
 } from '../../../../shared/automation-list-scope'
 import { validateAutomationListResponse } from '../../../../shared/automation-list-response'
+import { partitionLegacyAutomationList } from '../../../../shared/automation-legacy-list-partition'
 import type {
   AutomationAuthorityRef,
   AutomationOwnerRef
@@ -37,24 +34,18 @@ import type {
 } from '../../../../shared/automation-owner-precondition'
 import {
   AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-  AUTOMATION_LIST_HOST_SCOPE_UPDATE_REQUIRED_MESSAGE,
-  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
-  AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE,
-  type RuntimeCapability
+  AUTOMATION_LIST_HOST_SCOPE_UPDATE_REQUIRED_MESSAGE
 } from '../../../../shared/protocol-version'
-import { automationAuthorityCatalogKey } from './automation-host-catalog-types'
-import { automationHostDiagnostics } from './automation-host-diagnostics'
-
-const REQUEST_TIMEOUT_MS = 15_000
-
-export class AutomationHostScopeUnsupportedError extends Error {
-  readonly code = 'unsupported_host_scope'
-
-  constructor(message: string) {
-    super(message)
-    this.name = 'AutomationHostScopeUnsupportedError'
-  }
-}
+import {
+  AUTOMATION_AUTHORITY_REQUEST_TIMEOUT_MS as REQUEST_TIMEOUT_MS,
+  assertAuthorityCapability,
+  assertOwnerFencingSupported,
+  AutomationHostScopeUnsupportedError,
+  requiresOwnerFencing
+} from './automation-authority-capability'
+import { runtimeAutomationWorkspaceSelector } from './automation-runtime-workspace-selector'
+/** Re-exported so existing call sites keep importing the error from this module. */
+export { AutomationHostScopeUnsupportedError } from './automation-authority-capability'
 
 export class AutomationListResponseError extends Error {
   readonly code = 'invalid_response'
@@ -118,41 +109,6 @@ async function callAuthority<TResult>(
   })
 }
 
-/**
- * Fails closed on a missing capability, but only on a *known* absence: an
- * unreachable authority must classify as unavailable and retry, not as an old
- * server the user is told to upgrade.
- *
- * The probe is counted here because it is counted nowhere else: it deliberately
- * re-fetches on every call and rides outside the scheduler's four-slot pool, so
- * an instrument that saw only pooled work would report half the relay traffic a
- * 50-host refresh actually costs.
- */
-async function assertAuthorityCapability(
-  authority: AutomationAuthorityRef,
-  capability: RuntimeCapability,
-  message: string
-): Promise<void> {
-  if (authority.kind !== 'runtime') {
-    return
-  }
-  automationHostDiagnostics.recordCapabilityProbe({
-    authorityKey: automationAuthorityCatalogKey(authority)
-  })
-  const status = await getRuntimeEnvironmentStatus(authority.environmentId, REQUEST_TIMEOUT_MS)
-  if (!status.capabilities?.includes(capability)) {
-    throw new AutomationHostScopeUnsupportedError(message)
-  }
-}
-
-async function assertOwnerFencingSupported(authority: AutomationAuthorityRef): Promise<void> {
-  await assertAuthorityCapability(
-    authority,
-    AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
-    AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE
-  )
-}
-
 function validated(raw: unknown, selector: AutomationListScopeSelector): ScopedAutomationList {
   const validation = validateAutomationListResponse(raw, selector)
   if (!validation.ok) {
@@ -180,8 +136,9 @@ export async function listScopedAutomations(
 
 /**
  * The one unscoped request an old runtime gets per refresh cycle. Its result is
- * partitioned client-side into every requested entry; it carries no owners and
- * no usage projection, so those rows stay view-only.
+ * partitioned client-side into every requested entry; it carries no generations
+ * and no usage projection, so its SSH rows stay view-only. The partition may
+ * still assign owners where none are needed on the wire — Self.
  */
 export async function listLegacyAutomations(
   authority: AutomationAuthorityRef
@@ -198,11 +155,51 @@ export async function listLegacyAutomations(
   return automations as Automation[]
 }
 
+/**
+ * Self read on a server without host-scoped lists: the unscoped list is asked
+ * for and partitioned client-side, never a scoped request the server would
+ * answer with its whole store. Project evidence lives on the answering
+ * authority, so none is available here and every plausible local record reads
+ * as Self — the same id-keyed trust the legacy server itself applies, and the
+ * caller looks rows up by id.
+ */
+async function listLegacySelfAutomations(
+  authority: AutomationAuthorityRef
+): Promise<ScopedAutomationList> {
+  const automations = await listLegacyAutomations(authority)
+  const partition = partitionLegacyAutomationList(automations, {
+    repoConnectionId: () => null,
+    projectsAuthoritative: false
+  })
+  const selfRows = partition.rows.filter((row) => row.selector.kind === 'self')
+  return {
+    automations: selfRows.map((row) => row.automation),
+    items: selfRows.map((row) => ({
+      automationId: row.automation.id,
+      selector: { kind: 'self' }
+    })),
+    invalidRows: 0
+  }
+}
+
 /** Convenience wrapper for a row's own host; orphan scopes are requested with the selector form. */
 export async function listAutomationsForOwner(
   owner: AutomationOwnerRef
 ): Promise<ScopedAutomationList> {
-  return await listScopedAutomations(owner.authority, scopeSelector(owner))
+  try {
+    return await listScopedAutomations(owner.authority, scopeSelector(owner))
+  } catch (error) {
+    // Only Self may degrade: its records live on the authority the request is
+    // already pinned to. An SSH owner keeps failing closed on an old server.
+    if (
+      owner.authority.kind === 'runtime' &&
+      owner.selector.kind === 'self' &&
+      error instanceof AutomationHostScopeUnsupportedError
+    ) {
+      return await listLegacySelfAutomations(owner.authority)
+    }
+    throw error
+  }
 }
 
 /**
@@ -246,13 +243,22 @@ async function updateFenced(
   expectedOwner: AutomationOwnerPrecondition,
   destination?: AutomationDestination
 ): Promise<Automation> {
-  await assertOwnerFencingSupported(authority)
+  if (requiresOwnerFencing(expectedOwner, destination)) {
+    await assertOwnerFencingSupported(authority)
+  }
   if (authority.kind === 'desktop') {
     return await window.api.automations.update({ id, updates, expectedOwner, destination })
   }
+  const { projectId, workspaceId, ...runtimeUpdates } = updates
   const result = await callAuthority<{ automation: Automation }>(authority, 'automation.update', {
     id,
-    updates,
+    updates: {
+      ...runtimeUpdates,
+      ...('projectId' in updates ? { repo: projectId } : {}),
+      ...('workspaceId' in updates
+        ? { workspace: runtimeAutomationWorkspaceSelector(workspaceId) }
+        : {})
+    },
     expectedOwner,
     destination
   })
@@ -264,7 +270,9 @@ async function deleteFenced(
   id: string,
   expectedOwner: AutomationOwnerPrecondition
 ): Promise<void> {
-  await assertOwnerFencingSupported(authority)
+  if (requiresOwnerFencing(expectedOwner)) {
+    await assertOwnerFencingSupported(authority)
+  }
   if (authority.kind === 'desktop') {
     await window.api.automations.delete({ id, expectedOwner })
     return
@@ -325,8 +333,10 @@ export async function runAutomationNowForOwner(
   owner: AutomationOwnerRef,
   id: string
 ): Promise<AutomationRun> {
-  await assertOwnerFencingSupported(owner.authority)
   const expectedOwner = ownerPrecondition(owner)
+  if (requiresOwnerFencing(expectedOwner)) {
+    await assertOwnerFencingSupported(owner.authority)
+  }
   if (owner.authority.kind === 'desktop') {
     return await window.api.automations.runNow({ id, expectedOwner })
   }
@@ -342,7 +352,11 @@ export async function createAutomationForDestination(
   input: AutomationCreateInput,
   destination: AutomationDestination
 ): Promise<Automation> {
-  await assertOwnerFencingSupported(authority)
+  // A Self destination degrades safely on an old server: with the field ignored,
+  // the record still lands on that authority's local store — which is Self.
+  if (destination.selector.kind !== 'self') {
+    await assertOwnerFencingSupported(authority)
+  }
   if (authority.kind === 'desktop') {
     return await window.api.automations.create(input, { destination })
   }
@@ -350,7 +364,10 @@ export async function createAutomationForDestination(
   const result = await callAuthority<{ automation: Automation }>(authority, 'automation.create', {
     ...rest,
     repo: projectId,
-    workspace: input.workspaceMode === 'existing' ? (workspaceId ?? undefined) : undefined,
+    workspace:
+      input.workspaceMode === 'existing'
+        ? runtimeAutomationWorkspaceSelector(workspaceId)
+        : undefined,
     destination
   })
   return result.automation

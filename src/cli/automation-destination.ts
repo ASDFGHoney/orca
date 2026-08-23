@@ -17,6 +17,7 @@ import {
 import type { AutomationDestination } from '../shared/automation-owner-precondition'
 import type { RuntimeWorktreeRecord } from '../shared/runtime-types'
 import type { SshTargetSummary } from '../shared/ssh-types'
+import { AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE } from '../shared/protocol-version'
 import type { Repo } from '../shared/repo-types'
 import type { RuntimeClient } from './runtime-client'
 
@@ -39,21 +40,15 @@ async function resolveTargetRepo(
     .repo
 }
 
-/**
- * `undefined` means the authority registers the target but assigns no
- * generation, which is a host with nothing to fence — not a host to fail
- * against. A target the authority does not register at all is positive
- * evidence that the destination is gone.
- */
-async function sshTargetGeneration(
-  client: RuntimeClient,
-  targetId: string
-): Promise<number | undefined> {
+async function sshTargetGeneration(client: RuntimeClient, targetId: string): Promise<number> {
   const targets = (await client.call<{ targets: SshTargetSummary[] }>('ssh.listTargetSummaries'))
     .result.targets
   const match = targets.find((candidate) => candidate.id === targetId)
   if (!match) {
     throw new AutomationOwnerConflictError(AUTOMATION_OWNER_CONFLICT_CODES.invalidDestination)
+  }
+  if (match.generation === undefined) {
+    throw new Error(AUTOMATION_OWNER_FENCING_UPDATE_REQUIRED_MESSAGE)
   }
   return match.generation
 }
@@ -71,7 +66,5 @@ export async function resolveAutomationDestination(
     return { selector: { kind: 'self' } }
   }
   const generation = await sshTargetGeneration(client, connectionId)
-  return generation === undefined
-    ? undefined
-    : { selector: { kind: 'ssh', targetId: connectionId, targetGeneration: generation } }
+  return { selector: { kind: 'ssh', targetId: connectionId, targetGeneration: generation } }
 }

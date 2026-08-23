@@ -133,12 +133,7 @@ describe('authority-owned automation run completion', () => {
     service.stop()
   })
 
-  /**
-   * The throws on this path carry transport tokens, not sentences. Every other
-   * refusal in run history is one fixed sentence, so leaking `terminal_handle_stale`
-   * into the row a user reads breaks the only convention that surface has.
-   */
-  it('reports a failed observation in the same fixed sentence every other refusal uses', async () => {
+  it('keeps a run unverifiable when terminal observation is lost', async () => {
     const store = await createStore()
     const automation = createAutomation(store)
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -150,20 +145,15 @@ describe('authority-owned automation run completion', () => {
     })
 
     const run = await service.runNow(automation.id)
-    await vi.waitFor(() => {
-      expect(readRun(store, automation.id, run.id).status).toBe('dispatch_failed')
-    })
-
-    expect(readRun(store, automation.id, run.id).error).toBe(
-      'Orca stopped watching this run before it reported completion.'
-    )
-    // The token is still recoverable where it is actually useful.
+    await vi.waitFor(() => expect(logged).toHaveBeenCalled())
+    expect(readRun(store, automation.id, run.id).status).toBe('dispatched')
+    expect(readRun(store, automation.id, run.id).error).toBeNull()
     expect(logged.mock.calls.flat().map(String).join(' ')).toContain('terminal_handle_stale')
     logged.mockRestore()
     service.stop()
   })
 
-  it('reconciles stranded runs on startup without claiming completion', async () => {
+  it('keeps unresolvable retained runs dispatched after startup reconciliation', async () => {
     const store = await createStore()
     const automation = createAutomation(store)
     const dispatched = store.createAutomationRun(automation, 1_000, 'manual')
@@ -193,10 +183,10 @@ describe('authority-owned automation run completion', () => {
     service.setRendererReady()
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
 
-    expect(readRun(store, automation.id, dispatched.id).status).toBe('dispatch_failed')
-    expect(readRun(store, automation.id, dispatching.id).status).toBe('dispatch_failed')
-    expect(readRun(store, automation.id, dispatched.id).error).toContain('terminal')
-    expect(readRun(store, automation.id, dispatching.id).error).toContain('agent started')
+    expect(readRun(store, automation.id, dispatched.id).status).toBe('dispatched')
+    expect(readRun(store, automation.id, dispatching.id).status).toBe('dispatching')
+    expect(readRun(store, automation.id, dispatched.id).error).toBeNull()
+    expect(readRun(store, automation.id, dispatching.id).error).toBeNull()
     service.stop()
     vi.useRealTimers()
   })

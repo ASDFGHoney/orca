@@ -29,22 +29,18 @@ export type AutomationListRow = {
   /** Authority-qualified and incarnation-free; see the module note. */
   key: string
   automation: Automation
-  /** Storage authority captured with the host query; absent only for the bootstrap list. */
+  /** Storage authority captured with the host query. */
   catalogRef?: StableAutomationCatalogRef | null
-  /** The host this row actually came from; empty for unscoped legacy rows. */
+  /** The host this row actually came from. */
   hostLabel: string
   /** What the owning authority reported; null means unknown, never zero. */
   usageSummary: AutomationUsageSummary | null
 }
 
 const ROW_KEY_NAMESPACE = 'row'
-/** The pre-catalog list has no host to qualify with, so it says so rather than guessing one. */
-const UNSCOPED_HOST_KEY = 'unscoped'
 
-export function automationListRowKey(hostStableKey: string | null, automationId: string): string {
-  return [ROW_KEY_NAMESPACE, hostStableKey ?? UNSCOPED_HOST_KEY, automationId]
-    .map(encodeURIComponent)
-    .join('|')
+export function automationListRowKey(hostStableKey: string, automationId: string): string {
+  return [ROW_KEY_NAMESPACE, hostStableKey, automationId].map(encodeURIComponent).join('|')
 }
 
 /**
@@ -55,19 +51,6 @@ export function automationListRowKey(hostStableKey: string | null, automationId:
  */
 export function automationAuthorityRecordKey(authorityKey: string, automationId: string): string {
   return [authorityKey, automationId].map(encodeURIComponent).join('|')
-}
-
-/** The unscoped list the page shows before any host has answered. */
-export function unscopedAutomationListRows(
-  automations: readonly Automation[]
-): AutomationListRow[] {
-  return automations.map((automation) => ({
-    key: automationListRowKey(null, automation.id),
-    automation,
-    catalogRef: null,
-    hostLabel: '',
-    usageSummary: null
-  }))
 }
 
 export function automationRepoForRow(

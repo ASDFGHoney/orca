@@ -259,7 +259,7 @@ describe('buildAutomationHostCatalog', () => {
     expect(entry.executionHealth).toBe('unknown')
   })
 
-  it('keeps a legacy runtime view-only: no generations, no owners', () => {
+  it("keeps only a legacy runtime's SSH entries view-only; Self stays fully usable", () => {
     const catalog = buildAutomationHostCatalog(
       buildInput({
         runtimes: [
@@ -273,8 +273,17 @@ describe('buildAutomationHostCatalog', () => {
     const nested = entryAt(catalog, runtimeSshKey('env-1', 'legacy'))
     expect(nested.querySupport).toBe('legacy-unscoped')
     expect(nested.owner).toBeNull()
-    // Self needs no target generation, so it stays owned even on an old server.
-    expect(entryAt(catalog, runtimeSelfKey('env-1')).owner).not.toBeNull()
+    expect(nested.scopeGap).toBe('authority-unscoped')
+    // Self needs no target generation: it keeps its owner and records no scope
+    // gap, so an old server never renders Runtime + Self as View only.
+    const self = entryAt(catalog, runtimeSelfKey('env-1'))
+    expect(self.owner).toEqual({
+      authority: { kind: 'runtime', environmentId: 'env-1', pairingRevision: 7 },
+      selector: { kind: 'self' }
+    })
+    expect(self.scopeGap).toBeUndefined()
+    // Still the legacy transport: one unscoped list per authority per cycle.
+    expect(self.querySupport).toBe('legacy-unscoped')
   })
 
   it('downgrades a scoped entry whose target carries no generation', () => {

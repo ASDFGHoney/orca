@@ -17,6 +17,7 @@ import {
   installAutomationsPageHarness,
   mocks,
   renderPage,
+  RUNTIME_ID,
   runtimeHost,
   scopedList,
   SELF_PRECONDITION,
@@ -120,5 +121,72 @@ describe('AutomationsPage row actions under a colliding automation id', () => {
       expectedOwner: SELF_PRECONDITION
     })
     expect(runtimeAutomationCalls()).not.toContain('automation.delete')
+  })
+
+  it('routes a runtime orphan history, pause, and delete to its listing authority', async () => {
+    const desktop = makeAutomation({ id: 'a-1', name: 'Desktop nightly' })
+    const runtime = makeAutomation({ id: 'a-1', name: 'Runtime orphan' })
+    runtimeHost([], [])
+    scopedList([desktop])
+    api.automations.list.mockResolvedValue([desktop])
+    mocks.state.selectedAutomationId = 'a-1'
+    mocks.callRuntimeRpc.mockImplementation(async (_target: unknown, method: string) => {
+      if (method === 'automation.list') {
+        return {
+          automations: [runtime],
+          items: [
+            {
+              automationId: runtime.id,
+              selector: { kind: 'orphan', issue: 'missing_repo' }
+            }
+          ],
+          orphanCount: 1
+        }
+      }
+      return method === 'automation.runs' ? { runs: [] } : {}
+    })
+
+    await renderPage()
+    await settleHostQueries()
+    const runtimeRow = mocks.listPanel?.filteredRows.find(
+      (candidate) => candidate.automation.name === 'Runtime orphan'
+    )
+    expect(runtimeRow).toBeDefined()
+    if (!runtimeRow) {
+      throw new Error('runtime orphan row missing')
+    }
+    expect(mocks.listPanel?.isActionEnabled(runtimeRow, 'toggle')).toBe(true)
+    expect(mocks.listPanel?.isActionEnabled(runtimeRow, 'delete')).toBe(true)
+
+    await act(async () => {
+      mocks.listPanel?.selectAutomationRow(runtimeRow?.key ?? '')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(mocks.detailPane?.selected?.name).toBe('Runtime orphan')
+    await act(async () => {
+      mocks.listPanel?.toggleAutomation(runtimeRow)
+    })
+    await act(async () => {
+      mocks.listPanel?.requestDeleteAutomation(runtimeRow)
+    })
+    await act(async () => {
+      mocks.deleteDialog?.onConfirm()
+    })
+
+    const calls = mocks.callRuntimeRpc.mock.calls.filter((call) =>
+      ['automation.runs', 'automation.update', 'automation.delete'].includes(String(call[1]))
+    )
+    expect(calls.map((call) => call[0])).toEqual(
+      expect.arrayContaining([
+        { kind: 'environment', environmentId: RUNTIME_ID },
+        { kind: 'environment', environmentId: RUNTIME_ID },
+        { kind: 'environment', environmentId: RUNTIME_ID }
+      ])
+    )
+    expect(calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining(['automation.runs', 'automation.update', 'automation.delete'])
+    )
+    expect(api.automations.update).not.toHaveBeenCalled()
+    expect(api.automations.delete).not.toHaveBeenCalled()
   })
 })

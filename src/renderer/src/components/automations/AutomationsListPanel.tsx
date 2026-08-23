@@ -19,10 +19,6 @@ import type { TaskSourceHostAvailability } from '../task-source-context-summary'
 import type { AutomationRowAction } from './automation-captured-owner'
 import type { AutomationHostTarget } from './automation-host-client'
 import { clampAutomationListSearchQueryInput } from './automation-list-search'
-import {
-  getAutomationListArrowNavigationTarget,
-  type AutomationListArrowKey
-} from './automation-list-keyboard-navigation'
 import type { AutomationListRow } from './automation-list-row-identity'
 import type { AutomationPaneTab } from './automation-page-state'
 import { AutomationListSearchField } from './AutomationListSearchField'
@@ -31,8 +27,6 @@ import type { ExternalAutomationListEntry } from './external-automation-list-ent
 import type { ExternalAutomationScope } from './external-automation-scope-client'
 import { AutomationListLocalRows } from './AutomationListLocalRows'
 import { AutomationListExternalRows } from './AutomationListExternalRows'
-import { AutomationListHostGroups } from './AutomationListHostGroups'
-import { filterAutomationHostGroups } from './automation-host-list-rows'
 import { AutomationHostPicker } from './AutomationHostPicker'
 import { AutomationHostFilterNotice, AutomationHostLoadSummary } from './AutomationHostFilterNotice'
 import { AutomationListEmptyView } from './AutomationListEmptyView'
@@ -42,6 +36,7 @@ import type { AutomationHostCatalogView } from './use-automation-host-catalog'
 import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
 import type { AutomationHostCatalogEntry } from './automation-host-catalog-types'
 import { useAutomationListFocusRecovery } from './use-automation-list-focus-recovery'
+import { useAutomationListKeyboardNavigation } from './use-automation-list-keyboard-navigation'
 import { AUTOMATIONS_TABLE_GRID_CLASS } from './automations-table-layout'
 import { LIST_TABLE_CONTAINER_CLASS, LIST_TABLE_HEADER_CLASS } from '@/lib/list-table-layout'
 import { translate } from '@/i18n/i18n'
@@ -64,7 +59,7 @@ type AutomationsListPanelProps = {
   onRecoverHost: (
     action: AutomationHostRecoveryAction,
     entry?: AutomationHostCatalogEntry | null
-  ) => void
+  ) => void | Promise<void>
   filteredRows: readonly AutomationListRow[]
   filteredExternalAutomationEntries: readonly ExternalAutomationListEntry[]
   selectedRowKey: string | null
@@ -157,62 +152,18 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
   } = props
   const listRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
-  const pendingKeyboardScrollRef = useRef(false)
   const rowKeys = React.useMemo(() => filteredRows.map((row) => row.key), [filteredRows])
-  const visibleRowKeys = React.useMemo(() => new Set(rowKeys), [rowKeys])
-  const visibleItems = React.useMemo(
-    () => [
-      ...filteredRows.map((row) => ({ kind: 'local' as const, id: row.key })),
-      ...filteredExternalAutomationEntries.map((entry) => ({ kind: 'external' as const, id: entry.key }))
-    ],
-    [filteredExternalAutomationEntries, filteredRows]
-  )
   useAutomationListFocusRecovery({ rowKeys, containerRef: listRef, fallbackRef: pickerRef })
-  const handleSearchArrowNavigate = React.useCallback(
-    (key: AutomationListArrowKey) => {
-      const next = getAutomationListArrowNavigationTarget({
-        items: visibleItems,
-        selectedId: selectedRowKey,
-        selectedExternalKey,
-        key
-      })
-      if (!next) {
-        return
-      }
-      const alreadySelected =
-        next.kind === 'local'
-          ? selectedExternalKey === null && selectedRowKey === next.id
-          : selectedExternalKey === next.id
-      if (alreadySelected) {
-        listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: 'nearest' })
-        return
-      }
-      pendingKeyboardScrollRef.current = true
-      if (next.kind === 'local') {
-        selectExternalKey(null)
-        selectAutomationRow(next.id)
-      } else {
-        selectAutomationRow(null)
-        selectExternalKey(next.id)
-        setActivePaneTab('overview')
-      }
-    },
-    [
-      selectAutomationRow,
-      selectExternalKey,
-      selectedExternalKey,
-      selectedRowKey,
-      setActivePaneTab,
-      visibleItems
-    ]
-  )
-  React.useEffect(() => {
-    if (!pendingKeyboardScrollRef.current) {
-      return
-    }
-    pendingKeyboardScrollRef.current = false
-    listRef.current?.querySelector('[data-current="true"]')?.scrollIntoView({ block: 'nearest' })
-  }, [selectedExternalKey, selectedRowKey])
+  const handleSearchArrowNavigate = useAutomationListKeyboardNavigation({
+    filteredRows,
+    filteredExternalAutomationEntries,
+    selectedRowKey,
+    selectedExternalKey,
+    selectAutomationRow,
+    selectExternalKey,
+    setActivePaneTab,
+    listRef
+  })
   const emptyStateInput = {
     resolution: hostCatalog.resolution,
     ...searchCounts,
@@ -236,8 +187,9 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
     hostLabelById,
     isActionEnabled,
     onSelect: (rowKey: string) => {
-      selectExternalKey(null)
       selectAutomationRow(rowKey)
+      selectExternalKey(null)
+      setActivePaneTab('overview')
       onOpenDetail()
     },
     onRunNow: runNow,
@@ -251,9 +203,9 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
       className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 pb-4 md:px-5"
       data-contextual-tour-target="automations-list"
     >
-      <div className="flex shrink-0 items-end justify-between gap-3 pb-4">
-        <div className="flex min-w-0 flex-1 items-end gap-2">
-          <div ref={pickerRef} className="w-48 shrink-0">
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div ref={pickerRef} className="w-80 shrink-0">
             <AutomationHostPicker
               entries={hostCatalog.entries}
               resolution={hostCatalog.resolution}
@@ -274,22 +226,22 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="icon-sm"
+                className="shrink-0"
                 aria-label={translate(
-                  'auto.components.automations.AutomationsPage.19a6e30eae',
+                  'auto.components.automations.AutomationsPage.refreshAutomations',
                   'Refresh automations'
                 )}
-                onClick={onRefresh}
+                onClick={() => onRefresh()}
                 disabled={isRefreshing}
-                className="shrink-0 border border-border bg-background shadow-none hover:bg-muted/50"
               >
-                <RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} />
+                <RefreshCw className={cn('size-3.5', isRefreshing && 'animate-spin')} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>
+            <TooltipContent side="top" sideOffset={4}>
               {translate(
-                'auto.components.automations.AutomationsPage.19a6e30eae',
+                'auto.components.automations.AutomationsPage.refreshAutomations',
                 'Refresh automations'
               )}
             </TooltipContent>
@@ -326,10 +278,7 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
 
       <div
         ref={listRef}
-        className={cn(
-          'scrollbar-sleek min-h-0 flex-1 overflow-auto',
-          LIST_TABLE_CONTAINER_CLASS
-        )}
+        className={cn('scrollbar-sleek min-h-0 flex-1 overflow-auto', LIST_TABLE_CONTAINER_CLASS)}
       >
         {hasFilteredListItems ? (
           <>
@@ -342,6 +291,9 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
               </span>
               <span>
                 {translate('auto.components.automations.AutomationsPage.tableProject', 'Project')}
+              </span>
+              <span>
+                {translate('auto.components.automations.AutomationsPage.tableHost', 'Host')}
               </span>
               <span>
                 {translate('auto.components.automations.AutomationDetail.578ff46987', 'Next run')}
@@ -360,16 +312,7 @@ export function AutomationsListPanel(props: AutomationsListPanelProps): React.JS
               </span>
             </div>
             <div className="divide-y divide-border/50">
-              {hostCatalog.rows.groups.length > 0 ? (
-                <AutomationListHostGroups
-                  {...rowProps}
-                  groups={filterAutomationHostGroups(hostCatalog.rows.groups, visibleRowKeys)}
-                  searchActive={searchCounts.searchActive}
-                  onRecover={onRecoverHost}
-                />
-              ) : (
-                <AutomationListLocalRows {...rowProps} rows={filteredRows} />
-              )}
+              <AutomationListLocalRows {...rowProps} rows={filteredRows} />
               <AutomationListExternalRows
                 entries={filteredExternalAutomationEntries}
                 selectedExternalKey={selectedExternalKey}

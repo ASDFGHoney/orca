@@ -1,6 +1,7 @@
 import React from 'react'
 import { CalendarClock, PlayCircle } from 'lucide-react'
 import type { AutomationWorkspaceProvenance } from '../../../../shared/worktree/types'
+import type { StableAutomationAuthorityRef } from '../../../../shared/automation-owner-ref'
 import {
   WorktreeCardDetailSection,
   WorktreeCardDetailSectionContent
@@ -8,13 +9,14 @@ import {
 import { DetailHeader, MetadataActionIcon } from './WorktreeCardMetadataControls'
 import { translate } from '@/i18n/i18n'
 import {
-  getAutomationTargetFromHostId,
+  getAutomationTargetFromAuthority,
   listAutomationRunsForTarget,
   listAutomationsForTarget
 } from '@/components/automations/automation-host-client'
 
 type WorktreeCardAutomationDetailSectionProps = {
   provenance: AutomationWorkspaceProvenance
+  authority: StableAutomationAuthorityRef | null
   onOpenAutomation?: (event: React.MouseEvent) => void
   onOpenAutomationRun?: (event: React.MouseEvent) => void
 }
@@ -27,29 +29,36 @@ type AutomationProvenanceAvailability =
 
 export function WorktreeCardAutomationDetailSection({
   provenance,
+  authority,
   onOpenAutomation,
   onOpenAutomationRun
 }: WorktreeCardAutomationDetailSectionProps): React.JSX.Element {
   const [availability, setAvailability] = React.useState<AutomationProvenanceAvailability>({
     status: 'checking'
   })
+  const authorityKind = authority?.kind ?? null
+  const authorityEnvironmentId = authority?.kind === 'runtime' ? authority.environmentId : null
 
   React.useEffect(() => {
     let cancelled = false
     async function resolveAvailability(): Promise<void> {
       setAvailability({ status: 'checking' })
       try {
-        // Why not the workspace's host: the automation's host is recorded on the
-        // provenance, and an automation can land a workspace somewhere else
-        // entirely — substituting one for the other asks the wrong machine.
-        const target = getAutomationTargetFromHostId(provenance.hostId)
+        // The caller resolves portable provenance against this client's runtime owner.
+        if (!authorityKind) {
+          setAvailability({ status: 'unavailable' })
+          return
+        }
+        const target = getAutomationTargetFromAuthority(
+          authorityKind === 'runtime'
+            ? { kind: 'runtime', environmentId: authorityEnvironmentId! }
+            : { kind: 'desktop' }
+        )
         const automations = await listAutomationsForTarget(target)
         const automation = automations.find((entry) => entry.id === provenance.automationId)
         if (!automation) {
           if (!cancelled) {
-            // With no recorded host this read went to the desktop on no evidence,
-            // so a miss here is "could not check", never "removed".
-            setAvailability({ status: provenance.hostId ? 'automation-missing' : 'unavailable' })
+            setAvailability({ status: 'automation-missing' })
           }
           return
         }
@@ -71,7 +80,7 @@ export function WorktreeCardAutomationDetailSection({
     return () => {
       cancelled = true
     }
-  }, [provenance.automationId, provenance.automationRunId, provenance.hostId])
+  }, [authorityEnvironmentId, authorityKind, provenance.automationId, provenance.automationRunId])
 
   const canOpenAutomation = availability.status === 'available'
   const canOpenAutomationRun = availability.status === 'available' && availability.runAvailable

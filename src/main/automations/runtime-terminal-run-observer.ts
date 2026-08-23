@@ -185,11 +185,7 @@ export function createRuntimeAutomationRunTerminalObserver(
             throw error
           }
           if (Date.now() >= deadlineAt) {
-            return await buildUnobservedObservation(
-              runtime,
-              handle,
-              'Orca stopped watching this run after 6h without a completion signal.'
-            )
+            throw new Error('automation_run_observation_unverifiable')
           }
         }
       }

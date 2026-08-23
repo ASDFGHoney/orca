@@ -18,7 +18,7 @@ export type AutomationHostRowSelector = AutomationListItemSelector | LegacyAutom
 
 export type AutomationHostRow = {
   automation: Automation
-  /** Null when nothing may be mutated through it: legacy unscoped rows and orphans. */
+  /** Null when nothing may be mutated through it: legacy unscoped SSH rows and orphans. */
   owner: AutomationOwnerRef | null
   selector: AutomationHostRowSelector
   usageSummary: AutomationUsageSummary | null

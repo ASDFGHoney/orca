@@ -243,7 +243,8 @@ function remoteRelayErrorMessage(error: unknown): string {
 
 async function listRemoteManager(
   target: SshTarget,
-  provider: ExternalAutomationProvider
+  provider: ExternalAutomationProvider,
+  signal: AbortSignal
 ): Promise<ExternalAutomationManager> {
   const providerLabel = PROVIDER_LABELS[provider]
   const managerProviderId = `${provider}:ssh:${target.id}`
@@ -262,7 +263,7 @@ async function listRemoteManager(
     }
   }
   try {
-    const result = (await mux.request('externalAutomations.list', { provider })) as {
+    const result = (await mux.request('externalAutomations.list', { provider }, { signal })) as {
       jobs?: unknown[]
       hermesAvailable?: boolean
       openclawAvailable?: boolean
@@ -534,9 +535,9 @@ export function createScopedExternalAutomations(
           deps.scheduler.schedule({
             key: externalAutomationManagerCacheKey(key),
             scopeKey: scope.ownerKey,
-            run: () =>
+            run: (signal) =>
               scope.sshTarget
-                ? listRemoteManager(scope.sshTarget, scope.provider)
+                ? listRemoteManager(scope.sshTarget, scope.provider, signal)
                 : listLocalManager(scope.provider)
           }),
         { refresh: request.refresh }

@@ -1,0 +1,342 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e9]:
+          - generic [ref=e10]:
+            - generic "Orca" [ref=e11] [cursor=pointer]
+            - button "切换侧边栏" [ref=e13] [cursor=pointer]
+          - generic [ref=e16]:
+            - button "返回" [ref=e17] [cursor=pointer]
+            - button "前进" [disabled] [ref=e20]
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - button "任务" [ref=e26] [cursor=pointer]
+            - button "自动化" [ref=e29] [cursor=pointer]
+            - button "Orca 手机端" [ref=e36] [cursor=pointer]
+            - button "搜索工作树和浏览器选项卡" [ref=e40] [cursor=pointer]:
+              - generic [ref=e41]: 搜索
+          - generic [ref=e42]:
+            - generic [ref=e43]: Projects
+            - generic [ref=e45]:
+              - button "工作区选项" [ref=e46] [cursor=pointer]
+              - button "Add Project" [ref=e47] [cursor=pointer]
+              - button "New workspace" [ref=e48] [cursor=pointer]
+          - listbox "工作树" [ref=e50]:
+            - button "personal personal 的分组操作" [expanded] [ref=e51] [cursor=pointer]:
+              - generic [ref=e52]: personal
+              - generic:
+                - button "personal 的分组操作"
+            - button "AutoGenie AutoGenie 的项目操作 为 AutoGenie 创建新工作树" [expanded] [ref=e62] [cursor=pointer]:
+              - generic [ref=e63]: AutoGenie
+              - generic:
+                - button "AutoGenie 的项目操作"
+                - button "为 AutoGenie 创建新工作树"
+            - option "分支 · Unread 未读： main 主要 工作区元数据 Local Mac" [ref=e71]:
+              - generic [ref=e72]:
+                - generic [ref=e75] [cursor=pointer]:
+                  - generic [ref=e76]: 分支 · Unread
+                  - generic [ref=e84]:
+                    - generic [ref=e86]:
+                      - generic [ref=e87]:
+                        - generic [ref=e88]: 未读：
+                        - text: main
+                      - generic [ref=e89]: 主要
+                      - generic "工作区元数据" [ref=e92]: 工作区笔记
+                    - generic [ref=e98]: Local Mac
+                - button
+            - button "demo-generation demo-generation 的项目操作 为 demo-generation 创建新工作树" [expanded] [ref=e102]:
+              - generic [ref=e103]: demo-generation
+              - generic:
+                - button "demo-generation 的项目操作"
+                - button "为 demo-generation 创建新工作树"
+            - option "分支 main 主要 Local Mac" [ref=e111]:
+              - generic [ref=e112]:
+                - generic [ref=e115] [cursor=pointer]:
+                  - generic [ref=e116]: 分支
+                  - generic [ref=e123]:
+                    - generic [ref=e125]:
+                      - generic [ref=e126]: main
+                      - generic [ref=e127]: 主要
+                    - generic [ref=e128]: Local Mac
+                - button
+            - option "分支 · Unread 未读： demo Local Mac" [ref=e132]:
+              - generic [ref=e133]:
+                - generic [ref=e136] [cursor=pointer]:
+                  - generic [ref=e137]: 分支 · Unread
+                  - generic [ref=e145]:
+                    - generic [ref=e148]:
+                      - generic [ref=e149]: 未读：
+                      - text: demo
+                    - generic [ref=e150]: Local Mac
+                - button
+            - button "jinjing-work jinjing-work 的项目操作 为 jinjing-work 创建新工作树" [expanded] [ref=e154]:
+              - generic [ref=e155]: jinjing-work
+              - generic:
+                - button "jinjing-work 的项目操作"
+                - button "为 jinjing-work 创建新工作树"
+            - option "分支 main 主要 Local Mac" [ref=e163]:
+              - generic [ref=e164]:
+                - generic [ref=e167] [cursor=pointer]:
+                  - generic [ref=e168]: 分支
+                  - generic [ref=e175]:
+                    - generic [ref=e177]:
+                      - generic [ref=e178]: main
+                      - generic [ref=e179]: 主要
+                    - generic [ref=e180]: Local Mac
+                - button
+            - option "分支 improve-agent-session Local Mac" [ref=e184]:
+              - generic [ref=e185]:
+                - generic [ref=e188] [cursor=pointer]:
+                  - generic [ref=e189]: 分支
+                  - generic [ref=e196]:
+                    - generic [ref=e197]: improve-agent-session
+                    - generic [ref=e200]: Local Mac
+                - button
+            - button "orca orca 的项目操作 为 orca 创建新工作树" [expanded] [ref=e204]:
+              - generic [ref=e205]: orca
+              - generic:
+                - button "orca 的项目操作"
+                - button "为 orca 创建新工作树"
+            - option "Inactive orca 主要 4 直播 ports Local Mac Detached HEAD at 4fd93ea. You are viewing a commit, not a branch." [ref=e211]:
+              - generic [ref=e212]:
+                - generic [ref=e215] [cursor=pointer]:
+                  - generic [ref=e216]: Inactive
+                  - generic [ref=e221]:
+                    - generic [ref=e223]:
+                      - generic [ref=e224]: orca
+                      - generic [ref=e225]: 主要
+                      - button "4 直播 ports" [ref=e228]
+                    - generic [ref=e232]:
+                      - generic [ref=e233]: Local Mac
+                      - generic "Detached HEAD at 4fd93ea. You are viewing a commit, not a branch." [ref=e235]: Detached HEAD @ 4fd93ea
+                - button
+            - option "Inactive Connect to SSH host openclaw orca 主要 openclaw" [ref=e237]:
+              - generic [ref=e238]:
+                - generic [ref=e241] [cursor=pointer]:
+                  - generic [ref=e242]: Inactive
+                  - generic [ref=e247]:
+                    - generic [ref=e249]:
+                      - button "Connect to SSH host openclaw" [ref=e250]
+                      - generic [ref=e251]: orca
+                      - generic [ref=e252]: 主要
+                    - generic [ref=e253]: openclaw
+                - button
+            - option "分支 auto-daily-prod-release-scan-run-19-20260822T1740 Local Mac" [ref=e257]:
+              - generic [ref=e258]:
+                - generic [ref=e261] [cursor=pointer]:
+                  - generic [ref=e262]: 分支
+                  - generic [ref=e269]:
+                    - generic [ref=e270]: auto-daily-prod-release-scan-run-19-20260822T1740
+                    - generic [ref=e273]: Local Mac
+                - button
+            - 'option "PR: Merged fix(automations): localize schedule weekday names and labels Local Mac" [ref=e277]':
+              - generic [ref=e278]:
+                - generic [ref=e281] [cursor=pointer]:
+                  - generic [ref=e282]: "PR: Merged"
+                  - generic [ref=e289]:
+                    - generic [ref=e290]: "fix(automations): localize schedule weekday names and labels"
+                    - generic [ref=e293]: Local Mac
+                - button
+            - option "分支 fix-rebase-race Local Mac" [ref=e297]:
+              - generic [ref=e298]:
+                - generic [ref=e301] [cursor=pointer]:
+                  - generic [ref=e302]: 分支
+                  - generic [ref=e309]:
+                    - generic [ref=e310]: fix-rebase-race
+                    - generic [ref=e313]: Local Mac
+                - button
+            - option "分支 allow-create-automations-with-ai Local Mac" [ref=e317]:
+              - generic [ref=e318]:
+                - generic [ref=e321] [cursor=pointer]:
+                  - generic [ref=e322]: 分支
+                  - generic [ref=e329]:
+                    - generic [ref=e330]: allow-create-automations-with-ai
+                    - generic [ref=e333]: Local Mac
+                - button
+            - option "分支 sta-4846-reconnect 8 直播 ports Local Mac" [ref=e672]:
+              - generic [ref=e338]:
+                - generic [ref=e341] [cursor=pointer]:
+                  - generic [ref=e342]: 分支
+                  - generic [ref=e349]:
+                    - generic [ref=e351]:
+                      - generic [ref=e352]: sta-4846-reconnect
+                      - button "8 直播 ports" [ref=e675]
+                    - generic [ref=e353]: Local Mac
+                - button
+            - option "分支 sta-4907-review Local Mac" [ref=e357]:
+              - generic [ref=e358]:
+                - generic [ref=e361] [cursor=pointer]:
+                  - generic [ref=e362]: 分支
+                  - generic [ref=e369]:
+                    - generic [ref=e370]: sta-4907-review
+                    - generic [ref=e373]: Local Mac
+                - button
+            - option "分支 sta-4998-quick-open Local Mac" [ref=e377]:
+              - generic [ref=e378]:
+                - generic [ref=e381] [cursor=pointer]:
+                  - generic [ref=e382]: 分支
+                  - generic [ref=e389]:
+                    - generic [ref=e390]: sta-4998-quick-open
+                    - generic [ref=e393]: Local Mac
+                - button
+            - option "分支 sta-4999-ssh-scrollback 2 直播 ports Local Mac" [ref=e397]:
+              - generic [ref=e398]:
+                - generic [ref=e401] [cursor=pointer]:
+                  - generic [ref=e402]: 分支
+                  - generic [ref=e409]:
+                    - generic [ref=e411]:
+                      - generic [ref=e412]: sta-4999-ssh-scrollback
+                      - button "2 直播 ports" [ref=e415]
+                    - generic [ref=e418]: Local Mac
+                - button
+            - option "分支 sta-5000-add-project Local Mac" [ref=e422]:
+              - generic [ref=e423]:
+                - generic [ref=e426] [cursor=pointer]:
+                  - generic [ref=e427]: 分支
+                  - generic [ref=e434]:
+                    - generic [ref=e435]: sta-5000-add-project
+                    - generic [ref=e438]: Local Mac
+                - button
+            - option "分支 sta-5001-review Local Mac" [ref=e442]:
+              - generic [ref=e443]:
+                - generic [ref=e446] [cursor=pointer]:
+                  - generic [ref=e447]: 分支
+                  - generic [ref=e454]:
+                    - generic [ref=e455]: sta-5001-review
+                    - generic [ref=e458]: Local Mac
+                - button
+            - option "分支 sta-5097-5098-cold-park Local Mac" [ref=e462]:
+              - generic [ref=e463]:
+                - generic [ref=e466] [cursor=pointer]:
+                  - generic [ref=e467]: 分支
+                  - generic [ref=e474]:
+                    - generic [ref=e475]: sta-5097-5098-cold-park
+                    - generic [ref=e478]: Local Mac
+                - button
+            - option "分支 auto-continuous-readiness-checklist-8a-12p-4p-20260822T1500 Local Mac" [ref=e482]:
+              - generic [ref=e483]:
+                - generic [ref=e486] [cursor=pointer]:
+                  - generic [ref=e487]: 分支
+                  - generic [ref=e494]:
+                    - generic [ref=e495]: auto-continuous-readiness-checklist-8a-12p-4p-20260822T1500
+                    - generic [ref=e498]: Local Mac
+                - button
+            - option "分支 auto-e2e-tests-autofix-scheduled-ci-1h-run-9-20260822T0700 Local Mac" [ref=e502]:
+              - generic [ref=e503]:
+                - generic [ref=e506] [cursor=pointer]:
+                  - generic [ref=e507]: 分支
+                  - generic [ref=e514]:
+                    - generic [ref=e515]: auto-e2e-tests-autofix-scheduled-ci-1h-run-9-20260822T0700
+                    - generic [ref=e518]: Local Mac
+                - button
+            - option "分支 auto-continuous-readiness-checklist-8a-12p-4p-20260822T0300 Local Mac" [ref=e522]:
+              - generic [ref=e523]:
+                - generic [ref=e526] [cursor=pointer]:
+                  - generic [ref=e527]: 分支
+                  - generic [ref=e534]:
+                    - generic [ref=e535]: auto-continuous-readiness-checklist-8a-12p-4p-20260822T0300
+                    - generic [ref=e538]: Local Mac
+                - button
+          - generic [ref=e544]:
+            - generic [ref=e546]:
+              - button "设置" [ref=e547] [cursor=pointer]
+              - button "帮助" [ref=e548] [cursor=pointer]
+            - generic [ref=e549]:
+              - button "显示活动工作区" [ref=e550] [cursor=pointer]
+              - button "工作区板" [ref=e551] [cursor=pointer]
+      - generic [ref=e555]:
+        - generic [ref=e556]:
+          - text: ···
+          - main [ref=e557]:
+            - heading "自动化" [level=1] [ref=e559]
+            - generic [ref=e560]:
+              - generic [ref=e561]:
+                - generic [ref=e562]:
+                  - textbox "搜索自动化" [ref=e564]:
+                    - /placeholder: 搜索...
+                  - combobox "Filter by host" [ref=e566] [cursor=pointer]:
+                    - generic:
+                      - generic:
+                        - generic "Linux"
+                        - generic:
+                          - generic "Unreachable. This host could not be reached, so its automations could not be loaded.": Unreachable
+                          - generic "Not connected. Automations on this host cannot run until the connection is restored.": Not connected
+                  - button "Refresh automations" [ref=e567] [cursor=pointer]
+                - button "新建自动化" [ref=e568] [cursor=pointer]
+              - status [ref=e569]
+              - generic [ref=e570]:
+                - generic [ref=e571]: Linux could not be reached. Showing the automations last loaded from it.
+                - generic [ref=e572]:
+                  - generic "Unreachable. This host could not be reached, so its automations could not be loaded." [ref=e573]: Unreachable
+                  - generic "Not connected. Automations on this host cannot run until the connection is restored." [ref=e575]: Not connected
+                - button "Reconnect" [ref=e577] [cursor=pointer]
+              - status [ref=e578]: 1 of 3 hosts could not be loaded
+              - paragraph [ref=e579]: External automation managers are not listed for this host in this release.
+              - generic [ref=e580]:
+                - generic [ref=e581]:
+                  - generic [ref=e582]: 名称
+                  - generic [ref=e583]: 日程
+                  - generic [ref=e584]: 项目
+                  - generic [ref=e585]: Host
+                  - generic [ref=e586]: 下次运行
+                  - generic [ref=e587]: Last run
+                  - generic [ref=e588]: 状态
+                  - generic [ref=e589]: 智能体
+                  - generic [ref=e590]: 操作
+                - button "工作日仓库审计 Weekdays at 9:00 AM orca-internal openclaw Aug 24, 9:00 AM (in 2d) Never 启用 Codex · openclaw · 用量不可用 自动化操作" [ref=e592] [cursor=pointer]:
+                  - generic [ref=e593]: 工作日仓库审计
+                  - generic "Weekdays at 9:00 AM" [ref=e594]
+                  - generic "orca-internal" [ref=e595]
+                  - generic "openclaw" [ref=e596]
+                  - generic "Aug 24, 9:00 AM (in 2d)" [ref=e597]
+                  - generic "Never" [ref=e598]
+                  - generic [ref=e600]: 启用
+                  - generic "Codex · openclaw · 用量不可用" [ref=e602]
+                  - button "自动化操作" [ref=e605]
+        - button "显示浮动工作区" [ref=e607]
+        - button
+    - generic [ref=e608]:
+      - generic [ref=e609]:
+        - button "使用量" [ref=e611] [cursor=pointer]:
+          - generic [ref=e612]: 受限
+          - generic [ref=e618]:
+            - generic [ref=e623]: 已用 0% 4h 59m
+            - generic [ref=e624]: ·
+            - generic [ref=e625]: 已用 9% 4d 9h
+          - generic [ref=e626]: 已用 31% 5d 17h
+        - button "刷新速率限制" [ref=e631] [cursor=pointer]
+      - generic [ref=e637]:
+        - button "Caffeinate, Agent · Inactive" [ref=e638] [cursor=pointer]:
+          - generic [ref=e641]: Agent
+        - button "宠物菜单" [ref=e643] [cursor=pointer]:
+          - generic [ref=e644]: Mini Sama hidden
+        - button "资源管理器，22 个终端会话" [ref=e645] [cursor=pointer]:
+          - generic [ref=e648]: 1.43 GB
+          - generic [ref=e649]: ·
+          - generic [ref=e652]: "22"
+        - button "端口，109 工作区 ports" [ref=e678] [cursor=pointer]:
+          - generic [ref=e656]: "109"
+        - button "远程主机连接状态" [ref=e657] [cursor=pointer]:
+          - generic [ref=e658]: 0 个主机
+      - button
+    - region "Notifications alt+T"
+  - generic [ref=e668] [cursor=pointer]:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - button "Select element"
+          - generic:
+            - generic:
+              - button "Open comments":
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: "0"
+                        - generic: "0"
+          - generic:
+            - generic:
+              - button "Copy all comments"
+    - button "Expand toolbar" [ref=e669]

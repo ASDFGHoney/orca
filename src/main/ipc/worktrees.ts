@@ -2263,7 +2263,8 @@ export function registerWorktreeHandlers(
           authority: runtime,
           repoSelector: args.repoId,
           repo,
-          request: args.automationProvenanceRequest
+          request: args.automationProvenanceRequest,
+          storageAuthority: 'desktop'
         })
         const createArgs: CreateWorktreeArgsWithSystemProvenance = {
           ...args,
@@ -2330,7 +2331,8 @@ export function registerWorktreeHandlers(
           authority: runtime,
           repoSelector: args.repoId,
           repo,
-          request: args.automationProvenanceRequest
+          request: args.automationProvenanceRequest,
+          storageAuthority: 'desktop'
         })
         let result: CreateWorktreeResult
         try {

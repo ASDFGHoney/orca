@@ -2316,6 +2316,7 @@ void app.whenReady().then(async () => {
   reportSecretProtectionGap({
     dataFile: activeOrcaProfile.dataFile,
     force: process.env.ORCA_ALWAYS_REPORT_SECRET_PROTECTION === '1'
+  })
   // Why here: the host key store is a sidecar of the same profile, and every SSH connect consults
   // it. Left unbound it reports nothing trusted, which is safe but silently discards our own
   // accept records on every launch.

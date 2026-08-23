@@ -152,3 +152,23 @@ describe('AutomationsListPanel unchecked hosts', () => {
     expect(container.textContent).not.toContain('could not be checked')
   })
 })
+
+describe('AutomationsListPanel flat table layout', () => {
+  it('renders the Host column in the table header', () => {
+    const row = makeAutomationListRow()
+    renderPanel([row], '')
+
+    expect(container.textContent).toContain('Host')
+  })
+
+  it('renders rows in a flat list without host section headers', () => {
+    const row1 = makeAutomationListRow({ hostLabel: 'Local Mac' })
+    const row2 = makeAutomationListRow({ hostLabel: 'Linux' })
+    renderPanel([row1, row2], '')
+
+    expect(container.textContent).toContain('Local Mac')
+    expect(container.textContent).toContain('Linux')
+    // No section headers grouping by host
+    expect(container.querySelector('[data-host-group]')).toBeNull()
+  })
+})

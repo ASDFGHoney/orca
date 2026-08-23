@@ -121,6 +121,15 @@ export function resolveAutomationHostListRows(
   const capturedRows: AutomationCapturedRow[] = []
   let answered = false
 
+  const authorityByKey = new Map(
+    input.catalog.entries.flatMap((entry) => {
+      const authority = entry.owner?.authority
+      return authority
+        ? [[automationAuthorityCatalogKey(entry.stableRef.authority), authority] as const]
+        : []
+    })
+  )
+
   for (const entry of entries) {
     const cached = input.entry(entry.stableKey)
     if (cached && cached.fetchedAt !== null) {
@@ -143,7 +152,11 @@ export function resolveAutomationHostListRows(
         hostLabel: entry.label,
         usageSummary: row.usageSummary ?? null
       }
-      capturedRows.push({ rowKey: listRow.key, row })
+      const authority = authorityByKey.get(authorityKey)
+      if (!authority) {
+        continue
+      }
+      capturedRows.push({ rowKey: listRow.key, authority, row })
       rows.push(listRow)
       hostRows.push(listRow)
     }

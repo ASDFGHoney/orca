@@ -99,6 +99,26 @@ describe('AutomationsPage save visibility', () => {
     expect(rows(container, 'automation-row')).toEqual(['Sweep'])
   })
 
+  it('finishes the save while an external-manager probe is still hanging', async () => {
+    desktopStoreHolds([])
+    mocks.state.automationHostFilter = DESKTOP_SELF_FILTER
+    api.automations.create.mockResolvedValue(CREATED)
+
+    const { container } = await renderPage()
+    await settleHostQueries()
+
+    desktopStoreHolds([CREATED])
+    // An unreachable host's probe never answers. The save must not wait on it:
+    // waiting is what left the create dialog open over an emptied form.
+    api.automations.listExternalManagerForOwner.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    await createSweep()
+
+    expect(mocks.editorDialog?.open).toBe(false)
+    expect(rows(container, 'automation-row')).toEqual(['Sweep'])
+  })
+
   it('lists it after the page is reopened', async () => {
     desktopStoreHolds([])
     mocks.state.automationHostFilter = DESKTOP_SELF_FILTER

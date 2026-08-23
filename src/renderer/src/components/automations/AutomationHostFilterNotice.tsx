@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
 import { AutomationHostStatusBadges } from './AutomationHostBadges'
+import { AutomationHostRecoverButton } from './AutomationHostRecoverButton'
 import type { AutomationHostFilterResolution } from './automation-host-filter-resolution'
 import {
   automationHostRecoveryActions,
-  recoveryActionLabel,
   type AutomationHostRecoveryAction
 } from './automation-host-status-descriptors'
 
@@ -60,7 +59,7 @@ export function AutomationHostLoadSummary({
 
 type AutomationHostFilterNoticeProps = {
   resolution: AutomationHostFilterResolution
-  onRecover?: (action: AutomationHostRecoveryAction) => void
+  onRecover?: (action: AutomationHostRecoveryAction) => void | Promise<void>
   className?: string
 }
 
@@ -132,9 +131,7 @@ export function AutomationHostFilterNotice({
           <span className="min-w-0 flex-1">{message}</span>
           {resolution.entry ? <AutomationHostStatusBadges entry={resolution.entry} /> : null}
           {action && onRecover ? (
-            <Button type="button" variant="outline" size="xs" onClick={() => onRecover(action)}>
-              {recoveryActionLabel(action)}
-            </Button>
+            <AutomationHostRecoverButton action={action} onRecover={onRecover} />
           ) : null}
         </div>
       ) : null}

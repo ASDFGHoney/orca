@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react'
 
 import type { GitHubWorkItem } from '../../../../shared/github/work-item-types'
+import { automationWorkspaceStorageAuthority } from '../../../../shared/automation-workspace-provenance'
 import { hasWorktreeCardDetails } from './WorktreeCardMeta'
 import { usePromptCacheCountdownStartedAt } from './CacheTimer'
 import { useWorktreeAgentRows } from './useWorktreeAgentRows'
@@ -83,6 +84,12 @@ export function useWorktreeCardSecondaryDetails({
   const metaJiraIssue = showJiraIssue ? hoverJiraIssue : null
   const metaReview = showPR ? hoverReview : null
   const metaAutomationProvenance = showAutomation ? worktree.automationProvenance : null
+  const automationAuthority = metaAutomationProvenance
+    ? automationWorkspaceStorageAuthority(
+        metaAutomationProvenance,
+        worktree.runtimeOwnerEnvironmentId
+      )
+    : null
   const metaCliProvenance = showCli ? worktree.cliProvenance : null
   const metaComment = showComment ? hoverComment : null
   const showInlineAgentList = cardProps.includes('inline-agents') && (newCardStyle || !compactCards)
@@ -208,6 +215,7 @@ export function useWorktreeCardSecondaryDetails({
     metaJiraIssue,
     metaReview,
     metaAutomationProvenance,
+    automationAuthority,
     metaCliProvenance,
     metaComment,
     showInlineAgentList,

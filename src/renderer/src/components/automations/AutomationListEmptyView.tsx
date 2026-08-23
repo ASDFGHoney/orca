@@ -1,19 +1,16 @@
 import React from 'react'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   resolveAutomationListEmptyState,
   type AutomationListEmptyStateInput
 } from './automation-list-empty-state'
-import {
-  recoveryActionLabel,
-  type AutomationHostRecoveryAction
-} from './automation-host-status-descriptors'
+import { AutomationHostRecoverButton } from './AutomationHostRecoverButton'
+import type { AutomationHostRecoveryAction } from './automation-host-status-descriptors'
 
 /** Renders whichever empty/partial/failure state the list is in; nothing when rows exist. */
 
 export type AutomationListEmptyViewProps = AutomationListEmptyStateInput & {
-  onRecover?: (action: AutomationHostRecoveryAction) => void
+  onRecover?: (action: AutomationHostRecoveryAction) => void | Promise<void>
   className?: string
 }
 
@@ -44,15 +41,12 @@ export function AutomationListEmptyView({
         </p>
       ) : null}
       {recovery && onRecover ? (
-        <Button
-          type="button"
-          variant="outline"
+        <AutomationHostRecoverButton
+          action={recovery}
+          onRecover={onRecover}
           size="sm"
           className="mt-1.5"
-          onClick={() => onRecover(recovery)}
-        >
-          {recoveryActionLabel(recovery)}
-        </Button>
+        />
       ) : null}
     </div>
   )

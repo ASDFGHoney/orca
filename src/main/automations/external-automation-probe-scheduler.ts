@@ -35,16 +35,25 @@ type QueuedProbe = {
 }
 
 const DEFAULT_PROBE_CONCURRENCY = 4
+/**
+ * The priority lease is an ordering preference, not a lock. Work that holds it
+ * for an unbounded time — a headless dispatch, a handler whose promise never
+ * settles — would otherwise park every queued probe for the rest of the
+ * process, and a caller waiting on one would never be answered at all.
+ */
+const PRIORITY_HOLD_MAX_MS = 30_000
 
 export class ExternalAutomationProbeScheduler {
   private readonly concurrency: number
+  private readonly priorityHoldMaxMs: number
   private readonly queue: QueuedProbe[] = []
   private readonly active = new Map<string, { scopeKey: string; controller: AbortController }>()
   private readonly shared = new Map<string, Promise<unknown>>()
   private priorityHolds = 0
 
-  constructor(options?: { concurrency?: number }) {
+  constructor(options?: { concurrency?: number; priorityHoldMaxMs?: number }) {
     this.concurrency = Math.max(1, options?.concurrency ?? DEFAULT_PROBE_CONCURRENCY)
+    this.priorityHoldMaxMs = Math.max(0, options?.priorityHoldMaxMs ?? PRIORITY_HOLD_MAX_MS)
   }
 
   get inFlight(): number {
@@ -90,18 +99,27 @@ export class ExternalAutomationProbeScheduler {
     return settled as Promise<T>
   }
 
-  /** Held for the duration of Orca list/mutation work; queued probes wait behind it. */
+  /**
+   * Held for the duration of Orca list/mutation work; queued probes wait behind
+   * it, but only until the deadline — see `PRIORITY_HOLD_MAX_MS`.
+   */
   beginPriorityWork(): () => void {
     this.priorityHolds += 1
     let released = false
-    return () => {
+    let timer: ReturnType<typeof setTimeout>
+    const release = (): void => {
       if (released) {
         return
       }
       released = true
+      clearTimeout(timer)
       this.priorityHolds = Math.max(0, this.priorityHolds - 1)
       this.pump()
     }
+    timer = setTimeout(release, this.priorityHoldMaxMs)
+    // Why unref: a lease deadline must never be the reason the process stays up.
+    timer.unref?.()
+    return release
   }
 
   /** Drops queued and in-flight probes whose scope is no longer selected. */

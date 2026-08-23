@@ -15226,7 +15226,9 @@
           "newAutomation": "New Automation",
           "rowActions": "Automation actions",
           "tableLastRun": "Last run",
-          "noListMatches": "No automations match."
+          "noListMatches": "No automations match.",
+          "tableHost": "Host",
+          "refreshAutomations": "Refresh automations"
         },
         "AutomationsPageSkeleton": {
           "55527b7bcf": "Loading automations"
@@ -15465,11 +15467,14 @@
           "action": {
             "retry": "Retry",
             "reconnect": "Reconnect",
-            "updateServer": "Update server"
+            "updateServer": "Update server",
+            "runtimeConnectFailed": "Remote host is not reachable",
+            "sshConnectFailed": "SSH connection failed"
           }
         },
         "ownerAction": {
-          "failed": "That automation action did not complete."
+          "failed": "That automation action did not complete.",
+          "workspaceNotFound": "We couldn't find that workspace on this host. Choose a workspace that exists here and try again."
         },
         "externalScope": {
           "targetHidden": "This host is managed by Orca, so its external automation managers are not listed in this release.",
@@ -15496,6 +15501,7 @@
           "unavailable": "That host cannot hold a new automation yet. Choose another host to create this one on.",
           "stale": "{host} changed while this form was open. Choose it again before saving.",
           "projectMismatch": "That project is not on {host}. Choose a project on that host, or another host.",
+          "workspacesUnverified": "We couldn't verify workspaces on {host}. Check the connection and try again.",
           "noProjects": "No projects are set up on {host}. Add one there, or choose another host."
         }
       },

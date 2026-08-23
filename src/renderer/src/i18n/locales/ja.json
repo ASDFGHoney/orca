@@ -13822,7 +13822,11 @@
           "tableStatus": "ステータス",
           "tableActions": "操作",
           "newAutomation": "新しい自動化",
-          "rowActions": "自動化の操作"
+          "rowActions": "自動化の操作",
+          "tableLastRun": "前回の実行",
+          "noListMatches": "一致する自動化はありません。",
+          "tableHost": "ホスト",
+          "refreshAutomations": "自動化を更新"
         },
         "CreateFromPicker": {
           "f061f49e3f": "リポジトリブランチを検索…",

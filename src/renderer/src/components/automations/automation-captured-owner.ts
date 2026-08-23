@@ -8,12 +8,16 @@
  * works if the request names the incarnation the user actually saw.
  *
  * Three outcomes, kept distinct because they mean different things to the user:
- * an owned row acts normally; an orphan row still deletes and pauses under the
- * orphan precondition but can never execute; a legacy row proves nothing and
- * stays view-only until its authority advertises fencing.
+ * an owned row acts normally (a legacy Self row is owned — its authority is the
+ * fence); an orphan row still deletes and pauses under the orphan precondition
+ * but can never execute; a legacy SSH row proves nothing and stays view-only
+ * until its authority advertises fencing.
  */
 
-import type { AutomationOwnerRef } from '../../../../shared/automation-owner-ref'
+import type {
+  AutomationAuthorityRef,
+  AutomationOwnerRef
+} from '../../../../shared/automation-owner-ref'
 import { ownerKey } from '../../../../shared/automation-owner-key'
 import type { AutomationOwnerPrecondition } from '../../../../shared/automation-owner-precondition'
 import { translate } from '@/i18n/i18n'
@@ -34,6 +38,8 @@ export type AutomationActionBlock = {
 }
 
 export type AutomationCapturedOwner = {
+  /** The storage authority that listed the row, including its current pairing fence. */
+  authority: AutomationAuthorityRef | null
   owner: AutomationOwnerRef | null
   /** How the authority qualified the row; null when no list metadata was captured at all. */
   selector: AutomationHostRowSelector | null
@@ -41,16 +47,18 @@ export type AutomationCapturedOwner = {
 
 export type AutomationActionAvailability =
   | { kind: 'owned'; owner: AutomationOwnerRef; precondition: AutomationOwnerPrecondition }
-  | { kind: 'orphan-fenced'; precondition: AutomationOwnerPrecondition }
+  | {
+      kind: 'orphan-fenced'
+      authority: AutomationAuthorityRef
+      precondition: AutomationOwnerPrecondition
+    }
   | { kind: 'blocked'; block: AutomationActionBlock }
-  /**
-   * No owner metadata exists for this row yet, so the caller keeps its legacy
-   * unfenced path. Removed with the inference in Step 9, never in the same
-   * change — a mixed-version client still depends on it.
-   */
-  | { kind: 'uncaptured' }
 
-export const UNCAPTURED_AUTOMATION_OWNER: AutomationCapturedOwner = { owner: null, selector: null }
+export const UNCAPTURED_AUTOMATION_OWNER: AutomationCapturedOwner = {
+  authority: null,
+  owner: null,
+  selector: null
+}
 
 /** Delete and pause survive on an orphan; running it would need a host that no longer exists. */
 const ORPHAN_ACTIONS: ReadonlySet<AutomationRowAction> = new Set(['delete', 'toggle', 'history'])
@@ -89,14 +97,21 @@ export function automationActionAvailability(
     }
   }
   if (!captured.selector) {
-    return { kind: 'uncaptured' }
+    return { kind: 'blocked', block: unfencedBlock() }
   }
   if (captured.selector.kind === 'orphan') {
+    if (!captured.authority) {
+      return { kind: 'blocked', block: unfencedBlock() }
+    }
     return ORPHAN_ACTIONS.has(action)
-      ? { kind: 'orphan-fenced', precondition: ORPHAN_OWNER_PRECONDITION }
+      ? {
+          kind: 'orphan-fenced',
+          authority: captured.authority,
+          precondition: ORPHAN_OWNER_PRECONDITION
+        }
       : { kind: 'blocked', block: orphanBlock() }
   }
-  // A qualified selector with no owner is a legacy row: no generation was ever captured.
+  // A qualified selector with no owner is a legacy SSH row: no generation was ever captured.
   return { kind: 'blocked', block: unfencedBlock() }
 }
 
@@ -112,6 +127,7 @@ export function isAutomationActionEnabled(
 export type AutomationCapturedRow = {
   /** `automationListRowKey`: authority-qualified and incarnation-free. */
   rowKey: string
+  authority: AutomationAuthorityRef
   row: AutomationHostRow
 }
 
@@ -130,8 +146,8 @@ export function captureAutomationOwners(
   rows: Iterable<AutomationCapturedRow>
 ): Map<string, AutomationCapturedOwner> {
   const captured = new Map<string, AutomationCapturedOwner>()
-  for (const { rowKey, row } of rows) {
-    captured.set(rowKey, { owner: row.owner, selector: row.selector })
+  for (const { rowKey, authority, row } of rows) {
+    captured.set(rowKey, { authority, owner: row.owner, selector: row.selector })
   }
   return captured
 }

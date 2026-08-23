@@ -2,8 +2,11 @@
  * Turns an authority's answer into cache rows.
  *
  * Scoped rows keep the owner they were fetched under so every later action can
- * fence on it. Legacy rows keep no owner and no usage: the old response proves
- * neither, and the design forbids compensating with run-history downloads.
+ * fence on it. Legacy SSH and orphan rows keep no owner and no usage: the old
+ * response proves neither, and the design forbids compensating with run-history
+ * downloads. Legacy Self rows do carry an owner — a Self record lives on the
+ * answering authority itself and mutates by id under the pairing-revision
+ * fence, so an old server degrades nothing for it.
  */
 
 import type { Automation } from '../../../../shared/automations-types'
@@ -83,9 +86,12 @@ function legacySelectorMatches(
 
 /**
  * Fans one unscoped response out to every entry that asked for it, so an old
- * runtime is queried once per cycle rather than once per selector.
+ * runtime is queried once per cycle rather than once per selector. `authority`
+ * is the incarnation the answer was fetched under; it becomes the captured
+ * owner of the Self rows and of nothing else.
  */
 export function partitionLegacyAutomationHostRows(
+  authority: AutomationAuthorityRef,
   automations: readonly Automation[],
   refs: readonly StableAutomationCatalogRef[],
   context: LegacyAutomationPartitionContext,
@@ -100,7 +106,9 @@ export function partitionLegacyAutomationHostRows(
         .filter((row) => legacySelectorMatches(row.selector, ref))
         .map((row) => ({
           automation: row.automation,
-          owner: null,
+          // Self needs no registration generation, so it is fenceable even from
+          // an unscoped answer; SSH and orphan rows stay ownerless and view-only.
+          owner: row.selector.kind === 'self' ? { authority, selector: { kind: 'self' } } : null,
           selector: row.selector,
           usageSummary: null,
           usageKnown: false
