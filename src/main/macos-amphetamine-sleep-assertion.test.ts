@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MacosAmphetamineSleepAssertion } from './macos-amphetamine-sleep-assertion'
-import type { AmphetamineSessionState, OsascriptResult } from './macos-amphetamine-session'
+import type { OsascriptResult } from './macos-amphetamine-session'
 
 function ok(stdout = ''): OsascriptResult {
   return { code: 0, stdout, stderr: '', timedOut: false }
@@ -10,70 +10,49 @@ function failure(stderr: string, code = 1): OsascriptResult {
   return { code, stdout: '', stderr, timedOut: false }
 }
 
-const NO_SESSION: AmphetamineSessionState = {
-  presence: 'idle',
-  secondsRemaining: -3,
-  isTrigger: false,
-  displaySleepAllowed: false
-}
-
-const ORCA_SESSION: AmphetamineSessionState = {
-  presence: 'active',
-  secondsRemaining: 0,
-  isTrigger: false,
-  displaySleepAllowed: true
-}
-
-/** A 20-minute session with display sleep blocked — what a hand-started session looks like. */
-const USER_TIMED_SESSION: AmphetamineSessionState = {
-  presence: 'active',
-  secondsRemaining: 1_199,
-  isTrigger: false,
-  displaySleepAllowed: false
-}
-
-const USER_TRIGGER_SESSION: AmphetamineSessionState = {
-  presence: 'active',
-  secondsRemaining: -1,
-  isTrigger: true,
-  displaySleepAllowed: false
-}
-
-/** Stands in for the single global session Amphetamine actually keeps. */
-function createFakeAmphetamine(initial: AmphetamineSessionState = NO_SESSION) {
-  let session = { ...initial }
-  const scripts: string[] = []
+/**
+ * Stands in for Amphetamine's single global session.
+ *
+ * Acquire and release are modelled as the atomic scripts they are: the fake
+ * decides adopted/started and ended/foreign/gone in one step, so a test cannot
+ * accidentally depend on a check and a write being separable.
+ */
+function createFakeAmphetamine(initial: 'none' | 'orca' | 'foreign' = 'none') {
+  let session = initial
   const run = vi.fn(async (script: string) => {
-    scripts.push(script)
-    if (script.includes('session is active')) {
-      return ok(
-        `${session.presence}|${session.secondsRemaining}|${session.isTrigger}|${session.displaySleepAllowed}`
-      )
-    }
     if (script.includes('start new session')) {
-      session = { ...ORCA_SESSION }
-      return ok()
+      if (session === 'foreign') {
+        return ok('foreign')
+      }
+      if (session === 'orca') {
+        return ok('orca-shaped')
+      }
+      session = 'orca'
+      return ok('started')
     }
     if (script.includes('end session')) {
-      session = { ...NO_SESSION }
-      return ok()
+      if (session === 'none') {
+        return ok('gone')
+      }
+      if (session === 'foreign') {
+        return ok('foreign')
+      }
+      session = 'none'
+      return ok('ended')
     }
     return ok()
   })
-  // Counted from the spy, not `scripts`, so a test that overrides the
-  // implementation still gets accurate counts.
-  const countScripts = (needle: string) =>
-    run.mock.calls.filter(([script]) => script.includes(needle)).length
   return {
     run,
-    scripts,
-    starts: () => countScripts('start new session'),
-    ends: () => countScripts('end session'),
+    calls: () => run.mock.calls.length,
+    acquires: () =>
+      run.mock.calls.filter(([script]) => script.includes('start new session')).length,
+    releases: () => run.mock.calls.filter(([script]) => script.includes('end session')).length,
     get session() {
       return session
     },
-    setSession(next: AmphetamineSessionState) {
-      session = { ...next }
+    setSession(next: 'none' | 'orca' | 'foreign') {
+      session = next
     }
   }
 }
@@ -102,8 +81,12 @@ function createAssertion(
   })
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('MacosAmphetamineSleepAssertion session ownership', () => {
-  it('starts one indefinite session when nothing is running', async () => {
+  it('starts one session when nothing is running', async () => {
     const amphetamine = createFakeAmphetamine()
     const assertion = createAssertion(amphetamine)
 
@@ -111,24 +94,24 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     assertion.start('agents-working')
     await settle()
 
-    expect(amphetamine.starts()).toBe(1)
+    // A repeat start while already holding must not spend another Apple event.
+    expect(amphetamine.acquires()).toBe(1)
     expect(assertion.getHold()).toBe('owned')
   })
 
   it('adopts a session the user already started instead of replacing it', async () => {
-    const amphetamine = createFakeAmphetamine(USER_TIMED_SESSION)
+    const amphetamine = createFakeAmphetamine('foreign')
     const assertion = createAssertion(amphetamine)
 
     assertion.start('agents-working')
     await settle()
 
-    expect(amphetamine.starts()).toBe(0)
     expect(assertion.getHold()).toBe('adopted')
-    expect(amphetamine.session).toMatchObject(USER_TIMED_SESSION)
+    expect(amphetamine.session).toBe('foreign')
   })
 
   it('never ends an adopted session', async () => {
-    const amphetamine = createFakeAmphetamine(USER_TIMED_SESSION)
+    const amphetamine = createFakeAmphetamine('foreign')
     const assertion = createAssertion(amphetamine)
 
     assertion.start('agents-working')
@@ -136,22 +119,9 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     assertion.stop('agents-idle')
     await settle()
 
-    expect(amphetamine.ends()).toBe(0)
-    expect(amphetamine.session).toMatchObject(USER_TIMED_SESSION)
+    expect(amphetamine.releases()).toBe(0)
+    expect(amphetamine.session).toBe('foreign')
     expect(assertion.getHold()).toBeNull()
-  })
-
-  it('never replaces or ends a Trigger session', async () => {
-    const amphetamine = createFakeAmphetamine(USER_TRIGGER_SESSION)
-    const assertion = createAssertion(amphetamine)
-
-    assertion.start('agents-working')
-    await settle()
-    assertion.stop('agents-idle')
-    await settle()
-
-    expect(amphetamine.starts()).toBe(0)
-    expect(amphetamine.ends()).toBe(0)
   })
 
   it('ends its own session on stop', async () => {
@@ -163,8 +133,7 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     assertion.stop('agents-idle')
     await settle()
 
-    expect(amphetamine.ends()).toBe(1)
-    expect(amphetamine.session.presence).toBe('idle')
+    expect(amphetamine.session).toBe('none')
     expect(assertion.getHold()).toBeNull()
   })
 
@@ -174,78 +143,69 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
 
     assertion.start('agents-working')
     await settle()
-    // The user starts their own session, which implicitly ended Orca's.
-    amphetamine.setSession(USER_TIMED_SESSION)
+    // The user replaces Orca's session; the release script reports "foreign".
+    amphetamine.setSession('foreign')
     assertion.stop('agents-idle')
     await settle()
 
-    expect(amphetamine.ends()).toBe(0)
-    expect(amphetamine.session).toMatchObject(USER_TIMED_SESSION)
+    expect(amphetamine.session).toBe('foreign')
+    expect(assertion.getHold()).toBeNull()
   })
 
-  it('does not end a session it cannot verify is still its own', async () => {
-    const amphetamine = createFakeAmphetamine()
+  it('reclaims an Orca-shaped session left behind by a killed process', async () => {
+    // A crash leaves the indefinite session running; adopting it would mean
+    // never ending it, and the Mac would stay awake forever.
+    const amphetamine = createFakeAmphetamine('orca')
     const assertion = createAssertion(amphetamine)
 
     assertion.start('agents-working')
     await settle()
     expect(assertion.getHold()).toBe('owned')
 
-    // The user replaces Orca's session, and the read that would reveal it fails.
-    amphetamine.setSession(USER_TIMED_SESSION)
-    amphetamine.run.mockImplementation(async (script: string) =>
-      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
-    )
     assertion.stop('agents-idle')
     await settle()
+    expect(amphetamine.session).toBe('none')
+  })
 
-    // Ending blind here would kill the user's 20-minute session.
-    expect(amphetamine.ends()).toBe(0)
+  it('keeps its own hold when the periodic re-check sees its own session', async () => {
+    vi.useFakeTimers()
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine, { reconcileMs: 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await settle()
+
+    // Downgrading to 'adopted' here would strand Orca's own session.
     expect(assertion.getHold()).toBe('owned')
   })
 
-  it('takes over when an adopted session expires', async () => {
-    const amphetamine = createFakeAmphetamine(USER_TIMED_SESSION)
-    const assertion = createAssertion(amphetamine)
+  it('takes over when an adopted session disappears', async () => {
+    vi.useFakeTimers()
+    const amphetamine = createFakeAmphetamine('foreign')
+    const assertion = createAssertion(amphetamine, { reconcileMs: 1_000 })
 
     assertion.start('agents-working')
     await settle()
     expect(assertion.getHold()).toBe('adopted')
 
-    amphetamine.setSession(NO_SESSION)
-    assertion.start('amphetamine-reconcile')
+    amphetamine.setSession('none')
+    await vi.advanceTimersByTimeAsync(1_000)
     await settle()
 
-    expect(amphetamine.starts()).toBe(1)
     expect(assertion.getHold()).toBe('owned')
+    expect(amphetamine.session).toBe('orca')
   })
 
-  it('does not start a session when the state read is unparseable', async () => {
+  it('does not claim a hold when the acquire output is unrecognized', async () => {
     const amphetamine = createFakeAmphetamine()
-    amphetamine.run.mockImplementation(async (script: string) =>
-      script.includes('session is active') ? ok('garbage') : ok()
-    )
+    amphetamine.run.mockImplementation(async (_script: string) => ok('garbage'))
     const assertion = createAssertion(amphetamine)
 
     assertion.start('agents-working')
     await settle()
 
-    // Reading it as "no session" would start one on top of the user's.
-    expect(amphetamine.starts()).toBe(0)
-    expect(assertion.getHold()).toBeNull()
-  })
-
-  it('does not start a session when the state read fails', async () => {
-    const amphetamine = createFakeAmphetamine()
-    amphetamine.run.mockImplementation(async (script: string) =>
-      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
-    )
-    const assertion = createAssertion(amphetamine)
-
-    assertion.start('agents-working')
-    await settle()
-
-    expect(amphetamine.starts()).toBe(0)
     expect(assertion.getHold()).toBeNull()
   })
 
@@ -257,6 +217,58 @@ describe('MacosAmphetamineSleepAssertion session ownership', () => {
     await settle()
 
     expect(amphetamine.run).not.toHaveBeenCalled()
+  })
+})
+
+describe('MacosAmphetamineSleepAssertion throttling', () => {
+  it('does not loop when acquire keeps failing and the service refreshes', async () => {
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    let assertion: MacosAmphetamineSleepAssertion | null = null
+    // Mirrors AgentAwakeService: a failure refreshes, which starts again.
+    const onUnexpectedFailure = vi.fn(() => {
+      assertion?.start('refresh')
+    })
+    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
+
+    assertion.start('agents-working')
+    await settle()
+
+    expect(amphetamine.calls()).toBeLessThanOrEqual(2)
+  })
+
+  it('does not loop when release keeps failing and the service refreshes', async () => {
+    const amphetamine = createFakeAmphetamine()
+    let assertion: MacosAmphetamineSleepAssertion | null = null
+    // With the mode off, the refresh a failure triggers stops the assertion again.
+    const onUnexpectedFailure = vi.fn(() => {
+      assertion?.stop('refresh')
+    })
+    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.getHold()).toBe('owned')
+
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    const before = amphetamine.calls()
+    assertion.stop('agents-idle')
+    await settle()
+
+    expect(amphetamine.calls() - before).toBeLessThanOrEqual(2)
+  })
+
+  it('keeps the hold when a release fails so a later stop retries', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    assertion.stop('agents-idle')
+    await settle()
+
+    expect(assertion.getHold()).toBe('owned')
   })
 })
 
@@ -294,79 +306,12 @@ describe('MacosAmphetamineSleepAssertion availability', () => {
 
     expect(assertion.getUnavailableReason()).toBe('automation-denied')
   })
-
-  it('does not spawn osascript in a loop when the probe keeps failing on release', async () => {
-    const amphetamine = createFakeAmphetamine()
-    let assertion: MacosAmphetamineSleepAssertion | null = null
-    // Mirrors AgentAwakeService: an unexpected failure refreshes, and with the
-    // mode off that refresh stops the assertion again.
-    const onUnexpectedFailure = vi.fn(() => {
-      assertion?.stop('refresh')
-    })
-    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
-
-    assertion.start('agents-working')
-    await settle()
-    expect(assertion.getHold()).toBe('owned')
-
-    amphetamine.run.mockImplementation(async (script: string) =>
-      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
-    )
-    const before = amphetamine.run.mock.calls.length
-    assertion.stop('agents-idle')
-    await settle()
-
-    expect(amphetamine.run.mock.calls.length - before).toBeLessThanOrEqual(2)
-  })
-
-  it('does not spawn osascript in a loop when the probe keeps failing', async () => {
-    const amphetamine = createFakeAmphetamine()
-    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
-    let assertion: MacosAmphetamineSleepAssertion | null = null
-    // Mirrors AgentAwakeService: an unexpected failure refreshes, which starts again.
-    const onUnexpectedFailure = vi.fn(() => {
-      assertion?.start('refresh')
-    })
-    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
-
-    assertion.start('agents-working')
-    await settle()
-
-    // One probe per backoff window, not one per refresh.
-    expect(amphetamine.run.mock.calls.length).toBeLessThanOrEqual(2)
-  })
-
-  it('backs off and asks for a refresh after a transient failure', async () => {
-    const onUnexpectedFailure = vi.fn()
-    const amphetamine = createFakeAmphetamine()
-    amphetamine.run.mockImplementation(async (script: string) =>
-      script.includes('start new session')
-        ? failure('AppleEvent timed out')
-        : ok('idle|-3|false|false')
-    )
-    const assertion = createAssertion(amphetamine, {
-      now: () => 1_000,
-      onUnexpectedFailure
-    })
-
-    assertion.start('agents-working')
-    await settle()
-    expect(onUnexpectedFailure).toHaveBeenCalledWith('macos-amphetamine-assertion-failure')
-    expect(assertion.isUnavailable()).toBe(false)
-
-    assertion.start('agents-working')
-    await settle()
-    // Inside the retry window the next start must not issue another start.
-    expect(amphetamine.starts()).toBe(1)
-  })
 })
 
 describe('MacosAmphetamineSleepAssertion dispose', () => {
   it('ends its own session synchronously so quit cannot leak it', async () => {
     const amphetamine = createFakeAmphetamine()
-    const runOsascriptSync = vi.fn((script: string) =>
-      script.includes('session is active') ? ok('active|0|false|true') : ok()
-    )
+    const runOsascriptSync = vi.fn((_script: string) => ok('ended'))
     const assertion = createAssertion(amphetamine, { runOsascriptSync })
 
     assertion.start('agents-working')
@@ -376,50 +321,29 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
       true
     )
-  })
-
-  it('leaves a replaced session alone on dispose', async () => {
-    const amphetamine = createFakeAmphetamine()
-    const runOsascriptSync = vi.fn((script: string) =>
-      script.includes('session is active') ? ok('active|1199|false|false') : ok()
-    )
-    const assertion = createAssertion(amphetamine, { runOsascriptSync })
-
-    assertion.start('agents-working')
-    await settle()
-    assertion.dispose()
-
-    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
-      false
-    )
+    expect(assertion.getHold()).toBeNull()
   })
 
   it('ends a session that started while quit was already in flight', async () => {
     const amphetamine = createFakeAmphetamine()
-    let releaseStart = (): void => {}
-    const started = new Promise<void>((resolve) => {
-      releaseStart = resolve
+    let releaseAcquire = (): void => {}
+    const acquired = new Promise<void>((resolve) => {
+      releaseAcquire = resolve
     })
     amphetamine.run.mockImplementation(async (script: string) => {
-      if (script.includes('session is active')) {
-        return ok('idle|-3|false|false')
-      }
       if (script.includes('start new session')) {
-        await started
-        return ok()
+        await acquired
+        return ok('started')
       }
-      return ok()
+      return ok('ended')
     })
-    const runOsascriptSync = vi.fn((script: string) =>
-      script.includes('session is active') ? ok('active|0|false|true') : ok()
-    )
+    const runOsascriptSync = vi.fn((_script: string) => ok('ended'))
     const assertion = createAssertion(amphetamine, { runOsascriptSync })
 
     assertion.start('agents-working')
     await settle()
-    // Quit lands while `start new session` is still in flight.
     assertion.dispose()
-    releaseStart()
+    releaseAcquire()
     await settle()
 
     expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
@@ -428,27 +352,9 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(assertion.getHold()).toBeNull()
   })
 
-  it('does not end a session on dispose when the verifying read fails', async () => {
-    const amphetamine = createFakeAmphetamine()
-    const runOsascriptSync = vi.fn((script: string) =>
-      script.includes('session is active') ? failure('AppleEvent timed out') : ok()
-    )
-    const assertion = createAssertion(amphetamine, { runOsascriptSync })
-
-    assertion.start('agents-working')
-    await settle()
-    assertion.dispose()
-
-    // A leaked Orca session is one click away in Amphetamine's menu bar;
-    // silently ending the user's is not recoverable.
-    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
-      false
-    )
-  })
-
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {
     const amphetamine = createFakeAmphetamine()
-    const runOsascriptSync = vi.fn((_script: string) => ok())
+    const runOsascriptSync = vi.fn((_script: string) => ok('gone'))
     const assertion = createAssertion(amphetamine, { runOsascriptSync })
 
     assertion.dispose()
@@ -458,8 +364,8 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
   })
 
   it('does not end an adopted session on dispose', async () => {
-    const amphetamine = createFakeAmphetamine(USER_TIMED_SESSION)
-    const runOsascriptSync = vi.fn((_script: string) => ok())
+    const amphetamine = createFakeAmphetamine('foreign')
+    const runOsascriptSync = vi.fn((_script: string) => ok('foreign'))
     const assertion = createAssertion(amphetamine, { runOsascriptSync })
 
     assertion.start('agents-working')
@@ -467,5 +373,20 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     assertion.dispose()
 
     expect(runOsascriptSync).not.toHaveBeenCalled()
+  })
+
+  it('does not run a second async release after dispose has claimed it', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const runOsascriptSync = vi.fn((_script: string) => ok('ended'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    const before = amphetamine.releases()
+    assertion.stop('agents-idle')
+    assertion.dispose()
+    await settle()
+
+    expect(amphetamine.releases()).toBe(before)
   })
 })

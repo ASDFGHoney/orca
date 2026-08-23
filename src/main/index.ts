@@ -2359,9 +2359,12 @@ void app.whenReady().then(async () => {
   agentAwakeService.setMacosEngine(
     normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine)
   )
-  // Why eagerly: the status-bar picker has to know whether Amphetamine is installed
-  // before the user opens it, not after they pick an engine that cannot run.
-  void agentAwakeService.probeAmphetamine()
+  // Only when it is already the engine: otherwise the probe is a per-launch
+  // osascript spawn for UI that may never render, and getStatus() triggers it
+  // lazily when the picker first asks.
+  if (normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine) === 'amphetamine') {
+    void agentAwakeService.probeAmphetamine()
+  }
   // Why: start from empty — disk-hydrated status rows are UI continuity only; only this runtime's hook events keep the computer awake.
   agentAwakeService.setStatuses([])
   const collectChangedProviderSessionWorktrees = createHookProviderSessionInvalidator()

@@ -117,6 +117,9 @@ export class AgentAwakeService {
   }
 
   getStatus(): ComputerAwakeStatus {
+    // The picker asks for status when it first renders; that is the cheapest
+    // moment to learn whether Amphetamine exists, rather than at every launch.
+    void this.macos.probeInstalledIfUnknown()
     const workingAgentCount = this.getEligibleRunningStatusCount()
     return this.decorateStatus({
       mode: this.mode,

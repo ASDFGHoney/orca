@@ -119,12 +119,16 @@ test('offers the macOS keep-awake engine picker in the status bar', async ({ orc
 
   await waitForStartupFocusToSettle(orcaPage)
   await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
-  const engines = orcaPage.getByRole('radiogroup', { name: 'Keep awake engine' })
-  const caffeinateEngine = engines.getByRole('radio', { name: 'Caffeinate' })
-  const amphetamineEngine = engines.getByRole('radio', { name: 'Amphetamine' })
+  // Menu items, not bare buttons, so Radix roving focus reaches them by keyboard.
+  const caffeinateEngine = orcaPage.getByRole('menuitemradio', { name: 'Caffeinate' })
+  const amphetamineEngine = orcaPage.getByRole('menuitemradio', { name: 'Amphetamine' })
   await expect(caffeinateEngine).toBeVisible()
   await expect(amphetamineEngine).toBeVisible()
   await expect(caffeinateEngine).toHaveAttribute('aria-checked', 'true')
+
+  // Keyboard reachability is the point of using menu items here.
+  await orcaPage.keyboard.press('ArrowDown')
+  await expect(orcaPage.locator('[data-highlighted]')).toHaveCount(1)
 
   // The tooltips are how the two engines explain themselves, so assert their
   // substance rather than just their presence.

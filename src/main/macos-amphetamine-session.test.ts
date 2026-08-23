@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  AMPHETAMINE_PROBE_SCRIPT,
-  AMPHETAMINE_START_SESSION_SCRIPT,
+  AMPHETAMINE_ACQUIRE_SCRIPT,
+  AMPHETAMINE_RELEASE_SCRIPT,
   classifyAmphetamineFailure,
   detectAmphetamineInstalled,
-  isOrcaShapedSession,
-  parseAmphetamineSession,
+  parseAcquireOutcome,
+  parseReleaseOutcome,
   type OsascriptResult
 } from './macos-amphetamine-session'
 
@@ -17,55 +17,63 @@ function failure(stderr: string, code = 1): OsascriptResult {
   return { code, stdout: '', stderr, timedOut: false }
 }
 
-describe('Amphetamine session scripts', () => {
+describe('Amphetamine scripts', () => {
+  it('checks and starts in a single Apple event', () => {
+    // Two invocations would let a user session appear between them and be destroyed.
+    expect(AMPHETAMINE_ACQUIRE_SCRIPT.match(/tell application id/g)).toHaveLength(1)
+    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('if session is active then')
+    // The shape test must sit inside the same tell block as the start.
+    expect(AMPHETAMINE_ACQUIRE_SCRIPT.indexOf('display sleep allowed')).toBeLessThan(
+      AMPHETAMINE_ACQUIRE_SCRIPT.indexOf('start new session')
+    )
+  })
+
   it('asks for an indefinite session explicitly', () => {
     // Omitting options inherits the user's default duration, which silently expires.
-    expect(AMPHETAMINE_START_SESSION_SCRIPT).toContain('duration:0')
-    expect(AMPHETAMINE_START_SESSION_SCRIPT).toContain('interval:0')
+    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('duration:0')
+    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('interval:0')
   })
 
-  it('guards the probe so reading state cannot launch Amphetamine', () => {
-    expect(AMPHETAMINE_PROBE_SCRIPT).toContain('is running')
+  it('verifies every foreign-session shape before ending', () => {
+    for (const guard of [
+      'if not (session is active) then return "gone"',
+      'if session is Trigger then return "foreign"',
+      'if (session time remaining) is not 0 then return "foreign"',
+      'if not (display sleep allowed) then return "foreign"'
+    ]) {
+      expect(AMPHETAMINE_RELEASE_SCRIPT).toContain(guard)
+    }
+    // Every guard must precede the destructive command.
+    expect(AMPHETAMINE_RELEASE_SCRIPT.indexOf('display sleep allowed')).toBeLessThan(
+      AMPHETAMINE_RELEASE_SCRIPT.indexOf('end session')
+    )
   })
-})
 
-describe('parseAmphetamineSession', () => {
-  it.each([
-    ['active|0|false|true', { presence: 'active', secondsRemaining: 0 }],
-    ['active|1199|false|false', { presence: 'active', secondsRemaining: 1199 }],
-    ['active|-1|true|false', { presence: 'active', secondsRemaining: -1, isTrigger: true }],
-    ['idle|-3|false|false', { presence: 'idle', secondsRemaining: -3 }],
-    ['absent|-3|false|false', { presence: 'absent', secondsRemaining: -3 }]
-  ])('parses %s', (stdout, expected) => {
-    expect(parseAmphetamineSession(stdout)).toMatchObject(expected)
-  })
-
-  it('returns null for output it does not recognize', () => {
-    expect(parseAmphetamineSession('what')).toBeNull()
-    expect(parseAmphetamineSession('')).toBeNull()
+  it('never launches Amphetamine just to release', () => {
+    expect(AMPHETAMINE_RELEASE_SCRIPT).toContain('is running')
   })
 })
 
-describe('isOrcaShapedSession', () => {
-  const orcaShaped = {
-    presence: 'active' as const,
-    secondsRemaining: 0,
-    isTrigger: false,
-    displaySleepAllowed: true
-  }
-
-  it('matches the indefinite session Orca starts', () => {
-    expect(isOrcaShapedSession(orcaShaped)).toBe(true)
+describe('outcome parsing', () => {
+  it.each([
+    ['started', 'started'],
+    ['orca-shaped\n', 'orca-shaped'],
+    ['foreign', 'foreign']
+  ])('parses acquire %s', (stdout, expected) => {
+    expect(parseAcquireOutcome(stdout)).toBe(expected)
   })
 
   it.each([
-    ['a timed session', { secondsRemaining: 1199 }],
-    ['a Trigger session', { secondsRemaining: -1, isTrigger: true }],
-    ['an app or date session', { secondsRemaining: -2 }],
-    ['a session that blocks display sleep', { displaySleepAllowed: false }],
-    ['no session', { presence: 'idle' as const, secondsRemaining: -3 }]
-  ])('does not claim %s', (_label, overrides) => {
-    expect(isOrcaShapedSession({ ...orcaShaped, ...overrides })).toBe(false)
+    ['ended', 'ended'],
+    ['foreign\n', 'foreign'],
+    ['gone', 'gone']
+  ])('parses release %s', (stdout, expected) => {
+    expect(parseReleaseOutcome(stdout)).toBe(expected)
+  })
+
+  it.each(['', 'what', 'true'])('rejects unrecognized output %s', (stdout) => {
+    expect(parseAcquireOutcome(stdout)).toBeNull()
+    expect(parseReleaseOutcome(stdout)).toBeNull()
   })
 })
 

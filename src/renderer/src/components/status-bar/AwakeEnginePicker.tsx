@@ -1,5 +1,6 @@
 import { Coffee, Pill } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 import type { ComputerAwakeStatus, MacosAwakeEngine } from '../../../../shared/computer-awake-mode'
@@ -12,6 +13,7 @@ function openAmphetamineListing(): void {
 
 type EngineOptionProps = {
   icon: LucideIcon
+  value: MacosAwakeEngine
   label: string
   title: string
   body: string
@@ -24,6 +26,7 @@ type EngineOptionProps = {
 
 function EngineOption({
   icon: Icon,
+  value,
   label,
   title,
   body,
@@ -35,21 +38,26 @@ function EngineOption({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={selected}
+        {/* A menu item, not a bare button: Radix's roving focus only reaches
+            registered items, so plain buttons here are unreachable by keyboard
+            and role=radiogroup is not valid inside role=menu. preventDefault
+            keeps the menu open so engine and mode are one visit. */}
+        <DropdownMenuRadioItem
+          value={value}
           aria-label={label}
-          onClick={onSelect}
-          className={`flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-md border px-2 py-2 transition-colors ${
+          onSelect={(event) => {
+            event.preventDefault()
+            onSelect()
+          }}
+          className={`flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-md border py-2 pr-2 pl-2 transition-colors [&>span:first-child]:hidden ${
             selected
               ? 'border-border bg-accent text-foreground'
-              : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+              : 'border-transparent text-muted-foreground'
           } ${unavailable ? 'opacity-60' : ''}`}
         >
           <Icon className="size-4" />
           <span className="text-[11px] font-medium">{label}</span>
-        </button>
+        </DropdownMenuRadioItem>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6} className="max-w-64 py-2">
         <span className="block font-medium">{title}</span>
@@ -101,8 +109,8 @@ export function AwakeEnginePicker({
         )
 
   return (
-    <div
-      role="radiogroup"
+    <DropdownMenuRadioGroup
+      value={engine}
       aria-label={translate(
         'auto.components.status.bar.AwakeEnginePicker.label',
         'Keep awake engine'
@@ -111,6 +119,7 @@ export function AwakeEnginePicker({
     >
       <EngineOption
         icon={Coffee}
+        value="caffeinate"
         label={translate('auto.components.status.bar.AwakeEnginePicker.caffeinate', 'Caffeinate')}
         title={translate(
           'auto.components.status.bar.AwakeEnginePicker.caffeinateTitle',
@@ -125,6 +134,7 @@ export function AwakeEnginePicker({
       />
       <EngineOption
         icon={Pill}
+        value="amphetamine"
         label={translate('auto.components.status.bar.AwakeEnginePicker.amphetamine', 'Amphetamine')}
         title={translate(
           'auto.components.status.bar.AwakeEnginePicker.amphetamineTitle',
@@ -136,6 +146,6 @@ export function AwakeEnginePicker({
         unavailable={notInstalled}
         onSelect={() => (notInstalled ? openAmphetamineListing() : onChange('amphetamine'))}
       />
-    </div>
+    </DropdownMenuRadioGroup>
   )
 }

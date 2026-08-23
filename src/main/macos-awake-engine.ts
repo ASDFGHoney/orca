@@ -19,6 +19,8 @@ export type PlatformAwakeAssertion = {
 export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
   isUnavailable: () => boolean
   getUnavailableReason: () => AmphetamineUnavailableReason | null
+  clearUnavailable: () => void
+  getHold: () => 'owned' | 'adopted' | null
 }
 
 export type MacosAwakeEngineStatusFields = {
@@ -52,6 +54,7 @@ export class MacosAwakeEngineRouter {
   private readonly platform: NodeJS.Platform
   private engine: MacosAwakeEngine = DEFAULT_MACOS_AWAKE_ENGINE
   private amphetamineInstalled: boolean | undefined
+  private probing = false
 
   constructor(options: MacosAwakeEngineRouterOptions = {}) {
     this.logger = options.logger ?? console
@@ -74,6 +77,7 @@ export class MacosAwakeEngineRouter {
         onUnexpectedFailure: (reason) => this.onNeedsRefresh(reason),
         // Why refresh rather than just record: caffeinate has to take over the
         // live session, otherwise choosing Amphetamine silently stops holding it.
+        onHoldChanged: () => this.onNeedsRefresh('amphetamine-held'),
         onUnavailable: (unavailableReason) => {
           if (unavailableReason === 'not-installed') {
             this.amphetamineInstalled = false
@@ -83,19 +87,36 @@ export class MacosAwakeEngineRouter {
       })
   }
 
-  /** Returns true when the choice actually changed, so the caller knows to refresh. */
+  /** Returns true when the caller should refresh. */
   setEngine(engine: MacosAwakeEngine): boolean {
     const normalized = normalizeMacosAwakeEngine(engine)
-    if (this.engine === normalized) {
-      return false
-    }
-    // Release the outgoing engine first so the two never hold a session at once.
-    this.stop('macos-engine-change')
-    this.engine = normalized
     if (normalized === 'amphetamine') {
+      // Re-picking Amphetamine is the user's retry gesture after fixing a
+      // refused Automation grant, so it must clear the verdict even when the
+      // engine is unchanged.
+      this.amphetamineAssertion.clearUnavailable()
       void this.probeInstalled()
     }
+    if (this.engine === normalized) {
+      return normalized === 'amphetamine'
+    }
+    this.engine = normalized
+    // The outgoing engine is released by start(), only once the incoming one
+    // actually holds — see the note there.
     return true
+  }
+
+  /** Probe once, lazily, the first time anything asks for status. */
+  async probeInstalledIfUnknown(): Promise<boolean | undefined> {
+    if (this.platform !== 'darwin' || this.amphetamineInstalled !== undefined || this.probing) {
+      return this.amphetamineInstalled
+    }
+    this.probing = true
+    try {
+      return await this.probeInstalled()
+    } finally {
+      this.probing = false
+    }
   }
 
   /** Refresh the installed probe so the picker can disable Amphetamine before it is ever selected. */

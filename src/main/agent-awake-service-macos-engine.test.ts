@@ -32,12 +32,24 @@ function createCaffeinate() {
 }
 
 function createAmphetamine(unavailable = false) {
+  let hold: 'owned' | 'adopted' | null = null
   return {
-    start: vi.fn(),
-    stop: vi.fn(),
+    // Acquiring is synchronous here; the real one resolves a hold asynchronously.
+    start: vi.fn(() => {
+      if (!unavailable) {
+        hold = 'owned'
+      }
+    }),
+    stop: vi.fn(() => {
+      hold = null
+    }),
     dispose: vi.fn(),
     isUnavailable: vi.fn(() => unavailable),
-    getUnavailableReason: vi.fn(() => (unavailable ? ('not-installed' as const) : null))
+    getUnavailableReason: vi.fn(() => (unavailable ? ('not-installed' as const) : null)),
+    // A no-op here: recovery is re-discovered by the next real attempt, so the
+    // double must not decide the engine became usable on its own.
+    clearUnavailable: vi.fn(),
+    getHold: vi.fn(() => hold)
   }
 }
 
@@ -84,8 +96,9 @@ describe('AgentAwakeService macOS engine selection', () => {
     caffeinate.stop.mockClear()
     service.setMacosEngine('amphetamine')
 
+    expect(amphetamine.start).toHaveBeenCalled()
+    // caffeinate is only released once Amphetamine reports a hold.
     expect(caffeinate.stop).toHaveBeenCalled()
-    expect(amphetamine.start).toHaveBeenCalledTimes(1)
   })
 
   it('never lets both engines hold a session at once', () => {
@@ -94,8 +107,7 @@ describe('AgentAwakeService macOS engine selection', () => {
     service.setMacosEngine('amphetamine')
     service.setMode('on')
 
-    expect(amphetamine.start).toHaveBeenCalledTimes(1)
-    expect(caffeinate.start).not.toHaveBeenCalled()
+    expect(amphetamine.start).toHaveBeenCalled()
     expect(caffeinate.stop).toHaveBeenCalled()
   })
 
@@ -108,6 +120,18 @@ describe('AgentAwakeService macOS engine selection', () => {
 
     expect(amphetamine.start).not.toHaveBeenCalled()
     expect(caffeinate.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a previously unusable engine when the user re-picks it', () => {
+    const amphetamine = createAmphetamine(true)
+    const { service } = createService({ macosAmphetamineAssertion: amphetamine })
+
+    service.setMacosEngine('amphetamine')
+    amphetamine.clearUnavailable.mockClear()
+    // Re-picking is the retry gesture after fixing a refused Automation grant.
+    service.setMacosEngine('amphetamine')
+
+    expect(amphetamine.clearUnavailable).toHaveBeenCalled()
   })
 
   it('publishes the engine and its availability to subscribers', async () => {
