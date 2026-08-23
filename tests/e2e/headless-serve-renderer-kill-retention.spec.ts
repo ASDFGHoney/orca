@@ -13,6 +13,7 @@ import {
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import {
   processIdentityIsAlive,
+  processIdentityLiveness,
   recordProcessIdentity
 } from './helpers/daemon-generation-processes'
 
@@ -118,11 +119,12 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
     )
     const proveHostState = async (marker: string): Promise<void> => {
       const status = await launchedHost.client.call<RuntimeStatus>('status.get')
+      const processLiveness = await processIdentityLiveness([mainIdentity, daemonIdentity])
       expect(await launchedHost.app.evaluate(() => process.pid)).toBe(mainPid)
-      expect(await processIdentityIsAlive(mainIdentity)).toBe(true)
+      expect(processLiveness.get(mainPid)).toBe(true)
       expect(status.result.runtimeId).toBe(beforeStatus.result.runtimeId)
       expect(readDaemonPid(userDataDir)).toBe(daemonPid)
-      expect(await processIdentityIsAlive(daemonIdentity)).toBe(true)
+      expect(processLiveness.get(daemonPid)).toBe(true)
       const inventory = await readHostTerminalInventory(call, worktreeId)
       expect(inventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
       expect(inventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
