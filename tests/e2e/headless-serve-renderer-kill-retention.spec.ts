@@ -129,8 +129,7 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       expect(readDaemonPid(userDataDir)).toBe(daemonPid)
       expect(processLiveness.get(daemonPid)).toBe(true)
       const inventory = await readHostTerminalInventory(call, worktreeId)
-      expect(inventory.tabIds.toSorted()).toEqual(baselineInventory.tabIds.toSorted())
-      expect(inventory.ptyIdByTabId).toEqual(baselineInventory.ptyIdByTabId)
+      expect(inventory.terminalSurfaces).toEqual(baselineInventory.terminalSurfaces)
       await proveSameLivePty(call, terminalA, `${marker}_A`)
       await proveSameLivePty(call, terminalB, `${marker}_B`)
     }

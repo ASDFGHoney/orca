@@ -2379,8 +2379,8 @@
         "https://github.com/stablyai/orca/issues/16084",
         "https://github.com/stablyai/orca/pull/16120"
       ],
-      "invariant": "Killing one exact offscreen Chromium renderer cannot replace or terminate the headless main process, runtime, daemon, or unrelated daemon-backed PTYs during the immediate fault or the reported nine-second incident interval. The complete host terminal tab-to-PTY inventory remains identical to baseline, and both original PTY processes continue accepting input.",
-      "oracle": "Start an isolated headless serve runtime with zero initial BrowserWindows, create two daemon-backed terminal fixtures, and record main, runtime, daemon, complete terminal tab-to-PTY inventory, fixture-process, WebContents, and renderer-process identities. Fence one marked offscreen page by WebContents, URL, and OS process, force that renderer to crash, and require its original process to die. Observe beyond the reported nine-second renderer-victim-to-unit-failure interval while repeatedly requiring no main-process close, unchanged main/runtime/daemon identities, an unchanged complete host terminal inventory, and I/O through both original fixture processes.",
+      "invariant": "Killing one exact offscreen Chromium renderer cannot replace or terminate the headless main process, runtime, daemon, or unrelated daemon-backed PTYs during the immediate fault or the reported nine-second incident interval. Every terminal surface binding in the isolated fixture worktree remains identical to baseline by surface, parent-tab, leaf, and PTY identity, and both original PTY processes continue accepting input.",
+      "oracle": "Start an isolated headless serve runtime with zero initial BrowserWindows, create two daemon-backed terminal fixtures, and record main, runtime, daemon, every fixture-worktree terminal surface binding, fixture-process, WebContents, and renderer-process identities. Fence one marked offscreen page by WebContents, URL, and OS process, force that renderer to crash, and require its original process to die. Observe beyond the reported nine-second renderer-victim-to-unit-failure interval while repeatedly requiring no main-process close, unchanged main/runtime/daemon identities, unchanged exact surface-parent-leaf-PTY tuples in the fixture worktree, and I/O through both original fixture processes.",
       "commands": [
         "pnpm exec electron-vite build --mode e2e",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-serve-renderer-kill-retention.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
@@ -2392,7 +2392,7 @@
           "assertions": [
             "the exact original renderer process dies after the fenced WebContents fault",
             "main, runtime, and daemon identities remain unchanged and reachable",
-            "the complete host terminal tab-to-PTY inventory remains identical to baseline",
+            "every fixture-worktree terminal surface-parent-leaf-PTY binding remains identical to baseline",
             "both original PTY processes accept post-fault input"
           ]
         }
@@ -2404,8 +2404,8 @@
           "platform": "macos",
           "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/headless-serve-renderer-kill-retention.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 33,
-          "summary": "The exact offscreen renderer process died while the headless main process, runtime, daemon, complete baseline terminal tab-to-PTY inventory, and both original PTY processes remained live; repeated stability checkpoints beyond the reported nine-second interval retained post-fault I/O."
+          "durationSeconds": 34,
+          "summary": "The exact offscreen renderer process died while the headless main process, runtime, daemon, every baseline terminal surface binding in the fixture worktree, and both original PTY processes remained live; repeated stability checkpoints beyond the reported nine-second interval retained post-fault I/O."
         }
       ],
       "runtimeBudget": {
@@ -2418,7 +2418,7 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The earlier immediate-containment oracle passed on reported v1.4.184 and then-current main e3327c2f31: renderer-only death did not reproduce runtime or session loss in the isolated host topology. The final candidate, rebased onto main ab3b1d07cd, adds complete-inventory checks through a 12-second stability window; that extension has candidate evidence only. The process or event that ended the reported unit remains unidentified. Reverting the candidate removes the characterization coverage without changing product behavior."
+        "evidence": "The earlier immediate-containment oracle passed on reported v1.4.184 and then-current main e3327c2f31: renderer-only death did not reproduce runtime or session loss in the isolated host topology. The final candidate, rebased onto main 0926c25854, adds exact fixture-worktree surface-binding checks through a 12-second stability window; that extension has candidate evidence only. The process or event that ended the reported unit remains unidentified. Reverting the candidate removes the characterization coverage without changing product behavior."
       },
       "performanceBudget": {
         "required": false,
@@ -2435,7 +2435,7 @@
         "The test does not require the crashed browser surface to recover; browser-page recovery is a separate lifecycle contract.",
         "SSH, WSL, folder-workspace, multi-client, mixed-version, and whole-service restart journeys are uncollected; no production or wire behavior changes in this gate."
       ],
-      "demotionRule": "Demote if the exact renderer fault changes main/runtime/daemon identity, changes the complete terminal tab-to-PTY inventory, replaces either fixture process, loses post-fault PTY I/O, or cannot identify the killed renderer unambiguously."
+      "demotionRule": "Demote if the exact renderer fault changes main/runtime/daemon identity, changes any terminal surface-parent-leaf-PTY tuple in the fixture worktree, replaces either fixture process, loses post-fault PTY I/O, or cannot identify the killed renderer unambiguously."
     },
     {
       "id": "runtime.websocket-heartbeat-cadence",
