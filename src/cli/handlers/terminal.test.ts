@@ -94,6 +94,42 @@ describe('terminal send CLI', () => {
     })
   })
 
+  it('explains that Structured Chat blocked a refused send and how to recover', async () => {
+    const call = vi.fn().mockResolvedValue({
+      result: {
+        send: {
+          handle: 'term-1',
+          accepted: false,
+          bytesWritten: 0,
+          agentSessionRefusal: {
+            code: 'agent_session_conflict',
+            sessionId: 'session-1',
+            ownerRuntimeKind: 'native',
+            handoffStage: null,
+            ownerPid: 4242,
+            runtimeFence: 7
+          }
+        }
+      }
+    })
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await TERMINAL_HANDLERS['terminal send']({
+      flags: new Map<string, string | true>([
+        ['terminal', 'term-1'],
+        ['text', 'review'],
+        ['enter', true]
+      ]),
+      client: { call } as unknown as RuntimeClient,
+      cwd: '/tmp/worktree',
+      json: false
+    })
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringMatching(/Structured Chat.*Switch it to Terminal.*orca terminal send/s)
+    )
+  })
+
   it('keeps text-only and bare Enter sends as direct terminal input', async () => {
     const call = vi.fn().mockResolvedValue({
       result: { send: { handle: 'term-1', accepted: true, bytesWritten: 1 } }
