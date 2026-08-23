@@ -542,6 +542,7 @@ describe('PtyHandler', () => {
       const [shell, args] = mockPtySpawn.mock.calls[0] as [string, string[]]
       expect(shell).toBe('wsl.exe')
       expect(args).toEqual(['-d', 'Ubuntu'])
+      expect(mockPtySpawn.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true })
     })
 
     it('scopes HISTFILE past the wsl.exe wrapper and carries it over WSLENV', async () => {

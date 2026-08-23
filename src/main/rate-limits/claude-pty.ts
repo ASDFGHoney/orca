@@ -292,7 +292,8 @@ export async function fetchViaPty(options?: {
       // Why: hidden usage PTYs must not inherit the process cwd (e.g. / or a
       // drive root), which can trigger unbounded file discovery.
       cwd: resolveHiddenRateLimitPtyCwd(),
-      env: spawnEnv
+      env: spawnEnv,
+      ...(isWin32 ? { useConptyDll: true } : {})
     })
     const termDisposables: { dispose: () => void }[] = [registerHiddenRateLimitPty(term)]
     let enterInterval: ReturnType<typeof setInterval> | null = null

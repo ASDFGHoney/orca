@@ -981,7 +981,8 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
         ...(wslCodex ? cloneProcessEnvWithoutCodexHome() : process.env),
         TERM: 'xterm-256color',
         ...(options?.codexHomePath && !wslCodex ? { CODEX_HOME: options.codexHomePath } : {})
-      }
+      },
+      ...(isWin32 ? { useConptyDll: true } : {})
     })
     const termDisposables: { dispose: () => void }[] = [registerHiddenRateLimitPty(term)]
 

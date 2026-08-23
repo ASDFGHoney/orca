@@ -1,4 +1,4 @@
-import { fork, type ForkOptions } from 'node:child_process'
+import { fork, spawn, type ForkOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import * as membership from './windows-conpty-process-membership'
@@ -78,7 +78,68 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout repro
       }
     }
   }, 10_000)
+
+  it('reaps a stalled helper when its owning host is force-terminated', async () => {
+    const hostPath = requireFromTest.resolve('./fixtures/conpty-console-list-host.cjs')
+    const fixturePath = requireFromTest.resolve('./fixtures/conpty-console-list-stall.cjs')
+    const host = spawn(process.execPath, [hostPath, fixturePath], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let helperPid: number | undefined
+
+    try {
+      helperPid = await readHelperPid(host.stdout)
+      expect(isProcessAlive(helperPid)).toBe(true)
+      process.kill(host.pid!)
+      await waitForProcessExit(helperPid, 3_000)
+      expect(isProcessAlive(helperPid)).toBe(false)
+    } finally {
+      host.kill()
+      if (helperPid && isProcessAlive(helperPid)) {
+        process.kill(helperPid)
+      }
+    }
+  }, 10_000)
 })
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function readHelperPid(stdout: NodeJS.ReadableStream): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let output = ''
+    const timeout = setTimeout(
+      () => reject(new Error(`Host helper PID timed out: ${output}`)),
+      3_000
+    )
+    stdout.on('data', (chunk) => {
+      output += String(chunk)
+      const line = output.split(/\r?\n/, 1)[0]
+      try {
+        const helperPid = JSON.parse(line).helperPid
+        if (Number.isSafeInteger(helperPid) && helperPid > 0) {
+          clearTimeout(timeout)
+          resolve(helperPid)
+        }
+      } catch {
+        // Wait for a complete line.
+      }
+    })
+  })
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
 
 type Reader = {
   dispose(): void

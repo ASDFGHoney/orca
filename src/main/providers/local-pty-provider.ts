@@ -1407,23 +1407,23 @@ export class LocalPtyProvider implements IPtyProvider {
       ptyShellName.get(id)
     )
     const cachedAgent = ptyLastRecognizedForeground.get(id) ?? null
-    let treeMembershipUnavailable = false
-    // Why: PTY-owned tree membership preserves a live cached agent without a whole-table scan.
+    let consoleMembershipUnavailable = false
+    // Why: console membership preserves a live cached agent without the whole-table scan.
     if (
       process.platform === 'win32' &&
       canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
     ) {
       try {
-        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid, { jobOwner: proc })
+        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid, { owner: proc })
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
         if (consoleProcessIds !== null && consoleProcessIds.size > 1 && cachedAgent !== null) {
           return cachedAgent
         }
-        treeMembershipUnavailable = consoleProcessIds === null
+        consoleMembershipUnavailable = consoleProcessIds === null
       } catch {
-        treeMembershipUnavailable = true
+        consoleMembershipUnavailable = true
       }
     }
     try {
@@ -1443,9 +1443,9 @@ export class LocalPtyProvider implements IPtyProvider {
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
-      // Why: incomplete snapshot + unavailable tree probe isn't exit proof; only shell-only membership may clear the cache.
+      // Why: incomplete snapshot + unavailable console probe isn't exit proof; only shell-only membership may clear the cache.
       const stable = resolveStableForegroundProcess(
-        treeMembershipUnavailable && resolvedAgent === null
+        consoleMembershipUnavailable && resolvedAgent === null
           ? { ...resolution, available: false }
           : resolution,
         lastRecognizedAgent
@@ -1480,7 +1480,8 @@ export class LocalPtyProvider implements IPtyProvider {
           ...(process.platform === 'win32'
             ? {
                 forceProcessScan: true,
-                readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc.pid)
+                readWindowsConptyProcessIds: () =>
+                  readWindowsConptyProcessIds(proc.pid, { owner: proc })
               }
             : {})
         }

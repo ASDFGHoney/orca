@@ -493,6 +493,7 @@ describe('PtyHandler', () => {
         }
       })
       const userEnv = mockPtySpawn.mock.calls[0]?.[2]?.env as Record<string, string>
+      expect(mockPtySpawn.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true })
       expect(userEnv.GIT_TERMINAL_PROMPT).toBe('1')
       expect(userEnv.GCM_INTERACTIVE).toBe('auto')
       expect(userEnv.GIT_CONFIG_COUNT).toBe('1')

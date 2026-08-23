@@ -1,6 +1,4 @@
 import { fork, type ChildProcess } from 'node:child_process'
-import type { IPty } from 'node-pty'
-import { listPtyJobProcessIds } from '../windows/windows-pty-job'
 
 const CONPTY_PROCESS_LIST_TIMEOUT_MS = 3_000
 const CONPTY_PROCESS_LIST_QUEUE_LIMIT = 1
@@ -15,6 +13,7 @@ type WindowsConptyMembershipReaderDeps = {
 
 type MembershipRequest = {
   deadlineAt: number
+  owner: object | number
   promise: Promise<ReadonlySet<number> | null>
   resolve: (value: ReadonlySet<number> | null) => void
   rootPid: number
@@ -24,8 +23,8 @@ type MembershipRequest = {
 
 type ActiveProbe = {
   child: ChildProcess
+  onClose: () => void
   onError: () => void
-  onExit: () => void
   onMessage: (message: ProcessListMessage) => void
   request: MembershipRequest
   stopping: boolean
@@ -52,7 +51,7 @@ function normalizeProcessIds(
 /** Owns the single console-list subprocess admitted by one PTY host process. */
 export class WindowsConptyProcessMembershipReader {
   private readonly deps: Required<WindowsConptyMembershipReaderDeps>
-  private readonly requestsByRootPid = new Map<number, MembershipRequest>()
+  private readonly requestsByOwner = new Map<object | number, MembershipRequest>()
   private readonly queue: MembershipRequest[] = []
   private active: ActiveProbe | null = null
   private disposed = false
@@ -65,11 +64,11 @@ export class WindowsConptyProcessMembershipReader {
     }
   }
 
-  read(rootPid: number): Promise<ReadonlySet<number> | null> {
+  read(rootPid: number, owner: object | number = rootPid): Promise<ReadonlySet<number> | null> {
     if (this.disposed || !Number.isSafeInteger(rootPid) || rootPid <= 0) {
       return Promise.resolve(null)
     }
-    const existing = this.requestsByRootPid.get(rootPid)
+    const existing = this.requestsByOwner.get(owner)
     if (existing) {
       return existing.promise
     }
@@ -88,13 +87,14 @@ export class WindowsConptyProcessMembershipReader {
     const timeout = setTimeout(() => this.expire(request), deadlineAt - Date.now())
     request = {
       deadlineAt,
+      owner,
       promise,
       resolve: resolveRequest,
       rootPid,
       settled: false,
       timeout
     }
-    this.requestsByRootPid.set(rootPid, request)
+    this.requestsByOwner.set(owner, request)
     this.queue.push(request)
     this.pump()
     return promise
@@ -159,7 +159,7 @@ export class WindowsConptyProcessMembershipReader {
       this.finish(request, null)
       this.stopActive(probe)
     }
-    const onExit = (): void => this.release(probe)
+    const onClose = (): void => this.release(probe)
     const onMessage = (message: ProcessListMessage): void => {
       const helperPid = child.pid
       const processIds = normalizeProcessIds(message?.consoleProcessList, [
@@ -173,14 +173,14 @@ export class WindowsConptyProcessMembershipReader {
         consoleProcessIds.delete(helperPid)
         this.finish(request, consoleProcessIds)
       }
-      // The upstream agent is one-shot; wait for confirmed exit before admitting another.
+      // The upstream agent is one-shot; close follows process end and owns replacement admission.
       this.stopActive(probe)
     }
-    probe = { child, onError, onExit, onMessage, request, stopping: false }
+    probe = { child, onClose, onError, onMessage, request, stopping: false }
     this.active = probe
     child.once('message', probe.onMessage)
     child.on('error', probe.onError)
-    child.once('exit', probe.onExit)
+    child.once('close', probe.onClose)
   }
 
   private finish(request: MembershipRequest, value: ReadonlySet<number> | null): void {
@@ -189,8 +189,8 @@ export class WindowsConptyProcessMembershipReader {
     }
     request.settled = true
     clearTimeout(request.timeout)
-    if (this.requestsByRootPid.get(request.rootPid) === request) {
-      this.requestsByRootPid.delete(request.rootPid)
+    if (this.requestsByOwner.get(request.owner) === request) {
+      this.requestsByOwner.delete(request.owner)
     }
     request.resolve(value)
   }
@@ -210,7 +210,7 @@ export class WindowsConptyProcessMembershipReader {
   private release(probe: ActiveProbe): void {
     probe.child.removeListener('message', probe.onMessage)
     probe.child.removeListener('error', probe.onError)
-    probe.child.removeListener('exit', probe.onExit)
+    probe.child.removeListener('close', probe.onClose)
     this.finish(probe.request, null)
     if (this.active === probe) {
       this.active = null
@@ -224,7 +224,7 @@ const defaultReader = new WindowsConptyProcessMembershipReader()
 process.once('exit', () => defaultReader.dispose())
 
 type WindowsConptyProcessReadOptions = {
-  jobOwner?: IPty
+  owner?: object
   reader?: Pick<WindowsConptyProcessMembershipReader, 'read'>
 }
 
@@ -233,10 +233,5 @@ export function readWindowsConptyProcessIds(
   rootPid: number,
   options: WindowsConptyProcessReadOptions = {}
 ): Promise<ReadonlySet<number> | null> {
-  const reader = options.reader ?? defaultReader
-  if (!options.jobOwner) {
-    return reader.read(rootPid)
-  }
-  const processIds = normalizeProcessIds(listPtyJobProcessIds(options.jobOwner), [rootPid])
-  return processIds === null ? reader.read(rootPid) : Promise.resolve(processIds)
+  return (options.reader ?? defaultReader).read(rootPid, options.owner ?? rootPid)
 }
