@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnProcess } from '../../shared/child-process/run-process'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
 import { waitForProcessExitUntil } from './codex-process-exit-deadline'
@@ -70,17 +70,18 @@ type PendingRequest = {
 export async function openCodexAppServerConnection(
   launch: CodexAppServerLaunch,
   handlers: CodexAppServerConnectionHandlers = {},
-  spawnImpl: typeof spawn = spawn
+  spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<CodexAppServerConnection> {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, ...launch.env }
   for (const key of launch.envToDelete ?? []) {
     delete childEnv[key]
   }
-  const child = spawnImpl(launch.command, launch.args, {
+  const child = spawnImpl({
+    program: launch.command,
+    args: launch.args,
     env: childEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
-  }) as ChildProcessWithoutNullStreams
+    cwd: process.cwd()
+  })
 
   const pending = new Map<number, PendingRequest>()
   let stderrTail = ''
