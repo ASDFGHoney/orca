@@ -18,9 +18,7 @@ describe('workspace cleanup browse hydration', () => {
   })
 
   it('does not let a sync broadcast revert a filter the user just set', () => {
-    // The browse writer debounces 250ms, so any other ui.set inside that window
-    // broadcasts state that still holds the previous filters. Re-hydrating it here
-    // reverted the edit, and the pending debounce then persisted the revert.
+    // Other ui.set broadcasts carry stale browse state until its debounced writer runs.
     const store = createUIStore()
     store.getState().hydratePersistedUI(persistedWithIdleDays(30), 'startup')
 
