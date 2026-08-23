@@ -35,7 +35,7 @@ export type MacosAwakeEngineRouterOptions = {
   detectAmphetamine?: () => Promise<boolean | undefined>
   logger?: Logger
   now?: () => number
-  /** Re-run the awake decision: the live engine has to change hands immediately. */
+  /** Re-run the awake decision now, rather than waiting for the next status change. */
   onNeedsRefresh?: (reason: string) => void
   platform?: NodeJS.Platform
 }
@@ -80,8 +80,8 @@ export class MacosAwakeEngineRouter {
         logger: this.logger,
         now,
         onUnexpectedFailure: (reason) => this.onNeedsRefresh(reason),
-        // Why refresh rather than just record: caffeinate has to take over the
-        // live session, otherwise choosing Amphetamine silently stops holding it.
+        // Why refresh rather than just record: the picker reads this verdict, and
+        // Amphetamine must stop being attempted until it is usable again.
         onUnavailable: (unavailableReason) => {
           if (unavailableReason === 'not-installed') {
             this.amphetamineInstalled = false
@@ -105,8 +105,8 @@ export class MacosAwakeEngineRouter {
       return normalized === 'amphetamine'
     }
     this.engine = normalized
-    // The outgoing engine is released by start(), only once the incoming one
-    // actually holds — see the note there.
+    // start() decides what runs; caffeinate is unconditional, so nothing here
+    // has to sequence a release against it.
     return true
   }
 

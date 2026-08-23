@@ -599,6 +599,35 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(runOsascriptSync).toHaveBeenCalledTimes(2)
   })
 
+  it('does not claim a hold when an acquire fails after dispose', async () => {
+    // dispose() already ran its release passes because an acquire was in
+    // flight, so claiming here would make getHold() lie after teardown.
+    const amphetamine = createFakeAmphetamine()
+    let failAcquire = (): void => {}
+    amphetamine.run.mockImplementation(
+      async (_script: string) =>
+        new Promise<OsascriptResult>((resolve) => {
+          failAcquire = () => resolve(failure('AppleEvent timed out'))
+        })
+    )
+    const onUnexpectedFailure = vi.fn()
+    const assertion = createAssertion(amphetamine, {
+      now: () => 1_000,
+      onUnexpectedFailure,
+      runOsascriptSync: () => ok('gone')
+    })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+    failAcquire()
+    await settle()
+
+    expect(assertion.getHold()).toBeNull()
+    // Nothing can act on a refresh after teardown, so none should be requested.
+    expect(onUnexpectedFailure).not.toHaveBeenCalled()
+  })
+
   it('records a session it could not clean up during the dispose race', async () => {
     const amphetamine = createFakeAmphetamine()
     let releaseAcquire = (): void => {}

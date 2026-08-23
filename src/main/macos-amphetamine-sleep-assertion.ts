@@ -46,7 +46,7 @@ type MacosAmphetamineSleepAssertionOptions = {
 }
 
 /**
- * Holds a wake assertion through Amphetamine instead of `caffeinate`.
+ * Holds a wake assertion through Amphetamine, in addition to caffeinate.
  *
  * Amphetamine's session is global and singular — `start new session` ends whatever
  * was running, including the user's Triggers — so every write here is preceded by
@@ -224,11 +224,20 @@ export class MacosAmphetamineSleepAssertion {
       result = await this.runOsascript(AMPHETAMINE_ACQUIRE_SCRIPT, abort.signal)
     } catch (error) {
       this.acquireAbort = null
+      if (this.disposed) {
+        // dispose() already ran its release passes because an acquire was in
+        // flight. Claiming a hold now would make getHold() lie after teardown,
+        // and reporting would re-arm backoff and refresh work nothing can run.
+        return false
+      }
       this.claimIndeterminateAcquire()
       this.failures.reportFailure('acquire-spawn-error', reason, error)
       return false
     }
     this.acquireAbort = null
+    if (this.disposed && (result.code !== 0 || result.timedOut)) {
+      return false
+    }
     if (result.code !== 0 || result.timedOut) {
       // A timeout or an unclassified error cannot tell us whether the write
       // landed; a classified one can (no app, or no permission to send it).
@@ -240,6 +249,9 @@ export class MacosAmphetamineSleepAssertion {
     }
     const outcome = parseAcquireOutcome(result.stdout)
     if (!outcome) {
+      if (this.disposed) {
+        return false
+      }
       // The script ran and may well have started a session before producing
       // output we cannot read.
       this.claimIndeterminateAcquire()
