@@ -62,24 +62,30 @@ describe('worktree.rm runtime RPC liveness', () => {
       }
       expect(metadata.transports[0].kind).toBe(process.platform === 'win32' ? 'named-pipe' : 'unix')
       const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
-      await waitFor(() => session.frames.some((frame) => frame._keepalive === true))
+      await Promise.race([
+        waitFor(() => session.frames.some((frame) => frame._keepalive === true)),
+        session.done
+      ])
       const keepalivesBeforeIdleWindow = session.frames.filter(
         (frame) => frame._keepalive === true
       ).length
-      await sleep(150)
+      if (keepalivesBeforeIdleWindow > 0) {
+        await sleep(150)
+      }
       expect(session.frames.filter((frame) => frame.ok !== undefined)).toHaveLength(0)
+      removal.release()
+      await waitFor(removal.completed)
+      await session.done
+
+      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
+      expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)
       expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(
         keepalivesBeforeIdleWindow
       )
-      removal.release()
-      await session.done
-
-      expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)
       expect(session.frames.filter((frame) => frame.ok !== undefined)).toEqual([
         expect.objectContaining({ id: 'slow-rm', ok: true })
       ])
       expect(removal.completed()).toBe(true)
-      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
     } finally {
       removal.release()
       await server.stop()
@@ -105,9 +111,15 @@ describe('worktree.rm runtime RPC liveness', () => {
         throw new Error('runtime metadata was not written')
       }
       const session = startRemoval(metadata.transports[0].endpoint, metadata.authToken)
-      await waitFor(() => session.frames.filter((frame) => frame.ok !== undefined).length === 1)
+      await Promise.race([
+        waitFor(() => session.frames.filter((frame) => frame.ok !== undefined).length === 1),
+        session.done
+      ])
       await session.done
+      removal.release()
+      await waitFor(removal.completed)
 
+      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
       expect(session.frames.filter((frame) => frame._keepalive === true).length).toBeGreaterThan(1)
       expect(session.frames.filter((frame) => frame.ok !== undefined)).toEqual([
         expect.objectContaining({
@@ -119,10 +131,6 @@ describe('worktree.rm runtime RPC liveness', () => {
           })
         })
       ])
-
-      removal.release()
-      await waitFor(removal.completed)
-      expect(removal.removeManagedWorktree).toHaveBeenCalledTimes(1)
     } finally {
       removal.release()
       await server.stop()
