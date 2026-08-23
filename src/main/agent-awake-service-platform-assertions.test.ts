@@ -39,10 +39,16 @@ function createBlocker() {
 }
 
 function createPlatformAssertion() {
+  let holding = false
   return {
-    start: vi.fn(),
-    stop: vi.fn(),
-    dispose: vi.fn()
+    start: vi.fn(() => {
+      holding = true
+    }),
+    stop: vi.fn(() => {
+      holding = false
+    }),
+    dispose: vi.fn(),
+    isHolding: vi.fn(() => holding)
   }
 }
 

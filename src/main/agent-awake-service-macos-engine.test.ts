@@ -27,8 +27,23 @@ function createBlocker() {
   }
 }
 
+/** Models caffeinate reporting whether a process is actually held, not just that start() returned. */
 function createCaffeinate() {
-  return { start: vi.fn(), stop: vi.fn(), dispose: vi.fn() }
+  let holding = false
+  return {
+    start: vi.fn(() => {
+      holding = true
+    }),
+    stop: vi.fn(() => {
+      holding = false
+    }),
+    dispose: vi.fn(),
+    isHolding: vi.fn(() => holding),
+    /** The spawn failed asynchronously, or the child exited. */
+    loseProcess: () => {
+      holding = false
+    }
+  }
 }
 
 /**
@@ -144,6 +159,29 @@ describe('AgentAwakeService macOS coverage invariant', () => {
     expect(amphetamineHolding || caffeinateHolding).toBe(true)
   })
 
+  it('does not release Amphetamine when caffeinate accepted start but holds nothing', () => {
+    const amphetamine = createAmphetamine()
+    const caffeinate = createCaffeinate()
+    // start() returns normally, but no process is actually held — an async
+    // spawn failure looks exactly like this.
+    caffeinate.start.mockImplementation(() => {})
+    caffeinate.isHolding.mockReturnValue(false)
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      macosAssertion: caffeinate
+    })
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    amphetamine.settleHold('owned')
+    service.setStatuses([])
+    amphetamine.stop.mockClear()
+
+    service.setMacosEngine('caffeinate')
+
+    expect(amphetamine.stop).not.toHaveBeenCalled()
+  })
+
   it('drops the caffeinate stand-in once the hold actually lands', () => {
     // Coverage depends on a refresh firing when the hold changes; without it
     // caffeinate would stay up alongside Amphetamine indefinitely.
@@ -173,6 +211,7 @@ describe('AgentAwakeService macOS coverage invariant', () => {
     caffeinate.start.mockImplementation(() => {
       throw new Error('caffeinate spawn failed')
     })
+    caffeinate.isHolding.mockReturnValue(false)
     const { service } = createService({
       macosAmphetamineAssertion: amphetamine,
       macosAssertion: caffeinate
@@ -297,6 +336,7 @@ describe('AgentAwakeService macOS engine selection', () => {
     caffeinate.start.mockImplementation(() => {
       throw new Error('caffeinate spawn failed')
     })
+    caffeinate.isHolding.mockReturnValue(false)
     const { service } = createService({
       macosAmphetamineAssertion: amphetamine,
       macosAssertion: caffeinate

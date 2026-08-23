@@ -16,6 +16,11 @@ export type PlatformAwakeAssertion = {
   dispose: () => void
 }
 
+/** An assertion that can report whether it is actually holding right now. */
+export type ObservableAwakeAssertion = PlatformAwakeAssertion & {
+  isHolding: () => boolean
+}
+
 export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
   isUnavailable: () => boolean
   getUnavailableReason: () => AmphetamineUnavailableReason | null
@@ -32,7 +37,7 @@ export type MacosAwakeEngineStatusFields = {
 
 export type MacosAwakeEngineRouterOptions = {
   amphetamineAssertion?: AmphetamineAwakeAssertion
-  caffeinateAssertion?: PlatformAwakeAssertion
+  caffeinateAssertion?: ObservableAwakeAssertion
   detectAmphetamine?: () => Promise<boolean | undefined>
   logger?: Logger
   now?: () => number
@@ -51,7 +56,7 @@ export type MacosAwakeEngineRouterOptions = {
  */
 export class MacosAwakeEngineRouter {
   private readonly amphetamineAssertion: AmphetamineAwakeAssertion
-  private readonly caffeinateAssertion: PlatformAwakeAssertion
+  private readonly caffeinateAssertion: ObservableAwakeAssertion
   private readonly detectAmphetamine: () => Promise<boolean | undefined>
   private readonly logger: Logger
   private readonly onNeedsRefresh: (reason: string) => void
@@ -183,15 +188,22 @@ export class MacosAwakeEngineRouter {
       this.amphetamineAssertion.hasLiveHold()
 
     // Caffeinate is the floor: it runs whenever Amphetamine is not covering.
-    const caffeinateHolds = amphetamineCovers
-      ? false
-      : this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+    // isHolding, not the start call's return: a start that did not throw is not
+    // an assertion, because the spawn can fail asynchronously and the child can
+    // exit at any time. Releasing the other engine on "did not throw" is exactly
+    // how the machine ends up holding nothing.
+    let caffeinateHolds = false
+    if (!amphetamineCovers) {
+      this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+      caffeinateHolds = this.caffeinateAssertion.isHolding()
+    }
 
     if (amphetamineCovers) {
       this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
     }
-    // Release Amphetamine only once caffeinate has actually taken over; stopping
-    // it after a failed spawn would end the last assertion and hold nothing.
+    // Release Amphetamine only once caffeinate is observed holding — not merely
+    // asked to start. Stopping it otherwise ends the last assertion and holds
+    // nothing.
     if (!useAmphetamine && caffeinateHolds) {
       this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
     }

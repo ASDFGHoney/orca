@@ -118,6 +118,18 @@ export class MacosSystemSleepAssertion {
     this.stop('dispose')
   }
 
+  /**
+   * Whether a caffeinate process is currently held.
+   *
+   * A start that did not throw is not the same as an assertion: the spawn can
+   * fail asynchronously, and the child can exit at any time. Callers deciding
+   * whether it is safe to release another engine need the live answer, not the
+   * absence of an exception.
+   */
+  isHolding(): boolean {
+    return this.child !== null
+  }
+
   private handleChildFailure(
     child: CaffeinateProcess,
     failureKey: string,

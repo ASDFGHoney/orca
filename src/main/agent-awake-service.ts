@@ -11,10 +11,11 @@ import { LinuxLidSleepAssertion } from './linux-lid-sleep-assertion'
 import {
   MacosAwakeEngineRouter,
   type AmphetamineAwakeAssertion,
+  type ObservableAwakeAssertion,
   type PlatformAwakeAssertion
 } from './macos-awake-engine'
 
-export type { AmphetamineAwakeAssertion, PlatformAwakeAssertion }
+export type { AmphetamineAwakeAssertion, ObservableAwakeAssertion, PlatformAwakeAssertion }
 
 export const AGENT_AWAKE_STATUS_STALE_AFTER_MS = 2 * 60 * 60 * 1000
 
@@ -37,7 +38,7 @@ export type AgentAwakeServiceOptions = {
   linuxAssertion?: PlatformAwakeAssertion
   logger?: Logger
   macosAmphetamineAssertion?: AmphetamineAwakeAssertion
-  macosAssertion?: PlatformAwakeAssertion
+  macosAssertion?: ObservableAwakeAssertion
   now?: () => number
   platform?: NodeJS.Platform
   powerMonitor?: PowerMonitorEventSource | null
