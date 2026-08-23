@@ -8,6 +8,12 @@ class FakeTrack extends EventTarget {
   stop = vi.fn()
 }
 
+type FakeAudioProcessor = {
+  connect: ReturnType<typeof vi.fn>
+  disconnect: ReturnType<typeof vi.fn>
+  onaudioprocess: ((event: AudioProcessingEvent) => void) | null
+}
+
 function makeStream(track: FakeTrack): MediaStream {
   return {
     getTracks: () => [track],
@@ -15,8 +21,8 @@ function makeStream(track: FakeTrack): MediaStream {
   } as unknown as MediaStream
 }
 
-function installAudioContext(): void {
-  const processor = {
+function installAudioContext(): FakeAudioProcessor {
+  const processor: FakeAudioProcessor = {
     connect: vi.fn(),
     disconnect: vi.fn(),
     onaudioprocess: null
@@ -34,14 +40,16 @@ function installAudioContext(): void {
       close = vi.fn(async () => undefined)
     }
   )
+  return processor
 }
 
 describe('useAudioCapture device loss', () => {
   let track: FakeTrack
+  let processor: FakeAudioProcessor
 
   beforeEach(() => {
     track = new FakeTrack()
-    installAudioContext()
+    processor = installAudioContext()
     vi.stubGlobal('navigator', {
       mediaDevices: {
         getUserMedia: vi.fn(async () => makeStream(track)),
@@ -79,5 +87,24 @@ describe('useAudioCapture device loss', () => {
     track.dispatchEvent(new Event('ended'))
 
     expect(onCaptureLost).not.toHaveBeenCalled()
+  })
+
+  it('publishes the copied audio envelope without suppressing speech input', async () => {
+    const publishMeter = vi.fn()
+    const { result } = renderHook(() => useAudioCapture(publishMeter))
+    await result.current.start({ sessionId: 'meter-session' })
+
+    processor.onaudioprocess?.({
+      inputBuffer: { getChannelData: () => new Float32Array(128).fill(0.3) }
+    } as unknown as AudioProcessingEvent)
+
+    expect(publishMeter).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isSpeaking: true, peak: expect.closeTo(0.3, 5) })
+    )
+    expect(window.api.speech.feedAudio).toHaveBeenCalledWith(
+      expect.any(Float32Array),
+      48_000,
+      'meter-session'
+    )
   })
 })

@@ -1,16 +1,22 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type { DictationState, SpeechModelState } from '../../../../shared/speech-types'
+import {
+  DEFAULT_DICTATION_METER,
+  type DictationMeterState
+} from '../../components/dictation/dictation-audio-meter'
 
 export type DictationSlice = {
   dictationState: DictationState
   partialTranscript: string
   activeModelId: string | null
   modelStates: SpeechModelState[]
+  dictationMeter: DictationMeterState
   setDictationState: (state: DictationState) => void
   setPartialTranscript: (text: string) => void
   setActiveModelId: (id: string | null) => void
   setModelStates: (states: SpeechModelState[]) => void
+  setDictationMeter: (meter: DictationMeterState) => void
   refreshModelStates: () => Promise<void>
 }
 
@@ -45,11 +51,13 @@ export const createDictationSlice: StateCreator<AppState, [], [], DictationSlice
     partialTranscript: '',
     activeModelId: null,
     modelStates: [],
+    dictationMeter: DEFAULT_DICTATION_METER,
 
     setDictationState: (state) => set({ dictationState: state }),
     setPartialTranscript: (text) => set({ partialTranscript: text }),
     setActiveModelId: (id) => set({ activeModelId: id }),
     setModelStates,
+    setDictationMeter: (meter) => set({ dictationMeter: meter }),
 
     refreshModelStates: async () => {
       try {

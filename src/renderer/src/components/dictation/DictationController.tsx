@@ -19,6 +19,7 @@ export function DictationController() {
   const dictationState = useAppStore((s) => s.dictationState)
   const setDictationState = useAppStore((s) => s.setDictationState)
   const setPartialTranscript = useAppStore((s) => s.setPartialTranscript)
+  const setDictationMeter = useAppStore((s) => s.setDictationMeter)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
   const settings = useAppStore((s) => s.settings)
   const keybindings = useAppStore((s) => s.keybindings)
@@ -28,7 +29,7 @@ export function DictationController() {
     flushBufferedAudio,
     discardBufferedAudio,
     getCapturedChunkCount
-  } = useAudioCapture()
+  } = useAudioCapture(setDictationMeter)
 
   const dictationStateRef = useRef(dictationState)
   dictationStateRef.current = dictationState
