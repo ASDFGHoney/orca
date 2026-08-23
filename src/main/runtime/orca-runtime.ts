@@ -20337,6 +20337,7 @@ export class OrcaRuntimeService {
       missingRuntimeWorktreeIds,
       mirroredWorktreeIdByTabId,
       connectedPtyEvidence,
+      freshPtyLiveness,
       restoredAgentPresenceSupported,
       ptyProcessEvidenceDeadline
     )
@@ -20363,6 +20364,7 @@ export class OrcaRuntimeService {
       paneKeys: ReadonlySet<string>
       ptyIds: ReadonlySet<string>
     },
+    freshPtyLiveness: ReadonlySet<string> | null,
     restoredAgentPresenceSupported: boolean,
     ptyProcessEvidenceDeadline: number
   ): Promise<void> {
@@ -20412,7 +20414,11 @@ export class OrcaRuntimeService {
     }
     const hookEntriesAtInspection = this.getAgentStatusSnapshotFn?.() ?? []
     const restoredAgentLiveness = restoredAgentPresenceSupported
-      ? await this.resolveRestoredAgentLiveness(hookEntriesAtInspection, ptyProcessEvidenceDeadline)
+      ? await this.resolveRestoredAgentLiveness(
+          hookEntriesAtInspection,
+          ptyProcessEvidenceDeadline,
+          freshPtyLiveness
+        )
       : new Map<string, RestoredAgentLivenessResolution>()
     const hookEntries = restoredAgentPresenceSupported
       ? (this.getAgentStatusSnapshotFn?.() ?? hookEntriesAtInspection)
@@ -20563,7 +20569,8 @@ export class OrcaRuntimeService {
 
   private async resolveRestoredAgentLiveness(
     entries: readonly AgentStatusIpcPayload[],
-    deadline: number
+    deadline: number,
+    freshPtyLiveness: ReadonlySet<string> | null
   ): Promise<Map<string, RestoredAgentLivenessResolution>> {
     const restoredEntries = entries.filter((entry) => entry.restoredUnconfirmed === true)
     const resolved = await Promise.all(
@@ -20587,7 +20594,7 @@ export class OrcaRuntimeService {
             (binding.incarnationId !== null &&
               currentAtStart.incarnationId !== binding.incarnationId))
         ) {
-          return result('exited')
+          return result('unverifiable')
         }
         if (currentAtStart && this.isPtyKnownExited(currentAtStart.ptyId)) {
           return result('exited')
@@ -20607,6 +20614,9 @@ export class OrcaRuntimeService {
           controller !== this.ptyController ||
           !this.isRestoredAgentPtyBindingCurrent(entry, binding)
         ) {
+          return result('unverifiable')
+        }
+        if (evidence.status === 'exited' && freshPtyLiveness?.has(binding.ptyId)) {
           return result('unverifiable')
         }
         if (evidence.status !== 'live') {

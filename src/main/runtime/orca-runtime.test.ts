@@ -37846,6 +37846,60 @@ describe('OrcaRuntimeService', () => {
     expect(inspectProcess).toHaveBeenCalledExactlyOnceWith('persisted-pty')
   })
 
+  it('keeps conflicting persisted and current PTY bindings unverifiable', async () => {
+    const paneKey = makePaneKey('host-tab', HEADLESS_LEAF_ID)
+    const session = makeWorkspaceSessionWithHeadlessTerminal({
+      terminalPtyIncarnationsByPaneKey: {
+        [paneKey]: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      }
+    })
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(session)
+    const now = Date.now()
+    const inspectProcess = vi.fn(async () => ({
+      foregroundProcess: 'codex',
+      hasChildProcesses: true
+    }))
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          paneKey,
+          worktreeId: TEST_WORKTREE_ID,
+          tabId: 'host-tab',
+          state: 'working',
+          prompt: 'await binding adoption',
+          agentType: 'codex',
+          connectionId: null,
+          receivedAt: now,
+          stateStartedAt: now - 100,
+          restoredUnconfirmed: true
+        }
+      ]
+    })
+    runtime.setPtyController({
+      write: vi.fn(() => true),
+      kill: vi.fn(() => true),
+      getForegroundProcess: vi.fn(async () => 'codex'),
+      inspectProcess,
+      listProcesses: vi.fn(async () => [])
+    })
+    runtime.registerPty('current-pty', TEST_WORKTREE_ID, null, {
+      tabId: 'host-tab',
+      leafId: HEADLESS_LEAF_ID,
+      incarnationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    })
+
+    const { worktrees } = await runtime.getWorktreePs(undefined, true, true)
+
+    expect(worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)?.agents).toEqual([
+      expect.objectContaining({
+        paneKey,
+        restoredUnconfirmed: true,
+        agentLiveness: 'unverifiable'
+      })
+    ])
+    expect(inspectProcess).not.toHaveBeenCalled()
+  })
+
   it('omits a cold restored row only after terminal_gone confirms exact absence', async () => {
     const paneKey = makePaneKey('host-tab', HEADLESS_LEAF_ID)
     const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -37885,6 +37939,94 @@ describe('OrcaRuntimeService', () => {
     expect(worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)?.agents).toEqual(
       []
     )
+  })
+
+  it('keeps cached terminal_gone unverifiable when owning inventory re-observes the PTY', async () => {
+    const leafId = '33333333-3333-4333-8333-333333333333'
+    const paneKey = `tab-1:${leafId}`
+    const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const now = Date.now()
+    const inspectProcess = vi.fn(async () => {
+      throw new Error('terminal_gone')
+    })
+    const listProcesses = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        {
+          id: 'pty-1',
+          cwd: TEST_WORKTREE_PATH,
+          title: 'Codex',
+          incarnationId,
+          terminalHandle: 'term_restored'
+        }
+      ])
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          paneKey,
+          worktreeId: TEST_WORKTREE_ID,
+          tabId: 'tab-1',
+          state: 'working',
+          prompt: 'continue after restart',
+          agentType: 'codex',
+          connectionId: null,
+          receivedAt: now,
+          stateStartedAt: now - 100,
+          restoredUnconfirmed: true
+        }
+      ]
+    })
+    runtime.setPtyController({
+      write: vi.fn(() => true),
+      kill: vi.fn(() => true),
+      getForegroundProcess: vi.fn(async () => null),
+      inspectProcess,
+      listProcesses
+    })
+    runtime.registerPty('pty-1', TEST_WORKTREE_ID, null, {
+      tabId: 'tab-1',
+      leafId,
+      incarnationId
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+
+    const first = await runtime.getWorktreePs(undefined, true, true)
+    const second = await runtime.getWorktreePs(undefined, true, true)
+
+    expect(
+      first.worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)?.agents
+    ).toEqual([])
+    expect(
+      second.worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)?.agents
+    ).toEqual([
+      expect.objectContaining({
+        paneKey,
+        restoredUnconfirmed: true,
+        agentLiveness: 'unverifiable'
+      })
+    ])
+    expect(inspectProcess).toHaveBeenCalledOnce()
   })
 
   it('projects a restored agent after the execution host confirms its exact PTY is live', async () => {
