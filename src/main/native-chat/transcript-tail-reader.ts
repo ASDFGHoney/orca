@@ -5,7 +5,7 @@ import type {
 } from '../../shared/native-chat-types'
 import type { TranscriptRangeFs } from './transcript-range-fs'
 import { readOwnedSshNativeChatTranscriptTail } from './ssh-transcript-read'
-import { resolveNativeChatTranscriptOwner } from './native-chat-transcript-owner'
+import { resolveHydratedNativeChatTranscriptOwner } from './native-chat-transcript-owner'
 import { transcriptUnverifiableResult } from './transcript-host-verdict'
 import { resolveNativeChatTranscriptAgent } from '../../shared/native-chat-agent-support'
 import { resolveSessionFilePath, type ResolveSessionFileOptions } from './session-file-resolver'
@@ -256,7 +256,7 @@ export async function readNativeChatTranscriptTail(
 ): Promise<NativeChatTranscriptTailResult> {
   const owner = args.filePath
     ? ({ kind: 'legacy-local' } as const)
-    : resolveNativeChatTranscriptOwner(args)
+    : await resolveHydratedNativeChatTranscriptOwner(args, signal)
   if (owner.kind === 'unknown') {
     return transcriptUnverifiableResult()
   }

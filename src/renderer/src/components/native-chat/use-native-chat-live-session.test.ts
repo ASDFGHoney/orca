@@ -197,6 +197,29 @@ describe('useNativeChatLiveSession — transport routing', () => {
     expect(transport.subscribe).not.toHaveBeenCalled()
   })
 
+  it('makes zero transcript calls while ownership is unknown, then binds when proven', async () => {
+    const transport = getMockTransport('env-1')
+    const root = await render({
+      paneKey: PANE,
+      agent: AGENT,
+      sessionId: SESSION,
+      runtimeEnvironmentId: 'env-1',
+      enabled: false
+    })
+    expect(transport.readSession).not.toHaveBeenCalled()
+    expect(transport.subscribe).not.toHaveBeenCalled()
+
+    await rerender(root, {
+      paneKey: PANE,
+      agent: AGENT,
+      sessionId: SESSION,
+      runtimeEnvironmentId: 'env-1',
+      enabled: true
+    })
+    expect(transport.readSession).toHaveBeenCalledOnce()
+    expect(transport.subscribe).toHaveBeenCalledOnce()
+  })
+
   it('uses the local transport when the owner is null (unchanged behavior, R6)', async () => {
     await render({ paneKey: PANE, agent: AGENT, sessionId: SESSION })
 

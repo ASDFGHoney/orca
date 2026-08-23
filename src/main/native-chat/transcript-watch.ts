@@ -290,7 +290,9 @@ async function subscribeHostResolvedNativeChatTranscript(
     }
   }
 
-  const stopOwnerChanges = agentHookServer.subscribeProviderSessionChanges(() => void rebind())
+  await agentHookServer.awaitTranscriptOwnerHydration()
+  setupSignal?.throwIfAborted()
+  const stopOwnerChanges = agentHookServer.subscribeTranscriptOwnerChanges(() => void rebind())
   const abortFromSetup = (): void => subscription.unsubscribe()
   const subscription: NativeChatTranscriptSubscription = {
     watching: true,

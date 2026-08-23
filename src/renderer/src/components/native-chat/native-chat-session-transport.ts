@@ -5,9 +5,11 @@ import { isWebClientLocation } from '@/lib/web-client-location'
 import {
   callRuntimeRpc,
   RuntimeRpcCallError,
+  runtimeEnvironmentSupportsCapability,
   type RuntimeClientTarget
 } from '@/runtime/runtime-rpc-client'
 import { isRuntimeCompatBlockError } from '@/runtime/runtime-protocol-compat'
+import { NATIVE_CHAT_TRANSCRIPT_OWNER_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import {
   parseRuntimeNativeChatReadSessionResult,
   parseRuntimeNativeChatTurnLifecycle,
@@ -76,6 +78,15 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
   return {
     readSession: async (agent, sessionId, limit, transcriptPath, paneKey) => {
       try {
+        if (
+          !(await runtimeEnvironmentSupportsCapability(
+            environmentId,
+            NATIVE_CHAT_TRANSCRIPT_OWNER_RUNTIME_CAPABILITY,
+            15_000
+          ))
+        ) {
+          return { error: RUNTIME_TOO_OLD }
+        }
         const result = await callRuntimeRpc<unknown>(
           target,
           'nativeChat.readSession',
@@ -129,8 +140,11 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
 
       const openStream = (): void => {
         const attempt = ++activeAttempt
-        void window.api.runtimeEnvironments
-          .subscribe(
+        const subscribe = () => {
+          if (cancelled || attempt !== activeAttempt) {
+            return Promise.resolve(null)
+          }
+          return window.api.runtimeEnvironments.subscribe(
             {
               selector: environmentId,
               method: 'nativeChat.subscribe',
@@ -231,7 +245,22 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
               onClose: () => scheduleReconnect(attempt)
             }
           )
+        }
+        const handlePromise = runtimeEnvironmentSupportsCapability(
+          environmentId,
+          NATIVE_CHAT_TRANSCRIPT_OWNER_RUNTIME_CAPABILITY,
+          15_000
+        ).then((supported) => {
+          if (!supported) {
+            throw new Error(RUNTIME_TOO_OLD)
+          }
+          return subscribe()
+        })
+        void handlePromise
           .then((handle) => {
+            if (!handle) {
+              return
+            }
             // Why: reconnect attempts may resolve out of order. A stale handle
             // must never replace or tear down the current stream.
             if (cancelled || attempt !== activeAttempt || reconnectPendingAttempt === attempt) {
@@ -252,7 +281,10 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
                 type: 'snapshot',
                 messages: [],
                 hasMore: false,
-                error: toRuntimeNativeChatErrorMessage(err)
+                error:
+                  err instanceof Error && err.message === RUNTIME_TOO_OLD
+                    ? RUNTIME_TOO_OLD
+                    : toRuntimeNativeChatErrorMessage(err)
               })
               return
             }

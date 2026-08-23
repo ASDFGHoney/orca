@@ -39,6 +39,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'sess-abc',
       transcriptPath: null,
       connectionId: 'builder',
+      transcriptOwnership: 'proven-ssh',
       ptyId: 'pty-1',
       paneKey
     })
@@ -66,6 +67,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'sess-abc',
       transcriptPath: '/home/u/.claude/projects/slug/real-uuid.jsonl',
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-1',
       paneKey
     })
@@ -86,6 +88,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: null,
       transcriptPath: null,
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-1',
       paneKey
     })
@@ -119,6 +122,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'left-sess',
       transcriptPath: null,
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-left',
       paneKey: leftKey
     })
@@ -127,6 +131,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'right-sess',
       transcriptPath: null,
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-right',
       paneKey: rightKey
     })
@@ -150,6 +155,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'codex-1',
       transcriptPath: null,
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-1',
       paneKey
     })
@@ -171,6 +177,7 @@ describe('resolveNativeChatSession', () => {
         sessionId: null,
         transcriptPath: null,
         connectionId: null,
+        transcriptOwnership: 'unknown',
         ptyId: 'pty-1',
         paneKey
       })
@@ -313,6 +320,7 @@ describe('resolveNativeChatSession', () => {
       sessionId: 'codex-live',
       transcriptPath: null,
       connectionId: null,
+      transcriptOwnership: 'unknown',
       ptyId: 'pty-1',
       paneKey
     })

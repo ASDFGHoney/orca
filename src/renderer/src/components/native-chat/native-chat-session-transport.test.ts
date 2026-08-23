@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import {
   clearRuntimeCompatibilityCacheForTests,
-  markRuntimeEnvironmentCompatible,
+  markRuntimeEnvironmentCompatible as markRuntimeCompatible,
   RuntimeRpcCallError
 } from '@/runtime/runtime-rpc-client'
+import { NATIVE_CHAT_TRANSCRIPT_OWNER_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { RUNTIME_COMPAT_BLOCK_CODE } from '@/runtime/runtime-protocol-compat'
 import {
   getNativeChatSessionTransport,
@@ -19,6 +20,10 @@ const runtimeEnvironmentsCall = vi.fn()
 const runtimeEnvironmentsSubscribe = vi.fn()
 
 const ENV = 'env-1'
+
+function markRuntimeEnvironmentCompatible(environmentId: string): void {
+  markRuntimeCompatible(environmentId, [NATIVE_CHAT_TRANSCRIPT_OWNER_RUNTIME_CAPABILITY])
+}
 
 function message(id: string): NativeChatMessage {
   return {
@@ -90,6 +95,19 @@ describe('getNativeChatSessionTransport — selection', () => {
       timeoutMs: 15_000
     })
     expect(nativeChatReadSession).not.toHaveBeenCalled()
+  })
+
+  it('makes zero native-chat calls when a remote runtime lacks owner routing', async () => {
+    markRuntimeCompatible(ENV, [])
+    const transport = getNativeChatSessionTransport(ENV)
+
+    await expect(transport.readSession('claude', 'sess-1')).resolves.toEqual({
+      error:
+        'This remote runtime is too old to show agent chat history. Update the remote runtime to view it.'
+    })
+
+    expect(runtimeEnvironmentsCall).not.toHaveBeenCalled()
+    expect(runtimeEnvironmentsSubscribe).not.toHaveBeenCalled()
   })
 
   it('forwards pane identity through desktop IPC', async () => {
@@ -204,7 +222,7 @@ describe('runtime subscribe', () => {
     const transport = getNativeChatSessionTransport(ENV)
 
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
-    await Promise.resolve()
+    await flush()
 
     deliver({ type: 'appended', messages: [message('m-1')] })
     deliver({ type: 'snapshot', messages: [message('m-snapshot')] })
@@ -246,7 +264,7 @@ describe('runtime subscribe', () => {
       },
       vi.fn()
     )
-    await Promise.resolve()
+    await flush()
 
     expect(runtimeEnvironmentsSubscribe).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -265,7 +283,7 @@ describe('runtime subscribe', () => {
     const lifecycle = { state: 'completed', turnId: 'turn-1', timestamp: 42 } as const
 
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
-    await Promise.resolve()
+    await flush()
     deliver({
       type: 'snapshot',
       messages: [message('valid')],
@@ -296,7 +314,7 @@ describe('runtime subscribe', () => {
     const transport = getNativeChatSessionTransport(ENV)
 
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
-    await Promise.resolve()
+    await flush()
     deliver({
       type: 'snapshot',
       messages: [message('seed')],
@@ -322,7 +340,7 @@ describe('runtime subscribe', () => {
     const transport = getNativeChatSessionTransport(ENV)
 
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
-    await Promise.resolve()
+    await flush()
 
     // An ok response we can't parse must still un-stick the view exactly once,
     // carrying any error the runtime sent.
@@ -345,7 +363,7 @@ describe('runtime subscribe', () => {
     const transport = getNativeChatSessionTransport(ENV)
 
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
-    await Promise.resolve()
+    await flush()
 
     deliver({ type: 'snapshot', messages: [message('m-1')] })
     deliver({ type: 'snapshot', messages: [], error: 'runtime too old' })
@@ -425,6 +443,7 @@ describe('runtime subscribe', () => {
       const transport = getNativeChatSessionTransport(ENV)
 
       transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, vi.fn())
+      await vi.advanceTimersByTimeAsync(0)
       attempts[0]!.resolve({ unsubscribe: vi.fn(), sendBinary: vi.fn() })
       attempts[0]!.callbacks.onResponse({
         ok: true,
@@ -499,14 +518,15 @@ describe('runtime subscribe', () => {
         vi.fn()
       )
 
+      await vi.advanceTimersByTimeAsync(0)
       attempts[0]!.callbacks.onClose?.()
       await vi.advanceTimersByTimeAsync(RUNTIME_NATIVE_CHAT_RECONNECT_MS)
       const activeUnsubscribe = vi.fn()
       attempts[1]!.resolve({ unsubscribe: activeUnsubscribe, sendBinary: vi.fn() })
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
       const staleUnsubscribe = vi.fn()
       attempts[0]!.resolve({ unsubscribe: staleUnsubscribe, sendBinary: vi.fn() })
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
       stop()
 
       expect(staleUnsubscribe).toHaveBeenCalledOnce()
@@ -530,6 +550,7 @@ describe('runtime subscribe', () => {
       { subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' },
       onAppended
     )
+    await flush()
     stop() // teardown before the subscribe promise resolves
     resolveHandle({ unsubscribe, sendBinary: vi.fn() })
     await Promise.resolve()

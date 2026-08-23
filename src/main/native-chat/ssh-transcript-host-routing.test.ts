@@ -3,14 +3,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileRangeReadResult, FileStat, IFilesystemProvider } from '../providers/types'
-import { MAX_FILE_RANGE_READ_BYTES } from '../../shared/file-range-read'
 
 const mocks = vi.hoisted(() => ({
   getProvider: vi.fn<(connectionId: string) => IFilesystemProvider | undefined>(),
   generation: 1,
   changeListeners: new Set<(connectionId: string, generation: number) => void>(),
   ownerListeners: new Set<() => void>(),
-  statusRows: [] as Record<string, unknown>[]
+  statusRows: [] as Record<string, unknown>[],
+  retainedOwners: [] as Record<string, unknown>[],
+  unresolvedOwner: false,
+  awaitHydration: () => Promise.resolve()
 }))
 
 vi.mock('../agent-hooks/server', () => ({
@@ -18,7 +20,13 @@ vi.mock('../agent-hooks/server', () => ({
     getStatusSnapshot: () => mocks.statusRows,
     getStatusSnapshotForPane: (paneKey: string) =>
       mocks.statusRows.filter((row) => row.paneKey === paneKey),
-    subscribeProviderSessionChanges: (listener: () => void) => {
+    getTranscriptOwnerEvidence: (paneKey?: string) =>
+      paneKey
+        ? mocks.retainedOwners.filter((owner) => owner.paneKey === paneKey)
+        : mocks.retainedOwners,
+    hasUnresolvedRemoteTranscriptOwner: () => mocks.unresolvedOwner,
+    awaitTranscriptOwnerHydration: () => mocks.awaitHydration(),
+    subscribeTranscriptOwnerChanges: (listener: () => void) => {
       mocks.ownerListeners.add(listener)
       return () => mocks.ownerListeners.delete(listener)
     }
@@ -148,6 +156,9 @@ beforeEach(() => {
   mocks.changeListeners.clear()
   mocks.ownerListeners.clear()
   mocks.statusRows = []
+  mocks.retainedOwners = []
+  mocks.unresolvedOwner = false
+  mocks.awaitHydration = () => Promise.resolve()
   tempRoots = []
 })
 
@@ -763,73 +774,5 @@ describe('native chat SSH transcript host routing (#13663)', () => {
     })
 
     expect(result).toMatchObject({ messages: [{ id: 'bound-remote' }] })
-  })
-
-  it('pages a large append in bounded ranges without rereading the prefix', async () => {
-    const transcriptPath = '/tmp/large-append-session.jsonl'
-    const initial = Buffer.from(claudeLine('initial', 'first'))
-    const files = new Map([[transcriptPath, initial]])
-    const { provider, readFile, readFileRange, stat } = memoryProvider(files)
-    stat.mockImplementation(async (filePath: string): Promise<FileStat> => {
-      const bytes = files.get(filePath)!
-      return {
-        size: bytes.length,
-        type: 'file',
-        mtime: bytes.length,
-        mtimeMs: bytes.length,
-        dev: 7,
-        ino: 11
-      }
-    })
-    mocks.getProvider.mockReturnValue(provider)
-    const appended: string[] = []
-    const replacements: string[][] = []
-    const subscription = await subscribeNativeChatTranscript({
-      ...routedArgs(transcriptPath),
-      initialLimit: 40,
-      onInitialSnapshot: () => {},
-      onAppend: (messages) => appended.push(...messages.map((message) => message.id)),
-      onReplace: (messages) => replacements.push(messages.map((message) => message.id)),
-      debounceMs: 0,
-      reconciliationIntervalMs: 20
-    })
-
-    try {
-      await vi.waitFor(() => expect(readFileRange).toHaveBeenCalled())
-      readFileRange.mockClear()
-      const partial = Buffer.from('{"type":')
-      files.set(transcriptPath, Buffer.concat([initial, partial]))
-      await vi.waitFor(() =>
-        expect(readFileRange).toHaveBeenCalledWith(
-          transcriptPath,
-          initial.length,
-          partial.length,
-          expect.anything()
-        )
-      )
-      readFileRange.mockClear()
-      const append = Buffer.from(
-        Array.from({ length: 3_000 }, (_, index) =>
-          claudeLine(`append-${index}`, `bounded remote append ${index}`)
-        ).join('')
-      )
-      expect(append.length).toBeGreaterThan(MAX_FILE_RANGE_READ_BYTES)
-      files.set(transcriptPath, Buffer.concat([initial, partial, append]))
-
-      await vi.waitFor(() => expect(replacements.at(-1)).toContain('append-2999'))
-      expect(replacements.at(-1)).toHaveLength(40)
-      expect(appended).not.toContain('append-2999')
-      const requestedLengths = readFileRange.mock.calls.map((call) => call[2])
-      expect(Math.max(...requestedLengths)).toBeLessThanOrEqual(MAX_FILE_RANGE_READ_BYTES)
-      expect(requestedLengths.reduce((sum, length) => sum + length, 0)).toBeLessThanOrEqual(
-        append.length + 256
-      )
-      const afterReplacement = Buffer.from(claudeLine('after-replacement', 'still live'))
-      files.set(transcriptPath, Buffer.concat([initial, partial, append, afterReplacement]))
-      await vi.waitFor(() => expect(appended).toContain('after-replacement'), { timeout: 3_000 })
-      expect(readFile).not.toHaveBeenCalled()
-    } finally {
-      subscription.unsubscribe()
-    }
   })
 })

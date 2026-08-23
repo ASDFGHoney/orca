@@ -25,7 +25,10 @@ vi.mock('../agent-hooks/server', () => ({
           transcriptPath: '/home/user/session.jsonl'
         }
       }
-    ]
+    ],
+    getTranscriptOwnerEvidence: () => [],
+    hasUnresolvedRemoteTranscriptOwner: () => false,
+    awaitTranscriptOwnerHydration: () => Promise.resolve()
   }
 }))
 
