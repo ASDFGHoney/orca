@@ -64,11 +64,12 @@ export type NativeChatBlock =
   | NativeChatToolResultBlock
   | NativeChatImageRefBlock
 
-export const NATIVE_CHAT_NOTICE_KINDS = ['agent-notice'] as const
-export type NativeChatNoticeKind = (typeof NATIVE_CHAT_NOTICE_KINDS)[number]
-
 export const NATIVE_CHAT_NOTICE_LEVELS = ['info', 'warning', 'error'] as const
 export type NativeChatNoticeLevel = (typeof NATIVE_CHAT_NOTICE_LEVELS)[number]
+
+export type NativeChatNotice = {
+  level: NativeChatNoticeLevel
+}
 
 export type NativeChatMessage = {
   /** Stable across re-reads/appends so the assembler and the renderer list can
@@ -86,8 +87,7 @@ export type NativeChatMessage = {
   /** Present only for provider system notices the chat should render as a
    *  banner. Quiet status rows (interruption) omit it. Optional so mixed-version
    *  clients ignore the field. */
-  noticeKind?: NativeChatNoticeKind
-  noticeLevel?: NativeChatNoticeLevel
+  notice?: NativeChatNotice
 }
 
 export const NATIVE_CHAT_TURN_LIFECYCLE_STATES = ['working', 'completed', 'interrupted'] as const
@@ -148,6 +148,7 @@ export function isToolResultBlock(block: NativeChatBlock): block is NativeChatTo
 export function isInterruptedStatusMessage(message: NativeChatMessage): boolean {
   return (
     message.role === 'system' &&
+    message.notice === undefined &&
     message.blocks.some(
       (block) => block.type === 'text' && block.text === NATIVE_CHAT_INTERRUPTED_STATUS_TEXT
     )
@@ -157,7 +158,13 @@ export function isInterruptedStatusMessage(message: NativeChatMessage): boolean 
 /** Provider-authored system notice that Native Chat must render as a banner,
  *  not as quiet status or an assistant bubble. */
 export function isAgentNoticeMessage(message: NativeChatMessage): boolean {
-  return message.role === 'system' && message.noticeKind === 'agent-notice'
+  return (
+    message.role === 'system' &&
+    message.notice !== undefined &&
+    !message.blocks.some(
+      (block) => block.type === 'text' && block.text === NATIVE_CHAT_INTERRUPTED_STATUS_TEXT
+    )
+  )
 }
 
 export function isImageRefBlock(block: NativeChatBlock): block is NativeChatImageRefBlock {

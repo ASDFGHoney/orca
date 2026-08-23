@@ -16,7 +16,7 @@ export function NativeChatAgentNoticeBanner({
   text,
   onSwitchToTerminal
 }: NativeChatAgentNoticeBannerProps): React.JSX.Element {
-  const level = message.noticeLevel ?? 'info'
+  const level = message.notice?.level ?? 'info'
   const needsAttention = level === 'warning' || level === 'error'
   const Icon = needsAttention ? AlertTriangle : Info
 

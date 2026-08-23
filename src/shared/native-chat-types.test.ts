@@ -56,12 +56,11 @@ describe('agent notice vs interrupt status', () => {
     source: 'transcript' as const
   }
 
-  it('treats noticeKind agent-notice as a bannerable system notice', () => {
+  it('treats structured notice metadata as a bannerable system notice', () => {
     const message: NativeChatMessage = {
       ...base,
       role: 'system',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning'
+      notice: { level: 'warning' }
     }
     expect(isAgentNoticeMessage(message)).toBe(true)
     expect(isInterruptedStatusMessage(message)).toBe(false)
@@ -74,6 +73,17 @@ describe('agent notice vs interrupt status', () => {
       blocks: [{ type: 'text', text: NATIVE_CHAT_INTERRUPTED_STATUS_TEXT }]
     }
     expect(isInterruptedStatusMessage(message)).toBe(true)
+    expect(isAgentNoticeMessage(message)).toBe(false)
+  })
+
+  it('rejects malformed rows that mix notice metadata with interrupt copy', () => {
+    const message: NativeChatMessage = {
+      ...base,
+      role: 'system',
+      blocks: [{ type: 'text', text: NATIVE_CHAT_INTERRUPTED_STATUS_TEXT }],
+      notice: { level: 'warning' }
+    }
+    expect(isInterruptedStatusMessage(message)).toBe(false)
     expect(isAgentNoticeMessage(message)).toBe(false)
   })
 })

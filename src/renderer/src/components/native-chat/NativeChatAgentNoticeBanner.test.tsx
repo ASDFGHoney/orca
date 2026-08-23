@@ -16,8 +16,7 @@ function noticeMessage(noticeLevel: 'info' | 'warning' | 'error'): NativeChatMes
     blocks: [{ type: 'text', text: 'placeholder' }],
     timestamp: null,
     source: 'transcript',
-    noticeKind: 'agent-notice',
-    noticeLevel
+    notice: { level: noticeLevel }
   }
 }
 

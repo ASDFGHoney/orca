@@ -38,8 +38,7 @@ describe('NativeChatMessageList — agent notices', () => {
             blocks: [{ type: 'text', text: 'Please run /login in Claude Code.' }],
             timestamp: null,
             source: 'transcript',
-            noticeKind: 'agent-notice',
-            noticeLevel: 'warning'
+            notice: { level: 'warning' }
           }
         ])}
         isWorking={false}

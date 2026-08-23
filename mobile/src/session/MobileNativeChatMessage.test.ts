@@ -160,8 +160,7 @@ describe('MobileNativeChatMessage', () => {
       blocks: [{ type: 'text', text: 'Please run /login in Claude Code.' }],
       timestamp: null,
       source: 'transcript',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning'
+      notice: { level: 'warning' }
     })
     expect(textIn(tree.root)).toContain('Please run /login in Claude Code.')
     expect(tree.root.findAllByType('Pressable' as never)).toHaveLength(0)
@@ -170,21 +169,23 @@ describe('MobileNativeChatMessage', () => {
       .find((node) => node.props.accessibilityRole === 'alert')
     expect(banner).toBeTruthy()
   })
-  // STA-4983 x STA-4777: the notice bubble auto-merges cleanly with the selectable
-  // work, so nothing else catches it becoming the one uncopyable bubble.
-  it('makes agent notice text long-press selectable', () => {
-    const tree = render({
-      id: 'notice-1',
-      role: 'system',
-      blocks: [{ type: 'text', text: 'Please run /login to enroll this device.' }],
-      source: 'transcript',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning'
-    })
+  it('makes agent notice text selectable and respects font scaling', () => {
+    const tree = render(
+      {
+        id: 'notice-1',
+        role: 'system',
+        blocks: [{ type: 'text', text: 'Please run /login to enroll this device.' }],
+        timestamp: null,
+        source: 'transcript',
+        notice: { level: 'warning' }
+      },
+      { fontScale: 1.5 }
+    )
     const notice = tree.root
       .findAllByType('Text' as never)
       .find((node) => String(node.children.join('')).includes('/login'))
     expect(notice, 'notice text node').toBeDefined()
     expect(notice!.props.selectable).toBe(true)
+    expect(notice!.props.style).toContainEqual({ fontSize: 25.5, lineHeight: 34.5 })
   })
 })

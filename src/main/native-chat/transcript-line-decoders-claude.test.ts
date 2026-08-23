@@ -26,123 +26,58 @@ describe('decodeClaudeTranscriptLine — system notices', () => {
       blocks: [{ type: 'text', text: LOGIN_NOTICE }],
       timestamp: Date.parse('2026-08-13T13:26:51.452Z'),
       source: 'transcript',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning'
+      notice: { level: 'warning' }
     })
     expect(isAgentNoticeMessage(decoded!)).toBe(true)
   })
 
-  it('surfaces an unknown future subtype when it carries user-facing copy', () => {
-    const decoded = decode({
+  it.each([
+    ['informational', 'Device enrollment required', 'warning', 'warning'],
+    ['model_refusal_fallback', 'Switched to a fallback model', 'error', 'error'],
+    ['compact_boundary', 'Conversation compacted', 'suggestion', 'info']
+  ])('surfaces supported %s copy as an agent notice', (subtype, content, level, expectedLevel) => {
+    expect(decode({ type: 'system', subtype, content, level, uuid: `${subtype}-1` })).toMatchObject(
+      {
+        role: 'system',
+        blocks: [{ type: 'text', text: content }],
+        notice: { level: expectedLevel }
+      }
+    )
+  })
+
+  it.each([
+    {
       type: 'system',
-      subtype: 'trusted_device_required',
-      content: 'Enroll this device to continue Remote Control.',
-      level: 'warning',
-      timestamp: '2026-08-20T00:00:00.000Z',
-      uuid: 'future-notice'
-    })
-
-    expect(decoded).toMatchObject({
-      id: 'future-notice',
-      role: 'system',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning',
-      blocks: [{ type: 'text', text: 'Enroll this device to continue Remote Control.' }]
-    })
-    expect(isAgentNoticeMessage(decoded!)).toBe(true)
-  })
-
-  it('keeps known telemetry subtypes silent even when they carry extra fields', () => {
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'stop_hook_summary',
-        hookCount: 3,
-        timestamp: '2026-08-13T14:44:23.786Z',
-        uuid: 'e6f19769-d9b9-44eb-86e4-0092bf4cf6da'
-      })
-    ).toBeNull()
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'turn_duration',
-        durationMs: 5419,
-        timestamp: '2026-08-13T14:44:23.787Z',
-        uuid: 'cb4072ea-68ed-4140-a552-08de711c002b'
-      })
-    ).toBeNull()
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'away_summary',
-        content: 'PR #11417 is finalized and the evidence comment is posted.',
-        uuid: 'away-1'
-      })
-    ).toBeNull()
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'local_command',
-        content: '<command-name>/login</command-name>',
-        uuid: 'cmd-1'
-      })
-    ).toBeNull()
-  })
-
-  it('surfaces api_error copy from the structured error payload', () => {
-    const decoded = decode({
+      subtype: 'away_summary',
+      content: 'While you were away, Claude completed the requested implementation.',
+      uuid: 'away-1'
+    },
+    {
       type: 'system',
       subtype: 'api_error',
       level: 'error',
-      error: {
-        message: 'Connection error.',
-        formatted: 'Unable to connect to API (ECONNRESET)'
-      },
-      uuid: 'api-err-1',
-      timestamp: '2026-07-27T22:36:42.173Z'
-    })
-
-    expect(decoded).toMatchObject({
-      id: 'api-err-1',
-      role: 'system',
-      noticeKind: 'agent-notice',
-      noticeLevel: 'error',
-      blocks: [{ type: 'text', text: 'Unable to connect to API (ECONNRESET)' }]
-    })
-  })
-
-  it('surfaces model_refusal_fallback and compact_boundary copy as notices', () => {
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'model_refusal_fallback',
-        content: "Fable 5's safeguards flagged this message. Switched to Opus 4.8.",
-        level: 'warning',
-        uuid: 'refusal-1'
-      })
-    ).toMatchObject({
-      noticeKind: 'agent-notice',
-      noticeLevel: 'warning',
-      blocks: [
-        {
-          type: 'text',
-          text: "Fable 5's safeguards flagged this message. Switched to Opus 4.8."
-        }
-      ]
-    })
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'compact_boundary',
-        content: 'Conversation compacted',
-        level: 'info',
-        uuid: 'compact-1'
-      })
-    ).toMatchObject({
-      noticeKind: 'agent-notice',
-      noticeLevel: 'info',
-      blocks: [{ type: 'text', text: 'Conversation compacted' }]
-    })
+      error: { message: 'Connection error.', formatted: 'Unable to connect to API' },
+      retryAttempt: 2,
+      retryInMs: 1_000,
+      source: 'request_retry',
+      uuid: 'api-retry-1'
+    },
+    {
+      type: 'system',
+      subtype: 'stop_hook_summary',
+      content: 'Stop hook completed',
+      level: 'suggestion',
+      hookCount: 3,
+      uuid: 'stop-hook-1'
+    },
+    {
+      type: 'system',
+      subtype: 'bridge_status',
+      content: 'Bridge connected',
+      uuid: 'unknown-1'
+    }
+  ])('keeps non-message system records silent', (record) => {
+    expect(decode(record)).toBeNull()
   })
 
   it('drops an informational notice with no extractable copy instead of a blank banner', () => {
@@ -156,17 +91,6 @@ describe('decodeClaudeTranscriptLine — system notices', () => {
     ).toBeNull()
   })
 
-  it('drops an unknown subtype that has no extractable copy', () => {
-    expect(
-      decode({
-        type: 'system',
-        subtype: 'future_telemetry',
-        durationMs: 12,
-        uuid: 'future-empty'
-      })
-    ).toBeNull()
-  })
-
   it('does not mark ordinary assistant turns or interrupt status as agent notices', () => {
     const assistant = decode({
       type: 'assistant',
@@ -175,7 +99,7 @@ describe('decodeClaudeTranscriptLine — system notices', () => {
       uuid: '18d90d27-d0f1-481b-9735-b18b5f005307'
     })
     expect(assistant?.role).toBe('assistant')
-    expect(assistant?.noticeKind).toBeUndefined()
+    expect(assistant?.notice).toBeUndefined()
     expect(isAgentNoticeMessage(assistant!)).toBe(false)
 
     const interrupted = decode({
@@ -189,7 +113,7 @@ describe('decodeClaudeTranscriptLine — system notices', () => {
       }
     })
     expect(interrupted?.role).toBe('system')
-    expect(interrupted?.noticeKind).toBeUndefined()
+    expect(interrupted?.notice).toBeUndefined()
     expect(isAgentNoticeMessage(interrupted!)).toBe(false)
   })
 })
