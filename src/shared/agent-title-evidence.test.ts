@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { collectAgentTitleEvidence } from './agent-title-evidence'
+import { ALL_TUI_AGENTS, TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
 
 const agentFor = (title: string) => collectAgentTitleEvidence(title).agent
 const reasonFor = (title: string) => collectAgentTitleEvidence(title).reason
@@ -38,7 +39,30 @@ describe('collectAgentTitleEvidence', () => {
       const reverse = collectAgentTitleEvidence(`${b} and ${a}`)
       expect(forward.agent).toBe(reverse.agent)
       expect(forward.agent).toBeNull()
-      expect([...forward.freeTextNames].sort()).toEqual([...reverse.freeTextNames].sort())
+      expect([...forward.freeTextNames].sort()).toEqual([a, b].sort())
+      expect([...reverse.freeTextNames].sort()).toEqual([a, b].sort())
+    })
+  })
+
+  it.each([
+    ['claude', 'claude'],
+    ['openclaude', 'openclaude'],
+    ['codex', 'codex'],
+    ['copilot', 'copilot'],
+    ['cursor', 'cursor'],
+    ['gemini', 'gemini'],
+    ['antigravity', 'antigravity'],
+    ['opencode', 'opencode'],
+    ['mimo', 'mimo-code'],
+    ['openclaw', 'openclaw'],
+    ['aider', 'aider'],
+    ['grok', 'grok'],
+    ['devin', 'devin']
+  ] as const)('collects the free-text token %s without claiming identity', (token, agent) => {
+    expect(collectAgentTitleEvidence(`review the ${token} integration`)).toMatchObject({
+      agent: null,
+      reason: 'free-text-only',
+      freeTextNames: [agent]
     })
   })
 
@@ -89,6 +113,82 @@ describe('collectAgentTitleEvidence', () => {
     })
   })
 
+  it.each(ALL_TUI_AGENTS)('recognizes the canonical whole-title label for %s', (agent) => {
+    const title = TUI_AGENT_DISPLAY_NAMES[agent]
+    expect(collectAgentTitleEvidence(title)).toMatchObject({
+      agent,
+      reason: 'anchored'
+    })
+  })
+
+  it('does not treat an exact display name as free text', () => {
+    expect(collectAgentTitleEvidence('Grok').freeTextNames).toEqual([])
+  })
+
+  it.each([
+    ['Claude Code', 'claude'],
+    ['Gemini CLI', 'gemini'],
+    ['Agent Teams', 'claude-agent-teams']
+  ] as const)('recognizes the emitted whole-title alias %s', (title, agent) => {
+    expect(agentFor(title)).toBe(agent)
+    expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it.each([
+    ['Codex ready', 'codex'],
+    ['Codex - action required', 'codex'],
+    ['Cursor ready', 'cursor'],
+    ['Droid - action required', 'droid'],
+    ['Hermes ready', 'hermes'],
+    ['Devin - action required', 'devin'],
+    ['Pi ready', 'pi'],
+    ['OMP - action required', 'omp']
+  ] as const)('recognizes Orca-controlled synthetic title %s', (title, agent) => {
+    expect(agentFor(title)).toBe(agent)
+    expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it.each([
+    ['⠋ Cursor Agent', 'cursor'],
+    ['⠋ Pi idle', 'pi'],
+    ['⠋ OMP done', 'omp']
+  ] as const)('recognizes the decorated identity frame %s', (title, agent) => {
+    expect(agentFor(title)).toBe(agent)
+    expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it('does not invent synthetic titles for an opted-out profile', () => {
+    expect(agentFor('OpenCode ready')).toBeNull()
+    expect(reasonFor('OpenCode ready')).toBe('free-text-only')
+  })
+
+  it('reads identity from the innermost wrapper segment', () => {
+    expect(agentFor('zsh | ⠋ Claude Code')).toBe('claude')
+    expect(agentFor('ssh | tmux | Cursor Agent')).toBe('cursor')
+    expect(agentFor('ssh | tmux | OC | review the parser')).toBe('opencode')
+    expect(agentFor('zsh | Fix the Codex parser')).toBeNull()
+  })
+
+  it('bounds wrapper inspection while preserving innermost identity', () => {
+    const wrappers = Array.from({ length: 200 }, (_, index) => `wrapper-${index}`).join(' | ')
+    expect(agentFor(`${wrappers} | ⠋ Cursor Agent`)).toBe('cursor')
+    expect(agentFor(`${wrappers} | OC | review the parser`)).toBe('opencode')
+  })
+
+  it.each([
+    ['codex.exe', 'codex'],
+    ['openclaude.cmd', 'openclaude'],
+    ['gemini.ps1', 'gemini'],
+    ['droid.cmd', 'droid'],
+    ['hermes.exe', 'hermes'],
+    ['agy.bat', 'antigravity'],
+    ['CODEX.EXE', 'codex'],
+    ['DROID.CMD', 'droid']
+  ] as const)('recognizes the bare Windows launcher %s', (title, agent) => {
+    expect(agentFor(title)).toBe(agent)
+    expect(reasonFor(title)).toBe('anchored')
+  })
+
   it('produces no name evidence for an agent outside the token set', () => {
     // The token set is deliberately narrower than the agent union: short names like `omp` would
     // classify ordinary shell text. Such a title yields no evidence at all rather than a guess.
@@ -107,17 +207,62 @@ describe('collectAgentTitleEvidence', () => {
     )
   })
 
+  it('does not treat an embedded Claude sigil as a vendor marker', () => {
+    expect(collectAgentTitleEvidence('task text ✳ decoration')).toEqual({
+      vendorMarkers: [],
+      anchoredNames: [],
+      freeTextNames: [],
+      agent: null,
+      reason: 'no-evidence'
+    })
+  })
+
+  it('recognizes a bare Claude sigil as a vendor marker', () => {
+    expect(collectAgentTitleEvidence('✳')).toEqual({
+      vendorMarkers: ['claude'],
+      anchoredNames: [],
+      freeTextNames: [],
+      agent: 'claude',
+      reason: 'vendor-marker'
+    })
+  })
+
   describe('conflicting evidence of the same class resolves to nothing', () => {
     it('declines two anchored names', () => {
-      expect(reasonFor('OC | something… - grok')).toBe('conflicting-anchored-names')
+      const evidence = collectAgentTitleEvidence('OC | something… - grok')
+      expect(evidence.agent).toBeNull()
+      expect(evidence.reason).toBe('conflicting-anchored-names')
+      expect([...evidence.anchoredNames].sort()).toEqual(['grok', 'opencode'])
+    })
+
+    it('keeps an anchored conflict ahead of a vendor marker', () => {
+      const evidence = collectAgentTitleEvidence('✳ | OC | something… - grok')
+      expect(evidence.agent).toBeNull()
+      expect(evidence.reason).toBe('conflicting-anchored-names')
+      expect([...evidence.anchoredNames].sort()).toEqual(['grok', 'opencode'])
+      expect(evidence.vendorMarkers).toEqual(['claude'])
     })
 
     it('declines two vendor markers', () => {
-      expect(reasonFor('✳ ✦ two sigils')).toBe('conflicting-vendor-markers')
+      const evidence = collectAgentTitleEvidence('✳ ✦ two sigils')
+      expect(evidence.agent).toBeNull()
+      expect(evidence.reason).toBe('conflicting-vendor-markers')
+      expect([...evidence.vendorMarkers].sort()).toEqual(['claude', 'gemini'])
     })
   })
 
   it('declines a Claude management screen', () => {
-    expect(agentFor('claude agents')).toBeNull()
+    expect(collectAgentTitleEvidence('claude agents')).toEqual({
+      vendorMarkers: [],
+      anchoredNames: [],
+      freeTextNames: [],
+      agent: null,
+      reason: 'no-evidence'
+    })
+  })
+
+  it('requires whitespace before the owner suffix dash', () => {
+    expect(agentFor('task- codex')).toBeNull()
+    expect(reasonFor('task- codex')).toBe('free-text-only')
   })
 })
