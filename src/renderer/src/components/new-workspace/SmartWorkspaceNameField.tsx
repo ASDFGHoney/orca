@@ -639,6 +639,13 @@ export default function SmartWorkspaceNameField({
     () => (sourceQueryWithinLimit ? parseGitHubIssueOrPRLink(debouncedQuery) : null),
     [debouncedQuery, sourceQueryWithinLimit]
   )
+  const githubUrlIntent = useMemo(
+    () =>
+      isSmartWorkspaceSourceQueryWithinLimit(value) && (mode === 'smart' || mode === 'github')
+        ? parseGitHubIssueOrPRLink(value)
+        : null,
+    [mode, value]
+  )
   const linearUrlIntent = useMemo(
     () => parseBoundedSmartWorkspaceLinearIssueUrlIntent(value),
     [value]
@@ -1270,6 +1277,7 @@ export default function SmartWorkspaceNameField({
         value,
         debouncedQuery
       }),
+      githubUrlIntent,
       gitlabAvailable: gitlabSourceAvailable,
       gitlabItems: getVisibleHeldProviderResults({
         items: gitlabItems,
@@ -1302,6 +1310,7 @@ export default function SmartWorkspaceNameField({
     branchResultsSource,
     debouncedQuery,
     githubItems,
+    githubUrlIntent,
     gitlabSourceAvailable,
     gitlabItems,
     jiraSource.accountChoices,

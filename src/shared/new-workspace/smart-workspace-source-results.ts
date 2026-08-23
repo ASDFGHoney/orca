@@ -5,6 +5,8 @@ import type { LinearIssue } from '../linear/issue-types'
 import type { LinearCollectionResult } from '../linear/workspace-types'
 import type { BaseRefSearchResult } from '../repo-types'
 import { JIRA_ISSUE_KEY_PATTERN, parseJiraIssueUrl } from '../jira-issue-url'
+import { parseGitHubIssueOrPRLink, type GitHubIssueOrPRLink } from '../github/links'
+import { githubRepoIdentityKey } from '../github/repository-identity-key'
 import {
   isSmartWorkspaceLinearIssueIntentMatch,
   parseBoundedSmartWorkspaceLinearIssueUrlIntent
@@ -61,6 +63,16 @@ export function isBlockingJiraUrlIntent(mode: SmartNameMode, value: string): boo
 
 function toJiraSourceRow(issue: JiraIssue): SmartWorkspaceSourceRow {
   return { kind: 'jira', value: `jira-${issue.siteId ?? ''}-${issue.key}`, issue }
+}
+
+function isGitHubLinkIntentMatch(intent: GitHubIssueOrPRLink, item: GitHubWorkItem): boolean {
+  const itemLink = parseGitHubIssueOrPRLink(item.url)
+  return (
+    itemLink !== null &&
+    itemLink.type === intent.type &&
+    itemLink.number === intent.number &&
+    githubRepoIdentityKey(itemLink.slug) === githubRepoIdentityKey(intent.slug)
+  )
 }
 
 export function getBranchSearchRequest({
@@ -186,6 +198,7 @@ export function shouldHoldSourceResultsForQuery({
 export function buildSmartWorkspaceSourceRows({
   branches,
   githubItems,
+  githubUrlIntent,
   gitlabAvailable,
   gitlabItems,
   jiraIntent = false,
@@ -200,6 +213,7 @@ export function buildSmartWorkspaceSourceRows({
 }: {
   branches: BaseRefSearchResult[]
   githubItems: GitHubWorkItem[]
+  githubUrlIntent?: GitHubIssueOrPRLink | null
   gitlabAvailable: boolean
   gitlabItems: GitLabWorkItem[]
   jiraIntent?: boolean
@@ -220,6 +234,20 @@ export function buildSmartWorkspaceSourceRows({
     return []
   }
   const trimmed = value.trim()
+  if (githubUrlIntent && (mode === 'smart' || mode === 'github')) {
+    const githubRows = githubItems
+      .filter((item) => isGitHubLinkIntentMatch(githubUrlIntent, item))
+      .map((item) => ({
+        kind: 'github' as const,
+        value: `github-${item.repoId}-${item.type}-${item.number}`,
+        item
+      }))
+      .slice(0, resultLimit)
+    // Why: the full URL is unambiguous, so unrelated held provider rows must never become selectable.
+    return trimmed && mode === 'smart'
+      ? [{ kind: 'use-name' as const, value: 'use-name', name: trimmed }, ...githubRows]
+      : githubRows
+  }
   const nextRows: SmartWorkspaceSourceRow[] = []
   const resolvedLinearIssues = Array.isArray(linearIssues)
     ? linearIssues
