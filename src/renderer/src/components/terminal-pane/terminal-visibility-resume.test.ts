@@ -166,8 +166,13 @@ describe('resumeTerminalVisibility reveal repaint', () => {
 
     expect(repairPaneWebglCanvasDprMismatch).toHaveBeenCalledWith(pane)
     expect(presentPaneViewport).not.toHaveBeenCalled()
+    expect(resetAndRefreshAllTerminalWebglAtlases).toHaveBeenCalledTimes(1)
+    const atlasResetCallOrder = resetAndRefreshAllTerminalWebglAtlases.mock.invocationCallOrder[0]
+    if (atlasResetCallOrder === undefined) {
+      throw new Error('Shared atlas recovery call order missing')
+    }
     expect(repairPaneWebglCanvasDprMismatch.mock.invocationCallOrder[0]).toBeLessThan(
-      resetAndRefreshAllTerminalWebglAtlases.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+      atlasResetCallOrder
     )
   })
 
