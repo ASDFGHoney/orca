@@ -92,22 +92,43 @@ export type StoredCodexCredentialState =
   | 'unreadable'
   | 'no-credential'
 
+export type StoredCodexAuthMode =
+  | 'apikey'
+  | 'chatgpt'
+  | 'chatgptAuthTokens'
+  | 'agentIdentity'
+  | 'personalAccessToken'
+  | 'bedrockApiKey'
+  | `unknown:${string}`
+
+export type StoredCodexAuthObservation = {
+  state: StoredCodexCredentialState
+  mode: StoredCodexAuthMode | null
+  contents: string | null
+}
+
 // Why: callers deciding whether to deselect an account must tell a settled
 // logout ('no-credential') apart from a rotation in progress ('unreadable') or
 // an absent file ('missing') — collapsing them to false logs users out on races.
 export function readStoredCodexCredentialState(authPath: string): StoredCodexCredentialState {
+  return readStoredCodexAuthObservation(authPath).state
+}
+
+export function readStoredCodexAuthObservation(authPath: string): StoredCodexAuthObservation {
   let raw: string
   try {
     raw = readFileSync(authPath, 'utf8')
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     // Why: Windows auth.json rotation can surface transient EPERM/EBUSY reads.
-    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable'
+    return {
+      state: code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unreadable',
+      mode: null,
+      contents: null
+    }
   }
-  return classifyStoredCodexAuthContents(raw).state
+  return { ...classifyStoredCodexAuthContents(raw), contents: raw }
 }
-
-export type StoredCodexAuthMode = 'apikey' | 'chatgpt' | 'other'
 
 export function classifyStoredCodexAuthContents(raw: string): {
   state: Exclude<StoredCodexCredentialState, 'missing'>
@@ -145,18 +166,26 @@ function storedAuthMode(auth: StoredCodexAuth): StoredCodexAuthMode {
   if (isNonEmptyString(auth.auth_mode)) {
     switch (auth.auth_mode) {
       case 'apikey':
-        return 'apikey'
       case 'chatgpt':
       case 'chatgptAuthTokens':
-        return 'chatgpt'
+      case 'agentIdentity':
+      case 'personalAccessToken':
+      case 'bedrockApiKey':
+        return auth.auth_mode
       default:
-        return 'other'
+        return `unknown:${auth.auth_mode}`
     }
+  }
+  if (isNonEmptyString(auth.personal_access_token)) {
+    return 'personalAccessToken'
+  }
+  if (hasBedrockApiKey(auth.bedrock_api_key)) {
+    return 'bedrockApiKey'
   }
   if (isNonEmptyString(auth.OPENAI_API_KEY)) {
     return 'apikey'
   }
-  return hasChatGptCredential(auth.tokens) ? 'chatgpt' : 'other'
+  return 'chatgpt'
 }
 
 function hasCredentialForDeclaredMode(auth: StoredCodexAuth): boolean {
@@ -167,8 +196,9 @@ function hasCredentialForDeclaredMode(auth: StoredCodexAuth): boolean {
     case 'apikey':
       return isNonEmptyString(auth.OPENAI_API_KEY)
     case 'chatgpt':
-    case 'chatgptAuthTokens':
       return hasChatGptCredential(auth.tokens)
+    case 'chatgptAuthTokens':
+      return hasExternalChatGptCredential(auth.tokens)
     case 'agentIdentity':
       return hasAgentIdentityCredential(auth.agent_identity)
     case 'personalAccessToken':
@@ -210,6 +240,12 @@ function hasChatGptCredential(tokens: unknown): boolean {
     isNonEmptyString(tokens.access_token) &&
     isNonEmptyString(tokens.id_token) &&
     isNonEmptyString(tokens.refresh_token)
+  )
+}
+
+function hasExternalChatGptCredential(tokens: unknown): boolean {
+  return (
+    isRecord(tokens) && isNonEmptyString(tokens.access_token) && isNonEmptyString(tokens.id_token)
   )
 }
 

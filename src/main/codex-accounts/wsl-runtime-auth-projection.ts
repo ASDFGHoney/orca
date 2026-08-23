@@ -1,9 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { codexAuthMatchesSystemDefaultIdentity } from './codex-auth-identity'
-import {
-  classifyStoredCodexAuthContents,
-  readStoredCodexCredentialState
-} from './managed-codex-auth-readiness'
+import type { StoredCodexAuthObservation } from './managed-codex-auth-readiness'
 
 export type WslRuntimeAuthProjection =
   | { action: 'replace' }
@@ -11,55 +7,53 @@ export type WslRuntimeAuthProjection =
   | { action: 'wipe' }
 
 export function decideWslRuntimeAuthProjection(args: {
-  runtimeAuthPath: string
-  sourceAuthContents: string | null
+  runtimeAuth: StoredCodexAuthObservation
+  sourceAuth: StoredCodexAuthObservation
   explicitAccountSwitch: boolean
 }): WslRuntimeAuthProjection {
-  const runtimeState = readStoredCodexCredentialState(args.runtimeAuthPath)
-  if (runtimeState === 'unreadable' || runtimeState === 'incomplete') {
+  if (isIndeterminate(args.runtimeAuth) || isIndeterminate(args.sourceAuth)) {
     return { action: 'keep', deselect: false }
   }
-  if (args.explicitAccountSwitch) {
-    return args.sourceAuthContents ? { action: 'replace' } : { action: 'wipe' }
+  if (args.explicitAccountSwitch && args.sourceAuth.state === 'present') {
+    return { action: 'replace' }
   }
-  if (runtimeState === 'missing' || runtimeState === 'no-credential') {
-    return args.sourceAuthContents ? { action: 'replace' } : { action: 'wipe' }
+  if (args.runtimeAuth.state === 'missing' || args.runtimeAuth.state === 'no-credential') {
+    return args.sourceAuth.state === 'present' ? { action: 'replace' } : { action: 'wipe' }
   }
-
-  const runtimeContents = readRuntimeAuthContents(args.runtimeAuthPath)
-  if (runtimeContents === null) {
+  if (args.sourceAuth.state !== 'present') {
     return { action: 'keep', deselect: false }
   }
-  if (!args.sourceAuthContents) {
-    return { action: 'keep', deselect: true }
-  }
-  if (wslRuntimeAuthMayReplaceSource(runtimeContents, args.sourceAuthContents)) {
+  if (wslRuntimeAuthMayReplaceSource(args.runtimeAuth, args.sourceAuth)) {
     return { action: 'replace' }
   }
   return { action: 'keep', deselect: true }
 }
 
-// Why: a live API-key (or other mismatched) runtime login is not dirt to restore.
+// Why: a live credential with a conflicting or unprovable owner is not a stale mirror.
 export function wslRuntimeAuthMayReplaceSource(
-  runtimeContents: string,
-  sourceContents: string
+  runtimeAuth: StoredCodexAuthObservation,
+  sourceAuth: StoredCodexAuthObservation
 ): boolean {
-  const runtime = classifyStoredCodexAuthContents(runtimeContents)
-  const source = classifyStoredCodexAuthContents(sourceContents)
-  if (runtime.state !== 'present' || source.state !== 'present' || runtime.mode !== source.mode) {
+  if (
+    runtimeAuth.state !== 'present' ||
+    sourceAuth.state !== 'present' ||
+    !runtimeAuth.contents ||
+    !sourceAuth.contents
+  ) {
     return false
   }
-  return (
-    runtime.mode !== 'chatgpt' ||
-    codexAuthMatchesSystemDefaultIdentity(runtimeContents, sourceContents)
-  )
+  if (runtimeAuth.contents === sourceAuth.contents) {
+    return true
+  }
+  if (runtimeAuth.mode !== sourceAuth.mode) {
+    return false
+  }
+  if (runtimeAuth.mode === 'chatgpt' || runtimeAuth.mode === 'chatgptAuthTokens') {
+    return codexAuthMatchesSystemDefaultIdentity(runtimeAuth.contents, sourceAuth.contents)
+  }
+  return runtimeAuth.mode !== 'personalAccessToken'
 }
 
-function readRuntimeAuthContents(runtimeAuthPath: string): string | null {
-  try {
-    return readFileSync(runtimeAuthPath, 'utf-8')
-  } catch {
-    // Why: a race off the earlier present-state read is still not absence; skip.
-    return null
-  }
+function isIndeterminate(observation: StoredCodexAuthObservation): boolean {
+  return observation.state === 'unreadable' || observation.state === 'incomplete'
 }

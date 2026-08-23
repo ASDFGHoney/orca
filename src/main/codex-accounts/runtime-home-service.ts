@@ -86,6 +86,10 @@ import {
 import { migrateLegacySharedAuthToPerAccountHome } from './legacy-shared-auth-migration'
 import { CodexCredentialAbsenceGrace } from './codex-credential-absence-grace'
 import { decideWslRuntimeAuthProjection } from './wsl-runtime-auth-projection'
+import {
+  readStoredCodexAuthObservation,
+  type StoredCodexAuthObservation
+} from './managed-codex-auth-readiness'
 import { syncLegacySharedCodexConfigForRetainedPanes } from './legacy-shared-config-compatibility'
 import {
   getCodexPaneAccount,
@@ -1101,65 +1105,59 @@ export class CodexRuntimeHomeService {
       }
     }
 
+    const runtimeAuth = readStoredCodexAuthObservation(runtimeAuthPath)
     const activeAuthPath = activeAccount ? join(activeAccount.managedHomePath, 'auth.json') : null
-    if (activeAccount && activeAuthPath && existsSync(activeAuthPath)) {
-      const activeAuth = readFileSync(activeAuthPath, 'utf-8')
-      if (
+    const activeAuth = activeAuthPath ? readStoredCodexAuthObservation(activeAuthPath) : null
+    if (activeAccount && activeAuth) {
+      if (activeAuth.state === 'missing' || activeAuth.state === 'no-credential') {
+        console.warn(
+          '[codex-runtime-home] Active WSL managed account has no credential, restoring system default'
+        )
+        this.lastSyncedWslAccountIdByDistro.set(distro, null)
+        this.deselectWslManagedAccount(wslTarget)
+      } else {
         this.applyWslRuntimeAuthProjection({
           runtimeAuthPath,
+          runtimeAuth,
           distro,
-          sourceAuthContents: activeAuth,
+          sourceAuth: activeAuth,
           explicitAccountSwitch,
           selectedAccountId: activeAccount.id,
           wslTarget
         })
-      ) {
         return runtimeHomePath
       }
-    }
-    if (activeAccount && activeAuthPath) {
-      console.warn(
-        '[codex-runtime-home] Active WSL managed account is missing auth.json, restoring system default'
-      )
-      this.deselectWslManagedAccount(wslTarget)
     }
 
     const systemAuthPath = this.getWslSystemCodexAuthPath({ runtime: 'wsl', wslDistro: distro })
-    if (systemAuthPath && existsSync(systemAuthPath)) {
-      const systemAuth = readFileSync(systemAuthPath, 'utf-8')
+    const systemAuth: StoredCodexAuthObservation = systemAuthPath
+      ? readStoredCodexAuthObservation(systemAuthPath)
+      : { state: 'missing', mode: null, contents: null }
+    if (systemAuthPath && systemAuth.state === 'present' && systemAuth.contents) {
       const mirroredSystemDefaultAuth = this.lastWrittenWslAuthJsonByDistro.get(distro) ?? null
-      const runtimeAuth = existsSync(runtimeAuthPath)
-        ? readFileSync(runtimeAuthPath, 'utf-8')
-        : null
       if (
-        runtimeAuth !== null &&
-        runtimeAuth !== systemAuth &&
-        this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuth, systemAuth) &&
-        ((mirroredSystemDefaultAuth !== null && systemAuth === mirroredSystemDefaultAuth) ||
+        runtimeAuth.state === 'present' &&
+        runtimeAuth.contents &&
+        runtimeAuth.contents !== systemAuth.contents &&
+        this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuth.contents, systemAuth.contents) &&
+        ((mirroredSystemDefaultAuth !== null &&
+          systemAuth.contents === mirroredSystemDefaultAuth) ||
           (mirroredSystemDefaultAuth === null &&
-            this.runtimeAuthIsFresher(runtimeAuth, systemAuth)))
+            this.runtimeAuthIsFresher(runtimeAuth.contents, systemAuth.contents)))
       ) {
         // Why: WSL baselines are lost on restart, so a same-identity fresher runtime auth is a token refresh; copy it back before mirroring ~/.codex.
-        this.writeRuntimeAuthAtPath(systemAuthPath, runtimeAuth)
-        this.lastWrittenWslAuthJsonByDistro.set(distro, runtimeAuth)
+        this.writeRuntimeAuthAtPath(systemAuthPath, runtimeAuth.contents)
+        this.lastWrittenWslAuthJsonByDistro.set(distro, runtimeAuth.contents)
         this.lastSyncedWslAccountIdByDistro.set(distro, null)
         return runtimeHomePath
       }
-      this.applyWslRuntimeAuthProjection({
-        runtimeAuthPath,
-        distro,
-        sourceAuthContents: systemAuth,
-        explicitAccountSwitch: false,
-        selectedAccountId: null,
-        wslTarget
-      })
-      return runtimeHomePath
     }
 
     this.applyWslRuntimeAuthProjection({
       runtimeAuthPath,
+      runtimeAuth,
       distro,
-      sourceAuthContents: null,
+      sourceAuth: systemAuth,
       explicitAccountSwitch: false,
       selectedAccountId: null,
       wslTarget
@@ -1172,18 +1170,19 @@ export class CodexRuntimeHomeService {
     return home ? this.joinWslPath(home, ...WSL_CODEX_RUNTIME_HOME_SEGMENTS) : null
   }
 
-  // Returns true when the caller must stop: keep, replace, or a completed wipe.
+  // Applies the pure projection verdict while keeping writes and selection updates local.
   private applyWslRuntimeAuthProjection(args: {
     runtimeAuthPath: string
+    runtimeAuth: StoredCodexAuthObservation
     distro: string
-    sourceAuthContents: string | null
+    sourceAuth: StoredCodexAuthObservation
     explicitAccountSwitch: boolean
     selectedAccountId: string | null
     wslTarget: CodexAccountSelectionTarget
-  }): boolean {
+  }): void {
     const decision = decideWslRuntimeAuthProjection({
-      runtimeAuthPath: args.runtimeAuthPath,
-      sourceAuthContents: args.sourceAuthContents,
+      runtimeAuth: args.runtimeAuth,
+      sourceAuth: args.sourceAuth,
       explicitAccountSwitch: args.explicitAccountSwitch
     })
     if (decision.action === 'keep') {
@@ -1191,21 +1190,20 @@ export class CodexRuntimeHomeService {
         this.deselectWslManagedAccount(args.wslTarget)
         this.lastSyncedWslAccountIdByDistro.set(args.distro, null)
       }
-      return true
+      return
     }
     if (decision.action === 'wipe') {
       rmSync(args.runtimeAuthPath, { force: true })
       this.lastWrittenWslAuthJsonByDistro.set(args.distro, null)
       this.lastSyncedWslAccountIdByDistro.set(args.distro, null)
-      return true
+      return
     }
-    if (!args.sourceAuthContents) {
-      return false
+    if (!args.sourceAuth.contents) {
+      return
     }
-    this.writeRuntimeAuthAtPath(args.runtimeAuthPath, args.sourceAuthContents)
-    this.lastWrittenWslAuthJsonByDistro.set(args.distro, args.sourceAuthContents)
+    this.writeRuntimeAuthAtPath(args.runtimeAuthPath, args.sourceAuth.contents)
+    this.lastWrittenWslAuthJsonByDistro.set(args.distro, args.sourceAuth.contents)
     this.lastSyncedWslAccountIdByDistro.set(args.distro, args.selectedAccountId)
-    return true
   }
 
   private deselectWslManagedAccount(wslTarget: CodexAccountSelectionTarget): void {

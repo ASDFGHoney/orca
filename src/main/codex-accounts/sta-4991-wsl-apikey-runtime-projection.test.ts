@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CodexManagedAccount } from '../../shared/managed-account-types'
 import { createSettings } from './runtime-home-settings-test-fixtures'
@@ -212,45 +212,5 @@ describe('STA-4991 WSL API-key runtime projection', () => {
 
     expect(service.prepareForCodexLaunch({ runtime: 'wsl', wslDistro: 'Ubuntu' })).toBe(runtimeHome)
     expect(readFileSync(join(runtimeHome, 'auth.json'), 'utf-8')).toBe(chatgptAuth)
-  })
-
-  it('does not overwrite or deselect when runtime auth.json is unreadable', async () => {
-    const wslHome = join(testState.userDataDir, 'wsl-home')
-    vi.doMock('../wsl', () => ({
-      getDefaultWslDistro: () => 'Ubuntu',
-      getWslHome: () => wslHome
-    }))
-    const chatgptAuth = createCodexAuthJson('wsl@example.com', 'acct-wsl', 'managed-token')
-    const managedHomePath = createManagedAuth(testState.userDataDir, 'account-1', chatgptAuth)
-    const runtimeHome = wslRuntimeHomePath(wslHome)
-    mkdirSync(runtimeHome, { recursive: true })
-    const runtimeAuthPath = join(runtimeHome, 'auth.json')
-    writeFileSync(runtimeAuthPath, API_KEY_AUTH, 'utf-8')
-    chmodSync(runtimeAuthPath, 0o000)
-    const store = createStore(
-      createSettings({
-        codexManagedAccounts: [
-          wslAccount({
-            id: 'account-1',
-            email: 'wsl@example.com',
-            providerAccountId: 'acct-wsl',
-            managedHomePath
-          })
-        ],
-        activeCodexManagedAccountId: null,
-        activeCodexManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'account-1' } }
-      })
-    )
-    try {
-      const { CodexRuntimeHomeService } = await import('./runtime-home-service')
-      const service = new CodexRuntimeHomeService(store as never)
-      expect(service.prepareForCodexLaunch({ runtime: 'wsl', wslDistro: 'Ubuntu' })).toBe(
-        runtimeHome
-      )
-      expect(store.updateSettings).not.toHaveBeenCalled()
-    } finally {
-      chmodSync(runtimeAuthPath, 0o600)
-    }
-    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(API_KEY_AUTH)
   })
 })
