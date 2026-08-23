@@ -595,6 +595,12 @@ export function acceptReplayedWebSessionTabsSnapshot(
   }
 }
 
+function acceptReplayedWebSessionTabsEnvironment(environmentId: string): void {
+  for (const { worktree } of getTrackedWebSessionTabsWorktrees(environmentId)) {
+    acceptReplayedWebSessionTabsSnapshot(environmentId, worktree)
+  }
+}
+
 /**
  * A frame's fate, paired with whether that fate is host evidence for the
  * worktree — the mirror latch reads the pair, never a bare boolean.
@@ -4401,6 +4407,7 @@ export function useWebSessionTabsSync(): void {
       if (currentOwnerRevisions.get(environmentId) !== previousRevision) {
         clearWebSessionTabsTrackingForEnvironment(environmentId)
       } else if (!mirroredEnvironmentOwnerRevisions.has(environmentId)) {
+        acceptReplayedWebSessionTabsEnvironment(environmentId)
         mirroredEnvironmentOwnerRevisions.set(environmentId, previousRevision)
       }
     }

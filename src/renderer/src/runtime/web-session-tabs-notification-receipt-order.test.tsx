@@ -371,6 +371,48 @@ describe('paired session-tab notification receipt ordering', () => {
     }
   )
 
+  it('repairs an exact reconnect replay without dispatching it again', async () => {
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    const global = findSubscription('session.tabs.subscribeAll')
+    await publish(global, { type: 'updated', ...snapshot(1, 'working', NOW) })
+    await publish(global, { type: 'updated', ...snapshot(2, 'waiting', NOW + 1_000) })
+    vi.advanceTimersByTime(1_500)
+    notificationDispatch.mockClear()
+
+    useAppStore.setState({
+      runtimeStatusByEnvironmentId: new Map([
+        [ENVIRONMENT_ID, { status: null, connectionGeneration: 1 }]
+      ]) as AppState['runtimeStatusByEnvironmentId'],
+      agentStatusByPaneKey: {}
+    })
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue('')
+    hook.rerender()
+    await act(settle)
+
+    runtimeCall.mockResolvedValueOnce({
+      id: 'same-version-list-all-replay',
+      ok: true,
+      result: { snapshots: [snapshot(2, 'waiting', NOW + 1_000)] },
+      _meta: { runtimeId: RUNTIME_ID }
+    })
+    useAppStore.setState({
+      runtimeStatusByEnvironmentId: new Map([
+        [ENVIRONMENT_ID, { status: { runtimeId: RUNTIME_ID }, connectionGeneration: 2 }]
+      ]) as AppState['runtimeStatusByEnvironmentId']
+    })
+    mocks.runtimeSessionMirrorEnvironmentKey.mockReturnValue(RECONNECTED_MIRROR_KEY)
+    hook.rerender()
+    await act(settle)
+    vi.advanceTimersByTime(1_500)
+
+    expect(useAppStore.getState().agentStatusByPaneKey[PANE_KEY]).toMatchObject({
+      state: 'waiting'
+    })
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+
   it('keeps newer inventory eligibility when older recovery finishes last', async () => {
     const hook = renderHook(() => useWebSessionTabsSync())
     await act(settle)
