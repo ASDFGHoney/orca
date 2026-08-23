@@ -65,17 +65,21 @@ export function resolveGitFetchHeadCommand(
     return { needsLock: false, cwd, gitDir }
   }
   let writesFetchHead = true
+  let updatesRemoteTrackingRef = false
   for (const arg of args.slice(subcommandIndex + 1)) {
     if (arg === '--no-write-fetch-head') {
       writesFetchHead = false
     } else if (arg === '--write-fetch-head') {
       writesFetchHead = true
+    } else if (arg.includes(':refs/remotes/')) {
+      updatesRemoteTrackingRef = true
     }
   }
-  return { needsLock: writesFetchHead, cwd, gitDir }
+  // Why: explicit tracking-ref updates race sibling-worktree fetch transactions even without FETCH_HEAD.
+  return { needsLock: writesFetchHead || updatesRemoteTrackingRef, cwd, gitDir }
 }
 
-async function fetchHeadPath(
+async function fetchLockPath(
   worktreePath: string,
   signal: AbortSignal | undefined,
   explicitGitDir?: string
@@ -108,7 +112,18 @@ async function fetchHeadPath(
     }
     current = parent
   }
-  const canonicalGitDir = await realpath(gitDir).catch(() => path.resolve(gitDir))
+  let commonGitDir = gitDir
+  try {
+    const contents = await readFile(path.join(gitDir, 'commondir'), { encoding: 'utf-8', signal })
+    if (contents.trim()) {
+      commonGitDir = path.resolve(gitDir, contents.trim())
+    }
+  } catch {
+    if (signal?.aborted) {
+      throw abortError()
+    }
+  }
+  const canonicalGitDir = await realpath(commonGitDir).catch(() => path.resolve(commonGitDir))
   return path.join(canonicalGitDir, 'FETCH_HEAD')
 }
 
@@ -148,7 +163,7 @@ export async function runWithGitFetchHeadLock<T>(
   run: () => Promise<T>,
   explicitGitDir?: string
 ): Promise<T> {
-  const key = await fetchHeadPath(worktreePath, signal, explicitGitDir)
+  const key = await fetchLockPath(worktreePath, signal, explicitGitDir)
   const predecessor = lanes.get(key)?.tail ?? Promise.resolve()
   let release!: () => void
   const current = new Promise<void>((resolve) => {

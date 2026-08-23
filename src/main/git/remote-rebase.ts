@@ -46,7 +46,11 @@ export async function gitPullRebaseFromBase(
       }
       // Why: concurrent fetches can replace FETCH_HEAD and remote-tracking refs between fetch and rebase.
       rebaseRef = `refs/orca/rebase/${randomUUID()}`
-      const fetchArgs = [source.remoteName, `+refs/heads/${source.branchName}:${rebaseRef}`]
+      const fetchArgs = [
+        source.remoteName,
+        `+refs/heads/${source.branchName}:${rebaseRef}`,
+        `+refs/heads/${source.branchName}:refs/remotes/${source.displayName}`
+      ]
       await withLocalGitCapabilityCacheForExecution(
         { cwd: worktreePath, ...options },
         (capabilities) =>

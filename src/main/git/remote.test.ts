@@ -543,7 +543,8 @@ describe('git remote operations', () => {
           'fetch',
           '--no-write-fetch-head',
           'upstream',
-          expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
+          expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//),
+          '+refs/heads/main:refs/remotes/upstream/main'
         ],
         { ...REBASE_OPERATION_OPTIONS, timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
       ],
@@ -558,6 +559,9 @@ describe('git remote operations', () => {
     const rebasedRef = gitExecFileAsyncMock.mock.calls[4][0][2]
     const deletedRef = gitExecFileAsyncMock.mock.calls[5][0][2]
     expect(fetchRefspec).toBe(`+refs/heads/main:${rebasedRef}`)
+    expect(gitExecFileAsyncMock.mock.calls[3][0][4]).toBe(
+      '+refs/heads/main:refs/remotes/upstream/main'
+    )
     expect(deletedRef).toBe(rebasedRef)
   })
 
@@ -597,7 +601,8 @@ describe('git remote operations', () => {
         'fetch',
         '--no-write-fetch-head',
         'upstream',
-        expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//)
+        expect.stringMatching(/^\+refs\/heads\/main:refs\/orca\/rebase\//),
+        '+refs/heads/main:refs/remotes/upstream/main'
       ],
       { ...REBASE_OPERATION_OPTIONS, timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
     )
@@ -658,10 +663,10 @@ describe('git remote operations', () => {
 
     await gitPullRebaseFromBase('/repo', 'upstream/main')
 
-    const preferredRefspec = gitExecFileAsyncMock.mock.calls[3][0][3]
+    const preferredRefspecs = gitExecFileAsyncMock.mock.calls[3][0].slice(3)
     expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
       5,
-      ['fetch', 'upstream', preferredRefspec],
+      ['fetch', 'upstream', ...preferredRefspecs],
       { ...REBASE_OPERATION_OPTIONS, timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
     )
   })

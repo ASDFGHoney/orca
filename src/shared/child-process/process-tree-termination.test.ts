@@ -31,6 +31,7 @@ async function withWindows(run: () => Promise<void>): Promise<void> {
 describe('forceTerminateProcessTree', () => {
   afterEach(() => {
     spawnMock.mockReset()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -71,4 +72,27 @@ describe('forceTerminateProcessTree', () => {
       expect(child.kill).toHaveBeenCalledWith('SIGKILL')
     })
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'stops waiting when a POSIX process group cannot become quiescent',
+    async () => {
+      vi.useFakeTimers()
+      vi.spyOn(process, 'kill').mockImplementation(() => true)
+      spawnMock.mockImplementation(() => {
+        const probe = mockProcess(5678)
+        const stdout = new EventEmitter()
+        Object.defineProperty(probe, 'stdout', { value: stdout })
+        queueMicrotask(() => {
+          stdout.emit('data', Buffer.from('1234 D\n'))
+          probe.emit('close', 0)
+        })
+        return probe
+      })
+
+      const pending = forceTerminateProcessTree(mockProcess(1234))
+      await vi.advanceTimersByTimeAsync(2_100)
+
+      await expect(pending).resolves.toBe(false)
+    }
+  )
 })

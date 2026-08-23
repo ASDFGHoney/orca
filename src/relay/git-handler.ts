@@ -1234,7 +1234,11 @@ export class GitHandler {
         }
         // Why: concurrent fetches can replace FETCH_HEAD and remote-tracking refs between fetch and rebase.
         rebaseRef = `refs/orca/rebase/${randomUUID()}`
-        const fetchArgs = [source.remoteName, `+refs/heads/${source.branchName}:${rebaseRef}`]
+        const fetchArgs = [
+          source.remoteName,
+          `+refs/heads/${source.branchName}:${rebaseRef}`,
+          `+refs/heads/${source.branchName}:refs/remotes/${source.displayName}`
+        ]
         await this.gitCapabilities.runWithFallback(
           'fetch-no-write-fetch-head',
           () =>

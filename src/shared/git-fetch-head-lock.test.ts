@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises'
+import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { resolveGitFetchHeadCommand, runWithGitFetchHeadLock } from './git-fetch-head-lock'
@@ -10,6 +10,16 @@ describe('runWithGitFetchHeadLock', () => {
     { args: ['pull', '--rebase'], expected: true },
     { args: ['-c', 'maintenance.auto=false', 'fetch', 'origin'], expected: true },
     { args: ['fetch', '--no-write-fetch-head', 'origin'], expected: false },
+    {
+      args: [
+        'fetch',
+        '--no-write-fetch-head',
+        'origin',
+        '+refs/heads/main:refs/orca/rebase/one',
+        '+refs/heads/main:refs/remotes/origin/main'
+      ],
+      expected: true
+    },
     { args: ['fetch', '--no-write-fetch-head', '--write-fetch-head'], expected: true },
     { args: ['rev-parse', 'fetch'], expected: false }
   ])('classifies FETCH_HEAD operations: $args', ({ args, expected }) => {
@@ -139,6 +149,44 @@ describe('runWithGitFetchHeadLock', () => {
       expect(order[0]).toBe('root')
       expect(new Set(order.slice(1))).toEqual(new Set(['nested', 'alias']))
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes linked worktrees through their shared Git directory', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'fetch-head-linked-lock-'))
+    const main = path.join(root, 'main')
+    const linked = path.join(root, 'linked')
+    const commonGitDir = path.join(main, '.git')
+    const linkedGitDir = path.join(commonGitDir, 'worktrees', 'linked')
+    await Promise.all([mkdir(linkedGitDir, { recursive: true }), mkdir(linked)])
+    await Promise.all([
+      writeFile(path.join(linked, '.git'), `gitdir: ${linkedGitDir}\n`),
+      writeFile(path.join(linkedGitDir, 'commondir'), '../..\n')
+    ])
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const order: string[] = []
+    const first = runWithGitFetchHeadLock(main, undefined, async () => {
+      order.push('main')
+      await gate
+    })
+    await vi.waitFor(() => expect(order).toEqual(['main']))
+    const second = runWithGitFetchHeadLock(linked, undefined, async () => {
+      order.push('linked')
+    })
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(order).toEqual(['main'])
+      release()
+      await Promise.all([first, second])
+      expect(order).toEqual(['main', 'linked'])
+    } finally {
+      release()
+      await Promise.allSettled([first, second])
       await rm(root, { recursive: true, force: true })
     }
   })

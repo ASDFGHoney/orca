@@ -61,6 +61,10 @@ import {
   prepareWslLinkedWorktreeGitRouting,
   usesHostGitForWslLinkedWorktree
 } from './wsl-linked-worktree-git-routing'
+import {
+  createWslProcessGroupTermination,
+  type WslProcessGroupTermination
+} from './wsl-process-group-termination'
 // Re-exported for existing importers; lightweight consumers should import from './exec-error' to avoid this heavy module.
 import { extractExecError, parseRetryAfterMs } from './exec-error'
 export { extractExecError, parseRetryAfterMs }
@@ -84,6 +88,7 @@ type ResolvedCommand = {
   wslMode: 'direct-git' | 'login-shell' | 'non-login-shell' | null
   /** Present only when the caller opted into a fenced login-shell read. */
   captured?: WslCapturedLoginShellCommand
+  termination?: WslProcessGroupTermination
 }
 
 /**
@@ -322,6 +327,7 @@ function resolveCommand(
     captureLoginShellOutput?: boolean
     wslGitReadEnvironment?: WslGitReadEnvironment
     env?: NodeJS.ProcessEnv
+    terminationBarrier?: boolean
   } = {}
 ): ResolvedCommand {
   if (process.platform !== 'win32') {
@@ -351,25 +357,28 @@ function resolveCommand(
 
   if (command === 'git' && options.wslGitReadEnvironment) {
     const optionalLocks = options.env?.GIT_OPTIONAL_LOCKS
-    return {
-      binary: 'wsl.exe',
-      args: [
-        '-d',
-        wsl.distro,
-        '--exec',
-        '/usr/bin/env',
-        `PATH=${options.wslGitReadEnvironment.path}`,
-        `HOME=${options.wslGitReadEnvironment.home}`,
-        ...GIT_OUTPUT_LOCALE_ENV_ARGS,
-        ...(optionalLocks !== undefined ? [`GIT_OPTIONAL_LOCKS=${optionalLocks}`] : []),
-        options.wslGitReadEnvironment.gitPath,
-        ...(linuxCwd ? ['-C', linuxCwd] : []),
-        ...translatedArgs
-      ],
-      cwd: undefined,
-      wsl,
-      wslMode: 'direct-git'
-    }
+    return withWslProcessGroupTermination(
+      {
+        binary: 'wsl.exe',
+        args: [
+          '-d',
+          wsl.distro,
+          '--exec',
+          '/usr/bin/env',
+          `PATH=${options.wslGitReadEnvironment.path}`,
+          `HOME=${options.wslGitReadEnvironment.home}`,
+          ...GIT_OUTPUT_LOCALE_ENV_ARGS,
+          ...(optionalLocks !== undefined ? [`GIT_OPTIONAL_LOCKS=${optionalLocks}`] : []),
+          options.wslGitReadEnvironment.gitPath,
+          ...(linuxCwd ? ['-C', linuxCwd] : []),
+          ...translatedArgs
+        ],
+        cwd: undefined,
+        wsl,
+        wslMode: 'direct-git'
+      },
+      options.terminationBarrier
+    )
   }
 
   if (options.useWslLoginShell) {
@@ -379,31 +388,62 @@ function resolveCommand(
     // marker would be glued onto their first record.
     if (options.captureLoginShellOutput) {
       const captured = buildWslCapturedLoginShellCommand(shellCmd)
-      return {
+      return withWslProcessGroupTermination(
+        {
+          binary: 'wsl.exe',
+          args: buildWslExecArgs(wsl.distro, ['sh', '-lc', captured.command]),
+          cwd: undefined,
+          wsl,
+          wslMode: 'login-shell',
+          captured
+        },
+        options.terminationBarrier
+      )
+    }
+    return withWslProcessGroupTermination(
+      {
         binary: 'wsl.exe',
-        args: buildWslExecArgs(wsl.distro, ['sh', '-lc', captured.command]),
+        args: buildWslExecArgs(wsl.distro, ['sh', '-lc', buildWslLoginShellCommand(shellCmd)]),
         cwd: undefined,
         wsl,
-        wslMode: 'login-shell',
-        captured
-      }
-    }
-    return {
-      binary: 'wsl.exe',
-      args: buildWslExecArgs(wsl.distro, ['sh', '-lc', buildWslLoginShellCommand(shellCmd)]),
-      cwd: undefined,
-      wsl,
-      wslMode: 'login-shell'
-    }
+        wslMode: 'login-shell'
+      },
+      options.terminationBarrier
+    )
   }
 
+  return withWslProcessGroupTermination(
+    {
+      binary: 'wsl.exe',
+      args: buildWslExecArgs(wsl.distro, ['bash', '-c', shellCmd]),
+      // Why: the `cd` inside bash -c handles the directory; a UNC cwd on the Node process is redundant and can break Node internals.
+      cwd: undefined,
+      wsl,
+      wslMode: 'non-login-shell'
+    },
+    options.terminationBarrier
+  )
+}
+
+function withWslProcessGroupTermination(
+  command: ResolvedCommand,
+  enabled: boolean | undefined
+): ResolvedCommand {
+  if (!enabled || !command.wsl) {
+    return command
+  }
+  const execIndex = command.args.indexOf('--exec')
+  if (execIndex === -1) {
+    return command
+  }
+  const termination = createWslProcessGroupTermination(command.wsl.distro)
   return {
-    binary: 'wsl.exe',
-    args: buildWslExecArgs(wsl.distro, ['bash', '-c', shellCmd]),
-    // Why: the `cd` inside bash -c handles the directory; a UNC cwd on the Node process is redundant and can break Node internals.
-    cwd: undefined,
-    wsl,
-    wslMode: 'non-login-shell'
+    ...command,
+    args: [
+      ...command.args.slice(0, execIndex + 1),
+      ...termination.wrapGuestArgs(command.args.slice(execIndex + 1))
+    ],
+    termination
   }
 }
 
@@ -460,7 +500,8 @@ function resolveGitCommand(
     if (environment) {
       return resolveCommand('git', args, options.cwd, options.wslDistro, {
         wslGitReadEnvironment: environment,
-        env: options.env
+        env: options.env,
+        terminationBarrier: options.terminationBarrier
       })
     }
     if (distro) {
@@ -493,7 +534,8 @@ function resolveGitCommandWithoutProbe(
 ): ResolvedCommand {
   return resolveCommand('git', args, options.cwd, options.wslDistro, {
     useWslLoginShell: Boolean(options.wslDistro),
-    captureLoginShellOutput
+    captureLoginShellOutput,
+    terminationBarrier: options.terminationBarrier
   })
 }
 
@@ -620,7 +662,8 @@ const GIT_TERMINATION_BARRIER_FALLBACK_TIMEOUT_MS = 2_147_000_000
 async function execFileCaptureToTermination(
   command: string,
   args: string[],
-  options: ExecFileCaptureOptions
+  options: ExecFileCaptureOptions,
+  termination?: WslProcessGroupTermination
 ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
   const result = await runProcess({
     program: command,
@@ -630,11 +673,12 @@ async function execFileCaptureToTermination(
     timeoutMs: options.timeout ?? GIT_TERMINATION_BARRIER_FALLBACK_TIMEOUT_MS,
     maxOutputBytes: options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER,
     signal: options.signal,
-    terminationBarrier: true,
+    terminationBarrier: termination ?? true,
     ...(options.stdin === undefined ? {} : { input: options.stdin })
   })
   const stdout = options.encoding === 'buffer' ? Buffer.from(result.stdout) : result.stdout
-  const stderr = options.encoding === 'buffer' ? Buffer.from(result.stderr) : result.stderr
+  const cleanStderr = termination?.stripControlOutput(result.stderr) ?? result.stderr
+  const stderr = options.encoding === 'buffer' ? Buffer.from(cleanStderr) : cleanStderr
   if (result.code === 0 && !result.timedOut && !options.signal?.aborted) {
     return { stdout, stderr }
   }
@@ -1159,21 +1203,26 @@ async function gitExecFileAsyncUnlocked(
         : { env: nonInteractiveGitEnv(effectiveOptions.env), mode: 'default' as const }
       const capture = (
         command: ResolvedCommand
-      ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> =>
-        (options.terminationBarrier ? execFileCaptureToTermination : execFileCapture)(
-          command.binary,
-          command.args,
-          {
-            cwd: command.cwd,
-            encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
-            maxBuffer: options.maxBuffer,
-            timeout: options.timeout,
-            stdin: options.stdin,
-            env: policy.env,
-            signal: options.signal,
-            terminationBarrier: options.terminationBarrier
-          }
-        )
+      ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> => {
+        const captureOptions = {
+          cwd: command.cwd,
+          encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
+          maxBuffer: options.maxBuffer,
+          timeout: options.timeout,
+          stdin: options.stdin,
+          env: policy.env,
+          signal: options.signal,
+          terminationBarrier: options.terminationBarrier
+        }
+        return options.terminationBarrier
+          ? execFileCaptureToTermination(
+              command.binary,
+              command.args,
+              captureOptions,
+              command.termination
+            )
+          : execFileCapture(command.binary, command.args, captureOptions)
+      }
       let result: { stdout: string | Buffer; stderr: string | Buffer }
       try {
         result = await capture(resolved)

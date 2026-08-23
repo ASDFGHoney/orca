@@ -26,7 +26,7 @@ export async function forceTerminateProcessTree(child: ChildProcess): Promise<bo
     return false
   }
   if (process.platform !== 'win32' && child.pid) {
-    await waitForPosixProcessGroupQuiescence(child.pid)
+    return waitForPosixProcessGroupQuiescence(child.pid)
   }
   return true
 }
@@ -67,13 +67,17 @@ function taskkillTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boo
   })
 }
 
-async function waitForPosixProcessGroupQuiescence(processGroupId: number): Promise<void> {
+async function waitForPosixProcessGroupQuiescence(processGroupId: number): Promise<boolean> {
+  const deadline = Date.now() + SUBPROCESS_TIMEOUT_MS
   while (true) {
     const states = await readPosixProcessGroupStates(processGroupId)
     if (
       states ? states.every((state) => state.startsWith('Z')) : !processGroupExists(processGroupId)
     ) {
-      return
+      return true
+    }
+    if (Date.now() >= deadline) {
+      return false
     }
     await new Promise<void>((resolve) => setTimeout(resolve, PROBE_INTERVAL_MS))
   }

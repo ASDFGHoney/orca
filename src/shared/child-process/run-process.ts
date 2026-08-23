@@ -40,8 +40,14 @@ export type ProcessSpec = {
   maxOutputBytes?: number
   /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
-  /** Kill the whole process tree and do not settle until the root confirms exit. */
-  terminationBarrier?: boolean
+  /** Kill the whole process tree and do not settle until termination is verified. */
+  terminationBarrier?: boolean | ProcessTerminationBarrier
+}
+
+export type ProcessTerminationBarrier = {
+  observeStderr?: (chunk: Buffer | string) => void
+  signal: (child: ChildProcess, signal?: NodeJS.Signals) => Promise<boolean>
+  force: (child: ChildProcess) => Promise<boolean>
 }
 
 export type ProcessResult = {
@@ -178,9 +184,12 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     let timedOut = false
     let settled = false
     let barrierStopping = false
-    let barrierReady = false
+    let barrierAttemptComplete = false
+    let barrierTerminationVerified = false
     let initialBarrierTermination: Promise<boolean> | undefined
+    let deferredExit: { code: number | null; signal: NodeJS.Signals | null } | null = null
     let deferredClose: { code: number | null; signal: NodeJS.Signals | null } | null = null
+    let deferredError: Error | null = null
 
     const settle = (act: () => void): void => {
       if (settled) {
@@ -194,7 +203,12 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     }
 
     child.stdout?.on('data', (chunk: Buffer | string) => stdout.write(chunk))
-    child.stderr?.on('data', (chunk: Buffer | string) => stderr.write(chunk))
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr.write(chunk)
+      if (typeof spec.terminationBarrier === 'object') {
+        spec.terminationBarrier.observeStderr?.(chunk)
+      }
+    })
     // Why listeners that do nothing: an unhandled `error` on a stream is an
     // uncaught exception, and that takes the whole main process down. A child
     // that exits without reading makes the queued stdin write fail with EPIPE,
@@ -206,33 +220,51 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     }
 
     let graceTimer: ReturnType<typeof setTimeout> | undefined
+    const signalBarrierTree = (signal?: NodeJS.Signals): Promise<boolean> =>
+      (typeof spec.terminationBarrier === 'object'
+        ? spec.terminationBarrier.signal(child, signal)
+        : signalProcessTree(child, signal)
+      ).catch(() => false)
+    const forceBarrierTree = (): Promise<boolean> =>
+      (typeof spec.terminationBarrier === 'object'
+        ? spec.terminationBarrier.force(child)
+        : forceTerminateProcessTree(child)
+      ).catch(() => false)
 
     const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null): void =>
       settle(() =>
         resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
       )
 
+    const resolveBarrierIfSafe = (): void => {
+      const rootExit = deferredClose ?? deferredExit
+      if (barrierTerminationVerified || (barrierAttemptComplete && rootExit)) {
+        if (deferredError) {
+          settle(() => reject(deferredError))
+        } else {
+          resolveFromClose(rootExit?.code ?? null, rootExit?.signal ?? null)
+        }
+      }
+    }
+
     /**
      * Stop the child, then settle whether or not it complies.
      *
-     * Why settle regardless: `close` only fires once the child is really gone,
-     * so one that traps the signal would hold the caller forever -- and both
-     * the pwsh cache and the snapshot reader hand later callers their in-flight
-     * promise, so a single unkillable child would wedge every one of them.
+     * Why bounded: a descendant can keep `close` pending after the root exits,
+     * but failed termination verification must not let callers mutate shared state.
      */
     const stopAndSettle = (): void => {
       if (spec.terminationBarrier) {
         barrierStopping = true
-        initialBarrierTermination ??= signalProcessTree(child)
+        initialBarrierTermination ??= signalBarrierTree()
         if (process.platform === 'win32') {
           void initialBarrierTermination.then((terminated) => {
             if (!terminated) {
               return
             }
-            barrierReady = true
-            if (deferredClose) {
-              resolveFromClose(deferredClose.code, deferredClose.signal)
-            }
+            barrierAttemptComplete = true
+            barrierTerminationVerified = true
+            resolveBarrierIfSafe()
           })
         }
       } else {
@@ -242,26 +274,31 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         if (spec.terminationBarrier) {
           const initialTermination = initialBarrierTermination ?? Promise.resolve(false)
           if (process.platform === 'win32') {
+            if (typeof spec.terminationBarrier === 'object') {
+              void Promise.all([initialTermination, forceBarrierTree()]).then(
+                ([initialTerminated, forceTerminated]) => {
+                  barrierAttemptComplete = true
+                  barrierTerminationVerified = initialTerminated || forceTerminated
+                  resolveBarrierIfSafe()
+                }
+              )
+              return
+            }
             void initialTermination.then((terminated) => {
               if (!terminated) {
                 terminate(child, 'SIGKILL')
               }
-              barrierReady = true
-              if (deferredClose) {
-                resolveFromClose(deferredClose.code, deferredClose.signal)
-              }
+              barrierAttemptComplete = true
+              barrierTerminationVerified = terminated
+              resolveBarrierIfSafe()
             })
             return
           }
-          void Promise.all([initialTermination, forceTerminateProcessTree(child)]).then(
-            ([initialTerminated, forceTerminated]) => {
-              if (!initialTerminated || !forceTerminated) {
-                return
-              }
-              barrierReady = true
-              if (deferredClose) {
-                resolveFromClose(deferredClose.code, deferredClose.signal)
-              }
+          void Promise.all([initialTermination, forceBarrierTree()]).then(
+            ([_initialTerminated, forceTerminated]) => {
+              barrierAttemptComplete = true
+              barrierTerminationVerified = forceTerminated
+              resolveBarrierIfSafe()
             }
           )
           return
@@ -289,10 +326,24 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       onAbort()
     }
 
-    child.once('error', (error) => settle(() => reject(error)))
+    child.once('error', (error) => {
+      if (barrierStopping) {
+        deferredError = error
+        resolveBarrierIfSafe()
+        return
+      }
+      settle(() => reject(error))
+    })
+    child.once('exit', (code, signal) => {
+      deferredExit = { code, signal }
+      if (barrierStopping) {
+        resolveBarrierIfSafe()
+      }
+    })
     child.once('close', (code, signal) => {
-      if (barrierStopping && !barrierReady) {
+      if (barrierStopping) {
         deferredClose = { code, signal }
+        resolveBarrierIfSafe()
         return
       }
       resolveFromClose(code, signal)

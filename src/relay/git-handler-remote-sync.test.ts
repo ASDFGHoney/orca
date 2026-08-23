@@ -217,6 +217,17 @@ describe('GitHandler', () => {
         await expect(fs.access(path.join(tmpDir, 'topic.txt'))).resolves.toBeUndefined()
         await expect(fs.access(path.join(tmpDir, 'discarded.txt'))).rejects.toThrow()
         expect(
+          execFileSync('git', ['rev-parse', `origin/${branch}`], {
+            cwd: tmpDir,
+            encoding: 'utf-8'
+          }).trim()
+        ).toBe(
+          execFileSync('git', ['rev-parse', branch], {
+            cwd: producerDir,
+            encoding: 'utf-8'
+          }).trim()
+        )
+        expect(
           execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/orca/rebase'], {
             cwd: tmpDir,
             encoding: 'utf-8'
