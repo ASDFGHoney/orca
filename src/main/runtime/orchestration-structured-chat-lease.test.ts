@@ -367,4 +367,24 @@ describe('orchestration while Structured Chat owns an agent session', () => {
     expect(writes).toHaveBeenCalledTimes(2)
     expect(writes.mock.calls[1]).toEqual([PLAIN.ptyId, '\r'])
   })
+
+  it('accepts terminal.send unchanged for a never-adopted terminal', async () => {
+    const response = await rpc('terminal.send', {
+      terminal: PLAIN.handle,
+      text: 'ordinary prompt',
+      client: { id: 'test-client', type: 'desktop' }
+    })
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        send: {
+          handle: PLAIN.handle,
+          accepted: true,
+          bytesWritten: Buffer.byteLength('ordinary prompt')
+        }
+      }
+    })
+    expect(writes).toHaveBeenCalledExactlyOnceWith(PLAIN.ptyId, 'ordinary prompt')
+  })
 })

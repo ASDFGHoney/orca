@@ -140,7 +140,7 @@ describe('a chat that closes', () => {
     })
   })
 
-  it('keeps the child while another surface still holds the session', async () => {
+  it('keeps the child until the last surface releases it, and not longer', async () => {
     await attach()
     await host.hold(SESSION, SURFACE)
     await host.hold(SESSION, 'paired-phone:1')
@@ -150,6 +150,10 @@ describe('a chat that closes', () => {
 
     expect(closeSession).not.toHaveBeenCalled()
     expect(host.hasSession(SESSION)).toBe(true)
+
+    host.release(SESSION, 'paired-phone:1')
+
+    await waitForEviction()
   })
 
   it('does not lose the session to a release the client sent twice', async () => {

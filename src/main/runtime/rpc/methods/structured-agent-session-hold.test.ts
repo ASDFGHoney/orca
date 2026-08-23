@@ -140,7 +140,7 @@ describe('a client that disappears without cleanup', () => {
     expect(closeSession).toHaveBeenCalledWith(SESSION)
   })
 
-  it('does not release a hold another connection is still holding', async () => {
+  it('keeps the child until the last holding connection disappears, and not longer', async () => {
     await call('agentSession.hold', { sessionId: SESSION, holderId: 'chat-1' })
     await dispatcher.dispatchStreaming(
       {
@@ -158,6 +158,11 @@ describe('a client that disappears without cleanup', () => {
 
     expect(closeSession).not.toHaveBeenCalled()
     expect(host.hasSession(SESSION)).toBe(true)
+
+    runtime.cleanupSubscriptionsForConnection('connection-2')
+
+    await vi.waitFor(() => expect(host.hasSession(SESSION)).toBe(false))
+    expect(closeSession).toHaveBeenCalledWith(SESSION)
   })
 })
 
