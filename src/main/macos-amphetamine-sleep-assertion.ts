@@ -67,6 +67,8 @@ export class MacosAmphetamineSleepAssertion {
   private readonly backoff: AmphetamineFailureBackoff
   private desired: 'started' | 'stopped' = 'stopped'
   private readonly hold = new AmphetamineHold()
+  /** An acquire has been sent and not yet reported back, so a session may exist. */
+  private acquireInFlight = false
   private queue: Promise<void> = Promise.resolve()
   private disposed = false
   private readonly availability = new AmphetamineAvailability()
@@ -119,7 +121,12 @@ export class MacosAmphetamineSleepAssertion {
     this.desired = 'stopped'
     this.stopReconcileTimer()
     this.backoff.reset()
-    if (!this.hold.isOwned()) {
+    // acquireInFlight, not just the hold: quit can tear the event loop down
+    // before an awaited osascript reports, so an acquire that has already been
+    // sent may have created a session nothing will ever hear about. The release
+    // script verifies shape first, so running it when uncertain is safe — it
+    // reports 'gone' or 'foreign' and ends nothing.
+    if (!this.hold.isOwned() && !this.acquireInFlight) {
       this.hold.release()
       return
     }
@@ -224,12 +231,15 @@ export class MacosAmphetamineSleepAssertion {
       return false
     }
     let result: OsascriptResult
+    this.acquireInFlight = true
     try {
       result = await this.runOsascript(AMPHETAMINE_ACQUIRE_SCRIPT)
     } catch (error) {
+      this.acquireInFlight = false
       this.handleFailure('acquire-spawn-error', reason, error)
       return false
     }
+    this.acquireInFlight = false
     if (result.code !== 0 || result.timedOut) {
       this.handleScriptFailure('acquire', reason, result)
       return false
@@ -283,7 +293,7 @@ export class MacosAmphetamineSleepAssertion {
       return true
     }
     if (this.hold.get() === 'adopted') {
-      // Never end a session Orca did not start.
+      // Never end a session whose shape says it is not Orca's.
       this.hold.release()
       return true
     }

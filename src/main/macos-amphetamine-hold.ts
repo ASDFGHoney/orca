@@ -13,13 +13,13 @@ export class AmphetamineHold {
   private kind: AmphetamineHoldKind = null
   private stale = false
 
-  /** Orca started this session, or reclaimed one it had left behind. */
+  /** Shaped like Orca's, so Orca takes responsibility for ending it. */
   own(): void {
     this.kind = 'owned'
     this.stale = false
   }
 
-  /** Someone else's session is doing the job; Orca must not end it. */
+  /** Not shaped like Orca's, so it is someone else's; Orca must not end it. */
   adopt(): void {
     this.kind = 'adopted'
     this.stale = false

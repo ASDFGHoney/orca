@@ -12,9 +12,10 @@ const OSASCRIPT = '/usr/bin/osascript'
 /**
  * Amphetamine's session is a single global one, not a per-process assertion:
  * `start new session` documents that it "ends any existing sessions, including
- * Trigger-based sessions". So Orca reads the session before writing it and only
- * ever ends a session it started and still recognizes. See
- * docs/reference/macos-keep-awake-engines.md.
+ * Trigger-based sessions". So every write here is preceded by a read in the same
+ * script, and a session is only ended after it was seen to match the shape Orca
+ * creates. That is a shape match, not proof of provenance — Amphetamine exposes
+ * no session identity. See docs/reference/macos-keep-awake-engines.md.
  */
 /**
  * Check and start from ONE osascript invocation.
@@ -46,10 +47,10 @@ end tell`
  * Same caveat as the acquire script: consecutive Apple events, not a
  * transaction. The shape test lives here rather than in TypeScript so the last
  * check is the Apple event immediately before `end session`, which is the
- * smallest window this API allows. "foreign" means the live session is not the
- * one Orca started — timed, Trigger-driven, app/date-based, or blocking display
- * sleep — so it is left alone. Guarded by `is running` so releasing never
- * launches the app.
+ * smallest window this API allows. "foreign" means the live session does not
+ * match the shape Orca creates — timed, Trigger-driven, app/date-based, or
+ * blocking display sleep — so it is left alone. Guarded by `is running` so
+ * releasing never launches the app.
  */
 export const AMPHETAMINE_RELEASE_SCRIPT = `if application id "${AMPHETAMINE_BUNDLE_ID}" is running then
 	tell application id "${AMPHETAMINE_BUNDLE_ID}"
@@ -77,12 +78,14 @@ export type RunOsascript = (script: string) => Promise<OsascriptResult>
 
 /** What the acquire script did. */
 /**
- * 'orca-shaped' is a session matching what Orca creates but not necessarily one
- * this process started — after a crash it is Orca's own leaked session, which
- * must be reclaimed rather than adopted, or it would never be cleaned up.
+ * 'orca-shaped' matches what Orca creates. Usually that is Orca's own session,
+ * still held or leaked by a process that was killed, and reclaiming it is the
+ * only way it ever gets cleaned up. It can equally be a user session that
+ * happens to match; the two are indistinguishable, which is the accepted
+ * identity limit rather than something the code can resolve.
  */
 export type AmphetamineAcquireOutcome = 'started' | 'orca-shaped' | 'foreign'
-/** What the release script did. 'foreign' means the live session is not Orca's. */
+/** What the release script did. 'foreign' means the live session does not match Orca's shape. */
 export type AmphetamineReleaseOutcome = 'ended' | 'foreign' | 'gone'
 
 export function parseAcquireOutcome(stdout: string): AmphetamineAcquireOutcome | null {

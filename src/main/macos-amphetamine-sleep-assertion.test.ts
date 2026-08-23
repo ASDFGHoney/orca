@@ -549,6 +549,25 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(assertion.hasLiveHold()).toBe(false)
   })
 
+  it('cleans up when quit lands while an acquire is still in flight', async () => {
+    // The continuation may never run — quit can tear the event loop down first —
+    // so dispose cannot wait to learn whether a session was created.
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(
+      async (_script: string) => new Promise<OsascriptResult>(() => {})
+    )
+    const runOsascriptSync = vi.fn((_script: string) => ok('ended'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+
+    expect(runOsascriptSync.mock.calls.some(([script]) => script.includes('end session'))).toBe(
+      true
+    )
+  })
+
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {
     const amphetamine = createFakeAmphetamine()
     const runOsascriptSync = vi.fn((_script: string) => ok('gone'))
