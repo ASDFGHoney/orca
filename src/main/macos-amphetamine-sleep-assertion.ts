@@ -207,9 +207,12 @@ export class MacosAmphetamineSleepAssertion {
     if (this.unavailableReason) {
       return false
     }
-    // Already holding: only the periodic re-check spends an Apple event, to
-    // notice an adopted session expiring or ours being replaced.
-    if (this.hold !== null && !recheck) {
+    // Already holding and able to vouch for it: only the periodic re-check
+    // spends an Apple event, to notice an adopted session expiring or ours being
+    // replaced. hasLiveHold rather than hold: after a failed attempt the
+    // classification survives for cleanup but is not evidence anything is
+    // holding, and that is precisely when a retry is worth an Apple event.
+    if (this.hasLiveHold() && !recheck) {
       return true
     }
     // Gate before the Apple event: a failure reports through onUnexpectedFailure,

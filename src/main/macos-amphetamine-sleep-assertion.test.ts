@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MacosAmphetamineSleepAssertion } from './macos-amphetamine-sleep-assertion'
+import {
+  MACOS_AMPHETAMINE_ASSERTION_RETRY_MS,
+  MacosAmphetamineSleepAssertion
+} from './macos-amphetamine-sleep-assertion'
 import type { OsascriptResult } from './macos-amphetamine-session'
 
 function ok(stdout = ''): OsascriptResult {
@@ -308,6 +311,32 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     expect(assertion.getHold()).toBe('adopted')
     // ...but it is no longer evidence that anything is holding.
     expect(assertion.hasLiveHold()).toBe(false)
+  })
+
+  it('retries promptly once it can no longer vouch for its hold', async () => {
+    vi.useFakeTimers()
+    let clock = 1_000
+    const amphetamine = createFakeAmphetamine('foreign')
+    const assertion = createAssertion(amphetamine, { now: () => clock, reconcileMs: 100_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    await vi.advanceTimersByTimeAsync(100_000)
+    await settle()
+    expect(assertion.hasLiveHold()).toBe(false)
+
+    // Recovery must not have to wait for the next re-check: once the backoff
+    // window has passed, an untrusted hold is worth an Apple event on an
+    // ordinary start rather than only on the next periodic one.
+    clock += MACOS_AMPHETAMINE_ASSERTION_RETRY_MS + 1
+    amphetamine.run.mockImplementation(async (_script: string) => ok('foreign'))
+    const before = amphetamine.calls()
+    assertion.start('agents-working')
+    await settle()
+
+    expect(amphetamine.calls()).toBeGreaterThan(before)
+    expect(assertion.hasLiveHold()).toBe(true)
   })
 
   it('keeps the hold when a release fails so a later stop retries', async () => {
