@@ -69,6 +69,27 @@ describe('remote Linear list truncation output', () => {
     )
   })
 
+  it('formats search output from an older host without totalCount', () => {
+    const result = {
+      issues: [issue],
+      truncated: true,
+      meta: { query: 'auth', limit: 1, returned: 1, limitReached: true }
+    }
+
+    expect(formatRemoteLinearCli(result)?.stdout).toContain('truncated: showing 1')
+  })
+
+  it('falls back to raw JSON for malformed provider totals', () => {
+    const result = {
+      issues: [issue],
+      totalCount: '349',
+      truncated: true,
+      meta: { query: 'auth', limit: 1, returned: 1, limitReached: true }
+    }
+
+    expect(formatRemoteLinearCli(result)).toBeNull()
+  })
+
   it('accepts null limits from a new project-list host', () => {
     const result = {
       projects: [{ id: 'project-1', name: 'Launch' }],

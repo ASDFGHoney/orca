@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const callMock = vi.fn()
 
@@ -274,7 +276,7 @@ describe('orca linear CLI handlers', () => {
       })
     )
 
-    await main(['linear', 'project', 'list'], '/tmp/repo')
+    await main(['linear', 'project', 'list'], join(tmpdir(), 'repo'))
 
     expect(callMock).toHaveBeenCalledWith('linear.agentProjectList', {
       query: undefined,

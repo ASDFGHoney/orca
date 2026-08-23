@@ -41,7 +41,7 @@ describe('SSH Linear pagination contract', () => {
     )
     const issueHelp = getRemoteLinearHelp(parseRemoteCliArgs(['linear', 'list', '--help']))
 
-    expect(projectHelp).toContain('Omit --limit to walk every page')
-    expect(issueHelp).toContain('Omit --limit to walk every page')
+    expect(projectHelp).toContain('Omit --limit to walk until exhaustion or a safety backstop')
+    expect(issueHelp).toContain('Omit --limit to walk until exhaustion or a safety backstop')
   })
 })

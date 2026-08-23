@@ -21,6 +21,7 @@ import {
 import { acquire, release } from './linear-request-concurrency'
 import { clearToken } from './linear-token-store'
 import { getClients, isAuthError, type LinearClientForWorkspace } from './client'
+import { readLinearBeforeDeadline } from './linear-read-deadline'
 
 type LinearRawVariables = Record<string, unknown>
 
@@ -861,6 +862,8 @@ type ProjectListPageState = {
   items: LinearProjectSummary[]
   hasMore: boolean
   canPage: boolean
+  itemIds: Set<string>
+  seenCursors: Set<string>
   after?: string
   error?: LinearWorkspaceError
 }
@@ -881,7 +884,6 @@ async function readProjectListPage(
   }
   budget.pages += 1
   const previousCursor = state.after
-  await acquire()
   try {
     const variables = query
       ? { term: query, first, ...(previousCursor ? { after: previousCursor } : {}) }
@@ -890,18 +892,34 @@ async function readProjectListPage(
           ...(previousCursor ? { after: previousCursor } : {}),
           orderBy: 'updatedAt'
         }
-    const result = await state.entry.client.client.rawRequest<
-      ProjectConnectionResponse,
-      LinearRawVariables
-    >(query ? SEARCH_PROJECTS_QUERY : PROJECTS_QUERY, variables)
+    const read = await readLinearBeforeDeadline(state.entry, budget.deadline, (client) =>
+      client.client.rawRequest<ProjectConnectionResponse, LinearRawVariables>(
+        query ? SEARCH_PROJECTS_QUERY : PROJECTS_QUERY,
+        variables
+      )
+    )
+    if (!read.completed) {
+      state.hasMore = true
+      state.canPage = false
+      return
+    }
+    const result = read.value
     const connection = query ? result.data?.searchProjects : result.data?.projects
     const nodes = connection?.nodes ?? []
-    state.items.push(...nodes.map((project) => mapProjectForWorkspace(state.entry, project)))
+    for (const node of nodes) {
+      if (!state.itemIds.has(node.id)) {
+        state.itemIds.add(node.id)
+        state.items.push(mapProjectForWorkspace(state.entry, node))
+      }
+    }
     state.hasMore = Boolean(connection?.pageInfo?.hasNextPage)
     state.after = connection?.pageInfo?.endCursor ?? undefined
     state.canPage = Boolean(
-      state.hasMore && state.after && state.after !== previousCursor && nodes.length > 0
+      state.hasMore && state.after && !state.seenCursors.has(state.after) && nodes.length > 0
     )
+    if (state.canPage && state.after) {
+      state.seenCursors.add(state.after)
+    }
   } catch (error) {
     if (isAuthError(error)) {
       clearToken(state.entry.workspace.id)
@@ -912,11 +930,7 @@ async function readProjectListPage(
       throw error
     }
     state.error = workspaceError(state.entry, error)
-    state.items = []
-    state.hasMore = false
     state.canPage = false
-  } finally {
-    release()
   }
 }
 
@@ -933,10 +947,15 @@ async function readProjectListPages(
     entry,
     items: [],
     hasMore: false,
-    canPage: false
+    canPage: false,
+    itemIds: new Set(),
+    seenCursors: new Set()
   }))
   const budget = { deadline: Date.now() + LINEAR_AGENT_PROJECT_READ_BUDGET_MS, pages: 0 }
-  const first = limit === null ? LINEAR_PROJECT_API_PAGE_SIZE_MAX : Math.min(50, limit)
+  const first =
+    limit === null
+      ? LINEAR_PROJECT_API_PAGE_SIZE_MAX
+      : Math.min(LINEAR_PROJECT_API_PAGE_SIZE_MAX, limit)
   await Promise.all(
     states.map((state) => readProjectListPage(state, query, first, workspaceId, budget))
   )

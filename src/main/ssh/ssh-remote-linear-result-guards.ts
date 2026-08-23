@@ -35,7 +35,11 @@ export function isLinearSearchResult(result: unknown): result is LinearSearchRes
     Array.isArray(result.issues) &&
     isRecord(result.meta) &&
     typeof result.meta.query === 'string' &&
-    typeof result.meta.returned === 'number'
+    typeof result.meta.returned === 'number' &&
+    (result.totalCount === undefined ||
+      (typeof result.totalCount === 'number' &&
+        Number.isFinite(result.totalCount) &&
+        result.totalCount >= 0))
   )
 }
 

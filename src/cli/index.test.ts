@@ -415,13 +415,13 @@ describe('orca root help', () => {
     logSpy.mockClear()
     await main(['linear', 'list', '--help'], '/tmp/repo')
     expect(String(logSpy.mock.calls[0][0])).toContain(
-      '--limit <n>            Max issues to return; omit to walk every page'
+      '--limit <n>            Max issues to return; omit to walk pages until exhaustion or a safety backstop'
     )
 
     logSpy.mockClear()
     await main(['linear', 'project', 'list', '--help'], '/tmp/repo')
     expect(String(logSpy.mock.calls[0][0])).toContain(
-      '--limit <n>            Max projects to return; omit to walk every page'
+      '--limit <n>            Max projects to return; omit to walk pages until exhaustion or a safety backstop'
     )
     expect(callMock).not.toHaveBeenCalled()
   })

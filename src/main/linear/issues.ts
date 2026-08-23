@@ -19,6 +19,7 @@ import { acquire, release } from './linear-request-concurrency'
 import { clearToken } from './linear-token-store'
 import { getClients, isAuthError, type LinearClientForWorkspace } from './client'
 import { buildLinearListIssueFilter } from './issue-list-filter'
+import { readLinearBeforeDeadline } from './linear-read-deadline'
 import { mapLinearIssue } from './mappers'
 
 export type LinearIssueListOptions = {
@@ -81,6 +82,7 @@ type LinearIssuePageRequest = {
   after?: string
 }
 type LinearIssueConnectionLoader = (
+  client: LinearClient,
   page: LinearIssuePageRequest
 ) => Promise<LinearIssueConnection | null | undefined>
 
@@ -426,54 +428,12 @@ function mapRawIssueForWorkspace(
   }
 }
 
-async function readIssueConnectionPages(
-  entry: LinearClientForWorkspace,
-  limit: number | null,
-  loadConnection: LinearIssueConnectionLoader,
-  budget: LinearAgentListBudget
-): Promise<{ items: LinearIssue[]; hasMore: boolean }> {
-  const items: LinearIssue[] = []
-  let after: string | undefined
-  let hasMore = false
-
-  while (limit === null || items.length < limit) {
-    if (Date.now() >= budget.deadline || budget.pages >= LINEAR_AGENT_LIST_MAX_PAGES) {
-      hasMore = true
-      break
-    }
-    budget.pages += 1
-    const first =
-      limit === null
-        ? LINEAR_ISSUE_API_PAGE_SIZE_MAX
-        : Math.min(LINEAR_ISSUE_API_PAGE_SIZE_MAX, limit - items.length)
-    await acquire()
-    let connection: LinearIssueConnection | null | undefined
-    try {
-      connection = await loadConnection(after ? { first, after } : { first })
-    } finally {
-      release()
-    }
-    const nodes = connection?.nodes ?? []
-    items.push(...nodes.map((issue) => mapRawIssueForWorkspace(entry, issue)))
-    hasMore = Boolean(connection?.pageInfo?.hasNextPage)
-
-    const nextCursor = connection?.pageInfo?.endCursor ?? undefined
-    if (!hasMore || !nextCursor || nextCursor === after || nodes.length === 0) {
-      break
-    }
-    after = nextCursor
-  }
-
-  return { items, hasMore }
-}
-
 function getOldestIssueTime(issues: LinearIssue[]): number {
   const oldestIssue = issues.at(-1)
   return oldestIssue ? new Date(oldestIssue.updatedAt).getTime() : Number.POSITIVE_INFINITY
 }
 
 function getListIssueConnectionLoader(
-  entry: LinearClientForWorkspace,
   filter: LinearListFilter,
   options?: LinearIssueListOptions
 ): LinearIssueConnectionLoader {
@@ -488,8 +448,8 @@ function getListIssueConnectionLoader(
   })
 
   if (filter === 'assigned') {
-    return async (page) => {
-      const result = await entry.client.client.rawRequest<
+    return async (client, page) => {
+      const result = await client.client.rawRequest<
         LinearIssueConnectionResponse,
         LinearRawVariables
       >(VIEWER_ASSIGNED_ISSUES_QUERY, {
@@ -502,8 +462,8 @@ function getListIssueConnectionLoader(
   }
 
   if (filter === 'created') {
-    return async (page) => {
-      const result = await entry.client.client.rawRequest<
+    return async (client, page) => {
+      const result = await client.client.rawRequest<
         LinearIssueConnectionResponse,
         LinearRawVariables
       >(VIEWER_CREATED_ISSUES_QUERY, {
@@ -516,8 +476,8 @@ function getListIssueConnectionLoader(
   }
 
   if (filter === 'completed') {
-    return async (page) => {
-      const result = await entry.client.client.rawRequest<
+    return async (client, page) => {
+      const result = await client.client.rawRequest<
         LinearIssueConnectionResponse,
         LinearRawVariables
       >(VIEWER_ASSIGNED_ISSUES_QUERY, {
@@ -529,8 +489,8 @@ function getListIssueConnectionLoader(
     }
   }
 
-  return async (page) => {
-    const result = await entry.client.client.rawRequest<
+  return async (client, page) => {
+    const result = await client.client.rawRequest<
       LinearIssueConnectionResponse,
       LinearRawVariables
     >(ALL_ISSUES_QUERY, { ...variables, ...page, filter: filterInput })
@@ -871,6 +831,8 @@ type LinearIssueWorkspacePageState = {
   items: LinearIssue[]
   hasMore: boolean
   canPage: boolean
+  itemIds: Set<string>
+  seenCursors: Set<string>
   error?: LinearWorkspaceError
   after?: string
 }
@@ -904,39 +866,13 @@ function linearWorkspaceError(
   }
 }
 
-async function readListIssuesForWorkspace(
-  entry: LinearClientForWorkspace,
-  filter: LinearListFilter,
-  limit: number | null,
-  workspaceId: LinearWorkspaceSelection | null | undefined,
-  options?: LinearIssueListOptions
-): Promise<LinearCollectionResult<LinearIssue>> {
-  try {
-    return await readIssueConnectionPages(
-      entry,
-      limit,
-      getListIssueConnectionLoader(entry, filter, options),
-      { deadline: Date.now() + LINEAR_AGENT_LIST_READ_BUDGET_MS, pages: 0 }
-    )
-  } catch (error) {
-    if (isAuthError(error)) {
-      clearToken(entry.workspace.id)
-      if (shouldThrowAuthError(workspaceId)) {
-        throw error
-      }
-    } else {
-      console.warn('[linear] listIssues failed:', error)
-    }
-    return { items: [], hasMore: false, errors: [linearWorkspaceError(entry, error)] }
-  }
-}
-
 async function readIssueConnectionPage(
   entry: LinearClientForWorkspace,
   loadConnection: LinearIssueConnectionLoader,
+  client: LinearClient,
   page: LinearIssuePageRequest
 ): Promise<LinearIssuePageResult> {
-  const connection = await loadConnection(page)
+  const connection = await loadConnection(client, page)
   const nodes = connection?.nodes ?? []
   return {
     items: nodes.map((issue) => mapRawIssueForWorkspace(entry, issue)),
@@ -958,22 +894,39 @@ async function readListIssuesPageForState(
   }
   budget.pages += 1
   const previousCursor = state.after
-  await acquire()
   try {
-    const page = await readIssueConnectionPage(
-      state.entry,
-      state.loadConnection,
-      previousCursor ? { first, after: previousCursor } : { first }
+    const read = await readLinearBeforeDeadline(state.entry, budget.deadline, async (client) =>
+      readIssueConnectionPage(
+        state.entry,
+        state.loadConnection,
+        client,
+        previousCursor ? { first, after: previousCursor } : { first }
+      )
     )
-    state.items.push(...page.items)
+    if (!read.completed) {
+      state.hasMore = true
+      state.canPage = false
+      return
+    }
+    const page = read.value
+    for (const item of page.items) {
+      if (!state.itemIds.has(item.id)) {
+        state.itemIds.add(item.id)
+        state.items.push(item)
+      }
+    }
     state.hasMore = page.hasMore
     state.after = page.endCursor
     state.canPage = Boolean(
-      page.hasMore && page.endCursor && page.endCursor !== previousCursor && page.items.length > 0
+      page.hasMore &&
+      page.endCursor &&
+      !state.seenCursors.has(page.endCursor) &&
+      page.items.length > 0
     )
+    if (state.canPage && page.endCursor) {
+      state.seenCursors.add(page.endCursor)
+    }
   } catch (error) {
-    state.items = []
-    state.hasMore = false
     state.canPage = false
     state.error = linearWorkspaceError(state.entry, error)
     if (isAuthError(error)) {
@@ -984,8 +937,6 @@ async function readListIssuesPageForState(
     } else {
       console.warn('[linear] listIssues failed:', error)
     }
-  } finally {
-    release()
   }
 }
 
@@ -1030,10 +981,12 @@ async function readListIssuesAcrossWorkspaces(
 ): Promise<LinearCollectionResult<LinearIssue>> {
   const states: LinearIssueWorkspacePageState[] = entries.map((entry) => ({
     entry,
-    loadConnection: getListIssueConnectionLoader(entry, filter, options),
+    loadConnection: getListIssueConnectionLoader(filter, options),
     items: [],
     hasMore: false,
-    canPage: false
+    canPage: false,
+    itemIds: new Set(),
+    seenCursors: new Set()
   }))
   const first =
     limit === null
@@ -1117,10 +1070,6 @@ export async function listIssues(
   const entries = getClients(workspaceId)
   if (entries.length === 0) {
     return { items: [] }
-  }
-
-  if (entries.length === 1) {
-    return readListIssuesForWorkspace(entries[0], filter, effectiveLimit, workspaceId, options)
   }
 
   return readListIssuesAcrossWorkspaces(entries, filter, effectiveLimit, workspaceId, options)

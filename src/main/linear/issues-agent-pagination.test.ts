@@ -5,6 +5,8 @@ type RawRequest = (query: string, variables: Record<string, unknown>) => Promise
 
 const rawRequest = vi.fn<RawRequest>()
 const getClients = vi.fn()
+const clearToken = vi.fn()
+const isAuthError = vi.fn()
 const acquire = vi.fn().mockResolvedValue(undefined)
 const release = vi.fn()
 
@@ -13,10 +15,13 @@ vi.mock('./linear-request-concurrency', () => ({
   release: (...args: unknown[]) => release(...args)
 }))
 
-vi.mock('./linear-token-store', () => ({ clearToken: vi.fn() }))
+vi.mock('./linear-token-store', () => ({
+  clearToken: (...args: unknown[]) => clearToken(...args)
+}))
 vi.mock('./client', () => ({
+  createSignalBoundLinearClient: (entry: LinearClientForWorkspace) => entry.client,
   getClients: (...args: unknown[]) => getClients(...args),
-  isAuthError: () => false
+  isAuthError: (...args: unknown[]) => isAuthError(...args)
 }))
 
 function makeEntry(options?: {
@@ -63,6 +68,7 @@ function response(
 describe('Linear agent issue pagination', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    isAuthError.mockReturnValue(false)
     getClients.mockReturnValue([makeEntry()])
   })
 
@@ -149,6 +155,98 @@ describe('Linear agent issue pagination', () => {
     expect(result.hasMore).toBe(false)
     expect(firstRequest).toHaveBeenCalledTimes(2)
     expect(secondRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains concrete-workspace rows and truncation after a later page fails', async () => {
+    rawRequest
+      .mockResolvedValueOnce(response(['LIN-1'], { hasNextPage: true, endCursor: 'cursor-1' }))
+      .mockRejectedValueOnce(new Error('fetch failed'))
+    const { listIssues } = await import('./issues')
+
+    const result = await listIssues('all', null, 'workspace-1')
+
+    expect(result.items.map((issue) => issue.id)).toEqual(['LIN-1'])
+    expect(result.hasMore).toBe(true)
+    expect(result.errors).toMatchObject([
+      { workspaceId: 'workspace-1', type: 'network', message: 'fetch failed' }
+    ])
+  })
+
+  it('retains healthy and prior failed-workspace rows after a later page fails', async () => {
+    const firstRequest = vi
+      .fn<RawRequest>()
+      .mockResolvedValueOnce(
+        response(['W1-1'], { hasNextPage: true, endCursor: 'workspace-1-cursor-1' })
+      )
+      .mockRejectedValueOnce(new Error('fetch failed'))
+    const secondRequest = vi.fn<RawRequest>().mockResolvedValueOnce(response(['W2-1']))
+    getClients.mockReturnValue([
+      makeEntry({ request: firstRequest }),
+      makeEntry({
+        workspaceId: 'workspace-2',
+        organizationName: 'Second Workspace',
+        request: secondRequest
+      })
+    ])
+    const { listIssues } = await import('./issues')
+
+    const result = await listIssues('all', null, 'all')
+
+    expect(result.items.map((issue) => issue.id)).toEqual(['W1-1', 'W2-1'])
+    expect(result.hasMore).toBe(true)
+    expect(result.errors).toMatchObject([
+      { workspaceId: 'workspace-1', type: 'network', message: 'fetch failed' }
+    ])
+  })
+
+  it('keeps concrete list authentication failures throwing and clears the token', async () => {
+    const authError = new Error('authentication expired')
+    rawRequest.mockRejectedValueOnce(authError)
+    isAuthError.mockImplementation((error) => error === authError)
+    const { listIssues } = await import('./issues')
+
+    await expect(listIssues('all', null, 'workspace-1')).rejects.toThrow(authError)
+    expect(clearToken).toHaveBeenCalledWith('workspace-1')
+  })
+
+  it('reports deadline exhaustion as truncation without a workspace error', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    let grantPermit!: () => void
+    acquire.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        grantPermit = resolve
+      })
+    )
+    const { listIssues } = await import('./issues')
+
+    const resultPromise = listIssues('all', null, 'workspace-1')
+    await vi.advanceTimersByTimeAsync(20_000)
+    const result = await resultPromise
+
+    expect(result).toMatchObject({ items: [], hasMore: true })
+    expect(result.errors).toEqual([])
+    expect(rawRequest).not.toHaveBeenCalled()
+    grantPermit()
+    await Promise.resolve()
+    expect(release).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('deduplicates overlapping issue pages and stops a nonconsecutive cursor cycle', async () => {
+    rawRequest
+      .mockResolvedValueOnce(response(['LIN-1'], { hasNextPage: true, endCursor: 'cursor-a' }))
+      .mockResolvedValueOnce(
+        response(['LIN-1', 'LIN-2'], { hasNextPage: true, endCursor: 'cursor-b' })
+      )
+      .mockResolvedValueOnce(response(['LIN-3'], { hasNextPage: true, endCursor: 'cursor-a' }))
+    const { listIssues } = await import('./issues')
+
+    const result = await listIssues('all', null, 'workspace-1')
+
+    expect(result.items.map((issue) => issue.id)).toEqual(['LIN-1', 'LIN-2', 'LIN-3'])
+    expect(result.hasMore).toBe(true)
+    expect(rawRequest).toHaveBeenCalledTimes(3)
   })
 })
 

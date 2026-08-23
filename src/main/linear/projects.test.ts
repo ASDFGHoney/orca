@@ -19,6 +19,7 @@ vi.mock('./linear-token-store', () => ({
 }))
 
 vi.mock('./client', () => ({
+  createSignalBoundLinearClient: (entry: LinearClientForWorkspace) => entry.client,
   getClients: (...args: unknown[]) => getClients(...args),
   isAuthError: (...args: unknown[]) => isAuthError(...args)
 }))
@@ -327,6 +328,85 @@ describe('Linear project queries', () => {
     expect(result.hasMore).toBe(false)
     expect(firstRequest).toHaveBeenCalledTimes(2)
     expect(secondRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains all-workspace project rows when a later page fails', async () => {
+    const firstRequest = vi
+      .fn()
+      .mockResolvedValueOnce(
+        projectConnectionResponse([rawProject('W1-1')], {
+          hasNextPage: true,
+          endCursor: 'workspace-1-cursor-1'
+        })
+      )
+      .mockRejectedValueOnce(new Error('fetch failed'))
+    const secondRequest = vi
+      .fn()
+      .mockResolvedValueOnce(projectConnectionResponse([rawProject('W2-1')]))
+    getClients.mockReturnValue([
+      makeEntry({ request: firstRequest }),
+      makeEntry({
+        workspaceId: 'workspace-2',
+        organizationName: 'Second Workspace',
+        request: secondRequest
+      })
+    ])
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, null, 'all', true)
+
+    expect(result.items.map((project) => project.id)).toEqual(['W1-1', 'W2-1'])
+    expect(result.hasMore).toBe(true)
+    expect(result.errors).toMatchObject([
+      { workspaceId: 'workspace-1', type: 'unknown', message: 'fetch failed' }
+    ])
+  })
+
+  it('still rejects concrete project lists when a later page fails', async () => {
+    rawRequest
+      .mockResolvedValueOnce(
+        projectConnectionResponse([rawProject('project-1')], {
+          hasNextPage: true,
+          endCursor: 'project-cursor-1'
+        })
+      )
+      .mockRejectedValueOnce(new Error('fetch failed'))
+    const { listProjects } = await import('./projects')
+
+    await expect(listProjects(undefined, null, 'workspace-1', true)).rejects.toThrow('fetch failed')
+  })
+
+  it('deduplicates project pages and stops a nonconsecutive cursor cycle', async () => {
+    rawRequest
+      .mockResolvedValueOnce(
+        projectConnectionResponse([rawProject('project-1')], {
+          hasNextPage: true,
+          endCursor: 'cursor-a'
+        })
+      )
+      .mockResolvedValueOnce(
+        projectConnectionResponse([rawProject('project-1'), rawProject('project-2')], {
+          hasNextPage: true,
+          endCursor: 'cursor-b'
+        })
+      )
+      .mockResolvedValueOnce(
+        projectConnectionResponse([rawProject('project-3')], {
+          hasNextPage: true,
+          endCursor: 'cursor-a'
+        })
+      )
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, null, 'workspace-1', true)
+
+    expect(result.items.map((project) => project.id)).toEqual([
+      'project-1',
+      'project-2',
+      'project-3'
+    ])
+    expect(result.hasMore).toBe(true)
+    expect(rawRequest).toHaveBeenCalledTimes(3)
   })
 
   it('lets manual project issue refresh bypass older in-flight reads', async () => {
