@@ -2,7 +2,6 @@ import { translate } from '@/i18n/i18n'
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
 import {
   getWorkspaceCleanupGitLabel,
-  hasWorkspaceCleanupLocalContext,
   type WorkspaceCleanupReviewInfo
 } from './workspace-cleanup-presentation'
 import {
@@ -84,7 +83,7 @@ export function formatBranchSafetyDetails(candidate: WorkspaceCleanupCandidate):
   return details
 }
 
-export function formatContextDetails(candidate: WorkspaceCleanupCandidate): string | null {
+export function formatContextDetailLabels(candidate: WorkspaceCleanupCandidate): string[] {
   const parts: string[] = []
   if (candidate.localContext.terminalTabCount > 0) {
     parts.push(
@@ -109,6 +108,11 @@ export function formatContextDetails(candidate: WorkspaceCleanupCandidate): stri
       formatWorkspaceCleanupContextDetail('agent', candidate.localContext.retainedDoneAgentCount)
     )
   }
+  return parts
+}
+
+export function formatContextDetails(candidate: WorkspaceCleanupCandidate): string | null {
+  const parts = formatContextDetailLabels(candidate)
   return parts.length > 0 ? parts.join(', ') : null
 }
 
@@ -163,14 +167,6 @@ export function getReviewPillTone(reviewInfo: WorkspaceCleanupReviewInfo): Statu
     return 'review'
   }
   return 'neutral'
-}
-
-// A total conflates unlike resources and obscures what deletion discards.
-export function getContextPillLabel(candidate: WorkspaceCleanupCandidate): string | null {
-  if (!hasWorkspaceCleanupLocalContext(candidate)) {
-    return null
-  }
-  return formatContextDetails(candidate)
 }
 
 export function getContextCount(candidate: WorkspaceCleanupCandidate): number {

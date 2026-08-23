@@ -84,17 +84,17 @@ describe('WorkspaceCleanupConfirmRemove', () => {
     expect(container.querySelectorAll('span.truncate.text-sm.font-medium')).toHaveLength(5)
   })
 
-  it('names what local context would be discarded instead of totalling it', () => {
+  it('names each local context type separately instead of totalling them', () => {
     const candidate = makeFacetCandidate({
       worktreeId: 'repo-1::/repo/with-context',
       displayName: 'Has context',
       localContext: {
         terminalTabCount: 1,
-        cleanEditorTabCount: 0,
-        browserTabCount: 1,
-        diffCommentCount: 0,
+        cleanEditorTabCount: 2,
+        browserTabCount: 3,
+        diffCommentCount: 4,
         newestDiffCommentAt: null,
-        retainedDoneAgentCount: 0
+        retainedDoneAgentCount: 5
       }
     })
 
@@ -112,8 +112,18 @@ describe('WorkspaceCleanupConfirmRemove', () => {
       )
     })
 
-    expect(container.textContent).toContain('Terminal tabs: 1')
-    expect(container.textContent).toContain('Browser tabs: 1')
+    const labels = [
+      'Terminal tabs: 1',
+      'Editor tabs: 2',
+      'Browser tabs: 3',
+      'Diff notes: 4',
+      'Completed agents: 5'
+    ]
+    const renderedLabels = Array.from(container.querySelectorAll('span'))
+      .map((element) => element.textContent)
+      .filter((label): label is string => labels.includes(label ?? ''))
+
+    expect(renderedLabels).toEqual(labels)
     expect(container.textContent).not.toContain('Context: ')
   })
 
