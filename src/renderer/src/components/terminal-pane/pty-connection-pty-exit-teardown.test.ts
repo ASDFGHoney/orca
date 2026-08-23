@@ -407,9 +407,32 @@ describe('connectPanePty', () => {
     expect(deps.onPaneProcessDied).toHaveBeenCalledWith({
       paneId: 1,
       exitCode: 1,
+      startup: null,
       reason: 'process-failed'
     })
     expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
+  it('keeps a failed local split pane visible', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(2)
+    const deps = createDeps({ onPaneProcessDied: vi.fn() })
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+    onPtyExit?.('tab-pty', 1)
+
+    expect(deps.onPaneProcessDied).toHaveBeenCalledWith({
+      paneId: 1,
+      exitCode: 1,
+      startup: null,
+      reason: 'process-failed'
+    })
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
@@ -423,7 +446,8 @@ describe('connectPanePty', () => {
     })
     transportFactoryQueue.push(transport)
     const manager = createManager(1)
-    const deps = createDeps({ onPaneProcessDied: vi.fn() })
+    const startup = { command: 'codex --resume session-1' }
+    const deps = createDeps({ onPaneProcessDied: vi.fn(), startup })
 
     connectPanePty(createPane(1) as never, manager as never, deps as never)
     const onPtyExit = createdTransportOptions[0]?.onPtyExit as
@@ -438,6 +462,7 @@ describe('connectPanePty', () => {
     expect(deps.onPaneProcessDied).toHaveBeenCalledWith({
       paneId: 1,
       exitCode: 1,
+      startup,
       reason: 'git-bash-console-capacity'
     })
     expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()

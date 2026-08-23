@@ -2770,19 +2770,19 @@ export function connectPanePty(
       return
     }
     manager.setPaneGpuRendering(pane.id, true)
+    const failedLocalProcess = !connectionId && runtimeEnvironmentId === null && exitCode !== 0
+    if (failedLocalProcess && deps.onPaneProcessDied) {
+      const gitBashConsoleCapacityFailure = gitBashConsoleCapacityDetector.detected()
+      deps.onPaneProcessDied({
+        paneId: pane.id,
+        exitCode,
+        startup: gitBashConsoleCapacityFailure ? paneStartup : null,
+        reason: gitBashConsoleCapacityFailure ? 'git-bash-console-capacity' : 'process-failed'
+      })
+      return
+    }
     const panes = manager.getPanes()
     if (panes.length <= 1) {
-      const failedLocalProcess = !connectionId && runtimeEnvironmentId === null && exitCode !== 0
-      if (failedLocalProcess) {
-        deps.onPaneProcessDied?.({
-          paneId: pane.id,
-          exitCode,
-          reason: gitBashConsoleCapacityDetector.detected()
-            ? 'git-bash-console-capacity'
-            : 'process-failed'
-        })
-        return
-      }
       // Why: a worktree's sole newborn terminal can die on shell startup — e.g.
       // a PR branch ships an .envrc whose direnv command fails, so the login
       // shell exits non-zero immediately. Routing that through onPtyExitRef
@@ -9433,7 +9433,7 @@ export function connectPanePty(
     ) {
       return
     }
-    onExit(currentPtyId, 1)
+    onExit(currentPtyId)
   }
 
   const reconcileIfSessionMissing = (
@@ -9477,7 +9477,7 @@ export function connectPanePty(
         ) {
           return
         }
-        onExit(currentPtyId, 1)
+        onExit(currentPtyId)
       })
       .catch(() => {})
   }

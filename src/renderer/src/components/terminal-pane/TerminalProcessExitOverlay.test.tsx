@@ -15,7 +15,8 @@ describe('TerminalProcessExitOverlay', () => {
         processExit={{
           paneId: 1,
           exitCode: 1,
-          reason: 'git-bash-console-capacity'
+          reason: 'git-bash-console-capacity',
+          startup: null
         }}
         onRestart={onRestart}
         onClose={onClose}
@@ -33,7 +34,7 @@ describe('TerminalProcessExitOverlay', () => {
   it('preserves the exit code for other shell failures', () => {
     render(
       <TerminalProcessExitOverlay
-        processExit={{ paneId: 1, exitCode: 7, reason: 'process-failed' }}
+        processExit={{ paneId: 1, exitCode: 7, reason: 'process-failed', startup: null }}
         onRestart={vi.fn()}
         onClose={vi.fn()}
       />

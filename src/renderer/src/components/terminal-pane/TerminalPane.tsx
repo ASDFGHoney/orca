@@ -102,6 +102,7 @@ import type { AgentSessionContinuationRequest } from '@/lib/agent-session-contin
 import { useNotificationDispatch } from './use-notification-dispatch'
 import { connectPanePty } from './pty-connection'
 import type { PaneProcessExit, PtyConnectionDeps } from './pty-connection-types'
+import { resolveTerminalProcessExitRestartStartup } from './terminal-process-exit-restart'
 import { resolveTerminalLayoutActiveLeafId } from './terminal-layout-leaf-ids'
 import { shouldPreserveTerminalScrollbackBuffers } from '../../../../shared/workspace-session-terminal-buffers'
 import {
@@ -401,9 +402,14 @@ function TerminalPane(
   const [agentSessionContinuation, setAgentSessionContinuation] =
     useState<AgentSessionContinuationRequest | null>(null)
   const [terminalError, setTerminalError] = useState<string | null>(null)
-  const [paneProcessExit, setPaneProcessExit] = useState<PaneProcessExit | null>(null)
+  const [paneProcessExitsByPaneId, setPaneProcessExitsByPaneId] = useState<
+    Record<number, PaneProcessExit>
+  >({})
   const handlePaneProcessDied = useCallback((processExit: PaneProcessExit) => {
-    setPaneProcessExit(processExit)
+    setPaneProcessExitsByPaneId((current) => ({
+      ...current,
+      [processExit.paneId]: processExit
+    }))
   }, [])
   const [ptyRecoveryStatesByPaneId, setPtyRecoveryStatesByPaneId] = useState<
     Record<number, VisiblePtyRecoveryState>
@@ -1639,25 +1645,35 @@ function TerminalPane(
     ]
   )
 
-  const handleRestartExitedPane = useCallback(() => {
-    if (!paneProcessExit) {
-      return
-    }
-    setPaneProcessExit(null)
-    handleRestartCodexPane(
-      paneProcessExit.paneId,
-      paneProcessExit.reason === 'git-bash-console-capacity' ? startup : null
-    )
-  }, [handleRestartCodexPane, paneProcessExit, startup])
+  const clearPaneProcessExit = useCallback((paneId: number) => {
+    setPaneProcessExitsByPaneId((current) => {
+      if (current[paneId] === undefined) {
+        return current
+      }
+      const next = { ...current }
+      delete next[paneId]
+      return next
+    })
+  }, [])
 
-  const handleCloseExitedPane = useCallback(() => {
-    if (!paneProcessExit) {
-      return
-    }
-    const paneId = paneProcessExit.paneId
-    setPaneProcessExit(null)
-    executeClosePane(paneId)
-  }, [executeClosePane, paneProcessExit])
+  const handleRestartExitedPane = useCallback(
+    (processExit: PaneProcessExit) => {
+      clearPaneProcessExit(processExit.paneId)
+      handleRestartCodexPane(
+        processExit.paneId,
+        resolveTerminalProcessExitRestartStartup(processExit)
+      )
+    },
+    [clearPaneProcessExit, handleRestartCodexPane]
+  )
+
+  const handleCloseExitedPane = useCallback(
+    (paneId: number) => {
+      clearPaneProcessExit(paneId)
+      executeClosePane(paneId)
+    },
+    [clearPaneProcessExit, executeClosePane]
+  )
 
   // Why leaf bindings are a dep: a parked or deferred tab mounts with no
   // transport, so a queued restart has no ptyId to match on the mount pass. The
@@ -3063,20 +3079,21 @@ function TerminalPane(
           onRestartDaemon={() => daemonActions.setPending('restart')}
         />
       ) : null}
-      {paneProcessExit && isActive
-        ? managedPanes.map((pane) =>
-            pane.id === paneProcessExit.paneId
+      {isActive
+        ? managedPanes.map((pane) => {
+            const processExit = paneProcessExitsByPaneId[pane.id]
+            return processExit
               ? createPortal(
                   <TerminalProcessExitOverlay
-                    processExit={paneProcessExit}
-                    onRestart={handleRestartExitedPane}
-                    onClose={handleCloseExitedPane}
+                    processExit={processExit}
+                    onRestart={() => handleRestartExitedPane(processExit)}
+                    onClose={() => handleCloseExitedPane(pane.id)}
                   />,
                   pane.container,
                   `process-exit-${pane.id}`
                 )
               : null
-          )
+          })
         : null}
       {/* Why: portal into the pane so the banner stacks above the xterm canvas (sibling mount painted under WebGL). */}
       {showSshReconnectOverlay && sshReconnectTargetId && sshReconnectStatus
