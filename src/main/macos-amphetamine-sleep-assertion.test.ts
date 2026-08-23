@@ -274,6 +274,23 @@ describe('MacosAmphetamineSleepAssertion availability', () => {
     expect(assertion.getUnavailableReason()).toBe('automation-denied')
   })
 
+  it('does not spawn osascript in a loop when the probe keeps failing', async () => {
+    const amphetamine = createFakeAmphetamine()
+    amphetamine.run.mockImplementation(async (_script: string) => failure('AppleEvent timed out'))
+    let assertion: MacosAmphetamineSleepAssertion | null = null
+    // Mirrors AgentAwakeService: an unexpected failure refreshes, which starts again.
+    const onUnexpectedFailure = vi.fn(() => {
+      assertion?.start('refresh')
+    })
+    assertion = createAssertion(amphetamine, { now: () => 1_000, onUnexpectedFailure })
+
+    assertion.start('agents-working')
+    await settle()
+
+    // One probe per backoff window, not one per refresh.
+    expect(amphetamine.run.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
   it('backs off and asks for a refresh after a transient failure', async () => {
     const onUnexpectedFailure = vi.fn()
     const amphetamine = createFakeAmphetamine()

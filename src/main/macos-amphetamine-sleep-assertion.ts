@@ -178,6 +178,13 @@ export class MacosAmphetamineSleepAssertion {
     if (this.unavailableReason) {
       return false
     }
+    // Gate before the probe, not just before the start. A failing probe reports
+    // through onUnexpectedFailure, which refreshes the service, which starts
+    // this again — so a probe outside the backoff window is an unthrottled
+    // osascript spawn loop for as long as Amphetamine keeps failing.
+    if (this.backoff.isSuppressed()) {
+      return false
+    }
     const state = await this.probeSession(reason)
     if (!state) {
       return false
@@ -189,9 +196,6 @@ export class MacosAmphetamineSleepAssertion {
         this.hold = 'adopted'
       }
       return true
-    }
-    if (this.backoff.isSuppressed()) {
-      return false
     }
     let result: OsascriptResult
     try {
