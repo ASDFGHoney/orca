@@ -3985,12 +3985,10 @@ function loadInitialWebSessionTabs(
             }
           },
           freshSnapshots,
-          notificationBaseline.allowsInitialSnapshot
+          notificationBaseline.allowsSnapshot
         )
         for (const snapshot of freshSnapshots) {
-          if (isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
-            notificationBaseline.recordSnapshot(snapshot)
-          }
+          notificationBaseline.recordSnapshot(snapshot)
         }
       } finally {
         for (const finishRecovery of finishRecoveries) {
@@ -4020,29 +4018,53 @@ function loadInitialWebSessionTabs(
 }
 
 type WebSessionTabsNotificationBaseline = {
-  allowsInitialSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => boolean
   allowsSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => boolean
   recordSnapshot: (snapshot: RuntimeMobileSessionTabsResult) => void
+  completeInitialSubscription: () => void
+}
+
+type WebSessionTabsNotificationBaselineOwner = {
+  pairingRevision: number | undefined
+  baseline: WebSessionTabsNotificationBaseline
 }
 
 function createWebSessionTabsNotificationBaseline(
   environmentId: string
 ): WebSessionTabsNotificationBaseline {
-  const knownAtEffectStart = new Set(
+  const knownAtOwnerStart = new Set(
     getTrackedWebSessionTabsWorktrees(environmentId).map(({ worktree }) => worktree)
   )
-  const knownWorktrees = new Set(knownAtEffectStart)
+  const knownWorktrees = new Set(knownAtOwnerStart)
+  let awaitingInitialSubscription = true
   return {
-    allowsInitialSnapshot: (snapshot) => knownAtEffectStart.has(snapshot.worktree),
-    allowsSnapshot: (snapshot) => knownWorktrees.has(snapshot.worktree),
+    allowsSnapshot: (snapshot) =>
+      (awaitingInitialSubscription ? knownAtOwnerStart : knownWorktrees).has(snapshot.worktree),
     recordSnapshot: (snapshot) => {
       if (isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
+        knownAtOwnerStart.delete(snapshot.worktree)
         knownWorktrees.delete(snapshot.worktree)
       } else {
         knownWorktrees.add(snapshot.worktree)
       }
+    },
+    completeInitialSubscription: () => {
+      awaitingInitialSubscription = false
     }
   }
+}
+
+function getWebSessionTabsNotificationBaseline(
+  baselines: Map<string, WebSessionTabsNotificationBaselineOwner>,
+  environmentId: string,
+  pairingRevision: number | undefined
+): WebSessionTabsNotificationBaseline {
+  const existing = baselines.get(environmentId)
+  if (existing && existing.pairingRevision === pairingRevision) {
+    return existing.baseline
+  }
+  const baseline = createWebSessionTabsNotificationBaseline(environmentId)
+  baselines.set(environmentId, { pairingRevision, baseline })
+  return baseline
 }
 
 export function useWebSessionTabsSync(): void {
@@ -4060,7 +4082,9 @@ export function useWebSessionTabsSync(): void {
     ) => boolean
   >(() => true)
   const visibilityResumeOmissionsByKeyRef = useRef(new Map<string, VisibilityResumeOmission>())
-  const visibilityResumeNotificationBaselinesRef = useRef(new Map<string, ReadonlySet<string>>())
+  const notificationBaselinesByEnvironmentRef = useRef(
+    new Map<string, WebSessionTabsNotificationBaselineOwner>()
+  )
   const mirroredSessionTabsOwnerRevisionByEnvironmentRef = useRef(
     new Map<string, number | undefined>()
   )
@@ -4109,7 +4133,7 @@ export function useWebSessionTabsSync(): void {
       }
       mirroredSessionTabsOwnerRevisionByEnvironmentRef.current.clear()
       visibilityResumeOmissionsByKeyRef.current.clear()
-      visibilityResumeNotificationBaselinesRef.current.clear()
+      notificationBaselinesByEnvironmentRef.current.clear()
     },
     []
   )
@@ -4142,7 +4166,7 @@ export function useWebSessionTabsSync(): void {
         mirroredEnvironmentOwnerRevisions.get(environmentId) !== previousRevision
       ) {
         clearWebSessionTabsTrackingForEnvironment(environmentId)
-        visibilityResumeNotificationBaselinesRef.current.delete(environmentId)
+        notificationBaselinesByEnvironmentRef.current.delete(environmentId)
       }
     }
     mirroredSessionTabsOwnerRevisionByEnvironmentRef.current = mirroredEnvironmentOwnerRevisions
@@ -4162,10 +4186,17 @@ export function useWebSessionTabsSync(): void {
       return
     }
     const notificationBaselinesByEnvironment = new Map(
-      environments.map(({ environmentId }) => [
-        environmentId,
-        createWebSessionTabsNotificationBaseline(environmentId)
-      ])
+      environments.map(
+        ({ environmentId, expectedEnvironmentPairingRevision }) =>
+          [
+            environmentId,
+            getWebSessionTabsNotificationBaseline(
+              notificationBaselinesByEnvironmentRef.current,
+              environmentId,
+              expectedEnvironmentPairingRevision
+            )
+          ] as const
+      )
     )
 
     type VisibilityResumeEnvironment = {
@@ -4508,11 +4539,11 @@ export function useWebSessionTabsSync(): void {
         }
       }
       const resumedEnvironments = new Map<string, VisibilityResumeEnvironment>()
-      const notificationBaselines = new Map<string, ReadonlySet<string>>()
       const trackedWorktreeIds = new Set<string>()
       for (const index of restartingSpecIndexes) {
         const environmentId = environmentIdBySubscriptionSpec[index]
         if (environmentId) {
+          notificationBaselinesByEnvironment.get(environmentId)?.completeInitialSubscription()
           const trackedWorktrees = getTrackedWebSessionTabsWorktrees(environmentId)
           if (trackedWorktrees.length === 0) {
             continue
@@ -4520,10 +4551,6 @@ export function useWebSessionTabsSync(): void {
           for (const { worktree } of trackedWorktrees) {
             trackedWorktreeIds.add(worktree)
           }
-          notificationBaselines.set(
-            environmentId,
-            new Set(trackedWorktrees.map(({ worktree }) => worktree))
-          )
           resumedEnvironments.set(environmentId, {
             trackedWorktrees,
             inventoryReceived: false,
@@ -4532,7 +4559,6 @@ export function useWebSessionTabsSync(): void {
           })
         }
       }
-      visibilityResumeNotificationBaselinesRef.current = notificationBaselines
       visibilityResumeBatch =
         resumedEnvironments.size > 0
           ? {
@@ -4594,6 +4620,7 @@ export function useWebSessionTabsSync(): void {
                   return
                 }
                 if (response.ok === false) {
+                  notificationBaseline.completeInitialSubscription()
                   console.warn(
                     '[web-session-tabs-sync] global subscription failed:',
                     response.error.message
@@ -4712,6 +4739,11 @@ export function useWebSessionTabsSync(): void {
                         for (const snapshot of freshSnapshots) {
                           notificationBaseline.recordSnapshot(snapshot)
                         }
+                        for (const { snapshot } of applicable) {
+                          if (!isWebSessionTabsWorktreeRemovalFrame(snapshot)) {
+                            notificationBaseline.recordSnapshot(snapshot)
+                          }
+                        }
                         const freshSnapshotSet = new Set(freshSnapshots)
                         for (const { index, snapshot } of applicable) {
                           if (unchangedVisibilityResumeSnapshots[index]) {
@@ -4742,6 +4774,9 @@ export function useWebSessionTabsSync(): void {
                       }
                     })
                     .finally(() => {
+                      if (isCurrent()) {
+                        notificationBaseline.completeInitialSubscription()
+                      }
                       for (const finishRecovery of finishRecoveries) {
                         finishRecovery?.()
                       }
@@ -4759,6 +4794,7 @@ export function useWebSessionTabsSync(): void {
                   // talking has not reported a single PTY dead.
                   return
                 }
+                notificationBaseline.completeInitialSubscription()
                 const receivedFrame = recordReceivedWebSessionTabsSnapshot(environmentId, event)
                 recordVisibilityResumeSnapshotReceipt(environmentId, event, receivedFrame)
                 const finishRecovery = beginWebSessionTabsSnapshotRecovery(
@@ -4824,6 +4860,7 @@ export function useWebSessionTabsSync(): void {
               },
               onError: (error) => {
                 if (isCurrent()) {
+                  notificationBaseline.completeInitialSubscription()
                   console.warn('[web-session-tabs-sync] global subscription error:', error.message)
                 }
               }
@@ -4831,6 +4868,7 @@ export function useWebSessionTabsSync(): void {
           )
         },
         onSubscribeError: (error) => {
+          notificationBaseline.completeInitialSubscription()
           console.warn(
             '[web-session-tabs-sync] failed to subscribe globally:',
             error instanceof Error ? error.message : String(error)
@@ -4883,7 +4921,11 @@ export function useWebSessionTabsSync(): void {
 
     let requestedInitialTerminal = false
     let requestedRespawnAfterWake = false
-    const notificationBaseline = createWebSessionTabsNotificationBaseline(environmentId)
+    const notificationBaseline = getWebSessionTabsNotificationBaseline(
+      notificationBaselinesByEnvironmentRef.current,
+      environmentId,
+      expectedEnvironmentPairingRevision
+    )
     /** Resolves the settle receipt of the evidence this frame put (or already
      *  had) in the store, or null when the frame was discarded undecided. */
     const applyActiveSnapshot = async (
@@ -5029,10 +5071,7 @@ export function useWebSessionTabsSync(): void {
                   response,
                   isCurrent,
                   receivedFrame,
-                  notificationBaseline.allowsSnapshot(event) ||
-                    visibilityResumeNotificationBaselinesRef.current
-                      .get(environmentId)
-                      ?.has(activeWorktreeId) === true
+                  notificationBaseline.allowsSnapshot(event)
                 )
                   .catch((error) => {
                     if (isCurrent()) {

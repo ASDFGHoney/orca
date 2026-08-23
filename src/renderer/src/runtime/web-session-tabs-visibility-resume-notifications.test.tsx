@@ -370,6 +370,71 @@ describe('paired session-tab visibility-resume notifications', () => {
     hook.unmount()
   })
 
+  it.each(['done', 'blocked', 'waiting'] as const)(
+    'arms later %s resumes after duplicate cold listAll and subscription inventories',
+    async (state) => {
+      runtimeCall.mockResolvedValueOnce({
+        id: 'list-all',
+        ok: true,
+        result: { snapshots: [snapshot(1, 'working', NOW)] },
+        _meta: { runtimeId: RUNTIME_ID }
+      })
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+      await publish(findSubscription('session.tabs.subscribeAll'), {
+        type: 'snapshots',
+        snapshots: [snapshot(1, 'working', NOW)]
+      })
+      notificationDispatch.mockClear()
+
+      await parkAndReveal()
+      await publish(findSubscription('session.tabs.subscribeAll', 1), {
+        type: 'snapshots',
+        snapshots: [snapshot(2, state, NOW + 1_000)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(badgeCount()).toBe(1)
+      hook.unmount()
+    }
+  )
+
+  it.each(['done', 'blocked', 'waiting'] as const)(
+    'recovers %s after listAll succeeds and the initial subscription fails',
+    async (state) => {
+      runtimeCall.mockResolvedValueOnce({
+        id: 'list-all',
+        ok: true,
+        result: { snapshots: [snapshot(1, 'working', NOW)] },
+        _meta: { runtimeId: RUNTIME_ID }
+      })
+      const hook = renderHook(() => useWebSessionTabsSync())
+      await act(settle)
+      await act(async () => {
+        findSubscription('session.tabs.subscribeAll').callbacks.onResponse({
+          id: 'subscription-error',
+          ok: false,
+          error: { code: 'disconnected', message: 'subscription unavailable' },
+          _meta: { runtimeId: RUNTIME_ID }
+        })
+        await settle()
+      })
+      notificationDispatch.mockClear()
+
+      await parkAndReveal()
+      await publish(findSubscription('session.tabs.subscribeAll', 1), {
+        type: 'snapshots',
+        snapshots: [snapshot(2, state, NOW + 1_000)]
+      })
+      vi.advanceTimersByTime(1_500)
+
+      expect(notificationDispatch).toHaveBeenCalledTimes(1)
+      expect(badgeCount()).toBe(1)
+      hook.unmount()
+    }
+  )
+
   it.each(['done', 'blocked'] as const)(
     'keeps cold %s inventory silent when first mounted hidden',
     async (state) => {
@@ -502,6 +567,45 @@ describe('paired session-tab visibility-resume notifications', () => {
     await publish(global, {
       type: 'snapshots',
       snapshots: [snapshot(1, 'done', NOW + 1_000, NOW + 1_000, undefined, 'epoch-2')]
+    })
+    vi.advanceTimersByTime(1_500)
+
+    expect(notificationDispatch).not.toHaveBeenCalled()
+    expect(badgeCount()).toBe(0)
+    hook.unmount()
+  })
+
+  it('forgets active-stream eligibility after a visibility resume and removal', async () => {
+    seedRemoteMirrorState(true)
+    mocks.getExplicitRuntimeEnvironmentIdForWorktree.mockReturnValue(ENVIRONMENT_ID)
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+    await publish(findSubscription('session.tabs.subscribeAll'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    await publish(findSubscription('session.tabs.subscribe'), {
+      type: 'updated',
+      ...snapshot(1, 'working', NOW)
+    })
+    notificationDispatch.mockClear()
+
+    await parkAndReveal()
+    const active = findSubscription('session.tabs.subscribe', 1)
+    await publish(active, {
+      type: 'updated',
+      worktree: WORKTREE_ID,
+      publicationEpoch: 'epoch-1',
+      snapshotVersion: 2,
+      removed: true,
+      activeGroupId: null,
+      activeTabId: null,
+      activeTabType: null,
+      tabs: []
+    })
+    await publish(active, {
+      type: 'snapshot',
+      ...snapshot(1, 'done', NOW + 1_000, NOW + 1_000, undefined, 'epoch-2')
     })
     vi.advanceTimersByTime(1_500)
 
