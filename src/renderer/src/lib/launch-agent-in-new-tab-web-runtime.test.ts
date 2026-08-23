@@ -38,6 +38,9 @@ const store = {
   sshConnectionStates: new Map(),
   transientClearedAgentStatusConnectionIds: {},
   allWorktrees: vi.fn(() => store.worktreesByRepo['repo-1']),
+  getKnownWorktreeById: vi.fn((worktreeId: string) =>
+    store.allWorktrees().find((worktree) => worktree.id === worktreeId)
+  ),
   createTab: mocks.createTab,
   closeTab: mocks.closeTab,
   queueTabStartupCommand: vi.fn(),

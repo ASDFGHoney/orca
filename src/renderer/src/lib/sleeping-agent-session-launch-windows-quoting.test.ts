@@ -9,6 +9,8 @@ const mockCreateTab = vi.fn()
 const mockQueueTabStartupCommand = vi.fn()
 
 const store = {
+  activeWorktreeId: 'wt-1',
+  activeWorkspaceExecutionHostId: 'local' as string | null,
   settings: {
     agentCmdOverrides: {},
     agentDefaultArgs: {} as Record<string, string>,
@@ -25,23 +27,32 @@ const store = {
     {
       id: 'repo-1',
       connectionId: null as string | null,
-      path: 'C:\\Users\\neil\\repo'
+      path: 'C:\\Users\\neil\\repo',
+      executionHostId: 'local'
     }
-  ],
+  ] as { id: string; connectionId: string | null; path: string; executionHostId: string }[],
   worktreesByRepo: {
     'repo-1': [
       {
         id: 'wt-1',
         repoId: 'repo-1',
         path: 'C:\\Users\\neil\\repo\\feature',
-        displayName: 'feature'
+        displayName: 'feature',
+        hostId: 'local'
       }
     ]
-  } as Record<string, { id: string; repoId: string; path: string; displayName: string }[]>,
-  getKnownWorktreeById: (id: string) =>
+  } as Record<
+    string,
+    { id: string; repoId: string; path: string; displayName: string; hostId: string }[]
+  >,
+  getKnownWorktreeById: vi.fn((id: string, executionHostId?: string) =>
     Object.values(store.worktreesByRepo)
       .flat()
-      .find((worktree) => worktree.id === id),
+      .find(
+        (worktree) =>
+          worktree.id === id && (!executionHostId || worktree.hostId === executionHostId)
+      )
+  ),
   tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
@@ -80,13 +91,13 @@ const record: SleepingAgentSessionRecord = {
   updatedAt: 1
 }
 
-async function launch(): Promise<string | undefined> {
+async function launch(): Promise<{ command: string; startupCommandDelivery?: string } | undefined> {
   const { launchSleepingAgentSession } = await import('./sleeping-agent-session-launch')
   launchSleepingAgentSession(record)
   const queued = mockQueueTabStartupCommand.mock.calls.at(-1)?.[1] as
-    | { command: string }
+    | { command: string; startupCommandDelivery?: string }
     | undefined
-  return queued?.command
+  return queued
 }
 
 describe('launchSleepingAgentSession Windows shell quoting', () => {
@@ -98,14 +109,24 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
       agentDefaultEnv: {},
       activeRuntimeEnvironmentId: null
     }
-    store.repos = [{ id: 'repo-1', connectionId: null, path: 'C:\\Users\\neil\\repo' }]
+    store.activeWorktreeId = 'wt-1'
+    store.activeWorkspaceExecutionHostId = 'local'
+    store.repos = [
+      {
+        id: 'repo-1',
+        connectionId: null,
+        path: 'C:\\Users\\neil\\repo',
+        executionHostId: 'local'
+      }
+    ]
     store.worktreesByRepo = {
       'repo-1': [
         {
           id: 'wt-1',
           repoId: 'repo-1',
           path: 'C:\\Users\\neil\\repo\\feature',
-          displayName: 'feature'
+          displayName: 'feature',
+          hostId: 'local'
         }
       ]
     }
@@ -115,43 +136,67 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
   it('quotes the resume argv for a cmd.exe tab', async () => {
     store.settings.terminalWindowsShell = 'cmd.exe'
 
-    await expect(launch()).resolves.toBe(
-      `codex "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
-    )
+    await expect(launch()).resolves.toMatchObject({
+      command: `codex "--dangerously-bypass-approvals-and-sandbox" "resume" "${SESSION_ID}"`
+    })
   })
 
   it('keeps PowerShell quoting for a powershell tab', async () => {
     store.settings.terminalWindowsShell = 'powershell.exe'
 
-    await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
-    )
+    await expect(launch()).resolves.toMatchObject({
+      command: `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+    })
   })
 
   it('quotes the resume argv for a Git Bash tab', async () => {
     store.settings.terminalWindowsShell = 'git-bash'
 
-    await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
-    )
+    await expect(launch()).resolves.toMatchObject({
+      command: `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
+    })
   })
 
-  it('ignores the local Windows shell setting for an SSH workspace', async () => {
+  it('keeps a colliding SSH owner authoritative on a Windows client', async () => {
     store.settings.terminalWindowsShell = 'cmd.exe'
-    store.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/home/neil/repo' }]
+    store.activeWorkspaceExecutionHostId = 'ssh:ssh-1'
+    store.repos = [
+      {
+        id: 'repo-1',
+        connectionId: null,
+        path: 'C:\\Users\\neil\\repo',
+        executionHostId: 'local'
+      },
+      {
+        id: 'repo-1',
+        connectionId: 'ssh-1',
+        path: '/home/neil/repo',
+        executionHostId: 'ssh:ssh-1'
+      }
+    ]
     store.worktreesByRepo = {
       'repo-1': [
         {
           id: 'wt-1',
           repoId: 'repo-1',
+          path: 'C:\\Users\\neil\\repo\\feature',
+          displayName: 'feature',
+          hostId: 'local'
+        },
+        {
+          id: 'wt-1',
+          repoId: 'repo-1',
           path: '/home/neil/repo/feature',
-          displayName: 'feature'
+          displayName: 'feature',
+          hostId: 'ssh:ssh-1'
         }
       ]
     }
 
-    await expect(launch()).resolves.toBe(
-      `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`
-    )
+    await expect(launch()).resolves.toMatchObject({
+      command: `codex '--dangerously-bypass-approvals-and-sandbox' 'resume' '${SESSION_ID}'`,
+      startupCommandDelivery: 'shell-ready'
+    })
+    expect(store.getKnownWorktreeById).toHaveBeenCalledWith('wt-1', 'ssh:ssh-1')
   })
 })

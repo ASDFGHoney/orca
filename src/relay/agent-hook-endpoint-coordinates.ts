@@ -10,6 +10,14 @@ import { ORCA_HOOK_PROTOCOL_VERSION } from '../shared/agent-hook-types'
 const RELAY_HOOKS_DIR_NAME = '.orca-relay'
 const RELAY_HOOKS_SUBDIR = 'agent-hooks'
 
+export const RELAY_OWNED_AGENT_HOOK_ENV_KEYS = [
+  'ORCA_AGENT_HOOK_PORT',
+  'ORCA_AGENT_HOOK_TOKEN',
+  'ORCA_AGENT_HOOK_ENV',
+  'ORCA_AGENT_HOOK_VERSION',
+  'ORCA_AGENT_HOOK_ENDPOINT'
+] as const
+
 export function defaultEndpointDir(): string {
   return join(homedir(), RELAY_HOOKS_DIR_NAME, RELAY_HOOKS_SUBDIR)
 }

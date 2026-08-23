@@ -49,6 +49,9 @@ const store = {
     ]
   },
   allWorktrees: vi.fn(() => store.worktreesByRepo['repo-1']),
+  getKnownWorktreeById: vi.fn((worktreeId: string) =>
+    store.allWorktrees().find((worktree) => worktree.id === worktreeId)
+  ),
   tabsByWorktree: {
     'wt-1': [{ id: 'tab-1' }]
   },

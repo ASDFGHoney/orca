@@ -14089,6 +14089,202 @@
         "The legacy remote-uploads root is intentionally not reclaimed while a mixed-version relay may still own bytes there; eventual legacy-root retirement requires a separate compatibility decision."
       ],
       "demotionRule": "Demote if one live owner can remove another owner's bytes, cleanup exceeds 64 inspected entries per attempt, a lifecycle path retains its exact owned archive after settlement, or the process oracle flakes without an identified harness or product defect."
+    },
+    {
+      "id": "agent-session.provider-launch-context",
+      "title": "SSH Codex launches activate hooks at the owning provider boundary",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "ssh-relay-provider-and-shell-startup-preflight",
+      "layer": "provider-launch-and-pty-environment",
+      "surfaces": [
+        "fresh and draft Codex launches",
+        "sleeping and cold session resume",
+        "desktop AI Vault resume",
+        "SSH worktrees and folder workspaces"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos", "linux"],
+      "coveredProviders": ["local", "ssh", "wsl", "remote-runtime"],
+      "coverageNotes": "Deterministic shared recognition, final SSH relay feature selection, host-qualified renderer ownership, real bash/zsh/Fish startup, and SSH Docker contracts cover the launch policy. Official Linux Codex 0.113.0, 0.114.0, 0.128.0, and 0.129.0 binaries ratify the unsupported, legacy-name, and current-name boundaries. A rendered macOS-client/Linux-SSH Codex 0.149.0 TUI with an ORCA-scrubbed pre-existing app-server is the independent behavioral oracle. Windows SSH remains uncollected; unit contracts cover a Windows client selecting a colliding Linux SSH owner instead of local shell policy.",
+      "motivatingLinks": [
+        "https://linear.app/stably/issue/STA-3147",
+        "https://github.com/stablyai/orca/pull/16062"
+      ],
+      "invariant": "For a direct Orca-launched Codex TUI on an SSH POSIX host, the host-qualified planner preserves the command byte-for-byte and requests shell-ready delivery. The owning SSH relay independently recognizes the final launch and selects its existing Codex-hook startup feature; the post-profile bash/zsh/Fish preflight reads final PTY coordinates and actual invocation argv, then prepends exactly the version-compatible hook flag. Missing or partial coordinates, unsupported or malformed versions, a probe exceeding two seconds, explicit hook overrides, user aliases/functions, local, WSL, Windows-shell, paired-runtime, other-provider, and opaque launches execute unchanged.",
+      "oracle": "Pre-start an authenticated Codex app-server on the SSH host without ORCA_* variables, launch Codex with a prompt through the rendered Orca New tab surface, and require a real process argv containing separate --enable/hooks plus authoritative working-to-done events for the exact pane and a rendered response. Disable the shared direct-launch recognition predicate and require the same journey to preserve the remote hook-coordinate environment and rendered response while losing --enable/hooks and every exact-pane hook transition. Independently spawn the relay-generated interactive bash, zsh, and Fish launch configs with complete, missing, partial, explicitly overridden, malformed-version, hanging-version, alias, and function cases.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/tui-agent-startup.test.ts",
+        "ORCA_REQUIRE_FISH_MAJOR=4 pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/pty/codex-shell-launch-preflight.test.ts src/shared/startup-shell-portability.live-shell.test.ts src/relay/pty-shell-launch.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/agent-resume-launch-target.test.ts src/renderer/src/lib/sleeping-agent-session-launch-windows-quoting.test.ts src/renderer/src/lib/ai-vault-resume-command.test.ts src/renderer/src/lib/launch-ai-vault-session.test.ts src/renderer/src/components/terminal-pane/pty-connection-remote-runtime-attach.test.ts src/renderer/src/components/terminal-pane/pty-connection-cold-restore-resume-command.test.ts src/renderer/src/components/sidebar/folder-workspace-linked-startup-plan.test.ts src/renderer/src/lib/agent-background-session-launch-host.test.ts src/renderer/src/lib/launch-agent-in-new-tab-ssh-folder.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/renderer/src/lib/launch-agent-in-new-tab.test.ts src/renderer/src/lib/launch-agent-in-new-tab-windows-quoting.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-handler-spawn-environment.test.ts src/renderer/src/lib/launch-agent-in-new-tab-cwd.test.ts src/renderer/src/lib/launch-agent-in-new-tab-web-runtime.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/main/runtime/orca-runtime.test.ts"
+      ],
+      "testFiles": [
+        "src/shared/codex-remote-hook-launch.test.ts",
+        "src/shared/tui-agent-startup.test.ts",
+        "src/shared/startup-shell-portability.live-shell.test.ts",
+        "src/main/pty/codex-shell-launch-preflight.test.ts",
+        "src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+        "src/relay/pty-shell-launch.test.ts",
+        "src/relay/pty-handler-spawn-environment.test.ts",
+        "src/relay/pty-handler-startup-command-delivery.test.ts",
+        "src/renderer/src/lib/agent-resume-launch-target.test.ts",
+        "src/renderer/src/lib/sleeping-agent-session-launch-windows-quoting.test.ts",
+        "src/renderer/src/lib/ai-vault-resume-command.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-connection-remote-runtime-attach.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-connection-cold-restore-resume-command.test.ts",
+        "src/renderer/src/components/sidebar/folder-workspace-linked-startup-plan.test.ts",
+        "src/renderer/src/lib/agent-background-session-launch-host.test.ts",
+        "src/renderer/src/lib/launch-agent-in-new-tab-ssh-folder.test.ts",
+        "src/renderer/src/lib/launch-agent-in-new-tab-cwd.test.ts",
+        "src/renderer/src/lib/launch-agent-in-new-tab-web-runtime.test.ts",
+        "src/renderer/src/lib/launch-agent-in-new-tab-windows-quoting.test.ts",
+        "src/renderer/src/lib/launch-agent-in-new-tab.test.ts",
+        "src/renderer/src/lib/launch-ai-vault-session.test.ts",
+        "src/renderer/src/lib/launch-agent-background-session-remote.test.ts",
+        "src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
+        "src/main/runtime/orca-runtime.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/shared/codex-remote-hook-launch.test.ts",
+          "assertions": [
+            "direct and assignment-prefixed Codex commands remain byte-identical and request shell-ready delivery",
+            "opaque shell, package-runner, and mise overrides fail open unchanged",
+            "local, WSL, Windows-shell, and paired-runtime plans retain ordinary delivery"
+          ]
+        },
+        {
+          "file": "src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+          "assertions": [
+            "relay-generated bash, zsh, and Fish startup inject nothing before Codex 0.114, codex_hooks for 0.114 through 0.128, and hooks for 0.129+",
+            "partial coordinates, malformed versions, and a two-second probe timeout add no argv",
+            "explicit overrides and user aliases/functions remain unchanged"
+          ]
+        },
+        {
+          "file": "src/relay/pty-handler-startup-command-delivery.test.ts",
+          "assertions": [
+            "the owning relay recognizes the final direct SSH POSIX Codex command and selects the existing codex-hooks startup feature",
+            "unrelated, opaque, local, Windows-shell, and explicitly overridden launches select no Codex hook feature"
+          ]
+        },
+        {
+          "file": "src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
+          "assertions": [
+            "feature-disabled and settings-disabled SSH launches delete relay-owned hook coordinates",
+            "settings-disabled launches preserve general pane, tab, worktree, and launch-token identity"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-connection-cold-restore-resume-command.test.ts",
+          "assertions": [
+            "SSH expired-session cold restore preserves the command and replans shell-ready delivery on the replacement provider spawn"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/sidebar/folder-workspace-linked-startup-plan.test.ts",
+          "assertions": [
+            "SSH folder-workspace Codex plans preserve the command and request shell-ready delivery"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/launch-agent-in-new-tab-ssh-folder.test.ts",
+          "assertions": [
+            "the existing SSH folder-workspace New Tab path resolves host ownership before planning Codex",
+            "colliding local and SSH worktree/repo IDs are qualified by authoritative execution host before lookup"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+          "result": "passed",
+          "durationSeconds": 10.35,
+          "summary": "The provider-owned candidate passed all 54 shared recognition, final relay feature-selection, and real bash/zsh argv contracts."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+          "result": "failed",
+          "durationSeconds": 4.85,
+          "summary": "Expected red with the shared direct-launch predicate forced false: ten deterministic assertions lost relay feature selection, version-compatible real-shell argv, and resume shell-ready delivery. Restoring the predicate returned all 54 assertions to green."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "ORCA_REQUIRE_FISH_MAJOR=4 pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/pty/codex-shell-launch-preflight.test.ts src/shared/startup-shell-portability.live-shell.test.ts src/relay/pty-shell-launch.test.ts",
+          "result": "passed",
+          "durationSeconds": 10.25,
+          "summary": "The shell/preflight matrix passed 255 tests with 20 expected skips across available POSIX shells and Fish 4; it injected nothing for 0.113, selected codex_hooks for 0.114 through 0.128, and selected hooks for 0.129+, while malformed and timed-out probes failed open."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/agent-resume-launch-target.test.ts src/renderer/src/lib/sleeping-agent-session-launch-windows-quoting.test.ts src/renderer/src/lib/ai-vault-resume-command.test.ts src/renderer/src/lib/launch-ai-vault-session.test.ts src/renderer/src/components/terminal-pane/pty-connection-remote-runtime-attach.test.ts src/renderer/src/components/terminal-pane/pty-connection-cold-restore-resume-command.test.ts src/renderer/src/components/sidebar/folder-workspace-linked-startup-plan.test.ts src/renderer/src/lib/agent-background-session-launch-host.test.ts src/renderer/src/lib/launch-agent-in-new-tab-ssh-folder.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/renderer/src/lib/launch-agent-in-new-tab.test.ts src/renderer/src/lib/launch-agent-in-new-tab-windows-quoting.test.ts",
+          "result": "passed",
+          "durationSeconds": 3.32,
+          "summary": "Twelve renderer ownership and launch suites passed 129 resume-target, sleeping/cold, desktop AI Vault, folder-owner, Windows-shell, local, and remote-runtime isolation contracts."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-handler-spawn-environment.test.ts src/renderer/src/lib/launch-agent-in-new-tab-cwd.test.ts src/renderer/src/lib/launch-agent-in-new-tab-web-runtime.test.ts",
+          "result": "passed",
+          "durationSeconds": 4.2,
+          "summary": "Thirty-eight neighboring final-environment, local New Tab cwd, and paired web-runtime contracts passed after the local fixture supplied the same hydrated host ownership required in production."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/main/runtime/orca-runtime.test.ts",
+          "result": "passed",
+          "durationSeconds": 14.53,
+          "summary": "The rebased candidate passed 1,204 SSH hook-policy, background launch, and runtime ownership contracts with one existing skip."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 120,
+        "scope": "focused planner, relay, shell, resume, and launch-owner contracts"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "The deterministic contracts use direct argv, environment, and store oracles; CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "Literal main d1127b9939 completed the authenticated Codex 0.149.0 response in a rendered macOS Electron -> Linux Docker SSH folder workspace with complete PTY hook coordinates and an ORCA-scrubbed pre-existing app-server, but process argv had no --enable hooks and the exact pane had no working or done entry. Current origin/main 5bcbafff changes only CLI documentation beyond that reproduced main and touches none of the planner, relay, PTY, or hook-boundary files. The provider-owned candidate passed the same topology with separate --enable/hooks argv, exact-pane working-to-done hooks, and the rendered response. Forcing the shared recognition predicate false preserved the coordinate environment and rendered response but removed the flag and all exact-pane hook states; restoring it returned the identical journey to green. The focused unit/live-shell oracle likewise passed 54/54, failed ten assertions with the predicate disabled, and returned to 54/54 after restoration."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "The shared planner and owning relay each perform one bounded token scan only while planning a launch and leave the command string unchanged. Each recognized SSH Codex launch runs one launch-only codex --version probe from the existing post-profile shell preflight; it polls at 50ms only until completion, kills the exact probe at two seconds, and leaves no resident process or timer. Live hook-enabled launches intentionally use Codex's embedded app-server instead of reusing an environment-less daemon; concurrent-pane startup and memory cost remain unmeasured. No persistent polling, retry, wire field, command wrapper, or provider fanout is added."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
+        "Run a real Windows-client SSH launch.",
+        "Keep the policy-disabled real-TUI revert oracle red and the shell matrix green."
+      ],
+      "knownGaps": [
+        "Orca's enabled status-hook setting intentionally supplies a launch-scoped override to persistent config.toml; explicit launch arguments remain the per-launch opt-out.",
+        "There is no wire/schema change. A newer planner paired with an older relay preserves the command and receives the older relay's ordinary startup behavior; an older planner paired with a newer relay does not request shell-ready delivery, so the newer relay cannot apply the provider-owned preflight.",
+        "Unmodelable shell command overrides fail open without hook argv rather than risking a broken launch.",
+        "Copied AI Vault commands remain byte-identical because they can run outside an Orca-owned PTY with no authoritative coordinate boundary.",
+        "AI Vault spawn planning is limited to SSH POSIX and preserves scanner-authored command arguments; remote Windows and non-SSH runtime sessions remain unchanged.",
+        "Each live-coordinate TUI uses an embedded Codex app-server; multi-pane resource cost is not yet measured."
+      ],
+      "demotionRule": "Demote if an exact-pane SSH Codex hook is absent with complete coordinates, a supported shell injects without complete coordinates, a hanging version probe blocks launch beyond two seconds, an explicit launch override or user alias/function changes, ownership falls back across hosts, or local/WSL/Windows-shell commands change."
     }
   ]
 }

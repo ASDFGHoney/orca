@@ -216,7 +216,10 @@ describe('registerPtyHandlers', () => {
       unregisterSshPtyProvider('ssh-reattach-ok')
     }
   })
-  it('strips runtime-owned SSH pane env when remote agent hooks are disabled', async () => {
+  it.each([
+    ['the remote hook feature is off', '0', true, false],
+    ['agent status hooks are off', '1', false, true]
+  ])('scopes SSH identity when %s', async (_label, remoteFlag, hooksEnabled, preservesIdentity) => {
     type RuntimeSpawnController = {
       spawn(args: {
         cols: number
@@ -230,7 +233,7 @@ describe('registerPtyHandlers', () => {
       }): Promise<{ id: string }>
     }
     const savedRemoteHooks = process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
-    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '0'
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = remoteFlag
     const remoteSpawn = vi.fn(
       async (_opts: { env?: Record<string, string>; envToDelete?: string[] }) => ({
         id: 'ssh:ssh-runtime-env@@relay-pty'
@@ -282,7 +285,7 @@ describe('registerPtyHandlers', () => {
         runtime as never,
         undefined,
         (() => ({
-          agentStatusHooksEnabled: false,
+          agentStatusHooksEnabled: hooksEnabled,
           codexSystemDefaultRealHomeEnabled: true
         })) as never,
         undefined,
@@ -297,7 +300,8 @@ describe('registerPtyHandlers', () => {
           FOO: 'bar',
           ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
           ORCA_TAB_ID: 'tab-remote',
-          ORCA_WORKTREE_ID: 'wt-remote'
+          ORCA_WORKTREE_ID: 'wt-remote',
+          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
         },
         connectionId: 'ssh-runtime-env',
         worktreeId: 'wt-remote',
@@ -309,9 +313,28 @@ describe('registerPtyHandlers', () => {
       const spawnOptions = remoteSpawn.mock.calls[0]?.[0]
       const env = spawnOptions.env
       expect(env).toMatchObject({ FOO: 'bar' })
-      expect(env?.ORCA_PANE_KEY).toBeUndefined()
-      expect(env?.ORCA_TAB_ID).toBeUndefined()
-      expect(env?.ORCA_WORKTREE_ID).toBeUndefined()
+      if (preservesIdentity) {
+        expect(env).toMatchObject({
+          ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
+          ORCA_TAB_ID: 'tab-remote',
+          ORCA_WORKTREE_ID: 'wt-remote',
+          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
+        })
+      } else {
+        expect(env?.ORCA_PANE_KEY).toBeUndefined()
+        expect(env?.ORCA_TAB_ID).toBeUndefined()
+        expect(env?.ORCA_WORKTREE_ID).toBeUndefined()
+        expect(env?.ORCA_AGENT_LAUNCH_TOKEN).toBeUndefined()
+      }
+      expect(spawnOptions.envToDelete).toEqual(
+        expect.arrayContaining([
+          'ORCA_AGENT_HOOK_PORT',
+          'ORCA_AGENT_HOOK_TOKEN',
+          'ORCA_AGENT_HOOK_ENV',
+          'ORCA_AGENT_HOOK_VERSION',
+          'ORCA_AGENT_HOOK_ENDPOINT'
+        ])
+      )
       expect(spawnOptions.envToDelete ?? []).not.toContain('CODEX_HOME')
       expect(spawnOptions.envToDelete ?? []).not.toContain('ORCA_CODEX_HOME')
       expect(store.upsertSshRemotePtyLease).toHaveBeenCalledWith(

@@ -11,6 +11,7 @@ import {
   type AgentStartupShell
 } from './tui-agent-startup-shell'
 import type { TuiAgent } from './tui-agent'
+import { isDirectRemotePosixCodexLaunch } from './codex-remote-hook-launch'
 
 export type ResolvedAgentLaunchCommand =
   | {
@@ -18,6 +19,7 @@ export type ResolvedAgentLaunchCommand =
       command: string
       commandWithoutSessionOptions: string
       appliedSessionOptions: Record<string, SessionOptionValue>
+      directRemotePosixCodexLaunch: boolean
     }
   | { ok: false; error: string }
 
@@ -47,6 +49,12 @@ export function resolveAgentLaunchCommand(args: {
   if (!trailingTokens.ok) {
     return { ok: false, error: `CLI arguments are invalid: ${trailingTokens.error}` }
   }
+  const directRemotePosixCodexLaunch = isDirectRemotePosixCodexLaunch({
+    agent: args.agent,
+    command,
+    shell: args.shell,
+    isRemote: args.isRemote
+  })
   const resolvedOptions = resolveAgentSessionOptionLaunch(
     args.agent,
     args.sessionOptions,
@@ -96,7 +104,8 @@ export function resolveAgentLaunchCommand(args: {
         ? `${commandWithOptions} ${suffix.suffix}`
         : commandWithOptions,
     commandWithoutSessionOptions,
-    appliedSessionOptions: resolvedOptions.appliedValues
+    appliedSessionOptions: resolvedOptions.appliedValues,
+    directRemotePosixCodexLaunch
   }
 }
 

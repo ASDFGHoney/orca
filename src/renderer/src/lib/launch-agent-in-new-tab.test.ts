@@ -64,9 +64,12 @@ const store = {
     ]
   },
   allWorktrees: vi.fn(() => store.worktreesByRepo['repo-1']),
+  getKnownWorktreeById: vi.fn((worktreeId: string) =>
+    store.allWorktrees().find((worktree) => worktree.id === worktreeId)
+  ),
   tabsByWorktree: {
     'wt-1': [{ id: 'tab-1' }]
-  },
+  } as Record<string, { id: string; ptyId?: string | null }[]>,
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
   tabBarOrderByWorktree: {} as Record<string, string[]>,

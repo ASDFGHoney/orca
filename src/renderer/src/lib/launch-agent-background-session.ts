@@ -46,9 +46,8 @@ export async function launchAgentBackgroundSession(
 ): Promise<LaunchAgentBackgroundSessionResult | null> {
   const { agent, worktreeId, prompt, launchSource, title, onData, onExit, onAgentStatus } = args
   const store = useAppStore.getState()
-  // Folder workspaces exist only in getKnownWorktreeById (#2989).
-  const worktree = store.getKnownWorktreeById(worktreeId)
-  const repo = worktree ? store.repos.find((entry) => entry.id === worktree.repoId) : null
+  const launchHost = resolveAgentBackgroundLaunchHost({ store, worktreeId })
+  const { worktree } = launchHost
   if (!worktree) {
     throw new Error('The target workspace is no longer available.')
   }
@@ -56,12 +55,6 @@ export async function launchAgentBackgroundSession(
   const agentArgs = resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs)
   const agentEnv = resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv)
   // Folder launch ownership cannot be derived from a repo row (#2989).
-  const launchHost = resolveAgentBackgroundLaunchHost({
-    store,
-    worktreeId,
-    worktreePath: worktree.path,
-    repo
-  })
   const preflight = TUI_AGENT_CONFIG[agent].preflightTrust
   if (preflight && worktree.path && window.api.agentTrust?.markTrusted) {
     try {

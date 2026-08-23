@@ -75,8 +75,13 @@ export function launchAiVaultSessionInNewTab(args: {
     command: args.command,
     ...(args.env ? { env: args.env } : {}),
     ...(args.envToDelete ? { envToDelete: args.envToDelete } : {}),
-    ...(args.launchConfig ? { launchConfig: args.launchConfig, launchAgent: args.agent } : {}),
+    ...(args.launchConfig
+      ? { launchConfig: args.launchConfig, launchAgent: args.agent }
+      : args.agent === 'codex'
+        ? { launchAgent: args.agent }
+        : {}),
     ...(args.providerSession ? { resumeProviderSession: args.providerSession } : {}),
+    ...(args.agent === 'codex' ? { startupCommandDelivery: 'shell-ready' as const } : {}),
     telemetry: {
       agent_kind: tuiAgentToAgentKind(args.agent),
       launch_source: 'sidebar',

@@ -142,6 +142,14 @@ describe('launchAiVaultSessionInNewTab', () => {
 
     expect(mockCreateEmptySplitGroup).toHaveBeenCalledWith('wt-1', 'group-1', 'right')
     expect(mockCreateTab).toHaveBeenCalledWith('wt-1', 'group-new')
+    expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({
+        command: 'codex resume session-2',
+        launchAgent: 'codex',
+        startupCommandDelivery: 'shell-ready'
+      })
+    )
   })
 
   it('creates runtime-hosted resume terminals through the paired host', async () => {

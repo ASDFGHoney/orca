@@ -31,6 +31,7 @@ import {
 // Why: durable review-head refs are scoped by remote identity (name + URL hash).
 const ORIGIN_REMOTE_URL = 'git@example.com:group/repo.git'
 const ORIGIN_HEAD_COMPONENT = reviewHeadRemoteRefComponent('origin', ORIGIN_REMOTE_URL)
+const REMOTE_CODEX_COMMAND = 'codex'
 import { detectAgentStatusFromTitle, MAX_OSC_TITLE_CHARS } from '../../shared/agent-detection'
 import {
   addSparseWorktree,
@@ -6112,7 +6113,7 @@ describe('OrcaRuntimeService', () => {
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: '/remote/agent-feature',
-          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'hi'",
+          command: `${REMOTE_CODEX_COMMAND} '--dangerously-bypass-approvals-and-sandbox' 'hi'`,
           worktreeId: result.worktree.id
         })
       )
@@ -46315,7 +46316,7 @@ describe('OrcaRuntimeService', () => {
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: '/remote/mobile-codex-draft',
-          command: "codex '--dangerously-bypass-approvals-and-sandbox'",
+          command: `${REMOTE_CODEX_COMMAND} '--dangerously-bypass-approvals-and-sandbox'`,
           connectionId: 'ssh-1',
           worktreeId: result.worktree.id
         })

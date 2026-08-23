@@ -3,16 +3,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockQueueTabInitialCwd = vi.fn()
 const mockLaunchAgentInWebHostTab = vi.fn()
 const mockIsWebRuntimeSessionActive = vi.fn()
+const worktree = {
+  id: 'wt-1',
+  repoId: 'repo-1',
+  path: '/repo/worktree'
+}
 
 const store = {
+  activeWorktreeId: 'wt-1',
+  activeWorkspaceExecutionHostId: 'local',
   settings: {
     agentCmdOverrides: {},
     agentDefaultArgs: {},
     agentDefaultEnv: {},
     activeRuntimeEnvironmentId: null as string | null
   },
-  repos: [],
-  allWorktrees: vi.fn(() => []),
+  repos: [{ id: 'repo-1', connectionId: null, path: '/repo' }],
+  worktreesByRepo: { 'repo-1': [worktree] },
+  allWorktrees: vi.fn(() => [worktree]),
+  getKnownWorktreeById: vi.fn((id: string, hostId?: string) =>
+    id === worktree.id && (!hostId || hostId === 'local') ? worktree : undefined
+  ),
   tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] },
   openFiles: [] as { id: string; worktreeId: string }[],
   browserTabsByWorktree: {} as Record<string, { id: string }[]>,
@@ -43,6 +54,7 @@ vi.mock('@/runtime/web-runtime-session', () => ({
 }))
 
 vi.mock('@/lib/worktree-runtime-owner', () => ({
+  getExecutionHostIdForWorktree: () => 'local',
   getRuntimeEnvironmentIdForWorktree: () => 'web-runtime'
 }))
 

@@ -21,6 +21,7 @@ import type { TuiAgent } from './tui-agent'
 import type { SessionOptionValue } from './native-chat-session-options'
 import { resolveAgentLaunchCommand } from './tui-agent-launch-command'
 import { buildAgentResumeLaunchCommand } from './agent-resume-launch-command'
+import { remoteCodexHookStartupProps } from './codex-remote-hook-launch'
 
 export type AgentStartupPlan = {
   agent: TuiAgent
@@ -92,7 +93,7 @@ export function buildAgentStartupPlan(args: {
       followupPrompt: null,
       launchConfig,
       ...appliedSessionOptionProps(baseCommand.appliedSessionOptions),
-      ...(args.agentEnv ? { env: { ...args.agentEnv } } : {})
+      ...remoteCodexHookStartupProps(baseCommand.directRemotePosixCodexLaunch, args.agentEnv)
     }
   }
 
@@ -108,7 +109,7 @@ export function buildAgentStartupPlan(args: {
       launchConfig,
       ...appliedSessionOptionProps(baseCommand.appliedSessionOptions),
       ...(agent === 'codex' ? { startupCommandDelivery: 'shell-ready' as const } : {}),
-      ...(args.agentEnv ? { env: { ...args.agentEnv } } : {})
+      ...remoteCodexHookStartupProps(baseCommand.directRemotePosixCodexLaunch, args.agentEnv)
     }
   }
 
@@ -206,16 +207,16 @@ export function buildAgentResumeStartupPlan(args: {
   const shell = resolveStartupShell(args.platform, args.shell)
   const config = TUI_AGENT_CONFIG[args.agent]
   const resolvedAgentCommand = args.agentCommand?.trim()
-  const baseCommand = resolvedAgentCommand
-    ? ({ ok: true, command: resolvedAgentCommand } as const)
-    : resolveAgentLaunchCommand({
-        agent: args.agent,
-        cmdOverrides: args.cmdOverrides,
-        platform: args.platform,
-        shell,
-        agentArgs: args.agentArgs,
-        isRemote: args.isRemote
-      })
+  const baseCommand = resolveAgentLaunchCommand({
+    agent: args.agent,
+    cmdOverrides: resolvedAgentCommand
+      ? { ...args.cmdOverrides, [args.agent]: resolvedAgentCommand }
+      : args.cmdOverrides,
+    platform: args.platform,
+    shell,
+    agentArgs: resolvedAgentCommand ? null : args.agentArgs,
+    isRemote: args.isRemote
+  })
   if (!baseCommand.ok) {
     return null
   }
@@ -229,7 +230,7 @@ export function buildAgentResumeStartupPlan(args: {
     expectedProcess: config.expectedProcess,
     followupPrompt: null,
     launchConfig,
-    ...(args.agentEnv ? { env: { ...args.agentEnv } } : {})
+    ...remoteCodexHookStartupProps(baseCommand.directRemotePosixCodexLaunch, args.agentEnv)
   }
 }
 
@@ -290,7 +291,7 @@ export function buildAgentDraftLaunchPlan(args: {
       ...appliedSessionOptionProps(baseCommand.appliedSessionOptions),
       // Why: native draft flags carry user text on argv and must survive rc-file startup.
       ...(agent === 'codex' ? { startupCommandDelivery: 'shell-ready' as const } : {}),
-      ...(args.agentEnv ? { env: { ...args.agentEnv } } : {})
+      ...remoteCodexHookStartupProps(baseCommand.directRemotePosixCodexLaunch, args.agentEnv)
     }
   } else if (config.draftPromptEnvVar) {
     const clearVar = clearEnvCommand(config.draftPromptEnvVar, shell)

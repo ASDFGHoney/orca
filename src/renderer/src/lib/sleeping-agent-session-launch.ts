@@ -7,8 +7,8 @@ import {
   resolveAgentResumeLaunchTarget,
   type AgentResumeLaunchTarget
 } from '@/lib/agent-resume-launch-target'
-import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
+import { resolveAgentBackgroundLaunchHost } from '@/lib/agent-background-session-launch-host'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
@@ -30,14 +30,13 @@ export type ResumeSleepingAgentSessionsOptions = {
 
 function getResumeLaunchTarget(worktreeId: string): AgentResumeLaunchTarget {
   const state = useAppStore.getState()
-  const worktree = state.getKnownWorktreeById(worktreeId)
-  const repo = worktree ? state.repos.find((entry) => entry.id === worktree.repoId) : null
+  const launchHost = resolveAgentBackgroundLaunchHost({ store: state, worktreeId })
   // The resume tab is created without a shell override, so the global Windows shell wins.
   return resolveAgentResumeLaunchTarget({
     projectRuntime: getLocalProjectExecutionRuntimeContext(state, worktreeId),
-    connectionId: repo?.connectionId,
-    executionHostId: getExecutionHostIdForWorktree(state, worktreeId),
-    worktreePath: worktree?.path,
+    connectionId: launchHost.connectionId,
+    executionHostId: launchHost.executionHostId,
+    worktreePath: launchHost.worktree?.path,
     terminalWindowsShell: state.settings?.terminalWindowsShell
   })
 }
@@ -86,7 +85,8 @@ export function launchSleepingAgentSession(
       ? { ompResumeFilePath: launchConfig.ompResumeFilePath }
       : {}),
     platform: resumeTarget.platform,
-    shell: resumeTarget.shell
+    shell: resumeTarget.shell,
+    isRemote: resumeTarget.isRemote
   })
   if (!startupPlan) {
     toast.error(

@@ -10,6 +10,8 @@ export type AgentResumeLaunchTarget = {
   platform: NodeJS.Platform
   /** undefined keeps the platform default: PowerShell on win32, POSIX elsewhere. */
   shell: AgentStartupShell | undefined
+  /** SSH-only launch policy; WSL and paired non-SSH runtimes remain local. */
+  isRemote: boolean
 }
 
 export type AgentResumeLaunchTargetArgs = {
@@ -47,8 +49,11 @@ export function resolveAgentResumeLaunchTarget(
   args: AgentResumeLaunchTargetArgs
 ): AgentResumeLaunchTarget {
   const platform = resolveResumeLaunchPlatform(args)
+  const isRemote =
+    Boolean(args.connectionId) || parseExecutionHostId(args.executionHostId)?.kind === 'ssh'
   return {
     platform,
+    isRemote,
     shell: resolveLocalWindowsAgentStartupShell({
       platform,
       isRemote:

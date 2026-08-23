@@ -167,6 +167,74 @@ describe('PtyHandler', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
+    'selects Codex hooks from the authoritative relay launch context',
+    async () => {
+      const oldShell = process.env.SHELL
+      const oldHome = process.env.HOME
+      const homeDir = mkdtempSync(join(tmpdir(), 'relay-codex-hook-feature-'))
+
+      process.env.SHELL = '/bin/bash'
+      process.env.HOME = homeDir
+      try {
+        await dispatcher.callRequest('pty.spawn', {
+          env: { HOME: homeDir },
+          command: 'codex',
+          launchAgent: 'codex'
+        })
+      } finally {
+        if (oldShell === undefined) {
+          delete process.env.SHELL
+        } else {
+          process.env.SHELL = oldShell
+        }
+        if (oldHome === undefined) {
+          delete process.env.HOME
+        } else {
+          process.env.HOME = oldHome
+        }
+        rmSync(homeDir, { recursive: true, force: true })
+      }
+
+      const spawnEnv = mockPtySpawn.mock.calls[0]?.[2]?.env as Record<string, string>
+      expect(spawnEnv.ORCA_SHELL_FEATURES).toContain('codex-hooks')
+    }
+  )
+
+  it.skipIf(process.platform === 'win32').each([
+    ['another agent', { launchAgent: 'claude', command: 'codex' }],
+    ['an opaque launcher', { launchAgent: 'codex', command: 'mise exec -- codex' }],
+    ['an absolute executable', { launchAgent: 'codex', command: '/opt/codex/bin/codex' }]
+  ])('does not select Codex hooks for %s', async (_label, launch) => {
+    const oldShell = process.env.SHELL
+    const oldHome = process.env.HOME
+    const homeDir = mkdtempSync(join(tmpdir(), 'relay-codex-hook-negative-'))
+
+    process.env.SHELL = '/bin/bash'
+    process.env.HOME = homeDir
+    try {
+      await dispatcher.callRequest('pty.spawn', {
+        env: { HOME: homeDir },
+        ...launch
+      })
+    } finally {
+      if (oldShell === undefined) {
+        delete process.env.SHELL
+      } else {
+        process.env.SHELL = oldShell
+      }
+      if (oldHome === undefined) {
+        delete process.env.HOME
+      } else {
+        process.env.HOME = oldHome
+      }
+      rmSync(homeDir, { recursive: true, force: true })
+    }
+
+    const spawnEnv = mockPtySpawn.mock.calls[0]?.[2]?.env as Record<string, string>
+    expect(spawnEnv.ORCA_SHELL_FEATURES).not.toContain('codex-hooks')
+  })
+
+  it.skipIf(process.platform === 'win32')(
     'enables shell-ready marker env for provider-delivered startup commands',
     async () => {
       const oldShell = process.env.SHELL

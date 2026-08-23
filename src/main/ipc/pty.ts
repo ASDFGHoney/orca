@@ -342,6 +342,14 @@ const AGENT_HOOK_RUNTIME_ENV_KEYS = [
   'ORCA_CLAUDE_AGENT_STATUS_SETTINGS'
 ] as const
 
+const REMOTE_AGENT_HOOK_COORDINATE_ENV_KEYS = [
+  'ORCA_AGENT_HOOK_PORT',
+  'ORCA_AGENT_HOOK_TOKEN',
+  'ORCA_AGENT_HOOK_ENV',
+  'ORCA_AGENT_HOOK_VERSION',
+  'ORCA_AGENT_HOOK_ENDPOINT'
+] as const
+
 // Why: Orca never sets these, so an inherited value means a pty host launched from inside a Claude session — Claude reads it as a nested child and silently stops persisting the transcript.
 const CLAUDE_CHILD_SESSION_STAMP_ENV_KEYS = [
   'CLAUDE_CODE_CHILD_SESSION',
@@ -1008,7 +1016,7 @@ function getRelayPtyId(connectionId: string | null | undefined, ptyId: string): 
   return connectionId ? toRelaySshPtyId(connectionId, ptyId) : ptyId
 }
 
-function stripRemotePaneEnvWhenHooksDisabled(
+function stripRemoteHookContextWhenDisabled(
   connectionId: string | null | undefined,
   env: Record<string, string> | undefined
 ): Record<string, string> | undefined {
@@ -1681,6 +1689,16 @@ function getInheritedAgentHookEnvKeysToDelete(
   const env = spawnEnv ?? {}
   // Why: providers merge process.env after cleanup; delete stale hook keys without dropping fresh coordinates buildPtyHostEnv set.
   return AGENT_HOOK_RUNTIME_ENV_KEYS.filter((key) => env[key] === undefined)
+}
+
+function getRemoteAgentHookEnvKeysToDelete(args: {
+  connectionId: string | null | undefined
+  settings: GlobalSettings | undefined
+}): readonly string[] {
+  return args.connectionId &&
+    (!isRemoteAgentHooksEnabled() || !isAgentStatusHooksEnabled(args.settings))
+    ? REMOTE_AGENT_HOOK_COORDINATE_ENV_KEYS
+    : []
 }
 
 function getInheritedClaudeSessionStampEnvKeysToDelete(
@@ -4716,7 +4734,8 @@ export function registerPtyHandlers(
             : {})
         }
       }
-      const sshScopedEnv = stripRemotePaneEnvWhenHooksDisabled(args.connectionId, args.env)
+      const ptySettings = getSettings?.()
+      const sshScopedEnv = stripRemoteHookContextWhenDisabled(args.connectionId, args.env)
       let env: Record<string, string> | undefined = claudeAuth
         ? { ...sshScopedEnv, ...claudeAuth.envPatch }
         : sshScopedEnv
@@ -4792,7 +4811,6 @@ export function registerPtyHandlers(
         isDaemonHostSpawn &&
         shouldSkipCodexHomeEnvForWindowsShell(daemonShellOverride, cwd) &&
         !selectedCodexHomePath
-      const ptySettings = isDaemonHostSpawn ? getSettings?.() : undefined
       const stripInheritedOrcaCodexHome =
         isDaemonHostSpawn &&
         shouldStripInheritedOrcaCodexHome({
@@ -4864,6 +4882,10 @@ export function registerPtyHandlers(
         // Why: disable old hosts without removing ORCA_REAL_* while their Windows shim remains on PATH.
         isDaemonHostSpawn || args.connectionId ? LEGACY_TERMINAL_SHIM_REMOTE_ENV_KEYS : [],
         isDaemonHostSpawn ? getInheritedAgentHookEnvKeysToDelete(env) : [],
+        getRemoteAgentHookEnvKeysToDelete({
+          connectionId: args.connectionId,
+          settings: ptySettings
+        }),
         // Why: ungated, unlike the agent-hook keys — the local provider and the relay host also spread their own process.env into every spawn.
         getInheritedClaudeSessionStampEnvKeysToDelete(env)
       )
@@ -6337,7 +6359,8 @@ export function registerPtyHandlers(
         // Safety: skip entirely for SSH — every injection is a loopback secret or a local path that leaks or misleads on the remote host.
         const startupTerminalColorQueryReplyColors = getStartupTerminalColorQueryReplyColors(args)
         // Why: forward pane env to SSH only when the relay hook path is enabled, or a newer relay could emit statuses this build can't route.
-        const sshSourceEnv = stripRemotePaneEnvWhenHooksDisabled(args.connectionId, args.env)
+        const ptySettings = getSettings?.()
+        const sshSourceEnv = stripRemoteHookContextWhenDisabled(args.connectionId, args.env)
         const baseEnvWithAuth = claudeAuth
           ? { ...sshSourceEnv, ...claudeAuth.envPatch }
           : sshSourceEnv
@@ -6529,7 +6552,6 @@ export function registerPtyHandlers(
           isDaemonHostSpawn &&
           shouldSkipCodexHomeEnvForWindowsShell(effectiveShellOverride, cwd) &&
           !selectedCodexHomePath
-        const ptySettings = isDaemonHostSpawn ? getSettings?.() : undefined
         const stripInheritedOrcaCodexHome =
           isDaemonHostSpawn &&
           shouldStripInheritedOrcaCodexHome({
@@ -6596,6 +6618,10 @@ export function registerPtyHandlers(
           // Why: disable old hosts without removing ORCA_REAL_* while their Windows shim remains on PATH.
           isDaemonHostSpawn || args.connectionId ? LEGACY_TERMINAL_SHIM_REMOTE_ENV_KEYS : [],
           isDaemonHostSpawn ? getInheritedAgentHookEnvKeysToDelete(spawnEnv) : [],
+          getRemoteAgentHookEnvKeysToDelete({
+            connectionId: args.connectionId,
+            settings: ptySettings
+          }),
           getInheritedClaudeSessionStampEnvKeysToDelete(spawnEnv),
           skipCodexHomeEnv ? CODEX_HOME_ENV_KEYS : [],
           // Why: the persistent daemon compares its own merged CODEX_HOME pair;

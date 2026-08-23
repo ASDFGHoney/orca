@@ -10,6 +10,8 @@ vi.mock('@/lib/new-workspace', () => ({
   CLIENT_PLATFORM: 'win32'
 }))
 
+const REMOTE_CODEX_COMMAND = 'codex'
+
 type RuntimePreference = { kind: 'windows-host' } | { kind: 'wsl'; distro: string }
 
 type AiVaultResumeCommandState = Pick<
@@ -551,11 +553,59 @@ describe('ai vault resume command runtime', () => {
         }
       })
     ).toMatchObject({
-      command: "codex 'resume' 'session one'",
+      command: `${REMOTE_CODEX_COMMAND} 'resume' 'session one'`,
       cwd: '/home/alice/repo',
       envToDelete: ['CODEX_HOME', 'ORCA_CODEX_HOME'],
       providerSession: { key: 'session_id', id: 'session one' }
     })
+  })
+
+  it('preserves captured remote managed-home Codex arguments through the launch planner', () => {
+    const state = makeState({ worktreePath: '/home/alice/repo' })
+    state.repos = [{ id: 'repo-1', path: '/home/alice/repo', connectionId: 'ssh-1' }] as never
+
+    expect(
+      buildAiVaultResumeStartupForWorktree({
+        state,
+        worktreeId: 'repo-1::worktree-1',
+        session: {
+          agent: 'codex',
+          sessionId: 'session one',
+          cwd: '/home/alice/repo',
+          codexHome: '/home/alice/.orca/codex-home',
+          executionHostId: 'ssh:dev-box',
+          resumeCommand:
+            "CODEX_HOME='/stale/captured-home' codex --profile captured resume 'session one'"
+        }
+      })
+    ).toMatchObject({
+      command: `CODEX_HOME='/stale/captured-home' ${REMOTE_CODEX_COMMAND} --profile captured resume 'session one'`,
+      providerSession: { key: 'session_id', id: 'session one' }
+    })
+  })
+
+  it('keeps captured Codex commands when the target is not SSH POSIX', () => {
+    const state = makeState({ worktreePath: '/home/alice/repo' })
+    state.repos = [
+      { id: 'repo-1', path: '/home/alice/repo', executionHostId: 'runtime:target' }
+    ] as never
+    const resumeCommand = "CODEX_HOME='/home/alice/.codex' codex --profile captured resume 's1'"
+
+    expect(
+      buildAiVaultResumeStartupForWorktree({
+        state,
+        worktreeId: 'repo-1::worktree-1',
+        session: {
+          agent: 'codex',
+          sessionId: 's1',
+          cwd: '/home/alice/repo',
+          codexHome: '/home/alice/.codex',
+          executionHostId: 'runtime:source',
+          executionHostPlatform: 'linux',
+          resumeCommand
+        }
+      })
+    ).toMatchObject({ command: resumeCommand })
   })
 
   it('rebuilds remote real-home Codex commands when the override is blank', () => {
@@ -576,7 +626,7 @@ describe('ai vault resume command runtime', () => {
           resumeCommand: "CODEX_HOME='/root/.codex' codex resume 'session one'"
         }
       })
-    ).toBe("codex 'resume' 'session one'")
+    ).toBe(`${REMOTE_CODEX_COMMAND} 'resume' 'session one'`)
   })
 
   it('copies remote real-home Codex commands with explicit environment cleanup', () => {
@@ -598,12 +648,12 @@ describe('ai vault resume command runtime', () => {
     })
 
     expect(command).toBe(
-      `cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex 'resume' 'session one'`
+      "cd '/home/alice/repo' && env -u CODEX_HOME -u ORCA_CODEX_HOME codex 'resume' 'session one'"
     )
     expect(command).not.toContain('/retired/shared-home')
   })
 
-  it('rebuilds the command when a non-blank override is supplied for a remote session', () => {
+  it('fails open when a non-blank remote override hides the Codex argv boundary', () => {
     const state = makeState({ worktreePath: '/home/alice/repo' })
     state.repos = [{ id: 'repo-1', path: '/home/alice/repo', connectionId: 'ssh-1' }] as never
 
@@ -705,6 +755,6 @@ describe('ai vault resume command runtime', () => {
           resumeCommand: "CODEX_HOME='/root/.codex' codex resume 'session one'"
         }
       })
-    ).toBe("codex 'resume' 'session one'")
+    ).toBe(`${REMOTE_CODEX_COMMAND} 'resume' 'session one'`)
   })
 })

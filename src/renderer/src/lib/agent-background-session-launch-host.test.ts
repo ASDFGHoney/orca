@@ -4,30 +4,40 @@ import { resolveAgentBackgroundLaunchHost } from './agent-background-session-lau
 function makeFolderHostState(args: {
   connectionId: string | null
   folderPath: string
-  repos?: {
-    id: string
-    connectionId: string | null
-    path: string
-    projectGroupId: string
-  }[]
+  active?: boolean
 }) {
+  const hostId = args.connectionId ? `ssh:${args.connectionId}` : 'local'
+  const worktree = {
+    id: 'folder:folder-1',
+    repoId: 'folder-workspace:group-1',
+    path: args.folderPath,
+    hostId
+  }
   return {
+    activeWorktreeId: args.active === false ? 'other' : worktree.id,
+    activeWorkspaceExecutionHostId: args.active === false ? null : hostId,
     folderWorkspaces: [
       {
         id: 'folder-1',
         projectGroupId: 'group-1',
         folderPath: args.folderPath,
-        connectionId: args.connectionId
+        connectionId: args.connectionId,
+        executionHostId: hostId
       }
     ],
     projectGroups: [
       {
         id: 'group-1',
         parentGroupId: null,
-        connectionId: args.connectionId
+        connectionId: args.connectionId,
+        executionHostId: hostId
       }
     ],
-    repos: args.repos ?? []
+    repos: [],
+    worktreesByRepo: {},
+    detectedWorktreesByRepo: {},
+    getKnownWorktreeById: (id: string, requestedHost?: string) =>
+      id === worktree.id && requestedHost === hostId ? worktree : undefined
   }
 }
 
@@ -35,38 +45,26 @@ describe('resolveAgentBackgroundLaunchHost', () => {
   it('keeps an authoritative local folder owner local', () => {
     const host = resolveAgentBackgroundLaunchHost({
       store: makeFolderHostState({ connectionId: null, folderPath: '/project' }) as never,
-      worktreeId: 'folder:folder-1',
-      worktreePath: '/project',
-      repo: null
+      worktreeId: 'folder:folder-1'
     })
 
-    expect(host).toMatchObject({
-      connectionId: null,
-      isRemote: false,
-      expectedConnectionId: null
-    })
+    expect(host).toMatchObject({ connectionId: null, isRemote: false, executionHostId: 'local' })
   })
 
-  it('fails closed when folder ownership is ambiguous', () => {
-    const store = makeFolderHostState({
+  it('fails closed when same-ID folder ownership has no active discriminator', () => {
+    const local = makeFolderHostState({ connectionId: null, folderPath: '/local', active: false })
+    local.folderWorkspaces.push({
+      id: 'folder-1',
+      projectGroupId: 'group-1',
+      folderPath: '/remote',
       connectionId: 'ssh-1',
-      folderPath: '/project',
-      repos: [
-        {
-          id: 'repo-local',
-          connectionId: null,
-          path: '/project/repo',
-          projectGroupId: 'group-1'
-        }
-      ]
+      executionHostId: 'ssh:ssh-1'
     })
 
     expect(() =>
       resolveAgentBackgroundLaunchHost({
-        store: store as never,
-        worktreeId: 'folder:folder-1',
-        worktreePath: '/project',
-        repo: null
+        store: local as never,
+        worktreeId: 'folder:folder-1'
       })
     ).toThrow('unavailable or ambiguous')
   })
@@ -75,9 +73,7 @@ describe('resolveAgentBackgroundLaunchHost', () => {
     const folderPath = '\\\\wsl.localhost\\Ubuntu\\home\\me\\project'
     const host = resolveAgentBackgroundLaunchHost({
       store: makeFolderHostState({ connectionId: null, folderPath }) as never,
-      worktreeId: 'folder:folder-1',
-      worktreePath: folderPath,
-      repo: null
+      worktreeId: 'folder:folder-1'
     })
 
     expect(host.platform).toBe('linux')
