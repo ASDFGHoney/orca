@@ -521,6 +521,34 @@ describe('MacosAmphetamineSleepAssertion dispose', () => {
     expect(assertion.getHold()).toBeNull()
   })
 
+  it('records a session it could not clean up during the dispose race', async () => {
+    const amphetamine = createFakeAmphetamine()
+    let releaseAcquire = (): void => {}
+    const acquired = new Promise<void>((resolve) => {
+      releaseAcquire = resolve
+    })
+    amphetamine.run.mockImplementation(async (script: string) => {
+      if (script.includes('start new session')) {
+        await acquired
+        return ok('started')
+      }
+      return ok('ended')
+    })
+    // Quit-time cleanup fails, and nothing can retry after disposal.
+    const runOsascriptSync = vi.fn((_script: string) => failure('(-1743)'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+    releaseAcquire()
+    await settle()
+
+    // Reporting null would claim a session was cleaned up that was not.
+    expect(assertion.getHold()).toBe('owned')
+    expect(assertion.hasLiveHold()).toBe(false)
+  })
+
   it('does not touch Amphetamine on dispose when it holds nothing', async () => {
     const amphetamine = createFakeAmphetamine()
     const runOsascriptSync = vi.fn((_script: string) => ok('gone'))

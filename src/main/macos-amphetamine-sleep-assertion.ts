@@ -1,6 +1,7 @@
 import type { AmphetamineUnavailableReason } from '../shared/computer-awake-mode'
 import { AmphetamineAvailability } from './macos-amphetamine-availability'
 import { AmphetamineHold, type AmphetamineHoldKind } from './macos-amphetamine-hold'
+import { AmphetamineReconcileTimer } from './macos-amphetamine-reconcile-timer'
 import { AmphetamineFailureBackoff } from './macos-amphetamine-failure-backoff'
 import { releaseAmphetamineSessionSync } from './macos-amphetamine-quit-release'
 import {
@@ -69,7 +70,7 @@ export class MacosAmphetamineSleepAssertion {
   private queue: Promise<void> = Promise.resolve()
   private disposed = false
   private readonly availability = new AmphetamineAvailability()
-  private reconcileTimer: ReturnType<typeof setInterval> | null = null
+  private readonly reconcileTimer = new AmphetamineReconcileTimer()
 
   constructor(options: MacosAmphetamineSleepAssertionOptions = {}) {
     this.logger = options.logger ?? console
@@ -199,7 +200,8 @@ export class MacosAmphetamineSleepAssertion {
       } else if (!(await this.releaseSession(reason))) {
         return
       }
-      if (this.desired === (this.hold ? 'started' : 'stopped')) {
+      // .get(), not the hold object itself — which is always truthy.
+      if (this.desired === (this.hold.get() ? 'started' : 'stopped')) {
         return
       }
     }
@@ -256,7 +258,15 @@ export class MacosAmphetamineSleepAssertion {
         // Quit landed while the Apple event was in flight; nothing runs after
         // this, so the session has to go now. Reclaims need this as much as
         // fresh starts — both leave an indefinite session behind otherwise.
-        this.endSessionSync('dispose-race')
+        if (!this.endSessionSync('dispose-race')) {
+          // Record it rather than reporting null: nothing can retry, and a
+          // silent null would claim a session was cleaned up that was not.
+          this.hold.own()
+          this.hold.markStale()
+          this.logger.warn('[agent-awake] left an Amphetamine session running at quit', {
+            reason: 'dispose-race'
+          })
+        }
         return false
       }
       this.hold.own()
@@ -326,25 +336,15 @@ export class MacosAmphetamineSleepAssertion {
   }
 
   private startReconcileTimer(): void {
-    if (this.reconcileTimer || this.reconcileMs <= 0) {
-      return
-    }
-    this.reconcileTimer = setInterval(() => {
+    this.reconcileTimer.start(this.reconcileMs, () => {
       if (this.desired === 'started' && !this.disposed) {
         this.enqueue('amphetamine-reconcile', true)
       }
-    }, this.reconcileMs)
-    if (typeof this.reconcileTimer.unref === 'function') {
-      this.reconcileTimer.unref()
-    }
+    })
   }
 
   private stopReconcileTimer(): void {
-    if (!this.reconcileTimer) {
-      return
-    }
-    clearInterval(this.reconcileTimer)
-    this.reconcileTimer = null
+    this.reconcileTimer.stop()
   }
 
   private handleScriptFailure(
@@ -369,19 +369,19 @@ export class MacosAmphetamineSleepAssertion {
     reason: string,
     details: unknown
   ): void {
-    if (!this.availability.mark(unavailableReason)) {
-      return
-    }
-    // Still a failed attempt: otherwise hasLiveHold() would vouch for a hold
-    // that just failed and the router would drop its caffeinate stand-in.
+    const isNewVerdict = this.availability.mark(unavailableReason)
     this.hold.markStale()
     if (unavailableReason === 'not-installed') {
-      // No app means no session, so the hold is stale bookkeeping that would
-      // otherwise cost a pointless synchronous spawn on the quit path.
+      // No app means no session, so the hold is stale bookkeeping.
       this.hold.release()
     }
     this.stopReconcileTimer()
-    this.backoff.reset()
+    // Throttle even a repeat verdict. An unusable engine is still re-entered by
+    // every service refresh, and without this each entry spends an Apple event.
+    this.backoff.record(`unavailable:${unavailableReason}`, reason, details)
+    if (!isNewVerdict) {
+      return
+    }
     this.logger.warn('[agent-awake] Amphetamine is unavailable', {
       reason,
       unavailableReason,

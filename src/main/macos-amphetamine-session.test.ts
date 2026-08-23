@@ -85,9 +85,25 @@ describe('detectAmphetamineInstalled', () => {
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBe(true)
   })
 
-  it('reports not installed when the lookup fails', async () => {
+  it('reports not installed only when Launch Services says so', async () => {
     const run = vi.fn(async (_script: string) => failure('execution error: ... (-1728)'))
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBe(false)
+  })
+
+  it.each([
+    ['a transient error', failure('some other problem')],
+    ['a timeout', { code: null, stdout: '', stderr: '', timedOut: true }]
+  ])('reports unknown for %s rather than not-installed', async (_label, result) => {
+    // Recording false here would disable an engine whose app is installed.
+    const run = vi.fn(async (_script: string) => result as OsascriptResult)
+    await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBeUndefined()
+  })
+
+  it('reports unknown when the probe cannot be spawned', async () => {
+    const run = vi.fn(async (_script: string) => {
+      throw new Error('spawn failed')
+    })
+    await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBeUndefined()
   })
 
   it('never probes off macOS', async () => {

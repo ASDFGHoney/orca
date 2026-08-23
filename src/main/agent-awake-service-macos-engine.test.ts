@@ -161,6 +161,24 @@ describe('AgentAwakeService macOS engine selection', () => {
     expect(caffeinate.start).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a known install state when a later probe cannot tell', async () => {
+    const amphetamine = createAmphetamine()
+    const probe = vi.fn<() => Promise<boolean | undefined>>().mockResolvedValue(true)
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      detectAmphetamine: probe
+    })
+
+    await service.probeAmphetamine()
+    expect(service.getStatus().amphetamineInstalled).toBe(true)
+
+    // A transient probe failure must not read as "the app went away".
+    probe.mockResolvedValue(undefined)
+    await service.probeAmphetamine()
+
+    expect(service.getStatus().amphetamineInstalled).toBe(true)
+  })
+
   it('retries a previously unusable engine when the user re-picks it', () => {
     const amphetamine = createAmphetamine(true)
     const { service } = createService({ macosAmphetamineAssertion: amphetamine })

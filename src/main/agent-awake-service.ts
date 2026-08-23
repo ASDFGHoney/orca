@@ -33,7 +33,7 @@ type Logger = Pick<Console, 'debug' | 'warn'>
 
 export type AgentAwakeServiceOptions = {
   blocker?: PowerSaveBlocker
-  detectAmphetamine?: () => Promise<boolean>
+  detectAmphetamine?: () => Promise<boolean | undefined>
   linuxAssertion?: PlatformAwakeAssertion
   logger?: Logger
   macosAmphetamineAssertion?: AmphetamineAwakeAssertion

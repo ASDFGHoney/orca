@@ -112,20 +112,34 @@ export function runOsascriptSyncWithRunProcess(script: string): OsascriptResult 
   })
 }
 
-/** Resolve the bundle through Launch Services; a non-zero exit means no copy is installed. */
+/**
+ * Resolve the bundle through Launch Services.
+ *
+ * Returns undefined when the answer is unknown — a timeout, a spawn error, or an
+ * unrecognized failure. Only a lookup that positively failed to resolve the
+ * bundle reports false, because a caller that records false disables the engine
+ * and would otherwise do so on a transient hiccup.
+ */
 export async function detectAmphetamineInstalled(
   runOsascriptImpl: RunOsascript = runOsascriptWithRunProcess,
   platform: NodeJS.Platform = process.platform
-): Promise<boolean> {
+): Promise<boolean | undefined> {
   if (platform !== 'darwin') {
     return false
   }
+  let result: OsascriptResult
   try {
-    const result = await runOsascriptImpl(AMPHETAMINE_LOCATE_SCRIPT)
-    return result.code === 0 && result.stdout.trim().length > 0
+    result = await runOsascriptImpl(AMPHETAMINE_LOCATE_SCRIPT)
   } catch {
-    return false
+    return undefined
   }
+  if (result.code === 0) {
+    return result.stdout.trim().length > 0
+  }
+  if (result.timedOut) {
+    return undefined
+  }
+  return classifyAmphetamineFailure(result) === 'not-installed' ? false : undefined
 }
 
 export function classifyAmphetamineFailure(

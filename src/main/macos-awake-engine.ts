@@ -33,7 +33,7 @@ export type MacosAwakeEngineStatusFields = {
 export type MacosAwakeEngineRouterOptions = {
   amphetamineAssertion?: AmphetamineAwakeAssertion
   caffeinateAssertion?: PlatformAwakeAssertion
-  detectAmphetamine?: () => Promise<boolean>
+  detectAmphetamine?: () => Promise<boolean | undefined>
   logger?: Logger
   now?: () => number
   /** Re-run the awake decision: the live engine has to change hands immediately. */
@@ -52,7 +52,7 @@ export type MacosAwakeEngineRouterOptions = {
 export class MacosAwakeEngineRouter {
   private readonly amphetamineAssertion: AmphetamineAwakeAssertion
   private readonly caffeinateAssertion: PlatformAwakeAssertion
-  private readonly detectAmphetamine: () => Promise<boolean>
+  private readonly detectAmphetamine: () => Promise<boolean | undefined>
   private readonly logger: Logger
   private readonly onNeedsRefresh: (reason: string) => void
   private readonly platform: NodeJS.Platform
@@ -138,8 +138,10 @@ export class MacosAwakeEngineRouter {
   private async runInstalledProbe(): Promise<boolean | undefined> {
     try {
       const installed = await this.detectAmphetamine()
-      if (this.amphetamineInstalled === installed) {
-        return installed
+      if (installed === undefined || this.amphetamineInstalled === installed) {
+        // undefined means the probe could not tell; keep whatever is known
+        // rather than recording a false negative that disables the engine.
+        return this.amphetamineInstalled
       }
       this.amphetamineInstalled = installed
       this.onNeedsRefresh('amphetamine-probe')
