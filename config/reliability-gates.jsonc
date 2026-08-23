@@ -12330,9 +12330,7 @@
         },
         {
           "file": "src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
-          "assertions": [
-            "checks dpr after a heavy reveal even when the stable fit skips geometry work"
-          ]
+          "assertions": ["defers a heavy-reveal dpr present until the shared atlas recovery"]
         },
         {
           "file": "src/renderer/src/lib/pane-manager/terminal-canvas-dpr-repair.test.ts",

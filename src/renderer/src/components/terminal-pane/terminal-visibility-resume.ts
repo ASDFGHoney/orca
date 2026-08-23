@@ -227,11 +227,10 @@ function resumeTerminalVisibilityHeavy(manager: PaneManager, isActive: boolean):
   // would paint a stretched DOM-fallback flash, which is worse UX.
   manager.resumeRendering()
   // Why: unchanged grid geometry can skip the reveal fit, but a retained WebGL
-  // canvas may still carry the previous display's backing-store DPR.
+  // canvas may still carry the previous display's backing-store DPR. The
+  // caller's atlas recovery presents the final shared-atlas generation.
   for (const pane of manager.getPanes()) {
-    if (repairPaneWebglCanvasDprMismatch(pane)) {
-      presentPaneViewport(pane)
-    }
+    repairPaneWebglCanvasDprMismatch(pane)
   }
   // Why: resumeRendering just re-attached WebGL, whose cell metrics briefly differ
   // from the DOM renderer's; a raw fit here reflows on a transient one-column-off

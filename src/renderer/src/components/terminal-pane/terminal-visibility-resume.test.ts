@@ -8,6 +8,10 @@ import {
 vi.mock('@/lib/pane-manager/pane-manager-registry', () => ({
   resetAndRefreshAllTerminalWebglAtlases: vi.fn()
 }))
+const presentPaneViewport = vi.fn()
+vi.mock('@/lib/pane-manager/pane-webgl-renderer', () => ({
+  presentPaneViewport: (pane: unknown) => presentPaneViewport(pane)
+}))
 vi.mock('@/lib/pane-manager/pane-terminal-output-scheduler', () => ({
   flushTerminalOutput: vi.fn(),
   requestTerminalBacklogRecovery: vi.fn()
@@ -77,6 +81,7 @@ function resumeArgs(manager: FakeManager, shouldUseLightTabResume: boolean) {
 describe('resumeTerminalVisibility reveal repaint', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    repairPaneWebglCanvasDprMismatch.mockReturnValue(false)
   })
 
   it('schedules a pane-scoped repaint on a light tab reveal', () => {
@@ -148,14 +153,22 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     expect(flushDeferredPaneMetricOptionsIfMeasurable).not.toHaveBeenCalled()
   })
 
-  it('checks dpr after a heavy reveal even when the stable fit skips geometry work', () => {
+  it('defers a heavy-reveal dpr present until the shared atlas recovery', async () => {
     const pane = { terminal: {} }
     const manager = createManager()
     manager.getPanes.mockReturnValue([pane])
+    repairPaneWebglCanvasDprMismatch.mockReturnValueOnce(true)
+    const { resetAndRefreshAllTerminalWebglAtlases } = vi.mocked(
+      await import('@/lib/pane-manager/pane-manager-registry')
+    )
 
     resumeTerminalVisibility(resumeArgs(manager, false))
 
     expect(repairPaneWebglCanvasDprMismatch).toHaveBeenCalledWith(pane)
+    expect(presentPaneViewport).not.toHaveBeenCalled()
+    expect(repairPaneWebglCanvasDprMismatch.mock.invocationCallOrder[0]).toBeLessThan(
+      resetAndRefreshAllTerminalWebglAtlases.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    )
   })
 
   it('does not fit on a light tab reveal', () => {
@@ -211,6 +224,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     const second = { terminal: { name: 'pane-b' } }
     const manager = createManager()
     manager.getPanes.mockReturnValue([first, second])
+    repairPaneWebglCanvasDprMismatch.mockReturnValueOnce(true)
 
     recoverVisibleTerminalWindowWake({
       manager: manager as never as PaneManager,
@@ -221,6 +235,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     expect(repairPaneWebglCanvasDprMismatch).toHaveBeenCalledTimes(2)
     expect(repairPaneWebglCanvasDprMismatch).toHaveBeenNthCalledWith(1, first)
     expect(repairPaneWebglCanvasDprMismatch).toHaveBeenNthCalledWith(2, second)
+    expect(presentPaneViewport).toHaveBeenCalledWith(first)
   })
 
   it('latches viewport intent before refocus recovery flushes streaming output', async () => {
