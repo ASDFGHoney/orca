@@ -32,32 +32,21 @@ function keyboardPhase(state: KeyboardState, isLeaving: boolean): NativeChatKeyb
 function useUntrackedKeyboard(): AnimatedKeyboardInfo {
   const height = useSharedValue(0)
   const state = useSharedValue<KeyboardState>(KeyboardState.UNKNOWN)
-  // Why: useAnimatedStyle takes its dependencies from the updater's closure, so
-  // a fresh object each render would restart the UI-thread mapper every render.
+  // Stable identity prevents the UI-thread mapper restarting on every render.
   return useMemo(() => ({ height, state }), [height, state])
 }
 
-// Why: Reanimated's Android observer takes over the activity's window-insets
-// handling, which would fight the app's manual lift. Subscribe on iOS only —
-// the only platform with an interactive keyboard to follow anyway.
+// Reanimated's Android observer would take over Orca's manual window-inset handling.
 const useKeyboardFrame = Platform.OS === 'ios' ? useAnimatedKeyboard : useUntrackedKeyboard
 
-/** Keeps the composer glued to the keyboard's top edge, including through an
- *  iOS interactive dismissal — `keyboardWillHide` only fires once that gesture
- *  commits, so the route's `keyboardInset` cannot drive the drag on its own.
- *
- *  `useAnimatedKeyboard` is deprecated in favour of react-native-keyboard-
- *  controller, which is a new native dependency and so a separate decision. */
+/** Follows iOS dismissal frames that arrive before the route's committed inset. */
 export function useMobileNativeChatKeyboardLift(committedInset: number): {
   dismissMode: NativeChatKeyboardDismissMode
   padStyle: AnimatedStyle<ViewStyle>
 } {
   const bottomInset = useSafeAreaInsets().bottom
   const keyboard = useKeyboardFrame()
-  // The dismiss mode is a React prop, so mirror the observer across — derived
-  // from the same phase the padding reads, or the two disagree in exactly the
-  // state the fallback exists for and the drag strands the composer again.
-  // Latched separately from the reported state — see nativeChatKeyboardStaysLeaving.
+  // Direction changes must not release an in-flight interactive dismissal.
   const keyboardIsLeaving = useSharedValue(false)
   useAnimatedReaction(
     () => keyboard.state.value,
@@ -78,18 +67,14 @@ export function useMobileNativeChatKeyboardLift(committedInset: number): {
       }
     }
   )
-  // A keyboard on its way out has already zeroed the route's inset, so hold on
-  // to the settled lift — it is the only sane ceiling left for the frame.
+  // Retain a ceiling after keyboardWillHide zeroes the route inset.
   const [lastSettledPad, setLastSettledPad] = useState(0)
   useEffect(() => {
     if (committedInset > 0) {
       setLastSettledPad(committedInset + bottomInset)
     }
   }, [committedInset, bottomInset])
-  // Order matters: useAnimatedReaction registers no outputs, so Reanimated has
-  // no dependency edge from the latch above to this mapper and falls back to
-  // registration order. Declaring padStyle last is what keeps it reading a
-  // fresh latch — a reaction added below here would cost a frame per drag.
+  // Registration order keeps this mapper behind the output-less latch reaction.
   const padStyle = useAnimatedStyle(() => ({
     paddingBottom: resolveNativeChatBottomPad({
       phase: keyboardPhase(keyboard.state.value, keyboardIsLeaving.value),

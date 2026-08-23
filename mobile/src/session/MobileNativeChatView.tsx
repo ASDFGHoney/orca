@@ -187,17 +187,10 @@ export function MobileNativeChatView({
     [folded, streaming, pending, imagePreviewsByMessageId]
   )
 
-  // Follow the tail as the conversation grows and keep the newest message above
-  // the keyboard when it opens — but only when already pinned to the bottom, so
-  // we don't yank the user away while they read history.
+  // Follow growth and keyboard opening only while the user remains at the tail.
   const previousKeyboardInset = useRef(keyboardInset)
   useEffect(() => {
-    // The keyboard reaching zero is it leaving, which is now usually the user's
-    // own downward swipe; jumping to the tail would undo the scroll they just
-    // made. (The viewport grows as the keyboard goes, so `atBottom` can well
-    // still be true at that point — hence the guard rather than relying on it.)
-    // A merely *shorter* keyboard — a hardware one attaching, a suggestion strip
-    // collapsing — is not a dismissal and must not suppress the tail-follow.
+    // Only a zero transition is dismissal; shorter keyboards still follow the tail.
     const keyboardLeaving = keyboardInset === 0 && previousKeyboardInset.current > 0
     previousKeyboardInset.current = keyboardInset
     if (data.length === 0 || !atBottom || keyboardLeaving) {
@@ -285,7 +278,6 @@ export function MobileNativeChatView({
               // Let link/file taps land while the composer keyboard is up
               // instead of being swallowed by the dismiss gesture.
               keyboardShouldPersistTaps="handled"
-              // Drag the keyboard down with the finger (iOS) / dismiss on drag (Android).
               keyboardDismissMode={dismissMode}
               onScroll={onScroll}
               scrollEventThrottle={32}
