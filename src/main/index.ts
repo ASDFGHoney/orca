@@ -1165,13 +1165,7 @@ async function prepareCodexSessionResumeForLaunch(args: {
   const systemHomePath = getSystemCodexHomePath()
   // Why: codexSessionSourceHome is import-only; treating it as CODEX_HOME would mutate history sources and bypass account auth.
   const settingsStore = store
-  // Why: discovery omits a home whose ownership read is `indeterminate`
-  // (antivirus EBUSY); selection microseconds later may verify that same home.
-  // Snapshot both from this one call and union the verified selected home into
-  // the scan list, or a competing alias in another account wins (STA-4919).
-  // An unreadable selected home still throws rather than collapsing to "no
-  // selection" (STA-4422). The selected home is included only because this
-  // read verified it — never because verification was skipped.
+  // Why: include a newly verified selection when transient discovery omitted it (STA-4919).
   const { trustedCodexHomes: trustedHomes, selectedAccountCodexHome } = snapshotCodexResumeHomes({
     systemHomePath,
     runtimeHome: codexRuntimeHome

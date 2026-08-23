@@ -196,6 +196,40 @@ describe('STA-4919 Codex resume home snapshot', () => {
     })
   })
 
+  it('propagates a still-indeterminate selected home instead of admitting or skipping it', async () => {
+    const { service, homeA } = await createTwoAccountService()
+    const markerA = join(realpathSync(homeA), '.orca-managed-home')
+    lstatFaults.failNext(markerA, 2)
+    const { ManagedCodexHomeTemporarilyUnavailableError } =
+      await import('../codex-accounts/host-codex-managed-home-ownership')
+
+    expect(() =>
+      snapshotCodexResumeHomes({
+        systemHomePath: getSystemCodexHomePath(),
+        runtimeHome: service
+      })
+    ).toThrow(ManagedCodexHomeTemporarilyUnavailableError)
+    expect(lstatFaults.readsFor(markerA)).toBe(2)
+  })
+
+  it('deduplicates equivalent Windows home spellings while preserving the first path', () => {
+    const selectedHome = 'c:/users/brennan/.codex/'
+    const discoveredHome = String.raw`C:\Users\Brennan\.codex`
+
+    expect(
+      snapshotCodexResumeHomes({
+        systemHomePath: String.raw`C:\Users\System\.codex`,
+        runtimeHome: {
+          getHostCodexHomePathsForSessionDiscovery: () => [discoveredHome],
+          resolveSelectedHostAccountCodexHomePathForResume: () => selectedHome
+        }
+      })
+    ).toEqual({
+      trustedCodexHomes: [String.raw`C:\Users\System\.codex`, discoveredHome],
+      selectedAccountCodexHome: selectedHome
+    })
+  })
+
   it('still excludes a genuinely untrusted home that holds a competing alias', async () => {
     const { service, homeA, store } = await createTwoAccountService()
     const untrustedHome = join(testState.userDataDir, 'outside', 'account-c', 'home')
