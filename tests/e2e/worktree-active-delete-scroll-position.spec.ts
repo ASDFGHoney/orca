@@ -8,6 +8,8 @@ const VISUAL_PROOF_PAUSE_MS = 1_200
 const POST_REMOVAL_SAMPLE_FRAMES = 20
 const MAX_REMOVAL_WAIT_FRAMES = 300
 
+test.use({ minimumSeededWorktreeCount: 1 })
+
 type RowRemovalFrame = {
   animationCount: number
   belowTop: number | null
@@ -126,7 +128,7 @@ async function seedActiveDeletionRows(page: Page): Promise<{
   )
 }
 
-async function prepareScrolledActiveRow(page: Page, targetId: string): Promise<number> {
+async function prepareScrolledActiveRow(page: Page, targetId: string): Promise<void> {
   const target = page.locator(
     `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
   )
@@ -158,7 +160,6 @@ async function prepareScrolledActiveRow(page: Page, targetId: string): Promise<n
   })
   await expect(target).toBeVisible()
   await expect(target).toHaveAttribute('aria-current', 'page')
-  return scroller.evaluate((element) => element.scrollTop)
 }
 
 async function startRowRemovalSampling(
@@ -169,10 +170,7 @@ async function startRowRemovalSampling(
   await page.evaluate(
     ({ belowId, maxRemovalWaitFrames, postRemovalSampleFrames, targetId }) => {
       const sample = async (): Promise<RowRemovalFrame[]> => {
-        const frames: RowRemovalFrame[] = []
-        let framesAfterRemoval = 0
-        for (let index = 0; index < maxRemovalWaitFrames + postRemovalSampleFrames; index += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        const readFrame = (): RowRemovalFrame => {
           const scroller = document.querySelector<HTMLElement>('[data-worktree-sidebar]')
           const below = document.querySelector<HTMLElement>(
             `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(belowId)}]`
@@ -182,16 +180,22 @@ async function startRowRemovalSampling(
               `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
             )
           )
-          const animationCount =
-            below?.closest('[data-worktree-virtual-row]')?.firstElementChild?.getAnimations()
-              .length ?? 0
-          frames.push({
-            animationCount,
+          return {
+            animationCount:
+              below?.closest('[data-worktree-virtual-row]')?.firstElementChild?.getAnimations()
+                .length ?? 0,
             belowTop: below?.getBoundingClientRect().top ?? null,
             scrollTop: scroller?.scrollTop ?? 0,
             targetExists
-          })
-          framesAfterRemoval = targetExists ? 0 : framesAfterRemoval + 1
+          }
+        }
+        const frames: RowRemovalFrame[] = [readFrame()]
+        let framesAfterRemoval = 0
+        for (let index = 0; index < maxRemovalWaitFrames + postRemovalSampleFrames; index += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+          const frame = readFrame()
+          frames.push(frame)
+          framesAfterRemoval = frame.targetExists ? 0 : framesAfterRemoval + 1
           if (framesAfterRemoval >= postRemovalSampleFrames) {
             break
           }
@@ -225,7 +229,7 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   await waitForSessionReady(orcaPage)
   await orcaPage.setViewportSize({ width: 1_200, height: 800 })
   const { belowId, successorId, targetId } = await seedActiveDeletionRows(orcaPage)
-  const initialScrollTop = await prepareScrolledActiveRow(orcaPage, targetId)
+  await prepareScrolledActiveRow(orcaPage, targetId)
   const target = orcaPage.locator(
     `[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(targetId)}]`
   )
@@ -266,16 +270,20 @@ test('deleting the active scrolled worktree preserves position and closes the ro
   await pauseForVisualProof(orcaPage)
   const mountedTops = frames.flatMap((frame) => (frame.belowTop === null ? [] : [frame.belowTop]))
   const firstRemovedFrame = frames.findIndex((frame) => !frame.targetExists)
+  const scrollTopBeforeDelete = frames[0]?.scrollTop
+  if (scrollTopBeforeDelete === undefined) {
+    throw new Error('Row removal sampler recorded no pre-delete frame')
+  }
 
   expect(firstRemovedFrame).toBeGreaterThan(0)
   expect(frames.slice(firstRemovedFrame).every((frame) => !frame.targetExists)).toBe(true)
   expect(Math.max(...frames.map((frame) => frame.animationCount))).toBeGreaterThan(0)
   expect(Math.max(...mountedTops) - Math.min(...mountedTops)).toBeGreaterThan(30)
   expect(Math.max(...frames.map((frame) => frame.scrollTop))).toBeLessThanOrEqual(
-    initialScrollTop + 1
+    scrollTopBeforeDelete + 1
   )
   expect(Math.min(...frames.map((frame) => frame.scrollTop))).toBeGreaterThanOrEqual(
-    initialScrollTop - 1
+    scrollTopBeforeDelete - 1
   )
   await expect(
     orcaPage.locator(`[data-worktree-sidebar] [data-worktree-id=${JSON.stringify(successorId)}]`)
