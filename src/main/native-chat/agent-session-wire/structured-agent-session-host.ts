@@ -141,8 +141,13 @@ export class StructuredAgentSessionHost {
 
   isHeld = (sessionId: string): boolean => this.holds.isHeld(sessionId)
 
-  private resumeForHold(sessionId: string): Promise<void> {
-    return resumeHeldStructuredAgentSession({
+  private async resumeForHold(sessionId: string): Promise<void> {
+    const unreconciled = await this.reconcileLeases(sessionId)
+    if (unreconciled) {
+      throw new Error(unreconciled.code)
+    }
+    await this.runtimeState.resolveRecovery(sessionId)
+    await resumeHeldStructuredAgentSession({
       sessionId,
       deps: this.deps,
       now: () => this.now(),

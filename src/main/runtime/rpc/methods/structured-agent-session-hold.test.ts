@@ -126,6 +126,19 @@ describe('a client that holds a session', () => {
     await vi.waitFor(() => expect(host.hasSession(SESSION)).toBe(false))
     expect(closeSession).toHaveBeenCalledWith(SESSION)
   })
+
+  it('does not report success when no provider child can be acquired', async () => {
+    const response = await call('agentSession.hold', {
+      sessionId: 'session-missing',
+      holderId: 'chat-missing'
+    })
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: 'agent_session_identity_required' }
+    })
+    expect(host.isHeld('session-missing')).toBe(false)
+  })
 })
 
 // A phone that loses signal mid-conversation never sends a release. Before this, the app-server it

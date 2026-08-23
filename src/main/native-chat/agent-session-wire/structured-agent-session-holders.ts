@@ -34,6 +34,10 @@ export class StructuredAgentSessionHolders {
     return (this.bySession.get(sessionId)?.size ?? 0) > 0
   }
 
+  has(sessionId: string, holderId: string): boolean {
+    return this.bySession.get(sessionId)?.has(holderId) ?? false
+  }
+
   holderIds(sessionId: string): string[] {
     return [...(this.bySession.get(sessionId) ?? [])]
   }
