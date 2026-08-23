@@ -59,6 +59,7 @@ export class MacosAwakeEngineRouter {
   private engine: MacosAwakeEngine = DEFAULT_MACOS_AWAKE_ENGINE
   private amphetamineInstalled: boolean | undefined
   private probing = false
+  private probeAgain = false
 
   constructor(options: MacosAwakeEngineRouterOptions = {}) {
     this.logger = options.logger ?? console
@@ -124,14 +125,23 @@ export class MacosAwakeEngineRouter {
       return undefined
     }
     if (this.probing) {
-      // Concurrent probes can resolve out of order and clobber each other.
+      // Concurrent probes can resolve out of order and clobber each other, but
+      // dropping the request would strand a re-pick made just after an older
+      // probe sampled absence. Queue exactly one follow-up instead.
+      this.probeAgain = true
       return this.amphetamineInstalled
     }
     this.probing = true
     try {
-      return await this.runInstalledProbe()
+      let installed = await this.runInstalledProbe()
+      while (this.probeAgain) {
+        this.probeAgain = false
+        installed = await this.runInstalledProbe()
+      }
+      return installed
     } finally {
       this.probing = false
+      this.probeAgain = false
     }
   }
 
@@ -154,21 +164,15 @@ export class MacosAwakeEngineRouter {
 
   start(reason: string): void {
     const useAmphetamine = this.usesAmphetamine()
-    try {
-      if (useAmphetamine) {
-        this.amphetamineAssertion.start(reason)
-      } else {
-        this.caffeinateAssertion.start(reason)
-      }
-    } catch (err) {
-      this.logger.warn('[agent-awake] failed to start macOS sleep assertion', {
-        reason,
-        engine: useAmphetamine ? 'amphetamine' : 'caffeinate',
-        error: err
-      })
-    }
+    const startedIncoming = useAmphetamine
+      ? this.startAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      : this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
     if (!useAmphetamine) {
-      this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      // Only release Amphetamine if caffeinate actually took over. Stopping it
+      // after a throw would end the last native assertion and hold nothing.
+      if (startedIncoming) {
+        this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      }
       return
     }
     // Why caffeinate stays up until Amphetamine reports a hold: acquiring one is
@@ -176,14 +180,36 @@ export class MacosAwakeEngineRouter {
     // consent dialog for as long as the user takes to answer. Releasing
     // caffeinate first would leave that whole window with no assertion that
     // survives a lid close. Holding both is harmless; holding neither is not.
-    // hasLiveHold, not getHold: after a failed attempt the classification is
-    // retained so a later stop can still clean up, but it is not proof that
-    // anything is holding, and dropping the stand-in on it would uncover a lid
-    // close until the retry lands.
-    if (this.amphetamineAssertion.hasLiveHold()) {
+    // Only an owned hold releases caffeinate. Owned means the indefinite session
+    // Orca creates, which cannot expire; an adopted one is the user's and may be
+    // a timer that runs out at any moment, and the next re-check could be up to
+    // a full reconcile interval away. hasLiveHold too, because a classification
+    // retained after a failed attempt is not proof that anything is holding.
+    if (
+      this.amphetamineAssertion.getHold() === 'owned' &&
+      this.amphetamineAssertion.hasLiveHold()
+    ) {
       this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
     } else {
-      this.caffeinateAssertion.start(reason)
+      // Also guarded: an unguarded throw here escapes start(), and refresh() is
+      // called from setMode/setStatuses, so a failed caffeinate spawn would
+      // propagate out of an ordinary settings change.
+      this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
+    }
+  }
+
+  /** Returns whether the assertion was asked to start without throwing. */
+  private startAssertion(
+    assertion: PlatformAwakeAssertion,
+    label: string,
+    reason: string
+  ): boolean {
+    try {
+      assertion.start(reason)
+      return true
+    } catch (err) {
+      this.logger.warn(`[agent-awake] failed to start ${label} assertion`, { reason, error: err })
+      return false
     }
   }
 

@@ -3,7 +3,10 @@ import { AmphetamineAvailability } from './macos-amphetamine-availability'
 import { AmphetamineHold, type AmphetamineHoldKind } from './macos-amphetamine-hold'
 import { AmphetamineReconcileTimer } from './macos-amphetamine-reconcile-timer'
 import { AmphetamineFailureBackoff } from './macos-amphetamine-failure-backoff'
-import { releaseAmphetamineSessionSync } from './macos-amphetamine-quit-release'
+import {
+  disposeAmphetamineSession,
+  releaseAmphetamineSessionSync
+} from './macos-amphetamine-quit-release'
 import {
   AMPHETAMINE_ACQUIRE_SCRIPT,
   AMPHETAMINE_RELEASE_SCRIPT,
@@ -24,8 +27,11 @@ export const MACOS_AMPHETAMINE_RECONCILE_MS = 30_000
 type Logger = Pick<Console, 'debug' | 'warn'>
 
 /**
- * `owned` = Orca started this session and may end it.
- * `adopted` = a session was already running, so Orca's goal is met by someone else's and Orca must not touch it.
+ * `owned` = matches the shape Orca creates, so Orca is responsible for ending it.
+ * Usually a session Orca started, but Amphetamine exposes no identity, so the
+ * shape match cannot prove that — see macos-keep-awake-engines.md.
+ * `adopted` = does not match Orca's shape, so it is someone else's to end and
+ * Orca must not touch it. It may also be a timed session that expires on its own.
  */
 type MacosAmphetamineSleepAssertionOptions = {
   logger?: Logger
@@ -67,8 +73,8 @@ export class MacosAmphetamineSleepAssertion {
   private readonly backoff: AmphetamineFailureBackoff
   private desired: 'started' | 'stopped' = 'stopped'
   private readonly hold = new AmphetamineHold()
-  /** An acquire has been sent and not yet reported back, so a session may exist. */
-  private acquireInFlight = false
+  /** Aborts an in-flight acquire at quit; null when none is running. */
+  private acquireAbort: AbortController | null = null
   private queue: Promise<void> = Promise.resolve()
   private disposed = false
   private readonly availability = new AmphetamineAvailability()
@@ -121,34 +127,16 @@ export class MacosAmphetamineSleepAssertion {
     this.desired = 'stopped'
     this.stopReconcileTimer()
     this.backoff.reset()
-    // acquireInFlight, not just the hold: quit can tear the event loop down
-    // before an awaited osascript reports, so an acquire that has already been
-    // sent may have created a session nothing will ever hear about. The release
-    // script verifies shape first, so running it when uncertain is safe — it
-    // reports 'gone' or 'foreign' and ends nothing.
-    if (!this.hold.isOwned() && !this.acquireInFlight) {
-      this.hold.release()
-      return
-    }
-    if (this.endSessionSync('dispose')) {
-      this.hold.release()
-      return
-    }
-    // Keep the hold so the final state is honest. Nothing retries after
-    // disposal: the session outlives Orca, ended from Amphetamine's menu bar.
-    this.logger.warn('[agent-awake] left an Amphetamine session running at quit', {
-      unavailableReason: this.availability.get()
-    })
-  }
-
-  /**
-   * Why sync: quit tears the event loop down before an awaited osascript could
-   * report back, and a missed `end session` leaves the Mac awake indefinitely.
-   */
-  private endSessionSync(reason: string): boolean {
-    return releaseAmphetamineSessionSync({
+    // Kill any in-flight acquire before releasing. Otherwise the release can run
+    // first, report 'gone', and the acquire can then create a session whose await
+    // continuation never runs because teardown got there — leaking it silently.
+    const hadAcquireInFlight = this.acquireAbort !== null
+    this.acquireAbort?.abort()
+    this.acquireAbort = null
+    disposeAmphetamineSession({
+      hold: this.hold,
+      hadAcquireInFlight,
       logger: this.logger,
-      reason,
       runOsascriptSync: this.runOsascriptSync
     })
   }
@@ -231,15 +219,16 @@ export class MacosAmphetamineSleepAssertion {
       return false
     }
     let result: OsascriptResult
-    this.acquireInFlight = true
+    const abort = new AbortController()
+    this.acquireAbort = abort
     try {
-      result = await this.runOsascript(AMPHETAMINE_ACQUIRE_SCRIPT)
+      result = await this.runOsascript(AMPHETAMINE_ACQUIRE_SCRIPT, abort.signal)
     } catch (error) {
-      this.acquireInFlight = false
+      this.acquireAbort = null
       this.handleFailure('acquire-spawn-error', reason, error)
       return false
     }
-    this.acquireInFlight = false
+    this.acquireAbort = null
     if (result.code !== 0 || result.timedOut) {
       this.handleScriptFailure('acquire', reason, result)
       return false
@@ -268,7 +257,12 @@ export class MacosAmphetamineSleepAssertion {
         // Quit landed while the Apple event was in flight; nothing runs after
         // this, so the session has to go now. Reclaims need this as much as
         // fresh starts — both leave an indefinite session behind otherwise.
-        if (!this.endSessionSync('dispose-race')) {
+        const released = releaseAmphetamineSessionSync({
+          logger: this.logger,
+          reason: 'dispose-race',
+          runOsascriptSync: this.runOsascriptSync
+        })
+        if (!released) {
           // Record it rather than reporting null: nothing can retry, and a
           // silent null would claim a session was cleaned up that was not.
           this.hold.own()

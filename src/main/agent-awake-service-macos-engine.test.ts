@@ -191,6 +191,45 @@ describe('AgentAwakeService macOS engine selection', () => {
     expect(amphetamine.clearUnavailable).toHaveBeenCalled()
   })
 
+  it('keeps caffeinate when Amphetamine only adopted a session it does not own', () => {
+    const amphetamine = createAmphetamine()
+    const { service, caffeinate } = createService({ macosAmphetamineAssertion: amphetamine })
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    // An adopted session is the user's and may be a timer that expires between
+    // re-checks, so caffeinate must stay as the safety net.
+    amphetamine.settleHold('adopted')
+    caffeinate.stop.mockClear()
+    service.setStatuses([])
+
+    expect(caffeinate.stop).not.toHaveBeenCalled()
+    expect(caffeinate.start).toHaveBeenCalled()
+  })
+
+  it('does not release Amphetamine when caffeinate fails to take over', () => {
+    const amphetamine = createAmphetamine()
+    const caffeinate = createCaffeinate()
+    caffeinate.start.mockImplementation(() => {
+      throw new Error('caffeinate spawn failed')
+    })
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      macosAssertion: caffeinate
+    })
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    amphetamine.settleHold('owned')
+    service.setStatuses([])
+    amphetamine.stop.mockClear()
+
+    // Switching back with a broken caffeinate must not end the last assertion.
+    service.setMacosEngine('caffeinate')
+
+    expect(amphetamine.stop).not.toHaveBeenCalled()
+  })
+
   it('keeps caffeinate up when a hold classification is no longer proof', () => {
     const amphetamine = createAmphetamine()
     const { service, caffeinate } = createService({ macosAmphetamineAssertion: amphetamine })

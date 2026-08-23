@@ -1,3 +1,4 @@
+import type { AmphetamineHold } from './macos-amphetamine-hold'
 import { AMPHETAMINE_RELEASE_SCRIPT, type RunOsascriptSync } from './macos-amphetamine-session'
 
 type Logger = Pick<Console, 'debug' | 'warn'>
@@ -32,4 +33,36 @@ export function releaseAmphetamineSessionSync(options: {
     logger.warn('[agent-awake] failed to end Amphetamine session', { reason, error })
     return false
   }
+}
+
+/**
+ * Release whatever Orca may be holding, on the way out.
+ *
+ * Runs when a session is held *or* when an acquire is still in flight: quit can
+ * tear the event loop down before an awaited osascript reports, so an acquire
+ * already sent may have created a session nothing will ever hear about. Running
+ * the release when uncertain is safe because it verifies shape first.
+ *
+ * On failure the hold is kept and marked stale rather than cleared. Nothing can
+ * retry after disposal, and reporting nothing held would claim a cleanup that
+ * did not happen.
+ */
+export function disposeAmphetamineSession(options: {
+  hold: AmphetamineHold
+  hadAcquireInFlight: boolean
+  logger: Logger
+  runOsascriptSync: RunOsascriptSync
+}): void {
+  const { hold, hadAcquireInFlight, logger, runOsascriptSync } = options
+  if (!hold.isOwned() && !hadAcquireInFlight) {
+    hold.release()
+    return
+  }
+  if (releaseAmphetamineSessionSync({ logger, reason: 'dispose', runOsascriptSync })) {
+    hold.release()
+    return
+  }
+  hold.own()
+  hold.markStale()
+  logger.warn('[agent-awake] left an Amphetamine session running at quit')
 }

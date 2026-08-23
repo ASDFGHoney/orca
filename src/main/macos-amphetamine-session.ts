@@ -74,7 +74,7 @@ export type OsascriptResult = {
   timedOut: boolean
 }
 
-export type RunOsascript = (script: string) => Promise<OsascriptResult>
+export type RunOsascript = (script: string, signal?: AbortSignal) => Promise<OsascriptResult>
 
 /** What the acquire script did. */
 /**
@@ -99,11 +99,15 @@ export function parseReleaseOutcome(stdout: string): AmphetamineReleaseOutcome |
 }
 export type RunOsascriptSync = (script: string) => OsascriptResult
 
-export function runOsascriptWithRunProcess(script: string): Promise<OsascriptResult> {
+export function runOsascriptWithRunProcess(
+  script: string,
+  signal?: AbortSignal
+): Promise<OsascriptResult> {
   return runProcess({
     program: OSASCRIPT,
     args: ['-e', script],
-    timeoutMs: MACOS_AMPHETAMINE_OSASCRIPT_TIMEOUT_MS
+    timeoutMs: MACOS_AMPHETAMINE_OSASCRIPT_TIMEOUT_MS,
+    signal
   })
 }
 
@@ -137,7 +141,8 @@ export async function detectAmphetamineInstalled(
     return undefined
   }
   if (result.code === 0) {
-    return result.stdout.trim().length > 0
+    // Empty stdout on success is not a positive miss, so it is unknown too.
+    return result.stdout.trim().length > 0 ? true : undefined
   }
   if (result.timedOut) {
     return undefined
