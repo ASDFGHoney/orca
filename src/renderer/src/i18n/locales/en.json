@@ -14677,6 +14677,12 @@
           "3de5a129e7": "Listening",
           "4977162383": "Too loud",
           "25f2b7a6a5": "Speaking"
+          "335e1bc6cb": "Stop dictation"
+          "tooLoud": "Too loud",
+          "speaking": "Speaking",
+          "starting": "Starting mic…",
+          "processing": "Processing…",
+          "listening": "Listening"
         }
       },
       "dashboard": {
