@@ -517,11 +517,14 @@ describe('ClaudeAccountService credential capture', () => {
     const destroyStdin = vi.spyOn(child.stdin, 'destroy')
     const taskkill = new EventEmitter()
     const spawnMock = vi.fn((command: string) => (command === 'taskkill.exe' ? taskkill : child))
+    const cleanupInteractiveLogin = vi.fn()
     const buildInteractiveLoginSpawn = vi.fn(() => ({
       command: getCmdExePath(),
       args: ['/d', '/c', 'start', '', '/wait', 'claude', 'auth', 'login', '--claudeai'],
       stdio: 'ignore' as const,
-      windowsHide: true
+      windowsHide: true,
+      cleanup: cleanupInteractiveLogin,
+      getTerminationPid: () => 9876
     }))
     vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
     vi.doMock('../../shared/windows-interactive-login-spawn', () => ({
@@ -575,13 +578,14 @@ describe('ClaudeAccountService credential capture', () => {
       expect(child.kill).not.toHaveBeenCalled()
       expect(spawnMock).toHaveBeenCalledWith(
         'taskkill.exe',
-        ['/pid', '1234', '/t', '/f'],
+        ['/pid', '9876', '/t', '/f'],
         expect.objectContaining({ stdio: 'ignore', windowsHide: true })
       )
       expect(destroyStdin).not.toHaveBeenCalled()
       taskkill.emit('close', 0)
       await rejection
       expect(destroyStdin).toHaveBeenCalledTimes(1)
+      expect(cleanupInteractiveLogin).toHaveBeenCalledTimes(1)
       expect(service.cancelPendingLogin()).toBe(false)
     } finally {
       vi.doUnmock('node:child_process')

@@ -6,7 +6,10 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { app } from 'electron'
 import { getSpawnArgsForWindows } from '../win32-utils'
-import { buildWindowsHostInteractiveLoginSpawn } from '../../shared/windows-interactive-login-spawn'
+import {
+  buildWindowsHostInteractiveLoginSpawn,
+  type WindowsHostInteractiveLoginSpawn
+} from '../../shared/windows-interactive-login-spawn'
 import type {
   CodexManagedAccount,
   CodexManagedAccountSummary,
@@ -212,10 +215,14 @@ function removeManagedHomeTreeSync(targetPath: string): void {
   })
 }
 
-function killLoginProcessTree(child: ChildProcess): void {
+function killLoginProcessTree(
+  child: ChildProcess,
+  interactiveLogin?: WindowsHostInteractiveLoginSpawn | null
+): void {
+  const terminationPid = interactiveLogin?.getTerminationPid?.() ?? child.pid
   if (
     process.platform === 'win32' &&
-    typeof child.pid === 'number' &&
+    typeof terminationPid === 'number' &&
     child.exitCode === null &&
     child.signalCode === null
   ) {
@@ -223,7 +230,7 @@ function killLoginProcessTree(child: ChildProcess): void {
       // Why: child.kill() only reaches the direct child (cmd.exe for npm .cmd
       // shims); taskkill /t also ends codex descendants whose open handles on
       // the managed home make post-login file operations fail with ENOTEMPTY.
-      execFileSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      execFileSync('taskkill', ['/pid', String(terminationPid), '/t', '/f'], {
         windowsHide: true,
         timeout: WINDOWS_LOGIN_TREE_KILL_TIMEOUT_MS,
         stdio: 'ignore'
@@ -1777,6 +1784,7 @@ export class CodexAccountService {
         child.stderr?.off('data', appendOutput)
         child.off('error', onError)
         child.off('close', onClose)
+        spawnConfig.interactiveLogin?.cleanup?.()
       }
 
       const settle = (callback: () => void): void => {
@@ -1790,7 +1798,7 @@ export class CodexAccountService {
 
       const timeoutError = new Error('Codex sign-in took too long to finish. Please try again.')
       timeout = setTimeout(() => {
-        killLoginProcessTree(child)
+        killLoginProcessTree(child, spawnConfig.interactiveLogin)
         settle(() => {
           rejectPromise(timeoutError)
         })
@@ -1811,7 +1819,7 @@ export class CodexAccountService {
           }
           postAuthExitTimeout = setTimeout(() => {
             loginTreeKilledAfterAuth = true
-            killLoginProcessTree(child)
+            killLoginProcessTree(child, spawnConfig.interactiveLogin)
           }, WINDOWS_LOGIN_POST_AUTH_EXIT_GRACE_MS)
         }, WINDOWS_LOGIN_AUTH_POLL_INTERVAL_MS)
       }

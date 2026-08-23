@@ -1156,6 +1156,7 @@ export class ClaudeAccountService {
         child.off('error', onError)
         child.off(completionEvent, onDone)
         options?.signal?.removeEventListener('abort', onAbort)
+        interactiveLogin?.cleanup?.()
         if (options?.keepStdinOpen) {
           child.stdin?.destroy()
         }
@@ -1180,11 +1181,16 @@ export class ClaudeAccountService {
           return
         }
         terminationPending = true
-        if (process.platform === 'win32' && child.pid) {
-          const taskkill = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
-            stdio: 'ignore',
-            windowsHide: true
-          })
+        const windowsTerminationPid = interactiveLogin?.getTerminationPid?.() ?? child.pid
+        if (process.platform === 'win32' && windowsTerminationPid) {
+          const taskkill = spawn(
+            'taskkill.exe',
+            ['/pid', String(windowsTerminationPid), '/t', '/f'],
+            {
+              stdio: 'ignore',
+              windowsHide: true
+            }
+          )
           let taskkillFinished = false
           const finishTaskkill = (succeeded: boolean): void => {
             if (taskkillFinished) {
