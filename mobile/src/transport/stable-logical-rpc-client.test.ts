@@ -118,6 +118,36 @@ describe('stable logical RPC client', () => {
     pending.resolve(success('late'))
   })
 
+  it.each([
+    ['lan', 'relay'],
+    ['relay', 'lan']
+  ] as const)(
+    'attaches one browser screencast and publishes connected for %s to %s migration',
+    async (fromPath, toPath) => {
+      const oldSession = new FakeSession('connected')
+      const replacement = new FakeSession('connected')
+      const client = createStableLogicalRpcClient(oldSession, fromPath)
+      const states: ConnectionState[] = []
+      client.subscribe('browser.screencast', { worktree: 'id:wt-1', page: 'page-1' }, vi.fn(), {
+        onBinaryFrame: vi.fn()
+      })
+      client.onStateChange((state) => states.push(state))
+
+      await client.migrateTo(replacement, toPath)
+
+      expect(replacement.subscribe).toHaveBeenCalledOnce()
+      expect(replacement.subscribe).toHaveBeenCalledWith(
+        'browser.screencast',
+        { worktree: 'id:wt-1', page: 'page-1' },
+        expect.any(Function),
+        { onBinaryFrame: expect.any(Function) }
+      )
+      expect(oldSession.close).toHaveBeenCalledOnce()
+      expect(states).toEqual(['connected'])
+      expect(client.getActivePath()).toBe(toPath)
+    }
+  )
+
   it('keeps replies that commit before cutover and carries viewport state into replay', async () => {
     const oldSession = new FakeSession('connected')
     const nextSession = new FakeSession('connected')
