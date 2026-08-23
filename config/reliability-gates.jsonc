@@ -472,6 +472,15 @@
       ],
       "evidenceRuns": [
         {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/agent-prompt-delivery-state-machine.test.ts src/main/runtime/agent-prompt-delivery-outcome.test.ts src/main/runtime/agent-prompt-submission-runtime.test.ts src/main/runtime/agent-prompt-submission-verification.test.ts src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts src/shared/agent-prompt-injection.test.ts",
+          "result": "passed",
+          "durationSeconds": 27.54,
+          "summary": "Eleven runtime, RPC, CLI, and state-machine files passed 1,296 tests with one skip. Deterministic OpenCode readiness, lifecycle-only acknowledgement, current foreground policy, input exclusion, and local/federated unknown-outcome ownership all passed."
+        },
+        {
           "date": "2026-08-14",
           "runner": "local",
           "platform": "macos",
@@ -2296,6 +2305,24 @@
         }
       ],
       "evidenceRuns": [
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/agent-prompt-injection.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/agent-prompt-delivery-state-machine.test.ts src/main/runtime/agent-prompt-delivery-outcome.test.ts src/main/runtime/agent-prompt-submission-runtime.test.ts src/main/runtime/agent-prompt-submission-verification.test.ts src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts src/main/runtime/orchestration/coordinator.test.ts",
+          "result": "passed",
+          "durationSeconds": 23.47,
+          "summary": "Ten runtime and orchestration files passed 1,320 tests with one skip. The owner-level delivery state machine and both local and federated start_unknown receipts passed alongside existing dispatch and coordinator coverage."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec playwright test tests/e2e/orchestration-worker-settlement-release-cli.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 26.3,
+          "summary": "A rebuilt Electron plus compiled CLI orchestration topology passed through worker start, settlement, and terminal release in 18.1 seconds of test execution."
+        },
         {
           "date": "2026-08-14",
           "runner": "local",
@@ -9739,14 +9766,15 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, fresh Claude/Codex foreground identity, framing bytes, stale-agent shell fallback, and exact legacy behavior for every other configured agent. SSH, daemon, and remote-runtime remain explicit gaps.",
+      "coverageNotes": "Prior source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Current deterministic runtime tests cover fresh OpenCode readiness, current foreground policy, strict lifecycle acknowledgement, unknown-outcome ownership, and input exclusion. The legacy Electron fixture no longer identifies its fake foreground process and is an explicit harness gap; SSH, daemon, and remote-runtime remain unproved.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4328",
         "https://github.com/stablyai/orca/issues/14525"
       ],
-      "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when a fresh foreground-process read positively identifies the exact target as Claude or Codex on a desktop call; every other agent, stale agent metadata over a shell, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
-      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settlement only for freshly identified Claude/Codex, the legacy platform delay for every other configured agent, stale Codex launch identity over a shell to fall back, no wrapper polling, and byte-for-byte direct delivery for non-targets.",
+      "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The PTY-owning runtime exclusively owns input for the attempt, chooses readiness policy from the current foreground agent, and sends Enter only after fresh post-paste readiness. Only a fresh lifecycle transition acknowledges delivery; redraw bytes never do. Any failure after prompt bytes were written is operation_unknown, and orchestration retains the exact terminal in start_unknown rather than making it transferable. Non-target agents and older clients keep the direct terminal contract.",
+      "oracle": "Withhold OpenCode readiness beyond the old 500 ms deadline, emit a stale pre-attempt marker and then one split fresh marker, and require zero premature Enter plus one lifecycle-acknowledged Enter. A swallowed Enter followed by autonomous redraw output must remain operation_unknown. Missing readiness must emit no Enter but still remain operation_unknown because the paste reached the composer. Current foreground OpenCode must override stale Codex launch metadata and vice versa. Concurrent direct input must be rejected while the prompt owns PTY input, and prompt paste must be refused while direct input is already in flight. Local and federated orchestration receipts must persist operation_unknown as start_unknown, and the exact local terminal must not be transferable.",
       "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/agent-prompt-delivery-state-machine.test.ts src/main/runtime/agent-prompt-delivery-outcome.test.ts src/main/runtime/agent-prompt-submission-runtime.test.ts src/main/runtime/agent-prompt-submission-verification.test.ts src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts src/shared/agent-prompt-injection.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
         "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm.cmd exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -9757,6 +9785,12 @@
         "src/main/runtime/rpc/terminal-agent-prompt-send.test.ts",
         "src/main/runtime/rpc/terminal-send.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
+        "src/main/runtime/agent-prompt-delivery-state-machine.test.ts",
+        "src/main/runtime/agent-prompt-delivery-outcome.test.ts",
+        "src/main/runtime/agent-prompt-submission-runtime.test.ts",
+        "src/main/runtime/agent-prompt-submission-verification.test.ts",
+        "src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts",
+        "src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts",
         "src/shared/agent-prompt-injection.test.ts",
         "tests/e2e/terminal-send-agent-prompt-submit.spec.ts",
         "tests/tools/repro-terminal-send-submit.mjs"
@@ -9772,18 +9806,45 @@
         {
           "file": "src/main/runtime/rpc/terminal-agent-prompt-send.test.ts",
           "assertions": [
-            "a freshly proven Claude or Codex desktop target uses settled prompt delivery",
+            "a freshly proven Claude, Codex, or OpenCode desktop target uses settled prompt delivery",
             "a non-target agent or shell preserves the existing direct send"
           ]
         },
         {
           "file": "src/main/runtime/orca-runtime.test.ts",
           "assertions": [
-            "Claude and Codex wait for marker-gated composer quiescence before submit",
+            "Claude, Codex, and OpenCode wait for marker-gated composer quiescence before submit",
+            "OpenCode readiness timeout fails without Enter",
             "every other configured TUI agent retains the legacy platform delay",
             "a speculative CLI prompt check does not poll wrapper foregrounds",
             "the PTY write boundary retains bracketed framing and one delayed submit"
           ]
+        },
+        {
+          "file": "src/main/runtime/agent-prompt-delivery-state-machine.test.ts",
+          "assertions": [
+            "stale and split OpenCode markers cannot authorize a premature Enter",
+            "a swallowed Enter plus redraw remains operation_unknown",
+            "current foreground identity owns readiness policy",
+            "direct and prompt input cannot interleave"
+          ]
+        },
+        {
+          "file": "src/main/runtime/agent-prompt-submission-verification.test.ts",
+          "assertions": [
+            "only a fresh lifecycle transition acknowledges submission",
+            "generation replacement and permission transitions fail closed"
+          ]
+        },
+        {
+          "file": "src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts",
+          "assertions": [
+            "operation_unknown persists as start_unknown and blocks exact terminal transfer"
+          ]
+        },
+        {
+          "file": "src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts",
+          "assertions": ["remote operation_unknown persists as start_unknown"]
         },
         {
           "file": "tests/e2e/terminal-send-agent-prompt-submit.spec.ts",
@@ -9846,7 +9907,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds a bounded fresh foreground read and one non-retrying liveness check. Positively identified Claude and Codex reuse the O(prompt bytes) chunked prompt sender plus one PTY-local listener until post-marker quiescence or the bounded fallback. Every other agent and shell retains the existing direct-send path. Text-only, bare Enter, interrupt, mobile, renderer stream input, and query replies add no work."
+        "evidence": "Agent prompts remain O(prompt bytes), add one targeted foreground-process read, one PTY-local readiness listener, bounded timers, and the existing 50 ms lifecycle verification poll. Direct terminal sends add two O(1) map operations so an active prompt transaction cannot be interleaved; they add no polling, provider listing, subprocess, scan, or renderer work. Reservations, listeners, and timers are disposed on success, rejection, cancellation, and generation replacement."
       },
       "promotionCriteria": [
         "Collect live Codex and Claude CLI sends on representative slow systems.",
@@ -9854,7 +9915,9 @@
       ],
       "knownGaps": [
         "Live SSH/daemon/remote-runtime evidence is not yet attached.",
-        "Only Claude and Codex opt into settlement; every other agent retains the legacy behavior until independently validated.",
+        "Only Claude, Codex, and OpenCode opt into settlement; every other agent retains the legacy behavior until independently validated.",
+        "A local command that produces output without a lifecycle transition remains explicitly operation_unknown; PTY redraw output is insufficient proof of prompt consumption.",
+        "The current terminal-send Electron fixture is red before the product oracle because its fake agent no longer satisfies fresh foreground identity; current candidate evidence is deterministic runtime plus orchestration topology E2E.",
         "A new CLI talking to an old host safely loses the optional field and therefore keeps the old timing behavior until the host updates.",
         "The E2E fake agent models the submission race without requiring external agent authentication; live account-backed agents are covered separately."
       ],
@@ -9878,21 +9941,31 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, and Claude and Codex composer traces. The render gate stays on the PTY-owning runtime, so paired and SSH callers use the same provider write/output path without a wire change. SSH, daemon, remote-runtime, Linux, and Windows live journeys remain gaps.",
+      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, deterministic OpenCode readiness, strict acknowledgement, and local/federated unknown-outcome ownership. The state machine stays on the PTY-owning runtime and uses the existing operation_unknown/start_unknown contract without a wire change. SSH, daemon, remote-runtime, Linux, and Windows live journeys remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7226",
         "https://github.com/stablyai/orca/issues/13821",
-        "https://github.com/stablyai/orca/issues/14347"
+        "https://github.com/stablyai/orca/issues/14347",
+        "https://linear.app/stably/issue/STA-4495",
+        "https://linear.app/stably/issue/STA-5122",
+        "https://linear.app/stably/issue/STA-5150"
       ],
-      "invariant": "Injected orchestration task prompts for recognized agent CLIs must send the prompt body inside one bracketed-paste frame, sanitize embedded ESC bytes, preserve chunk boundaries without losing the frame, and submit exactly once only after the agent can accept Enter. Claude and Codex must emit a post-paste composer marker and then settle, or reach the bounded fallback first; every other agent retains the platform delay.",
-      "oracle": "Runtime tests assert the exact PTY write sequence, failure cleanup, Claude/Codex marker-gated multi-frame renders, and the legacy platform delay for every other configured agent. The candidate resets settlement on later frames, gives a late marker a fresh bounded window, and still submits once at the hard deadline if output never settles. Orchestration tests assert dispatch/coordinator use the agent prompt path; the live CLI harness covers long Codex-like framing.",
+      "invariant": "Injected orchestration prompts must be one exclusive PTY input transaction: one sanitized bracketed-paste frame, current-provider readiness, at most one Enter, and strict lifecycle acknowledgement. Once any prompt byte is written, every unacknowledged exit is operation_unknown. Local and federated orchestration must durably retain the exact terminal in start_unknown, with no transfer or automated retry authority. PTY output alone never proves submission.",
+      "oracle": "The deterministic OpenCode oracle withholds readiness beyond the old delay, ignores a stale marker, emits a split fresh marker, and requires zero premature Enter plus one lifecycle-acknowledged Enter. Independent negative signals require operation_unknown for missing readiness and for swallowed Enter followed by autonomous redraw output. Input exclusion tests prevent direct/prompt interleaving. Local and federated receipt tests require operation_unknown to persist as start_unknown, and the local exact terminal transfer lookup must return no candidate.",
       "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/agent-prompt-injection.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/agent-prompt-delivery-state-machine.test.ts src/main/runtime/agent-prompt-delivery-outcome.test.ts src/main/runtime/agent-prompt-submission-runtime.test.ts src/main/runtime/agent-prompt-submission-verification.test.ts src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts src/main/runtime/orchestration/coordinator.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/agent-prompt-injection.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts src/main/runtime/orchestration/coordinator.test.ts",
         "node tests/tools/repro-orchestration-long-prompt.mjs --cli out/bin/orca-dev --mode codex-like --size-kb 32 --timeout-ms 20000"
       ],
       "testFiles": [
         "src/shared/agent-prompt-injection.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
+        "src/main/runtime/agent-prompt-delivery-state-machine.test.ts",
+        "src/main/runtime/agent-prompt-delivery-outcome.test.ts",
+        "src/main/runtime/agent-prompt-submission-runtime.test.ts",
+        "src/main/runtime/agent-prompt-submission-verification.test.ts",
+        "src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts",
+        "src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts",
         "src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts",
         "src/main/runtime/orchestration/coordinator.test.ts",
         "tests/tools/repro-orchestration-long-prompt.mjs"
@@ -9911,7 +9984,7 @@
           "file": "src/main/runtime/orca-runtime.test.ts",
           "assertions": [
             "runtime writes bracketed paste before a delayed submit",
-            "Claude and Codex ignore unrelated and split pre-marker output, then wait for render quiescence before one submit",
+            "Claude, Codex, and OpenCode ignore unrelated and split pre-marker output, then wait for render quiescence before one submit",
             "every other configured TUI agent retains the platform delay",
             "a late Codex marker receives a fresh settlement window before one submit",
             "a silent Claude composer reaches one bounded fallback submit",
@@ -9919,6 +9992,31 @@
             "large prompt frames are chunked and reconstructed before submit",
             "partial prompt write failure closes the paste frame and does not submit"
           ]
+        },
+        {
+          "file": "src/main/runtime/agent-prompt-delivery-state-machine.test.ts",
+          "assertions": [
+            "OpenCode emits no Enter at the old fixed deadline",
+            "one fresh split readiness marker authorizes one Enter",
+            "redraw output after a swallowed Enter remains unknown",
+            "current foreground policy overrides stale launch metadata",
+            "direct input cannot interleave with prompt delivery"
+          ]
+        },
+        {
+          "file": "src/main/runtime/agent-prompt-submission-verification.test.ts",
+          "assertions": [
+            "only lifecycle evidence acknowledges",
+            "permission and PTY-generation changes reject"
+          ]
+        },
+        {
+          "file": "src/main/runtime/rpc/methods/orchestration-composed-workers.test.ts",
+          "assertions": ["local ambiguous input retains terminal ownership and is not transferable"]
+        },
+        {
+          "file": "src/main/runtime/rpc/methods/orchestration-federation-start-receipt.test.ts",
+          "assertions": ["federated ambiguous input persists as start_unknown"]
         },
         {
           "file": "src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts",
@@ -10005,7 +10103,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Claude and Codex add one PTY-local output listener until 1.5 seconds of post-marker output quiescence or the bounded fallback; each later frame resets one quiet timer. Other agents retain the platform delay. No polling, provider listing, subprocess churn, hidden-pane wakeups, renderer work, or wire traffic is added."
+        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Claude, Codex, and OpenCode add one targeted foreground read and one PTY-local listener until quiescence or the bounded readiness deadline; submission verification keeps the existing bounded lifecycle poll. Direct terminal sends add O(1) reservation bookkeeping only. All reservations, timers, and listeners are disposed on every settlement path. No provider listing, repeated subprocess, hidden-pane wakeup, renderer work, scan, or wire traffic is added."
       },
       "promotionCriteria": [
         "Run the live harness in soak with a self-starting dev runtime or provider-contract fixture.",
@@ -10015,6 +10113,8 @@
       "knownGaps": [
         "Live harness command currently expects an already-running dev runtime and generated out/bin/orca-dev wrapper.",
         "No Windows ConPTY, Linux PTY, SSH, daemon, or remote-runtime live evidence yet.",
+        "Local agent commands without lifecycle hooks remain outcome_unknown even when visible output suggests they ran; accepting redraw bytes would reintroduce silent false success.",
+        "The legacy terminal-send Electron fixture currently fails its fake foreground identity precondition and is not candidate evidence.",
         "Push-on-idle orchestration message banners remain outside this dispatch-prompt gate."
       ],
       "demotionRule": "Demote or quarantine if the live harness flakes without a product bug or harness bug filed to the terminal-input owner."

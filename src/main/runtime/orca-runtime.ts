@@ -105,6 +105,7 @@ import {
   type AgentPromptActivity,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
+import { agentPromptDeliveryBecameUnknown } from './agent-prompt-delivery-outcome'
 import {
   awaitWindowsHostGitEnvironmentReady,
   gitExecFileAsync,
@@ -3300,6 +3301,11 @@ export class OrcaRuntimeService {
   private agentPromptPermissionSequenceByPtyId = new Map<string, number>()
   private agentPromptExplicitStatusFloorByPtyId = new Map<string, number>()
   private agentPromptSubmissionTailByPtyId = new Map<string, Promise<void>>()
+  private directTerminalWriteCountByPtyId = new Map<string, number>()
+  private agentPromptInputReservationByPtyId = new Map<
+    string,
+    { generation: number; token: symbol }
+  >()
   private providerSequenceInitializedPtys = new Set<string>()
   private providerSequenceOffsetByPtyId = new Map<string, number>()
   private providerSnapshotPreferredPtys = new Set<string>()
@@ -18637,7 +18643,9 @@ export class OrcaRuntimeService {
         throw new Error('invalid_terminal_send')
       }
       await assertTerminalInputWithinLimitWithYield(action.text)
-      await this.writeTerminalAction(pty.pty.ptyId, action, payload, options)
+      await this.withDirectTerminalInput(pty.pty.ptyId, () =>
+        this.writeTerminalAction(pty.pty.ptyId, action, payload, options)
+      )
       return {
         handle,
         accepted: true,
@@ -18662,7 +18670,9 @@ export class OrcaRuntimeService {
       throw new Error('terminal_not_writable')
     }
 
-    await this.writeTerminalAction(leaf.ptyId, action, payload, options)
+    await this.withDirectTerminalInput(leaf.ptyId, () =>
+      this.writeTerminalAction(leaf.ptyId!, action, payload, options)
+    )
 
     return {
       handle,
@@ -18694,12 +18704,8 @@ export class OrcaRuntimeService {
         async () => {
           this.assertLiveTerminalHandleTargetsPty(handle, pty.pty.ptyId)
           this.assertAgentPromptGeneration(pty.pty.ptyId, generation)
-          return await this.writeTerminalAgentPrompt(
-            handle,
-            pty.pty.ptyId,
-            generation,
-            payload,
-            options
+          return await this.withAgentPromptInputReservation(pty.pty.ptyId, generation, () =>
+            this.writeTerminalAgentPrompt(handle, pty.pty.ptyId, generation, payload, options)
           )
         }
       )
@@ -18721,7 +18727,9 @@ export class OrcaRuntimeService {
     const submits = await this.serializeAgentPromptSubmission(leaf.ptyId, generation, async () => {
       this.assertLiveTerminalHandleTargetsPty(handle, leaf.ptyId!)
       this.assertAgentPromptGeneration(leaf.ptyId!, generation)
-      return await this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, options)
+      return await this.withAgentPromptInputReservation(leaf.ptyId!, generation, () =>
+        this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, options)
+      )
     })
     const bytesWritten = Buffer.byteLength(payload, 'utf8') + submits
     return { handle, accepted: true, bytesWritten }
@@ -19364,6 +19372,49 @@ export class OrcaRuntimeService {
     await options.afterWrite?.(ptyId)
   }
 
+  private async withDirectTerminalInput<T>(ptyId: string, write: () => Promise<T>): Promise<T> {
+    const reservation = this.agentPromptInputReservationByPtyId.get(ptyId)
+    if (reservation?.generation === this.getPtyLifecycleGeneration(ptyId)) {
+      throw new Error('terminal_input_busy')
+    }
+    if (reservation) {
+      this.agentPromptInputReservationByPtyId.delete(ptyId)
+    }
+    this.directTerminalWriteCountByPtyId.set(
+      ptyId,
+      (this.directTerminalWriteCountByPtyId.get(ptyId) ?? 0) + 1
+    )
+    try {
+      return await write()
+    } finally {
+      const remaining = (this.directTerminalWriteCountByPtyId.get(ptyId) ?? 1) - 1
+      if (remaining === 0) {
+        this.directTerminalWriteCountByPtyId.delete(ptyId)
+      } else {
+        this.directTerminalWriteCountByPtyId.set(ptyId, remaining)
+      }
+    }
+  }
+
+  private async withAgentPromptInputReservation<T>(
+    ptyId: string,
+    generation: number,
+    submit: () => Promise<T>
+  ): Promise<T> {
+    if ((this.directTerminalWriteCountByPtyId.get(ptyId) ?? 0) > 0) {
+      throw new Error('terminal_input_busy')
+    }
+    const token = Symbol('agent-prompt-input')
+    this.agentPromptInputReservationByPtyId.set(ptyId, { generation, token })
+    try {
+      return await submit()
+    } finally {
+      if (this.agentPromptInputReservationByPtyId.get(ptyId)?.token === token) {
+        this.agentPromptInputReservationByPtyId.delete(ptyId)
+      }
+    }
+  }
+
   private async writeTerminalInputChunks(
     ptyId: string,
     text: string,
@@ -19405,7 +19456,8 @@ export class OrcaRuntimeService {
     this.assertAgentPromptGeneration(ptyId, generation)
     const permissionBaseline = this.getAgentPromptActivity(handle, ptyId)
     this.assertAgentPromptPermissionSafe(permissionBaseline, permissionBaseline)
-    const renderGate = this.createAgentPromptRenderGate(ptyId)
+    const settlementAgent = await this.resolveAgentPromptSettlementAgent(ptyId)
+    const renderGate = this.createAgentPromptRenderGate(ptyId, settlementAgent)
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -19445,42 +19497,52 @@ export class OrcaRuntimeService {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
       renderGate?.dispose()
+      if (wrotePasteBytes && !isAgentPromptTerminalReplacement(error)) {
+        throw agentPromptDeliveryBecameUnknown(error)
+      }
       throw error
     }
 
-    if (renderGate) {
-      try {
-        await waitForAgentPromptPromise(renderGate.wait(), options.signal)
-      } finally {
-        renderGate.dispose()
-      }
-    } else {
-      await waitForAgentPromptDelay(AGENT_PROMPT_SUBMIT_DELAY_MS, options.signal)
-    }
-    assertAgentPromptRequestActive(options.signal)
-    this.assertAgentPromptGeneration(ptyId, generation)
     try {
-      await options.beforeWrite?.(ptyId)
-    } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
+      if (renderGate) {
+        try {
+          await waitForAgentPromptPromise(renderGate.wait(), options.signal)
+        } finally {
+          renderGate.dispose()
+        }
+      } else {
+        await waitForAgentPromptDelay(AGENT_PROMPT_SUBMIT_DELAY_MS, options.signal)
       }
-      throw error
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      try {
+        await options.beforeWrite?.(ptyId)
+      } catch (error) {
+        if (options.suffixFailureError) {
+          throw new Error(options.suffixFailureError)
+        }
+        throw error
+      }
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      const baseline = this.getAgentPromptActivity(handle, ptyId)
+      this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
+      const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
+      if (!suffixWrote) {
+        throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+      }
+      await verifyAgentPromptSubmission({
+        baseline,
+        readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+        signal: options.signal
+      })
+      return 1
+    } catch (error) {
+      if (isAgentPromptTerminalReplacement(error)) {
+        throw error
+      }
+      throw agentPromptDeliveryBecameUnknown(error)
     }
-    assertAgentPromptRequestActive(options.signal)
-    this.assertAgentPromptGeneration(ptyId, generation)
-    const baseline = this.getAgentPromptActivity(handle, ptyId)
-    this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
-    const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
-    if (!suffixWrote) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
-    }
-    await verifyAgentPromptSubmission({
-      baseline,
-      readActivity: () => this.getAgentPromptActivity(handle, ptyId),
-      signal: options.signal
-    })
-    return 1
   }
 
   private async serializeAgentPromptSubmission<T>(
@@ -19556,14 +19618,36 @@ export class OrcaRuntimeService {
     }
   }
 
-  private createAgentPromptRenderGate(ptyId: string): {
+  private async resolveAgentPromptSettlementAgent(ptyId: string): Promise<TuiAgent | null> {
+    const pty = this.ptysById.get(ptyId)
+    if (!pty) {
+      return null
+    }
+    try {
+      const recognized = recognizeAgentProcess(
+        (await this.ptyController?.getForegroundProcess(ptyId)) ?? null
+      )?.agent
+      if (recognized) {
+        pty.foregroundAgent = recognized
+        return getAgentPromptSettlementPolicy(recognized) ? recognized : null
+      }
+    } catch {
+      // Current metadata remains the bounded fallback when foreground inspection is unavailable.
+    }
+    const fallback = pty.foregroundAgent ?? pty.launchAgent
+    return getAgentPromptSettlementPolicy(fallback) ? fallback : null
+  }
+
+  private createAgentPromptRenderGate(
+    ptyId: string,
+    agent: TuiAgent | null
+  ): {
     arm: () => void
     wait: () => Promise<void>
     dispose: () => void
   } | null {
-    const pty = this.ptysById.get(ptyId)
-    const agent = pty?.launchAgent ?? pty?.foregroundAgent
-    if (!isTerminalSendSettlementAgent(agent)) {
+    const policy = getAgentPromptSettlementPolicy(agent)
+    if (!policy) {
       return null
     }
     let armed = false
@@ -19573,11 +19657,13 @@ export class OrcaRuntimeService {
     let quietTimer: NodeJS.Timeout | null = null
     let hardTimer: NodeJS.Timeout | null = null
     let resolveRender!: () => void
-    const rendered = new Promise<void>((resolve) => {
+    let rejectRender!: (error: Error) => void
+    const rendered = new Promise<void>((resolve, reject) => {
       resolveRender = resolve
+      rejectRender = reject
     })
 
-    const finish = (): void => {
+    const finish = (error?: Error): void => {
       if (settled) {
         return
       }
@@ -19590,7 +19676,11 @@ export class OrcaRuntimeService {
         clearTimeout(hardTimer)
         hardTimer = null
       }
-      resolveRender()
+      if (error) {
+        rejectRender(error)
+      } else {
+        resolveRender()
+      }
     }
     const armQuietTimer = (): void => {
       if (quietTimer) {
@@ -19602,7 +19692,13 @@ export class OrcaRuntimeService {
       if (hardTimer) {
         clearTimeout(hardTimer)
       }
-      hardTimer = setTimeout(finish, AGENT_PROMPT_RENDER_TIMEOUT_MS)
+      hardTimer = setTimeout(
+        () =>
+          finish(
+            policy.renderTimeout === 'reject' ? new Error('agent_prompt_not_ready') : undefined
+          ),
+        AGENT_PROMPT_RENDER_TIMEOUT_MS
+      )
     }
     const unsubscribe = this.subscribeToTerminalData(ptyId, (data) => {
       if (!armed || settled) {
@@ -19626,12 +19722,7 @@ export class OrcaRuntimeService {
         markerCarry = ''
         armHardTimer()
       },
-      wait: async () => {
-        if (settled) {
-          return
-        }
-        await rendered
-      },
+      wait: () => rendered,
       dispose: () => {
         unsubscribe()
         if (quietTimer) {
@@ -34695,7 +34786,7 @@ export class OrcaRuntimeService {
       }
       const recognized = recognizeAgentProcess(await this.ptyController.getForegroundProcess(ptyId))
       const recognizedAgent = recognized?.agent
-      if (!isTerminalSendSettlementAgent(recognizedAgent)) {
+      if (!recognizedAgent || !getAgentPromptSettlementPolicy(recognizedAgent)) {
         return false
       }
       if (!(await this.isTerminalRunningAgent(handle, { retryForegroundWrappers: false }))) {
@@ -40839,10 +40930,31 @@ function classifyAgentTitle(title: string | null): 'agent' | 'management' | 'neu
   return detectAgentStatusFromTitle(title) !== null ? 'agent' : 'neutral'
 }
 
-function isTerminalSendSettlementAgent(
+type AgentPromptSettlementPolicy = Readonly<{
+  renderTimeout: 'submit' | 'reject'
+}>
+
+const BOUNDED_FALLBACK_AGENT_PROMPT_SETTLEMENT: AgentPromptSettlementPolicy = {
+  renderTimeout: 'submit'
+}
+const READINESS_REQUIRED_AGENT_PROMPT_SETTLEMENT: AgentPromptSettlementPolicy = {
+  renderTimeout: 'reject'
+}
+
+function getAgentPromptSettlementPolicy(
   agent: TuiAgent | null | undefined
-): agent is 'claude' | 'codex' {
-  return agent === 'claude' || agent === 'codex'
+): AgentPromptSettlementPolicy | null {
+  if (agent === 'claude' || agent === 'codex') {
+    return BOUNDED_FALLBACK_AGENT_PROMPT_SETTLEMENT
+  }
+  if (agent === 'opencode') {
+    return READINESS_REQUIRED_AGENT_PROMPT_SETTLEMENT
+  }
+  return null
+}
+
+function isAgentPromptTerminalReplacement(error: unknown): boolean {
+  return error instanceof Error && error.message === 'terminal_handle_stale'
 }
 
 function findLastCompleteOscTitleRange(data: string): { start: number; end: number } | null {

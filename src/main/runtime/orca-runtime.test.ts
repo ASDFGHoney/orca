@@ -16943,7 +16943,7 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  it.each(['claude', 'codex'] as const)(
+  it.each(['claude', 'codex', 'opencode'] as const)(
     'waits for %s composer output frames to settle before one submit',
     async (agent) => {
       vi.useFakeTimers()
@@ -17019,7 +17019,7 @@ describe('OrcaRuntimeService', () => {
 
   it.each(
     (Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]).filter(
-      (agent) => agent !== 'claude' && agent !== 'codex'
+      (agent) => agent !== 'claude' && agent !== 'codex' && agent !== 'opencode'
     )
   )('preserves the legacy fixed submit delay for %s', async (agent) => {
     vi.useFakeTimers()
@@ -24393,7 +24393,7 @@ describe('OrcaRuntimeService', () => {
     expect(getForegroundProcess).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['claude', 'codex'] as const)(
+  it.each(['claude', 'codex', 'opencode'] as const)(
     'authorizes settled CLI prompts only after positive %s foreground identity',
     async (agent) => {
       const runtime = new OrcaRuntimeService(store)
