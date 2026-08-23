@@ -1,3 +1,4 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 // Why: aggregated detail-fetch for GitLabItemDialog. Parallel of
 // src/main/github/work-item-details.ts but scoped to v1 surface —
 // description body, flattened discussion notes, MR pipeline jobs/reviewers.
@@ -20,7 +21,6 @@ import {
   getGlabKnownHosts,
   glabHostnameArgs,
   glabRepoExecOptions,
-  glabExecFileAsync,
   release,
   resolveIssueSource,
   type LocalGitExecOptions,

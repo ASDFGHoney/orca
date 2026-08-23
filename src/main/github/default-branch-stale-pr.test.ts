@@ -1,3 +1,4 @@
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 /*
  * Issue #9171 — "Wrong PR diffs displayed when checking out the default branch".
  *

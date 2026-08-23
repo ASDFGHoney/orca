@@ -1,9 +1,9 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import type { GitLabAssignableUser } from '../../shared/gitlab-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import {
   acquire,
   getGlabKnownHosts,
-  glabExecFileAsync,
   glabHostnameArgs,
   glabRepoExecOptions,
   release,

@@ -19,7 +19,7 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => '/tmp'), isPackaged: false }
 }))
 
-vi.mock('../git/worktree', () => ({
+vi.mock('../git/worktree-listing', () => ({
   listWorktrees: vi.fn().mockResolvedValue([]),
   listWorktreesStrict: vi.fn().mockResolvedValue([])
 }))

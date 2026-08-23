@@ -1,3 +1,4 @@
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: clientMocks.ghExecFileAsyncMock }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as GithubApiRepositoryModule from './github-api-repository'
 import type * as GitHubEnterpriseRepositoryModule from './github-enterprise-repository'

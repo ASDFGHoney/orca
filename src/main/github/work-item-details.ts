@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 /* eslint-disable max-lines -- Why: groups the PR/Issue fetch paths and file-contents resolver so caching/rate-limit strategy lives in one place. */
 import type { PRCheckDetail } from '../../shared/github/check-types'
 import type {
@@ -14,7 +15,6 @@ import type {
 import type { GitHubWorkItem, GitHubWorkItemDetails } from '../../shared/github/work-item-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import {
-  ghExecFileAsync,
   acquire,
   release,
   ghRepoExecOptions,

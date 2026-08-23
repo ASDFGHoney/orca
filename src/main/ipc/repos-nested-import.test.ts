@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type * as GitRunner from '../git/runner'
 import type * as RepoModule from '../git/repo'
+import type * as DefaultBaseRefModule from '../git/default-base-ref'
+import type * as RepositoryRemotesModule from '../git/repository-remotes'
 
 const { reposMocks, moduleMocks } = await vi.hoisted(async () => {
   const moduleMocks = await import('./repos-remote-test-harness')
@@ -14,10 +16,16 @@ vi.mock('electron', () => moduleMocks.electronModuleMock(reposMocks))
 vi.mock('../git/repo', async (importOriginal) =>
   moduleMocks.gitRepoModuleMock(await importOriginal<typeof RepoModule>())
 )
+vi.mock('../git/default-base-ref', async (importOriginal) =>
+  moduleMocks.defaultBaseRefModuleMock(await importOriginal<typeof DefaultBaseRefModule>())
+)
+vi.mock('../git/repository-remotes', async (importOriginal) =>
+  moduleMocks.repositoryRemotesModuleMock(await importOriginal<typeof RepositoryRemotesModule>())
+)
 vi.mock('../git/runner', async (importOriginal) =>
   moduleMocks.gitRunnerModuleMock(reposMocks, await importOriginal<typeof GitRunner>())
 )
-vi.mock('../git/worktree', () => moduleMocks.gitWorktreeModuleMock(reposMocks))
+vi.mock('../git/worktree-listing', () => moduleMocks.gitWorktreeModuleMock(reposMocks))
 vi.mock('./registered-worktree-roots-cache', () =>
   moduleMocks.registeredWorktreeRootsCacheModuleMock(reposMocks)
 )

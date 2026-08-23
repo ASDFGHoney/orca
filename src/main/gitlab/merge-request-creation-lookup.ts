@@ -1,13 +1,9 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import {
   getHostedReviewLocalGitOptions,
   type HostedReviewExecutionOptions
 } from '../source-control/hosted-review-git-options'
-import {
-  glabExecFileAsync,
-  glabHostnameArgs,
-  glabRepoExecOptions,
-  type ProjectRef
-} from './gl-utils'
+import { glabHostnameArgs, glabRepoExecOptions, type ProjectRef } from './gl-utils'
 
 export function parseMergeRequestPayload(stdout: string): { number: number; url: string } | null {
   const trimmed = stdout.trim()

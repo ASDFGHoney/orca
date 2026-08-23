@@ -10,6 +10,7 @@ import {
 
 import type * as BranchLineTotal from '../../shared/git-branch-line-total'
 import type * as GitRunner from './runner'
+import type * as GitStream from './git-stream'
 
 // Why: real git, spied argv. Every exec is recorded so the performance contract
 // ("no ranged diff unless asked", "one exec for concurrent callers") can be
@@ -51,8 +52,15 @@ vi.mock('./runner', async (importOriginal) => {
     ) => {
       gitExecCalls.push(args[0])
       return actual.gitExecFileAsyncBuffer(...args)
-    },
-    gitStreamStdout: async (...args: Parameters<typeof GitRunner.gitStreamStdout>) => {
+    }
+  }
+})
+
+vi.mock('./git-stream', async (importOriginal) => {
+  const actual = await importOriginal<typeof GitStream>()
+  return {
+    ...actual,
+    gitStreamStdout: async (...args: Parameters<typeof GitStream.gitStreamStdout>) => {
       gitExecCalls.push(args[0])
       return actual.gitStreamStdout(...args)
     }
@@ -61,10 +69,10 @@ vi.mock('./runner', async (importOriginal) => {
 
 import {
   clearEffectiveUpstreamStatusCacheForTests,
-  clearSubmodulePathsCacheForTests,
-  getStatus,
   invalidateGitReadCaches
-} from './status'
+} from './git-read-cache'
+import { clearSubmodulePathsCacheForTests } from './submodule-paths'
+import { getStatus } from './status'
 
 const BOGUS_MERGE_BASE = 'deadbeef'.repeat(5)
 // No fixture path here looks like test or generated code, so it is all source.

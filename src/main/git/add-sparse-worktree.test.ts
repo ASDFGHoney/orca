@@ -34,9 +34,10 @@ vi.mock('./runner', () => ({
   gitExecFileSync: gitExecFileSyncMock,
   translateWslOutputPaths: translateWslOutputPathsMock
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
-vi.mock('./status', () => ({
-  resolveGitDir: resolveGitDirMock,
+vi.mock('./conflict-status', () => ({ resolveGitDir: resolveGitDirMock }))
+vi.mock('./git-read-cache', () => ({
   runWithGitReadCacheInvalidation: <T>(run: () => Promise<T>) => run()
 }))
 

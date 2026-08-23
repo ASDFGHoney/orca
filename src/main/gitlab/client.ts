@@ -1,3 +1,4 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 /* eslint-disable max-lines -- co-locates GitLab MR/issue/work-item operations sharing one acquire/release pattern. */
 import type { ClassifiedError } from '../../shared/classified-error'
 import type {
@@ -34,7 +35,6 @@ import {
   glabHostnameArgs,
   glabRepoExecOptions,
   glabApiWithHeaders,
-  glabExecFileAsync,
   parseGlabAuthStatusHosts,
   parseGlabJsonList,
   release,

@@ -51,7 +51,8 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import { getBranchCompare, getCommitCompare } from './status'
+import { getBranchCompare } from './branch-comparison'
+import { getCommitCompare } from './commit-comparison'
 
 describe('getBranchCompare', () => {
   beforeEach(() => {

@@ -3,7 +3,8 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { listWorktrees, removeWorktree } from './worktree'
+import { removeWorktree } from './worktree'
+import { listWorktrees } from './worktree-listing'
 
 const tempRoots: string[] = []
 

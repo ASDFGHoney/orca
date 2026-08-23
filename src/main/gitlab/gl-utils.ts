@@ -1,7 +1,8 @@
-import { gitExecFileAsync, glabExecFileAsync } from '../git/runner'
+import { gitExecFileAsync } from '../git/runner'
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import { parseGlabApiResponse, type GlabApiResponse } from './glab-api-response'
 
-export { glabExecFileAsync, gitExecFileAsync }
+export { gitExecFileAsync }
 export {
   classifyGlabError,
   classifyJobLogError,

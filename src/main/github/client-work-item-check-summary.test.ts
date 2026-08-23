@@ -1,3 +1,4 @@
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { ghExecFileAsyncMock, getOwnerRepoMock, rateLimitGuardMock } = vi.hoisted(() => ({

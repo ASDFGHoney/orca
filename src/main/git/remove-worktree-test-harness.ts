@@ -1,7 +1,7 @@
 import { expect, type Mock } from 'vitest'
 
 import { clearGitCapabilityStateForTests } from './git-capability-state'
-import { _resetWorktreeScanCacheForTests } from './worktree'
+import { resetWorktreeScanCache as _resetWorktreeScanCacheForTests } from './worktree-listing'
 
 export type MockResult = {
   error?: Error

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { invalidateGitBranchLineTotalInFlight } from '../../shared/git-branch-line-total'
-import { getStatus, invalidateGitReadCaches } from './status'
+import { getStatus } from './status'
+import { invalidateGitReadCaches } from './git-read-cache'
 
 const tempRoots: string[] = []
 

@@ -12,7 +12,7 @@ vi.mock('child_process', () => ({
   spawn: spawnMock
 }))
 
-import { ghExecFileAsync } from './runner'
+import { ghExecFileAsync } from './github-cli-runner'
 import {
   _resetGhRateLimitBreaker,
   getGhRateLimitBlockedUntilMs,

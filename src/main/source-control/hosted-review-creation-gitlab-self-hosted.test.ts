@@ -28,6 +28,9 @@ vi.mock('../git/runner', () => ({
   ghExecFileAsync: ghExecFileAsyncMock,
   extractExecError: vi.fn()
 }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
+vi.mock('../git/gitlab-cli-runner', () => ({ glabExecFileAsync: glabExecFileAsyncMock }))
+vi.mock('../git/exec-error', () => ({ extractExecError: vi.fn() }))
 
 vi.mock('../github/client', () => ({
   createGitHubPullRequest: vi.fn(),

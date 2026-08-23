@@ -4,7 +4,8 @@ import path from 'node:path'
 import {
   createBoundedFileReaderModuleMock,
   createFsPromisesModuleMock,
-  createGitRunnerModuleMock
+  createGitRunnerModuleMock,
+  createGitStreamModuleMock
 } from './status-test-harness'
 
 const {
@@ -36,6 +37,13 @@ vi.mock('./runner', () =>
     gitStreamOptionsMock
   })
 )
+vi.mock('./git-stream', () =>
+  createGitStreamModuleMock({
+    gitExecFileAsyncMock,
+    gitExecFileAsyncBufferMock,
+    gitStreamOptionsMock
+  })
+)
 
 vi.mock('fs/promises', () =>
   createFsPromisesModuleMock({ lstatMock, realpathMock, readFileMock, statMock, rmMock })
@@ -52,14 +60,14 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
+import { clearEffectiveUpstreamStatusCacheForTests } from './git-read-cache'
 import {
-  clearEffectiveUpstreamStatusCacheForTests,
   clearSubmodulePathsCacheForTests,
-  getDiff,
-  getSubmoduleStatus,
   listSubmodulePaths,
   resolveSubmoduleWorktreePath
-} from './status'
+} from './submodule-paths'
+import { getDiff } from './status-file-diff'
+import { getSubmoduleStatus } from './submodule-status'
 
 describe('submodule diff routing', () => {
   const OLD_OID = 'a'.repeat(40)

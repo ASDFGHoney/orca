@@ -11,7 +11,7 @@
  * Output is parsed from `gh auth status`, which prints free-form text but
  * uses stable field labels ("Token scopes:", "(GITHUB_TOKEN)", etc.).
  */
-import { ghExecFileAsync } from '../git/runner'
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type { GhAuthDiagnostic, GhAuthAccount } from '../../shared/github/auth-types'
 
 // Required scopes for ProjectV2 GraphQL access in Orca. `project` is the

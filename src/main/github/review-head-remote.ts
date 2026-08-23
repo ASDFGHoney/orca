@@ -1,6 +1,6 @@
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import { pickPreferredGitRemote } from '../../shared/preferred-git-remote'
-import { getDefaultRemote } from '../git/repo'
+import { getDefaultRemote } from '../git/repository-remotes'
 import { getGitHubApiRepositoryForRemote } from './github-api-repository'
 
 type GitExec = (args: string[]) => Promise<{ stdout: string; stderr: string }>

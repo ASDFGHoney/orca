@@ -4,16 +4,15 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { getDefaultBaseRef, resolveDefaultBaseRefViaExec } from './default-base-ref'
+import { getBranchConflictKind } from './branch-conflict-detection'
+import { getRemoteCount } from './repository-remotes'
 import {
   buildSearchBaseRefsArgv,
-  getDefaultBaseRef,
-  getBranchConflictKind,
-  getRemoteCount,
   parseAndFilterSearchRefDetails,
-  resolveDefaultBaseRefViaExec,
   searchBaseRefDetails,
   searchBaseRefs
-} from './repo'
+} from './base-ref-search'
 
 // Why: use real git state (not mocked) because the bug is in the for-each-ref glob shape a mock would miss.
 

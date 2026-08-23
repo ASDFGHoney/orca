@@ -12,7 +12,7 @@ import type {
 import { isDefaultGitHubHost } from '../../shared/github/repository-identity-key'
 import { isWslUncPath } from '../../shared/wsl-paths'
 import { acquire, release } from './gh-utils'
-import { ghExecFileAsync } from '../git/runner'
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import {
   clearGhRateLimitBlock,
   getGhRateLimitBlockedUntilMs,

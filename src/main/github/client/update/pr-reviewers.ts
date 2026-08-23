@@ -1,4 +1,5 @@
-import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
+import { acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 export async function requestPRReviewers(
   repoPath: string,

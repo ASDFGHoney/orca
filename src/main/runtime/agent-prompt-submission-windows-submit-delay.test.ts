@@ -14,7 +14,7 @@ vi.mock('../../shared/agent-prompt-injection', async (importOriginal) => ({
   AGENT_PROMPT_SUBMIT_DELAY_MS: WINDOWS_SUBMIT_DELAY_MS
 }))
 
-vi.mock('../git/worktree', () => ({
+vi.mock('../git/worktree-listing', () => ({
   listWorktrees: vi.fn().mockResolvedValue([
     {
       path: '/tmp/worktree-a',

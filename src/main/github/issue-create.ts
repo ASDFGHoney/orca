@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type {
   GitHubCreateIssueFields,
   GitHubCreateIssueResult
@@ -8,7 +9,7 @@ import {
   resolveGitHubRepoExecution,
   resolveIssueGitHubApiRepositorySource
 } from './github-api-repository'
-import { acquire, extractExecError, ghExecFileAsync, release } from './gh-utils'
+import { acquire, extractExecError, release } from './gh-utils'
 
 function githubIssueErrorMessage(error: unknown): string {
   const { stderr, stdout } = extractExecError(error)

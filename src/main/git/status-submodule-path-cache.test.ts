@@ -20,12 +20,11 @@ vi.mock('./runner', () => ({
 
 import {
   MAX_SUBMODULE_PATHS_CACHE_ENTRIES,
-  abortMerge,
-  abortRebase,
   clearSubmodulePathsCacheForTests,
   getSubmodulePathsCacheCountForTests,
   listSubmodulePaths
-} from './status'
+} from './submodule-paths'
+import { abortMerge, abortRebase } from './conflict-status'
 import { checkoutBranch } from './checkout'
 import { gitPull, gitPullRebaseFromBase } from './remote'
 import { addWorktree, removeWorktree } from './worktree'

@@ -56,7 +56,11 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import { getBranchDiff, getCommitDiff, getDiff, getStagedCommitContext, stageFile } from './status'
+import { getBranchDiff } from './branch-comparison'
+import { getCommitDiff } from './commit-comparison'
+import { getDiff } from './status-file-diff'
+import { getStagedCommitContext } from './git-commit-operations'
+import { stageFile } from './git-index-mutations'
 
 function deferredBuffer(content: string): {
   promise: Promise<{ stdout: Buffer }>

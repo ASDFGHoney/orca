@@ -4,14 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { listFilesWithGit } from '../ipc/filesystem-list-files-git-fallback'
 import { searchWithGitGrep } from '../ipc/filesystem-search-git'
-import {
-  gitExecFileAsync,
-  gitExecFileAsyncBuffer,
-  gitStreamStdout,
-  toLinuxPath,
-  toWindowsWslPath
-} from './runner'
-import { listWorktrees } from './worktree'
+import { gitExecFileAsync, gitExecFileAsyncBuffer } from './runner'
+import { gitStreamStdout } from './git-stream'
+import { toLinuxPath, toWindowsWslPath } from '../wsl'
+import { listWorktrees } from './worktree-listing'
 import { resetWslLinkedWorktreeGitRoutingForTests } from './wsl-linked-worktree-git-routing'
 
 const distro = process.env.ORCA_TEST_WSL_DISTRO?.trim()

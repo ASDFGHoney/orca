@@ -36,6 +36,7 @@ vi.mock('./git/runner', async () => ({
   ...(await vi.importActual<typeof GitRunner>('./git/runner')),
   gitExecFileSync: gitExecFileSyncMock
 }))
+vi.mock('./git/git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
 describe('readIssueCommand', () => {
   it('prefers the local override over the shared orca.yaml command', async () => {

@@ -1,7 +1,7 @@
 import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
 import { gitExecFileAsync } from './runner'
-import { runWithGitReadCacheInvalidation } from './status'
+import { runWithGitReadCacheInvalidation } from './git-read-cache'
 
 /**
  * Reject branch names git would parse as an option (`-`/`--…`) or that aren't a

@@ -1,9 +1,9 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { ClassifiedError } from '../../../../shared/classified-error'
 import { classifyGitHubUnavailable } from '../../../../shared/github/api-availability'
 import { parseTaskQuery, type ParsedTaskQuery } from '../../../../shared/task-query'
 import { sortWorkItemsByNumber } from '../../../../shared/work-items'
 import {
-  ghExecFileAsync,
   classifyListIssuesError,
   classifyListPrsError,
   ghRepoExecOptions,

@@ -27,15 +27,47 @@ vi.mock(
   '../local-downloaded-folder-promotion',
   async () => (await import('./filesystem-test-harness')).folderPromotionMock
 )
+vi.mock('../git/status', async () => (await import('./filesystem-test-harness')).gitStatusQueryMock)
 vi.mock(
-  '../git/status',
-  async () => (await import('./filesystem-test-harness')).gitStatusModuleMock
+  '../git/submodule-status',
+  async () => (await import('./filesystem-test-harness')).gitSubmoduleStatusMock
+)
+vi.mock(
+  '../git/conflict-status',
+  async () => (await import('./filesystem-test-harness')).gitConflictStatusMock
+)
+vi.mock(
+  '../git/status-file-diff',
+  async () => (await import('./filesystem-test-harness')).gitFileDiffMock
+)
+vi.mock(
+  '../git/git-commit-operations',
+  async () => (await import('./filesystem-test-harness')).gitCommitOperationsMock
+)
+vi.mock(
+  '../git/git-index-mutations',
+  async () => (await import('./filesystem-test-harness')).gitIndexMutationsMock
+)
+vi.mock(
+  '../git/git-discard-changes',
+  async () => (await import('./filesystem-test-harness')).gitDiscardChangesMock
+)
+vi.mock(
+  '../git/branch-comparison',
+  async () => (await import('./filesystem-test-harness')).gitBranchComparisonMock
+)
+vi.mock(
+  '../git/commit-comparison',
+  async () => (await import('./filesystem-test-harness')).gitCommitComparisonMock
 )
 vi.mock(
   '../git/check-ignored-paths',
   async () => (await import('./filesystem-test-harness')).gitIgnoredPathsMock
 )
-vi.mock('../git/worktree', async () => (await import('./filesystem-test-harness')).gitWorktreeMock)
+vi.mock(
+  '../git/worktree-listing',
+  async () => (await import('./filesystem-test-harness')).gitWorktreeMock
+)
 vi.mock(
   '../providers/ssh-filesystem-dispatch',
   async () => (await import('./filesystem-test-harness')).sshFilesystemDispatchMock

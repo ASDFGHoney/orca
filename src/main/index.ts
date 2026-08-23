@@ -300,7 +300,7 @@ import { moveWorktree } from './git/worktree'
 import {
   configureWindowsHostGitEnvironmentReadiness,
   setDefaultWslDistroOverride
-} from './git/runner'
+} from './git/command-resolution'
 import { getRepoIdFromWorktreeId } from '../shared/worktree/id'
 import { parseWorkspaceKey } from '../shared/workspace-scope'
 import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsupported-pty-state'

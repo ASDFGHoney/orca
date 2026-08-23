@@ -1,5 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { PRCheckRunDetails } from '../../../../shared/github/check-types'
-import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
+import { acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import {
   GITHUB_CHECK_DETAILS_HOST_TIMEOUT_MS,

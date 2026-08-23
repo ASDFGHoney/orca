@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const { ghExecFileAsyncMock } = vi.hoisted(() => ({ ghExecFileAsyncMock: vi.fn() }))
 
-vi.mock('../git/runner', () => ({
-  ghExecFileAsync: ghExecFileAsyncMock
-}))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 import { diagnoseGhAuth, parseAuthStatus } from './auth-diagnose'
 
 describe('parseAuthStatus', () => {

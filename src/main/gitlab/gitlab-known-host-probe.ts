@@ -1,6 +1,6 @@
 import { runCoalescedProbe, type CoalescedProbes } from '../git/coalesced-probe'
 import { NEGATIVE_ENTRY_TTL_MS } from '../git/remote-ref-probe-cache'
-import { glabExecFileAsync } from '../git/runner'
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import { getSshGitProviderGeneration } from '../providers/ssh-git-dispatch'
 import { DEFAULT_GITLAB_HOSTS, normalizeGitLabHost } from './project-ref-parser'
 

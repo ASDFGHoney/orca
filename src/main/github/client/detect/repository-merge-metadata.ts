@@ -1,5 +1,5 @@
 import { normalizeGitHubPRMergeMethodSettings } from '../../../../shared/github/pull-request-merge-methods'
-import { ghExecFileAsync } from '../../gh-utils'
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import { githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import { noteRepositoryRateLimitSpend, repositoryRateLimitGuard } from '../../rate-limit'

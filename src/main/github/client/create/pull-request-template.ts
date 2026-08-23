@@ -1,8 +1,9 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getSshFilesystemProvider } from '../../../providers/ssh-filesystem-dispatch'
 import { joinWorktreeRelativePath } from '../../../runtime/runtime-relative-paths'
-import { ghExecFileAsync, ghRepoExecOptions, githubRepoContext } from '../../gh-utils'
+import { ghRepoExecOptions, githubRepoContext } from '../../gh-utils'
 import {
   getHostedReviewLocalGitOptions,
   type HostedReviewExecutionOptions

@@ -21,13 +21,11 @@ import {
   _markProjectViewParentFieldRetriedForTests,
   _markProjectViewParentFieldWarningLoggedForTests,
   _rememberProjectViewOwnerTypeForTests,
-  _resetProjectViewCachesForTests,
-  classifyProjectError,
-  isValidOwnerSlug,
-  isValidRepoSlug,
-  parseProjectPaste,
-  resolveProjectRef
-} from './project-view'
+  _resetProjectViewCachesForTests
+} from './project-view/cache-state'
+import { classifyProjectError } from './project-view/project-error-classification'
+import { isValidOwnerSlug, isValidRepoSlug } from './project-view/internals'
+import { parseProjectPaste, resolveProjectRef } from './project-view/project-reference'
 
 describe('classifyProjectError', () => {
   it('classifies HTTP 404 as not_found', () => {

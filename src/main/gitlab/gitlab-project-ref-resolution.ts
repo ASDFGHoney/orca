@@ -1,4 +1,4 @@
-import { glabExecFileAsync } from '../git/runner'
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import { isTransientGitProbeError, readRemoteUrl } from '../git/remote-url-probe'
 import { NEGATIVE_ENTRY_TTL_MS } from '../git/remote-ref-probe-cache'
 import { getSshGitProviderGeneration } from '../providers/ssh-git-dispatch'

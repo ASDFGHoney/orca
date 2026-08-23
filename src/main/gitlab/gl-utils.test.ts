@@ -10,6 +10,7 @@ vi.mock('../git/runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
   glabExecFileAsync: glabExecFileAsyncMock
 }))
+vi.mock('../git/gitlab-cli-runner', () => ({ glabExecFileAsync: glabExecFileAsyncMock }))
 
 import {
   _getProjectRefCacheSize,

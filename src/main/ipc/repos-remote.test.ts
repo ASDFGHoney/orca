@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import type * as GitRunner from '../git/runner'
 import type * as RepoModule from '../git/repo'
+import type * as DefaultBaseRefModule from '../git/default-base-ref'
+import type * as RepositoryRemotesModule from '../git/repository-remotes'
 
 const { reposMocks, moduleMocks } = await vi.hoisted(async () => {
   const moduleMocks = await import('./repos-remote-test-harness')
@@ -11,6 +13,12 @@ const { reposMocks, moduleMocks } = await vi.hoisted(async () => {
 vi.mock('electron', () => moduleMocks.electronModuleMock(reposMocks))
 vi.mock('../git/repo', async (importOriginal) =>
   moduleMocks.gitRepoModuleMock(await importOriginal<typeof RepoModule>())
+)
+vi.mock('../git/default-base-ref', async (importOriginal) =>
+  moduleMocks.defaultBaseRefModuleMock(await importOriginal<typeof DefaultBaseRefModule>())
+)
+vi.mock('../git/repository-remotes', async (importOriginal) =>
+  moduleMocks.repositoryRemotesModuleMock(await importOriginal<typeof RepositoryRemotesModule>())
 )
 vi.mock('../git/runner', async (importOriginal) =>
   moduleMocks.gitRunnerModuleMock(reposMocks, await importOriginal<typeof GitRunner>())
@@ -33,7 +41,7 @@ import { registerRepoHandlers } from './repos'
 import { clearGitCapabilityStateForTests } from '../git/git-capability-state'
 import { resetSshProviderAuthorities } from '../ssh/ssh-provider-authority'
 import { DEFAULT_REPO_BADGE_COLOR } from '../../shared/constants'
-import { clearSubmodulePathsCacheForTests } from '../git/status'
+import { clearSubmodulePathsCacheForTests } from '../git/submodule-paths'
 import { createRepoHandlerHarness, waitForAssertion } from './repos-remote-test-harness'
 
 const {

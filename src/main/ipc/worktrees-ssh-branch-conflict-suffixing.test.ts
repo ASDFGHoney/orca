@@ -15,8 +15,14 @@ vi.mock('../git/worktree', async () =>
 vi.mock('../git/runner', async () =>
   (await import('./worktrees-test-module-mocks')).gitRunnerModuleMock()
 )
-vi.mock('../git/repo', async () =>
-  (await import('./worktrees-test-module-mocks')).gitRepoModuleMock()
+vi.mock('../git/default-base-ref', async () =>
+  (await import('./worktrees-test-module-mocks')).defaultBaseRefModuleMock()
+)
+vi.mock('../git/repository-remotes', async () =>
+  (await import('./worktrees-test-module-mocks')).repositoryRemotesModuleMock()
+)
+vi.mock('../git/branch-conflict-detection', async () =>
+  (await import('./worktrees-test-module-mocks')).branchConflictDetectionModuleMock()
 )
 vi.mock('../git/git-username', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

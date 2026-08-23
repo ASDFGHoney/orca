@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as RunnerModule from './runner'
+import type * as GitHubCliRunnerModule from './github-cli-runner'
 
 const gitExecFileAsyncMock = vi.hoisted(() => vi.fn())
 const ghExecFileAsyncMock = vi.hoisted(() => vi.fn())
@@ -8,7 +9,13 @@ vi.mock('./runner', async () => {
   const actual = await vi.importActual<typeof RunnerModule>('./runner')
   return {
     ...actual,
-    gitExecFileAsync: gitExecFileAsyncMock,
+    gitExecFileAsync: gitExecFileAsyncMock
+  }
+})
+vi.mock('./github-cli-runner', async () => {
+  const actual = await vi.importActual<typeof GitHubCliRunnerModule>('./github-cli-runner')
+  return {
+    ...actual,
     ghExecFileAsync: ghExecFileAsyncMock
   }
 })

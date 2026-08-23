@@ -5,7 +5,7 @@ import { nativeWindowsPathToPosixShellPath } from '../shared/setup-runner-comman
 import { scriptDeclaresPosixShell } from '../shared/setup-script-shebang'
 import { resolveWindowsShellStartupFamily } from '../shared/windows-terminal-shell'
 import { resolveWindowsGitBashShellPath } from './git-bash'
-import { gitExecFileSync } from './git/runner'
+import { gitExecFileSync } from './git/git-process-launch'
 import { isWslPath, toWindowsWslPath, toLinuxPath } from './wsl'
 import { getHookRuntimeTarget, getHookWslContext } from './hook-runtime-target'
 import { SETUP_RUNNER_PATH_ENV_KEYS, getSetupRunnerEnvVars } from './setup-hook-env-vars'

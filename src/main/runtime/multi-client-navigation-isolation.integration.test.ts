@@ -28,7 +28,7 @@ import {
   type ResponseReader
 } from './paired-client-navigation-test-harness'
 
-vi.mock('../git/worktree', () => {
+vi.mock('../git/worktree-listing', () => {
   const worktrees = ['host', 'client-a', 'client-a2', 'client-b', 'session'].map((name) => ({
     path: `/tmp/${name}`,
     head: name,

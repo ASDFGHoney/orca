@@ -16,7 +16,7 @@ vi.mock('./local-worktree-filesystem', () => ({
   removeLocalWorktreePath: removeLocalWorktreePathMock
 }))
 
-vi.mock('./git/worktree', () => ({
+vi.mock('./git/worktree-listing', () => ({
   listWorktreesStrict: listWorktreesStrictMock
 }))
 

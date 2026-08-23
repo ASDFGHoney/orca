@@ -3,7 +3,8 @@ import type { GitWorktreeInfo } from '../shared/worktree/types'
 import { assertWorktreeUnlockedForRemoval } from '../shared/worktree/removal'
 import { areWorktreePathsEqual, formatWorktreeRemovalError } from './ipc/worktree-logic'
 import { gitExecFileAsync } from './git/runner'
-import { listWorktreesStrict, type GitWorktreeExecOptions } from './git/worktree'
+import type { GitWorktreeExecOptions } from './git/worktree-execution-options'
+import { listWorktreesStrict } from './git/worktree-listing'
 import { removeLocalWorktreePath } from './local-worktree-filesystem'
 
 type LocalWindowsRemovalRecoveryArgs = {

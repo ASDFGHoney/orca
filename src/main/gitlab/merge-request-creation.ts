@@ -1,3 +1,4 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CreateHostedReviewInput, CreateHostedReviewResult } from '../../shared/hosted-review'
@@ -13,13 +14,7 @@ import {
   type HostedReviewExecutionOptions
 } from '../source-control/hosted-review-git-options'
 import { getProjectSlug } from './client'
-import {
-  acquire,
-  glabExecFileAsync,
-  glabHostnameArgs,
-  glabRepoExecOptions,
-  release
-} from './gl-utils'
+import { acquire, glabHostnameArgs, glabRepoExecOptions, release } from './gl-utils'
 import { findOpenMRByHeadBase, parseMergeRequestPayload } from './merge-request-creation-lookup'
 
 function execErrorMessage(error: unknown): string {

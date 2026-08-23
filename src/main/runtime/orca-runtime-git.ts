@@ -26,27 +26,21 @@ import {
 import { withLinkedIssueDraftContext } from '../../shared/source-control-ai-action-variables'
 import type { SourceControlAiOperation } from '../../shared/source-control-ai-types'
 import type { GitProviderStatusOptions } from '../providers/types'
-import { getRemoteCommitUrl, getRemoteFileUrl } from '../git/repo'
+import { getRemoteCommitUrl, getRemoteFileUrl } from '../git/repository-remotes'
+import { abortMerge, abortRebase, detectConflictOperation } from '../git/conflict-status'
+import { bulkDiscardChanges, discardChanges } from '../git/git-discard-changes'
 import {
-  abortMerge,
-  abortRebase,
-  bulkDiscardChanges,
   bulkStageFiles,
   bulkUnstageFiles,
-  commitChanges,
-  detectConflictOperation,
-  discardChanges,
-  getBranchCompare,
-  getBranchDiff,
-  getCommitCompare,
-  getCommitDiff,
-  getDiff,
-  getStagedCommitContext,
-  getStatus as getGitStatus,
-  getSubmoduleStatus as getGitSubmoduleStatus,
   stageFile,
   unstageFile
-} from '../git/status'
+} from '../git/git-index-mutations'
+import { commitChanges, getStagedCommitContext } from '../git/git-commit-operations'
+import { getBranchCompare, getBranchDiff } from '../git/branch-comparison'
+import { getCommitCompare, getCommitDiff } from '../git/commit-comparison'
+import { getDiff } from '../git/status-file-diff'
+import { getStatus as getGitStatus } from '../git/status'
+import { getSubmoduleStatus as getGitSubmoduleStatus } from '../git/submodule-status'
 import { checkoutBranch, listLocalBranches } from '../git/checkout'
 import type { RuntimeGitCheckoutResult, RuntimeGitLocalBranches } from '../../shared/runtime-types'
 import { getHistory as getGitHistory } from '../git/history'

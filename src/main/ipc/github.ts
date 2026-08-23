@@ -61,9 +61,9 @@ import {
   clearVisiblePRRefreshWindow,
   enqueuePRRefresh,
   refreshPRNow,
-  reportVisiblePRRefreshCandidates,
-  setPRRefreshOutcomeObserver
+  reportVisiblePRRefreshCandidates
 } from '../github/pr-refresh-coordinator'
+import { setRefreshOutcomeObserver } from '../github/pr-refresh-queue-state'
 import { getWorkItemDetails, getPRFileContents } from '../github/work-item-details'
 import { getRateLimit } from '../github/rate-limit'
 import { diagnoseGhAuth } from '../github/auth-diagnose'
@@ -73,24 +73,29 @@ import {
 } from '../github/pr-refresh-validation-backoff'
 import { getLocalProjectWorktreeGitOptions } from '../project-runtime-git-options'
 import { dispatchWorkItem, type WorkItemArgs } from './github-work-item-args'
+import { getProjectViewTable, listProjectViews } from '../github/project-view'
+import { listAccessibleProjects } from '../github/project-view/accessible-project-discovery'
+import { resolveProjectRef } from '../github/project-view/project-reference'
+import { updateIssueBySlug } from '../github/project-view/mutations'
 import {
-  getProjectViewTable,
-  listAccessibleProjects,
-  resolveProjectRef,
-  listProjectViews,
-  getWorkItemDetailsBySlug,
-  updateProjectItemFieldValue,
   clearProjectItemFieldValue,
-  updateIssueBySlug,
-  updatePullRequestBySlug,
+  updateProjectItemFieldValue
+} from '../github/project-view/project-item-field-mutations'
+import { updatePullRequestBySlug } from '../github/project-view/pull-request-mutations'
+import {
   addIssueCommentBySlug,
-  updateIssueCommentBySlug,
   deleteIssueCommentBySlug,
-  listLabelsBySlug,
+  updateIssueCommentBySlug
+} from '../github/project-view/issue-comment-mutations'
+import {
   listAssignableUsersBySlug,
+  listLabelsBySlug
+} from '../github/project-view/repository-label-assignee-sources'
+import {
   listIssueTypesBySlug,
   updateIssueTypeBySlug
-} from '../github/project-view'
+} from '../github/project-view/repository-issue-types'
+import { getWorkItemDetailsBySlug } from '../github/project-view/work-item-details-query'
 import type {
   AddIssueCommentBySlugArgs,
   ClearProjectItemFieldArgs,
@@ -252,7 +257,7 @@ export function registerGitHubHandlers(store: Store, stats: StatsCollector): voi
     }
   }
 
-  setPRRefreshOutcomeObserver((candidate, outcome) => {
+  setRefreshOutcomeObserver((candidate, outcome) => {
     const repo =
       store.getRepos().find((r) => r.id === candidate.repoId) ??
       store.getRepos().find((r) => resolve(r.path) === resolve(candidate.repoPath))

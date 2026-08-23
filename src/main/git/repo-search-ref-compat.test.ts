@@ -8,9 +8,10 @@ vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
   gitExecFileSync: vi.fn()
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: vi.fn() }))
 
 import { clearGitCapabilityStateForTests } from './git-capability-state'
-import { searchBaseRefs } from './repo'
+import { searchBaseRefs } from './base-ref-search'
 
 describe('searchBaseRefs git compatibility', () => {
   afterEach(() => {

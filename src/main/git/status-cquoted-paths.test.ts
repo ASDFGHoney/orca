@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { getStatus, stageFile } from './status'
+import { getStatus } from './status'
+import { stageFile } from './git-index-mutations'
 
 const tempRoots: string[] = []
 

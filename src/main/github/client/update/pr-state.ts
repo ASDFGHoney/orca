@@ -1,6 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { GitHubPullRequestStateUpdate } from '../../../../shared/issue-mutation-types'
 import {
-  ghExecFileAsync,
   acquire,
   release,
   classifyPullRequestUpdateError,

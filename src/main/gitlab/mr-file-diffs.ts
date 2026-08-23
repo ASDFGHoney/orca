@@ -1,9 +1,9 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import type { GitLabMRFile } from '../../shared/gitlab-types'
 import { encodedProject } from './project-path-encoding'
 import {
   glabHostnameArgs,
   glabRepoExecOptions,
-  glabExecFileAsync,
   type LocalGitExecOptions,
   type ProjectRef
 } from './gl-utils'

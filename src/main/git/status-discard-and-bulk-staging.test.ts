@@ -52,13 +52,8 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import {
-  bulkDiscardChanges,
-  bulkStageFiles,
-  bulkUnstageFiles,
-  discardChanges,
-  isWithinWorktree
-} from './status'
+import { bulkDiscardChanges, discardChanges, isWithinWorktree } from './git-discard-changes'
+import { bulkStageFiles, bulkUnstageFiles } from './git-index-mutations'
 
 describe('discardChanges', () => {
   beforeEach(() => {

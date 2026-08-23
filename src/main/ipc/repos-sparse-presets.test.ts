@@ -35,11 +35,11 @@ vi.mock('electron', () => ({
 
 vi.mock('../git/repo', () => ({
   isGitRepo: vi.fn().mockReturnValue(true),
-  getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop()),
-  getBaseRefDefault: vi.fn().mockResolvedValue('origin/main'),
-  searchBaseRefs: vi.fn().mockResolvedValue([]),
-  BASE_REF_SEARCH_ARGS: ['for-each-ref'],
-  filterBaseRefSearchOutput: vi.fn().mockReturnValue([])
+  getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop())
+}))
+
+vi.mock('../git/default-base-ref', () => ({
+  getBaseRefDefault: vi.fn().mockResolvedValue('origin/main')
 }))
 
 vi.mock('./registered-worktree-roots-cache', () => ({

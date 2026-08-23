@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type { ClassifiedError } from '../../shared/classified-error'
 import type { IssueInfo } from '../../shared/github/pull-request-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
@@ -9,7 +10,7 @@ import {
   resolveIssueGitHubApiRepositorySource
 } from './github-api-repository'
 // prettier-ignore
-import { ghExecFileAsync, acquire, release, classifyListIssuesError } from './gh-utils'
+import { acquire, release, classifyListIssuesError } from './gh-utils'
 
 // Why: distinguishes a successful-empty listing from a failed fetch. The
 // previous `catch { return [] }` conflated a 403 on a private upstream with an

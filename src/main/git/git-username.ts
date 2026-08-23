@@ -1,7 +1,9 @@
 import type { SshGitProvider } from '../providers/ssh-git-provider'
-import { extractExecError, ghExecFileAsync, gitExecFileAsync } from './runner'
+import { gitExecFileAsync } from './runner'
+import { ghExecFileAsync } from './github-cli-runner'
+import { extractExecError } from './exec-error'
 import { parseHostedRemote } from './hosted-remote-url'
-import { resolveDefaultBaseRefViaExec } from './repo'
+import { resolveDefaultBaseRefViaExec } from './default-base-ref'
 
 const EXPLICIT_USERNAME_CONFIG_KEYS = ['github.user', 'user.username'] as const
 

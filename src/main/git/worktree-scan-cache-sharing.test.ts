@@ -18,6 +18,7 @@ vi.mock('./runner', () => ({
   gitExecFileSync: gitExecFileSyncMock,
   translateWslOutputPaths: translateWslOutputPathsMock
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
 // Default: the checkout cannot be renamed aside, so removal deletes it in place.
 vi.mock('../worktree-trash', () => ({
@@ -26,14 +27,13 @@ vi.mock('../worktree-trash', () => ({
   scheduleWorktreeTrashDeletion: vi.fn()
 }))
 
+import { moveWorktree, removeWorktree } from './worktree'
 import {
-  _getWorktreeScanCacheSizesForTests,
-  _resetWorktreeScanCacheForTests,
+  getWorktreeScanCacheSizes as _getWorktreeScanCacheSizesForTests,
   listWorktrees,
-  moveWorktree,
-  removeWorktree,
+  resetWorktreeScanCache as _resetWorktreeScanCacheForTests,
   WORKTREE_LIST_TIMEOUT_MS
-} from './worktree'
+} from './worktree-listing'
 import { registerWorktreeSuiteHooks } from './worktree-test-harness'
 
 registerWorktreeSuiteHooks()

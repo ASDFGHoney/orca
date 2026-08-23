@@ -13,7 +13,7 @@ import {
   createWorktreeSharedPaths,
   findExistingWorktreeSymlinkPaths
 } from '../ipc/worktree-symlinks'
-import { assertWorktreeCleanForRemoval } from './worktree'
+import { assertWorktreeCleanForRemoval } from './worktree-removal-preflight'
 import { getStatus } from './status'
 
 const git = (args: string[], cwd: string): void => {

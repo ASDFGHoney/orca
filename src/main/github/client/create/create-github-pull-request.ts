@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type {
   CreateHostedReviewInput,
   CreateHostedReviewResult
@@ -9,13 +10,7 @@ import {
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import {
-  ghExecFileAsync,
-  acquire,
-  release,
-  ghRepoExecOptions,
-  githubRepoContext
-} from '../../gh-utils'
+import { acquire, release, ghRepoExecOptions, githubRepoContext } from '../../gh-utils'
 import {
   getHostedReviewLocalGitOptions,
   type HostedReviewExecutionOptions

@@ -8,8 +8,9 @@ vi.mock('./runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
   gitExecFileSync: vi.fn()
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: vi.fn() }))
 
-import { getBaseRefDefault } from './repo'
+import { getBaseRefDefault } from './default-base-ref'
 
 describe('getBaseRefDefault async subprocess bounds', () => {
   beforeEach(() => {

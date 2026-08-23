@@ -3,17 +3,18 @@
 // and stderr extraction from execFile rejections (err.message is unreliable).
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  appendGitConfigEnv,
-  extractExecError,
-  isTransientGhError,
   nonInteractiveGitEnv,
-  parseRetryAfterMs,
   promptGuardGitEnv,
   promptGuardShellEnv,
-  redirectPortedHostnameToEnv,
   untranslatedGitOutputEnv
-} from './runner'
-import { mergeGitConfigEnvProtocol } from '../../shared/git-credential-prompt-env'
+} from './git-environment-policy'
+import { extractExecError, parseRetryAfterMs } from './exec-error'
+import { isTransientGhError } from './github-cli-policy'
+import { redirectPortedHostnameToEnv } from './gitlab-cli-runner'
+import {
+  appendGitConfigEnv,
+  mergeGitConfigEnvProtocol
+} from '../../shared/git-credential-prompt-env'
 
 // Reads git config injected via the GIT_CONFIG_COUNT/KEY/VALUE env protocol
 // back into a plain key→value map so tests can assert on it directly.
@@ -344,7 +345,6 @@ describe('redirectPortedHostnameToEnv WSLENV forwarding', () => {
     // A WSL-routed glab only sees Windows variables listed in WSLENV; without
     // the entry the ported host is silently dropped and glab talks to
     // gitlab.com (#12557).
-    const { redirectPortedHostnameToEnv } = await import('./runner')
     const { options } = redirectPortedHostnameToEnv(
       ['api', '--hostname', 'gitlab.example.com:8443'],
       { env: { PATH: '/usr/bin' } }

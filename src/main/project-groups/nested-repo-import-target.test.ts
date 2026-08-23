@@ -1,14 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { join } from 'node:path'
 import type { GitWorktreeInfo } from '../../shared/worktree/types'
-import { listWorktreeGraph } from '../git/worktree'
+import { listWorktreeGraph } from '../git/worktree-listing'
 import {
   createNestedRepoImportTargetResolver,
   resolveLocalNestedRepoImportTargetPath,
   resolveSshNestedRepoImportTargetPath
 } from './nested-repo-import-target'
 
-vi.mock('../git/worktree', () => ({
+vi.mock('../git/worktree-listing', () => ({
   listWorktreeGraph: vi.fn()
 }))
 

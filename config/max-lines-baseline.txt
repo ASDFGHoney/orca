@@ -22,13 +22,6 @@ inline src/main/codex-accounts/service.ts
 inline src/main/codex/config-toml-trust.ts
 inline src/main/codex/hook-service.ts
 inline src/main/daemon/daemon-init.ts
-inline src/main/git/repo.ts
-inline src/main/git/runner.ts
-inline src/main/git/status.ts
-inline src/main/git/worktree.ts
-inline src/main/github/pr-refresh-coordinator.ts
-inline src/main/github/project-view.ts
-inline src/main/github/project-view/mutations.ts
 inline src/main/github/work-item-details.ts
 inline src/main/gitlab/client.ts
 inline src/main/index.ts

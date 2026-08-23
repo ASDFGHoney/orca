@@ -10,7 +10,7 @@ import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
 import { validateGitPushTarget } from './push-target-validation'
 import { gitExecFileAsync } from './runner'
-import { runWithGitReadCacheInvalidation } from './status'
+import { runWithGitReadCacheInvalidation } from './git-read-cache'
 
 async function getConfiguredPushTarget(
   worktreePath: string,

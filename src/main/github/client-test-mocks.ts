@@ -71,7 +71,6 @@ export function createGitHubClientMocks(): GitHubClientMocks {
 
 export type GhUtilsModuleMock = {
   execFileAsync: Mock
-  ghExecFileAsync: Mock
   getOwnerRepo: Mock
   getIssueOwnerRepo: Mock
   getOwnerRepoForRemote: Mock
@@ -90,7 +89,6 @@ export type GhUtilsModuleMock = {
 export function ghUtilsModuleMock(mocks: GitHubClientMocks): GhUtilsModuleMock {
   return {
     execFileAsync: mocks.execFileAsyncMock,
-    ghExecFileAsync: mocks.ghExecFileAsyncMock,
     getOwnerRepo: mocks.getOwnerRepoMock,
     getIssueOwnerRepo: mocks.getIssueOwnerRepoMock,
     getOwnerRepoForRemote: mocks.getOwnerRepoForRemoteMock,
@@ -122,12 +120,11 @@ export function ghUtilsModuleMock(mocks: GitHubClientMocks): GhUtilsModuleMock {
   }
 }
 
-export type GitRunnerModuleMock = { gitExecFileAsync: Mock; ghExecFileAsync: Mock }
+export type GitRunnerModuleMock = { gitExecFileAsync: Mock }
 
 export function gitRunnerModuleMock(mocks: GitHubClientMocks): GitRunnerModuleMock {
   return {
-    gitExecFileAsync: mocks.gitExecFileAsyncMock,
-    ghExecFileAsync: mocks.ghExecFileAsyncMock
+    gitExecFileAsync: mocks.gitExecFileAsyncMock
   }
 }
 

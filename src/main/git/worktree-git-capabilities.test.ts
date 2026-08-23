@@ -9,9 +9,10 @@ vi.mock('./runner', () => ({
   gitExecFileSync: vi.fn(),
   translateWslOutputPaths: (output: string) => output
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: vi.fn() }))
 
 import { clearGitCapabilityStateForTests } from './git-capability-state'
-import { listWorktrees } from './worktree'
+import { listWorktrees } from './worktree-listing'
 
 const WORKTREE_LIST_OUTPUT = `worktree /repo
 HEAD abc123

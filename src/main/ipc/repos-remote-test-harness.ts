@@ -2,7 +2,10 @@ import { EventEmitter } from 'node:events'
 import { vi } from 'vitest'
 import type { Mock } from 'vitest'
 import type * as GitRunner from '../git/runner'
+import type * as GitProcessLaunch from '../git/git-process-launch'
 import type * as RepoModule from '../git/repo'
+import type * as DefaultBaseRefModule from '../git/default-base-ref'
+import type * as RepositoryRemotesModule from '../git/repository-remotes'
 
 /** Unconstrained spy; annotated explicitly so declaration emit never names @vitest/spy internals. */
 export type ReposIpcSpy = Mock<(...args: never[]) => unknown>
@@ -111,18 +114,25 @@ export function electronModuleMock(mocks: ReposIpcMocks): Record<string, unknown
   }
 }
 
-// Why: use real pure helpers so SSH parity tests catch drift in DEFAULT_BASE_REF_PROBES / normalizeRefSearchQuery.
 export function gitRepoModuleMock(actual: typeof RepoModule): Record<string, unknown> {
   return {
     ...actual,
-    // Stub only the functions that spawn git / touch the filesystem.
     isGitRepo: vi.fn().mockReturnValue(true),
     getGitRepoRoot: vi.fn((path: string) => path),
-    getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop()),
-    getBaseRefDefault: vi.fn().mockResolvedValue('origin/main'),
-    getRemoteCount: vi.fn().mockResolvedValue(1),
-    searchBaseRefs: vi.fn().mockResolvedValue([])
+    getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop())
   }
+}
+
+export function defaultBaseRefModuleMock(
+  actual: typeof DefaultBaseRefModule
+): Record<string, unknown> {
+  return { ...actual, getBaseRefDefault: vi.fn().mockResolvedValue('origin/main') }
+}
+
+export function repositoryRemotesModuleMock(
+  actual: typeof RepositoryRemotesModule
+): Record<string, unknown> {
+  return { ...actual, getRemoteCount: vi.fn().mockResolvedValue(1) }
 }
 
 // Why: keep the real env builders so the clone regression test (#7652) asserts real markers, not a mock echoing itself.
@@ -133,8 +143,16 @@ export function gitRunnerModuleMock(
   return {
     ...actual,
     gitExecFileAsync: mocks.gitExecFileAsyncMock,
-    gitExecFileAsyncBuffer: vi.fn(),
-    gitStreamStdout: vi.fn(),
+    gitExecFileAsyncBuffer: vi.fn()
+  }
+}
+
+export function gitProcessLaunchModuleMock(
+  mocks: ReposIpcMocks,
+  actual: typeof GitProcessLaunch
+): Record<string, unknown> {
+  return {
+    ...actual,
     gitSpawn: mocks.gitSpawnMock,
     gitSpawnAfterWindowsEnvironmentReady: mocks.gitSpawnAfterWindowsEnvironmentReadyMock
   }

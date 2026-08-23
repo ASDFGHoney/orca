@@ -1,4 +1,4 @@
-import { ghExecFileAsync } from '../../gh-utils'
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { OwnerRepo, ghRepoExecOptions } from '../../gh-utils'
 import { githubHostExecOptions, type GitHubApiRepository } from '../../github-api-repository'
 import type { GhExecOptions } from './../github-exec-scope'

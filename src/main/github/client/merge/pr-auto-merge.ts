@@ -1,11 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { GitHubPRMergeMethod } from '../../../../shared/github/pull-request-types'
-import {
-  ghExecFileAsync,
-  acquire,
-  release,
-  classifyGhError,
-  type LocalGitExecOptions
-} from '../../gh-utils'
+import { acquire, release, classifyGhError, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import { githubPRStackExecutionScope, type GhExecOptions } from './../github-exec-scope'
 import { detectRepositoryMergeMetadata } from './../detect/repository-merge-metadata'

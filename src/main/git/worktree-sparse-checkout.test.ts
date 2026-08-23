@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { listWorktrees, parseCoreSparseCheckoutFlag } from './worktree'
+import { listWorktrees } from './worktree-listing'
+import { parseCoreSparseCheckoutFlag } from './worktree-sparse-checkout'
 
 const tempRoots: string[] = []
 

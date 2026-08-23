@@ -15,6 +15,7 @@ vi.mock('../git/runner', () => ({
   gitExecFileAsync: gitExecFileAsyncMock,
   ghExecFileAsync: vi.fn()
 }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: vi.fn() }))
 
 vi.mock('../providers/ssh-git-dispatch', () => ({
   getSshGitProviderGeneration: getSshGitProviderGenerationMock,

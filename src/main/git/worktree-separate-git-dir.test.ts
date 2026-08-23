@@ -25,8 +25,8 @@ vi.mock('./runner', async () => {
   }
 })
 
-// Imported after vi.mock so worktree.ts binds to the spied runner.
-const { listWorktrees } = await import('./worktree')
+// Imported after vi.mock so worktree-listing.ts binds to the spied runner.
+const { listWorktrees } = await import('./worktree-listing')
 
 const tempRoots: string[] = []
 

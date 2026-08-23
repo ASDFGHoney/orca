@@ -1,4 +1,4 @@
-import { ghExecFileAsync } from './gh-utils'
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import { noteRepositoryRateLimitSpend, repositoryRateLimitGuard } from './rate-limit'
 import { githubHostExecOptions } from './github-api-repository'
 import { githubRepoIdentityKey } from '../../shared/github/repository-identity-key'

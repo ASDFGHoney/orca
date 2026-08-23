@@ -1,6 +1,6 @@
 import type { PRCheckRunDetails } from '../../../../shared/github/check-types'
 import { sliceCheckLogTail } from '../../../../shared/check-job-log-tail-slice'
-import { ghExecFileAsync } from '../../gh-utils'
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { GitHubApiRepository } from '../../github-api-repository'
 import { githubRepoIdentityKey } from '../../../../shared/github/repository-identity-key'
 import type { GhExecOptions } from './../github-exec-scope'

@@ -51,7 +51,7 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import { abortMerge, abortRebase, detectConflictOperation } from './status'
+import { abortMerge, abortRebase, detectConflictOperation } from './conflict-status'
 
 describe('abortMerge', () => {
   beforeEach(() => {

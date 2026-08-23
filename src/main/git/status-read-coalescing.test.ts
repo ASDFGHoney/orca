@@ -5,7 +5,8 @@ import path from 'node:path'
 import {
   createBoundedFileReaderModuleMock,
   createFsPromisesModuleMock,
-  createGitRunnerModuleMock
+  createGitRunnerModuleMock,
+  createGitStreamModuleMock
 } from './status-test-harness'
 
 const {
@@ -37,6 +38,13 @@ vi.mock('./runner', () =>
     gitStreamOptionsMock
   })
 )
+vi.mock('./git-stream', () =>
+  createGitStreamModuleMock({
+    gitExecFileAsyncMock,
+    gitExecFileAsyncBufferMock,
+    gitStreamOptionsMock
+  })
+)
 
 vi.mock('fs/promises', () =>
   createFsPromisesModuleMock({ lstatMock, realpathMock, readFileMock, statMock, rmMock })
@@ -53,7 +61,9 @@ vi.mock('../../shared/node-bounded-file-reader', async (importOriginal) =>
   })
 )
 
-import { clearEffectiveUpstreamStatusCacheForTests, getStatus, stageFile } from './status'
+import { clearEffectiveUpstreamStatusCacheForTests } from './git-read-cache'
+import { getStatus } from './status'
+import { stageFile } from './git-index-mutations'
 
 describe('getStatus', () => {
   beforeEach(() => {

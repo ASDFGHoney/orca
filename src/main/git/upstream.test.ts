@@ -11,7 +11,7 @@ vi.mock('./runner', () => ({
 }))
 
 import { getUpstreamStatus, invalidateGitUpstreamStatusReads } from './upstream'
-import { runWithGitReadCacheInvalidation } from './status'
+import { runWithGitReadCacheInvalidation } from './git-read-cache'
 
 const missingTrackingRefError = new Error(
   "fatal: ambiguous argument 'HEAD@{u}': unknown revision or path not in the working tree.\n" +

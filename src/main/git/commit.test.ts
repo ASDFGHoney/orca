@@ -9,7 +9,7 @@ vi.mock('./runner', () => ({
   gitExecFileAsyncBuffer: vi.fn()
 }))
 
-import { commitChanges } from './status'
+import { commitChanges } from './git-commit-operations'
 
 describe('commitChanges', () => {
   beforeEach(() => {

@@ -15,12 +15,12 @@ vi.mock('node:child_process', () => ({
 
 import {
   commandExecFileAsync,
-  ghExecFileAsync,
   gitExecFileAsync,
-  gitStreamStdout,
   translateWslOutputPaths,
   wslAwareSpawn
 } from './runner'
+import { ghExecFileAsync } from './github-cli-runner'
+import { gitStreamStdout } from './git-stream'
 
 type MockChildProcess = EventEmitter & {
   stdout: EventEmitter

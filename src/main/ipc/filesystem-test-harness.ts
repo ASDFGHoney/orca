@@ -33,6 +33,10 @@ export const abortRebaseMock: IpcMock = vi.fn()
 export const getDiffMock: IpcMock = vi.fn()
 export const getBranchCompareMock: IpcMock = vi.fn()
 export const getBranchDiffMock: IpcMock = vi.fn()
+export const getCommitCompareMock: IpcMock = vi.fn()
+export const getCommitDiffMock: IpcMock = vi.fn()
+export const getSubmoduleStatusMock: IpcMock = vi.fn()
+export const detectConflictOperationMock: IpcMock = vi.fn()
 export const getStagedCommitContextMock: IpcMock = vi.fn()
 export const stageFileMock: IpcMock = vi.fn()
 export const bulkStageFilesMock: IpcMock = vi.fn()
@@ -100,6 +104,41 @@ export const gitStatusModuleMock = {
   bulkUnstageFiles: bulkUnstageFilesMock,
   bulkDiscardChanges: bulkDiscardChangesMock,
   discardChanges: discardChangesMock
+}
+export const gitStatusQueryMock = { getStatus: getStatusMock }
+export const gitSubmoduleStatusMock = { getSubmoduleStatus: getSubmoduleStatusMock }
+export const gitConflictStatusMock = {
+  abortMerge: abortMergeMock,
+  abortRebase: abortRebaseMock,
+  detectConflictOperation: detectConflictOperationMock
+}
+export const gitFileDiffMock = { getDiff: getDiffMock }
+export const gitCommitOperationsMock = {
+  commitChanges: commitChangesMock,
+  getStagedCommitContext: getStagedCommitContextMock
+}
+export const gitIndexMutationsMock = {
+  stageFile: stageFileMock,
+  bulkStageFiles: bulkStageFilesMock,
+  unstageFile: unstageFileMock,
+  bulkUnstageFiles: bulkUnstageFilesMock
+}
+export const gitDiscardChangesMock = {
+  bulkDiscardChanges: bulkDiscardChangesMock,
+  discardChanges: discardChangesMock
+}
+export const gitBranchComparisonMock = {
+  getBranchCompare: getBranchCompareMock,
+  getBranchDiff: getBranchDiffMock
+}
+export const gitCommitComparisonMock = {
+  getCommitCompare: getCommitCompareMock,
+  getCommitDiff: getCommitDiffMock
+}
+export const repoWorktreesMock = {
+  listRepoWorktrees: listWorktreesMock,
+  isRepoRoot: (repos: { path: string }[], targetPath: string) =>
+    repos.some((repo) => path.resolve(repo.path) === path.resolve(targetPath))
 }
 
 export const gitIgnoredPathsMock = { checkIgnoredPaths: checkIgnoredPathsMock }

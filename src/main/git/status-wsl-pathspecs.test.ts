@@ -14,14 +14,8 @@ vi.mock('./runner', () => ({
   gitStreamStdout: vi.fn()
 }))
 
-import {
-  bulkDiscardChanges,
-  bulkStageFiles,
-  bulkUnstageFiles,
-  discardChanges,
-  stageFile,
-  unstageFile
-} from './status'
+import { bulkDiscardChanges, discardChanges } from './git-discard-changes'
+import { bulkStageFiles, bulkUnstageFiles, stageFile, unstageFile } from './git-index-mutations'
 
 const worktreePath = path.resolve('repo')
 const windowsRelativePath = 'tests\\breakgit'

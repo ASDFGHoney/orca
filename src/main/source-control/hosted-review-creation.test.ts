@@ -1,3 +1,5 @@
+vi.mock('../git/gitlab-cli-runner', () => ({ glabExecFileAsync: glabExecFileAsyncMock }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {

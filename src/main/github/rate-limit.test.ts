@@ -4,9 +4,7 @@ const { ghExecFileAsyncMock } = vi.hoisted(() => ({
   ghExecFileAsyncMock: vi.fn()
 }))
 
-vi.mock('../git/runner', () => ({
-  ghExecFileAsync: ghExecFileAsyncMock
-}))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 
 vi.mock('./gh-utils', () => ({
   acquire: vi.fn(),

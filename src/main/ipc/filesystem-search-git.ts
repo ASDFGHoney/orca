@@ -7,7 +7,7 @@ import {
   ingestGitGrepLine,
   SEARCH_TIMEOUT_MS
 } from '../../shared/text-search'
-import { gitSpawnAfterWindowsEnvironmentReady } from '../git/runner'
+import { gitSpawnAfterWindowsEnvironmentReady } from '../git/git-process-launch'
 import {
   isWslLinkedWorktreeGitRoutingCandidate,
   prepareWslLinkedWorktreeGitRouting

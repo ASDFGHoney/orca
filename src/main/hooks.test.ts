@@ -34,6 +34,7 @@ vi.mock('./git/runner', async () => ({
   ...(await vi.importActual<typeof GitRunner>('./git/runner')),
   gitExecFileSync: gitExecFileSyncMock
 }))
+vi.mock('./git/git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
 describe('runHook', () => {
   const makeRepo = (hookSettings?: {

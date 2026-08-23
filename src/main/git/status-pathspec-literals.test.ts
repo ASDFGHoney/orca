@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { bulkStageFiles, bulkUnstageFiles, stageFile, unstageFile } from './status'
+import { bulkStageFiles, bulkUnstageFiles, stageFile, unstageFile } from './git-index-mutations'
 
 const tempRoots: string[] = []
 const globNamedFile = '[k]eep.log'

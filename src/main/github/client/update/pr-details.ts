@@ -1,5 +1,5 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import {
-  ghExecFileAsync,
   acquire,
   release,
   classifyPullRequestUpdateError,

@@ -4,7 +4,7 @@ const { listWorktreesMock } = vi.hoisted(() => ({
   listWorktreesMock: vi.fn()
 }))
 
-vi.mock('./git/worktree', () => ({
+vi.mock('./git/worktree-listing', () => ({
   listWorktrees: listWorktreesMock
 }))
 

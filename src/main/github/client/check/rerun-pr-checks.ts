@@ -1,5 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { GitHubRerunPRChecksResult } from '../../../../shared/github/check-types'
-import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
+import { acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 // Why: pure error helpers come from their own modules so tests that mock gh-utils still classify for real.
 import { extractExecError } from '../../../git/exec-error'
 import { classifyRerunChecksError } from '../../gh-error-classification'

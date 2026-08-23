@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process'
-import { gitSpawnAfterWindowsEnvironmentReady } from '../git/runner'
+import { gitSpawnAfterWindowsEnvironmentReady } from '../git/git-process-launch'
 import {
   isWslLinkedWorktreeGitRoutingCandidate,
   prepareWslLinkedWorktreeGitRouting

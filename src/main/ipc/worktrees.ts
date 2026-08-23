@@ -82,12 +82,10 @@ import {
   resolveCustomWorktreeVisibilitySources
 } from '../../shared/worktree/visibility-sources'
 import { resolveConfiguredWorktreeBasePaths } from '../../shared/worktree/configured-worktree-base-path'
-import {
-  assertWorktreeCleanForRemoval,
-  forceDeleteLocalBranch,
-  listWorktreesStrict as listGitWorktreesStrict,
-  removeWorktree
-} from '../git/worktree'
+import { removeWorktree } from '../git/worktree'
+import { forceDeleteLocalBranch } from '../git/worktree-branch-cleanup'
+import { listWorktreesStrict as listGitWorktreesStrict } from '../git/worktree-listing'
+import { assertWorktreeCleanForRemoval } from '../git/worktree-removal-preflight'
 import { gitExecFileAsync } from '../git/runner'
 import { withWorktreeRemoveStageSpan, withWorktreeSpan } from '../observability/instrumentation'
 import { resolveGitHubPrStartPoint } from '../github/pr-start-point'
@@ -95,7 +93,7 @@ import {
   fetchGitHubPullRequestHeadRef,
   fetchPrHeadTrackingRef
 } from '../github/pr-head-tracking-ref'
-import { pruneWorktreePRRefreshAliases } from '../github/pr-refresh-coordinator'
+import { pruneWorktreeRefreshAliases } from '../github/pr-refresh-queue-state'
 import { resolveGitHubReviewHeadRemote } from '../github/review-head-remote'
 import { listRepoWorktrees } from '../repo-worktrees'
 import { getSshGitProvider, requireSshGitProvider } from '../providers/ssh-git-dispatch'
@@ -355,7 +353,7 @@ function removeWorktreeMetadataAndTransientState(
     // Why: schedule async history tree removal — never recursive-rmSync on the delete critical path.
     deleteWorktreeHistoryDir(worktreeId)
     // Why: release the removed worktree's PR-refresh aliases so coalesced queue entries don't retain it all session (memory creep).
-    pruneWorktreePRRefreshAliases(worktreeId)
+    pruneWorktreeRefreshAliases(worktreeId)
   }
   // Why: removed workspaces must never resurrect from the persisted cleanup/space scan snapshots.
   const snapshotDirectory = store.getProfileStorageDirectory()

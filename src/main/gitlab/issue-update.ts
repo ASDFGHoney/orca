@@ -1,10 +1,10 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import type { GitLabIssueUpdate } from '../../shared/gitlab-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import {
   acquire,
   classifyGlabError,
   getGlabKnownHosts,
-  glabExecFileAsync,
   glabHostnameArgs,
   glabRepoExecOptions,
   release,

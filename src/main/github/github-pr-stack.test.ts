@@ -7,7 +7,7 @@ const { ghExecFileAsyncMock, rateLimitGuardMock, noteRateLimitSpendMock } = vi.h
   noteRateLimitSpendMock: vi.fn()
 }))
 
-vi.mock('../git/runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 vi.mock('./rate-limit', () => ({
   repositoryRateLimitGuard: rateLimitGuardMock,
   noteRepositoryRateLimitSpend: noteRateLimitSpendMock

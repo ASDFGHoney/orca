@@ -1,14 +1,14 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { gitExecFileAsync, ghExecFileAsync } from '../git/runner'
-// Pure error-parsing helpers come from the lightweight module (not `runner`) so
-// tests that mock `../git/runner` still resolve the real implementations.
+import { gitExecFileAsync } from '../git/runner'
+// Pure error parsing stays independent from either process runner so tests can
+// mock Git and GitHub CLI execution without replacing classification behavior.
 import { extractExecError, parseRetryAfterMs } from '../git/exec-error'
 
 // Why: legacy generic execFile wrapper - only used by callers that don't need
-// WSL-aware routing. Repo-scoped callers should use the runner exports below.
+// WSL-aware routing. Repo-scoped callers should use the WSL-aware exports below.
 export const execFileAsync = promisify(execFile)
-export { ghExecFileAsync, gitExecFileAsync, extractExecError, parseRetryAfterMs }
+export { gitExecFileAsync, extractExecError, parseRetryAfterMs }
 export {
   classifyGhError,
   classifyListIssuesError,

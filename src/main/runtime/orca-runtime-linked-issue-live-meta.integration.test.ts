@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorktreeMeta } from '../../shared/worktree/meta-types'
-import type * as GitStatusModule from '../git/status'
+import type * as GitCommitOperationsModule from '../git/git-commit-operations'
 import type * as CommitMessageTextGenerationModule from '../text-generation/commit-message-text-generation'
-import type * as WorktreeModule from '../git/worktree'
+import type * as WorktreeListingModule from '../git/worktree-listing'
 import { OrcaRuntimeService } from './orca-runtime'
 
 const mocks = vi.hoisted(() => ({
@@ -15,14 +15,14 @@ const mocks = vi.hoisted(() => ({
   resolveCommitMessageSettings: vi.fn()
 }))
 
-vi.mock('../git/worktree', async () => ({
-  ...(await vi.importActual<typeof WorktreeModule>('../git/worktree')),
+vi.mock('../git/worktree-listing', async () => ({
+  ...(await vi.importActual<typeof WorktreeListingModule>('../git/worktree-listing')),
   listWorktrees: mocks.listWorktrees,
   listWorktreesStrict: mocks.listWorktrees
 }))
 
-vi.mock('../git/status', async () => ({
-  ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
+vi.mock('../git/git-commit-operations', async () => ({
+  ...(await vi.importActual<typeof GitCommitOperationsModule>('../git/git-commit-operations')),
   getStagedCommitContext: mocks.getStagedCommitContext
 }))
 

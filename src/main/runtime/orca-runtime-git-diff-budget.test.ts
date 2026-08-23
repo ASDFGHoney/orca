@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { REMOTE_RPC_MAX_CONTENT_BYTES } from '../../shared/remote-rpc-content-budget'
 import type { GitDiffResult } from '../../shared/git-diff-compare-types'
 import type { GlobalSettings } from '../../shared/global-settings-types'
-import type * as GitStatusModule from '../git/status'
+import type * as GitFileDiffModule from '../git/status-file-diff'
+import type * as GitBranchComparisonModule from '../git/branch-comparison'
+import type * as GitCommitComparisonModule from '../git/commit-comparison'
 import { RuntimeGitCommands, type ResolvedRuntimeGitWorktree } from './orca-runtime-git'
 
 const mocks = vi.hoisted(() => ({
@@ -18,10 +20,18 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
   getSshGitProvider: mocks.getSshGitProvider
 }))
 
-vi.mock('../git/status', async () => ({
-  ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
-  getDiff: mocks.getDiff,
-  getBranchDiff: mocks.getBranchDiff,
+vi.mock('../git/status-file-diff', async () => ({
+  ...(await vi.importActual<typeof GitFileDiffModule>('../git/status-file-diff')),
+  getDiff: mocks.getDiff
+}))
+
+vi.mock('../git/branch-comparison', async () => ({
+  ...(await vi.importActual<typeof GitBranchComparisonModule>('../git/branch-comparison')),
+  getBranchDiff: mocks.getBranchDiff
+}))
+
+vi.mock('../git/commit-comparison', async () => ({
+  ...(await vi.importActual<typeof GitCommitComparisonModule>('../git/commit-comparison')),
   getCommitDiff: mocks.getCommitDiff
 }))
 

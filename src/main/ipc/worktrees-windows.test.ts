@@ -71,11 +71,15 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../git/worktree', () => ({
-  listWorktrees: listWorktreesMock,
-  listWorktreesStrict: listWorktreesMock,
-  assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock,
   addWorktree: addWorktreeMock,
   removeWorktree: removeWorktreeMock
+}))
+vi.mock('../git/worktree-listing', () => ({
+  listWorktrees: listWorktreesMock,
+  listWorktreesStrict: listWorktreesMock
+}))
+vi.mock('../git/worktree-removal-preflight', () => ({
+  assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock
 }))
 
 vi.mock('../git/runner', () => ({
@@ -85,11 +89,15 @@ vi.mock('../git/runner', () => ({
   gitExecFileAsync: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
   gitExecFileSync: vi.fn()
 }))
+vi.mock('../git/git-process-launch', () => ({ gitExecFileSync: vi.fn() }))
 
-vi.mock('../git/repo', () => ({
+vi.mock('../git/default-base-ref', () => ({
   getDefaultBaseRef: getDefaultBaseRefMock,
   resolveDefaultBaseRefWithLocalGit: resolveDefaultBaseRefWithLocalGitMock,
-  resolveDefaultBaseRefViaExec: resolveDefaultBaseRefViaExecMock,
+  resolveDefaultBaseRefViaExec: resolveDefaultBaseRefViaExecMock
+}))
+
+vi.mock('../git/branch-conflict-detection', () => ({
   getBranchConflictKind: getBranchConflictKindMock
 }))
 

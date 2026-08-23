@@ -45,12 +45,9 @@ import { DiffCommentSchema } from '../../shared/diff-comment-schema'
 import { invalidateAuthorizedRootsCache } from './registered-worktree-roots-cache'
 import type { ChildProcess } from 'node:child_process'
 import { access, mkdir, readdir, rm } from 'node:fs/promises'
-import {
-  awaitWindowsHostGitEnvironmentReady,
-  gitExecFileAsync,
-  gitSpawnAfterWindowsEnvironmentReady,
-  nonInteractiveGitEnv
-} from '../git/runner'
+import { awaitWindowsHostGitEnvironmentReady, gitExecFileAsync } from '../git/runner'
+import { gitSpawnAfterWindowsEnvironmentReady } from '../git/git-process-launch'
+import { nonInteractiveGitEnv } from '../git/git-environment-policy'
 import { isAbsolute, join, posix } from 'node:path'
 import {
   cleanupClaimedCloneTarget,
@@ -66,22 +63,17 @@ import {
   resolveNestedRepoSelection
 } from '../project-groups/nested-repo-import'
 import { createNestedRepoImportTargetResolver } from '../project-groups/nested-repo-import-target'
+import { isGitRepo, getGitRepoRoot, getLinkedWorktreeMainRepoRoot, getRepoName } from '../git/repo'
+import { getBaseRefDefault, resolveDefaultBaseRefViaExec } from '../git/default-base-ref'
+import { getRemoteCount, parseRemoteCount } from '../git/repository-remotes'
 import {
-  isGitRepo,
-  getGitRepoRoot,
-  getLinkedWorktreeMainRepoRoot,
-  getRepoName,
-  getBaseRefDefault,
-  getRemoteCount,
   normalizeRefSearchQuery,
   parseAndFilterSearchRefDetails,
-  parseRemoteCount,
-  resolveDefaultBaseRefViaExec,
   buildSearchBaseRefsArgv,
-  isForEachRefExcludeUnsupportedError,
   mergeBaseRefSearchResultGroups,
   searchBaseRefDetails
-} from '../git/repo'
+} from '../git/base-ref-search'
+import { isForEachRefExcludeUnsupportedError } from '../../shared/git-ref-command-capabilities'
 import { getSshGitProvider } from '../providers/ssh-git-dispatch'
 import { getSshGitCapabilityCache } from '../git/git-capability-state'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
@@ -123,7 +115,7 @@ import {
   normalizeCustomWorktreeVisibilitySources,
   normalizeWorktreeVisibilitySourcePreferences
 } from '../../shared/worktree/visibility-sources'
-import { runWithGitReadCacheInvalidation } from '../git/status'
+import { runWithGitReadCacheInvalidation } from '../git/git-read-cache'
 import { isAdmissibleDirectSshAuthority } from '../../shared/ssh-retained-payload-admission'
 import { isCurrentSshProviderAuthority } from '../ssh/ssh-provider-authority'
 

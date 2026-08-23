@@ -1,3 +1,5 @@
+vi.mock('../git/gitlab-cli-runner', () => ({ glabExecFileAsync: glabExecFileAsyncMock }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

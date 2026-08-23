@@ -15,6 +15,7 @@ vi.mock('../git/runner', () => ({
   ghExecFileAsync: ghExecFileAsyncMock,
   gitExecFileAsync: gitExecFileAsyncMock
 }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 
 vi.mock('../ssh/ssh-g-config-resolution', () => ({
   resolveWithSshG: resolveWithSshGMock

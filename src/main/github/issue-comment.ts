@@ -1,7 +1,8 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type { GitHubCommentResult, PRComment } from '../../shared/github/comment-types'
 import type { LocalGitExecOptions, OwnerRepo } from './gh-utils'
 import { getIssueGitHubApiRepository, resolveGitHubRepoExecution } from './github-api-repository'
-import { acquire, classifyGhError, ghExecFileAsync, release } from './gh-utils'
+import { acquire, classifyGhError, release } from './gh-utils'
 
 /**
  * Add a comment to an existing GitHub issue.

@@ -1,4 +1,5 @@
-import { ghExecFileAsync, acquire, release, type OwnerRepo } from '../../gh-utils'
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
+import { acquire, release, type OwnerRepo } from '../../gh-utils'
 import {
   getHostedReviewLocalGitOptions,
   type HostedReviewExecutionOptions

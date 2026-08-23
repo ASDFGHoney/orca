@@ -12,6 +12,9 @@ const { gitSpawnMock } = vi.hoisted(() => ({
 vi.mock('../git/runner', () => ({
   gitSpawnAfterWindowsEnvironmentReady: gitSpawnMock
 }))
+vi.mock('../git/git-process-launch', () => ({
+  gitSpawnAfterWindowsEnvironmentReady: gitSpawnMock
+}))
 
 import { listFilesWithGit } from './filesystem-list-files-git-fallback'
 import { isFileListingCancellation } from '../../shared/file-listing-cancellation'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { applyGhHostToArgs } from './runner'
+import { applyGhHostToArgs } from './github-cli-policy'
 
 describe('applyGhHostToArgs', () => {
   it('returns args unchanged when no host is given', () => {

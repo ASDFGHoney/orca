@@ -47,9 +47,11 @@ vi.mock('../git/repo', () => ({
   isGitRepo: isGitRepoMock,
   getGitRepoRoot: getGitRepoRootMock,
   getLinkedWorktreeMainRepoRoot: getLinkedWorktreeMainRepoRootMock,
-  getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop()),
-  getBaseRefDefault: vi.fn().mockResolvedValue('origin/main'),
-  searchBaseRefs: vi.fn().mockResolvedValue([])
+  getRepoName: vi.fn().mockImplementation((path: string) => path.split('/').pop())
+}))
+
+vi.mock('../git/default-base-ref', () => ({
+  getBaseRefDefault: vi.fn().mockResolvedValue('origin/main')
 }))
 
 vi.mock('../repo-detection', () => ({

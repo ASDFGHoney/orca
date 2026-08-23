@@ -39,26 +39,20 @@ import {
   ingestRgJsonLine,
   SEARCH_TIMEOUT_MS
 } from '../../shared/text-search'
+import { getStatus } from '../git/status'
+import { getSubmoduleStatus } from '../git/submodule-status'
+import { abortMerge, abortRebase, detectConflictOperation } from '../git/conflict-status'
+import { getDiff } from '../git/status-file-diff'
+import { commitChanges, getStagedCommitContext } from '../git/git-commit-operations'
 import {
-  getStatus,
-  getSubmoduleStatus,
-  abortMerge,
-  abortRebase,
-  detectConflictOperation,
-  getDiff,
-  commitChanges,
   stageFile,
   unstageFile,
   bulkStageFiles,
-  bulkUnstageFiles,
-  bulkDiscardChanges,
-  discardChanges,
-  getStagedCommitContext,
-  getBranchCompare,
-  getBranchDiff,
-  getCommitCompare,
-  getCommitDiff
-} from '../git/status'
+  bulkUnstageFiles
+} from '../git/git-index-mutations'
+import { bulkDiscardChanges, discardChanges } from '../git/git-discard-changes'
+import { getBranchCompare, getBranchDiff } from '../git/branch-comparison'
+import { getCommitCompare, getCommitDiff } from '../git/commit-comparison'
 import { getHistory } from '../git/history'
 import {
   cancelGenerateCommitMessageLocal,
@@ -89,7 +83,7 @@ import type { HostedReviewProvider } from '../../shared/hosted-review'
 import type { ResolvedSourceControlAiGenerationParams } from '../../shared/source-control-ai'
 import { withLinkedIssueDraftContext } from '../../shared/source-control-ai-action-variables'
 import { validateGitPushTarget } from '../git/push-target-validation'
-import { getRemoteCommitUrl, getRemoteFileUrl } from '../git/repo'
+import { getRemoteCommitUrl, getRemoteFileUrl } from '../git/repository-remotes'
 import { resolveAuthorizedPath, authorizeExternalPath } from './filesystem-auth'
 import { resolveRegisteredWorktreePath } from './registered-worktree-roots-cache'
 import { validateGitRelativeFilePath, isENOENT } from './filesystem-path-containment'

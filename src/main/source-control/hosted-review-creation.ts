@@ -1,3 +1,5 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
+import { ghExecFileAsync } from '../git/github-cli-runner'
 /* eslint-disable max-lines -- Why: detection, eligibility, and creation preflight share one boundary so gating can't drift. */
 import type {
   CreateHostedReviewInput,
@@ -22,18 +24,17 @@ import { isBitbucketReviewCreationAuthenticated } from '../bitbucket/pull-reques
 import { getEnterpriseGitHubRepoSlug } from '../github/github-enterprise-repository'
 import { getRepoSlug } from '../github/client'
 import { isDefaultGitHubHost } from '../../shared/github/repository-identity-key'
-import { acquire, ghExecFileAsync, gitExecFileAsync, release } from '../github/gh-utils'
+import { acquire, gitExecFileAsync, release } from '../github/gh-utils'
 import { isNoUpstreamError, normalizeGitErrorMessage } from '../../shared/git-remote-error'
 import type { GitUpstreamStatus } from '../../shared/git-status-types'
-import { gitOptionalLocksDisabledEnv } from '../git/runner'
+import { gitOptionalLocksDisabledEnv } from '../git/git-environment-policy'
 import { parsePorcelainV1Records, type PorcelainV1Record } from '../git/porcelain-v1-records'
 import { findExistingWorktreeSymlinkPaths } from '../git/worktree-symlink-detection'
-import { resolveDefaultBaseRefViaExec } from '../git/repo'
+import { resolveDefaultBaseRefViaExec } from '../git/default-base-ref'
 import { getUpstreamStatus } from '../git/upstream'
 import { getProjectSlug } from '../gitlab/client'
 import {
   acquire as acquireGlab,
-  glabExecFileAsync,
   glabRepoExecOptions,
   release as releaseGlab
 } from '../gitlab/gl-utils'

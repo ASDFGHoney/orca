@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type {
   CreateStackedHostedReviewInput,
   CreateStackedHostedReviewResult
@@ -7,7 +8,7 @@ import {
   normalizeHostedReviewBaseRef,
   normalizeHostedReviewHeadRef
 } from '../../shared/hosted-review-refs'
-import { acquire, ghExecFileAsync, ghRepoExecOptions, githubRepoContext, release } from './gh-utils'
+import { acquire, ghRepoExecOptions, githubRepoContext, release } from './gh-utils'
 import {
   getOriginGitHubApiRepository,
   githubHostExecOptions,

@@ -1,6 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import {
-  ghExecFileAsync,
   classifyGhError,
   ghRepoExecOptions,
   githubRepoContext,

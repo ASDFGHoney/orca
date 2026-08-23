@@ -29,6 +29,7 @@ vi.mock('./git/runner', async () => ({
   ...(await vi.importActual<typeof GitRunner>('./git/runner')),
   gitExecFileSync: gitExecFileSyncMock
 }))
+vi.mock('./git/git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
 describe('runner script builders', () => {
   it('builds Windows runners for newline-heavy scripts without line-array splitting', async () => {

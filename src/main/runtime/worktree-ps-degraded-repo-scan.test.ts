@@ -24,7 +24,7 @@ vi.mock('../providers/ssh-git-dispatch', () => ({
 }))
 
 const listWorktreesStrictMock = vi.hoisted(() => vi.fn())
-vi.mock('../git/worktree', async (importOriginal) => ({
+vi.mock('../git/worktree-listing', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorktreesStrict: listWorktreesStrictMock
 }))

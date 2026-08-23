@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as NodeFsPromises from 'node:fs/promises'
-import type * as GitRunner from './runner'
+import type * as GitStream from './git-stream'
 import type { GitExec } from '../../relay/git-handler-ops'
 import type { RelayGitStreamExec } from '../../relay/git-stdout-stream'
 
@@ -16,8 +16,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...actual, readFile: readFileMock }
 })
 
-vi.mock('./runner', async (importOriginal) => {
-  const actual = await importOriginal<typeof GitRunner>()
+vi.mock('./git-stream', async (importOriginal) => {
+  const actual = await importOriginal<typeof GitStream>()
   return { ...actual, gitStreamStdout: gitStreamStdoutMock }
 })
 

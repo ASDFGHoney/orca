@@ -1,10 +1,10 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import type { GitLabAssignableUser, GitLabMRApprovalState } from '../../shared/gitlab-types'
 import { mapGitLabUser, type GitLabRawUser } from './gitlab-assignable-user-mapping'
 import { encodedProject } from './project-path-encoding'
 import {
   glabHostnameArgs,
   glabRepoExecOptions,
-  glabExecFileAsync,
   type LocalGitExecOptions,
   type ProjectRef
 } from './gl-utils'

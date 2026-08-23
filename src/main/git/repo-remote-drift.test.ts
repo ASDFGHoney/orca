@@ -15,7 +15,7 @@ vi.mock('./runner', async (importOriginal) => {
   }
 })
 
-import { getRecentDriftSubjects, getRemoteDrift } from './repo'
+import { getRecentDriftSubjects, getRemoteDrift } from './remote-drift'
 
 describe('remote drift Git probes', () => {
   beforeEach(() => {

@@ -8,7 +8,7 @@ import { OrcaRuntimeRpcServer } from './runtime-rpc'
 import { sendRequest } from './runtime-rpc-test-harness'
 import { makeStore } from './runtime-rpc-worktree-store-fixtures'
 
-vi.mock('../git/worktree', () => {
+vi.mock('../git/worktree-listing', () => {
   const worktrees = [
     {
       path: '/tmp/worktree-a',

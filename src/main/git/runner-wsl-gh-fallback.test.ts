@@ -20,7 +20,9 @@ vi.mock('../wsl', async (importOriginal) => ({
   getDefaultWslDistro: getDefaultWslDistroMock
 }))
 
-import { ghExecFileAsync, glabExecFileAsync, setDefaultWslDistroOverride } from './runner'
+import { ghExecFileAsync } from './github-cli-runner'
+import { glabExecFileAsync } from './gitlab-cli-runner'
+import { setDefaultWslDistroOverride } from './command-resolution'
 import { _resetGhRateLimitBreaker } from './gh-rate-limit-breaker'
 
 const PRIMARY_RATE_LIMIT_STDERR =

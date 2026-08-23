@@ -105,13 +105,10 @@ import {
   type AgentPromptActivity,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
-import {
-  awaitWindowsHostGitEnvironmentReady,
-  gitExecFileAsync,
-  gitSpawnAfterWindowsEnvironmentReady,
-  nonInteractiveGitEnv
-} from '../git/runner'
-import { runWithGitReadCacheInvalidation } from '../git/status'
+import { awaitWindowsHostGitEnvironmentReady, gitExecFileAsync } from '../git/runner'
+import { gitSpawnAfterWindowsEnvironmentReady } from '../git/git-process-launch'
+import { nonInteractiveGitEnv } from '../git/git-environment-policy'
+import { runWithGitReadCacheInvalidation } from '../git/git-read-cache'
 import { wakeFolderRepoGitUpgradeWatch } from '../ipc/folder-repo-git-upgrade-wake'
 import {
   cleanupClaimedCloneTarget,
@@ -964,24 +961,29 @@ import {
   searchIssues as searchJiraIssues,
   updateIssue as updateJiraIssue
 } from '../jira/issues'
+import { getProjectViewTable, listProjectViews } from '../github/project-view'
+import { listAccessibleProjects } from '../github/project-view/accessible-project-discovery'
+import { resolveProjectRef } from '../github/project-view/project-reference'
+import { updateIssueBySlug } from '../github/project-view/mutations'
 import {
   clearProjectItemFieldValue,
-  getProjectViewTable,
-  getWorkItemDetailsBySlug,
-  listAccessibleProjects,
-  listProjectViews,
-  resolveProjectRef,
+  updateProjectItemFieldValue
+} from '../github/project-view/project-item-field-mutations'
+import { updatePullRequestBySlug } from '../github/project-view/pull-request-mutations'
+import {
   addIssueCommentBySlug,
   deleteIssueCommentBySlug,
+  updateIssueCommentBySlug
+} from '../github/project-view/issue-comment-mutations'
+import {
   listAssignableUsersBySlug,
+  listLabelsBySlug
+} from '../github/project-view/repository-label-assignee-sources'
+import {
   listIssueTypesBySlug,
-  listLabelsBySlug,
-  updateIssueCommentBySlug,
-  updateIssueBySlug,
-  updateIssueTypeBySlug,
-  updateProjectItemFieldValue,
-  updatePullRequestBySlug
-} from '../github/project-view'
+  updateIssueTypeBySlug
+} from '../github/project-view/repository-issue-types'
+import { getWorkItemDetailsBySlug } from '../github/project-view/work-item-details-query'
 import type {
   ClearProjectItemFieldArgs,
   GetProjectViewTableArgs,
@@ -1000,39 +1002,32 @@ import type {
   UpdateProjectItemFieldArgs,
   UpdatePullRequestBySlugArgs
 } from '../../shared/github/project-request-types'
+import { isGitRepo, getRepoName } from '../git/repo'
 import {
   getBaseRefDefault,
-  getDefaultRemote,
-  getBranchConflictKind,
-  isGitRepo,
-  getRepoName,
+  resolveDefaultBaseRefViaExec,
+  resolveDefaultBaseRefWithLocalGit
+} from '../git/default-base-ref'
+import { getDefaultRemote, getRemoteCount, parseRemoteCount } from '../git/repository-remotes'
+import { getBranchConflictKind } from '../git/branch-conflict-detection'
+import {
   searchBaseRefDetails,
-  getRemoteCount,
   normalizeRefSearchQuery,
   parseAndFilterSearchRefDetails,
-  parseRemoteCount,
-  resolveDefaultBaseRefViaExec,
-  resolveDefaultBaseRefWithLocalGit,
   buildSearchBaseRefsArgv,
-  isForEachRefExcludeUnsupportedError,
-  mergeBaseRefSearchResultGroups,
-  getRemoteDrift,
-  getRecentDriftSubjects
-} from '../git/repo'
+  mergeBaseRefSearchResultGroups
+} from '../git/base-ref-search'
+import { isForEachRefExcludeUnsupportedError } from '../../shared/git-ref-command-capabilities'
+import { getRemoteDrift, getRecentDriftSubjects } from '../git/remote-drift'
 import { hasCommitObjectViaGitExec } from '../git/commit-object-ref'
 import { hasWorktreeBaseCommitRef } from '../git/worktree-base-ref-probe'
 import { resolveLocalGitUsername } from '../git/git-username'
 import { getSshGitCapabilityCache } from '../git/git-capability-state'
-import {
-  listWorktrees,
-  listWorktreesStrict,
-  addWorktree,
-  addSparseWorktree,
-  assertWorktreeCleanForRemoval,
-  forceDeleteLocalBranch,
-  removeWorktree
-} from '../git/worktree'
-import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
+import { addSparseWorktree, addWorktree, removeWorktree } from '../git/worktree'
+import { forceDeleteLocalBranch } from '../git/worktree-branch-cleanup'
+import { listWorktrees, listWorktreesStrict } from '../git/worktree-listing'
+import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree-operation-contracts'
+import { assertWorktreeCleanForRemoval } from '../git/worktree-removal-preflight'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { invalidateAuthorizedRootsCache } from '../ipc/registered-worktree-roots-cache'
 import {

@@ -22,9 +22,11 @@ vi.mock('../git/runner', () => ({
 
 vi.mock('../git/repo', () => ({
   isGitRepo: vi.fn(),
-  getRepoName: vi.fn(),
-  getBaseRefDefault: vi.fn(),
-  searchBaseRefs: vi.fn()
+  getRepoName: vi.fn()
+}))
+
+vi.mock('../git/default-base-ref', () => ({
+  getBaseRefDefault: vi.fn()
 }))
 
 vi.mock('./registered-worktree-roots-cache', () => ({

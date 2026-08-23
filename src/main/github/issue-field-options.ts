@@ -1,3 +1,4 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type { GitHubAssignableUser } from '../../shared/github/pull-request-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import type { LocalGitExecOptions } from './gh-utils'
@@ -5,7 +6,7 @@ import {
   resolveGitHubRepoExecution,
   resolveIssueGitHubApiRepositorySource
 } from './github-api-repository'
-import { acquire, ghExecFileAsync, release } from './gh-utils'
+import { acquire, release } from './gh-utils'
 
 export async function listLabels(
   repoPath: string,

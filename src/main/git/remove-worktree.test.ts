@@ -34,9 +34,10 @@ vi.mock('./runner', () => ({
   gitExecFileSync: gitExecFileSyncMock,
   translateWslOutputPaths: translateWslOutputPathsMock
 }))
+vi.mock('./git-process-launch', () => ({ gitExecFileSync: gitExecFileSyncMock }))
 
-vi.mock('./status', () => ({
-  resolveGitDir: resolveGitDirMock,
+vi.mock('./conflict-status', () => ({ resolveGitDir: resolveGitDirMock }))
+vi.mock('./git-read-cache', () => ({
   runWithGitReadCacheInvalidation: <T>(run: () => Promise<T>) => run()
 }))
 
@@ -53,7 +54,8 @@ import {
   resetWorktreeRemovalState
 } from './remove-worktree-test-harness'
 
-import { removeWorktree, WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS } from './worktree'
+import { removeWorktree } from './worktree'
+import { WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS } from './worktree-registration-repair'
 
 const mockGitCommands = createGitCommandMocker(gitExecFileAsyncMock)
 const getGitCalls = createGitCallReader(gitExecFileAsyncMock)

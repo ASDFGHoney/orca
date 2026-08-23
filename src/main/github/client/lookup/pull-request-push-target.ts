@@ -1,7 +1,7 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import type { GitPushTarget } from '../../../../shared/worktree/types'
 import {
-  ghExecFileAsync,
   acquire,
   release,
   ghRepoExecOptions,

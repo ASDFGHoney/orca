@@ -34,14 +34,14 @@ vi.mock('../ipc/registered-worktree-roots-cache', () => ({
   invalidateAuthorizedRootsCache: vi.fn()
 }))
 
-vi.mock('../git/repo', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>
-  return {
-    ...actual,
-    getDefaultBaseRef: vi.fn().mockReturnValue('origin/main'),
-    getBranchConflictKind: vi.fn().mockResolvedValue(null)
-  }
-})
+vi.mock('../git/default-base-ref', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  getDefaultBaseRef: vi.fn().mockReturnValue('origin/main')
+}))
+vi.mock('../git/branch-conflict-detection', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  getBranchConflictKind: vi.fn().mockResolvedValue(null)
+}))
 
 vi.mock('../git/git-username', async () => {
   const actual = await vi.importActual<typeof GitUsernameModule>('../git/git-username')

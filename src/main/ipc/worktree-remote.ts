@@ -26,13 +26,14 @@ import type {
   WorktreeHeadIdentity
 } from '../../shared/worktree/types'
 import { getPRForBranch } from '../github/client'
-import { listWorktrees, addWorktree, addSparseWorktree } from '../git/worktree'
-import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
+import { addSparseWorktree, addWorktree } from '../git/worktree'
+import { listWorktrees } from '../git/worktree-listing'
+import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree-operation-contracts'
+import { getBranchConflictKind } from '../git/branch-conflict-detection'
 import {
-  getBranchConflictKind,
   resolveDefaultBaseRefViaExec,
   resolveDefaultBaseRefWithLocalGit
-} from '../git/repo'
+} from '../git/default-base-ref'
 import { resolveLocalGitUsername, getSshGitUsername } from '../git/git-username'
 import { hasCommitObjectViaGitExec } from '../git/commit-object-ref'
 import { probeWorktreeBaseRefPresence } from '../git/worktree-base-ref-probe'

@@ -23,6 +23,10 @@ vi.mock('../git/runner', () => ({
   extractExecError: vi.fn(() => ({ stdout: '', stderr: '' })),
   ghExecFileAsync: ghExecFileAsyncMock
 }))
+vi.mock('../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
+vi.mock('../git/exec-error', () => ({
+  extractExecError: vi.fn(() => ({ stdout: '', stderr: '' }))
+}))
 
 vi.mock('./rate-limit', () => ({
   rateLimitGuard: vi.fn(() => ({ blocked: false })),
@@ -36,7 +40,8 @@ vi.mock('./github-enterprise-repository', () => ({
 }))
 
 import { runGraphql, runRest } from './project-view/internals'
-import { _resetProjectViewCachesForTests, resolveProjectRef } from './project-view'
+import { _resetProjectViewCachesForTests } from './project-view/cache-state'
+import { resolveProjectRef } from './project-view/project-reference'
 
 describe('project view host authentication boundary', () => {
   beforeEach(() => {

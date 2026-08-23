@@ -32,20 +32,17 @@ import {
 const ORIGIN_REMOTE_URL = 'git@example.com:group/repo.git'
 const ORIGIN_HEAD_COMPONENT = reviewHeadRemoteRefComponent('origin', ORIGIN_REMOTE_URL)
 import { detectAgentStatusFromTitle, MAX_OSC_TITLE_CHARS } from '../../shared/agent-detection'
-import {
-  addSparseWorktree,
-  addWorktree,
-  assertWorktreeCleanForRemoval,
-  listWorktrees,
-  listWorktreesStrict,
-  removeWorktree
-} from '../git/worktree'
+import { addSparseWorktree, addWorktree, removeWorktree } from '../git/worktree'
+
+import { listWorktrees, listWorktreesStrict } from '../git/worktree-listing'
+import { assertWorktreeCleanForRemoval } from '../git/worktree-removal-preflight'
+import * as gitProcessLaunch from '../git/git-process-launch'
 import * as gitRunner from '../git/runner'
 import {
   WORKTREE_PROCESS_SWEEP_TIMEOUT_MS,
   WORKTREE_TEARDOWN_RPC_MARGIN_MS
 } from './worktree-teardown'
-import { clearSubmodulePathsCacheForTests, listSubmodulePaths } from '../git/status'
+import { clearSubmodulePathsCacheForTests, listSubmodulePaths } from '../git/submodule-paths'
 import { getEffectiveHooks, hasHooksFile, loadHooks, parseOrcaYaml, runHook } from '../hooks'
 import { createSetupRunnerScript, resolveSetupRunnerShell } from '../worktree-runner-script'
 import {
@@ -53,7 +50,8 @@ import {
   getDefaultTabsLaunch,
   shouldRunSetupForCreate
 } from '../effective-hook-config'
-import { getBaseRefDefault, getBranchConflictKind } from '../git/repo'
+import { getBaseRefDefault } from '../git/default-base-ref'
+import { getBranchConflictKind } from '../git/branch-conflict-detection'
 import { OrchestrationDb } from './orchestration/db'
 import type { MessagePriority, MessageRow, MessageType } from './orchestration/types'
 import {
@@ -429,12 +427,18 @@ const {
 })
 
 vi.mock('../git/worktree', () => ({
-  listWorktrees: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
-  listWorktreesStrict: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
-  assertWorktreeCleanForRemoval: vi.fn().mockResolvedValue(undefined),
   addSparseWorktree: addSparseWorktreeMock,
   addWorktree: addWorktreeMock,
-  removeWorktree: removeWorktreeMock,
+  removeWorktree: removeWorktreeMock
+}))
+vi.mock('../git/worktree-listing', () => ({
+  listWorktrees: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES),
+  listWorktreesStrict: vi.fn().mockResolvedValue(MOCK_GIT_WORKTREES)
+}))
+vi.mock('../git/worktree-removal-preflight', () => ({
+  assertWorktreeCleanForRemoval: vi.fn().mockResolvedValue(undefined)
+}))
+vi.mock('../git/worktree-branch-cleanup', () => ({
   forceDeleteLocalBranch: forceDeleteLocalBranchMock
 }))
 
@@ -659,7 +663,7 @@ vi.mock('../github/issues', async (importOriginal) => {
 })
 
 // Why: CLI worktree creation resolves a default against fabricated repo paths, so keep the async resolver deterministic.
-vi.mock('../git/repo', async (importOriginal) => {
+vi.mock('../git/default-base-ref', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   const actualGetBaseRefDefault = actual.getBaseRefDefault as (
     path: string,
@@ -667,15 +671,19 @@ vi.mock('../git/repo', async (importOriginal) => {
   ) => Promise<string | null>
   return {
     ...actual,
-    // Why: fabricated local test repos need a deterministic default, while WSL coverage must still exercise the real async Git-options path.
+    // Fabricated local repos need a deterministic default; WSL coverage still exercises real Git options.
     getBaseRefDefault: vi
       .fn()
       .mockImplementation((path: string, options?: { wslDistro?: string }) =>
         options?.wslDistro ? actualGetBaseRefDefault(path, options) : Promise.resolve('origin/main')
-      ),
-    getBranchConflictKind: vi.fn().mockResolvedValue(null)
+      )
   }
 })
+
+vi.mock('../git/branch-conflict-detection', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  getBranchConflictKind: vi.fn().mockResolvedValue(null)
+}))
 
 vi.mock('../git/git-username', async () => {
   const actual = await vi.importActual<typeof GitUsernameModule>('../git/git-username')
@@ -8387,7 +8395,7 @@ describe('OrcaRuntimeService', () => {
   it('keeps project clone setup on the cloned host-qualified repo', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const repos: Record<string, unknown>[] = []
     getRepoUpstreamMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
     const runtimeStore = {
@@ -8455,7 +8463,7 @@ describe('OrcaRuntimeService', () => {
     mkdirSync(existingFolder, { recursive: true })
     execFileSync('git', ['init'], { cwd: existingFolder, stdio: 'ignore' })
     const spawnSpy = vi
-      .spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+      .spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
       .mockImplementation(() => {
         // Why: unreachable while the guard holds; stubbed so a regression records the call
         // instead of shelling out to a real network clone.
@@ -8512,7 +8520,7 @@ describe('OrcaRuntimeService', () => {
   it('adopts public clone repos into host-qualified project setup', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const repos: Record<string, unknown>[] = []
     getRepoUpstreamMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
     const runtimeStore = {
@@ -8582,7 +8590,7 @@ describe('OrcaRuntimeService', () => {
   it('keeps project clone repos split by runtime host on the same clone path', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const repos: Record<string, unknown>[] = [
       {
         id: 'repo-host-a',
@@ -8754,7 +8762,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('defaults runtime cloneRepo badgeColor to DEFAULT_REPO_BADGE_COLOR', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const added: Record<string, unknown>[] = []
     const colorStore = {
       ...store,
@@ -8789,7 +8797,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('drops a same-path negative submodule cache before runtime cloneRepo', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-reclone-'))
     const clonePath = join(destination, 'reclone')
     const added: Record<string, unknown>[] = []
@@ -8826,7 +8834,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('preserves existing badgeColor on runtime cloneRepo folder->git dedupe upgrade', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     spawnSpy.mockImplementation(() => {
       const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
       proc.stderr = new EventEmitter()
@@ -8924,7 +8932,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('rejects runtime cloneRepo dot-segment URLs before spawning git', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const runtime = createRuntime()
     const tempRoot = await mkdtemp(join(tmpdir(), 'orca-runtime-clone-'))
     const destination = join(tempRoot, 'destination')
@@ -8941,7 +8949,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('rejects runtime cloneRepo parent-segment URLs before spawning git', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const runtime = createRuntime()
     const tempRoot = await mkdtemp(join(tmpdir(), 'orca-runtime-clone-'))
     const destination = join(tempRoot, 'destination')
@@ -8958,7 +8966,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('removes an owned runtime clone target when git exits unsuccessfully', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockResolvedValue(proc as never)
@@ -8985,7 +8993,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('preserves an existing runtime clone target when git exits unsuccessfully', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockResolvedValue(proc as never)
@@ -9012,7 +9020,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('skips runtime clone failure cleanup when the owned target is replaced', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockResolvedValue(proc as never)
@@ -9041,7 +9049,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('serializes concurrent runtime clones for the same target', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawnAfterWindowsEnvironmentReady')
+    const spawnSpy = vi.spyOn(gitProcessLaunch, 'gitSpawnAfterWindowsEnvironmentReady')
     const firstProc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     firstProc.stderr = new EventEmitter()
     spawnSpy.mockResolvedValueOnce(firstProc as never)

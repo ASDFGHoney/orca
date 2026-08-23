@@ -7,7 +7,7 @@ import type {
   PRState
 } from '../../shared/github/pull-request-types'
 import { githubRepoIdentityKey } from '../../shared/github/repository-identity-key'
-import { ghExecFileAsync } from '../git/runner'
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import {
   githubHostExecOptions,
   type GitHubApiRepository,

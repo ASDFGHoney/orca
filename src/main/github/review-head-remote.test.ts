@@ -5,7 +5,7 @@ const { getDefaultRemoteMock, getGitHubApiRepositoryForRemoteMock } = vi.hoisted
   getGitHubApiRepositoryForRemoteMock: vi.fn()
 }))
 
-vi.mock('../git/repo', () => ({ getDefaultRemote: getDefaultRemoteMock }))
+vi.mock('../git/repository-remotes', () => ({ getDefaultRemote: getDefaultRemoteMock }))
 vi.mock('./github-api-repository', () => ({
   getGitHubApiRepositoryForRemote: getGitHubApiRepositoryForRemoteMock
 }))

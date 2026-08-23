@@ -1,6 +1,7 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { PRConflictSummary } from '../../../../shared/github/pull-request-types'
 import { getPRConflictSummary } from '../../conflict-summary'
-import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
+import { acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import { mergeGitHubPRStack } from '../../github-pr-stack'
 import { githubPRStackExecutionScope, type GhExecOptions } from './../github-exec-scope'

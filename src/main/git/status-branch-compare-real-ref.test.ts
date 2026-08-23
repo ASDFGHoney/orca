@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { getBranchCompare } from './status'
+import { getBranchCompare } from './branch-comparison'
 
 const tempRoots: string[] = []
 

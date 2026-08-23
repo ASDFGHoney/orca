@@ -1,8 +1,8 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { IssueSourcePreference } from '../../../../shared/repo-types'
 import { isGitHubWorkItemsQueryTooLarge } from '../../../../shared/github/work-items-query-bounds'
 import { parseTaskQuery, type ParsedTaskQuery } from '../../../../shared/task-query'
 import {
-  ghExecFileAsync,
   acquire,
   release,
   ghRepoExecOptions,

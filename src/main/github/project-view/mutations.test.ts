@@ -1,3 +1,4 @@
+vi.mock('../../git/github-cli-runner', () => ({ ghExecFileAsync: ghExecFileAsyncMock }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -46,7 +47,8 @@ vi.mock('./internals', () => ({
       : { ok: false, error: { type: 'validation_error', message: `${name} invalid` } }
 }))
 
-import { getWorkItemDetailsBySlug, updateIssueBySlug } from './mutations'
+import { updateIssueBySlug } from './mutations'
+import { getWorkItemDetailsBySlug } from './work-item-details-query'
 
 describe('updateIssueBySlug', () => {
   beforeEach(() => {

@@ -26,6 +26,16 @@ vi.mock('./runner', () => ({
     GIT_OPTIONAL_LOCKS: '0'
   })
 }))
+vi.mock('./git-stream', () => ({
+  gitStreamStdout: async (
+    args: string[],
+    options: { onStdout: (chunk: string) => boolean | void }
+  ) => {
+    const { stdout } = await gitExecFileAsyncMock(args)
+    const stoppedEarly = options.onStdout(stdout ?? '') === true
+    return { stoppedEarly }
+  }
+}))
 
 vi.mock('fs/promises', () => ({
   readFile: readFileMock
@@ -35,7 +45,8 @@ vi.mock('fs', () => ({
   existsSync: existsSyncMock
 }))
 
-import { clearEffectiveUpstreamStatusCacheForTests, getStatus } from './status'
+import { clearEffectiveUpstreamStatusCacheForTests } from './git-read-cache'
+import { getStatus } from './status'
 
 function getGitArgs(call: unknown[]): string[] {
   return call[0] as string[]

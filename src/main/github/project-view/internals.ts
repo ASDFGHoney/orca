@@ -3,7 +3,8 @@
 // every gh call through the runner gives us transient-5xx retry, WSL path
 // translation, and a single hook point for future quota tracking.
 import { acquire, release } from '../gh-utils'
-import { extractExecError, ghExecFileAsync } from '../../git/runner'
+import { ghExecFileAsync } from '../../git/github-cli-runner'
+import { extractExecError } from '../../git/exec-error'
 import {
   repositoryRateLimitGuard,
   noteRepositoryRateLimitSpend,
@@ -24,7 +25,6 @@ export {
   acquire,
   release,
   extractExecError,
-  ghExecFileAsync,
   repositoryRateLimitGuard,
   noteRepositoryRateLimitSpend
 }

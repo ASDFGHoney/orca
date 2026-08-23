@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, rm, symlink, writeFile, access, readFile } from 'node:fs/promises'
 import * as path from 'node:path'
 import { tmpdir } from 'node:os'
-import { bulkDiscardChanges, discardChanges } from './status'
+import { bulkDiscardChanges, discardChanges } from './git-discard-changes'
 
 const tempRoots: string[] = []
 

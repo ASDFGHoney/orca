@@ -21,6 +21,16 @@ vi.mock('./runner', () => ({
     GIT_OPTIONAL_LOCKS: '0'
   })
 }))
+vi.mock('./git-stream', () => ({
+  gitStreamStdout: async (
+    args: string[],
+    options: { onStdout: (chunk: string) => boolean | void }
+  ) => {
+    const { stdout } = await gitExecFileAsyncMock(args)
+    const stoppedEarly = options.onStdout(stdout ?? '') === true
+    return { stoppedEarly }
+  }
+}))
 
 vi.mock('fs/promises', () => ({
   readFile: readFileMock
@@ -40,11 +50,11 @@ function emptyGitConfigSnapshot(): { stdout: string } {
 
 import {
   clearEffectiveUpstreamNegativeStatusCache,
-  clearEffectiveUpstreamStatusCacheForTests,
   getEffectiveUpstreamStatusCacheCountForTests,
-  getEffectiveUpstreamStatusGenerationCountForTests,
-  getStatus
-} from './status'
+  getEffectiveUpstreamStatusGenerationCountForTests
+} from './effective-upstream-status-cache'
+import { clearEffectiveUpstreamStatusCacheForTests } from './git-read-cache'
+import { getStatus } from './status'
 
 describe('local upstream negative cache', () => {
   beforeEach(() => {

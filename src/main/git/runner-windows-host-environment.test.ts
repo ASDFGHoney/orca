@@ -14,12 +14,12 @@ vi.mock('node:child_process', () => ({
 
 import {
   awaitWindowsHostGitEnvironmentReady,
-  configureWindowsHostGitEnvironmentReadiness,
   gitExecFileAsync,
-  gitExecFileAsyncBuffer,
-  gitSpawnAfterWindowsEnvironmentReady,
-  gitStreamStdout
+  gitExecFileAsyncBuffer
 } from './runner'
+import { configureWindowsHostGitEnvironmentReadiness } from './command-resolution'
+import { gitSpawnAfterWindowsEnvironmentReady } from './git-process-launch'
+import { gitStreamStdout } from './git-stream'
 
 type MockChildProcess = EventEmitter & {
   stdout: EventEmitter

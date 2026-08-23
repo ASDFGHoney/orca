@@ -17,7 +17,9 @@ vi.mock('../observability/instrumentation', () => ({
 }))
 vi.mock('../diagnostics/main-thread-churn-probe', () => ({ recordSubprocessSpawn: vi.fn() }))
 
-import { gitExecFileAsync, gitSpawn, gitStreamStdout } from './runner'
+import { gitExecFileAsync } from './runner'
+import { gitSpawn } from './git-process-launch'
+import { gitStreamStdout } from './git-stream'
 import {
   getWslGitReadEnvironment,
   resetWslGitReadEnvironmentForTests,

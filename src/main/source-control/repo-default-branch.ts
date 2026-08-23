@@ -1,4 +1,4 @@
-import { resolveDefaultBaseRefViaExec } from '../git/repo'
+import { resolveDefaultBaseRefViaExec } from '../git/default-base-ref'
 import { gitExecFileAsync } from '../git/runner'
 import { getSshGitProvider } from '../providers/ssh-git-dispatch'
 import type { HostedReviewLocalGitOptions } from './hosted-review-git-options'

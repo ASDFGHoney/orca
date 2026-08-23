@@ -1,7 +1,8 @@
+import { ghExecFileAsync } from '../git/github-cli-runner'
 import type { GitHubIssueUpdate } from '../../shared/issue-mutation-types'
 import type { LocalGitExecOptions } from './gh-utils'
 import { getIssueGitHubApiRepository, resolveGitHubRepoExecution } from './github-api-repository'
-import { acquire, classifyGhError, ghExecFileAsync, release } from './gh-utils'
+import { acquire, classifyGhError, release } from './gh-utils'
 
 /**
  * Update an existing GitHub issue. Fans out to separate gh commands for

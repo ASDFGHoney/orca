@@ -111,13 +111,21 @@ export const electronModuleMock = () => ({
 })
 
 export const gitWorktreeModuleMock = () => ({
-  listWorktrees: listWorktreesMock,
-  listWorktreesStrict: listWorktreesMock,
-  parseWorktreeList: parseWorktreeListMock,
-  assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock,
   addWorktree: addWorktreeMock,
   addSparseWorktree: addSparseWorktreeMock,
-  removeWorktree: removeWorktreeMock,
+  removeWorktree: removeWorktreeMock
+})
+
+export const gitWorktreeListingModuleMock = () => ({
+  listWorktrees: listWorktreesMock,
+  listWorktreesStrict: listWorktreesMock
+})
+
+export const gitWorktreeRemovalPreflightModuleMock = () => ({
+  assertWorktreeCleanForRemoval: assertWorktreeCleanForRemovalMock
+})
+
+export const gitWorktreeBranchCleanupModuleMock = () => ({
   forceDeleteLocalBranch: forceDeleteLocalBranchMock
 })
 
@@ -129,11 +137,17 @@ export const gitRunnerModuleMock = (): {
   gitExecFileSync: vi.fn()
 })
 
-export const gitRepoModuleMock = () => ({
+export const defaultBaseRefModuleMock = () => ({
   getBaseRefDefault: getBaseRefDefaultMock,
   resolveDefaultBaseRefWithLocalGit: resolveDefaultBaseRefWithLocalGitMock,
-  resolveDefaultBaseRefViaExec: resolveDefaultBaseRefViaExecMock,
-  getDefaultRemote: getDefaultRemoteMock,
+  resolveDefaultBaseRefViaExec: resolveDefaultBaseRefViaExecMock
+})
+
+export const repositoryRemotesModuleMock = () => ({
+  getDefaultRemote: getDefaultRemoteMock
+})
+
+export const branchConflictDetectionModuleMock = () => ({
   getBranchConflictKind: getBranchConflictKindMock
 })
 

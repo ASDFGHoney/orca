@@ -1,9 +1,10 @@
+import { glabExecFileAsync } from '../git/gitlab-cli-runner'
 import type { ClassifiedError } from '../../shared/classified-error'
 import type { GitLabCommentResult, GitLabIssueInfo, MRComment } from '../../shared/gitlab-types'
 import type { IssueSourcePreference } from '../../shared/repo-types'
 import { mapGitLabIssueInfo } from './mappers'
 // prettier-ignore
-import { glabExecFileAsync, acquire, release, getIssueProjectRef, resolveIssueSource, classifyGlabError, classifyListFetchError, getGlabKnownHosts, glabRepoExecOptions, glabHostnameArgs, parseGlabJsonList, type LocalGitExecOptions, type ProjectRef } from './gl-utils'
+import { acquire, release, getIssueProjectRef, resolveIssueSource, classifyGlabError, classifyListFetchError, getGlabKnownHosts, glabRepoExecOptions, glabHostnameArgs, parseGlabJsonList, type LocalGitExecOptions, type ProjectRef } from './gl-utils'
 import { encodedProject } from './project-path-encoding'
 
 // Why: parallel to GitHub's IssueListResult — distinguishes a successful-

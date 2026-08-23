@@ -8,7 +8,7 @@ import { makeStore } from './runtime-rpc-worktree-store-fixtures'
 
 const WORKTREE_PATH = '/tmp/worktree-a'
 
-vi.mock('../git/worktree', () => ({
+vi.mock('../git/worktree-listing', () => ({
   listWorktrees: vi.fn().mockResolvedValue([
     {
       path: '/tmp/worktree-a',

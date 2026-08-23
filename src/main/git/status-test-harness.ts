@@ -42,6 +42,21 @@ export function createGitRunnerModuleMock(mocks: GitRunnerMocks): Record<string,
     })
   }
 }
+export function createGitStreamModuleMock(mocks: GitRunnerMocks): Record<string, unknown> {
+  return {
+    // Why: status tests seed the status call through gitExecFileAsyncMock; preserve
+    // that queue while mocking the concrete stream module used by production.
+    gitStreamStdout: async (
+      args: string[],
+      options: { signal?: AbortSignal; onStdout: (chunk: string) => boolean | void }
+    ) => {
+      mocks.gitStreamOptionsMock(options)
+      const { stdout } = await mocks.gitExecFileAsyncMock(args)
+      const stoppedEarly = options.onStdout(stdout ?? '') === true
+      return { stoppedEarly }
+    }
+  }
+}
 
 export function createFsPromisesModuleMock(mocks: FsPromisesMocks): Record<string, unknown> {
   return {

@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type * as GitStatusModule from '../git/status'
+import type * as GitConflictStatusModule from '../git/conflict-status'
+import type * as GitCommitOperationsModule from '../git/git-commit-operations'
 import type * as CommitMessageTextGenerationModule from '../text-generation/commit-message-text-generation'
 import type * as PullRequestContextModule from '../text-generation/pull-request-context'
 import { RuntimeGitCommands, type ResolvedRuntimeGitWorktree } from './orca-runtime-git'
@@ -26,10 +28,18 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../git/status', async () => ({
   ...(await vi.importActual<typeof GitStatusModule>('../git/status')),
-  abortMerge: mocks.abortMerge,
-  abortRebase: mocks.abortRebase,
-  getStagedCommitContext: mocks.getStagedCommitContext,
   getStatus: mocks.getStatus
+}))
+
+vi.mock('../git/conflict-status', async () => ({
+  ...(await vi.importActual<typeof GitConflictStatusModule>('../git/conflict-status')),
+  abortMerge: mocks.abortMerge,
+  abortRebase: mocks.abortRebase
+}))
+
+vi.mock('../git/git-commit-operations', async () => ({
+  ...(await vi.importActual<typeof GitCommitOperationsModule>('../git/git-commit-operations')),
+  getStagedCommitContext: mocks.getStagedCommitContext
 }))
 
 vi.mock('../git/checkout', () => ({

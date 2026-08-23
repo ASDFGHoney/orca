@@ -1,5 +1,6 @@
+import { ghExecFileAsync } from '../../../git/github-cli-runner'
 import type { GitHubReactionContent } from '../../../../shared/github/comment-types'
-import { ghExecFileAsync, acquire, release, type LocalGitExecOptions } from '../../gh-utils'
+import { acquire, release, type LocalGitExecOptions } from '../../gh-utils'
 import { resolveGitHubRepoExecution, type GitHubApiRepository } from '../../github-api-repository'
 import { toGraphQLReactionContent } from '../../comment-reactions'
 import { noteRepositoryRateLimitSpend, repositoryRateLimitGuard } from '../../rate-limit'
