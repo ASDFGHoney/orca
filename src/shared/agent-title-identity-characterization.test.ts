@@ -4,10 +4,10 @@ import { getAgentLabel } from './agent-title-identity'
 /**
  * Characterization of `getAgentLabel` before the identity refactor.
  *
- * `getAgentLabel` is an ordered first-match-wins scan of substring predicates over a display
- * title, so chain position — not evidence strength — decides identity. These tests pin the
- * current answers, including the wrong ones, so the resolver change shows up as a reviewable
- * diff of assertions rather than as silent behavior drift.
+ * `getAgentLabel` is an ordered first-match-wins scan of title predicates. Detector precedence
+ * and targeted exceptions — not a unified evidence model — decide identity. These tests pin
+ * the current answers, including the wrong ones, so the resolver change shows up as a
+ * reviewable diff of assertions rather than as silent behavior drift.
  *
  * Cases marked DEFECT are minimized from real recorded pane titles
  * (`terminal-history/<id>/checkpoint.json` -> `lastTitle`). At the time of writing the live
@@ -70,10 +70,9 @@ describe('getAgentLabel — characterization (pre-refactor)', () => {
     )
   })
 
-  describe('chain position, not evidence strength, decides between two names', () => {
-    // The pairwise property: whichever agent is checked first wins, regardless of which one
-    // the title's grammar actually identifies. Both orderings of the same pair agree, which is
-    // the tell — the title carries no signal that distinguishes them.
+  describe('title order does not decide between two names', () => {
+    // Both orderings of each pair agree: detector precedence and its targeted exceptions,
+    // rather than name order within the title, choose the label.
     it.each([
       ['codex', 'grok', 'Codex'],
       ['grok', 'codex', 'Codex'],
