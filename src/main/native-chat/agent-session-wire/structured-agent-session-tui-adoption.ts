@@ -18,6 +18,7 @@ export type StructuredTuiAdoptionRequest = {
   caller: StructuredAgentSessionCaller
   params: AgentSessionAttachParams
   owner: StructuredTuiOwner
+  onOwnerProven?: () => void
 }
 
 export function adoptStructuredTuiOwner(
@@ -56,6 +57,7 @@ async function adopt(
   } else {
     assertMatchingTuiOwner(record, owner)
   }
+  input.onOwnerProven?.()
   const attached = await attachJournal({
     record,
     params,
@@ -98,12 +100,16 @@ async function proveAdoptedTuiOwner(
 ): Promise<AgentSessionRecord> {
   const { sessionId } = record
   const fence = record.lease.runtimeFence
-  await input.deps.store.commitProcessIdentity({
-    sessionId,
-    fence,
-    process: input.owner.process,
-    now: input.now()
-  })
+  if (record.lease.ownerProcess === null) {
+    await input.deps.store.commitProcessIdentity({
+      sessionId,
+      fence,
+      process: input.owner.process,
+      now: input.now()
+    })
+  } else if (!isDeepStrictEqual(record.lease.ownerProcess, input.owner.process)) {
+    throw new Error('agent_session_conflict')
+  }
   return input.deps.store.proveOwner({
     sessionId,
     fence,

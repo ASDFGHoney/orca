@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockCreateTab = vi.fn()
 const mockSetTabViewMode = vi.fn()
 const mockWaitForAgentReady = vi.fn()
+const mockPasteDraftWhenAgentReady = vi.fn()
+const mockMarkNativeChatLaunchPromptFailed = vi.fn()
 
 const store = {
   activeRepoId: 'repo-1',
@@ -39,13 +41,15 @@ const store = {
   setAgentStatus: vi.fn(),
   seedNativeChatLaunchPrompt: vi.fn(),
   seedNativeChatLaunchDraft: vi.fn(),
-  markNativeChatLaunchPromptFailed: vi.fn()
+  markNativeChatLaunchPromptFailed: mockMarkNativeChatLaunchPromptFailed
 }
 
 vi.mock('@/store', () => ({ useAppStore: { getState: () => store } }))
 vi.mock('sonner', () => ({ toast: { message: vi.fn(), error: vi.fn() } }))
 vi.mock('@/components/tab-bar/reconcile-order', () => ({ reconcileTabOrder: vi.fn(() => []) }))
-vi.mock('@/lib/agent-paste-draft', () => ({ pasteDraftWhenAgentReady: vi.fn() }))
+vi.mock('@/lib/agent-paste-draft', () => ({
+  pasteDraftWhenAgentReady: mockPasteDraftWhenAgentReady
+}))
 vi.mock('@/lib/agent-ready-wait', () => ({ waitForAgentReady: mockWaitForAgentReady }))
 vi.mock('@/lib/telemetry', () => ({
   track: vi.fn(),
@@ -68,6 +72,7 @@ describe('structured chat adoption guard on the launch path', () => {
     store.projects = [{ id: 'repo-1', localWindowsRuntimePreference: { kind: 'inherit-global' } }]
     mockCreateTab.mockReturnValue({ id: 'tab-1' })
     mockWaitForAgentReady.mockResolvedValue({ ready: true, reason: 'foreground-match' })
+    mockPasteDraftWhenAgentReady.mockResolvedValue(true)
   })
 
   it('adopts a local Codex tab into the structured stack', async () => {
@@ -94,6 +99,26 @@ describe('structured chat adoption guard on the launch path', () => {
     // Chat adoption probes the pane's foreground process: flipping now hands the user an adoption
     // error in place of the terminal Codex is still starting in.
     expect(mockSetTabViewMode).not.toHaveBeenCalledWith('tab-1', 'chat')
+  })
+
+  it('shows rejected prompt delivery in chat after Codex becomes ready', async () => {
+    const error = new Error('prompt transport rejected')
+    mockPasteDraftWhenAgentReady.mockRejectedValue(error)
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    const result = launchAgentInNewTab({
+      agent: 'codex',
+      worktreeId: 'wt-1',
+      prompt: 'large generated prompt',
+      promptDelivery: 'submit-after-ready'
+    })
+
+    await expect(result?.promptDeliveryResult).rejects.toBe(error)
+    expect(mockMarkNativeChatLaunchPromptFailed).toHaveBeenCalledWith('tab-1')
+    await vi.waitFor(() => expect(mockSetTabViewMode).toHaveBeenCalledWith('tab-1', 'chat'))
+    expect(mockMarkNativeChatLaunchPromptFailed.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetTabViewMode.mock.invocationCallOrder[0]!
+    )
   })
 
   it('keeps an SSH Codex tab on the bridge', async () => {

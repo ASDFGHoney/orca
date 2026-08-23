@@ -64,7 +64,7 @@ export function isStructuredTuiAdoptionReservation(
     lease.runtimeKind === 'tui' &&
     lease.claimStatus === 'reserved' &&
     lease.handoffStage === 'new-owner-proving' &&
-    lease.ownerProcess === null &&
+    (lease.ownerProcess === null || lease.ownerProcess.spawnToken === spawnToken) &&
     lease.reservedSpawnToken === spawnToken &&
     !lease.unreconciled
   )
@@ -117,10 +117,9 @@ export async function reserveStructuredTuiAdoption(
 }
 
 /**
- * Undo a reservation whose proof never landed. `processlessAt` is the durable "nothing ever
- * spawned under this token" proof, which is what lets the next attempt supersede the record
- * instead of being refused by it forever — and what stops a restart from latching it into
- * recovery.
+ * Undo a reservation whose proof never landed. Adoption only attributes its synthetic token to an
+ * existing process, so clearing a partially committed identity truthfully restores the durable
+ * "nothing spawned under this token" proof needed by the next attempt.
  */
 export async function releaseStructuredTuiAdoptionReservation(
   input: StructuredTuiAdoptionReservationRelease & {
@@ -138,12 +137,18 @@ export async function releaseStructuredTuiAdoptionReservation(
     return
   }
   const now = input.now()
-  await input.deps.store.setReservationProcesslessProof({
-    sessionId: input.sessionId,
-    fence: input.fence,
-    spawnToken: input.spawnToken,
-    processlessAt: now,
-    now
+  await input.deps.store.transitionHandoff(input.sessionId, (current) => {
+    if (
+      current.lease.runtimeFence !== input.fence ||
+      !isStructuredTuiAdoptionReservation(current, input.spawnToken)
+    ) {
+      return current
+    }
+    return {
+      ...current,
+      lease: { ...current.lease, ownerProcess: null, processlessAt: now },
+      updatedAt: now
+    }
   })
 }
 
