@@ -342,6 +342,40 @@ describe('Claude structured dispatch image limits', () => {
     })
   })
 
+  // A dispatch that gave up still has a replay in flight. Once its waiter is
+  // gone, that frame matches no owner and would otherwise fall to the compat
+  // path and settle whoever is now at the head.
+  it('drops the replay of a dispatch that already timed out', async () => {
+    const session = sessionFor()
+    const first = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
+      60
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    const firstUuid = session.dispatchWaiters[0]!.sentUuid
+    await expect(first).resolves.toMatchObject({ state: 'unknown' })
+    expect(session.dispatchWaiters).toHaveLength(0)
+
+    const second = dispatchClaudeTurn(
+      session,
+      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
+      ACK_BUDGET_MS
+    )
+    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
+    const secondUuid = session.dispatchWaiters[0]!.sentUuid
+
+    // The dead send's echo lands while the second is waiting.
+    resolveClaudeReplayWaiter(session, userReplayFrame(firstUuid, 'one'))
+    expect(session.dispatchWaiters).toHaveLength(1)
+
+    resolveClaudeReplayWaiter(session, userReplayFrame(secondUuid, 'two'))
+    await expect(second).resolves.toMatchObject({
+      state: 'accepted',
+      providerIdentity: { uuid: secondUuid }
+    })
+  })
+
   // The waiter queue is positional, so shifting the head on a send failure
   // resolves whichever dispatch happens to be first - reporting a delivered
   // message as unconfirmed while the send that actually failed keeps waiting.

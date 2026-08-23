@@ -72,6 +72,10 @@ export type ClaudeSession = {
   fence: number
   prompts: ClaudePromptRegistry
   dispatchWaiters: ClaudeDispatchWaiter[]
+  /** Uuids of dispatches that left the queue without their echo (timed out, or
+   *  the send failed). Their replay can still arrive, and it must be dropped
+   *  rather than fall through to the head - it belongs to nobody now. */
+  retiredSentUuids?: string[]
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
   translator: ClaudeJournalTranslator | null

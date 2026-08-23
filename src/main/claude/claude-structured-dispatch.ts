@@ -128,6 +128,12 @@ export function resolveClaudeReplayWaiter(
     settleWaiter(session, owner, uuid)
     return
   }
+  // A replay for a dispatch that already gave up belongs to nobody. Dropping it
+  // here is what keeps the compat path below from handing it to the head, which
+  // would upsert the dead send's text over a live one's bubble.
+  if (session.retiredSentUuids?.includes(uuid)) {
+    return
+  }
   // Compat path for a CLI that mints its own uuid instead of echoing ours. The
   // frame then carries no correlation at all, so the head is the only candidate
   // and the shape gates have to carry the weight.
@@ -194,11 +200,24 @@ async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]>
   return content
 }
 
+/** Enough to cover the replays still in flight for sends that gave up; the list
+ *  only grows when a dispatch leaves without its echo. */
+const RETIRED_UUID_MEMORY = 64
+
 function dropWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void {
   const index = session.dispatchWaiters.indexOf(waiter)
   if (index !== -1) {
     session.dispatchWaiters.splice(index, 1)
   }
+}
+
+/** Remember a dispatch that left without its echo, so the echo cannot later be
+ *  mistaken for somebody else's on the compat path. */
+function retireWaiter(session: ClaudeSession, waiter: ClaudeDispatchWaiter): void {
+  dropWaiter(session, waiter)
+  const retired = session.retiredSentUuids ?? []
+  retired.push(waiter.sentUuid)
+  session.retiredSentUuids = retired.slice(-RETIRED_UUID_MEMORY)
 }
 
 /** Arms a waiter and hands it back, so a failure can retire ITS OWN waiter — the
@@ -217,7 +236,7 @@ function waitForReplay(
       sentUuid,
       resolve,
       timer: setTimeout(() => {
-        dropWaiter(session, waiter)
+        retireWaiter(session, waiter)
         resolve(null)
       }, timeoutMs)
     }
@@ -302,7 +321,7 @@ export async function dispatchClaudeTurn(
         }
       }
     }
-    dropWaiter(session, waiter)
+    retireWaiter(session, waiter)
     clearTimeout(waiter.timer)
     waiter.resolve(null)
     return { state: 'unknown', reason: (error as Error).message }
