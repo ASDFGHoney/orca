@@ -18,6 +18,7 @@ import {
 } from '../ssh-reattach-model-restore'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 
 import type { ReattachPayloadContext } from './reattach-payload-context'
 import type { ReattachPayloadSession } from './reattach-payload-session'
@@ -186,7 +187,11 @@ export function createReattachPayloadHandlers(
           session.writeReplayData(modelSnapshot.pendingEscapeTailAnsi)
         }
         // Why: main sampled its delivery backlog with the snapshot; the baseline drops/slices deferred and live chunks the snapshot already covers.
-        session.setRestoredSnapshotBaseline(ctx.ptyId, modelSnapshot)
+        session.setRestoredSnapshotBaseline(
+          ctx.ptyId,
+          modelSnapshot,
+          restoredSnapshotPaintsPrintableContent(modelSnapshot)
+        )
         session.recordRendererOrderedSeq(modelSnapshot)
         session.sendFocusedReattachFocusInAfterReplay(ctx.ptyId, ctx.attemptGeneration)
         if (ctx.connectResult?.coldRestore && !isRemoteRuntimePtyId(ctx.ptyId)) {

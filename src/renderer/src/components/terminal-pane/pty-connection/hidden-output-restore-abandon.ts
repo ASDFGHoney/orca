@@ -75,7 +75,11 @@ export function bindAbandonHiddenOutputRestore(session: ConnectPanePtySession): 
       pendingData += sliced ?? chunk.data
     }
     if (replayingSnapshot && replayedSeq !== null) {
-      session.setRestoredSnapshotBaseline(expectedPtyId, replayingSnapshot)
+      session.setRestoredSnapshotBaseline(
+        expectedPtyId,
+        replayingSnapshot,
+        replayingSnapshot.paintsContent === true
+      )
       for (const chunk of pendingChunks) {
         if (typeof chunk.seq === 'number' && session.restoredSnapshotExpectedStartSeq !== null) {
           session.restoredSnapshotExpectedStartSeq = Math.max(

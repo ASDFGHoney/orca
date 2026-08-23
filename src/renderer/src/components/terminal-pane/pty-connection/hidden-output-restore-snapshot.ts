@@ -21,6 +21,7 @@ import {
 import { HIDDEN_OUTPUT_RESTORE_UNAVAILABLE_WARNING } from './hidden-output-restore-limits'
 import { shouldWritePtyOutputForeground } from './foreground-output-scan'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
@@ -80,6 +81,7 @@ export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession):
           if (typeof snapshot.seq === 'number') {
             session.hiddenOutputRestoreReplayingSnapshot = {
               seq: snapshot.seq,
+              paintsContent: restoredSnapshotPaintsPrintableContent(snapshot),
               ...(typeof snapshot.pendingDeliveryStartSeq === 'number'
                 ? { pendingDeliveryStartSeq: snapshot.pendingDeliveryStartSeq }
                 : {})

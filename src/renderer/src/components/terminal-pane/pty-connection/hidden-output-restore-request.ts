@@ -16,6 +16,7 @@ import {
   HIDDEN_OUTPUT_RESTORE_LOCAL_GATE_MAX_ATTEMPTS
 } from './hidden-output-restore-limits'
 import { shouldWritePtyOutputForeground } from './foreground-output-scan'
+import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
@@ -215,7 +216,11 @@ export function bindHiddenOutputRestoreRequest(session: ConnectPanePtySession): 
           return
         }
         // Why: everything at/before snapshot.seq is now painted; chunks still draining from main's ACK backlog below it are duplicates to suppress.
-        session.setRestoredSnapshotBaseline(currentPtyId, snapshot)
+        session.setRestoredSnapshotBaseline(
+          currentPtyId,
+          snapshot,
+          restoredSnapshotPaintsPrintableContent(snapshot)
+        )
         session.hiddenOutputRestoreReplayingSnapshot = null
         const needsFreshSnapshot = session.hiddenOutputRestoreFreshSnapshotNeeded
         session.hiddenOutputRestoreFreshSnapshotNeeded = false

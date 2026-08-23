@@ -162,9 +162,16 @@ export function bindDeferredColdRestoreAndSnapshot(session: ConnectPanePtySessio
   bindCaptureTransportOutputCallbacks(session)
   session.setRestoredSnapshotBaseline = function (
     ptyId: string,
-    snapshot: { seq?: number; pendingDeliveryStartSeq?: number }
+    snapshot: { seq?: number; pendingDeliveryStartSeq?: number },
+    paintsContent: boolean
   ): void {
     if (typeof snapshot.seq !== 'number') {
+      session.clearRestoredSnapshotBaseline()
+      return
+    }
+    // Why: arming drops the redelivery permanently, so the snapshot's painted
+    // content must be able to back the seq it claims; a blank image cannot (STA-5179).
+    if (snapshot.seq > 0 && !paintsContent) {
       session.clearRestoredSnapshotBaseline()
       return
     }
