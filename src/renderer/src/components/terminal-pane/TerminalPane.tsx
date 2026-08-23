@@ -60,6 +60,7 @@ import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from '../terminal/running-terminal-clo
 import CodexRestartChip from '../CodexRestartChip'
 import { MobileDriverOverlay } from './MobileDriverOverlay'
 import { stripSshReconnectOwnedErrorLines, TerminalErrorToast } from './TerminalErrorToast'
+import { TerminalProcessExitOverlay } from './TerminalProcessExitOverlay'
 import { TerminalSessionStateSaveFailureDialog } from './TerminalSessionStateSaveFailureDialog'
 import TerminalContextMenu from './TerminalContextMenu'
 import TerminalPaneHeaderOverlay, { type PaneTitleOverlayRect } from './TerminalPaneHeaderOverlay'
@@ -100,6 +101,7 @@ import type { PreparedAgentSessionFork } from './terminal-agent-session-fork'
 import type { AgentSessionContinuationRequest } from '@/lib/agent-session-continuation'
 import { useNotificationDispatch } from './use-notification-dispatch'
 import { connectPanePty } from './pty-connection'
+import type { PaneProcessExit, PtyConnectionDeps } from './pty-connection-types'
 import { resolveTerminalLayoutActiveLeafId } from './terminal-layout-leaf-ids'
 import { shouldPreserveTerminalScrollbackBuffers } from '../../../../shared/workspace-session-terminal-buffers'
 import {
@@ -399,6 +401,10 @@ function TerminalPane(
   const [agentSessionContinuation, setAgentSessionContinuation] =
     useState<AgentSessionContinuationRequest | null>(null)
   const [terminalError, setTerminalError] = useState<string | null>(null)
+  const [paneProcessExit, setPaneProcessExit] = useState<PaneProcessExit | null>(null)
+  const handlePaneProcessDied = useCallback((processExit: PaneProcessExit) => {
+    setPaneProcessExit(processExit)
+  }, [])
   const [ptyRecoveryStatesByPaneId, setPtyRecoveryStatesByPaneId] = useState<
     Record<number, VisiblePtyRecoveryState>
   >({})
@@ -1368,6 +1374,7 @@ function TerminalPane(
     onPtyExitRef,
     onAgentExitedRef,
     onPtyErrorRef,
+    onPaneProcessDied: handlePaneProcessDied,
     onPtyRecoveryStateRef,
     clearTabPtyId,
     consumeSuppressedPtyExit: useAppStore((store) => store.consumeSuppressedPtyExit),
@@ -1535,7 +1542,10 @@ function TerminalPane(
   }, [])
 
   const handleRestartCodexPane = useCallback(
-    (paneId: number) => {
+    (
+      paneId: number,
+      restartStartup: PtyConnectionDeps['startup'] = CODEX_ACCOUNT_RESTART_STARTUP
+    ) => {
       const manager = managerRef.current
       const pane = manager?.getPanes().find((candidate) => candidate.id === paneId)
       if (!manager || !pane) {
@@ -1565,7 +1575,7 @@ function TerminalPane(
         tabId,
         worktreeId,
         cwd,
-        startup: CODEX_ACCOUNT_RESTART_STARTUP,
+        startup: restartStartup,
         mountFollowsTerminalPark: false,
         paneTransportsRef,
         paneMode2031Ref,
@@ -1577,6 +1587,7 @@ function TerminalPane(
         onPtyExitRef,
         onAgentExitedRef,
         onPtyErrorRef,
+        onPaneProcessDied: handlePaneProcessDied,
         onPtyRecoveryStateRef,
         clearTabPtyId,
         consumeSuppressedPtyExit: useAppStore.getState().consumeSuppressedPtyExit,
@@ -1607,6 +1618,7 @@ function TerminalPane(
       clearTabPtyId,
       cwd,
       dispatchNotification,
+      handlePaneProcessDied,
       markWorktreeUnread,
       markTerminalTabUnread,
       markTerminalPaneUnread,
@@ -1626,6 +1638,26 @@ function TerminalPane(
       worktreeId
     ]
   )
+
+  const handleRestartExitedPane = useCallback(() => {
+    if (!paneProcessExit) {
+      return
+    }
+    setPaneProcessExit(null)
+    handleRestartCodexPane(
+      paneProcessExit.paneId,
+      paneProcessExit.reason === 'git-bash-console-capacity' ? startup : null
+    )
+  }, [handleRestartCodexPane, paneProcessExit, startup])
+
+  const handleCloseExitedPane = useCallback(() => {
+    if (!paneProcessExit) {
+      return
+    }
+    const paneId = paneProcessExit.paneId
+    setPaneProcessExit(null)
+    executeClosePane(paneId)
+  }, [executeClosePane, paneProcessExit])
 
   // Why leaf bindings are a dep: a parked or deferred tab mounts with no
   // transport, so a queued restart has no ptyId to match on the mount pass. The
@@ -3031,6 +3063,21 @@ function TerminalPane(
           onRestartDaemon={() => daemonActions.setPending('restart')}
         />
       ) : null}
+      {paneProcessExit && isActive
+        ? managedPanes.map((pane) =>
+            pane.id === paneProcessExit.paneId
+              ? createPortal(
+                  <TerminalProcessExitOverlay
+                    processExit={paneProcessExit}
+                    onRestart={handleRestartExitedPane}
+                    onClose={handleCloseExitedPane}
+                  />,
+                  pane.container,
+                  `process-exit-${pane.id}`
+                )
+              : null
+          )
+        : null}
       {/* Why: portal into the pane so the banner stacks above the xterm canvas (sibling mount painted under WebGL). */}
       {showSshReconnectOverlay && sshReconnectTargetId && sshReconnectStatus
         ? managedPanes.map((pane) =>

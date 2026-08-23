@@ -60,6 +60,7 @@ import {
   type HasPty
 } from './terminal-dead-session-reconcile'
 import type { PtyConnectionDeps } from './pty-connection-types'
+import { createGitBashConsoleCapacityDetector } from './git-bash-console-capacity'
 import type { SessionRestoredBannerReason } from './session-restored-banner-pane-state'
 import {
   consumeCommittedPtyShutdownExit,
@@ -2659,7 +2660,11 @@ export function connectPanePty(
       })
     return claimKey
   }
-  const onExit = (ptyId: string, opts: { preserveRendererBinding?: boolean } = {}): void => {
+  const onExit = (
+    ptyId: string,
+    exitCode = 0,
+    opts: { preserveRendererBinding?: boolean } = {}
+  ): void => {
     if (handledExitPtyId === ptyId) {
       return
     }
@@ -2667,7 +2672,7 @@ export function connectPanePty(
       // Why: the transport emits exit once; replay it only after a verified commit so rollback keeps renderer state retryable.
       deferPtyShutdownExit(ptyId, (settlement) => {
         if (settlement === 'committed') {
-          onExit(ptyId, { preserveRendererBinding: true })
+          onExit(ptyId, exitCode, { preserveRendererBinding: true })
         }
       })
       return
@@ -2767,6 +2772,17 @@ export function connectPanePty(
     manager.setPaneGpuRendering(pane.id, true)
     const panes = manager.getPanes()
     if (panes.length <= 1) {
+      const failedLocalProcess = !connectionId && runtimeEnvironmentId === null && exitCode !== 0
+      if (failedLocalProcess) {
+        deps.onPaneProcessDied?.({
+          paneId: pane.id,
+          exitCode,
+          reason: gitBashConsoleCapacityDetector.detected()
+            ? 'git-bash-console-capacity'
+            : 'process-failed'
+        })
+        return
+      }
       // Why: a worktree's sole newborn terminal can die on shell startup — e.g.
       // a PR branch ships an .envrc whose direnv command fails, so the login
       // shell exits non-zero immediately. Routing that through onPtyExitRef
@@ -3860,6 +3876,7 @@ export function connectPanePty(
   // Captured shortcuts must open the redraw window without arming that teardown.
   let lastInteractiveRedrawInputAt = Number.NEGATIVE_INFINITY
   let hasReceivedPtyOutput = false
+  const gitBashConsoleCapacityDetector = createGitBashConsoleCapacityDetector()
   let deferredReattachLiveData: DeferredReattachLiveDataQueue | null = null
   let reattachLiveDataDeferralDepth = 0
   let deferredReattachLiveDataOwners = new Map<number, { failed: boolean }>()
@@ -7847,6 +7864,7 @@ export function connectPanePty(
       if (streamGeneration !== transportStreamGeneration) {
         return
       }
+      gitBashConsoleCapacityDetector.observe(data)
       if (deferredReattachLiveData !== null) {
         const ackCredit = takeCurrentTerminalDeliveryCredit()
         deferredReattachLiveData.enqueue({
@@ -9415,7 +9433,7 @@ export function connectPanePty(
     ) {
       return
     }
-    onExit(currentPtyId)
+    onExit(currentPtyId, 1)
   }
 
   const reconcileIfSessionMissing = (
@@ -9459,7 +9477,7 @@ export function connectPanePty(
         ) {
           return
         }
-        onExit(currentPtyId)
+        onExit(currentPtyId, 1)
       })
       .catch(() => {})
   }

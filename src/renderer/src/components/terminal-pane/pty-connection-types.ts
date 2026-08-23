@@ -17,6 +17,12 @@ import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { SessionOptionValue } from '../../../../shared/native-chat-session-options'
 import type { DirectSshPaneRetryAttemptId } from '@/store/slices/direct-ssh-terminal-recovery'
 
+export type PaneProcessExit = {
+  paneId: number
+  exitCode: number
+  reason: 'git-bash-console-capacity' | 'process-failed'
+}
+
 export type PtyConnectionDeps = {
   tabId: string
   worktreeId: string
@@ -66,6 +72,7 @@ export type PtyConnectionDeps = {
   onPtyExitRef: React.RefObject<(ptyId: string) => void>
   onAgentExitedRef: React.RefObject<(leafId: string) => void>
   onPtyErrorRef?: React.RefObject<(paneId: number, message: string) => void>
+  onPaneProcessDied?: (processExit: PaneProcessExit) => void
   onPtyRecoveryStateRef?: React.RefObject<
     (paneId: number, state: PtyTransportRecoveryState | null) => void
   >

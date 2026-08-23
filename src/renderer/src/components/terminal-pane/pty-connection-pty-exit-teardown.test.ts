@@ -388,6 +388,82 @@ describe('connectPanePty', () => {
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
+  it('keeps a failed local terminal visible after user input', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const pane = createPane(1)
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps({ onPaneProcessDied: vi.fn() })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+
+    sendTerminalInputThroughPane(pane, 'agent startup\r')
+    onPtyExit?.('tab-pty', 1)
+
+    expect(deps.onPaneProcessDied).toHaveBeenCalledWith({
+      paneId: 1,
+      exitCode: 1,
+      reason: 'process-failed'
+    })
+    expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
+  it('classifies the Git Bash capacity failure before retaining its pane', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+    const transport = createMockTransport('tab-pty')
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      capturedDataCallback.current = callbacks.onData ?? null
+      return 'tab-pty'
+    })
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps({ onPaneProcessDied: vi.fn() })
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+
+    capturedDataCallback.current?.(
+      'console device allocation failure - too many consoles in use, max consoles is 128'
+    )
+    onPtyExit?.('tab-pty', 1)
+
+    expect(deps.onPaneProcessDied).toHaveBeenCalledWith({
+      paneId: 1,
+      exitCode: 1,
+      reason: 'git-bash-console-capacity'
+    })
+    expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()
+  })
+
+  it('does not retain a failed direct-SSH terminal locally', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    mockStoreState = {
+      ...mockStoreState,
+      repos: [{ ...mockStoreState.repos[0], connectionId: 'ssh-1' }]
+    } as StoreState
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps({ onPaneProcessDied: vi.fn() })
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode?: number) => void)
+      | undefined
+    onPtyExit?.('tab-pty', 1)
+
+    expect(deps.onPaneProcessDied).not.toHaveBeenCalled()
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+  })
+
   it('tears down the sole terminal when a reattached (not freshly spawned) PTY exits', async () => {
     // Why: reattach/coldRestore skip onPtySpawn, so a now-dead previously-live session must still route through onPtyExitRef; the keep-mounted guard is only for brand-new shells.
     const { connectPanePty } = await import('./pty-connection')
