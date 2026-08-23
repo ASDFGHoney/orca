@@ -144,6 +144,29 @@ describe('AgentAwakeService macOS coverage invariant', () => {
     expect(amphetamineHolding || caffeinateHolding).toBe(true)
   })
 
+  it('drops the caffeinate stand-in once the hold actually lands', () => {
+    // Coverage depends on a refresh firing when the hold changes; without it
+    // caffeinate would stay up alongside Amphetamine indefinitely.
+    const amphetamine = createAmphetamine()
+    const caffeinate = createCaffeinate()
+    const { service } = createService({
+      macosAmphetamineAssertion: amphetamine,
+      macosAssertion: caffeinate
+    })
+    const refreshes: string[] = []
+    amphetamine.onHoldChanged(() => refreshes.push('hold-changed'))
+
+    service.setMacosEngine('amphetamine')
+    service.setMode('on')
+    expect(caffeinate.start).toHaveBeenCalled()
+    caffeinate.stop.mockClear()
+
+    amphetamine.settleHold('owned')
+    service.setStatuses([])
+
+    expect(caffeinate.stop).toHaveBeenCalled()
+  })
+
   it('holds something even when the incoming engine cannot start', () => {
     const amphetamine = createAmphetamine()
     const caffeinate = createCaffeinate()
