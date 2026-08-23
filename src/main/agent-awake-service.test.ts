@@ -41,16 +41,10 @@ function createBlocker() {
 }
 
 function createMacosAssertion() {
-  let holding = false
   return {
-    start: vi.fn(() => {
-      holding = true
-    }),
-    stop: vi.fn(() => {
-      holding = false
-    }),
-    dispose: vi.fn(),
-    isHolding: vi.fn(() => holding)
+    start: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn()
   }
 }
 
