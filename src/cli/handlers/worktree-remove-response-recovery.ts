@@ -1,4 +1,5 @@
 import { RuntimeClientError, RuntimeRpcFailureError } from '../runtime-client'
+import { stripMutationResponseLossRetryAdvice } from '../mutation-response-loss-message'
 
 const REMOVE_RESPONSE_LOSS_STEPS = [
   'Run: orca worktree list --json and verify whether the workspace is absent.',
@@ -15,7 +16,7 @@ export function addWorktreeRemoveResponseRecovery(error: unknown): unknown {
     mutationMayHaveCompleted: true,
     nextSteps: REMOVE_RESPONSE_LOSS_STEPS
   }
-  const message = `${error.message} The workspace removal may still complete; verify state before retrying.`
+  const message = `${stripMutationResponseLossRetryAdvice(error.message)} The workspace removal may still complete; verify state before retrying.`
   if (error instanceof RuntimeRpcFailureError) {
     return new RuntimeRpcFailureError({
       ...error.response,

@@ -161,8 +161,8 @@ export class UnixSocketTransport implements RpcTransport {
   }
 
   // Why: the keepalive timer is opt-in per request via `startKeepalive()`.
-  // Short RPCs never call it and pay no timer overhead; only long-poll
-  // handlers (e.g. orchestration.check --wait) arm it. See §3.1.
+  // Short RPCs never call it and pay no timer overhead; long polls and
+  // explicitly bounded slow dispatches arm it. See §3.1.
   private dispatchMessage(socket: Socket, rawMessage: string, inflight: Set<() => void>): void {
     let replied = false
     let keepaliveTimer: NodeJS.Timeout | null = null

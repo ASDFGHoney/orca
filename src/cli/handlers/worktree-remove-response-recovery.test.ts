@@ -8,6 +8,16 @@ describe('worktree remove response recovery', () => {
       requestPhase: 'awaiting_response',
       method: 'worktree.rm'
     }),
+    new RuntimeClientError(
+      'runtime_unavailable',
+      'The Orca runtime closed the connection before responding. Restart Orca and try again.',
+      { requestPhase: 'awaiting_response', method: 'worktree.rm' }
+    ),
+    new RuntimeClientError(
+      'runtime_unavailable',
+      'The Orca runtime changed while the request was in flight. Retry the command.',
+      { requestPhase: 'awaiting_response', method: 'worktree.rm' }
+    ),
     new RuntimeRpcFailureError({
       id: 'slow-rm',
       ok: false,
@@ -28,6 +38,7 @@ describe('worktree remove response recovery', () => {
       }
     })
     expect((recovered as Error).message).toContain('may still complete')
+    expect((recovered as Error).message).not.toMatch(/Restart Orca and try again|Retry the command/)
   })
 
   it.each([
