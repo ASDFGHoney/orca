@@ -202,6 +202,17 @@ describe('foldMobileNativeChatMessages control characters', () => {
     expect(folded[0]?.blocks).toEqual([{ type: 'text', text }])
   })
 
+  // Ordering is load-bearing: `buildMobileImagePastePayload` wraps a path as
+  // `ESC[200~<path>ESC[201~`, and taking ESC off as just another control byte
+  // would strand the printable `[200~` / `[201~` tails in the bubble. Escape
+  // sequences must come off before lone control bytes.
+  it('drops a bracketed-paste wrapper, not just its ESC introducer', () => {
+    const folded = foldMobileNativeChatMessages([
+      turn('m1', 'user', '\u001B[200~/tmp/photo.png\u001B[201~ look at this')
+    ])
+    expect(folded[0]?.blocks).toEqual([{ type: 'text', text: '/tmp/photo.png look at this' }])
+  })
+
   it('returns the same messages when there is nothing to strip', () => {
     const messages = [turn('m1', 'user', 'a clean message')]
     expect(foldMobileNativeChatMessages(messages)[0]).toBe(messages[0])
