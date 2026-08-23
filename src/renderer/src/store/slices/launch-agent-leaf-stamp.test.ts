@@ -3,7 +3,8 @@ import type { TerminalLayoutSnapshot, TerminalTab } from '../../../../shared/ter
 import { emptyLayoutSnapshot, singlePaneLayoutSnapshot } from './terminal-helpers'
 import {
   resolveLaunchAgentLeafId,
-  stampLaunchAgentLeafIdOnFirstLayout
+  stampLaunchAgentLeafIdOnFirstLayout,
+  transferLaunchAgentLeafStampOnDetach
 } from './launch-agent-leaf-stamp'
 
 const LEAF_A = '11111111-1111-4111-8111-111111111111'
@@ -114,5 +115,51 @@ describe('resolveLaunchAgentLeafId', () => {
         nextLayout: singlePaneLayoutSnapshot(LEAF_A)
       })
     ).toBeUndefined()
+  })
+})
+
+describe('transferLaunchAgentLeafStampOnDetach', () => {
+  it('moves launch provenance with the detached leaf', () => {
+    const tabs = transferLaunchAgentLeafStampOnDetach({
+      tabs: [
+        makeTab({ id: 'source', launchAgent: 'cursor', launchAgentLeafId: LEAF_A }),
+        makeTab({ id: 'target' })
+      ],
+      sourceTabId: 'source',
+      targetTabId: 'target',
+      detachedLeafId: LEAF_A
+    })
+
+    expect(tabs?.find((tab) => tab.id === 'source')).not.toHaveProperty('launchAgent')
+    expect(tabs?.find((tab) => tab.id === 'source')).not.toHaveProperty('launchAgentLeafId')
+    expect(tabs?.find((tab) => tab.id === 'target')).toMatchObject({
+      launchAgent: 'cursor',
+      launchAgentLeafId: LEAF_A
+    })
+  })
+
+  it('does not overwrite existing target launch provenance', () => {
+    expect(
+      transferLaunchAgentLeafStampOnDetach({
+        tabs: [
+          makeTab({ id: 'source', launchAgent: 'cursor', launchAgentLeafId: LEAF_A }),
+          makeTab({ id: 'target', launchAgent: 'codex', launchAgentLeafId: LEAF_B })
+        ],
+        sourceTabId: 'source',
+        targetTabId: 'target',
+        detachedLeafId: LEAF_A
+      })
+    ).toBeNull()
+  })
+
+  it('does not guess ownership for an unpinned launch', () => {
+    expect(
+      transferLaunchAgentLeafStampOnDetach({
+        tabs: [makeTab({ id: 'source', launchAgent: 'cursor' }), makeTab({ id: 'target' })],
+        sourceTabId: 'source',
+        targetTabId: 'target',
+        detachedLeafId: LEAF_A
+      })
+    ).toBeNull()
   })
 })

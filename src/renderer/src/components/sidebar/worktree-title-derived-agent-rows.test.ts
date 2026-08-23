@@ -323,6 +323,26 @@ describe('buildTitleDerivedAgentRows', () => {
     expect(rows[0]?.entry.terminalTitle).toBe('Rename the auth helper')
   })
 
+  it('keeps a live mirrored Cursor title that was also stamped as the tab default', () => {
+    const rows = buildWorktreeAgentRows({
+      tabs: [
+        makeTab('tab-1', {
+          launchAgent: 'cursor',
+          launchAgentLeafId: LEAF_ID_1,
+          defaultTitle: 'Cursor Agent'
+        })
+      ],
+      entries: [],
+      retained: [],
+      runtimePaneTitlesByTabId: { 'tab-1': { 1: 'Cursor Agent' } },
+      ptyIdsByTabId: { 'tab-1': ['pty-cursor'] },
+      terminalLayoutsByTabId: { 'tab-1': makeSingleLayout(LEAF_ID_1) },
+      now: 2000
+    })
+
+    expect(rows.map((row) => [row.agentType, row.state])).toEqual([['cursor', 'idle']])
+  })
+
   it('keeps a launched Codex pane visible under an arbitrary session title', () => {
     const rows = buildWorktreeAgentRows({
       tabs: [makeTab('tab-1', { launchAgent: 'codex', launchAgentLeafId: LEAF_ID_1 })],

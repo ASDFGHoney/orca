@@ -51,7 +51,10 @@ import type { AiVaultSessionTitle } from '../../../../shared/ai-vault-session-ti
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
 import { sweepRetiredTerminalTabState } from './retired-terminal-tab-state-sweep'
-import { stampLaunchAgentLeafIdOnFirstLayout } from './launch-agent-leaf-stamp'
+import {
+  stampLaunchAgentLeafIdOnFirstLayout,
+  transferLaunchAgentLeafStampOnDetach
+} from './launch-agent-leaf-stamp'
 import { clearTransientTerminalState, emptyLayoutSnapshot } from './terminal-helpers'
 import {
   collectReleasedLeafIds,
@@ -3663,6 +3666,24 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       const nextTabsByWorktree = detachedPtyId
         ? withTerminalTabPtyId(sourceTabsByWorktree, targetTabId, detachedPtyId)
         : sourceTabsByWorktree
+      const sourceWorktreeId = getTerminalTabOwnerWorktreeId(nextTabsByWorktree, sourceTabId)
+      const targetWorktreeId = getTerminalTabOwnerWorktreeId(nextTabsByWorktree, targetTabId)
+      const transferredTabs =
+        sourceWorktreeId !== null && sourceWorktreeId === targetWorktreeId
+          ? transferLaunchAgentLeafStampOnDetach({
+              tabs: nextTabsByWorktree[sourceWorktreeId] ?? [],
+              sourceTabId,
+              targetTabId,
+              detachedLeafId
+            })
+          : null
+      const tabsByWorktree =
+        transferredTabs && sourceWorktreeId !== null
+          ? { ...nextTabsByWorktree, [sourceWorktreeId]: transferredTabs }
+          : nextTabsByWorktree
+      if (transferredTabs) {
+        scheduleRuntimeGraphSync()
+      }
       const directSshLedger = transferDirectSshPaneDetachLedger(s, {
         detachedPtyId,
         sourcePtyId: sourcePrimaryPtyId,
@@ -3675,7 +3696,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         ptyIdsByTabId: nextPtyIdsByTabId,
         lastKnownRelayPtyIdByTabId: nextLastKnownRelayPtyIdByTabId,
         ...directSshLedger,
-        ...(nextTabsByWorktree !== s.tabsByWorktree ? { tabsByWorktree: nextTabsByWorktree } : {})
+        ...(tabsByWorktree !== s.tabsByWorktree ? { tabsByWorktree } : {})
       }
     })
     // Why: detach keeps the process and its pane key alive, so move resume/status authority to the new surface before the source closes.

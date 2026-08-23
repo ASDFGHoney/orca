@@ -48,6 +48,40 @@ export function stampLaunchAgentLeafIdOnFirstLayout(args: {
   return nextTabs
 }
 
+/** Moves launch provenance with a detached leaf without overwriting existing target ownership. */
+export function transferLaunchAgentLeafStampOnDetach(args: {
+  tabs: readonly TerminalTab[]
+  sourceTabId: string
+  targetTabId: string
+  detachedLeafId: string
+}): TerminalTab[] | null {
+  const sourceIndex = args.tabs.findIndex((tab) => tab.id === args.sourceTabId)
+  const targetIndex = args.tabs.findIndex((tab) => tab.id === args.targetTabId)
+  const source = args.tabs[sourceIndex]
+  const target = args.tabs[targetIndex]
+  if (
+    !source?.launchAgent ||
+    source.launchAgentLeafId !== args.detachedLeafId ||
+    !target ||
+    target.launchAgent ||
+    target.launchAgentLeafId
+  ) {
+    return null
+  }
+
+  const sourceWithoutLaunchProvenance = { ...source }
+  delete sourceWithoutLaunchProvenance.launchAgent
+  delete sourceWithoutLaunchProvenance.launchAgentLeafId
+  const nextTabs = [...args.tabs]
+  nextTabs[sourceIndex] = sourceWithoutLaunchProvenance
+  nextTabs[targetIndex] = {
+    ...target,
+    launchAgent: source.launchAgent,
+    launchAgentLeafId: args.detachedLeafId
+  }
+  return nextTabs
+}
+
 function soleLeafIdOnFirstLayout(
   previousLayout: TerminalLayoutSnapshot | undefined,
   nextLayout: TerminalLayoutSnapshot
