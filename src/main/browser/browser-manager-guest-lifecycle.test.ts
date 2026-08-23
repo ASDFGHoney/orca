@@ -11,7 +11,6 @@ const browserMocks = vi.hoisted(() => ({
   guestSetWindowOpenHandlerMock: vi.fn(),
   guestOpenDevToolsMock: vi.fn(),
   webContentsFromIdMock: vi.fn(),
-  getAllWebContentsMock: vi.fn(() => []),
   screenGetCursorScreenPointMock: vi.fn(() => ({ x: 0, y: 0 })),
   openPopupWithOriginBarMock: vi.fn()
 }))
@@ -32,8 +31,7 @@ vi.mock('electron', () => ({
     getCursorScreenPoint: browserMocks.screenGetCursorScreenPointMock
   },
   webContents: {
-    fromId: browserMocks.webContentsFromIdMock,
-    getAllWebContents: browserMocks.getAllWebContentsMock
+    fromId: browserMocks.webContentsFromIdMock
   }
 }))
 
@@ -61,7 +59,6 @@ const {
 describe('browserManager', () => {
   beforeEach(() => {
     resetBrowserManagerMocks(browserMocks)
-    browserMocks.getAllWebContentsMock.mockReset().mockReturnValue([])
     resetBrowserManagerState()
   })
 
@@ -93,34 +90,6 @@ describe('browserManager', () => {
     })
 
     expect(browserManager.getSessionProfileIdForTab('browser-1')).toBe('work')
-  })
-
-  it('keeps a retired-session request guard until an unregistered guest is destroyed', () => {
-    const browserSession = {} as Electron.Session
-    let destroyed = false
-    let destroyedHandler: (() => void) | undefined
-    const guest = {
-      id: 105,
-      session: browserSession,
-      isDestroyed: vi.fn(() => destroyed),
-      once: vi.fn((event: string, handler: () => void) => {
-        if (event === 'destroyed') {
-          destroyedHandler = handler
-        }
-      })
-    }
-    browserMocks.getAllWebContentsMock.mockReturnValue([guest] as never)
-    const removeRequestGuard = vi
-      .spyOn(browserManager, 'removeCertificateRequestGuard')
-      .mockImplementation(() => {})
-
-    browserManager.deferCertificateRequestGuardRemoval(browserSession)
-
-    expect(removeRequestGuard).not.toHaveBeenCalled()
-    destroyed = true
-    destroyedHandler?.()
-    expect(removeRequestGuard).toHaveBeenCalledWith(browserSession)
-    removeRequestGuard.mockRestore()
   })
 
   it('blocks non-web guest navigations after attach', () => {

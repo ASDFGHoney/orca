@@ -35,7 +35,7 @@ import {
   retireProxySessionApplication
 } from '../network/proxy-settings'
 import { invalidateBrowserSessionProxyApplication } from './browser-session-proxy'
-import { browserManager } from './browser-manager'
+import { cancelBrowserWebAuthnAccountRequestsForSession } from './browser-webauthn-account-picker'
 
 export type BrowserSessionRegistryProfileOptions = {
   orcaProfileId: string
@@ -269,10 +269,8 @@ class BrowserSessionRegistry {
       clearBrowserSessionUserAgentMode(sess)
       invalidateBrowserSessionProxyApplication(sess)
       const release = retireProxySessionApplication(sess)
-      clearBrowserSessionPartitionPolicies(profile.partition, sess, {
-        retainRequestGuard: true
-      })
-      browserManager.deferCertificateRequestGuardRemoval(sess)
+      // Why: persistent partitions can retain service workers after every WebContents dies, so a retired session's deny policies must remain permanent.
+      cancelBrowserWebAuthnAccountRequestsForSession(sess)
       try {
         await release
       } catch {
