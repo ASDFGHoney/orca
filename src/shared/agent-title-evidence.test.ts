@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { collectAgentTitleEvidence } from './agent-title-evidence'
-import { ALL_TUI_AGENTS, TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
 
 const agentFor = (title: string) => collectAgentTitleEvidence(title).agent
 const reasonFor = (title: string) => collectAgentTitleEvidence(title).reason
@@ -113,25 +112,30 @@ describe('collectAgentTitleEvidence', () => {
     })
   })
 
-  it.each(ALL_TUI_AGENTS)('recognizes the canonical whole-title label for %s', (agent) => {
-    const title = TUI_AGENT_DISPLAY_NAMES[agent]
-    expect(collectAgentTitleEvidence(title)).toMatchObject({
-      agent,
-      reason: 'anchored'
-    })
-  })
-
-  it('does not treat an exact display name as free text', () => {
-    expect(collectAgentTitleEvidence('Grok').freeTextNames).toEqual([])
-  })
-
   it.each([
     ['Claude Code', 'claude'],
     ['Gemini CLI', 'gemini'],
+    ['Claude Agent Teams', 'claude-agent-teams'],
+    ['MiMo Code', 'mimo-code'],
+    ['Prime Agent', 'prime-agent'],
+    ['Command Code', 'command-code'],
+    ['GitHub Copilot', 'copilot'],
     ['Agent Teams', 'claude-agent-teams']
   ] as const)('recognizes the emitted whole-title alias %s', (title, agent) => {
     expect(agentFor(title)).toBe(agent)
     expect(reasonFor(title)).toBe('anchored')
+  })
+
+  it.each(['Continue', 'Charm', 'Goose', 'Amp'])(
+    'does not treat the UI-only display label %s as identity',
+    (title) => {
+      expect(agentFor(title)).toBeNull()
+      expect(reasonFor(title)).toBe('no-evidence')
+    }
+  )
+
+  it('does not treat an emitted label as free text', () => {
+    expect(collectAgentTitleEvidence('Prime Agent').freeTextNames).toEqual([])
   })
 
   it.each([

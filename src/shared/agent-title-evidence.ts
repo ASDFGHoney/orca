@@ -18,7 +18,7 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES
 } from './synthetic-agent-title'
 import type { TuiAgent } from './tui-agent'
-import { ALL_TUI_AGENTS, TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
+import { TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
 
 /**
  * Order-independent identity evidence from a terminal title.
@@ -78,9 +78,19 @@ const PATTERN_NAMES: readonly (readonly [RegExp, TuiAgent])[] = [
   [HERMES_AGENT_NAME_RE, 'hermes']
 ]
 
-/** Exact whole-title labels are strong evidence even for agents unsafe to match in free text. */
+/** Catalog labels known to be emitted as terminal titles, not merely presented in Orca's UI. */
+const EMITTED_DISPLAY_LABEL_AGENTS = [
+  'claude-agent-teams',
+  'mimo-code',
+  'prime-agent',
+  'command-code',
+  'copilot'
+] as const satisfies readonly TuiAgent[]
+
 const DISPLAY_LABELS = [
-  ...ALL_TUI_AGENTS.map((agent) => [TUI_AGENT_DISPLAY_NAMES[agent].toLowerCase(), agent] as const),
+  ...EMITTED_DISPLAY_LABEL_AGENTS.map(
+    (agent) => [TUI_AGENT_DISPLAY_NAMES[agent].toLowerCase(), agent] as const
+  ),
   ['claude code', 'claude'],
   ['gemini cli', 'gemini'],
   ['agent teams', 'claude-agent-teams']
