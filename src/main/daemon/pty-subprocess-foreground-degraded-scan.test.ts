@@ -2,7 +2,7 @@
 // timed-out CIM scan (available:false) or an incomplete snapshot (available:true
 // with the agent row missing) must not retire a still-working agent and make
 // the coordinator read the shell as a false "agent done". Console presence is
-// the arbiter of a real exit.
+// PTY-owned tree membership is the arbiter of a real exit.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -127,19 +127,20 @@ describe('daemon pty foreground degraded-scan handling', () => {
     expect(readConptyMock).not.toHaveBeenCalled()
   })
 
-  it('keeps a cached agent when a scan finds no agent but the console still has a child', async () => {
+  it('keeps a cached agent when a scan finds no agent but the PTY tree still has a child', async () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })
-    readConptyMock.mockResolvedValue(new Set([12345, 999])) // child still attached
-    const { handle } = await spawnWindowsShell()
+    readConptyMock.mockResolvedValue(new Set([12345, 999]))
+    const { proc, handle } = await spawnWindowsShell()
 
     await readForegroundAt(handle, 0)
     expect(await readForegroundAt(handle, 1_000)).toBe('claude')
     expect(await readForegroundAt(handle, 2_500)).toBe('claude')
+    expect(readConptyMock).toHaveBeenCalledWith(12345, { jobOwner: proc })
   })
 
-  it('retires a cached agent when a scan finds no agent and the console is shell-only', async () => {
+  it('retires a cached agent when a scan finds no agent and the PTY tree is shell-only', async () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })
@@ -152,7 +153,7 @@ describe('daemon pty foreground degraded-scan handling', () => {
     expect(readConptyMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps a cached agent when the console-membership probe is unavailable', async () => {
+  it('keeps a cached agent when the PTY-membership probe is unavailable', async () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })

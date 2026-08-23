@@ -228,23 +228,26 @@ describe('LocalPtyProvider', () => {
       await expect(foreground).resolves.toBeNull()
     })
 
-    it('confirms a still-active agent from ConPTY console presence without a whole-table scan', async () => {
+    it('confirms a still-active agent from PTY tree membership without a whole-table scan', async () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       mockProc.process = 'powershell.exe'
       resolveAgentForegroundProcessMock.mockResolvedValue({
         available: true,
         processName: 'claude'
       })
-      // A child beyond the shell is still attached to this console.
+      // A child beyond the shell is still owned by this PTY.
       readWindowsConptyProcessIdsMock.mockResolvedValue(new Set([12345, 999]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       // First call establishes the agent identity via the scan.
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
-      // node-pty still only names the shell, but console presence confirms the
+      // node-pty still only names the shell, but tree membership confirms the
       // agent — no second whole-table scan.
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
       expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(1)
+      expect(readWindowsConptyProcessIdsMock).toHaveBeenCalledWith(12345, {
+        jobOwner: mockProc
+      })
     })
 
     it('falls through to the scan when the ConPTY console shows only the shell', async () => {

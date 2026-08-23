@@ -1,100 +1,286 @@
+import type { ChildProcess, fork } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { describe, expect, it, vi } from 'vitest'
-import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
+import type { IPty } from 'node-pty'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-function forkWith(event: 'message' | 'error' | 'none', value?: unknown, pid?: number) {
-  const child = new EventEmitter() as EventEmitter & {
-    kill: ReturnType<typeof vi.fn>
-    pid?: number
-  }
-  child.kill = vi.fn()
-  if (pid !== undefined) {
-    child.pid = pid
-  }
-  const forkProcess = vi.fn(() => {
-    queueMicrotask(() => {
-      if (event === 'message') {
-        child.emit('message', { consoleProcessList: value })
-      } else if (event === 'error') {
-        child.emit('error', new Error('spawn failed'))
-      }
-    })
-    return child
-  })
-  return { child, forkProcess: forkProcess as never }
+const { listPtyJobProcessIds } = vi.hoisted(() => ({ listPtyJobProcessIds: vi.fn() }))
+vi.mock('../windows/windows-pty-job', () => ({ listPtyJobProcessIds }))
+
+import {
+  readWindowsConptyProcessIds,
+  WindowsConptyProcessMembershipReader
+} from './windows-conpty-process-membership'
+
+type FakeChild = EventEmitter & {
+  kill: ReturnType<typeof vi.fn>
+  pid?: number
+  spawnargs: string[]
 }
 
-describe('readWindowsConptyProcessIds', () => {
-  it('returns exact console membership from the fixed node-pty helper', async () => {
-    const { forkProcess } = forkWith('message', [999, 101, 202, 303], 999)
+function fakeChild(pid?: number, exitOnKill = true): FakeChild {
+  const child = new EventEmitter() as FakeChild
+  child.pid = pid
+  child.spawnargs = []
+  child.kill = vi.fn(() => {
+    if (exitOnKill) {
+      queueMicrotask(() => child.emit('exit', 0, null))
+    }
+    return true
+  })
+  return child
+}
 
-    await expect(
-      readWindowsConptyProcessIds(101, {
-        forkProcess,
-        resolveAgentPath: () => '/fixed/node-pty/conpty_console_list_agent.js'
-      })
-    ).resolves.toEqual(new Set([101, 202, 303]))
+function readerWith(children: FakeChild[], timeoutMs = 100) {
+  const forkProcess = vi.fn(() => {
+    const child = children.shift()
+    if (!child) {
+      throw new Error('unexpected fork')
+    }
+    return child as unknown as ChildProcess
+  }) as unknown as typeof fork
+  const reader = new WindowsConptyProcessMembershipReader({
+    forkProcess,
+    resolveAgentPath: () => 'C:\\fixed\\node-pty\\conpty_console_list_agent.js',
+    timeoutMs
+  })
+  return { forkProcess: vi.mocked(forkProcess), reader }
+}
+
+afterEach(() => {
+  listPtyJobProcessIds.mockReset()
+  vi.useRealTimers()
+})
+
+describe('WindowsConptyProcessMembershipReader', () => {
+  it('returns normalized console membership and terminates the one-shot helper', async () => {
+    const child = fakeChild(999)
+    const { forkProcess, reader } = readerWith([child])
+    const result = reader.read(101)
+
+    child.emit('message', { consoleProcessList: [999, 101, 202, 303] })
+
+    await expect(result).resolves.toEqual(new Set([101, 202, 303]))
     expect(forkProcess).toHaveBeenCalledWith(
-      '/fixed/node-pty/conpty_console_list_agent.js',
+      'C:\\fixed\\node-pty\\conpty_console_list_agent.js',
       ['101'],
       { silent: true }
     )
+    expect(child.kill).toHaveBeenCalledTimes(1)
+  })
+
+  it('single-flights concurrent reads for one PTY root', async () => {
+    const child = fakeChild(999)
+    const { forkProcess, reader } = readerWith([child])
+    const first = reader.read(101)
+    const second = reader.read(101)
+
+    expect(second).toBe(first)
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    child.emit('message', { consoleProcessList: [999, 101, 202] })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      new Set([101, 202]),
+      new Set([101, 202])
+    ])
+  })
+
+  it('waits for helper exit before admitting a different root', async () => {
+    const firstChild = fakeChild(901, false)
+    const secondChild = fakeChild(902)
+    const { forkProcess, reader } = readerWith([firstChild, secondChild])
+    const first = reader.read(101)
+    const second = reader.read(202)
+
+    firstChild.emit('message', { consoleProcessList: [901, 101] })
+    await expect(first).resolves.toEqual(new Set([101]))
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+
+    firstChild.emit('exit', 0, null)
+    expect(forkProcess).toHaveBeenCalledTimes(2)
+    secondChild.emit('message', { consoleProcessList: [902, 202] })
+    await expect(second).resolves.toEqual(new Set([202]))
+  })
+
+  it('does not reuse a settled result before the prior helper exits', async () => {
+    const firstChild = fakeChild(901, false)
+    const secondChild = fakeChild(902)
+    const { forkProcess, reader } = readerWith([firstChild, secondChild])
+    const first = reader.read(101)
+
+    firstChild.emit('message', { consoleProcessList: [901, 101, 303] })
+    await expect(first).resolves.toEqual(new Set([101, 303]))
+    const second = reader.read(101)
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+
+    firstChild.emit('exit', 0, null)
+    expect(forkProcess).toHaveBeenCalledTimes(2)
+    secondChild.emit('message', { consoleProcessList: [902, 101, 404] })
+    await expect(second).resolves.toEqual(new Set([101, 404]))
+  })
+
+  it('admits at most one helper when concurrent roots stall', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild(999, false)
+    const { forkProcess, reader } = readerWith([child], 10)
+    const reads = Array.from({ length: 32 }, (_, index) => reader.read(100 + index))
+
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(10)
+
+    await expect(Promise.all(reads)).resolves.toEqual(Array.from({ length: 32 }, () => null))
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    reader.dispose()
+  })
+
+  it('bounds pending distinct roots and load-sheds excess work', async () => {
+    const child = fakeChild(999, false)
+    const { forkProcess, reader } = readerWith([child])
+    const active = reader.read(101)
+    const queued = reader.read(202)
+
+    await expect(reader.read(303)).resolves.toBeNull()
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    reader.dispose()
+    await expect(Promise.all([active, queued])).resolves.toEqual([null, null])
+  })
+
+  it('does not replace a helper that failed to terminate', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild(999, false)
+    const { forkProcess, reader } = readerWith([child], 10)
+
+    const first = reader.read(101)
+    await vi.advanceTimersByTimeAsync(10)
+    await expect(first).resolves.toBeNull()
+    const second = reader.read(202)
+    await vi.advanceTimersByTimeAsync(10)
+
+    await expect(second).resolves.toBeNull()
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    reader.dispose()
+  })
+
+  it('drops an expired queued root without spawning it later', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild(999, false)
+    const { forkProcess, reader } = readerWith([child], 10)
+    const active = reader.read(101)
+    const queued = reader.read(202)
+
+    await vi.advanceTimersByTimeAsync(10)
+    await expect(Promise.all([active, queued])).resolves.toEqual([null, null])
+    child.emit('exit', 0, null)
+
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not admit a staggered queued root after the active deadline', async () => {
+    vi.useFakeTimers()
+    const child = fakeChild(999)
+    const { forkProcess, reader } = readerWith([child], 10)
+    const active = reader.read(101)
+    await vi.advanceTimersByTimeAsync(5)
+    const queued = reader.read(202)
+
+    await vi.advanceTimersByTimeAsync(5)
+
+    await expect(Promise.all([active, queued])).resolves.toEqual([null, null])
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('disposal settles active and queued reads without admitting another helper', async () => {
+    const child = fakeChild(999, false)
+    const { forkProcess, reader } = readerWith([child])
+    const active = reader.read(101)
+    const queued = reader.read(202)
+
+    reader.dispose()
+
+    await expect(Promise.all([active, queued])).resolves.toEqual([null, null])
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+    await expect(reader.read(303)).resolves.toBeNull()
+  })
+
+  it('fails closed when the helper cannot spawn', async () => {
+    const { forkProcess, reader } = readerWith([])
+
+    await expect(reader.read(101)).resolves.toBeNull()
+    expect(forkProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects invalid roots without spawning', async () => {
+    const { forkProcess, reader } = readerWith([])
+
+    await expect(reader.read(0)).resolves.toBeNull()
+    expect(forkProcess).not.toHaveBeenCalled()
   })
 
   it.each([
-    ['root-only failure fallback', [101], 999],
+    ['root-only fallback', [101], 999],
     ['malformed response', [999, 101, '202'], 999],
     ['missing PTY root', [999, 202, 303], 999],
     ['missing helper pid', [101, 202], 999],
     ['unavailable helper pid', [101, 202], undefined]
   ])('fails closed for %s', async (_label, processIds, helperPid) => {
-    const { forkProcess } = forkWith('message', processIds, helperPid)
-    await expect(readWindowsConptyProcessIds(101, { forkProcess })).resolves.toBeNull()
-  })
+    const child = fakeChild(helperPid)
+    const { reader } = readerWith([child])
+    const result = reader.read(101)
 
-  it('returns root-only membership when only the helper and shell are attached', async () => {
-    const { forkProcess } = forkWith('message', [999, 101], 999)
-    await expect(readWindowsConptyProcessIds(101, { forkProcess })).resolves.toEqual(new Set([101]))
-  })
+    child.emit('message', { consoleProcessList: processIds })
 
-  it('reports membership excluding the helper when a real child is attached', async () => {
-    const { forkProcess } = forkWith('message', [999, 101, 202], 999)
-    await expect(readWindowsConptyProcessIds(101, { forkProcess })).resolves.toEqual(
-      new Set([101, 202])
-    )
-  })
-
-  it('handles helper spawn errors without an unhandled child error', async () => {
-    const { forkProcess } = forkWith('error')
-    await expect(readWindowsConptyProcessIds(101, { forkProcess })).resolves.toBeNull()
-  })
-
-  it('kills a silent helper at the bounded timeout', async () => {
-    vi.useFakeTimers()
-    try {
-      const { child, forkProcess } = forkWith('none')
-      const result = readWindowsConptyProcessIds(101, { forkProcess, timeoutMs: 10 })
-      await vi.advanceTimersByTimeAsync(10)
-      await expect(result).resolves.toBeNull()
-      expect(child.kill).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
+    await expect(result).resolves.toBeNull()
   })
 
   it('absorbs an asynchronous kill error after timeout settlement', async () => {
     vi.useFakeTimers()
-    try {
-      const { child, forkProcess } = forkWith('none')
-      child.kill.mockImplementation(() => {
-        queueMicrotask(() => child.emit('error', new Error('kill failed')))
-      })
-      const result = readWindowsConptyProcessIds(101, { forkProcess, timeoutMs: 10 })
-      await vi.advanceTimersByTimeAsync(10)
-      await expect(result).resolves.toBeNull()
-      expect(child.listenerCount('error')).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
+    const child = fakeChild(999, false)
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => child.emit('error', new Error('kill failed')))
+      return false
+    })
+    const { reader } = readerWith([child], 10)
+    const result = reader.read(101)
+
+    await vi.advanceTimersByTimeAsync(10)
+
+    await expect(result).resolves.toBeNull()
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    reader.dispose()
+  })
+})
+
+describe('readWindowsConptyProcessIds job membership', () => {
+  const proc = { pid: 101 } as IPty
+
+  it('uses kernel-owned job membership without a helper', async () => {
+    listPtyJobProcessIds.mockReturnValue([101, 202])
+    const reader = { read: vi.fn() }
+
+    await expect(
+      readWindowsConptyProcessIds(proc.pid, { jobOwner: proc, reader: reader as never })
+    ).resolves.toEqual(new Set([101, 202]))
+    expect(reader.read).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the bounded reader when job membership is unavailable', async () => {
+    listPtyJobProcessIds.mockReturnValue(null)
+    const reader = { read: vi.fn().mockResolvedValue(new Set([101])) }
+
+    await expect(
+      readWindowsConptyProcessIds(proc.pid, { jobOwner: proc, reader: reader as never })
+    ).resolves.toEqual(new Set([101]))
+    expect(reader.read).toHaveBeenCalledWith(101)
+  })
+
+  it('rejects malformed job membership instead of publishing stale identity', async () => {
+    listPtyJobProcessIds.mockReturnValue([202])
+    const reader = { read: vi.fn().mockResolvedValue(null) }
+
+    await expect(
+      readWindowsConptyProcessIds(proc.pid, { jobOwner: proc, reader: reader as never })
+    ).resolves.toBeNull()
+    expect(reader.read).toHaveBeenCalledWith(101)
   })
 })

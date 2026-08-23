@@ -1407,23 +1407,23 @@ export class LocalPtyProvider implements IPtyProvider {
       ptyShellName.get(id)
     )
     const cachedAgent = ptyLastRecognizedForeground.get(id) ?? null
-    let consoleMembershipUnavailable = false
-    // Why: console membership preserves a live cached agent without the whole-table scan (incomplete under Windows load).
+    let treeMembershipUnavailable = false
+    // Why: PTY-owned tree membership preserves a live cached agent without a whole-table scan.
     if (
       process.platform === 'win32' &&
       canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
     ) {
       try {
-        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid)
+        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid, { jobOwner: proc })
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
         if (consoleProcessIds !== null && consoleProcessIds.size > 1 && cachedAgent !== null) {
           return cachedAgent
         }
-        consoleMembershipUnavailable = consoleProcessIds === null
+        treeMembershipUnavailable = consoleProcessIds === null
       } catch {
-        consoleMembershipUnavailable = true
+        treeMembershipUnavailable = true
       }
     }
     try {
@@ -1443,9 +1443,9 @@ export class LocalPtyProvider implements IPtyProvider {
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
-      // Why: incomplete snapshot + unavailable console probe isn't exit proof; only shell-only membership may clear the cache.
+      // Why: incomplete snapshot + unavailable tree probe isn't exit proof; only shell-only membership may clear the cache.
       const stable = resolveStableForegroundProcess(
-        consoleMembershipUnavailable && resolvedAgent === null
+        treeMembershipUnavailable && resolvedAgent === null
           ? { ...resolution, available: false }
           : resolution,
         lastRecognizedAgent

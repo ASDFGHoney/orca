@@ -6172,19 +6172,28 @@
         "https://github.com/stablyai/orca/pull/6968",
         "https://github.com/stablyai/orca/pull/6970",
         "https://github.com/stablyai/orca/pull/6999",
-        "https://github.com/stablyai/orca/issues/8048"
+        "https://github.com/stablyai/orca/issues/8048",
+        "https://github.com/stablyai/orca/issues/10857"
       ],
-      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size.",
-      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. A broader Windows live gate still needs shell input, resize, cursor, and CJK/wide-glyph pixel evidence.",
+      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size. Each PTY host admits at most one conpty_console_list_agent at a time, and it admits no replacement until the prior helper exits.",
+      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. The issue #10857 slice injects 32 distinct stalled membership probes, asserts one real OS helper PID and one fork, then proves timeout/disposal leaves no helper behind; units independently assert same-root single-flight, exit-before-replacement, bounded pending work, failed-reap admission closure, job-membership routing, and fail-closed malformed/stale results. The Electron/CDP golden independently proves rendered shell input/output and Windows environment expansion. Resize, cursor, and CJK/wide-glyph pixel evidence remain broader-gate work.",
       "commands": [
         "pnpm vitest run src/main/daemon/pty-subprocess.test.ts src/main/daemon/daemon-pty-adapter.test.ts",
         "pnpm build:electron-vite && node config/scripts/windows-daemon-workspace-close-repro.mjs",
-        "node config/scripts/windows-daemon-workspace-close-repro.mjs"
+        "node config/scripts/windows-daemon-workspace-close-repro.mjs",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/windows/windows-pty-job.win32.test.ts",
+        "pnpm exec playwright test tests/e2e/golden-shell-command.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1"
       ],
       "testFiles": [
         "src/main/daemon/pty-subprocess.test.ts",
         "src/main/daemon/daemon-pty-adapter.test.ts",
-        "config/scripts/windows-daemon-workspace-close-repro.mjs"
+        "config/scripts/windows-daemon-workspace-close-repro.mjs",
+        "src/main/providers/windows-conpty-process-membership.test.ts",
+        "src/main/providers/windows-conpty-process-membership.repro.test.ts",
+        "src/main/providers/windows-conpty-process-membership.win32.test.ts",
+        "src/main/windows/windows-pty-job.win32.test.ts",
+        "tests/e2e/golden-shell-command.spec.ts"
       ],
       "assertionRefs": [
         {
@@ -6205,6 +6214,39 @@
           "assertions": [
             "all 25 victim sessions and OS PIDs are reaped while the built daemon PID and an unrelated witness PowerShell remain alive"
           ]
+        },
+        {
+          "file": "src/main/providers/windows-conpty-process-membership.test.ts",
+          "assertions": [
+            "same-root requests single-flight and distinct roots wait for confirmed helper exit",
+            "timeouts, failed reaps, queue pressure, malformed results, and disposal preserve one active plus one queued request and fail closed",
+            "tree-presence reads use kernel job membership while exact-console reads retain the supervised helper"
+          ]
+        },
+        {
+          "file": "src/main/providers/windows-conpty-process-membership.repro.test.ts",
+          "assertions": [
+            "32 concurrent distinct-root stalls create exactly one live OS helper process",
+            "all reads settle and the supervised helper is absent after cleanup"
+          ]
+        },
+        {
+          "file": "src/main/providers/windows-conpty-process-membership.win32.test.ts",
+          "assertions": [
+            "real ConPTY membership includes the attached child and excludes a child launched into another console"
+          ]
+        },
+        {
+          "file": "src/main/windows/windows-pty-job.win32.test.ts",
+          "assertions": [
+            "patched native job membership includes detached descendants and becomes unverifiable after tree teardown"
+          ]
+        },
+        {
+          "file": "tests/e2e/golden-shell-command.spec.ts",
+          "assertions": [
+            "a rendered daemon-backed ConPTY accepts keyboard input, echoes output, identifies its foreground shell, and expands a Windows environment path"
+          ]
         }
       ],
       "evidenceRuns": [
@@ -6216,6 +6258,33 @@
           "result": "passed",
           "durationSeconds": 7.6,
           "summary": "All 25 victim sessions and OS PIDs were reaped while the built daemon and witness PTY survived the real ConPTY workspace-close races. The double-close, history ordering, and seed-failure restart regressions produced intentional red failures before their fixes and passed afterward."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
+          "result": "passed",
+          "durationSeconds": 1.21,
+          "summary": "The physical Windows stall injection observed one live node.exe helper for 32 concurrent distinct roots and zero leftovers after settlement; ownership units and a real ConPTY attached-versus-detached membership probe also passed."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/windows/windows-pty-job.win32.test.ts",
+          "result": "passed",
+          "durationSeconds": 25.61,
+          "summary": "A patched native build reported job ownership, included a detached grandchild, terminated the exact tree, preserved clean-exit backgrounding, and returned unverifiable rather than stale membership after teardown."
+        },
+        {
+          "date": "2026-08-23",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec playwright test tests/e2e/golden-shell-command.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 31,
+          "summary": "The isolated Electron/CDP journey rendered a fresh daemon-backed Windows terminal, accepted and echoed keyboard input, identified its foreground shell, expanded LOCALAPPDATA, and shut down cleanly."
         }
       ],
       "runtimeBudget": {
@@ -6228,11 +6297,11 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
+        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. The identical helper-bound oracle observed 32 live helpers on v1.4.158/current main, one on the candidate, and 32 with the candidate's admission owner disabled; cleanup reached zero in every arm. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Must include input latency and no broad session listing while typing or switching terminals."
+        "evidence": "The membership owner deletes helper work from tree-presence reads when job support is available, single-flights same-root reads, caps distinct-root subprocess concurrency at one, and retains at most one queued distinct root; the physical Windows fault injection records fork and live-process counts. Input latency and no broad session listing while typing or switching terminals remain required."
       },
       "promotionCriteria": [
         "Start as Windows nightly/soak because Windows Electron E2E has been flaky.",
@@ -6241,7 +6310,7 @@
       ],
       "knownGaps": [
         "Real IME composition may require a separate lower-layer/native-text-forwarding gate.",
-        "The built-daemon harness proves process/session liveness but not renderer pixels; visible shell input, resize, cursor, and CJK repaint remain uncovered."
+        "The built-daemon harness proves process/session liveness but not renderer pixels; resize, cursor, and CJK repaint remain uncovered."
       ],
       "demotionRule": "Cannot promote while Windows E2E is flaky, silently skipped, or screenshot-only."
     },
