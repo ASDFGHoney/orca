@@ -6175,33 +6175,20 @@
         "https://github.com/stablyai/orca/issues/8048",
         "https://github.com/stablyai/orca/issues/10857"
       ],
-      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size. Bundled-ConPTY foreground reads never fork conpty_console_list_agent and publish no unproved membership. Each system-ConPTY host admits at most one console-list helper and no replacement before confirmed close; concurrent teardown beyond that bound fails closed to root-only cleanup.",
-      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. The issue #10857 slice injects 32 distinct stalled foreground reads and asserts zero forks and zero live OS helpers; disabling the no-fork path creates 32 of each and fails the same assertion. The node-pty owner fault injects 32 concurrent system-ConPTY teardown reads and asserts one admitted helper, load shedding, and close-before-replacement. Relay and hidden PTYs retain system-ConPTY teardown semantics. The Electron/CDP golden independently proves rendered shell input/output and Windows environment expansion. Resize, cursor, and CJK/wide-glyph pixel evidence remain broader-gate work.",
+      "invariant": "Windows local and daemon terminals must spawn with the intended shell, survive overlapping graceful/forced workspace teardown without affecting unrelated PTYs, retain recovered scrollback across the fresh daemon's first checkpoint, accept normal Enter/Backspace/Arrow input after agent or TUI exit, render cursor/CJK/wide-glyph redraws without stale cells, and converge to nonzero applied size. Foreground membership polling creates zero conpty_console_list_agent subprocesses and returns unverifiable.",
+      "oracle": "The issue #8048 slice asserts one node-pty ConPTY close for a graceful-then-force sequence, atomically seeds recovered history before fresh shell output and re-anchoring, preserves recovery after seed failure plus adapter restart, and runs 25 built-daemon close races while checking victim session/PID reaping, a stable daemon PID, and a live witness PTY. The issue #10857 slice injects 32 distinct stalled foreground reads and requires zero forks and zero live helpers; disabling the no-fork behavior produces 32 of each and fails the identical assertion. A broader Windows live gate still needs shell input, resize, cursor, and CJK/wide-glyph pixel evidence.",
       "commands": [
         "pnpm vitest run src/main/daemon/pty-subprocess.test.ts src/main/daemon/daemon-pty-adapter.test.ts",
         "pnpm build:electron-vite && node config/scripts/windows-daemon-workspace-close-repro.mjs",
         "node config/scripts/windows-daemon-workspace-close-repro.mjs",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-console-list-admission.node-pty.test.ts config/scripts/node-pty-console-list-agent-patch.test.mjs src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/hidden-pty-cleanup.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/windows/windows-pty-job.win32.test.ts",
-        "pnpm exec playwright test tests/e2e/golden-shell-command.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1"
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts"
       ],
       "testFiles": [
         "src/main/daemon/pty-subprocess.test.ts",
         "src/main/daemon/daemon-pty-adapter.test.ts",
         "config/scripts/windows-daemon-workspace-close-repro.mjs",
         "src/main/providers/windows-conpty-process-membership.test.ts",
-        "src/main/providers/windows-conpty-process-membership.repro.test.ts",
-        "src/main/providers/windows-conpty-process-membership.win32.test.ts",
-        "src/main/providers/windows-conpty-console-list-admission.node-pty.test.ts",
-        "config/scripts/node-pty-console-list-agent-patch.test.mjs",
-        "src/main/providers/local-pty-provider-foreground-process.test.ts",
-        "src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts",
-        "src/main/rate-limits/hidden-pty-cleanup.test.ts",
-        "src/relay/pty-handler-spawn-environment.test.ts",
-        "src/relay/pty-handler-revive.test.ts",
-        "src/main/windows/windows-pty-job.win32.test.ts",
-        "tests/e2e/golden-shell-command.spec.ts"
+        "src/main/providers/windows-conpty-process-membership.repro.test.ts"
       ],
       "assertionRefs": [
         {
@@ -6224,58 +6211,10 @@
           ]
         },
         {
-          "file": "src/main/providers/windows-conpty-process-membership.test.ts",
-          "assertions": ["foreground membership fails closed without invoking a supplied fork"]
-        },
-        {
           "file": "src/main/providers/windows-conpty-process-membership.repro.test.ts",
           "assertions": [
-            "32 concurrent distinct-root reads create zero forks and zero live OS helper processes",
+            "32 concurrent distinct-root foreground reads create zero forks and zero live OS helpers",
             "the identical disabled arm creates 32 forks and 32 live helpers, then cleans up to zero"
-          ]
-        },
-        {
-          "file": "src/main/providers/windows-conpty-process-membership.win32.test.ts",
-          "assertions": [
-            "the real bundled-ConPTY topology fails closed instead of publishing unproved attached or detached membership"
-          ]
-        },
-        {
-          "file": "src/main/providers/windows-conpty-console-list-admission.node-pty.test.ts",
-          "assertions": [
-            "32 concurrent dependency-owned reads admit one helper and load-shed the rest",
-            "a replacement is admitted only after the prior helper closes",
-            "32 physical stalled reads create one live OS helper and cleanup reaches zero"
-          ]
-        },
-        {
-          "file": "config/scripts/node-pty-console-list-agent-patch.test.mjs",
-          "assertions": [
-            "the stock SSH dependency receives and verifies the same helper-admission owner"
-          ]
-        },
-        {
-          "file": "src/relay/pty-handler-spawn-environment.test.ts",
-          "assertions": [
-            "a fresh Windows relay PTY retains node-pty's system-ConPTY teardown owner"
-          ]
-        },
-        {
-          "file": "src/relay/pty-handler-revive.test.ts",
-          "assertions": [
-            "a revived Windows relay PTY retains node-pty's system-ConPTY teardown owner"
-          ]
-        },
-        {
-          "file": "src/main/windows/windows-pty-job.win32.test.ts",
-          "assertions": [
-            "patched native job membership includes detached descendants and becomes unverifiable after tree teardown"
-          ]
-        },
-        {
-          "file": "tests/e2e/golden-shell-command.spec.ts",
-          "assertions": [
-            "a rendered daemon-backed ConPTY accepts keyboard input, echoes output, identifies its foreground shell, and expands a Windows environment path"
           ]
         }
       ],
@@ -6293,37 +6232,10 @@
           "date": "2026-08-23",
           "runner": "local",
           "platform": "windows",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts src/main/providers/windows-conpty-process-membership.win32.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-process-membership.test.ts src/main/providers/windows-conpty-process-membership.repro.test.ts",
           "result": "passed",
-          "durationSeconds": 0.46,
-          "summary": "The physical Windows injection observed zero forks and zero helpers for 32 concurrent foreground reads; the real bundled-ConPTY topology returned unverifiable instead of stale membership."
-        },
-        {
-          "date": "2026-08-23",
-          "runner": "local",
-          "platform": "windows",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/windows-conpty-console-list-admission.node-pty.test.ts config/scripts/node-pty-console-list-agent-patch.test.mjs src/main/providers/local-pty-provider-foreground-process.test.ts src/main/daemon/pty-subprocess-foreground-degraded-scan.test.ts src/main/rate-limits/hidden-pty-cleanup.test.ts src/relay/pty-handler-spawn-environment.test.ts src/relay/pty-handler-revive.test.ts",
-          "result": "passed",
-          "durationSeconds": 3.84,
-          "summary": "The dependency-owned fault created one live OS helper for 32 stalled reads and cleaned to zero; the stock SSH patch contract, local/daemon foreground, hidden cleanup, and relay fresh/revive paths passed."
-        },
-        {
-          "date": "2026-08-23",
-          "runner": "local",
-          "platform": "windows",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/windows/windows-pty-job.win32.test.ts",
-          "result": "passed",
-          "durationSeconds": 25.61,
-          "summary": "A patched native build reported job ownership, included a detached grandchild, terminated the exact tree, preserved clean-exit backgrounding, and returned unverifiable rather than stale membership after teardown."
-        },
-        {
-          "date": "2026-08-23",
-          "runner": "local",
-          "platform": "windows",
-          "command": "pnpm exec playwright test tests/e2e/golden-shell-command.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
-          "result": "passed",
-          "durationSeconds": 31,
-          "summary": "The isolated Electron/CDP journey rendered a fresh daemon-backed Windows terminal, accepted and echoed keyboard input, identified its foreground shell, expanded LOCALAPPDATA, and shut down cleanly."
+          "durationSeconds": 0.98,
+          "summary": "The physical injection observed zero forks and zero helpers for 32 concurrent foreground reads; disabling the fix produced 32 forks and 32 live helpers with cleanup to zero."
         }
       ],
       "runtimeBudget": {
@@ -6336,11 +6248,11 @@
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. The identical helper oracle observed 32 live helpers on v1.4.158/current main, zero on the candidate, and 32 with the candidate's no-fork behavior disabled; cleanup reached zero in the forking arms. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
+        "evidence": "The ConPTY double-close and cold-restore re-anchor assertions were each observed failing before the fix and passing afterward. The identical STA-2715 oracle produced 32 live helpers on current main and with the candidate fix disabled, versus zero on the candidate. Keyboard protocol, shell resolution, resize, and CJK repaint still need red/green proof."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Bundled-ConPTY foreground reads create no subprocess. System-ConPTY relay and hidden teardown share the dependency-owned one-helper-per-host admission bound, independent of PTY churn; the slot remains occupied until confirmed helper close. Physical Windows injections record foreground fork/live counts. Input latency and no broad session listing while typing or switching terminals remain required."
+        "evidence": "Foreground membership reads create no subprocess. Input latency and no broad session listing while typing or switching terminals remain required."
       },
       "promotionCriteria": [
         "Start as Windows nightly/soak because Windows Electron E2E has been flaky.",
@@ -6349,7 +6261,7 @@
       ],
       "knownGaps": [
         "Real IME composition may require a separate lower-layer/native-text-forwarding gate.",
-        "The built-daemon harness proves process/session liveness but not renderer pixels; resize, cursor, and CJK repaint remain uncovered."
+        "The built-daemon harness proves process/session liveness but not renderer pixels; visible shell input, resize, cursor, and CJK repaint remain uncovered."
       ],
       "demotionRule": "Cannot promote while Windows E2E is flaky, silently skipped, or screenshot-only."
     },
@@ -9409,13 +9321,13 @@
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": [],
-      "coverageNotes": "Deterministic main/renderer tests run on macOS and exercise simulated Windows plus POSIX/Linux process-confirmation behavior. They cover exact local-ConPTY membership, detached-child rejection, SSH and paired-runtime host-platform routing including legacy runtime PTY IDs, active-PTY ownership after worktree host changes, Windows-to-WSL routing, unknown-metadata fallback, production handler composition, KKP authorization on every host, process-confirmed Droid routing and launch-triggered confirmation, typed-alias and forged-OSC isolation, shells without OSC 133, split/detach ownership with preserved shell classification, stale PTY exit/rebind rejection, command-generation revocation, daemon v21 warm-reattach identity, unavailable inspection, and lazy subprocess/RPC callback counts. A live linux-arm64 Docker target additionally proved real relay deployment, SSH PTY host detection, and exact inactive/active KKP bytes. The Electron byte test runs only on Windows; live Windows evidence remains uncollected. Test failures report exact expected bytes; no product telemetry or raw terminal logging is added.",
+      "coverageNotes": "Deterministic main/renderer tests run on macOS and exercise simulated Windows plus POSIX/Linux process-confirmation behavior. They cover injected exact-membership resolver behavior and detached-child rejection, while production local/daemon Windows membership fails closed without forking a helper. They also cover SSH and paired-runtime host-platform routing including legacy runtime PTY IDs, active-PTY ownership after worktree host changes, Windows-to-WSL routing, unknown-metadata fallback, production handler composition, KKP authorization on every host, process-confirmed Droid routing and launch-triggered confirmation, typed-alias and forged-OSC isolation, shells without OSC 133, split/detach ownership with preserved shell classification, stale PTY exit/rebind rejection, command-generation revocation, daemon v21 warm-reattach identity, unavailable inspection, and lazy subprocess/RPC callback counts. A live linux-arm64 Docker target additionally proved real relay deployment, SSH PTY host detection, and exact inactive/active KKP bytes. The Electron byte test runs only on Windows; live Windows routing evidence remains uncollected. Test failures report exact expected bytes; no product telemetry or raw terminal logging is added.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7620",
         "https://github.com/stablyai/orca/pull/7668"
       ],
       "invariant": "Shift+Enter key recognition follows the client OS, while emitted bytes follow the active application and PTY host: active Kitty keyboard protocol authorizes CSI-u on every host; otherwise Windows hosts use Esc+CR except when allowlisted Droid ownership or fresh routing-trusted Droid process evidence authorizes CSI-u, and non-Windows hosts use Esc+CR. The active SSH connection, remote-runtime PTY owner, or live local session outranks later worktree ownership changes, and missing host-platform metadata falls back to the client. Every new command and PTY replacement revokes stale agent routing until current evidence settles; split or reused panes cannot inherit sibling or prior-PTY authority; unrelated keys perform no host, agent, protocol, or ConPTY lookup.",
-      "oracle": "Renderer tests assert exact bytes across client/PTY-host combinations, including Kitty keyboard protocol active and inactive on Windows and non-Windows hosts, and prove SSH identity, the environment encoded in an active remote-runtime PTY id, and live local-session identity outrank current worktree ownership, while unavailable platform metadata falls back to the client. A live linux-arm64 SSH PTY independently captured Esc+CR with KKP inactive and CSI-u with KKP active. Fresh Windows process evidence authorizes Droid bytes only after a recognized global candidate is intersected with the exact ConPTY console process list; detached descendants, helper failure/timeout/root-only fallback, stale PTY exit/rebind results, typed text, and hook/OSC output fail closed. A new OSC 133;C immediately publishes a routing-neutral generation, including during D-to-C races. In cmd.exe/Git Bash/custom shells without OSC 133, accepted inferred commands start the same fresh generation; accepted submit/interrupt, title exit, focus, and visibility revoke trusted Droid bytes while one bounded confirmation runs. Detach preserves the live PTY's source shell override so WSL/native classification cannot change with the current default. Ordinary fast shell commands use cached/no-scan paths; routing-relevant confirmation bypasses cached process snapshots and keeps the bounded three-read ladder. Daemon protocol v21 persists only an allowlisted launchAgent; warm reattach uses it as a display/confirmation hint and restores routing only after current process proof. The Windows Electron test focuses the real xterm textarea and records exact renderer-to-main PTY writes.",
+      "oracle": "Renderer tests assert exact bytes across client/PTY-host combinations, including Kitty keyboard protocol active and inactive on Windows and non-Windows hosts, and prove SSH identity, the environment encoded in an active remote-runtime PTY id, and live local-session identity outrank current worktree ownership, while unavailable platform metadata falls back to the client. A live linux-arm64 SSH PTY independently captured Esc+CR with KKP inactive and CSI-u with KKP active. Resolver tests prove that exact injected Windows console membership can authorize an attached Droid candidate and reject a detached candidate; production local/daemon membership is unavailable and therefore cannot authorize from that evidence. Stale PTY exit/rebind results, typed text, and hook/OSC output also fail closed. A new OSC 133;C immediately publishes a routing-neutral generation, including during D-to-C races. In cmd.exe/Git Bash/custom shells without OSC 133, accepted inferred commands start the same fresh generation; accepted submit/interrupt, title exit, focus, and visibility revoke trusted Droid bytes while one bounded confirmation runs. Detach preserves the live PTY's source shell override so WSL/native classification cannot change with the current default. Ordinary fast shell commands use cached/no-scan paths; routing-relevant confirmation bypasses cached process snapshots and keeps the bounded three-read ladder. Daemon protocol v21 persists only an allowlisted launchAgent; warm reattach uses it as a display/confirmation hint and restores routing only after current process proof. The Windows Electron test focuses the real xterm textarea and records exact renderer-to-main PTY writes.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-foreground-confirmation-protocol.test.ts src/main/daemon/daemon-pty-adapter.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/daemon-server.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts src/main/daemon/pty-subprocess-foreground-scan-cadence.test.ts src/main/daemon/pty-subprocess.test.ts src/main/ipc/pty-runtime-kill-and-exit.test.ts src/main/providers/agent-foreground-process.test.ts src/main/providers/local-pty-provider-foreground-process.test.ts src/main/providers/windows-conpty-process-membership.test.ts src/renderer/src/components/terminal-pane/pane-foreground-agent-tracker.test.ts src/renderer/src/components/terminal-pane/pty-connection-command-finished-cleanup.test.ts src/renderer/src/components/terminal-pane/pty-connection-foreground-agent-routing.test.ts src/renderer/src/components/terminal-pane/pty-connection-foreground-agent-sampling.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/terminal-pane-tab-detach.test.ts src/renderer/src/components/terminal-pane/terminal-shortcut-policy.test.ts src/renderer/src/components/terminal-pane/terminal-windows-shift-enter.test.ts src/renderer/src/store/slices/store-active-worktree-terminal-creation.test.ts src/renderer/src/store/slices/terminal-pane-detach-agent-identity.test.ts src/shared/agent-process-recognition.test.ts src/shared/process-table-snapshot.test.ts tests/e2e/terminal-foreground-confirmation.unit.test.ts",
         "pnpm run test:e2e -- tests/e2e/terminal-shortcuts.spec.ts",
@@ -9473,9 +9385,7 @@
         {
           "file": "src/main/providers/windows-conpty-process-membership.test.ts",
           "assertions": [
-            "the fixed node-pty helper returns validated integer console membership containing the PTY root",
-            "root-only fallback, malformed/missing-root messages, spawn errors, and a silent helper timeout all fail closed",
-            "the bounded timeout kills the child helper exactly once"
+            "production foreground membership returns unavailable without forking a helper"
           ]
         },
         {
@@ -9684,7 +9594,7 @@
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "daemon"],
-      "coverageNotes": "Runtime and provider-contract tests on macOS cover exact-PTY authorization, verified managed-Claude launch identity, local/daemon fresh confirmation, exact ConPTY membership, and unsupported-provider fail-closed behavior. Physical Windows, live Linux, SSH, WSL, and remote-runtime validation remain explicit gaps; providers without confirmation preserve conservative refusal when no verified launch identity exists.",
+      "coverageNotes": "Runtime and provider-contract tests on macOS cover exact-PTY authorization, verified managed-Claude launch identity, local/daemon fresh confirmation, injected exact-membership resolver behavior, and unsupported-provider fail-closed behavior. Production local/daemon Windows membership returns unavailable without forking a helper. Physical Windows guarded-send, live Linux, SSH, WSL, and remote-runtime validation remain explicit gaps; providers without confirmation preserve conservative refusal when no verified launch identity exists.",
       "motivatingLinks": ["https://github.com/stablyai/orca/issues/8303"],
       "invariant": "A guarded note send writes only to the exact PTY binding checked by the guard and only while permission/wait evidence allows input; a generic busy title requires independent agent identity from the title, a verified managed launch bound to the current PTY incarnation, or the foreground process; fresh hook state conflicting with an ordinary shell foreground requires fresh provider confirmation of a recognized agent in that PTY.",
       "oracle": "A quarter-circle Claude task title authorizes without a provider lookup only on the exact PTY incarnation carrying verified managed-Claude launch identity; the same title in a bare pane, with an unverified launch hint, or after PTY incarnation replacement is refused while current Claude activity remains a working signal. Fresh explicit state plus ordinary PowerShell plus confirmed recognized agent is sendable on the same PTY. Confirmed shell/non-agent, unavailable confirmation, PTY exit, handle rebind, or a callback PTY mismatch returns a refusal or not-writable result and writes zero bytes.",
@@ -9752,8 +9662,7 @@
         {
           "file": "src/main/providers/windows-conpty-process-membership.test.ts",
           "assertions": [
-            "exact ConPTY console membership comes from the fixed node-pty helper",
-            "malformed, incomplete, timed-out, and spawn-error membership reads fail closed"
+            "production foreground membership returns unavailable without forking a helper"
           ]
         },
         {

@@ -10,6 +10,7 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout repro
     const fixturePath = requireFromTest.resolve('./fixtures/conpty-console-list-stall.cjs')
     const children: ReturnType<typeof fork>[] = []
     const exits: Promise<void>[] = []
+    const spawns: Promise<void>[] = []
     const forkProcess = ((
       modulePath: string | URL,
       argsOrOptions?: readonly string[] | ForkOptions,
@@ -19,19 +20,25 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY helper fanout repro
         ? fork(modulePath, argsOrOptions, options)
         : fork(modulePath, argsOrOptions as ForkOptions | undefined)
       children.push(child)
+      spawns.push(
+        new Promise((resolve, reject) => {
+          child.once('spawn', resolve)
+          child.once('error', reject)
+        })
+      )
       exits.push(new Promise((resolve) => child.once('exit', () => resolve())))
       return child
     }) as typeof fork
     const deps = {
       forkProcess,
       resolveAgentPath: () => fixturePath,
-      timeoutMs: 1_000
+      timeoutMs: 3_000
     }
     const reader = createReader(deps)
 
     try {
       const probes = Array.from({ length: 32 }, (_, index) => reader.read(4242 + index))
-      await new Promise((resolve) => setTimeout(resolve, 250))
+      await Promise.all(spawns)
       const liveChildren = children.filter((child) => {
         if (!child.pid || child.exitCode !== null) {
           return false
@@ -92,7 +99,7 @@ type ReaderDeps = {
 }
 
 function createReader(deps: ReaderDeps): Reader {
-  if (process.env.ORCA_TEST_DISABLE_CONPTY_MEMBERSHIP_BOUND === '1') {
+  if (process.env.ORCA_TEST_DISABLE_CONPTY_MEMBERSHIP_NO_FORK === '1') {
     return createUnboundedReader(deps)
   }
   const ReaderClass = Reflect.get(membership, 'WindowsConptyProcessMembershipReader') as
