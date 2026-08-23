@@ -61,7 +61,10 @@ import {
 import { upstreamOnlyCommitsArePatchEquivalent } from '../shared/git-upstream-status'
 import { assertGitPushTargetShape } from '../shared/git-push-target-validation'
 import { getPublishTargetStatus, type GitCommandRunner } from '../shared/git-publish-target-status'
+import { isNoWriteFetchHeadUnsupportedError } from '../shared/git-fetch-head-capability'
+import { resolveGitFetchHeadCommand, runWithGitFetchHeadLock } from '../shared/git-fetch-head-lock'
 import {
+  REBASE_FROM_BASE_OPERATION_TIMEOUT_MS,
   REBASE_SOURCE_FETCH_TIMEOUT_MS,
   resolveGitRemoteRebaseSource
 } from '../shared/git-rebase-source'
@@ -100,10 +103,12 @@ import { endSubprocessStdin } from '../shared/subprocess-stdin-write'
 import { clearGitStatusLineStatsCache } from '../shared/git-status-line-stats-cache'
 import { invalidateGitBranchLineTotalInFlight } from '../shared/git-branch-line-total'
 import { streamRelayGitStdout } from './git-stdout-stream'
+import { runProcess } from '../shared/child-process/run-process'
 
 const execFileAsync = promisify(execFile)
 const MAX_GIT_BUFFER = 10 * 1024 * 1024
 const BULK_CHUNK_SIZE = 100
+const GIT_REBASE_PROCESS_FALLBACK_TIMEOUT_MS = 2_147_000_000
 
 function resolveSubmoduleStatusArea(
   params: Record<string, unknown>
@@ -182,6 +187,47 @@ function execFileWithStdin(
   })
 }
 
+async function runGitToTermination(
+  args: string[],
+  options: ExecFileOptions,
+  stdin: string | undefined
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await runProcess({
+    program: 'git',
+    args,
+    cwd: typeof options.cwd === 'string' ? options.cwd : undefined,
+    env: options.env,
+    timeoutMs:
+      typeof options.timeout === 'number'
+        ? options.timeout
+        : GIT_REBASE_PROCESS_FALLBACK_TIMEOUT_MS,
+    maxOutputBytes: typeof options.maxBuffer === 'number' ? options.maxBuffer : MAX_GIT_BUFFER,
+    signal: options.signal,
+    terminationBarrier: true,
+    ...(stdin === undefined ? {} : { input: stdin })
+  })
+  if (result.code === 0 && !result.timedOut && !options.signal?.aborted) {
+    return { stdout: result.stdout, stderr: result.stderr }
+  }
+  const error = new Error(
+    result.timedOut
+      ? `git ${args[0] ?? 'command'} timed out.`
+      : options.signal?.aborted
+        ? 'The operation was aborted.'
+        : result.stderr.trim() || `git ${args[0] ?? 'command'} failed.`
+  )
+  if (options.signal?.aborted) {
+    error.name = 'AbortError'
+  }
+  throw Object.assign(error, {
+    code: result.code,
+    killed: result.timedOut || result.signal !== null || options.signal?.aborted === true,
+    signal: result.signal,
+    stdout: result.stdout,
+    stderr: result.stderr
+  })
+}
+
 export class GitHandler {
   private dispatcher: RelayDispatcher
   private readonly gitDiffReadDedupe = new InFlightPromiseDedupe<unknown>()
@@ -252,7 +298,7 @@ export class GitHandler {
     this.dispatcher.onRequest('git.push', (p) => this.push(p))
     this.dispatcher.onRequest('git.pull', (p) => this.pull(p))
     this.dispatcher.onRequest('git.fastForward', (p) => this.fastForward(p))
-    this.dispatcher.onRequest('git.rebaseFromBase', (p) => this.rebaseFromBase(p))
+    this.dispatcher.onRequest('git.rebaseFromBase', (p, context) => this.rebaseFromBase(p, context))
     this.dispatcher.onRequest('git.branchDiff', (p, context) => this.branchDiff(p, context))
     this.dispatcher.onRequest('git.commitDiff', (p, context) => this.commitDiff(p, context))
     this.dispatcher.onRequest('git.listWorktrees', (p, context) => this.listWorktrees(p, context))
@@ -333,25 +379,36 @@ export class GitHandler {
       nonInteractive?: boolean
       stdin?: string
       timeout?: number
+      terminationBarrier?: boolean
     }
   ): Promise<{ stdout: string; stderr: string }> {
-    const env = opts?.nonInteractive ? buildRelayUnattendedGitEnv() : buildRelayGitEnv()
-    if (opts?.disableOptionalLocks) {
-      env.GIT_OPTIONAL_LOCKS = '0'
+    const expandedCwd = expandTilde(cwd)
+    const run = async (): Promise<{ stdout: string; stderr: string }> => {
+      const env = opts?.nonInteractive ? buildRelayUnattendedGitEnv() : buildRelayGitEnv()
+      if (opts?.disableOptionalLocks) {
+        env.GIT_OPTIONAL_LOCKS = '0'
+      }
+      const execOptions = {
+        cwd: expandedCwd,
+        env,
+        encoding: 'utf-8',
+        maxBuffer: opts?.maxBuffer ?? MAX_GIT_BUFFER,
+        timeout: opts?.timeout,
+        signal: opts?.signal
+      } satisfies ExecFileOptions
+      if (opts?.terminationBarrier) {
+        return runGitToTermination(args, execOptions, opts.stdin)
+      }
+      if (opts?.stdin !== undefined) {
+        return execFileWithStdin('git', args, execOptions, opts.stdin)
+      }
+      const { stdout, stderr } = await execFileAsync('git', args, execOptions)
+      return { stdout: String(stdout), stderr: String(stderr) }
     }
-    const execOptions = {
-      cwd: expandTilde(cwd),
-      env,
-      encoding: 'utf-8',
-      maxBuffer: opts?.maxBuffer ?? MAX_GIT_BUFFER,
-      timeout: opts?.timeout,
-      signal: opts?.signal
-    } satisfies ExecFileOptions
-    if (opts?.stdin !== undefined) {
-      return execFileWithStdin('git', args, execOptions, opts.stdin)
-    }
-    const { stdout, stderr } = await execFileAsync('git', args, execOptions)
-    return { stdout: String(stdout), stderr: String(stderr) }
+    const command = resolveGitFetchHeadCommand(args, expandedCwd)
+    return command.needsLock
+      ? runWithGitFetchHeadLock(command.cwd, opts?.signal, run, command.gitDir)
+      : run()
   }
 
   private async gitBuffer(args: string[], cwd: string): Promise<Buffer> {
@@ -1132,37 +1189,76 @@ export class GitHandler {
     await this.pullWithArgs(params, ['--ff-only'])
   }
 
-  private async rebaseFromBase(params: Record<string, unknown>) {
+  private async rebaseFromBase(params: Record<string, unknown>, context?: RequestContext) {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     const baseRef = params.baseRef as string
     let rebaseRef: string | null = null
+    const controller = new AbortController()
+    const abortFromContext = () => controller.abort()
+    if (context?.signal?.aborted) {
+      controller.abort()
+    } else {
+      context?.signal?.addEventListener('abort', abortFromContext, { once: true })
+    }
+    const timeout = setTimeout(() => controller.abort(), REBASE_FROM_BASE_OPERATION_TIMEOUT_MS)
     try {
       try {
         const source = await resolveGitRemoteRebaseSource(
-          ((args) => this.git(args, worktreePath)) as GitCommandRunner,
+          ((args) =>
+            this.git(args, worktreePath, {
+              signal: controller.signal,
+              terminationBarrier: true
+            })) as GitCommandRunner,
           baseRef
         )
         let forkPoint: string | null = null
+        let hasHead = true
         try {
           const { stdout } = await this.git(
             ['merge-base', '--fork-point', `refs/remotes/${source.displayName}`, 'HEAD'],
-            worktreePath
+            worktreePath,
+            { signal: controller.signal, terminationBarrier: true }
           )
           forkPoint = stdout.trim() || null
         } catch {
           // A first fetch or an unhelpful reflog falls back to Git's merge-base behavior.
+          try {
+            await this.git(['rev-parse', '--verify', 'HEAD'], worktreePath, {
+              signal: controller.signal,
+              terminationBarrier: true
+            })
+          } catch {
+            hasHead = false
+          }
         }
         // Why: concurrent fetches can replace FETCH_HEAD and remote-tracking refs between fetch and rebase.
         rebaseRef = `refs/orca/rebase/${randomUUID()}`
-        await this.git(
-          ['fetch', source.remoteName, `+refs/heads/${source.branchName}:${rebaseRef}`],
-          worktreePath,
-          { timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS }
+        const fetchArgs = [source.remoteName, `+refs/heads/${source.branchName}:${rebaseRef}`]
+        await this.gitCapabilities.runWithFallback(
+          'fetch-no-write-fetch-head',
+          () =>
+            this.git(['fetch', '--no-write-fetch-head', ...fetchArgs], worktreePath, {
+              timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS,
+              signal: controller.signal,
+              terminationBarrier: true
+            }),
+          () =>
+            this.git(['fetch', ...fetchArgs], worktreePath, {
+              timeout: REBASE_SOURCE_FETCH_TIMEOUT_MS,
+              signal: controller.signal,
+              terminationBarrier: true
+            }),
+          isNoWriteFetchHeadUnsupportedError
         )
         await this.git(
-          forkPoint ? ['rebase', '--onto', rebaseRef, forkPoint] : ['rebase', rebaseRef],
-          worktreePath
+          hasHead
+            ? forkPoint
+              ? ['rebase', '--onto', rebaseRef, forkPoint]
+              : ['rebase', rebaseRef]
+            : ['merge', '--ff-only', rebaseRef],
+          worktreePath,
+          { signal: controller.signal, terminationBarrier: true }
         )
       } catch (error) {
         throw new Error(normalizeGitErrorMessage(error, 'pull'))
@@ -1175,6 +1271,8 @@ export class GitHandler {
           // Cleanup must not hide the fetch or rebase result.
         }
       }
+      clearTimeout(timeout)
+      context?.signal?.removeEventListener('abort', abortFromContext)
       this.clearGitMutationReadCaches()
     }
   }

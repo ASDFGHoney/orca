@@ -253,6 +253,34 @@ describe('WSL direct Git reads', () => {
     })
   })
 
+  it('fences parsed output from a barrier Git login-shell fallback', async () => {
+    await withPlatform('win32', async () => {
+      seedWslGitReadEnvironmentForTests(DISTRO, LOGIN_ENVIRONMENT)
+      spawnMock.mockImplementation((_command, args) => {
+        const child = createMockChild()
+        queueMicrotask(() => {
+          const fenced = fencedProbeStdout(args?.[5], 'fork-point\n')
+          const echoedMarker = fenced.match(/__ORCA_WSL_CAPTURE_BEGIN_[^_]+__/)?.[0] ?? ''
+          child.stdout.emit('data', Buffer.from(`${echoedMarker}shell trace\n${fenced}`))
+          child.emit('close', 0, null)
+        })
+        return child
+      })
+
+      await expect(
+        gitExecFileAsync(['merge-base', '--fork-point', 'upstream/main', 'HEAD'], {
+          cwd: String.raw`C:\repo`,
+          env: { GIT_CONFIG_GLOBAL: '/home/user/custom.gitconfig' },
+          wslDistro: DISTRO,
+          captureWslLoginShellOutput: true,
+          terminationBarrier: true
+        })
+      ).resolves.toEqual({ stdout: 'fork-point\n', stderr: '' })
+
+      expect(spawnMock.mock.calls[0]?.[1]?.[5]).toContain('__ORCA_WSL_CAPTURE_BEGIN_')
+    })
+  })
+
   it('ignores unchanged ambient host Git variables when selecting the direct path', async () => {
     await withPlatform('win32', async () => {
       const originalAskpass = process.env.GIT_ASKPASS

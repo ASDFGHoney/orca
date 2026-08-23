@@ -1,5 +1,7 @@
 // Why: a stalled remote must fail the rebase fetch, not hang the rebase; client and relay share one bound.
 export const REBASE_SOURCE_FETCH_TIMEOUT_MS = 60_000
+export const REBASE_FROM_BASE_OPERATION_TIMEOUT_MS = REBASE_SOURCE_FETCH_TIMEOUT_MS + 60_000
+export const REBASE_FROM_BASE_RPC_TIMEOUT_MS = REBASE_FROM_BASE_OPERATION_TIMEOUT_MS + 5_000
 
 export type GitCommandRunner = (args: string[]) => Promise<{ stdout: string }>
 

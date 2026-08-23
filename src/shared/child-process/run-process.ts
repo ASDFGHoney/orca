@@ -5,6 +5,7 @@ import {
   type SpawnOptions as NodeSpawnOptions
 } from 'node:child_process'
 import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
+import { forceTerminateProcessTree, signalProcessTree } from './process-tree-termination'
 
 /**
  * The single place Orca starts a child process.
@@ -39,6 +40,8 @@ export type ProcessSpec = {
   maxOutputBytes?: number
   /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
+  /** Kill the whole process tree and do not settle until the root confirms exit. */
+  terminationBarrier?: boolean
 }
 
 export type ProcessResult = {
@@ -89,7 +92,8 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
     windowsHide: true,
     // Why never `shell: true`: it concatenates arguments without escaping (Node
     // itself warns DEP0190) and it silently makes windowsHide a no-op.
-    shell: false
+    shell: false,
+    ...(spec.terminationBarrier && platform !== 'win32' ? { detached: true } : {})
   }
 
   if (platform !== 'win32' || !isCmdInterpretedProgram(spec.program)) {
@@ -155,6 +159,9 @@ function createOutputSink(maxBytes: number): {
  * the process could not be started at all.
  */
 export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
+  if (spec.signal?.aborted) {
+    return Promise.resolve({ code: null, signal: null, stdout: '', stderr: '', timedOut: false })
+  }
   const maxOutputBytes = spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
 
   return new Promise<ProcessResult>((resolve, reject) => {
@@ -170,6 +177,10 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     const stderr = createOutputSink(maxOutputBytes)
     let timedOut = false
     let settled = false
+    let barrierStopping = false
+    let barrierReady = false
+    let initialBarrierTermination: Promise<boolean> | undefined
+    let deferredClose: { code: number | null; signal: NodeJS.Signals | null } | null = null
 
     const settle = (act: () => void): void => {
       if (settled) {
@@ -196,6 +207,11 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
 
     let graceTimer: ReturnType<typeof setTimeout> | undefined
 
+    const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null): void =>
+      settle(() =>
+        resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
+      )
+
     /**
      * Stop the child, then settle whether or not it complies.
      *
@@ -205,18 +221,53 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
      * promise, so a single unkillable child would wedge every one of them.
      */
     const stopAndSettle = (): void => {
-      terminate(child)
-      graceTimer ??= setTimeout(() => {
-        terminate(child, 'SIGKILL')
-        settle(() =>
-          resolve({
-            code: null,
-            signal: null,
-            stdout: stdout.text(),
-            stderr: stderr.text(),
-            timedOut
+      if (spec.terminationBarrier) {
+        barrierStopping = true
+        initialBarrierTermination ??= signalProcessTree(child)
+        if (process.platform === 'win32') {
+          void initialBarrierTermination.then((terminated) => {
+            if (!terminated) {
+              return
+            }
+            barrierReady = true
+            if (deferredClose) {
+              resolveFromClose(deferredClose.code, deferredClose.signal)
+            }
           })
-        )
+        }
+      } else {
+        terminate(child)
+      }
+      graceTimer ??= setTimeout(() => {
+        if (spec.terminationBarrier) {
+          const initialTermination = initialBarrierTermination ?? Promise.resolve(false)
+          if (process.platform === 'win32') {
+            void initialTermination.then((terminated) => {
+              if (!terminated) {
+                terminate(child, 'SIGKILL')
+              }
+              barrierReady = true
+              if (deferredClose) {
+                resolveFromClose(deferredClose.code, deferredClose.signal)
+              }
+            })
+            return
+          }
+          void Promise.all([initialTermination, forceTerminateProcessTree(child)]).then(
+            ([initialTerminated, forceTerminated]) => {
+              if (!initialTerminated || !forceTerminated) {
+                return
+              }
+              barrierReady = true
+              if (deferredClose) {
+                resolveFromClose(deferredClose.code, deferredClose.signal)
+              }
+            }
+          )
+          return
+        }
+        terminate(child, 'SIGKILL')
+        resolveFromClose(null, null)
       }, PROCESS_EXIT_GRACE_MS)
       graceTimer.unref?.()
     }
@@ -239,11 +290,13 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     }
 
     child.once('error', (error) => settle(() => reject(error)))
-    child.once('close', (code, signal) =>
-      settle(() =>
-        resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
-      )
-    )
+    child.once('close', (code, signal) => {
+      if (barrierStopping && !barrierReady) {
+        deferredClose = { code, signal }
+        return
+      }
+      resolveFromClose(code, signal)
+    })
 
     // Why close rather than leave open: a child that reads stdin (a hook
     // draining its payload, a CLI probing for a TTY) otherwise blocks until the
@@ -252,12 +305,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
   })
 }
 
-/**
- * Best-effort termination of a captured child.
- *
- * Deliberately root-only: descendant reaping is the job-object owner's
- * responsibility, not every caller's.
- */
+/** Best-effort root termination, or whole-tree termination for barrier callers. */
 function terminate(child: ChildProcess, signal?: NodeJS.Signals): void {
   try {
     child.kill(signal)

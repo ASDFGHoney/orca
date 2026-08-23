@@ -44,6 +44,11 @@ import {
 } from '../../shared/wsl-login-shell-command'
 import { UNTRANSLATED_GIT_OUTPUT_ENV } from '../../shared/git-output-locale'
 import { endSubprocessStdin } from '../../shared/subprocess-stdin-write'
+import { runProcess } from '../../shared/child-process/run-process'
+import {
+  resolveGitFetchHeadCommand,
+  runWithGitFetchHeadLock
+} from '../../shared/git-fetch-head-lock'
 import {
   disableWslGitReadEnvironment,
   getWslGitReadEnvironment,
@@ -418,6 +423,8 @@ type GitExecOptions = {
   wslDistro?: string
   preferWslDirectGit?: boolean
   useConfiguredSshCommandForNetwork?: boolean
+  terminationBarrier?: boolean
+  captureWslLoginShellOutput?: boolean
 }
 
 type CommandExecOptions = {
@@ -605,6 +612,49 @@ function killSpawnedCommandTree(child: ChildProcess): Promise<void> {
 type ExecFileCaptureOptions = Omit<ExecFileOptions, 'timeout'> & {
   timeout?: number
   stdin?: string
+  terminationBarrier?: boolean
+}
+
+const GIT_TERMINATION_BARRIER_FALLBACK_TIMEOUT_MS = 2_147_000_000
+
+async function execFileCaptureToTermination(
+  command: string,
+  args: string[],
+  options: ExecFileCaptureOptions
+): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> {
+  const result = await runProcess({
+    program: command,
+    args,
+    cwd: typeof options.cwd === 'string' ? options.cwd : undefined,
+    env: options.env,
+    timeoutMs: options.timeout ?? GIT_TERMINATION_BARRIER_FALLBACK_TIMEOUT_MS,
+    maxOutputBytes: options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER,
+    signal: options.signal,
+    terminationBarrier: true,
+    ...(options.stdin === undefined ? {} : { input: options.stdin })
+  })
+  const stdout = options.encoding === 'buffer' ? Buffer.from(result.stdout) : result.stdout
+  const stderr = options.encoding === 'buffer' ? Buffer.from(result.stderr) : result.stderr
+  if (result.code === 0 && !result.timedOut && !options.signal?.aborted) {
+    return { stdout, stderr }
+  }
+  const error = new Error(
+    result.timedOut
+      ? `${command} timed out.`
+      : options.signal?.aborted
+        ? 'The operation was aborted.'
+        : result.stderr.trim() || `${command} exited with ${result.code}.`
+  )
+  if (options.signal?.aborted) {
+    error.name = 'AbortError'
+  }
+  throw Object.assign(error, {
+    code: result.code,
+    killed: result.timedOut || result.signal !== null || options.signal?.aborted === true,
+    signal: result.signal,
+    stdout,
+    stderr
+  })
 }
 
 function emptyExecFileOutput(options: ExecFileCaptureOptions): string | Buffer {
@@ -1077,7 +1127,7 @@ async function buildNetworkSshPolicyEnv(options: GitExecOptions): Promise<{
  * Async git command execution. Drop-in replacement for
  * `execFileAsync('git', args, { cwd, encoding, ... })`.
  */
-export async function gitExecFileAsync(
+async function gitExecFileAsyncUnlocked(
   args: string[],
   options: GitExecOptions
 ): Promise<{ stdout: string; stderr: string }> {
@@ -1090,7 +1140,7 @@ export async function gitExecFileAsync(
           signal: options.signal
         })
       }
-      let resolved = resolveGitCommand(args, options)
+      let resolved = resolveGitCommand(args, options, false, options.captureWslLoginShellOutput)
       const environmentReady = prepareWindowsHostGitEnvironment(
         resolved,
         options.env,
@@ -1098,33 +1148,52 @@ export async function gitExecFileAsync(
       )
       const env = environmentReady ? await environmentReady : options.env
       const effectiveOptions = env === options.env ? options : { ...options, env }
-      resolved = resolveGitCommand(args, effectiveOptions)
+      resolved = resolveGitCommand(
+        args,
+        effectiveOptions,
+        false,
+        effectiveOptions.captureWslLoginShellOutput
+      )
       const policy = effectiveOptions.useConfiguredSshCommandForNetwork
         ? await buildNetworkSshPolicyEnv(effectiveOptions)
         : { env: nonInteractiveGitEnv(effectiveOptions.env), mode: 'default' as const }
       const capture = (
         command: ResolvedCommand
       ): Promise<{ stdout: string | Buffer; stderr: string | Buffer }> =>
-        execFileCapture(command.binary, command.args, {
-          cwd: command.cwd,
-          encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
-          maxBuffer: options.maxBuffer,
-          timeout: options.timeout,
-          stdin: options.stdin,
-          env: policy.env,
-          signal: options.signal
-        })
+        (options.terminationBarrier ? execFileCaptureToTermination : execFileCapture)(
+          command.binary,
+          command.args,
+          {
+            cwd: command.cwd,
+            encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
+            maxBuffer: options.maxBuffer,
+            timeout: options.timeout,
+            stdin: options.stdin,
+            env: policy.env,
+            signal: options.signal,
+            terminationBarrier: options.terminationBarrier
+          }
+        )
       let result: { stdout: string | Buffer; stderr: string | Buffer }
       try {
         result = await capture(resolved)
       } catch (error) {
         if (directWslGitExitCode(error, resolved) !== null && !options.signal?.aborted) {
           const wasMissing = invalidateMissingDirectWslGit(error, resolved)
-          result = await capture(resolveGitCommand(args, effectiveOptions, true))
+          const fallback = resolveGitCommand(
+            args,
+            effectiveOptions,
+            true,
+            effectiveOptions.captureWslLoginShellOutput
+          )
+          result = await capture(fallback)
           // Why: matching failures can be normal Git control flow; only a successful login retry proves the direct environment was insufficient.
           disableDirectWslGitAfterSuccessfulFallback(wasMissing, resolved)
           const { stdout, stderr } = result
-          return { stdout: stdout as string, stderr: stderr as string }
+          return {
+            stdout: readCapturedGitString(stdout as string, fallback),
+            stderr: stderr as string
+          }
         }
         if (options.useConfiguredSshCommandForNetwork && error && typeof error === 'object') {
           Object.assign(error, { gitSshPolicyMode: policy.mode })
@@ -1132,9 +1201,20 @@ export async function gitExecFileAsync(
         throw error
       }
       const { stdout, stderr } = result
-      return { stdout: stdout as string, stderr: stderr as string }
+      return { stdout: readCapturedGitString(stdout as string, resolved), stderr: stderr as string }
     }
   )
+}
+
+export function gitExecFileAsync(
+  args: string[],
+  options: GitExecOptions
+): Promise<{ stdout: string; stderr: string }> {
+  const run = () => gitExecFileAsyncUnlocked(args, options)
+  const command = resolveGitFetchHeadCommand(args, options.cwd)
+  return command.needsLock
+    ? runWithGitFetchHeadLock(command.cwd, options.signal, run, command.gitDir)
+    : run()
 }
 
 /**
@@ -1222,13 +1302,27 @@ function readCapturedGitBuffer(stdout: Buffer, resolved: ResolvedCommand): Buffe
   if (!captured) {
     return stdout
   }
-  const beginIndex = stdout.indexOf(captured.beginMarker, 0, 'utf8')
+  const beginIndex = stdout.lastIndexOf(captured.beginMarker, undefined, 'utf8')
   if (beginIndex === -1) {
     return stdout
   }
   const payloadStart = beginIndex + Buffer.byteLength(captured.beginMarker, 'utf8')
   const endIndex = stdout.indexOf(captured.endMarker, payloadStart, 'utf8')
   return endIndex === -1 ? stdout.subarray(payloadStart) : stdout.subarray(payloadStart, endIndex)
+}
+
+function readCapturedGitString(stdout: string, resolved: ResolvedCommand): string {
+  const captured = resolved.captured
+  if (!captured) {
+    return stdout
+  }
+  const beginIndex = stdout.lastIndexOf(captured.beginMarker)
+  if (beginIndex === -1) {
+    return stdout
+  }
+  const payloadStart = beginIndex + captured.beginMarker.length
+  const endIndex = stdout.indexOf(captured.endMarker, payloadStart)
+  return endIndex === -1 ? stdout.slice(payloadStart) : stdout.slice(payloadStart, endIndex)
 }
 
 /** Result of a streamed git command; `stoppedEarly` is true when onStdout asked to stop before the child exited. */

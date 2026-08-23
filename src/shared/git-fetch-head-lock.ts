@@ -1,0 +1,171 @@
+import * as path from 'node:path'
+import { readFile, realpath, stat } from 'node:fs/promises'
+
+type GitFetchHeadLockLane = {
+  tail: Promise<void>
+  release: () => void
+}
+
+const lanes = new Map<string, GitFetchHeadLockLane>()
+const GLOBAL_OPTIONS_WITH_VALUE = new Set([
+  '-c',
+  '-C',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--super-prefix',
+  '--config-env',
+  '--exec-path'
+])
+
+type GitFetchHeadCommand = { needsLock: boolean; cwd: string; gitDir?: string }
+
+export function resolveGitFetchHeadCommand(
+  args: readonly string[],
+  initialCwd: string
+): GitFetchHeadCommand {
+  let cwd = initialCwd
+  let gitDir: string | undefined
+  let subcommandIndex = -1
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === '-C' && args[index + 1]) {
+      cwd = path.resolve(cwd, args[index + 1])
+      index += 1
+      continue
+    }
+    if (arg.startsWith('-C') && arg.length > 2) {
+      cwd = path.resolve(cwd, arg.slice(2))
+      continue
+    }
+    if (arg === '--git-dir' && args[index + 1]) {
+      gitDir = path.resolve(cwd, args[index + 1])
+      index += 1
+      continue
+    }
+    if (arg.startsWith('--git-dir=')) {
+      gitDir = path.resolve(cwd, arg.slice('--git-dir='.length))
+      continue
+    }
+    if (GLOBAL_OPTIONS_WITH_VALUE.has(arg)) {
+      index += 1
+      continue
+    }
+    if (arg.startsWith('-')) {
+      continue
+    }
+    subcommandIndex = index
+    break
+  }
+  const subcommand = args[subcommandIndex]
+  if (subcommand === 'pull') {
+    return { needsLock: true, cwd, gitDir }
+  }
+  if (subcommand !== 'fetch') {
+    return { needsLock: false, cwd, gitDir }
+  }
+  let writesFetchHead = true
+  for (const arg of args.slice(subcommandIndex + 1)) {
+    if (arg === '--no-write-fetch-head') {
+      writesFetchHead = false
+    } else if (arg === '--write-fetch-head') {
+      writesFetchHead = true
+    }
+  }
+  return { needsLock: writesFetchHead, cwd, gitDir }
+}
+
+async function fetchHeadPath(
+  worktreePath: string,
+  signal: AbortSignal | undefined,
+  explicitGitDir?: string
+): Promise<string> {
+  let current = await realpath(worktreePath).catch(() => path.resolve(worktreePath))
+  let gitDir = explicitGitDir
+  while (!gitDir) {
+    const dotGitPath = path.join(current, '.git')
+    try {
+      const metadata = await stat(dotGitPath)
+      if (metadata.isDirectory()) {
+        gitDir = dotGitPath
+        break
+      }
+      const contents = await readFile(dotGitPath, { encoding: 'utf-8', signal })
+      const match = contents.match(/^gitdir:\s*(.+)\s*$/m)
+      if (match) {
+        gitDir = path.resolve(current, match[1])
+        break
+      }
+    } catch {
+      if (signal?.aborted) {
+        throw abortError()
+      }
+    }
+    const parent = path.dirname(current)
+    if (parent === current) {
+      gitDir = path.join(current, '.git')
+      break
+    }
+    current = parent
+  }
+  const canonicalGitDir = await realpath(gitDir).catch(() => path.resolve(gitDir))
+  return path.join(canonicalGitDir, 'FETCH_HEAD')
+}
+
+function abortError(): Error {
+  const error = new Error('The operation was aborted.')
+  error.name = 'AbortError'
+  return error
+}
+
+async function waitForPredecessor(
+  predecessor: Promise<void>,
+  signal: AbortSignal | undefined
+): Promise<void> {
+  if (!signal) {
+    await predecessor.catch(() => undefined)
+    return
+  }
+  if (signal.aborted) {
+    throw abortError()
+  }
+  let rejectAbort!: (error: Error) => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject
+  })
+  const onAbort = () => rejectAbort(abortError())
+  signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    await Promise.race([predecessor.catch(() => undefined), aborted])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+}
+
+export async function runWithGitFetchHeadLock<T>(
+  worktreePath: string,
+  signal: AbortSignal | undefined,
+  run: () => Promise<T>,
+  explicitGitDir?: string
+): Promise<T> {
+  const key = await fetchHeadPath(worktreePath, signal, explicitGitDir)
+  const predecessor = lanes.get(key)?.tail ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const lane = { tail: predecessor.catch(() => undefined).then(() => current), release }
+  lanes.set(key, lane)
+  void lane.tail.then(() => {
+    if (lanes.get(key) === lane) {
+      lanes.delete(key)
+    }
+  })
+
+  try {
+    await waitForPredecessor(predecessor, signal)
+    return await run()
+  } finally {
+    lane.release()
+  }
+}

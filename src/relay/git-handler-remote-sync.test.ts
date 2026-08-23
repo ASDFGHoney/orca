@@ -3,7 +3,7 @@
  * sync, fast-forward, and the narrow review-head fetches for GitHub pull
  * requests and GitLab merge requests.
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -14,16 +14,20 @@ import { gitInit, gitCommit, type MockDispatcher } from './git-handler-test-setu
 import {
   createGitHandlerRelay,
   createGitTempDir,
-  removeGitTempDir
+  removeGitTempDir,
+  type GitSpyTarget
 } from './git-handler-test-harness'
 
 describe('GitHandler', () => {
   let dispatcher: MockDispatcher
   let tmpDir: string
+  let gitTarget: GitSpyTarget
 
   beforeEach(() => {
     tmpDir = createGitTempDir()
-    ;({ dispatcher } = createGitHandlerRelay())
+    const relay = createGitHandlerRelay()
+    dispatcher = relay.dispatcher
+    gitTarget = relay.handler as unknown as GitSpyTarget
   })
 
   afterEach(async () => {
@@ -199,7 +203,10 @@ describe('GitHandler', () => {
         execFileSync('git', ['reset', '--hard', forkPoint], { cwd: producerDir, stdio: 'pipe' })
         writeFileSync(path.join(producerDir, 'replacement.txt'), 'replacement')
         gitCommit(producerDir, 'replacement remote commit')
-        execFileSync('git', ['push', '--force', 'origin', branch], { cwd: producerDir, stdio: 'pipe' })
+        execFileSync('git', ['push', '--force', 'origin', branch], {
+          cwd: producerDir,
+          stdio: 'pipe'
+        })
 
         await dispatcher.callRequest('git.rebaseFromBase', {
           worktreePath: tmpDir,
@@ -222,6 +229,82 @@ describe('GitHandler', () => {
         ])
       }
     }, 15_000)
+
+    it('fast-forwards an unborn branch from the selected remote base', async () => {
+      const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-unborn-bare-'))
+      const producerDir = mkdtempSync(path.join(tmpdir(), 'relay-git-unborn-producer-'))
+      try {
+        execFileSync('git', ['init', '--bare'], { cwd: bareDir, stdio: 'pipe' })
+        gitInit(producerDir)
+        writeFileSync(path.join(producerDir, 'base.txt'), 'base')
+        gitCommit(producerDir, 'base')
+        const branch = execFileSync('git', ['branch', '--show-current'], {
+          cwd: producerDir,
+          encoding: 'utf-8'
+        }).trim()
+        execFileSync('git', ['remote', 'add', 'origin', bareDir], {
+          cwd: producerDir,
+          stdio: 'pipe'
+        })
+        execFileSync('git', ['push', 'origin', branch], { cwd: producerDir, stdio: 'pipe' })
+
+        gitInit(tmpDir)
+        execFileSync('git', ['remote', 'add', 'origin', bareDir], { cwd: tmpDir, stdio: 'pipe' })
+
+        await dispatcher.callRequest('git.rebaseFromBase', {
+          worktreePath: tmpDir,
+          baseRef: `origin/${branch}`
+        })
+
+        await expect(fs.access(path.join(tmpDir, 'base.txt'))).resolves.toBeUndefined()
+        expect(execFileSync('git', ['rev-parse', '--verify', 'HEAD'], { cwd: tmpDir })).toBeTruthy()
+      } finally {
+        await Promise.all([
+          fs.rm(bareDir, { recursive: true, force: true }),
+          fs.rm(producerDir, { recursive: true, force: true })
+        ])
+      }
+    })
+
+    it('cancels the active rebase fetch and still removes its private ref', async () => {
+      const controller = new AbortController()
+      let rejectFetch!: (error: Error) => void
+      const fetchStarted = new Promise<void>((resolve) => {
+        vi.spyOn(gitTarget, 'git').mockImplementation(async (args, _cwd, options) => {
+          if (args[0] === 'remote') {
+            return { stdout: 'origin\n', stderr: '' }
+          }
+          if (args[0] === 'merge-base') {
+            return { stdout: 'fork-point\n', stderr: '' }
+          }
+          if (args[0] === 'fetch') {
+            resolve()
+            return new Promise((_resolve, reject) => {
+              rejectFetch = reject
+              options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+                once: true
+              })
+            })
+          }
+          return { stdout: '', stderr: '' }
+        })
+      })
+
+      const request = dispatcher.callRequest(
+        'git.rebaseFromBase',
+        { worktreePath: tmpDir, baseRef: 'origin/main' },
+        { isStale: () => false, signal: controller.signal }
+      )
+      await fetchStarted
+      controller.abort()
+      await expect(request).rejects.toThrow('aborted')
+
+      const calls = vi.mocked(gitTarget.git).mock.calls
+      expect(calls.some(([args]) => args[0] === 'rebase')).toBe(false)
+      const cleanup = calls.find(([args]) => args[0] === 'update-ref')
+      expect(cleanup?.[2]?.signal).toBeUndefined()
+      expect(rejectFetch).toBeTypeOf('function')
+    })
 
     it('fetches the explicit publish target remote', async () => {
       const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-fork-bare-'))
