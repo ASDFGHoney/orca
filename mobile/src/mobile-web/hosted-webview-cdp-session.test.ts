@@ -113,6 +113,12 @@ describe('hosted WebView CDP target selection', () => {
         fetchImpl: fetchTargets(['about:blank', 'file:///native-terminal.html'])
       })
     ).resolves.toBeUndefined()
+    await expect(
+      assertNoHostedMobileWebCdpTarget({
+        discoveryUrl: 'http://127.0.0.1:9222',
+        fetchImpl: fetchTargets(Array.from({ length: 17 }, () => 'about:blank'))
+      })
+    ).rejects.toThrow('Native baseline CDP target count exceeded its inspection limit')
     for (const url of [
       'orca-mobile-web://session-a/',
       'https://orca-mobile-web.invalid/#session-a'

@@ -71,7 +71,7 @@ describe('mobile web bridge client', () => {
           operation: 'capabilities',
           limits: {
             maxRequestBytes: 256,
-            maxResponseBytes: 16 * 1024,
+            maxResponseBytes: 64 * 1024,
             maxConcurrent: 1,
             rateCapacity: 4,
             rateRefillPerSecond: 1

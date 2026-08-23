@@ -37,11 +37,12 @@ export async function assertNoHostedMobileWebCdpTarget({
   ) {
     throw new Error('Native baseline has a hosted mobile WebView CDP target')
   }
+  const inspectableTargets = discoveredTargets.filter(isSafeCdpTarget)
+  if (inspectableTargets.length > CDP_TARGET_LIMIT) {
+    throw new Error('Native baseline CDP target count exceeded its inspection limit')
+  }
   const probes = await Promise.all(
-    discoveredTargets
-      .filter(isSafeCdpTarget)
-      .slice(-CDP_TARGET_LIMIT)
-      .map((target) => probeHostedWebView(target, WebSocketCtor))
+    inspectableTargets.map((target) => probeHostedWebView(target, WebSocketCtor))
   )
   if (probes.some((probe) => probe && isHostedMobileWebUrl(probe.href))) {
     throw new Error('Native baseline has a hosted mobile WebView CDP target')
