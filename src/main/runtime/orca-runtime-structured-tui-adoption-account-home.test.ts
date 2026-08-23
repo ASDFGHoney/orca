@@ -49,6 +49,7 @@ type AdoptionRig = {
 let root: string
 let paneAccountHome: string
 let selectedAccountHome: string
+let sharedRuntimeHome: string
 let rig: AdoptionRig
 
 async function writeRolloutFixture(codexHome: string, threadId: string): Promise<void> {
@@ -201,6 +202,7 @@ beforeEach(async () => {
   vi.stubEnv('ORCA_USER_DATA_PATH', root)
   paneAccountHome = join(root, 'codex-accounts', PANE_ACCOUNT_ID, 'home')
   selectedAccountHome = join(root, 'codex-accounts', SELECTED_ACCOUNT_ID, 'home')
+  sharedRuntimeHome = join(root, 'codex-runtime-home', 'home')
   await recordPaneAccount({
     selectionKey: 'host',
     accountId: PANE_ACCOUNT_ID,
@@ -228,6 +230,25 @@ afterEach(async () => {
 })
 
 describe('structured Codex adoption resolves the account home from the pane', () => {
+  it('adopts a local-fallback pane from its shared-home launch provenance', async () => {
+    await recordPaneAccount({
+      selectionKey: 'host',
+      accountId: null,
+      homeRoute: 'shared-home'
+    })
+    await writeRolloutFixture(sharedRuntimeHome, THREAD_ID)
+
+    const result = await rig.runtime.adoptStructuredAgentSessionTerminal(adoptInput(), {
+      callerKey: 'renderer-1'
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(rig.store.getRecord(SESSION_ID)).toMatchObject({
+      accountHome: { variable: 'CODEX_HOME', path: sharedRuntimeHome },
+      lease: { runtimeKind: 'tui', claimStatus: 'live' }
+    })
+  }, 20_000)
+
   it('adopts a pane whose Codex runs under a non-selected account home', async () => {
     // Only the pane's account owns the rollout; the selected account's home has none.
     await writeRolloutFixture(paneAccountHome, THREAD_ID)
