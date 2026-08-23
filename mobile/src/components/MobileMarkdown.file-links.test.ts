@@ -130,35 +130,3 @@ describe('MobileMarkdown file links', () => {
     expect(pressables(renderer!)).toHaveLength(0)
   })
 })
-
-describe('MobileMarkdown text selection', () => {
-  // Why: definite assignment, not `| null` - react-test-renderer's types are
-  // unavailable to the type-aware lint pass, so a written union trips
-  // no-redundant-type-constituents.
-  let renderer!: ReactTestRenderer
-
-  afterEach(() => {
-    act(() => renderer?.unmount())
-  })
-
-  function renderMarkdown(content: string): ReactTestRenderer {
-    act(() => {
-      renderer = create(createElement(MobileMarkdown, { content }))
-    })
-    return renderer
-  }
-
-  it('makes paragraph text selectable for long-press copy', () => {
-    const tree = renderMarkdown('Hello from the agent')
-    const texts = tree.root.findAllByType('Text' as never)
-    expect(texts.length).toBeGreaterThan(0)
-    expect(texts.every((node) => node.props.selectable === true)).toBe(true)
-  })
-
-  it('makes headings, lists, quotes, and code selectable', () => {
-    const tree = renderMarkdown('# Title\n\n> quoted\n\n- item\n\n```ts\nconst x = 1\n```')
-    const texts = tree.root.findAllByType('Text' as never)
-    expect(texts.length).toBeGreaterThan(0)
-    expect(texts.every((node) => node.props.selectable === true)).toBe(true)
-  })
-})

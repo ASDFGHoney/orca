@@ -174,7 +174,7 @@ function Prose({
       )
     }
     return (
-      <Text selectable style={[styles.imageRef, { fontSize: TEXT_SIZE * fontScale }]}>
+      <Text style={[styles.imageRef, { fontSize: TEXT_SIZE * fontScale }]}>
         🖼 {block.alt ?? block.path ?? block.url ?? 'image'}
       </Text>
     )
