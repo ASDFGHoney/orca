@@ -8,6 +8,7 @@ import {
   resetCodexConfigSyncStallLatchForTests
 } from './config-sync-stall'
 import { syncSystemConfigIntoManagedCodexHome } from './codex-config-mirror'
+import { getCodexSettingsBaselinePath } from './config-settings-baseline'
 
 let root: string
 let homes: { runtimeHomePath: string; systemHomePath: string }
@@ -67,6 +68,20 @@ describe('getCodexConfigSyncStatus', () => {
     writeFileSync(runtimeConfigPath(), 'model = "runtime-model"\n', 'utf-8')
 
     expect(getCodexConfigSyncStatus(homes).reason).toBe('unreadable-source')
+  })
+
+  it('reports a stall when the settings baseline cannot be read', () => {
+    writeFileSync(systemConfigPath(), 'model = "gpt-5"\n', 'utf-8')
+    writeFileSync(runtimeConfigPath(), 'model = "gpt-5"\n', 'utf-8')
+    const baselinePath = getCodexSettingsBaselinePath(homes.runtimeHomePath)
+    mkdirSync(baselinePath)
+
+    expect(getCodexConfigSyncStatus(homes)).toEqual({
+      state: 'stalled',
+      reason: 'managed-home-unavailable',
+      systemConfigPath: systemConfigPath(),
+      managedStatePath: baselinePath
+    })
   })
 
   it('stays synced before the runtime config exists, since nothing can fall behind yet', () => {
@@ -174,7 +189,7 @@ describe('reportCodexConfigSyncOutcome', () => {
     const message = String(warn.mock.calls[0]?.[0])
     expect(message).toContain(runtimeConfigPath())
     expect(message).not.toContain(systemConfigPath())
-    expect(message).toContain('The managed config must be readable before settings can sync.')
+    expect(message).toContain('The managed state must be readable before settings can sync.')
   })
 
   it('clears a stall without claiming the source became readable', () => {

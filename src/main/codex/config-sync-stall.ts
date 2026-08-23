@@ -1,6 +1,10 @@
 import { join } from 'node:path'
 import { observeAgentStateFile } from './codex-path-observation'
 import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from './codex-home-paths'
+import {
+  getCodexSettingsBaselinePath,
+  observeCodexSettingsBaseline
+} from './config-settings-baseline'
 import type { CodexSettingsPromotionHomes } from './config-settings-promotion'
 import type {
   CodexConfigSyncStallReason,
@@ -37,7 +41,21 @@ export function getCodexConfigSyncStatus(
   if (runtimeConfigObservation.kind === 'indeterminate') {
     // Why: the managed home is what could not be read, so say that rather than
     // borrowing a source-side reason and blaming the wrong path.
-    return { state: 'stalled', reason: 'managed-home-unavailable', systemConfigPath }
+    return {
+      state: 'stalled',
+      reason: 'managed-home-unavailable',
+      systemConfigPath,
+      managedStatePath: runtimeConfigPath
+    }
+  }
+  const baselineObservation = observeCodexSettingsBaseline(homes.runtimeHomePath)
+  if (baselineObservation.kind === 'indeterminate') {
+    return {
+      state: 'stalled',
+      reason: 'managed-home-unavailable',
+      systemConfigPath,
+      managedStatePath: getCodexSettingsBaselinePath(homes.runtimeHomePath)
+    }
   }
   const systemConfigObservation = observeAgentStateFile(systemConfigPath)
   if (systemConfigObservation.kind === 'absent') {
@@ -95,8 +113,9 @@ export function reportCodexConfigSyncOutcome(
   }
   stalledHomes.set(runtimeHomePath, status.reason)
   if (status.reason === 'managed-home-unavailable') {
+    const managedStatePath = status.managedStatePath ?? join(runtimeHomePath, 'config.toml')
     console.warn(
-      `[codex-config] Config sync stalled (${status.reason}): ${join(runtimeHomePath, 'config.toml')} is unusable, so ${runtimeHomePath} keeps its last synced settings. The managed config must be readable before settings can sync.`
+      `[codex-config] Config sync stalled (${status.reason}): ${managedStatePath} is unusable, so ${runtimeHomePath} keeps its last synced settings. The managed state must be readable before settings can sync.`
     )
     return
   }

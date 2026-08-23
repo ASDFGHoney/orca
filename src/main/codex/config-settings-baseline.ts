@@ -120,7 +120,7 @@ export function writeCodexSettingsBaseline(
   writeFileSync(baselinePath, serialized, { encoding: 'utf-8', mode: 0o600 })
 }
 
-function getCodexSettingsBaselinePath(runtimeHomePath: string): string {
+export function getCodexSettingsBaselinePath(runtimeHomePath: string): string {
   return join(runtimeHomePath, SETTINGS_BASELINE_FILE)
 }
 
