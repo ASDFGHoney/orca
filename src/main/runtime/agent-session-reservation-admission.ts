@@ -34,6 +34,7 @@ export type AgentSessionReserveRequest = {
   location: AgentSessionExecutionLocation
   provider: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
+  /** Legacy internal input accepted for compatibility and deliberately discarded. */
   launchEnv?: AgentSessionLaunchEnv
   runtimeKind: AgentSessionReservation['runtimeKind']
   /** Null when the session does not exist yet; otherwise the fence the caller last observed. */
@@ -129,10 +130,7 @@ export function applyAgentSessionReservation(
   if (request.expectedFence === null) {
     throw new Error('agent_session_conflict')
   }
-  const pinned =
-    existing.launchEnv || !request.launchEnv
-      ? existing
-      : { ...existing, launchEnv: { ...request.launchEnv }, updatedAt: request.now }
+  const { launchEnv: _discarded, ...pinned } = existing
   return reserveAgentSessionOwner({
     record: pinned,
     expectedFence: request.expectedFence,
@@ -152,7 +150,6 @@ function createAgentSessionRecord(
     provider: request.provider,
     providerHandleChain: [],
     accountHome: request.accountHome,
-    ...(request.launchEnv ? { launchEnv: { ...request.launchEnv } } : {}),
     createdAt: request.now,
     updatedAt: request.now,
     lease: {

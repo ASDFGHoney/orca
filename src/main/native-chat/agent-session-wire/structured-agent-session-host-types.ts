@@ -26,9 +26,6 @@ export type StructuredAgentSessionHostDeps = {
   /** Host spawn-token process scan; null means the platform cannot enumerate, never "none". */
   scanSpawnTokenProcesses?: () => Promise<AgentSessionSpawnTokenScan | null>
   mintSpawnToken?: () => string
-  resolveLaunchEnv?: (
-    provider: AgentSessionRecord['provider']
-  ) => Promise<Record<string, string> | undefined> | Record<string, string> | undefined
   now?: () => number
   onEventSinkError?: (input: { sessionId: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
