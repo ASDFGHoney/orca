@@ -7,8 +7,7 @@ import type { BuiltInWindowsTerminalShell } from '../../../src/shared/windows-te
 export const GOLDEN_STUB_READY_MARKER = 'GOLDEN_STUB_AGENT_READY'
 export const GOLDEN_STUB_EXIT_MARKER = 'GOLDEN_STUB_AGENT_EXITED'
 
-/** Agents the fixture dir shims onto PATH, so detection lists them and the
- *  tab-bar `+` menu renders a launch row for each. */
+/** Agents exposed by the fixture directory for tab-bar detection. */
 export const GOLDEN_STUB_AGENTS = [
   { id: 'codex', menuItemName: /^Codex(?:\s|$)/i },
   { id: 'claude', menuItemName: /^Claude(?:\s|$)/i }

@@ -17,11 +17,7 @@ import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } fro
 import { getTerminalContent } from './helpers/terminal'
 import type { BuiltInWindowsTerminalShell } from '../../src/shared/windows-terminal-shell'
 
-// Covers the full tab-bar `+` agent launch chain — detection row, startup-plan
-// build, tab create, PTY spawn under the configured runtime, startup-command
-// injection. golden-agent-tui-launch.spec.ts covers one agent on the default
-// shell and never runs in the Windows golden lane, so a Windows-only break
-// anywhere in that chain ships as "clicking an agent does nothing".
+// Covers the Windows-only tab-bar launch path that the default-shell test misses.
 
 test.use({ launchEnv: getGoldenStubAgentLaunchEnv() })
 
@@ -80,10 +76,8 @@ test.describe('Windows runtimes', () => {
 
     const distro = await getFirstWslDistro(orcaPage)
     test.skip(!distro, 'No WSL distro is available on this Windows host')
-    test.skip(
-      !stageWslGoldenStubAgent(distro!),
-      'WSL distro would not accept the staged stub agent'
-    )
+    const stage = stageWslGoldenStubAgent(distro!)
+    test.skip(!stage, 'WSL distro would not accept the staged stub agent')
 
     try {
       // Why the runtime switch and not terminalWindowsShell: WSL is a project
@@ -97,7 +91,7 @@ test.describe('Windows runtimes', () => {
       // ran in WSL rather than on the Windows host.
       expect(await getTerminalContent(orcaPage)).toContain(GOLDEN_STUB_READY_MARKER)
     } finally {
-      removeWslGoldenStubAgent(distro!)
+      removeWslGoldenStubAgent(distro!, stage!)
     }
   })
 })

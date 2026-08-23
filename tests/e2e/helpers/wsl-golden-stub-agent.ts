@@ -2,8 +2,7 @@ import { execFileSync } from 'node:child_process'
 import type { Page } from '@stablyai/playwright-test'
 import { buildWslExecArgs } from '../../../src/shared/wsl-login-shell-command'
 
-/** Distro path the stub is staged at. Only reachable from inside WSL, so the
- *  stub's marker in a pane is itself proof the pane executed in the distro. */
+/** A WSL-only path makes the stub marker proof that the pane ran in the distro. */
 const WSL_STUB_PATH = '/usr/local/bin/golden-stub-agent'
 const WSL_STUB_AGENT_LINK = '/usr/local/bin/codex'
 
@@ -12,18 +11,23 @@ const WSL_STUB_AGENT_LINK = '/usr/local/bin/codex'
 const STAGE_SCRIPT =
   `mkdir -p /usr/local/bin && ` +
   `printf '#!/bin/sh\\necho GOLDEN_STUB_AGENT_READY\\nexec sleep 3600\\n' > ${WSL_STUB_PATH} && ` +
-  `chmod 0755 ${WSL_STUB_PATH} && ` +
-  `ln -sf ${WSL_STUB_PATH} ${WSL_STUB_AGENT_LINK}`
+  `chmod 0755 ${WSL_STUB_PATH}`
 
-const UNSTAGE_SCRIPT = `rm -f ${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}`
+const STAGE_CODEX_LINK_IF_MISSING_SCRIPT =
+  `if [ -e ${WSL_STUB_AGENT_LINK} ] || [ -L ${WSL_STUB_AGENT_LINK} ]; then ` +
+  `printf existing; else ln -s ${WSL_STUB_PATH} ${WSL_STUB_AGENT_LINK} && printf created; fi`
+
+const REMOVE_STUB_SCRIPT = `rm -f ${WSL_STUB_PATH}`
+const REMOVE_CODEX_LINK_AND_STUB_SCRIPT = `rm -f ${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}`
 
 // Why --exec (via buildWslExecArgs): under `--`, wsl.exe expands `$name` in
 // every argument and silently rewrites the script.
-function runInWslAsRoot(distro: string, script: string): void {
-  execFileSync('wsl.exe', ['-u', 'root', ...buildWslExecArgs(distro, ['sh', '-c', script])], {
-    stdio: 'pipe',
-    windowsHide: true
-  })
+function runInWslAsRoot(distro: string, script: string): string {
+  return execFileSync(
+    'wsl.exe',
+    ['-u', 'root', ...buildWslExecArgs(distro, ['sh', '-c', script])],
+    { encoding: 'utf8', stdio: 'pipe', windowsHide: true }
+  )
 }
 
 export async function getFirstWslDistro(page: Page): Promise<string | null> {
@@ -34,20 +38,30 @@ export async function getFirstWslDistro(page: Page): Promise<string | null> {
   return wsl.available ? (wsl.distros[0] ?? null) : null
 }
 
-/** Returns false when the distro won't take the stub (no root interop, read-only
- *  rootfs); callers skip rather than fail, since that is a host limitation. */
-export function stageWslGoldenStubAgent(distro: string): boolean {
+export type WslGoldenStubAgentStage = {
+  createdCodexLink: boolean
+}
+
+/** Returns null when the distro cannot stage the stub. */
+export function stageWslGoldenStubAgent(distro: string): WslGoldenStubAgentStage | null {
   try {
     runInWslAsRoot(distro, STAGE_SCRIPT)
-    return true
+    return {
+      createdCodexLink:
+        runInWslAsRoot(distro, STAGE_CODEX_LINK_IF_MISSING_SCRIPT).trim() === 'created'
+    }
   } catch {
-    return false
+    removeWslGoldenStubAgent(distro, { createdCodexLink: false })
+    return null
   }
 }
 
-export function removeWslGoldenStubAgent(distro: string): void {
+export function removeWslGoldenStubAgent(distro: string, stage: WslGoldenStubAgentStage): void {
   try {
-    runInWslAsRoot(distro, UNSTAGE_SCRIPT)
+    runInWslAsRoot(
+      distro,
+      stage.createdCodexLink ? REMOVE_CODEX_LINK_AND_STUB_SCRIPT : REMOVE_STUB_SCRIPT
+    )
   } catch {
     // Best-effort cleanup; a leftover stub only affects this fixture's own name.
   }
