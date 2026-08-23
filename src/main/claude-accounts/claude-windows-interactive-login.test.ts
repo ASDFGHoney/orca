@@ -35,7 +35,27 @@ describe('Claude Windows host interactive login', () => {
       queueMicrotask(() => child.emit('exit', 0))
       return child
     })
+    const buildInteractiveLoginSpawn = vi.fn(() => ({
+      command: getCmdExePath(),
+      args: [
+        '/d',
+        '/c',
+        'start',
+        '',
+        '/wait',
+        'C:\\Tools\\claude.cmd',
+        'auth',
+        'login',
+        '--claudeai'
+      ],
+      stdio: 'ignore' as const,
+      windowsHide: true,
+      dispose: vi.fn()
+    }))
     vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
+    vi.doMock('../../shared/windows-interactive-login-spawn', () => ({
+      buildWindowsHostInteractiveLoginSpawn: buildInteractiveLoginSpawn
+    }))
 
     try {
       const { ClaudeAccountService } = await import('./service')
@@ -58,6 +78,11 @@ describe('Claude Windows host interactive login', () => {
         1000
       )
 
+      expect(buildInteractiveLoginSpawn).toHaveBeenCalledWith('C:\\Tools\\claude.cmd', [
+        'auth',
+        'login',
+        '--claudeai'
+      ])
       expect(spawnMock).toHaveBeenCalledWith(
         getCmdExePath(),
         expect.arrayContaining(['start', '', '/wait']),
@@ -69,6 +94,7 @@ describe('Claude Windows host interactive login', () => {
       expect(child.kill).not.toHaveBeenCalled()
     } finally {
       vi.doUnmock('node:child_process')
+      vi.doUnmock('../../shared/windows-interactive-login-spawn')
     }
   })
 })

@@ -46,12 +46,22 @@ describe('Codex Windows host interactive login', () => {
       queueMicrotask(() => child.emit('close', 0))
       return child
     })
+    const buildInteractiveLoginSpawn = vi.fn(() => ({
+      command: getCmdExePath(),
+      args: ['/d', '/c', 'start', '', '/wait', 'C:\\Tools\\codex.cmd', 'login'],
+      stdio: 'ignore' as const,
+      windowsHide: true,
+      dispose: vi.fn()
+    }))
     vi.doMock('node:child_process', () => ({
       execFileSync: vi.fn(),
       spawn: spawnMock
     }))
     vi.doMock('../codex-cli/command', () => ({
       resolveCodexCommand: () => 'C:\\Tools\\codex.cmd'
+    }))
+    vi.doMock('../../shared/windows-interactive-login-spawn', () => ({
+      buildWindowsHostInteractiveLoginSpawn: buildInteractiveLoginSpawn
     }))
 
     try {
@@ -67,6 +77,7 @@ describe('Codex Windows host interactive login', () => {
         }
       ).runCodexLogin(testState.fakeHomeDir)
 
+      expect(buildInteractiveLoginSpawn).toHaveBeenCalledWith('C:\\Tools\\codex.cmd', ['login'])
       expect(spawnMock).toHaveBeenCalledWith(
         getCmdExePath(),
         expect.arrayContaining(['start', '', '/wait']),
@@ -80,6 +91,7 @@ describe('Codex Windows host interactive login', () => {
       Object.defineProperty(process, 'platform', originalPlatform)
       vi.doUnmock('node:child_process')
       vi.doUnmock('../codex-cli/command')
+      vi.doUnmock('../../shared/windows-interactive-login-spawn')
     }
   })
 })

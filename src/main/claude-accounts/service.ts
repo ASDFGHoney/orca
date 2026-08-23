@@ -1106,11 +1106,10 @@ export class ClaudeAccountService {
           ? interactiveLogin.stdio
           : [options?.keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         shell: spawnConfig.shell,
-        // On Windows this is wsl.exe or a cmd invocation; without the flag it
-        // opens a console and steals foreground on every managed login (#10488).
-        windowsHide: true,
+        // Hide noninteractive commands and the fallback wrapper; direct console
+        // login handles need the owning window to remain visible.
+        windowsHide: interactiveLogin?.windowsHide ?? true,
         windowsVerbatimArguments: spawnConfig.windowsVerbatimArguments,
-        windowsHide: interactiveLogin?.windowsHide,
         env: spawnConfig.env,
         // Why: Claude auth can leave browser/login descendants alive after denial.
         // A process group lets cancellation terminate the whole POSIX login tree.
