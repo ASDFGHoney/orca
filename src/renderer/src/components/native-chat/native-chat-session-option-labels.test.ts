@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { translate } from '@/i18n/i18n'
 import {
+  nativeChatModelAndEffortPillLabel,
   nativeChatModelPillLabel,
   nativeChatSessionChoiceLabel
 } from './native-chat-session-option-labels'
@@ -47,6 +48,42 @@ describe('nativeChatModelPillLabel', () => {
     // A discovered list can drop an id the record still tracks; showing the id beats
     // showing "Model" while a real model is running.
     expect(nativeChatModelPillLabel(modelDescriptor('reported', 'grok-build'))).toBe('grok-build')
+  })
+})
+
+describe('nativeChatModelAndEffortPillLabel', () => {
+  it('shows reported model and effort as one current-state label', () => {
+    const effort: SessionOptionDescriptor = {
+      id: 'effort',
+      label: 'Reasoning effort',
+      category: 'thought_level',
+      valueSource: 'reported',
+      settable: true,
+      kind: {
+        type: 'select',
+        currentValue: 'high',
+        choices: [{ value: 'high', label: 'High' }]
+      }
+    }
+
+    expect(nativeChatModelAndEffortPillLabel(modelDescriptor('reported', 'grok-4.5'), effort)).toBe(
+      'Grok 4.5 High'
+    )
+  })
+
+  it('does not imply an unknown effort value', () => {
+    const effort: SessionOptionDescriptor = {
+      id: 'effort',
+      label: 'Reasoning effort',
+      category: 'thought_level',
+      valueSource: 'unknown',
+      settable: true,
+      kind: { type: 'select', choices: [{ value: 'high', label: 'High' }] }
+    }
+
+    expect(nativeChatModelAndEffortPillLabel(modelDescriptor('reported', 'grok-4.5'), effort)).toBe(
+      'Grok 4.5'
+    )
   })
 })
 

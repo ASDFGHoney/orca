@@ -217,7 +217,7 @@ describe('NativeChatSessionOptionPickers', () => {
       />
     )
     await waitFor(() =>
-      expect(screen.getAllByTestId('dropdown-root')[1]?.getAttribute('data-open')).toBe('true')
+      expect(screen.getAllByTestId('dropdown-root')[0]?.getAttribute('data-open')).toBe('true')
     )
 
     rerender(
@@ -237,7 +237,7 @@ describe('NativeChatSessionOptionPickers', () => {
     render(
       <NativeChatSessionOptionPickers
         surface={surface}
-        snapshot={[model(), effort]}
+        snapshot={[model(), effort, fast]}
         isWorking={false}
       />
     )
@@ -258,18 +258,18 @@ describe('NativeChatSessionOptionPickers', () => {
         isWorking={false}
       />
     )
-    expect(screen.getByRole('button', { name: 'Model Opus 4.8' }).textContent).toContain('Opus 4.8')
-    expect(screen.getByRole('button', { name: 'Model Opus 4.8' }).textContent).not.toContain(
-      'Model:'
-    )
-    expect(screen.getByRole('button', { name: 'Effort High · Fast' }).textContent).toContain(
-      'High · Fast'
+    const modelAndEffort = screen.getByRole('button', {
+      name: 'Model · Effort Opus 4.8 High'
+    })
+    expect(modelAndEffort.textContent).toContain('Opus 4.8 High')
+    expect(modelAndEffort.textContent).not.toContain('Model:')
+    expect(screen.getByRole('button', { name: 'Session options Fast' }).textContent).toContain(
+      'Fast'
     )
     expect(
       screen
-        .getByRole('button', { name: 'Effort High · Fast' })
-        .compareDocumentPosition(screen.getByRole('button', { name: 'Model Opus 4.8' })) &
-        Node.DOCUMENT_POSITION_FOLLOWING
+        .getByRole('button', { name: 'Session options Fast' })
+        .compareDocumentPosition(modelAndEffort) & Node.DOCUMENT_POSITION_FOLLOWING
     ).not.toBe(0)
 
     rerender(
@@ -290,21 +290,18 @@ describe('NativeChatSessionOptionPickers', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Effort' }).textContent).toContain('Effort')
+    expect(screen.getByRole('button', { name: 'Model · Effort Opus 4.8' }).textContent).toContain(
+      'Opus 4.8'
+    )
   })
 
-  it('disables both picker triggers while the agent is working', () => {
+  it('disables the combined picker trigger while the agent is working', () => {
     render(
       <NativeChatSessionOptionPickers surface={surface} snapshot={[model(), effort]} isWorking />
     )
     expect(
       screen
-        .getByRole('button', { name: 'Model Opus 4.8' })
-        .parentElement?.getAttribute('data-disabled')
-    ).toBe('true')
-    expect(
-      screen
-        .getByRole('button', { name: 'Effort High' })
+        .getByRole('button', { name: 'Model · Effort Opus 4.8 High' })
         .parentElement?.getAttribute('data-disabled')
     ).toBe('true')
   })
@@ -323,11 +320,9 @@ describe('NativeChatSessionOptionPickers', () => {
         isWorking={false}
       />
     )
-    expect(screen.getByRole('button', { name: 'Model' }).textContent).toContain('Model')
-    expect(screen.getByRole('button', { name: 'Model' }).textContent).not.toContain('Model: Model')
-    expect(screen.getByRole('button', { name: 'Effort' }).textContent).not.toContain(
-      'Effort: Effort'
-    )
+    const unknown = screen.getByRole('button', { name: 'Model · Effort Model' })
+    expect(unknown.textContent).toContain('Model')
+    expect(unknown.textContent).not.toContain('Model: Model')
 
     rerender(
       <NativeChatSessionOptionPickers
@@ -340,6 +335,21 @@ describe('NativeChatSessionOptionPickers', () => {
       'Fast'
     )
     expect(screen.queryByRole('button', { name: /^Effort/ })).toBeNull()
+  })
+
+  it('applies effort from the combined model menu', async () => {
+    const setOption = vi.fn().mockResolvedValue({ snapshot: [] })
+    render(
+      <NativeChatSessionOptionPickers
+        surface={{ ...surface, setOption }}
+        snapshot={[model(), effort]}
+        isWorking={false}
+      />
+    )
+
+    screen.getByRole('radio', { name: 'Low' }).click()
+
+    await waitFor(() => expect(setOption).toHaveBeenCalledWith('effort', 'low'))
   })
 
   it('shows the unconfirmed hint for dispatched values', () => {

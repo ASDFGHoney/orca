@@ -82,6 +82,17 @@ export function nativeChatModelPillLabel(descriptor: SessionOptionDescriptor): s
   )
 }
 
+export function nativeChatModelAndEffortPillLabel(
+  model: SessionOptionDescriptor,
+  effort: SessionOptionDescriptor | undefined
+): string {
+  const modelLabel = nativeChatModelPillLabel(model)
+  if (!effort || effort.valueSource === 'unknown') {
+    return modelLabel
+  }
+  return `${modelLabel} ${nativeChatOptionsPillLabel([effort])}`
+}
+
 export function nativeChatOptionsPillTitle(
   descriptors: readonly SessionOptionDescriptor[]
 ): string {
