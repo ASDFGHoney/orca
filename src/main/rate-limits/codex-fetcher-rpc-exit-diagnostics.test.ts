@@ -82,9 +82,9 @@ describe('Codex RPC exit diagnostics', () => {
       2
     )
 
-    expect(result.error).toBe(
-      "Codex RPC process exited (exit code 2): error: invalid value 'untrusted' for '--ask-for-approval <APPROVAL_POLICY>'"
-    )
+    expect(result.error).toContain('Codex RPC process exited (exit code 2)')
+    expect(result.error).toContain("invalid value 'untrusted'")
+    expect(result.error).toContain("try '--help'")
   })
 
   it('names the exit code when the child says nothing', async () => {
@@ -101,9 +101,7 @@ describe('Codex RPC exit diagnostics', () => {
       1
     )
 
-    expect(result.error).toBe(
-      'ERROR: The ChatGPT access token could not be refreshed; please sign in again.'
-    )
+    expect(result.error).toBe('Your ChatGPT session could not be refreshed. Please sign in again.')
     // The renderer's re-auth warning gates on exactly this predicate;
     // codex-account-auth-warning.test.ts asserts the surfaced string end-to-end.
     expect(isCodexAuthError(result.error)).toBe(true)
@@ -128,5 +126,15 @@ describe('Codex RPC exit diagnostics', () => {
     expect(result.error).not.toContain('moveoplus')
     expect(result.error).not.toContain('sk-aaaa')
     expect(result.error?.length ?? 0).toBeLessThan(500)
+  })
+
+  it('keeps the final failure after startup banners', async () => {
+    const result = await runStub(
+      'Welcome to WSL\nLoading shell profile\nERROR: unknown option --obsolete\n',
+      2
+    )
+
+    expect(result.error).toContain('Welcome to WSL')
+    expect(result.error).toContain('ERROR: unknown option --obsolete')
   })
 })

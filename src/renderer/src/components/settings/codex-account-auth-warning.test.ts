@@ -38,14 +38,10 @@ describe('codex account auth warning', () => {
     ).toBe(false)
   })
 
-  // Strings produced verbatim by the RPC-exit path in
-  // codex-fetcher-rpc-exit-diagnostics.test.ts.
   it('warns re-auth when the app-server quits over a dead refresh token', () => {
     expect(
       getCodexAccountAuthWarning({
-        limits: codexLimits(
-          'ERROR: The ChatGPT access token could not be refreshed; please sign in again.'
-        ),
+        limits: codexLimits('Your ChatGPT session could not be refreshed. Please sign in again.'),
         target: { runtime: 'host', wslDistro: null },
         runtime: { runtime: 'host' },
         activeAccountId: 'account-1',
