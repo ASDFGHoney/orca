@@ -4,7 +4,7 @@ import {
   type AiVaultScanIssue
 } from '../../shared/ai-vault-types'
 import type { ExecutionHostId } from '../../shared/execution-host'
-import { isLiveSqliteUnavailableError } from '../sqlite/live-sqlite-readonly'
+import { isSqliteBusyError } from '../sqlite/readonly-sync-database'
 import { errorMessage } from './session-scanner-values'
 
 // Why: a stalled WSL distro or an unreachable remote host fails one probe per
@@ -53,7 +53,7 @@ export function sessionParseIssueFromError(args: {
   path: string
   error: unknown
 }): AiVaultScanIssue {
-  if (isLiveSqliteUnavailableError(args.error)) {
+  if (isSqliteBusyError(args.error)) {
     return liveSqliteUnavailableIssue({
       executionHostId: args.executionHostId,
       agent: args.agent,

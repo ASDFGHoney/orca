@@ -10,7 +10,7 @@ import {
   shouldCaptureFullFirstUserPrompt
 } from './session-scanner-first-user-prompt'
 import { normalizeTitleText } from './session-scanner-values'
-import { openLiveSqliteReadonly } from '../sqlite/live-sqlite-readonly'
+import { openReadonlySyncDatabase } from '../sqlite/readonly-sync-database'
 import type SyncDatabase from '../sqlite/sync-database'
 import { columnExists, tableExists } from '../opencode-usage/schema-helpers'
 
@@ -252,7 +252,7 @@ export async function parseOpenCodeSqliteSession(args: {
   const { dbPath, sessionId, platform } = args
   let db: SyncDatabase | null = null
   try {
-    db = openLiveSqliteReadonly(dbPath)
+    db = openReadonlySyncDatabase(dbPath)
     if (!canReadOpenCodeSessions(db)) {
       return null
     }

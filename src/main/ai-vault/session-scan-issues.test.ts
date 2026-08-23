@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
-import { LiveSqliteUnavailableError } from '../sqlite/live-sqlite-readonly'
 import { liveSqliteUnavailableIssue, sessionParseIssueFromError } from './session-scan-issues'
 
 describe('sessionParseIssueFromError', () => {
@@ -35,16 +34,5 @@ describe('sessionParseIssueFromError', () => {
       path: '/tmp/opencode.db',
       message: 'no such table: session'
     })
-  })
-
-  it('maps a serialized worker unavailable error onto the same notice', () => {
-    expect(
-      sessionParseIssueFromError({
-        executionHostId: LOCAL_EXECUTION_HOST_ID,
-        agent: 'opencode',
-        path: '/tmp/opencode.db',
-        error: new Error(new LiveSqliteUnavailableError().message)
-      }).kind
-    ).toBe('notice')
   })
 })

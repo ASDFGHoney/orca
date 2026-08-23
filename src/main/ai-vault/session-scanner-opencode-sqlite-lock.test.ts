@@ -1,145 +1,96 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
-import {
-  flushLiveSqliteSnapshotsForTests,
-  setLiveSqliteFileCopyForTests
-} from '../sqlite/live-sqlite-readonly'
 import Database from '../sqlite/sync-database'
-import { buildOpenCodeSqliteCandidatePath } from './session-scanner-opencode-sqlite-paths'
 import { listOpenCodeSqliteSessions } from './session-scanner-opencode-sqlite-list'
+import { buildOpenCodeSqliteCandidatePath } from './session-scanner-opencode-sqlite-paths'
 import { parseOpenCodeSqliteSession } from './session-scanner-opencode-sqlite'
 
-let tempDirs: string[] = []
+const temporaryDirectories: string[] = []
 
-afterEach(() => {
-  setLiveSqliteFileCopyForTests(null)
-  flushLiveSqliteSnapshotsForTests()
-  for (const dir of tempDirs) {
-    rmSync(dir, { recursive: true, force: true })
-  }
-  tempDirs = []
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true }))
+  )
 })
 
-function createLockedOpenCodeDb(): { writer: Database.Database; path: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'orca-opencode-sqlite-lock-'))
-  tempDirs.push(dir)
-  const path = join(dir, 'opencode.db')
+const HOLDER_SOURCE = `
+import { parentPort, workerData } from 'node:worker_threads'
+const { DatabaseSync } = process.getBuiltinModule('node:sqlite')
+const db = new DatabaseSync(workerData.dbPath)
+db.exec('BEGIN EXCLUSIVE')
+parentPort.postMessage('locked')
+parentPort.once('message', (message) => {
+  if (message !== 'reader-started') throw new Error('Unexpected lock-holder message')
+  setTimeout(() => {
+    db.exec('COMMIT')
+    db.close()
+    parentPort.postMessage('committed')
+  }, 200)
+})
+`
+
+async function createDatabase(schema: string): Promise<{ directory: string; path: string }> {
+  const directory = await mkdtemp(join(tmpdir(), 'orca-opencode-sqlite-lock-'))
+  temporaryDirectories.push(directory)
+  const path = join(directory, 'opencode.db')
   const writer = new Database(path)
-  writer.exec(`
-    CREATE TABLE session (
-      id TEXT PRIMARY KEY,
-      time_created INTEGER NOT NULL,
-      time_updated INTEGER NOT NULL
-    );
-    INSERT INTO session VALUES ('ses_locked', 1777634000000, 1777634001000);
-    BEGIN EXCLUSIVE;
-  `)
-  return { writer, path }
+  writer.exec(schema)
+  writer.close()
+  return { directory, path }
 }
 
-describe('listOpenCodeSqliteSessions under a live writer lock', () => {
-  it('lists sessions from a contended database without a raw sqlite lock string', async () => {
-    const { writer, path } = createLockedOpenCodeDb()
+async function holdExclusive(directory: string, dbPath: string): Promise<Worker> {
+  const workerPath = join(directory, 'holder.mjs')
+  await writeFile(workerPath, HOLDER_SOURCE)
+  const worker = new Worker(workerPath, { workerData: { dbPath } })
+  await new Promise<void>((resolve, reject) => {
+    worker.once('error', reject)
+    worker.on('message', (message) => {
+      if (message === 'locked') {
+        resolve()
+      }
+    })
+  })
+  return worker
+}
+
+describe('OpenCode session SQLite under transient writer contention', () => {
+  it('lists sessions after an exclusive writer releases within the timeout', async () => {
+    const { directory, path } = await createDatabase(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL
+      );
+      INSERT INTO session VALUES ('ses_locked', 1777634000000, 1777634001000);
+    `)
+    const worker = await holdExclusive(directory, path)
     try {
+      worker.postMessage('reader-started')
       const issues: AiVaultScanIssue[] = []
       const candidates = await listOpenCodeSqliteSessions({
         dbPaths: [path],
         limit: 10,
         issues
       })
-      expect(JSON.stringify(issues)).not.toMatch(/database is locked/i)
+
+      expect(issues).toEqual([])
       expect(candidates.map((candidate) => candidate.file.path)).toEqual([
         buildOpenCodeSqliteCandidatePath(path, 'ses_locked')
       ])
-      expect(issues).toEqual([])
     } finally {
-      writer.exec('COMMIT')
-      writer.close()
+      await worker.terminate()
     }
   })
 
-  it('surfaces a retryable unavailable notice when the contended DB cannot be snapshotted', async () => {
-    const { writer, path } = createLockedOpenCodeDb()
-    setLiveSqliteFileCopyForTests(() => {
-      throw new Error('EPERM: copy blocked')
-    })
-    try {
-      const issues: AiVaultScanIssue[] = []
-      const candidates = await listOpenCodeSqliteSessions({
-        dbPaths: [path],
-        limit: 10,
-        issues
-      })
-      expect(candidates).toEqual([])
-      expect(issues).toHaveLength(1)
-      expect(issues[0]?.kind).toBe('notice')
-      expect(issues[0]?.agent).toBe('opencode')
-      expect(issues[0]?.path).toBe(path)
-      expect(issues[0]?.message).toMatch(/temporarily unavailable/i)
-      expect(issues[0]?.message).not.toMatch(/database is locked/i)
-      expect(issues.filter((issue) => !issue.kind)).toEqual([])
-    } finally {
-      writer.exec('COMMIT')
-      writer.close()
-    }
-  })
-
-  it('recovers the session list on the next scan after the writer releases', async () => {
-    const { writer, path } = createLockedOpenCodeDb()
-    setLiveSqliteFileCopyForTests(() => {
-      throw new Error('EPERM: copy blocked')
-    })
-    const lockedIssues: AiVaultScanIssue[] = []
-    const locked = await listOpenCodeSqliteSessions({
-      dbPaths: [path],
-      limit: 10,
-      issues: lockedIssues
-    })
-    expect(locked).toEqual([])
-    expect(lockedIssues[0]?.kind).toBe('notice')
-
-    setLiveSqliteFileCopyForTests(null)
-    writer.exec('COMMIT')
-    writer.close()
-
-    const recoveredIssues: AiVaultScanIssue[] = []
-    const recovered = await listOpenCodeSqliteSessions({
-      dbPaths: [path],
-      limit: 10,
-      issues: recoveredIssues
-    })
-    expect(recoveredIssues).toEqual([])
-    expect(recovered.map((candidate) => candidate.file.path)).toEqual([
-      buildOpenCodeSqliteCandidatePath(path, 'ses_locked')
-    ])
-  })
-
-  it('still lists an uncontended readable database', async () => {
-    const { writer, path } = createLockedOpenCodeDb()
-    writer.exec('COMMIT')
-    writer.close()
-
-    const issues: AiVaultScanIssue[] = []
-    const candidates = await listOpenCodeSqliteSessions({
-      dbPaths: [path],
-      limit: 10,
-      issues
-    })
-    expect(issues).toEqual([])
-    expect(candidates).toHaveLength(1)
-  })
-})
-
-describe('parseOpenCodeSqliteSession under a live writer lock', () => {
-  it('parses a contended session without throwing a raw sqlite lock string', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'orca-opencode-sqlite-parse-lock-'))
-    tempDirs.push(dir)
-    const path = join(dir, 'opencode.db')
-    const writer = new Database(path)
-    writer.exec(`
+  it('parses a session after an exclusive writer releases within the timeout', async () => {
+    const { directory, path } = await createDatabase(`
       CREATE TABLE session (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -168,20 +119,21 @@ describe('parseOpenCodeSqliteSession under a live writer lock', () => {
         'ses_locked', 'proj-1', 'slug', '/tmp/opencode', 'Locked session', '1.0.0',
         1777634000000, 1777634001000, 0, 1, 1, 0, 0, 0
       );
-      BEGIN EXCLUSIVE;
     `)
+    const worker = await holdExclusive(directory, path)
     try {
+      worker.postMessage('reader-started')
       const session = await parseOpenCodeSqliteSession({
         dbPath: path,
         sessionId: 'ses_locked',
         platform: 'darwin'
       })
+
       expect(session).not.toBeNull()
       expect(session?.sessionId).toBe('ses_locked')
       expect(session?.title).toBe('Locked session')
     } finally {
-      writer.exec('COMMIT')
-      writer.close()
+      await worker.terminate()
     }
   })
 })

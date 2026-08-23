@@ -1,10 +1,6 @@
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  isLiveSqliteUnavailableError,
-  openLiveSqliteReadonly
-} from '../sqlite/live-sqlite-readonly'
-import type SyncDatabase from '../sqlite/sync-database'
+import SyncDatabase from '../sqlite/sync-database'
 
 const STATE_DB_FILE_PATTERN = /^state_(\d+)\.sqlite$/
 
@@ -44,7 +40,7 @@ export function readCodexStateDbBackfillStatus(codexHomePath: string): CodexStat
   }
   let db: SyncDatabase | null = null
   try {
-    db = openLiveSqliteReadonly(stateDbPath)
+    db = new SyncDatabase(stateDbPath, { readonly: true, fileMustExist: true })
     const table = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backfill_state'")
       .get()
@@ -64,11 +60,7 @@ export function readCodexStateDbBackfillStatus(codexHomePath: string): CodexStat
     return {
       kind: 'unreadable',
       stateDbPath,
-      error: isLiveSqliteUnavailableError(error)
-        ? 'Codex state is temporarily unavailable.'
-        : error instanceof Error
-          ? error.message
-          : String(error)
+      error: error instanceof Error ? error.message : String(error)
     }
   } finally {
     try {

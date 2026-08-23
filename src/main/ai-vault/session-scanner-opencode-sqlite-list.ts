@@ -5,10 +5,7 @@ import {
 } from './session-scanner-opencode-sqlite-paths'
 import type { SessionFileCandidate } from './session-scanner-types'
 import { errorMessage } from './session-scanner-values'
-import {
-  isLiveSqliteUnavailableError,
-  openLiveSqliteReadonly
-} from '../sqlite/live-sqlite-readonly'
+import { isSqliteBusyError, openReadonlySyncDatabase } from '../sqlite/readonly-sync-database'
 import type SyncDatabase from '../sqlite/sync-database'
 import { columnExists, tableExists } from '../opencode-usage/schema-helpers'
 import { liveSqliteUnavailableIssue, recordSessionScanIssue } from './session-scan-issues'
@@ -100,7 +97,7 @@ export async function listOpenCodeSqliteSessions(args: {
   for (const dbPath of args.dbPaths) {
     let db: SyncDatabase | null = null
     try {
-      db = openLiveSqliteReadonly(dbPath)
+      db = openReadonlySyncDatabase(dbPath)
       if (!canReadOpenCodeSessions(db)) {
         continue
       }
@@ -113,7 +110,7 @@ export async function listOpenCodeSqliteSessions(args: {
     } catch (err) {
       recordSessionScanIssue(
         args.issues,
-        isLiveSqliteUnavailableError(err)
+        isSqliteBusyError(err)
           ? liveSqliteUnavailableIssue({ agent: 'opencode', path: dbPath })
           : { agent: 'opencode', path: dbPath, message: errorMessage(err) }
       )
