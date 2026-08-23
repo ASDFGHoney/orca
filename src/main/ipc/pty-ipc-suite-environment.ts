@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, vi } from 'vitest'
+import * as electron from 'electron'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
+import { setPtyHostBindings } from './pty-host-bindings'
+import { testPtyIpcSurface } from './pty-ipc-test-surface'
 import type { Mock } from 'vitest'
 import {
   handleMock,
@@ -32,8 +36,6 @@ import {
   setMigrationUnsupportedPtyMock,
   clearMigrationUnsupportedPtyMock,
   clearMigrationUnsupportedPtysForPaneKeyMock,
-  bindAgentSessionPaneMock,
-  clearAgentSessionPaneBindingsForPtyMock,
   clearPaneKeyAliasesForPtyMock,
   recordCodexPaneAccountMock,
   forgetCodexPaneAccountMock,
@@ -91,6 +93,25 @@ export function createPtyIpcSuiteEnvironment(): PtyIpcSuiteEnvironment {
   const envScope = createPtyIpcProcessEnvScope()
 
   beforeEach(() => {
+    // Why here: pty.ts registers against injected surfaces now, so the mocked ipcMain
+    // must be installed for the shared `handlers` map to keep capturing registrations.
+    setPtyHostBindings({ ipc: testPtyIpcSurface() })
+    // Why here: pty.ts reads app paths and the packaged flag through the AppEnvironment
+    // port now, so the shared vi.mock('electron') app object alone is inert. Back the
+    // port with the same mocks so every suite's existing expectations still hold.
+    // Why read through the electron mock instead of hardcoding: suites toggle
+    // `app.isPackaged` mid-test to exercise dev-mode spawn paths, so the port must
+    // observe the same mutable field rather than freeze a value at install time.
+    const electronAppMock = (
+      vi.mocked(electron) as unknown as {
+        app: { isPackaged: boolean; getPath: (name: string) => string; getVersion: () => string }
+      }
+    ).app
+    installFakeAppEnvironment({
+      getPath: (name) => electronAppMock.getPath(name),
+      isPackaged: () => electronAppMock.isPackaged,
+      getVersion: () => electronAppMock.getVersion()
+    })
     envScope.applyTestEnvDefaults()
     handlers.clear()
     handleMock.mockReset()
@@ -125,8 +146,6 @@ export function createPtyIpcSuiteEnvironment(): PtyIpcSuiteEnvironment {
     setMigrationUnsupportedPtyMock.mockReset()
     clearMigrationUnsupportedPtyMock.mockReset()
     clearMigrationUnsupportedPtysForPaneKeyMock.mockReset()
-    bindAgentSessionPaneMock.mockReset()
-    clearAgentSessionPaneBindingsForPtyMock.mockReset()
     clearPaneKeyAliasesForPtyMock.mockReset()
     recordCodexPaneAccountMock.mockReset()
     forgetCodexPaneAccountMock.mockReset()
@@ -164,7 +183,8 @@ export function createPtyIpcSuiteEnvironment(): PtyIpcSuiteEnvironment {
     // Why: wrapper roots resolve from ORCA_USER_DATA_PATH; mirror the mocked userData so ZDOTDIR/wrapper assertions match.
     process.env.ORCA_USER_DATA_PATH = '/tmp/orca-user-data'
     existsSyncMock.mockReturnValue(true)
-    statSyncMock.mockReturnValue({ isDirectory: () => true, mode: 0o755 })
+    // size: the shell wrapper writer verifies each generated file is non-empty.
+    statSyncMock.mockReturnValue({ isDirectory: () => true, mode: 0o755, size: 1 })
     readFileSyncMock.mockReturnValue('')
     openCodeBuildPtyEnvMock.mockImplementation((_ptyId: string, existingConfigDir?: string) => ({
       ORCA_OPENCODE_HOOK_PORT: '4567',
