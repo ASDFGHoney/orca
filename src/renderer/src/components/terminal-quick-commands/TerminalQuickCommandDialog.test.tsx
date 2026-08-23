@@ -2,9 +2,8 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalQuickCommand } from '../../../../shared/terminal-quick-command-types'
-import { beforeEach } from 'vitest'
 import { TerminalQuickCommandDialog } from './TerminalQuickCommandDialog'
 
 const useLocalAgentCatalogMock = vi.fn((_options?: { enabled?: boolean }) => ({

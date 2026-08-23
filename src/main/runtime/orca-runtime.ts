@@ -1139,7 +1139,10 @@ import type {
   ResolveAgentLaunchPlanResult
 } from '../agent-launch/agent-launch-boundary'
 import { mapClientKindToLaunchClient } from '../agent-launch/agent-launch-boundary'
-import type { LaunchIntent } from '../../shared/agent-launch-host-contract'
+import type {
+  AgentLaunchExecutionHostId,
+  LaunchIntent
+} from '../../shared/agent-launch-host-contract'
 import {
   mintAgentLaunchOperationId,
   agentLaunchIdempotencyKey,
@@ -1180,9 +1183,10 @@ import {
 } from '../agent-launch/agent-launch-reconcile-runtime-deps'
 import type { ReconcileIntentRouterArms } from '../agent-launch/agent-launch-reconcile-intent-router'
 import { getHostBackgroundAgentLaunchStore } from '../agent-launch/background-agent-launch-store-host'
-import type { AgentLaunchExecutionHostId } from '../../shared/agent-launch-host-contract'
-import type { PendingAgentLaunchSnapshot } from '../agent-launch/agent-launch-operation-store'
-import type { SettledAgentLaunchOperation } from '../agent-launch/agent-launch-operation-store'
+import type {
+  PendingAgentLaunchSnapshot,
+  SettledAgentLaunchOperation
+} from '../agent-launch/agent-launch-operation-store'
 import type {
   AgentLaunchInput,
   AgentLaunchSpawnRequest,
