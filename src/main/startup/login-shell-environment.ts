@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
 import { win32 as pathWin32 } from 'node:path'
+import { spawnProcess } from '../../shared/child-process/run-process'
 import { resolveWindowsShellStartupFamily } from '../../shared/windows-terminal-shell'
 import {
   resolveProfileLoadingFallbackShell,
@@ -86,12 +86,7 @@ function spawnShellAndReadEnvironment(shell: string): Promise<NodeJS.ProcessEnv 
   return new Promise((resolve) => {
     let settled = false
     const chunks: Buffer[] = []
-    const child = spawn(shell, args, {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      detached: false,
-      windowsHide: true
-    })
+    const child = spawnProcess({ program: shell, args, env: process.env })
     const finish = (value: NodeJS.ProcessEnv | null): void => {
       if (settled) {
         return
@@ -108,6 +103,11 @@ function spawnShellAndReadEnvironment(shell: string): Promise<NodeJS.ProcessEnv 
       }
       finish(null)
     }, SPAWN_TIMEOUT_MS)
+    child.stdin.on('error', () => {})
+    child.stdout.on('error', () => finish(null))
+    child.stderr.on('error', () => {})
+    child.stdin.end()
+    child.stderr.resume()
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
     child.on('error', () => finish(null))
     child.on('close', () => {
