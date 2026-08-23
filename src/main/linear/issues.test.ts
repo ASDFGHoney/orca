@@ -6,7 +6,6 @@ const rawRequest = vi.fn()
 const getClients = vi.fn()
 const clearToken = vi.fn()
 const isAuthError = vi.fn()
-
 vi.mock('./linear-request-concurrency', () => ({
   acquire: vi.fn().mockResolvedValue(undefined),
   release: vi.fn()

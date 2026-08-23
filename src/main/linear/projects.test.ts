@@ -6,10 +6,12 @@ const rawRequest = vi.fn()
 const getClients = vi.fn()
 const clearToken = vi.fn()
 const isAuthError = vi.fn()
+const acquire = vi.fn().mockResolvedValue(undefined)
+const release = vi.fn()
 
 vi.mock('./linear-request-concurrency', () => ({
-  acquire: vi.fn().mockResolvedValue(undefined),
-  release: vi.fn()
+  acquire: (...args: unknown[]) => acquire(...args),
+  release: (...args: unknown[]) => release(...args)
 }))
 
 vi.mock('./linear-token-store', () => ({
@@ -21,17 +23,21 @@ vi.mock('./client', () => ({
   isAuthError: (...args: unknown[]) => isAuthError(...args)
 }))
 
-function makeEntry(): LinearClientForWorkspace {
+function makeEntry(options?: {
+  workspaceId?: string
+  organizationName?: string
+  request?: typeof rawRequest
+}): LinearClientForWorkspace {
   return {
     workspace: {
-      id: 'workspace-1',
-      organizationId: 'workspace-1',
-      organizationName: 'Workspace',
+      id: options?.workspaceId ?? 'workspace-1',
+      organizationId: options?.workspaceId ?? 'workspace-1',
+      organizationName: options?.organizationName ?? 'Workspace',
       displayName: 'Ada',
       email: 'ada@example.com'
     },
     client: {
-      client: { rawRequest }
+      client: { rawRequest: options?.request ?? rawRequest }
     }
   } as unknown as LinearClientForWorkspace
 }
@@ -77,6 +83,13 @@ function projectSearchConnectionResponse(
       }
     }
   }
+}
+
+function projectConnectionResponse(
+  projects: ReturnType<typeof rawProject>[],
+  pageInfo: { hasNextPage: boolean; endCursor?: string | null } = { hasNextPage: false }
+) {
+  return { data: { projects: { nodes: projects, pageInfo } } }
 }
 
 function rawCustomView(id: string) {
@@ -201,6 +214,119 @@ describe('Linear project queries', () => {
     const { listProjects } = await import('./projects')
 
     await expect(listProjects(undefined, 20, 'workspace-1', true)).rejects.toThrow(error.message)
+  })
+
+  it('walks every project page when the caller omits a limit', async () => {
+    rawRequest.mockImplementation((_query, variables) =>
+      Promise.resolve(
+        variables.after
+          ? projectConnectionResponse(
+              Array.from({ length: 25 }, (_, index) => rawProject(`project-${index + 51}`)),
+              { hasNextPage: false }
+            )
+          : projectConnectionResponse(
+              Array.from({ length: 50 }, (_, index) => rawProject(`project-${index + 1}`)),
+              { hasNextPage: true, endCursor: 'project-cursor-50' }
+            )
+      )
+    )
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, null, 'workspace-1', true)
+
+    expect(result.items).toHaveLength(75)
+    expect(result.hasMore).toBe(false)
+    expect(rawRequest).toHaveBeenCalledTimes(2)
+    expect(acquire).toHaveBeenCalledTimes(2)
+    expect(release).toHaveBeenCalledTimes(2)
+    expect(rawRequest.mock.calls[0][0]).toContain('$after: String')
+    expect(rawRequest.mock.calls[0][0]).toContain('endCursor')
+    expect(rawRequest.mock.calls[1][1]).toMatchObject({
+      first: 50,
+      after: 'project-cursor-50',
+      orderBy: 'updatedAt'
+    })
+  })
+
+  it('preserves explicit project limits above the legacy clamp', async () => {
+    rawRequest.mockImplementation((_query, variables) =>
+      Promise.resolve(
+        variables.after
+          ? projectConnectionResponse(
+              Array.from({ length: 10 }, (_, index) => rawProject(`project-${index + 51}`)),
+              { hasNextPage: true, endCursor: 'project-cursor-more' }
+            )
+          : projectConnectionResponse(
+              Array.from({ length: 50 }, (_, index) => rawProject(`project-${index + 1}`)),
+              { hasNextPage: true, endCursor: 'project-cursor-50' }
+            )
+      )
+    )
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, 60, 'workspace-1', true)
+
+    expect(result.items).toHaveLength(60)
+    expect(result.hasMore).toBe(true)
+    expect(rawRequest.mock.calls[1][1]).toMatchObject({ first: 10 })
+  })
+
+  it('stops an exhaustive project walk at the page ceiling', async () => {
+    let page = 0
+    rawRequest.mockImplementation(() => {
+      page += 1
+      return Promise.resolve(
+        projectConnectionResponse([rawProject(`project-${page}`)], {
+          hasNextPage: true,
+          endCursor: `project-cursor-${page}`
+        })
+      )
+    })
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, null, 'workspace-1', true)
+
+    expect(result.items).toHaveLength(200)
+    expect(result.hasMore).toBe(true)
+    expect(rawRequest).toHaveBeenCalledTimes(200)
+  })
+
+  it('fairly exhausts every workspace when the project limit is omitted', async () => {
+    const firstRequest = vi.fn()
+    const secondRequest = vi.fn()
+    for (const [prefix, request] of [
+      ['W1', firstRequest],
+      ['W2', secondRequest]
+    ] as const) {
+      let page = 0
+      request.mockImplementation(() => {
+        page += 1
+        return Promise.resolve(
+          projectConnectionResponse(
+            [rawProject(`${prefix}-${page}`)],
+            page === 1
+              ? { hasNextPage: true, endCursor: `${prefix}-cursor-1` }
+              : { hasNextPage: false }
+          )
+        )
+      })
+    }
+    getClients.mockReturnValue([
+      makeEntry({ request: firstRequest }),
+      makeEntry({
+        workspaceId: 'workspace-2',
+        organizationName: 'Second Workspace',
+        request: secondRequest
+      })
+    ])
+    const { listProjects } = await import('./projects')
+
+    const result = await listProjects(undefined, null, 'all', true)
+
+    expect(result.items).toHaveLength(4)
+    expect(result.hasMore).toBe(false)
+    expect(firstRequest).toHaveBeenCalledTimes(2)
+    expect(secondRequest).toHaveBeenCalledTimes(2)
   })
 
   it('lets manual project issue refresh bypass older in-flight reads', async () => {

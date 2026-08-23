@@ -16,9 +16,10 @@ import { encodeIssueListCursor, resolveIssueListCursor } from './mcp-issue-list-
 import { buildIssueFilter } from './mcp-issue-list-filter'
 
 // Why: `--limit` is opt-in, so the default read walks every page instead of quietly cutting
-// the answer off. Linear caps `first` at 250. The budget and page ceiling are backstops, not
-// caps: the CLI abandons an RPC at 60s, so a walk that would outlive it has to stop early and
-// say `truncated` with a continuation cursor rather than fail the whole command.
+// the answer off. The 250-row request size is conservative: Linear documents complexity-based
+// GraphQL limits, not a fixed 250-row connection maximum. The budget and page ceiling are
+// backstops, not caps: the CLI abandons an RPC at 60s, so a longer walk stops early and says
+// `truncated` with a continuation cursor rather than failing the whole command.
 const LIST_ISSUES_PAGE_SIZE = 250
 const LIST_ISSUES_MAX_PAGES = 200
 const LIST_ISSUES_READ_BUDGET_MS = 20_000

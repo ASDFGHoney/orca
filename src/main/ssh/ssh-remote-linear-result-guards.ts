@@ -65,7 +65,7 @@ export function isLinearProjectListResult(result: unknown): result is LinearProj
     Array.isArray(result.projects) &&
     result.projects.every(isLinearProjectListProject) &&
     isRecord(result.meta) &&
-    typeof result.meta.limit === 'number' &&
+    (typeof result.meta.limit === 'number' || result.meta.limit === null) &&
     typeof result.meta.returned === 'number' &&
     typeof result.meta.hasMore === 'boolean' &&
     typeof result.meta.partial === 'boolean' &&

@@ -308,13 +308,14 @@ const ORCA_ISSUE_FIELDS = `
 `
 
 const PROJECTS_QUERY = `
-  query OrcaLinearProjects($first: Int, $filter: ProjectFilter, $orderBy: PaginationOrderBy) {
-    projects(first: $first, filter: $filter, orderBy: $orderBy) {
+  query OrcaLinearProjects($first: Int, $after: String, $filter: ProjectFilter, $orderBy: PaginationOrderBy) {
+    projects(first: $first, after: $after, filter: $filter, orderBy: $orderBy) {
       nodes {
         ${ORCA_PROJECT_FIELDS}
       }
       pageInfo {
         hasNextPage
+        endCursor
       }
     }
   }
@@ -507,6 +508,8 @@ const CUSTOM_VIEW_PROJECTS_QUERY = `
 
 const inFlight = new Map<string, Promise<unknown>>()
 const LINEAR_PROJECT_API_PAGE_SIZE_MAX = 50
+const LINEAR_AGENT_PROJECT_MAX_PAGES = 200
+const LINEAR_AGENT_PROJECT_READ_BUDGET_MS = 20_000
 
 function clampLimit(limit = 20): number {
   return Math.min(Math.max(1, Math.floor(limit)), LINEAR_PROJECT_API_PAGE_SIZE_MAX)
@@ -853,32 +856,137 @@ async function readConcreteCollection<T>(
   return readCollection(key, concreteWorkspaceId, load, force)
 }
 
+type ProjectListPageState = {
+  entry: LinearClientForWorkspace
+  items: LinearProjectSummary[]
+  hasMore: boolean
+  canPage: boolean
+  after?: string
+  error?: LinearWorkspaceError
+}
+
+type ProjectListBudget = { deadline: number; pages: number }
+
+async function readProjectListPage(
+  state: ProjectListPageState,
+  query: string | undefined,
+  first: number,
+  workspaceId: LinearWorkspaceSelection | null | undefined,
+  budget: ProjectListBudget
+): Promise<void> {
+  if (Date.now() >= budget.deadline || budget.pages >= LINEAR_AGENT_PROJECT_MAX_PAGES) {
+    state.hasMore = true
+    state.canPage = false
+    return
+  }
+  budget.pages += 1
+  const previousCursor = state.after
+  await acquire()
+  try {
+    const variables = query
+      ? { term: query, first, ...(previousCursor ? { after: previousCursor } : {}) }
+      : {
+          first,
+          ...(previousCursor ? { after: previousCursor } : {}),
+          orderBy: 'updatedAt'
+        }
+    const result = await state.entry.client.client.rawRequest<
+      ProjectConnectionResponse,
+      LinearRawVariables
+    >(query ? SEARCH_PROJECTS_QUERY : PROJECTS_QUERY, variables)
+    const connection = query ? result.data?.searchProjects : result.data?.projects
+    const nodes = connection?.nodes ?? []
+    state.items.push(...nodes.map((project) => mapProjectForWorkspace(state.entry, project)))
+    state.hasMore = Boolean(connection?.pageInfo?.hasNextPage)
+    state.after = connection?.pageInfo?.endCursor ?? undefined
+    state.canPage = Boolean(
+      state.hasMore && state.after && state.after !== previousCursor && nodes.length > 0
+    )
+  } catch (error) {
+    if (isAuthError(error)) {
+      clearToken(state.entry.workspace.id)
+    } else {
+      console.warn('[linear] project list read failed:', error)
+    }
+    if (shouldFailWholeRequest(workspaceId)) {
+      throw error
+    }
+    state.error = workspaceError(state.entry, error)
+    state.items = []
+    state.hasMore = false
+    state.canPage = false
+  } finally {
+    release()
+  }
+}
+
+async function readProjectListPages(
+  query: string | undefined,
+  limit: number | null,
+  workspaceId: LinearWorkspaceSelection | null | undefined
+): Promise<LinearCollectionResult<LinearProjectSummary>> {
+  const entries = getClients(workspaceId)
+  if (entries.length === 0) {
+    return { items: [] }
+  }
+  const states: ProjectListPageState[] = entries.map((entry) => ({
+    entry,
+    items: [],
+    hasMore: false,
+    canPage: false
+  }))
+  const budget = { deadline: Date.now() + LINEAR_AGENT_PROJECT_READ_BUDGET_MS, pages: 0 }
+  const first = limit === null ? LINEAR_PROJECT_API_PAGE_SIZE_MAX : Math.min(50, limit)
+  await Promise.all(
+    states.map((state) => readProjectListPage(state, query, first, workspaceId, budget))
+  )
+
+  if (limit === null) {
+    while (states.some((state) => state.canPage)) {
+      await Promise.all(
+        states
+          .filter((state) => state.canPage)
+          .map((state) =>
+            readProjectListPage(state, query, LINEAR_PROJECT_API_PAGE_SIZE_MAX, workspaceId, budget)
+          )
+      )
+    }
+  } else {
+    while (states.reduce((count, state) => count + state.items.length, 0) < limit) {
+      const state = states.find((candidate) => candidate.canPage)
+      if (!state) {
+        break
+      }
+      const returned = states.reduce((count, candidate) => count + candidate.items.length, 0)
+      await readProjectListPage(
+        state,
+        query,
+        Math.min(LINEAR_PROJECT_API_PAGE_SIZE_MAX, limit - returned),
+        workspaceId,
+        budget
+      )
+    }
+  }
+
+  const allItems = states.flatMap((state) => state.items)
+  const items = limit === null ? allItems : allItems.slice(0, limit)
+  return {
+    items,
+    hasMore: states.some((state) => state.hasMore) || items.length < allItems.length,
+    errors: states.flatMap((state) => (state.error ? [state.error] : []))
+  }
+}
+
 export async function listProjects(
   query: string | undefined,
-  limit = 20,
+  limit: number | null = 20,
   workspaceId?: LinearWorkspaceSelection | null,
   force = false
 ): Promise<LinearCollectionResult<LinearProjectSummary>> {
-  const first = clampLimit(limit)
-  const trimmed = query?.trim()
-  const key = `listProjects:${workspaceId ?? 'default'}:${trimmed ?? ''}:${first}`
-  return readCollection(
-    key,
-    workspaceId,
-    async (entry) => {
-      const variables = trimmed ? { term: trimmed, first } : { first, orderBy: 'updatedAt' }
-      const result = await entry.client.client.rawRequest<
-        ProjectConnectionResponse,
-        LinearRawVariables
-      >(trimmed ? SEARCH_PROJECTS_QUERY : PROJECTS_QUERY, variables)
-      const connection = trimmed ? result.data?.searchProjects : result.data?.projects
-      return {
-        items: (connection?.nodes ?? []).map((project) => mapProjectForWorkspace(entry, project)),
-        hasMore: !!connection?.pageInfo?.hasNextPage
-      }
-    },
-    force
-  )
+  const effectiveLimit = limit === null ? null : Math.max(1, Math.floor(limit))
+  const trimmed = query?.trim() || undefined
+  const key = `listProjects:${workspaceId ?? 'default'}:${trimmed ?? ''}:${effectiveLimit ?? 'all'}`
+  return coalesce(key, () => readProjectListPages(trimmed, effectiveLimit, workspaceId), force)
 }
 
 export async function listProjectsByExactName(
