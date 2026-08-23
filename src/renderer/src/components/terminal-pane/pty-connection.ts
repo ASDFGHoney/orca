@@ -352,6 +352,7 @@ import { directSshAuthoritiesEqual } from '@/store/slices/direct-ssh-terminal-au
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
+const PANE_OWNER_UNVERIFIED_ERROR = 'terminal_pane_owner_unverified'
 // Why: relay requests expire at 30s; leave one second for their fallback before re-arming locally.
 const DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS = 31_000
 const REMOTE_PTY_ID_PREFIX = 'remote:'
@@ -9221,12 +9222,16 @@ export function connectPanePty(
           : window.api.pty.declarePendingPaneSerializer(cacheKey).catch(() => null)
 
       let expiredReattachError = false
+      let paneOwnerUnverified = false
       const coldRestoreStartup = buildColdRestoreAgentResumeStartup()
       const outputCallbacks = captureTransportOutputCallbacks(
         (message) => {
           if (isSshSessionExpiredError(message)) {
             expiredReattachError = true
             return
+          }
+          if (message.includes(PANE_OWNER_UNVERIFIED_ERROR)) {
+            paneOwnerUnverified = true
           }
           if (!isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
             return
@@ -9267,6 +9272,14 @@ export function connectPanePty(
       const trackedReattachPromise = Promise.resolve(reattachPromise)
         .then(async (result) => {
           if (outputCallbacks.generation !== transportStreamGeneration) {
+            finishReattachLiveDataDeferral(false, outputCallbacks.generation)
+            const gen = await preSignalPromise
+            if (typeof gen === 'number') {
+              void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+            }
+            return
+          }
+          if (!result && paneOwnerUnverified) {
             finishReattachLiveDataDeferral(false, outputCallbacks.generation)
             const gen = await preSignalPromise
             if (typeof gen === 'number') {
@@ -9330,6 +9343,10 @@ export function connectPanePty(
             return
           }
           if (rejectObsoleteDirectSshReattach(deferredReattachSessionId)) {
+            return
+          }
+          if (message.includes(PANE_OWNER_UNVERIFIED_ERROR)) {
+            reportError(message)
             return
           }
           warnTerminalLifecycleAnomaly('restored PTY reattach threw', {
