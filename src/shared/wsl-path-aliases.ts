@@ -5,15 +5,15 @@ import {
 import { parseWslUncPath } from './wsl-paths'
 
 /**
- * Spellings of one path that Windows and WSL both use for the same files.
+ * Root spellings that explicitly identify one Windows/WSL filesystem path.
  *
  * Claude in a WSL pane records `/mnt/c/...` even when Orca's worktree is `C:\...`.
- * Distro-native repos already had the UNC → Linux alias; this adds the drvfs pair.
+ * A raw `/mnt/c` root stays POSIX because its syntax alone does not prove WSL.
  */
-export function wslPathAliases(pathValue: string): string[] {
+export function wslRootPathAliases(pathValue: string): string[] {
   const aliases: string[] = []
   const seen = new Set<string>()
-  const add = (value: string) => {
+  const add = (value: string | null) => {
     if (!value || seen.has(value)) {
       return
     }
@@ -26,30 +26,19 @@ export function wslPathAliases(pathValue: string): string[] {
   const unc = parseWslUncPath(pathValue)
   if (unc) {
     add(unc.linuxPath)
+    add(windowsDrivePathFromWslMount(unc.linuxPath))
   }
 
-  const driveMatch = pathValue.match(/^([A-Za-z]):[/\\](.*)$/)
-  if (driveMatch) {
-    const rest = driveMatch[2].replace(/\\/g, '/')
-    add(`/mnt/${driveMatch[1].toLowerCase()}${rest ? `/${rest}` : ''}`)
-  }
-
-  for (const candidate of aliases) {
-    const mountMatch = candidate.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/)
-    if (!mountMatch) {
-      continue
-    }
-    const rest = (mountMatch[2] || '').replace(/\//g, '\\')
-    add(`${mountMatch[1].toUpperCase()}:${rest || '\\'}`)
-  }
+  add(wslMountPathFromWindowsDrive(pathValue))
 
   return aliases
 }
 
-export function normalizedWslPathAliases(pathValue: string): string[] {
+/** Candidate spellings include a potential drive alias that only an explicit root can match. */
+export function normalizedWslPathCandidateAliases(pathValue: string): string[] {
   const aliases: string[] = []
   const seen = new Set<string>()
-  for (const alias of wslPathAliases(pathValue)) {
+  for (const alias of candidateWslPathAliases(pathValue)) {
     const normalized = normalizeRuntimePathForComparison(alias)
     if (seen.has(normalized)) {
       continue
@@ -60,14 +49,45 @@ export function normalizedWslPathAliases(pathValue: string): string[] {
   return aliases
 }
 
+export function wslAliasedPathDepth(pathValue: string): number {
+  const canonicalPath =
+    parseWslUncPath(pathValue)?.linuxPath ?? wslMountPathFromWindowsDrive(pathValue) ?? pathValue
+  return normalizeRuntimePathForComparison(canonicalPath).split('/').filter(Boolean).length
+}
+
 export function createWslAliasedPathInsideOrEqualMatcher(
   rootPath: string
 ): (normalizedCandidate: string) => boolean {
-  const matchers = wslPathAliases(rootPath).map(createNormalizedPathInsideOrEqualMatcher)
+  const matchers = wslRootPathAliases(rootPath).map(createNormalizedPathInsideOrEqualMatcher)
   return (normalizedCandidate) => matchers.some((ownsPath) => ownsPath(normalizedCandidate))
 }
 
 export function isWslAliasedPathInsideOrEqual(rootPath: string, candidatePath: string): boolean {
   const ownsPath = createWslAliasedPathInsideOrEqualMatcher(rootPath)
-  return normalizedWslPathAliases(candidatePath).some(ownsPath)
+  return normalizedWslPathCandidateAliases(candidatePath).some(ownsPath)
+}
+
+function candidateWslPathAliases(pathValue: string): string[] {
+  const aliases = [pathValue]
+  const linuxPath = parseWslUncPath(pathValue)?.linuxPath ?? pathValue
+  const windowsPath = windowsDrivePathFromWslMount(linuxPath)
+  return windowsPath ? [...aliases, windowsPath] : aliases
+}
+
+function wslMountPathFromWindowsDrive(pathValue: string): string | null {
+  const match = pathValue.match(/^([A-Za-z]):[/\\](.*)$/)
+  if (!match) {
+    return null
+  }
+  const rest = match[2].replace(/\\/g, '/')
+  return `/mnt/${match[1].toLowerCase()}${rest ? `/${rest}` : ''}`
+}
+
+function windowsDrivePathFromWslMount(pathValue: string): string | null {
+  const match = pathValue.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/)
+  if (!match) {
+    return null
+  }
+  const rest = (match[2] ?? '').replace(/\//g, '\\')
+  return `${match[1].toUpperCase()}:${rest || '\\'}`
 }

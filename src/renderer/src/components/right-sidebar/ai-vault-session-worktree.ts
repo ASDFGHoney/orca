@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import {
   createWslAliasedPathInsideOrEqualMatcher,
-  normalizedWslPathAliases
+  normalizedWslPathCandidateAliases,
+  wslAliasedPathDepth
 } from '../../../../shared/wsl-path-aliases'
 import { splitWorktreeIdForFilesystem } from '../../../../shared/worktree/id'
 import {
@@ -10,10 +11,7 @@ import {
   normalizeExecutionHostId,
   type ExecutionHostId
 } from '../../../../shared/execution-host'
-import {
-  isRuntimePathAbsolute,
-  normalizeRuntimePathForComparison
-} from '../../../../shared/cross-platform-path'
+import { isRuntimePathAbsolute } from '../../../../shared/cross-platform-path'
 import type { AiVaultSession } from '../../../../shared/ai-vault-types'
 import type { Repo } from '../../../../shared/repo-types'
 import type { Worktree } from '../../../../shared/worktree/types'
@@ -46,7 +44,7 @@ type WorktreeCandidate = {
   source: 'current-path' | 'prior-path'
   // Precomputed so a 500-session scan doesn't re-normalize ~500 roots per session.
   ownsNormalizedCwd: (normalizedCwd: string) => boolean
-  normalizedPathLength: number
+  pathDepth: number
 }
 
 export function resolveAiVaultSessionWorktreeInfo({
@@ -89,7 +87,7 @@ function resolveWorktreeInfoFromCandidates(
   }
 
   const sessionHostId = normalizeExecutionHostId(session.executionHostId)
-  const cwdAliases = normalizedWslPathAliases(session.cwd)
+  const cwdAliases = normalizedWslPathCandidateAliases(session.cwd)
   const matched = candidates
     .filter((candidate) => cwdAliases.some((alias) => candidate.ownsNormalizedCwd(alias)))
     .filter((candidate) => !sessionHostId || candidate.hostId === sessionHostId)
@@ -238,7 +236,7 @@ function makeWorktreeCandidate(
     status: worktree.isArchived ? 'archived' : 'active',
     source,
     ownsNormalizedCwd: createWslAliasedPathInsideOrEqualMatcher(path),
-    normalizedPathLength: normalizeRuntimePathForComparison(path).length
+    pathDepth: wslAliasedPathDepth(path)
   }
 }
 
@@ -248,9 +246,9 @@ function hasUsablePath(pathValue: string): boolean {
 }
 
 function compareWorktreeCandidates(left: WorktreeCandidate, right: WorktreeCandidate): number {
-  const lengthDifference = right.normalizedPathLength - left.normalizedPathLength
-  if (lengthDifference !== 0) {
-    return lengthDifference
+  const depthDifference = right.pathDepth - left.pathDepth
+  if (depthDifference !== 0) {
+    return depthDifference
   }
   if (left.source === right.source) {
     return 0

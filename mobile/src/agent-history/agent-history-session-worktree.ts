@@ -1,5 +1,8 @@
 import { isRuntimePathAbsolute } from '../../../src/shared/cross-platform-path'
-import { isWslAliasedPathInsideOrEqual } from '../../../src/shared/wsl-path-aliases'
+import {
+  isWslAliasedPathInsideOrEqual,
+  wslAliasedPathDepth
+} from '../../../src/shared/wsl-path-aliases'
 import { splitWorktreeIdForFilesystem } from '../../../src/shared/worktree/id'
 import type { AiVaultSession } from '../../../src/shared/ai-vault-types'
 import type { Worktree } from '../worktree/workspace-list-types'
@@ -15,6 +18,7 @@ export type MobileAgentHistorySessionWorktreeInfo = {
 type WorktreeCandidate = {
   worktree: WorktreeWithPriorIds
   path: string
+  pathDepth: number
   source: 'current-path' | 'prior-path'
 }
 
@@ -62,14 +66,24 @@ function buildMobileWorktreeCandidates(worktrees: readonly Worktree[]): Worktree
   const candidates: WorktreeCandidate[] = []
   for (const worktree of worktrees as readonly WorktreeWithPriorIds[]) {
     if (hasUsablePath(worktree.path)) {
-      candidates.push({ worktree, path: worktree.path, source: 'current-path' })
+      candidates.push({
+        worktree,
+        path: worktree.path,
+        pathDepth: wslAliasedPathDepth(worktree.path),
+        source: 'current-path'
+      })
     }
     for (const priorWorktreeId of worktree.priorWorktreeIds ?? []) {
       const parsed = splitWorktreeIdForFilesystem(priorWorktreeId)
       if (!parsed || parsed.repoId !== worktree.repoId || !hasUsablePath(parsed.worktreePath)) {
         continue
       }
-      candidates.push({ worktree, path: parsed.worktreePath, source: 'prior-path' })
+      candidates.push({
+        worktree,
+        path: parsed.worktreePath,
+        pathDepth: wslAliasedPathDepth(parsed.worktreePath),
+        source: 'prior-path'
+      })
     }
   }
   return candidates
@@ -80,16 +94,12 @@ function hasUsablePath(pathValue: string): boolean {
 }
 
 function compareWorktreeCandidates(left: WorktreeCandidate, right: WorktreeCandidate): number {
-  const lengthDifference = normalizedPathLength(right.path) - normalizedPathLength(left.path)
-  if (lengthDifference !== 0) {
-    return lengthDifference
+  const depthDifference = right.pathDepth - left.pathDepth
+  if (depthDifference !== 0) {
+    return depthDifference
   }
   if (left.source === right.source) {
     return 0
   }
   return left.source === 'current-path' ? -1 : 1
-}
-
-function normalizedPathLength(pathValue: string): number {
-  return pathValue.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase().length
 }

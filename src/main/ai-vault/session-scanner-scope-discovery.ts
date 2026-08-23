@@ -8,7 +8,7 @@ import {
 import { WslTranscriptFsError } from '../native-chat/wsl-transcript-fs-gate'
 import { encodeClaudeProjectPaths, isClaudeProjectDirInScope } from './claude-project-dir-encoding'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
-import { isWslAliasedPathInsideOrEqual, wslPathAliases } from '../../shared/wsl-path-aliases'
+import { isWslAliasedPathInsideOrEqual, wslRootPathAliases } from '../../shared/wsl-path-aliases'
 import { recordSessionScanIssue } from './session-scan-issues'
 import type { FileWithMtime } from './session-scanner-types'
 import { errorMessage, extractString, parseJsonObject } from './session-scanner-values'
@@ -106,7 +106,7 @@ export async function discoverInScopeClaudeFiles(args: {
 function claudeProjectScopePrefixes(scopePaths: readonly string[]): Set<string> {
   const prefixes = new Set<string>()
   for (const scopePath of scopePaths) {
-    for (const candidate of wslPathAliases(scopePath)) {
+    for (const candidate of wslRootPathAliases(scopePath)) {
       for (const prefix of encodeClaudeProjectPaths(candidate)) {
         prefixes.add(prefix)
       }
