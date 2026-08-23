@@ -1,4 +1,3 @@
-import { spawn, type ChildProcess } from 'node:child_process'
 import {
   buildRgArgsForQuickOpen,
   normalizeQuickOpenRgLine,
@@ -22,9 +21,11 @@ import { fileListingCancellationError } from '../shared/file-listing-cancellatio
 import { RelayErrorCode } from './protocol'
 import { GrowingByteBuffer } from '../shared/growing-byte-buffer'
 import { RipgrepUnavailableError } from '../shared/ripgrep-process-availability'
+import { spawnProcess } from '../shared/child-process/run-process'
 
 const MARKDOWN_LISTING_TIMEOUT_MS = 25_000
 const MARKDOWN_GLOBS = ['*.md', '*.mdx', '*.markdown']
+type MarkdownRgProcess = ReturnType<typeof spawnProcess>
 
 class MarkdownPathFieldAccumulator {
   private readonly field = new GrowingByteBuffer()
@@ -88,8 +89,8 @@ function relativePathDepth(path: string): number {
 export async function listMarkdownPathsWithRg(
   rootPath: string,
   signal?: AbortSignal,
-  spawnProcess: (args: string[]) => ChildProcess = (args) =>
-    spawn('rg', args, { cwd: rootPath, stdio: ['ignore', 'pipe', 'pipe'] })
+  spawnRgProcess: (args: string[]) => MarkdownRgProcess = (args) =>
+    spawnProcess({ program: 'rg', args, cwd: rootPath })
 ): Promise<string[]> {
   const paths = new Set<string>()
   const budget = createMarkdownDocumentListingBudget()
@@ -106,7 +107,7 @@ export async function listMarkdownPathsWithRg(
         reject(fileListingCancellationError(signal))
         return
       }
-      const child = spawnProcess(markdownRgArgs(args))
+      const child = spawnRgProcess(markdownRgArgs(args))
       const fields = new MarkdownPathFieldAccumulator()
       let done = false
       let parseablePathCount = 0
@@ -210,11 +211,11 @@ export async function listMarkdownPathsWithRg(
 export async function listRelayMarkdownDocumentPaths(
   rootPath: string,
   signal?: AbortSignal,
-  spawnProcess?: (args: string[]) => ChildProcess
+  spawnRgProcess?: (args: string[]) => MarkdownRgProcess
 ): Promise<string[]> {
   try {
     try {
-      return await listMarkdownPathsWithRg(rootPath, signal, spawnProcess)
+      return await listMarkdownPathsWithRg(rootPath, signal, spawnRgProcess)
     } catch (error) {
       if (!(error instanceof RipgrepUnavailableError)) {
         throw error
