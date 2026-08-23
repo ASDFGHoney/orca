@@ -1,26 +1,20 @@
 import React from 'react'
 import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import { toMegabytes } from './workspace-cleanup-facet-panel-model'
 import type { WorkspaceCleanupAppliedFilter } from '../../../../shared/workspace-cleanup-applied-filters'
 import { listAppliedWorkspaceCleanupFilters } from '../../../../shared/workspace-cleanup-applied-filters'
 import type { WorkspaceCleanupFilterState } from '../../../../shared/workspace-cleanup-filter-model'
 
-/**
- * Names each active constraint in the filter bar, one removable chip apiece.
- *
- * Why in the bar and not the panel: a filter that narrows the list must be visible
- * without opening anything. The reported defect was a persisted `idleMinDays` the user
- * never set — the bar already showed "Showing 546 of 799", so the effect was visible
- * and only the cause was hidden.
- */
+/** Why in the bar, not the panel: a filter narrowing the list must be visible without opening anything. */
+// Why not memoized: the labels are translated at build time, so caching them on
+// `filters` alone reuses the previous language's strings after a language change.
+// Derivation is constant-size (one pass over the filter fields, not per row).
 export function useAppliedWorkspaceCleanupFilters(
   filters: WorkspaceCleanupFilterState
 ): WorkspaceCleanupAppliedFilter[] {
-  return React.useMemo(
-    () => listAppliedWorkspaceCleanupFilters(filters, buildAppliedFilterFormatters()),
-    [filters]
-  )
+  return listAppliedWorkspaceCleanupFilters(filters, buildAppliedFilterFormatters())
 }
 
 export function WorkspaceCleanupAppliedFilterChips({
@@ -49,18 +43,19 @@ export function WorkspaceCleanupAppliedFilterChips({
           className="inline-flex items-center gap-1 rounded-full border border-border bg-background py-0.5 pl-2 pr-1 text-[11px] text-muted-foreground"
         >
           {filter.label}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="rounded-full"
             aria-label={translate(
               'components.workspace.cleanup.browse.removeFilter',
               'Remove filter {{value0}}',
               { value0: filter.label }
             )}
             onClick={() => onClear(filter)}
-            className="flex size-4 items-center justify-center rounded-full hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <X className="size-3" />
-          </button>
+          </Button>
         </span>
       ))}
     </div>
