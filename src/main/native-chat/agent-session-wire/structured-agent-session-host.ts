@@ -49,7 +49,6 @@ import {
 } from './structured-agent-session-host-handoff'
 import { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
-import { pinnedAgentSessionLaunchEnv } from './structured-agent-session-launch-env'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
 import type {
   StructuredAgentSessionCaller,
@@ -167,8 +166,7 @@ export class StructuredAgentSessionHost {
           spawnToken: this.deps.mintSpawnToken?.() ?? randomUUID(),
           claimKeyId: this.deps.claimKeyId,
           handoffOperationId: params.envelope.clientOperationId,
-          probe: await this.runtimeState.probeOwner(sessionId),
-          ...(await pinnedAgentSessionLaunchEnv(this.deps.resolveLaunchEnv, params))
+          probe: await this.runtimeState.probeOwner(sessionId)
         },
         callerKey: caller.callerKey,
         params,

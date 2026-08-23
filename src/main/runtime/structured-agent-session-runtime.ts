@@ -41,13 +41,14 @@ export type StructuredAgentSessionRuntimeDeps = {
   /** Key id this host's claims are minted under. */
   claimKeyId: string
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
-  resolveCodexCommand?: () => string
+  resolveCodexCommand?: (options?: { pathEnv?: string | null; homePath?: string }) => string
   /** Transport for the Codex child. Overridden only to drive the whole runtime
    *  against a scripted app-server; production spawns the real one. */
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
   /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
   readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
-  resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
+  resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
+  resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
 }
@@ -92,6 +93,11 @@ export async function stopStructuredAgentSessionRuntime(): Promise<void> {
 }
 
 async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<InstalledRuntime> {
+  const bootEnvironment = (deps.resolveEnvironment ?? resolveLoginShellEnvironment)()
+  const resolveEnvironment = async (): Promise<NodeJS.ProcessEnv> => ({
+    ...(await bootEnvironment),
+    ...deps.resolveCodexOverrides?.()
+  })
   const store = await AgentSessionRecordStore.open({
     directory: join(deps.stateDirectory, RECORD_STORE_DIR_NAME),
     hostId: deps.hostId
@@ -102,6 +108,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       resolveLaunch: createCodexStructuredLaunchResolver({
         store,
         resolveWorkspacePath: deps.resolveWorkspacePath,
+        resolveEnvironment,
         ...(deps.resolveCodexCommand ? { resolveCommand: deps.resolveCodexCommand } : {})
       }),
       ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {}),
@@ -113,8 +120,6 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       journalRoot: deps.stateDirectory,
       claimKeyId: deps.claimKeyId,
       probeOwner: createStructuredAgentSessionOwnerProbe(deps.hostId),
-      resolveLaunchEnv: async () =>
-        (await (deps.resolveLaunchEnv ?? resolveLoginShellEnvironment)()) as Record<string, string>,
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
       ...(deps.handoffTransport ? { handoffTransport: deps.handoffTransport } : {})
