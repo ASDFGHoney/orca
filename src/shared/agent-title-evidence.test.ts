@@ -145,8 +145,8 @@ describe('collectAgentTitleEvidence', () => {
     }
   )
 
-  it('does not treat an emitted label as free text', () => {
-    expect(collectAgentTitleEvidence('Prime Agent').freeTextNames).toEqual([])
+  it('does not duplicate an anchored token as free text', () => {
+    expect(collectAgentTitleEvidence('Codex').freeTextNames).toEqual([])
   })
 
   it.each([
