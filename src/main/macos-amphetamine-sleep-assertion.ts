@@ -1,5 +1,8 @@
 import type { AmphetamineUnavailableReason } from '../shared/computer-awake-mode'
+import { AmphetamineAvailability } from './macos-amphetamine-availability'
+import { AmphetamineHold, type AmphetamineHoldKind } from './macos-amphetamine-hold'
 import { AmphetamineFailureBackoff } from './macos-amphetamine-failure-backoff'
+import { releaseAmphetamineSessionSync } from './macos-amphetamine-quit-release'
 import {
   AMPHETAMINE_ACQUIRE_SCRIPT,
   AMPHETAMINE_RELEASE_SCRIPT,
@@ -23,8 +26,6 @@ type Logger = Pick<Console, 'debug' | 'warn'>
  * `owned` = Orca started this session and may end it.
  * `adopted` = a session was already running, so Orca's goal is met by someone else's and Orca must not touch it.
  */
-type SessionHold = 'owned' | 'adopted' | null
-
 type MacosAmphetamineSleepAssertionOptions = {
   logger?: Logger
   now?: () => number
@@ -59,12 +60,10 @@ export class MacosAmphetamineSleepAssertion {
   private readonly runOsascriptSync: RunOsascriptSync
   private readonly backoff: AmphetamineFailureBackoff
   private desired: 'started' | 'stopped' = 'stopped'
-  private hold: SessionHold = null
-  /** The last attempt failed, so `hold` is a stale classification rather than a live assertion. */
-  private attemptFailed = false
+  private readonly hold = new AmphetamineHold()
   private queue: Promise<void> = Promise.resolve()
   private disposed = false
-  private unavailableReason: AmphetamineUnavailableReason | null = null
+  private readonly availability = new AmphetamineAvailability()
   private reconcileTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(options: MacosAmphetamineSleepAssertionOptions = {}) {
@@ -86,7 +85,7 @@ export class MacosAmphetamineSleepAssertion {
   }
 
   start(reason: string): void {
-    if (this.platform !== 'darwin' || this.disposed || this.unavailableReason) {
+    if (this.platform !== 'darwin' || this.disposed || this.availability.isUnavailable()) {
       return
     }
     this.desired = 'started'
@@ -114,30 +113,31 @@ export class MacosAmphetamineSleepAssertion {
     this.desired = 'stopped'
     this.stopReconcileTimer()
     this.backoff.reset()
-    if (this.hold !== 'owned') {
-      this.hold = null
+    if (!this.hold.isOwned()) {
+      this.hold.release()
       return
     }
-    this.hold = null
-    this.endSessionSync('dispose')
+    if (this.endSessionSync('dispose')) {
+      this.hold.release()
+      return
+    }
+    // Keep the hold so the final state is honest. Nothing retries after
+    // disposal: the session outlives Orca, ended from Amphetamine's menu bar.
+    this.logger.warn('[agent-awake] left an Amphetamine session running at quit', {
+      unavailableReason: this.availability.get()
+    })
   }
 
   /**
    * Why sync: quit tears the event loop down before an awaited osascript could
    * report back, and a missed `end session` leaves the Mac awake indefinitely.
    */
-  private endSessionSync(reason: string): void {
-    try {
-      // The script re-tests the shape immediately before ending, which is the
-      // narrowest window this API allows — not a transaction (see
-      // docs/reference/macos-keep-awake-engines.md).
-      const result = this.runOsascriptSync(AMPHETAMINE_RELEASE_SCRIPT)
-      if (result.code !== 0) {
-        this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, result })
-      }
-    } catch (error) {
-      this.logger.warn('[agent-awake] failed to end Amphetamine session', { reason, error })
-    }
+  private endSessionSync(reason: string): boolean {
+    return releaseAmphetamineSessionSync({
+      logger: this.logger,
+      reason,
+      runOsascriptSync: this.runOsascriptSync
+    })
   }
 
   /**
@@ -147,25 +147,23 @@ export class MacosAmphetamineSleepAssertion {
    * relaunch, even though the tooltip tells the user how to fix it.
    */
   clearUnavailable(): void {
-    if (!this.unavailableReason) {
-      return
+    if (this.availability.clear()) {
+      this.backoff.reset()
     }
-    this.unavailableReason = null
-    this.backoff.reset()
   }
 
   /** True once Amphetamine proved unusable, so callers can fall back to caffeinate. */
   isUnavailable(): boolean {
-    return this.unavailableReason !== null
+    return this.availability.isUnavailable()
   }
 
   getUnavailableReason(): AmphetamineUnavailableReason | null {
-    return this.unavailableReason
+    return this.availability.get()
   }
 
   /** 'owned' or 'adopted' while a session backs this assertion; null when nothing does. */
-  getHold(): SessionHold {
-    return this.hold
+  getHold(): AmphetamineHoldKind {
+    return this.hold.get()
   }
 
   /**
@@ -176,7 +174,7 @@ export class MacosAmphetamineSleepAssertion {
    * whether to drop a stand-in assertion must not treat it as proof.
    */
   hasLiveHold(): boolean {
-    return this.hold !== null && !this.attemptFailed
+    return this.hold.isLive()
   }
 
   private enqueue(reason: string, recheck = false): void {
@@ -204,20 +202,17 @@ export class MacosAmphetamineSleepAssertion {
 
   /** Returns false when it could not make progress, so the caller stops looping. */
   private async ensureSession(reason: string, recheck = false): Promise<boolean> {
-    if (this.unavailableReason) {
+    if (this.availability.isUnavailable()) {
       return false
     }
-    // Already holding and able to vouch for it: only the periodic re-check
-    // spends an Apple event, to notice an adopted session expiring or ours being
-    // replaced. hasLiveHold rather than hold: after a failed attempt the
-    // classification survives for cleanup but is not evidence anything is
-    // holding, and that is precisely when a retry is worth an Apple event.
-    if (this.hasLiveHold() && !recheck) {
+    // hasLiveHold, not hold: a classification retained after a failure is not
+    // evidence anything is holding, and that is when a retry is worth an event.
+    // Otherwise only the periodic re-check spends one.
+    if (this.hold.isLive() && !recheck) {
       return true
     }
-    // Gate before the Apple event: a failure reports through onUnexpectedFailure,
-    // which refreshes the service, which starts this again — so an ungated
-    // attempt is an unthrottled osascript loop while Amphetamine keeps failing.
+    // Gate before the Apple event: a failure refreshes the service, which starts
+    // this again, so an ungated attempt is an unthrottled osascript loop.
     if (this.backoff.isSuppressed()) {
       return false
     }
@@ -238,10 +233,15 @@ export class MacosAmphetamineSleepAssertion {
       return false
     }
     if (outcome === 'foreign') {
+      if (this.disposed) {
+        // Nothing to end — the script left the foreign session alone — but
+        // installing a hold and firing listeners after teardown is a lie.
+        return false
+      }
       // Someone else's session already keeps the Mac awake, and the script left
       // it untouched. Adopting is both sufficient and the only safe option.
-      this.hold = 'adopted'
-      this.attemptFailed = false
+      this.hold.adopt()
+
       this.backoff.reset()
       this.onHoldChanged()
       return true
@@ -254,8 +254,8 @@ export class MacosAmphetamineSleepAssertion {
         this.endSessionSync('dispose-race')
         return false
       }
-      this.hold = 'owned'
-      this.attemptFailed = false
+      this.hold.own()
+
       this.backoff.reset()
       this.onHoldChanged()
       return true
@@ -264,12 +264,12 @@ export class MacosAmphetamineSleepAssertion {
   }
 
   private async releaseSession(reason: string): Promise<boolean> {
-    if (this.hold === null) {
+    if (this.hold.get() === null) {
       return true
     }
-    if (this.hold === 'adopted') {
+    if (this.hold.get() === 'adopted') {
       // Never end a session Orca did not start.
-      this.hold = null
+      this.hold.release()
       return true
     }
     if (this.backoff.isSuppressed()) {
@@ -289,9 +289,8 @@ export class MacosAmphetamineSleepAssertion {
       return false
     }
     if (result.code !== 0 || result.timedOut) {
-      // A missing app or revoked grant means there is no session left to end,
-      // and the engine is now unusable — classify it here too, or the next
-      // start spends another failing Apple event before noticing.
+      // Classify here too, or the next start spends another failing Apple event
+      // before noticing the engine is unusable.
       const unavailable = classifyAmphetamineFailure(result)
       if (unavailable) {
         this.markUnavailable(unavailable, reason, result)
@@ -299,7 +298,7 @@ export class MacosAmphetamineSleepAssertion {
         // grant leaves it running, so keep the hold: restoring the grant is the
         // one path that can still clean it up.
         if (unavailable === 'not-installed') {
-          this.hold = null
+          this.hold.release()
         }
         return unavailable === 'not-installed'
       }
@@ -314,7 +313,7 @@ export class MacosAmphetamineSleepAssertion {
     }
     // 'ended', 'foreign' and 'gone' all mean Orca no longer holds anything, and
     // the script only ever ended a session matching the shape Orca creates.
-    this.hold = null
+    this.hold.release()
     this.backoff.reset()
     return true
   }
@@ -363,14 +362,16 @@ export class MacosAmphetamineSleepAssertion {
     reason: string,
     details: unknown
   ): void {
-    if (this.unavailableReason === unavailableReason) {
+    if (!this.availability.mark(unavailableReason)) {
       return
     }
-    this.unavailableReason = unavailableReason
+    // Still a failed attempt: otherwise hasLiveHold() would vouch for a hold
+    // that just failed and the router would drop its caffeinate stand-in.
+    this.hold.markStale()
     if (unavailableReason === 'not-installed') {
       // No app means no session, so the hold is stale bookkeeping that would
       // otherwise cost a pointless synchronous spawn on the quit path.
-      this.hold = null
+      this.hold.release()
     }
     this.stopReconcileTimer()
     this.backoff.reset()
@@ -383,7 +384,7 @@ export class MacosAmphetamineSleepAssertion {
   }
 
   private handleFailure(failureKey: string, reason: string, details: unknown): void {
-    this.attemptFailed = true
+    this.hold.markStale()
     this.backoff.record(failureKey, reason, details)
     this.onUnexpectedFailure('macos-amphetamine-assertion-failure')
   }

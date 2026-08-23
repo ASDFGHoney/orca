@@ -261,6 +261,64 @@ describe('MacosAmphetamineSleepAssertion throttling', () => {
     expect(amphetamine.calls() - before).toBeLessThanOrEqual(2)
   })
 
+  it('stops vouching for a hold after a classified failure', async () => {
+    const amphetamine = createFakeAmphetamine()
+    const assertion = createAssertion(amphetamine, { now: () => 1_000 })
+
+    assertion.start('agents-working')
+    await settle()
+    expect(assertion.hasLiveHold()).toBe(true)
+
+    amphetamine.run.mockImplementation(async (_script: string) =>
+      failure('Not authorized to send Apple events to Amphetamine. (-1743)')
+    )
+    assertion.stop('agents-idle')
+    await settle()
+
+    // The hold survives for cleanup, but the attempt failed — vouching for it
+    // here would let the router drop the caffeinate stand-in.
+    expect(assertion.getHold()).toBe('owned')
+    expect(assertion.hasLiveHold()).toBe(false)
+  })
+
+  it('does not reinstall a hold when a foreign result lands after dispose', async () => {
+    const amphetamine = createFakeAmphetamine('foreign')
+    let releaseAcquire = (): void => {}
+    const acquired = new Promise<void>((resolve) => {
+      releaseAcquire = resolve
+    })
+    amphetamine.run.mockImplementation(async (script: string) => {
+      if (script.includes('start new session')) {
+        await acquired
+        return ok('foreign')
+      }
+      return ok('gone')
+    })
+    const assertion = createAssertion(amphetamine, { runOsascriptSync: () => ok('gone') })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+    releaseAcquire()
+    await settle()
+
+    expect(assertion.getHold()).toBeNull()
+  })
+
+  it('keeps the hold on dispose when the final release fails', async () => {
+    const amphetamine = createFakeAmphetamine()
+    // Automation still denied at quit: nothing can retry, so the state must at
+    // least be honest that a session was left running.
+    const runOsascriptSync = vi.fn((_script: string) => failure('(-1743)'))
+    const assertion = createAssertion(amphetamine, { runOsascriptSync })
+
+    assertion.start('agents-working')
+    await settle()
+    assertion.dispose()
+
+    expect(assertion.getHold()).toBe('owned')
+  })
+
   it('keeps the hold when Automation is revoked, since the session still runs', async () => {
     const amphetamine = createFakeAmphetamine()
     const assertion = createAssertion(amphetamine, { now: () => 1_000 })
