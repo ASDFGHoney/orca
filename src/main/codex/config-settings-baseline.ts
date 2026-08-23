@@ -24,12 +24,10 @@ type StoredSettingsBaseline = {
 }
 
 /**
- * Why callers need three answers, not two: the baseline records what Orca last
- * mirrored, so `null` drives "there is nothing to compare against, bootstrap
- * one". For a file that merely could not be READ, bootstrapping overwrites the
- * record of a change the user made inside Codex, and the next mirror pass then
- * writes the old value back over their edit. Absent and unparseable still map
- * to `absent` — rebuilding those is the intent.
+ * Why callers need three answers, not two: without a readable baseline,
+ * promotion cannot distinguish an in-Codex edit from Orca's last mirror. An
+ * unreadable baseline must stall that mirror; absent and unparseable still map
+ * to `absent` because rebuilding those is the intent.
  */
 export type CodexSettingsBaselineObservation =
   | { kind: 'present'; baseline: CodexSettingsBaseline }

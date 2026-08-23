@@ -3,11 +3,12 @@ import type * as NodeFs from 'node:fs'
 import type * as NodeOs from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { syncSystemConfigIntoManagedCodexHome } from './codex-config-mirror'
 import type { CodexTrustEntry } from './config-toml-trust'
 
 // STA-4823: six shared Codex state files were rebuilt, erased or reported as
-// healthy after a read that had merely failed. Every one is reachable on the
-// host lane; the WSL-specific half of the catalogue stays in STA-4606.
+// healthy after a read that had merely failed. Host permission failures drive
+// four; the other guards cover transient transport and observation races.
 
 const denials = vi.hoisted(() => {
   const state = {
@@ -18,9 +19,8 @@ const denials = vi.hoisted(() => {
       state.paths.add(path)
     },
     /**
-     * Content reads fail but `existsSync` still says the file is there — the
-     * shape a Windows sharing violation takes, as distinct from `deny`, which
-     * models an ACL denial where `existsSync` itself reports false.
+     * Content reads fail but `existsSync` and metadata reads still succeed —
+     * the measured host permission/sharing-denial shape.
      */
     denyReads(path: string): void {
       state.readOnlyPaths.add(path)
@@ -33,8 +33,9 @@ const denials = vi.hoisted(() => {
      * produce this. `chmod 000` on macOS and `icacls /deny (R)` on Windows both
      * leave `existsSync` TRUE, leave `stat`/`lstat` succeeding, and fail only
      * the content read (EACCES / EPERM errno -4048). The shape modelled here is
-     * the UNC / `\\wsl$` transport, where an unreachable distro reports errno
-     * `UNKNOWN` at every level and `existsSync` folds that to false.
+     * a transient transport failure: a UNC / `\\wsl$` probe reports errno
+     * `UNKNOWN`, `existsSync` folds it to false, and the transport recovers
+     * before the following write.
      *
      * The distinction decides what the guard is worth: under a permission denial
      * the pre-fix code already failed safe, because `existsSync` was true so it
@@ -46,6 +47,8 @@ const denials = vi.hoisted(() => {
     },
     release(path: string): void {
       state.paths.delete(path)
+      state.readOnlyPaths.delete(path)
+      state.existenceDeniedPaths.delete(path)
     },
     reset(): void {
       state.paths.clear()
@@ -268,7 +271,7 @@ describe('STA-4823 D30 — an unreadable trust-grant ledger must not be rewritte
   it('skips the write instead of dropping every other home', () => {
     const ledgerPath = seedLedgerWithAnotherHome()
     const before = realFs.readFileSync(ledgerPath, 'utf-8')
-    denials.deny(ledgerPath)
+    denials.denyReads(ledgerPath)
 
     writeCodexTrustGrantLedgerHome(
       runtimeHomePath,
@@ -317,7 +320,7 @@ describe('STA-4823 D33 — an unreadable hooks.json is not an empty hooks.json',
   })
 })
 
-describe('STA-4823 D26 — an unreadable settings baseline must not be overwritten', () => {
+describe('STA-4823 D26 — an unreadable settings baseline must stall the mirror', () => {
   function seedBaseline(): string {
     realFs.writeFileSync(
       baselinePath(),
@@ -327,20 +330,29 @@ describe('STA-4823 D26 — an unreadable settings baseline must not be overwritt
     return realFs.readFileSync(baselinePath(), 'utf-8')
   }
 
-  it('leaves the record alone so the pending edit can still be promoted', () => {
+  it('preserves the pending runtime edit until the baseline can be read', () => {
     const before = seedBaseline()
-    realFs.writeFileSync(
-      join(runtimeHomePath, 'config.toml'),
-      'model = "edited-in-codex"\n',
-      'utf-8'
-    )
-    denials.deny(baselinePath())
+    const runtimeConfigPath = join(runtimeHomePath, 'config.toml')
+    realFs.writeFileSync(runtimeConfigPath, 'model = "edited-in-codex"\n', 'utf-8')
+    realFs.writeFileSync(join(systemHome(), 'config.toml'), 'model = "old-model"\n', 'utf-8')
+    denials.denyReads(baselinePath())
+
+    syncSystemConfigIntoManagedCodexHome({ runtimeHomePath, systemHomePath: systemHome() })
+
+    // Before the fix the failed baseline read became "no baseline", promotion
+    // returned an empty plan, and the mirror wrote the old system value over
+    // the pending in-Codex edit.
+    expect(realFs.readFileSync(runtimeConfigPath, 'utf-8')).toContain('edited-in-codex')
+    expect(realFs.readFileSync(baselinePath(), 'utf-8')).toBe(before)
+  })
+
+  it('does not replace a baseline after an indeterminate existence probe', () => {
+    const before = seedBaseline()
+    realFs.writeFileSync(join(runtimeHomePath, 'config.toml'), 'model = "edited"\n', 'utf-8')
+    denials.denyExistence(baselinePath())
 
     snapshotCodexRuntimeSettingsBaseline(runtimeHomePath)
 
-    // Before the fix this recorded "edited-in-codex" as Orca's own write, so
-    // the user's in-Codex change was never promoted and the next mirror pass
-    // wrote the old value back over it.
     expect(realFs.readFileSync(baselinePath(), 'utf-8')).toBe(before)
   })
 
@@ -396,9 +408,9 @@ describe('STA-4823 D15 — the sync status must not report synced while the mirr
 
     const status = getCodexConfigSyncStatus({ runtimeHomePath, systemHomePath: systemHome() })
 
-    // Before the fix existsSync reported the locked runtime config as absent
-    // and this returned `synced` — telling the user their edits had been
-    // applied while nothing had run.
+    // Before the fix existsSync collapsed this failed observation into absence
+    // and returned `synced` — telling the user their edits had been applied
+    // while nothing had run.
     expect(status).toMatchObject({ state: 'stalled', reason: 'managed-home-unavailable' })
   })
 
@@ -446,7 +458,7 @@ describe('STA-4823 D31 — an unreadable pane registry must not erase every attr
   it('does not persist an empty registry over the real one', () => {
     seedTwoAttributedPanes()
     const before = realFs.readFileSync(registryPath(), 'utf-8')
-    denials.deny(registryPath())
+    denials.denyReads(registryPath())
 
     paneRegistry.recordCodexPaneAccount('pty-3', {
       selectionKey: 'host',
@@ -461,7 +473,7 @@ describe('STA-4823 D31 — an unreadable pane registry must not erase every attr
 
   it('does not cache the erasure, so attribution returns when the file does', () => {
     seedTwoAttributedPanes()
-    denials.deny(registryPath())
+    denials.denyReads(registryPath())
 
     expect(paneRegistry.getCodexPaneAccount(PANE)).toBeNull()
 

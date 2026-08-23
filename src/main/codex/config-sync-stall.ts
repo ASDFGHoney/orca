@@ -27,9 +27,9 @@ export function getCodexConfigSyncStatus(
   const runtimeConfigPath = join(homes.runtimeHomePath, 'config.toml')
   // Why: a stall only withholds settings once a managed runtime config exists;
   // without one the mirror seeds it and there is nothing yet to fall behind.
-  // But `existsSync` said "no runtime config" for one that was merely locked,
-  // and this function then reported `synced` while the mirror was refusing —
-  // telling the user their edits had been applied when nothing had run.
+  // But `existsSync` never proved the config readable, so this function could
+  // report `synced` while the mirror refused its content read — telling the
+  // user their edits had been applied when nothing had run.
   const runtimeConfigObservation = observeAgentStateFile(runtimeConfigPath)
   if (runtimeConfigObservation.kind === 'absent') {
     return { state: 'synced', reason: null, systemConfigPath }

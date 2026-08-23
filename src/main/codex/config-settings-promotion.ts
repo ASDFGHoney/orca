@@ -163,13 +163,6 @@ export function snapshotCodexRuntimeSettingsBaseline(
   runtimeHomePath = getOrcaManagedCodexHomePath(),
   conflicts: ReadonlyMap<string, CodexSettingsConflict> = new Map()
 ): void {
-  // Why: overwriting a baseline that could not be read records whatever the
-  // runtime config says now as "Orca wrote this", so an edit the user made
-  // inside Codex since the last pass is reclassified and never promoted again.
-  // Absent and malformed are still rebuilt — that is what this function is for.
-  if (observeCodexSettingsBaseline(runtimeHomePath).kind === 'indeterminate') {
-    return
-  }
   try {
     const runtimeTomlPath = join(runtimeHomePath, 'config.toml')
     // Why: record an empty baseline even for a missing runtime config, so Codex's first write still diffs and promotes.
@@ -274,10 +267,10 @@ function promoteCodexRuntimeSettingsToSystemUnsafe(
   const writeTarget = resolvePromotionWriteTarget(systemTomlPath)
   // Why: a dangling symlink may target an unmade dir tree; create its real parent so the atomic temp write has a home.
   mkdirSync(dirname(writeTarget.path), { recursive: true, mode: 0o700 })
-  // Why: this is the user's real ~/.codex/config.toml, and `existsSync` reading
-  // `false` for a locked file sent it down the reconstruct branch below, which
-  // replaces the canonical config with settings derived from Orca's runtime
-  // copy. One read replaces the old existsSync + read pair and its TOCTOU gap.
+  // Why: this is the user's real ~/.codex/config.toml, and an indeterminate
+  // existence probe sent it down the reconstruct branch below, which replaces
+  // the canonical config with settings derived from Orca's runtime copy. One
+  // read replaces the old existsSync + read pair and its TOCTOU gap.
   // The indeterminate arm is a backstop rather than the live guard: an
   // unreadable system config already refused in readPromotedSettingValues,
   // because `writeTarget.path` always resolves to the same file as

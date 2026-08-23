@@ -338,12 +338,10 @@ export function upsertHookTrustEntries(
   configPath: string,
   entries: readonly CodexTrustEntry[]
 ): void {
-  // Why: `existsSync` answered `false` for a locked config exactly as for an
-  // absent one, so `existing` became '' and the upsert below rebuilt the file
-  // from the trust entries alone — replacing the user's model, provider, MCP
-  // servers, approvals and comments with a trust-only stub. Only a definitive
-  // absence may seed from empty; every caller in hook-service already turns a
-  // throw here into "trust entries could not be written. Run /hooks in Codex".
+  // Why: `existsSync` collapses an indeterminate probe into the same `false` as
+  // absence. If the path recovers before the write, rebuilding from '' replaces
+  // the user's model, provider, MCP servers, approvals and comments with a
+  // trust-only stub. Only a definitive absence may seed from empty.
   const observation = observe(() => readTomlFile(configPath))
   if (observation.kind === 'indeterminate') {
     throw observation.error
