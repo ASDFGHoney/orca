@@ -549,7 +549,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(provider.exec).toHaveBeenCalledWith(
       ['for-each-ref', '--count=1', '--format=%(refname)', 'refs/heads/main'],
@@ -565,7 +565,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(result.localBaseRefRefresh).toEqual({
       status: 'skipped_not_fast_forward',
@@ -582,7 +582,7 @@ describe('registerWorktreeHandlers', () => {
     const result = (await handlers['worktrees:create'](null, {
       repoId: 'repo-ssh',
       name: 'improve-dashboard'
-    })) as CreateWorktreeResult
+    })) as CreatedWorktreeResult
 
     expect(result.localBaseRefRefresh).toEqual({
       status: 'skipped_not_fast_forward',

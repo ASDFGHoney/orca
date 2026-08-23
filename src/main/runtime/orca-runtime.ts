@@ -336,6 +336,7 @@ import type {
   TerminalTab
 } from '../../shared/terminal-tab-types'
 import type { BuiltInTuiAgent, TuiAgent } from '../../shared/tui-agent'
+import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
 import type { BranchPrefixStrategy } from '../../shared/ui-chrome-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import type { WorkspaceSource as WorkspaceCreateTelemetrySource } from '../../shared/workspace-source'
@@ -378,7 +379,7 @@ import {
   type ExecutionHostId
 } from '../../shared/execution-host'
 import { preservedBranchCleanupScopeKey } from '../../shared/preserved-branch-cleanup'
-import { getRegisteredSshState } from '../ssh/ssh-target-registry'
+import { getActiveMultiplexer, getRegisteredSshState } from '../ssh/ssh-target-registry'
 import type {
   AgentProviderSessionMetadata,
   SleepingAgentLaunchConfig
@@ -570,7 +571,10 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
-import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
+import {
+  resolveLocalWindowsAgentStartupShell,
+  resolveWindowsShellStartupFamily
+} from '../../shared/windows-terminal-shell'
 import {
   getTuiAgentLaunchCommand,
   isTuiAgent,
@@ -3295,6 +3299,10 @@ export class OrcaRuntimeService {
   private agentCatalogSettingsUnsubscribe: (() => void) | null = null
   private managedHookReconciliationGeneration = 0
   private managedHookReconciliationTail: Promise<void> = Promise.resolve()
+  private readonly sshAgentStartupShellByConnection = new WeakMap<
+    object,
+    Promise<AgentStartupShell | undefined>
+  >()
   private readonly orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport | null
   private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setInterval>>()
   private orchestrationTerminalHistoryRecoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -24357,19 +24365,13 @@ export class OrcaRuntimeService {
     return { repoId: repo.id, worktreeId: worktree.id, activated: true, sleepingAgentWake }
   }
 
-  /** Resolve a legacy renderer-spawned worktree-create startup request through the
-   *  host boundary's resolve-only path (catalog resolution, I6 disabled-base
-   *  blocking, typed failures) WITHOUT admission — this path registers no terminal
-   *  receipt and has no settle seam, so a held token would leak capacity. Detection
-   *  and target home stay the honest unknowns the legacy builders already used
-   *  (null), so the conversion moves resolution authority into the resolver without
-   *  changing the derived target. One-release shim; removed with the legacy
-   *  startupAgent/startupDraft fields. */
-  /** The resolve-only spawn target for a repo: platform/shell/host derived from the
-   *  repo descriptor, detection + target home the honest unknowns the legacy
-   *  builders used (null). Shared by the legacy startup shim and the automation
-   *  classifier so both resolve against the same derived target. */
-  private buildResolveOnlySpawnTarget(repo: Repo): AgentLaunchSpawnTarget {
+  /** The resolve-only spawn target for a repo. Detection stays unknown; automation
+   *  may opt into the local home its real launch receives, while the legacy shim
+   *  preserves its historical null target home. */
+  private buildResolveOnlySpawnTarget(
+    repo: Repo,
+    includeLocalTargetHome = false
+  ): AgentLaunchSpawnTarget {
     const descriptor = this.buildRepoAgentLaunchDescriptor(repo)
     const confidentiality = defaultTransportConfidentiality(descriptor)
     return {
@@ -24377,7 +24379,12 @@ export class OrcaRuntimeService {
       ...(descriptor.shell ? { shell: descriptor.shell } : {}),
       isRemote: isRemoteForDescriptor(descriptor),
       executionHostId: executionHostIdForDescriptor(descriptor),
-      targetHomePath: null,
+      targetHomePath:
+        includeLocalTargetHome &&
+        descriptor.kind === 'local' &&
+        descriptor.platform === process.platform
+          ? homedir()
+          : null,
       detectedStockBaseAgents: null,
       ...(confidentiality !== undefined
         ? { transportConfidentialityAvailable: confidentiality }
@@ -24385,6 +24392,9 @@ export class OrcaRuntimeService {
     }
   }
 
+  /** Resolve a legacy renderer-spawned worktree-create startup request through the
+   *  host boundary's resolve-only path without admission. One-release shim;
+   *  removed with the legacy startupAgent/startupDraft fields. */
   private resolveLegacyStartupPlan(
     repo: Repo,
     request: AgentLaunchSpawnRequest
@@ -24415,7 +24425,8 @@ export class OrcaRuntimeService {
   classifyAgentLaunchForAutomation(
     agent: TuiAgent,
     repo: Repo,
-    runId: string
+    runId: string,
+    worktreePath: string
   ): AgentLaunchFailure | null {
     const result = resolveAgentLaunchStartupPlanWithoutAdmission(
       {
@@ -24426,8 +24437,8 @@ export class OrcaRuntimeService {
       {
         request: { selection: { kind: 'agent', agent }, prompt: '', allowEmptyPromptLaunch: true },
         intent: { kind: 'automation', runId },
-        target: this.buildResolveOnlySpawnTarget(repo),
-        variables: {},
+        target: this.buildResolveOnlySpawnTarget(repo, true),
+        variables: { repoPath: repo.path, worktreePath },
         scope: `automation:${runId}`,
         principal: { kind: 'local' }
       }
@@ -28627,7 +28638,8 @@ export class OrcaRuntimeService {
    *  host running a divergent shell (WSL) returns null (unknown) so the resolver
    *  skips its gate instead of failing on a PATH that isn't the target's. */
   private async detectStockBaseAgentsForDescriptor(
-    descriptor: AgentLaunchHostDescriptor
+    descriptor: AgentLaunchHostDescriptor,
+    baseAgents?: readonly BuiltInTuiAgent[]
   ): Promise<readonly string[] | null> {
     try {
       if (descriptor.kind === 'ssh') {
@@ -28635,7 +28647,10 @@ export class OrcaRuntimeService {
         // honest unknown here. The plain probe reports `[]` for an unreachable host,
         // which resolve-agent-launch's stock-name gate would read as "base agent
         // absent" and abort the launch (and worktree create) during a relay blip.
-        return await detectRemoteAgentsIfReachable({ connectionId: descriptor.connectionId })
+        return await detectRemoteAgentsIfReachable({
+          connectionId: descriptor.connectionId,
+          ...(baseAgents ? { baseAgents } : {})
+        })
       }
       if (descriptor.kind === 'local' && descriptor.platform === process.platform) {
         return await detectInstalledAgentsWithShellPathHydration()
@@ -28644,6 +28659,38 @@ export class OrcaRuntimeService {
       return null
     }
     return null
+  }
+
+  /** Native-Windows SSH quoting follows the relay's OpenSSH DefaultShell, not
+   * this client's terminal setting. Cache only for the live mux generation. */
+  private async resolveAgentLaunchStartupShellForDescriptor(
+    descriptor: AgentLaunchHostDescriptor
+  ): Promise<AgentStartupShell | undefined> {
+    if (descriptor.kind !== 'ssh' || descriptor.platform !== 'win32') {
+      return undefined
+    }
+    const mux = getActiveMultiplexer(descriptor.connectionId)
+    if (!mux || mux.isDisposed()) {
+      return undefined
+    }
+    const existing = this.sshAgentStartupShellByConnection.get(mux)
+    if (existing) {
+      return await existing
+    }
+    const probe = mux
+      .request('pty.getDefaultShell')
+      .then((shell) =>
+        typeof shell === 'string' ? resolveWindowsShellStartupFamily(shell) : undefined
+      )
+    this.sshAgentStartupShellByConnection.set(mux, probe)
+    try {
+      return await probe
+    } catch {
+      if (this.sshAgentStartupShellByConnection.get(mux) === probe) {
+        this.sshAgentStartupShellByConnection.delete(mux)
+      }
+      return undefined
+    }
   }
 
   /** Target home for `~` expansion: this machine's home for a same-platform local
@@ -28683,8 +28730,11 @@ export class OrcaRuntimeService {
       boundary: getHostAgentLaunchBoundary(),
       getSettings: () => this.requireStore().getSettings(),
       getCatalogRevision: () => this.requireStore().getSettings().agentCatalogRevision ?? 1,
-      detectStockBaseAgents: (descriptor) => this.detectStockBaseAgentsForDescriptor(descriptor),
+      detectStockBaseAgents: (descriptor, baseAgents) =>
+        this.detectStockBaseAgentsForDescriptor(descriptor, baseAgents),
       resolveTargetHomePath: (descriptor) => this.resolveTargetHomeForDescriptor(descriptor),
+      resolveStartupShell: (descriptor) =>
+        this.resolveAgentLaunchStartupShellForDescriptor(descriptor),
       // Best-effort workspace trust runs as the boundary's pre-admission
       // preflight against the authoritative worktree path the resolver used.
       markWorkspaceTrusted: async (launch) => {
@@ -30057,7 +30107,7 @@ export class OrcaRuntimeService {
     const requestId = randomUUID()
     const reply = await new Promise<{ tabId: string; title: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
-        ipcMain.removeListener('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
         opts.signal?.removeEventListener('abort', onAbort)
         reject(new Error('Terminal creation timed out'))
       }, 10_000)
@@ -30065,7 +30115,7 @@ export class OrcaRuntimeService {
       // its shell) stays alive for the host and mirrors on reconnect (#7718).
       const onAbort = (): void => {
         clearTimeout(timer)
-        ipcMain.removeListener('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
         reject(new Error('client_disconnected'))
       }
 
@@ -30082,7 +30132,7 @@ export class OrcaRuntimeService {
           return
         }
         clearTimeout(timer)
-        ipcMain.removeListener('terminal:tabCreateReply', handler)
+        getRuntimeDesktopSurface().removeIpcListener('terminal:tabCreateReply', handler)
         opts.signal?.removeEventListener('abort', onAbort)
         if (r.error) {
           reject(new Error(r.error))
@@ -30091,7 +30141,7 @@ export class OrcaRuntimeService {
         }
       }
       opts.signal?.addEventListener('abort', onAbort, { once: true })
-      ipcMain.on('terminal:tabCreateReply', handler)
+      getRuntimeDesktopSurface().onIpc('terminal:tabCreateReply', handler)
       win.webContents.send('terminal:requestTabCreate', {
         requestId,
         worktreeId,
@@ -30555,8 +30605,11 @@ export class OrcaRuntimeService {
         boundary: getHostAgentLaunchBoundary(),
         getSettings: () => this.requireStore().getSettings(),
         getCatalogRevision: () => this.requireStore().getSettings().agentCatalogRevision ?? 1,
-        detectStockBaseAgents: (descriptor) => this.detectStockBaseAgentsForDescriptor(descriptor),
+        detectStockBaseAgents: (descriptor, baseAgents) =>
+          this.detectStockBaseAgentsForDescriptor(descriptor, baseAgents),
         resolveTargetHomePath: (descriptor) => this.resolveTargetHomeForDescriptor(descriptor),
+        resolveStartupShell: (descriptor) =>
+          this.resolveAgentLaunchStartupShellForDescriptor(descriptor),
         sessionRecordStore: getHostAgentSessionRecordStore(),
         markWorkspaceTrusted: async (launch) => {
           if (workspace.connectionId) {

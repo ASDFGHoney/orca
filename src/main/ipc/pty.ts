@@ -189,6 +189,7 @@ import {
   type TerminalStartupCwdMissingDirFallback
 } from '../../shared/terminal-startup-cwd'
 import { isWslUncPath, toWindowsWslPath } from '../../shared/wsl-paths'
+import { resolveWindowsShellStartupFamily } from '../../shared/windows-terminal-shell'
 import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-authority'
 import {
   agentSessionOwnerBindingsEqual,
@@ -6414,7 +6415,9 @@ export function registerPtyHandlers(
           const getLaunchSettings = getSettings
           const descriptor = describeSpawnExecutionHost({
             connectionId: args.connectionId,
-            cwd,
+            // Remote path syntax is still authoritative when workspace cwd
+            // resolution has no local/store-backed answer.
+            cwd: cwd ?? args.cwd,
             // Why: this pane's tab shell overrides the global setting, and the
             // host now quotes the launch/resume argv for it (#12320).
             shellOverride: args.shellOverride,
@@ -6431,7 +6434,14 @@ export function registerPtyHandlers(
               // unknowns skip the stock-detection gate and fail typed only for
               // `~`-prefixed values, never a fabricated result.
               detectStockBaseAgents: detectionUnavailable,
-              resolveTargetHomePath: resolveLocalTargetHomePath
+              resolveTargetHomePath: resolveLocalTargetHomePath,
+              resolveStartupShell: async (target) => {
+                if (target.kind !== 'ssh' || target.platform !== 'win32') {
+                  return undefined
+                }
+                const shell = args.shellOverride ?? (await provider.getDefaultShell())
+                return resolveWindowsShellStartupFamily(shell)
+              }
             },
             descriptor,
             { worktreePath: cwd ?? null, repoPath: null }

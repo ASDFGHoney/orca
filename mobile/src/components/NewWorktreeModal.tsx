@@ -35,7 +35,6 @@ import type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-ho
 import type { Repo as SharedRepo } from '../../../src/shared/repo-types'
 import type { TuiAgent } from '../../../src/shared/tui-agent'
 import { hostAgentCatalogReadOnlyNotice } from '../tasks/mobile-agent-catalog-projection'
-import { hostSupportsAgentLaunchIdentity } from '../session/agent-launch-identity-capability'
 import { buildInteractiveLaunchParams } from './interactive-worktree-launch-params'
 import type { SshConnectionState } from '../../../src/shared/ssh-types'
 import { getProjectIdentityKey } from '../../../src/shared/project-host-setup-projection'
@@ -47,6 +46,7 @@ import {
   resolveNewWorktreeAgentSelection,
   type NewWorktreeAgentOption as AgentOption
 } from './new-worktree-agent-selection'
+import { resolveNewWorktreeAgentIdentitySupport } from './new-worktree-agent-identity-support'
 import { useAgentCatalogSnapshot } from './use-agent-catalog-snapshot'
 import { getCachedRepos, setCachedRepos } from '../cache/repo-cache'
 import { useLastVisitedWorktreeRepoId } from '../worktree/use-last-visited-worktree-repo'
@@ -607,18 +607,11 @@ function NewWorktreeModalContent({
       } catch {
         // Best-effort refresh; the runtime validates the same setting before spawning.
       }
-      let hasIdentityCapability = false
-      try {
-        const statusResponse = await client.sendRequest('status.get')
-        if (statusResponse.ok) {
-          hasIdentityCapability = hostSupportsAgentLaunchIdentity(
-            (statusResponse as RpcSuccess).result
-          )
-        }
-      } catch {
-        // Best-effort probe; an unreachable status keeps the legacy client-assembled
-        // launch path, which every host still accepts.
-      }
+      const hasIdentityCapability = await resolveNewWorktreeAgentIdentitySupport({
+        client,
+        selectedAgent,
+        catalogSnapshot: agentCatalog
+      })
       if (
         selectedAgent.id !== '__blank__' &&
         !isMobileTuiAgentEnabled(selectedAgent.id, latestRuntimeSettings?.disabledTuiAgents)

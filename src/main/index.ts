@@ -2748,6 +2748,13 @@ void app.whenReady().then(async () => {
   automations = new AutomationService(store, {
     claudeUsage,
     codexUsage,
+    classifyAgentLaunch: (automation, run, target) =>
+      runtimeService.classifyAgentLaunchForAutomation(
+        automation.agentId,
+        target.repo,
+        run.id,
+        target.cwd
+      ),
     // Why: desktop clients mirror remote-host automations, but only a server process should execute remote_host_service-owned schedules.
     allowRemoteHostScheduling: isServeMode,
     headlessDispatcher: isServeMode

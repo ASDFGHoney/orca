@@ -45925,7 +45925,10 @@ describe('OrcaRuntimeService', () => {
       agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, allowEmptyPromptLaunch: true }
     })
 
-    expect(detectRemoteAgentsMock).toHaveBeenCalledWith({ connectionId: 'ssh-1' })
+    expect(detectRemoteAgentsMock).toHaveBeenCalledWith({
+      connectionId: 'ssh-1',
+      baseAgents: ['claude']
+    })
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/remote/agentlaunch-remote',
