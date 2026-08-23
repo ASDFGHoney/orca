@@ -43,7 +43,6 @@ export type ClaudeStructuredSessionAdapterDeps = {
   now?: () => number
   requestTimeoutMs?: number
   initTimeoutMs?: number
-  dispatchAckTimeoutMs?: number
   persistHandle?: (input: {
     sessionId: string
     providerSessionId: string
@@ -52,34 +51,46 @@ export type ClaudeStructuredSessionAdapterDeps = {
   }) => Promise<void>
 }
 
-export type ClaudeDispatchWaiter = {
-  resolve: (uuid: string | null) => void
-  timer: ReturnType<typeof setTimeout>
-  acceptsResult: boolean
-  /** The uuid stamped on this dispatch's outgoing frame. The CLI echoes a
-   *  client-supplied uuid verbatim, so a replay carrying it belongs to THIS
-   *  send - no queue-position guessing. */
-  sentUuid: string
-  /** Set when this waiter was actually settled, so a caller can tell "my replay
-   *  arrived" from "something removed me from the queue". */
-  settledUuid?: string
-}
-
 export type ClaudeSession = {
   connection: ClaudeStreamJsonConnection
   providerSessionId: string
   leafUuid: string | null
   fence: number
   prompts: ClaudePromptRegistry
-  dispatchWaiters: ClaudeDispatchWaiter[]
-  /** Uuids of dispatches that left the queue without their echo (timed out, or
-   *  the send failed). Their replay can still arrive, and it must be dropped
-   *  rather than fall through to the head - it belongs to nobody now. */
-  retiredSentUuids?: string[]
+  generation: object
+  sentUserUuidSequence: Map<string, number>
+  deliveryEvidenceUuids: Set<string>
+  dispatchLane: Promise<void>
+  dispatchFenced: boolean
+  terminal: ClaudeSessionTerminal
   options: Map<string, string>
   reportedOptions: { model?: string; effort?: string }
   translator: ClaudeJournalTranslator | null
   events: StructuredAgentSessionEventSink | undefined
+}
+
+export type ClaudeSessionTerminal = {
+  closed: boolean
+  signal: Promise<void>
+  close: () => void
+}
+
+export function createClaudeSessionTerminal(): ClaudeSessionTerminal {
+  let close = (): void => {}
+  const terminal: ClaudeSessionTerminal = {
+    closed: false,
+    signal: new Promise<void>((resolve) => {
+      close = resolve
+    }),
+    close: () => {
+      if (terminal.closed) {
+        return
+      }
+      terminal.closed = true
+      close()
+    }
+  }
+  return terminal
 }
 
 export type ClaudeAcquisitionAttempt = {

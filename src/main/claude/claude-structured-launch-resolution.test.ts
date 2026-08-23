@@ -60,9 +60,7 @@ describe('claude structured launch resolution', () => {
     expect(first.args).toContain('--setting-sources')
     expect(first.args).toContain(CLAUDE_DEFAULT_SETTING_SOURCES.join(','))
     expect(CLAUDE_STRUCTURED_BASE_ARGS).toContain('--verbose')
-    // Load-bearing: `resolveClaudeReplayWaiter` settles a send only on the
-    // `isReplay` marker this flag asks for. Drop it and every send blocks its
-    // whole ack budget and lands "delivery unconfirmed".
+    // Exact echoes advance the durable leaf used by the next resume.
     expect(CLAUDE_STRUCTURED_BASE_ARGS).toContain('--replay-user-messages')
   })
 

@@ -3,25 +3,39 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
-import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structured-dispatch'
-import type { ClaudeSession } from './claude-structured-session-state'
+import { dispatchClaudeTurn } from './claude-structured-dispatch'
+import type { ClaudeJournalTranslator } from './claude-structured-journal-translation'
+import { createClaudeSessionTerminal, type ClaudeSession } from './claude-structured-session-state'
 
-// vi.waitFor's first successful poll lands ~50ms after the waiter is armed, so a
-// 100ms ack budget leaves almost none for the frame under parallel load.
-const ACK_BUDGET_MS = 5_000
+function translatorSpies() {
+  return {
+    registerOwnedTurn: vi.fn(),
+    confirmOwnedTurn: vi.fn(),
+    settleOwnedTurn: vi.fn(),
+    abandonOwnedTurn: vi.fn()
+  }
+}
 
-function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession {
+function sessionFor(
+  send = vi.fn().mockResolvedValue(undefined),
+  translator = translatorSpies()
+): ClaudeSession {
   return {
     connection: { send } as unknown as ClaudeSession['connection'],
     providerSessionId: 'provider-session',
     leafUuid: null,
     fence: 1,
     prompts: {} as ClaudeSession['prompts'],
-    dispatchWaiters: [],
+    generation: {},
+    sentUserUuidSequence: new Map(),
+    deliveryEvidenceUuids: new Set(),
+    dispatchLane: Promise.resolve(),
+    dispatchFenced: false,
+    terminal: createClaudeSessionTerminal(),
     options: new Map(),
     reportedOptions: {},
     events: undefined,
-    translator: null
+    translator: translator as unknown as ClaudeJournalTranslator
   }
 }
 
@@ -29,401 +43,207 @@ function userMessage(blocks: AgentJournalMessageItem['blocks']): AgentJournalMes
   return { kind: 'message', role: 'user', blocks }
 }
 
-/** Claude's `--replay-user-messages` echo of a prompt Orca dispatched. */
-function userReplayFrame(uuid: string, text: string): Record<string, unknown> {
-  return {
-    type: 'user',
-    message: { role: 'user', content: [{ type: 'text', text }] },
-    session_id: 'provider-session',
-    parent_tool_use_id: null,
-    uuid,
-    isReplay: true
-  }
+function deferred() {
+  let resolve = (): void => {}
+  let reject = (_error: Error): void => {}
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
-describe('Claude structured dispatch image limits', () => {
-  it('accepts a slash command from its result receipt when Claude omits the user replay', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: '/permissions' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      subtype: 'success',
-      session_id: 'provider-session',
-      uuid: 'command-result-uuid'
+describe('Claude structured dispatch', () => {
+  it('registers a caller UUID before writing and accepts that identity after the write', async () => {
+    const translator = translatorSpies()
+    let session!: ClaudeSession
+    const send = vi.fn(async (message: Record<string, unknown>) => {
+      const uuid = message.uuid as string
+      expect(session.sentUserUuidSequence.get(uuid)).toBe(0)
+      expect(translator.registerOwnedTurn).toHaveBeenCalledWith('provider-session', uuid, 0)
     })
+    session = sessionFor(send, translator)
 
-    await expect(dispatched).resolves.toEqual({
+    const result = await dispatchClaudeTurn(session, {
+      clientMessageId: 'client-1',
+      body: userMessage([{ type: 'text', text: 'hello' }])
+    })
+    const sentUuid = send.mock.calls[0]![0].uuid as string
+
+    expect(result).toEqual({
       state: 'accepted',
-      providerIdentity: {
-        provider: 'claude',
-        sessionId: 'provider-session',
-        uuid: 'command-result-uuid'
-      }
+      providerIdentity: { provider: 'claude', sessionId: 'provider-session', uuid: sentUuid }
     })
+    expect(translator.confirmOwnedTurn).toHaveBeenCalledWith(sentUuid)
   })
 
-  it('does not mistake a normal turn result for its missing user replay', async () => {
+  it('keeps concurrent dispatch identities in registration order', async () => {
     const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
 
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      session_id: 'provider-session',
-      uuid: 'unrelated-result-uuid'
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'hello'))
-
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'user-replay-uuid' }
-    })
-  })
-
-  // Both frames captured verbatim from `claude -p --input-format stream-json
-  // --output-format stream-json --replay-user-messages`: the replay of the sent
-  // prompt and the tool-result turn that follows it share `type: 'user'` and a
-  // null `parent_tool_use_id`.
-  it('does not adopt a tool-result turn as the user replay', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [
-          {
-            tool_use_id: 'toolu_01TY2ETgHfpYVuq3ETuGYfDV',
-            type: 'tool_result',
-            content: 'probe-two',
-            is_error: false
-          }
-        ]
-      },
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'tool-result-uuid',
-      tool_use_result: { stdout: 'probe-two', stderr: '', interrupted: false }
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
-
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'user-replay-uuid' }
-    })
-  })
-
-  // An injected turn is the worse half of this class: unlike a tool result it
-  // DOES build a journal body, so adopting its uuid upserts harness text over the
-  // user's own bubble AND leaves the real replay to append as a second row.
-  it('does not adopt a harness-injected user turn as the user replay', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] },
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'injected-uuid'
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
-
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'user-replay-uuid' }
-    })
-  })
-
-  // NOT red against the merge base - the old predicate accepts this frame too.
-  // It pins that the gate never sniffs content: an image-only echo carries no
-  // text and builds no journal body, so any body-model gate would refuse this
-  // send its own replay and report a delivered message as unconfirmed.
-  it('accepts the replay of a send that carries only a local image', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'orca-claude-replay-'))
-    try {
-      const path = join(directory, 'shot.png')
-      await writeFile(path, Buffer.alloc(64))
-      const session = sessionFor()
-      const dispatched = dispatchClaudeTurn(
-        session,
-        { clientMessageId: 'client-1', body: userMessage([{ type: 'image-ref', path }]) },
-        ACK_BUDGET_MS
-      )
-      await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-      resolveClaudeReplayWaiter(session, {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
-          ]
-        },
-        parent_tool_use_id: null,
-        session_id: 'provider-session',
-        uuid: 'image-replay-uuid',
-        isReplay: true
+    const [first, second] = await Promise.all([
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-1',
+        body: userMessage([{ type: 'text', text: 'one' }])
+      }),
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-2',
+        body: userMessage([{ type: 'text', text: 'two' }])
       })
+    ])
+    const entries = [...session.sentUserUuidSequence]
 
-      await expect(dispatched).resolves.toMatchObject({
-        state: 'accepted',
-        providerIdentity: { uuid: 'image-replay-uuid' }
+    expect(entries.map((entry) => entry[1])).toEqual([0, 1])
+    expect(first).toMatchObject({ providerIdentity: { uuid: entries[0]![0] } })
+    expect(second).toMatchObject({ providerIdentity: { uuid: entries[1]![0] } })
+  })
+
+  it('keeps acceptance when the exact echo arrives before the write rejects', async () => {
+    const translator = translatorSpies()
+    let session!: ClaudeSession
+    const send = vi.fn(async (message: Record<string, unknown>) => {
+      const uuid = message.uuid as string
+      session.deliveryEvidenceUuids.add(uuid)
+      translator.confirmOwnedTurn(uuid)
+      throw new Error('flush failed')
+    })
+    session = sessionFor(send, translator)
+
+    const result = await dispatchClaudeTurn(session, {
+      clientMessageId: 'client-1',
+      body: userMessage([{ type: 'text', text: 'hello' }])
+    })
+    const sentUuid = send.mock.calls[0]![0].uuid as string
+
+    expect(result).toMatchObject({ state: 'accepted', providerIdentity: { uuid: sentUuid } })
+    expect(session.dispatchFenced).toBe(false)
+    expect(translator.abandonOwnedTurn).not.toHaveBeenCalled()
+  })
+
+  it('fences later dispatches after an unobserved write failure', async () => {
+    const translator = translatorSpies()
+    const send = vi.fn().mockRejectedValueOnce(new Error('broken pipe'))
+    const session = sessionFor(send, translator)
+
+    await expect(
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-1',
+        body: userMessage([{ type: 'text', text: 'one' }])
+      })
+    ).resolves.toEqual({ state: 'unknown', reason: 'broken pipe' })
+    const sentUuid = send.mock.calls[0]![0].uuid as string
+    expect(translator.abandonOwnedTurn).toHaveBeenCalledWith(sentUuid)
+
+    await expect(
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-2',
+        body: userMessage([{ type: 'text', text: 'two' }])
+      })
+    ).resolves.toMatchObject({ state: 'unknown' })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not materialize a queued dispatch after the active write becomes uncertain', async () => {
+    const pendingWrite = deferred()
+    const send = vi.fn().mockImplementationOnce(() => pendingWrite.promise)
+    const session = sessionFor(send)
+    const first = dispatchClaudeTurn(session, {
+      clientMessageId: 'client-1',
+      body: userMessage([{ type: 'text', text: 'one' }])
+    })
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    const second = dispatchClaudeTurn(session, {
+      clientMessageId: 'client-2',
+      body: userMessage([])
+    })
+
+    pendingWrite.reject(new Error('broken pipe'))
+
+    await expect(first).resolves.toEqual({ state: 'unknown', reason: 'broken pipe' })
+    await expect(second).resolves.toMatchObject({
+      state: 'unknown',
+      reason: 'claude delivery is uncertain until the session reconnects'
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the dispatch lane after local validation fails', async () => {
+    const send = vi.fn().mockResolvedValue(undefined)
+    const session = sessionFor(send)
+
+    const [first, second] = await Promise.all([
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-1',
+        body: userMessage([])
+      }),
+      dispatchClaudeTurn(session, {
+        clientMessageId: 'client-2',
+        body: userMessage([{ type: 'text', text: 'two' }])
+      })
+    ])
+
+    expect(first).toEqual({
+      state: 'rejected',
+      reason: 'Claude dispatch requires text or an image'
+    })
+    expect(second).toMatchObject({ state: 'accepted' })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('wakes active and queued dispatches when the session becomes terminal', async () => {
+    const pendingWrite = deferred()
+    const send = vi.fn().mockImplementationOnce(() => pendingWrite.promise)
+    const session = sessionFor(send)
+    const first = dispatchClaudeTurn(session, {
+      clientMessageId: 'client-1',
+      body: userMessage([{ type: 'text', text: 'one' }])
+    })
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    const second = dispatchClaudeTurn(session, {
+      clientMessageId: 'client-2',
+      body: userMessage([{ type: 'text', text: 'two' }])
+    })
+
+    session.terminal.close()
+
+    await expect(first).resolves.toEqual({
+      state: 'unknown',
+      reason: 'claude session closed while delivery was pending'
+    })
+    await expect(second).resolves.toEqual({
+      state: 'rejected',
+      reason: 'claude structured session closed before dispatch'
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+    pendingWrite.resolve()
+  })
+
+  it('accepts image-only content under the UUID written to stdin', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'orca-claude-dispatch-'))
+    try {
+      const path = join(directory, 'pixel.png')
+      await writeFile(path, Buffer.from([0, 1, 2]))
+      const session = sessionFor()
+
+      const result = await dispatchClaudeTurn(session, {
+        clientMessageId: 'client-image',
+        body: userMessage([{ type: 'image-ref', path }])
+      })
+      const sent = vi.mocked(session.connection.send).mock.calls[0]![0]
+
+      expect(result).toMatchObject({ state: 'accepted', providerIdentity: { uuid: sent.uuid } })
+      expect(sent).toMatchObject({
+        message: {
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: 'AAEC' }
+            }
+          ]
+        }
       })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
-  })
-
-  // `acceptsResult` settles a send on a bare `result` frame, which carries no
-  // correlation to the waiting dispatch - so a message that merely opens with a
-  // path must not opt into it, or an unrelated turn's result claims its identity.
-  it('does not let a path-leading message settle on an unrelated result frame', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      {
-        clientMessageId: 'client-1',
-        body: userMessage([{ type: 'text', text: '/Users/me/repo/src/foo.ts - explain this' }])
-      },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      subtype: 'success',
-      session_id: 'provider-session',
-      uuid: 'unrelated-turn-result'
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(
-      session,
-      userReplayFrame('real-replay', '/Users/me/repo/src/foo.ts - explain this')
-    )
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'real-replay' }
-    })
-  })
-
-  it.each([
-    ['/README.md - what does this do?', 'a bare filename'],
-    ['  /clear', 'an indented command, which the TUI reads as prose']
-  ])('keeps %s off the result path (%s)', async (text) => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'result',
-      subtype: 'success',
-      session_id: 'provider-session',
-      uuid: 'unrelated-turn-result'
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame('real-replay', text))
-    await expect(dispatched).resolves.toMatchObject({
-      providerIdentity: { uuid: 'real-replay' }
-    })
-  })
-
-  // Captured from claude 2.1.237: the model-switch breadcrumb is enqueued as
-  // `{type:'user', parent_tool_use_id:null, isReplay:true}` with STRING content.
-  // Orca triggers it itself from the model picker, and the CLI's own
-  // RemoteSessionManager filters the same frames by content prefix.
-  it('does not adopt a model-switch breadcrumb even though it is stamped', async () => {
-    const session = sessionFor()
-    const dispatched = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'queued' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    resolveClaudeReplayWaiter(session, {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: '<local-command-stdout>Set model to Sonnet</local-command-stdout>'
-      },
-      parent_tool_use_id: null,
-      session_id: 'provider-session',
-      uuid: 'breadcrumb-uuid',
-      isReplay: true
-    })
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame('user-replay-uuid', 'queued'))
-    await expect(dispatched).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'user-replay-uuid' }
-    })
-  })
-
-  // The CLI round-trips a client-supplied uuid on the replay (measured), so a
-  // dispatch can be matched to its OWN echo instead of to whatever is at the
-  // head of the queue.
-  it('stamps a uuid on the outgoing frame', async () => {
-    const session = sessionFor()
-    void dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-
-    expect(session.connection.send).toHaveBeenCalledWith(
-      expect.objectContaining({ uuid: session.dispatchWaiters[0]!.sentUuid })
-    )
-  })
-
-  it('settles the dispatch whose uuid was echoed, not the queue head', async () => {
-    const session = sessionFor()
-    const first = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-    const second = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(2))
-    const firstUuid = session.dispatchWaiters[0]!.sentUuid
-    const secondUuid = session.dispatchWaiters[1]!.sentUuid
-
-    // Out of order: the second send's echo arrives while the first is still head.
-    resolveClaudeReplayWaiter(session, userReplayFrame(secondUuid, 'two'))
-    await expect(second).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: secondUuid }
-    })
-    expect(session.dispatchWaiters.map((waiter) => waiter.sentUuid)).toEqual([firstUuid])
-
-    resolveClaudeReplayWaiter(session, userReplayFrame(firstUuid, 'one'))
-    await expect(first).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: firstUuid }
-    })
-  })
-
-  // A dispatch that gave up still has a replay in flight. Once its waiter is
-  // gone, that frame matches no owner and would otherwise fall to the compat
-  // path and settle whoever is now at the head.
-  it('drops the replay of a dispatch that already timed out', async () => {
-    const session = sessionFor()
-    const first = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
-      60
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-    const firstUuid = session.dispatchWaiters[0]!.sentUuid
-    await expect(first).resolves.toMatchObject({ state: 'unknown' })
-    expect(session.dispatchWaiters).toHaveLength(0)
-
-    const second = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-    const secondUuid = session.dispatchWaiters[0]!.sentUuid
-
-    // The dead send's echo lands while the second is waiting.
-    resolveClaudeReplayWaiter(session, userReplayFrame(firstUuid, 'one'))
-    expect(session.dispatchWaiters).toHaveLength(1)
-
-    resolveClaudeReplayWaiter(session, userReplayFrame(secondUuid, 'two'))
-    await expect(second).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: secondUuid }
-    })
-  })
-
-  // The waiter queue is positional, so shifting the head on a send failure
-  // resolves whichever dispatch happens to be first - reporting a delivered
-  // message as unconfirmed while the send that actually failed keeps waiting.
-  it('retires its own waiter when the send fails, not the one at the head', async () => {
-    const session = sessionFor()
-    const first = dispatchClaudeTurn(
-      session,
-      { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'one' }]) },
-      ACK_BUDGET_MS
-    )
-    await vi.waitFor(() => expect(session.dispatchWaiters).toHaveLength(1))
-    const firstWaiter = session.dispatchWaiters[0]
-
-    session.connection.send = vi.fn().mockRejectedValue(new Error('broken pipe'))
-    await expect(
-      dispatchClaudeTurn(
-        session,
-        { clientMessageId: 'client-2', body: userMessage([{ type: 'text', text: 'two' }]) },
-        ACK_BUDGET_MS
-      )
-    ).resolves.toEqual({ state: 'unknown', reason: 'broken pipe' })
-
-    expect(session.dispatchWaiters).toEqual([firstWaiter])
-    resolveClaudeReplayWaiter(session, userReplayFrame('replay-one', 'one'))
-    await expect(first).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'replay-one' }
-    })
-  })
-
-  // A write can reach Claude and still reject on the following flush.
-  it('keeps an identity the replay already claimed when the send then rejects', async () => {
-    const session = sessionFor()
-    session.connection.send = vi.fn().mockImplementation(async () => {
-      resolveClaudeReplayWaiter(session, userReplayFrame('landed-anyway', 'hello'))
-      throw new Error('flush failed')
-    })
-
-    await expect(
-      dispatchClaudeTurn(
-        session,
-        { clientMessageId: 'client-1', body: userMessage([{ type: 'text', text: 'hello' }]) },
-        ACK_BUDGET_MS
-      )
-    ).resolves.toMatchObject({
-      state: 'accepted',
-      providerIdentity: { uuid: 'landed-anyway' }
-    })
   })
 
   it('rejects more than twenty URL images before sending', async () => {
@@ -436,7 +256,7 @@ describe('Claude structured dispatch image limits', () => {
     )
 
     await expect(
-      dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
+      dispatchClaudeTurn(session, { clientMessageId: 'client-1', body })
     ).resolves.toEqual({ state: 'rejected', reason: 'Claude messages support at most 20 images' })
     expect(session.connection.send).not.toHaveBeenCalled()
   })
@@ -455,7 +275,7 @@ describe('Claude structured dispatch image limits', () => {
       const body = userMessage(paths.map((path) => ({ type: 'image-ref' as const, path })))
 
       await expect(
-        dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
+        dispatchClaudeTurn(session, { clientMessageId: 'client-1', body })
       ).resolves.toEqual({
         state: 'rejected',
         reason: `Claude images must total no more than ${20 * 1024 * 1024} bytes`
@@ -475,7 +295,7 @@ describe('Claude structured dispatch image limits', () => {
       const body = userMessage([{ type: 'image-ref', path }])
 
       await expect(
-        dispatchClaudeTurn(session, { clientMessageId: 'client-1', body }, 1)
+        dispatchClaudeTurn(session, { clientMessageId: 'client-1', body })
       ).resolves.toEqual({
         state: 'rejected',
         reason: `Claude image must be a non-empty file no larger than ${5 * 1024 * 1024} bytes`
