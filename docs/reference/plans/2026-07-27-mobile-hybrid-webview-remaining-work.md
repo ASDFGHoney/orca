@@ -43,6 +43,11 @@ production-readiness claim.
 
 ## Physical Devices and Layouts
 
+- [ ] Re-run the corrected iPhone Simulator native-versus-hosted fixture for
+      Workspace, Accounts, Tasks, Session, Agent History, Files/Preview, Source
+      Control/Review, host editing, Floating Workspace, and recovery. Require
+      CDP proof that no hosted private-origin target exists around each native
+      capture and replace the invalidated historical screenshot metrics.
 - [ ] Test the oldest supported low-memory and current iPhone.
 - [ ] Test the oldest supported low-memory and current Android phone/API.
 - [ ] Test a supported physical iPad and Android tablet/large-screen layout.

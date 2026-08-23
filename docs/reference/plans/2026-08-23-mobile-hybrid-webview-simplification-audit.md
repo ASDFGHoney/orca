@@ -1,9 +1,11 @@
 # Mobile Hybrid WebView Simplification Audit
 
 - **Date:** 2026-08-23
-- **Status:** Reviewed; bounded follow-ups remain
+- **Status:** Simplifications integrated; release validation remains
 - **Candidate checkpoint:** `e931b2db07`
 - **Base and `origin/main` checkpoint:** `4c984d4c1b`
+- **Post-audit integration checkpoint:** `b14fe74214`
+- **Current `origin/main` checkpoint:** `b2902cb61e`
 - **Decision record:** [migration record](2026-07-22-mobile-hybrid-webview-single-pr-migration.md)
 - **Release gates:** [remaining-work tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
 
@@ -26,6 +28,12 @@ Desktop execution adapters, route adapters, validation infrastructure, and
 security/lifecycle tests. The checkpoint comparison was 81 commits, 1,396
 files, 140,153 additions, and 8,772 deletions. Those counts describe
 `4c984d4c1b...e931b2db07`; they are not current-main release metrics.
+
+After the approved reductions, fixes, and current-main merge, the comparison is
+89 commits, 1,401 files, 134,626 additions, and 8,771 deletions relative to
+`b2902cb61e`. Documentation condensation accounts for most of the reduction;
+the explicit 224-operation bridge and shared RNW presentation remain the main
+implementation span.
 
 The non-negotiable constraints were:
 
@@ -138,21 +146,23 @@ Generated output must remain reviewable, deterministic, exact-v2 compatible,
 and covered by the existing malformed/lifecycle corpora. Prototype this on
 Tasks, Files, and Session before any broad conversion.
 
-## Sibling Workstreams
+## Integrated Audit Workstreams
 
-Sibling refs are evidence under review, not changes in this worktree:
+| Workstream                 | Integrated commit | Result                                                                                                                                                             |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dead-code reachability     | `35630bd1db`      | Added a focused mobile Knip audit and removed only confirmed unreachable providers, aliases, exports, and fixtures                                                 |
+| Validation consolidation   | `0820c97a15`      | Replaced repeated bridge roundtrip setup with one real broker/page/shell fixture while preserving authority, correlation, revocation, and disposal coverage        |
+| iOS cache boundary         | `9b9c76222f`      | Prevented host-root symlink traversal across staging, activation, cleanup, sessions, removal, and quota accounting; added adversarial Swift coverage               |
+| Documentation condensation | `bc99618482`      | Reduced four execution-era records to the migration decision, completed evidence, remaining gates, and this audit                                                  |
+| Parity and cutover seams   | `7815f3afb3`      | Preserved native host editing, made workspace routes hybrid-only, removed the hosted picker duplicate, added test-only native baselines, and negotiated host gates |
+| Subscription regression    | `ee15298704`      | Restored the shared bridge envelope used by subscriptions after the parity refactor exposed a removed-method call                                                  |
+| Parity bounds              | `2094dde1f9`      | Made native CDP exclusion fail closed above its inspection limit and expanded the bounded session-capability response allowance                                    |
 
-| Workstream                  | Current ref at audit update | Finding or defect being addressed                                                                                                                                   | Integration state                                                |
-| --------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `mobile_dead_code`          | `d9f1f11c24`                | Missing mobile reachability audit plus confirmed unreachable provider types, SSH artifact writer, duplicate terminal-file alias, unused exports, and stale fixtures | Commit exists on sibling ref; not integrated here                |
-| `mobile_validation_cleanup` | `05ca72d1a9`                | Ten bridge roundtrip tests duplicate broker/client parsing and lifecycle setup                                                                                      | Shared fixture commit exists on sibling ref; not integrated here |
-| `mobile_security_boundary`  | `288653ff41`                | iOS host-cache root symlinks could redirect cleanup, staging, session, or removal work outside the cache; add an exact tree boundary and adversarial Swift coverage | Fix exists on sibling ref; not integrated here                   |
-| `mobile_parity_cutover`     | `e931b2db07`                | Audit remaining dual-runtime/cutover scaffolding and parity defects without changing presentation                                                                   | No sibling commit observed; outcome pending                      |
-
-Integration must review each sibling diff from this worktree's base, preserve
-SSH/folder/provider compatibility, run its declared validation, and avoid
-double-applying overlapping contract changes. This audit does not claim sibling
-fixes landed in the candidate.
+The declarative registry prototype covered Tasks, Files, and Session and proved
+that metadata, grants, and typed calls can be generated without replacing the
+handwritten authorization executors. Converting all 224 operations in this PR
+would increase review and compatibility risk, so the registry remains a
+non-blocking follow-up.
 
 ## Living Checklist
 
@@ -163,15 +173,13 @@ fixes landed in the candidate.
 - [x] Reject the generic-RPC/native-invocation design.
 - [x] Approve declarative mechanical wiring only as an explicit-domain-adapter
       follow-up.
-- [x] Identify confirmed dead-code and repeated-test-fixture reductions on
-      sibling refs without claiming integration.
-- [ ] Review and integrate approved sibling commits with focused tests and
-      current-base conflict analysis.
-- [ ] Review the iOS host-root boundary fix, complete the remaining security
-      and parity-cutover sibling audits, and record accepted/rejected findings
-      with file/commit evidence.
-- [ ] Prototype the declarative registry on Tasks, Files, and Session; compare
-      trusted code, declarations, compatibility, lifecycle behavior, and tests.
+- [x] Integrate confirmed dead-code and repeated-test-fixture reductions with
+      focused validation.
+- [x] Integrate and validate the iOS host-root boundary fix.
+- [x] Complete the parity-cutover audit without changing the shared
+      presentation.
+- [x] Prototype the declarative registry on Tasks, Files, and Session and defer
+      broad conversion to a follow-up.
 - [ ] Rerun package verification, typecheck/lint, bridge/cache/security suites,
       Direct/SSH hosted E2E, emulator parity, and diff hygiene after integrated
       simplifications.

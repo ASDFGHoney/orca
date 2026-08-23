@@ -21,6 +21,9 @@ performance, accessibility, or production-promotion gates.
 | Candidate checkpoint                       | `e931b2db07`                                                       |
 | `origin/main` and merge base at checkpoint | `4c984d4c1b`                                                       |
 | Checkpoint comparison                      | 81 commits; 1,396 files; 140,153 additions; 8,772 deletions        |
+| Post-audit integration checkpoint          | `b14fe74214`                                                       |
+| Current `origin/main` checkpoint           | `b2902cb61e`                                                       |
+| Post-audit comparison                      | 89 commits; 1,401 files; 134,626 additions; 8,771 deletions        |
 | Latest verified package                    | `121fe8682fc221fd7e6f2955fe1f246017d164db3122d71526bc3f66b19578c5` |
 | Latest package size                        | 51 assets; 9,151,993 raw bytes; 2,649,166 gzip bytes               |
 
@@ -33,13 +36,13 @@ Commit and branch counts are historical evidence for that checkpoint; rerun
 | Area                | Completed result                                                                                                                                                     | Durable evidence                                                                                                                         |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | Architecture        | Stable native shell plus Desktop-served RNW workspace package; native and Desktop authority split frozen                                                             | [Architecture](../mobile-hybrid-webview-architecture.md) and [migration record](2026-07-22-mobile-hybrid-webview-single-pr-migration.md) |
-| UI source           | Duplicate web presentation removed; existing RN screens/components shared through native/web adapters                                                                | `a7dcd591b9`; route inventory and screenshot metrics below                                                                               |
-| Cutover             | Home, onboarding, notifications, cold resume, workspace, and exact-session entry use the production hosted route; prototype route/flag/contracts removed             | `0a91c04a49`, `ce43d114be`, retired-name gates                                                                                           |
+| UI source           | Duplicate web presentation removed; existing RN screens/components shared through native/web adapters                                                                | `a7dcd591b9`; [parity inventory](2026-07-22-mobile-hybrid-webview-parity-inventory.md)                                                   |
+| Cutover             | Home, onboarding, notifications, cold resume, workspace, and exact-session entry use the production hosted route; native host editing remains native                 | `0a91c04a49`, `ce43d114be`, `7815f3afb3`, retired-name gates                                                                             |
 | Build               | Deterministic RNW manifest/document/assets, CSP, size report, and independent verifier integrated with Desktop packaging                                             | `pnpm build:mobile-web-rnw`                                                                                                              |
 | Delivery            | Authenticated `mobileWeb.package.*` methods work over paired Direct and local protocol-compatible Relay composition                                                  | Hosted WebView E2E commands below                                                                                                        |
-| Cache               | Exact manifest/activation parsing, bounded reads, path/symlink defense, concurrency, atomic host-scoped active/previous generations, corruption recovery             | `0a247f9743` and cache/security test groups                                                                                              |
+| Cache               | Exact manifest/activation parsing, bounded reads, path/symlink defense, concurrency, atomic host-scoped active/previous generations, corruption recovery             | `0a247f9743`, `9b9c76222f`, and cache/security test groups                                                                               |
 | Private origin      | iOS custom scheme and Android fixed HTTPS origin enforce declared assets, CSP, navigation, download, popup, service-worker, and network isolation                    | iOS/Android security journeys below                                                                                                      |
-| Bridge              | Exact v2 contract, named operations, generated grants/schemas/bounds, opaque authority, mutation reauthorization, response correlation, lifecycle cleanup            | `548d8d64aa`, `e526780848`, `b2068661f7`                                                                                                 |
+| Bridge              | Exact v2 contract, named operations, generated grants/schemas/bounds, opaque authority, mutation reauthorization, response correlation, lifecycle cleanup            | `548d8d64aa`, `e526780848`, `b2068661f7`, `ee15298704`, `2094dde1f9`                                                                     |
 | Routes              | Workspace, Accounts, Tasks, Session, Agent History, Files/Preview, Source Control, and Review use explicit hosted adapters                                           | [Parity inventory](2026-07-22-mobile-hybrid-webview-parity-inventory.md)                                                                 |
 | Terminal            | Real xterm/PTY byte path, bounded ACK/backpressure, links, selection/paste, reconnect/resnapshot, SSH recovery                                                       | Direct, SSH, and packaged SSH E2E commands                                                                                               |
 | Native capabilities | Gesture/permission/foreground-mediated clipboard, documents/photos, haptics, external URLs, speech/audio, settings, and diagnostics                                  | iOS/Android capability journeys and focused tests                                                                                        |
@@ -102,24 +105,14 @@ and raw result location.
 ## Route and Presentation Evidence
 
 The [parity inventory](2026-07-22-mobile-hybrid-webview-parity-inventory.md) is
-the complete ownership and route record. The deterministic iPhone 17 Pro
-Simulator fixture compares native and hosted instances of the same source.
-
-| Surface        | Changed pixels | Mean channel difference |                Additional metric |
-| -------------- | -------------: | ----------------------: | -------------------------------: |
-| Workspace      |         0.879% |                   1.876 | 0.000395 vertical landmark delta |
-| Accounts       |         0.050% |                   0.099 |    0.000544 vertical-title delta |
-| Tasks          |         0.022% |                   0.084 |    0.000016 vertical-title delta |
-| Session        |         0.800% |                   1.693 |    0.000366 vertical-title delta |
-| Files          |         0.030% |                   0.128 |                                — |
-| Preview        |         0.061% |                   0.274 |                                — |
-| Source Control |         0.736% |                   0.910 |                                — |
-| Review         |         2.134% |                   1.947 |                                — |
-
-The budgets were 3% changed pixels, 4 mean channel difference, and 0.005 for
-the applicable landmark/title delta. Source Control/Review used the full
-1,294-file comparison and showed the same `0/1294 reviewed` state. These
-simulator screenshots support source parity; they do not close physical-device,
+the complete ownership and route record. Historical screenshot figures are not
+current evidence: the prior production cutover redirected native `/h/**`
+workspace routes into Hybrid, so that run could compare hosted output against
+hosted output. `7815f3afb3` added a development-only native baseline and CDP
+assertions before and after every native capture; `2094dde1f9` makes the
+assertion fail closed when more targets exist than it can inspect. Corrected
+native-versus-hosted results must replace the invalidated figures before parity
+certification. Simulator evidence will still not close physical-device,
 accessibility, input, or performance gates.
 
 ## Security and Lifecycle Evidence
