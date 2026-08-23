@@ -64,10 +64,7 @@ export function formatWorkspaceCleanupScanProgress(
   )
 }
 
-/**
- * Why no suggestion count: "suggestion" is Orca's verdict about the user's own
- * work. The dialog stopped acting on it; this toast must stop announcing it.
- */
+/** Reports scan size without classifying the user's work. */
 export function formatWorkspaceCleanupReadyToast(workspaceCount: number): string {
   if (workspaceCount === 0) {
     return translate('components.workspace.cleanup.scan.noWorkspaces', 'No workspaces found.')

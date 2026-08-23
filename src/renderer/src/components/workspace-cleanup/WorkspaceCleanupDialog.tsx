@@ -286,10 +286,9 @@ function WorkspaceCleanupDialogContent({
   )
   // Header state is scoped to the same rows the header action controls.
   const selectedSelectableCount = useMemo(() => {
-    const selectable = new Set(selectableIdentities)
     let count = 0
-    for (const id of selectedIds) {
-      if (selectable.has(id)) {
+    for (const identity of selectableIdentities) {
+      if (selectedIds.has(identity)) {
         count += 1
       }
     }
