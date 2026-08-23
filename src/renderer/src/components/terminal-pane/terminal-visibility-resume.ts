@@ -17,6 +17,7 @@ import { focusActivePane } from './pane-helpers'
 import { scheduleTabRevealWebglAtlasRecovery } from './terminal-webgl-atlas-recovery'
 import { flushDeferredPaneMetricOptionsIfMeasurable } from '@/lib/pane-manager/pane-fit'
 import { repairPaneWebglCanvasDprMismatch } from '@/lib/pane-manager/terminal-canvas-dpr-repair'
+import { presentPaneViewport } from '@/lib/pane-manager/pane-webgl-renderer'
 
 const VISIBLE_RESUME_FLUSH_CHARS = 256 * 1024
 const WINDOW_WAKE_FLUSH_CHARS = 64 * 1024
@@ -90,6 +91,10 @@ export function resumeTerminalVisibility({
       requestLightTabBacklogRecovery(manager)
       // Why: reveal is the lifecycle boundary that owns hidden renderer repair.
       scheduleTabRevealWebglAtlasRecovery()
+      // Why: the atlas burst often runs while this tab is still display:none
+      // (paused=true needFull=true in the field trace). A present-only pass after
+      // overlay layout rebuilds the WebGL model without a second atlas wipe.
+      manager.scheduleRevealPresent()
       if (flushedDeferredMetrics) {
         // Why: the light path normally skips fitting, but flushed metrics changed
         // cell size — refit so cols/rows match before the overlay settles.
@@ -161,6 +166,13 @@ export function recoverVisibleTerminalWindowWake({
   // Why: backlog writes can expose transient viewport geometry while parsing.
   syncTerminalViewportIntents(manager)
   for (const pane of manager.getPanes()) {
+    // Why: clamshell undock / monitor move changes devicePixelRatio while the
+    // pane can stay "visible" with a stale WebGL backing store. The addon's
+    // device-pixel observer misses that (no CSS-box change, or no box while
+    // the lid was closed). Repair here — not only on tab reveal.
+    if (repairPaneWebglCanvasDprMismatch(pane)) {
+      presentPaneViewport(pane)
+    }
     requestTerminalBacklogRecovery(pane.terminal)
     flushTerminalOutput(pane.terminal, { maxChars: WINDOW_WAKE_FLUSH_CHARS })
     // Why: window blur fires mouseleave, clearing xterm's current link but not

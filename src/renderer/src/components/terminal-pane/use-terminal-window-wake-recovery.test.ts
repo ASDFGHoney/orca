@@ -3,12 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 
-const { recoverVisibleTerminalWindowWakeMock } = vi.hoisted(() => ({
-  recoverVisibleTerminalWindowWakeMock: vi.fn()
+const {
+  recoverVisibleTerminalWindowWakeMock,
+  repairPaneWebglCanvasDprMismatchMock,
+  presentPaneViewportMock
+} = vi.hoisted(() => ({
+  recoverVisibleTerminalWindowWakeMock: vi.fn(),
+  repairPaneWebglCanvasDprMismatchMock: vi.fn(() => false),
+  presentPaneViewportMock: vi.fn()
 }))
 
 vi.mock('./terminal-visibility-resume', () => ({
   recoverVisibleTerminalWindowWake: recoverVisibleTerminalWindowWakeMock
+}))
+
+vi.mock('@/lib/pane-manager/terminal-canvas-dpr-repair', () => ({
+  repairPaneWebglCanvasDprMismatch: repairPaneWebglCanvasDprMismatchMock
+}))
+
+vi.mock('@/lib/pane-manager/pane-webgl-renderer', () => ({
+  presentPaneViewport: presentPaneViewportMock
 }))
 
 import { useTerminalWindowWakeRecovery } from './use-terminal-window-wake-recovery'
@@ -29,6 +43,9 @@ describe('useTerminalWindowWakeRecovery', () => {
   beforeEach(() => {
     systemResumedCallback = null
     recoverVisibleTerminalWindowWakeMock.mockClear()
+    repairPaneWebglCanvasDprMismatchMock.mockClear()
+    presentPaneViewportMock.mockClear()
+    repairPaneWebglCanvasDprMismatchMock.mockReturnValue(false)
     unsubscribeSystemResumed.mockClear()
     onSystemResumed.mockClear()
     resetTerminalFreezeBreadcrumbsForTesting()
@@ -179,5 +196,31 @@ describe('useTerminalWindowWakeRecovery', () => {
     renderWakeRecoveryHook(false)
 
     expect(onSystemResumed).not.toHaveBeenCalled()
+  })
+
+  it('repairs WebGL canvas dpr on window resize without wiping the glyph atlas', () => {
+    // Chromium emits resize when devicePixelRatio changes (undock / monitor
+    // move) even if the CSS box is unchanged.
+    const pane = { id: 1, terminal: {} }
+    const resizeManager = { getPanes: () => [pane] } as unknown as PaneManager
+    repairPaneWebglCanvasDprMismatchMock.mockReturnValue(true)
+    const { unmount } = renderHook(() =>
+      useTerminalWindowWakeRecovery({
+        isVisible: true,
+        managerRef: { current: resizeManager },
+        isActiveRef: { current: true },
+        isVisibleRef: { current: true }
+      })
+    )
+
+    window.dispatchEvent(new Event('resize'))
+
+    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledWith(pane)
+    expect(presentPaneViewportMock).toHaveBeenCalledWith(pane)
+    expect(recoverVisibleTerminalWindowWakeMock).not.toHaveBeenCalled()
+
+    unmount()
+    window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledTimes(1)
   })
 })

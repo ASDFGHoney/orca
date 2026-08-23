@@ -1,9 +1,9 @@
 import { WebglAddon } from '@xterm/addon-webgl'
-import type { ManagedPaneInternal } from './pane-manager-types'
+import type { ManagedPane, ManagedPaneInternal } from './pane-manager-types'
 import { recordTerminalWebglDiagnostic } from '../../../../shared/terminal-webgl-diagnostics'
 import { getLivePaneCensus } from './pane-manager-registry'
 import { isManagedPaneDisplayNone } from './pane-display-visibility'
-import { forceRepaintThroughRenderPause } from './terminal-render-pause-release'
+import { forceFullViewportPresent } from './terminal-render-pause-release'
 import {
   getTerminalWebglAutoDecision,
   resetTerminalWebglAutoDecision
@@ -138,7 +138,7 @@ export function markComplexScriptOutput(pane: ManagedPaneInternal): void {
   pane.hasComplexScriptOutput = true
 }
 
-export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
+export function clearWebglTextureAtlas(pane: ManagedPaneInternal): void {
   if (pane.webglDisabledAfterContextLoss) {
     return
   }
@@ -147,11 +147,51 @@ export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
     // context-loss event. Clearing the atlas preserves GPU rendering and forces
     // a fresh paint when the pane becomes visible/focused again.
     pane.webglAddon?.clearTextureAtlas()
+  } catch {
+    /* ignore — pane may have been disposed in the meantime */
+  }
+}
+
+const DISPLAYED_PRESENT_RETRY_FRAMES = 16
+const pendingDisplayedPresentRetries = new WeakMap<ManagedPaneInternal, number>()
+
+function schedulePresentWhenDisplayed(pane: ManagedPaneInternal): void {
+  if (typeof globalThis.requestAnimationFrame !== 'function') {
+    return
+  }
+  if (pendingDisplayedPresentRetries.has(pane)) {
+    return
+  }
+  pendingDisplayedPresentRetries.set(pane, DISPLAYED_PRESENT_RETRY_FRAMES)
+  const tick = (): void => {
+    const remaining = pendingDisplayedPresentRetries.get(pane) ?? 0
+    if (remaining <= 0 || !pane.terminal) {
+      pendingDisplayedPresentRetries.delete(pane)
+      return
+    }
+    if (isManagedPaneDisplayNone(pane)) {
+      pendingDisplayedPresentRetries.set(pane, remaining - 1)
+      globalThis.requestAnimationFrame(tick)
+      return
+    }
+    pendingDisplayedPresentRetries.delete(pane)
+    presentPaneViewport(pane)
+  }
+  globalThis.requestAnimationFrame(tick)
+}
+
+export function presentPaneViewport(pane: ManagedPane): void {
+  const internal = pane as ManagedPaneInternal
+  if (internal.webglDisabledAfterContextLoss) {
+    return
+  }
+  try {
     // Why: on reveal xterm's IntersectionObserver can still report the pane as
     // not intersecting, so a plain refresh() is swallowed by RenderService's
     // paused-render gate and the cleared model never repaints (stale bottom rows
-    // until a drag-select forces a redraw). Force the paused render through
-    // first; only fall back to refresh() when the terminal was not gated.
+    // until a drag-select forces a redraw). Drive one synchronous full present
+    // even if the observer already unpaused; only fall back to refresh() when
+    // internals are unavailable.
     //
     // Why the display check: that release is only right for a pane that is
     // DOM-visible. A pane with no box at all (collapsed sibling of an expanded
@@ -162,7 +202,17 @@ export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
     // it also drops the full repaint the observer owes the pane on reveal, and
     // the deferred _pausedResizeTask that flushes alongside it. Latching is what
     // xterm's own gate does, and the reveal repaints from the latch.
-    if (isManagedPaneDisplayNone(pane) || !forceRepaintThroughRenderPause(pane.terminal)) {
+    if (isManagedPaneDisplayNone(pane)) {
+      pane.terminal.refresh(0, pane.terminal.rows - 1)
+      // Why: light tab reveal runs while the overlay is still display:none
+      // (field trace: paused=true needFull=true at click). A plain refresh only
+      // latches _needsFullRefresh; if IntersectionObserver never fires, the
+      // canvas keeps pre-hide pixels until a user resize. Retry once the box
+      // exists so the full present actually runs.
+      schedulePresentWhenDisplayed(internal)
+      return
+    }
+    if (!forceFullViewportPresent(pane.terminal)) {
       // Why: refresh even without a WebGL addon so recovery never silently
       // no-ops — a DOM-rendered pane can hold stale pixels after reveal too.
       pane.terminal.refresh(0, pane.terminal.rows - 1)
@@ -170,6 +220,11 @@ export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
   } catch {
     /* ignore — pane may have been disposed in the meantime */
   }
+}
+
+export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
+  clearWebglTextureAtlas(pane)
+  presentPaneViewport(pane)
 }
 
 function refitAfterFitAnchoredWebglAttach(pane: ManagedPaneInternal): void {

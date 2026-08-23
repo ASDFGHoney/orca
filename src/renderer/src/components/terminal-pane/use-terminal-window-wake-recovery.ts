@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { recoverVisibleTerminalWindowWake } from './terminal-visibility-resume'
+import { repairPaneWebglCanvasDprMismatch } from '@/lib/pane-manager/terminal-canvas-dpr-repair'
+import { presentPaneViewport } from '@/lib/pane-manager/pane-webgl-renderer'
 import { recordTerminalFreezeBreadcrumb } from './terminal-freeze-breadcrumbs'
 import type { IDisposable } from '@xterm/xterm'
 
@@ -111,7 +113,22 @@ export function useTerminalWindowWakeRecovery({
         recoverVisibleWake(true, 'system-resumed')
       }
     }
+    const onWindowResize = (): void => {
+      // Why: Chromium emits window resize on devicePixelRatio changes even when
+      // the CSS box is unchanged (monitor move / undock). xterm's own observer
+      // misses that while the canvas had no box (laptop lid closed).
+      const manager = managerRef.current
+      if (!manager || !isVisibleRef.current) {
+        return
+      }
+      for (const pane of manager.getPanes?.() ?? []) {
+        if (repairPaneWebglCanvasDprMismatch(pane)) {
+          presentPaneViewport(pane)
+        }
+      }
+    }
     window.addEventListener('focus', onFocus)
+    window.addEventListener('resize', onWindowResize)
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('visibilitychange', onVisibilityChange)
     }
@@ -126,6 +143,7 @@ export function useTerminalWindowWakeRecovery({
     return () => {
       cancelScheduledWakeRecovery()
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener('resize', onWindowResize)
       if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
         document.removeEventListener('visibilitychange', onVisibilityChange)
       }

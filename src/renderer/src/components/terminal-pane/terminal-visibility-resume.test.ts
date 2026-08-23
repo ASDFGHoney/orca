@@ -87,6 +87,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     resumeTerminalVisibility(resumeArgs(manager, true))
 
     expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealPresent).toHaveBeenCalledTimes(1)
     expect(manager.resumeRendering).not.toHaveBeenCalled()
     expect(scheduleTabRevealWebglAtlasRecovery).toHaveBeenCalledTimes(1)
   })
@@ -191,6 +192,25 @@ describe('resumeTerminalVisibility reveal repaint', () => {
 
     expect(manager.fitAllRevealedPanes).toHaveBeenCalledTimes(1)
     expect(manager.fitAllPanes).not.toHaveBeenCalled()
+  })
+
+  it('repairs WebGL canvas backing-store dpr on window wake', () => {
+    // Clamshell undock: dpr changes while the pane stayed "visible" with a
+    // stale backing store; tab-reveal is not in the path.
+    const first = { terminal: { name: 'pane-a' } }
+    const second = { terminal: { name: 'pane-b' } }
+    const manager = createManager()
+    manager.getPanes.mockReturnValue([first, second])
+
+    recoverVisibleTerminalWindowWake({
+      manager: manager as never as PaneManager,
+      isActive: true,
+      clearGlyphAtlases: false
+    })
+
+    expect(repairPaneWebglCanvasDprMismatch).toHaveBeenCalledTimes(2)
+    expect(repairPaneWebglCanvasDprMismatch).toHaveBeenNthCalledWith(1, first)
+    expect(repairPaneWebglCanvasDprMismatch).toHaveBeenNthCalledWith(2, second)
   })
 
   it('latches viewport intent before refocus recovery flushes streaming output', async () => {

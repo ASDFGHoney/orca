@@ -12284,7 +12284,7 @@
       "id": "terminal-render.pixel-refresh-repair",
       "title": "Forced repaint does not change revealed pane pixels",
       "maturity": "experimental",
-      "protection": "none",
+      "protection": "partial",
       "owner": "terminal-rendering",
       "layer": "electron-visual-golden",
       "surfaces": [
@@ -12296,44 +12296,71 @@
       ],
       "platforms": ["macos", "linux", "windows"],
       "providers": ["local", "daemon"],
-      "coveredPlatforms": [],
-      "coveredProviders": [],
-      "coverageNotes": "Registered gap only; the live repro harness with a refresh-repair oracle exists but is not productized into the release-blocking terminal-rendering-golden suite.",
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local"],
+      "coverageNotes": "A headed macOS Electron test drives a real WebGL terminal through a tab hide/reveal while DEC 2026 output is held. It verifies the serialized buffer contains the new frame, then compares compositor screenshots before and after a direct full-buffer present. The same renderer choreography is provider-local, but daemon, SSH, remote-runtime, Linux, and Windows GPU runs remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/7133",
         "https://github.com/stablyai/orca/pull/7054"
       ],
       "invariant": "After any reveal, restore, or wake, the pixels a pane displays must equal what a forced full model-invalidating repaint would draw from the buffer; a material refresh-repair diff means stale rendering escaped, whatever the mechanism.",
       "oracle": "Screenshot the revealed pane, force a model-invalidating full repaint, screenshot again, and assert the bounded pixel diff is immaterial; pair with a JS-level render-model-vs-buffer comparison. Compositor screenshots only, because WebGL canvas readback is blank with preserveDrawingBuffer disabled.",
-      "commands": [],
-      "testFiles": [],
-      "assertionRefs": [],
-      "evidenceRuns": [],
+      "commands": [
+        "pnpm run ensure:electron-runtime && pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+        "ORCA_E2E_RECORD_VIDEO=1 pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --repeat-each=3"
+      ],
+      "testFiles": ["tests/e2e/terminal-reveal-paused-render-repro.spec.ts"],
+      "assertionRefs": [
+        {
+          "file": "tests/e2e/terminal-reveal-paused-render-repro.spec.ts",
+          "assertions": ["@headful tab reveal presents a synchronized-output WebGL frame"]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-22",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm run ensure:electron-runtime && pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
+          "result": "passed",
+          "durationSeconds": 16,
+          "summary": "A real WebGL tab reveal matched the current serialized synchronized-output frame with zero changed pixels after a direct renderer present. The test persists and attaches the exact before/after screenshots and pixel-diff metadata."
+        },
+        {
+          "date": "2026-08-22",
+          "runner": "local",
+          "platform": "macos",
+          "command": "ORCA_E2E_RECORD_VIDEO=1 pnpm exec playwright test tests/e2e/terminal-reveal-paused-render-repro.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1 --repeat-each=3",
+          "result": "passed",
+          "durationSeconds": 48,
+          "summary": "Three consecutive headed real-WebGL runs passed in 15.0-15.7 seconds each and emitted a 1920x1080 video per BrowserWindow."
+        }
+      ],
       "runtimeBudget": {
-        "p95Seconds": 300,
-        "scope": "release-blocking golden Electron visual test"
+        "p95Seconds": 120,
+        "scope": "focused prebuilt headed Electron visual test"
       },
       "flakeHistory": {
-        "status": "not-started",
-        "evidence": "Runs nightly only while the per-platform diff threshold stabilizes; the destination is the release-blocking terminal-rendering-golden suite in release-cut.yml."
+        "status": "unknown",
+        "evidence": "Four local macOS headed runs passed, including three consecutive video-recorded repeats; CI soak history and cross-platform GPU runs are not yet available."
       },
       "redGreenEvidence": {
-        "status": "missing",
-        "evidence": "Needs an intentionally fossilized render model (skip the model invalidation on reveal) proving the refresh-repair diff fires."
+        "status": "complete",
+        "evidence": "On unmodified main, the revealed screenshot differed from a direct renderer present across 87.68% of pixels even though serialization already contained the new frame. With synchronized-output presentation enabled, the same test passes the 1.5% material-diff threshold."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Soak-only; must not add product-path repaints beyond the existing reveal hardening."
+        "evidence": "Recovery remains event-driven and limited to visible managers. The deterministic 64-hidden-manager count test requires zero hidden atlas clears or presents. A display:none retry is deduped per pane and capped at 16 animation frames; no polling, provider calls, PTY scans, or background output work was added."
       },
       "promotionCriteria": [
-        "Productize the existing stale-render repro harness with the refresh-repair oracle and failure artifacts.",
         "Establish a stable material-diff threshold across platforms via nightly runs.",
         "Promotion means membership in the release-blocking terminal-rendering-golden suite that release-cut.yml runs against every release tag; never PR-blocking.",
-        "Register the gate command as a direct spec-file invocation; the checker rejects --grep tag selectors, so do not reuse the existing --grep-based golden script as the command."
+        "Add Linux and Windows GPU evidence or retain those platform gaps explicitly."
       ],
       "knownGaps": [
-        "No manifest command yet.",
-        "Buffer-clean, pixels-stale variants are otherwise invisible to every buffer oracle in the manifest."
+        "The deterministic test holds synchronized output past xterm's one-second safety timeout so the reveal race is stable.",
+        "The renderer-level frame injection isolates the paint failure; provider delivery and hidden-output snapshot restore have separate gates.",
+        "Linux, Windows, daemon, SSH, and remote-runtime live GPU evidence is not yet recorded."
       ],
       "demotionRule": "Drop from the golden suite back to nightly diagnostic if diff thresholds cannot be kept stable across CI runners."
     },

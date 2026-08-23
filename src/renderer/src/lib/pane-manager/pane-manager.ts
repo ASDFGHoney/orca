@@ -26,6 +26,8 @@ import { applyTerminalGpuAcceleration } from './pane-terminal-gpu-acceleration'
 import { rebuildAttachedWebgl } from './pane-webgl-reattach'
 import {
   markPaneComplexScriptOutput,
+  clearPaneWebglTextureAtlases,
+  presentPaneViewports,
   resetPaneWebglTextureAtlases,
   resumePaneRendering,
   setPaneGpuRenderingState,
@@ -278,6 +280,14 @@ export class PaneManager {
 
   resetWebglTextureAtlases(): void {
     resetPaneWebglTextureAtlases(this.panes.values())
+  }
+
+  clearWebglTextureAtlases(): void {
+    clearPaneWebglTextureAtlases(this.panes.values())
+  }
+
+  presentForcedViewports(): void {
+    presentPaneViewports(this.panes.values())
   }
 
   setAtlasRecoveryVisible(visible: boolean): void {

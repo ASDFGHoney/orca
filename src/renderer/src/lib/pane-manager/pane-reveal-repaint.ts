@@ -1,5 +1,6 @@
 import type { ManagedPaneInternal } from './pane-manager-types'
 import { reattachWebglIfNeeded } from './pane-webgl-reattach'
+import { presentPaneViewport } from './pane-webgl-renderer'
 import { resetAndRefreshAllTerminalWebglAtlases } from './pane-manager-registry'
 
 type PaneGetter = () => Iterable<ManagedPaneInternal>
@@ -96,8 +97,6 @@ export function schedulePaneRevealRepaint(getPanes: () => Iterable<ManagedPaneIn
 export function schedulePaneRevealPresent(getPanes: () => Iterable<ManagedPaneInternal>): void {
   forEachPaneOnSettledFrame(getPanes, (pane) => {
     reattachWebglIfNeeded(pane)
-    if (pane.terminal.rows > 0) {
-      pane.terminal.refresh(0, pane.terminal.rows - 1)
-    }
+    presentPaneViewport(pane)
   })
 }
