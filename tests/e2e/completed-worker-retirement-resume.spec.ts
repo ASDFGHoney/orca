@@ -191,6 +191,13 @@ for (const closeMode of ['terminal-close-cli', 'worker-release'] as const) {
         return dispatchCapability
       })
       .not.toBeNull()
+    await expect
+      .poll(() =>
+        readCompletedWorkerLedger()
+          .filter((event) => event.event === 'ack')
+          .map((event) => event.mode)
+      )
+      .toEqual(['bracketed'])
     if (!dispatchCapability) {
       throw new Error('Background worker did not receive its dispatch capability')
     }

@@ -92,23 +92,21 @@ void emitAuthorityHook()
 let acknowledged = false
 let lifecycleSent = false
 ${FAKE_AGENT_PASTE_END_SCANNER_SOURCE}
-let pasteEnded = false
 process.stdin.on('data', (chunk) => {
   const input = chunk.toString()
   const pasteEndScan = scanFakeAgentPasteEnd(fakeAgentPasteEndTail, input)
   fakeAgentPasteEndTail = pasteEndScan.tail
-  if (pasteEndScan.ended) {
-    pasteEnded = true
+  if (pasteEndScan.pasteEndOffset !== null) {
     process.stdout.write('\\x1b[?25h')
   }
   if (input.includes('\\x03')) {
     appendLedger('ORCA_E2E_INTERRUPTION_LEDGER', { event: 'stdin-ctrl-c' })
   }
   if (!acknowledged) {
-    fakeAgentMaybeAck(pasteEnded, input, (mode) => {
+    fakeAgentMaybeAck(pasteEndScan, input, (mode) => {
       acknowledged = true
-      const suffix = mode === 'bracketed' ? '' : ' (unbracketed paste)'
-      process.stdout.write('\\u001b]0;Codex Working\\u0007ACK' + suffix + '\\n')
+      const message = mode === 'bracketed' ? 'ACK' : 'PASTE_PROTOCOL_ERROR'
+      process.stdout.write('\\u001b]0;Codex Working\\u0007' + message + '\\n')
       setTimeout(() => process.stdout.write('\\u001b]0;Codex Ready\\u0007'), 10)
     })
   }

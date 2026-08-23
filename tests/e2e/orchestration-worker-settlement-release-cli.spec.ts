@@ -30,22 +30,20 @@ if (process.argv.slice(2).includes('app-server')) {
 let capability = null
 let acknowledged = false
 ${FAKE_AGENT_PASTE_END_SCANNER_SOURCE}
-let pasteEnded = false
 process.stdout.write('\\u001b]0;Codex Ready\\u0007OpenAI Codex\\nmodel: e2e\\ndirectory: e2e\\n')
 process.stdin.on('data', (chunk) => {
   const input = chunk.toString()
   const pasteEndScan = scanFakeAgentPasteEnd(fakeAgentPasteEndTail, input)
   fakeAgentPasteEndTail = pasteEndScan.tail
-  if (pasteEndScan.ended) {
-    pasteEnded = true
+  if (pasteEndScan.pasteEndOffset !== null) {
     process.stdout.write('\\x1b[?25h')
   }
   capability ||= input.match(/--dispatch-capability (dcap_[A-Za-z0-9_-]+)/)?.[1] || null
   if (!acknowledged) {
-    fakeAgentMaybeAck(pasteEnded, input, (mode) => {
+    fakeAgentMaybeAck(pasteEndScan, input, (mode) => {
       acknowledged = true
-      const suffix = mode === 'bracketed' ? '' : ' (unbracketed paste)'
-      process.stdout.write('\\u001b]0;Codex Working\\u0007ACK' + suffix + '\\n')
+      const message = mode === 'bracketed' ? 'ACK' : 'PASTE_PROTOCOL_ERROR'
+      process.stdout.write('\\u001b]0;Codex Working\\u0007' + message + '\\n')
       setTimeout(() => process.stdout.write('\\u001b]0;Codex Ready\\u0007'), 10)
     })
   }
