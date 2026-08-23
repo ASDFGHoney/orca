@@ -479,3 +479,31 @@ describe('retireLandedMobileNativeChatPending - sends that can never land', () =
     ).toEqual(['p1', 'p3'])
   })
 })
+
+// Drainage speaks only for echoes that reconcile by TEXT. These two reconcile by
+// other means (or not at all), and stranding them deletes content rather than
+// repositioning it - the bubble is the only place either one is visible.
+describe('retireLandedMobileNativeChatPending - drainage leaves non-text echoes alone', () => {
+  it('keeps a photo echo when a later send lands', () => {
+    const messages = [assistantTurn('m1', 'ready', 1000), userTurn('m2', 'later', 5000)]
+    const pending = [
+      { ...pendingSend('p1', '', 'm1'), images: ['file:///a.png'] },
+      pendingSend('p2', 'later', 'm1')
+    ]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1'])
+  })
+
+  it('keeps an echo whose caption is only image markers when a later send lands', () => {
+    const messages = [
+      assistantTurn('m1', 'ready', 1000),
+      userTurn('m2', '[Image #1]', 4000),
+      userTurn('m3', 'later', 5000)
+    ]
+    const pending = [pendingSend('p1', '[Image #1]', 'm1'), pendingSend('p2', 'later', 'm1')]
+    expect(
+      retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES).map((i) => i.id)
+    ).toEqual(['p1'])
+  })
+})

@@ -204,9 +204,7 @@ function selectStrandedPendingIds(
   for (let index = pending.length - 1; index >= 0; index--) {
     const item = pending[index]!
     if (!landed.has(item.id) && !glued.has(item.id)) {
-      // An unresolved baseline was captured against a transcript not known to be
-      // this session's, so drainage around it proves nothing about it.
-      if (accountedAfter && hasLater && item.baselineResolved) {
+      if (accountedAfter && hasLater && reconcilesByText(item)) {
         stranded.add(item.id)
       } else {
         accountedAfter = false
@@ -215,4 +213,22 @@ function selectStrandedPendingIds(
     hasLater = true
   }
   return stranded.size === 0 ? NO_PENDING_IDS : stranded
+}
+
+/** Whether drainage says anything about this echo at all.
+ *
+ * Drainage is evidence that a TEXT match will never arrive, so it only speaks for
+ * echoes that reconcile by text and failed. The others must be left alone:
+ *
+ * - an image echo reconciles when its local preview reaches the authoritative
+ *   message, which the count pass holds it for — stranding it deletes the photo
+ *   from the chat, since the bubble is the only place it is visible;
+ * - a send whose text normalizes away (a caption of only `[Image #N]` markers)
+ *   has no key to match on either side, and its transcript row renders empty, so
+ *   dropping the echo makes the message vanish rather than merely sit misplaced;
+ * - an unresolved baseline was captured against a transcript not known to be this
+ *   session's, so drainage around it proves nothing about it.
+ */
+function reconcilesByText(item: MobileNativeChatPendingMessage): boolean {
+  return item.baselineResolved && !item.images?.length && normalizeReconcileText(item.text) !== ''
 }
