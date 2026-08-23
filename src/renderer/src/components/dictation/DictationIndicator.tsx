@@ -8,11 +8,12 @@ import { useAppStore } from '@/store'
 import { Square } from 'lucide-react'
 import { dispatchDictationControl } from './dictation-control-events'
 import { DictationGrapes } from './DictationGrapes'
+import { useDictationMeter } from './dictation-meter-store'
 
 export function DictationIndicator() {
   const dictationState = useAppStore((state) => state.dictationState)
   const partialTranscript = useAppStore((state) => state.partialTranscript)
-  const dictationMeter = useAppStore((state) => state.dictationMeter)
+  const dictationMeter = useDictationMeter()
   const isHoldMode = useAppStore((state) => state.settings?.voice?.dictationMode === 'hold')
   const shortcut = useShortcutKeyDetails('voice.dictation')
 
@@ -24,15 +25,18 @@ export function DictationIndicator() {
   const isListening = dictationState === 'listening'
   const isClipping = isListening && dictationMeter.isClipping
   const isSpeaking = isListening && dictationMeter.isSpeaking && !isClipping
+  const lifecycleLabel =
+    dictationState === 'starting'
+      ? translate('auto.components.dictation.DictationIndicator.starting', 'Starting mic…')
+      : dictationState === 'stopping'
+        ? translate('auto.components.dictation.DictationIndicator.processing', 'Processing…')
+        : translate('auto.components.dictation.DictationIndicator.listening', 'Listening')
   const label = isClipping
     ? translate('auto.components.dictation.DictationIndicator.tooLoud', 'Too loud')
     : isSpeaking
       ? translate('auto.components.dictation.DictationIndicator.speaking', 'Speaking')
-      : dictationState === 'starting'
-        ? translate('auto.components.dictation.DictationIndicator.starting', 'Starting mic…')
-        : dictationState === 'stopping'
-          ? translate('auto.components.dictation.DictationIndicator.processing', 'Processing…')
-          : translate('auto.components.dictation.DictationIndicator.listening', 'Listening')
+      : lifecycleLabel
+  const announcedLabel = isClipping ? label : lifecycleLabel
   const canStop = dictationState !== 'stopping'
   const showShortcut = !isHoldMode && shortcut.keys.length > 0
   const transcript = partialTranscript.trim()
@@ -43,8 +47,7 @@ export function DictationIndicator() {
 
   return (
     <div
-      role="status"
-      aria-live="polite"
+      data-testid="dictation-indicator"
       className={cn(
         'fixed bottom-12 left-1/2 z-50 -translate-x-1/2 overflow-hidden',
         'border border-border bg-popover/95 text-sm text-popover-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur',
@@ -61,7 +64,12 @@ export function DictationIndicator() {
           active={dictationState !== 'stopping'}
           transitioning={dictationState !== 'listening'}
         />
-        <span className="min-w-0 truncate font-medium">{label}</span>
+        <span aria-hidden className="min-w-0 truncate font-medium">
+          {label}
+        </span>
+        <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {announcedLabel}
+        </span>
         {canStop ? (
           <>
             <span aria-hidden className="ml-0.5 h-4 w-px shrink-0 bg-border" />

@@ -45,11 +45,9 @@ describe('dictation audio meter', () => {
     )
 
     expect(toPublicDictationMeterState(analyzed)).toEqual({
-      level: analyzed.level,
-      peak: analyzed.peak,
+      level: Math.round(analyzed.level * 100) / 100,
       isSpeaking: analyzed.isSpeaking,
-      isClipping: analyzed.isClipping,
-      lastUpdatedAt: 250
+      isClipping: analyzed.isClipping
     })
   })
 })

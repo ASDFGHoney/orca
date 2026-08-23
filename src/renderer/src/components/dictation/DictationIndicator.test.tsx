@@ -12,10 +12,8 @@ const storeState = {
   partialTranscript: '',
   dictationMeter: {
     level: 0,
-    peak: 0,
     isSpeaking: false,
-    isClipping: false,
-    lastUpdatedAt: 0
+    isClipping: false
   },
   settings: { voice: { dictationMode: 'toggle' } } as {
     voice?: { dictationMode?: 'toggle' | 'hold' }
@@ -26,6 +24,10 @@ vi.mock('@/store', () => {
   const useAppStore = (selector: (value: typeof storeState) => unknown) => selector(storeState)
   return { useAppStore }
 })
+
+vi.mock('./dictation-meter-store', () => ({
+  useDictationMeter: () => storeState.dictationMeter
+}))
 
 vi.mock('@/i18n/i18n', () => ({
   translate: (_key: string, fallback: string) => fallback
@@ -53,10 +55,8 @@ beforeEach(() => {
   storeState.partialTranscript = ''
   storeState.dictationMeter = {
     level: 0,
-    peak: 0,
     isSpeaking: false,
-    isClipping: false,
-    lastUpdatedAt: 0
+    isClipping: false
   }
   storeState.settings = { voice: { dictationMode: 'toggle' } }
   setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
@@ -118,7 +118,7 @@ describe('DictationIndicator', () => {
     storeState.dictationState = 'stopping'
     render(<DictationIndicator />)
 
-    expect(screen.getByText('Processing…')).toBeTruthy()
+    expect(screen.getByText('Processing…', { selector: '[aria-hidden="true"]' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Stop dictation' })).toBeNull()
   })
 
@@ -132,28 +132,25 @@ describe('DictationIndicator', () => {
   it('reacts to speaking audio and exposes the semantic state', () => {
     storeState.dictationMeter = {
       level: 0.72,
-      peak: 0.8,
       isSpeaking: true,
-      isClipping: false,
-      lastUpdatedAt: 100
+      isClipping: false
     }
     render(<DictationIndicator />)
 
     expect(screen.getByText('Speaking')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Listening')
     expect(screen.getByTestId('dictation-grapes').children).toHaveLength(9)
   })
 
   it('uses the destructive role only while clipping', () => {
     storeState.dictationMeter = {
       level: 1,
-      peak: 1,
       isSpeaking: true,
-      isClipping: true,
-      lastUpdatedAt: 100
+      isClipping: true
     }
     const { container } = render(<DictationIndicator />)
 
-    expect(screen.getByText('Too loud')).toBeTruthy()
+    expect(screen.getByText('Too loud', { selector: '[aria-hidden="true"]' })).toBeTruthy()
     expect((container.firstChild as HTMLElement).className).toContain('text-destructive')
   })
 
@@ -161,7 +158,8 @@ describe('DictationIndicator', () => {
     storeState.partialTranscript = 'A polished voice visualizer'
     render(<DictationIndicator />)
 
-    expect(screen.getByText('Listening')).toBeTruthy()
+    expect(screen.getByText('Listening', { selector: '[aria-hidden="true"]' })).toBeTruthy()
     expect(screen.getByText('A polished voice visualizer')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Listening')
   })
 })

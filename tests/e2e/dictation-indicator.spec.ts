@@ -3,10 +3,8 @@ import type { Page } from '@stablyai/playwright-test'
 
 type MeterFixture = {
   level: number
-  peak: number
   isSpeaking: boolean
   isClipping: boolean
-  lastUpdatedAt: number
 }
 
 async function setDictationVisualState(
@@ -16,19 +14,22 @@ async function setDictationVisualState(
   partialTranscript = ''
 ): Promise<void> {
   await page.evaluate(
-    ({ dictationState, dictationMeter, transcript }) => {
+    ({ dictationState, transcript }) => {
       const store = window.__store
       if (!store) {
         throw new Error('Expected the E2E store to be exposed')
       }
       store.setState({
         dictationState,
-        dictationMeter,
         partialTranscript: transcript
       })
     },
-    { dictationState: state, dictationMeter: meter, transcript: partialTranscript }
+    { dictationState: state, transcript: partialTranscript }
   )
+  await page.waitForFunction(() => Boolean(window.__dictationMeterE2E))
+  await page.evaluate((dictationMeter) => {
+    window.__dictationMeterE2E?.publish(dictationMeter)
+  }, meter)
 }
 
 async function pauseForRecordedProof(page: Page): Promise<void> {
@@ -38,15 +39,17 @@ async function pauseForRecordedProof(page: Page): Promise<void> {
 }
 
 test('dictation grapes react across the visible recording lifecycle', async ({ orcaPage }) => {
-  const quiet = { level: 0, peak: 0, isSpeaking: false, isClipping: false, lastUpdatedAt: 1 }
+  const quiet = { level: 0, isSpeaking: false, isClipping: false }
   await setDictationVisualState(orcaPage, 'listening', quiet)
 
-  const status = orcaPage.getByRole('status').filter({ has: orcaPage.getByText('Listening') })
-  await expect(status).toBeVisible()
-  await expect(status.getByTestId('dictation-grapes').locator('span')).toHaveCount(9)
-  await expect(status.getByRole('button', { name: 'Stop dictation' })).toBeVisible()
+  const indicator = orcaPage.getByTestId('dictation-indicator')
+  const status = indicator.getByRole('status')
+  await expect(indicator).toBeVisible()
+  await expect(status).toHaveText('Listening')
+  await expect(indicator.getByTestId('dictation-grapes').locator('span')).toHaveCount(9)
+  await expect(indicator.getByRole('button', { name: 'Stop dictation' })).toBeVisible()
   await orcaPage.emulateMedia({ reducedMotion: 'reduce' })
-  await expect(status.getByTestId('dictation-grapes').locator('span').first()).toHaveCSS(
+  await expect(indicator.getByTestId('dictation-grapes').locator('span').first()).toHaveCSS(
     'transition-property',
     'none'
   )
@@ -55,20 +58,18 @@ test('dictation grapes react across the visible recording lifecycle', async ({ o
 
   const speaking = {
     level: 0.76,
-    peak: 0.84,
     isSpeaking: true,
-    isClipping: false,
-    lastUpdatedAt: 2
+    isClipping: false
   }
   await setDictationVisualState(orcaPage, 'listening', speaking)
-  await expect(orcaPage.getByRole('status').filter({ hasText: 'Speaking' })).toBeVisible()
+  await expect(indicator.getByText('Speaking')).toBeVisible()
+  await expect(status).toHaveText('Listening')
   await pauseForRecordedProof(orcaPage)
 
-  const clipping = { ...speaking, level: 1, peak: 1, isClipping: true, lastUpdatedAt: 3 }
+  const clipping = { ...speaking, level: 1, isClipping: true }
   await setDictationVisualState(orcaPage, 'listening', clipping)
-  const clippingStatus = orcaPage.getByRole('status').filter({ hasText: 'Too loud' })
-  await expect(clippingStatus).toBeVisible()
-  await expect(clippingStatus).toHaveClass(/text-destructive/)
+  await expect(status).toHaveText('Too loud')
+  await expect(indicator).toHaveClass(/text-destructive/)
   await pauseForRecordedProof(orcaPage)
 
   await setDictationVisualState(
@@ -80,11 +81,11 @@ test('dictation grapes react across the visible recording lifecycle', async ({ o
   await expect(
     orcaPage.getByText('The visualizer follows every word without covering the workspace.')
   ).toBeVisible()
+  await expect(status).toHaveText('Listening')
   await pauseForRecordedProof(orcaPage)
 
   await setDictationVisualState(orcaPage, 'stopping', quiet)
-  const processing = orcaPage.getByRole('status').filter({ hasText: 'Processing…' })
-  await expect(processing).toBeVisible()
-  await expect(processing.getByRole('button', { name: 'Stop dictation' })).toHaveCount(0)
+  await expect(status).toHaveText('Processing…')
+  await expect(indicator.getByRole('button', { name: 'Stop dictation' })).toHaveCount(0)
   await pauseForRecordedProof(orcaPage)
 })

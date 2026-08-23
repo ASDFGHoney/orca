@@ -14,12 +14,12 @@ import { translate } from '@/i18n/i18n'
 import { showDictationStartErrorToast } from './dictation-start-error-toast'
 import { useHoldDictationGesture } from './use-hold-dictation-gesture'
 import { DICTATION_CONTROL_EVENT, type DictationControlAction } from './dictation-control-events'
+import { publishDictationMeter } from './dictation-meter-store'
 
 export function DictationController() {
   const dictationState = useAppStore((s) => s.dictationState)
   const setDictationState = useAppStore((s) => s.setDictationState)
   const setPartialTranscript = useAppStore((s) => s.setPartialTranscript)
-  const setDictationMeter = useAppStore((s) => s.setDictationMeter)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
   const settings = useAppStore((s) => s.settings)
   const keybindings = useAppStore((s) => s.keybindings)
@@ -29,7 +29,7 @@ export function DictationController() {
     flushBufferedAudio,
     discardBufferedAudio,
     getCapturedChunkCount
-  } = useAudioCapture(setDictationMeter)
+  } = useAudioCapture(publishDictationMeter)
 
   const dictationStateRef = useRef(dictationState)
   dictationStateRef.current = dictationState

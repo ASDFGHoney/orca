@@ -1,12 +1,12 @@
 export type DictationMeterState = {
   level: number
-  peak: number
   isSpeaking: boolean
   isClipping: boolean
-  lastUpdatedAt: number
 }
 
 export type DictationMeterAnalyzerState = DictationMeterState & {
+  peak: number
+  lastUpdatedAt: number
   noiseFloor: number
   smoothedLevel: number
   clippingUntil: number
@@ -14,10 +14,8 @@ export type DictationMeterAnalyzerState = DictationMeterState & {
 
 export const DEFAULT_DICTATION_METER: DictationMeterState = {
   level: 0,
-  peak: 0,
   isSpeaking: false,
-  isClipping: false,
-  lastUpdatedAt: 0
+  isClipping: false
 }
 
 const CLIPPING_THRESHOLD = 0.98
@@ -30,6 +28,8 @@ function clamp(value: number, min: number, max: number): number {
 export function createDictationMeterAnalyzerState(): DictationMeterAnalyzerState {
   return {
     ...DEFAULT_DICTATION_METER,
+    peak: 0,
+    lastUpdatedAt: 0,
     noiseFloor: 0.008,
     smoothedLevel: 0,
     clippingUntil: Number.NEGATIVE_INFINITY
@@ -88,10 +88,19 @@ export function toPublicDictationMeterState(
   state: DictationMeterAnalyzerState
 ): DictationMeterState {
   return {
-    level: state.level,
-    peak: state.peak,
+    level: Math.round(state.level * 100) / 100,
     isSpeaking: state.isSpeaking,
-    isClipping: state.isClipping,
-    lastUpdatedAt: state.lastUpdatedAt
+    isClipping: state.isClipping
   }
+}
+
+export function dictationMeterStatesEqual(
+  left: DictationMeterState,
+  right: DictationMeterState
+): boolean {
+  return (
+    left.level === right.level &&
+    left.isSpeaking === right.isSpeaking &&
+    left.isClipping === right.isClipping
+  )
 }
