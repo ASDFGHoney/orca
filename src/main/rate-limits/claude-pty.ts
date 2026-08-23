@@ -7,11 +7,7 @@ import { resolveClaudeCommand } from '../codex-cli/command'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
 import { applyClaudeEnvPatch } from '../claude-accounts/environment'
 import { withMacTailscaleDnsHint } from '../network/macos-tailscale-dns-diagnostic'
-import {
-  cleanupHiddenRateLimitPty,
-  registerHiddenRateLimitPty,
-  windowsHiddenPtySpawnOptions
-} from './hidden-pty-cleanup'
+import { cleanupHiddenRateLimitPty, registerHiddenRateLimitPty } from './hidden-pty-cleanup'
 import { extractClaudePtyResetMetadata } from './claude-pty-reset-parser'
 import {
   getHiddenRateLimitWslCwdSetupCommands,
@@ -296,8 +292,7 @@ export async function fetchViaPty(options?: {
       // Why: hidden usage PTYs must not inherit the process cwd (e.g. / or a
       // drive root), which can trigger unbounded file discovery.
       cwd: resolveHiddenRateLimitPtyCwd(),
-      env: spawnEnv,
-      ...windowsHiddenPtySpawnOptions()
+      env: spawnEnv
     })
     const termDisposables: { dispose: () => void }[] = [registerHiddenRateLimitPty(term)]
     let enterInterval: ReturnType<typeof setInterval> | null = null

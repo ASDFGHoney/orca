@@ -1,9 +1,12 @@
 import type { IPty } from 'node-pty'
+import { fork } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
 
 const ptys: IPty[] = []
 const detachedPids: number[] = []
+const require = createRequire(import.meta.url)
 
 afterEach(() => {
   for (const pty of ptys.splice(0)) {
@@ -43,9 +46,51 @@ describe.runIf(process.platform === 'win32')('Windows ConPTY process membership'
     detachedPids.push(detachedPid)
     expect(attachedPid).toBeGreaterThan(0)
     expect(detachedPid).toBeGreaterThan(0)
+    const bundledProbe = await readRawConsoleMembership(pty.pid)
+    expect(bundledProbe.processIds).toContain(pty.pid)
+    expect(bundledProbe.helperPid).toBeGreaterThan(0)
     await expect(readWindowsConptyProcessIds(pty.pid)).resolves.toBeNull()
   }, 15_000)
+
+  it('proves the helper can join system ConPTY', async () => {
+    const nodePty = await import('node-pty')
+    const pty = nodePty.spawn('cmd.exe', ['/q', '/d'], {
+      cols: 120,
+      cwd: process.cwd(),
+      env: process.env,
+      name: 'xterm-256color',
+      rows: 24
+    })
+    ptys.push(pty)
+
+    const probe = await readRawConsoleMembership(pty.pid)
+    expect(probe.processIds).toContain(pty.pid)
+    expect(probe.processIds).toContain(probe.helperPid)
+  }, 15_000)
 })
+
+function readRawConsoleMembership(
+  rootPid: number
+): Promise<{ helperPid: number; processIds: number[] }> {
+  const agentPath = require.resolve('node-pty/lib/conpty_console_list_agent.js')
+  const child = fork(agentPath, [String(rootPid)], { silent: true })
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill()
+      reject(new Error(`Timed out reading console membership for ${rootPid}`))
+    }, 5_000)
+    child.once('error', reject)
+    child.once('message', (message: { consoleProcessList?: unknown }) => {
+      clearTimeout(timeout)
+      const processIds = message.consoleProcessList
+      if (!child.pid || !Array.isArray(processIds)) {
+        reject(new Error('Console-list helper returned malformed membership'))
+        return
+      }
+      resolve({ helperPid: child.pid, processIds })
+    })
+  })
+}
 
 function waitForOutput(pty: IPty, pattern: RegExp): Promise<RegExpMatchArray> {
   return new Promise((resolve, reject) => {

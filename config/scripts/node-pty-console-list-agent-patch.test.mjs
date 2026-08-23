@@ -23,12 +23,16 @@ describe('Windows SSH relay node-pty console-list patch', () => {
 
     patchNodePtyConsoleListAgent(fixture.root)
     const once = readFileSync(fixture.agentPath, 'utf8')
+    const ownerOnce = readFileSync(fixture.agentOwnerPath, 'utf8')
     expect(once).toContain('consoleProcessList = [shellPid];')
+    expect(ownerOnce).toContain('var activeConsoleListAgent = null;')
+    expect(ownerOnce).toContain('if (activeConsoleListAgent !== null)')
     expect(existsSync(`${fixture.agentPath}.orca-patch-${process.pid}`)).toBe(false)
     expect(() => assertPatchedNodePtyConsoleListAgent(fixture.root)).not.toThrow()
 
     patchNodePtyConsoleListAgent(fixture.root)
     expect(readFileSync(fixture.agentPath, 'utf8')).toBe(once)
+    expect(readFileSync(fixture.agentOwnerPath, 'utf8')).toBe(ownerOnce)
   })
 
   it('refuses a different package version or unexpected agent source', () => {
@@ -54,10 +58,39 @@ function writeNodePtyFixture(version, agentSource) {
   const nodePtyDir = join(root, 'node_modules', 'node-pty')
   const libDir = join(nodePtyDir, 'lib')
   const agentPath = join(libDir, 'conpty_console_list_agent.js')
+  const agentOwnerPath = join(libDir, 'windowsPtyAgent.js')
   mkdirSync(libDir, { recursive: true })
   writeFileSync(join(nodePtyDir, 'package.json'), JSON.stringify({ version }))
   writeFileSync(agentPath, agentSource)
-  return { root, agentPath }
+  writeFileSync(agentOwnerPath, publishedAgentOwnerSource())
+  return { root, agentOwnerPath, agentPath }
+}
+
+function publishedAgentOwnerSource() {
+  const installedPath = require.resolve('node-pty/lib/windowsPtyAgent.js')
+  const installed = readFileSync(installedPath, 'utf8').replace(
+    'var winptyNative;\nvar activeConsoleListAgent = null;',
+    'var winptyNative;'
+  )
+  const originalMethod = `    WindowsPtyAgent.prototype._getConsoleProcessList = function () {
+        var _this = this;
+        return new Promise(function (resolve) {
+            var agent = child_process_1.fork(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()]);
+            agent.on('message', function (message) {
+                clearTimeout(timeout);
+                resolve(message.consoleProcessList);
+            });
+            var timeout = setTimeout(function () {
+                // Something went wrong, just send back the shell PID
+                agent.kill();
+                resolve([_this._innerPid]);
+            }, 5000);
+        });
+    };`
+  return installed.replace(
+    /    WindowsPtyAgent\.prototype\._getConsoleProcessList = function \(\) \{[\s\S]*?^    \};(?=\n    Object\.defineProperty)/m,
+    originalMethod
+  )
 }
 
 function publishedAgentSource() {

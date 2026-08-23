@@ -22,11 +22,7 @@ import { resolveCodexCommand } from '../codex-cli/command'
 import { CODEX_READ_ONLY_APP_SERVER_ARGS } from '../codex-cli/codex-read-only-app-server-args'
 import { withMacTailscaleDnsHint } from '../network/macos-tailscale-dns-diagnostic'
 import { getCmdExePath, getSpawnArgsForWindows } from '../win32-utils'
-import {
-  cleanupHiddenRateLimitPty,
-  registerHiddenRateLimitPty,
-  windowsHiddenPtySpawnOptions
-} from './hidden-pty-cleanup'
+import { cleanupHiddenRateLimitPty, registerHiddenRateLimitPty } from './hidden-pty-cleanup'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { extractCodexAuthError, isCodexAuthError } from '../../shared/codex-auth-errors'
 import { buildWslExecArgs, buildWslLoginShellCommand } from '../../shared/wsl-login-shell-command'
@@ -985,8 +981,7 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
         ...(wslCodex ? cloneProcessEnvWithoutCodexHome() : process.env),
         TERM: 'xterm-256color',
         ...(options?.codexHomePath && !wslCodex ? { CODEX_HOME: options.codexHomePath } : {})
-      },
-      ...windowsHiddenPtySpawnOptions()
+      }
     })
     const termDisposables: { dispose: () => void }[] = [registerHiddenRateLimitPty(term)]
 

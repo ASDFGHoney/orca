@@ -1,19 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-const { isPtyJobOwnershipAvailable, terminatePtyJob } = vi.hoisted(() => ({
-  isPtyJobOwnershipAvailable: vi.fn(() => true),
-  terminatePtyJob: vi.fn(() => 'terminated')
-}))
-vi.mock('../windows/windows-pty-job', () => ({
-  isPtyJobOwnershipAvailable,
-  terminatePtyJob
-}))
-
 import {
   cleanupHiddenRateLimitPty,
   getActiveHiddenRateLimitPtyCount,
-  registerHiddenRateLimitPty,
-  windowsHiddenPtySpawnOptions
+  registerHiddenRateLimitPty
 } from './hidden-pty-cleanup'
 
 function setPlatform(platform: NodeJS.Platform): void {
@@ -28,7 +17,6 @@ describe('cleanupHiddenRateLimitPty', () => {
 
   afterEach(() => {
     setPlatform(originalPlatform)
-    isPtyJobOwnershipAvailable.mockReturnValue(true)
     vi.clearAllMocks()
   })
 
@@ -96,24 +84,8 @@ describe('cleanupHiddenRateLimitPty', () => {
 
     cleanupHiddenRateLimitPty(term, [], { kill: true })
 
-    expect(terminatePtyJob).toHaveBeenCalledWith(term)
-    expect(terminatePtyJob.mock.invocationCallOrder[0]).toBeLessThan(
-      term.kill.mock.invocationCallOrder[0]
-    )
     expect(term.kill).toHaveBeenCalledTimes(1)
     expect(term.destroy).not.toHaveBeenCalled()
-  })
-
-  it('selects bundled ConPTY only when Windows job cleanup is available', () => {
-    setPlatform('win32')
-    expect(windowsHiddenPtySpawnOptions()).toEqual({ useConptyDll: true })
-
-    isPtyJobOwnershipAvailable.mockReturnValue(false)
-    expect(windowsHiddenPtySpawnOptions()).toEqual({})
-
-    setPlatform('linux')
-    isPtyJobOwnershipAvailable.mockReturnValue(true)
-    expect(windowsHiddenPtySpawnOptions()).toEqual({})
   })
 
   it('destroys a Windows PTY after natural exit so ConPTY cleanup still runs', () => {
@@ -127,7 +99,6 @@ describe('cleanupHiddenRateLimitPty', () => {
 
     cleanupHiddenRateLimitPty(term, [], { kill: false })
 
-    expect(terminatePtyJob).toHaveBeenCalledWith(term)
     expect(term.kill).toHaveBeenCalledTimes(1)
     expect(term.destroy).toHaveBeenCalledTimes(1)
   })

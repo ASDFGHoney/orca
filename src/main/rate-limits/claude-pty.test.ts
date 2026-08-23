@@ -106,11 +106,6 @@ describe('fetchViaPty', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const spawnCwd = spawnMock.mock.calls[0]?.[2]?.cwd as string
-    if (process.platform === 'win32') {
-      expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true })
-    } else {
-      expect(spawnMock.mock.calls[0]?.[2]).not.toHaveProperty('useConptyDll')
-    }
     expect(spawnCwd).toContain('rate-limit-pty-cwd')
     expect(spawnCwd).not.toBe('/')
     expect(spawnCwd).not.toMatch(/^[A-Za-z]:(?:[\\/])?$/)

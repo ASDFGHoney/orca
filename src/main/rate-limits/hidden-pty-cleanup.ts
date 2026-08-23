@@ -1,6 +1,3 @@
-import type { IPty } from 'node-pty'
-import { isPtyJobOwnershipAvailable, terminatePtyJob } from '../windows/windows-pty-job'
-
 type HiddenPty = {
   kill: (signal?: string) => void
   destroy?: () => void
@@ -25,11 +22,6 @@ export function getActiveHiddenRateLimitPtyCount(): number {
   return activeHiddenRateLimitPtys.size
 }
 
-/** Uses bundled ConPTY only when cleanup can terminate the exact PTY job. */
-export function windowsHiddenPtySpawnOptions(): { useConptyDll: true } | Record<string, never> {
-  return process.platform === 'win32' && isPtyJobOwnershipAvailable() ? { useConptyDll: true } : {}
-}
-
 export function cleanupHiddenRateLimitPty(
   term: HiddenPty,
   disposables: Disposable[],
@@ -37,10 +29,6 @@ export function cleanupHiddenRateLimitPty(
 ): void {
   for (const disposable of disposables.splice(0)) {
     disposable.dispose()
-  }
-
-  if (process.platform === 'win32') {
-    terminatePtyJob(term as IPty)
   }
 
   if (options.kill) {

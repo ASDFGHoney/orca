@@ -111,6 +111,73 @@ index 1ec12f796a822c78fba9ad7f6448c3987e325c23..cec8b67aef02f8199e5606a0d257088b
  var DEFAULT_FILE = 'sh';
  var DEFAULT_NAME = 'xterm';
  var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
+index a358ffb177357e177661033c1b092f9c9d0e5f5a..ae940a617faf11f8634128a823fda0ebbc77af6b 100644
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -15,6 +15,7 @@ var windowsConoutConnection_1 = require("./windowsConoutConnection");
+ var utils_1 = require("./utils");
+ var conptyNative;
+ var winptyNative;
++var activeConsoleListAgent = null;
+ /**
+  * The amount of time to wait for additional data after the conpty shell process has exited before
+  * shutting down the socket. The timer will be reset if a new data event comes in after the timer
+@@ -180,16 +181,49 @@ var WindowsPtyAgent = /** @class */ (function () {
+     };
+     WindowsPtyAgent.prototype._getConsoleProcessList = function () {
+         var _this = this;
++        if (activeConsoleListAgent !== null) {
++            return Promise.resolve([this._innerPid]);
++        }
+         return new Promise(function (resolve) {
+-            var agent = child_process_1.fork(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()]);
+-            agent.on('message', function (message) {
++            var agent;
++            try {
++                agent = child_process_1.fork(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()]);
++            }
++            catch (_a) {
++                resolve([_this._innerPid]);
++                return;
++            }
++            activeConsoleListAgent = agent;
++            var settled = false;
++            var finish = function (consoleProcessList) {
++                if (settled) {
++                    return;
++                }
++                settled = true;
+                 clearTimeout(timeout);
+-                resolve(message.consoleProcessList);
++                resolve(consoleProcessList);
++            };
++            agent.on('message', function (message) {
++                finish(message.consoleProcessList);
++            });
++            agent.on('error', function () {
++                finish([_this._innerPid]);
++            });
++            agent.on('close', function () {
++                if (activeConsoleListAgent === agent) {
++                    activeConsoleListAgent = null;
++                }
++                finish([_this._innerPid]);
+             });
+             var timeout = setTimeout(function () {
+                 // Something went wrong, just send back the shell PID
+-                agent.kill();
+-                resolve([_this._innerPid]);
++                try {
++                    agent.kill();
++                }
++                catch (_a) {
++                    // Keep the slot closed until close; failure is root-only.
++                }
++                finish([_this._innerPid]);
+             }, 5000);
+         });
+     };
 diff --git a/src/conpty_console_list_agent.ts b/src/conpty_console_list_agent.ts
 index 181ccabbbe9c4948a9725fb1db907a68e9de01fc..67f31facf85562b67adbfbd04ce28ddd8eeb4a79 100644
 --- a/src/conpty_console_list_agent.ts
@@ -743,3 +810,77 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..ec6bf3932c65b89c013ff133dc6bf46a
    return exports;
  };
  
+diff --git a/src/windowsPtyAgent.ts b/src/windowsPtyAgent.ts
+index d7054449516f0c9a62af351c2caa17331206d530..78e955edad1bddb68d56b17b9db1fa2e8777d4c6 100644
+--- a/src/windowsPtyAgent.ts
++++ b/src/windowsPtyAgent.ts
+@@ -7,7 +7,7 @@
+ import * as fs from 'fs';
+ import * as os from 'os';
+ import * as path from 'path';
+-import { fork } from 'child_process';
++import { ChildProcess, fork } from 'child_process';
+ import { Socket } from 'net';
+ import { ArgvOrCommandLine } from './types';
+ import { ConoutConnection } from './windowsConoutConnection';
+@@ -15,6 +15,7 @@ import { loadNativeModule } from './utils';
+ 
+ let conptyNative: IConptyNative;
+ let winptyNative: IWinptyNative;
++let activeConsoleListAgent: ChildProcess | null = null;
+ 
+ /**
+  * The amount of time to wait for additional data after the conpty shell process has exited before
+@@ -183,16 +184,47 @@ export class WindowsPtyAgent {
+   }
+ 
+   private _getConsoleProcessList(): Promise<number[]> {
++    if (activeConsoleListAgent !== null) {
++      return Promise.resolve([this._innerPid]);
++    }
+     return new Promise<number[]>(resolve => {
+-      const agent = fork(path.join(__dirname, 'conpty_console_list_agent'), [ this._innerPid.toString() ]);
+-      agent.on('message', message => {
++      let agent: ChildProcess;
++      try {
++        agent = fork(path.join(__dirname, 'conpty_console_list_agent'), [this._innerPid.toString()]);
++      } catch {
++        resolve([this._innerPid]);
++        return;
++      }
++      activeConsoleListAgent = agent;
++      let settled = false;
++      const finish = (consoleProcessList: number[]): void => {
++        if (settled) {
++          return;
++        }
++        settled = true;
+         clearTimeout(timeout);
+-        resolve(message.consoleProcessList);
++        resolve(consoleProcessList);
++      };
++      agent.on('message', (message: { consoleProcessList: number[] }) => {
++        finish(message.consoleProcessList);
++      });
++      agent.on('error', () => {
++        finish([this._innerPid]);
++      });
++      agent.on('close', () => {
++        if (activeConsoleListAgent === agent) {
++          activeConsoleListAgent = null;
++        }
++        finish([this._innerPid]);
+       });
+       const timeout = setTimeout(() => {
+         // Something went wrong, just send back the shell PID
+-        agent.kill();
+-        resolve([ this._innerPid ]);
++        try {
++          agent.kill();
++        } catch {
++          // Keep the slot closed until close; failure is root-only.
++        }
++        finish([this._innerPid]);
+       }, 5000);
+     });
+   }
