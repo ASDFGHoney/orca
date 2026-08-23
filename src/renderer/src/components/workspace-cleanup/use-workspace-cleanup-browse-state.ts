@@ -16,6 +16,10 @@ export type WorkspaceCleanupBrowseController = {
   ) => void
   toggleSortField: (field: WorkspaceCleanupSortField) => void
   clearFilters: () => void
+  /** Applies a whole-state transform, for callers that clear one named constraint. */
+  replaceFilters: (
+    transform: (filters: WorkspaceCleanupFilterState) => WorkspaceCleanupFilterState
+  ) => void
 }
 
 /**
@@ -56,6 +60,16 @@ export function useWorkspaceCleanupBrowseState(): WorkspaceCleanupBrowseControll
     [updateBrowse]
   )
 
+  // Why read the store rather than the rendered `browse`: a chip click and any other
+  // filter write can land in the same tick, and the rendered snapshot would drop one.
+  const replaceFilters = useCallback<WorkspaceCleanupBrowseController['replaceFilters']>(
+    (transform) => {
+      const current = useAppStore.getState().workspaceCleanupBrowse
+      updateBrowse({ ...current, filters: transform(current.filters) })
+    },
+    [updateBrowse]
+  )
+
   const clearFilters = useCallback(() => {
     updateBrowse((current) => ({
       ...current,
@@ -68,6 +82,7 @@ export function useWorkspaceCleanupBrowseState(): WorkspaceCleanupBrowseControll
     sort: browse.sort,
     patchFilters,
     toggleSortField,
-    clearFilters
+    clearFilters,
+    replaceFilters
   }
 }
