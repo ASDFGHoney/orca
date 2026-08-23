@@ -244,18 +244,21 @@ export function useAutoAckViewedAgent(floatingPanelVisible: boolean): void {
       lastUnreadAgentCompletionPanes = s.unreadAgentCompletionPanes
 
       for (const target of targets) {
+        // Why re-read: acking target[0] writes to the store, which re-enters this scan synchronously
+        // and may already have handled target[1]; `s` is a pre-write snapshot that would re-ack it.
+        const current = useAppStore.getState()
         const tabId = target.tabId
-        const activeLeafId = resolveActiveLeafId(s, tabId)
-        const toAck = computeAutoAckTargets(s, tabId, activeLeafId)
-        const activePaneKey = computeViewedAgentCompletionPaneKey(s, tabId, activeLeafId)
+        const activeLeafId = resolveActiveLeafId(current, tabId)
+        const toAck = computeAutoAckTargets(current, tabId, activeLeafId)
+        const activePaneKey = computeViewedAgentCompletionPaneKey(current, tabId, activeLeafId)
         if (toAck.length > 0 || activePaneKey) {
           const paneKeysToClear = new Set(toAck)
           if (activePaneKey) {
             paneKeysToClear.add(activePaneKey)
           }
           const worktreeId = target.worktreeId
-          acknowledgeViewedAgentAttention(s, {
-            activeWorktreeId: shouldClearViewedAgentWorktreeUnread(s, {
+          acknowledgeViewedAgentAttention(current, {
+            activeWorktreeId: shouldClearViewedAgentWorktreeUnread(current, {
               activeWorktreeId: worktreeId,
               activeTabId: tabId,
               paneKeysToClear
