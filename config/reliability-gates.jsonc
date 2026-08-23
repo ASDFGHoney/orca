@@ -12350,7 +12350,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Recovery remains event-driven and limited to visible managers. The deterministic 64-hidden-manager count test requires zero hidden atlas clears or presents. A display:none retry is deduped per pane and capped at 16 animation frames; no polling, provider calls, PTY scans, or background output work was added."
+        "evidence": "The tab-reveal present path runs only at event-driven recovery boundaries and adds no polling, provider calls, PTY scans, or background output work. The shared terminal-render.atlas-recovery-fanout contracts separately prove zero hidden-manager atlas clears or presents and a per-pane display:none retry deduped and capped at 16 animation frames."
       },
       "promotionCriteria": [
         "Establish a stable material-diff threshold across platforms via nightly runs.",

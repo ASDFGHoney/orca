@@ -204,6 +204,7 @@ describe('useTerminalWindowWakeRecovery', () => {
     const pane = { id: 1, terminal: {} }
     const resizeManager = { getPanes: () => [pane] } as unknown as PaneManager
     repairPaneWebglCanvasDprMismatchMock.mockReturnValue(true)
+    vi.stubGlobal('devicePixelRatio', 1)
     const { unmount } = renderHook(() =>
       useTerminalWindowWakeRecovery({
         isVisible: true,
@@ -214,12 +215,17 @@ describe('useTerminalWindowWakeRecovery', () => {
     )
 
     window.dispatchEvent(new Event('resize'))
+    expect(repairPaneWebglCanvasDprMismatchMock).not.toHaveBeenCalled()
+
+    vi.stubGlobal('devicePixelRatio', 2)
+    window.dispatchEvent(new Event('resize'))
 
     expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledWith(pane)
     expect(presentPaneViewportMock).toHaveBeenCalledWith(pane)
     expect(recoverVisibleTerminalWindowWakeMock).not.toHaveBeenCalled()
 
     unmount()
+    vi.stubGlobal('devicePixelRatio', 3)
     window.dispatchEvent(new Event('resize'))
     expect(repairPaneWebglCanvasDprMismatchMock).toHaveBeenCalledTimes(1)
   })

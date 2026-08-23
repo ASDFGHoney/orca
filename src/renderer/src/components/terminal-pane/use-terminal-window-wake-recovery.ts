@@ -31,6 +31,7 @@ export function useTerminalWindowWakeRecovery({
     }
     let wakeRecoveryFrameId: number | null = null
     let settledClearGlyphAtlases = false
+    let observedDevicePixelRatio = window.devicePixelRatio
     const cancelScheduledWakeRecovery = (): void => {
       if (wakeRecoveryFrameId === null || typeof cancelAnimationFrame !== 'function') {
         wakeRecoveryFrameId = null
@@ -117,6 +118,11 @@ export function useTerminalWindowWakeRecovery({
       // Why: Chromium emits window resize on devicePixelRatio changes even when
       // the CSS box is unchanged (monitor move / undock). xterm's own observer
       // misses that while the canvas had no box (laptop lid closed).
+      const devicePixelRatio = window.devicePixelRatio
+      if (devicePixelRatio === observedDevicePixelRatio) {
+        return
+      }
+      observedDevicePixelRatio = devicePixelRatio
       const manager = managerRef.current
       if (!manager || !isVisibleRef.current) {
         return

@@ -170,6 +170,10 @@ function schedulePresentWhenDisplayed(pane: ManagedPaneInternal): void {
       return
     }
     if (isManagedPaneDisplayNone(pane)) {
+      if (remaining === 1) {
+        pendingDisplayedPresentRetries.delete(pane)
+        return
+      }
       pendingDisplayedPresentRetries.set(pane, remaining - 1)
       globalThis.requestAnimationFrame(tick)
       return

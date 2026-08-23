@@ -254,15 +254,17 @@ describe('terminal WebGL addon lifecycle', () => {
     const { pane, renderService } = createPausedPane('none')
 
     presentPaneViewport(pane)
+    presentPaneViewport(pane)
+    expect(queued).toHaveLength(1)
     let callbacks = 0
     while (queued.length > 0) {
       queued.shift()?.(callbacks * 16)
       callbacks += 1
     }
 
-    expect(callbacks).toBe(17)
+    expect(callbacks).toBe(16)
     expect(renderService._isPaused).toBe(true)
-    expect(renderService.refreshRows).toHaveBeenCalledTimes(1)
+    expect(renderService.refreshRows).toHaveBeenCalledTimes(2)
   })
 
   it('still forces the paused render through for a pane that has a layout box', () => {

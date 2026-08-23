@@ -14,6 +14,7 @@ import { recordTerminalWebglDiagnostic } from '../../../../shared/terminal-webgl
  */
 type XtermRendererInternals = {
   _canvas?: HTMLCanvasElement
+  _devicePixelRatio?: number
   _gl?: { canvas?: HTMLCanvasElement }
   dimensions?: {
     device?: { canvas?: { width?: number; height?: number } }
@@ -41,10 +42,14 @@ export function repairPaneWebglCanvasDprMismatch(pane: ManagedPane): boolean {
   }
   const staleBackingWidth = canvas.width
   const staleBackingHeight = canvas.height
+  const cachedDevicePixelRatio = renderer._devicePixelRatio
+  const devicePixelRatioChanged =
+    typeof cachedDevicePixelRatio === 'number' && cachedDevicePixelRatio !== view.devicePixelRatio
   // xterm rounds its CSS canvas size before ResizeObserver converts it back to
   // device pixels; allow that round trip without forcing layout on every fit.
   const roundingTolerance = Math.max(1, Math.ceil(view.devicePixelRatio / 2))
   if (
+    !devicePixelRatioChanged &&
     Math.abs(staleBackingWidth - expectedWidth) <= roundingTolerance &&
     Math.abs(staleBackingHeight - expectedHeight) <= roundingTolerance
   ) {
@@ -64,6 +69,7 @@ export function repairPaneWebglCanvasDprMismatch(pane: ManagedPane): boolean {
     paneId: pane.id,
     staleBackingWidth,
     expectedBackingWidth: expectedWidth,
+    ...(cachedDevicePixelRatio === undefined ? {} : { cachedDevicePixelRatio }),
     devicePixelRatio: view.devicePixelRatio
   })
   return true

@@ -20,7 +20,7 @@ import { compareTerminalScreenshots } from './terminal-screenshot-diff'
  * is then swallowed and the freshly-cleared render model never repaints.
  *
  * This spec drives the REAL production reveal path (manager.resetWebglTextureAtlases
- * -> resetWebglTextureAtlas -> forceRepaintThroughRenderPause) against a real
+ * -> resetWebglTextureAtlas -> forceFullViewportPresent) against a real
  * xterm Terminal + RenderService. It:
  *   1. proves the bug: while paused, a plain refresh() renders nothing;
  *   2. proves the fix: the real reveal repaint forces a full-viewport render

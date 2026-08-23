@@ -6,6 +6,7 @@ function makePane(args: {
   backingWidth: number
   expectedWidth: number
   dpr: number
+  cachedDpr?: number
   backingHeight?: number
   expectedHeight?: number
   connected?: boolean
@@ -32,6 +33,7 @@ function makePane(args: {
     (args.hasRenderer ?? true)
       ? {
           _canvas: canvas,
+          _devicePixelRatio: args.cachedDpr ?? args.dpr,
           dimensions: {
             device: {
               canvas: { width: args.expectedWidth, height: args.expectedHeight ?? 1200 }
@@ -77,6 +79,19 @@ describe('repairPaneWebglCanvasDprMismatch', () => {
     const { pane, handleResize } = makePane({ backingWidth: 1080, expectedWidth: 2160, dpr: 2 })
     expect(repairPaneWebglCanvasDprMismatch(pane)).toBe(true)
     expect(handleResize).toHaveBeenCalledTimes(1)
+  })
+
+  it('repairs when the canvas and renderer dimensions share a stale dpr cache', () => {
+    const { pane, handleDevicePixelRatioChange, handleResize } = makePane({
+      backingWidth: 1080,
+      expectedWidth: 1080,
+      dpr: 2,
+      cachedDpr: 1
+    })
+
+    expect(repairPaneWebglCanvasDprMismatch(pane)).toBe(true)
+    expect(handleDevicePixelRatioChange).toHaveBeenCalledTimes(1)
+    expect(handleResize).toHaveBeenCalledWith(120, 40)
   })
 
   it('is a no-op when backing matches the renderer device dimensions', () => {
