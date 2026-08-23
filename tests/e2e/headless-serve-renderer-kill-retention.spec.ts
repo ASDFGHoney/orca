@@ -117,6 +117,9 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       fixturePath,
       path.join(scratch, 'pty-b.log')
     )
+    const baselineInventory = await readHostTerminalInventory(call, worktreeId)
+    expect(baselineInventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
+    expect(baselineInventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
     const proveHostState = async (marker: string): Promise<void> => {
       const status = await launchedHost.client.call<RuntimeStatus>('status.get')
       const processLiveness = await processIdentityLiveness([mainIdentity, daemonIdentity])
@@ -126,8 +129,8 @@ test('STA-5228 renderer death keeps headless runtime and PTYs alive', async ({ t
       expect(readDaemonPid(userDataDir)).toBe(daemonPid)
       expect(processLiveness.get(daemonPid)).toBe(true)
       const inventory = await readHostTerminalInventory(call, worktreeId)
-      expect(inventory.ptyIdByTabId[terminalA.tabId]).toBe(terminalA.ptyId)
-      expect(inventory.ptyIdByTabId[terminalB.tabId]).toBe(terminalB.ptyId)
+      expect(inventory.tabIds.toSorted()).toEqual(baselineInventory.tabIds.toSorted())
+      expect(inventory.ptyIdByTabId).toEqual(baselineInventory.ptyIdByTabId)
       await proveSameLivePty(call, terminalA, `${marker}_A`)
       await proveSameLivePty(call, terminalB, `${marker}_B`)
     }
