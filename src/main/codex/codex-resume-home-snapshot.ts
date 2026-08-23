@@ -28,8 +28,8 @@ function uniqueTrustedHomes(homes: readonly string[]): string[] {
  * Why: discovery silently omits a home whose ownership read is `indeterminate`
  * (transient EBUSY/EPERM). Selection, microseconds later, may succeed for that
  * same home. The legacy rescan iterates only the discovery list, so a competing
- * alias in another account would win (STA-4919). Include the selected home only
- * after this read verified it — never because verification was skipped.
+ * alias in another account would win (STA-4919). Append a missed selected home
+ * only after this read verified it — never because verification was skipped.
  */
 export function snapshotCodexResumeHomes(args: {
   systemHomePath: string
