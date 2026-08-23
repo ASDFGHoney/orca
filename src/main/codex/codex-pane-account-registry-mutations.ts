@@ -34,7 +34,7 @@ export class CodexPaneAccountRegistryMutations {
   }
 
   flush(): void {
-    if (this.pending.size === 0) {
+    if (this.pending.size === 0 && !this.needsPersistence) {
       this.clearRetryState()
       return
     }
