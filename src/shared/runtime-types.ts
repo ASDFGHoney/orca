@@ -479,6 +479,19 @@ export type RuntimeTerminalSummary = {
   /** Where this terminal actually runs. Absent when the host predates the field
    *  or could not name the host — never read an absent value as local. */
   executionHostId?: ExecutionHostId
+  /**
+   * Which agent the HOST resolved for this pane, from launch/process evidence it owns.
+   *
+   * Why the host and not the reader: a reader has only `title`, and a title is a decoration
+   * channel — a Codex pane whose task text says "claude" is indistinguishable from a Claude pane
+   * to anyone parsing the string. Consumers that act on identity (message routing, delivery)
+   * must use this, not `title`.
+   *
+   * Absent means UNKNOWN, never "no agent": the host predates the field, or it had no evidence
+   * beyond the title. Callers that authorize an action on identity must fail closed on absence
+   * rather than falling back to parsing `title`.
+   */
+  agentIdentity?: TuiAgent
 }
 
 export type RuntimeTerminalVisualTerminalNode = {

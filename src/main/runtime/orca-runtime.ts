@@ -329,6 +329,7 @@ import type {
   TerminalPaneLayoutNode,
   TerminalTab
 } from '../../shared/terminal-tab-types'
+import { resolvePublishedPaneAgentIdentity } from '../../shared/published-pane-agent-identity'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { BranchPrefixStrategy } from '../../shared/ui-chrome-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
@@ -33029,6 +33030,16 @@ export class OrcaRuntimeService {
     return null
   }
 
+  /** Thin adapter so the summary builders stay declarative; the decision lives in `src/shared`. */
+  private resolvePaneAgentIdentityField(
+    launchAgent: TuiAgent | null | undefined,
+    foregroundAgent: TuiAgent | null | undefined,
+    title: string | null
+  ): { agentIdentity?: TuiAgent } {
+    const agentIdentity = resolvePublishedPaneAgentIdentity({ launchAgent, foregroundAgent, title })
+    return agentIdentity ? { agentIdentity } : {}
+  }
+
   private buildTerminalSummary(
     leaf: RuntimeLeafRecord,
     worktreesById: Map<string, ResolvedWorktree>,
@@ -33069,7 +33080,12 @@ export class OrcaRuntimeService {
       lastOutputAt: leaf.lastOutputAt,
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId)
+      ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty?.launchAgent,
+        pty?.foregroundAgent,
+        getLatestLeafTitle(leaf, tab?.title ?? null)
+      )
     }
   }
 
@@ -35048,7 +35064,12 @@ export class OrcaRuntimeService {
       lastOutputAt: pty.lastOutputAt,
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
-      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId)
+      ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
+      ...this.resolvePaneAgentIdentityField(
+        pty.launchAgent,
+        pty.foregroundAgent,
+        getLatestPtyTitle(pty)
+      )
     }
   }
 
