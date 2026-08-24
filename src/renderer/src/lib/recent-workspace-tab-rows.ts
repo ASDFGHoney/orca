@@ -10,6 +10,8 @@ import { tabHasLivePty } from './tab-has-live-pty'
 import type { WorktreeStatus } from './worktree-status'
 import type { TabGroup } from '../../../shared/tab-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
+import type { ExecutionHostId } from '../../../shared/execution-host'
+import { getWorktreeVisitTimestamp } from './worktree-visit-recency'
 
 /**
  * Row model for Cmd+J's empty-query "Recent chats & terminals" section.
@@ -20,7 +22,15 @@ import type { TerminalTab } from '../../../shared/terminal-tab-types'
 export type RecentWorkspaceTabRow = {
   /** Palette item id. */
   id: string
+  /**
+   * Per-occurrence identity used while the palette is open. Persisted tab ids can collide across
+   * hosts (or in a transient duplicate snapshot), so ordering must not use `id` as its key.
+   * Callers that know their ids are unique may omit this and fall back to `id`.
+   */
+  occurrenceId?: string
   worktreeId: string
+  /** Host owner used to distinguish same-id rows published by two hosts. */
+  worktreeHostId?: ExecutionHostId
   /** Unified tab id — the key `TabGroup.recentTabIds` uses. Null for rows outside a tab group. */
   unifiedTabId: string | null
   /** Terminal tab whose panes carry agent state. Null for editor, browser and simulator rows. */
@@ -38,7 +48,7 @@ export type RecentWorkspaceTabOrderInputs = {
 }
 
 type RankedRow = {
-  id: string
+  occurrenceId: string
   needsAttention: boolean
   attentionClass: SmartClass
   attentionTimestamp: number
@@ -152,11 +162,14 @@ export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs):
     .map((row): RankedRow => {
       const attention = resolveRecentWorkspaceTabAttention(row, paneSources, now)
       return {
-        id: row.id,
+        occurrenceId: row.occurrenceId ?? row.id,
         needsAttention: attention.cls <= NEEDS_ATTENTION_MAX_CLASS,
         attentionClass: attention.cls,
         attentionTimestamp: attention.attentionTimestamp,
-        visitedAt: lastVisitedAtByWorktreeId[row.worktreeId],
+        visitedAt: getWorktreeVisitTimestamp(lastVisitedAtByWorktreeId, {
+          id: row.worktreeId,
+          hostId: row.worktreeHostId
+        }),
         worktreeId: row.worktreeId,
         worktreeOrder: worktreeOrder.get(row.worktreeId) ?? Number.MAX_SAFE_INTEGER,
         focusOrdinal:
@@ -166,5 +179,5 @@ export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs):
       }
     })
     .sort(compareRankedRows)
-    .map((row) => row.id)
+    .map((row) => row.occurrenceId)
 }

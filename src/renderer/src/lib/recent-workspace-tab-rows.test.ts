@@ -206,6 +206,21 @@ describe('orderRecentWorkspaceTabs', () => {
     ])
   })
 
+  it('returns each occurrence identity when palette ids collide', () => {
+    const rows = [
+      row('workspace-tab:duplicate', {
+        occurrenceId: 'recent-tab:alpha',
+        worktreeId: 'wt-alpha'
+      }),
+      row('workspace-tab:duplicate', {
+        occurrenceId: 'recent-tab:beta',
+        worktreeId: 'wt-beta'
+      })
+    ]
+
+    expect(order(rows, sources([]))).toEqual(['recent-tab:alpha', 'recent-tab:beta'])
+  })
+
   it('treats rows without a terminal tab as idle', () => {
     const rows = [row('browser', { terminalTab: null, unifiedTabId: null }), row('blocked')]
 
