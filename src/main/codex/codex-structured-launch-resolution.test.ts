@@ -64,6 +64,20 @@ describe('codex structured launch resolution', () => {
     expect(launch.resumeThreadId).toBe('thread-current')
   })
 
+  it('places the durable user configuration before the app-server subcommand', async () => {
+    const launch = await resolverFor(
+      record({ launchArgs: ['--profile', 'review', '-c', 'model_reasoning_effort=high'] })
+    )({ identity: IDENTITY })
+
+    expect(launch.args).toEqual([
+      '--profile',
+      'review',
+      '-c',
+      'model_reasoning_effort=high',
+      'app-server'
+    ])
+  })
+
   it('pins resume to the rollout file that proved the durable thread', async () => {
     const resolveRollout = vi.fn(async () => '/home/work/.codex/sessions/rollout.jsonl')
     const launch = await resolverFor(

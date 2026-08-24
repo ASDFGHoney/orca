@@ -620,6 +620,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
+import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import {
   getTuiAgentLaunchCommand,
@@ -10627,8 +10628,24 @@ export class OrcaRuntimeService {
       // in a plain folder lands in the folder rather than failing to resolve.
       resolveWorkspacePath: async (workspaceId) =>
         (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
+      resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
+      resolveLaunchEnvOverlay: () =>
+        resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
+  }
+
+  private resolveConfiguredCodexStructuredArgs(): string[] {
+    const settings = this.requireStore().getSettings()
+    const shell = resolveLocalWindowsAgentStartupShell({
+      platform: process.platform,
+      isRemote: false,
+      terminalWindowsShell: settings.terminalWindowsShell
+    })
+    return resolveCodexStructuredAppServerArgs(
+      resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
+      shell ?? 'posix'
+    )
   }
 
   private createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport {
@@ -11499,6 +11516,7 @@ export class OrcaRuntimeService {
     if (!host) {
       throw new Error('structured_agent_session_unsupported')
     }
+    const launchArgs = this.resolveConfiguredCodexStructuredArgs()
     const launchEnv = resolveTuiAgentLaunchEnv(
       'codex',
       this.requireStore().getSettings().agentDefaultEnv
@@ -11516,6 +11534,7 @@ export class OrcaRuntimeService {
       accountHome: intent.accountHome,
       spawnToken: randomUUID(),
       claimKeyId: this.agentSessionClaimSigner.keyId,
+      launchArgs,
       launchEnv
     })
     if (!reserved.ok) {

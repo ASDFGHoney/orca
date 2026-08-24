@@ -18,8 +18,10 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import {
   _internals as codexPaneAccountRegistryInternals,
+  getCodexPaneAccount,
   type CodexPaneAccountRecord
 } from '../codex/codex-pane-account-registry'
+import { getLocalPtyProvider, registerPtyHandlers, setLocalPtyProvider } from '../ipc/pty'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { createStructuredAgentSessionOwnerProbe } from './structured-agent-session-runtime'
@@ -72,7 +74,7 @@ async function recordPaneAccount(record: CodexPaneAccountRecord | null): Promise
   codexPaneAccountRegistryInternals.resetCache()
 }
 
-function buildSettings() {
+function buildSettings(activeAccountId = SELECTED_ACCOUNT_ID) {
   const account = (id: string, managedHomePath: string) => ({
     id,
     email: `${id}@example.com`,
@@ -85,7 +87,7 @@ function buildSettings() {
     // Why a configured CODEX_HOME: it is what the create intent resolves to in this rig, so an
     // adoption that follows the selection probes THIS home instead of the pane's.
     agentDefaultEnv: { codex: { CODEX_HOME: selectedAccountHome } },
-    activeCodexManagedAccountId: SELECTED_ACCOUNT_ID,
+    activeCodexManagedAccountId: activeAccountId,
     codexManagedAccounts: [
       account(PANE_ACCOUNT_ID, paneAccountHome),
       account(SELECTED_ACCOUNT_ID, selectedAccountHome)
@@ -230,6 +232,64 @@ afterEach(async () => {
 })
 
 describe('structured Codex adoption resolves the account home from the pane', () => {
+  it('refuses adoption when the selected account changes during a local-fallback spawn', async () => {
+    await recordPaneAccount(null)
+    await writeRolloutFixture(sharedRuntimeHome, THREAD_ID)
+    let activeAccountId = PANE_ACCOUNT_ID
+    let finishSpawn: (() => void) | undefined
+    const spawn = vi.fn(
+      () =>
+        new Promise<{ id: string }>((resolve) => {
+          finishSpawn = () => resolve({ id: PTY_ID })
+        })
+    )
+    const previousProvider = getLocalPtyProvider()
+    setLocalPtyProvider({
+      routesFreshSpawnsToLocalProvider: true,
+      spawn,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      shutdown: vi.fn(),
+      onData: vi.fn(() => vi.fn()),
+      onExit: vi.fn(() => vi.fn()),
+      listProcesses: vi.fn(async () => []),
+      getForegroundProcess: vi.fn(async () => null)
+    } as never)
+    const spawnRuntime = {
+      setPtyController: vi.fn(),
+      registerPty: vi.fn(),
+      noteTerminalSpawnCommand: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    }
+    try {
+      registerPtyHandlers(
+        null,
+        spawnRuntime as never,
+        () => sharedRuntimeHome,
+        () => buildSettings(activeAccountId) as never
+      )
+      const controller = spawnRuntime.setPtyController.mock.calls[0]?.[0] as {
+        spawn(args: Record<string, unknown>): Promise<{ id: string }>
+      }
+      const launch = controller.spawn({ cols: 80, rows: 24, worktreeId: WORKTREE_ID })
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce())
+      activeAccountId = SELECTED_ACCOUNT_ID
+      finishSpawn?.()
+      await launch
+
+      expect(getCodexPaneAccount(PTY_ID)).toBeNull()
+      await expect(
+        rig.runtime.adoptStructuredAgentSessionTerminal(adoptInput(), { callerKey: 'renderer-1' })
+      ).rejects.toThrow('no record of which Codex account this terminal launched under')
+      expect(rig.store.getRecord(SESSION_ID)).toBeNull()
+    } finally {
+      setLocalPtyProvider(previousProvider)
+    }
+  })
+
   it('adopts a local-fallback pane from its shared-home launch provenance', async () => {
     await recordPaneAccount({
       selectionKey: 'host',

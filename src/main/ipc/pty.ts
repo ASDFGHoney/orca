@@ -207,7 +207,10 @@ import {
 import { setTerminalViewAttributes } from '../runtime/terminal-view-attribute-store'
 import { validateTerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { PtyModelRestoreReason } from '../../shared/pty-model-restore-marker'
-import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
+import {
+  getSelectedCodexAccountIdForTarget,
+  type CodexAccountSelectionTarget
+} from '../codex-accounts/runtime-selection'
 import {
   isCodexHomeAuthReadyForLaunch,
   waitForManagedCodexAuthReady
@@ -1487,6 +1490,7 @@ function recordCodexPaneAccountForSpawn(args: {
   pinnedByResume: boolean
   launchCodexHomePath: string | null
   launchEnv?: NodeJS.ProcessEnv
+  selectedAccountIdAtLaunch?: string | null
   target: CodexAccountSelectionTarget
   settings: GlobalSettings | undefined
 }): void {
@@ -1513,25 +1517,37 @@ function recordCodexPaneAccountForSpawn(args: {
     )
       ? customHomeOverride.context
       : undefined
-  const record = args.settings
-    ? resolveCodexPaneLaunchAccount({
-        pinnedByResume: args.pinnedByResume,
-        launchCodexHomePath: args.launchCodexHomePath,
-        // Why: pane-local overrides cannot be re-derived when a restart builds
-        // a fresh launch env, so route prompts would guess and block valid input.
-        recordComparableHomeRoute:
-          args.pinnedByResume ||
-          ((customHomeOverride?.source !== 'environment' ||
-            recheckableEnvironmentOverride !== undefined) &&
-            (customHomeOverride?.source !== 'shell-startup' ||
-              recheckableShellStartupOverride !== undefined)),
-        shellStartupHomeOverride: args.pinnedByResume ? undefined : recheckableShellStartupOverride,
-        environmentHomeOverride: args.pinnedByResume ? undefined : recheckableEnvironmentOverride,
-        systemCodexHomePath: getSystemCodexHomePath(),
-        settings: args.settings,
-        target: args.target
-      })
-    : null
+  const accountSelectionChanged =
+    !args.pinnedByResume &&
+    args.settings !== undefined &&
+    args.selectedAccountIdAtLaunch !== undefined &&
+    getSelectedCodexAccountIdForTarget(args.settings, args.target) !==
+      args.selectedAccountIdAtLaunch
+  const record =
+    args.settings && !accountSelectionChanged
+      ? resolveCodexPaneLaunchAccount({
+          pinnedByResume: args.pinnedByResume,
+          launchCodexHomePath: args.launchCodexHomePath,
+          // Why: pane-local overrides cannot be re-derived when a restart builds
+          // a fresh launch env, so route prompts would guess and block valid input.
+          recordComparableHomeRoute:
+            args.pinnedByResume ||
+            ((customHomeOverride?.source !== 'environment' ||
+              recheckableEnvironmentOverride !== undefined) &&
+              (customHomeOverride?.source !== 'shell-startup' ||
+                recheckableShellStartupOverride !== undefined)),
+          shellStartupHomeOverride: args.pinnedByResume
+            ? undefined
+            : recheckableShellStartupOverride,
+          environmentHomeOverride: args.pinnedByResume ? undefined : recheckableEnvironmentOverride,
+          systemCodexHomePath: getSystemCodexHomePath(),
+          settings: args.settings,
+          ...(args.selectedAccountIdAtLaunch !== undefined
+            ? { selectedAccountId: args.selectedAccountIdAtLaunch }
+            : {}),
+          target: args.target
+        })
+      : null
   if (!record) {
     forgetCodexPaneAccount(args.ptyId)
     return
@@ -4785,6 +4801,9 @@ export function registerPtyHandlers(
         })
         selectedCodexHomePath = resolution instanceof Promise ? await resolution : resolution
       }
+      const selectedCodexAccountIdAtLaunch = getSettings
+        ? getSelectedCodexAccountIdForTarget(getSettings(), codexSelectionTarget)
+        : undefined
       if (args.launchAgent === 'codex' && selectedCodexHomePath) {
         await ensureCodexStateDbBackfillRecoveryStarted(selectedCodexHomePath)
       }
@@ -5350,6 +5369,7 @@ export function registerPtyHandlers(
           pinnedByResume: codexResumeHomeSelected,
           launchCodexHomePath: selectedCodexHomePath,
           launchEnv: args.env,
+          selectedAccountIdAtLaunch: selectedCodexAccountIdAtLaunch,
           target: codexSelectionTarget,
           settings: getSettings?.()
         })
@@ -6538,6 +6558,9 @@ export function registerPtyHandlers(
           })
           selectedCodexHomePath = resolution instanceof Promise ? await resolution : resolution
         }
+        const selectedCodexAccountIdAtLaunch = getSettings
+          ? getSelectedCodexAccountIdForTarget(getSettings(), codexSelectionTarget)
+          : undefined
         if (args.launchAgent === 'codex' && selectedCodexHomePath) {
           await ensureCodexStateDbBackfillRecoveryStarted(selectedCodexHomePath)
         }
@@ -6932,6 +6955,7 @@ export function registerPtyHandlers(
           pinnedByResume: codexResumeHomeSelected,
           launchCodexHomePath: selectedCodexHomePath,
           launchEnv: baseEnv,
+          selectedAccountIdAtLaunch: selectedCodexAccountIdAtLaunch,
           target: codexSelectionTarget,
           settings: getSettings?.()
         })

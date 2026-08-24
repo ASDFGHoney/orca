@@ -309,9 +309,20 @@ beforeEach(async () => {
         claimKeyId: 'key-1',
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
+        resolveLaunchArgs: () => [
+          '--profile',
+          'review',
+          '-c',
+          'model_reasoning_effort=high',
+          '--model',
+          'gpt-5.6'
+        ],
         resolveLaunchEnv: async () => ({
           EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
           CODEX_HOME: '/shell/home'
+        }),
+        resolveLaunchEnvOverlay: () => ({
+          CODEX_API_BASE_URL: 'https://configured.example.test'
         }),
         openCodexConnection: codex.openConnection,
         readProcessStartTime: async () => 1_700_000_000_000
@@ -395,8 +406,18 @@ describe('a structured codex session over agentSession.*', () => {
     expect(created.snapshot.items).toEqual([])
     expect(codex.live().launch.env).toMatchObject({
       EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
+      CODEX_API_BASE_URL: 'https://configured.example.test',
       CODEX_HOME: '/home/dev/.codex'
     })
+    expect(codex.live().launch.args).toEqual([
+      '--profile',
+      'review',
+      '-c',
+      'model_reasoning_effort=high',
+      '--model',
+      'gpt-5.6',
+      'app-server'
+    ])
     const stream = await subscribe('sub-first-send')
     const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hi' }] }
 

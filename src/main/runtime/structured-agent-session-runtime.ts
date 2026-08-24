@@ -47,7 +47,9 @@ export type StructuredAgentSessionRuntimeDeps = {
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
   /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
   readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
+  resolveLaunchArgs?: () => Promise<string[]> | string[]
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
+  resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   onError?: (input: { scope: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
 }
@@ -113,8 +115,16 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       journalRoot: deps.stateDirectory,
       claimKeyId: deps.claimKeyId,
       probeOwner: createStructuredAgentSessionOwnerProbe(deps.hostId),
-      resolveLaunchEnv: async () =>
-        (await (deps.resolveLaunchEnv ?? resolveLoginShellEnvironment)()) as Record<string, string>,
+      ...(deps.resolveLaunchArgs
+        ? { resolveLaunchArgs: async () => await deps.resolveLaunchArgs!() }
+        : {}),
+      resolveLaunchEnv: async () => ({
+        ...((await (deps.resolveLaunchEnv ?? resolveLoginShellEnvironment)()) as Record<
+          string,
+          string
+        >),
+        ...(await deps.resolveLaunchEnvOverlay?.())
+      }),
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
       ...(deps.handoffTransport ? { handoffTransport: deps.handoffTransport } : {})

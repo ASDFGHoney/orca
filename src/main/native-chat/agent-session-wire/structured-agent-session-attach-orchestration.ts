@@ -15,7 +15,10 @@ import type {
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
 import { refuseAgentSessionMutation } from './structured-agent-session-mutation-admission'
 import { performAttach } from './structured-agent-session-attach-flow'
-import { pinnedAgentSessionLaunchEnv } from './structured-agent-session-launch-env'
+import {
+  pinnedAgentSessionLaunchArgs,
+  pinnedAgentSessionLaunchEnv
+} from './structured-agent-session-launch-env'
 import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 
 export async function attachStructuredAgentSession(
@@ -45,6 +48,7 @@ export async function attachStructuredAgentSession(
       claimKeyId: context.deps.claimKeyId,
       handoffOperationId: params.envelope.clientOperationId,
       probe: await context.runtimeState.probeOwner(sessionId),
+      ...(await pinnedAgentSessionLaunchArgs(context.deps.resolveLaunchArgs, params)),
       ...(await pinnedAgentSessionLaunchEnv(context.deps.resolveLaunchEnv, params))
     },
     callerKey,

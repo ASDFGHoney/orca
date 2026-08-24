@@ -15,8 +15,6 @@ import { getSpawnArgsForWindows } from '../win32-utils'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 
-const CODEX_APP_SERVER_ARGS = ['app-server']
-
 export type CodexStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   /** Absolute path of a workspace on this host. Rejects when the workspace no
@@ -51,7 +49,10 @@ export function createCodexStructuredLaunchResolver(
       throw new Error(`codex sessions pin CODEX_HOME, not ${accountHome.variable}`)
     }
     const command = (deps.resolveCommand ?? resolveCodexCommand)()
-    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, CODEX_APP_SERVER_ARGS)
+    const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
+      ...(record.launchArgs ?? []),
+      'app-server'
+    ])
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
     return {
