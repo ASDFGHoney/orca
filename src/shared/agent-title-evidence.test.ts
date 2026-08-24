@@ -86,10 +86,10 @@ describe('collectAgentTitleEvidence', () => {
     })
 
     it('lets an anchored name outrank a foreign vendor marker', () => {
-      // `agy` is the entire undecorated remainder — the strongest name evidence a title carries —
-      // so it wins against Claude's sigil rather than losing to it by position.
-      expect(agentFor('✳ agy')).toBe('antigravity')
-      expect(reasonFor('✳ agy')).toBe('anchored')
+      expect(agentFor('✳ agy')).toBe('claude')
+      expect(reasonFor('✳ agy')).toBe('vendor-marker')
+      expect(agentFor('✳ codex')).toBe('claude')
+      expect(reasonFor('✳ codex')).toBe('vendor-marker')
     })
 
     it('keeps an OpenCode envelope OpenCode when its session text names another agent', () => {
@@ -347,5 +347,9 @@ describe('collectAgentTitleEvidence', () => {
   it('requires whitespace before the owner suffix dash', () => {
     expect(agentFor('task- codex')).toBeNull()
     expect(reasonFor('task- codex')).toBe('free-text-only')
+  })
+
+  it('terminates when a wrapper title starts with a separator', () => {
+    expect(agentFor(' | ')).toBeNull()
   })
 })
