@@ -195,6 +195,14 @@ describe('collectAgentTitleEvidence', () => {
     expect(reasonFor(title)).toBe('anchored')
   })
 
+  it.each(['Droid', 'Hermes', 'Devin'])(
+    'does not treat a bare working label as synthetic identity: %s',
+    (title) => {
+      expect(agentFor(title)).toBeNull()
+      expect(reasonFor(title)).toBe('free-text-only')
+    }
+  )
+
   it.each([
     'Claude Code ready',
     'Claude thinking',
@@ -221,7 +229,10 @@ describe('collectAgentTitleEvidence', () => {
   it.each([
     ['⠋ Cursor Agent', 'cursor'],
     ['⠋ Pi idle', 'pi'],
-    ['⠋ OMP done', 'omp']
+    ['⠋ OMP done', 'omp'],
+    ['⠋ Droid', 'droid'],
+    ['⠋ Hermes', 'hermes'],
+    ['⠋ Devin', 'devin']
   ] as const)('recognizes the decorated identity frame %s', (title, agent) => {
     expect(agentFor(title)).toBe(agent)
     expect(reasonFor(title)).toBe('anchored')

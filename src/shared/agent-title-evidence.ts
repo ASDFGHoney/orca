@@ -7,6 +7,7 @@ import {
   GEMINI_SILENT_WORKING,
   GEMINI_WORKING,
   HERMES_AGENT_NAME_RE,
+  containsAgentSpinnerGlyph,
   isClaudeIdentityFrameSegment,
   isClaudeManagementTitle,
   isCursorNativeAgentTitle,
@@ -196,7 +197,10 @@ function agentForSyntheticTitle(text: string): TuiAgent | null {
     const profile = SYNTHETIC_AGENT_TITLE_PROFILES[agent]
     const emittedLabels = [profile.permissionLabel, profile.idleLabel]
     if (profile.synthesizeWorkingTitle !== false) {
-      emittedLabels.push(profile.workingLabel)
+      // Working labels are emitted only as spinner frames; a bare name is free text.
+      if (containsAgentSpinnerGlyph(trimmed) && normalized === profile.workingLabel.toLowerCase()) {
+        return agent
+      }
     }
     if (
       profile.synthesizeTerminalTitle !== false &&
