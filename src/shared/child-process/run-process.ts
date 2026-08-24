@@ -198,6 +198,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     let deferredExit: { code: number | null; signal: NodeJS.Signals | null } | null = null
     let deferredClose: { code: number | null; signal: NodeJS.Signals | null } | null = null
     let deferredError: Error | null = null
+    let rootExitedBeforeBarrier = false
 
     const settle = (act: () => void): void => {
       if (settled) {
@@ -257,7 +258,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
 
     const resolveBarrierIfSafe = (): void => {
       const rootExit = deferredClose ?? deferredExit
-      if (barrierTerminationVerified || (barrierAttemptComplete && rootExit)) {
+      if (barrierTerminationVerified || (rootExitedBeforeBarrier && rootExit)) {
         settleBarrierOutcome()
         return
       }
@@ -304,6 +305,11 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
                 ([initialTerminated, forceTerminated]) => {
                   barrierAttemptComplete = true
                   barrierTerminationVerified = initialTerminated || forceTerminated
+                  if (!barrierTerminationVerified) {
+                    // The barrier never confirmed the tree died, so the root
+                    // would otherwise outlive the abort or timeout.
+                    terminate(child, 'SIGKILL')
+                  }
                   resolveBarrierIfSafe()
                 }
               )
@@ -323,6 +329,9 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
             ([_initialTerminated, forceTerminated]) => {
               barrierAttemptComplete = true
               barrierTerminationVerified = forceTerminated
+              if (!barrierTerminationVerified) {
+                terminate(child, 'SIGKILL')
+              }
               resolveBarrierIfSafe()
             }
           )
@@ -360,12 +369,18 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       settle(() => reject(error))
     })
     child.once('exit', (code, signal) => {
+      if (!barrierStopping) {
+        rootExitedBeforeBarrier = true
+      }
       deferredExit = { code, signal }
       if (barrierStopping) {
         resolveBarrierIfSafe()
       }
     })
     child.once('close', (code, signal) => {
+      if (!barrierStopping) {
+        rootExitedBeforeBarrier = true
+      }
       if (barrierStopping) {
         deferredClose = { code, signal }
         resolveBarrierIfSafe()

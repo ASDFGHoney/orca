@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { normalizeGitErrorMessage } from '../../shared/git-remote-error'
 import { isNoWriteFetchHeadUnsupportedError } from '../../shared/git-fetch-head-capability'
+import { runWithGitWorktreeOperationLock } from '../../shared/git-worktree-operation-lock'
 import {
   REBASE_SOURCE_FETCH_TIMEOUT_MS,
   resolveGitRemoteRebaseSource
@@ -15,6 +16,16 @@ export async function gitPullRebaseFromBase(
   worktreePath: string,
   baseRef: string,
   options: GitRuntimeOptions = {}
+): Promise<void> {
+  await runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
+    gitPullRebaseFromBaseUnlocked(worktreePath, baseRef, options)
+  )
+}
+
+async function gitPullRebaseFromBaseUnlocked(
+  worktreePath: string,
+  baseRef: string,
+  options: GitRuntimeOptions
 ): Promise<void> {
   await runWithGitReadCacheInvalidation(async () => {
     const operationOptions = {

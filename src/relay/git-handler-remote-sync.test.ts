@@ -241,6 +241,92 @@ describe('GitHandler', () => {
       }
     }, 15_000)
 
+    it('rebases the selected linked worktree without moving the source worktree', async () => {
+      const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-linked-rebase-bare-'))
+      const producerParent = mkdtempSync(path.join(tmpdir(), 'relay-git-linked-rebase-producer-'))
+      const producerDir = path.join(producerParent, 'repo')
+      const targetParent = mkdtempSync(path.join(tmpdir(), 'relay-git-linked-rebase-target-'))
+      const targetDir = path.join(targetParent, 'feature')
+      try {
+        execFileSync('git', ['init', '--bare'], { cwd: bareDir, stdio: 'pipe' })
+        gitInit(tmpDir)
+        writeFileSync(path.join(tmpDir, 'base.txt'), 'base')
+        gitCommit(tmpDir, 'base')
+        const baseBranch = execFileSync('git', ['branch', '--show-current'], {
+          cwd: tmpDir,
+          encoding: 'utf-8'
+        }).trim()
+        execFileSync('git', ['remote', 'add', 'origin', bareDir], { cwd: tmpDir, stdio: 'pipe' })
+        execFileSync('git', ['push', '--set-upstream', 'origin', baseBranch], {
+          cwd: tmpDir,
+          stdio: 'pipe'
+        })
+        execFileSync('git', ['worktree', 'add', '-b', 'feature', targetDir, 'HEAD'], {
+          cwd: tmpDir,
+          stdio: 'pipe'
+        })
+        writeFileSync(path.join(targetDir, 'topic.txt'), 'topic')
+        gitCommit(targetDir, 'topic')
+        writeFileSync(path.join(tmpDir, 'source-dirty.txt'), 'leave me alone')
+        const sourceHeadBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tmpDir,
+          encoding: 'utf-8'
+        }).trim()
+        const sourceStatusBefore = execFileSync('git', ['status', '--short'], {
+          cwd: tmpDir,
+          encoding: 'utf-8'
+        })
+
+        execFileSync('git', ['clone', bareDir, producerDir], { stdio: 'pipe' })
+        execFileSync('git', ['config', 'user.email', 'test@test.com'], {
+          cwd: producerDir,
+          stdio: 'pipe'
+        })
+        execFileSync('git', ['config', 'user.name', 'Test'], { cwd: producerDir, stdio: 'pipe' })
+        execFileSync('git', ['checkout', baseBranch], { cwd: producerDir, stdio: 'pipe' })
+        writeFileSync(path.join(producerDir, 'latest.txt'), 'latest')
+        gitCommit(producerDir, 'latest base')
+        const latestBaseOid = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: producerDir,
+          encoding: 'utf-8'
+        }).trim()
+        execFileSync('git', ['push', 'origin', baseBranch], { cwd: producerDir, stdio: 'pipe' })
+
+        await dispatcher.callRequest('git.rebaseFromBase', {
+          worktreePath: targetDir,
+          baseRef: `origin/${baseBranch}`
+        })
+
+        expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpDir }).toString().trim()).toBe(
+          sourceHeadBefore
+        )
+        expect(execFileSync('git', ['status', '--short'], { cwd: tmpDir, encoding: 'utf-8' })).toBe(
+          sourceStatusBefore
+        )
+        expect(
+          execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: targetDir, encoding: 'utf-8' }).trim()
+        ).toBe(latestBaseOid)
+        expect(
+          execFileSync('git', ['reflog', '-1', '--format=%gs'], {
+            cwd: targetDir,
+            encoding: 'utf-8'
+          })
+        ).toContain('rebase (finish)')
+        expect(
+          execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/orca/rebase'], {
+            cwd: targetDir,
+            encoding: 'utf-8'
+          }).trim()
+        ).toBe('')
+      } finally {
+        await Promise.all([
+          fs.rm(bareDir, { recursive: true, force: true }),
+          fs.rm(producerParent, { recursive: true, force: true }),
+          fs.rm(targetParent, { recursive: true, force: true })
+        ])
+      }
+    }, 15_000)
+
     it('fast-forwards an unborn branch from the selected remote base', async () => {
       const bareDir = mkdtempSync(path.join(tmpdir(), 'relay-git-unborn-bare-'))
       const producerDir = mkdtempSync(path.join(tmpdir(), 'relay-git-unborn-producer-'))

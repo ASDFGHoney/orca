@@ -62,6 +62,7 @@ import { upstreamOnlyCommitsArePatchEquivalent } from '../shared/git-upstream-st
 import { assertGitPushTargetShape } from '../shared/git-push-target-validation'
 import { getPublishTargetStatus, type GitCommandRunner } from '../shared/git-publish-target-status'
 import { isNoWriteFetchHeadUnsupportedError } from '../shared/git-fetch-head-capability'
+import { runWithGitWorktreeOperationLock } from '../shared/git-worktree-operation-lock'
 import { resolveGitFetchHeadCommand, runWithGitFetchHeadLock } from '../shared/git-fetch-head-lock'
 import {
   REBASE_FROM_BASE_OPERATION_TIMEOUT_MS,
@@ -1190,6 +1191,12 @@ export class GitHandler {
   }
 
   private async rebaseFromBase(params: Record<string, unknown>, context?: RequestContext) {
+    return runWithGitWorktreeOperationLock(params.worktreePath as string, context?.signal, () =>
+      this.runRebaseFromBase(params, context)
+    )
+  }
+
+  private async runRebaseFromBase(params: Record<string, unknown>, context?: RequestContext) {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     const baseRef = params.baseRef as string

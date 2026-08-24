@@ -38,7 +38,7 @@ describe('runProcess termination failure', () => {
     vi.clearAllMocks()
   })
 
-  it('waits for root exit when bounded tree termination cannot be verified', async () => {
+  it('holds the result until the barrier deadline when tree termination cannot be verified', async () => {
     const child = mockChild()
     spawnMock.mockReturnValue(child)
     const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
@@ -52,6 +52,8 @@ describe('runProcess termination failure', () => {
     expect(settled).toBe(false)
     child.emit('exit', null, 'SIGKILL')
 
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(10_000)
     await expect(pending).resolves.toMatchObject({ timedOut: true })
   })
 
@@ -118,6 +120,28 @@ describe('runProcess termination failure', () => {
     expect(settled).toBe(false)
     child.emit('exit', null, 'SIGKILL')
 
+    await vi.advanceTimersByTimeAsync(10_000)
     await rejection
+  })
+
+  it('kills the root when an object barrier cannot verify tree termination', async () => {
+    const child = mockChild()
+    spawnMock.mockReturnValue(child)
+    const pending = runProcess({
+      program: 'wsl.exe',
+      timeoutMs: 10,
+      terminationBarrier: {
+        signal: vi.fn().mockResolvedValue(false),
+        force: vi.fn().mockResolvedValue(false)
+      }
+    })
+    void pending.catch(() => {})
+
+    await vi.advanceTimersByTimeAsync(2_010)
+
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    child.emit('exit', null, 'SIGKILL')
+    await vi.advanceTimersByTimeAsync(10_000)
+    await expect(pending).resolves.toMatchObject({ timedOut: true })
   })
 })
