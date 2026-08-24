@@ -1033,9 +1033,6 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
                       'auto.components.sidebar.WorktreeContextMenu.deleteWorktree',
                       'Delete Worktree'
                     )}
-                    {deleteShortcut ? (
-                      <DropdownMenuShortcut>{deleteShortcut}</DropdownMenuShortcut>
-                    ) : null}
                   </DropdownMenuItem>
                 </div>
               </TooltipTrigger>
@@ -1092,7 +1089,7 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
                           'auto.components.sidebar.WorktreeContextMenu.f4475537d8',
                           'Delete'
                         )}
-            {!removesProject && deleteShortcut ? (
+            {!isMultiContext && !removesProject && deleteShortcut ? (
               <DropdownMenuShortcut>{deleteShortcut}</DropdownMenuShortcut>
             ) : null}
           </DropdownMenuItem>

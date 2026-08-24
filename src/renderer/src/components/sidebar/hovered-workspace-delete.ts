@@ -4,11 +4,12 @@ import type { AppState } from '@/store/types'
 import { isEditableTarget } from '@/lib/editable-target'
 import {
   composeWorktreeHostIdentity,
+  getExecutionHostIdFromWorktreeHostIdentity,
   getWorktreeHostIdentity
 } from '../../../../shared/worktree/host-qualified-identity'
 import type { Worktree } from '../../../../shared/worktree/types'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
-import { parseExecutionHostId, type ExecutionHostId } from '../../../../shared/execution-host'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 import { runWorktreeDelete } from './delete-worktree-flow'
 import { getDeleteStateForWorktreeHost } from './worktree-delete-state-host-match'
 
@@ -67,9 +68,7 @@ export function resolveHoveredWorkspaceDeleteTarget(
   }
   const workspaceScope = parseWorkspaceKey(hovered.workspaceId)
   if (workspaceScope?.type === 'folder') {
-    const executionHostId = parseExecutionHostId(
-      hovered.hostIdentity.slice(0, hovered.hostIdentity.indexOf('|'))
-    )?.id
+    const executionHostId = getExecutionHostIdFromWorktreeHostIdentity(hovered.hostIdentity)
     if (!executionHostId) {
       return null
     }

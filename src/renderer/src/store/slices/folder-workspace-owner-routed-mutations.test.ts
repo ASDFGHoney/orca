@@ -427,6 +427,7 @@ describe('folder workspace owner-routed mutations', () => {
       timeoutMs: 15_000
     })
     expect(folderWorkspacesDelete).not.toHaveBeenCalled()
+    expect(store.getState().folderWorkspaces).toEqual([])
   })
 
   it('deletes only the host-qualified folder when ids collide', async () => {

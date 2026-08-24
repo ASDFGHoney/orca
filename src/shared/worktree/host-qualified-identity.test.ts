@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../execution-host'
 import {
   composeWorktreeHostIdentity,
+  getExecutionHostIdFromWorktreeHostIdentity,
   getWorktreeHostIdentity,
   getWorktreeIdFromHostIdentity
 } from './host-qualified-identity'
@@ -57,5 +58,9 @@ describe('worktree host identity', () => {
     // encodeURIComponent escapes '|' as %7C, which is what makes the split exact.
     expect(toSshExecutionHostId('we|rd')).not.toContain('|')
     expect(toRuntimeExecutionHostId('we|rd')).not.toContain('|')
+  })
+
+  it('rejects identities without a host separator', () => {
+    expect(getExecutionHostIdFromWorktreeHostIdentity('ssh:build-box')).toBeUndefined()
   })
 })

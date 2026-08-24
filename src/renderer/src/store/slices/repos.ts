@@ -115,7 +115,6 @@ import {
   getExecutionHostIdForFolderWorkspace,
   getRuntimeEnvironmentIdForFolderWorkspace
 } from '@/lib/folder-workspace-runtime-owner'
-import { getCatalogOwnerHostId } from '@/lib/worktree-runtime-owner-index'
 import {
   FolderWorkspaceUpdateCoordinator,
   type FolderWorkspaceUpdateTicket
@@ -3022,7 +3021,8 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       set((s) => ({
         folderWorkspaces: s.folderWorkspaces.filter(
           (workspace) =>
-            workspace.id !== folderWorkspaceId || getCatalogOwnerHostId(workspace) !== ownerHostId
+            workspace.id !== folderWorkspaceId ||
+            getFolderWorkspaceHostId(workspace, s.projectGroups) !== ownerHostId
         ),
         folderWorkspacePathStatuses: {}
       }))

@@ -1,4 +1,5 @@
 import type { ExecutionHostId } from '../execution-host'
+import { parseExecutionHostId } from '../execution-host'
 import type { Worktree } from './types'
 
 /**
@@ -36,6 +37,16 @@ export function composeWorktreeHostIdentity(
   worktreeId: string
 ): string {
   return `${hostId ?? ''}${HOST_SEPARATOR}${worktreeId}`
+}
+
+export function getExecutionHostIdFromWorktreeHostIdentity(
+  identity: string
+): ExecutionHostId | undefined {
+  const separatorIndex = identity.indexOf(HOST_SEPARATOR)
+  if (separatorIndex <= 0) {
+    return undefined
+  }
+  return parseExecutionHostId(identity.slice(0, separatorIndex))?.id
 }
 
 /**

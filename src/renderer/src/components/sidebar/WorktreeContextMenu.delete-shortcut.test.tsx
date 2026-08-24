@@ -198,7 +198,7 @@ describe('WorktreeContextMenu delete shortcut display', () => {
     expect(deleteShortcuts.length).toBe(1)
   })
 
-  it('renders the delete shortcut on disabled Delete Worktree for primary checkout', () => {
+  it('omits the delete shortcut on disabled Delete Worktree for primary checkout', () => {
     const worktree = {
       id: 'repo-1::main',
       repoId: 'repo-1',
@@ -217,7 +217,7 @@ describe('WorktreeContextMenu delete shortcut display', () => {
 
     const shortcuts = container.querySelectorAll('[data-testid="dropdown-menu-shortcut"]')
     const deleteShortcuts = Array.from(shortcuts).filter((el) => el.textContent === '⌘⇧⌫')
-    expect(deleteShortcuts.length).toBe(1)
+    expect(deleteShortcuts.length).toBe(0)
   })
 
   it('omits the shortcut badge when the action is unassigned', () => {
