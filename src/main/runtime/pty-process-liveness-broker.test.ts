@@ -244,6 +244,34 @@ describe('PtyProcessLivenessBroker', () => {
     )
   })
 
+  it('does not let stale inventory presence suppress a later exact exit', async () => {
+    const inspectProcess = vi
+      .fn()
+      .mockResolvedValueOnce({ foregroundProcess: 'codex', hasChildProcesses: true })
+      .mockRejectedValueOnce(new Error('terminal_gone'))
+    const source = { getForegroundProcess: vi.fn(async () => null), inspectProcess }
+    const broker = new PtyProcessLivenessBroker({ timeoutMs: 100 })
+
+    await expect(
+      broker.inspect({
+        source,
+        ptyId: 'pty-1',
+        identity: 'incarnation-a',
+        freshness: 1,
+        owningInventoryObservedPty: true
+      })
+    ).resolves.toEqual(expect.objectContaining({ status: 'live' }))
+    await expect(
+      broker.inspect({
+        source,
+        ptyId: 'pty-1',
+        identity: 'incarnation-a',
+        freshness: 2,
+        owningInventoryObservedPty: false
+      })
+    ).resolves.toEqual({ status: 'exited' })
+  })
+
   it('does not let an old incarnation populate the replacement cache entry', async () => {
     let resolveOld!: (value: { foregroundProcess: string; hasChildProcesses: boolean }) => void
     const oldInspection = new Promise<{

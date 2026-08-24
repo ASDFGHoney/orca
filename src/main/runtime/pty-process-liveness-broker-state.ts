@@ -1,4 +1,4 @@
-import type { PtyProcessLivenessBrokerOptions } from './pty-process-liveness-broker'
+import type { PtyProcessLivenessBrokerOptions } from './pty-process-liveness-broker-types'
 
 export const DEFAULT_LIVE_TTL_MS = 10_000
 export const DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS = 3_000

@@ -12,34 +12,15 @@ import {
   maxConcurrentUnscopedProbes,
   processEvidenceKey
 } from './pty-process-liveness-broker-state'
+import type {
+  PtyProcessEvidenceEntry,
+  PtyProcessLivenessBrokerOptions
+} from './pty-process-liveness-broker-types'
+export type { PtyProcessLivenessBrokerOptions } from './pty-process-liveness-broker-types'
 export type {
   PtyProcessInspectionSource,
   PtyProcessLivenessEvidence
 } from './pty-process-inspection'
-type PtyProcessEvidenceEntry = {
-  source: PtyProcessInspectionSource
-  identity: string
-  unscopedProbe: boolean
-  consumerIds: Set<string>
-  hasUnscopedConsumer: boolean
-  freshness: number
-  owningInventoryObservedPty: boolean
-  failureCount: number
-  evidence: PtyProcessLivenessEvidence | null
-  expiresAt: number
-  timedOut: boolean
-  probe: Promise<PtyProcessLivenessEvidence> | null
-}
-export type PtyProcessLivenessBrokerOptions = {
-  timeoutMs: number
-  maxConcurrentProbes?: number
-  maxConcurrentUnscopedProbes?: number
-  liveTtlMs?: number
-  unavailableBackoffBaseMs?: number
-  unavailableBackoffMaxMs?: number
-  now?: () => number
-  onInspectionError?: (ptyId: string, error: unknown) => void
-}
 export class PtyProcessLivenessBroker {
   private readonly entries = new Map<string, PtyProcessEvidenceEntry>()
   private readonly now: () => number
@@ -82,6 +63,15 @@ export class PtyProcessLivenessBroker {
       if (existing.evidence?.status === 'exited') {
         this.storeUnverifiable(existing, 'owning inventory re-observed PTY')
       }
+    }
+    if (
+      existing?.source === args.source &&
+      existing.identity === args.identity &&
+      freshness >= existing.freshness &&
+      !existing.probe &&
+      args.owningInventoryObservedPty !== true
+    ) {
+      existing.owningInventoryObservedPty = false
     }
     if (
       existing?.source === args.source &&
