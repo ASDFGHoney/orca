@@ -20704,6 +20704,9 @@ export class OrcaRuntimeService {
         if (!evidence || evidence.status !== 'live') {
           return result(evidence?.status ?? 'unverifiable')
         }
+        if (!this.inventoryProvesRestoredBindingPresent(freshPtyInventory, binding)) {
+          return result('unverifiable')
+        }
         if (binding.source === 'persisted') {
           return result('unverifiable')
         }
@@ -20748,6 +20751,7 @@ export class OrcaRuntimeService {
     if (
       encodedHost === 'foreign' ||
       (encodedHost !== null && encodedHost !== hook.hostKey) ||
+      (controllerIdentity?.wslDistro && !hook.hostKey.startsWith('wsl:')) ||
       (hook.hostKey.startsWith('wsl:') &&
         controllerIdentity?.wslDistro?.toLowerCase() !== hook.hostKey.slice(4))
     ) {
