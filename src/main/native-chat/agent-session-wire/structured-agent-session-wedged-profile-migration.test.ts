@@ -272,10 +272,7 @@ describe('already-wedged profiles become usable on load', () => {
     expect(isAcquirable(lease)).toBe(true)
   })
 
-  it("stops a child carrying a lost record's spawn token before recovery respawns", async () => {
-    // `listOrphanSpawnTokens` had no production caller, so a child spawned under a reservation
-    // that went down with the primary store file was never stopped — and recovery then granted a
-    // second owner on the same Codex thread.
+  it('does not infer orphan ownership from a host-global token scan', async () => {
     await seedStore(
       wedgedRecord({
         claimStatus: 'conflicted',
@@ -284,6 +281,13 @@ describe('already-wedged profiles become usable on load', () => {
       })
     )
     const order: string[] = []
+    const scan = vi.fn(
+      async () =>
+        new Map([
+          ['spawn-lost', [31_337]],
+          [DEAD_OWNER.spawnToken, [12_546]]
+        ])
+    )
     acquire.mockImplementation(async ({ fence }) => {
       order.push('acquire')
       return {
@@ -298,23 +302,16 @@ describe('already-wedged profiles become usable on load', () => {
       }
     })
     openHost({
-      scanSpawnTokenProcesses: async () =>
-        new Map([
-          ['spawn-lost', [31_337]],
-          // The surviving record still claims this one, so it must be left alone.
-          [DEAD_OWNER.spawnToken, [12_546]]
-        ]),
+      scanSpawnTokenProcesses: scan,
       stopOwnerProcess: (pid) => order.push(`stop:${pid}`)
     })
 
     await host.restoreReadableSessions()
-    // Startup only reaps now; a hold is what asks for a child. The ordering property is unchanged
-    // and still the point: the orphan holding the lost token must be gone BEFORE anything is
-    // granted a new owner for that provider session, or two children race one conversation.
-    expect(order).toEqual(['stop:31337'])
+    expect(order).toEqual([])
+    expect(scan).not.toHaveBeenCalled()
     await host.hold(SESSION, 'holder-1')
 
-    expect(order).toEqual(['stop:31337', 'acquire'])
+    expect(order).toEqual(['acquire'])
   })
 
   it('names the missing evidence when a latched record still cannot be freed', async () => {

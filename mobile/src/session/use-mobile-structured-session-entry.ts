@@ -4,6 +4,7 @@ import {
   createStructuredAgentSessionOperationId,
   structuredAgentSessionCreateFingerprint
 } from '../../../src/shared/structured-agent-session-mutation'
+import type { StructuredAgent } from '../../../src/shared/structured-agent-session-mutation'
 import type { RpcClient } from '../transport/rpc-client'
 import { useMobileStructuredAgentSession } from './use-mobile-structured-agent-session'
 import { useMobileStructuredAttachments } from './use-mobile-structured-attachments'
@@ -16,6 +17,7 @@ export function useMobileStructuredSessionEntry(args: {
   drawerOpen: boolean
   hostSupported: boolean
   worktreeId: string
+  agent?: StructuredAgent
   sessionId: string | null
   creationGuardRef: MutableRefObject<boolean>
   setCreating: (creating: boolean) => void
@@ -31,6 +33,7 @@ export function useMobileStructuredSessionEntry(args: {
     drawerOpen,
     hostSupported,
     worktreeId,
+    agent = 'codex',
     sessionId,
     creationGuardRef,
     setCreating,
@@ -56,7 +59,8 @@ export function useMobileStructuredSessionEntry(args: {
     connected,
     sessionId,
     fence: session.fence,
-    setOption: writes.setOption
+    setOption: writes.setOption,
+    agent
   })
   const attachments = useMobileStructuredAttachments({
     client,
@@ -75,7 +79,7 @@ export function useMobileStructuredSessionEntry(args: {
     void client
       .sendRequest('agentSession.createSupport', {
         worktree: `id:${worktreeId}`,
-        agent: 'codex'
+        agent
       })
       .then((response) => {
         if (!stale) {
@@ -88,7 +92,7 @@ export function useMobileStructuredSessionEntry(args: {
     return () => {
       stale = true
     }
-  }, [client, connected, drawerOpen, hostSupported, worktreeId])
+  }, [agent, client, connected, drawerOpen, hostSupported, worktreeId])
 
   const create = useCallback(async (): Promise<void> => {
     if (!client || creationGuardRef.current || !createSupported) {
@@ -106,10 +110,14 @@ export function useMobileStructuredSessionEntry(args: {
           sessionId,
           clientOperationId: createStructuredAgentSessionOperationId(() => ExpoCrypto.randomUUID()),
           expectedRuntimeFence: null,
-          payloadFingerprint: structuredAgentSessionCreateFingerprint({ sessionId, worktree })
+          payloadFingerprint: structuredAgentSessionCreateFingerprint({
+            sessionId,
+            worktree,
+            agent
+          })
         },
         worktree,
-        agent: 'codex'
+        agent
       })
       if (!response.ok) {
         throw new Error(response.error.message)
@@ -137,7 +145,8 @@ export function useMobileStructuredSessionEntry(args: {
     onError,
     setCreateError,
     setCreating,
-    worktreeId
+    worktreeId,
+    agent
   ])
 
   return { createSupported, create, session, writes, sessionOptions, attachments }

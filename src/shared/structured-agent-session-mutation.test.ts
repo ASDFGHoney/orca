@@ -26,7 +26,7 @@ describe('structured agent session client mutations', () => {
         workspaceSupport: true,
         agent: 'claude'
       })
-    ).toBe(false)
+    ).toBe(true)
     expect(
       showStructuredAgentSessionChoice({
         hostCapability: true,

@@ -2227,12 +2227,19 @@ export default function SessionScreen() {
       ((repoResponse as RpcSuccess).result as { repos?: RuntimeRepoSummary[] }).repos ?? []
     return repos.find((repo) => repo.id === repoId)?.connectionId?.trim() || null
   }, [client, isFloatingWorkspaceRoute, worktreeId])
+  const structuredAgent =
+    activeSessionTab?.type === 'agent-session'
+      ? activeSessionTab.agent
+      : (createTabAgentOptions.find(
+          (option) => option.agent === 'codex' || option.agent === 'claude'
+        )?.agent ?? 'codex')
   const structuredSessionEntry = useMobileStructuredSessionEntry({
     client,
     connected: connState === 'connected',
     drawerOpen: showCreateTabDrawer,
     hostSupported: structuredAgentSessionSupported,
     worktreeId,
+    agent: structuredAgent,
     sessionId: activeSessionTab?.type === 'agent-session' ? activeSessionTab.sessionId : null,
     creationGuardRef: creatingTerminalRef,
     setCreating,
@@ -4168,12 +4175,12 @@ export default function SessionScreen() {
   const structuredChatAction = showMobileStructuredChatChoice({
     hostCapability: structuredAgentSessionSupported,
     workspaceSupport: structuredSessionEntry.createSupported,
-    agent: createTabAgentOptions.some((option) => option.agent === 'codex') ? 'codex' : ''
+    agent: structuredAgent
   })
     ? [
         {
           label: 'Chat session',
-          hint: 'Codex · structured chat',
+          hint: `${structuredAgent === 'claude' ? 'Claude' : 'Codex'} · structured chat`,
           icon: MessageSquare,
           onPress: structuredSessionEntry.create
         }

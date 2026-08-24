@@ -33,7 +33,11 @@ export function nativeChatRouteForTerminal(input: {
     return 'bridge'
   }
   if (input.structuredSessionId) {
-    return input.agent === null || input.agent === 'codex' ? 'structured' : 'bridge'
+    return (input.agent === null || input.agent === 'codex' || input.agent === 'claude') &&
+      (input.agent === null ||
+        structuredSessionProviderMatches(input.structuredSessionId, input.agent))
+      ? 'structured'
+      : 'bridge'
   }
   return input.mode === 'chat' ? nativeChatRouteForAgent(input.agent) : 'bridge'
 }
@@ -68,6 +72,13 @@ function activeTerminalFacts(state: AppState, tab: Tab) {
 
 function adoptedSessionId(threadId: string): string {
   return `codex_${threadId.replaceAll(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 128)
+}
+
+function structuredSessionProviderMatches(sessionId: string, agent: AgentType | null): boolean {
+  if (agent !== 'claude' && agent !== 'codex') {
+    return false
+  }
+  return sessionId.startsWith(`${agent}_`)
 }
 
 function operationId(): string {
@@ -184,7 +195,8 @@ export async function setTerminalNativeChatMode(input: {
   ) {
     input.patch(tab.id, {
       viewMode: input.mode,
-      ...(tab.structuredSessionId && facts.agent !== 'codex'
+      ...(tab.structuredSessionId &&
+      !structuredSessionProviderMatches(tab.structuredSessionId, facts.agent)
         ? { structuredSessionId: undefined }
         : {})
     })

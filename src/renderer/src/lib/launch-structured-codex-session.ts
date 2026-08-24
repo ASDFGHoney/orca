@@ -9,13 +9,16 @@ import {
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 
-function newSessionId(): string {
-  return `codex_${crypto.randomUUID().replaceAll('-', '_')}`
+function newSessionId(agent: 'claude' | 'codex'): string {
+  return `${agent}_${crypto.randomUUID().replaceAll('-', '_')}`
 }
 
-export async function launchStructuredCodexSession(worktreeId: string): Promise<string> {
-  const sessionId = newSessionId()
-  const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent: 'codex' as const }
+export async function launchStructuredAgentSession(
+  worktreeId: string,
+  agent: 'claude' | 'codex'
+): Promise<string> {
+  const sessionId = newSessionId(agent)
+  const fields = { worktree: toRuntimeWorktreeSelector(worktreeId), agent }
   const result = await callStructuredAgentSession<
     AgentSessionMutationResult<AgentSessionAttachResult>
   >({ kind: 'local' }, 'agentSession.create', {
@@ -35,4 +38,12 @@ export async function launchStructuredCodexSession(worktreeId: string): Promise<
     throw new Error(result.refusal.message)
   }
   return result.value.sessionId
+}
+
+export function launchStructuredCodexSession(worktreeId: string): Promise<string> {
+  return launchStructuredAgentSession(worktreeId, 'codex')
+}
+
+export function launchStructuredClaudeSession(worktreeId: string): Promise<string> {
+  return launchStructuredAgentSession(worktreeId, 'claude')
 }

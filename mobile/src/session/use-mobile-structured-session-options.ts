@@ -14,8 +14,7 @@ import type {
 } from '../../../src/shared/agent-session-wire'
 import type { RpcClient } from '../transport/rpc-client'
 import type { MobileNativeChatSessionOptionsController } from './use-mobile-native-chat-session-options'
-
-const CODEX_CATALOG = getAgentSessionOptionCatalog('codex')
+import type { StructuredAgent } from '../../../src/shared/structured-agent-session-mutation'
 
 export function useMobileStructuredSessionOptions(args: {
   client: RpcClient | null
@@ -23,22 +22,24 @@ export function useMobileStructuredSessionOptions(args: {
   sessionId: string | null
   fence: number | null
   setOption: (key: string, value: string) => Promise<AgentSessionOptionResult | null>
+  agent?: StructuredAgent
 }): MobileNativeChatSessionOptionsController {
-  const { client, connected, fence, sessionId, setOption: dispatchOption } = args
+  const { client, connected, fence, sessionId, setOption: dispatchOption, agent = 'codex' } = args
+  const catalog = getAgentSessionOptionCatalog(agent)
   const [optionState, setOptionState] = useState(() =>
-    createStructuredAgentSessionOptionState('codex')
+    createStructuredAgentSessionOptionState(agent)
   )
   const [pickerRequest, setPickerRequest] = useState<{ id: string; token: number } | null>(null)
   const activeRecordRef = useRef(optionState.record)
   useEffect(() => {
-    const next = createStructuredAgentSessionOptionState('codex')
+    const next = createStructuredAgentSessionOptionState(agent)
     activeRecordRef.current = next.record
     setOptionState(next)
-  }, [fence, sessionId])
+  }, [agent, fence, sessionId])
 
   useEffect(() => {
     setPickerRequest(null)
-    if (!client || !connected || !sessionId || !CODEX_CATALOG) {
+    if (!client || !connected || !sessionId || !catalog) {
       return
     }
     let stale = false
@@ -51,7 +52,7 @@ export function useMobileStructuredSessionOptions(args: {
         const result = response.result as AgentSessionOptionsResult
         setOptionState((current) =>
           current.record === activeRecordRef.current
-            ? applyStructuredAgentSessionOptions(current, CODEX_CATALOG, result)
+            ? applyStructuredAgentSessionOptions(current, catalog, result)
             : current
         )
       })
@@ -59,7 +60,7 @@ export function useMobileStructuredSessionOptions(args: {
     return () => {
       stale = true
     }
-  }, [client, connected, fence, sessionId])
+  }, [catalog, client, connected, fence, sessionId])
 
   const snapshot = useMemo(
     () => (sessionId ? structuredAgentSessionOptionSnapshot(optionState) : []),

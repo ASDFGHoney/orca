@@ -32,7 +32,10 @@ import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
 import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
 import { waitForAgentReady } from '@/lib/agent-ready-wait'
-import { launchStructuredCodexSession } from '@/lib/launch-structured-codex-session'
+import {
+  launchStructuredClaudeSession,
+  launchStructuredCodexSession
+} from '@/lib/launch-structured-codex-session'
 import { translate } from '@/i18n/i18n'
 
 export type LaunchAgentInNewTabArgs = {
@@ -180,16 +183,18 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   }
 
   const launchDirectStructuredChat =
-    agent === 'codex' &&
+    (agent === 'codex' || agent === 'claude') &&
     !hasPrompt &&
     initialViewModeProps.viewMode === 'chat' &&
     canUseStructuredNativeChat(store, worktreeId)
   if (launchDirectStructuredChat) {
-    void launchStructuredCodexSession(worktreeId).catch((error) => {
+    const launchStructured =
+      agent === 'claude' ? launchStructuredClaudeSession : launchStructuredCodexSession
+    void launchStructured(worktreeId).catch((error) => {
       toast.error(
         translate(
           'components.native-chat.structuredSessionLaunchFailed',
-          'Could not open Codex chat'
+          `Could not open ${agent === 'claude' ? 'Claude' : 'Codex'} chat`
         ),
         {
           description: error instanceof Error ? error.message : String(error)
@@ -202,7 +207,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   // Why: queue startup BEFORE TerminalPane mounts — it snapshots pendingStartupByTabId in useState on first render.
   // Why: followup path pastes an unsubmitted draft, so gate the initial chat view like a draft launch, not auto-submit.
   const adoptStructuredChat =
-    agent === 'codex' &&
+    (agent === 'codex' || agent === 'claude') &&
     initialViewModeProps.viewMode === 'chat' &&
     canUseStructuredNativeChat(store, worktreeId)
   const tab = store.createTab(worktreeId, groupId, undefined, {
