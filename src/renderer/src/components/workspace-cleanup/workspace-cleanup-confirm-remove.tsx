@@ -13,7 +13,7 @@ import {
 import type { WorkspaceCleanupRemovalProgress } from './workspace-cleanup-background-removal'
 import {
   getCandidateFactStatuses,
-  getContextPillLabel,
+  formatContextDetailLabels,
   getDirtyGitLabel,
   getReviewPillTone,
   shouldShowGitMetadataChip
@@ -217,7 +217,7 @@ function ConfirmRemoveRow({
 }): React.JSX.Element {
   const dirtyLabel = getDirtyGitLabel(candidate)
   const branchDiffersFromName = candidate.branch !== candidate.displayName
-  const contextPillLabel = getContextPillLabel(candidate)
+  const contextPillLabels = formatContextDetailLabels(candidate)
   const showGitMetadataChip = shouldShowGitMetadataChip(candidate)
   const factStatuses = getCandidateFactStatuses(candidate)
   const hostLabel = getWorkspaceCleanupCandidateHostLabel(candidate)
@@ -251,7 +251,9 @@ function ConfirmRemoveRow({
         {reviewInfo.label ? (
           <StatusPill tone={getReviewPillTone(reviewInfo)}>{reviewInfo.label}</StatusPill>
         ) : null}
-        {contextPillLabel ? <StatusPill>{contextPillLabel}</StatusPill> : null}
+        {contextPillLabels.map((label) => (
+          <StatusPill key={label}>{label}</StatusPill>
+        ))}
         {dirtyLabel && showGitMetadataChip ? (
           <StatusPill tone="destructive">{dirtyLabel}</StatusPill>
         ) : null}
