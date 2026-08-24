@@ -22,6 +22,7 @@ import {
 import {
   applyGraphSessionTitle,
   cloneGraphSessionTitleState,
+  type GraphSessionAgent,
   type GraphSessionTitleState
 } from './session-scanner-graph-session-title'
 import {
@@ -174,7 +175,7 @@ export function rovoPartsText(parts: unknown[], role: 'user' | 'assistant'): str
 // Agents whose transcripts are append-only message-graph JSONL (session +
 // model_change + message records). OMP and Prime Agent are Pi forks and
 // share the format.
-export type MessageGraphAgent = 'openclaw' | 'pi' | 'omp' | 'prime-agent'
+export type MessageGraphAgent = GraphSessionAgent
 
 export async function parseMessageGraphSessionFile(
   agent: MessageGraphAgent,
@@ -255,6 +256,7 @@ export function createMessageGraphSessionResumeState(
   file: FileWithMtime
 ): ResumableSessionParseState {
   const resume = createMessageGraphResumeFrom({
+    agent,
     accumulator: createAccumulator({ agent, file, sessionId: sessionIdFromFileName(file.path) }),
     source: null
   })
