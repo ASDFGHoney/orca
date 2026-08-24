@@ -20945,7 +20945,7 @@ export class OrcaRuntimeService {
     if (parsedHost?.kind === 'ssh') {
       return pty.connectionId === parsedHost.targetId
     }
-    return pty.connectionId === null && !pty.wslDistro
+    return parsedHost?.kind === 'local' && pty.connectionId === null && !pty.wslDistro
   }
 
   private inventoryProvesRestoredBindingPresent(
