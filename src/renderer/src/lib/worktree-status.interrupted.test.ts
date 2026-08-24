@@ -16,23 +16,21 @@ const base = {
 
 describe('resolveWorktreeStatus — interrupted (STA-5357)', () => {
   it('reports interrupted rather than done for an interrupted agent', () => {
-    // Why `hasLiveDone` is also set: `interrupted` only ever coexists with `done`
-    // (agent-status-types.ts clamps it), so the done flag is always present too.
-    // Before the fix that made the card indistinguishable from a clean finish.
-    expect(resolveWorktreeStatus({ ...base, hasInterrupted: true, hasLiveDone: true })).toBe(
-      'interrupted'
-    )
+    // The bug: `interrupted` is clamped onto `done` at parse time, so the summary swallowed it into
+    // hasLiveDone and the card rendered a cancelled turn as a clean finish.
+    expect(resolveWorktreeStatus({ ...base, hasInterrupted: true })).toBe('interrupted')
   })
 
-  it('keeps interrupted visible when a sibling agent merely finished', () => {
-    expect(resolveWorktreeStatus({ ...base, hasInterrupted: true, hasLiveDone: true })).not.toBe(
-      'done'
-    )
+  it('is never the emerald done state on its own', () => {
+    expect(resolveWorktreeStatus({ ...base, hasInterrupted: true })).not.toBe('done')
   })
 
-  it('outranks working, so a cancelled turn is not hidden by a busy sibling', () => {
+  // Why interrupted YIELDS to everything else: Esc / Ctrl+C is a deliberate act, so the user already
+  // knows. It is the least attention-demanding state — smart-attention already classes it 4 (idle),
+  // below both done and working. Distinguishable from done, never louder than a live agent.
+  it('yields to a working sibling — the live agent is the louder signal', () => {
     expect(resolveWorktreeStatus({ ...base, hasInterrupted: true, hasLiveWorking: true })).toBe(
-      'interrupted'
+      'working'
     )
   })
 
@@ -42,10 +40,14 @@ describe('resolveWorktreeStatus — interrupted (STA-5357)', () => {
     )
   })
 
-  it('outranks monitoring', () => {
+  it('yields to monitoring — background work is still live', () => {
     expect(resolveWorktreeStatus({ ...base, hasInterrupted: true, hasLiveMonitoring: true })).toBe(
-      'interrupted'
+      'monitoring'
     )
+  })
+
+  it('yields to a sibling that genuinely finished', () => {
+    expect(resolveWorktreeStatus({ ...base, hasInterrupted: true, hasLiveDone: true })).toBe('done')
   })
 
   it('leaves every other combination alone', () => {

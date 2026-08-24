@@ -213,15 +213,16 @@ export function resolveTerminalTabAttentionBadge({
   if (status === 'monitoring') {
     return 'monitoring'
   }
-  // Why above unread and done: a cancelled turn needs a human, and an unread bell would bury it.
-  if (status === 'interrupted') {
-    return 'interrupted'
-  }
   if (hasUnread) {
     return 'unread'
   }
   if (status === 'done') {
     return 'done'
+  }
+  // Why last (STA-5357): the user pressed Esc / Ctrl+C, so this is the least attention-demanding
+  // signal — it must be distinguishable from `done`, but it must not outrank anything live.
+  if (status === 'interrupted') {
+    return 'interrupted'
   }
   return null
 }

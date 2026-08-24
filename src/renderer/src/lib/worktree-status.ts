@@ -167,13 +167,6 @@ export function resolveWorktreeStatus(args: {
   if (heuristic === 'permission') {
     return 'permission'
   }
-  // Why above working (STA-5357): `interrupted` only ever rides on `done`, so before this it set
-  // `hasLiveDone` and the card rendered a cancelled turn as a clean finish — and a busy sibling could
-  // hide it entirely. It sits below permission because a prompt waiting on the user is the more urgent
-  // ask, and matches SUMMARY_STATE_ORDER so the card and the expanded agent list agree.
-  if (args.hasInterrupted) {
-    return 'interrupted'
-  }
   // Why: restored cards get the hook snapshot before panes mount; trust the explicit working row so they stay yellow on restart.
   if (args.hasLiveWorking || heuristic === 'working') {
     return 'working'
@@ -183,6 +176,14 @@ export function resolveWorktreeStatus(args: {
   }
   if (args.hasLiveDone || args.hasRetainedDone) {
     return 'done'
+  }
+  // Why LAST (STA-5357): `interrupted` means the user pressed Esc or Ctrl+C, so they already know —
+  // it is the least attention-demanding state, exactly as smart-attention classes it (Class 4, idle,
+  // below both done and working). It still needs its own branch rather than folding into `done`,
+  // because the flag rides on `done` and rendering it as a completion is the bug this fixes: a
+  // cancelled turn is not a finished one.
+  if (args.hasInterrupted) {
+    return 'interrupted'
   }
   return heuristic
 }

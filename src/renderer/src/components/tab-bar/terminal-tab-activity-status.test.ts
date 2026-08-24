@@ -125,7 +125,9 @@ describe('resolveTerminalTabActivityStatus', () => {
     ).toBe('interrupted')
   })
 
-  it('does not let a finished sibling mask an interrupted pane', () => {
+  it('lets a finished sibling win — interrupted is the quietest state', () => {
+    // Why: Esc / Ctrl+C is deliberate, so the user already knows. Interrupted must be
+    // DISTINGUISHABLE from done (that is the bug) without being LOUDER than anything live.
     const interrupted = entry(FIRST_LEAF_ID, 'done', { interrupted: true })
     const finished = entry(SECOND_LEAF_ID, 'done')
     expect(
@@ -137,7 +139,7 @@ describe('resolveTerminalTabActivityStatus', () => {
         },
         ptyIdsByTabId: LIVE_PTY
       })
-    ).toBe('interrupted')
+    ).toBe('done')
   })
 
   it('falls back to a live working title when hook status is stale', () => {
