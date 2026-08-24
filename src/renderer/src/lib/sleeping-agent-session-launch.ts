@@ -87,6 +87,7 @@ export function launchSleepingAgentSession(
     // double-launching a provider session that is already queued.
     resumeProviderSession: record.providerSession,
     launchAgent: requestedAgent,
+    sleepingRecordPaneKey: record.paneKey,
     showSessionRestoredBanner: true,
     telemetry: {
       agent_kind: tuiAgentToAgentKind(baseAgent),
@@ -99,7 +100,11 @@ export function launchSleepingAgentSession(
     launchAgent: requestedAgent,
     providerSession: record.providerSession
   })
-  state.clearSleepingAgentSession(record.paneKey)
+  // Why: the record is NOT cleared here. The host resolves the launch after the
+  // pane mounts, so it can still fail (or land unverifiable on contact loss);
+  // clearing now would strand the session with no retry record. Consumption of
+  // the queued startup — spent only once the pane owns a concrete PTY — clears
+  // it via sleepingRecordPaneKey; until then the sweep's replay dedup skips it.
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
   }

@@ -577,6 +577,7 @@ import {
 } from '../../shared/windows-terminal-shell'
 import {
   getTuiAgentLaunchCommand,
+  isBuiltInTuiAgent,
   isTuiAgent,
   TUI_AGENT_CONFIG,
   type TuiAgentConfig
@@ -1643,6 +1644,10 @@ type RuntimePtyWorktreeRecord = {
   // Why: provider PTY IDs can be reused; launch identity belongs only to the process that received the token.
   launchIncarnationId: PtyIncarnationId | null
   launchAgent: TuiAgent | null
+  /** Requested (possibly custom) launch identity, set only when it differs from
+   *  launchAgent. Display-only for client snapshots — every behavior check stays
+   *  keyed on launchAgent, the built-in base. */
+  launchRequestedAgent: TuiAgent | null
   /** Host-owned launch notices for this terminal (mirrored to session tabs). */
   launchNotices: PersistedLaunchNoticeState | null
   foregroundAgent: TuiAgent | null
@@ -8367,6 +8372,7 @@ export class OrcaRuntimeService {
       ptyId: pty.ptyId,
       title,
       ...(pty.launchAgent ? { launchAgent: pty.launchAgent } : {}),
+      ...(pty.launchRequestedAgent ? { requestedAgent: pty.launchRequestedAgent } : {}),
       ...(pty.launchNotices ? { launchNotices: pty.launchNotices } : {}),
       ...(args.startupCwd ? { startupCwd: args.startupCwd } : {}),
       ...(viewMode ? { viewMode } : {}),
@@ -11435,7 +11441,12 @@ export class OrcaRuntimeService {
       tabId: string
       leafId: string
       incarnationId?: PtyIncarnationId
-      agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
+      agentLaunchAuthority?: {
+        launchToken: string
+        launchAgent: TuiAgent
+        /** Requested (possibly custom) identity for display; launchAgent stays the base. */
+        requestedAgent?: TuiAgent
+      }
     },
     isWsl?: boolean
   ): void {
@@ -11473,6 +11484,11 @@ export class OrcaRuntimeService {
       pty.launchToken = agentLaunchAuthority.launchToken
       pty.launchIncarnationId = binding.incarnationId
       pty.launchAgent = agentLaunchAuthority.launchAgent
+      pty.launchRequestedAgent =
+        isTuiAgent(agentLaunchAuthority.requestedAgent) &&
+        agentLaunchAuthority.requestedAgent !== agentLaunchAuthority.launchAgent
+          ? agentLaunchAuthority.requestedAgent
+          : null
     }
     const pendingIncarnation = this.pendingPtyRegistrationIncarnations.get(ptyId)
     if (
@@ -24531,11 +24547,14 @@ export class OrcaRuntimeService {
     repo: Repo,
     agent: TuiAgent,
     prompt: string | undefined,
-    launchPreferences?: AgentLaunchPreferences
+    launchPreferences?: AgentLaunchPreferences,
+    worktreePath?: string
   ): {
     agent: TuiAgent
     startup: WorktreeStartupLaunch
     followup?: WorktreeStartupFollowup
+    /** Base harness for terminal surfacing when `agent` is a custom id. */
+    launchAgent?: TuiAgent
   } {
     if (!this.store) {
       throw new Error('runtime_unavailable')
@@ -24543,6 +24562,63 @@ export class OrcaRuntimeService {
     const settings = this.store.getSettings()
     if (!isTuiAgentEnabled(agent, settings.disabledTuiAgents)) {
       throw new Error('Selected agent is disabled. Choose an enabled agent before creating.')
+    }
+    if (!isBuiltInTuiAgent(agent)) {
+      // Custom ids carry no static startup config: resolve to the base harness
+      // through the boundary's resolve-only path — the same resolver interactive
+      // launches use. Only trusted in-process callers (headless automation, the
+      // unix-socket CLI legacy shim) reach here with a custom id; remote clients
+      // are rejected at the RPC guard (U7).
+      const resolution = resolveAgentLaunchStartupPlanWithoutAdmission(
+        {
+          boundary: getHostAgentLaunchBoundary(),
+          getSettings: () => this.requireStore().getSettings(),
+          getCatalogRevision: () => this.requireStore().getSettings().agentCatalogRevision ?? 1
+        },
+        {
+          request: {
+            selection: { kind: 'agent', agent },
+            prompt: prompt ?? '',
+            allowEmptyPromptLaunch: true
+          },
+          intent: { kind: 'interactive', client: 'desktop' },
+          target: this.buildResolveOnlySpawnTarget(repo, true),
+          variables: { repoPath: repo.path, ...(worktreePath ? { worktreePath } : {}) },
+          scope: 'legacy-startup',
+          principal: { kind: 'local' }
+        }
+      )
+      if (!resolution.ok) {
+        const code =
+          'failure' in resolution ? resolution.failure.code : resolution.requestError.code
+        throw new Error(`Could not build launch command for ${agent} (${code}).`)
+      }
+      const plan = resolution.plan
+      return {
+        agent,
+        startup: {
+          command: plan.launchCommand,
+          ...(plan.launchConfig ? { launchConfig: plan.launchConfig } : {}),
+          ...(plan.startupCommandDelivery
+            ? { startupCommandDelivery: plan.startupCommandDelivery }
+            : {}),
+          ...(plan.env ? { env: plan.env } : {})
+        },
+        ...(plan.followupPrompt
+          ? {
+              followup: {
+                expectedProcess: plan.expectedProcess,
+                prompt: plan.followupPrompt
+              }
+            }
+          : {}),
+        launchAgent:
+          resolveTuiAgentBaseAgent(
+            agent,
+            (settings as GlobalSettings).customTuiAgents,
+            (settings as GlobalSettings).deletedCustomTuiAgents
+          ) ?? agent
+      }
     }
     // Why: CLI clients may target SSH runtimes from macOS/Windows, so quote for
     // the workspace shell rather than the client shell.
@@ -24959,7 +25035,18 @@ export class OrcaRuntimeService {
       if (replay) {
         observeData(replay)
       }
-      hardTimer = setTimeout(() => finish(null), resolveDraftPasteReadyTimeoutMs(agent))
+      // Thread the catalog so a custom id inherits its base harness's readiness
+      // budget instead of the default; the resolver still defaults if absent.
+      const catalogSettings = this.store?.getSettings() as GlobalSettings | undefined
+      hardTimer = setTimeout(
+        () => finish(null),
+        resolveDraftPasteReadyTimeoutMs(
+          agent,
+          undefined,
+          catalogSettings?.customTuiAgents,
+          catalogSettings?.deletedCustomTuiAgents
+        )
+      )
     })
   }
 
@@ -30761,6 +30848,43 @@ export class OrcaRuntimeService {
       if (!store) {
         throw new Error('runtime_unavailable')
       }
+      if (!isBuiltInTuiAgent(opts.startupAgent)) {
+        // Custom ids carry no static startup config: the built-in-only plan
+        // builder below would throw opaquely, so resolve them through the same
+        // host agentLaunch boundary as the sanctioned launch path. Built-in ids
+        // keep the legacy plan byte-for-byte for old clients.
+        const resolution = await this.resolveWorkspaceAgentLaunch(
+          workspace,
+          {
+            selection: { kind: 'agent', agent: opts.startupAgent },
+            prompt: '',
+            allowEmptyPromptLaunch: true
+          },
+          opts.clientKind,
+          opts.deviceId
+        )
+        if (resolution.kind === 'failed') {
+          // Preserve this surface's throwing contract: a typed pre-spawn failure
+          // must abort creation loudly, never fall through to a bare shell.
+          const outcome = resolution.outcome
+          const code =
+            outcome.status === 'failed' ? outcome.failure.code : outcome.requestError.code
+          throw new Error(`Could not launch ${opts.startupAgent} (${code}).`)
+        }
+        if (resolution.kind === 'bypass') {
+          // A fresh selection can never resolve as a vault-resume bypass.
+          throw new Error(`Could not build launch command for ${opts.startupAgent}.`)
+        }
+        return {
+          kind: 'launched',
+          admissionToken: resolution.admissionToken,
+          receipt: resolution.receipt,
+          ...(resolution.fields.postReadyPrompt
+            ? { postReadyPrompt: resolution.fields.postReadyPrompt }
+            : {}),
+          options: this.applyResolvedLaunchToTerminalOptions(opts, resolution.fields)
+        }
+      }
     } else if (callerSuppliedLaunch || !store || !opts.command || !workspace.repo) {
       return { kind: 'options', options: opts }
     }
@@ -31115,25 +31239,39 @@ export class OrcaRuntimeService {
         shell,
         isRemote
       }
-      const startup =
-        request.promptDelivery === 'draft'
+      // Custom ids carry no static startup config: route them through the same
+      // host agentLaunch boundary as terminal.create (catalog base resolution,
+      // admission, typed failures) instead of the built-in-only plan builders,
+      // which throw an opaque error for them.
+      const customAgentLaunch = !isBuiltInTuiAgent(request.agent)
+      if (customAgentLaunch && request.agentArgs !== undefined) {
+        // The boundary launches the catalog's own args template; a per-launch
+        // override would be silently dropped, so refuse rather than mislaunch.
+        throw new Error(`Custom agent ${request.agent} does not accept an agentArgs override.`)
+      }
+      const startup = customAgentLaunch
+        ? null
+        : request.promptDelivery === 'draft'
           ? buildAgentDraftLaunchPlan({ ...startupArgs, draft: request.prompt ?? '' })
           : buildAgentStartupPlan({
               ...startupArgs,
               prompt: request.prompt ?? '',
               allowEmptyPromptLaunch: true
             })
-      if (!startup) {
+      if (!customAgentLaunch && !startup) {
         throw new Error('agent_session_identity_required')
       }
-      if (workspace.connectionId) {
-        await this.markRemoteWorkspaceTrustedForAgent(
-          request.agent,
-          workspace.connectionId,
-          workspace.path
-        )
-      } else {
-        this.markLocalWorkspaceTrustedForAgent(request.agent, workspace.path)
+      if (!customAgentLaunch) {
+        // The boundary marks trust in its pre-admission preflight for custom ids.
+        if (workspace.connectionId) {
+          await this.markRemoteWorkspaceTrustedForAgent(
+            request.agent,
+            workspace.connectionId,
+            workspace.path
+          )
+        } else {
+          this.markLocalWorkspaceTrustedForAgent(request.agent, workspace.path)
+        }
       }
       if (caller.signal?.aborted) {
         throw new Error('client_disconnected')
@@ -31151,25 +31289,50 @@ export class OrcaRuntimeService {
       const operationLeafId =
         request.placement?.leafId ?? deterministicAgentSessionUuid(`${executionOperationId}:leaf`)
       const operationHandle = `term_${deterministicAgentSessionUuid(`${executionOperationId}:handle`)}`
+      const operationSurfaceOptions = {
+        cwd: startupCwd,
+        presentation: request.presentation ?? 'background',
+        tabId: operationTabId,
+        leafId: operationLeafId,
+        preAllocatedHandle: operationHandle,
+        viewMode: request.viewMode,
+        agentSessionCreateOperationId: executionOperationId,
+        signal: caller.signal,
+        onPtySpawnCommitted: () => {
+          retainReplayFence = true
+        }
+      }
       try {
-        terminal = await this.createTerminal(`id:${workspace.id}`, {
-          command: startup.launchCommand,
-          env: startup.env,
-          launchConfig: startup.launchConfig,
-          launchAgent: request.agent,
-          startupCommandDelivery: startup.startupCommandDelivery,
-          cwd: startupCwd,
-          presentation: request.presentation ?? 'background',
-          tabId: operationTabId,
-          leafId: operationLeafId,
-          preAllocatedHandle: operationHandle,
-          viewMode: request.viewMode,
-          agentSessionCreateOperationId: executionOperationId,
-          signal: caller.signal,
-          onPtySpawnCommitted: () => {
-            retainReplayFence = true
+        if (startup) {
+          terminal = await this.createTerminal(`id:${workspace.id}`, {
+            command: startup.launchCommand,
+            env: startup.env,
+            launchConfig: startup.launchConfig,
+            launchAgent: request.agent,
+            startupCommandDelivery: startup.startupCommandDelivery,
+            ...operationSurfaceOptions
+          })
+        } else {
+          const created = await this.createTerminal(`id:${workspace.id}`, {
+            agentLaunch: {
+              selection: { kind: 'agent', agent: request.agent },
+              prompt: request.prompt ?? '',
+              allowEmptyPromptLaunch: true,
+              ...(request.promptDelivery === 'draft' ? { promptDelivery: 'draft' as const } : {})
+            },
+            clientKind: caller.clientKind,
+            ...operationSurfaceOptions
+          })
+          if (!('handle' in created)) {
+            // Pre-spawn typed failure: no terminal exists — keep this surface's
+            // throwing contract instead of the RPC-success failure envelope.
+            const outcome = created.agentLaunch
+            const code =
+              outcome.status === 'failed' ? outcome.failure.code : outcome.requestError.code
+            throw new Error(`Could not launch ${request.agent} (${code}).`)
           }
-        })
+          terminal = created
+        }
       } catch (error) {
         if (isAgentSessionOperationOutcomeUnknown(error)) {
           retainReplayFence = true
@@ -31525,6 +31688,11 @@ export class OrcaRuntimeService {
             pty.launchToken = launchToken ?? null
             pty.launchIncarnationId = launchToken ? pty.incarnationId : null
             pty.launchAgent = launchOpts.launchAgent ?? null
+            pty.launchRequestedAgent =
+              agentLaunchReceipt &&
+              agentLaunchReceipt.requestedAgent !== agentLaunchReceipt.baseAgent
+                ? agentLaunchReceipt.requestedAgent
+                : null
             pty.launchNotices =
               agentLaunchReceipt && agentLaunchReceipt.notices.length > 0
                 ? {
@@ -31908,21 +32076,33 @@ export class OrcaRuntimeService {
     if (!repo) {
       throw new Error('Repository for the selected workspace is no longer available.')
     }
-    const startup = this.buildStartupForAgent(repo, opts.agent, opts.prompt)
+    const startup = this.buildStartupForAgent(
+      repo,
+      opts.agent,
+      opts.prompt,
+      undefined,
+      worktree.path
+    )
     if (repo.connectionId) {
       await this.markRemoteWorkspaceTrustedForAgent(opts.agent, repo.connectionId, worktree.path)
     } else {
       this.markLocalWorkspaceTrustedForAgent(opts.agent, worktree.path)
     }
-    return await this.createTerminal(`id:${worktree.id}`, {
+    const terminal = await this.createTerminal(`id:${worktree.id}`, {
       command: startup.startup.command,
       env: startup.startup.env,
       ...(startup.startup.launchConfig ? { launchConfig: startup.startup.launchConfig } : {}),
-      launchAgent: startup.agent,
+      launchAgent: startup.launchAgent ?? startup.agent,
       startupCommandDelivery: startup.startup.startupCommandDelivery,
       telemetry: startup.startup.telemetry,
       title: opts.title
     })
+    if (startup.followup) {
+      // Stdin-after-start base agents (resolved custom launches included) get the
+      // prompt via the readiness-gated writer; command-folded prompts skip this.
+      this.sendStartupFollowupWhenReady(terminal.handle, startup.followup)
+    }
+    return terminal
   }
 
   // Why: dedupes a worktree.create whose response was lost when a mobile
@@ -35811,6 +35991,7 @@ export class OrcaRuntimeService {
         launchToken: state.launchToken ?? null,
         launchIncarnationId: null,
         launchAgent: null,
+        launchRequestedAgent: null,
         launchNotices: null,
         foregroundAgent: null,
         connected: state.connected ?? true,

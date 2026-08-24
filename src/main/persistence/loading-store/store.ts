@@ -203,7 +203,8 @@ import { getDataFile, getGithubCacheFile, readGithubCacheSnapshot } from './user
 import {
   STALE_DURABLE_WRITE_TEMP_AGE_MS,
   gcStaleWorktreeMeta,
-  normalizeWorktreeLinkedItemMetadata
+  normalizeWorktreeLinkedItemMetadata,
+  normalizeWorktreeMetaAgentLaunchState
 } from '../tracking-repos/worktree-metadata-normalization'
 import {
   migrateAgentYoloDefaults,
@@ -1650,6 +1651,10 @@ export class Store {
     result = folderScopeConnectionMigration.state
 
     if (normalizeWorktreeLinkedItemMetadata(result)) {
+      this.loadNeedsSave = true
+    }
+
+    if (normalizeWorktreeMetaAgentLaunchState(result)) {
       this.loadNeedsSave = true
     }
 

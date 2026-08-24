@@ -2775,18 +2775,20 @@ void app.whenReady().then(async () => {
                 repo: target.repo
               })
             })
-            terminalHandle = created.startupTerminal?.handle ?? ''
-            terminalSessionId = created.startupTerminal?.tabId ?? null
-            terminalPaneKey = created.startupTerminal?.paneKey ?? null
-            terminalPtyId = created.startupTerminal?.ptyId ?? null
             workspaceId = created.worktree.id
             workspaceDisplayName = created.worktree.displayName ?? null
-            if (!terminalHandle) {
-              throw new Error(
-                created.warning ||
-                  'Automation workspace was created, but no agent terminal started.'
-              )
-            }
+            // Launch AFTER create (renderer-dispatch parity): the launch resolver
+            // needs the authoritative worktree path for custom-agent variables,
+            // which does not exist yet on the create-time legacy startup arm.
+            const terminal = await runtimeService.launchAgentTerminal(`id:${workspaceId}`, {
+              agent: automation.agentId,
+              prompt: automation.prompt,
+              title: run.title
+            })
+            terminalHandle = terminal.handle
+            terminalSessionId = terminal.tabId ?? null
+            terminalPaneKey = terminal.paneKey ?? null
+            terminalPtyId = terminal.ptyId ?? null
           } else {
             if (!automation.workspaceId) {
               throw new Error('The target workspace is no longer available.')

@@ -24,6 +24,7 @@ import {
 } from './worktree-title-derived-agent-rows'
 import { buildSubagentChildRows } from './worktree-subagent-child-rows'
 import { resolveCompatibleAgentTypeForOwner } from '../../../../shared/agent-title-owner'
+import { parseCustomTuiAgentId } from '../../../../shared/custom-tui-agents'
 import { compareWorktreeAgentRows } from './worktree-agent-row-order'
 import {
   effectiveWorktreeAgentRowStartedAt,
@@ -35,16 +36,25 @@ import {
  * and normalizing compatible agent kinds.
  */
 function resolveRowAgentType(entry: AgentStatusEntry, tab?: TerminalTab | null): AgentType {
-  const entryAgentType = resolveCompatibleAgentTypeForOwner(entry.agentType, tab?.launchAgent)
-  if (entryAgentType && entryAgentType !== 'unknown') {
-    return entryAgentType
-  }
-  return (
-    resolveAgentTypeFromTerminalTitle(entry.terminalTitle ?? tab?.title, tab?.launchAgent) ??
-    tab?.launchAgent ??
-    entryAgentType ??
-    'unknown'
-  )
+  const launchAgent = tab?.launchAgent
+  // Hook and title evidence only ever names the base harness, so a custom
+  // launch identity resolves compatibility through its encoded base.
+  const requestedCustomBase = parseCustomTuiAgentId(launchAgent)?.baseAgent ?? null
+  const ownerAgentType = requestedCustomBase ?? launchAgent
+  const entryAgentType = resolveCompatibleAgentTypeForOwner(entry.agentType, ownerAgentType)
+  const resolved =
+    entryAgentType && entryAgentType !== 'unknown'
+      ? entryAgentType
+      : (resolveAgentTypeFromTerminalTitle(entry.terminalTitle ?? tab?.title, ownerAgentType) ??
+        launchAgent ??
+        entryAgentType ??
+        'unknown')
+  // Why: evidence matching the requested custom identity's base re-owns the row
+  // to the requested id, so the sidebar/dashboard show the custom agent's own
+  // identity instead of its base harness.
+  return launchAgent && (resolved === requestedCustomBase || resolved === launchAgent)
+    ? launchAgent
+    : resolved
 }
 
 function orchestrationContextsEqual(

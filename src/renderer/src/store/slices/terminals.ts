@@ -580,6 +580,10 @@ export type TerminalSlice = {
        *  alongside a pre-U5 record's `launchConfig` for host-side provenance. */
       legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
+      /** Sleeping-record paneKey this queued resume owns. Cleared on consumption
+       *  (spent only once the pane owns a concrete PTY), so a launch that fails
+       *  before spawn keeps the record for recovery to retry. */
+      sleepingRecordPaneKey?: string
       launchToken?: string
       launchAgent?: TuiAgent
       /** Explicit CLI override for host-owned agent launches; omission uses host settings. */
@@ -798,6 +802,7 @@ export type TerminalSlice = {
       // recorded execution owner before replay.
       legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
+      sleepingRecordPaneKey?: string
       launchToken?: string
       launchAgent?: TuiAgent
       agentArgsOverride?: string | null
@@ -820,6 +825,7 @@ export type TerminalSlice = {
     launchConfig?: SleepingAgentLaunchConfig
     legacyResumeRecordedConnectionId?: string | null
     resumeProviderSession?: AgentProviderSessionMetadata
+    sleepingRecordPaneKey?: string
     launchToken?: string
     launchAgent?: TuiAgent
     agentArgsOverride?: string | null
@@ -3845,6 +3851,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       delete next[tabId]
       return { pendingStartupByTabId: next }
     })
+
+    // Why: consumption is the spawn-success signal (the pane owns a concrete
+    // PTY), so the sleeping record this resume launched from is now settled.
+    if (pending.sleepingRecordPaneKey) {
+      get().clearSleepingAgentSession(pending.sleepingRecordPaneKey)
+    }
 
     return pending
   },

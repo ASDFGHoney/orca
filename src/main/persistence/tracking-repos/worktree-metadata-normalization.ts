@@ -14,6 +14,9 @@ import {
   normalizeWorkspaceLinkedItem
 } from '../../../shared/workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
+import { parsePersistedAgentLaunchFailure } from '../../../shared/agent-launch-failure-schema'
+import { isTuiAgent } from '../../../shared/tui-agent-config'
+import type { PendingAgentLaunch } from '../../../shared/worktree/meta-types'
 import type { StoreOwnedPersistedState } from '../loading-store/store-owned-state'
 
 // Why: worktrees deleted outside Orca orphan their worktreeMeta, so the map grew monotonically (63% dead on a heavy install).
@@ -130,6 +133,56 @@ export function normalizeWorktreeLinkedItemMetadata(state: StoreOwnedPersistedSt
     }
     if (!areTaskSourceContextsEqual(meta.linkedTaskSourceContext, linkedTaskSourceContext)) {
       meta.linkedTaskSourceContext = linkedTaskSourceContext
+      changed = true
+    }
+  }
+  return changed
+}
+
+/** Whether a persisted value is a well-formed PendingAgentLaunch. Strict like the
+ *  failure schema: an unknown or malformed field rejects the whole entry. */
+function isValidPendingAgentLaunch(value: unknown): value is PendingAgentLaunch {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const record = value as Record<string, unknown>
+  if (typeof record.operationId !== 'string' || !record.operationId) {
+    return false
+  }
+  if (!isTuiAgent(record.requestedAgent)) {
+    return false
+  }
+  if (
+    record.priorFailureId !== undefined &&
+    (typeof record.priorFailureId !== 'string' || !record.priorFailureId)
+  ) {
+    return false
+  }
+  return Object.keys(record).every(
+    (key) => key === 'operationId' || key === 'requestedAgent' || key === 'priorFailureId'
+  )
+}
+
+/** Fail-closed load validation for the U6 agent-launch owner fields on worktree
+ *  meta (mirrors the automation-run read path): a corrupt or forged persisted
+ *  agentLaunchFailure/pendingAgentLaunch drops instead of surfacing as a recovery
+ *  card or blocking pending-launch reconciliation. Runs after
+ *  normalizeWorktreeLinkedItemMetadata, which guarantees every entry is an object. */
+export function normalizeWorktreeMetaAgentLaunchState(state: StoreOwnedPersistedState): boolean {
+  let changed = false
+  for (const meta of Object.values(state.worktreeMeta ?? {})) {
+    if (
+      meta.agentLaunchFailure !== undefined &&
+      parsePersistedAgentLaunchFailure(meta.agentLaunchFailure) === null
+    ) {
+      delete meta.agentLaunchFailure
+      changed = true
+    }
+    if (
+      meta.pendingAgentLaunch !== undefined &&
+      !isValidPendingAgentLaunch(meta.pendingAgentLaunch)
+    ) {
+      delete meta.pendingAgentLaunch
       changed = true
     }
   }

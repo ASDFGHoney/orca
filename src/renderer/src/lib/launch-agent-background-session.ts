@@ -199,12 +199,15 @@ export async function launchAgentBackgroundSession(
       runtimeTerminalHandle = terminal.handle
       ptyId = toRemoteRuntimePtyId(runtimeTerminalHandle, runtimeTarget.environmentId)
     } else {
+      // A WSL UNC worktree needs the pane opened inside the distro shell.
+      const wslUncShellOverride =
+        !sshConnectionId && isWslUncPath(worktree.path) ? { shellOverride: 'wsl.exe' } : {}
       const result = await window.api.pty.spawn({
         cols: 120,
         rows: 40,
         cwd: worktree.path,
         agentLaunch,
-        ...(!sshConnectionId && isWslUncPath(worktree.path) ? { shellOverride: 'wsl.exe' } : {}),
+        ...wslUncShellOverride,
         env: paneEnv,
         connectionId: sshConnectionId,
         worktreeId,

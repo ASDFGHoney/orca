@@ -559,11 +559,13 @@ function admitRendererAgentLaunchAuthority(args: {
   launchToken: unknown
   spawnEnv: Record<string, string> | undefined
   launchAgent: unknown
+  /** Host-receipt requested identity (may be custom); display-only downstream. */
+  requestedAgent?: TuiAgent
   launchConfig: SleepingAgentLaunchConfig | undefined
   isReattach: boolean
   hasStablePaneOwner: boolean
   incarnationId: unknown
-}): { launchToken: string; launchAgent: TuiAgent } | null {
+}): { launchToken: string; launchAgent: TuiAgent; requestedAgent?: TuiAgent } | null {
   if (
     args.isReattach ||
     args.hasStablePaneOwner ||
@@ -577,7 +579,13 @@ function admitRendererAgentLaunchAuthority(args: {
   ) {
     return null
   }
-  return { launchToken: args.launchToken, launchAgent: args.launchAgent }
+  return {
+    launchToken: args.launchToken,
+    launchAgent: args.launchAgent,
+    ...(isTuiAgent(args.requestedAgent) && args.requestedAgent !== args.launchAgent
+      ? { requestedAgent: args.requestedAgent }
+      : {})
+  }
 }
 
 function shouldRefreshNativeClaudeAgentTeamsEnv(args: {
@@ -7527,6 +7535,12 @@ export function registerPtyHandlers(
             launchToken: args.launchToken,
             spawnEnv,
             launchAgent: args.launchAgent,
+            // Why: args.launchAgent was rewritten to the receipt's built-in base for
+            // behavior keying; the requested (possibly custom) identity survives only
+            // via the receipt, or paired clients display the base harness instead.
+            ...(agentLaunchOutcome?.status === 'launched'
+              ? { requestedAgent: agentLaunchOutcome.receipt.requestedAgent }
+              : {}),
             launchConfig: effectiveLaunchConfig,
             isReattach: result.isReattach === true,
             hasStablePaneOwner: stablePaneOwner !== null,
