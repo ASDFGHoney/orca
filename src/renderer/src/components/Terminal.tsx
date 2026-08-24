@@ -1777,8 +1777,9 @@ function Terminal(): React.JSX.Element | null {
         const hasUnifiedEntry = Object.values(state.unifiedTabsByWorktree).some((tabs) =>
           tabs.some((tab) => tab.contentType === 'browser' && tab.entityId === tabId)
         )
-        destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
         closeBrowserTab(tabId)
+        // closeBrowserTab announces the MRU target before guest teardown can trigger bridge fallback.
+        destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
         if (!hasUnifiedEntry && state.activeWorktreeId === owningWorktreeId) {
           const worktreeFile = state.openFiles.find((file) => file.worktreeId === owningWorktreeId)
           if (worktreeFile) {
@@ -1796,8 +1797,9 @@ function Terminal(): React.JSX.Element | null {
         }
         return
       }
-      destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
       closeBrowserTab(tabId)
+      // closeBrowserTab announces the MRU target before guest teardown can trigger bridge fallback.
+      destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
     },
     [closeBrowserTab, setActiveFile, setActiveTab, setActiveTabType, setActiveWorktree]
   )
@@ -1868,8 +1870,8 @@ function Terminal(): React.JSX.Element | null {
         } else if (
           (state.browserTabsByWorktree[activeWorktreeId] ?? []).some((tab) => tab.id === id)
         ) {
-          destroyWorkspaceWebviews(state.browserPagesByWorkspace, id)
           closeBrowserTab(id)
+          destroyWorkspaceWebviews(state.browserPagesByWorkspace, id)
         } else if (unifiedTab?.contentType === 'simulator') {
           // Why: simulator tabs live only in the unified-tab store, so the
           // entity-store checks above never match them.

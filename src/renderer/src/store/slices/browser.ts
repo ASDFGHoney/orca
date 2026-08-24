@@ -805,6 +805,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   },
   closeBrowserTab: (tabId) => {
     let remotePagesToClose: { worktreeId: string; handle: RemoteBrowserPageHandle }[] = []
+    let activeBrowserWorktreeIdToNotify: string | null = null
     set((s) => {
       let owningWorktreeId: string | null = null
       let closedWorkspace: BrowserWorkspace | null = null
@@ -865,6 +866,9 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
 
       const isActiveTabInOwningWorktree =
         s.activeWorktreeId === owningWorktreeId && s.activeBrowserTabId === tabId
+      if (isActiveTabInOwningWorktree) {
+        activeBrowserWorktreeIdToNotify = owningWorktreeId
+      }
       const nextActiveTabTypeByWorktree = { ...s.activeTabTypeByWorktree }
       let nextActiveTabType = s.activeTabType
       if (remainingBrowserTabs.length === 0) {
@@ -946,6 +950,34 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         get().closeUnifiedTab(workspaceItem.id)
       }
     }
+
+    // Why: announce the MRU page before guest teardown so bridge fallback cannot choose registration order.
+    if (activeBrowserWorktreeIdToNotify) {
+      const state = get()
+      const activeWorkspaceId = state.activeBrowserTabIdByWorktree[activeBrowserWorktreeIdToNotify]
+      const activeWorkspace = activeWorkspaceId
+        ? findWorkspace(state.browserTabsByWorktree, activeWorkspaceId)
+        : null
+      const activePage = activeWorkspace?.activePageId
+        ? (state.browserPagesByWorkspace[activeWorkspace.id] ?? []).find(
+            (page) => page.id === activeWorkspace.activePageId
+          )
+        : undefined
+      if (
+        activeWorkspace?.activePageId &&
+        isLocalBrowserPageOwner(
+          state,
+          activeBrowserWorktreeIdToNotify,
+          activePage?.browserRuntimeEnvironmentId
+        ) &&
+        typeof window !== 'undefined' &&
+        window.api?.browser
+      ) {
+        window.api.browser
+          .notifyActiveTabChanged({ browserPageId: activeWorkspace.activePageId })
+          .catch(() => {})
+      }
+    }
   },
 
   shutdownWorktreeBrowsers: async (worktreeId) => {
@@ -953,8 +985,9 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     // Why: snapshot before the loop — closeBrowserTab empties the array, so set() below couldn't recompute hadBrowserTabs.
     const hadBrowserTabs = workspaces.length > 0
     for (const workspace of workspaces) {
-      destroyWorkspaceWebviews(get().browserPagesByWorkspace, workspace.id)
+      const browserPagesByWorkspace = get().browserPagesByWorkspace
       get().closeBrowserTab(workspace.id)
+      destroyWorkspaceWebviews(browserPagesByWorkspace, workspace.id)
     }
     set((s) => {
       const nextBrowserTabsByWorktree = { ...s.browserTabsByWorktree }
