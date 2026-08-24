@@ -517,6 +517,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   it('re-arms the native stream when the root is replaced with the same child names', async () => {
     vi.useFakeTimers()
+    vi.clearAllTimers()
     const restorePerformanceNow = vi
       .spyOn(nodePerformance, 'now')
       .mockImplementation(() => Date.now())
@@ -552,6 +553,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   it('disposes an in-flight stale resubscribe and fences its interruption hook', async () => {
     vi.useFakeTimers()
+    vi.clearAllTimers()
     const restorePerformanceNow = vi
       .spyOn(nodePerformance, 'now')
       .mockImplementation(() => Date.now())
