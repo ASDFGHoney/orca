@@ -1,7 +1,7 @@
 import type { WorkspaceKey } from '../../../shared/folder-workspace-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { worktreeWorkspaceKey } from '../../../shared/workspace-scope'
-import type { StoreOwnedPersistedState } from '../loading-store/store-owned-state'
+import type { PersistedState } from '../../../shared/persisted-state-types'
 
 /**
  * Re-keys every worktreeId-keyed record in `state` from `oldWorktreeId` to `newWorktreeId`. Mutates `state` in place;
@@ -9,7 +9,7 @@ import type { StoreOwnedPersistedState } from '../loading-store/store-owned-stat
  * See `Store.migrateWorktreeIdentity` for why the rename happens.
  */
 export function migrateWorktreeIdentity(
-  state: StoreOwnedPersistedState,
+  state: PersistedState,
   oldWorktreeId: string,
   newWorktreeId: string
 ): boolean {
