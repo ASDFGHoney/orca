@@ -3601,6 +3601,9 @@ export class Store {
       this.markWorkspaceSessionPartitionDirty(resolvedHostId, 'pty-binding')
       try {
         this.workspaceSessionSidecars.flushSync('pty-binding')
+        if (!existsSync(this.dataFile)) {
+          this.flushOrThrow()
+        }
       } catch (err) {
         restoreSession()
         try {
@@ -3655,6 +3658,9 @@ export class Store {
     this.markWorkspaceSessionPartitionDirty(resolvedHostId, 'pty-binding')
     try {
       this.workspaceSessionSidecars.flushSync('pty-binding')
+      if (!existsSync(this.dataFile)) {
+        this.flushOrThrow()
+      }
     } catch (err) {
       restoreSession()
       try {
