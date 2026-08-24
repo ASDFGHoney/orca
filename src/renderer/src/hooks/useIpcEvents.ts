@@ -8,7 +8,7 @@ import { getWorktreeMapFromState, getRepoMapFromState } from '@/store/selectors'
 import { applyUIZoom } from '@/lib/ui-zoom'
 import { activateAndRevealWorktree, activateAndRevealWorkspace } from '@/lib/worktree-activation'
 import { buildLinearIssueLinkedWorkItem } from '@/lib/linear-linked-work-item'
-import { runWorktreeDelete } from '@/components/sidebar/delete-worktree-flow'
+import { deleteHoveredWorkspaceImmediately } from '@/components/sidebar/hovered-workspace-delete'
 import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
 import { createBackgroundSleepingAgentWakeDispatcher } from '@/lib/wake-sleeping-agents-in-background'
 import { TOGGLE_WORKSPACE_BOARD_EVENT } from '@/components/sidebar/useWorkspaceBoardPanel'
@@ -924,7 +924,12 @@ export function useIpcEvents(): void {
           `[worktree-purge] diff-based purge removing state for ${removed.length} worktree(s):`,
           removed
         )
-        afterState.purgeWorktreeTerminalState(removed)
+        const purgeHostId =
+          options?.executionHostId ??
+          (options?.forceLocalOwner ? LOCAL_EXECUTION_HOST_ID : undefined)
+        afterState.purgeWorktreeTerminalState(
+          purgeHostId ? removed.map((id) => ({ id, hostId: purgeHostId })) : removed
+        )
         afterState.removeWorkspaceSpaceWorktrees(removed)
       }
     }
@@ -1426,20 +1431,10 @@ export function useIpcEvents(): void {
     if (window.api.ui.onDeleteCurrentWorkspace) {
       unsubs.push(
         window.api.ui.onDeleteCurrentWorkspace(() => {
-          const store = useAppStore.getState()
-          if (
-            store.activeModal !== 'none' ||
-            store.activeView !== 'terminal' ||
-            !store.activeWorktreeId
-          ) {
+          if (isFloatingWorkspacePanelFocused()) {
             return
           }
-          runWorktreeDelete(
-            store.activeWorktreeId,
-            store.activeWorkspaceExecutionHostId
-              ? { expectedHostId: store.activeWorkspaceExecutionHostId }
-              : {}
-          )
+          deleteHoveredWorkspaceImmediately(useAppStore.getState())
         })
       )
     }

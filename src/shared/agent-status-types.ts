@@ -3,7 +3,7 @@
 // a narrow interrupt fallback synthesizes a final `done` when an agent misses its cancellation hook.
 
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
-import type { WithAgentStatusObservation } from './agent-status-observation'
+import type { AgentStatusRowFacets, WithAgentStatusObservation } from './agent-status-observation'
 import {
   AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH,
   AGENT_STATUS_INTERACTIVE_PROMPT_MAX_LENGTH,
@@ -169,7 +169,7 @@ export type AgentStatusEntry = {
    *  the transition may have been missed while no receiver was up, so freshness gates
    *  treat the row as stale immediately. Cleared by any accepted live event. */
   restoredUnconfirmed?: boolean
-} & WithAgentStatusObservation
+} & AgentStatusRowFacets
 
 export type MigrationUnsupportedPtyEntry = {
   ptyId: string
