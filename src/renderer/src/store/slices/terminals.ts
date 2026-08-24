@@ -49,10 +49,8 @@ import { WINDOWS_GIT_BASH_SHELL } from '../../../../shared/windows-terminal-shel
 import type { AgentStartedTelemetry } from '../../lib/worktree-startup-payload'
 import type { AiVaultSessionTitle } from '../../../../shared/ai-vault-session-title'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
-import { forgetAgentHibernationTabOutput } from '@/lib/agent-hibernation-output-activity'
-import { forgetForegroundTerminalTabs } from '@/lib/foreground-terminal-tabs'
 import { terminalLayoutEqual } from '@/lib/terminal-layout-equality'
-import { forgetAgentStartupDeliveriesForTabs } from '@/lib/agent-startup-delivery-guards'
+import { sweepRetiredTerminalTabState } from './retired-terminal-tab-state-sweep'
 import { clearTransientTerminalState, emptyLayoutSnapshot } from './terminal-helpers'
 import {
   collectReleasedLeafIds,
@@ -651,6 +649,8 @@ export type TerminalSlice = {
   setTabBarOrder: (worktreeId: string, order: string[]) => void
   setActiveTab: (tabId: string) => void
   setActiveTabForWorktree: (worktreeId: string, tabId: string) => void
+  /** Resolve the canonical legacy terminal-tab owner key for renderer lifecycle guards. */
+  getTerminalTabOwnerWorktreeId?: (tabId: string) => string | null
   updateTabTitle: (tabId: string, title: string) => void
   updateTabTitles: (updates: readonly TerminalTabTitleUpdate[]) => void
   setAiVaultTabTitle: (tabId: string, aiVaultTitle: AiVaultSessionTitle | null) => void
@@ -1500,6 +1500,9 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     return tab
   },
 
+  getTerminalTabOwnerWorktreeId: (tabId) =>
+    getTerminalTabOwnerWorktreeId(get().tabsByWorktree, tabId),
+
   openNewTerminalTabInActiveWorkspace: async (groupId) => {
     const state = get()
     const worktreeId = state.activeWorktreeId
@@ -1830,19 +1833,8 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           : {})
       }
     })
-    // Why: sweep tab agent status through its suppressor-aware removal path.
-    // Why: Pi can leave a completed row keyed under an already-missing tab id; pass the worktree to sweep that orphan while preserving active pre-render child rows.
-    get().dropAgentStatusByTabPrefix(
-      tabId,
-      closingWorktreeId ? { worktreeId: closingWorktreeId } : undefined
-    )
-    // Why: retired pane keys never recur, so stranded foreground entries would accumulate for the renderer's whole lifetime.
-    get().clearPaneForegroundAgentByTabPrefix(tabId)
-    // Why: closing a tab permanently retires its panes (reopen mints a fresh leafId), so drop hibernation output epochs to keep the module map from growing forever.
-    forgetAgentHibernationTabOutput(tabId)
-    // Why: same rationale — retired tab ids never recur, so drop the foreground last-seen and consumed agent-startup delivery guards.
-    forgetForegroundTerminalTabs([tabId])
-    forgetAgentStartupDeliveriesForTabs([tabId])
+    // Why shared with the paired snapshot apply: every path that removes a tab owes it the same sweep, and a second copy of the list is how one path silently misses a new entry.
+    sweepRetiredTerminalTabState(get(), tabId, closingWorktreeId)
     for (const tabs of Object.values(get().unifiedTabsByWorktree)) {
       const workspaceItem = tabs.find(
         (entry) => entry.contentType === 'terminal' && entry.entityId === tabId
