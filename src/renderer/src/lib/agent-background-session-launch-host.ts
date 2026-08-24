@@ -10,6 +10,7 @@ import { isWslUncPath } from '../../../shared/wsl-paths'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
 import {
   findIndexedWorktreeOwner,
+  resolveIndexedWorktreeOwner,
   findIndexedRepoOwner,
   findIndexedRepoOwnerForHost
 } from '@/lib/worktree-runtime-owner-index'
@@ -45,6 +46,10 @@ export function resolveAgentBackgroundLaunchHost(args: {
   const { store, worktreeId, allowLegacyUnknownHost = false } = args
   const executionHostId = getResolvedExecutionHostIdForWorktree(store, worktreeId)
   const workspaceScope = parseWorkspaceKey(worktreeId)
+  const legacyWorktreeResolution =
+    !executionHostId && workspaceScope?.type !== 'folder'
+      ? resolveIndexedWorktreeOwner(store.worktreesByRepo, worktreeId)
+      : null
   const legacyWorktree = executionHostId
     ? null
     : workspaceScope?.type === 'folder'
@@ -56,14 +61,32 @@ export function resolveAgentBackgroundLaunchHost(args: {
   const legacyRepo =
     args.repo ??
     (legacyWorktree
-      ? (store.repos.find((entry) => entry.id === legacyWorktree.repoId) ?? null)
+      ? (() => {
+          const owner = findIndexedRepoOwner(store.repos, legacyWorktree.repoId)
+          return owner
+            ? (store.repos.find(
+                (entry) =>
+                  entry.id === owner.id &&
+                  entry.connectionId === owner.connectionId &&
+                  entry.executionHostId === owner.executionHostId
+              ) ?? null)
+            : null
+        })()
       : null)
   const folderWorkspaceId =
     workspaceScope?.type === 'folder' ? workspaceScope.folderWorkspaceId : undefined
   const isFolderWorkspace = folderWorkspaceId !== undefined
   if (!executionHostId && !legacyWorktree && worktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+    if (legacyWorktreeResolution?.kind === 'ambiguous') {
+      throw new Error('The target workspace host is unavailable or ambiguous.')
+    }
+    const ownershipCatalogHydrated =
+      Object.keys(store.worktreesByRepo ?? {}).length > 0 ||
+      store.repos.length > 0 ||
+      store.folderWorkspaces.length > 0
     if (
       !allowLegacyUnknownHost ||
+      ownershipCatalogHydrated ||
       (isFolderWorkspace && store.folderWorkspaces.some((entry) => entry.id === folderWorkspaceId))
     ) {
       throw new Error('The target workspace host is unavailable or ambiguous.')
@@ -103,7 +126,9 @@ export function resolveAgentBackgroundLaunchHost(args: {
     throw new Error('The target workspace is no longer available.')
   }
   const parsedExecutionHost = parseExecutionHostId(executionHostId)
-  const runtimeOwnedWorktree = Boolean(worktree.runtimeOwnerEnvironmentId?.trim())
+  const runtimeOwnedWorktree =
+    parsedExecutionHost?.kind === 'runtime' &&
+    worktree.runtimeOwnerEnvironmentId?.trim() === parsedExecutionHost.environmentId
   const runtimeRepoOwner = runtimeOwnedWorktree
     ? findIndexedRepoOwner(store.repos, worktree.repoId)
     : null

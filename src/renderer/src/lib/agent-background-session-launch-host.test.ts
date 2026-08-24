@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { resolveAgentBackgroundLaunchHost } from './agent-background-session-launch-host'
 
 function makeFolderHostState(args: {
@@ -107,7 +107,7 @@ describe('resolveAgentBackgroundLaunchHost', () => {
     const worktree = {
       id: 'repo-1::/remote',
       repoId: 'repo-1',
-      hostId: 'ssh:ssh-a',
+      hostId: undefined,
       runtimeOwnerEnvironmentId: 'runtime-a',
       path: '/remote'
     }
@@ -127,11 +127,41 @@ describe('resolveAgentBackgroundLaunchHost', () => {
       worktreesByRepo: { 'repo-1': [worktree] },
       detectedWorktreesByRepo: {},
       getKnownWorktreeById: (id: string, hostId?: string) =>
-        id === worktree.id && hostId === 'ssh:ssh-a' ? worktree : undefined
+        id === worktree.id && hostId === 'runtime:runtime-a' ? worktree : undefined
     }
 
     expect(
       resolveAgentBackgroundLaunchHost({ store: store as never, worktreeId: worktree.id })
-    ).toMatchObject({ connectionId: 'ssh-a', executionHostId: 'ssh:ssh-a' })
+    ).toMatchObject({ connectionId: 'ssh-a', executionHostId: 'runtime:runtime-a' })
+  })
+
+  it('keeps legacy resume fail-closed for colliding worktree owners', () => {
+    const worktree = (hostId: string) => ({
+      id: 'shared-worktree',
+      repoId: hostId,
+      hostId,
+      path: '/remote'
+    })
+    const store = {
+      activeWorktreeId: null,
+      activeWorkspaceExecutionHostId: null,
+      folderWorkspaces: [],
+      projectGroups: [],
+      repos: [],
+      worktreesByRepo: {
+        'repo-a': [worktree('ssh:ssh-a')],
+        'repo-b': [worktree('local')]
+      },
+      detectedWorktreesByRepo: {},
+      getKnownWorktreeById: vi.fn()
+    }
+
+    expect(() =>
+      resolveAgentBackgroundLaunchHost({
+        store: store as never,
+        worktreeId: 'shared-worktree',
+        allowLegacyUnknownHost: true
+      })
+    ).toThrow('unavailable or ambiguous')
   })
 })
