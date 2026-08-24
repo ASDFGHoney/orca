@@ -35,12 +35,15 @@ export class RestoredAgentAuthorityResolver {
     if (current && persisted && !sameRestoredAgentProcessAuthority(current, persisted)) {
       return { binding: null, hasExactBinding: false }
     }
+    const existing = this.commitmentByHookIdentity.get(args.hook.identity)
+    if (!existing && !persisted) {
+      return { binding: null, hasExactBinding: false }
+    }
     const binding = current ?? persisted
     if (!binding) {
       return { binding: null, hasExactBinding: false }
     }
     const commitment = processAuthorityKey(binding)
-    const existing = this.commitmentByHookIdentity.get(args.hook.identity)
     if (existing && existing !== commitment) {
       return { binding: null, hasExactBinding: false }
     }
@@ -83,7 +86,8 @@ function processAuthorityKey(binding: RestoredAgentAuthorityBinding): string {
     binding.worktreeKey,
     binding.paneKey,
     binding.ptyId,
-    binding.incarnationId ?? `generation:${binding.lifecycleGeneration}`,
-    binding.terminalHandle ?? null
+    binding.incarnationId === null
+      ? ['generation', binding.lifecycleGeneration]
+      : ['incarnation', binding.incarnationId]
   ])
 }

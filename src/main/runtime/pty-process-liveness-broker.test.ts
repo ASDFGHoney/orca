@@ -48,6 +48,80 @@ describe('PtyProcessLivenessBroker', () => {
     expect(inspectProcess).toHaveBeenCalledOnce()
   })
 
+  it('bounds hanging probes across PTYs and prunes retired consumer entries', async () => {
+    vi.useFakeTimers()
+    const resolvers: ((value: {
+      foregroundProcess: string
+      hasChildProcesses: boolean
+    }) => void)[] = []
+    const inspectProcess = vi.fn(
+      () =>
+        new Promise<{ foregroundProcess: string; hasChildProcesses: boolean }>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    const source = { getForegroundProcess: vi.fn(async () => null), inspectProcess }
+    const broker = new PtyProcessLivenessBroker({ timeoutMs: 100, maxConcurrentProbes: 2 })
+
+    const reads = Array.from({ length: 5 }, (_, index) =>
+      broker.inspect({
+        source,
+        ptyId: `pty-${index}`,
+        identity: `incarnation-${index}`,
+        consumerId: 'restored-agent'
+      })
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    await Promise.all(reads)
+
+    expect(inspectProcess).toHaveBeenCalledTimes(2)
+    expect(broker.getActiveProbeCount()).toBe(2)
+    expect(broker.getEntryCount()).toBe(2)
+
+    broker.retainConsumerEvidence('restored-agent', [])
+    expect(broker.getEntryCount()).toBe(0)
+    expect(broker.getActiveProbeCount()).toBe(2)
+
+    for (const resolve of resolvers) {
+      resolve({ foregroundProcess: 'codex', hasChildProcesses: true })
+    }
+    await vi.runAllTimersAsync()
+    expect(broker.getActiveProbeCount()).toBe(0)
+  })
+
+  it('does not prune evidence shared with an unscoped broker consumer', async () => {
+    let resolveInspection!: (value: {
+      foregroundProcess: string
+      hasChildProcesses: boolean
+    }) => void
+    const inspection = new Promise<{ foregroundProcess: string; hasChildProcesses: boolean }>(
+      (resolve) => {
+        resolveInspection = resolve
+      }
+    )
+    const source = {
+      getForegroundProcess: vi.fn(async () => null),
+      inspectProcess: vi.fn(() => inspection)
+    }
+    const broker = new PtyProcessLivenessBroker({ timeoutMs: 100 })
+
+    const restored = broker.inspect({
+      source,
+      ptyId: 'pty-1',
+      identity: 'incarnation-a',
+      consumerId: 'restored-agent'
+    })
+    const foreground = broker.inspect({ source, ptyId: 'pty-1', identity: 'incarnation-a' })
+    broker.retainConsumerEvidence('restored-agent', [])
+
+    expect(broker.getEntryCount()).toBe(1)
+    resolveInspection({ foregroundProcess: 'codex', hasChildProcesses: true })
+    await expect(Promise.all([restored, foreground])).resolves.toEqual([
+      expect.objectContaining({ status: 'live' }),
+      expect.objectContaining({ status: 'live' })
+    ])
+  })
+
   it('caches live evidence across sequential clients', async () => {
     const inspectProcess = vi.fn(async () => ({
       foregroundProcess: 'codex',

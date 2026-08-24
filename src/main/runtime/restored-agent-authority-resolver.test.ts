@@ -42,9 +42,13 @@ describe('RestoredAgentAuthorityResolver', () => {
 
   it('keeps one hook fenced to its first process incarnation', () => {
     const resolver = new RestoredAgentAuthorityResolver()
-    expect(resolver.resolve({ hook, current: binding(), persisted: null }).binding).toEqual(
-      binding()
-    )
+    expect(
+      resolver.resolve({
+        hook,
+        current: binding(),
+        persisted: binding({ source: 'persisted' })
+      }).binding
+    ).toEqual(binding())
 
     expect(
       resolver.resolve({
@@ -57,7 +61,11 @@ describe('RestoredAgentAuthorityResolver', () => {
 
   it('treats lifecycle generations as fallback identity when incarnation exists', () => {
     const resolver = new RestoredAgentAuthorityResolver()
-    resolver.resolve({ hook, current: binding(), persisted: null })
+    resolver.resolve({
+      hook,
+      current: binding(),
+      persisted: binding({ source: 'persisted' })
+    })
 
     expect(
       resolver.resolve({
@@ -66,6 +74,91 @@ describe('RestoredAgentAuthorityResolver', () => {
         persisted: null
       }).binding
     ).toEqual(binding({ lifecycleGeneration: 2 }))
+  })
+
+  it('does not confuse a generation-shaped incarnation with fallback identity', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+    resolver.resolve({
+      hook,
+      current: binding({ incarnationId: null, lifecycleGeneration: 1 }),
+      persisted: binding({
+        incarnationId: null,
+        lifecycleGeneration: 1,
+        source: 'persisted'
+      })
+    })
+
+    expect(
+      resolver.resolve({
+        hook,
+        current: binding({ incarnationId: 'generation:1', lifecycleGeneration: 99 }),
+        persisted: null
+      })
+    ).toEqual({ binding: null, hasExactBinding: false })
+  })
+
+  it('keeps process authority stable when a terminal handle is learned', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+    resolver.resolve({
+      hook,
+      current: binding(),
+      persisted: binding({ source: 'persisted' })
+    })
+
+    expect(
+      resolver.resolve({
+        hook,
+        current: binding({ terminalHandle: 'term_learned' }),
+        persisted: null
+      }).binding
+    ).toEqual(binding({ terminalHandle: 'term_learned' }))
+  })
+
+  it('uses a hook terminal handle as a constraint when one is present', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+    const handleHook = { ...hook, terminalHandle: 'term_expected' }
+
+    expect(
+      resolver.resolve({
+        hook: handleHook,
+        current: binding({ terminalHandle: 'term_other' }),
+        persisted: null
+      })
+    ).toEqual({ binding: null, hasExactBinding: false })
+  })
+
+  it('requires persisted authority before accepting a current binding', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+
+    expect(resolver.resolve({ hook, current: binding(), persisted: null })).toEqual({
+      binding: null,
+      hasExactBinding: false
+    })
+  })
+
+  it('seeds from persisted authority and later accepts matching current authority', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+    const persisted = binding({ source: 'persisted' })
+
+    expect(resolver.resolve({ hook, current: null, persisted })).toEqual({
+      binding: persisted,
+      hasExactBinding: true
+    })
+    expect(resolver.resolve({ hook, current: binding(), persisted: null }).binding).toEqual(
+      binding()
+    )
+  })
+
+  it('does not let a replacement current binding borrow first authority', () => {
+    const resolver = new RestoredAgentAuthorityResolver()
+
+    expect(
+      resolver.resolve({
+        hook,
+        current: binding({ ptyId: 'pty-replacement', incarnationId: 'incarnation-b' }),
+        persisted: binding({ source: 'persisted' })
+      })
+    ).toEqual({ binding: null, hasExactBinding: false })
   })
 
   it('rejects disagreement between current and persisted bindings', () => {
@@ -82,15 +175,20 @@ describe('RestoredAgentAuthorityResolver', () => {
 
   it('forgets commitments after their restored hook disappears', () => {
     const resolver = new RestoredAgentAuthorityResolver()
-    resolver.resolve({ hook, current: binding(), persisted: null })
+    resolver.resolve({
+      hook,
+      current: binding(),
+      persisted: binding({ source: 'persisted' })
+    })
     resolver.retain(new Set())
 
+    const replacement = binding({ incarnationId: 'incarnation-b', source: 'persisted' })
     expect(
       resolver.resolve({
         hook,
-        current: binding({ incarnationId: 'incarnation-b' }),
-        persisted: null
+        current: null,
+        persisted: replacement
       }).binding
-    ).toEqual(binding({ incarnationId: 'incarnation-b' }))
+    ).toEqual(replacement)
   })
 })

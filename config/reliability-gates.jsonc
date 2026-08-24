@@ -10272,7 +10272,7 @@
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "daemon", "ssh"],
-      "coverageNotes": "A deterministic service-state-machine oracle now models a current-contract worker and coordinator whose renderer graph identities disappear across an app/runtime update. It exercises the production verifier with restored PTY and hydrated hook commitments, proves authenticated completion replay across a fresh runtime, explicit takeover, ordinary mail routing, remote-attachment process fencing, retained Task/Dispatch/terminal identity, and unchanged fixture marker bytes, and rejects foreign pane evidence. Worktree inventory coverage now capability-gates restored presence, resolves each exact PTY on the execution host as live, unverifiable, or exited, keeps live/unverifiable identities visible without reviving stale activity, preserves byte-compatible legacy suppression, and keeps completed shell-only rows retired. Other deterministic units cover authority-aware legacy formatting, exact legacy worker identity planning, local worker presentation, retained-output reads after adoption, reveal-failure warnings, stable-pane Run/Dispatch routing, creator pane/process/Run-generation fencing, indexed retained-Run lookup scaling, the SSH in-process CLI fallback, exact legacy Task/Dispatch/report-receipt verification, JSON rejection envelopes, and capability-negotiated Run-home settlement. The federation oracle drops the first terminal ACK, restarts Run-home twice, verifies replay through the existing polling path and the persisted acknowledgment watermark, races identical reports, accepts preexisting same-outcome ACK batches, rejects conflicting batches, and covers protocol v1/v2 completion across independently updated peers. A migration unit upgrades a v26 database with a zeroed watermark without replaying older migrations. Three isolated macOS Electron journeys launch fake Codex workers through the real RPC path. Distinct installed A/B artifacts plus live SSH, WSL, folder, Linux, and Windows cutover journeys remain explicit gaps.",
+      "coverageNotes": "A deterministic service-state-machine oracle now models a current-contract worker and coordinator whose renderer graph identities disappear across an app/runtime update. It exercises the production verifier with restored PTY and hydrated hook commitments, proves authenticated completion replay across a fresh runtime, explicit takeover, ordinary mail routing, remote-attachment process fencing, retained Task/Dispatch/terminal identity, and unchanged fixture marker bytes, and rejects foreign pane evidence. Worktree inventory coverage now capability-gates restored presence, resolves each exact PTY on the execution host as live, unverifiable, or exited, keeps live/unverifiable identities visible without reviving stale activity, preserves byte-compatible legacy suppression, and keeps completed shell-only rows retired. Persisted surface identity must seed first authority, request-wide indexes preserve ambiguous-binding refusal without per-row PTY scans, and shared inspection admits at most eight unresolved provider probes while restored-only cache entries are pruned when hooks disappear. Other deterministic units cover authority-aware legacy formatting, exact legacy worker identity planning, local worker presentation, retained-output reads after adoption, reveal-failure warnings, stable-pane Run/Dispatch routing, creator pane/process/Run-generation fencing, indexed retained-Run lookup scaling, the SSH in-process CLI fallback, exact legacy Task/Dispatch/report-receipt verification, JSON rejection envelopes, and capability-negotiated Run-home settlement. The federation oracle drops the first terminal ACK, restarts Run-home twice, verifies replay through the existing polling path and the persisted acknowledgment watermark, races identical reports, accepts preexisting same-outcome ACK batches, rejects conflicting batches, and covers protocol v1/v2 completion across independently updated peers. A migration unit upgrades a v26 database with a zeroed watermark without replaying older migrations. Three isolated macOS Electron journeys launch fake Codex workers through the real RPC path. Distinct installed A/B artifacts plus live SSH, WSL, folder, Linux, and Windows cutover journeys remain explicit gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/11107#discussion_r3663321387",
         "https://github.com/stablyai/orca/issues/13858",
@@ -10355,9 +10355,19 @@
           "file": "src/main/runtime/restored-agent-authority-resolver.test.ts",
           "assertions": [
             "one restored hook cannot borrow a replacement PTY incarnation or another execution host",
+            "current-only surface identity cannot establish first authority; exact persisted identity seeds it before matching current state may continue",
             "conflicting current and persisted bindings remain unverifiable",
             "incarnation identity survives local lifecycle-generation changes",
+            "tagged fallback generations cannot collide with generation-shaped incarnation ids, and optional handles do not redefine process equality",
             "retired hook commitments are released without unbounded growth"
+          ]
+        },
+        {
+          "file": "src/main/runtime/pty-process-liveness-broker.test.ts",
+          "assertions": [
+            "cross-PTY hanging probes remain below the broker-wide admission cap",
+            "retired restored-agent entries are pruned without deleting evidence shared by other process consumers",
+            "per-identity timeouts, settlement, TTL reuse, backoff, exact absence, and owning-inventory reconciliation remain single-flight"
           ]
         },
         {
@@ -10374,7 +10384,8 @@
             "terminal_gone is the only inspection rejection that retires the exact restored row",
             "fresh exact inventory cannot be overwritten by older cached terminal_gone evidence after later contact loss",
             "slow foreground inspection cannot manufacture agent exit or certify a replacement incarnation",
-            "sequential inventory clients reuse bounded process evidence instead of polling each restored row"
+            "sequential inventory clients reuse bounded process evidence instead of polling each restored row",
+            "multi-row catalogs build two host-session authority indexes per request and inspect at most four restored rows concurrently"
           ]
         },
         {
@@ -10515,8 +10526,8 @@
           "platform": "macos",
           "command": "pnpm run test:e2e -- tests/e2e/orchestration-legacy-worker-restart-recovery.spec.ts --workers=1",
           "result": "passed",
-          "durationSeconds": 49.8,
-          "summary": "Both legacy- and current-contract isolated restart journeys kept the original live PID/PTTY/incarnation, visible inactive tab, writable ACK output, and active Dispatch, while capable worktree.ps retained the exact agent row as unverifiable because the fresh desktop could not inspect the daemon-owned process. Disabling only restored-presence negotiation made the byte-identical journey fail with agent undefined while all preceding liveness, tab, and Dispatch checks stayed green."
+          "durationSeconds": 54.8,
+          "summary": "Both legacy- and current-contract isolated restart journeys kept the original live PID/PTTY/incarnation, visible inactive tab exactly once, writable ACK output, and active Dispatch, while capable worktree.ps retained the exact agent row as unverifiable because the fresh desktop could not inspect the daemon-owned process. Disabling only restored-presence negotiation made the byte-identical journey fail with agent undefined while all preceding liveness, tab, and Dispatch checks stayed green."
         },
         {
           "date": "2026-08-23",
@@ -10524,8 +10535,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts --fileParallelism=false --maxWorkers=1 src/main/runtime/restored-agent-authority-resolver.test.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
           "result": "passed",
-          "durationSeconds": 49.44,
-          "summary": "Ten focused runtime and wire files passed 1,292 tests with one skip, including bounded inspection timeout, exact terminal_gone absence, three-poll fresh-presence reconciliation, cold handle-qualified contact loss, incarnation/host/hook replacement fencing, slow foreground completion, callback isolation, sequential-client call counts, live/unverifiable/exited/hidden-tab/legacy projection, encrypted desktop/CLI capability advertisement, and cross-version terminal wire compatibility. Full mobile typecheck and 3,674 tests passed separately."
+          "durationSeconds": 27.06,
+          "summary": "Ten focused runtime and wire files passed 1,301 tests with one skip, including persisted-seeded first authority, replacement-current refusal, tagged incarnation identity, handle-remint continuity, two request-wide authority indexes, four-wide catalog inspection, eight-wide global hanging-probe admission, consumer-scoped cache pruning, bounded inspection timeout, exact terminal_gone absence, three-poll fresh-presence reconciliation, cold handle-qualified contact loss, slow foreground completion, callback isolation, live/unverifiable/exited/hidden-tab/legacy projection, encrypted desktop/CLI capability advertisement, and cross-version terminal wire compatibility. Full mobile typecheck and 3,674 tests passed separately."
         },
         {
           "date": "2026-08-13",
@@ -10704,7 +10715,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Worker-start reuses the existing one-shot renderer reveal and adds no polling, provider listing, or output work. Startup recovery performs one bounded controller inventory per legacy candidate, exact owner/identity checks, one background reveal, and a provider/renderer snapshot only when an adopted worker's in-memory tail is empty and terminal.read is explicitly requested. One incarnation-scoped process-evidence broker now serves both the incumbent foreground-agent refresh and capable restored-row projection: concurrent callers deduplicate, sequential live reads reuse a 10-second TTL, unavailable reads back off from 3 to 30 seconds, a hung provider retains at most one unresolved probe per identity, and every catalog read shares the existing three-second controller budget. Lifecycle, incarnation, reconnect, and controller changes invalidate evidence. Check adds one optional pane-key field and reuses the existing Run scan or bounded active-Dispatch lookup. Federation replay keeps the existing per-Dispatch polling cadence and existing transport queue limit, retaining a terminal Dispatch only while its imported cursor exceeds one persisted acknowledgment watermark. Each successful ACK adds one primary-key SQLite update; exact eligibility is a primary-key lookup, and identical pending terminal lookup is bounded by the existing 256-item per-Dispatch relay quota and pending-relay index. A version-aware schema sentinel keeps valid v26 databases on the direct v26-to-v27 migration path."
+        "evidence": "Worker-start reuses the existing one-shot renderer reveal and adds no polling, provider listing, or output work. Startup recovery performs one bounded controller inventory per legacy candidate, exact owner/identity checks, one background reveal, and a provider/renderer snapshot only when an adopted worker's in-memory tail is empty and terminal.read is explicitly requested. One incarnation-scoped process-evidence broker now serves both the incumbent foreground-agent refresh and capable restored-row projection: concurrent callers deduplicate, sequential live reads reuse a 10-second TTL, unavailable reads back off from 3 to 30 seconds, and at most eight unresolved provider probes can exist across PTYs even when their promises never settle. Restored projection builds one O(PTYs + persisted surfaces + restored rows) authority index before inspection and one after it, maps catalog work four-wide, and prunes entries owned only by disappeared restored hooks without pruning shared foreground evidence. Every catalog read shares the existing three-second controller budget. Lifecycle, incarnation, reconnect, and controller changes invalidate evidence. Check adds one optional pane-key field and reuses the existing Run scan or bounded active-Dispatch lookup. Federation replay keeps the existing per-Dispatch polling cadence and existing transport queue limit, retaining a terminal Dispatch only while its imported cursor exceeds one persisted acknowledgment watermark. Each successful ACK adds one primary-key SQLite update; exact eligibility is a primary-key lookup, and identical pending terminal lookup is bounded by the existing 256-item per-Dispatch relay quota and pending-relay index. A version-aware schema sentinel keeps valid v26 databases on the direct v26-to-v27 migration path."
       },
       "promotionCriteria": [
         "Collect 100 consecutive passes or 14 days of stable CI history on macOS, Linux, and Windows.",

@@ -1049,6 +1049,7 @@ const TEST_FOLDER_WORKSPACE_KEY = `folder:${TEST_FOLDER_WORKSPACE_ID}`
 const TEST_FOLDER_WORKSPACE_PATH = '/tmp/platform'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const HEADLESS_LEAF_ID = '11111111-1111-4111-8111-111111111111'
+const RESTORED_AGENT_INSPECTION_TEST_CONCURRENCY = 4
 const HEADLESS_SECOND_LEAF_ID = '22222222-2222-4222-8222-222222222222'
 const HEADLESS_THIRD_LEAF_ID = '33333333-3333-4333-8333-333333333333'
 const RESTORED_AUTHORITY_TOKEN = 'restored-authority-secret'
@@ -1691,6 +1692,37 @@ function makeWorkspaceSessionWithHeadlessTerminal(
     terminalLayoutsByTabId: { 'host-tab': layout },
     ...overrides
   }
+}
+
+function makePersistedRestoredAgentSession(args: {
+  tabId: string
+  leafId: string
+  ptyId: string
+  incarnationId: string
+}): WorkspaceSessionState {
+  const paneKey = makePaneKey(args.tabId, args.leafId)
+  return makeWorkspaceSessionWithHeadlessTerminal({
+    activeTabId: args.tabId,
+    activeTabIdByWorktree: { [TEST_WORKTREE_ID]: args.tabId },
+    tabsByWorktree: {
+      [TEST_WORKTREE_ID]: [
+        {
+          id: args.tabId,
+          ptyId: args.ptyId,
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Persisted Agent',
+          customTitle: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: 1
+        }
+      ]
+    },
+    terminalLayoutsByTabId: {
+      [args.tabId]: makeHeadlessTerminalLayout({ [args.leafId]: args.ptyId })
+    },
+    terminalPtyIncarnationsByPaneKey: { [paneKey]: args.incarnationId }
+  })
 }
 
 computeWorktreePathMock.mockImplementation(
@@ -37991,6 +38023,78 @@ describe('OrcaRuntimeService', () => {
     expect(inspectProcess).not.toHaveBeenCalled()
   })
 
+  it('indexes restored authority once per snapshot and bounds request inspection fanout', async () => {
+    const rowCount = 12
+    const tabs = Array.from({ length: rowCount }, (_, index) => ({
+      id: `tab-${index}`,
+      ptyId: `persisted-pty-${index}`,
+      worktreeId: TEST_WORKTREE_ID,
+      title: `Agent ${index}`,
+      customTitle: null,
+      color: null,
+      sortOrder: index,
+      createdAt: index + 1
+    }))
+    const terminalLayoutsByTabId = Object.fromEntries(
+      tabs.map((tab) => [tab.id, makeHeadlessTerminalLayout({ [HEADLESS_LEAF_ID]: tab.ptyId })])
+    )
+    const terminalPtyIncarnationsByPaneKey = Object.fromEntries(
+      tabs.map((tab, index) => [makePaneKey(tab.id, HEADLESS_LEAF_ID), `incarnation-${index}`])
+    )
+    const session = makeWorkspaceSessionWithHeadlessTerminal({
+      tabsByWorktree: { [TEST_WORKTREE_ID]: tabs },
+      terminalLayoutsByTabId,
+      terminalPtyIncarnationsByPaneKey
+    })
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(session)
+    const getWorkspaceSession = vi.fn(runtimeStore.getWorkspaceSession)
+    let activeInspections = 0
+    let maxActiveInspections = 0
+    const inspectProcess = vi.fn(async () => {
+      activeInspections += 1
+      maxActiveInspections = Math.max(maxActiveInspections, activeInspections)
+      await Promise.resolve()
+      activeInspections -= 1
+      return { foregroundProcess: 'codex', hasChildProcesses: true }
+    })
+    const now = Date.now()
+    const runtime = new OrcaRuntimeService(
+      { ...runtimeStore, getWorkspaceSession } as never,
+      undefined,
+      {
+        getAgentStatusSnapshot: () =>
+          tabs.map((tab, index) => ({
+            paneKey: makePaneKey(tab.id, HEADLESS_LEAF_ID),
+            worktreeId: TEST_WORKTREE_ID,
+            tabId: tab.id,
+            state: 'working' as const,
+            prompt: `restored agent ${index}`,
+            agentType: 'codex',
+            connectionId: null,
+            receivedAt: now + index,
+            stateStartedAt: now - rowCount + index,
+            restoredUnconfirmed: true
+          }))
+      }
+    )
+    runtime.setPtyController({
+      write: vi.fn(() => true),
+      kill: vi.fn(() => true),
+      getForegroundProcess: vi.fn(async () => 'codex'),
+      inspectProcess,
+      listProcesses: vi.fn(async () => [])
+    })
+
+    const { worktrees } = await runtime.getWorktreePs(undefined, true, true)
+
+    expect(
+      worktrees.find((worktree) => worktree.worktreeId === TEST_WORKTREE_ID)?.agents
+    ).toHaveLength(rowCount)
+    expect(inspectProcess).toHaveBeenCalledTimes(rowCount)
+    expect(maxActiveInspections).toBe(RESTORED_AGENT_INSPECTION_TEST_CONCURRENCY)
+    expect(getWorkspaceSession.mock.calls.length).toBeLessThanOrEqual(4)
+  })
+
   it('omits a cold restored row only after terminal_gone confirms exact absence', async () => {
     const paneKey = makePaneKey('host-tab', HEADLESS_LEAF_ID)
     const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -38085,6 +38189,14 @@ describe('OrcaRuntimeService', () => {
     const leafId = '33333333-3333-4333-8333-333333333333'
     const paneKey = `tab-1:${leafId}`
     const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makePersistedRestoredAgentSession({
+        tabId: 'tab-1',
+        leafId,
+        ptyId: 'pty-1',
+        incarnationId
+      })
+    )
     const now = Date.now()
     const inspectProcess = vi.fn(async () => {
       throw new Error('terminal_gone')
@@ -38102,7 +38214,7 @@ describe('OrcaRuntimeService', () => {
         }
       ])
       .mockRejectedValueOnce(new Error('socket_closed'))
-    const runtime = new OrcaRuntimeService(store, undefined, {
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
       getAgentStatusSnapshot: () => [
         {
           paneKey,
@@ -38183,12 +38295,21 @@ describe('OrcaRuntimeService', () => {
   it('projects a restored agent after the execution host confirms its exact PTY is live', async () => {
     const leafId = '33333333-3333-4333-8333-333333333333'
     const paneKey = `tab-1:${leafId}`
+    const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makePersistedRestoredAgentSession({
+        tabId: 'tab-1',
+        leafId,
+        ptyId: 'pty-1',
+        incarnationId
+      })
+    )
     const now = Date.now()
     const inspectProcess = vi.fn(async () => ({
       foregroundProcess: 'node /opt/codex/bin/codex',
       hasChildProcesses: true
     }))
-    const runtime = new OrcaRuntimeService(store, undefined, {
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
       getAgentStatusSnapshot: () => [
         {
           paneKey,
@@ -38209,7 +38330,9 @@ describe('OrcaRuntimeService', () => {
       kill: vi.fn(() => true),
       getForegroundProcess: vi.fn(async () => 'node /opt/codex/bin/codex'),
       inspectProcess,
-      listProcesses: vi.fn(async () => [{ id: 'pty-1', cwd: TEST_WORKTREE_PATH, title: 'Codex' }])
+      listProcesses: vi.fn(async () => [
+        { id: 'pty-1', cwd: TEST_WORKTREE_PATH, title: 'Codex', incarnationId }
+      ])
     })
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, {
@@ -38403,6 +38526,15 @@ describe('OrcaRuntimeService', () => {
   it('fences a restored-agent inspection across PTY reincarnation', async () => {
     const leafId = '33333333-3333-4333-8333-333333333333'
     const paneKey = `tab-1:${leafId}`
+    const incarnationId = 'incarnation-a'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makePersistedRestoredAgentSession({
+        tabId: 'tab-1',
+        leafId,
+        ptyId: 'pty-1',
+        incarnationId
+      })
+    )
     const now = Date.now()
     let resolveInspection!: (value: {
       foregroundProcess: string
@@ -38414,7 +38546,7 @@ describe('OrcaRuntimeService', () => {
           resolveInspection = resolve
         })
     )
-    const runtime = new OrcaRuntimeService(store, undefined, {
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
       getAgentStatusSnapshot: () => [
         {
           paneKey,
@@ -38440,7 +38572,7 @@ describe('OrcaRuntimeService', () => {
     runtime.registerPty('pty-1', TEST_WORKTREE_ID, null, {
       tabId: 'tab-1',
       leafId,
-      incarnationId: 'incarnation-a'
+      incarnationId
     })
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, {
@@ -38494,6 +38626,15 @@ describe('OrcaRuntimeService', () => {
   it('does not publish a restored hook snapshot replaced during inspection', async () => {
     const leafId = '33333333-3333-4333-8333-333333333333'
     const paneKey = `tab-1:${leafId}`
+    const incarnationId = 'incarnation-a'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makePersistedRestoredAgentSession({
+        tabId: 'tab-1',
+        leafId,
+        ptyId: 'pty-1',
+        incarnationId
+      })
+    )
     const now = Date.now()
     let rows: AgentStatusIpcPayload[] = [
       {
@@ -38519,7 +38660,7 @@ describe('OrcaRuntimeService', () => {
           resolveInspection = resolve
         })
     )
-    const runtime = new OrcaRuntimeService(store, undefined, {
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
       getAgentStatusSnapshot: () => rows
     })
     runtime.setPtyController({
@@ -38532,7 +38673,7 @@ describe('OrcaRuntimeService', () => {
     runtime.registerPty('pty-1', TEST_WORKTREE_ID, null, {
       tabId: 'tab-1',
       leafId,
-      incarnationId: 'incarnation-a'
+      incarnationId
     })
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, {
@@ -38570,12 +38711,21 @@ describe('OrcaRuntimeService', () => {
   it('omits an exited restored agent after the exact PTY is confirmed shell-only', async () => {
     const leafId = '33333333-3333-4333-8333-333333333333'
     const paneKey = `tab-1:${leafId}`
+    const incarnationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makePersistedRestoredAgentSession({
+        tabId: 'tab-1',
+        leafId,
+        ptyId: 'pty-1',
+        incarnationId
+      })
+    )
     const now = Date.now()
     const inspectProcess = vi.fn(async () => ({
       foregroundProcess: 'zsh',
       hasChildProcesses: false
     }))
-    const runtime = new OrcaRuntimeService(store, undefined, {
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
       getAgentStatusSnapshot: () => [
         {
           paneKey,
@@ -38596,7 +38746,9 @@ describe('OrcaRuntimeService', () => {
       kill: vi.fn(() => true),
       getForegroundProcess: vi.fn(async () => 'zsh'),
       inspectProcess,
-      listProcesses: vi.fn(async () => [{ id: 'pty-1', cwd: TEST_WORKTREE_PATH, title: 'zsh' }])
+      listProcesses: vi.fn(async () => [
+        { id: 'pty-1', cwd: TEST_WORKTREE_PATH, title: 'zsh', incarnationId }
+      ])
     })
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, {

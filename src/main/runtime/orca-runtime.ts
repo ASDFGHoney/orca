@@ -660,7 +660,11 @@ import type { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { createRuntimeBrowserCommands } from './runtime-browser-commands-factory'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import { deriveRemoteRuntimeTerminalCreateHandle } from './remote-runtime-terminal-create-identity'
-import { PtyProcessLivenessBroker } from './pty-process-liveness-broker'
+import {
+  PtyProcessLivenessBroker,
+  type PtyProcessLivenessEvidence
+} from './pty-process-liveness-broker'
+import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import {
   RestoredAgentAuthorityResolver,
   sameRestoredAgentProcessAuthority,
@@ -1996,6 +2000,19 @@ type PtyControllerInventory = Readonly<{
   incarnationIdByPtyId: ReadonlyMap<string, string>
   terminalIdentityByPtyId: ReadonlyMap<string, PtyControllerTerminalIdentity>
   queriedHostIds: ReadonlySet<ExecutionHostId>
+}>
+
+type PersistedRestoredAgentSurface = Readonly<{
+  ptyId: string
+  worktreeId: string
+  paneKey: string
+  incarnationId: string
+}>
+
+type RestoredAgentAuthoritySnapshot = Readonly<{
+  currentPtyByPaneKey: ReadonlyMap<string, RuntimePtyWorktreeRecord>
+  persistedSurfaceByKey: ReadonlyMap<string, PersistedRestoredAgentSurface | null>
+  inventory: PtyControllerInventory | null
 }>
 
 type WorktreeStartupDraftPaste = {
@@ -19090,9 +19107,10 @@ export class OrcaRuntimeService {
   }
 
   private getPtyProcessEvidenceIdentity(ptyId: string): string {
-    return (
-      this.ptysById.get(ptyId)?.incarnationId ??
-      `runtime:${this.runtimeId}:${this.getPtyLifecycleGeneration(ptyId)}`
+    return makePtyProcessEvidenceIdentity(
+      this.ptysById.get(ptyId)?.incarnationId ?? null,
+      this.runtimeId,
+      this.getPtyLifecycleGeneration(ptyId)
     )
   }
 
@@ -20591,14 +20609,76 @@ export class OrcaRuntimeService {
     freshPtyInventory: PtyControllerInventory | null
   ): Promise<Map<string, RestoredAgentLivenessResolution>> {
     const restoredEntries = entries.filter((entry) => entry.restoredUnconfirmed === true)
-    this.restoredAgentAuthority.retain(
-      new Set(restoredEntries.map((entry) => restoredAgentHookIdentity(entry)))
+    const retainedHookIdentities = new Set(
+      restoredEntries.map((entry) => restoredAgentHookIdentity(entry))
     )
-    const resolved = await Promise.all(
-      restoredEntries.map(async (entry): Promise<[string, RestoredAgentLivenessResolution]> => {
-        const hookIdentity = restoredAgentHookIdentity(entry)
-        const authority = this.getRestoredAgentAuthority(entry, freshPtyInventory)
+    this.restoredAgentAuthority.retain(retainedHookIdentities)
+    const hooks = restoredEntries.map((entry) => ({
+      entry,
+      hookIdentity: restoredAgentHookIdentity(entry),
+      hook: this.getRestoredAgentAuthorityHook(entry)
+    }))
+    const initialSnapshot = this.buildRestoredAgentAuthoritySnapshot(
+      restoredEntries,
+      freshPtyInventory
+    )
+    const initial = hooks.map((item) => ({
+      ...item,
+      authority: item.hook
+        ? this.getRestoredAgentAuthority(item.hook, initialSnapshot)
+        : { binding: null, hasExactBinding: false }
+    }))
+    this.ptyProcessLiveness.retainConsumerEvidence(
+      RESTORED_AGENT_PROCESS_EVIDENCE_CONSUMER,
+      initial.flatMap(({ authority }) => {
         const binding = authority.binding
+        return binding
+          ? [{ ptyId: binding.ptyId, identity: this.getRestoredAgentEvidenceIdentity(binding) }]
+          : []
+      })
+    )
+    const controller = this.ptyController
+    const observed = await mapWithConcurrency(
+      initial,
+      RESTORED_AGENT_INSPECTION_CONCURRENCY,
+      async (
+        item
+      ): Promise<{
+        item: (typeof initial)[number]
+        evidence: PtyProcessLivenessEvidence | null
+        settledLiveness: RestoredAgentLiveness | null
+      }> => {
+        const binding = item.authority.binding
+        if (!binding) {
+          return { item, evidence: null, settledLiveness: 'unverifiable' }
+        }
+        if (this.isPtyKnownExited(binding.ptyId)) {
+          return { item, evidence: null, settledLiveness: 'exited' }
+        }
+        if (!controller) {
+          return { item, evidence: null, settledLiveness: 'unverifiable' }
+        }
+        const evidence = await this.ptyProcessLiveness.inspect({
+          source: controller,
+          ptyId: binding.ptyId,
+          identity: this.getRestoredAgentEvidenceIdentity(binding),
+          deadline,
+          owningInventoryObservedPty: this.inventoryProvesRestoredBindingPresent(
+            freshPtyInventory,
+            binding
+          ),
+          consumerId: RESTORED_AGENT_PROCESS_EVIDENCE_CONSUMER
+        })
+        return { item, evidence, settledLiveness: null }
+      }
+    )
+    const validationSnapshot = this.buildRestoredAgentAuthoritySnapshot(
+      restoredEntries,
+      freshPtyInventory
+    )
+    return new Map(
+      observed.map(({ item, evidence, settledLiveness }) => {
+        const { entry, hookIdentity, authority, hook } = item
         const result = (
           liveness: RestoredAgentLiveness,
           hasExactBinding = authority.hasExactBinding
@@ -20606,37 +20686,23 @@ export class OrcaRuntimeService {
           entry.paneKey,
           { liveness, hookIdentity, hasExactBinding }
         ]
-        if (!binding) {
-          return result('unverifiable')
+        if (settledLiveness) {
+          return result(settledLiveness)
         }
-        if (this.isPtyKnownExited(binding.ptyId)) {
-          return result('exited')
-        }
-        const controller = this.ptyController
-        if (!controller) {
-          return result('unverifiable')
-        }
-        const evidence = await this.ptyProcessLiveness.inspect({
-          source: controller,
-          ptyId: binding.ptyId,
-          identity:
-            binding.incarnationId ?? `runtime:${this.runtimeId}:${binding.lifecycleGeneration}`,
-          deadline,
-          owningInventoryObservedPty: this.inventoryProvesRestoredBindingPresent(
-            freshPtyInventory,
-            binding
-          )
-        })
-        const currentAuthority = this.getRestoredAgentAuthority(entry, freshPtyInventory).binding
+        const binding = authority.binding
+        const currentAuthority = hook
+          ? this.getRestoredAgentAuthority(hook, validationSnapshot).binding
+          : null
         if (
           controller !== this.ptyController ||
+          !binding ||
           !currentAuthority ||
           !sameRestoredAgentProcessAuthority(currentAuthority, binding)
         ) {
           return result('unverifiable')
         }
-        if (evidence.status !== 'live') {
-          return result(evidence.status)
+        if (!evidence || evidence.status !== 'live') {
+          return result(evidence?.status ?? 'unverifiable')
         }
         if (binding.source === 'persisted') {
           return result('unverifiable')
@@ -20654,85 +20720,72 @@ export class OrcaRuntimeService {
         )
       })
     )
-    return new Map(resolved)
   }
 
   private getRestoredAgentAuthority(
-    entry: AgentStatusIpcPayload,
-    inventory: PtyControllerInventory | null
+    hook: RestoredAgentAuthorityHook,
+    snapshot: RestoredAgentAuthoritySnapshot
   ) {
-    const hook = this.getRestoredAgentAuthorityHook(entry)
-    if (!hook) {
-      return { binding: null, hasExactBinding: false }
-    }
     return this.restoredAgentAuthority.resolve({
       hook,
-      current: this.getCurrentRestoredAgentBinding(entry, hook, inventory),
-      persisted: this.getPersistedRestoredAgentPtyBinding(entry, hook, inventory)
+      current: this.getCurrentRestoredAgentBinding(hook, snapshot),
+      persisted: this.getPersistedRestoredAgentPtyBinding(hook, snapshot)
     })
   }
 
   private getPersistedRestoredAgentPtyBinding(
-    entry: AgentStatusIpcPayload,
     hook: RestoredAgentAuthorityHook,
-    inventory: PtyControllerInventory | null
+    snapshot: RestoredAgentAuthoritySnapshot
   ): RestoredAgentAuthorityBinding | null {
-    if (!entry.worktreeId) {
+    const binding = snapshot.persistedSurfaceByKey.get(
+      restoredAgentSurfaceKey(hook.hostKey, hook.worktreeKey, hook.paneKey)
+    )
+    if (!binding) {
       return null
     }
-    const session = this.getWorkspaceSessionForWorktree(entry.worktreeId)
-    for (const [ptyId, binding] of indexPersistedPtySurfaceBindings(session)) {
-      if (
-        binding.paneKey === entry.paneKey &&
-        runtimeWorktreeIdsEqual(binding.worktreeId, entry.worktreeId)
-      ) {
-        const controllerIdentity = inventory?.terminalIdentityByPtyId.get(ptyId)
-        const encodedHost = getPtyExecutionHost(ptyId)
-        if (
-          encodedHost === 'foreign' ||
-          (encodedHost !== null && encodedHost !== hook.hostKey) ||
-          (hook.hostKey.startsWith('wsl:') &&
-            controllerIdentity?.wslDistro?.toLowerCase() !== hook.hostKey.slice(4))
-        ) {
-          return null
-        }
-        return {
-          ptyId,
-          incarnationId: binding.incarnationId,
-          lifecycleGeneration: this.getPtyLifecycleGeneration(ptyId),
-          source: 'persisted',
-          paneKey: binding.paneKey,
-          worktreeKey: hook.worktreeKey,
-          hostKey: hook.hostKey,
-          ...((controllerIdentity?.handle ?? hook.terminalHandle)
-            ? { terminalHandle: controllerIdentity?.handle ?? hook.terminalHandle }
-            : {})
-        }
-      }
+    const controllerIdentity = snapshot.inventory?.terminalIdentityByPtyId.get(binding.ptyId)
+    const encodedHost = getPtyExecutionHost(binding.ptyId)
+    if (
+      encodedHost === 'foreign' ||
+      (encodedHost !== null && encodedHost !== hook.hostKey) ||
+      (hook.hostKey.startsWith('wsl:') &&
+        controllerIdentity?.wslDistro?.toLowerCase() !== hook.hostKey.slice(4))
+    ) {
+      return null
     }
-    return null
+    return {
+      ptyId: binding.ptyId,
+      incarnationId: binding.incarnationId,
+      lifecycleGeneration: this.getPtyLifecycleGeneration(binding.ptyId),
+      source: 'persisted',
+      paneKey: binding.paneKey,
+      worktreeKey: hook.worktreeKey,
+      hostKey: hook.hostKey,
+      ...((controllerIdentity?.handle ?? hook.terminalHandle)
+        ? { terminalHandle: controllerIdentity?.handle ?? hook.terminalHandle }
+        : {})
+    }
   }
 
   private getCurrentRestoredAgentBinding(
-    entry: AgentStatusIpcPayload,
     hook: RestoredAgentAuthorityHook,
-    inventory: PtyControllerInventory | null
+    snapshot: RestoredAgentAuthoritySnapshot
   ): RestoredAgentAuthorityBinding | null {
-    const current = this.getExactPtyRecordForPaneKey(entry.paneKey)
+    const current = snapshot.currentPtyByPaneKey.get(hook.paneKey)
     if (
       !current ||
-      !runtimeWorktreeIdsEqual(current.worktreeId, entry.worktreeId ?? '') ||
+      runtimeWorktreeIdentityKey(current.worktreeId) !== hook.worktreeKey ||
       !this.ptyMatchesRestoredAgentHost(current, hook.hostKey)
     ) {
       return null
     }
-    const controllerIdentity = inventory?.terminalIdentityByPtyId.get(current.ptyId)
+    const controllerIdentity = snapshot.inventory?.terminalIdentityByPtyId.get(current.ptyId)
     return {
       ptyId: current.ptyId,
       incarnationId: current.incarnationId,
       lifecycleGeneration: this.getPtyLifecycleGeneration(current.ptyId),
       source: 'current',
-      paneKey: entry.paneKey,
+      paneKey: hook.paneKey,
       worktreeKey: hook.worktreeKey,
       hostKey: hook.hostKey,
       ...((controllerIdentity?.handle ??
@@ -20746,6 +20799,100 @@ export class OrcaRuntimeService {
           }
         : {})
     }
+  }
+
+  private buildRestoredAgentAuthoritySnapshot(
+    entries: readonly AgentStatusIpcPayload[],
+    inventory: PtyControllerInventory | null
+  ): RestoredAgentAuthoritySnapshot {
+    const requestedPaneKeys = new Set(entries.map((entry) => entry.paneKey))
+    const currentCandidates = new Map<string, Set<RuntimePtyWorktreeRecord>>()
+    const addCurrent = (paneKey: string, pty: RuntimePtyWorktreeRecord | undefined): void => {
+      if (!pty || !requestedPaneKeys.has(paneKey)) {
+        return
+      }
+      const candidates = currentCandidates.get(paneKey) ?? new Set<RuntimePtyWorktreeRecord>()
+      candidates.add(pty)
+      currentCandidates.set(paneKey, candidates)
+    }
+    for (const paneKey of requestedPaneKeys) {
+      const parsed = parsePaneKey(paneKey)
+      const leaf = parsed
+        ? this.leaves.get(this.getLeafKey(parsed.tabId, parsed.leafId))
+        : undefined
+      addCurrent(paneKey, leaf?.ptyId ? this.ptysById.get(leaf.ptyId) : undefined)
+    }
+    for (const pty of this.ptysById.values()) {
+      if (pty.paneKey) {
+        addCurrent(pty.paneKey, pty)
+      }
+    }
+    const currentPtyByPaneKey = new Map<string, RuntimePtyWorktreeRecord>()
+    for (const [paneKey, candidates] of currentCandidates) {
+      const connected = [...candidates].filter((pty) => pty.connected)
+      if (connected.length === 1) {
+        currentPtyByPaneKey.set(paneKey, connected[0]!)
+      } else if (connected.length === 0 && candidates.size === 1) {
+        currentPtyByPaneKey.set(paneKey, [...candidates][0]!)
+      }
+    }
+
+    const persistedSurfaceByKey = new Map<string, PersistedRestoredAgentSurface | null>()
+    const indexedSessionHostIds = new Set<ExecutionHostId>()
+    for (const entry of entries) {
+      if (!entry.worktreeId) {
+        continue
+      }
+      const sessionHostId = this.tryGetWorkspaceSessionHostIdForWorktree(entry.worktreeId)
+      if (!sessionHostId || indexedSessionHostIds.has(sessionHostId)) {
+        continue
+      }
+      indexedSessionHostIds.add(sessionHostId)
+      const session = this.store?.getWorkspaceSession?.(sessionHostId)
+      for (const [ptyId, binding] of indexPersistedPtySurfaceBindings(session)) {
+        const hostKeys = this.getPersistedRestoredAgentHostKeys(sessionHostId, ptyId, inventory)
+        for (const hostKey of hostKeys) {
+          const key = restoredAgentSurfaceKey(
+            hostKey,
+            runtimeWorktreeIdentityKey(binding.worktreeId),
+            binding.paneKey
+          )
+          const candidate = { ptyId, ...binding }
+          const existing = persistedSurfaceByKey.get(key)
+          if (existing === undefined) {
+            persistedSurfaceByKey.set(key, candidate)
+          } else if (
+            existing !== null &&
+            (existing.ptyId !== candidate.ptyId ||
+              existing.incarnationId !== candidate.incarnationId)
+          ) {
+            persistedSurfaceByKey.set(key, null)
+          }
+        }
+      }
+    }
+    return { currentPtyByPaneKey, persistedSurfaceByKey, inventory }
+  }
+
+  private getPersistedRestoredAgentHostKeys(
+    sessionHostId: ExecutionHostId,
+    ptyId: string,
+    inventory: PtyControllerInventory | null
+  ): readonly string[] {
+    const encodedHost = getPtyExecutionHost(ptyId)
+    if (encodedHost && encodedHost !== 'foreign') {
+      return [encodedHost]
+    }
+    const wslDistro = inventory?.terminalIdentityByPtyId.get(ptyId)?.wslDistro?.trim()
+    return wslDistro ? [sessionHostId, `wsl:${wslDistro.toLowerCase()}`] : [sessionHostId]
+  }
+
+  private getRestoredAgentEvidenceIdentity(binding: RestoredAgentAuthorityBinding): string {
+    return makePtyProcessEvidenceIdentity(
+      binding.incarnationId,
+      this.runtimeId,
+      binding.lifecycleGeneration
+    )
   }
 
   private getRestoredAgentAuthorityHook(
@@ -20779,29 +20926,6 @@ export class OrcaRuntimeService {
       hostKey,
       ...(entry.terminalHandle ? { terminalHandle: entry.terminalHandle } : {})
     }
-  }
-
-  private getExactPtyRecordForPaneKey(paneKey: string): RuntimePtyWorktreeRecord | null {
-    const parsed = parsePaneKey(paneKey)
-    const leaf = parsed ? this.leaves.get(this.getLeafKey(parsed.tabId, parsed.leafId)) : undefined
-    const candidates = new Set<RuntimePtyWorktreeRecord>()
-    if (leaf?.ptyId) {
-      const pty = this.ptysById.get(leaf.ptyId)
-      if (pty) {
-        candidates.add(pty)
-      }
-    }
-    for (const pty of this.ptysById.values()) {
-      if (pty.paneKey === paneKey) {
-        candidates.add(pty)
-      }
-    }
-    const connected = [...candidates].filter((pty) => pty.connected)
-    return connected.length === 1
-      ? connected[0]!
-      : candidates.size === 1
-        ? [...candidates][0]!
-        : null
   }
 
   private ptyMatchesRestoredAgentHost(pty: RuntimePtyWorktreeRecord, hostKey: string): boolean {
@@ -39025,6 +39149,8 @@ export function resolveWorktreeScanCacheTtlMs(repo: Pick<Repo, 'path' | 'connect
 }
 const PTY_CONTROLLER_LIST_TIMEOUT_MS = 3000
 const PTY_PROCESS_INSPECTION_TIMEOUT_MS = 1_000
+const RESTORED_AGENT_INSPECTION_CONCURRENCY = 4
+const RESTORED_AGENT_PROCESS_EVIDENCE_CONSUMER = 'restored-agent'
 // Why: the slice of the list budget reserved for the aggregate to collect the providers
 // that answered after a stalled one gives up.
 const PTY_CONTROLLER_LIST_PROVIDER_MARGIN_MS = 500
@@ -40865,6 +40991,22 @@ function restoredAgentHookIdentity(entry: AgentStatusIpcPayload): string {
     entry.toolInput,
     entry.interrupted
   ])
+}
+
+function restoredAgentSurfaceKey(hostKey: string, worktreeKey: string, paneKey: string): string {
+  return JSON.stringify([hostKey, worktreeKey, paneKey])
+}
+
+function makePtyProcessEvidenceIdentity(
+  incarnationId: string | null,
+  runtimeId: string,
+  lifecycleGeneration: number
+): string {
+  return JSON.stringify(
+    incarnationId === null
+      ? ['runtime-generation', runtimeId, lifecycleGeneration]
+      : ['incarnation', incarnationId]
+  )
 }
 
 function indexPersistedPtyWorktreeBindings(

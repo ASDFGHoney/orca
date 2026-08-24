@@ -1,25 +1,20 @@
-export type PtyProcessInspectionSource = {
-  getForegroundProcess(ptyId: string): Promise<string | null>
-  inspectProcess?: (ptyId: string) => Promise<{
-    foregroundProcess: string | null
-    hasChildProcesses: boolean
-    unavailable?: true
-  }>
-  hasChildProcesses?: (ptyId: string) => Promise<boolean>
-}
+import {
+  describeProcessInspectionError,
+  inspectPtyProcess,
+  type PtyProcessInspectionSource,
+  type PtyProcessLivenessEvidence
+} from './pty-process-inspection'
 
-export type PtyProcessLivenessEvidence =
-  | {
-      status: 'live'
-      foregroundProcess: string | null
-      hasChildProcesses: boolean | null
-    }
-  | { status: 'unverifiable'; reason: string }
-  | { status: 'exited' }
+export type {
+  PtyProcessInspectionSource,
+  PtyProcessLivenessEvidence
+} from './pty-process-inspection'
 
 type PtyProcessEvidenceEntry = {
   source: PtyProcessInspectionSource
   identity: string
+  consumerIds: Set<string>
+  hasUnscopedConsumer: boolean
   freshness: number
   owningInventoryObservedPty: boolean
   failureCount: number
@@ -31,6 +26,7 @@ type PtyProcessEvidenceEntry = {
 
 export type PtyProcessLivenessBrokerOptions = {
   timeoutMs: number
+  maxConcurrentProbes?: number
   liveTtlMs?: number
   unavailableBackoffBaseMs?: number
   unavailableBackoffMaxMs?: number
@@ -41,10 +37,12 @@ export type PtyProcessLivenessBrokerOptions = {
 const DEFAULT_LIVE_TTL_MS = 10_000
 const DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS = 3_000
 const DEFAULT_UNAVAILABLE_BACKOFF_MAX_MS = 30_000
+const DEFAULT_MAX_CONCURRENT_PROBES = 8
 
 export class PtyProcessLivenessBroker {
   private readonly entries = new Map<string, PtyProcessEvidenceEntry>()
   private readonly now: () => number
+  private activeProbeCount = 0
 
   constructor(private readonly options: PtyProcessLivenessBrokerOptions) {
     this.now = options.now ?? Date.now
@@ -59,6 +57,7 @@ export class PtyProcessLivenessBroker {
     deadline?: number
     waitForSettlement?: boolean
     owningInventoryObservedPty?: boolean
+    consumerId?: string
   }): Promise<PtyProcessLivenessEvidence> {
     const freshness = args.freshness ?? 0
     const waitMs = args.waitForSettlement
@@ -71,6 +70,9 @@ export class PtyProcessLivenessBroker {
           )
         )
     const existing = this.entries.get(args.ptyId)
+    if (existing?.source === args.source && existing.identity === args.identity) {
+      this.rememberConsumer(existing, args.consumerId)
+    }
     if (
       existing?.source === args.source &&
       existing.identity === args.identity &&
@@ -121,6 +123,12 @@ export class PtyProcessLivenessBroker {
     if (waitMs === 0) {
       return Promise.resolve({ status: 'unverifiable', reason: 'process inspection timed out' })
     }
+    if (this.activeProbeCount >= this.maxConcurrentProbes()) {
+      return Promise.resolve({
+        status: 'unverifiable',
+        reason: 'process inspection capacity unavailable'
+      })
+    }
 
     const failureCount =
       existing?.source === args.source && existing.identity === args.identity
@@ -129,6 +137,8 @@ export class PtyProcessLivenessBroker {
     const entry: PtyProcessEvidenceEntry = {
       source: args.source,
       identity: args.identity,
+      consumerIds: new Set(args.consumerId ? [args.consumerId] : []),
+      hasUnscopedConsumer: args.consumerId === undefined,
       freshness,
       owningInventoryObservedPty: args.owningInventoryObservedPty === true,
       failureCount,
@@ -137,7 +147,8 @@ export class PtyProcessLivenessBroker {
       timedOut: false,
       probe: null
     }
-    const probe = this.runProbe(args.source, args.ptyId)
+    this.activeProbeCount += 1
+    const probe = inspectPtyProcess(args.source, args.ptyId)
       .then((evidence) => {
         const reconciled =
           evidence.status === 'exited' && entry.owningInventoryObservedPty
@@ -169,7 +180,10 @@ export class PtyProcessLivenessBroker {
           entry.probe = null
           entry.timedOut = false
           entry.failureCount += 1
-          entry.evidence = { status: 'unverifiable', reason: describeError(error) }
+          entry.evidence = {
+            status: 'unverifiable',
+            reason: describeProcessInspectionError(error)
+          }
           entry.expiresAt = this.now() + this.unavailableBackoffMs(entry.failureCount)
         }
         try {
@@ -177,9 +191,11 @@ export class PtyProcessLivenessBroker {
         } catch {
           // Diagnostic observers cannot change the authority verdict.
         }
-        return { status: 'unverifiable', reason: describeError(error) }
+        return { status: 'unverifiable', reason: describeProcessInspectionError(error) }
       })
-    entry.probe = probe
+    entry.probe = probe.finally(() => {
+      this.activeProbeCount -= 1
+    })
     this.entries.set(args.ptyId, entry)
     return this.waitForProbe(args.ptyId, entry, waitMs)
   }
@@ -192,6 +208,27 @@ export class PtyProcessLivenessBroker {
     this.entries.clear()
   }
 
+  retainConsumerEvidence(
+    consumerId: string,
+    retained: readonly Readonly<{ ptyId: string; identity: string }>[]
+  ): void {
+    const retainedKeys = new Set(
+      retained.map(({ ptyId, identity }) => processEvidenceKey(ptyId, identity))
+    )
+    for (const [ptyId, entry] of this.entries) {
+      if (
+        !entry.consumerIds.has(consumerId) ||
+        retainedKeys.has(processEvidenceKey(ptyId, entry.identity))
+      ) {
+        continue
+      }
+      entry.consumerIds.delete(consumerId)
+      if (!entry.hasUnscopedConsumer && entry.consumerIds.size === 0) {
+        this.entries.delete(ptyId)
+      }
+    }
+  }
+
   getPendingCount(): number {
     let count = 0
     for (const entry of this.entries.values()) {
@@ -202,33 +239,12 @@ export class PtyProcessLivenessBroker {
     return count
   }
 
-  private async runProbe(
-    source: PtyProcessInspectionSource,
-    ptyId: string
-  ): Promise<PtyProcessLivenessEvidence> {
-    try {
-      if (source.inspectProcess) {
-        const inspection = await source.inspectProcess(ptyId)
-        return inspection.unavailable
-          ? { status: 'unverifiable', reason: 'process inspection unavailable' }
-          : {
-              status: 'live',
-              foregroundProcess: inspection.foregroundProcess,
-              hasChildProcesses: inspection.hasChildProcesses
-            }
-      }
-      const foregroundProcess = await source.getForegroundProcess(ptyId)
-      return {
-        status: 'live',
-        foregroundProcess,
-        hasChildProcesses: source.hasChildProcesses ? await source.hasChildProcesses(ptyId) : null
-      }
-    } catch (error) {
-      if (isTerminalGoneError(error)) {
-        return { status: 'exited' }
-      }
-      throw error
-    }
+  getActiveProbeCount(): number {
+    return this.activeProbeCount
+  }
+
+  getEntryCount(): number {
+    return this.entries.size
   }
 
   private waitForProbe(
@@ -265,6 +281,21 @@ export class PtyProcessLivenessBroker {
     return Math.min(max, base * 2 ** Math.max(0, failureCount - 1))
   }
 
+  private maxConcurrentProbes(): number {
+    const configured = this.options.maxConcurrentProbes ?? DEFAULT_MAX_CONCURRENT_PROBES
+    return Number.isFinite(configured) && configured > 0
+      ? Math.max(1, Math.floor(configured))
+      : DEFAULT_MAX_CONCURRENT_PROBES
+  }
+
+  private rememberConsumer(entry: PtyProcessEvidenceEntry, consumerId: string | undefined): void {
+    if (consumerId === undefined) {
+      entry.hasUnscopedConsumer = true
+    } else {
+      entry.consumerIds.add(consumerId)
+    }
+  }
+
   private storeUnverifiable(entry: PtyProcessEvidenceEntry, reason: string): void {
     entry.failureCount += 1
     entry.evidence = { status: 'unverifiable', reason }
@@ -272,15 +303,6 @@ export class PtyProcessLivenessBroker {
   }
 }
 
-function isTerminalGoneError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  const code =
-    error && typeof error === 'object' && 'code' in error
-      ? String((error as { code?: unknown }).code)
-      : ''
-  return message === 'terminal_gone' || code === 'terminal_gone'
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function processEvidenceKey(ptyId: string, identity: string): string {
+  return JSON.stringify([ptyId, identity])
 }
