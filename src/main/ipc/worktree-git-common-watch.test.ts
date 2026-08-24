@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
 import { performance as nodePerformance } from 'node:perf_hooks'
@@ -18,17 +18,10 @@ import type {
 } from './worktree-base-directory-poller'
 import { startGitCommonWatch } from './worktree-git-common-watch'
 import { startGitCommonPolling } from './worktree-git-common-polling'
-import { gitMetadataPollScheduler } from './git-metadata-poll-scheduler'
 
 vi.mock('./parcel-watcher-process', () => ({
   subscribeViaWatcherProcess: vi.fn()
 }))
-
-beforeEach(() => {
-  gitMetadataPollScheduler.resetForTests()
-  gitMetadataPollScheduler.setNowForTests(() => Date.now())
-})
-
 // Records every stat target so a test can assert which paths a parked poll stopped touching.
 const { statCalls } = vi.hoisted(() => ({ statCalls: [] as string[] }))
 
@@ -52,6 +45,20 @@ const RECONCILIATION_TICKS = 15
 const alwaysVisible: WorktreePollerWindowVisibility = {
   isWindowVisible: () => true,
   onWindowBecameVisible: () => () => {}
+}
+
+async function replaceWorktreesRoot(
+  commonDir: string,
+  worktreesDir: string,
+  retainedEntry: string
+): Promise<void> {
+  await rm(worktreesDir, { recursive: true })
+  // Linux can reuse a just-deleted directory inode. Reserve that inode with a
+  // sibling before recreating the watched root so reconciliation sees a replacement.
+  const inodeReservation = join(commonDir, 'worktrees-replacement-inode')
+  await mkdir(inodeReservation)
+  await mkdir(retainedEntry, { recursive: true })
+  await rm(inodeReservation, { recursive: true, force: true })
 }
 
 function createVisibilityHarness(): {
@@ -100,7 +107,6 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
-    gitMetadataPollScheduler.resetForTests()
     childSubscriptions = []
     statCalls.length = 0
     subscribeMock.mockReset()
@@ -524,7 +530,6 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   it('re-arms the native stream when the root is replaced with the same child names', async () => {
     vi.useFakeTimers()
-    vi.clearAllTimers()
     const restorePerformanceNow = vi
       .spyOn(nodePerformance, 'now')
       .mockImplementation(() => Date.now())
@@ -538,18 +543,9 @@ describe('worktree git-common narrow watch (darwin)', () => {
       await startWatch(commonDir, received)
       const staleSubscription = childSubscriptions[0]
 
-      await rm(worktreesDir, { recursive: true })
-      await mkdir(retainedEntry, { recursive: true })
+      await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      await vi.runOnlyPendingTimersAsync()
-      // Native filesystem promises settle outside the fake timer callback; wait for the
-      // re-subscribe observable rather than relying on timer advancement to flush them.
-      await vi.waitFor(
-        () => {
-          expect(subscribeMock).toHaveBeenCalledTimes(2)
-        },
-        { timeout: 1_000 }
-      )
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
       expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
 
       const beforeStaleEvent = received.length
@@ -568,7 +564,6 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   it('disposes an in-flight stale resubscribe and fences its interruption hook', async () => {
     vi.useFakeTimers()
-    vi.clearAllTimers()
     const restorePerformanceNow = vi
       .spyOn(nodePerformance, 'now')
       .mockImplementation(() => Date.now())
@@ -589,31 +584,16 @@ describe('worktree git-common narrow watch (darwin)', () => {
       const onWatchError = vi.fn()
       await startWatch(commonDir, received, () => [], onWatchError)
 
-      await rm(worktreesDir, { recursive: true })
-      await mkdir(retainedEntry, { recursive: true })
+      await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      await vi.runOnlyPendingTimersAsync()
-      await vi.waitFor(
-        () => {
-          expect(subscribeMock).toHaveBeenCalledTimes(2)
-        },
-        { timeout: 1_000 }
-      )
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
       const stalePendingSubscription = childSubscriptions[1]
 
-      await rm(worktreesDir, { recursive: true })
-      await mkdir(retainedEntry, { recursive: true })
+      await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      await vi.waitFor(
-        () => {
-          expect(
-            received
-              .flat()
-              .filter((event) => event.type === 'create' && event.path === worktreesDir)
-          ).toHaveLength(2)
-        },
-        { timeout: 1_000 }
-      )
+      expect(
+        received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
+      ).toHaveLength(2)
 
       const beforeStaleInterruption = received.length
       stalePendingSubscription.hooks.onInterruption?.()
@@ -626,12 +606,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
         }
       })
       await vi.advanceTimersByTimeAsync(POLL_MS)
-      await vi.waitFor(
-        () => {
-          expect(subscribeMock).toHaveBeenCalledTimes(3)
-        },
-        { timeout: 1_000 }
-      )
+      expect(subscribeMock).toHaveBeenCalledTimes(3)
       expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
 
       const immediateEntry = join(worktreesDir, 'current-generation')
@@ -671,7 +646,6 @@ describe('worktree git-common polling gate (non-darwin)', () => {
 
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
-    gitMetadataPollScheduler.resetForTests()
   })
 
   async function makePollingCommonDir(): Promise<string> {
