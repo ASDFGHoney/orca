@@ -44,7 +44,13 @@ export function pruneWorktreeStateForRepo(
       const keyHost = isWorktreeHostIdentity(key) ? key.slice(0, key.indexOf('|')) : null
       // Why: bare keys are scoped by the per-partition gating below; only host-qualified
       // keys can sit in another host's partition and need host-matching at collection time.
-      const belongsToPrunedHost = hostId === null || keyHost === null || keyHost === hostId
+      // Why the empty-host arm: the host split parks the canonical unknown-host form (`|<id>`) in
+      // the local partition, so a local prune must claim it or the orphan restores next launch.
+      const belongsToPrunedHost =
+        hostId === null ||
+        keyHost === null ||
+        keyHost === hostId ||
+        (keyHost === '' && hostId === LOCAL_EXECUTION_HOST_ID)
       if (belongsToPrunedHost && rawKey.startsWith(prefix)) {
         ownerKeysToPrune.add(key)
       }

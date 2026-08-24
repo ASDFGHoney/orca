@@ -350,11 +350,7 @@ function isCurrentOpenTabItem(item: OpenTabPaletteItem): boolean {
   return item.type === 'browser-page' ? item.result.isCurrentPage : item.result.isCurrentTab
 }
 
-/**
- * Builds a stable key for one open-tab result before adding an occurrence ordinal. The command id
- * is intentionally not enough: two hosts can publish the same tab id, and a duplicate snapshot can
- * briefly contain the same row twice.
- */
+/** Not the command id: two hosts — or a duplicate snapshot — can publish the same tab id. */
 function getRecentTabOccurrenceBase(item: OpenTabPaletteItem): string {
   if (item.type === 'browser-page') {
     const result = item.result
@@ -1614,9 +1610,8 @@ function WorktreeJumpPaletteContent({
     visible
   ])
 
-  // Why: walk the frozen order rather than re-sorting the tab list — the frozen occurrence ids are the ranking,
-  // so agent churn never reshuffles rows under the cursor. Cap after resolving, not before: a chip
-  // applied mid-open narrows `openTabItems`, and capping first would leave the section empty.
+  // Why walk the frozen order, and cap after resolving: agent churn must not reshuffle rows, and a
+  // mid-open chip narrows `openTabItems` — capping first would leave the section empty.
   const recentTabItems = useMemo<PaletteItem[]>(() => {
     const itemByOccurrenceId = new Map(
       openTabRecentRows.map(({ occurrenceId, item }) => [occurrenceId, item])

@@ -12,6 +12,7 @@ import type { TabGroup } from '../../../shared/tab-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import { getWorktreeVisitTimestamp } from './worktree-visit-recency'
+import { composeWorktreeHostIdentity } from '../../../shared/worktree/host-qualified-identity'
 
 /**
  * Row model for Cmd+J's empty-query "Recent chats & terminals" section.
@@ -43,7 +44,7 @@ export type RecentWorkspaceTabOrderInputs = {
   paneSources: TabPaneInputSources
   now: number
   lastVisitedAtByWorktreeId: Record<string, number>
-  /** Unified tab id → ordinal in its worktree's focused group; higher is more recent. */
+  /** `focusedGroupTabKey` → ordinal in that worktree's focused group; higher is more recent. */
   focusedGroupTabRecency: ReadonlyMap<string, number>
 }
 
@@ -100,6 +101,15 @@ export function resolveRecentWorkspaceTabStatus(
     : 'inactive'
 }
 
+/**
+ * Ordinals are per-worktree, so the key must be too: two worktrees can publish the same tab id and
+ * a bare key would let one overwrite the other's MRU position.
+ */
+export function focusedGroupTabKey(worktreeId: string, unifiedTabId: string): string {
+  // NUL separator: a worktree id embeds a filesystem path, so a printable one would be ambiguous.
+  return `${worktreeId}\u0000${unifiedTabId}`
+}
+
 /** `TabGroup.recentTabIds` keeps most-recent at the tail, so the index is the ordinal. */
 export function buildFocusedGroupTabRecency(
   activeGroupIdByWorktree: Record<string, string | undefined>,
@@ -113,7 +123,9 @@ export function buildFocusedGroupTabRecency(
     }
     // Why: MRU only means something inside the focused group; other groups keep positional order.
     const focusedGroup = groups?.find((group) => group.id === activeGroupId)
-    focusedGroup?.recentTabIds?.forEach((tabId, index) => recency.set(tabId, index))
+    focusedGroup?.recentTabIds?.forEach((tabId, index) =>
+      recency.set(focusedGroupTabKey(worktreeId, tabId), index)
+    )
   }
   return recency
 }
@@ -152,10 +164,12 @@ function compareRankedRows(a: RankedRow, b: RankedRow): number {
  */
 export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs): string[] {
   const { rows, paneSources, now, lastVisitedAtByWorktreeId, focusedGroupTabRecency } = inputs
+  // Host-qualified: the same worktree id on two hosts is two workspaces and must not share a block.
   const worktreeOrder = new Map<string, number>()
   for (const row of rows) {
-    if (!worktreeOrder.has(row.worktreeId)) {
-      worktreeOrder.set(row.worktreeId, worktreeOrder.size)
+    const identity = composeWorktreeHostIdentity(row.worktreeHostId, row.worktreeId)
+    if (!worktreeOrder.has(identity)) {
+      worktreeOrder.set(identity, worktreeOrder.size)
     }
   }
   return rows
@@ -171,11 +185,14 @@ export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs):
           hostId: row.worktreeHostId
         }),
         worktreeId: row.worktreeId,
-        worktreeOrder: worktreeOrder.get(row.worktreeId) ?? Number.MAX_SAFE_INTEGER,
+        worktreeOrder:
+          worktreeOrder.get(composeWorktreeHostIdentity(row.worktreeHostId, row.worktreeId)) ??
+          Number.MAX_SAFE_INTEGER,
         focusOrdinal:
           row.unifiedTabId === null
             ? NO_FOCUS_ORDINAL
-            : (focusedGroupTabRecency.get(row.unifiedTabId) ?? NO_FOCUS_ORDINAL)
+            : (focusedGroupTabRecency.get(focusedGroupTabKey(row.worktreeId, row.unifiedTabId)) ??
+              NO_FOCUS_ORDINAL)
       }
     })
     .sort(compareRankedRows)

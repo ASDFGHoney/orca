@@ -109,7 +109,10 @@ export function migrateWorktreeIdentity(
         const nextKey = isWorktreeHostIdentity(key)
           ? `${key.slice(0, key.length - rawId.length)}${newWorktreeId}`
           : newWorktreeId
-        nextRecency[nextKey] = value
+        // Why max: a partial migration leaves both identities behind; taking the older one would
+        // regress Cmd+J recency after restart.
+        const existing = nextRecency[nextKey]
+        nextRecency[nextKey] = existing === undefined ? value : Math.max(existing, value)
         delete nextRecency[key]
         recencyChanged = true
       }
