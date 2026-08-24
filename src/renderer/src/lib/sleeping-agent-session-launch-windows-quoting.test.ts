@@ -133,6 +133,18 @@ describe('launchSleepingAgentSession Windows shell quoting', () => {
     mockCreateTab.mockReturnValue({ id: 'tab-1' })
   })
 
+  it('skips a resume while the worktree owner is unavailable', async () => {
+    const repos = store.repos
+    store.repos = []
+    try {
+      const { launchSleepingAgentSession } = await import('./sleeping-agent-session-launch')
+      expect(launchSleepingAgentSession(record)).toBe(false)
+      expect(mockCreateTab).not.toHaveBeenCalled()
+    } finally {
+      store.repos = repos
+    }
+  })
+
   it('quotes the resume argv for a cmd.exe tab', async () => {
     store.settings.terminalWindowsShell = 'cmd.exe'
 

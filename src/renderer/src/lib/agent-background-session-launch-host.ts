@@ -2,12 +2,17 @@ import type { useAppStore } from '@/store'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
+import { getFolderWorkspaceConnectionId } from '@/lib/folder-workspace-connection'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { isWindowsAbsolutePathLike } from '../../../shared/cross-platform-path'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
 import { isWslUncPath } from '../../../shared/wsl-paths'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
-import { findIndexedRepoOwnerForHost } from '@/lib/worktree-runtime-owner-index'
+import {
+  findIndexedWorktreeOwner,
+  findIndexedRepoOwner,
+  findIndexedRepoOwnerForHost
+} from '@/lib/worktree-runtime-owner-index'
 import { parseExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 
@@ -22,7 +27,8 @@ export type AgentBackgroundLaunchHost = {
   isRemote: boolean
   /** Accepted status connection; undefined preserves unknown-owner behavior. */
   expectedConnectionId: string | null | undefined
-  executionHostId: ExecutionHostId
+  /** Null only for legacy records whose host owner was not persisted. */
+  executionHostId: ExecutionHostId | null
   worktree: NonNullable<ReturnType<LaunchStore['getKnownWorktreeById']>> | null
   repo: LaunchRepo | null
 }
@@ -33,11 +39,51 @@ export function resolveAgentBackgroundLaunchHost(args: {
   worktreeId: string
   worktreePath?: string
   repo?: LaunchRepo | null
+  /** Legacy resume records predate persisted execution-host ownership. */
+  allowLegacyUnknownHost?: boolean
 }): AgentBackgroundLaunchHost {
-  const { store, worktreeId } = args
+  const { store, worktreeId, allowLegacyUnknownHost = false } = args
   const executionHostId = getResolvedExecutionHostIdForWorktree(store, worktreeId)
-  if (!executionHostId) {
-    throw new Error('The target workspace host is unavailable or ambiguous.')
+  const workspaceScope = parseWorkspaceKey(worktreeId)
+  const legacyWorktree = executionHostId
+    ? null
+    : workspaceScope?.type === 'folder'
+      ? (store.getKnownWorktreeById(worktreeId) ?? null)
+      : (() => {
+          const owner = findIndexedWorktreeOwner(store.worktreesByRepo, worktreeId)
+          return owner ? (store.getKnownWorktreeById(worktreeId) ?? null) : null
+        })()
+  const legacyRepo =
+    args.repo ??
+    (legacyWorktree
+      ? (store.repos.find((entry) => entry.id === legacyWorktree.repoId) ?? null)
+      : null)
+  const folderWorkspaceId =
+    workspaceScope?.type === 'folder' ? workspaceScope.folderWorkspaceId : undefined
+  const isFolderWorkspace = folderWorkspaceId !== undefined
+  if (!executionHostId && !legacyWorktree && worktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+    if (
+      !allowLegacyUnknownHost ||
+      (isFolderWorkspace && store.folderWorkspaces.some((entry) => entry.id === folderWorkspaceId))
+    ) {
+      throw new Error('The target workspace host is unavailable or ambiguous.')
+    }
+    return {
+      connectionId: legacyRepo?.connectionId ?? null,
+      platform: legacyRepo
+        ? getAgentLaunchPlatformForRepo(
+            legacyRepo,
+            legacyRepo.connectionId
+              ? undefined
+              : getLocalProjectExecutionRuntimeContext(store, worktreeId)
+          )
+        : CLIENT_PLATFORM,
+      isRemote: Boolean(legacyRepo?.connectionId),
+      expectedConnectionId: legacyRepo?.connectionId ?? undefined,
+      executionHostId: null,
+      worktree: null,
+      repo: legacyRepo
+    }
   }
   if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
     return {
@@ -45,17 +91,34 @@ export function resolveAgentBackgroundLaunchHost(args: {
       platform: CLIENT_PLATFORM,
       isRemote: false,
       expectedConnectionId: null,
-      executionHostId,
+      executionHostId: executionHostId ?? null,
       worktree: null,
       repo: null
     }
   }
-  const worktree = store.getKnownWorktreeById(worktreeId, executionHostId)
+  const worktree =
+    (executionHostId ? store.getKnownWorktreeById(worktreeId, executionHostId) : legacyWorktree) ??
+    null
   if (!worktree) {
     throw new Error('The target workspace is no longer available.')
   }
-  const repo = findIndexedRepoOwnerForHost(store.repos, worktree.repoId, executionHostId)
-  const worktreePath = worktree.path
+  const parsedExecutionHost = parseExecutionHostId(executionHostId)
+  const runtimeOwnedWorktree = Boolean(worktree.runtimeOwnerEnvironmentId?.trim())
+  const runtimeRepoOwner = runtimeOwnedWorktree
+    ? findIndexedRepoOwner(store.repos, worktree.repoId)
+    : null
+  const runtimeRepo = runtimeRepoOwner
+    ? (store.repos.find(
+        (entry) =>
+          entry.id === runtimeRepoOwner.id &&
+          entry.connectionId === runtimeRepoOwner.connectionId &&
+          entry.executionHostId === runtimeRepoOwner.executionHostId
+      ) ?? null)
+    : null
+  const repo = executionHostId
+    ? (findIndexedRepoOwnerForHost(store.repos, worktree.repoId, executionHostId) ?? runtimeRepo)
+    : legacyRepo
+  const worktreePath = args.worktreePath ?? worktree.path
   if (repo) {
     return {
       connectionId: repo.connectionId ?? null,
@@ -67,13 +130,26 @@ export function resolveAgentBackgroundLaunchHost(args: {
       expectedConnectionId: repo.connectionId ?? null,
       worktree,
       repo,
-      executionHostId
+      executionHostId: executionHostId ?? null
     }
   }
-  const parsedHost = parseExecutionHostId(executionHostId)
+  if (!executionHostId && allowLegacyUnknownHost) {
+    return {
+      connectionId: null,
+      platform: CLIENT_PLATFORM,
+      isRemote: false,
+      expectedConnectionId: undefined,
+      executionHostId: null,
+      worktree,
+      repo: null
+    }
+  }
   const folderWorkspaceConnectionId =
-    parsedHost?.kind === 'ssh' ? parsedHost.targetId : parsedHost ? null : undefined
-  const isFolderWorkspace = parseWorkspaceKey(worktreeId)?.type === 'folder'
+    parsedExecutionHost?.kind === 'ssh'
+      ? parsedExecutionHost.targetId
+      : parsedExecutionHost
+        ? null
+        : getFolderWorkspaceConnectionId(store, folderWorkspaceId ?? '')
   if (!isFolderWorkspace || folderWorkspaceConnectionId === undefined) {
     throw new Error('The target folder workspace host is unavailable or ambiguous.')
   }
@@ -90,6 +166,6 @@ export function resolveAgentBackgroundLaunchHost(args: {
     expectedConnectionId: folderWorkspaceConnectionId ?? null,
     worktree,
     repo: null,
-    executionHostId
+    executionHostId: executionHostId ?? null
   }
 }

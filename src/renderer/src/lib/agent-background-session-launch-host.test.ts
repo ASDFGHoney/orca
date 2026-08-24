@@ -78,4 +78,60 @@ describe('resolveAgentBackgroundLaunchHost', () => {
 
     expect(host.platform).toBe('linux')
   })
+
+  it('fails closed when a non-runtime worktree only has a mismatched repo owner', () => {
+    const worktree = {
+      id: 'repo-1::/remote',
+      repoId: 'repo-1',
+      hostId: 'ssh:ssh-a',
+      path: '/remote'
+    }
+    const store = {
+      activeWorktreeId: null,
+      activeWorkspaceExecutionHostId: null,
+      folderWorkspaces: [],
+      projectGroups: [],
+      repos: [{ id: 'repo-1', connectionId: null, executionHostId: 'local' }],
+      worktreesByRepo: { 'repo-1': [worktree] },
+      detectedWorktreesByRepo: {},
+      getKnownWorktreeById: (id: string, hostId?: string) =>
+        id === worktree.id && hostId === worktree.hostId ? worktree : undefined
+    }
+
+    expect(() =>
+      resolveAgentBackgroundLaunchHost({ store: store as never, worktreeId: worktree.id })
+    ).toThrow('folder workspace host is unavailable or ambiguous')
+  })
+
+  it('allows a unique repo fallback only for an explicitly runtime-owned worktree', () => {
+    const worktree = {
+      id: 'repo-1::/remote',
+      repoId: 'repo-1',
+      hostId: 'ssh:ssh-a',
+      runtimeOwnerEnvironmentId: 'runtime-a',
+      path: '/remote'
+    }
+    const store = {
+      activeWorktreeId: null,
+      activeWorkspaceExecutionHostId: null,
+      folderWorkspaces: [],
+      projectGroups: [],
+      repos: [
+        {
+          id: 'repo-1',
+          path: '/remote',
+          connectionId: 'ssh-a',
+          executionHostId: 'runtime:runtime-a'
+        }
+      ],
+      worktreesByRepo: { 'repo-1': [worktree] },
+      detectedWorktreesByRepo: {},
+      getKnownWorktreeById: (id: string, hostId?: string) =>
+        id === worktree.id && hostId === 'ssh:ssh-a' ? worktree : undefined
+    }
+
+    expect(
+      resolveAgentBackgroundLaunchHost({ store: store as never, worktreeId: worktree.id })
+    ).toMatchObject({ connectionId: 'ssh-a', executionHostId: 'ssh:ssh-a' })
+  })
 })

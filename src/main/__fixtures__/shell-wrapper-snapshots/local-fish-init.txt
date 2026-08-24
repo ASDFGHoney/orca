@@ -2,9 +2,20 @@ function __orca_shell_ready_marker --on-event fish_prompt
   builtin printf "\033]777;orca-shell-ready\007"
   functions -e __orca_shell_ready_marker
 end
-if test -n "$ORCA_CODEX_LAUNCH_PREFLIGHT"; and test (type -t codex 2>/dev/null) = file
+
+if test -n "$ORCA_CODEX_LAUNCH_PREFLIGHT$__orca_codex_hooks_enabled"; and test (type -t codex 2>/dev/null) = file
   function codex
-    command "$ORCA_CODEX_LAUNCH_PREFLIGHT" agent hooks prepare-codex >/dev/null 2>&1; or true
+    if test -n "$ORCA_CODEX_LAUNCH_PREFLIGHT"
+      command "$ORCA_CODEX_LAUNCH_PREFLIGHT" agent hooks prepare-codex >/dev/null 2>&1; or true
+    end
+    set feature
+    if test -n "$__orca_codex_hooks_enabled"; and test -n "$ORCA_AGENT_HOOK_PORT"; and test -n "$ORCA_AGENT_HOOK_TOKEN"; and test -n "$ORCA_PANE_KEY"; and not __orca_codex_hooks_override $argv
+      set feature (__orca_codex_hooks_feature)
+    end
+    if test -n "$feature"
+      command codex --enable "$feature" $argv
+      return $status
+    end
     command codex $argv
   end
 end

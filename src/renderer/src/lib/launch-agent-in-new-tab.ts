@@ -82,7 +82,13 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     onPromptDelivered
   } = args
   const store = useAppStore.getState()
-  const launchHost = resolveAgentBackgroundLaunchHost({ store, worktreeId })
+  let launchHost: ReturnType<typeof resolveAgentBackgroundLaunchHost>
+  try {
+    launchHost = resolveAgentBackgroundLaunchHost({ store, worktreeId })
+  } catch {
+    // Host ambiguity is a normal transient state while workspace ownership hydrates.
+    return null
+  }
   const resolvedLaunchPlatform = launchPlatform ?? launchHost.platform ?? CLIENT_PLATFORM
   // Why: SSH remotes deploy the shim as plain `orca`, so skip the Linux-only `orca-ide` rename for remote launches.
   const isRemote = launchHost.isRemote

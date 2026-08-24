@@ -144,9 +144,7 @@ describe('launchAgentInNewTab SSH folder ownership', () => {
     store.activeWorkspaceExecutionHostId = null
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
-    expect(() => launchAgentInNewTab({ agent: 'codex', worktreeId: 'shared-worktree' })).toThrow(
-      'unavailable or ambiguous'
-    )
+    expect(launchAgentInNewTab({ agent: 'codex', worktreeId: 'shared-worktree' })).toBeNull()
     expect(store.createTab).not.toHaveBeenCalled()
     expect(queueTabStartupCommand).not.toHaveBeenCalled()
   })

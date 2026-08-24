@@ -30,7 +30,11 @@ export type ResumeSleepingAgentSessionsOptions = {
 
 function getResumeLaunchTarget(worktreeId: string): AgentResumeLaunchTarget {
   const state = useAppStore.getState()
-  const launchHost = resolveAgentBackgroundLaunchHost({ store: state, worktreeId })
+  const launchHost = resolveAgentBackgroundLaunchHost({
+    store: state,
+    worktreeId,
+    allowLegacyUnknownHost: true
+  })
   // The resume tab is created without a shell override, so the global Windows shell wins.
   return resolveAgentResumeLaunchTarget({
     projectRuntime: getLocalProjectExecutionRuntimeContext(state, worktreeId),
@@ -67,7 +71,13 @@ export function launchSleepingAgentSession(
 ): boolean {
   const state = useAppStore.getState()
   const launchConfig = record.launchConfig
-  const resumeTarget = getResumeLaunchTarget(record.worktreeId)
+  let resumeTarget: AgentResumeLaunchTarget
+  try {
+    resumeTarget = getResumeLaunchTarget(record.worktreeId)
+  } catch {
+    // Ownership can be undecidable while a persisted workspace rehydrates.
+    return false
+  }
   const startupPlan = buildAgentResumeStartupPlan({
     agent: record.agent,
     providerSession: record.providerSession,

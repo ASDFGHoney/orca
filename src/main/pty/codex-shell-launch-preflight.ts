@@ -90,36 +90,36 @@ __orca_codex_hooks_override() {
   return 1
 }
 __orca_codex_hooks_feature() {
-  local version major minor patch probe_file probe_pid remaining probe_status
-  probe_file="$(mktemp "\${TMPDIR:-/tmp}/orca-codex-version.XXXXXX" 2>/dev/null)" || return 0
-  command codex --version >"$probe_file" 2>/dev/null &
-  probe_pid=$!
-  remaining=${CODEX_VERSION_PROBE_ATTEMPTS}
-  while kill -0 "$probe_pid" 2>/dev/null && [[ $remaining -gt 0 ]]; do
+  local __orca_codex_version __orca_codex_major __orca_codex_minor __orca_codex_patch __orca_codex_probe_file __orca_codex_probe_pid __orca_codex_remaining __orca_codex_probe_status
+  __orca_codex_probe_file="$(mktemp "\${TMPDIR:-/tmp}/orca-codex-version.XXXXXX" 2>/dev/null)" || return 0
+  command codex --version >"$__orca_codex_probe_file" 2>/dev/null &
+  __orca_codex_probe_pid=$!
+  __orca_codex_remaining=${CODEX_VERSION_PROBE_ATTEMPTS}
+  while kill -0 "$__orca_codex_probe_pid" 2>/dev/null && [[ $__orca_codex_remaining -gt 0 ]]; do
     sleep ${CODEX_VERSION_PROBE_INTERVAL_SECONDS} 2>/dev/null || break
-    remaining=$(( remaining - 1 ))
+    __orca_codex_remaining=$(( __orca_codex_remaining - 1 ))
   done
-  if kill -0 "$probe_pid" 2>/dev/null; then
-    kill "$probe_pid" 2>/dev/null || :
-    wait "$probe_pid" 2>/dev/null || :
-    rm -f "$probe_file"
+  if kill -0 "$__orca_codex_probe_pid" 2>/dev/null; then
+    kill "$__orca_codex_probe_pid" 2>/dev/null || :
+    wait "$__orca_codex_probe_pid" 2>/dev/null || :
+    rm -f "$__orca_codex_probe_file"
     return 0
   fi
-  if wait "$probe_pid" 2>/dev/null; then probe_status=0; else probe_status=$?; fi
-  version="$(<"$probe_file")"
-  rm -f "$probe_file"
-  [[ "$probe_status" == 0 ]] || return 0
-  version="\${version##* }"
-  major="\${version%%.*}"
-  minor="\${version#*.}"; minor="\${minor%%.*}"
-  patch="\${version#*.*.}"; patch="\${patch%%[-+]*}"
-  [[ -n "$major" && -n "$minor" && -n "$patch" ]] || return 0
-  [[ "$major" != *[^0-9]* && "$minor" != *[^0-9]* && "$patch" != *[^0-9]* ]] || return 0
-  if (( major >= 1 )); then
+  if wait "$__orca_codex_probe_pid" 2>/dev/null; then __orca_codex_probe_status=0; else __orca_codex_probe_status=$?; fi
+  __orca_codex_version="$(<"$__orca_codex_probe_file")"
+  rm -f "$__orca_codex_probe_file"
+  [[ "$__orca_codex_probe_status" == 0 ]] || return 0
+  __orca_codex_version="\${__orca_codex_version##* }"
+  __orca_codex_major="\${__orca_codex_version%%.*}"
+  __orca_codex_minor="\${__orca_codex_version#*.}"; __orca_codex_minor="\${__orca_codex_minor%%.*}"
+  __orca_codex_patch="\${__orca_codex_version#*.*.}"; __orca_codex_patch="\${__orca_codex_patch%%[-+]*}"
+  [[ -n "$__orca_codex_major" && -n "$__orca_codex_minor" && -n "$__orca_codex_patch" ]] || return 0
+  [[ "$__orca_codex_major" != *[^0-9]* && "$__orca_codex_minor" != *[^0-9]* && "$__orca_codex_patch" != *[^0-9]* ]] || return 0
+  if (( __orca_codex_major >= 1 )); then
     printf hooks
-  elif (( minor >= 129 )); then
+  elif (( __orca_codex_minor >= 129 )); then
     printf hooks
-  elif (( minor >= 114 )); then
+  elif (( __orca_codex_minor >= 114 )); then
     printf codex_hooks
   fi
 }
