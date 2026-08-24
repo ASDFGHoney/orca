@@ -4,6 +4,14 @@ import {
   type PtyProcessInspectionSource,
   type PtyProcessLivenessEvidence
 } from './pty-process-inspection'
+import {
+  DEFAULT_LIVE_TTL_MS,
+  DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS,
+  DEFAULT_UNAVAILABLE_BACKOFF_MAX_MS,
+  maxConcurrentProbes,
+  maxConcurrentUnscopedProbes,
+  processEvidenceKey
+} from './pty-process-liveness-broker-state'
 
 export type {
   PtyProcessInspectionSource,
@@ -13,6 +21,7 @@ export type {
 type PtyProcessEvidenceEntry = {
   source: PtyProcessInspectionSource
   identity: string
+  unscopedProbe: boolean
   consumerIds: Set<string>
   hasUnscopedConsumer: boolean
   freshness: number
@@ -27,6 +36,7 @@ type PtyProcessEvidenceEntry = {
 export type PtyProcessLivenessBrokerOptions = {
   timeoutMs: number
   maxConcurrentProbes?: number
+  maxConcurrentUnscopedProbes?: number
   liveTtlMs?: number
   unavailableBackoffBaseMs?: number
   unavailableBackoffMaxMs?: number
@@ -34,15 +44,11 @@ export type PtyProcessLivenessBrokerOptions = {
   onInspectionError?: (ptyId: string, error: unknown) => void
 }
 
-const DEFAULT_LIVE_TTL_MS = 10_000
-const DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS = 3_000
-const DEFAULT_UNAVAILABLE_BACKOFF_MAX_MS = 30_000
-const DEFAULT_MAX_CONCURRENT_PROBES = 8
-
 export class PtyProcessLivenessBroker {
   private readonly entries = new Map<string, PtyProcessEvidenceEntry>()
   private readonly now: () => number
   private activeProbeCount = 0
+  private activeUnscopedProbeCount = 0
 
   constructor(private readonly options: PtyProcessLivenessBrokerOptions) {
     this.now = options.now ?? Date.now
@@ -123,7 +129,11 @@ export class PtyProcessLivenessBroker {
     if (waitMs === 0) {
       return Promise.resolve({ status: 'unverifiable', reason: 'process inspection timed out' })
     }
-    if (this.activeProbeCount >= this.maxConcurrentProbes()) {
+    const unscopedProbe = args.consumerId === undefined
+    if (
+      this.activeProbeCount >= maxConcurrentProbes(this.options) ||
+      (unscopedProbe && this.activeUnscopedProbeCount >= maxConcurrentUnscopedProbes(this.options))
+    ) {
       return Promise.resolve({
         status: 'unverifiable',
         reason: 'process inspection capacity unavailable'
@@ -137,6 +147,7 @@ export class PtyProcessLivenessBroker {
     const entry: PtyProcessEvidenceEntry = {
       source: args.source,
       identity: args.identity,
+      unscopedProbe,
       consumerIds: new Set(args.consumerId ? [args.consumerId] : []),
       hasUnscopedConsumer: args.consumerId === undefined,
       freshness,
@@ -148,6 +159,9 @@ export class PtyProcessLivenessBroker {
       probe: null
     }
     this.activeProbeCount += 1
+    if (unscopedProbe) {
+      this.activeUnscopedProbeCount += 1
+    }
     const probe = inspectPtyProcess(args.source, args.ptyId)
       .then((evidence) => {
         const reconciled =
@@ -195,6 +209,9 @@ export class PtyProcessLivenessBroker {
       })
     entry.probe = probe.finally(() => {
       this.activeProbeCount -= 1
+      if (entry.unscopedProbe) {
+        this.activeUnscopedProbeCount -= 1
+      }
     })
     this.entries.set(args.ptyId, entry)
     return this.waitForProbe(args.ptyId, entry, waitMs)
@@ -243,6 +260,10 @@ export class PtyProcessLivenessBroker {
     return this.activeProbeCount
   }
 
+  getActiveUnscopedProbeCount(): number {
+    return this.activeUnscopedProbeCount
+  }
+
   getEntryCount(): number {
     return this.entries.size
   }
@@ -281,13 +302,6 @@ export class PtyProcessLivenessBroker {
     return Math.min(max, base * 2 ** Math.max(0, failureCount - 1))
   }
 
-  private maxConcurrentProbes(): number {
-    const configured = this.options.maxConcurrentProbes ?? DEFAULT_MAX_CONCURRENT_PROBES
-    return Number.isFinite(configured) && configured > 0
-      ? Math.max(1, Math.floor(configured))
-      : DEFAULT_MAX_CONCURRENT_PROBES
-  }
-
   private rememberConsumer(entry: PtyProcessEvidenceEntry, consumerId: string | undefined): void {
     if (consumerId === undefined) {
       entry.hasUnscopedConsumer = true
@@ -301,8 +315,4 @@ export class PtyProcessLivenessBroker {
     entry.evidence = { status: 'unverifiable', reason }
     entry.expiresAt = this.now() + this.unavailableBackoffMs(entry.failureCount)
   }
-}
-
-function processEvidenceKey(ptyId: string, identity: string): string {
-  return JSON.stringify([ptyId, identity])
 }
