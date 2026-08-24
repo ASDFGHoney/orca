@@ -3683,6 +3683,20 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
       // Kill PTYs for all worktrees belonging to this repo
       const worktreeIds = getKnownRepoWorktreeIds(get(), projectId, ownerHostId)
+      // A raw id can be published by two hosts. Keep the purge host-scoped for
+      // those twins so the sibling's qualified visit recency survives.
+      const knownRepoWorktrees = [
+        ...(get().worktreesByRepo[projectId] ?? []),
+        ...(get().detectedWorktreesByRepo[projectId]?.worktrees ?? [])
+      ]
+      const exactSiblingIds = new Set(
+        knownRepoWorktrees
+          .filter((worktree) => !worktreeBelongsToHost(worktree, ownerHostId))
+          .map((worktree) => worktree.id)
+      )
+      const purgeTargets = worktreeIds.map((id) =>
+        exactSiblingIds.has(id) ? { id, hostId: ownerHostId } : id
+      )
       const localAgentContextProjectIds =
         ownerHostId === LOCAL_EXECUTION_HOST_ID
           ? [
@@ -3718,7 +3732,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       }
 
       // Why: use the canonical per-worktree purge to evict all worktree-scoped maps (hand-deletion leaked most); runs before the set() below so it still sees tabsByWorktree.
-      get().purgeWorktreeTerminalState(worktreeIds)
+      get().purgeWorktreeTerminalState(purgeTargets)
       get().clearLocalDetectedAgentContextsForProjects(localAgentContextProjectIds)
 
       set((s) => {
