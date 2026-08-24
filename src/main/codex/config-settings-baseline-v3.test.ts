@@ -142,6 +142,29 @@ describe('Codex settings baseline v3 persistence', () => {
     expect(readCodexSettingsBaseline(runtimeHomePath)).not.toBeNull()
   })
 
+  it('writes v2 when ordinary tracking is requested without source authority', () => {
+    writeCodexSettingsBaseline(runtimeHomePath, {
+      settings: new Map([
+        ['model', '"gpt-5"'],
+        ['personality', '"local"']
+      ]),
+      conflicts: new Map(),
+      knownPromotedKeys: new Set(['model']),
+      sourceIsAuthoritative: false,
+      tracksAllOrdinarySettings: true
+    })
+
+    expect(readStoredBaseline()).toMatchObject({
+      version: 2,
+      settings: { model: '"gpt-5"', personality: '"local"' }
+    })
+    expect(readStoredBaseline().sourceAuthority).toBeUndefined()
+    expect(readCodexSettingsBaseline(runtimeHomePath)).toMatchObject({
+      tracksAllOrdinarySettings: false,
+      sourceIsAuthoritative: false
+    })
+  })
+
   it('keeps promoted ancestors when an unlisted value forces v2 fallback', () => {
     const settings = new Map<string, string | null>([
       ['model', '"gpt-5"'],

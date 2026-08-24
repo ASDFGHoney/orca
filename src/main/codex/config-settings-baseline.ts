@@ -197,7 +197,9 @@ function isCodexSettingsConflict(value: unknown): value is CodexSettingsConflict
 
 function buildStoredSettingsBaseline(baseline: CodexSettingsBaseline): StoredSettingsBaseline {
   const preferred: StoredSettingsBaseline = {
-    version: baseline.tracksAllOrdinarySettings ? 3 : 2,
+    // A complete ordinary-key snapshot is only authoritative when it came
+    // from a readable system mirror; otherwise v2 keeps absence ambiguous.
+    version: baseline.tracksAllOrdinarySettings && baseline.sourceIsAuthoritative ? 3 : 2,
     settings: Object.fromEntries(baseline.settings)
   }
   if (baseline.conflicts.size > 0) {
