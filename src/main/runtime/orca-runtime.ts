@@ -5989,11 +5989,16 @@ export class OrcaRuntimeService {
       }
     }
     const resolvedWorktreeId = scope?.type === 'worktree' ? scope.worktreeId : worktreeId
+    const resolvedOwnerIndex = ownerIndex ?? this.buildWorkspaceExecutionOwnerIndex()
     const parsed = splitWorktreeIdForFilesystem(resolvedWorktreeId)
     if (!parsed) {
-      return null
+      const ownerHostIds = resolvedOwnerIndex.exactHostIdsByWorktreeId.get(resolvedWorktreeId)
+      return ownerHostIds?.size === 1
+        ? ownerHostIds.values().next().value!
+        : ownerHostIds?.size === 0 || ownerHostIds === undefined
+          ? LOCAL_EXECUTION_HOST_ID
+          : null
     }
-    const resolvedOwnerIndex = ownerIndex ?? this.buildWorkspaceExecutionOwnerIndex()
     const ownerHostIds = new Set(
       resolvedOwnerIndex.exactHostIdsByWorktreeId.get(resolvedWorktreeId) ?? []
     )
@@ -6189,7 +6194,8 @@ export class OrcaRuntimeService {
     }
     const parsed = splitWorktreeIdForFilesystem(worktreeId)
     if (!parsed) {
-      return true
+      // Unparseable IDs have no path-based owner candidates to compare.
+      return (ownerIndex.exactHostIdsByWorktreeId.get(worktreeId)?.size ?? 0) > 1
     }
     const ownerHostIds = new Set(ownerIndex.exactHostIdsByWorktreeId.get(worktreeId) ?? [])
     const repoOwners = ownerIndex.repoOwnersById.get(parsed.repoId) ?? []
