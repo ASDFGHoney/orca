@@ -13,10 +13,12 @@ function makeScrollable(el: HTMLElement, scrollHeight: number, clientHeight: num
   Object.defineProperty(el, 'clientHeight', { value: clientHeight, configurable: true })
 }
 
-function wheel(el: HTMLElement, deltaY: number): void {
+function wheel(el: HTMLElement, deltaY: number): WheelEvent {
+  const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true })
   act(() => {
-    el.dispatchEvent(new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true }))
+    el.dispatchEvent(event)
   })
+  return event
 }
 
 function renderPopover(contentClassName: string, nested: boolean): void {
@@ -42,17 +44,8 @@ function renderPopover(contentClassName: string, nested: boolean): void {
 }
 
 describe('PopoverContent wheel shim', () => {
-  let rafCallbacks: FrameRequestCallback[]
-
   beforeEach(() => {
     root = null
-    // The shim defers the scroll write to rAF; capture and flush it explicitly.
-    rafCallbacks = []
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-      rafCallbacks.push(cb)
-      return rafCallbacks.length
-    })
-    vi.stubGlobal('cancelAnimationFrame', () => {})
   })
 
   afterEach(() => {
@@ -63,14 +56,6 @@ describe('PopoverContent wheel shim', () => {
     vi.unstubAllGlobals()
   })
 
-  const flushFrames = (): void => {
-    const pending = rafCallbacks
-    rafCallbacks = []
-    for (const cb of pending) {
-      cb(0)
-    }
-  }
-
   it('scrolls a nested viewport when the content itself cannot scroll', () => {
     // The workspace-cleanup Filters panel: a flex column whose PopoverContent is
     // overflow-hidden, with a ScrollArea viewport above a pinned footer.
@@ -80,11 +65,11 @@ describe('PopoverContent wheel shim', () => {
     makeScrollable(content, 800, 400)
     makeScrollable(viewport, 1000, 400)
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(viewport.scrollTop).toBe(120)
     expect(content.scrollTop).toBe(0)
+    expect(event.defaultPrevented).toBe(true)
   })
 
   it('still scrolls the content itself when it is the scroller', () => {
@@ -95,10 +80,10 @@ describe('PopoverContent wheel shim', () => {
     content.style.overflowY = 'auto'
     makeScrollable(content, 1000, 400)
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(content.scrollTop).toBe(120)
+    expect(event.defaultPrevented).toBe(true)
   })
 
   it('leaves popovers that did not opt in alone', () => {
@@ -106,10 +91,10 @@ describe('PopoverContent wheel shim', () => {
     const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
     makeScrollable(viewport, 1000, 400)
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(viewport.scrollTop).toBe(0)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('ignores vertically clipped elements and horizontal-only scrollers', () => {
@@ -124,11 +109,11 @@ describe('PopoverContent wheel shim', () => {
     Object.defineProperty(viewport, 'scrollWidth', { value: 1000, configurable: true })
     Object.defineProperty(viewport, 'clientWidth', { value: 400, configurable: true })
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(content.scrollTop).toBe(0)
     expect(viewport.scrollTop).toBe(0)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('does nothing when no element in the target chain can scroll', () => {
@@ -140,11 +125,11 @@ describe('PopoverContent wheel shim', () => {
     makeScrollable(content, 1000, 400)
     makeScrollable(viewport, 1000, 400)
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(content.scrollTop).toBe(0)
     expect(viewport.scrollTop).toBe(0)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('runs for the shim-only marker, which carries no styling', () => {
@@ -157,9 +142,9 @@ describe('PopoverContent wheel shim', () => {
     makeScrollable(content, 400, 400)
     makeScrollable(viewport, 1000, 400)
 
-    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
-    flushFrames()
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(viewport.scrollTop).toBe(120)
+    expect(event.defaultPrevented).toBe(true)
   })
 })

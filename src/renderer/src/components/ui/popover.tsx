@@ -4,7 +4,6 @@ import * as React from 'react'
 import { Popover as PopoverPrimitive } from 'radix-ui'
 
 import { cn } from '@/lib/utils'
-import { updatePopoverContentRef } from './popover-content-ref'
 
 function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
@@ -48,32 +47,37 @@ function PopoverContent({
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   portalContainer?: HTMLElement | null
 }) {
-  const wheelFrameIdsRef = React.useRef<Set<number>>(new Set())
-
-  const cancelWheelFrames = React.useCallback(() => {
-    for (const frameId of wheelFrameIdsRef.current) {
-      cancelAnimationFrame(frameId)
-    }
-    wheelFrameIdsRef.current.clear()
-  }, [])
+  const [content, setContent] = React.useState<HTMLDivElement | null>(null)
 
   const setContentRef = React.useCallback(
     (node: HTMLDivElement | null) => {
-      // Why: the wheel shim schedules frames against the content node; cancel
-      // them when Radix removes that node instead of from a passive Effect.
-      return updatePopoverContentRef(forwardedRef, node, cancelWheelFrames)
+      setContent(node)
+      if (typeof forwardedRef === 'function') {
+        const cleanup = forwardedRef(node)
+        if (node !== null && typeof cleanup === 'function') {
+          return () => {
+            setContent(null)
+            cleanup()
+          }
+        }
+      } else if (forwardedRef) {
+        forwardedRef.current = node
+      }
+      return undefined
     },
-    [cancelWheelFrames, forwardedRef]
+    [forwardedRef]
   )
 
-  const handleWheel = React.useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
-      onWheel?.(event)
+  React.useEffect(() => {
+    if (!content) {
+      return
+    }
+
+    const handleWheel = (event: WheelEvent): void => {
       if (event.defaultPrevented) {
         return
       }
 
-      const content = event.currentTarget
       // Why two markers: `popover-scroll-content` also imposes a 15rem max-height and its
       // own overflow, which a popover that manages its own layout (a fixed-height flex
       // column over a pinned footer) must not inherit. `popover-wheel-scroll` opts into
@@ -106,19 +110,14 @@ function PopoverContent({
       // are portaled outside the dialog subtree, so native wheel scrolling is
       // swallowed even though the scrollbar can be dragged.
       if (nextScrollTop !== el.scrollTop) {
-        const previousScrollTop = el.scrollTop
-        event.stopPropagation()
-        const frameId = requestAnimationFrame(() => {
-          wheelFrameIdsRef.current.delete(frameId)
-          if (el.scrollTop === previousScrollTop) {
-            el.scrollTop = nextScrollTop
-          }
-        })
-        wheelFrameIdsRef.current.add(frameId)
+        event.preventDefault()
+        el.scrollTop = nextScrollTop
       }
-    },
-    [onWheel]
-  )
+    }
+
+    content.addEventListener('wheel', handleWheel, { passive: false })
+    return () => content.removeEventListener('wheel', handleWheel)
+  }, [content])
 
   return (
     <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
@@ -144,7 +143,7 @@ function PopoverContent({
             WebkitAppRegion: 'no-drag'
           } as React.CSSProperties
         }
-        onWheel={handleWheel}
+        onWheel={onWheel}
         {...props}
       />
     </PopoverPrimitive.Portal>
