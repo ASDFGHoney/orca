@@ -256,6 +256,8 @@ beforeEach(async () => {
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
         resolveClaudeCommand: () => '/usr/local/bin/claude',
+        resolveLaunchArgs: (provider) =>
+          provider === 'claude' ? ['--dangerously-skip-permissions'] : ['--codex-only'],
         resolveClaudeLaunchEnv: () => ({
           ANTHROPIC_AUTH_TOKEN: 'configured-token',
           ANTHROPIC_BASE_URL: 'https://gateway.example.test'
@@ -303,6 +305,8 @@ describe('a structured Claude session over agentSession.*', () => {
     const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
     expect(claude.live().launch.args).toContain('--session-id')
     expect(claude.live().launch.args).toContain(PROVIDER_SESSION)
+    expect(claude.live().launch.args).toContain('--dangerously-skip-permissions')
+    expect(claude.live().launch.args).not.toContain('--codex-only')
     expect(claude.live().launch.env).toEqual({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',

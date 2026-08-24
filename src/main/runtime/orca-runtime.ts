@@ -622,6 +622,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../shared/tui-agent-launch-defaults'
+import { tokenizeStartupCommand } from '../../shared/tui-agent-startup-shell'
 import { resolveCodexStructuredAppServerArgs } from '../codex/codex-structured-app-server-args'
 import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-terminal-shell'
 import {
@@ -10642,7 +10643,10 @@ export class OrcaRuntimeService {
       // in a plain folder lands in the folder rather than failing to resolve.
       resolveWorkspacePath: async (workspaceId) =>
         (await this.resolveRuntimeFileTarget(`id:${workspaceId}`)).worktree.path,
-      resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
+      resolveLaunchArgs: (provider) =>
+        provider === 'claude'
+          ? this.resolveConfiguredClaudeStructuredArgs()
+          : this.resolveConfiguredCodexStructuredArgs(),
       resolveLaunchEnvOverlay: () =>
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
       resolveClaudeCommand: () => resolveClaudeCommand(),
@@ -10663,6 +10667,29 @@ export class OrcaRuntimeService {
       resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
       shell ?? 'posix'
     )
+  }
+
+  private resolveConfiguredClaudeStructuredArgs(): string[] {
+    const settings = this.requireStore().getSettings()
+    const configured = resolveTuiAgentLaunchArgs('claude', settings.agentDefaultArgs)
+    const shell = resolveLocalWindowsAgentStartupShell({
+      platform: process.platform,
+      isRemote: false,
+      terminalWindowsShell: settings.terminalWindowsShell
+    })
+    const parsed = tokenizeStartupCommand(configured, shell ?? 'posix')
+    if (!parsed.ok) {
+      throw new Error(
+        `Structured Claude chat cannot apply the configured CLI arguments: ${parsed.error}`
+      )
+    }
+    const divergent = parsed.spans.find((span) => span.divergesFromShell)
+    if (divergent) {
+      throw new Error(
+        `Structured Claude chat cannot apply the configured CLI arguments: ${configured.slice(divergent.start, divergent.end)}`
+      )
+    }
+    return parsed.tokens
   }
 
   private createStructuredAgentSessionHandoffTransport(): StructuredAgentSessionHandoffTransport {

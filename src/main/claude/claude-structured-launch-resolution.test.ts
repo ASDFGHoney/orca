@@ -86,6 +86,15 @@ describe('claude structured launch resolution', () => {
     expect(launch.args.slice(-2)).toEqual(['--resume', 'provider-current'])
   })
 
+  it('preserves launch arguments pinned when the session was created', async () => {
+    const launch = await resolverFor(record({ launchArgs: ['--dangerously-skip-permissions'] }))({
+      identity: IDENTITY
+    })
+
+    expect(launch.args[0]).toBe('--dangerously-skip-permissions')
+    expect(launch.args.slice(-2)).toEqual(['--session-id', launch.providerSessionId])
+  })
+
   it('resolves configured environment live without storing it in the session record', async () => {
     let token = 'first-token'
     const resolver = resolverFor(record(), () => ({

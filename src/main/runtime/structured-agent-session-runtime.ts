@@ -58,7 +58,7 @@ export type StructuredAgentSessionRuntimeDeps = {
   /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
   readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
   readClaudeProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
-  resolveLaunchArgs?: () => Promise<string[]> | string[]
+  resolveLaunchArgs?: (provider: AgentSessionRecord['provider']) => Promise<string[]> | string[]
   resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
   resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
@@ -178,7 +178,10 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       probeOwner: createStructuredAgentSessionOwnerProbe(deps.hostId),
       probeOwners: createStructuredAgentSessionOwnerProbes(deps.hostId),
       ...(deps.resolveLaunchArgs
-        ? { resolveLaunchArgs: async () => await deps.resolveLaunchArgs!() }
+        ? {
+            resolveLaunchArgs: async (provider: AgentSessionRecord['provider']) =>
+              await deps.resolveLaunchArgs!(provider)
+          }
         : {}),
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
