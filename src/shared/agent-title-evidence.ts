@@ -198,7 +198,11 @@ function agentForSyntheticTitle(text: string): TuiAgent | null {
     const emittedLabels = [profile.permissionLabel, profile.idleLabel]
     if (profile.synthesizeWorkingTitle !== false) {
       // Working labels are emitted only as spinner frames; a bare name is free text.
-      if (containsAgentSpinnerGlyph(trimmed) && normalized === profile.workingLabel.toLowerCase()) {
+      if (
+        profile.synthesizeTerminalTitle !== false &&
+        containsAgentSpinnerGlyph(trimmed) &&
+        normalized === profile.workingLabel.toLowerCase()
+      ) {
         return agent
       }
     }

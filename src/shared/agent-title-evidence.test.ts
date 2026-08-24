@@ -240,6 +240,7 @@ describe('collectAgentTitleEvidence', () => {
 
   it('does not invent synthetic titles for an opted-out profile', () => {
     expect(agentFor('OpenCode ready')).toBeNull()
+    expect(agentFor('⠋ OpenCode')).toBeNull()
     expect(reasonFor('OpenCode ready')).toBe('free-text-only')
   })
 
