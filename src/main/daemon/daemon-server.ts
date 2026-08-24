@@ -1267,7 +1267,12 @@ export class DaemonServer {
         } catch (err) {
           this.lastInputAtBySessionId.delete(request.payload.sessionId)
           if (err instanceof SessionNotFoundError) {
-            this.sendExitEvent(client, request.payload.sessionId, -1)
+            this.sendExitEvent(
+              client,
+              request.payload.sessionId,
+              -1,
+              request.payload.expectedIncarnationId
+            )
           }
           throw err
         }
@@ -1278,7 +1283,12 @@ export class DaemonServer {
           this.host.resize(request.payload.sessionId, request.payload.cols, request.payload.rows)
         } catch (err) {
           if (err instanceof SessionNotFoundError) {
-            this.sendExitEvent(client, request.payload.sessionId, -1)
+            this.sendExitEvent(
+              client,
+              request.payload.sessionId,
+              -1,
+              request.payload.expectedIncarnationId
+            )
           }
           throw err
         }
@@ -1502,7 +1512,8 @@ export class DaemonServer {
   private sendExitEvent(
     client: ConnectedClient | undefined,
     sessionId: string,
-    code: number
+    code: number,
+    incarnationId?: string
   ): void {
     if (!client?.streamSocket) {
       return
@@ -1512,7 +1523,7 @@ export class DaemonServer {
       type: 'event',
       event: 'exit',
       sessionId,
-      payload: { code }
+      payload: { code, ...(incarnationId ? { incarnationId } : {}) }
     })
     this.streamDataBatcher.flush(client.clientId)
   }

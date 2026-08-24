@@ -2193,7 +2193,14 @@ export function createRemoteRuntimePtyTransport(
         if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {
           connecting = false
           const message = runtimeTerminalErrorMessage(error)
-          if (options.sessionId) {
+          if (options.sessionId && isRemoteTerminalGoneMessage(message)) {
+            recovery.cancel()
+            handleRemoteTerminalError(error)
+            ownerUnverifiableResult = {
+              id: options.sessionId,
+              exitedBeforeAttach: true
+            }
+          } else if (options.sessionId) {
             recovery.markDisconnected()
             surfaceErrorMessage(message)
             ownerUnverifiableResult = {

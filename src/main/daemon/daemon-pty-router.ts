@@ -13,6 +13,7 @@ import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
 import { TerminalSessionOwnerUnverifiedError } from './daemon-errors'
+import type { TerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -82,8 +83,16 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.adapterFor(id).hasPty(id)
   }
 
-  async probePtyLiveness(id: string, expectedIncarnationId?: string): Promise<boolean | null> {
-    return await this.ownerResolver.probe(id, expectedIncarnationId)
+  async probePtyLiveness(
+    id: string,
+    expectedIncarnationId?: string,
+    expectedOwnerIdentity?: TerminalOwnerIdentity
+  ): Promise<boolean | null> {
+    return await this.ownerResolver.probe(id, expectedIncarnationId, expectedOwnerIdentity)
+  }
+
+  getTerminalOwnerIdentity(id: string): TerminalOwnerIdentity | null {
+    return this.adapterFor(id).getTerminalOwnerIdentity?.(id) ?? null
   }
 
   write(id: string, data: string): boolean {

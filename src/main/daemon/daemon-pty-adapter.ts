@@ -41,8 +41,7 @@ import {
   GET_SIZE_PROTOCOL_VERSION,
   HISTORY_SEED_TRANSFER_PROTOCOL_VERSION,
   SNAPSHOT_SERIALIZER_FIDELITY_DAEMON_PROTOCOL_VERSION,
-  STABLE_PANE_ATTACH_ONLY_DAEMON_PROTOCOL_VERSION,
-  SESSION_INCARNATION_ATTACH_FENCE_DAEMON_PROTOCOL_VERSION
+  STABLE_PANE_ATTACH_ONLY_DAEMON_PROTOCOL_VERSION
 } from './daemon-protocol-version'
 import {
   isAgentSessionClaimedSpawnResult,
@@ -97,11 +96,14 @@ import { createDaemonAuditEligibilityTracker } from './daemon-audit-eligibility-
 import { normalizeDesktopTerminalSnapshotRows } from '../../shared/terminal-scrollback-policy'
 import type { TerminalExitCause } from '../../shared/terminal-exit-cause'
 import { TerminalSessionOwnerUnverifiedError } from './daemon-errors'
+import type { ExecutionHostId } from '../../shared/execution-host'
+import type { TerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
 
 type PendingDaemonSpawnOperation = {
   exitsBySessionId: Map<string, { incarnationId?: string }[]>
   ignoredExitIncarnationIds: Set<string>
   ignoreNextExit: boolean
+  acceptsUnroutedExit: boolean
 }
 
 type HistoryRecoveryContext = {
@@ -150,6 +152,8 @@ export type DaemonPtyAdapterOptions = {
   packagedAppVersion?: string | null
   /** Forks a fresh daemon after endpoint death or a confirmed health replacement. */
   respawn?: (reason: DaemonRespawnReason) => Promise<void | (() => void)>
+  /** Canonical execution host for persisted owner identity. */
+  executionHostId?: ExecutionHostId
 }
 
 export type DaemonRespawnReason =
@@ -246,6 +250,8 @@ export class DaemonPtyAdapter implements IPtyProvider {
   private respawnFn: DaemonPtyAdapterOptions['respawn'] | null
   private runtimeDir: string | null
   private packagedAppVersion: string | null
+  private readonly executionHostId: ExecutionHostId
+  private readonly ownerEndpointRef: string
   private pendingRespawnAdoptionRelease: (() => void) | null = null
   private respawnAdoptionClosed = false
   // Why: concurrent spawn() calls hitting a dead daemon would each fork their own; this promise coalesces respawns so only the first forks and the rest await it.
@@ -372,6 +378,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
     this.respawnFn = opts.respawn ?? null
     this.runtimeDir = opts.runtimeDir ?? opts.profileScope ?? null
     this.packagedAppVersion = opts.packagedAppVersion ?? null
+    this.executionHostId = opts.executionHostId ?? 'local'
+    // Opaque and portable: never persist socket/token paths or profile dirs.
+    this.ownerEndpointRef = `daemon-v${this.protocolVersion}`
     this.supportsCheckpoints = this.protocolVersion >= 4
     this.supportsIncrementalCheckpoints = this.protocolVersion >= 13
     this.supportsProducerFlowControl = this.protocolVersion >= 19
@@ -403,6 +412,28 @@ export class DaemonPtyAdapter implements IPtyProvider {
 
   getLastAuthenticatedDaemonIdentity(): DaemonEndpointIdentity | null {
     return this.lastAuthenticatedIdentity ? { ...this.lastAuthenticatedIdentity } : null
+  }
+
+  /** Returns durable identity only after the socket has authenticated. */
+  private ownerIdentity(
+    sessionIncarnationId?: PtyIncarnationId
+  ): TerminalOwnerIdentity | undefined {
+    const daemon = this.lastAuthenticatedIdentity
+    if (!daemon || !sessionIncarnationId) {
+      return undefined
+    }
+    return {
+      executionHostId: this.executionHostId,
+      ownerKind: 'daemon',
+      ownerIncarnationId: daemon.launchNonce,
+      sessionIncarnationId,
+      protocolVersion: this.protocolVersion,
+      endpointRef: this.ownerEndpointRef
+    }
+  }
+
+  getTerminalOwnerIdentity(id: string): TerminalOwnerIdentity | null {
+    return this.ownerIdentity(this.sessionIncarnations.get(id)) ?? null
   }
 
   getLastAuditObservation(): DaemonAuditObservation | null {
@@ -440,7 +471,8 @@ export class DaemonPtyAdapter implements IPtyProvider {
     const operation = {
       exitsBySessionId: new Map<string, { incarnationId?: string }[]>(),
       ignoredExitIncarnationIds: new Set<string>(),
-      ignoreNextExit: false
+      ignoreNextExit: false,
+      acceptsUnroutedExit: false
     }
     const operations = this.pendingSpawnOperationsBySessionId.get(sessionId) ?? new Set()
     operations.add(operation)
@@ -521,16 +553,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
       throw new Error('agent_session_claim_unavailable')
     }
     const requestedSessionId = opts.sessionId!
-    // Why: v30 daemons survive upgrades; reject their accidental create result before publication.
+    // Why: v31+ daemons already enforce attach-only. Older daemons are handled by the
+    // legacy create-then-kill fence below, while v36 can still reattach surviving PTYs.
     const attachOnly = opts.attachOnly === true
-    if (
-      attachOnly &&
-      opts.expectedIncarnationIsAuthoritative === true &&
-      opts.expectedIncarnationId !== undefined &&
-      this.protocolVersion < SESSION_INCARNATION_ATTACH_FENCE_DAEMON_PROTOCOL_VERSION
-    ) {
-      throw new TerminalSessionOwnerUnverifiedError(requestedSessionId)
-    }
     const emulateLegacyAttachOnly =
       attachOnly && this.protocolVersion < STABLE_PANE_ATTACH_ONLY_DAEMON_PROTOCOL_VERSION
     let sessionId = requestedSessionId
@@ -640,10 +665,10 @@ export class DaemonPtyAdapter implements IPtyProvider {
         ? CODEX_SHELL_READY_TIMEOUT_MS
         : undefined
 
-    const requestCreateOrAttach = (
+    const requestCreateOrAttach = async (
       historySeed: string | undefined,
       historySeedTransferId: string | undefined
-    ) => {
+    ): Promise<CreateOrAttachResult> => {
       if (opts.signal?.aborted) {
         throw new Error('client_disconnected')
       }
@@ -680,14 +705,19 @@ export class DaemonPtyAdapter implements IPtyProvider {
           ? { agentSessionEnsure: opts.agentSessionEnsure }
           : {})
       }
-      return opts.signal
-        ? this.client.request<CreateOrAttachResult>(
-            'createOrAttach',
-            payload,
-            undefined,
-            opts.signal
-          )
-        : this.client.request<CreateOrAttachResult>('createOrAttach', payload)
+      operation.acceptsUnroutedExit = !attachOnly
+      try {
+        return await (opts.signal
+          ? this.client.request<CreateOrAttachResult>(
+              'createOrAttach',
+              payload,
+              undefined,
+              opts.signal
+            )
+          : this.client.request<CreateOrAttachResult>('createOrAttach', payload))
+      } finally {
+        operation.acceptsUnroutedExit = false
+      }
     }
 
     const createOrAttach = async (
@@ -799,6 +829,12 @@ export class DaemonPtyAdapter implements IPtyProvider {
       result.agentSessionEnsure ? { agentSessionEnsure: result.agentSessionEnsure } : {}
     const incarnationResult = (): Pick<PtySpawnResult, 'incarnationId'> | Record<string, never> =>
       result.incarnationId ? { incarnationId: result.incarnationId } : {}
+    const ownerIdentityResult = ():
+      | Pick<PtySpawnResult, 'ownerIdentity'>
+      | Record<string, never> => {
+      const identity = this.ownerIdentity(result.incarnationId)
+      return identity ? { ownerIdentity: identity } : {}
+    }
     let providerWslDistro = result.wslDistro === undefined ? wslDistro : result.wslDistro
     // Why: explicit null from a current daemon overrides the caller's WSL preference; undefined keeps compatibility with older daemons.
     wslDistro = providerWslDistro ?? undefined
@@ -924,6 +960,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
         return {
           id: sessionId,
           ...incarnationResult(),
+          ...ownerIdentityResult(),
           pid,
           ...claimResult(),
           ...launchIdentity(),
@@ -936,6 +973,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
       return {
         id: sessionId,
         ...incarnationResult(),
+        ...ownerIdentityResult(),
         pid,
         ...claimResult(),
         ...launchIdentity(),
@@ -978,6 +1016,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
       return {
         id: sessionId,
         ...incarnationResult(),
+        ...ownerIdentityResult(),
         pid,
         ...claimResult(),
         ...launchIdentity(),
@@ -1005,6 +1044,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
     return {
       id: sessionId,
       ...incarnationResult(),
+      ...ownerIdentityResult(),
       pid,
       ...claimResult(),
       ...launchIdentity(),
@@ -1153,14 +1193,22 @@ export class DaemonPtyAdapter implements IPtyProvider {
 
   async probePtyLiveness(
     id: string,
-    expectedIncarnationId?: PtyIncarnationId
+    expectedIncarnationId?: PtyIncarnationId,
+    expectedOwnerIdentity?: TerminalOwnerIdentity
   ): Promise<boolean | null> {
     try {
       await this.ensureConnected(Date.now() + LIVENESS_PROBE_TIMEOUT_MS)
       const ownerIdentityAtProbe = this.lastAuthenticatedIdentity
         ? { ...this.lastAuthenticatedIdentity }
         : null
-      const canConfirmAbsence = this.hasExactSessionAuthority(id, expectedIncarnationId)
+      const canConfirmAbsence =
+        this.hasExactSessionAuthority(id, expectedIncarnationId) &&
+        (expectedOwnerIdentity === undefined ||
+          this.ownerIdentity(expectedIncarnationId ?? this.sessionIncarnations.get(id))
+            ?.ownerIncarnationId === expectedOwnerIdentity.ownerIncarnationId)
+      if (expectedOwnerIdentity !== undefined && !canConfirmAbsence) {
+        return null
+      }
       if (
         (expectedIncarnationId === undefined || canConfirmAbsence) &&
         !this.getSizeUnsupported &&
@@ -1224,14 +1272,30 @@ export class DaemonPtyAdapter implements IPtyProvider {
 
   write(id: string, data: string): boolean {
     const recoverable = this.prepareWrite(id)
-    return this.finishWrite(id, this.client.notify('write', { sessionId: id, data }), recoverable)
+    return this.finishWrite(
+      id,
+      this.client.notify('write', {
+        sessionId: id,
+        data,
+        ...(this.sessionIncarnations.get(id)
+          ? { expectedIncarnationId: this.sessionIncarnations.get(id) }
+          : {})
+      }),
+      recoverable
+    )
   }
 
   async writeWithSettlement(id: string, data: string): Promise<boolean> {
     const recoverable = this.prepareWrite(id)
     return this.finishWrite(
       id,
-      await this.client.notifyWithSettlement('write', { sessionId: id, data }),
+      await this.client.notifyWithSettlement('write', {
+        sessionId: id,
+        data,
+        ...(this.sessionIncarnations.get(id)
+          ? { expectedIncarnationId: this.sessionIncarnations.get(id) }
+          : {})
+      }),
       recoverable
     )
   }
@@ -1266,7 +1330,14 @@ export class DaemonPtyAdapter implements IPtyProvider {
 
   resize(id: string, cols: number, rows: number): void {
     this.markSessionDirty(id)
-    this.client.notify('resize', { sessionId: id, cols, rows })
+    this.client.notify('resize', {
+      sessionId: id,
+      cols,
+      rows,
+      ...(this.sessionIncarnations.get(id)
+        ? { expectedIncarnationId: this.sessionIncarnations.get(id) }
+        : {})
+    })
   }
 
   pauseProducer(id: string): void {
@@ -1864,6 +1935,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
           admission.admit({
             id: session.sessionId,
             ...(session.incarnationId ? { incarnationId: session.incarnationId } : {}),
+            ...(this.ownerIdentity(session.incarnationId)
+              ? { ownerIdentity: this.ownerIdentity(session.incarnationId) }
+              : {}),
             // Why: OSC 7 may not arrive before cleanup; spawn cwd is authoritative until the daemon reports a live cwd.
             cwd: session.cwd ?? this.initialCwds.get(session.sessionId) ?? '',
             title: 'shell',
@@ -3050,8 +3124,10 @@ export class DaemonPtyAdapter implements IPtyProvider {
           fact: event.payload
         })
       } else if (event.event === 'exit') {
+        const directPendingOperations =
+          this.pendingSpawnOperationsBySessionId.get(event.sessionId) ?? new Set()
         const pendingOperations = new Set([
-          ...(this.pendingSpawnOperationsBySessionId.get(event.sessionId) ?? []),
+          ...directPendingOperations,
           ...this.pendingClaimSpawnOperations
         ])
         for (const operation of pendingOperations) {
@@ -3066,9 +3142,14 @@ export class DaemonPtyAdapter implements IPtyProvider {
           operation.exitsBySessionId.set(event.sessionId, exits)
         }
         const currentIncarnationId = this.sessionIncarnations.get(event.sessionId)
+        const acceptsUnroutedExit =
+          directPendingOperations.size > 0 &&
+          [...directPendingOperations].every((operation) => operation.acceptsUnroutedExit)
         if (
           !event.payload.incarnationId ||
-          (currentIncarnationId && event.payload.incarnationId !== currentIncarnationId)
+          (currentIncarnationId && event.payload.incarnationId !== currentIncarnationId) ||
+          (!acceptsUnroutedExit &&
+            !this.hasExactSessionAuthority(event.sessionId, event.payload.incarnationId))
         ) {
           return
         }

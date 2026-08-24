@@ -50,7 +50,10 @@ import {
   type PtySideEffectGauge
 } from './pty-side-effect-pending-census'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
-import { isTerminalPaneOwnerUnverified } from '../../../../shared/terminal-pane-owner-verdict'
+import {
+  isTerminalPaneOwnerUnverified,
+  isTerminalSessionExited
+} from '../../../../shared/terminal-pane-owner-verdict'
 
 // Re-export public API so existing consumers keep working.
 export {
@@ -951,6 +954,12 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         return spawnResult.id
       } catch (err) {
         const msg = extractIpcErrorMessage(err, err instanceof Error ? err.message : String(err))
+        if (options.sessionId && isTerminalSessionExited(msg)) {
+          return {
+            id: options.sessionId,
+            exitedBeforeAttach: true
+          } satisfies PtyConnectResult
+        }
         if (options.sessionId && isTerminalPaneOwnerUnverified(msg)) {
           storedCallbacks.onError?.(msg)
           return {
@@ -976,10 +985,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         }
         if (options.sessionId) {
           storedCallbacks.onError?.(msg)
-          return {
-            id: options.sessionId,
-            ownerUnverifiable: true
-          } satisfies PtyConnectResult
+          throw err
         }
         // Why: on cold start the SSH provider isn't registered yet, so pty:spawn throws a raw IPC error; replace with a friendly message.
         if (connectionId && msg.includes('No PTY provider for connection')) {

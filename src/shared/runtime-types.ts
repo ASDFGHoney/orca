@@ -40,6 +40,7 @@ import type { ExecutionHostId } from './execution-host'
 import type { PtyIncarnationId } from './pty-incarnation'
 import type { RasterImageDimensions } from './raster-image-dimensions'
 import type { TerminalExitCause } from './terminal-exit-cause'
+import type { TerminalOwnerIdentity } from './terminal-owner-identity'
 
 export type { RuntimeMarkdownReadTabResult, RuntimeMarkdownSaveTabResult }
 
@@ -461,6 +462,7 @@ export type RuntimeTerminalSummary = {
   handle: string
   ptyId: string | null
   incarnationId?: string | null
+  ownerIdentity?: TerminalOwnerIdentity
   orphaned?: boolean
   worktreeId: string
   worktreePath: string

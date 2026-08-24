@@ -118,6 +118,7 @@ import {
   type RetiredNameRegistry
 } from '../../../shared/worktree/retired-name-registry'
 import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../../../shared/worktree/id'
+import type { TerminalOwnerIdentity } from '../../../shared/terminal-owner-identity'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../worktree-removal-repo-owner'
 import { isPathInsideOrEqual } from '../../../shared/cross-platform-path'
 import { normalizeTerminalQuickCommands } from '../../../shared/terminal-quick-commands'
@@ -3227,6 +3228,7 @@ export class Store {
       leafId: string
       ptyId: string
       incarnationId?: string
+      ownerIdentity?: TerminalOwnerIdentity
       startupCwd?: string
       expectedBinding?: { ptyId: string; incarnationId?: string }
       expectedSourceBinding?: PtyBindingSourceExpectation
@@ -3325,6 +3327,19 @@ export class Store {
         }
         delete session.terminalSurfaceTombstonesByPaneKey[paneKey]
       }
+    }
+    if (args.ownerIdentity) {
+      // Store the complete tuple atomically with the pane binding. A partial
+      // owner record is worse than legacy/unknown because it invites inference.
+      session.terminalPtyOwnersByPaneKey = {
+        ...session.terminalPtyOwnersByPaneKey,
+        [paneKey]: { ...args.ownerIdentity }
+      }
+    } else if (args.incarnationId) {
+      // A new authenticated session without owner metadata is legacy/unknown;
+      // never let an older owner tuple follow the rebinding.
+      session.terminalPtyOwnersByPaneKey = { ...session.terminalPtyOwnersByPaneKey }
+      delete session.terminalPtyOwnersByPaneKey[paneKey]
     }
     const tabs = session.tabsByWorktree?.[bindingWorktreeId]
     const tab = tabs?.find((t) => t.id === args.tabId)

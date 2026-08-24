@@ -9,6 +9,8 @@ import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent, WebContents } fro
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready-bash-rcfile'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { PtyBindingSourceExpectation, Store } from '../persistence'
+import { sameTerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
+import type { TerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
 import { retireTerminalSurfaceFromPersistence } from '../runtime/mobile-session-terminal-persistence-retirement'
 import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../shared/pty-liveness-verdict'
 import { TERMINAL_PANE_OWNER_UNVERIFIED } from '../../shared/terminal-pane-owner-verdict'
@@ -691,6 +693,7 @@ type StablePaneOwner = {
   hasPersistedBinding?: true
   persistedIncarnationId?: string
   runtimeIncarnationId?: string
+  ownerIdentity?: TerminalOwnerIdentity
 }
 type StablePaneAdoption = {
   result: PtySpawnResult
@@ -704,7 +707,7 @@ function resolvePersistedStablePaneOwner(
   paneKey: string,
   worktreeId: string,
   connectionId: string | null | undefined
-): Pick<StablePaneOwner, 'tabId' | 'leafId' | 'ptyId' | 'incarnationId'> | null {
+): Pick<StablePaneOwner, 'tabId' | 'leafId' | 'ptyId' | 'incarnationId' | 'ownerIdentity'> | null {
   if (!store || typeof store.getWorkspaceSession !== 'function') {
     return null
   }
@@ -723,11 +726,13 @@ function resolvePersistedStablePaneOwner(
     return null
   }
   const incarnationId = session.terminalPtyIncarnationsByPaneKey?.[paneKey]
+  const ownerIdentity = session.terminalPtyOwnersByPaneKey?.[paneKey]
   return {
     tabId: parsed.tabId,
     leafId: parsed.leafId,
     ptyId,
-    ...(incarnationId ? { incarnationId } : {})
+    ...(incarnationId ? { incarnationId } : {}),
+    ...(ownerIdentity ? { ownerIdentity } : {})
   }
 }
 
@@ -781,6 +786,7 @@ function resolveStablePaneOwner(
     ...(runtimeIncarnationId || persisted?.incarnationId
       ? { incarnationId: runtimeIncarnationId ?? persisted?.incarnationId }
       : {}),
+    ...(persisted?.ownerIdentity ? { ownerIdentity: persisted.ownerIdentity } : {}),
     ...(persisted ? { hasPersistedBinding: true as const } : {}),
     ...(persisted?.incarnationId ? { persistedIncarnationId: persisted.incarnationId } : {}),
     ...(runtimeIncarnationId ? { runtimeIncarnationId } : {})
@@ -866,6 +872,7 @@ function persistAdmittedStablePaneBinding(args: {
       leafId: args.owner.leafId,
       ptyId: args.result.id,
       ...(args.result.incarnationId ? { incarnationId: args.result.incarnationId } : {}),
+      ...(args.result.ownerIdentity ? { ownerIdentity: args.result.ownerIdentity } : {}),
       ...(args.startupCwd ? { startupCwd: args.startupCwd } : {}),
       expectedBinding
     },
@@ -895,6 +902,7 @@ async function attachStablePaneOwner(
       sessionId: owner.ptyId,
       attachOnly: true,
       expectedIncarnationId: owner.runtimeIncarnationId ?? owner.persistedIncarnationId,
+      expectedOwnerIdentity: owner.ownerIdentity,
       expectedIncarnationIsAuthoritative:
         owner.runtimeIncarnationId !== undefined || owner.hasPersistedBinding === true,
       isNewSession: undefined,
@@ -957,7 +965,9 @@ async function attachStablePaneOwner(
     result.isReattach !== true ||
     (owner.runtimeIncarnationId !== undefined &&
       result.incarnationId !== owner.runtimeIncarnationId) ||
-    (result.incarnationId === undefined && owner.incarnationId !== undefined)
+    (result.incarnationId === undefined && owner.incarnationId !== undefined) ||
+    (owner.ownerIdentity !== undefined &&
+      !sameTerminalOwnerIdentity(owner.ownerIdentity, result.ownerIdentity))
   ) {
     throw new Error('terminal_pane_owner_changed')
   }
@@ -5302,7 +5312,8 @@ export function registerPtyHandlers(
           runtime?.registerPty(result.id, owner.surface.worktreeId, args.connectionId ?? null, {
             tabId: owner.surface.tabId,
             leafId: owner.surface.leafId,
-            ...(result.incarnationId ? { incarnationId: result.incarnationId } : {})
+            ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+            ...(result.ownerIdentity ? { ownerIdentity: result.ownerIdentity } : {})
           })
           if (!args.connectionId) {
             options?.onCodexHomePtySpawned?.({
@@ -5379,6 +5390,7 @@ export function registerPtyHandlers(
               ptyId: result.id,
               hostAdmittedMembership: true,
               ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+              ...(result.ownerIdentity ? { ownerIdentity: result.ownerIdentity } : {}),
               ...(cwd ? { startupCwd: cwd } : {}),
               ...(hostSessionBinding.expectedSourceBinding
                 ? { expectedSourceBinding: hostSessionBinding.expectedSourceBinding }
@@ -5429,7 +5441,8 @@ export function registerPtyHandlers(
               ? {
                   tabId: args.tabId,
                   leafId: metadataLeafId,
-                  ...(result.incarnationId ? { incarnationId: result.incarnationId } : {})
+                  ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+                  ...(result.ownerIdentity ? { ownerIdentity: result.ownerIdentity } : {})
                 }
               : undefined,
             !args.connectionId
@@ -5682,7 +5695,7 @@ export function registerPtyHandlers(
                   err instanceof Error ? err.message : String(err)
                 )
               }
-              runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
+              // Transport failure is not exit evidence; preserve topology for retry.
             }
           })
         return true
@@ -5701,7 +5714,7 @@ export function registerPtyHandlers(
                 err instanceof Error ? err.message : String(err)
               )
             }
-            runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
+            // Startup failure is not exit evidence; preserve topology for retry.
           }
         })
         return true
@@ -5797,10 +5810,6 @@ export function registerPtyHandlers(
           // Why: the relay lease must still be tombstoned, but an absent SSH
           // provider is lost contact — the remote PTY is designed to survive it,
           // so nothing here observed an exit to report as a confirmed stop.
-          const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
-          runtime?.onPtyExit(ptyId, -1, incarnationId)
-          rememberSyntheticKillExit(ptyId)
-          sendPtyExitToRenderer({ id: ptyId, code: -1 })
           runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
         }
         return false
@@ -6989,6 +6998,7 @@ export function registerPtyHandlers(
               leafId: validatedLeafId,
               ptyId: result.id,
               ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+              ...(result.ownerIdentity ? { ownerIdentity: result.ownerIdentity } : {}),
               ...(cwd ? { startupCwd: cwd } : {})
             }
             if (args.connectionId) {
@@ -7103,6 +7113,7 @@ export function registerPtyHandlers(
                   tabId: args.tabId,
                   leafId: metadataLeafId,
                   ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
+                  ...(result.ownerIdentity ? { ownerIdentity: result.ownerIdentity } : {}),
                   ...(agentLaunchAuthority ? { agentLaunchAuthority } : {})
                 }
               : undefined,
@@ -7389,11 +7400,11 @@ export function registerPtyHandlers(
     if (ptyOwnership.get(args.id) !== null) {
       return false
     }
-    const provider = tryGetProviderForPty(args.id)
-    if (!provider?.hasPty?.(args.id)) {
-      return false
-    }
     try {
+      const provider = tryGetProviderForPty(args.id)
+      if (!provider?.hasPty?.(args.id)) {
+        return false
+      }
       const now = performance.now()
       lastInputAtByPty.set(args.id, now)
       interactiveOutputCharsByPty.set(args.id, 0)

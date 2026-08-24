@@ -115,10 +115,7 @@ export type CancelCreateOrAttachRequest = {
 export type WriteRequest = {
   id: string
   type: 'write'
-  payload: {
-    sessionId: string
-    data: string
-  }
+  payload: { sessionId: string; data: string; expectedIncarnationId?: PtyIncarnationId }
 }
 
 export type ResizeRequest = {
@@ -128,6 +125,7 @@ export type ResizeRequest = {
     sessionId: string
     cols: number
     rows: number
+    expectedIncarnationId?: PtyIncarnationId
   }
 }
 

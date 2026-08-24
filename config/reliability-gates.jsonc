@@ -14297,7 +14297,8 @@
       ],
       "knownGaps": [
         "Persisted daemon owner-incarnation identity is not yet implemented; the immediate guard uses exact in-process routes plus session incarnations and fails closed when the route is missing.",
-        "A current client intentionally refuses authoritative reattach to a surviving pre-v37 daemon because that owner cannot fence before attach side effects; topology survives but the terminal can remain inaccessible for that PTY's lifetime.",
+        "A current client can reattach a persisted-incarnation session through a surviving v31-v36 daemon and validates its returned incarnation, but those owners cannot reject an incarnation mismatch before attach-side replay or subscription changes.",
+        "Pre-incarnation daemon events cannot authoritatively settle a saved session; anonymous exits remain unverifiable and may leave a dead legacy pane visible until the user closes it.",
         "A pre-fence SSH relay can ignore the optional expected incarnation and mutate delivery before a current client rejects its response; capability negotiation remains permanent-boundary work.",
         "The real macOS and Docker journeys did not recreate the exact A-unregistered/B-compatible-slot incident topology.",
         "Paired headed/headless could not start because the local runtime exposed no paired web-client URL; WSL, ConPTY, and physical Windows remain untested.",

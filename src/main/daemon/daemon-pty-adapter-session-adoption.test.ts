@@ -206,9 +206,20 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       request.mockRestore()
     })
 
-    it('does not send an incarnation-fenced attach to a pre-fence daemon', async () => {
+    it('reattaches an exact surviving session through a pre-fence daemon', async () => {
       const request = vi.spyOn(DaemonClient.prototype, 'request')
+      request.mockResolvedValue({
+        id: 'legacy-owner-session',
+        isNew: false,
+        isReattach: true,
+        incarnationId: 'expected-incarnation',
+        snapshot: null
+      } as never)
       const legacy = new DaemonPtyAdapter({ socketPath, tokenPath, protocolVersion: 36 })
+      vi.spyOn(
+        (legacy as unknown as { client: DaemonClient }).client,
+        'ensureConnected'
+      ).mockResolvedValue()
       try {
         await expect(
           legacy.spawn({
@@ -219,8 +230,11 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
             expectedIncarnationId: 'expected-incarnation',
             expectedIncarnationIsAuthoritative: true
           })
-        ).rejects.toMatchObject({ name: 'TerminalSessionOwnerUnverifiedError' })
-        expect(request).not.toHaveBeenCalled()
+        ).resolves.toMatchObject({ id: 'legacy-owner-session', isReattach: true })
+        expect(request).toHaveBeenCalledWith(
+          'createOrAttach',
+          expect.objectContaining({ attachOnly: true })
+        )
       } finally {
         legacy.dispose()
         request.mockRestore()

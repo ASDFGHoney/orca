@@ -8,5 +8,9 @@ export function isTerminalPaneOwnerUnverified(value: unknown): boolean {
 
 export function isTerminalSessionExited(value: unknown): boolean {
   const message = value instanceof Error ? value.message : String(value)
-  return message.includes(TERMINAL_SESSION_EXITED)
+  return (
+    message.includes(TERMINAL_SESSION_EXITED) ||
+    message.includes('Terminal session exited:') ||
+    (value instanceof Error && value.name === 'TerminalSessionExitedError')
+  )
 }

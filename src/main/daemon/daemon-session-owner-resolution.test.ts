@@ -429,6 +429,31 @@ describe('DaemonSessionOwnerResolver', () => {
     expect(owner.listProcesses).not.toHaveBeenCalled()
   })
 
+  it('reports exact-owner absence with multiple complete adapters', async () => {
+    const owner = provider(
+      async () => [],
+      async () => {
+        throw new SessionNotFoundError('missing')
+      }
+    )
+    const other = provider(async () => [])
+    const routes = new Map<string, IPtyProvider>([['missing', owner]])
+    const resolver = new DaemonSessionOwnerResolver([owner, other], routes)
+    resolver.recordRoute('missing', owner, 'missing-incarnation')
+
+    await expect(
+      resolver.spawnAttachOnly({
+        sessionId: 'missing',
+        expectedIncarnationId: 'missing-incarnation',
+        expectedIncarnationIsAuthoritative: true,
+        attachOnly: true,
+        cols: 80,
+        rows: 24
+      })
+    ).rejects.toBeInstanceOf(TerminalSessionExitedError)
+    expect(other.listProcesses).toHaveBeenCalledOnce()
+  })
+
   it('keeps absence unverified when there are no possible owners', async () => {
     const resolver = new DaemonSessionOwnerResolver([], new Map())
 

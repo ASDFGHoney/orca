@@ -398,6 +398,7 @@ import {
   resolveUnreportedExitCause,
   type TerminalExitCause
 } from '../../shared/terminal-exit-cause'
+import type { TerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
 import type {
   LinearCurrentIssueContextHints,
   LinearAttachResult,
@@ -1469,6 +1470,7 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
 type RuntimePtyWorktreeRecord = {
   ptyId: string
   incarnationId: PtyIncarnationId | null
+  ownerIdentity: TerminalOwnerIdentity | null
   worktreeId: string
   connectionId: string | null
   runtimeSessionOwned: boolean
@@ -10809,6 +10811,7 @@ export class OrcaRuntimeService {
       tabId: string
       leafId: string
       incarnationId?: PtyIncarnationId
+      ownerIdentity?: TerminalOwnerIdentity
       agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
     },
     isWsl?: boolean
@@ -10830,7 +10833,8 @@ export class OrcaRuntimeService {
         : {}),
       ...(isWsl !== undefined ? { isWsl } : {}),
       ...(binding && paneKey ? { tabId: binding.tabId, paneKey } : {}),
-      ...(binding?.incarnationId ? { incarnationId: binding.incarnationId } : {})
+      ...(binding?.incarnationId ? { incarnationId: binding.incarnationId } : {}),
+      ownerIdentity: binding?.ownerIdentity ?? null
     })
     const agentLaunchAuthority = binding?.agentLaunchAuthority
     if (
@@ -32333,6 +32337,7 @@ export class OrcaRuntimeService {
         | 'isWsl'
         | 'wslDistro'
         | 'incarnationId'
+        | 'ownerIdentity'
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
@@ -32352,6 +32357,7 @@ export class OrcaRuntimeService {
       pty = {
         ptyId,
         incarnationId: state.incarnationId ?? null,
+        ownerIdentity: state.ownerIdentity ?? null,
         worktreeId,
         connectionId,
         runtimeSessionOwned: state.runtimeSessionOwned ?? false,
@@ -32413,6 +32419,9 @@ export class OrcaRuntimeService {
         this.invalidatePtyIncarnationHandle(ptyId)
       }
       pty.incarnationId = state.incarnationId
+    }
+    if (state.ownerIdentity !== undefined) {
+      pty.ownerIdentity = state.ownerIdentity
     }
     if (state.connectionId !== undefined) {
       pty.connectionId = state.connectionId
@@ -33023,6 +33032,7 @@ export class OrcaRuntimeService {
       handle: this.issueHandle(leaf),
       ptyId: leaf.ptyId,
       incarnationId: pty?.incarnationId ?? null,
+      ...(pty?.ownerIdentity ? { ownerIdentity: pty.ownerIdentity } : {}),
       orphaned: false,
       worktreeId: leaf.worktreeId,
       worktreePath: worktree?.path ?? '',
@@ -35002,6 +35012,7 @@ export class OrcaRuntimeService {
       handle: this.issuePtyHandle(pty),
       ptyId: pty.ptyId,
       incarnationId: pty.incarnationId,
+      ...(pty.ownerIdentity ? { ownerIdentity: pty.ownerIdentity } : {}),
       orphaned,
       worktreeId: pty.worktreeId,
       worktreePath: worktree?.path ?? '',

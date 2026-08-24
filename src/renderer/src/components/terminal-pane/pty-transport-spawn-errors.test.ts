@@ -88,6 +88,73 @@ describe('createIpcPtyTransport', () => {
     expect(onError).toHaveBeenCalledWith('ENOENT: spawn /bin/nope not found')
   })
 
+  it.each(['terminal_session_exited: pty-dead', 'Terminal session exited: pty-dead'])(
+    'preserves authoritative session-exited evidence during reattach: %s',
+    async (message) => {
+      const { createIpcPtyTransport } = await import('./pty-transport')
+      const spawnMock = vi.fn().mockRejectedValue(new Error(message))
+
+      ;(globalThis as { window: typeof window }).window = {
+        ...originalWindow,
+        api: {
+          ...originalWindow?.api,
+          pty: {
+            ...originalWindow?.api?.pty,
+            spawn: spawnMock,
+            write: vi.fn(),
+            resize: vi.fn(),
+            kill: vi.fn(),
+            onData: vi.fn(() => () => {}),
+            onReplay: vi.fn(() => () => {}),
+            onExit: vi.fn(() => () => {})
+          }
+        }
+      } as unknown as typeof window
+
+      const onError = vi.fn()
+      const result = await createIpcPtyTransport().connect({
+        url: '',
+        sessionId: 'pty-dead',
+        callbacks: { onError }
+      })
+
+      expect(result).toEqual({ id: 'pty-dead', exitedBeforeAttach: true })
+      expect(onError).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not reinterpret an unexpected reattach failure as an ownership verdict', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi.fn().mockRejectedValue(new Error('unexpected provider failure'))
+
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const onError = vi.fn()
+    await expect(
+      createIpcPtyTransport().connect({
+        url: '',
+        sessionId: 'pty-existing',
+        callbacks: { onError }
+      })
+    ).rejects.toThrow('unexpected provider failure')
+    expect(onError).toHaveBeenCalledWith('unexpected provider failure')
+  })
+
   it('surfaces the SSH-not-active toast for a regular SSH target with no PTY provider', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const spawnMock = vi.fn().mockRejectedValue(new Error('No PTY provider for connection ssh-1'))
