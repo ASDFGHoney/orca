@@ -1,5 +1,6 @@
 import type { AgentType } from '../../../../shared/agent-status-types'
 import {
+  discoveredModelsDefineCatalogMembership,
   getAgentSessionOptionCatalog,
   mergeCatalogModels,
   mergeDiscoveredModelsWithConsentGatedSeeds,
@@ -55,7 +56,8 @@ export function resolveNativeChatLaunchSessionOptions(
   agent: AgentType
 ): Record<string, SessionOptionValue> | undefined {
   const values = resolveNativeChatSessionOptionDefaults(persisted, agent)
-  if (!values || !getAgentSessionOptionCatalog(agent)?.discoveredModelsAreAuthoritative) {
+  const catalog = getAgentSessionOptionCatalog(agent)
+  if (!values || !catalog || !discoveredModelsDefineCatalogMembership(catalog)) {
     return values
   }
   let probed = false

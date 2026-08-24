@@ -1,6 +1,7 @@
 import type { AgentType } from '../../../../shared/agent-status-types'
 import {
   createClaudeCatalogOptions,
+  discoveredModelsDefineCatalogMembership,
   getAgentSessionOptionCatalog,
   type CatalogModel
 } from '../../../../shared/agent-session-option-catalog'
@@ -79,7 +80,8 @@ export async function discoverNativeChatCatalogModels(
     !result.success ||
     result.models.length === 0 ||
     // Why: static fallbacks must never impersonate a probe whose rows replace the seed.
-    ((catalog?.discoveredModelsReplaceSeed || catalog?.discoveredModelsAreAuthoritative) &&
+    (catalog &&
+      discoveredModelsDefineCatalogMembership(catalog) &&
       result.catalogOrigin !== 'probe')
   ) {
     return null

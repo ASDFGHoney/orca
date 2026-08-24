@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  discoveredModelsDefineCatalogMembership,
   getAgentSessionOptionCatalog,
   mergeCatalogModels,
   mergeDiscoveredModelsWithConsentGatedSeeds
@@ -11,6 +12,18 @@ import {
 } from './native-chat-session-option-defaults'
 
 describe('agent session option catalog', () => {
+  it('shares membership policy across replacing and authoritative catalogs', () => {
+    expect(discoveredModelsDefineCatalogMembership(getAgentSessionOptionCatalog('claude')!)).toBe(
+      true
+    )
+    expect(discoveredModelsDefineCatalogMembership(getAgentSessionOptionCatalog('grok')!)).toBe(
+      true
+    )
+    expect(discoveredModelsDefineCatalogMembership(getAgentSessionOptionCatalog('cursor')!)).toBe(
+      false
+    )
+  })
+
   it('returns no catalog for unknown agents', () => {
     expect(getAgentSessionOptionCatalog('future-agent')).toBeNull()
   })

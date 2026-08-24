@@ -40,6 +40,16 @@ export function getAgentSessionOptionCatalog(agent: AgentType): AgentSessionOpti
   return CATALOGS[agent] ?? null
 }
 
+/** Whether a successful discovery result defines the catalog's model membership. */
+export function discoveredModelsDefineCatalogMembership(
+  catalog: AgentSessionOptionCatalog
+): boolean {
+  return (
+    catalog.discoveredModelsReplaceSeed === true ||
+    catalog.discoveredModelsAreAuthoritative === true
+  )
+}
+
 export function findCatalogModel(
   catalog: AgentSessionOptionCatalog,
   modelId: string

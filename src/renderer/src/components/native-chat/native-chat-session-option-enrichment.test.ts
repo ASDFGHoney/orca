@@ -357,6 +357,22 @@ describe('native chat session option enrichment', () => {
     ).toEqual({ model: 'retired' })
   })
 
+  it('drops a persisted Claude alias missing from a replacing probe but keeps Fable', async () => {
+    const persisted = {
+      claude: { model: 'opus', valuesByModel: { opus: { effort: 'high' } } }
+    }
+    const discover = vi.fn().mockResolvedValue([{ id: 'sonnet', label: 'Sonnet', options: [] }])
+    ensureNativeChatModelEnrichment({ agent: 'claude', hostKey: 'local', discover })
+    await vi.waitFor(() => expect(readNativeChatEnrichedModels('claude', 'local')).not.toBeNull())
+
+    expect(resolveNativeChatLaunchSessionOptions(persisted, 'claude')).toBeUndefined()
+    expect(resolveNativeChatLaunchSessionOptions({ claude: { model: 'fable' } }, 'claude')).toEqual(
+      {
+        model: 'fable'
+      }
+    )
+  })
+
   it('rejects a spec fallback for Claude, whose successful probe replaces the seed', async () => {
     mocks.discoverRuntimeCommitMessageModels.mockResolvedValue({
       success: true,
