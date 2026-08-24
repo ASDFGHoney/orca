@@ -51,7 +51,8 @@ const POLL_MS = 25
 // Reconciliation runs every 15 poll ticks. Fake timers keep native re-arm tests
 // independent of host load while preserving the production interval.
 const RECONCILIATION_TICKS = 15
-// Advance multiple windows to cover the scheduler's staggered phase and async snapshot work.
+// Advance one extra reconciliation window so the fake performance clock crosses the
+// 15-tick boundary even when timer and filesystem-promise scheduling differ by a tick.
 const alwaysVisible: WorktreePollerWindowVisibility = {
   isWindowVisible: () => true,
   onWindowBecameVisible: () => () => {}
@@ -538,7 +539,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
-      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
       expect(subscribeMock).toHaveBeenCalledTimes(2)
       expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
 
@@ -576,13 +577,13 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
-      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
       expect(subscribeMock).toHaveBeenCalledTimes(2)
       const stalePendingSubscription = childSubscriptions[1]
 
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
-      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
       expect(
         received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
       ).toHaveLength(2)
