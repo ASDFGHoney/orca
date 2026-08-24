@@ -37,10 +37,7 @@ export function shouldUseAiVaultServiceProcess(): boolean {
   return process.env.NODE_ENV !== 'test'
 }
 
-/**
- * Without this a scan that tripped the circuit leaves the panel refusing every
- * refresh for the rest of the fault window, with no way for the user to retry.
- */
+// Let forced refreshes retry after a local service circuit opens.
 export function clearAiVaultBackgroundRestartCircuit(): void {
   if (shouldUseAiVaultServiceProcess()) {
     clearAiVaultServiceRestartCircuit()

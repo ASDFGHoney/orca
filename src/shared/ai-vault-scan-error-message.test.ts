@@ -72,4 +72,13 @@ describe('describeAiVaultScanError', () => {
     expect(describeAiVaultScanError(authored)).toBe(authored)
     expect(describeAiVaultScanError('SSH relay is not ready')).toBe('SSH relay is not ready')
   })
+
+  it('removes transport wrappers before passing through an unknown message', () => {
+    expect(
+      describeAiVaultScanError(
+        "Error invoking remote method 'aiVault:listSessions': Error: SSH relay is not ready"
+      )
+    ).toBe('SSH relay is not ready')
+    expect(describeAiVaultScanError('Relay Scanner is not ready')).toBe('Scanner is not ready')
+  })
 })

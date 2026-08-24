@@ -8,8 +8,8 @@ const RETRY = 'Refresh to try again.'
 
 /** Electron wraps every rejected `ipcMain.handle` before the renderer sees it. */
 const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )?/
-/** Relay-hosted scans reuse the local wording behind a `Relay ` prefix. */
-const RELAY_PREFIX = /^Relay (?=AI Vault )/
+/** Relay-hosted scan errors carry a transport-only `Relay ` prefix. */
+const RELAY_PREFIX = /^Relay /
 /** Both the fork-based service and the legacy worker thread emit this family. */
 const SCANNER = String.raw`AI Vault (?:service|scanner worker)`
 
@@ -46,5 +46,5 @@ function humanize(text: string): string | null {
 /** Returns user-facing copy, or the original text when it is already meaningful. */
 export function describeAiVaultScanError(raw: string): string {
   const text = raw.replace(IPC_INVOKE_PREFIX, '').replace(RELAY_PREFIX, '')
-  return humanize(text) ?? raw
+  return humanize(text) ?? text
 }
