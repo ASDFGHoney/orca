@@ -61,8 +61,14 @@ export function useWorkspaceCleanupUnverifiedRemoval({
             setDeletionPhaseByIdentity((current) => ({ ...current, [identity]: 'deleting' }))
           }
         },
-        onRowFailed: (failure) =>
-          clearQueuedDeleteState(failure.worktreeId, failure.executionHostId),
+        onRowFailed: (failure) => {
+          clearQueuedDeleteState(failure.worktreeId, failure.executionHostId)
+          // A preflight/timeout failure can arrive before the background
+          // batch settles; drop the optimistic deleting overlay immediately.
+          if (mountedRef.current) {
+            setDeletionPhaseByIdentity((current) => withoutIdentity(current, identity))
+          }
+        },
         onResult: (result) => {
           clearQueuedDeleteState(candidate.worktreeId, hostId ?? undefined)
           if (mountedRef.current) {
@@ -71,6 +77,7 @@ export function useWorkspaceCleanupUnverifiedRemoval({
         },
         onLateResult: (result) => {
           if (mountedRef.current) {
+            setDeletionPhaseByIdentity((current) => withoutIdentity(current, identity))
             applyLateResult(result, setRowFailures, onDeselect)
           }
         },

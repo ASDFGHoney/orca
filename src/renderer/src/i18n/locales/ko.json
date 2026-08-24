@@ -14574,7 +14574,8 @@
           "gitStatusCheckFailed": "Git 상태 확인 실패",
           "gitStatusUnverified": "Git 상태를 확인할 수 없음",
           "deleteAnyway": "그래도 삭제",
-          "forceDeleteProjection": "현재 {{value0}}개에 위험 요소가 표시되며 강제 삭제가 필요할 수 있습니다"
+          "forceDeleteProjectionOne": "현재 워크스페이스 {{count}}개에 위험 요소가 표시되며 강제 삭제가 필요할 수 있습니다",
+          "forceDeleteProjectionMany": "현재 워크스페이스 {{count}}개에 위험 요소가 표시되며 강제 삭제가 필요할 수 있습니다"
         }
       }
     },

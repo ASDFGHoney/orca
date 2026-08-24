@@ -14565,7 +14565,8 @@
           "gitStatusCheckFailed": "Git 状态检查失败",
           "gitStatusUnverified": "无法验证 Git 状态",
           "deleteAnyway": "仍然删除",
-          "forceDeleteProjection": "当前有 {{value0}} 个工作区显示风险，可能需要强制删除"
+          "forceDeleteProjectionOne": "当前有 {{count}} 个工作区显示风险，可能需要强制删除",
+          "forceDeleteProjectionMany": "当前有 {{count}} 个工作区显示风险，可能需要强制删除"
         }
       }
     },

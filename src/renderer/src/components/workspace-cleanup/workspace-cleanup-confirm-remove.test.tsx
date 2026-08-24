@@ -192,11 +192,30 @@ describe('WorkspaceCleanupConfirmRemove', () => {
     expect(container.textContent).toContain('Pinned')
     expect(container.textContent).toContain('Git status unavailable')
     expect(container.textContent).toContain('Could not verify unpushed commits')
-    expect(container.textContent).toContain('2 currently show risk and may need a force delete')
+    expect(container.textContent).toContain(
+      '2 workspaces currently show risk and may need a force delete'
+    )
     expect(
       [...container.querySelectorAll('.text-destructive')].map((node) => node.textContent)
     ).toEqual(
       expect.arrayContaining(['Git status unavailable', 'Could not verify unpushed commits'])
+    )
+
+    act(() => {
+      root.render(
+        <WorkspaceCleanupConfirmRemove
+          candidates={[failed]}
+          now={Date.now()}
+          reviewInfoByWorktreeId={new Map()}
+          progress={null}
+          onBack={vi.fn()}
+          onCancel={vi.fn()}
+          onConfirm={vi.fn()}
+        />
+      )
+    })
+    expect(container.textContent).toContain(
+      '1 workspace currently shows risk and may need a force delete'
     )
   })
 })

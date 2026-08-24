@@ -142,11 +142,17 @@ export function WorkspaceCleanupConfirmRemove({
           </div>
           {riskCount > 0 ? (
             <div className="text-xs text-destructive">
-              {translate(
-                'components.workspace.cleanup.browse.forceDeleteProjection',
-                '{{value0}} currently show risk and may need a force delete',
-                { value0: riskCount }
-              )}
+              {riskCount === 1
+                ? translate(
+                    'components.workspace.cleanup.browse.forceDeleteProjectionOne',
+                    '{{count}} workspace currently shows risk and may need a force delete',
+                    { count: riskCount }
+                  )
+                : translate(
+                    'components.workspace.cleanup.browse.forceDeleteProjectionMany',
+                    '{{count}} workspaces currently show risk and may need a force delete',
+                    { count: riskCount }
+                  )}
             </div>
           ) : null}
         </div>
