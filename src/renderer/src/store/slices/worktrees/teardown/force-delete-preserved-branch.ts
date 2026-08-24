@@ -61,9 +61,11 @@ export function createForceDeletePreservedBranch(
       const target =
         retainedTarget?.target ??
         getActiveRuntimeTarget(settingsForWorktreeOwner(get(), worktreeId))
+      const parsedCleanupHost = parseExecutionHostId(cleanupHostId)
       const effectiveHostId =
         target.kind === 'environment' &&
-        parseExecutionHostId(cleanupHostId)?.environmentId === target.environmentId
+        parsedCleanupHost?.kind === 'runtime' &&
+        parsedCleanupHost.environmentId === target.environmentId
           ? undefined
           : cleanupHostId
       const result = await (target.kind === 'local'

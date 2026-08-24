@@ -59,9 +59,11 @@ function qualifyRuntimeCallHost(
   target: ReturnType<typeof getActiveRuntimeTarget>,
   hostId: ExecutionHostId | undefined
 ): ExecutionHostId | undefined {
+  const parsedHost = parseExecutionHostId(hostId)
   if (
     target.kind === 'environment' &&
-    parseExecutionHostId(hostId)?.environmentId === target.environmentId
+    parsedHost?.kind === 'runtime' &&
+    parsedHost.environmentId === target.environmentId
   ) {
     return undefined
   }
