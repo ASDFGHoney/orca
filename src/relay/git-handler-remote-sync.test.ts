@@ -399,6 +399,7 @@ describe('GitHandler', () => {
       const calls = vi.mocked(gitTarget.git).mock.calls
       expect(calls.some(([args]) => args[0] === 'rebase')).toBe(false)
       const cleanup = calls.find(([args]) => args[0] === 'update-ref')
+      expect(cleanup).toBeDefined()
       expect(cleanup?.[2]?.signal).toBeUndefined()
       expect(rejectFetch).toBeTypeOf('function')
     })
