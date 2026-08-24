@@ -13,6 +13,7 @@ const fixtureReport = path.join(fixtureRoot, 'report.json')
 const fixtureMarker = `ORCA_TERMINAL_SEND_E2E_${process.pid}`
 const fixtureScript = path.join(process.cwd(), 'tests', 'tools', 'repro-terminal-send-submit.mjs')
 const fakeCodex = path.join(fixtureBin, process.platform === 'win32' ? 'codex.cmd' : 'codex')
+const swallowedEnterFixtureTimeoutMs = 60_000
 
 mkdirSync(fixtureBin)
 writeFileSync(
@@ -44,7 +45,7 @@ test('CLI text plus Enter waits for a slow agent composer before submitting', as
   orcaPage,
   testRepoPath
 }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(110_000)
   await waitForSessionReady(orcaPage)
   const userDataDir = await electronApp.evaluate(({ app }) => app.getPath('userData'))
   const repoRoot = process.cwd()
@@ -94,7 +95,7 @@ test('CLI reports a swallowed Enter without submitting a second Enter', async ({
   orcaPage,
   testRepoPath
 }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(110_000)
   await waitForSessionReady(orcaPage)
   const userDataDir = await electronApp.evaluate(({ app }) => app.getPath('userData'))
   const repoRoot = process.cwd()
@@ -109,7 +110,7 @@ test('CLI reports a swallowed Enter without submitting a second Enter', async ({
         '--worktree',
         testRepoPath,
         '--agent-command',
-        'codex --swallow-first-enter',
+        `codex --swallow-first-enter --timeout-ms ${swallowedEnterFixtureTimeoutMs}`,
         '--expect-stalled',
         '--report',
         fixtureReport,
@@ -120,7 +121,7 @@ test('CLI reports a swallowed Enter without submitting a second Enter', async ({
       {
         cwd: repoRoot,
         env: { ...process.env, ORCA_DEV_USER_DATA_PATH: userDataDir },
-        timeout: 60_000
+        timeout: 90_000
       }
     )
     stdout = result.stdout
@@ -137,6 +138,7 @@ test('CLI reports a swallowed Enter without submitting a second Enter', async ({
     prematureEnters: 0,
     receivedEnters: 1,
     swallowedEnters: 1,
+    configuredTimeoutMs: swallowedEnterFixtureTimeoutMs,
     markerReceived: true
   })
 })
@@ -146,7 +148,7 @@ test('CLI does not write prompt bytes into an active permission dialog', async (
   orcaPage,
   testRepoPath
 }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(110_000)
   await waitForSessionReady(orcaPage)
   const userDataDir = await electronApp.evaluate(({ app }) => app.getPath('userData'))
   const repoRoot = process.cwd()

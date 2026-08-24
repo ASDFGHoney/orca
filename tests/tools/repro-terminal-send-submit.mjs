@@ -308,6 +308,7 @@ async function fakeAgentMain() {
   const writeReport = async (submitted) => {
     const hasBracketedPasteFrame = input.includes(BEGIN) && input.includes(END)
     const report = {
+      configuredTimeoutMs: timeoutMs,
       contractOk:
         prematureEnters === 0 &&
         (permissionBeforeSend || !pasteFramingRequired || hasBracketedPasteFrame),

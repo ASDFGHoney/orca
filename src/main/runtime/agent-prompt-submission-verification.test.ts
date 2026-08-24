@@ -75,6 +75,21 @@ describe('agent prompt submission verification', () => {
     await rejected
   })
 
+  it('accepts a working transition after the former five-second deadline', async () => {
+    vi.useFakeTimers()
+    let current = activity()
+    const verification = verifyAgentPromptSubmission({
+      baseline: current,
+      readActivity: () => current
+    })
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    current = activity({ workingSequence: 5, status: 'working' })
+    await vi.advanceTimersByTimeAsync(50)
+
+    await expect(verification).resolves.toBeUndefined()
+  })
+
   it('blocks when permission appears after submit', async () => {
     vi.useFakeTimers()
     let current = activity()

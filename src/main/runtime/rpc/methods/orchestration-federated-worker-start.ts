@@ -21,6 +21,7 @@ import {
   type OrchestrationWorkerLaunchReceipt
 } from './orchestration-worker-launch-preferences'
 import { validateFederatedWorkerStartPlacement } from './orchestration-worker-start-validation'
+import { resolveFederatedWorkerStartBudgets } from './orchestration-worker-start-budgets'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -57,13 +58,13 @@ export async function startFederatedWorker(args: {
     model: params.model,
     effort: params.effort
   })
-
   const server = runtime.resolveOrchestrationWorkerServer(params.on as string)
+  const budgets = resolveFederatedWorkerStartBudgets(params.timeoutMs)
   const status = (await runtime.callOrchestrationWorkerServer(
     server.environmentId,
     'status.get',
     undefined,
-    params.timeoutMs
+    budgets.preflightTimeoutMs
   )) as RuntimeStatus
   if (!status.capabilities?.includes(ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY)) {
     throw new OrchestrationError(
@@ -155,8 +156,9 @@ export async function startFederatedWorker(args: {
         timeoutMs: params.timeoutMs,
         devMode: params.devMode
       },
-      (params.timeoutMs ?? 60_000) + 15_000,
-      { orchestrationRequestId: orchestrationMutation.requestId }
+      budgets.attachDeadlineMs,
+      { orchestrationRequestId: orchestrationMutation.requestId },
+      { contractVerified: true }
     )) as RemoteStartReceipt
     if (remote.dispatchId !== started.dispatch.id) {
       throw new OrchestrationError(
@@ -250,7 +252,6 @@ export async function startFederatedWorker(args: {
     return federatedUnknownReceipt(worker, task.id, server.name, requestedLaunch)
   }
 }
-
 type RemoteStartReceipt = {
   dispatchId: string
   state: string

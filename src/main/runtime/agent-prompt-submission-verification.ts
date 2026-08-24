@@ -1,4 +1,5 @@
-export const AGENT_PROMPT_EFFECT_TIMEOUT_MS = 5_000
+export { AGENT_PROMPT_EFFECT_TIMEOUT_MS } from '../../shared/orchestration-timing-budgets'
+import { AGENT_PROMPT_EFFECT_TIMEOUT_MS } from '../../shared/orchestration-timing-budgets'
 const AGENT_PROMPT_EFFECT_POLL_MS = 50
 
 export type AgentPromptActivity = Readonly<{

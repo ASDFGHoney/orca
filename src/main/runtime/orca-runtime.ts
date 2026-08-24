@@ -5748,7 +5748,8 @@ export class OrcaRuntimeService {
     method: string,
     params: unknown,
     timeoutMs?: number,
-    envelope?: RuntimeOrchestrationEnvelope
+    envelope?: RuntimeOrchestrationEnvelope,
+    internal?: { contractVerified?: boolean }
   ): Promise<unknown> {
     if (!this.orchestrationEnvironmentTransport) {
       throw new OrchestrationError(
@@ -5756,7 +5757,7 @@ export class OrcaRuntimeService {
         'Connected-server orchestration is unavailable in this runtime.'
       )
     }
-    if (isOrchestrationMutation(method, params)) {
+    if (isOrchestrationMutation(method, params) && !internal?.contractVerified) {
       const statusResponse = await this.orchestrationEnvironmentTransport.call(
         selector,
         'status.get',
