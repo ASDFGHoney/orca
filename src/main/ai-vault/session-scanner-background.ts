@@ -9,6 +9,7 @@ import {
   type ReadAiVaultFirstUserPromptResult
 } from './session-first-user-prompt-read'
 import {
+  clearAiVaultServiceRestartCircuit,
   invalidateAiVaultServiceCache,
   listAiVaultSubagentSessionsInService,
   readAiVaultFirstUserPromptInService,
@@ -34,6 +35,16 @@ export function shouldUseAiVaultServiceProcess(): boolean {
     return false
   }
   return process.env.NODE_ENV !== 'test'
+}
+
+/**
+ * Without this a scan that tripped the circuit leaves the panel refusing every
+ * refresh for the rest of the fault window, with no way for the user to retry.
+ */
+export function clearAiVaultBackgroundRestartCircuit(): void {
+  if (shouldUseAiVaultServiceProcess()) {
+    clearAiVaultServiceRestartCircuit()
+  }
 }
 
 export function scanAiVaultSessionsInBackground(
