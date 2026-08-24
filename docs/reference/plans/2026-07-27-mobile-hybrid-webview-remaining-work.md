@@ -20,11 +20,13 @@ React Native presentation, hybrid-only workspace routing, and explicit native/
 Desktop ownership. Direct, Docker SSH, actual iOS WKWebView, emulator isolation,
 corrupt-cache/process-loss recovery, and protocol-compatible local Relay
 composition have recorded evidence. The 2026-08-21 independent OpenCode review
-was completed and its high-severity findings were fixed.
+was completed and its high-severity findings were fixed. The 2026-08-23
+concurrency follow-up also fixed overlapping branch-comparison continuations,
+native-alert package replacement, and rapid Android Back traversal races.
 
 Latest recorded package:
-`015f15ca1bbbc28f25318283a2fff0ea616db868540a2e86bd3d5ce61c4a3f25`,
-52 assets, 9,310,227 raw bytes, 2,691,744 gzip bytes. This summary is not a
+`12df9ad54b240dd8ec9ef97b2e00c971536b0d05ca6c0c1834d47bbd509480ca`,
+52 assets, 9,310,634 raw bytes, 2,691,771 gzip bytes. This summary is not a
 production-readiness claim.
 
 ## Packaged Desktop and Signed App Matrix

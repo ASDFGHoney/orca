@@ -22,10 +22,11 @@ performance, accessibility, or production-promotion gates.
 | `origin/main` and merge base at checkpoint | `4c984d4c1b`                                                       |
 | Checkpoint comparison                      | 81 commits; 1,396 files; 140,153 additions; 8,772 deletions        |
 | Post-audit integration checkpoint          | `b8d04428c0`                                                       |
-| Current `origin/main` checkpoint           | `e50cc309c3`                                                       |
-| Post-audit comparison                      | 92 commits; 1,401 files; 134,633 additions; 8,771 deletions        |
-| Latest verified package                    | `015f15ca1bbbc28f25318283a2fff0ea616db868540a2e86bd3d5ce61c4a3f25` |
-| Latest package size                        | 52 assets; 9,310,227 raw bytes; 2,691,744 gzip bytes               |
+| Lifecycle hardening checkpoint             | `5d4af00f5f`                                                       |
+| Current `origin/main` checkpoint           | `0a613d5fed`                                                       |
+| Post-audit comparison                      | 95 commits; 1,471 files; 141,224 additions; 9,112 deletions        |
+| Latest verified package                    | `12df9ad54b240dd8ec9ef97b2e00c971536b0d05ca6c0c1834d47bbd509480ca` |
+| Latest package size                        | 52 assets; 9,310,634 raw bytes; 2,691,771 gzip bytes               |
 
 Commit and branch counts are historical evidence for that checkpoint; rerun
 `git merge-base origin/main HEAD`, `git rev-list --count origin/main..HEAD`, and
@@ -84,8 +85,8 @@ and raw result location.
 ## Package and Topology Evidence
 
 - Latest independent verification:
-  `015f15ca1bbbc28f25318283a2fff0ea616db868540a2e86bd3d5ce61c4a3f25`,
-  52 assets, 9,310,227 raw bytes, 2,691,744 gzip bytes.
+  `12df9ad54b240dd8ec9ef97b2e00c971536b0d05ca6c0c1834d47bbd509480ca`,
+  52 assets, 9,310,634 raw bytes, 2,691,771 gzip bytes.
 - Packaged macOS arm64 Desktop through an isolated Docker SSH provider to an
   actual iOS WKWebView used
   `7c7c673deb74e158cdfb99b1ca536fd88cd3ab5dac4eb8db78c43ca12f6ce31d`.
@@ -117,12 +118,12 @@ certification. Simulator evidence will still not close physical-device,
 accessibility, input, or performance gates.
 
 The 2026-08-23 strict iPhone Simulator Source Control/Review run used package
-`015f15ca1bbbc28f25318283a2fff0ea616db868540a2e86bd3d5ce61c4a3f25` and an
+`12df9ad54b240dd8ec9ef97b2e00c971536b0d05ca6c0c1834d47bbd509480ca` and an
 actual WKWebView. It covered host-list long press into Source Control, changed
 file Review, return to Source Control and workspace root, physical workspace
 selection into Session, and a second session-origin Source Control mount. The
-corrected native-versus-hosted captures passed at 1.172% and 1.189% changed
-pixels against a 3% budget, with 1.470 and 1.321 mean channel differences
+corrected native-versus-hosted captures passed at 1.741% and 0.057% changed
+pixels against a 3% budget, with 1.952 and 0.146 mean channel differences
 against a 4.0 budget. The second mount retained branch and pull-request state.
 
 ## Security and Lifecycle Evidence
@@ -141,10 +142,15 @@ against a 4.0 budget. The second mount retained branch and pull-request state.
 - Cross-build/session tests cover a 15-pair stale authority grid. Cancellation,
   client replacement, disposal, replay, late subscription registration, and
   delayed mutation results fail closed.
-- Branch comparisons retain one bounded shell-owned host snapshot across
-  single-use page continuations. Only the exact next page bypasses the initial
-  rate charge; forged and replayed continuations remain throttled, and large
-  comparisons no longer rerun Git for every 128-entry page.
+- Concurrent branch comparisons retain independent bounded shell-owned host
+  snapshots behind distinct single-use page continuations. Only an exact next
+  page bypasses the initial rate charge; forged and replayed continuations
+  remain throttled, and large comparisons no longer rerun Git for every
+  128-entry page.
+- Native alerts remain shell-owned while a refreshed package waits to replace
+  its session, and concurrent replacement brokers cannot orphan or duplicate
+  the alert. Rapid delayed Android Back traversals retain separate bounded
+  expectations instead of redispatching handlers and over-popping routes.
 - Exact iOS and Android emulator apps rendered hostile filenames, diffs,
   terminal links, provider/task strings, errors, Markdown, HTML, SVG, Mermaid,
   and image metadata inertly, with no execution marker or sentinel traffic.
@@ -167,7 +173,7 @@ against a 4.0 budget. The second mount retained branch and pull-request state.
 
 ## Evidence Interpretation
 
-The latest recorded full mobile validation passed 722 files and 4,708 tests,
+The latest recorded full mobile validation passed 722 files and 4,715 tests,
 with three skips. The latest concurrent root run passed 6,193 files and 58,084
 tests, with 39 skipped files and 245 skipped tests; two deadline-sensitive tests
 failed under load and then passed 25/25 together with one worker. Root, mobile,
@@ -176,10 +182,10 @@ localization, max-lines, and Electron ratchets also passed. Relay Markdown
 discovery passed its shared cross-platform process-launcher boundary tests.
 Rerun current CI before release; historical counts are not evergreen.
 
-The 2026-08-23 branch-comparison correction additionally passed 33 focused
-broker/history/grant tests, mobile and hosted-web typechecks, focused lint and
-formatting, diff hygiene, and the strict actual-WKWebView Source Control/Review
-journey above.
+The 2026-08-23 concurrency hardening additionally passed 43 focused pager,
+broker, alert, package-session, and Back-navigation tests; mobile and hosted-web
+typechecks; focused lint and formatting; diff hygiene; and the strict
+actual-WKWebView Source Control/Review journey above.
 
 No entry in this document claims the following passed: physical phones or
 tablets, production-store-signed apps, Windows/Linux/headless packaged Desktop,
