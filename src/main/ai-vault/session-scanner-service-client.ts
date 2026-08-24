@@ -78,6 +78,7 @@ export class AiVaultScannerServiceClient {
 
   clearRestartCircuit(): void {
     this.restartPolicy.clearCircuit()
+    this.pump()
   }
 
   async invalidate(paths: string[]): Promise<void> {

@@ -12,9 +12,14 @@ export class AiVaultServiceRestartPolicy {
     return this.timer !== null
   }
 
-  /** A forced refresh is a deliberate user action, so it reopens the circuit. */
+  /** A forced refresh starts a fresh retry window immediately. */
   clearCircuit(): void {
     this.circuitUntil = 0
+    this.faults = []
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
   }
 
   startError(): Error | null {

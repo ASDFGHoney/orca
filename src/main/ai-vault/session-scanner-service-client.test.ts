@@ -181,6 +181,40 @@ describe('AiVaultScannerServiceClient', () => {
     client.dispose()
   })
 
+  it('starts a queued retry immediately when a forced refresh clears backoff', async () => {
+    vi.useFakeTimers()
+    const children: AiVaultServiceTestChild[] = []
+    const client = new AiVaultScannerServiceClient({
+      processFactory: () => {
+        const child = new AiVaultServiceTestChild(18_345 + children.length)
+        children.push(child)
+        return child.asChildProcess()
+      },
+      init: { sessionParseCache: null }
+    })
+    const titles = client.request({ type: 'request', operation: 'titles', requests: [] })
+
+    vi.advanceTimersByTime(AI_VAULT_SERVICE_READY_TIMEOUT_MS)
+    await Promise.resolve()
+    expect(children).toHaveLength(1)
+
+    client.clearRestartCircuit()
+    expect(children).toHaveLength(2)
+
+    readyAiVaultServiceChild(children[1]!)
+    await vi.waitFor(() =>
+      expect(children[1]!.sent).toContainEqual(expect.objectContaining({ operation: 'titles' }))
+    )
+    children[1]!.emit('message', {
+      type: 'result',
+      id: aiVaultServiceRequestId(children[1]!, 'titles'),
+      operation: 'titles',
+      value: { titles: [] }
+    })
+    await expect(titles).resolves.toEqual({ titles: [] })
+    client.dispose()
+  })
+
   it('lets a forced refresh reopen the circuit instead of waiting out the window', async () => {
     vi.useFakeTimers()
     const children: AiVaultServiceTestChild[] = []
