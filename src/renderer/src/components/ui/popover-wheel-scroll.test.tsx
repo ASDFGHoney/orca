@@ -218,7 +218,12 @@ describe('PopoverContent wheel shim', () => {
   })
 
   it('respects descendant cancellation', () => {
-    const innerOnWheel = vi.fn((event: ReactWheelEvent<HTMLDivElement>) => event.preventDefault())
+    const innerOnWheel = vi.fn((event: ReactWheelEvent<HTMLDivElement>) => {
+      // Model React's passive delegated wheel event: synthetic cancellation does not
+      // update the native event observed by the shim.
+      Object.defineProperty(event.nativeEvent, 'preventDefault', { value: vi.fn() })
+      event.preventDefault()
+    })
     renderPopover('popover-wheel-scroll', true, { innerOnWheel })
     const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
     viewport.style.overflowY = 'auto'
@@ -227,7 +232,7 @@ describe('PopoverContent wheel shim', () => {
     const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
 
     expect(innerOnWheel).toHaveBeenCalledOnce()
-    expect(event.defaultPrevented).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
     expect(viewport.scrollTop).toBe(0)
   })
 

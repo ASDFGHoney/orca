@@ -181,8 +181,8 @@ function PopoverContent({
             WebkitAppRegion: 'no-drag'
           } as React.CSSProperties
         }
-        onWheel={onWheel ? handleConsumerWheel : undefined}
-        onWheelCapture={onWheelCapture ? handleConsumerWheelCapture : undefined}
+        onWheel={handleConsumerWheel}
+        onWheelCapture={handleConsumerWheelCapture}
         {...props}
       />
     </PopoverPrimitive.Portal>
