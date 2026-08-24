@@ -42,9 +42,9 @@ export function pruneWorktreeStateForRepo(
     for (const key of keys) {
       const rawKey = isWorktreeHostIdentity(key) ? getWorktreeIdFromHostIdentity(key) : key
       const keyHost = isWorktreeHostIdentity(key) ? key.slice(0, key.indexOf('|')) : null
-      const belongsToPrunedHost =
-        hostId === null ||
-        (keyHost === null ? hostId === LOCAL_EXECUTION_HOST_ID : keyHost === hostId)
+      // Why: bare keys are scoped by the per-partition gating below; only host-qualified
+      // keys can sit in another host's partition and need host-matching at collection time.
+      const belongsToPrunedHost = hostId === null || keyHost === null || keyHost === hostId
       if (belongsToPrunedHost && rawKey.startsWith(prefix)) {
         ownerKeysToPrune.add(key)
       }

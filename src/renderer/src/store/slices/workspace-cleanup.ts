@@ -822,10 +822,11 @@ function getInitialWorkspaceCleanupGitDeferrals(state: AppState): string[] {
     const hasVisibleContext =
       openEditorWorktreeIds.has(worktreeId) ||
       (state.browserTabsByWorktree[worktreeId]?.length ?? 0) > 0
+    // Why: enrichment state may be a plain snapshot without slice methods.
     const lastVisitedAt =
       getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
         id: worktreeId,
-        hostId: state.getKnownWorktreeById(worktreeId)?.hostId
+        hostId: state.getKnownWorktreeById?.(worktreeId)?.hostId
       }) ?? 0
     if (
       hasVisibleContext &&
@@ -999,7 +1000,7 @@ function getWorkspaceCleanupLocalStateSignature(
     lastVisitedAt:
       getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
         id: worktreeId,
-        hostId: state.getKnownWorktreeById(worktreeId)?.hostId
+        hostId: getWorkspaceCleanupCandidateHostId(candidate)
       }) ?? 0,
     viewed: state.workspaceCleanupViewedCandidates[worktreeId] ?? null,
     dismissal

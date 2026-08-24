@@ -369,12 +369,13 @@ function getRecentTabOccurrenceBase(item: OpenTabPaletteItem): string {
   }
   if (item.type === 'simulator-tab') {
     const result = item.result
+    // Why no groupId: it changes when a tab is regrouped mid-open, and the frozen
+    // order must keep resolving the row; tabId already identifies it within a host.
     return JSON.stringify([
       item.type,
       item.id,
       result.executionHostId ?? '',
       result.worktreeId,
-      result.groupId,
       result.tabId
     ])
   }
@@ -384,7 +385,6 @@ function getRecentTabOccurrenceBase(item: OpenTabPaletteItem): string {
     item.id,
     result.executionHostId ?? '',
     result.worktreeId,
-    result.groupId,
     result.tabId,
     result.entityId
   ])

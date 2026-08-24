@@ -90,7 +90,11 @@ export function exportRemoteWorkspaceSession(
     }
     const worktreePath = worktreePathFromId(worktreeId)
     if (worktreePath) {
-      lastVisitedAtByWorktreePath[worktreePath] = timestamp
+      // Why max: a bare legacy key and its host-qualified twin collapse onto one path.
+      lastVisitedAtByWorktreePath[worktreePath] = Math.max(
+        lastVisitedAtByWorktreePath[worktreePath] ?? 0,
+        timestamp
+      )
     }
   }
 
