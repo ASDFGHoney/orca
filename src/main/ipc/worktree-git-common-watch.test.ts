@@ -586,9 +586,14 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
       await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(2)
+          expect(childSubscriptions[1]).toBeDefined()
+        },
+        { timeout: 1_000 }
+      )
       const stalePendingSubscription = childSubscriptions[1]
-
       await replaceWorktreesRoot(commonDir, worktreesDir, retainedEntry)
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
       expect(
