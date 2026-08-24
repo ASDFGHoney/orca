@@ -94,6 +94,7 @@ import {
   type StructuredTuiOwner
 } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
+import { agentSessionProviderHandlesEqual } from '../../shared/agent-session-provider-handle'
 import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
 import {
   agentSessionOwnerBindingsEqual,
@@ -101,6 +102,7 @@ import {
   scopedAgentSessionClaimsEqual
 } from '../../shared/claimed-agent-pty-owner-snapshot'
 import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
+import { claudeProviderHandleLink } from '../claude/claude-structured-owner-identity'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import {
   beginAdoptedCodexReadinessWatch,
@@ -121,6 +123,7 @@ import {
 import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
 import { stopAdoptedCodexTui } from './adopted-codex-tui-stop'
 import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
+import { resolveSessionFilePath } from '../native-chat/session-file-resolver'
 import { StructuredTuiAdoptionInflight } from './structured-tui-adoption-inflight'
 import { releaseStructuredTuiAdoptionReservation } from './structured-tui-adoption-reservation-release'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
@@ -10707,20 +10710,23 @@ export class OrcaRuntimeService {
           })
         }
         const head = record.providerHandleChain.at(-1)
-        if (head?.handle.provider !== 'codex') {
+        if (!head || (head.handle.provider !== 'codex' && head.handle.provider !== 'claude')) {
           throw new Error('agent_session_identity_required')
         }
+        const provider = head.handle.provider
+        const providerSessionId =
+          provider === 'claude' ? head.handle.sessionId : head.handle.threadId
         const launched = await this.ensureAgentSession(
           {
             kind: 'explicit',
             worktree: `id:${record.location.workspaceId}`,
-            agent: 'codex',
-            providerSession: { key: 'session_id', id: head.handle.threadId },
+            agent: provider,
+            providerSession: { key: 'session_id', id: providerSessionId },
             ...(record.options ? { launchPreferences: record.options } : {}),
             presentation: 'background'
           },
           {},
-          { spawnToken, codexHome: record.accountHome.path, sessionId: record.sessionId }
+          { spawnToken, providerRoot: record.accountHome.path, sessionId: record.sessionId }
         )
         const terminal = launched.terminal
         try {
@@ -10738,28 +10744,45 @@ export class OrcaRuntimeService {
               hostId: record.location.executionHostId,
               rootPid: terminal.processId,
               spawnToken,
-              agent: 'codex'
+              agent: provider
             }),
-            link: codexProviderHandleLink({
-              threadId: head.handle.threadId,
-              resumed: true,
-              fence,
-              observedAt: Date.now()
-            })
+            link:
+              provider === 'codex'
+                ? codexProviderHandleLink({
+                    threadId: head.handle.threadId,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
+                : claudeProviderHandleLink({
+                    sessionId: head.handle.sessionId,
+                    leafUuid: head.handle.leafUuid,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
           })
           await onSpawned?.(spawnedOwner)
           await this.waitForTerminal(terminal.handle, {
             condition: 'tui-idle',
             timeoutMs: 30_000
           })
-          const proof = await this.waitForStructuredTuiProof({
-            handle: terminal.handle,
-            paneKey: terminal.paneKey,
-            threadId: head.handle.threadId,
-            spawnToken,
-            codexHome: record.accountHome.path,
-            sessionId: record.sessionId
-          })
+          const proof =
+            provider === 'codex'
+              ? await this.waitForStructuredTuiProof({
+                  handle: terminal.handle,
+                  paneKey: terminal.paneKey,
+                  threadId: head.handle.threadId,
+                  spawnToken,
+                  codexHome: record.accountHome.path,
+                  sessionId: record.sessionId
+                })
+              : await this.waitForStructuredClaudeTuiProof({
+                  handle: terminal.handle,
+                  paneKey: terminal.paneKey,
+                  sessionId: head.handle.sessionId,
+                  projectsDir: join(record.accountHome.path, 'projects')
+                })
           const revealed = await this.focusTerminal(terminal.handle)
           return this.refreshStructuredTuiOwnerBinding({
             ...spawnedOwner,
@@ -10807,15 +10830,16 @@ export class OrcaRuntimeService {
         }
         const proof = await probeAgentSessionProcessIdentity({ identity: current.process })
         if (proof.outcome !== 'identity-matched' || proof.matchedOn.length === 0) {
-          throw new Error('The owning Codex child process could not be re-proved.')
+          throw new Error(
+            `The owning ${current.link.handle.provider} child process could not be re-proved.`
+          )
         }
         const head = record.providerHandleChain.at(-1)
         if (
-          head?.handle.provider !== 'codex' ||
+          !head ||
           (record.lease.provenHandleLinkId !== null &&
             current.link.linkId !== record.lease.provenHandleLinkId) ||
-          current.link.handle.provider !== 'codex' ||
-          current.link.handle.threadId !== head.handle.threadId
+          !agentSessionProviderHandlesEqual(current.link.handle, head.handle)
         ) {
           throw new Error('agent_session_identity_required')
         }
@@ -10824,14 +10848,21 @@ export class OrcaRuntimeService {
       recoverTuiOwner: async (record) => {
         const identity = record.lease.ownerProcess
         const head = record.providerHandleChain.at(-1)
-        if (!identity || head?.handle.provider !== 'codex') {
+        if (
+          !identity ||
+          !head ||
+          (head.handle.provider !== 'codex' && head.handle.provider !== 'claude')
+        ) {
           throw new Error('agent_session_identity_required')
         }
+        const provider = head.handle.provider
+        const providerSessionId =
+          provider === 'claude' ? head.handle.sessionId : head.handle.threadId
         let candidate = [...this.ptysById.values()].find(
           (pty) =>
             pty.connected &&
             pty.launchToken === identity.spawnToken &&
-            pty.launchAgent === 'codex' &&
+            pty.launchAgent === provider &&
             pty.tabId &&
             pty.paneKey
         )
@@ -10841,7 +10872,7 @@ export class OrcaRuntimeService {
           const workspace = await this.resolveTerminalWorkspaceLaunchScope(
             `id:${record.location.workspaceId}`
           )
-          const baseNamespace = this.getAgentSessionExecutionNamespace(workspace, 'codex')
+          const baseNamespace = this.getAgentSessionExecutionNamespace(workspace, provider)
           if (
             !baseNamespace ||
             !runtimeWorktreeIdsEqual(workspace.id, record.location.workspaceId)
@@ -10850,9 +10881,9 @@ export class OrcaRuntimeService {
           }
           const claim = this.agentSessionClaimSigner.createClaim({
             namespace: { ...baseNamespace, providerRoot: record.accountHome.path },
-            identity: canonicalizeAgentSessionIdentity('codex', {
+            identity: canonicalizeAgentSessionIdentity(provider, {
               key: 'session_id',
-              id: head.handle.threadId
+              id: providerSessionId
             }),
             canonicalWorktreeId: workspace.id
           })
@@ -10925,7 +10956,7 @@ export class OrcaRuntimeService {
           }
           if (
             !recovered ||
-            !(await this.proveRecoveredStructuredTuiPtyProcess(recovered.pty, identity))
+            !(await this.proveRecoveredStructuredTuiPtyProcess(recovered.pty, identity, provider))
           ) {
             throw new Error('The owning agent terminal could not be recovered.')
           }
@@ -10949,22 +10980,30 @@ export class OrcaRuntimeService {
           throw new Error('The owning agent terminal could not be recovered.')
         }
         agentSessionPtyWriteGate.bindPty(candidate.ptyId, record.sessionId)
-        const proof = durableOwner
-          ? await this.resolveRecoveredStructuredTuiTranscript({
-              handle,
-              paneKey: candidate.paneKey,
-              threadId: head.handle.threadId,
-              codexHome: record.accountHome.path,
-              durableOwner
-            })
-          : await this.waitForStructuredTuiProof({
-              handle,
-              paneKey: candidate.paneKey,
-              threadId: head.handle.threadId,
-              spawnToken: identity.spawnToken,
-              codexHome: record.accountHome.path,
-              sessionId: record.sessionId
-            })
+        const proof =
+          provider === 'codex'
+            ? durableOwner
+              ? await this.resolveRecoveredStructuredTuiTranscript({
+                  handle,
+                  paneKey: candidate.paneKey,
+                  threadId: head.handle.threadId,
+                  codexHome: record.accountHome.path,
+                  durableOwner
+                })
+              : await this.waitForStructuredTuiProof({
+                  handle,
+                  paneKey: candidate.paneKey,
+                  threadId: head.handle.threadId,
+                  spawnToken: identity.spawnToken,
+                  codexHome: record.accountHome.path,
+                  sessionId: record.sessionId
+                })
+            : await this.waitForStructuredClaudeTuiProof({
+                handle,
+                paneKey: candidate.paneKey,
+                sessionId: head.handle.sessionId,
+                projectsDir: join(record.accountHome.path, 'projects')
+              })
         return {
           terminal: {
             handle,
@@ -10973,12 +11012,21 @@ export class OrcaRuntimeService {
             ptyId: candidate.ptyId
           },
           process: identity,
-          link: codexProviderHandleLink({
-            threadId: head.handle.threadId,
-            resumed: true,
-            fence: record.lease.runtimeFence,
-            observedAt: Date.now()
-          }),
+          link:
+            provider === 'codex'
+              ? codexProviderHandleLink({
+                  threadId: head.handle.threadId,
+                  resumed: true,
+                  fence: record.lease.runtimeFence,
+                  observedAt: Date.now()
+                })
+              : claudeProviderHandleLink({
+                  sessionId: head.handle.sessionId,
+                  leafUuid: head.handle.leafUuid,
+                  resumed: true,
+                  fence: record.lease.runtimeFence,
+                  observedAt: Date.now()
+                }),
           transcriptPath: proof.transcriptPath
         }
       },
@@ -10999,14 +11047,14 @@ export class OrcaRuntimeService {
       stopRecoveredOwner: (record) => this.stopStructuredSessionProcess(record),
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
-      revealNativeSession: ({ workspaceId, sessionId, adoptedTerminal }) => {
+      revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
         if (adoptedTerminal) {
           return
         }
         this.publishStructuredAgentSessionTab({
           workspaceId,
           sessionId,
-          agent: 'codex',
+          agent,
           activate: false
         })
         this.notifier?.focusEditorTab?.(structuredAgentSessionTabId(sessionId), workspaceId)
@@ -11017,7 +11065,8 @@ export class OrcaRuntimeService {
 
   private async proveRecoveredStructuredTuiPtyProcess(
     pty: RuntimePtyWorktreeRecord,
-    identity: NonNullable<AgentSessionRecord['lease']['ownerProcess']>
+    identity: NonNullable<AgentSessionRecord['lease']['ownerProcess']>,
+    provider: 'codex' | 'claude' = 'codex'
   ): Promise<boolean> {
     const listings = await this.ptyController?.listProcesses?.(pty.connectionId)
     const listed = listings?.find(
@@ -11040,7 +11089,7 @@ export class OrcaRuntimeService {
         hostId: identity.hostId,
         rootPid: listed.rootProcessId,
         spawnToken: identity.spawnToken,
-        agent: 'codex'
+        agent: provider
       })
       const matched = {
         hostId: observed.hostId === identity.hostId,
@@ -11076,7 +11125,7 @@ export class OrcaRuntimeService {
         ptyId: pty.ptyId,
         incarnationId: pty.incarnationId,
         rootProcessId: listed.rootProcessId,
-        mismatchedFields: ['codex-child-proof'],
+        mismatchedFields: [`${provider}-child-proof`],
         error: error instanceof Error ? error.message : String(error)
       })
       return false
@@ -11438,6 +11487,29 @@ export class OrcaRuntimeService {
         )
       }
     })
+  }
+
+  private async waitForStructuredClaudeTuiProof(input: {
+    handle: string
+    paneKey: string
+    sessionId: string
+    projectsDir: string
+  }): Promise<{ transcriptPath?: string }> {
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      const pty = this.getLivePtyForHandle(input.handle)?.pty
+      if (!pty?.connected || pty.paneKey !== input.paneKey || pty.launchAgent !== 'claude') {
+        throw new Error('The resumed Claude terminal lost its launch identity.')
+      }
+      const transcriptPath = await resolveSessionFilePath('claude', input.sessionId, {
+        claudeProjectsDir: input.projectsDir
+      })
+      if (transcriptPath) {
+        return { transcriptPath }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    throw new Error('The agent terminal did not prove the expected Claude session.')
   }
 
   private async resolveRecoveredStructuredTuiTranscript(input: {
@@ -29288,7 +29360,7 @@ export class OrcaRuntimeService {
   async ensureAgentSession(
     request: RuntimeEnsureAgentSessionRequest,
     _caller: RuntimeAgentSessionRpcCaller = {},
-    handoffAuthority?: { spawnToken: string; codexHome: string; sessionId: string }
+    handoffAuthority?: { spawnToken: string; providerRoot: string; sessionId: string }
   ): Promise<RuntimeEnsureAgentSessionResult> {
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
@@ -29301,7 +29373,7 @@ export class OrcaRuntimeService {
     const resolvedNamespace = this.getAgentSessionExecutionNamespace(workspace, request.agent)
     const namespace =
       resolvedNamespace && handoffAuthority
-        ? { ...resolvedNamespace, providerRoot: handoffAuthority.codexHome }
+        ? { ...resolvedNamespace, providerRoot: handoffAuthority.providerRoot }
         : resolvedNamespace
     if (
       !namespace ||
@@ -29338,7 +29410,11 @@ export class OrcaRuntimeService {
           : resolveTuiAgentLaunchArgs(request.agent, settings.agentDefaultArgs),
       agentEnv: {
         ...resolveTuiAgentLaunchEnv(request.agent, settings.agentDefaultEnv),
-        ...(handoffAuthority ? { CODEX_HOME: handoffAuthority.codexHome } : {})
+        ...(handoffAuthority && request.agent === 'codex'
+          ? { CODEX_HOME: handoffAuthority.providerRoot }
+          : handoffAuthority && request.agent === 'claude'
+            ? { CLAUDE_CONFIG_DIR: handoffAuthority.providerRoot }
+            : {})
       },
       ompResumeFilePath: request.ompResumeFilePath,
       sessionOptions: this.toAgentSessionOptions(request.launchPreferences),

@@ -119,6 +119,7 @@ export async function handoffStructuredSessionToNative(
   deps.transport?.revealNativeSession?.({
     workspaceId: record.location.workspaceId,
     sessionId,
+    agent: record.provider,
     ...(owner?.adoptedTerminal ? { adoptedTerminal: true } : {})
   })
   context.setStatus(sessionId, {

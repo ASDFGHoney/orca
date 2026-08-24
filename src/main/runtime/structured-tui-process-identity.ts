@@ -4,6 +4,7 @@ import {
   type ProcessTableRow
 } from '../../shared/process-table-snapshot'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
+import type { AgentSessionHandleProvider } from '../../shared/agent-session-provider-handle'
 import { queryWindowsProcessRowsFresh } from '../providers/windows-foreground-process-rows'
 import { readProcessStartTimeMs } from './agent-session-process-identity-probe'
 
@@ -40,7 +41,7 @@ function descendants(rows: ProcessRow[], rootPid: number): (ProcessRow & { depth
 export function resolveStructuredTuiChildPid(
   rows: ProcessRow[],
   rootPid: number,
-  agent: 'codex'
+  agent: AgentSessionHandleProvider
 ): number | null {
   const candidates = descendants(rows, rootPid).filter(
     (row) => recognizeAgentProcessFromCommandLine(row.command)?.agent === agent
@@ -67,7 +68,7 @@ export async function readStructuredTuiProcessIdentity(input: {
   hostId: string
   rootPid: number
   spawnToken: string
-  agent: 'codex'
+  agent: AgentSessionHandleProvider
   platform?: NodeJS.Platform
   readPosixRows?: () => Promise<ProcessTableRow[]>
   readWindowsRows?: typeof queryWindowsProcessRowsFresh
@@ -106,7 +107,8 @@ export async function readStructuredTuiProcessIdentity(input: {
     }
     const remainingMs = deadline - now()
     if (remainingMs <= 0) {
-      throw new Error('The resumed terminal did not expose one exact Codex child process.')
+      const label = input.agent === 'codex' ? 'Codex' : 'Claude'
+      throw new Error(`The resumed terminal did not expose one exact ${label} child process.`)
     }
     await sleep(Math.min(input.pollIntervalMs ?? STRUCTURED_TUI_PROCESS_POLL_MS, remainingMs))
   }

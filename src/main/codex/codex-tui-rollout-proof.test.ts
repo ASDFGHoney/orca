@@ -55,6 +55,17 @@ describe('Codex TUI rollout proof', () => {
     expect(readSessionMetaId).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts Codex rollout ids with a distinct rollout suffix', async () => {
+    const files = async function* (): AsyncGenerator<string> {
+      yield `/pinned/sessions/2026/08/11/rollout-now-${THREAD}_019fd900-77aa-7c19-8bd0-2b3c4d5e6f71.jsonl`
+    }
+    const readSessionMetaId = vi.fn(async () => THREAD)
+
+    await expect(
+      resolvePinnedCodexRolloutProof('/pinned', THREAD, { listFiles: files, readSessionMetaId })
+    ).resolves.toContain(`rollout-now-${THREAD}_`)
+  })
+
   it('skips a rollout file that vanishes mid-scan instead of aborting the proof', async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-rollout-proof-'))
     try {

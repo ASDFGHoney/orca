@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
+import { agentSessionProviderHandlesEqual } from '../../../shared/agent-session-provider-handle'
 import type {
   AgentSessionAttachResult,
   AgentSessionMutationResult
@@ -128,9 +129,9 @@ function assertMatchingTuiOwner(
     record.lease.runtimeKind !== 'tui' ||
     record.lease.claimStatus !== 'live' ||
     !isDeepStrictEqual(record.lease.ownerProcess, owner.process) ||
-    head?.provider !== 'codex' ||
-    adopted.provider !== 'codex' ||
-    head.threadId !== adopted.threadId
+    !head ||
+    head.provider !== adopted.provider ||
+    !agentSessionProviderHandlesEqual(head, adopted)
   ) {
     throw new Error('agent_session_conflict')
   }

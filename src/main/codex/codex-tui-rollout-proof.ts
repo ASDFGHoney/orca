@@ -12,6 +12,7 @@ const STATUS_SESSION_RE = new RegExp(
 const ROLLOUT_READ_LIMIT = 64 * 1024
 const STATUS_COMMAND_PASTE = '\u001b[200~/status\u001b[201~'
 const KITTY_ENTER = '\u001b[13u'
+const TAB = '\t'
 
 export type CodexTuiProofOutput = {
   text: string
@@ -55,14 +56,22 @@ export async function resolvePinnedCodexRolloutProof(
     options.listFiles ??
     ((root: string) => listCodexSessionJsonlFilesIncrementally(root, { batchSize: 64, yieldMs: 0 }))
   const readSessionMetaId = options.readSessionMetaId ?? readCodexRolloutSessionMetaId
-  const expectedSuffix = `-${threadId}.jsonl`.toLowerCase()
+  const expectedThreadSegment = `-${threadId.toLowerCase()}`
 
   for await (const filePath of listFiles(sessionsRoot)) {
     const relativePath = relativePathInsideRoot(sessionsRoot, filePath)?.replace(/\\/g, '/')
     if (
       !relativePath ||
       !/^\d{4}\/\d{2}\/\d{2}\/rollout-[^/]+\.jsonl$/.test(relativePath) ||
-      !relativePath.toLowerCase().endsWith(expectedSuffix)
+      !(() => {
+        const lower = relativePath.toLowerCase()
+        const marker = lower.lastIndexOf(expectedThreadSegment)
+        if (marker === -1) {
+          return false
+        }
+        const after = lower.slice(marker + expectedThreadSegment.length)
+        return after === '.jsonl' || (after.startsWith('_') && after.endsWith('.jsonl'))
+      })()
     ) {
       continue
     }
@@ -84,7 +93,17 @@ export async function proveCodexTuiRollout(input: {
   delay?: (ms: number) => Promise<void>
 }): Promise<{ transcriptPath: string }> {
   const resolveRollout = input.resolveRollout ?? resolvePinnedCodexRolloutProof
-  const transcriptPath = await resolveRollout(input.codexHome, input.threadId)
+  const delay = input.delay ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+  const proofDeadline = Date.now() + (input.timeoutMs ?? 15_000)
+  let transcriptPath: string | null = null
+  // Codex can rotate or finish flushing the rollout while the resumed TUI is
+  // starting. Keep the proof retryable inside the same bounded deadline.
+  while (!transcriptPath && Date.now() < proofDeadline) {
+    transcriptPath = await resolveRollout(input.codexHome, input.threadId)
+    if (!transcriptPath) {
+      await delay(Math.min(100, Math.max(1, proofDeadline - Date.now())))
+    }
+  }
   if (!transcriptPath) {
     throw new Error('The agent terminal did not prove the expected Codex rollout.')
   }
@@ -94,13 +113,12 @@ export async function proveCodexTuiRollout(input: {
   if (!input.write(probe.command)) {
     throw new Error('The agent terminal could not verify its Codex session.')
   }
-  const delay = input.delay ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   await delay(100)
   if (!input.write(probe.submit)) {
     throw new Error('The agent terminal could not verify its Codex session.')
   }
 
-  const deadline = Date.now() + (input.timeoutMs ?? 15_000)
+  const deadline = proofDeadline
   const retrySubmitAt = Date.now() + 750
   let retriedSubmit = false
   while (Date.now() < deadline) {
@@ -112,6 +130,13 @@ export async function proveCodexTuiRollout(input: {
       !parseCodexTuiStatusSessionId(output.text)
     ) {
       retriedSubmit = true
+      // Newer Codex builds keep the slash-command popup open after a bracketed
+      // paste. Tab commits the highlighted command as text; the following Enter
+      // then dispatches it instead of merely selecting the popup row.
+      if (!input.write(TAB)) {
+        throw new Error('The agent terminal could not finish Codex session verification.')
+      }
+      await delay(100)
       if (!input.write(probe.submit)) {
         throw new Error('The agent terminal could not finish Codex session verification.')
       }
