@@ -170,6 +170,45 @@ describe('manual sleep stale session recovery', () => {
     expect(mockApi.pty.kill).toHaveBeenCalledWith('pty-shell', { keepHistory: true })
   })
 
+  it('rejects preflight when a renderer PTY has an unrecordable live Claude pane', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const store = createTestStore()
+    seedTabs(store)
+    store.setState({
+      ptyIdsByTabId: { 'tab-1': ['pty-claude'] },
+      agentStatusByPaneKey: {
+        'tab-1:leaf-1': makeAgentEntry({ providerSession: undefined })
+      }
+    } as Partial<AppState>)
+
+    expect(() => store.getState().preflightManualWorktreeSleep('wt-1')).toThrow(
+      'agent_sleep_capture_missing'
+    )
+
+    expect(mockApi.pty.kill).not.toHaveBeenCalled()
+    expect(store.getState().sleepingAgentSessionsByPaneKey).toEqual({})
+  })
+
+  it('allows preflight without renderer PTYs even when a stale row cannot be recorded', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const store = createTestStore()
+    seedTabs(store)
+    store.setState({
+      ptyIdsByTabId: { 'tab-1': [] },
+      agentStatusByPaneKey: {
+        'tab-1:leaf-1': makeAgentEntry({
+          updatedAt: STALE_AT,
+          providerSession: undefined
+        })
+      }
+    } as Partial<AppState>)
+
+    expect(() => store.getState().preflightManualWorktreeSleep('wt-1')).not.toThrow()
+    expect(store.getState().sleepingAgentSessionsByPaneKey).toEqual({})
+  })
+
   // Why: killing a still-running resumable agent without a recovery record is the
   // destructive gap. Sleep must keep the PTY and surface the miss (STA-2844).
   it('aborts sleep instead of killing a live Claude pane it cannot record', async () => {

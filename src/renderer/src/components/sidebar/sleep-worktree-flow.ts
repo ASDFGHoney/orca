@@ -143,12 +143,31 @@ export async function runSleepWorktrees(worktreeIds: readonly string[]): Promise
   }
   const {
     activeWorktreeId,
+    preflightManualWorktreeSleep,
     setActiveWorktree,
     shutdownWorktreeBrowsers,
     shutdownWorktreeTerminals
   } = useAppStore.getState()
+  const errors: string[] = []
+  const failedWorktreeIds = new Set<string>()
+  for (const worktreeId of worktreeIds) {
+    try {
+      preflightManualWorktreeSleep(worktreeId)
+    } catch (err) {
+      console.error('[sleep-worktree] session capture preflight failed', {
+        worktreeId,
+        error: err
+      })
+      failedWorktreeIds.add(worktreeId)
+      errors.push(describeSleepFailure(err))
+    }
+  }
   let activeSleepIntentWorktreeId: string | null = null
-  if (activeWorktreeId && worktreeIds.includes(activeWorktreeId)) {
+  if (
+    activeWorktreeId &&
+    worktreeIds.includes(activeWorktreeId) &&
+    !failedWorktreeIds.has(activeWorktreeId)
+  ) {
     const restoreSidebarPosition = preserveSidebarWorktreePosition(activeWorktreeId)
     // Why: clearing the active workspace can unmount TerminalPanes before
     // shutdownWorktreeTerminals writes PTY suppressions. Use a non-rendering
@@ -159,10 +178,11 @@ export async function runSleepWorktrees(worktreeIds: readonly string[]): Promise
     setActiveWorktree(null)
     restoreSidebarPosition()
   }
-  const errors: string[] = []
-  const failedWorktreeIds = new Set<string>()
   try {
     for (const worktreeId of worktreeIds) {
+      if (failedWorktreeIds.has(worktreeId)) {
+        continue
+      }
       try {
         // Why: sleep mirrors removeWorktree's shutdown sequence — browsers first
         // so destroyPersistentWebview unregisters the Chromium guests before any
