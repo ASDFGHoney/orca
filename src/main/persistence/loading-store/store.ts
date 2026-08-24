@@ -2617,6 +2617,7 @@ export class Store {
     return {
       state: this.state,
       flush: () => this.flush(),
+      scheduleSave: () => this.scheduleSave(),
       recordCreated: () => this.recordFeatureInteraction('automation-created')
     }
   }
@@ -2625,6 +2626,7 @@ export class Store {
     return {
       state: this.state,
       flush: () => this.flush(),
+      scheduleSave: () => this.scheduleSave(),
       recordManualRun: () => this.recordFeatureInteraction('automation-run'),
       getWorkspaceDisplayName: (workspaceId) =>
         this.getAutomationRunWorkspaceDisplayName(workspaceId)
