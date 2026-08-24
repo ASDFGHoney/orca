@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY } from '../../../src/shared/protocol-version'
 import type { RpcClient } from '../transport/rpc-client'
 import { startRuntimeCapabilityProbe } from '../transport/runtime-capability-probe'
@@ -23,11 +23,14 @@ export function useMobileWebPackageCapability(args: {
 }): MobileWebPackageCapabilityStatus {
   const { client, hostId, state } = args
   const [resolved, setResolved] = useState<ResolvedPackageCapability | null>(null)
-  const [unverified, setUnverified] = useState(true)
+  const verifiedConnectionRef = useRef<ResolvedPackageCapability | null>(null)
+
+  if (state !== 'connected' || !client || !hostId) {
+    verifiedConnectionRef.current = null
+  }
 
   useEffect(() => {
     if (state !== 'connected' || !client || !hostId) {
-      setUnverified(true)
       return
     }
     const requestClient = client
@@ -38,7 +41,11 @@ export function useMobileWebPackageCapability(args: {
         hostId: requestHostId,
         supported: capabilities.includes(MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY)
       })
-      setUnverified(false)
+      verifiedConnectionRef.current = {
+        client: requestClient,
+        hostId: requestHostId,
+        supported: capabilities.includes(MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY)
+      }
     })
   }, [client, hostId, state])
 
@@ -48,7 +55,8 @@ export function useMobileWebPackageCapability(args: {
   if (
     !client ||
     !hostId ||
-    unverified ||
+    verifiedConnectionRef.current?.client !== client ||
+    verifiedConnectionRef.current.hostId !== hostId ||
     resolved?.client !== client ||
     resolved.hostId !== hostId
   ) {

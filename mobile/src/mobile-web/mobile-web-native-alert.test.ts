@@ -1,4 +1,4 @@
-import type { AlertButton, AlertOptions } from 'react-native'
+import { Alert, type AlertButton } from 'react-native'
 import { describe, expect, it, vi } from 'vitest'
 import {
   MobileWebNativeAlertLifecycle,
@@ -10,7 +10,7 @@ vi.mock('react-native', () => ({ Alert: { alert: vi.fn() } }))
 describe('mobile web native alert', () => {
   it('preserves native button/options presentation and correlates the selected index', async () => {
     let buttons: AlertButton[] = []
-    let options: AlertOptions | undefined
+    let options: Parameters<typeof Alert.alert>[3]
     const target = {
       alert: vi.fn((_title, _message, nextButtons, nextOptions) => {
         buttons = nextButtons ?? []
@@ -42,7 +42,7 @@ describe('mobile web native alert', () => {
   })
 
   it('reports an outside/back dismissal when the native platform allows it', async () => {
-    let options: AlertOptions | undefined
+    let options: Parameters<typeof Alert.alert>[3]
     const target = {
       alert: vi.fn((_title, _message, _buttons, nextOptions) => {
         options = nextOptions
@@ -63,7 +63,7 @@ describe('mobile web native alert', () => {
 
   it('serializes native alerts across broker lifecycles', async () => {
     let buttons: AlertButton[] = []
-    let options: AlertOptions | undefined
+    let options: Parameters<typeof Alert.alert>[3]
     const target = {
       alert: vi.fn((_title, _message, nextButtons, nextOptions) => {
         buttons = nextButtons ?? []

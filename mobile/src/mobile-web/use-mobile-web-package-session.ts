@@ -56,6 +56,12 @@ export function useMobileWebPackageSession({
     packageCapability === 'offline' ||
     packageCapability === 'supported' ||
     (packageCapability === 'pending' && ownedSessionRef.current !== null)
+  const effectivePackageLoading = packageCapability === 'update-required' ? false : packageLoading
+  const effectivePackageWarning =
+    packageWarning ??
+    (packageCapability === 'update-required'
+      ? MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING
+      : undefined)
 
   const publishSession = useCallback(
     async (
@@ -167,10 +173,8 @@ export function useMobileWebPackageSession({
     if (!host || packageAccessAllowed) {
       return
     }
-    setPackageLoading(packageCapability === 'pending')
     if (packageCapability === 'update-required') {
       mobileWebDiagnosticsStore.warning(host.id, 'host_update_required')
-      setPackageWarning(MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING)
     }
   }, [host?.id, packageAccessAllowed, packageCapability])
 
@@ -290,8 +294,8 @@ export function useMobileWebPackageSession({
   return {
     session,
     viewEpoch,
-    packageLoading,
-    packageWarning,
+    packageLoading: effectivePackageLoading,
+    packageWarning: effectivePackageWarning,
     markHealthy,
     handleHealthTimeout,
     handleProcessTerminated,
