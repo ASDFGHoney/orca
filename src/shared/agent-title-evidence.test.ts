@@ -132,7 +132,10 @@ describe('collectAgentTitleEvidence', () => {
     it.each([
       '◐ DaemonConnectionLostError with 70 Codex agents',
       'Fix the grok hook',
-      'Debug the cursor sidecar'
+      'Debug the cursor sidecar',
+      'grok',
+      '⠋ grok',
+      '⠋ codex'
     ])('declines %j', (title) => {
       expect(agentFor(title)).toBeNull()
       expect(reasonFor(title)).toBe('free-text-only')
@@ -174,7 +177,7 @@ describe('collectAgentTitleEvidence', () => {
   })
 
   it('does not duplicate an anchored token as free text', () => {
-    expect(collectAgentTitleEvidence('Codex').freeTextNames).toEqual([])
+    expect(collectAgentTitleEvidence('codex.exe').freeTextNames).toEqual([])
     expect(collectAgentTitleEvidence('Claude Agent Teams').freeTextNames).toEqual([])
   })
 

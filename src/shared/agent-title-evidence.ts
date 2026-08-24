@@ -165,6 +165,22 @@ function agentForBareName(text: string): TuiAgent | null {
   return names.length === 1 && /^[\p{L}\p{N}]+$/u.test(bareToken) ? names[0] : null
 }
 
+function agentForWholeTitle(text: string): TuiAgent | null {
+  const trimmed = text.trim()
+  if (!trimmed || /[\\/]/.test(trimmed)) {
+    return null
+  }
+  const stripped = stripBareNameDecoration(trimmed)
+  const label = DISPLAY_LABELS.find(([text]) => text === stripped.toLowerCase())
+  if (label) {
+    return label[1]
+  }
+  if (!WINDOWS_LAUNCHER_SUFFIX_RE.test(stripped)) {
+    return null
+  }
+  return agentForBareName(stripped)
+}
+
 function agentForOwnerSuffix(text: string): TuiAgent | null {
   const normalized = text.toLowerCase()
   return ALL_TUI_AGENTS.find((agent) => agent === normalized) ?? agentForBareName(text)
@@ -178,11 +194,13 @@ function agentForSyntheticTitle(text: string): TuiAgent | null {
   const normalized = trimmed.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase()
   for (const agent of SYNTHETIC_AGENT_TITLE_AGENTS) {
     const profile = SYNTHETIC_AGENT_TITLE_PROFILES[agent]
+    const emittedLabels = [profile.permissionLabel, profile.idleLabel]
+    if (profile.synthesizeWorkingTitle !== false) {
+      emittedLabels.push(profile.workingLabel)
+    }
     if (
       profile.synthesizeTerminalTitle !== false &&
-      [profile.workingLabel, profile.permissionLabel, profile.idleLabel].some(
-        (label) => normalized === label.toLowerCase()
-      )
+      emittedLabels.some((label) => normalized === label.toLowerCase())
     ) {
       return agent
     }
@@ -254,9 +272,15 @@ function collectAnchoredNames(segments: readonly string[]): TuiAgent[] {
     const withoutSigil = segment.startsWith(`${CLAUDE_IDLE} `)
       ? segment.slice(CLAUDE_IDLE.length)
       : segment
-    const bare = agentForBareName(withoutSigil)
+    const bare = agentForWholeTitle(withoutSigil)
     if (bare) {
       anchored.add(bare)
+    }
+    if (segment.startsWith(`${CLAUDE_IDLE} `)) {
+      const sigilClaim = agentForBareName(withoutSigil)
+      if (sigilClaim) {
+        anchored.add(sigilClaim)
+      }
     }
     const synthetic = agentForSyntheticTitle(segment)
     if (synthetic) {
