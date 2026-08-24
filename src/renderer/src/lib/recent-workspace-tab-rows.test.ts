@@ -130,6 +130,22 @@ describe('orderRecentWorkspaceTabs', () => {
     ).toEqual(['warm', 'cold'])
   })
 
+  it('uses host-qualified recency for same-id worktree rows', () => {
+    const rows = [
+      row('local', { worktreeId: 'repo::/app', worktreeHostId: 'local' }),
+      row('ssh', { worktreeId: 'repo::/app', worktreeHostId: 'ssh:builder' })
+    ]
+
+    expect(
+      order(rows, sources([]), {
+        lastVisitedAtByWorktreeId: {
+          'local|repo::/app': NOW - 1_000,
+          'ssh:builder|repo::/app': NOW
+        }
+      })
+    ).toEqual(['ssh', 'local'])
+  })
+
   it('prefers any visited worktree over a never-visited one', () => {
     const rows = [row('never'), row('ancient')]
 

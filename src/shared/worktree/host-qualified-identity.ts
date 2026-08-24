@@ -1,4 +1,4 @@
-import type { ExecutionHostId } from '../execution-host'
+import { parseExecutionHostId, type ExecutionHostId } from '../execution-host'
 import type { Worktree } from './types'
 
 /**
@@ -48,4 +48,13 @@ export function composeWorktreeHostIdentity(
  */
 export function getWorktreeIdFromHostIdentity(identity: string): string {
   return identity.slice(identity.indexOf(HOST_SEPARATOR) + 1)
+}
+
+/** True only for the canonical host-qualified form, not a legacy id containing `|`. */
+export function isWorktreeHostIdentity(identity: string): boolean {
+  const separator = identity.indexOf(HOST_SEPARATOR)
+  return (
+    separator === 0 ||
+    (separator > 0 && parseExecutionHostId(identity.slice(0, separator)) !== null)
+  )
 }

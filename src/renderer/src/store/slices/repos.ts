@@ -50,6 +50,7 @@ import { applyManualRepoOrder, getManualRepoOrder } from '../../../../shared/man
 import { getProjectGroupSubtreeIds } from '../../../../shared/project-groups'
 import { isPathInsideOrEqual } from '../../../../shared/cross-platform-path'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
+import { getWorktreeIdFromVisitKey, getWorktreeVisitKey } from '@/lib/worktree-visit-recency'
 import { structuralValuesEqual } from '../../../../shared/structural-value-equality'
 import { selectProjectGroupRemovalTargets } from './project-group-removal-targets'
 import {
@@ -3756,6 +3757,9 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         }
         // Why: editor state is worktree-scoped; clear the repo's open files + active-file tracking so orphans don't linger in the session save.
         const worktreeIdSet = new Set(worktreeIds)
+        const removedVisitKeys = new Set(
+          worktreeIds.map((worktreeId) => getWorktreeVisitKey(worktreeId, ownerHostId))
+        )
         const nextOpenFiles = s.openFiles.filter((f) => !worktreeIdSet.has(f.worktreeId))
         const nextActiveFileIdByWorktree = { ...s.activeFileIdByWorktree }
         const nextActiveTabTypeByWorktree = { ...s.activeTabTypeByWorktree }
@@ -3771,9 +3775,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         const repoIdFullyRemoved = !nextRepos.some((r) => r.id === projectId)
         let nextLastVisitedAtByWorktreeId = s.lastVisitedAtByWorktreeId
         for (const id of Object.keys(s.lastVisitedAtByWorktreeId)) {
+          const rawId = getWorktreeIdFromVisitKey(id)
           if (
-            worktreeIdSet.has(id) ||
-            (repoIdFullyRemoved && getRepoIdFromWorktreeId(id) === projectId)
+            (ownerHostId && removedVisitKeys.has(id)) ||
+            (!ownerHostId && worktreeIdSet.has(rawId)) ||
+            (repoIdFullyRemoved && getRepoIdFromWorktreeId(rawId) === projectId)
           ) {
             if (nextLastVisitedAtByWorktreeId === s.lastVisitedAtByWorktreeId) {
               nextLastVisitedAtByWorktreeId = { ...s.lastVisitedAtByWorktreeId }

@@ -3,6 +3,10 @@ import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../shared/e
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import type { StoreOwnedPersistedState } from '../loading-store/store-owned-state'
 import { removeWorkspaceSessionOwners } from '../restoring-sessions/session-owner-removal'
+import {
+  getWorktreeIdFromHostIdentity,
+  isWorktreeHostIdentity
+} from '../../../shared/worktree/host-qualified-identity'
 
 export function pruneWorktreeStateForRepo(
   state: StoreOwnedPersistedState,
@@ -36,7 +40,12 @@ export function pruneWorktreeStateForRepo(
   const ownerKeysToPrune = new Set<string>()
   const collectPrefixedKeys = (keys: Iterable<string>): void => {
     for (const key of keys) {
-      if (key.startsWith(prefix)) {
+      const rawKey = isWorktreeHostIdentity(key) ? getWorktreeIdFromHostIdentity(key) : key
+      const keyHost = isWorktreeHostIdentity(key) ? key.slice(0, key.indexOf('|')) : null
+      const belongsToPrunedHost =
+        hostId === null ||
+        (keyHost === null ? hostId === LOCAL_EXECUTION_HOST_ID : keyHost === hostId)
+      if (belongsToPrunedHost && rawKey.startsWith(prefix)) {
         ownerKeysToPrune.add(key)
       }
     }
