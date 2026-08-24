@@ -2980,6 +2980,16 @@ function voidClaimsOfReplacedClaudeSession(
   ) {
     return
   }
+  // Compact/unknown SessionStart events are intentionally ignored by the status fold; do not let
+  // them advance the owner anchor or the next real lead event will miss the replacement.
+  if (
+    eventName === 'SessionStart' &&
+    hookPayload['source'] !== 'startup' &&
+    hookPayload['source'] !== 'resume' &&
+    hookPayload['source'] !== 'clear'
+  ) {
+    return
+  }
   const sessionId = readString(hookPayload, 'session_id')
   if (!sessionId) {
     return

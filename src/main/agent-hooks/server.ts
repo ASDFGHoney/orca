@@ -2608,7 +2608,8 @@ export class AgentHookServer {
     ) {
       return null
     }
-    return { ...entry, providerSessionOnly: true, retainedForLiveness: true }
+    const { launchToken: _launchToken, ...resumeIdentity } = entry
+    return { ...resumeIdentity, providerSessionOnly: true, retainedForLiveness: true }
   }
 
   /** Drop only the status row (user dismissal); do NOT wipe prompt/tool caches since the pane's agent may still be alive. Use clearPaneState for PTY-teardown. */

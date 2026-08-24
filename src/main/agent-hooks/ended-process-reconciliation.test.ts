@@ -43,6 +43,7 @@ function resumableClaudeRow(server: AgentHookServer): void {
       worktreeId: 'wt-1',
       source: 'claude',
       hookEventName: 'UserPromptSubmit',
+      launchToken: 'dead-launch-token',
       providerSession: { key: 'session_id', id: 'resume-me' },
       payload: { state: 'working', prompt: 'review the PR', agentType: 'claude' }
     },
@@ -132,8 +133,17 @@ describe('reconcileEndedProcessForPaneKeys', () => {
       const kept = server.getStatusSnapshotForPane(PANE)[0]
       expect(kept?.providerSessionOnly).toBe(true)
       expect(kept?.providerSession?.id).toBe('resume-me')
+      expect(kept?.launchToken).toBeUndefined()
       // The live claims still went: a latch left behind would re-gate the pane on its next event.
       expect(server._getStateForTests().claudeRunningNonAgentTaskPaneKeys.has(PANE)).toBe(false)
+
+      // The retained identity must not recreate dead launch authority after restart.
+      server.flushStatusPersistSync()
+      server.stop()
+      const restarted = await startServer()
+      expect(restarted.getStatusSnapshotForPane(PANE)[0]?.launchToken).toBeUndefined()
+      expect(restarted.getHydratedAuthorityCommitments()).toHaveLength(0)
+      restarted.stop()
     } finally {
       server.stop()
     }

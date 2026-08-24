@@ -175,6 +175,24 @@ describe('Claude session replacement voids the replaced session claims', () => {
     expect(state.claudeSessionOwnerByPaneKey.get(paneKey)).toBe(SESSION_A)
   })
 
+  it('does not anchor an ignored compact SessionStart', () => {
+    const state = createHookListenerState()
+    const paneKey = makePaneKey('compact-owner', LEAF_ID)
+
+    stop(state, paneKey, SESSION_A, { session_crons: [{ id: 'cron-1' }] })
+    expect(
+      claudeEvent(state, paneKey, {
+        hook_event_name: 'SessionStart',
+        session_id: SESSION_B,
+        source: 'compact'
+      })
+    ).toBeNull()
+
+    stop(state, paneKey, SESSION_B)
+
+    expect(state.claudeActiveSessionCronPaneKeys.has(paneKey)).toBe(false)
+  })
+
   it('leaves the lead-state record to the incoming fold rather than deleting it', () => {
     const state = createHookListenerState()
     const paneKey = makePaneKey('lead-untouched', LEAF_ID)
