@@ -1,4 +1,5 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
+import { getPtyIpc } from '../../pty-host-bindings'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import { createPtyWriteInput } from './write-input'
 
@@ -7,6 +8,7 @@ export function installPtyWriteIpcHandlers(deps: {
   runtime?: OrcaRuntimeService
   clearHiddenRendererResizeOutput: (id: string) => void
 }): void {
+  const ipcMain = getPtyIpc()
   const { mainWindow, runtime } = deps
   const {
     writePtyInput,

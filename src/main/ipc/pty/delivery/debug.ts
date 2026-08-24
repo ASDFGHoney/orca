@@ -1,4 +1,4 @@
-import { powerMonitor } from 'electron'
+import { getPtyPower } from '../../pty-host-bindings'
 import {
   type PtyMainDeliveryDiagnostics,
   EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS,
@@ -49,6 +49,7 @@ export function installPowerSignalBreadcrumbs(): void {
     return
   }
   powerSignalBreadcrumbsInstalled = true
+  const powerMonitor = getPtyPower()
   powerMonitor.on('suspend', () => {
     lastPowerSuspendAtMs = Date.now()
     mainDeliveryBreadcrumbs.record('power-suspend')

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { getPtyIpc } from '../../pty-host-bindings'
 import type { Store } from '../../../persistence'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import type { IPtyProvider } from '../../../providers/types'
@@ -40,6 +40,7 @@ export function installPtyInspectIpcHandlers(deps: {
   rememberSyntheticKillExit: (id: string) => void
   sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void
 }): void {
+  const ipcMain = getPtyIpc()
   const {
     store,
     runtime,

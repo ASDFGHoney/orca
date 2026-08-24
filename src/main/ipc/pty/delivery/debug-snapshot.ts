@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { getAppEnvironment } from '../../../../shared/app-environment'
 import {
   type PtyMainDeliveryDiagnostics,
   type PtyPerPtyDeliveryDiagnostics,
@@ -48,7 +48,7 @@ export function buildMainDeliveryDiagnostics(session: PtyIpcSession): PtyMainDel
   perPty.sort((a, b) => b.inFlightChars + b.pendingChars - (a.inFlightChars + a.pendingChars))
   const windowAlive = !session.mainWindow.isDestroyed()
   return {
-    appVersion: app.getVersion(),
+    appVersion: getAppEnvironment().getVersion(),
     mainUptimeMs: Math.round(process.uptime() * 1000),
     windowFocused: windowAlive ? session.mainWindow.isFocused() : null,
     windowVisible: windowAlive ? session.mainWindow.isVisible() : null,

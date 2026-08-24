@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { getAppEnvironment } from '../../../../shared/app-environment'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { isAgentStatusHooksEnabled } from '../../../agent-hooks/managed-agent-hook-controls'
@@ -55,9 +55,9 @@ export function configureLocalPtyProvider(args: {
       const skipCodexHomeEnv = ctx?.isWsl === true && !selectedCodexHomePath
       const ptySettings = getSettings?.()
       const env = buildPtyHostEnv(id, baseEnv, {
-        isPackaged: app.isPackaged,
+        isPackaged: getAppEnvironment().isPackaged(),
         resourcesPath: process.resourcesPath,
-        userDataPath: app.getPath('userData'),
+        userDataPath: getAppEnvironment().getPath('userData'),
         selectedCodexHomePath,
         skipCodexHomeEnv,
         stripInheritedOrcaCodexHome: shouldStripInheritedOrcaCodexHome({

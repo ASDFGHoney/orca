@@ -1,8 +1,9 @@
-import { ipcMain } from 'electron'
+import { getPtyIpc } from '../../pty-host-bindings'
 import { runPtyIpcSpawn } from './spawn-run'
 import type { PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
 
 export function installPtySpawnIpcHandler(deps: PtySpawnIpcDeps): void {
+  const ipcMain = getPtyIpc()
   const { getLocalPtyStartupPromise } = deps
 
   ipcMain.handle('pty:spawn', async (_event, args: PtySpawnIpcArgs) => {

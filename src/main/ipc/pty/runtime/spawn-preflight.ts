@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { getAppEnvironment } from '../../../../shared/app-environment'
 import type { PtySpawnResult } from '../../../providers/types'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
@@ -240,13 +240,13 @@ export async function prepareRuntimePtySpawn(
       settings: ptySettings
     })
   if (ctx.isDaemonHostSpawn && ctx.sessionId && !ctx.preAdoptedStablePane) {
-    if (!isSafePtySessionId(ctx.sessionId, app.getPath('userData'))) {
+    if (!isSafePtySessionId(ctx.sessionId, getAppEnvironment().getPath('userData'))) {
       throw new Error('Invalid PTY session id')
     }
     ctx.env = buildPtyHostEnv(ctx.sessionId, ctx.env ?? {}, {
-      isPackaged: app.isPackaged,
+      isPackaged: getAppEnvironment().isPackaged(),
       resourcesPath: process.resourcesPath,
-      userDataPath: app.getPath('userData'),
+      userDataPath: getAppEnvironment().getPath('userData'),
       selectedCodexHomePath: ctx.selectedCodexHomePath,
       skipCodexHomeEnv: ctx.skipCodexHomeEnv,
       stripInheritedOrcaCodexHome: ctx.stripInheritedOrcaCodexHome,

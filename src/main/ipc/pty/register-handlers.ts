@@ -1,4 +1,4 @@
-import { type BrowserWindow, ipcMain } from 'electron'
+import type { BrowserWindow } from 'electron'
 import type { OrcaRuntimeService } from '../../runtime/orca-runtime'
 import type { Store } from '../../persistence'
 import type { GlobalSettings } from '../../../shared/global-settings-types'
@@ -49,6 +49,7 @@ import { installSessionSshOutputIntake } from './delivery/ssh-intake'
 import { installPtySerializeBufferIpc } from './ipc/serialize-buffer'
 import { installPtyResizeVisibilityIpc } from './ipc/resize-visibility'
 import { adoptStablePane } from './pane/adopt-stable'
+import { getPtyIpc } from '../pty-host-bindings'
 import {
   noCodexResumeLaunch,
   prepareCodexResumeHome,
@@ -66,6 +67,7 @@ export function registerPtyHandlers(
   store?: Store,
   options?: PtyIpcSessionOptions
 ): void {
+  const ipcMain = getPtyIpc()
   // Why first: the outgoing session owns the producer pauses, so its real reset must run
   // before the bridge is neutralized or a PTY paused during re-registration stays paused.
   resetRendererDeliveryAccountingForLifecycleReset()

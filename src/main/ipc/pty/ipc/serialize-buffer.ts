@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { ipcMain } from 'electron'
+import { getPtyIpc } from '../../pty-host-bindings'
 import { parseTerminalKittyKeyboardFlags } from '../../../../shared/terminal-kitty-keyboard-flags'
 import { isMainWindowPtyIpcEvent } from './write-input'
 import type { PtyIpcSession, SerializeResult } from '../session'
@@ -19,6 +19,7 @@ export function settleSerializeRequest(
 }
 
 export function installPtySerializeBufferIpc(session: PtyIpcSession): void {
+  const ipcMain = getPtyIpc()
   // Why: one persistent listener with a request-ID dispatch table instead of one per call, so concurrent serialize requests don't trip Node's MaxListeners=10 warning.
   ipcMain.on(
     'pty:serializeBuffer:response',

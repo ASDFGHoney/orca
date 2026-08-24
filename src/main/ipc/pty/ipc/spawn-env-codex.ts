@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { getAppEnvironment } from '../../../../shared/app-environment'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { isAgentStatusHooksEnabled } from '../../../agent-hooks/managed-agent-hook-controls'
 import { isSafePtySessionId } from '../../../daemon/pty-session-id'
@@ -123,16 +123,16 @@ export async function assemblePtyIpcSpawnCodexEnv(ctx: PtyIpcSpawnState): Promis
     }
     const sessionIdForEnv = ctx.effectiveSessionId
     // Why: this id reaches filesystem paths; reject traversal/separators so a crafted IPC payload can't escape the expected roots.
-    if (!isSafePtySessionId(sessionIdForEnv, app.getPath('userData'))) {
+    if (!isSafePtySessionId(sessionIdForEnv, getAppEnvironment().getPath('userData'))) {
       throw new Error('Invalid PTY session id')
     }
     // Why: clone before mutating so injections don't leak back into args.env (renderer may reuse it).
     ctx.env = { ...ctx.baseEnv }
     try {
       buildPtyHostEnv(sessionIdForEnv, ctx.env, {
-        isPackaged: app.isPackaged,
+        isPackaged: getAppEnvironment().isPackaged(),
         resourcesPath: process.resourcesPath,
-        userDataPath: app.getPath('userData'),
+        userDataPath: getAppEnvironment().getPath('userData'),
         selectedCodexHomePath: ctx.selectedCodexHomePath,
         skipCodexHomeEnv: ctx.skipCodexHomeEnv,
         stripInheritedOrcaCodexHome: ctx.stripInheritedOrcaCodexHome,

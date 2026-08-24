@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { getPtyIpc } from '../../pty-host-bindings'
 import type {
   PtyDeliveryWriteOff,
   PtyRendererDeliveryHealthReply,
@@ -34,6 +34,7 @@ import { isMainWindowPtyIpcEvent } from './write-input'
 import type { PtyIpcSession } from '../session'
 
 export function installPtyResizeVisibilityIpc(session: PtyIpcSession): void {
+  const ipcMain = getPtyIpc()
   const { runtime, mainWindow } = session
 
   // Why: resize is fire-and-forget — ipcMain.on (not .handle) halves IPC traffic by skipping the empty acknowledgement reply.
