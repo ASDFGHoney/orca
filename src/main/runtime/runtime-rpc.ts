@@ -445,8 +445,18 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
 type LongPollClass = 'ask' | 'wait'
 
 // Why: single classifier for long-poll requests (handlers that block on an external event), shared by counter/abort/keepalive. See §3.1.
-function longPollClassOf(request: RpcRequest): LongPollClass | null {
+export function longPollClassOf(request: RpcRequest): LongPollClass | null {
   if (request.method === 'terminal.wait') {
+    return 'wait'
+  }
+  // Agent-prompt submission waits for the PTY's lifecycle transition (up to
+  // the verification budget); keep the local socket alive for that wait.
+  if (
+    request.method === 'terminal.send' &&
+    typeof request.params === 'object' &&
+    request.params !== null &&
+    (request.params as { agentPrompt?: unknown }).agentPrompt === true
+  ) {
     return 'wait'
   }
   // Why: orchestration.ask blocks unconditionally (default 600 s) holding the

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, test } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
+import { SWALLOWED_ENTER_FIXTURE_TIMEOUT_MS } from '../../src/shared/orchestration-timing-budgets'
 
 const execFileAsync = promisify(execFile)
 const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'orca-terminal-send-agent-prompt-'))
@@ -13,7 +14,7 @@ const fixtureReport = path.join(fixtureRoot, 'report.json')
 const fixtureMarker = `ORCA_TERMINAL_SEND_E2E_${process.pid}`
 const fixtureScript = path.join(process.cwd(), 'tests', 'tools', 'repro-terminal-send-submit.mjs')
 const fakeCodex = path.join(fixtureBin, process.platform === 'win32' ? 'codex.cmd' : 'codex')
-const swallowedEnterFixtureTimeoutMs = 60_000
+const swallowedEnterFixtureTimeoutMs = SWALLOWED_ENTER_FIXTURE_TIMEOUT_MS
 
 mkdirSync(fixtureBin)
 writeFileSync(

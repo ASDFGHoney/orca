@@ -20,6 +20,7 @@ import { RemoteRuntimeCompatGate } from './remote-runtime-compat-gate'
 import { createOrchestrationCompatibilityEnvelope } from './orchestration-compatibility-envelope'
 import { getTimeoutMsParam, isWaitingCheck } from './runtime-request-timeout'
 import { resolveWorkerStartClientTimeoutMs } from '../../shared/orchestration-timing-budgets'
+import { buildOrchestrationRecoveryCommand } from './orchestration-recovery-command'
 
 // Why: for long-poll methods the caller's method-level
 // `params.timeoutMs` is the inner waiter budget; we extend the client-side
@@ -80,6 +81,9 @@ export class RuntimeClient {
     const orchestrationRequestId = orchestrationMutation
       ? (options?.orchestrationRequestId ?? randomUUID())
       : undefined
+    const originalCommand = orchestrationMutation
+      ? buildOrchestrationRecoveryCommand(method, params)
+      : undefined
     const compatibilityEnvelope = method.startsWith('orchestration.')
       ? {
           ...this.orchestrationCompatibility,
@@ -108,10 +112,14 @@ export class RuntimeClient {
           envelope
         })
       } catch (error) {
-        throw attachMutationRecovery(error, orchestrationRequestId)
+        throw attachMutationRecovery(error, orchestrationRequestId, originalCommand)
       }
       if (response.ok === false) {
-        throw new RuntimeRpcFailureError(response)
+        throw attachMutationRecovery(
+          new RuntimeRpcFailureError(response),
+          orchestrationRequestId,
+          originalCommand
+        )
       }
       if (this.environmentSelector) {
         markEnvironmentUsed(this.userDataPath, this.environmentSelector, {
@@ -125,10 +133,14 @@ export class RuntimeClient {
     try {
       response = await sendRequest<TResult>(metadata, method, params, effectiveTimeoutMs, envelope)
     } catch (error) {
-      throw attachMutationRecovery(error, orchestrationRequestId)
+      throw attachMutationRecovery(error, orchestrationRequestId, originalCommand)
     }
     if (response.ok === false) {
-      throw new RuntimeRpcFailureError(response)
+      throw attachMutationRecovery(
+        new RuntimeRpcFailureError(response),
+        orchestrationRequestId,
+        originalCommand
+      )
     }
     return response
   }
@@ -246,7 +258,11 @@ export class RuntimeClient {
   }
 }
 
-function attachMutationRecovery(error: unknown, requestId: string | undefined): unknown {
+function attachMutationRecovery(
+  error: unknown,
+  requestId: string | undefined,
+  originalCommand?: string[]
+): unknown {
   if (!requestId || !(error instanceof RuntimeClientError)) {
     return error
   }
@@ -255,7 +271,11 @@ function attachMutationRecovery(error: unknown, requestId: string | undefined): 
     `${error.message} Orchestration mutation request ID: ${requestId}.`,
     {
       ...(error.data && typeof error.data === 'object' ? error.data : {}),
-      orchestrationRequestId: requestId
+      orchestrationRequestId: requestId,
+      ...(originalCommand &&
+      !(error.data && typeof error.data === 'object' && 'originalCommand' in error.data)
+        ? { originalCommand }
+        : {})
     }
   )
 }
