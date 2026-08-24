@@ -104,7 +104,10 @@ export function configureLocalPtyProvider(args: {
       clearProviderPtyState(id)
       ptyOwnership.delete(id)
       markClaudePtyExited(id)
-      runtime?.onPtyExit(id, code, incarnationId, cause ? { cause } : undefined)
+      runtime?.onPtyExit(id, code, incarnationId, {
+        providerExitObserved: true,
+        ...(cause ? { cause } : {})
+      })
     },
     onData: (id, data, timestamp, sequenceChars, transformed) =>
       runtime?.onPtyData(id, data, timestamp, sequenceChars ?? data.length, transformed)
