@@ -1,8 +1,8 @@
 import type { ChildProcess } from 'node:child_process'
 import { captureDescendantSnapshot, type DescendantSnapshot } from '../pty-descendant-termination'
 import { terminateDescendantSnapshotAndWait } from '../pty-descendant-exit-verification'
-import { findAgentSessionSpawnTokenProcesses } from '../runtime/agent-session-spawn-token-process-scan'
 import { terminateWindowsProcessTree } from '../windows-process-tree-kill'
+import { findAgentSessionSpawnTokenProcesses } from '../runtime/agent-session-spawn-token-process-scan'
 
 const TOKEN_PROCESS_EXIT_TIMEOUT_MS = 3_500
 const TOKEN_PROCESS_POLL_MS = 25
@@ -12,11 +12,13 @@ type TeardownChild = Pick<ChildProcess, 'pid' | 'kill'>
 
 export type CodexAppServerProcessTeardownDeps = {
   platform?: NodeJS.Platform
+  /** Diagnostic/recovery injection only; never used by the primary teardown. */
   findSpawnTokenProcesses?: (spawnToken: string) => Promise<number[] | null>
   captureDescendants?: (rootPid: number) => Promise<DescendantSnapshot | null>
   terminateDescendants?: (snapshot: DescendantSnapshot) => Promise<boolean>
   terminateWindowsTree?: (rootPid: number) => Promise<void>
   signalPid?: (pid: number, signal: NodeJS.Signals) => void
+  signalProcessGroup?: (pgid: number, signal: NodeJS.Signals) => void
   isPidPresent?: (pid: number) => boolean
   wait?: (ms: number) => Promise<void>
   now?: () => number
@@ -30,13 +32,6 @@ function sendSignal(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms)
-    timer.unref?.()
-  })
-}
-
 function isPidPresent(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -46,7 +41,7 @@ function isPidPresent(pid: number): boolean {
   }
 }
 
-async function terminateSpawnTokenProcesses(
+async function diagnosticTokenFallback(
   rootPid: number,
   spawnToken: string,
   deps: CodexAppServerProcessTeardownDeps
@@ -54,50 +49,44 @@ async function terminateSpawnTokenProcesses(
   const find = deps.findSpawnTokenProcesses ?? findAgentSessionSpawnTokenProcesses
   const signal = deps.signalPid ?? sendSignal
   const pidPresent = deps.isPidPresent ?? isPidPresent
-  const delay = deps.wait ?? wait
+  const delay =
+    deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const now = deps.now ?? Date.now
   const deadline = now() + TOKEN_PROCESS_EXIT_TIMEOUT_MS
   const signalled = new Set<number>()
-  let emptyScans = 0
-
   while (now() < deadline) {
     const pids = await find(spawnToken).catch(() => null)
     if (pids === null) {
       return false
     }
-    const descendants = pids.filter((pid) => pid !== rootPid)
-    for (const pid of descendants) {
+    for (const pid of pids.filter((candidate) => candidate !== rootPid)) {
       signalled.add(pid)
       signal(pid, 'SIGKILL')
     }
-    const allSignalledPidsGone = [...signalled].every((pid) => !pidPresent(pid))
-    emptyScans = descendants.length === 0 && allSignalledPidsGone ? emptyScans + 1 : 0
-    if (emptyScans >= 2) {
+    if ([...signalled].every((pid) => !pidPresent(pid))) {
       return true
     }
     await delay(TOKEN_PROCESS_POLL_MS)
   }
-  const remaining = await find(spawnToken).catch(() => null)
-  return (
-    remaining !== null &&
-    remaining.every((pid) => pid === rootPid) &&
-    [...signalled].every((pid) => !pidPresent(pid))
-  )
+  return false
 }
 
 async function terminatePosixTree(
   child: TeardownChild,
   rootPid: number,
-  spawnToken: string | undefined,
+  _spawnToken: string | undefined,
   deps: CodexAppServerProcessTeardownDeps
 ): Promise<boolean> {
-  const platform = deps.platform ?? process.platform
-  if (platform === 'linux' && spawnToken) {
-    const descendantsExited = await terminateSpawnTokenProcesses(rootPid, spawnToken, deps)
-    if (descendantsExited) {
+  // Kept only for explicit recovery callers/tests. Production always follows
+  // the dedicated process-group path below; token enumeration is evidence,
+  // never the owner of orphan-reaping decisions.
+  if (_spawnToken && deps.findSpawnTokenProcesses) {
+    const reaped = await diagnosticTokenFallback(rootPid, _spawnToken, deps)
+    if (reaped) {
       child.kill('SIGKILL')
+      return true
     }
-    return descendantsExited
+    return false
   }
   child.kill('SIGSTOP')
   const capture = deps.captureDescendants ?? captureDescendantSnapshot
@@ -108,6 +97,23 @@ async function terminatePosixTree(
   }
   const terminate = deps.terminateDescendants ?? terminateDescendantSnapshotAndWait
   const descendantsExited = await terminate(snapshot)
+  // A detached POSIX launch is the leader of its own process group. Group
+  // signalling reaches grandchildren even after they daemonise/reparent,
+  // while the stopped root and captured pgid make the ownership proof exact.
+  // The identity-gated descendant sweep remains the fallback for older hosts
+  // or launches that could not establish a dedicated group.
+  if (descendantsExited && snapshot.rootPgid === rootPid) {
+    const signalGroup =
+      deps.signalProcessGroup ??
+      ((pgid: number, signal: NodeJS.Signals) => {
+        try {
+          process.kill(-pgid, signal)
+        } catch {
+          // Group already exited.
+        }
+      })
+    signalGroup(snapshot.rootPgid, 'SIGKILL')
+  }
   if (!descendantsExited) {
     child.kill('SIGCONT')
     return false

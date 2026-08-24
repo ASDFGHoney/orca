@@ -1,4 +1,6 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
+import { assignHostProcessToKillOnCloseJob } from '../windows/windows-pty-job'
+import { createProviderSpawnSpec } from './codex-app-server-posix-supervisor'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
 import { terminateCodexAppServerProcessTree } from './codex-app-server-process-teardown'
@@ -65,12 +67,10 @@ export async function openCodexAppServerConnection(
   for (const key of launch.envToDelete ?? []) {
     delete childEnv[key]
   }
-  const child = spawnImpl({
-    program: launch.command,
-    args: launch.args,
-    env: childEnv,
-    cwd: process.cwd()
-  })
+  const child = spawnImpl(createProviderSpawnSpec(launch, childEnv, process.platform))
+  if (process.platform === 'win32') {
+    assignHostProcessToKillOnCloseJob()
+  }
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
 
   const pending = new Map<number, PendingRequest>()
@@ -122,8 +122,6 @@ export async function openCodexAppServerConnection(
   child.on('error', (error) => {
     handleUnexpectedEnd(error)
   })
-  // Why: 'close' rather than 'exit' guarantees the stderr tail is complete, so
-  // an early death classifies as missing-subcommand instead of transient.
   child.on('close', () => {
     handleUnexpectedEnd()
   })
@@ -190,8 +188,6 @@ export async function openCodexAppServerConnection(
   }
 
   let stdoutBuffer = ''
-  // Why: stream decoding must retain a multibyte character split across pipe
-  // chunks, or a non-ASCII turn becomes invalid JSON.
   child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
     stdoutBuffer += chunk
     if (Buffer.byteLength(stdoutBuffer) > STDOUT_LINE_MAX_BYTES) {

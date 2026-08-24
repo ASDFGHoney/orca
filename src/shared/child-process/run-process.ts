@@ -40,6 +40,13 @@ export type ProcessSpec = {
   maxOutputBytes?: number
   /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
+  /**
+   * On POSIX, start the child as the leader of a dedicated process group.
+   * Callers that own the returned process may then signal the negative pid to
+   * reach descendants that detach from the parent's ppid tree. Windows ignores
+   * this flag; ownership there is provided by a Job Object.
+   */
+  detached?: boolean
 }
 
 export type ProcessResult = {
@@ -91,6 +98,12 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
     // Why never `shell: true`: it concatenates arguments without escaping (Node
     // itself warns DEP0190) and it silently makes windowsHide a no-op.
     shell: false
+  }
+
+  if (platform !== 'win32' && spec.detached) {
+    // Node's detached mode creates a new session/process group whose leader is
+    // the child pid. Keep stdio attached: the app-server is a live JSONL pipe.
+    base.detached = true
   }
 
   if (platform !== 'win32' || !isCmdInterpretedProgram(spec.program)) {
