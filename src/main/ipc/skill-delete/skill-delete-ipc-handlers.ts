@@ -13,7 +13,7 @@ import {
   type SkillDeleteRequestDependencies
 } from '../skills/skill-delete-request-service'
 import { resolveSkillDiscoveryTarget } from '../skills/skill-discovery-target'
-import { handleMainWindowSkillIpc } from './skill-ipc-main-window'
+import { handleMainWindowSkillIpc } from '../skill-ipc-main-window'
 
 /**
  * Local only. A remote runtime is reached straight from the renderer through
