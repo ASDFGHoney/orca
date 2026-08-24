@@ -534,7 +534,14 @@ describe('worktree git-common narrow watch (darwin)', () => {
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      // Native filesystem promises settle outside the fake timer callback; wait for the
+      // re-subscribe observable rather than relying on timer advancement to flush them.
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(2)
+        },
+        { timeout: 1_000 }
+      )
       expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
 
       const beforeStaleEvent = received.length
@@ -577,15 +584,27 @@ describe('worktree git-common narrow watch (darwin)', () => {
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(2)
+        },
+        { timeout: 1_000 }
+      )
       const stalePendingSubscription = childSubscriptions[1]
 
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
-      expect(
-        received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
-      ).toHaveLength(2)
+      await vi.waitFor(
+        () => {
+          expect(
+            received
+              .flat()
+              .filter((event) => event.type === 'create' && event.path === worktreesDir)
+          ).toHaveLength(2)
+        },
+        { timeout: 1_000 }
+      )
 
       const beforeStaleInterruption = received.length
       stalePendingSubscription.hooks.onInterruption?.()
@@ -598,7 +617,12 @@ describe('worktree git-common narrow watch (darwin)', () => {
         }
       })
       await vi.advanceTimersByTimeAsync(POLL_MS)
-      expect(subscribeMock).toHaveBeenCalledTimes(3)
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(3)
+        },
+        { timeout: 1_000 }
+      )
       expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
 
       const immediateEntry = join(worktreesDir, 'current-generation')
