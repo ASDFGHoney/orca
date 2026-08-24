@@ -1194,7 +1194,7 @@ export function createAgentCompletionCoordinator(
     clearWorkingBoundary()
   }
 
-  function dispose(): void {
+  function dispose(disposeOptions: { clearReplayState?: boolean } = {}): void {
     if (disposed) {
       return
     }
@@ -1211,7 +1211,10 @@ export function createAgentCompletionCoordinator(
       coordinatorCountByPaneKey.delete(options.paneKey)
     }
     // Why: one pane can have hook and mounted coordinators; a remount disposal must not erase replay state still owned by its live sibling.
-    if (remainingCoordinators <= 0 && !options.isLive()) {
+    if (
+      remainingCoordinators <= 0 &&
+      (disposeOptions.clearReplayState === true || !options.isLive())
+    ) {
       lastCompletionIdentityByPaneKey.delete(options.paneKey)
       handledTurnCompletedAtsByPaneKey.delete(options.paneKey)
       pendingStampedTailByPaneKey.delete(options.paneKey)
