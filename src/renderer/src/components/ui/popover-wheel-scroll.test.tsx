@@ -1,5 +1,12 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import {
+  act,
+  createRef,
+  type Ref,
+  type RefCallback,
+  type WheelEvent as ReactWheelEvent,
+  type WheelEventHandler
+} from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Popover, PopoverContent, PopoverTrigger } from './popover'
@@ -21,7 +28,23 @@ function wheel(el: HTMLElement, deltaY: number): WheelEvent {
   return event
 }
 
-function renderPopover(contentClassName: string, nested: boolean): void {
+function renderPopover(
+  contentClassName: string,
+  nested: boolean,
+  {
+    onWheel,
+    onWheelCapture,
+    innerOnWheel,
+    contentRef,
+    portalContainer
+  }: {
+    onWheel?: WheelEventHandler<HTMLDivElement>
+    onWheelCapture?: WheelEventHandler<HTMLDivElement>
+    innerOnWheel?: WheelEventHandler<HTMLDivElement>
+    contentRef?: Ref<HTMLDivElement>
+    portalContainer?: HTMLElement
+  } = {}
+): void {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -29,13 +52,23 @@ function renderPopover(contentClassName: string, nested: boolean): void {
     root!.render(
       <Popover open>
         <PopoverTrigger>open</PopoverTrigger>
-        <PopoverContent className={contentClassName}>
+        <PopoverContent
+          className={contentClassName}
+          onWheel={onWheel}
+          onWheelCapture={onWheelCapture}
+          ref={contentRef}
+          portalContainer={portalContainer}
+        >
           {nested ? (
             <div data-testid="viewport" style={{ overflowY: 'auto' }}>
-              <div data-testid="inner">tall</div>
+              <div data-testid="inner" onWheel={innerOnWheel}>
+                tall
+              </div>
             </div>
           ) : (
-            <div data-testid="inner">tall</div>
+            <div data-testid="inner" onWheel={innerOnWheel}>
+              tall
+            </div>
           )}
         </PopoverContent>
       </Popover>
@@ -146,5 +179,90 @@ describe('PopoverContent wheel shim', () => {
 
     expect(viewport.scrollTop).toBe(120)
     expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('lets a consumer prevent the shim scroll', () => {
+    const onWheel = vi.fn((event: ReactWheelEvent<HTMLDivElement>) => {
+      Object.defineProperty(event.nativeEvent, 'preventDefault', { value: vi.fn() })
+      event.preventDefault()
+    })
+    const portalContainer = document.createElement('div')
+    document.body.appendChild(portalContainer)
+    renderPopover('popover-wheel-scroll', true, { onWheel, portalContainer })
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    viewport.style.overflowY = 'auto'
+    makeScrollable(viewport, 1000, 400)
+
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+
+    expect(onWheel).toHaveBeenCalledOnce()
+    expect(event.defaultPrevented).toBe(false)
+    expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('respects consumer capture cancellation', () => {
+    const onWheelCapture = vi.fn((event: ReactWheelEvent<HTMLDivElement>) => {
+      Object.defineProperty(event.nativeEvent, 'preventDefault', { value: vi.fn() })
+      event.preventDefault()
+    })
+    renderPopover('popover-wheel-scroll', true, { onWheelCapture })
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    viewport.style.overflowY = 'auto'
+    makeScrollable(viewport, 1000, 400)
+
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+
+    expect(onWheelCapture).toHaveBeenCalledOnce()
+    expect(event.defaultPrevented).toBe(false)
+    expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('respects descendant cancellation', () => {
+    const innerOnWheel = vi.fn((event: ReactWheelEvent<HTMLDivElement>) => event.preventDefault())
+    renderPopover('popover-wheel-scroll', true, { innerOnWheel })
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    viewport.style.overflowY = 'auto'
+    makeScrollable(viewport, 1000, 400)
+
+    const event = wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+
+    expect(innerOnWheel).toHaveBeenCalledOnce()
+    expect(event.defaultPrevented).toBe(true)
+    expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('preserves callback ref cleanup', () => {
+    const cleanup = vi.fn()
+    const contentRef: RefCallback<HTMLDivElement> = vi.fn(() => cleanup)
+    renderPopover('', false, { contentRef })
+
+    expect(contentRef).toHaveBeenCalledTimes(1)
+    expect(contentRef).toHaveBeenCalledWith(
+      document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+    )
+
+    act(() => root!.unmount())
+    root = null
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect(contentRef).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears callback refs that do not return cleanup', () => {
+    const callbackRef = vi.fn((_node: HTMLDivElement | null): void => {})
+    renderPopover('', false, { contentRef: callbackRef })
+
+    act(() => root!.unmount())
+    root = null
+    expect(callbackRef).toHaveBeenLastCalledWith(null)
+  })
+
+  it('clears object refs on detach', () => {
+    const objectRef = createRef<HTMLDivElement>()
+    renderPopover('', false, { contentRef: objectRef })
+    expect(objectRef.current).toBeInstanceOf(HTMLDivElement)
+
+    act(() => root!.unmount())
+    root = null
+    expect(objectRef.current).toBeNull()
   })
 })
