@@ -15,3 +15,9 @@ export function agentPromptDeliveryBecameUnknown(error: unknown): AgentPromptDel
   }
   return new AgentPromptDeliveryUnknownError(error instanceof Error ? error.message : String(error))
 }
+
+export function isAgentPromptDeliveryUnknownError(
+  error: unknown
+): error is AgentPromptDeliveryUnknownError {
+  return error instanceof AgentPromptDeliveryUnknownError
+}

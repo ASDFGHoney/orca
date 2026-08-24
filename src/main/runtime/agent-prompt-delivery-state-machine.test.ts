@@ -4,6 +4,7 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS
 } from '../../shared/agent-prompt-injection'
 import type { TuiAgent } from '../../shared/tui-agent'
+import { PtyInputTransactionOwner } from '../pty-input-transaction'
 import { OrcaRuntimeService } from './orca-runtime'
 import { makeStore } from './runtime-rpc-worktree-store-fixtures'
 
@@ -33,19 +34,31 @@ vi.mock('../git/worktree', () => ({
 async function createPromptRuntime(options: {
   launchAgent: TuiAgent
   foregroundAgent?: TuiAgent
+  foregroundProcess?: string | (() => string | null | Promise<string | null>)
+  inspectProcess?: () => {
+    foregroundProcess: string | null
+    hasChildProcesses: boolean
+    unavailable?: true
+  }
   onWrite?: (runtime: OrcaRuntimeService, data: string) => void
 }): Promise<{ runtime: OrcaRuntimeService; handle: string; writes: string[] }> {
   const runtime = new OrcaRuntimeService(makeStore() as never)
   const writes: string[] = []
+  const inputOwner = new PtyInputTransactionOwner((_ptyId, data) => {
+    writes.push(data)
+    options.onWrite?.(runtime, data)
+    return true
+  })
   runtime.setPtyController({
     spawn: vi.fn().mockResolvedValue({ id: 'pty-prompt' }),
-    write: (_ptyId, data) => {
-      writes.push(data)
-      options.onWrite?.(runtime, data)
-      return true
-    },
+    write: (ptyId, data) => inputOwner.write(ptyId, data),
+    beginInputTransaction: (ptyId, generation, kind) => inputOwner.begin(ptyId, generation, kind),
     kill: () => true,
-    getForegroundProcess: async () => options.foregroundAgent ?? options.launchAgent
+    inspectProcess: options.inspectProcess ? async () => options.inspectProcess!() : undefined,
+    getForegroundProcess: async () =>
+      typeof options.foregroundProcess === 'function'
+        ? options.foregroundProcess()
+        : (options.foregroundProcess ?? options.foregroundAgent ?? options.launchAgent)
   })
   const terminal = await runtime.createTerminal(`path:${WORKTREE_PATH}`, {
     launchAgent: options.launchAgent
@@ -193,7 +206,271 @@ describe('agent prompt delivery state machine', () => {
     expect(writes.filter((data) => data === '\r')).toHaveLength(1)
   })
 
-  it('rejects direct input while an agent prompt owns PTY input', async () => {
+  it('rejects a current shell instead of using stale OpenCode metadata', async () => {
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      foregroundProcess: 'zsh'
+    })
+
+    await expect(runtime.sendTerminalAgentPrompt(handle, 'review this')).rejects.toThrow(
+      'agent_prompt_target_changed'
+    )
+    expect(writes).toEqual([])
+  })
+
+  it('rejects an authoritative missing foreground before writing', async () => {
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      inspectProcess: () => ({ foregroundProcess: null, hasChildProcesses: false })
+    })
+
+    await expect(runtime.sendTerminalAgentPrompt(handle, 'review this')).rejects.toThrow(
+      'agent_prompt_target_changed'
+    )
+    expect(writes).toEqual([])
+  })
+
+  it('does not submit after the agent returns to a shell', async () => {
+    vi.useFakeTimers()
+    let foregroundProcess = 'opencode'
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      foregroundProcess: () => foregroundProcess,
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          foregroundProcess = 'zsh'
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+      }
+    })
+    const outcome = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(outcome).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'agent_prompt_target_changed' }
+    })
+    expect(writes).not.toContain('\r')
+  })
+
+  it('rechecks permission after the final foreground inspection', async () => {
+    let finishInspection!: (process: string | null) => void
+    let enterInspection!: () => void
+    const inspectionEntered = new Promise<void>((resolve) => {
+      enterInspection = resolve
+    })
+    const finalInspection = new Promise<string | null>((resolve) => {
+      finishInspection = resolve
+    })
+    let blockInspection = false
+    let reportedInspection = false
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'codex',
+      foregroundProcess: () => {
+        if (blockInspection) {
+          if (!reportedInspection) {
+            reportedInspection = true
+            enterInspection()
+          }
+          return finalInspection
+        }
+        return 'codex'
+      },
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          blockInspection = true
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+      }
+    })
+    const outcome = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await inspectionEntered
+    runtime.onPtyData('pty-prompt', '\x1b]0;Codex waiting for permission\x07', Date.now())
+    finishInspection('codex')
+
+    await expect(outcome).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'agent_prompt_blocked' }
+    })
+    expect(writes).not.toContain('\r')
+  })
+
+  it.each([
+    { nextProcess: 'zsh', label: 'a shell' },
+    { nextProcess: 'gemini', label: 'another agent' }
+  ])('does not submit after Aider changes to $label', async ({ nextProcess }) => {
+    vi.useFakeTimers()
+    let foregroundProcess = 'aider'
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'aider',
+      foregroundProcess: () => foregroundProcess,
+      onWrite: (_runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          foregroundProcess = nextProcess
+        }
+      }
+    })
+    const outcome = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(outcome).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'agent_prompt_target_changed' }
+    })
+    expect(writes).not.toContain('\r')
+  })
+
+  it('retains metadata fallback when foreground inspection is unavailable throughout', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      inspectProcess: () => ({
+        foregroundProcess: null,
+        hasChildProcesses: true,
+        unavailable: true
+      }),
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+        if (data === '\r') {
+          runtime.onPtyData('pty-prompt', '\x1b]0;OpenCode working\x07', Date.now())
+        }
+      }
+    })
+    const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
+
+    await vi.runAllTimersAsync()
+
+    await expect(submission).resolves.toMatchObject({ accepted: true })
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+  })
+
+  it('routes a query reply after the prompt paste frame closes', async () => {
+    vi.useFakeTimers()
+    let queryReply: Promise<unknown> | undefined
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      onWrite: (runtime, data) => {
+        if (data.includes('\x1b[200~') && !data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          queueMicrotask(() => {
+            queryReply = runtime.sendTerminal(handle, { text: '\x1b[?0u' })
+          })
+        }
+      }
+    })
+    const outcome = runtime
+      .sendTerminalAgentPrompt(handle, 'x'.repeat(20_000))
+      .catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(queryReply).resolves.toMatchObject({ accepted: true })
+    await expect(outcome).resolves.toMatchObject({ code: 'operation_unknown' })
+    const pasteEnd = writes.findIndex((data) => data.includes(AGENT_PROMPT_BRACKETED_PASTE_END))
+    expect(writes.indexOf('\x1b[?0u')).toBeGreaterThan(pasteEnd)
+    expect(writes).not.toContain('\r')
+  })
+
+  it('does not run a queued prompt after an unknown delivery outcome', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({ launchAgent: 'opencode' })
+    const first = runtime.sendTerminalAgentPrompt(handle, 'first prompt').catch((error) => error)
+    const second = runtime.sendTerminalAgentPrompt(handle, 'second prompt').catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(first).resolves.toMatchObject({ code: 'operation_unknown' })
+    await expect(second).resolves.toMatchObject({ code: 'operation_unknown' })
+    expect(writes.join('')).toContain('first prompt')
+    expect(writes.join('')).not.toContain('second prompt')
+  })
+
+  it('reports a generation reset after paste as unknown', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+          runtime.synchronizePtyOutputSequenceFromProvider(
+            'pty-prompt',
+            { value: 0, generation: 'reset' },
+            runtime.getPtyOutputSequence('pty-prompt')
+          )
+        }
+      }
+    })
+    const outcome = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(outcome).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'terminal_handle_stale' }
+    })
+    expect(writes).not.toContain('\r')
+  })
+
+  it('reports a generation reset after a partial paste as unknown', async () => {
+    let reset = false
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      onWrite: (runtime) => {
+        if (reset) {
+          return
+        }
+        reset = true
+        runtime.synchronizePtyOutputSequenceFromProvider(
+          'pty-prompt',
+          { value: 0, generation: 'reset' },
+          runtime.getPtyOutputSequence('pty-prompt')
+        )
+      }
+    })
+
+    await expect(runtime.sendTerminalAgentPrompt(handle, 'x'.repeat(20_000))).rejects.toMatchObject(
+      {
+        code: 'operation_unknown',
+        data: { reason: 'terminal_handle_stale' }
+      }
+    )
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).not.toContain(AGENT_PROMPT_BRACKETED_PASTE_END)
+  })
+
+  it('reports a generation reset immediately after Enter as unknown', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+        if (data === '\r') {
+          runtime.synchronizePtyOutputSequenceFromProvider(
+            'pty-prompt',
+            { value: 0, generation: 'reset' },
+            runtime.getPtyOutputSequence('pty-prompt')
+          )
+        }
+      }
+    })
+    const outcome = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await vi.runAllTimersAsync()
+
+    await expect(outcome).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'terminal_handle_stale' }
+    })
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+  })
+
+  it('lets direct input cancel an unacknowledged agent prompt', async () => {
     vi.useFakeTimers()
     const { runtime, handle, writes } = await createPromptRuntime({ launchAgent: 'opencode' })
     const promptOutcome = runtime
@@ -201,16 +478,40 @@ describe('agent prompt delivery state machine', () => {
       .catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(0)
 
-    await expect(runtime.sendTerminal(handle, { text: 'manual input' })).rejects.toThrow(
-      'terminal_input_busy'
-    )
+    await expect(runtime.sendTerminal(handle, { text: 'manual input' })).resolves.toMatchObject({
+      accepted: true
+    })
     await vi.runAllTimersAsync()
 
     await expect(promptOutcome).resolves.toMatchObject({ code: 'operation_unknown' })
-    expect(writes.join('')).not.toContain('manual input')
+    expect(writes.join('')).toContain('manual input')
+    expect(writes.filter((data) => data === '\r')).toHaveLength(0)
   })
 
-  it('refuses a prompt before paste while direct input is in flight', async () => {
+  it('does not attribute post-Enter user activity to the prompt', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'aider',
+      onWrite: (runtime, data) => {
+        if (data === 'manual input') {
+          runtime.onPtyData('pty-prompt', '\x1b]0;Aider working\x07', Date.now())
+        }
+      }
+    })
+    const prompt = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+
+    await vi.advanceTimersByTimeAsync(AGENT_PROMPT_SUBMIT_DELAY_MS)
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+    await runtime.sendTerminal(handle, { text: 'manual input' })
+    await vi.runAllTimersAsync()
+
+    await expect(prompt).resolves.toMatchObject({
+      code: 'operation_unknown',
+      data: { reason: 'terminal_input_superseded' }
+    })
+  })
+
+  it('keeps a prompt authoritative until guarded direct input is admitted', async () => {
     let releaseWrite!: () => void
     let enteredWrite!: () => void
     const entered = new Promise<void>((resolve) => {
@@ -232,13 +533,16 @@ describe('agent prompt delivery state machine', () => {
     )
     await entered
 
-    await expect(runtime.sendTerminalAgentPrompt(handle, 'review this')).rejects.toThrow(
-      'terminal_input_busy'
-    )
+    const prompt = runtime.sendTerminalAgentPrompt(handle, 'review this').catch((error) => error)
+    for (let turn = 0; turn < 20; turn += 1) {
+      await Promise.resolve()
+    }
+    expect(writes.join('')).toContain('review this')
+
     releaseWrite()
     await direct
+    await expect(prompt).resolves.toMatchObject({ code: 'operation_unknown' })
 
     expect(writes.join('')).toContain('manual input')
-    expect(writes.join('')).not.toContain('review this')
   })
 })

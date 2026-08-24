@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   AgentPromptDeliveryUnknownError,
-  agentPromptDeliveryBecameUnknown
+  agentPromptDeliveryBecameUnknown,
+  isAgentPromptDeliveryUnknownError
 } from './agent-prompt-delivery-outcome'
 
 describe('agent prompt delivery outcome', () => {
@@ -19,5 +20,6 @@ describe('agent prompt delivery outcome', () => {
     const error = new AgentPromptDeliveryUnknownError('agent_prompt_not_ready')
 
     expect(agentPromptDeliveryBecameUnknown(error)).toBe(error)
+    expect(isAgentPromptDeliveryUnknownError(error)).toBe(true)
   })
 })

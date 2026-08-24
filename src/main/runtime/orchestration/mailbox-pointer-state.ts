@@ -1,8 +1,9 @@
 import type { OrchestrationMailboxLeaf } from './mailbox-owner'
 
 export type OrchestrationMailboxDeliveryFlight = {
-  enterTimer: ReturnType<typeof setTimeout> | null
-  stagedMessageIds: string[]
+  abortController: AbortController
+  mutated: boolean
+  redriveMailbox: string | null
 }
 
 export type ParkedOrchestrationMailboxDelivery = {
@@ -28,7 +29,7 @@ export class OrchestrationMailboxPointerState {
   }
 
   beginFlight(ptyId: string): OrchestrationMailboxDeliveryFlight {
-    const flight = { enterTimer: null, stagedMessageIds: [] }
+    const flight = { abortController: new AbortController(), mutated: false, redriveMailbox: null }
     this.flightsByPtyId.set(ptyId, flight)
     return flight
   }
@@ -74,22 +75,15 @@ export class OrchestrationMailboxPointerState {
     return this.watermarkByMailbox.get(mailboxHandle)?.active === true
   }
 
-  releaseSupersededWatermark(
-    mailboxHandle: string,
-    newestSequence: number,
-    ptyId: string | null,
-    leafKey: string
-  ): boolean {
+  releaseSupersededWatermark(mailboxHandle: string, newestSequence: number): boolean {
     const owner = this.watermarkByMailbox.get(mailboxHandle)
+    if (owner && !owner.active) {
+      return false
+    }
     if (newestSequence > (owner?.sequence ?? -1)) {
       return true
     }
-    return Boolean(
-      owner &&
-      !owner.active &&
-      !(owner.ptyId === ptyId && owner.leafKey === leafKey) &&
-      this.clearWatermark(mailboxHandle, owner.sequence, owner.ptyId)
-    )
+    return false
   }
 
   setWatermark(mailbox: string, sequence: number, ptyId: string, leafKey: string): void {
@@ -156,11 +150,20 @@ export class OrchestrationMailboxPointerState {
     const releasedMailboxes: string[] = []
     for (const mailboxHandle of this.watermarkMailboxesByPtyId.get(ptyId) ?? []) {
       const owner = this.watermarkByMailbox.get(mailboxHandle)
-      if (owner?.ptyId === ptyId && this.clearWatermark(mailboxHandle, owner.sequence, ptyId)) {
+      if (!owner || owner.ptyId !== ptyId) {
+        continue
+      }
+      if (flight?.mutated || !owner.active) {
+        owner.active = false
+        continue
+      }
+      if (this.clearWatermark(mailboxHandle, owner.sequence, ptyId)) {
         releasedMailboxes.push(mailboxHandle)
       }
     }
-    this.watermarkMailboxesByPtyId.delete(ptyId)
+    if (!flight?.mutated) {
+      this.watermarkMailboxesByPtyId.delete(ptyId)
+    }
     return { flight, releasedMailboxes }
   }
 
