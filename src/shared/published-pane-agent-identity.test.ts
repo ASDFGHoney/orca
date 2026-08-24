@@ -30,10 +30,17 @@ describe('resolvePublishedPaneAgentIdentity', () => {
     expect(resolve({ launchAgent: 'claude', foregroundAgent: 'codex' })).toBe('codex')
   })
 
-  it('falls back to the title when the host has no process or launch evidence', () => {
-    // Hook-less agents over SSH surface only a decorated title; dropping it would make those
-    // panes unaddressable. It is last, not absent.
-    expect(resolve({ title: '✳ Claude Code' })).toBe('claude')
+  it('publishes nothing from a title alone, even an unambiguous one', () => {
+    // Deliberate, and the sharpest trade in this change. What this publishes AUTHORIZES ACTIONS:
+    // orchestration routing uses it to pick which real agent pane receives a message. A title is
+    // a decoration channel, and a stale one outlives the agent that wrote it, so a pane whose only
+    // evidence is a parsed string publishes no identity and every action consumer fails closed.
+    //
+    // The cost: a hook-less agent over SSH that Orca did not launch, and whose foreground process
+    // the host cannot read, is not addressable by @agent. That is a real capability loss, accepted
+    // because a message delivered into the wrong agent's prompt is not recoverable and an
+    // undelivered one is — the sender sees zero recipients.
+    expect(resolve({ title: '✳ Claude Code' })).toBeUndefined()
   })
 
   it('publishes nothing when the title names no agent unambiguously', () => {

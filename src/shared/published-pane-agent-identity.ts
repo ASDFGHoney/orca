@@ -8,10 +8,10 @@ import type { TuiAgent } from './tui-agent'
  * Kept out of the runtime class so it can be tested without one, and so routing, delivery and the
  * UI all read the same decision instead of each re-deriving it.
  *
- * Title is included but ranks last, and contributes only when the evidence parser finds an
- * unambiguous name. A task title that merely mentions an agent yields no title evidence at all,
- * which is the whole point: "Switch Claude and Codex off the load balancer… - grok" is a Grok
- * pane, and used to receive both `@claude` and `@codex`.
+ * Title is NOT consulted. What this publishes authorizes actions, and a terminal title is a
+ * decoration channel a user can type any agent's name into — "Switch Claude and Codex off the
+ * load balancer… - grok" is a Grok pane that used to receive both `@claude` and `@codex`.
+ * Identity therefore comes only from launch and foreground-process evidence the host owns.
  *
  * Returns undefined when nothing is known, and absence is published as absence. A caller that
  * authorizes an action must fail closed on it rather than falling back to parsing the title.
@@ -24,6 +24,11 @@ export function resolvePublishedPaneAgentIdentity(args: {
   const titleAgent = args.title ? collectAgentTitleEvidence(args.title).agent : null
   return (
     resolvePaneAgentIdentity({
+      // Why the floor: what this publishes authorizes actions — orchestration routing decides
+      // which real agent pane receives a message. Ranking title last makes a bad delivery
+      // unlikely; refusing to see it makes one impossible. A pane whose only evidence is a
+      // parsed string publishes no identity, and every action consumer fails closed on absence.
+      minimumSource: 'launch',
       evidence: [
         ...(args.foregroundAgent
           ? [{ source: 'process' as const, agent: args.foregroundAgent }]
