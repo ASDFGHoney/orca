@@ -90,7 +90,7 @@ beforeEach(() => {
 describe('native chat routing', () => {
   it.each([
     ['codex', 'structured'],
-    ['claude', 'bridge'],
+    ['claude', 'structured'],
     ['openclaude', 'bridge'],
     ['grok', 'bridge'],
     ['omp', 'bridge']

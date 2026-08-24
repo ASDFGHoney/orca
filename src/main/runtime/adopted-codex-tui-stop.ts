@@ -13,8 +13,9 @@ function provesIdentity(proof: AgentSessionOwnerProbe): boolean {
   return proof.outcome === 'identity-matched' && proof.matchedOn.length > 0
 }
 
-export async function stopAdoptedCodexTui(input: {
+export async function stopAdoptedTuiProcess(input: {
   identity: AgentSessionProcessIdentity
+  agent?: 'claude' | 'codex'
   probe?: (identity: AgentSessionProcessIdentity) => Promise<AgentSessionOwnerProbe>
   signal?: (pid: number, signal: NodeJS.Signals) => void
   sleep?: (delayMs: number) => Promise<void>
@@ -29,7 +30,7 @@ export async function stopAdoptedCodexTui(input: {
   }
   if (!provesIdentity(initial)) {
     throw new Error(
-      'The Codex TUI process could not be re-proved; structured chat was not started.'
+      `The ${input.agent === 'claude' ? 'Claude' : 'Codex'} TUI process could not be re-proved; structured chat was not started.`
     )
   }
 
@@ -56,5 +57,10 @@ export async function stopAdoptedCodexTui(input: {
       await sleep(input.pollMs ?? STOP_POLL_MS)
     }
   }
-  throw new Error('The Codex TUI exit could not be proven; structured chat was not started.')
+  throw new Error(
+    `The ${input.agent === 'claude' ? 'Claude' : 'Codex'} TUI exit could not be proven; structured chat was not started.`
+  )
 }
+
+/** @deprecated Use stopAdoptedTuiProcess. */
+export const stopAdoptedCodexTui = stopAdoptedTuiProcess

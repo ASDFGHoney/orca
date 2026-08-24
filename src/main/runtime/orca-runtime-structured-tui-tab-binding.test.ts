@@ -83,6 +83,7 @@ function terminalAdoptionHarness() {
 /** The host half adoption now needs: the lease is reserved before the provider probe runs. */
 function structuredHostDouble(overrides: Record<string, unknown> = {}) {
   return {
+    supportsCreate: vi.fn(() => true),
     reserveAdoptedTuiOwner: vi.fn(async (input: { spawnToken: string }) => ({
       ok: true,
       fence: 1,

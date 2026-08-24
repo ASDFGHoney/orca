@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { AgentType } from '../../shared/native-chat-types'
 import {
   resolveNativeChatTranscriptAgent,
@@ -121,6 +122,34 @@ export async function resolveSessionFilePath(
     throw unavailable
   }
   return resolved
+}
+
+/** Read Claude's durable branch marker from the transcript metadata. */
+export async function readClaudeTranscriptLeafUuid(transcriptPath: string): Promise<string | null> {
+  const contents = await readFile(transcriptPath, 'utf8')
+  let leafUuid: string | null = null
+  for (const line of contents.split('\n')) {
+    if (!line.trim()) {
+      continue
+    }
+    let record: unknown
+    try {
+      record = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (
+      typeof record === 'object' &&
+      record !== null &&
+      !Array.isArray(record) &&
+      (record as { type?: unknown }).type === 'last-prompt' &&
+      typeof (record as { leafUuid?: unknown }).leafUuid === 'string' &&
+      (record as { leafUuid: string }).leafUuid.trim().length > 0
+    ) {
+      leafUuid = (record as { leafUuid: string }).leafUuid.trim()
+    }
+  }
+  return leafUuid
 }
 
 async function resolveSessionFileById(

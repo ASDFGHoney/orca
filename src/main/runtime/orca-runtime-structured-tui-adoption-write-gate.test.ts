@@ -98,6 +98,7 @@ async function buildRig(): Promise<ProofRig> {
   const host = new StructuredAgentSessionHost({
     store,
     adapter: {
+      supportsCreate: () => true,
       acquire: vi.fn(),
       dispatch: vi.fn(),
       cancelTurn: vi.fn(),
@@ -227,6 +228,20 @@ describe('structured Codex adoption against the real PTY write gate', () => {
       lease: { runtimeKind: 'tui', claimStatus: 'live', handoffStage: null }
     })
   }, 20_000)
+
+  it('fails before reservation when the provider is not proven on this host', async () => {
+    vi.spyOn(rig.host, 'supportsCreate').mockReturnValue(false)
+
+    await expect(
+      rig.runtime.adoptStructuredAgentSessionTerminal(
+        { ...adoptInput(), threadId: THREAD_ID },
+        { callerKey: 'renderer-1' }
+      )
+    ).rejects.toThrow('handoff is not proven on this execution host')
+
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
+    expect(rig.store.getRecord(SESSION_ID)).toBeNull()
+  })
 
   it('authorizes the probe when no thread id has been published yet', async () => {
     const result = await rig.runtime.adoptStructuredAgentSessionTerminal(adoptInput(), {

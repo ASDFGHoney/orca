@@ -319,6 +319,32 @@ describe('method routing', () => {
     )
   })
 
+  it('rejects conflicting legacy and provider session identities', async () => {
+    const fields = {
+      worktree: 'id:workspace-1',
+      tabId: 'tab-1',
+      paneKey: 'tab-1:leaf-1',
+      ptyId: 'pty-1',
+      agent: 'claude' as const,
+      threadId: 'legacy-thread',
+      providerSessionId: 'provider-session'
+    }
+    const params = {
+      envelope: envelope({
+        expectedRuntimeFence: null,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.adoptTerminal',
+          sessionId: SESSION,
+          fields
+        })
+      }),
+      ...fields
+    }
+
+    await expect(call('agentSession.adoptTerminal', params)).resolves.toMatchObject({ ok: false })
+    expect(runtimeCalls.adoptStructuredAgentSessionTerminal).not.toHaveBeenCalled()
+  })
+
   it('routes ownership handoff requests to the structured host', async () => {
     const fields = {
       direction: 'to-native' as const,

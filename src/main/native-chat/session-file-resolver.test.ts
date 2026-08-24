@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { resolveSessionFilePath } from './session-file-resolver'
+import { readClaudeTranscriptLeafUuid, resolveSessionFilePath } from './session-file-resolver'
 
 let tempRoots: string[] = []
 
@@ -27,6 +27,26 @@ function restoreEnv(key: string, previous: string | undefined): void {
 }
 
 describe('resolveSessionFilePath', () => {
+  it('reads Claude last-prompt leaf metadata as the durable branch marker', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-leaf-')
+    const transcript = join(root, 'session.jsonl')
+    await writeFile(
+      transcript,
+      `${JSON.stringify({ type: 'last-prompt', leafUuid: 'leaf-old' })}\n${JSON.stringify({ type: 'last-prompt', leafUuid: 'leaf-current' })}\n`,
+      'utf8'
+    )
+
+    await expect(readClaudeTranscriptLeafUuid(transcript)).resolves.toBe('leaf-current')
+  })
+
+  it('fails closed when a Claude transcript has no branch marker', async () => {
+    const root = await makeRoot('orca-native-chat-resolve-claude-no-leaf-')
+    const transcript = join(root, 'session.jsonl')
+    await writeFile(transcript, '{"type":"assistant","uuid":"not-a-leaf"}\n', 'utf8')
+
+    await expect(readClaudeTranscriptLeafUuid(transcript)).resolves.toBeNull()
+  })
+
   it('globs Claude project subdirs for <sessionId>.jsonl', async () => {
     const root = await makeRoot('orca-native-chat-resolve-claude-')
     const claudeProjectsDir = join(root, 'claude-projects')

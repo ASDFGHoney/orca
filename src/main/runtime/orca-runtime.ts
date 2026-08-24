@@ -121,9 +121,12 @@ import {
   probeAgentSessionProcessIdentity
 } from './agent-session-process-identity-probe'
 import { waitForStructuredTuiExitProof } from './structured-tui-exit-proof'
-import { stopAdoptedCodexTui } from './adopted-codex-tui-stop'
+import { stopAdoptedTuiProcess } from './adopted-codex-tui-stop'
 import { readStructuredTuiProcessIdentity } from './structured-tui-process-identity'
-import { resolveSessionFilePath } from '../native-chat/session-file-resolver'
+import {
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+} from '../native-chat/session-file-resolver'
 import { StructuredTuiAdoptionInflight } from './structured-tui-adoption-inflight'
 import { releaseStructuredTuiAdoptionReservation } from './structured-tui-adoption-reservation-release'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
@@ -184,7 +187,7 @@ import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-messag
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir, hostname } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
@@ -1297,6 +1300,11 @@ import { createNestedRepoImportTargetResolver } from '../project-groups/nested-r
 function sanitizeNestedRepoRuntimeImportError(context: string, error: unknown): string {
   console.warn(`[project-groups] ${context}`, error)
   return 'Repository could not be imported'
+}
+
+function isPathWithinDirectory(directory: string, candidate: string): boolean {
+  const relativePath = relative(resolve(directory), resolve(candidate))
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
 type RuntimeAccountServices = {
@@ -10716,6 +10724,7 @@ export class OrcaRuntimeService {
         const provider = head.handle.provider
         const providerSessionId =
           provider === 'claude' ? head.handle.sessionId : head.handle.threadId
+        const launchStartedAt = Date.now()
         const launched = await this.ensureAgentSession(
           {
             kind: 'explicit',
@@ -10781,11 +10790,24 @@ export class OrcaRuntimeService {
                   handle: terminal.handle,
                   paneKey: terminal.paneKey,
                   sessionId: head.handle.sessionId,
-                  projectsDir: join(record.accountHome.path, 'projects')
+                  projectsDir: join(record.accountHome.path, 'projects'),
+                  expectedLeafUuid: head.handle.leafUuid,
+                  spawnToken,
+                  minimumProviderSessionReceivedAt: launchStartedAt
                 })
           const revealed = await this.focusTerminal(terminal.handle)
           return this.refreshStructuredTuiOwnerBinding({
             ...spawnedOwner,
+            link:
+              provider === 'claude'
+                ? claudeProviderHandleLink({
+                    sessionId: head.handle.sessionId,
+                    leafUuid: proof.leafUuid ?? head.handle.leafUuid,
+                    resumed: true,
+                    fence,
+                    observedAt: Date.now()
+                  })
+                : spawnedOwner.link,
             terminal: {
               handle: terminal.handle,
               tabId: revealed.tabId,
@@ -11002,7 +11024,8 @@ export class OrcaRuntimeService {
                 handle,
                 paneKey: candidate.paneKey,
                 sessionId: head.handle.sessionId,
-                projectsDir: join(record.accountHome.path, 'projects')
+                projectsDir: join(record.accountHome.path, 'projects'),
+                expectedLeafUuid: head.handle.leafUuid
               })
         return {
           terminal: {
@@ -11022,7 +11045,7 @@ export class OrcaRuntimeService {
                 })
               : claudeProviderHandleLink({
                   sessionId: head.handle.sessionId,
-                  leafUuid: head.handle.leafUuid,
+                  leafUuid: proof.leafUuid ?? head.handle.leafUuid,
                   resumed: true,
                   fence: record.lease.runtimeFence,
                   observedAt: Date.now()
@@ -11161,9 +11184,11 @@ export class OrcaRuntimeService {
     onSpawned?: (owner: StructuredTuiOwner) => Promise<void>
   }): Promise<StructuredTuiOwner> {
     const head = input.record.providerHandleChain.at(-1)
+    const provider = head?.handle.provider
     const pty = this.ptysById.get(input.owner.terminal.ptyId)
     if (
-      head?.handle.provider !== 'codex' ||
+      !head ||
+      (provider !== 'codex' && provider !== 'claude') ||
       !pty?.connected ||
       pty.paneKey !== input.owner.terminal.paneKey
     ) {
@@ -11179,12 +11204,16 @@ export class OrcaRuntimeService {
       isRemote: false,
       terminalWindowsShell: settings.terminalWindowsShell
     })
+    const providerSession =
+      provider === 'claude'
+        ? { key: 'session_id' as const, id: head.handle.sessionId }
+        : { key: 'session_id' as const, id: head.handle.threadId }
     const startup = buildAgentResumeStartupPlan({
-      agent: 'codex',
-      providerSession: { key: 'session_id', id: head.handle.threadId },
+      agent: provider,
+      providerSession,
       cmdOverrides: settings.agentCmdOverrides ?? {},
-      agentArgs: resolveTuiAgentLaunchArgs('codex', settings.agentDefaultArgs),
-      agentEnv: resolveTuiAgentLaunchEnv('codex', settings.agentDefaultEnv),
+      agentArgs: resolveTuiAgentLaunchArgs(provider, settings.agentDefaultArgs),
+      agentEnv: resolveTuiAgentLaunchEnv(provider, settings.agentDefaultEnv),
       sessionOptions: this.toAgentSessionOptions(input.record.options),
       sessionOptionsOverrideAgentArgs: Boolean(input.record.options),
       platform,
@@ -11192,35 +11221,45 @@ export class OrcaRuntimeService {
       isRemote: false
     })
     if (!startup || !pty.paneKey) {
-      throw new Error('The adopted terminal could not resume Codex.')
+      throw new Error(`The adopted terminal could not resume ${provider}.`)
     }
-    // Why this is checked up front: the resumed Codex proves itself through its own
-    // SessionStart hook, so without the hooks there is nothing to wait for — fail
-    // now with the reason instead of after a 30s silence.
+    // A Codex resume needs its SessionStart listener; Claude uses the provider-row proof below.
     const subscribeAgentHookEvents = this.subscribeAgentHookEventsFn
     if (
-      !subscribeAgentHookEvents ||
-      settings.agentStatusHooksEnabled === false ||
-      settings.disabledTuiAgents?.includes('codex') === true
+      provider === 'codex' &&
+      (!subscribeAgentHookEvents ||
+        settings.agentStatusHooksEnabled === false ||
+        settings.disabledTuiAgents?.includes(provider) === true)
     ) {
-      throw new Error('Agent status hooks are off, so Codex cannot confirm the resumed session.')
+      throw new Error(
+        `Agent status hooks are off, so ${provider} cannot confirm the resumed session.`
+      )
     }
-    // Why the watch opens before the write: a warm Codex can post SessionStart
-    // before `writeAgentSessionProof` even returns, and a proof that arrives
-    // before its listener is a proof Orca never sees.
-    const sessionNonce = randomUUID()
-    const readiness = beginAdoptedCodexReadinessWatch({
-      subscribe: subscribeAgentHookEvents,
-      target: { paneKey: pty.paneKey, threadId: head.handle.threadId, sessionNonce }
-    })
+    // Open the Codex watch before writing: a warm process can post SessionStart immediately.
+    const sessionNonce = provider === 'codex' ? randomUUID() : null
+    const readiness =
+      provider === 'codex'
+        ? beginAdoptedCodexReadinessWatch({
+            subscribe: subscribeAgentHookEvents!,
+            target: {
+              paneKey: pty.paneKey,
+              threadId: head.handle.threadId,
+              sessionNonce: sessionNonce!
+            }
+          })
+        : null
     // Why: a throw between here and the await would otherwise leave the watch's
     // timeout rejection unhandled.
-    void readiness.settled.catch(() => {})
+    void readiness?.settled.catch(() => {})
     let proved = false
     try {
+      const proofStartedAt = Date.now()
       const resumeCommand = withInlineEnvAssignments({
         command: startup.launchCommand,
-        env: { [AGENT_HOOK_SESSION_NONCE_ENV_VAR]: sessionNonce },
+        env: {
+          ORCA_AGENT_LAUNCH_TOKEN: input.spawnToken,
+          ...(sessionNonce ? { [AGENT_HOOK_SESSION_NONCE_ENV_VAR]: sessionNonce } : {})
+        },
         platform,
         shell
       })
@@ -11230,7 +11269,7 @@ export class OrcaRuntimeService {
           spawnToken: input.spawnToken
         })
       ) {
-        throw new Error('The adopted terminal could not resume Codex.')
+        throw new Error(`The adopted terminal could not resume ${provider}.`)
       }
       const listing = (await this.ptyController.listProcesses?.())?.find(
         (candidate) =>
@@ -11244,32 +11283,71 @@ export class OrcaRuntimeService {
         hostId: input.record.location.executionHostId,
         rootPid: listing.rootProcessId,
         spawnToken: input.spawnToken,
-        agent: 'codex'
+        agent: provider
       })
       const owner: StructuredTuiOwner = {
         ...input.owner,
         process,
-        link: codexProviderHandleLink({
-          threadId: head.handle.threadId,
-          resumed: true,
-          fence: input.fence,
-          observedAt: Date.now()
-        })
+        link:
+          provider === 'claude'
+            ? claudeProviderHandleLink({
+                sessionId: head.handle.sessionId,
+                leafUuid: head.handle.leafUuid,
+                resumed: true,
+                fence: input.fence,
+                observedAt: Date.now()
+              })
+            : codexProviderHandleLink({
+                threadId: head.handle.threadId,
+                resumed: true,
+                fence: input.fence,
+                observedAt: Date.now()
+              })
       }
       await input.onSpawned?.(owner)
-      const transcriptPath = await this.waitForAdoptedStructuredTuiProof({
-        owner,
-        readiness,
-        threadId: head.handle.threadId,
-        codexHome: input.record.accountHome.path
-      })
+      const proof =
+        provider === 'claude'
+          ? await this.waitForStructuredClaudeTuiProof({
+              handle: owner.terminal.handle,
+              paneKey: owner.terminal.paneKey,
+              sessionId: head.handle.sessionId,
+              projectsDir: join(input.record.accountHome.path, 'projects'),
+              expectedLeafUuid: head.handle.leafUuid,
+              spawnToken: input.spawnToken,
+              minimumProviderSessionReceivedAt: proofStartedAt
+            })
+          : await this.waitForAdoptedStructuredTuiProof({
+              owner,
+              readiness: readiness!,
+              threadId: head.handle.threadId,
+              codexHome: input.record.accountHome.path
+            })
+      // The resumed child now owns this pane under the handoff token; future hook rows and
+      // adoption attempts must bind to this incarnation rather than the stopped process.
+      pty.launchToken = input.spawnToken
+      pty.launchIncarnationId = pty.incarnationId
+      pty.launchAgent = provider
       proved = true
-      const provenOwner = { ...owner, transcriptPath }
+      const provenOwner = {
+        ...owner,
+        ...(provider === 'claude'
+          ? {
+              link: claudeProviderHandleLink({
+                sessionId: head.handle.sessionId,
+                leafUuid: proof.leafUuid ?? null,
+                resumed: true,
+                fence: input.fence,
+                observedAt: Date.now()
+              })
+            }
+          : {}),
+        transcriptPath: proof.transcriptPath
+      }
       this.adoptedStructuredTuiOwners.set(input.record.sessionId, provenOwner)
       return provenOwner
     } finally {
       if (!proved) {
-        readiness.dispose()
+        readiness?.dispose()
       }
     }
   }
@@ -11284,7 +11362,7 @@ export class OrcaRuntimeService {
     readiness: AdoptedCodexReadinessWatch
     threadId: string
     codexHome: string
-  }): Promise<string> {
+  }): Promise<{ transcriptPath: string; leafUuid?: never }> {
     await input.readiness.settled
     const pty = this.ptysById.get(input.owner.terminal.ptyId)
     if (!pty?.connected || pty.paneKey !== input.owner.terminal.paneKey) {
@@ -11294,7 +11372,7 @@ export class OrcaRuntimeService {
     if (!transcriptPath) {
       throw new Error('The agent terminal did not prove the expected Codex rollout.')
     }
-    return transcriptPath
+    return { transcriptPath }
   }
 
   private async closeAdoptedStructuredTuiOwner(owner: StructuredTuiOwner): Promise<void> {
@@ -11302,7 +11380,10 @@ export class OrcaRuntimeService {
     if (!pty?.connected || pty.paneKey !== owner.terminal.paneKey) {
       throw new Error('The owning agent terminal lost its pane identity.')
     }
-    await stopAdoptedCodexTui({ identity: owner.process })
+    await stopAdoptedTuiProcess({
+      identity: owner.process,
+      agent: owner.link.handle.provider
+    })
   }
 
   private refreshStructuredTuiOwnerBinding(owner: StructuredTuiOwner): StructuredTuiOwner {
@@ -11451,7 +11532,7 @@ export class OrcaRuntimeService {
     spawnToken: string
     codexHome: string
     sessionId: string
-  }): Promise<{ transcriptPath?: string }> {
+  }): Promise<{ transcriptPath?: string; leafUuid?: never }> {
     const readBoundPty = (): RuntimePtyWorktreeRecord => {
       const pty = this.getLivePtyForHandle(input.handle)?.pty
       if (
@@ -11494,18 +11575,51 @@ export class OrcaRuntimeService {
     paneKey: string
     sessionId: string
     projectsDir: string
-  }): Promise<{ transcriptPath?: string }> {
+    expectedLeafUuid?: string | null
+    /** Set when this call launched a new Claude process; a cached transcript marker is not enough. */
+    spawnToken?: string
+    minimumProviderSessionReceivedAt?: number
+  }): Promise<{ transcriptPath: string; leafUuid: string }> {
     const deadline = Date.now() + 15_000
     while (Date.now() < deadline) {
       const pty = this.getLivePtyForHandle(input.handle)?.pty
       if (!pty?.connected || pty.paneKey !== input.paneKey || pty.launchAgent !== 'claude') {
         throw new Error('The resumed Claude terminal lost its launch identity.')
       }
+      if (input.spawnToken) {
+        if (!this.hasProviderSessionObservationSource()) {
+          throw new Error('The Claude terminal could not prove its fresh provider session.')
+        }
+        const observedProviderRow = this.findAdoptedProviderSession(
+          input.paneKey,
+          'claude',
+          input.sessionId
+        )
+        if (
+          !observedProviderRow ||
+          observedProviderRow.launchToken !== input.spawnToken ||
+          (input.minimumProviderSessionReceivedAt !== undefined &&
+            observedProviderRow.receivedAt < input.minimumProviderSessionReceivedAt)
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 100))
+          continue
+        }
+      }
       const transcriptPath = await resolveSessionFilePath('claude', input.sessionId, {
         claudeProjectsDir: input.projectsDir
       })
       if (transcriptPath) {
-        return { transcriptPath }
+        if (!isPathWithinDirectory(input.projectsDir, transcriptPath)) {
+          throw new Error('The Claude terminal reported a transcript outside its account root.')
+        }
+        const leafUuid = await readClaudeTranscriptLeafUuid(transcriptPath)
+        if (!leafUuid) {
+          throw new Error('The Claude terminal did not prove its transcript leaf.')
+        }
+        if (input.expectedLeafUuid && leafUuid !== input.expectedLeafUuid) {
+          throw new Error('The Claude terminal resumed a different conversation leaf.')
+        }
+        return { transcriptPath, leafUuid }
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
@@ -11518,7 +11632,7 @@ export class OrcaRuntimeService {
     threadId: string
     codexHome: string
     durableOwner: { binding: AgentSessionOwnerBinding; incarnationId: string }
-  }): Promise<{ transcriptPath: string }> {
+  }): Promise<{ transcriptPath: string; leafUuid?: never }> {
     const assertDurableOwner = (): void => {
       const pty = this.getLivePtyForHandle(input.handle)?.pty
       if (
@@ -11576,7 +11690,10 @@ export class OrcaRuntimeService {
       tabId: string
       paneKey: string
       ptyId: string
+      agent?: 'claude' | 'codex'
+      providerSessionId?: string
       threadId?: string
+      providerTranscriptPath?: string
     },
     caller: StructuredAgentSessionCaller
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
@@ -11595,6 +11712,8 @@ export class OrcaRuntimeService {
     caller: StructuredAgentSessionCaller
   ): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
     const pty = this.ptysById.get(input.ptyId)
+    const provider = input.agent ?? (pty?.launchAgent === 'claude' ? 'claude' : 'codex')
+    const providerSessionId = input.providerSessionId ?? input.threadId
     if (
       !pty?.connected ||
       pty.connectionId !== null ||
@@ -11602,16 +11721,22 @@ export class OrcaRuntimeService {
       pty.tabId !== input.tabId ||
       pty.paneKey !== input.paneKey
     ) {
-      throw new Error('Structured Codex chat can only adopt this local terminal pane.')
+      throw new Error(`Structured ${provider} chat can only adopt this local terminal pane.`)
+    }
+    if (pty.launchAgent && pty.launchAgent !== provider) {
+      throw new Error(`Structured ${provider} chat cannot adopt a ${pty.launchAgent} terminal.`)
+    }
+    if (provider === 'claude' && !providerSessionId) {
+      throw new Error(`Structured ${provider} chat needs a provider session identity.`)
     }
     const target = await this.resolveRuntimeFileTarget(input.worktree)
     if (target.connectionId || target.worktree.id !== pty.worktreeId) {
-      throw new Error('Structured Codex chat is unavailable for remote terminals.')
+      throw new Error(`Structured ${provider} chat is unavailable for remote terminals.`)
     }
     const intent = await this.resolveStructuredAgentSessionAdoptionIntent({
       envelope: input.envelope,
       worktree: input.worktree,
-      agent: 'codex',
+      agent: provider,
       ptyId: input.ptyId
     })
     const listing = (await this.ptyController?.listProcesses?.())?.find(
@@ -11620,26 +11745,33 @@ export class OrcaRuntimeService {
         (!pty.incarnationId || candidate.incarnationId === pty.incarnationId)
     )
     if (!listing?.rootProcessId) {
-      throw new Error('Could not prove the Codex terminal process.')
+      throw new Error(`Could not prove the ${provider} terminal process.`)
     }
     const rootProcessId = listing.rootProcessId
     const sessionId = input.envelope.sessionId
     const priorBoundSessionId = agentSessionPtyWriteGate.boundSessionId(input.ptyId)
     if (priorBoundSessionId !== null && priorBoundSessionId !== sessionId) {
-      throw new Error('This terminal pane already belongs to another structured Codex session.')
+      const providerLabel = provider === 'codex' ? 'Codex' : 'Claude'
+      throw new Error(
+        `This terminal pane already belongs to another structured ${providerLabel} session.`
+      )
     }
     const host = getStructuredAgentSessionHost()
     if (!host) {
       throw new Error('structured_agent_session_unsupported')
     }
-    const launchArgs = this.resolveConfiguredCodexStructuredArgs()
+    if (!host.supportsCreate(intent.location, provider)) {
+      throw new Error(`Structured ${provider} handoff is not proven on this execution host.`)
+    }
+    const launchArgs =
+      provider === 'claude'
+        ? this.resolveConfiguredClaudeStructuredArgs()
+        : this.resolveConfiguredCodexStructuredArgs()
     const launchEnv = resolveTuiAgentLaunchEnv(
-      'codex',
+      provider,
       this.requireStore().getSettings().agentDefaultEnv
     )
-    // Why the reservation comes before the proof: `admitProof` authorizes the `/status` probe only
-    // for a reservation that already names this session, `tui`, and this spawn token. Reserving
-    // afterwards left the probe unauthorized, so every adoption failed at its first keystroke.
+    // Reserve before any proof so the write gate authorizes only this adoption attempt.
     const reserved = await host.reserveAdoptedTuiOwner({
       caller,
       sessionId,
@@ -11662,6 +11794,8 @@ export class OrcaRuntimeService {
     try {
       return await this.attachAdoptedStructuredTui({
         input,
+        provider,
+        providerSessionId,
         caller,
         host,
         intent,
@@ -11707,6 +11841,8 @@ export class OrcaRuntimeService {
 
   private async attachAdoptedStructuredTui(args: {
     input: Parameters<OrcaRuntimeService['adoptStructuredAgentSessionTerminal']>[0]
+    provider: 'claude' | 'codex'
+    providerSessionId?: string
     caller: StructuredAgentSessionCaller
     host: NonNullable<ReturnType<typeof getStructuredAgentSessionHost>>
     intent: AgentSessionAttachParams
@@ -11716,11 +11852,22 @@ export class OrcaRuntimeService {
     pty: RuntimePtyWorktreeRecord
     onOwnerProven: (owner: StructuredTuiOwner) => void
   }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
-    const { input, caller, host, intent, fence, spawnToken, rootProcessId, pty } = args
+    const {
+      input,
+      provider,
+      providerSessionId,
+      caller,
+      host,
+      intent,
+      fence,
+      spawnToken,
+      rootProcessId,
+      pty
+    } = args
     const readPty = (): RuntimePtyWorktreeRecord => {
       const current = this.ptysById.get(input.ptyId)
       if (!current?.connected || current.paneKey !== input.paneKey) {
-        throw new Error('The Codex terminal lost its pane identity.')
+        throw new Error(`The ${provider} terminal lost its pane identity.`)
       }
       return current
     }
@@ -11729,10 +11876,10 @@ export class OrcaRuntimeService {
         hostId: intent.location.executionHostId,
         rootPid: rootProcessId,
         spawnToken,
-        agent: 'codex'
+        agent: provider
       })
     const process = await readProcess()
-    let threadId = input.threadId
+    let threadId = input.threadId ?? input.providerSessionId
     const proofInput = {
       codexHome: intent.accountHome.path,
       kittyKeyboardFlags: this.providerModeTrackersByPtyId.get(input.ptyId)?.flags ?? 0,
@@ -11750,7 +11897,39 @@ export class OrcaRuntimeService {
         }) ?? false
     }
     let transcriptPath: string | undefined
-    if (threadId) {
+    let leafUuid: string | null = null
+    if (provider === 'claude') {
+      const observedProviderRow = this.findAdoptedProviderSession(
+        input.paneKey,
+        provider,
+        providerSessionId!
+      )
+      if (this.hasProviderSessionObservationSource() && !observedProviderRow) {
+        throw new Error('The Claude terminal did not publish its provider session identity.')
+      }
+      if (pty.launchToken && observedProviderRow?.launchToken !== pty.launchToken) {
+        throw new Error('The Claude terminal published a stale provider session identity.')
+      }
+      const observedProviderSession = observedProviderRow?.providerSession
+      const transcriptHint =
+        observedProviderSession?.transcriptPath ??
+        (!this.hasProviderSessionObservationSource() ? input.providerTranscriptPath : undefined)
+      transcriptPath =
+        (await resolveSessionFilePath('claude', providerSessionId!, {
+          claudeProjectsDir: join(intent.accountHome.path, 'projects'),
+          ...(transcriptHint ? { transcriptPath: transcriptHint } : {})
+        })) ?? undefined
+      if (!transcriptPath) {
+        throw new Error('The Claude terminal did not prove its transcript.')
+      }
+      if (!isPathWithinDirectory(join(intent.accountHome.path, 'projects'), transcriptPath)) {
+        throw new Error('The Claude terminal reported a transcript outside its account root.')
+      }
+      leafUuid = await readClaudeTranscriptLeafUuid(transcriptPath)
+      if (!leafUuid) {
+        throw new Error('The Claude terminal did not prove its transcript leaf.')
+      }
+    } else if (threadId) {
       const proof = await proveCodexTuiRollout({ ...proofInput, threadId })
       transcriptPath = proof.transcriptPath
     } else {
@@ -11765,7 +11944,7 @@ export class OrcaRuntimeService {
       confirmedProcess.pid !== process.pid ||
       confirmedProcess.processStartTimeMs !== process.processStartTimeMs
     ) {
-      throw new Error('The Codex terminal process changed during conversation proof.')
+      throw new Error(`The ${provider} terminal process changed during conversation proof.`)
     }
     const owner: StructuredTuiOwner = {
       terminal: {
@@ -11775,15 +11954,25 @@ export class OrcaRuntimeService {
         ptyId: input.ptyId
       },
       process,
-      link: codexProviderHandleLink({
-        threadId,
-        resumed: false,
-        origin: 'adopted',
-        // Why not 1: a retry supersedes the previous attempt's reservation, and `proveOwner`
-        // refuses a handle link minted at any fence but the reservation's own.
-        fence,
-        observedAt: Date.now()
-      }),
+      link:
+        provider === 'claude'
+          ? claudeProviderHandleLink({
+              sessionId: providerSessionId!,
+              leafUuid,
+              resumed: false,
+              origin: 'adopted',
+              fence,
+              observedAt: Date.now()
+            })
+          : codexProviderHandleLink({
+              threadId: threadId!,
+              resumed: false,
+              origin: 'adopted',
+              // Why not 1: a retry supersedes the previous attempt's reservation, and `proveOwner`
+              // refuses a handle link minted at any fence but the reservation's own.
+              fence,
+              observedAt: Date.now()
+            }),
       ...(transcriptPath ? { transcriptPath } : {}),
       historySource: 'provider-resume',
       adoptedTerminal: true
@@ -11797,17 +11986,23 @@ export class OrcaRuntimeService {
           sessionId: input.envelope.sessionId,
           fields: {
             location: intent.location,
-            provider: 'codex',
-            agent: 'codex',
+            provider,
+            agent: provider,
             accountHome: intent.accountHome,
             runtimeKind: 'tui',
-            providerHandle: { kind: 'codex', threadId },
+            providerHandle:
+              provider === 'claude'
+                ? { kind: 'claude', sessionId: providerSessionId!, leafUuid }
+                : { kind: 'codex', threadId: threadId! },
             expectedRuntimeFence: null
           }
         })
       },
       runtimeKind: 'tui',
-      providerHandle: { kind: 'codex', threadId }
+      providerHandle:
+        provider === 'claude'
+          ? { kind: 'claude', sessionId: providerSessionId!, leafUuid }
+          : { kind: 'codex', threadId: threadId! }
     }
     const adopted = await host.adoptTuiOwner({
       caller,
@@ -11819,6 +12014,29 @@ export class OrcaRuntimeService {
       args.onOwnerProven(owner)
     }
     return adopted
+  }
+
+  private hasProviderSessionObservationSource(): boolean {
+    return (
+      this.getAgentProviderSessionRowsForPaneFn !== null ||
+      this.getAgentProviderSessionSnapshotFn !== null
+    )
+  }
+
+  private findAdoptedProviderSession(
+    paneKey: string,
+    provider: 'claude' | 'codex',
+    providerSessionId: string
+  ): AgentStatusIpcPayload | undefined {
+    const rows =
+      this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ??
+      (this.getAgentProviderSessionSnapshotFn?.() ?? []).filter((row) => row.paneKey === paneKey)
+    return rows
+      .filter((row) => row.agentType === provider && row.providerSession?.id === providerSessionId)
+      .reduce<AgentStatusIpcPayload | undefined>(
+        (latest, row) => (!latest || row.receivedAt > latest.receivedAt ? row : latest),
+        undefined
+      )
   }
 
   private async resolveStructuredAgentSessionLocation(worktreeSelector: string) {
@@ -11865,21 +12083,23 @@ export class OrcaRuntimeService {
     })
   }
 
-  /**
-   * Why adoption resolves its own intent: the pane's Codex is already running under the
-   * CODEX_HOME it was spawned with, and only that home's sessions directory can hold its
-   * rollout. Following the create intent here probed the currently selected account instead,
-   * so adopting a pane on any other account failed with no hint that the account mismatched.
-   */
+  /** Adoption follows the pane's launch environment, not the currently selected account. */
   async resolveStructuredAgentSessionAdoptionIntent(input: {
     envelope: { sessionId: string; clientOperationId: string }
     worktree: string
-    agent: 'codex'
+    agent: 'claude' | 'codex'
     ptyId: string
   }): Promise<AgentSessionAttachParams> {
     return this.resolveStructuredAgentSessionIntent(input, () =>
-      this.resolveAdoptedCodexPaneHomePath(input.ptyId)
+      input.agent === 'claude'
+        ? this.resolveAdoptedClaudePaneHomePath(input.ptyId)
+        : this.resolveAdoptedCodexPaneHomePath(input.ptyId)
     )
+  }
+
+  private resolveAdoptedClaudePaneHomePath(ptyId: string): string {
+    const configured = this.ptysById.get(ptyId)?.launchConfig?.agentEnv.CLAUDE_CONFIG_DIR?.trim()
+    return configured || join(homedir(), '.claude')
   }
 
   private resolveAdoptedCodexPaneHomePath(ptyId: string): string {

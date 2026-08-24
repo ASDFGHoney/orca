@@ -287,12 +287,12 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     void (promptDeliveryCompletion ?? Promise.resolve())
       .catch(() => undefined)
       .then(async () => {
-        const ready = await waitForAgentReady(tab.id, TUI_AGENT_CONFIG.codex.expectedProcess)
+        const ready = await waitForAgentReady(tab.id, TUI_AGENT_CONFIG[agent].expectedProcess)
         if (!ready.ready) {
-          // Why: chat adoption proves the pane's foreground process. Flipping a tab whose Codex is
+          // Why: chat adoption proves the pane's foreground process. Flipping a tab whose agent is
           // not up yet trades a working terminal for an adoption error; the view toggle re-runs
           // adoption whenever the user wants it.
-          console.warn('Codex was not ready for structured chat; staying in terminal view', {
+          console.warn(`${agent} was not ready for structured chat; staying in terminal view`, {
             tabId: tab.id,
             reason: ready.reason
           })

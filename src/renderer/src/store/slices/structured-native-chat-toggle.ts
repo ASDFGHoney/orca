@@ -20,7 +20,7 @@ import type { AppState } from '../types'
 export type NativeChatRoute = 'structured' | 'bridge'
 
 export function nativeChatRouteForAgent(agent: AgentType | null): NativeChatRoute {
-  return agent === 'codex' ? 'structured' : 'bridge'
+  return agent === 'codex' || agent === 'claude' ? 'structured' : 'bridge'
 }
 
 export function nativeChatRouteForTerminal(input: {
@@ -66,12 +66,13 @@ function activeTerminalFacts(state: AppState, tab: Tab) {
     agent: agent ?? null,
     paneKey,
     ptyId: ptyId ?? null,
-    threadId: status?.providerSession?.id
+    threadId: status?.providerSession?.id,
+    providerTranscriptPath: status?.providerSession?.transcriptPath
   }
 }
 
-function adoptedSessionId(threadId: string): string {
-  return `codex_${threadId.replaceAll(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 128)
+function adoptedSessionId(agent: 'claude' | 'codex', providerSessionId: string): string {
+  return `${agent}_${providerSessionId.replaceAll(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 128)
 }
 
 function structuredSessionProviderMatches(sessionId: string, agent: AgentType | null): boolean {
@@ -93,14 +94,15 @@ async function currentFence(sessionId: string): Promise<number> {
   )
   const fence = history.ok ? history.page.fence : history.fence
   if (!fence) {
-    throw new Error('Structured Codex chat did not publish an ownership fence.')
+    throw new Error('Structured chat did not publish an ownership fence.')
   }
   return fence
 }
 
 async function waitForOwner(
   sessionId: string,
-  owner: 'native' | 'tui'
+  owner: 'native' | 'tui',
+  agent: 'claude' | 'codex'
 ): Promise<AgentSessionHandoffStatus> {
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const status = await callStructuredAgentSession<AgentSessionHandoffStatus>(
@@ -116,7 +118,7 @@ async function waitForOwner(
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  throw new Error('Codex ownership transfer did not finish.')
+  throw new Error(`${agent} ownership transfer did not finish.`)
 }
 
 async function requestHandoff(
@@ -204,22 +206,29 @@ export async function setTerminalNativeChatMode(input: {
   }
   pendingTabs.add(tab.id)
   try {
+    const provider = facts.agent === 'claude' ? 'claude' : 'codex'
     let sessionId = tab.structuredSessionId
     let fence: number
     if (!sessionId) {
       if (!facts.paneKey || !facts.ptyId) {
-        throw new Error('Codex has not published a resumable terminal pane yet.')
+        throw new Error(
+          `${provider === 'claude' ? 'Claude' : 'Codex'} has not published a resumable terminal pane yet.`
+        )
       }
       sessionId = facts.threadId
-        ? adoptedSessionId(facts.threadId)
-        : adoptedSessionId(`adopt-${crypto.randomUUID()}`)
+        ? adoptedSessionId(provider, facts.threadId)
+        : adoptedSessionId(provider, `adopt-${crypto.randomUUID()}`)
       const worktree = `id:${tab.worktreeId}`
       const fields = {
         worktree,
         tabId: tab.entityId,
         paneKey: facts.paneKey,
         ptyId: facts.ptyId,
-        ...(facts.threadId ? { threadId: facts.threadId } : {})
+        agent: provider,
+        ...(facts.threadId ? { providerSessionId: facts.threadId } : {}),
+        ...(facts.providerTranscriptPath
+          ? { providerTranscriptPath: facts.providerTranscriptPath }
+          : {})
       }
       const adopted = await callStructuredAgentSession<
         AgentSessionMutationResult<AgentSessionAttachResult>
@@ -255,22 +264,30 @@ export async function setTerminalNativeChatMode(input: {
       handoffOperationId,
       recoverableOperationId ? 'retry' : 'start'
     )
-    const status = await waitForOwner(sessionId, input.mode === 'chat' ? 'native' : 'tui')
+    const status = await waitForOwner(sessionId, input.mode === 'chat' ? 'native' : 'tui', provider)
     if (status.phase === 'failed') {
-      throw new Error(status.error?.message ?? 'Codex ownership transfer failed.')
+      throw new Error(
+        status.error?.message ??
+          `${facts.agent === 'claude' ? 'Claude' : 'Codex'} ownership transfer failed.`
+      )
     }
     input.patch(tab.id, { structuredSessionId: sessionId, viewMode: input.mode })
     return 'structured'
   } catch (error) {
+    const agentLabel = facts.agent === 'claude' ? 'Claude' : 'Codex'
     toast.error(
-      translate(
-        input.mode === 'chat'
-          ? 'components.native-chat.structuredAdoptionFailed'
-          : 'components.native-chat.structuredReturnToTerminalFailed',
-        input.mode === 'chat'
-          ? 'Could not switch this Codex session to structured chat'
-          : 'Could not return this Codex session to the terminal'
-      ),
+      facts.agent === 'claude'
+        ? input.mode === 'chat'
+          ? 'Could not switch this Claude session to structured chat'
+          : 'Could not return this Claude session to the terminal'
+        : translate(
+            input.mode === 'chat'
+              ? 'components.native-chat.structuredAdoptionFailed'
+              : 'components.native-chat.structuredReturnToTerminalFailed',
+            input.mode === 'chat'
+              ? `Could not switch this ${agentLabel} session to structured chat`
+              : `Could not return this ${agentLabel} session to the terminal`
+          ),
       { description: error instanceof Error ? error.message : String(error) }
     )
     return 'ignored'

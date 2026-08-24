@@ -81,7 +81,12 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
           tabId: params.tabId,
           paneKey: params.paneKey,
           ptyId: params.ptyId,
-          ...(params.threadId ? { threadId: params.threadId } : {})
+          ...(params.agent ? { agent: params.agent } : {}),
+          ...(params.threadId ? { threadId: params.threadId } : {}),
+          ...(params.providerSessionId ? { providerSessionId: params.providerSessionId } : {}),
+          ...(params.providerTranscriptPath
+            ? { providerTranscriptPath: params.providerTranscriptPath }
+            : {})
         }
       })
       const conflict = agentSessionFingerprintConflict(params.envelope, fingerprint)
