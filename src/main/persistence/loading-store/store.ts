@@ -3856,6 +3856,7 @@ export class Store {
     return {
       state: this.state,
       protectedSecrets: this.protectedSecrets,
+      scheduleSave: () => this.scheduleSave(),
       flushDurableStateOrThrowAsync: () => this.flushDurableStateOrThrowAsync()
     }
   }
@@ -3909,6 +3910,7 @@ export class Store {
           targetId,
           leases
         ),
+      scheduleSave: () => this.scheduleSave(),
       flush: () => this.flush(),
       flushDurableStateOrThrowAsync: () => this.flushDurableStateOrThrowAsync()
     }
