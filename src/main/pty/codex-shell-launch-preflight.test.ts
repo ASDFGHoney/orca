@@ -170,7 +170,8 @@ function runRemoteHookLaunch(shell: string, version: string, args = '', alias = 
         ...process.env,
         PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
         ORCA_AGENT_HOOK_PORT: '43117',
-        ORCA_AGENT_HOOK_TOKEN: 'token-1'
+        ORCA_AGENT_HOOK_TOKEN: 'token-1',
+        ORCA_PANE_KEY: 'tab-1:11111111-1111-4111-8111-111111111111'
       }
     }
   ).trim()
