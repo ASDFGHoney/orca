@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
+import type * as NodePerfHooks from 'node:perf_hooks'
 import { chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,12 +36,22 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     }
   }
 })
+vi.mock('node:perf_hooks', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodePerfHooks>()
+  return {
+    ...actual,
+    performance: {
+      ...actual.performance,
+      now: () => Date.now()
+    }
+  }
+})
 
 const POLL_MS = 25
-// Native re-arm is intentionally deferred to the 15-tick reconciliation. Give
-// loaded CI shards enough wall-clock slack without changing the exact call count.
-const RECONCILIATION_WAIT_TIMEOUT_MS = 30_000
-
+// Reconciliation runs every 15 poll ticks. Fake timers keep native re-arm tests
+// independent of host load while preserving the production interval.
+const RECONCILIATION_TICKS = 15
+// Advance multiple windows to cover the scheduler's staggered phase and async snapshot work.
 const alwaysVisible: WorktreePollerWindowVisibility = {
   isWindowVisible: () => true,
   onWindowBecameVisible: () => () => {}
@@ -514,90 +525,89 @@ describe('worktree git-common narrow watch (darwin)', () => {
   })
 
   it('re-arms the native stream when the root is replaced with the same child names', async () => {
-    installSubscribeMock()
-    const commonDir = await makeCommonDir(true)
-    const worktreesDir = join(commonDir, 'worktrees')
-    const retainedEntry = join(worktreesDir, 'same-child')
-    await mkdir(retainedEntry)
-    const received: WorktreeBasePollEvent[][] = []
-    await startWatch(commonDir, received)
-    const staleSubscription = childSubscriptions[0]
+    vi.useFakeTimers()
+    try {
+      installSubscribeMock()
+      const commonDir = await makeCommonDir(true)
+      const worktreesDir = join(commonDir, 'worktrees')
+      const retainedEntry = join(worktreesDir, 'same-child')
+      await mkdir(retainedEntry)
+      const received: WorktreeBasePollEvent[][] = []
+      await startWatch(commonDir, received)
+      const staleSubscription = childSubscriptions[0]
 
-    await rm(worktreesDir, { recursive: true })
-    await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(
-      () => {
-        expect(subscribeMock).toHaveBeenCalledTimes(2)
-      },
-      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
-    )
-    expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
+      await rm(worktreesDir, { recursive: true })
+      await mkdir(retainedEntry, { recursive: true })
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
 
-    const beforeStaleEvent = received.length
-    staleSubscription.callback(null, [{ type: 'update', path: retainedEntry }])
-    expect(received).toHaveLength(beforeStaleEvent)
+      const beforeStaleEvent = received.length
+      staleSubscription.callback(null, [{ type: 'update', path: retainedEntry }])
+      expect(received).toHaveLength(beforeStaleEvent)
 
-    const immediateEntry = join(worktreesDir, 'after-rearm')
-    childSubscriptions[1].callback(null, [{ type: 'create', path: immediateEntry }])
-    expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+      const immediateEntry = join(worktreesDir, 'after-rearm')
+      childSubscriptions[1].callback(null, [{ type: 'create', path: immediateEntry }])
+      expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+    } finally {
+      await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+      vi.useRealTimers()
+    }
   })
 
   it('disposes an in-flight stale resubscribe and fences its interruption hook', async () => {
-    const deferredSubscribe = Promise.withResolvers<{
-      unsubscribe: () => Promise<void>
-    }>()
-    subscribeMock.mockImplementation(async (dir, callback, _opts, hooks = {}) => {
-      const unsubscribe = vi.fn(async () => {})
-      childSubscriptions.push({ dir, callback, hooks, unsubscribe })
-      return childSubscriptions.length === 2 ? deferredSubscribe.promise : { unsubscribe }
-    })
-    const commonDir = await makeCommonDir(true)
-    const worktreesDir = join(commonDir, 'worktrees')
-    const retainedEntry = join(worktreesDir, 'same-child')
-    await mkdir(retainedEntry)
-    const received: WorktreeBasePollEvent[][] = []
-    const onWatchError = vi.fn()
-    await startWatch(commonDir, received, () => [], onWatchError)
+    vi.useFakeTimers()
+    try {
+      const deferredSubscribe = Promise.withResolvers<{
+        unsubscribe: () => Promise<void>
+      }>()
+      subscribeMock.mockImplementation(async (dir, callback, _opts, hooks = {}) => {
+        const unsubscribe = vi.fn(async () => {})
+        childSubscriptions.push({ dir, callback, hooks, unsubscribe })
+        return childSubscriptions.length === 2 ? deferredSubscribe.promise : { unsubscribe }
+      })
+      const commonDir = await makeCommonDir(true)
+      const worktreesDir = join(commonDir, 'worktrees')
+      const retainedEntry = join(worktreesDir, 'same-child')
+      await mkdir(retainedEntry)
+      const received: WorktreeBasePollEvent[][] = []
+      const onWatchError = vi.fn()
+      await startWatch(commonDir, received, () => [], onWatchError)
 
-    await rm(worktreesDir, { recursive: true })
-    await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(
-      () => {
-        expect(subscribeMock).toHaveBeenCalledTimes(2)
-      },
-      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
-    )
-    const stalePendingSubscription = childSubscriptions[1]
+      await rm(worktreesDir, { recursive: true })
+      await mkdir(retainedEntry, { recursive: true })
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      const stalePendingSubscription = childSubscriptions[1]
 
-    await rm(worktreesDir, { recursive: true })
-    await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(
-      () => {
-        expect(
-          received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
-        ).toHaveLength(2)
-      },
-      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
-    )
+      await rm(worktreesDir, { recursive: true })
+      await mkdir(retainedEntry, { recursive: true })
+      await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 3)
+      expect(
+        received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
+      ).toHaveLength(2)
 
-    const beforeStaleInterruption = received.length
-    stalePendingSubscription.hooks.onInterruption?.()
-    expect(received).toHaveLength(beforeStaleInterruption)
-    expect(onWatchError).not.toHaveBeenCalled()
+      const beforeStaleInterruption = received.length
+      stalePendingSubscription.hooks.onInterruption?.()
+      expect(received).toHaveLength(beforeStaleInterruption)
+      expect(onWatchError).not.toHaveBeenCalled()
 
-    deferredSubscribe.resolve({
-      unsubscribe: async () => {
-        await stalePendingSubscription.unsubscribe()
-      }
-    })
-    await vi.waitFor(() => {
+      deferredSubscribe.resolve({
+        unsubscribe: async () => {
+          await stalePendingSubscription.unsubscribe()
+        }
+      })
+      await vi.advanceTimersByTimeAsync(POLL_MS)
       expect(subscribeMock).toHaveBeenCalledTimes(3)
-    })
-    expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
+      expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
 
-    const immediateEntry = join(worktreesDir, 'current-generation')
-    childSubscriptions[2].callback(null, [{ type: 'create', path: immediateEntry }])
-    expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+      const immediateEntry = join(worktreesDir, 'current-generation')
+      childSubscriptions[2].callback(null, [{ type: 'create', path: immediateEntry }])
+      expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
+    } finally {
+      await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+      vi.useRealTimers()
+    }
   })
 
   it('stops forwarding events and unsubscribes the child on dispose', async () => {
