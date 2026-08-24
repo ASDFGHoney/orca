@@ -26,10 +26,17 @@ let container: HTMLDivElement | null = null
 
 // One row per bucket the retired tab partition used to hide behind a tab.
 const FLEET: WorkspaceCleanupFacets[] = [
-  makeNamedFacets('ready-one', { candidate: { tier: 'ready' }, sizeBytes: 4 * 1024 * 1024 }),
+  makeNamedFacets('ready-one', {
+    candidate: { tier: 'ready' },
+    sizeBytes: 4 * 1024 * 1024
+  }),
   makeNamedFacets('needs-review', { candidate: { tier: 'review' } }),
   makeNamedFacets('protected-one', {
-    candidate: { tier: 'protected', blockers: ['pinned'], selectedByDefault: false }
+    candidate: {
+      tier: 'protected',
+      blockers: ['pinned'],
+      selectedByDefault: false
+    }
   }),
   makeNamedFacets('ignored-one', { dismissed: true })
 ]
@@ -110,24 +117,17 @@ describe('workspace cleanup flat list', () => {
 
   it('switches the visible rows when filters are applied', () => {
     const filters = createDefaultWorkspaceCleanupFilterState()
-    filters.safety.tiers = ['ready']
     filters.safety.dismissed = 'exclude'
     renderRows(query(filters).rows)
-    expect(renderedNames()).toEqual(['ready-one'])
+    expect(renderedNames()).not.toContain('ignored-one')
 
-    filters.safety.tiers = []
     filters.safety.dismissed = 'only'
     renderRows(query(filters).rows)
     expect(renderedNames()).toEqual(['ignored-one'])
-
-    filters.safety.dismissed = 'any'
-    filters.safety.tiers = ['protected']
-    renderRows(query(filters).rows)
-    expect(renderedNames()).toEqual(['protected-one'])
   })
 
-  it('reports only the rows the user could actually queue for deletion', () => {
-    expect(query().selectableIdentities).not.toContain(
+  it('lets select-all include pinned label rows', () => {
+    expect(query().selectableIdentities).toContain(
       getWorkspaceCleanupHostIdentity('local', 'repo-1::/repo/protected-one')
     )
   })

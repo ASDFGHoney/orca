@@ -56,7 +56,7 @@ export async function buildWorkspaceCleanupCandidate(args: {
     : await readWorkspaceCleanupGitEvidence(worktree, repo, provider, signal)
   appendWorkspaceCleanupItems(blockers, gitEvidence.blockers)
 
-  const candidateWithoutFingerprint: WorkspaceCleanupCandidate = {
+  const candidateWithoutFingerprint = {
     worktreeId: worktree.id,
     repoId: repo.id,
     repoName: repo.displayName,
@@ -65,8 +65,6 @@ export async function buildWorkspaceCleanupCandidate(args: {
     displayName: worktree.displayName,
     branch: shortWorkspaceCleanupBranchName(worktree.branch),
     path: worktree.path,
-    tier: 'review',
-    selectedByDefault: false,
     reasons,
     blockers: uniqueWorkspaceCleanupBlockers(blockers),
     lastActivityAt: worktree.lastActivityAt,
@@ -110,8 +108,6 @@ export function buildWorkspaceCleanupCandidateFromError(
     displayName: worktree.displayName,
     branch: shortWorkspaceCleanupBranchName(worktree.branch),
     path: worktree.path,
-    tier: 'protected',
-    selectedByDefault: false,
     reasons: getWorkspaceCleanupInactivityReasonsForWorkspace(worktree, scannedAt),
     blockers: ['git-status-error'],
     lastActivityAt: worktree.lastActivityAt,
@@ -193,7 +189,7 @@ function shouldReadWorkspaceCleanupGitEvidence(args: {
     return false
   }
   if (
-    blockers.includes('pinned') ||
+    (blockers.includes('pinned') && !forceGitCheck) ||
     blockers.includes('main-worktree') ||
     blockers.includes('folder-repo')
   ) {
