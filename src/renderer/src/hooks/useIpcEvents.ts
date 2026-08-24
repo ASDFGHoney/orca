@@ -3454,11 +3454,15 @@ export function useIpcEvents(): void {
         data.restoredUnconfirmed === true
           ? { ...statusPayloadWithTurnBoundary, restoredUnconfirmed: true }
           : statusPayloadWithTurnBoundary
+      const statusPayloadWithDiagnostic =
+        data.reconcileDiagnostic !== undefined
+          ? { ...statusPayloadWithProvenance, reconcileDiagnostic: data.reconcileDiagnostic }
+          : statusPayloadWithProvenance
       // Why: main sequenced this row as the pane authority; carry its stamp rather than
       // minting a renderer one, which would claim a second authority for the same observation.
       const statusPayloadWithObservation = data.observation
-        ? { ...statusPayloadWithProvenance, observation: data.observation }
-        : statusPayloadWithProvenance
+        ? { ...statusPayloadWithDiagnostic, observation: data.observation }
+        : statusPayloadWithDiagnostic
       const identity = resolveAgentStatusIdentity({
         existing: existingStatus
           ? {

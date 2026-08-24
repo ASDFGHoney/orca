@@ -7,6 +7,8 @@
 //
 // NOTHING READS IT YET. It is stamped so consumers can be migrated one at a time.
 
+import type { AgentReconcileDiagnostic } from './agent-reconcile-diagnostic'
+
 /** Where the evidence for a status row came from — the ingress, not the transport.
  *  A hook event relayed over SSH is still `hook`; the relay is a carrier. */
 export const AGENT_STATUS_OBSERVATION_ORIGINS = [
@@ -60,7 +62,10 @@ export type AgentStatusObservation = {
  *  stamped carry none, so consumers must keep working without it. Deliberately NOT mixed into
  *  `AgentStatusPayload` — the ingress stamps it and it is never read back out of the reported
  *  body, so a hook or OSC writer cannot declare its own provenance. */
-export type WithAgentStatusObservation = { observation?: AgentStatusObservation }
+export type WithAgentStatusObservation = {
+  observation?: AgentStatusObservation
+  reconcileDiagnostic?: AgentReconcileDiagnostic | null
+}
 
 // ─── THE ORDERING RULE ──────────────────────────────────────────────────────
 // `(authorityId, incarnation, revision)` is a total order ONLY within one authorityId.

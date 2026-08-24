@@ -24,6 +24,7 @@ import {
   type AgentSubagentSnapshot,
   type ParsedAgentStatusPayload
 } from './agent-status-types'
+import type { AgentReconcileDiagnostic } from './agent-reconcile-diagnostic'
 import { normalizeOptionalField } from './agent-status-field-normalization'
 import { isAskUserQuestionTool } from './agent-question-answered-intent'
 import {
@@ -54,6 +55,7 @@ import {
   reconcileCodexSubagentTranscript,
   type CodexSubagentTranscriptState
 } from './codex-subagent-transcript'
+import { seedCodexSubagentTranscriptFromSnapshot } from './codex-subagent-transcript-seeding'
 import { ORCA_HOOK_PROTOCOL_VERSION } from './agent-hook-types'
 import { REMOTE_AGENT_HOOK_ENV, type AgentHookSource } from './agent-hook-relay'
 import {
@@ -363,6 +365,8 @@ export type AgentHookEventPayload = {
   providerSessionOnly?: boolean
   /** True when this event is a relay cache replay rather than a live hook. */
   isReplay?: boolean
+  /** Optional restart reconciliation diagnostic; never encoded as AgentStatusState. */
+  reconcileDiagnostic?: AgentReconcileDiagnostic | null
   /** Transport-only Claude background-work evidence used to reject false input-based interrupts. */
   claudeRunningNonAgentTask?: boolean
   payload: ParsedAgentStatusPayload
@@ -3638,7 +3642,8 @@ export function hasCodexTranscriptSubagents(state: HookListenerState, paneKey: s
 export function seedCodexStateFromSnapshot(
   state: HookListenerState,
   paneKey: string,
-  payload: Pick<ParsedAgentStatusPayload, 'model' | 'state' | 'subagents'>
+  payload: Pick<ParsedAgentStatusPayload, 'model' | 'state' | 'subagents'>,
+  transcriptPath?: string
 ): void {
   const snapshots = payload.subagents ?? []
   if (snapshots.length > 0 && !state.codexSubagentRosterByPaneKey.has(paneKey)) {
@@ -3657,6 +3662,15 @@ export function seedCodexStateFromSnapshot(
             : 'working',
       model: payload.model
     })
+  }
+  if (transcriptPath && snapshots.length > 0) {
+    const transcript = getOrCreateCodexSubagentTranscriptState(state, paneKey)
+    reconcileCodexSubagentTranscript(
+      transcript,
+      getOrCreateCodexSubagentRoster(state, paneKey),
+      transcriptPath
+    )
+    seedCodexSubagentTranscriptFromSnapshot(transcript, snapshots)
   }
 }
 
