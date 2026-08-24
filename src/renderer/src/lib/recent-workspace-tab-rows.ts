@@ -45,6 +45,7 @@ type RankedRow = {
   visitedAt: number | undefined
   focusOrdinal: number
   worktreeId: string
+  worktreeOrder: number
 }
 
 /** Classes 1 (blocked/waiting) and 2 (freshly done) are the rows that want the user. */
@@ -127,10 +128,8 @@ function compareRankedRows(a: RankedRow, b: RankedRow): number {
     }
     return b.visitedAt - a.visitedAt
   }
-  // Why: focusOrdinal is a per-worktree sequence, so comparing it across worktrees interleaves
-  // them arbitrarily. Keep input (positional) order instead.
-  if (a.worktreeId !== b.worktreeId) {
-    return 0
+  if (a.worktreeOrder !== b.worktreeOrder) {
+    return a.worktreeOrder - b.worktreeOrder
   }
   return b.focusOrdinal - a.focusOrdinal
 }
@@ -139,10 +138,16 @@ function compareRankedRows(a: RankedRow, b: RankedRow): number {
  * Rank rows into ids, most-wanted first:
  *   tier 1 — needs attention: class 1 (blocked/waiting) then 2 (fresh done), newest first
  *   tier 2 — everything else: worktree focus recency, then focused-group MRU
- * Full ties keep input order, which callers pass in positional (worktree/group/tab) order.
+ * Equal worktree tiers preserve first-seen worktree order, then use that worktree's MRU.
  */
 export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs): string[] {
   const { rows, paneSources, now, lastVisitedAtByWorktreeId, focusedGroupTabRecency } = inputs
+  const worktreeOrder = new Map<string, number>()
+  for (const row of rows) {
+    if (!worktreeOrder.has(row.worktreeId)) {
+      worktreeOrder.set(row.worktreeId, worktreeOrder.size)
+    }
+  }
   return rows
     .map((row): RankedRow => {
       const attention = resolveRecentWorkspaceTabAttention(row, paneSources, now)
@@ -153,6 +158,7 @@ export function orderRecentWorkspaceTabs(inputs: RecentWorkspaceTabOrderInputs):
         attentionTimestamp: attention.attentionTimestamp,
         visitedAt: lastVisitedAtByWorktreeId[row.worktreeId],
         worktreeId: row.worktreeId,
+        worktreeOrder: worktreeOrder.get(row.worktreeId) ?? Number.MAX_SAFE_INTEGER,
         focusOrdinal:
           row.unifiedTabId === null
             ? NO_FOCUS_ORDINAL

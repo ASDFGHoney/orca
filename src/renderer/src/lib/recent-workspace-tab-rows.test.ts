@@ -179,6 +179,24 @@ describe('orderRecentWorkspaceTabs', () => {
     ).toEqual(['alpha-2', 'alpha-1', 'beta-1'])
   })
 
+  it('keeps an interleaved worktree block together before applying its focused-group MRU', () => {
+    const rows = [
+      row('alpha-old', { worktreeId: 'wt-alpha', unifiedTabId: 'unified-alpha-old' }),
+      row('beta', { worktreeId: 'wt-beta', unifiedTabId: 'unified-beta' }),
+      row('alpha-new', { worktreeId: 'wt-alpha', unifiedTabId: 'unified-alpha-new' })
+    ]
+
+    expect(
+      order(rows, sources([]), {
+        focusedGroupTabRecency: new Map([
+          ['unified-alpha-old', 0],
+          ['unified-alpha-new', 1],
+          ['unified-beta', 0]
+        ])
+      })
+    ).toEqual(['alpha-new', 'alpha-old', 'beta'])
+  })
+
   it('keeps input (positional) order when nothing else separates two rows', () => {
     const rows = [row('a', { worktreeId: 'wt-1' }), row('b', { worktreeId: 'wt-1' })]
 
