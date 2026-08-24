@@ -161,6 +161,18 @@ describe('collectAgentTitleEvidence', () => {
     }
   )
 
+  it.each([
+    '~/codex',
+    '/grok',
+    '.\\openclaude',
+    'C:\\codex',
+    'C:/codex',
+    '~/Codex ready',
+    '.\\Cursor ready'
+  ])('does not treat the cwd path %s as identity', (title) => {
+    expect(agentFor(title)).toBeNull()
+  })
+
   it('does not duplicate an anchored token as free text', () => {
     expect(collectAgentTitleEvidence('Codex').freeTextNames).toEqual([])
     expect(collectAgentTitleEvidence('Claude Agent Teams').freeTextNames).toEqual([])

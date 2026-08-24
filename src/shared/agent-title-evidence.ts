@@ -147,10 +147,11 @@ function stripBareNameDecoration(text: string): string {
 }
 
 function agentForBareName(text: string): TuiAgent | null {
-  if (!text.trim()) {
+  const trimmed = text.trim()
+  if (!trimmed || /[\\/]/.test(trimmed)) {
     return null
   }
-  const stripped = stripBareNameDecoration(text)
+  const stripped = stripBareNameDecoration(trimmed)
   // Why labels too: an agent may write its own display name as the entire title (`⠐ Claude Code`).
   // That is the same claim as a bare token, just spelled the way the vendor spells it.
   const label = DISPLAY_LABELS.find(([text]) => text === stripped.toLowerCase())
@@ -170,10 +171,11 @@ function agentForOwnerSuffix(text: string): TuiAgent | null {
 }
 
 function agentForSyntheticTitle(text: string): TuiAgent | null {
-  const normalized = text
-    .trim()
-    .replace(/^[^\p{L}\p{N}]+/u, '')
-    .toLowerCase()
+  const trimmed = text.trim()
+  if (/[\\/]/.test(trimmed)) {
+    return null
+  }
+  const normalized = trimmed.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase()
   for (const agent of SYNTHETIC_AGENT_TITLE_AGENTS) {
     const profile = SYNTHETIC_AGENT_TITLE_PROFILES[agent]
     if (
