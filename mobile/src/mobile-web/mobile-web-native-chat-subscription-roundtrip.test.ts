@@ -5,10 +5,8 @@ import {
 } from '../../../src/shared/mobile-web/bridge-contract'
 import { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { RpcClient } from '../transport/rpc-client'
-import {
-  MOBILE_WEB_PRODUCTION_GRANTS,
-  MobileWebCapabilityBroker
-} from './mobile-web-capability-broker'
+import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
 
 const CONTEXT = {
   shellSessionId: 'S'.repeat(43),

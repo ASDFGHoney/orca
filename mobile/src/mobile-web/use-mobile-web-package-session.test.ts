@@ -56,10 +56,12 @@ const SESSION_B = {
 describe('useMobileWebPackageSession', () => {
   let renderer: ReactTestRenderer | null = null
   let packageSession: MobileWebPackageSession | null = null
+  let beforeSessionReplacement: (() => Promise<void>) | undefined
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
     packageSession = null
+    beforeSessionReplacement = undefined
     native.openSession.mockReset()
     native.recoverSession.mockReset()
     native.markSessionHealthy.mockReset().mockResolvedValue({ buildId: SESSION_A.buildId })
@@ -78,11 +80,18 @@ describe('useMobileWebPackageSession', () => {
     renderer = null
   })
 
-  function Harness({ state }: { state: ConnectionState }): null {
+  function Harness({
+    state,
+    host = HOST
+  }: {
+    state: ConnectionState
+    host?: HostProfile | null
+  }): null {
     packageSession = useMobileWebPackageSession({
       client: state === 'connected' ? CLIENT : null,
-      host: HOST,
-      state
+      host: host ?? undefined,
+      state,
+      beforeSessionReplacement
     })
     return null
   }
@@ -311,6 +320,59 @@ describe('useMobileWebPackageSession', () => {
     expect(packageSession?.session).toEqual(SESSION_A)
     expect(native.openSession).toHaveBeenCalledTimes(1)
     expect(packageSession?.packageLoading).toBe(false)
+  })
+
+  it('keeps the current session published until replacement is safe', async () => {
+    const safe = deferred<void>()
+    beforeSessionReplacement = () => safe.promise
+    native.openSession.mockImplementation((_host: string, buildId: string | null) =>
+      Promise.resolve(buildId ? SESSION_B : SESSION_A)
+    )
+    downloadPackage.mockResolvedValue({ commit: { buildId: SESSION_B.buildId } })
+
+    await mount('connected')
+
+    expect(packageSession?.session).toEqual(SESSION_A)
+    expect(native.openSession).toHaveBeenCalledWith(
+      HOST.publicKeyB64,
+      SESSION_B.buildId,
+      MOBILE_WEB_BRIDGE_PROTOCOL_VERSION
+    )
+    expect(native.closeSession).not.toHaveBeenCalledWith(SESSION_A.sessionId)
+
+    await act(async () => {
+      safe.resolve()
+      await safe.promise
+      await flushPromises()
+    })
+
+    expect(packageSession?.session).toEqual(SESSION_B)
+    expect(native.closeSession).toHaveBeenCalledWith(SESSION_A.sessionId)
+  })
+
+  it('rejects a replacement whose host becomes stale while activation waits', async () => {
+    const safe = deferred<void>()
+    beforeSessionReplacement = () => safe.promise
+    native.openSession.mockImplementation((_host: string, buildId: string | null) =>
+      Promise.resolve(buildId ? SESSION_B : SESSION_A)
+    )
+    downloadPackage.mockResolvedValue({ commit: { buildId: SESSION_B.buildId } })
+
+    await mount('connected')
+    expect(packageSession?.session).toEqual(SESSION_A)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { state: 'connected', host: null }))
+      await flushPromises()
+    })
+    await act(async () => {
+      safe.resolve()
+      await safe.promise
+      await flushPromises()
+    })
+
+    expect(packageSession?.session).toBeNull()
+    expect(native.closeSession).toHaveBeenCalledWith(SESSION_B.sessionId)
   })
 
   it('keeps the loading state while a first desktop refresh is active', async () => {

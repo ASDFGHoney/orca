@@ -41,6 +41,7 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
   client: RpcClient
   workspaceAuthority: MobileWebWorkspaceAuthority
   branchComparePager?: MobileWebSourceControlBranchComparePager
+  requestId?: string
 }): Promise<HistoryOperationResult> {
   if (args.operation === 'branches') {
     const payload = MobileWebSourceControlBranchesPayloadSchema.parse(args.payload)
@@ -70,7 +71,12 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
     if (!args.branchComparePager) {
       throw new MobileWebBrokerError('internal')
     }
-    return args.branchComparePager.page(args.payload, args.client, args.workspaceAuthority)
+    return args.branchComparePager.page(
+      args.payload,
+      args.client,
+      args.workspaceAuthority,
+      args.requestId
+    )
   }
 
   const payload = MobileWebSourceControlCommitComparePayloadSchema.parse(args.payload)

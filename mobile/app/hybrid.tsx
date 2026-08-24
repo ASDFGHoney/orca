@@ -8,12 +8,10 @@ import {
   type MobileWebBridgeShellMessage,
   type MobileWebResumeRoute
 } from '../../src/shared/mobile-web/bridge-contract'
-import {
-  MOBILE_WEB_PRODUCTION_GRANTS,
-  MobileWebCapabilityBroker
-} from '../src/mobile-web/mobile-web-capability-broker'
+import { MobileWebCapabilityBroker } from '../src/mobile-web/mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from '../src/mobile-web/mobile-web-production-grants'
 import { MobileWebHealthDeadline } from '../src/mobile-web/mobile-web-health-deadline'
-import { useMobileWebPackageSession } from '../src/mobile-web/use-mobile-web-package-session'
+import { useMobileWebAlertSafePackageSession } from '../src/mobile-web/use-mobile-web-alert-safe-package-session'
 import { createMobileWebNativeCapabilityAuthority } from '../src/mobile-web/mobile-web-native-capability-authority'
 import { MobileWebHybridShellPresentation } from '../src/mobile-web/MobileWebHybridShellPresentation'
 import { useMobileWebNavigationIntentHandoff } from '../src/mobile-web/use-mobile-web-navigation-intent-handoff'
@@ -85,7 +83,7 @@ export default function HybridScreen() {
     recoverPrevious,
     clearCache,
     showWarning
-  } = useMobileWebPackageSession({ client, host: selectedHost, state })
+  } = useMobileWebAlertSafePackageSession({ client, host: selectedHost, state })
   const bridgeRuntimeRef = useMobileWebBridgeRuntimeRef(client, state, session?.sessionId)
   const coldResumeRoute = useMobileWebColdResumeRoute({
     hosts,

@@ -231,6 +231,7 @@ export async function executeMobileWebCapabilityRequest(
       client: args.connectedClient(),
       workspaceAuthority: args.workspaceAuthority,
       branchComparePager: args.sourceControlBranchCompare,
+      requestId: request.requestId,
       terminalClientId: args.terminalClientId
     })
   }

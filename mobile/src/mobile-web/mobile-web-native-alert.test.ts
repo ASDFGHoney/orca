@@ -1,6 +1,9 @@
 import type { AlertButton, AlertOptions } from 'react-native'
 import { describe, expect, it, vi } from 'vitest'
-import { presentMobileWebNativeAlert } from './mobile-web-native-alert'
+import {
+  MobileWebNativeAlertLifecycle,
+  presentMobileWebNativeAlert
+} from './mobile-web-native-alert'
 
 vi.mock('react-native', () => ({ Alert: { alert: vi.fn() } }))
 
@@ -56,5 +59,38 @@ describe('mobile web native alert', () => {
 
     options?.onDismiss?.()
     await expect(result).resolves.toEqual({ kind: 'dismissed' })
+  })
+
+  it('serializes native alerts across broker lifecycles', async () => {
+    let buttons: AlertButton[] = []
+    let options: AlertOptions | undefined
+    const target = {
+      alert: vi.fn((_title, _message, nextButtons, nextOptions) => {
+        buttons = nextButtons ?? []
+        options = nextOptions
+      })
+    }
+    const lifecycle = new MobileWebNativeAlertLifecycle()
+    const first = lifecycle.present({ title: 'First', buttons: [{ text: 'OK' }] }, target)
+
+    await expect(
+      lifecycle.present({ title: 'Second', buttons: [{ text: 'OK' }] }, target)
+    ).rejects.toMatchObject({ code: 'rate_limited' })
+    let idle = false
+    const waiting = lifecycle.waitForIdle().then(() => {
+      idle = true
+    })
+    await Promise.resolve()
+    expect(idle).toBe(false)
+
+    buttons[0]?.onPress?.()
+    options?.onDismiss?.()
+    await expect(first).resolves.toEqual({ kind: 'button', buttonIndex: 0 })
+    await waiting
+    expect(idle).toBe(true)
+
+    const third = lifecycle.present({ title: 'Third', buttons: [{ text: 'OK' }] }, target)
+    options?.onDismiss?.()
+    await expect(third).resolves.toEqual({ kind: 'dismissed' })
   })
 })

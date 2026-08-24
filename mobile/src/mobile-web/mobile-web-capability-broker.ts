@@ -34,7 +34,6 @@ import {
 
 type PageRequest = Extract<MobileWebBridgePageMessage, { type: 'request' }>
 type PendingRequest = { operationKey: string; subscriptionId?: string; cancelled: boolean }
-export { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
 export class MobileWebCapabilityBroker {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly replay = new MobileWebBrokerReplayGuard()
@@ -218,6 +217,7 @@ export class MobileWebCapabilityBroker {
         await this.messages.error(request.requestId, code, isRetryableMobileWebBridgeError(code))
       }
     } finally {
+      this.authorities.sourceControlBranchCompare.releaseClaim(request.requestId)
       if (this.pending.get(request.requestId) === pending) {
         this.pending.delete(request.requestId)
       }

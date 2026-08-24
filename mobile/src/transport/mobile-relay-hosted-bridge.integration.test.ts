@@ -6,10 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import nacl from 'tweetnacl'
 import WebSocketClient, { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { connectMobileRelayRpcSession } from './mobile-relay-rpc-session'
-import {
-  MOBILE_WEB_PRODUCTION_GRANTS,
-  MobileWebCapabilityBroker
-} from '../mobile-web/mobile-web-capability-broker'
+import { MobileWebCapabilityBroker } from '../mobile-web/mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from '../mobile-web/mobile-web-production-grants'
 import {
   MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
   parseMobileWebBridgePageMessage,

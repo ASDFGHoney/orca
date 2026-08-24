@@ -49,7 +49,7 @@ import {
 } from '../components/codex-reset-credit'
 import { readCodexResetCreditCapability } from '../components/codex-reset-credit-capability'
 import type { RpcClient } from '../transport/rpc-client'
-import { presentMobileWebNativeAlert } from './mobile-web-native-alert'
+import { mobileWebNativeAlertLifecycle } from './mobile-web-native-alert'
 
 type MobileWebNativeDraftScope = {
   hostIdentity: string
@@ -98,10 +98,13 @@ export type MobileWebNativeCapabilityAuthority = {
 }
 
 export function createMobileWebNativeCapabilityAuthority(
-  draftScope: MobileWebNativeDraftScope
+  draftScope: MobileWebNativeDraftScope,
+  alert: NonNullable<
+    MobileWebNativeCapabilityAuthority['alert']
+  > = mobileWebNativeAlertLifecycle.present
 ): MobileWebNativeCapabilityAuthority {
   return {
-    alert: presentMobileWebNativeAlert,
+    alert,
     hapticFeedback(kind) {
       if (kind === 'selection') {
         triggerSelection()

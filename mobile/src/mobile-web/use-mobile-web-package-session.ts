@@ -17,32 +17,23 @@ import {
 import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
 import { useMobileWebPackageCapability } from './use-mobile-web-package-capability'
 import { useMobileWebPackageRecovery } from './use-mobile-web-package-recovery'
+import type { MobileWebPackageSession } from './mobile-web-package-session-state'
+
+export type { MobileWebPackageSession } from './mobile-web-package-session-state'
 
 const MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING =
   'Update Orca on this desktop to use its workspace interface.'
 
-export type MobileWebPackageSession = {
-  session: MobileWebShellSession | null
-  viewEpoch: number
-  packageLoading: boolean
-  packageWarning: string | undefined
-  markHealthy: (sessionId: string) => Promise<void>
-  handleHealthTimeout: (sessionId: string) => Promise<void>
-  handleProcessTerminated: (sessionId: string) => Promise<void>
-  retryPackage: () => void
-  recoverPrevious: () => Promise<void>
-  clearCache: () => Promise<void>
-  showWarning: (warning: string) => void
-}
-
 export function useMobileWebPackageSession({
   client,
   host,
-  state
+  state,
+  beforeSessionReplacement
 }: {
   client: RpcClient | null
   host: HostProfile | undefined
   state: ConnectionState
+  beforeSessionReplacement?: () => Promise<void>
 }): MobileWebPackageSession {
   const hostEpochRef = useRef(0)
   const activeHostIdRef = useRef<string | null>(null)
@@ -79,6 +70,13 @@ export function useMobileWebPackageSession({
         return false
       }
       const previous = ownedSessionRef.current
+      if (previous && previous.sessionId !== next.sessionId) {
+        await beforeSessionReplacement?.()
+        if (hostEpochRef.current !== hostEpoch) {
+          await ExpoMobileWebShell.closeSession(next.sessionId).catch(() => {})
+          return false
+        }
+      }
       ownedSessionRef.current = next
       setSession(next)
       setViewEpoch(0)
@@ -94,7 +92,7 @@ export function useMobileWebPackageSession({
       }
       return true
     },
-    []
+    [beforeSessionReplacement]
   )
 
   useEffect(() => {

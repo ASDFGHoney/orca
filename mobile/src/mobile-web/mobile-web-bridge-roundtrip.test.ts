@@ -4,7 +4,7 @@ import {
   parseMobileWebBridgeShellMessage
 } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-capability-broker'
+import { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
 import { createMobileWebBridgeRoundtripFixture } from './mobile-web-bridge-roundtrip-fixture'
 
 const CONTEXT = {

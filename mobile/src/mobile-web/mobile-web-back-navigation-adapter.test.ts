@@ -117,6 +117,28 @@ describe('mobile web BackHandler adapter', () => {
     expect(harness.target.location.href).toBe('https://orca.test/files')
     expect(handler).not.toHaveBeenCalled()
   })
+
+  it('tracks rapid delayed Back traversals independently', () => {
+    vi.useFakeTimers()
+    const harness = navigationHarness(500)
+    const backHandler = backHandlerTarget()
+    installMobileWebBackNavigationAdapter(backHandler, harness.target)
+    harness.target.history.pushState({}, '', '/files')
+    harness.target.history.pushState({}, '', '/preview')
+    harness.target.history.pushState({}, '', '/detail')
+    const handler = vi.fn(() => {
+      harness.target.history.back()
+      return true
+    })
+    backHandler.addEventListener('hardwareBackPress', handler)
+
+    expect(dispatchMobileWebBackNavigation(harness.target)).toBe(true)
+    expect(dispatchMobileWebBackNavigation(harness.target)).toBe(true)
+    vi.advanceTimersByTime(500)
+
+    expect(handler).toHaveBeenCalledTimes(2)
+    expect(harness.target.location.href).toBe('https://orca.test/files')
+  })
 })
 
 function backHandlerTarget() {

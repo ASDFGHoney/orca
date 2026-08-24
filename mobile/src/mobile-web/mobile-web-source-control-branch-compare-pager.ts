@@ -3,6 +3,8 @@ import {
   type MobileWebSourceControlBranchComparePayload,
   type MobileWebSourceControlBranchCompareResult
 } from '../../../src/shared/mobile-web/source-control-history-contract'
+import { sha256 } from '@noble/hashes/sha256'
+import { Buffer } from 'buffer/'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { mobileWebEncodedByteLength } from './mobile-web-request-accounting'
@@ -10,6 +12,8 @@ import { sanitizeMobileWebBranchCompare } from './mobile-web-source-control-hist
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
 
 const HOST_RESULT_MAX_BYTES = 8 * 1024 * 1024
+const MAX_RETAINED_CONTINUATIONS = 8
+const DIRECT_REQUEST_ID = 'direct'
 
 type Continuation = {
   workspaceId: string
@@ -20,77 +24,83 @@ type Continuation = {
 }
 
 export class MobileWebSourceControlBranchComparePager {
-  private continuation: Continuation | null = null
-  private claimed: Continuation | null = null
-  private active = false
+  private readonly continuations: Continuation[] = []
+  private readonly claimed = new Map<string, Continuation>()
+  private sequence = 0
 
   claimRequestContinuation(request: {
+    requestId: string
     capability: string
     operation: string
     payload: unknown
   }): boolean {
-    this.claimed = null
     return (
       request.capability === 'sourceControl' &&
       request.operation === 'branchCompare' &&
-      this.claimContinuation(request.payload)
+      this.claimContinuation(request.payload, request.requestId)
     )
   }
 
-  claimContinuation(payloadValue: unknown): boolean {
+  claimContinuation(payloadValue: unknown, requestId = DIRECT_REQUEST_ID): boolean {
     const parsed = MobileWebSourceControlBranchComparePayloadSchema.safeParse(payloadValue)
-    const continuation = this.continuation
-    if (!parsed.success || !parsed.data.expectedRevision || !continuation) {
+    if (!parsed.success || !parsed.data.expectedRevision || this.claimed.has(requestId)) {
       return false
     }
     const payload = parsed.data
-    if (
-      continuation.workspaceId !== payload.workspaceId ||
-      continuation.baseRef !== payload.baseRef ||
-      continuation.revision !== payload.expectedRevision ||
-      continuation.nextOffset !== payload.offset
-    ) {
+    const index = this.continuations.findIndex((continuation) =>
+      matchesContinuation(continuation, payload)
+    )
+    if (index === -1) {
       return false
     }
-    this.continuation = null
-    this.claimed = continuation
+    const [continuation] = this.continuations.splice(index, 1)
+    if (!continuation) {
+      return false
+    }
+    this.claimed.set(requestId, continuation)
     return true
   }
 
   async page(
     payloadValue: unknown,
     client: RpcClient,
-    workspaceAuthority: MobileWebWorkspaceAuthority
+    workspaceAuthority: MobileWebWorkspaceAuthority,
+    requestId = DIRECT_REQUEST_ID
   ): Promise<MobileWebSourceControlBranchCompareResult> {
-    if (this.active) {
-      throw new MobileWebBrokerError('rate_limited')
-    }
-    this.active = true
     try {
       const payload = MobileWebSourceControlBranchComparePayloadSchema.parse(payloadValue)
-      const hostResult = payload.expectedRevision
-        ? this.consumeClaim(payload)
+      const continuation = payload.expectedRevision ? this.consumeClaim(payload, requestId) : null
+      const hostResult = continuation
+        ? continuation.hostResult
         : await this.begin(payload, client, workspaceAuthority)
-      const page = sanitizeMobileWebBranchCompare(hostResult, payload)
+      const sanitized = sanitizeMobileWebBranchCompare(
+        hostResult,
+        continuation ? { ...payload, expectedRevision: undefined } : payload
+      )
+      const revision = continuation?.revision ?? this.createRevision(sanitized.revision, requestId)
+      const page = { ...sanitized, revision }
       if (page.nextOffset !== null) {
-        this.continuation = {
+        this.retain({
           workspaceId: payload.workspaceId,
           baseRef: payload.baseRef,
           revision: page.revision,
           nextOffset: page.nextOffset,
           hostResult
-        }
+        })
       }
       return page
     } finally {
-      this.active = false
-      this.claimed = null
+      this.claimed.delete(requestId)
     }
   }
 
   clear(): void {
-    this.continuation = null
-    this.claimed = null
+    this.continuations.length = 0
+    this.claimed.clear()
+  }
+
+  releaseClaim(requestId: string): void {
+    this.claimed.delete(requestId)
   }
 
   private async begin(
@@ -98,7 +108,6 @@ export class MobileWebSourceControlBranchComparePager {
     client: RpcClient,
     workspaceAuthority: MobileWebWorkspaceAuthority
   ): Promise<unknown> {
-    this.clear()
     if (payload.offset !== 0) {
       throw new MobileWebBrokerError('invalid_request')
     }
@@ -116,8 +125,11 @@ export class MobileWebSourceControlBranchComparePager {
     return response.result
   }
 
-  private consumeClaim(payload: MobileWebSourceControlBranchComparePayload): unknown {
-    const continuation = this.claimed
+  private consumeClaim(
+    payload: MobileWebSourceControlBranchComparePayload,
+    requestId: string
+  ): Continuation {
+    const continuation = this.claimed.get(requestId)
     if (!continuation) {
       throw new MobileWebBrokerError('invalid_request')
     }
@@ -131,6 +143,31 @@ export class MobileWebSourceControlBranchComparePager {
     ) {
       throw new MobileWebBrokerError('invalid_request')
     }
-    return continuation.hostResult
+    return continuation
   }
+
+  private retain(continuation: Continuation): void {
+    if (this.continuations.length >= MAX_RETAINED_CONTINUATIONS) {
+      this.continuations.shift()
+    }
+    this.continuations.push(continuation)
+  }
+
+  private createRevision(contentRevision: string, requestId: string): string {
+    this.sequence += 1
+    const content = new TextEncoder().encode(`${contentRevision}:${requestId}:${this.sequence}`)
+    return Buffer.from(sha256(content)).toString('hex')
+  }
+}
+
+function matchesContinuation(
+  continuation: Continuation,
+  payload: MobileWebSourceControlBranchComparePayload
+): boolean {
+  return (
+    continuation.workspaceId === payload.workspaceId &&
+    continuation.baseRef === payload.baseRef &&
+    continuation.revision === payload.expectedRevision &&
+    continuation.nextOffset === payload.offset
+  )
 }

@@ -61,6 +61,7 @@ export async function executeMobileWebSourceControlOperation(args: {
   client: RpcClient
   workspaceAuthority: MobileWebWorkspaceAuthority
   branchComparePager?: MobileWebSourceControlBranchComparePager
+  requestId?: string
   terminalClientId?: string
 }): Promise<
   | MobileWebSourceControlStatusResult
@@ -96,7 +97,8 @@ export async function executeMobileWebSourceControlOperation(args: {
       payload: args.payload,
       client: args.client,
       workspaceAuthority: args.workspaceAuthority,
-      branchComparePager: args.branchComparePager
+      branchComparePager: args.branchComparePager,
+      requestId: args.requestId
     })
   }
   if (args.operation === 'status') {

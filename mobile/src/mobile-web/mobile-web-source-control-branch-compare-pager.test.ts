@@ -12,6 +12,21 @@ const OID_A = 'a'.repeat(40)
 const OID_B = 'b'.repeat(40)
 
 describe('mobile web source-control branch-compare pager', () => {
+  it('creates continuation identities without a Node global Buffer', async () => {
+    const originalBuffer = globalThis.Buffer
+    vi.stubGlobal('Buffer', undefined)
+    try {
+      const pager = new MobileWebSourceControlBranchComparePager()
+      const client = compareClient(MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT + 1)
+
+      await expect(pager.page(firstPayload(), client, workspaceAuthority)).resolves.toMatchObject({
+        nextOffset: MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT
+      })
+    } finally {
+      vi.stubGlobal('Buffer', originalBuffer)
+    }
+  })
+
   it('uses one host snapshot across single-use continuation claims', async () => {
     const pager = new MobileWebSourceControlBranchComparePager()
     const client = compareClient(MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT + 1)
@@ -46,22 +61,61 @@ describe('mobile web source-control branch-compare pager', () => {
     })
     expect(client.sendRequest).toHaveBeenCalledOnce()
   })
+
+  it('keeps two identical comparison sequences independently claimable', async () => {
+    const pager = new MobileWebSourceControlBranchComparePager()
+    const client = compareClient(MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT + 1)
+    const [first, second] = await Promise.all([
+      pager.page(firstPayload(), client, workspaceAuthority),
+      pager.page(firstPayload(), client, workspaceAuthority)
+    ])
+    const firstContinuation = continuationPayload(first)
+    const secondContinuation = continuationPayload(second)
+
+    expect(pager.claimContinuation(firstContinuation, 'request-a')).toBe(true)
+    expect(pager.claimContinuation(secondContinuation, 'request-b')).toBe(true)
+    await expect(
+      Promise.all([
+        pager.page(firstContinuation, client, workspaceAuthority, 'request-a'),
+        pager.page(secondContinuation, client, workspaceAuthority, 'request-b')
+      ])
+    ).resolves.toEqual([
+      expect.objectContaining({ nextOffset: null }),
+      expect.objectContaining({ nextOffset: null })
+    ])
+    expect(client.sendRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let one comparison identity revoke another', async () => {
+    const pager = new MobileWebSourceControlBranchComparePager()
+    const client = compareClient(MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT + 1)
+    const first = await pager.page(firstPayload('main'), client, workspaceAuthority)
+    const second = await pager.page(firstPayload('release'), client, workspaceAuthority)
+    const firstContinuation = continuationPayload(first, 'main')
+    const secondContinuation = continuationPayload(second, 'release')
+
+    expect(pager.claimContinuation(firstContinuation, 'request-a')).toBe(true)
+    expect(pager.claimContinuation(secondContinuation, 'request-b')).toBe(true)
+  })
 })
 
-function firstPayload(): MobileWebSourceControlBranchComparePayload {
-  return { workspaceId: 'workspace-1', baseRef: 'main', offset: 0, limit: 128 }
+function firstPayload(baseRef = 'main'): MobileWebSourceControlBranchComparePayload {
+  return { workspaceId: 'workspace-1', baseRef, offset: 0, limit: 128 }
 }
 
-function continuationPayload(first: {
-  nextOffset: number | null
-  revision: string
-}): MobileWebSourceControlBranchComparePayload {
+function continuationPayload(
+  first: {
+    nextOffset: number | null
+    revision: string
+  },
+  baseRef = 'main'
+): MobileWebSourceControlBranchComparePayload {
   if (first.nextOffset === null) {
     throw new Error('Expected a continuation')
   }
   return {
     workspaceId: 'workspace-1',
-    baseRef: 'main',
+    baseRef,
     offset: first.nextOffset,
     limit: 128,
     expectedRevision: first.revision

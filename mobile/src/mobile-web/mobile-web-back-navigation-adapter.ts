@@ -21,7 +21,13 @@ type MobileWebNavigationTarget = {
 
 const HISTORY_INDEX_KEY = '__orcaMobileWebBackIndex'
 const PROGRAMMATIC_TRAVERSAL_TIMEOUT_MS = 5_000
+const MAX_EXPECTED_TRAVERSALS = 32
 const installedHistories = new WeakMap<object, () => boolean>()
+
+type ExpectedTraversal = {
+  targetIndex: number
+  timeout: ReturnType<typeof setTimeout>
+}
 
 export function installMobileWebBackNavigationAdapter(
   backHandler: MobileWebBackHandlerTarget = BackHandler,
@@ -40,19 +46,27 @@ export function installMobileWebBackNavigationAdapter(
   const originalForward = history.forward.bind(history)
   let currentIndex = historyIndex(history.state) ?? 0
   let maximumIndex = currentIndex
-  let expectedProgrammaticIndex: number | null = null
-  let programmaticReset: ReturnType<typeof setTimeout> | undefined
+  const expectedTraversals: ExpectedTraversal[] = []
   let restoringFromIndex: number | null = null
 
   originalReplaceState(indexedHistoryState(history.state, currentIndex), '', undefined)
 
   const markProgrammatic = (targetIndex: number): void => {
-    expectedProgrammaticIndex = targetIndex
-    clearTimeout(programmaticReset)
-    programmaticReset = setTimeout(() => {
-      expectedProgrammaticIndex = null
-    }, PROGRAMMATIC_TRAVERSAL_TIMEOUT_MS)
+    if (expectedTraversals.length === MAX_EXPECTED_TRAVERSALS) {
+      clearTimeout(expectedTraversals.shift()?.timeout)
+    }
+    const expected: ExpectedTraversal = {
+      targetIndex,
+      timeout: setTimeout(() => {
+        const index = expectedTraversals.indexOf(expected)
+        if (index !== -1) {
+          expectedTraversals.splice(index, 1)
+        }
+      }, PROGRAMMATIC_TRAVERSAL_TIMEOUT_MS)
+    }
+    expectedTraversals.push(expected)
   }
+  const projectedIndex = (): number => expectedTraversals.at(-1)?.targetIndex ?? currentIndex
   history.pushState = (data, unused, url) => {
     currentIndex += 1
     maximumIndex = currentIndex
@@ -62,21 +76,24 @@ export function installMobileWebBackNavigationAdapter(
     originalReplaceState(indexedHistoryState(data, currentIndex), unused, url)
   }
   history.go = (delta = 0) => {
-    const targetIndex = Math.max(0, Math.min(maximumIndex, currentIndex + delta))
-    if (targetIndex !== currentIndex) {
+    const fromIndex = projectedIndex()
+    const targetIndex = Math.max(0, Math.min(maximumIndex, fromIndex + delta))
+    if (targetIndex !== fromIndex) {
       markProgrammatic(targetIndex)
     }
     originalGo(delta)
   }
   history.back = () => {
-    if (currentIndex > 0) {
-      markProgrammatic(currentIndex - 1)
+    const fromIndex = projectedIndex()
+    if (fromIndex > 0) {
+      markProgrammatic(fromIndex - 1)
     }
     originalBack()
   }
   history.forward = () => {
-    if (currentIndex < maximumIndex) {
-      markProgrammatic(currentIndex + 1)
+    const fromIndex = projectedIndex()
+    if (fromIndex < maximumIndex) {
+      markProgrammatic(fromIndex + 1)
     }
     originalForward()
   }
@@ -114,9 +131,12 @@ export function installMobileWebBackNavigationAdapter(
     }
 
     const direction = Math.sign(nextIndex - currentIndex)
-    if (nextIndex === expectedProgrammaticIndex) {
-      expectedProgrammaticIndex = null
-      clearTimeout(programmaticReset)
+    const expectedIndex = expectedTraversals.findIndex(
+      (expected) => expected.targetIndex === nextIndex
+    )
+    if (expectedIndex !== -1) {
+      const consumed = expectedTraversals.splice(0, expectedIndex + 1)
+      consumed.forEach((expected) => clearTimeout(expected.timeout))
       currentIndex = nextIndex
       return
     }
