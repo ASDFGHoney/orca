@@ -420,8 +420,10 @@
   stroke: var(--color-yellow-500);
 }
 
+/* Why: static turquoise, distinct from working-yellow — the turn is over but
+   background work is still registered. Same token as the sidebar/dashboard dot. */
 .fleet-status-monitoring .agent-map-agent-mark {
-  stroke: var(--color-yellow-500);
+  stroke: var(--agent-monitoring);
 }
 
 .fleet-status-blocked .agent-map-agent-mark {

@@ -136,7 +136,7 @@ describe('palette live status', () => {
     await render()
 
     expect(testContainer.querySelector('[data-spinner]')).toBeNull()
-    expect(testContainer.querySelector('.lucide-radio')?.classList).toContain('text-yellow-500')
+    expect(testContainer.querySelector('.bg-agent-monitoring')).not.toBeNull()
     expect(dotLabels()).toEqual(['Monitoring background tasks'])
   })
 
@@ -276,7 +276,7 @@ describe('palette live status', () => {
     })
 
     expect(testContainer.querySelector('[data-spinner]')).toBeNull()
-    expect(testContainer.querySelector('.lucide-radio')?.classList).toContain('text-yellow-500')
+    expect(testContainer.querySelector('.bg-agent-monitoring')).not.toBeNull()
     expect(dotLabels()).toEqual(['Monitoring background tasks'])
     expect(testContainer.querySelector('[title="Monitoring background tasks"]')).not.toBeNull()
   })

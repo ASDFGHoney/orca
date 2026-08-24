@@ -1,5 +1,4 @@
 import React from 'react'
-import { Radio } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentQuestionIcon } from '@/components/AgentQuestionIcon'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
@@ -41,18 +40,6 @@ const StatusIndicator = React.memo(function StatusIndicator({
     )
   }
 
-  if (status === 'monitoring') {
-    return (
-      <span
-        className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
-        title={resolvedTitle}
-        {...rest}
-      >
-        <Radio className="size-3 text-yellow-500" aria-hidden="true" />
-      </span>
-    )
-  }
-
   if (status === 'permission') {
     return (
       <span
@@ -79,7 +66,11 @@ const StatusIndicator = React.memo(function StatusIndicator({
               // 'active' (terminal open, quiet). Working uses a yellow
               // ring above; 'inactive' stays grey.
               'bg-emerald-500'
-            : 'bg-neutral-500/40'
+            : // Why: static turquoise — the lead turn ended, but background work
+              // is still registered, so this is neither working nor done.
+              status === 'monitoring'
+              ? 'bg-agent-monitoring'
+              : 'bg-neutral-500/40'
         )}
       />
     </span>

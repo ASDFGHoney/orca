@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { Radio } from 'lucide-react-native'
 import { Animated, Easing, StyleSheet, View } from 'react-native'
 import type { AgentDotState } from '../worktree/agent-row-display'
 
@@ -8,8 +7,10 @@ import type { AgentDotState } from '../worktree/agent-row-display'
 // emerald for 'done', red for blocked/waiting/interrupted (attention), neutral
 // for idle. Distinct from the worktree-level AgentSpinner, which collapses the
 // agent vocabulary into the 5-state rollup the sidebar dot uses.
-const DOT_COLORS: Record<Exclude<AgentDotState, 'working' | 'monitoring'>, string> = {
+const DOT_COLORS: Record<Exclude<AgentDotState, 'working'>, string> = {
   done: '#10b981',
+  // Keep in step with --agent-monitoring in the desktop main.css.
+  monitoring: '#8abeb7',
   blocked: '#ef4444',
   waiting: '#ef4444',
   interrupted: '#ef4444',
@@ -46,16 +47,11 @@ export function AgentStateDot({ state }: { state: AgentDotState }) {
     )
   }
 
-  if (state === 'monitoring') {
-    return (
-      <View style={styles.wrapper} accessibilityLabel="Monitoring background tasks">
-        <Radio size={10} color={WORKING_COLOR} />
-      </View>
-    )
-  }
-
   return (
-    <View style={styles.wrapper}>
+    <View
+      style={styles.wrapper}
+      accessibilityLabel={state === 'monitoring' ? 'Monitoring background tasks' : undefined}
+    >
       <View style={[styles.dot, { backgroundColor: DOT_COLORS[state] }]} />
     </View>
   )

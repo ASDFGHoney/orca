@@ -4,13 +4,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSpinner } from './AgentSpinner'
 import { AgentStateDot } from './AgentStateDot'
 
-const DESKTOP_WORKING_COLOR = '#eab308'
+// Why: pinned to --agent-monitoring in the desktop main.css. Mobile has no CSS
+// tokens, so this literal is the only thing keeping the two surfaces in step.
+const DESKTOP_MONITORING_COLOR = '#8abeb7'
+const DESKTOP_DONE_COLOR = '#10b981'
 
 type MonitoringTestRenderer = {
   readonly root: {
-    findByType(type: string): { props: Record<string, unknown> }
+    findAllByType(type: string): { props: Record<string, unknown> }[]
   }
   unmount(): void
+}
+
+/** Background colour of the inner dot (the wrapper View is index 0). */
+function dotColor(renderer: MonitoringTestRenderer | null): string | undefined {
+  const inner = renderer?.root.findAllByType('View')[1]
+  const style = inner?.props.style
+  const layers = Array.isArray(style) ? style : [style]
+  for (const layer of layers) {
+    const color = (layer as { backgroundColor?: string } | undefined)?.backgroundColor
+    if (typeof color === 'string') {
+      return color
+    }
+  }
+  return undefined
 }
 
 const { animationLoop, animationTiming, setValue } = vi.hoisted(() => ({
@@ -19,7 +36,6 @@ const { animationLoop, animationTiming, setValue } = vi.hoisted(() => ({
   setValue: vi.fn()
 }))
 
-vi.mock('lucide-react-native', () => ({ Radio: 'Radio' }))
 vi.mock('react-native', () => ({
   Animated: {
     Value: function Value() {
@@ -48,30 +64,33 @@ describe('mobile monitoring indicators', () => {
     renderer = null
   })
 
-  it('renders a static Radio for a monitoring agent', async () => {
+  it('renders a static turquoise dot for a monitoring agent', async () => {
     await act(async () => {
       renderer = create(createElement(AgentStateDot, { state: 'monitoring' }))
     })
 
-    expect(renderer?.root.findByType('Radio').props).toMatchObject({
-      color: DESKTOP_WORKING_COLOR,
-      size: 10
-    })
+    expect(dotColor(renderer)).toBe(DESKTOP_MONITORING_COLOR)
+    // Why: the lead turn is over — spinning here is the bug this state exists to fix.
     expect(animationTiming).not.toHaveBeenCalled()
     expect(animationLoop).not.toHaveBeenCalled()
   })
 
-  it('renders a static Radio for an all-monitoring workspace', async () => {
+  it('keeps a monitoring agent dot separable from the done dot', async () => {
+    await act(async () => {
+      renderer = create(createElement(AgentStateDot, { state: 'monitoring' }))
+    })
+
+    expect(dotColor(renderer)).not.toBe(DESKTOP_DONE_COLOR)
+  })
+
+  it('renders a static turquoise dot for an all-monitoring workspace', async () => {
     await act(async () => {
       renderer = create(
         createElement(AgentSpinner, { status: 'working', workingMode: 'monitoring' })
       )
     })
 
-    expect(renderer?.root.findByType('Radio').props).toMatchObject({
-      color: DESKTOP_WORKING_COLOR,
-      size: 12
-    })
+    expect(dotColor(renderer)).toBe(DESKTOP_MONITORING_COLOR)
     expect(animationTiming).not.toHaveBeenCalled()
     expect(animationLoop).not.toHaveBeenCalled()
   })
