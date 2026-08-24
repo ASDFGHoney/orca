@@ -4,7 +4,7 @@ import {
   getNewlyConnectedRuntimeEnvironmentIds,
   getNewlyDisconnectedRuntimeEnvironmentIds,
   getRuntimeProjectRefreshEnvironmentIds
-} from './useIpcEvents'
+} from './ipc-events/runtime-environment-subscription-selection'
 
 describe('buildRuntimeClientEventEnvironmentKey', () => {
   it('treats runtime environment ids as a stable set', () => {
