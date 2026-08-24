@@ -218,7 +218,8 @@ describe('registerPtyHandlers', () => {
   })
   it.each([
     ['the remote hook feature is off', '0', true, false],
-    ['agent status hooks are off', '1', false, true]
+    ['agent status hooks are off', '1', false, true],
+    ['remote hooks are enabled', '1', true, true]
   ])('scopes SSH identity when %s', async (_label, remoteFlag, hooksEnabled, preservesIdentity) => {
     type RuntimeSpawnController = {
       spawn(args: {
@@ -235,7 +236,11 @@ describe('registerPtyHandlers', () => {
     const savedRemoteHooks = process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
     process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = remoteFlag
     const remoteSpawn = vi.fn(
-      async (_opts: { env?: Record<string, string>; envToDelete?: string[] }) => ({
+      async (_opts: {
+        env?: Record<string, string>
+        envToDelete?: string[]
+        agentStatusHooksEnabled?: boolean
+      }) => ({
         id: 'ssh:ssh-runtime-env@@relay-pty'
       })
     )
@@ -313,6 +318,8 @@ describe('registerPtyHandlers', () => {
       const spawnOptions = remoteSpawn.mock.calls[0]?.[0]
       const env = spawnOptions.env
       expect(env).toMatchObject({ FOO: 'bar' })
+      const forwardsHookPolicy = remoteFlag === '1' && hooksEnabled
+      expect(spawnOptions.agentStatusHooksEnabled).toBe(forwardsHookPolicy ? true : undefined)
       if (preservesIdentity) {
         expect(env).toMatchObject({
           ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
@@ -326,15 +333,20 @@ describe('registerPtyHandlers', () => {
         expect(env?.ORCA_WORKTREE_ID).toBeUndefined()
         expect(env?.ORCA_AGENT_LAUNCH_TOKEN).toBeUndefined()
       }
-      expect(spawnOptions.envToDelete).toEqual(
-        expect.arrayContaining([
-          'ORCA_AGENT_HOOK_PORT',
-          'ORCA_AGENT_HOOK_TOKEN',
-          'ORCA_AGENT_HOOK_ENV',
-          'ORCA_AGENT_HOOK_VERSION',
-          'ORCA_AGENT_HOOK_ENDPOINT'
-        ])
-      )
+      const hookCoordinateKeys = [
+        'ORCA_AGENT_HOOK_PORT',
+        'ORCA_AGENT_HOOK_TOKEN',
+        'ORCA_AGENT_HOOK_ENV',
+        'ORCA_AGENT_HOOK_VERSION',
+        'ORCA_AGENT_HOOK_ENDPOINT'
+      ]
+      if (forwardsHookPolicy) {
+        expect(spawnOptions.envToDelete ?? []).not.toEqual(
+          expect.arrayContaining(hookCoordinateKeys)
+        )
+      } else {
+        expect(spawnOptions.envToDelete).toEqual(expect.arrayContaining(hookCoordinateKeys))
+      }
       expect(spawnOptions.envToDelete ?? []).not.toContain('CODEX_HOME')
       expect(spawnOptions.envToDelete ?? []).not.toContain('ORCA_CODEX_HOME')
       expect(store.upsertSshRemotePtyLease).toHaveBeenCalledWith(

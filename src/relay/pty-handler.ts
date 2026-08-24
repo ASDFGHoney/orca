@@ -21,7 +21,10 @@ import { addWslEnvKeys } from '../shared/wsl-env'
 import { SHELL_STARTUP_FEATURE_ENV } from '../main/shell-startup-features'
 import { DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS } from '../shared/ssh-types'
 import { shouldUseShellReadyStartupDelivery } from '../shared/codex-startup-delivery'
-import { isDirectRemotePosixCodexLaunch } from '../shared/codex-remote-hook-launch'
+import {
+  hasCompleteRemoteAgentHookContext,
+  isDirectRemotePosixCodexLaunch
+} from '../shared/codex-remote-hook-launch'
 import { buildStartupCommandSubmission } from '../shared/startup-command-submission'
 import { resolveSetupAgentSequenceLaunchCommand } from '../shared/setup-agent-sequencing'
 import {
@@ -1624,6 +1627,8 @@ export class PtyHandler {
     const remoteCodexHookLaunch = Boolean(
       launchCommandHint &&
       launchAgent &&
+      params.agentStatusHooksEnabled === true &&
+      hasCompleteRemoteAgentHookContext({ env: spawnEnv, paneKey: params.paneKey }) &&
       isDirectRemotePosixCodexLaunch({
         agent: launchAgent,
         command: launchCommandHint,

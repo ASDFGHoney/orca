@@ -4915,6 +4915,13 @@ export function registerPtyHandlers(
       if (args.startupCommandDelivery !== undefined) {
         spawnOptions.startupCommandDelivery = args.startupCommandDelivery
       }
+      if (
+        args.connectionId &&
+        isRemoteAgentHooksEnabled() &&
+        isAgentStatusHooksEnabled(ptySettings)
+      ) {
+        spawnOptions.agentStatusHooksEnabled = true
+      }
       if (isTuiAgent(args.launchAgent)) {
         spawnOptions.launchAgent = args.launchAgent
       }
@@ -6656,6 +6663,13 @@ export function registerPtyHandlers(
         }
         if (args.startupCommandDelivery !== undefined) {
           spawnOptions.startupCommandDelivery = args.startupCommandDelivery
+        }
+        if (
+          args.connectionId &&
+          isRemoteAgentHooksEnabled() &&
+          isAgentStatusHooksEnabled(ptySettings)
+        ) {
+          spawnOptions.agentStatusHooksEnabled = true
         }
         if (isTuiAgent(args.launchAgent)) {
           spawnOptions.launchAgent = args.launchAgent

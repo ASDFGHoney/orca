@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildAgentResumeStartupPlan, buildAgentStartupPlan } from './tui-agent-startup'
+import { hasCompleteRemoteAgentHookContext } from './codex-remote-hook-launch'
+
+const PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
 
 function launch(command: string) {
   return buildAgentStartupPlan({
@@ -13,6 +16,24 @@ function launch(command: string) {
 }
 
 describe('remote Codex hook launch context', () => {
+  it('requires matching valid pane metadata and final server coordinates', () => {
+    const env = {
+      ORCA_AGENT_HOOK_PORT: '43117',
+      ORCA_AGENT_HOOK_TOKEN: 'token-1',
+      ORCA_PANE_KEY: PANE_KEY
+    }
+
+    expect(hasCompleteRemoteAgentHookContext({ env, paneKey: PANE_KEY })).toBe(true)
+    expect(hasCompleteRemoteAgentHookContext({ env, paneKey: undefined })).toBe(false)
+    expect(hasCompleteRemoteAgentHookContext({ env, paneKey: 'other:1' })).toBe(false)
+    expect(
+      hasCompleteRemoteAgentHookContext({
+        env: { ...env, ORCA_AGENT_HOOK_TOKEN: '' },
+        paneKey: PANE_KEY
+      })
+    ).toBe(false)
+  })
+
   it('preserves the shell command word and marks direct remote POSIX launches', () => {
     const plan = launch("CODEX_HOME='/tmp/codex home' codex --profile captured")
 
@@ -42,6 +63,9 @@ describe('remote Codex hook launch context', () => {
   it.each([
     ["'CODEX_HOME=/tmp/codex' codex", "'CODEX_HOME=/tmp/codex' codex 'fix it'"],
     ['select-profile && codex', "select-profile && codex 'fix it'"],
+    ['FOO=bar; codex', "FOO=bar; codex 'fix it'"],
+    ['codex && echo done', "codex && echo done 'fix it'"],
+    ['codex\necho done', "codex\necho done 'fix it'"],
     ['sh -c \'codex "$@"\' --', "sh -c 'codex \"$@\"' -- 'fix it'"],
     ['npx @openai/codex', "npx @openai/codex 'fix it'"],
     ['mise exec -- codex', "mise exec -- codex 'fix it'"],

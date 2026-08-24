@@ -129,7 +129,7 @@ if [[ -n "\${ORCA_CODEX_LAUNCH_PREFLIGHT:-}\${__orca_codex_hooks_enabled:-}" && 
   function codex {
     [[ -z "\${ORCA_CODEX_LAUNCH_PREFLIGHT:-}" ]] || "\${ORCA_CODEX_LAUNCH_PREFLIGHT}" agent hooks prepare-codex >/dev/null 2>&1 || :
     local __orca_codex_feature=""
-    if [[ -n "\${__orca_codex_hooks_enabled:-}" && -n "\${ORCA_AGENT_HOOK_PORT:-}" && -n "\${ORCA_AGENT_HOOK_TOKEN:-}" ]] && ! __orca_codex_hooks_override "$@"; then
+    if [[ -n "\${__orca_codex_hooks_enabled:-}" && -n "\${ORCA_AGENT_HOOK_PORT:-}" && -n "\${ORCA_AGENT_HOOK_TOKEN:-}" && -n "\${ORCA_PANE_KEY:-}" ]] && ! __orca_codex_hooks_override "$@"; then
       __orca_codex_feature="$(__orca_codex_hooks_feature)"
     fi
     if [[ -n "$__orca_codex_feature" ]]; then
@@ -209,7 +209,7 @@ if test -n "$ORCA_CODEX_LAUNCH_PREFLIGHT$__orca_codex_hooks_enabled"; and test (
       command "$ORCA_CODEX_LAUNCH_PREFLIGHT" agent hooks prepare-codex >/dev/null 2>&1; or true
     end
     set feature
-    if test -n "$__orca_codex_hooks_enabled"; and test -n "$ORCA_AGENT_HOOK_PORT"; and test -n "$ORCA_AGENT_HOOK_TOKEN"; and not __orca_codex_hooks_override $argv
+    if test -n "$__orca_codex_hooks_enabled"; and test -n "$ORCA_AGENT_HOOK_PORT"; and test -n "$ORCA_AGENT_HOOK_TOKEN"; and test -n "$ORCA_PANE_KEY"; and not __orca_codex_hooks_override $argv
       set feature (__orca_codex_hooks_feature)
     end
     if test -n "$feature"

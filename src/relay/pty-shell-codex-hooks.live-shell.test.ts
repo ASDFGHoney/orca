@@ -16,6 +16,9 @@ import { isDirectRemotePosixCodexLaunch } from '../shared/codex-remote-hook-laun
 import { getRelayShellLaunchConfig } from './pty-shell-launch'
 
 type TestShell = { name: 'bash' | 'zsh' | 'fish'; path: string }
+type HookCoordinate = 'ORCA_AGENT_HOOK_PORT' | 'ORCA_AGENT_HOOK_TOKEN' | 'ORCA_PANE_KEY'
+
+const PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
 
 const roots: string[] = []
 
@@ -61,7 +64,7 @@ function runRelayCodex(
   shell: TestShell,
   options: {
     version?: string
-    coordinates?: Partial<Record<'ORCA_AGENT_HOOK_PORT' | 'ORCA_AGENT_HOOK_TOKEN', string>>
+    coordinates?: Partial<Record<HookCoordinate, string>>
     args?: string
     opaque?: boolean
   } = {}
@@ -133,7 +136,8 @@ describe.skipIf(process.platform === 'win32')('relay Codex hook launch in real s
   describe.each(SHELLS)('$name', (shell) => {
     const coordinates = {
       ORCA_AGENT_HOOK_PORT: '43117',
-      ORCA_AGENT_HOOK_TOKEN: 'token-1'
+      ORCA_AGENT_HOOK_TOKEN: 'token-1',
+      ORCA_PANE_KEY: PANE_KEY
     }
 
     it.each([
@@ -148,10 +152,21 @@ describe.skipIf(process.platform === 'win32')('relay Codex hook launch in real s
       expect(runRelayCodex(shell, { version, coordinates }).argv).toEqual(expected)
     })
 
-    it('requires both final hook coordinates', () => {
+    it('requires final hook server coordinates', () => {
       expect(runRelayCodex(shell, { coordinates: { ORCA_AGENT_HOOK_PORT: '43117' } }).argv).toEqual(
         []
       )
+    })
+
+    it('requires final pane identity', () => {
+      expect(
+        runRelayCodex(shell, {
+          coordinates: {
+            ORCA_AGENT_HOOK_PORT: '43117',
+            ORCA_AGENT_HOOK_TOKEN: 'token-1'
+          }
+        }).argv
+      ).toEqual([])
     })
 
     it('preserves an explicit launch override', () => {

@@ -44,6 +44,12 @@ import {
 } from './pty-handler-test-harness'
 import type { MockDispatcher } from './pty-handler-test-harness'
 
+const PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
+const HOOK_SERVER_ENV = {
+  ORCA_AGENT_HOOK_PORT: '43117',
+  ORCA_AGENT_HOOK_TOKEN: 'token-1'
+}
+
 describe('PtyHandler', () => {
   let dispatcher: MockDispatcher
   let handler: PtyHandler
@@ -175,11 +181,14 @@ describe('PtyHandler', () => {
 
       process.env.SHELL = '/bin/bash'
       process.env.HOME = homeDir
+      handler.addEnvAugmenter(() => HOOK_SERVER_ENV)
       try {
         await dispatcher.callRequest('pty.spawn', {
-          env: { HOME: homeDir },
+          env: { HOME: homeDir, ORCA_PANE_KEY: PANE_KEY },
+          paneKey: PANE_KEY,
           command: 'codex',
-          launchAgent: 'codex'
+          launchAgent: 'codex',
+          agentStatusHooksEnabled: true
         })
       } finally {
         if (oldShell === undefined) {
@@ -201,9 +210,20 @@ describe('PtyHandler', () => {
   )
 
   it.skipIf(process.platform === 'win32').each([
-    ['another agent', { launchAgent: 'claude', command: 'codex' }],
-    ['an opaque launcher', { launchAgent: 'codex', command: 'mise exec -- codex' }],
-    ['an absolute executable', { launchAgent: 'codex', command: '/opt/codex/bin/codex' }]
+    ['another agent', { launchAgent: 'claude', command: 'codex', agentStatusHooksEnabled: true }],
+    [
+      'an opaque launcher',
+      { launchAgent: 'codex', command: 'mise exec -- codex', agentStatusHooksEnabled: true }
+    ],
+    [
+      'an absolute executable',
+      { launchAgent: 'codex', command: '/opt/codex/bin/codex', agentStatusHooksEnabled: true }
+    ],
+    ['an old-client request', { launchAgent: 'codex', command: 'codex' }],
+    [
+      'an incomplete pane context',
+      { launchAgent: 'codex', command: 'codex', agentStatusHooksEnabled: true, missingPane: true }
+    ]
   ])('does not select Codex hooks for %s', async (_label, launch) => {
     const oldShell = process.env.SHELL
     const oldHome = process.env.HOME
@@ -211,10 +231,19 @@ describe('PtyHandler', () => {
 
     process.env.SHELL = '/bin/bash'
     process.env.HOME = homeDir
+    handler.addEnvAugmenter(() => HOOK_SERVER_ENV)
     try {
       await dispatcher.callRequest('pty.spawn', {
-        env: { HOME: homeDir },
-        ...launch
+        env: {
+          HOME: homeDir,
+          ...(!('missingPane' in launch) ? { ORCA_PANE_KEY: PANE_KEY } : {})
+        },
+        ...(!('missingPane' in launch) ? { paneKey: PANE_KEY } : {}),
+        launchAgent: launch.launchAgent,
+        command: launch.command,
+        ...('agentStatusHooksEnabled' in launch
+          ? { agentStatusHooksEnabled: launch.agentStatusHooksEnabled }
+          : {})
       })
     } finally {
       if (oldShell === undefined) {

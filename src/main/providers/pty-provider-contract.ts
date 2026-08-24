@@ -52,6 +52,8 @@ export type PtySpawnOptions = {
   command?: string
   commandDelivery?: 'renderer' | 'provider'
   startupCommandDelivery?: StartupCommandDelivery
+  /** Additive launch policy; absent keeps older clients' remote behavior unchanged. */
+  agentStatusHooksEnabled?: boolean
   /** Minimal allowlisted launch ownership preserved by daemon reattach. */
   launchAgent?: TuiAgent
   /** Orca worktree identity. When present, the local provider scopes shell

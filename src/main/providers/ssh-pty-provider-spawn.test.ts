@@ -423,7 +423,8 @@ describe('spawn', () => {
       rows: 40,
       command: 'echo from-runtime',
       commandDelivery: 'provider',
-      startupCommandDelivery: 'shell-ready'
+      startupCommandDelivery: 'shell-ready',
+      agentStatusHooksEnabled: true
     })
 
     expectRequest(mux.request, 'pty.spawn', {
@@ -433,7 +434,8 @@ describe('spawn', () => {
       env: { [POWERLEVEL10K_WIZARD_DISABLE_ENV]: 'true' },
       command: 'echo from-runtime',
       commandDelivery: 'provider',
-      startupCommandDelivery: 'shell-ready'
+      startupCommandDelivery: 'shell-ready',
+      agentStatusHooksEnabled: true
     })
   })
 

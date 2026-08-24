@@ -14107,14 +14107,15 @@
       "providers": ["local", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": ["local", "ssh", "wsl", "remote-runtime"],
-      "coverageNotes": "Deterministic shared recognition, final SSH relay feature selection, host-qualified renderer ownership, real bash/zsh/Fish startup, and SSH Docker contracts cover the launch policy. Official Linux Codex 0.113.0, 0.114.0, 0.128.0, and 0.129.0 binaries ratify the unsupported, legacy-name, and current-name boundaries. A rendered macOS-client/Linux-SSH Codex 0.149.0 TUI with an ORCA-scrubbed pre-existing app-server is the independent behavioral oracle. Windows SSH remains uncollected; unit contracts cover a Windows client selecting a colliding Linux SSH owner instead of local shell policy.",
+      "coverageNotes": "Deterministic client-policy forwarding, strict shared recognition, final SSH relay context validation, host-qualified renderer ownership, real bash/zsh/Fish startup, and SSH Docker contracts cover the launch policy. Official Linux Codex 0.113.0, 0.114.0, 0.128.0, and 0.129.0 binaries ratify the unsupported, legacy-name, and current-name boundaries. A rendered macOS-client/Linux-SSH Codex 0.149.0 TUI with an ORCA-scrubbed pre-existing app-server is the independent behavioral oracle on literal origin/main 5bcbafff, the candidate, and the candidate with recognition disabled. Windows SSH remains uncollected; unit contracts cover a Windows client selecting a colliding Linux SSH owner instead of local shell policy.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-3147",
         "https://github.com/stablyai/orca/pull/16062"
       ],
-      "invariant": "For a direct Orca-launched Codex TUI on an SSH POSIX host, the host-qualified planner preserves the command byte-for-byte and requests shell-ready delivery. The owning SSH relay independently recognizes the final launch and selects its existing Codex-hook startup feature; the post-profile bash/zsh/Fish preflight reads final PTY coordinates and actual invocation argv, then prepends exactly the version-compatible hook flag. Missing or partial coordinates, unsupported or malformed versions, a probe exceeding two seconds, explicit hook overrides, user aliases/functions, local, WSL, Windows-shell, paired-runtime, other-provider, and opaque launches execute unchanged.",
-      "oracle": "Pre-start an authenticated Codex app-server on the SSH host without ORCA_* variables, launch Codex with a prompt through the rendered Orca New tab surface, and require a real process argv containing separate --enable/hooks plus authoritative working-to-done events for the exact pane and a rendered response. Disable the shared direct-launch recognition predicate and require the same journey to preserve the remote hook-coordinate environment and rendered response while losing --enable/hooks and every exact-pane hook transition. Independently spawn the relay-generated interactive bash, zsh, and Fish launch configs with complete, missing, partial, explicitly overridden, malformed-version, hanging-version, alias, and function cases.",
+      "invariant": "For a direct Orca-launched Codex TUI on an SSH POSIX host, the client main process explicitly conveys enabled agent-status-hook policy without changing the command. The owning SSH relay activates the existing Codex-hook startup feature only when that intent is true, the trusted launch identity and final command are a strictly direct Codex launch, and final relay server coordinates plus a valid top-level pane key agree with the spawned environment. The post-profile bash/zsh/Fish preflight revalidates port, token, and pane identity against the actual invocation, then prepends exactly the version-compatible hook flag. Absent client intent, missing or mismatched context, unsupported or malformed versions, a probe exceeding two seconds, explicit hook overrides, user aliases/functions, local, WSL, Windows-shell, paired-runtime, other-provider, compound, and opaque launches execute unchanged.",
+      "oracle": "Pre-start an authenticated Codex app-server on the SSH host without ORCA_* variables, launch Codex with a prompt through the rendered Orca New tab surface, and require a real process argv containing separate --enable/hooks plus complete hook coordinates, authoritative working-to-done events for the exact pane, and a rendered response. Disable the shared direct-launch recognition predicate and require the byte-identical journey to preserve the complete remote hook-coordinate environment and rendered response while losing --enable/hooks and every exact-pane hook transition. Independently require old-client requests, disabled current policy, missing or mismatched pane identity, compound commands, and incomplete server coordinates to select no hook feature, then spawn the relay-generated interactive bash, zsh, and Fish launch configs with complete, missing, partial, explicitly overridden, malformed-version, hanging-version, alias, and function cases.",
       "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/providers/ssh-pty-provider-spawn.test.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/tui-agent-startup.test.ts",
         "ORCA_REQUIRE_FISH_MAJOR=4 pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/pty/codex-shell-launch-preflight.test.ts src/shared/startup-shell-portability.live-shell.test.ts src/relay/pty-shell-launch.test.ts",
@@ -14131,6 +14132,7 @@
         "src/relay/pty-shell-launch.test.ts",
         "src/relay/pty-handler-spawn-environment.test.ts",
         "src/relay/pty-handler-startup-command-delivery.test.ts",
+        "src/main/providers/ssh-pty-provider-spawn.test.ts",
         "src/renderer/src/lib/agent-resume-launch-target.test.ts",
         "src/renderer/src/lib/sleeping-agent-session-launch-windows-quoting.test.ts",
         "src/renderer/src/lib/ai-vault-resume-command.test.ts",
@@ -14153,7 +14155,8 @@
           "file": "src/shared/codex-remote-hook-launch.test.ts",
           "assertions": [
             "direct and assignment-prefixed Codex commands remain byte-identical and request shell-ready delivery",
-            "opaque shell, package-runner, and mise overrides fail open unchanged",
+            "final server coordinates and valid matching pane metadata form one complete hook context",
+            "compound, opaque shell, package-runner, and mise overrides fail open unchanged",
             "local, WSL, Windows-shell, and paired-runtime plans retain ordinary delivery"
           ]
         },
@@ -14161,20 +14164,27 @@
           "file": "src/relay/pty-shell-codex-hooks.live-shell.test.ts",
           "assertions": [
             "relay-generated bash, zsh, and Fish startup inject nothing before Codex 0.114, codex_hooks for 0.114 through 0.128, and hooks for 0.129+",
-            "partial coordinates, malformed versions, and a two-second probe timeout add no argv",
+            "missing server coordinates or pane identity, malformed versions, and a two-second probe timeout add no argv",
             "explicit overrides and user aliases/functions remain unchanged"
           ]
         },
         {
           "file": "src/relay/pty-handler-startup-command-delivery.test.ts",
           "assertions": [
-            "the owning relay recognizes the final direct SSH POSIX Codex command and selects the existing codex-hooks startup feature",
-            "unrelated, opaque, local, Windows-shell, and explicitly overridden launches select no Codex hook feature"
+            "the owning relay requires explicit client hook policy, a final direct SSH POSIX Codex command, and complete matching hook context before selecting codex-hooks",
+            "old-client, incomplete-pane, unrelated-agent, and opaque launches select no Codex hook feature"
+          ]
+        },
+        {
+          "file": "src/main/providers/ssh-pty-provider-spawn.test.ts",
+          "assertions": [
+            "the SSH provider forwards the additive hook-policy field without command-string rewriting"
           ]
         },
         {
           "file": "src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
           "assertions": [
+            "current clients forward hook-policy intent only when both the remote feature and user setting are enabled",
             "feature-disabled and settings-disabled SSH launches delete relay-owned hook coordinates",
             "settings-disabled launches preserve general pane, tab, worktree, and launch-token identity"
           ]
@@ -14204,10 +14214,10 @@
           "date": "2026-08-23",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/providers/ssh-pty-provider-spawn.test.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
           "result": "passed",
-          "durationSeconds": 10.35,
-          "summary": "The provider-owned candidate passed all 54 shared recognition, final relay feature-selection, and real bash/zsh argv contracts."
+          "durationSeconds": 10.48,
+          "summary": "The structural replacement passed all 97 client-policy, SSH request forwarding, strict recognition, complete-context, final relay feature-selection, and real bash/zsh/Fish argv contracts."
         },
         {
           "date": "2026-08-23",
@@ -14216,7 +14226,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
           "result": "failed",
           "durationSeconds": 4.85,
-          "summary": "Expected red with the shared direct-launch predicate forced false: ten deterministic assertions lost relay feature selection, version-compatible real-shell argv, and resume shell-ready delivery. Restoring the predicate returned all 54 assertions to green."
+          "summary": "Expected red with the shared direct-launch predicate forced false: ten deterministic assertions lost relay feature selection, version-compatible real-shell argv, and resume shell-ready delivery. Restoring the predicate returned the focused 97-test candidate suite to green."
         },
         {
           "date": "2026-08-23",
@@ -14224,8 +14234,8 @@
           "platform": "macos",
           "command": "ORCA_REQUIRE_FISH_MAJOR=4 pnpm exec vitest run --config config/vitest.config.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/pty/codex-shell-launch-preflight.test.ts src/shared/startup-shell-portability.live-shell.test.ts src/relay/pty-shell-launch.test.ts",
           "result": "passed",
-          "durationSeconds": 10.25,
-          "summary": "The shell/preflight matrix passed 255 tests with 20 expected skips across available POSIX shells and Fish 4; it injected nothing for 0.113, selected codex_hooks for 0.114 through 0.128, and selected hooks for 0.129+, while malformed and timed-out probes failed open."
+          "durationSeconds": 12.48,
+          "summary": "The shell/preflight matrix passed 257 tests with 20 expected skips across available POSIX shells and Fish 4; it injected nothing for missing pane identity or Codex 0.113, selected codex_hooks for 0.114 through 0.128, and selected hooks for 0.129+, while malformed and timed-out probes failed open."
         },
         {
           "date": "2026-08-23",
@@ -14251,8 +14261,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/main/runtime/orca-runtime.test.ts",
           "result": "passed",
-          "durationSeconds": 14.53,
-          "summary": "The rebased candidate passed 1,204 SSH hook-policy, background launch, and runtime ownership contracts with one existing skip."
+          "durationSeconds": 13.69,
+          "summary": "The structural candidate passed 1,205 SSH hook-policy, background launch, and runtime ownership contracts with one existing skip."
         }
       ],
       "runtimeBudget": {
@@ -14265,11 +14275,11 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "Literal main d1127b9939 completed the authenticated Codex 0.149.0 response in a rendered macOS Electron -> Linux Docker SSH folder workspace with complete PTY hook coordinates and an ORCA-scrubbed pre-existing app-server, but process argv had no --enable hooks and the exact pane had no working or done entry. Current origin/main 5bcbafff changes only CLI documentation beyond that reproduced main and touches none of the planner, relay, PTY, or hook-boundary files. The provider-owned candidate passed the same topology with separate --enable/hooks argv, exact-pane working-to-done hooks, and the rendered response. Forcing the shared recognition predicate false preserved the coordinate environment and rendered response but removed the flag and all exact-pane hook states; restoring it returned the identical journey to green. The focused unit/live-shell oracle likewise passed 54/54, failed ten assertions with the predicate disabled, and returned to 54/54 after restoration."
+        "evidence": "Literal origin/main 5bcbafff completed the authenticated Codex 0.149.0 response in a rendered macOS Electron -> Linux Docker SSH folder workspace with complete PTY hook coordinates and an ORCA-scrubbed pre-existing app-server, but process argv had no --enable hooks and the exact pane had no working or done entry. The structural candidate passed the byte-identical topology with separate --enable/hooks argv, exact-pane working-to-done hooks, and the rendered response. Forcing the shared recognition predicate false while keeping explicit policy and complete coordinates preserved the coordinate environment and rendered response but removed the flag and all exact-pane hook states; restoring it returned the identical journey to green. The focused contract/live-shell oracle likewise passed 97/97, failed ten causal assertions with recognition disabled, and returned to 97/97 after restoration."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The shared planner and owning relay each perform one bounded token scan only while planning a launch and leave the command string unchanged. Each recognized SSH Codex launch runs one launch-only codex --version probe from the existing post-profile shell preflight; it polls at 50ms only until completion, kills the exact probe at two seconds, and leaves no resident process or timer. Live hook-enabled launches intentionally use Codex's embedded app-server instead of reusing an environment-less daemon; concurrent-pane startup and memory cost remain unmeasured. No persistent polling, retry, wire field, command wrapper, or provider fanout is added."
+        "evidence": "The client adds one optional boolean only at SSH spawn, while the shared planner and owning relay each perform one bounded token scan only while planning a launch and leave the command string unchanged. Each recognized SSH Codex launch runs one launch-only codex --version probe from the existing post-profile shell preflight; it polls at 50ms only until completion, kills the exact probe at two seconds, and leaves no resident process or timer. Live hook-enabled launches intentionally use Codex's embedded app-server instead of reusing an environment-less daemon; concurrent-pane startup and memory cost remain unmeasured. No persistent polling, retry, command wrapper, or provider fanout is added."
       },
       "promotionCriteria": [
         "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
@@ -14278,13 +14288,13 @@
       ],
       "knownGaps": [
         "Orca's enabled status-hook setting intentionally supplies a launch-scoped override to persistent config.toml; explicit launch arguments remain the per-launch opt-out.",
-        "There is no wire/schema change. A newer planner paired with an older relay preserves the command and receives the older relay's ordinary startup behavior; an older planner paired with a newer relay does not request shell-ready delivery, so the newer relay cannot apply the provider-owned preflight.",
+        "The SSH spawn request has one optional additive policy field. An older relay ignores it and preserves ordinary startup behavior; its absence from an older client defaults off in a newer relay, so mixed versions never enable hooks without explicit client policy.",
         "Unmodelable shell command overrides fail open without hook argv rather than risking a broken launch.",
         "Copied AI Vault commands remain byte-identical because they can run outside an Orca-owned PTY with no authoritative coordinate boundary.",
         "AI Vault spawn planning is limited to SSH POSIX and preserves scanner-authored command arguments; remote Windows and non-SSH runtime sessions remain unchanged.",
         "Each live-coordinate TUI uses an embedded Codex app-server; multi-pane resource cost is not yet measured."
       ],
-      "demotionRule": "Demote if an exact-pane SSH Codex hook is absent with complete coordinates, a supported shell injects without complete coordinates, a hanging version probe blocks launch beyond two seconds, an explicit launch override or user alias/function changes, ownership falls back across hosts, or local/WSL/Windows-shell commands change."
+      "demotionRule": "Demote if an exact-pane SSH Codex hook is absent with explicit policy and complete matching context, a relay or supported shell injects without explicit policy or complete matching context, a hanging version probe blocks launch beyond two seconds, an explicit launch override, compound command, or user alias/function changes, ownership falls back across hosts, or local/WSL/Windows-shell commands change."
     }
   ]
 }
