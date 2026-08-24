@@ -1638,6 +1638,7 @@ const GH_RETRY_DELAYS_MS = [250, 1000] as const
 // Why: Retry-After is unbounded and untrusted; cap at 30s so a gh call can't block the IPC thread indefinitely.
 const GH_RETRY_AFTER_MAX_MS = 30_000
 const DEFAULT_GH_EXEC_TIMEOUT_MS = 30_000
+const DEFAULT_GLAB_EXEC_TIMEOUT_MS = 30_000
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -1936,7 +1937,7 @@ export async function glabExecFileAsync(
         cwd: resolved.cwd,
         encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
         maxBuffer: options.maxBuffer,
-        timeout: options.timeout,
+        timeout: options.timeout ?? DEFAULT_GLAB_EXEC_TIMEOUT_MS,
         env: options.env,
         signal: options.signal
       })
