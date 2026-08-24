@@ -20,7 +20,7 @@ export async function verifyHostedIosNativeSettingsJourney({
     () =>
       waitForVisibleHostedWebView({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: expectedWorkspace,
         timeoutMs
       })
   )

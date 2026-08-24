@@ -15,17 +15,13 @@ export function mobileWebNavigationRouteTarget(route: MobileWebNavigationRoute):
     return '/'
   }
   if (route.kind === 'tasks') {
-    const query = route.taskSource
-      ? `?${new URLSearchParams({ taskSource: route.taskSource }).toString()}`
-      : ''
-    return `/h/${HOSTED_PAGE_HOST_ID}/tasks${query}`
+    return `/h/${HOSTED_PAGE_HOST_ID}/tasks`
   }
   if (route.kind === 'accounts') {
     return `/h/${HOSTED_PAGE_HOST_ID}/accounts`
   }
   if (route.kind === 'newWorkspace') {
-    return '/?action=newWorktree'
+    return '/'
   }
-  const query = new URLSearchParams({ name: route.workspaceName }).toString()
-  return `/h/${HOSTED_PAGE_HOST_ID}/session/${encodeURIComponent(route.workspaceId)}?${query}`
+  return `/h/${HOSTED_PAGE_HOST_ID}/session/${encodeURIComponent(route.workspaceId)}`
 }

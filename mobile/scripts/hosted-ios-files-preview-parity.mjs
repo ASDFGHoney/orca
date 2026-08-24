@@ -7,7 +7,8 @@ import {
   tapHostedIosAccessibilityControlByLabelPrefix,
   tapHostedIosPoint,
   waitForHostedIosAccessibilityControl,
-  waitForHostedIosAccessibilityControlByLabelPrefix
+  waitForHostedIosAccessibilityControlByLabelPrefix,
+  waitForHostedIosAccessibilityLabel
 } from './hosted-ios-emulator-accessibility.mjs'
 import { assertHostedIosScreenshotParity } from './hosted-ios-screenshot-parity.mjs'
 import {
@@ -47,7 +48,7 @@ export async function captureNativeFilesPreviewBaselines({
   })
   await tapHostedIosAccessibilityControl(emulator, FILES_STABLE_LABEL, timeoutMs)
   await tapHostedIosAccessibilityControl(emulator, PREVIEW_FILE_LABEL, timeoutMs)
-  await waitForHostedIosAccessibilityControl(emulator, PREVIEW_STABLE_LABEL, timeoutMs)
+  await waitForHostedIosAccessibilityLabel(emulator, PREVIEW_STABLE_LABEL, timeoutMs)
   const preview = await captureNativeRoute({
     deviceUdid,
     emulator,
@@ -78,7 +79,7 @@ export async function captureHostedFilesPreviewParity({
     () =>
       waitForVisibleHostedWebView({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: expectedWorkspace,
         timeoutMs
       })
   )
@@ -253,7 +254,7 @@ async function returnHostedToWorkspaces(options) {
     resolve: (transitionTimeoutMs) =>
       waitForVisibleHostedWebView({
         discoveryUrl: options.discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: options.expectedWorkspace,
         timeoutMs: transitionTimeoutMs
       })
   })

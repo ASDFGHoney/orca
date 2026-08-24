@@ -4,11 +4,10 @@ import { promisify } from 'node:util'
 import { dismissEmulatorDeveloperMenuIfPresent } from './emulator-developer-menu-dismissal.mjs'
 import {
   tapHostedIosAccessibilityControl,
-  tapHostedIosAccessibilityControlStartingWith,
   waitForHostedIosAccessibilityControl,
   waitForHostedIosAccessibilityControlByLabelPrefix,
   waitForHostedIosAccessibilityControlEndingWith,
-  waitForHostedIosAccessibilityControlStartingWith
+  waitForHostedIosAccessibilityControlMatching
 } from './hosted-ios-emulator-accessibility.mjs'
 import { longPressHostedIosAccessibilityControlByLabelPrefix } from './hosted-ios-emulator-long-press.mjs'
 import { assertHostedIosScreenshotParity } from './hosted-ios-screenshot-parity.mjs'
@@ -27,12 +26,19 @@ export async function captureNativeSourceControlReviewBaselines({
   await dismissEmulatorDeveloperMenuIfPresent(emulator)
   await longPressHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
   await tapHostedIosAccessibilityControl(emulator, 'Source Control', timeoutMs)
-  await waitForHostedIosAccessibilityControlStartingWith(
+  const changedFileControl = await waitForHostedIosAccessibilityControlMatching(
     emulator,
-    CHANGED_FILE_LABEL_PREFIX,
+    (node) =>
+      node.label?.startsWith(CHANGED_FILE_LABEL_PREFIX) ||
+      node.value?.startsWith(CHANGED_FILE_LABEL_PREFIX),
     timeoutMs
   )
-  await waitForHostedIosAccessibilityControl(emulator, 'Create pull request', timeoutMs)
+  const reviewControl = await waitForHostedIosAccessibilityControlMatching(
+    emulator,
+    (node) =>
+      nativePullRequestState(node.label) !== null || nativePullRequestState(node.value) !== null,
+    timeoutMs
+  )
   await waitForHostedIosAccessibilityControlEndingWith(emulator, ' on branch', timeoutMs)
   const sourceControl = await captureNativeRoute({
     deviceUdid,
@@ -42,7 +48,12 @@ export async function captureNativeSourceControlReviewBaselines({
     title: 'Source Control',
     timeoutMs
   })
-  await tapHostedIosAccessibilityControlStartingWith(emulator, CHANGED_FILE_LABEL_PREFIX, timeoutMs)
+  sourceControl.changedFileLabel = accessibilityControlText(changedFileControl, (value) =>
+    value.startsWith(CHANGED_FILE_LABEL_PREFIX)
+  )
+  sourceControl.pullRequestState =
+    nativePullRequestState(reviewControl.label) ?? nativePullRequestState(reviewControl.value)
+  await tapHostedIosAccessibilityControl(emulator, sourceControl.changedFileLabel, timeoutMs)
   await waitForHostedIosAccessibilityControl(emulator, 'Open review actions', timeoutMs)
   await waitForHostedIosAccessibilityControlEndingWith(emulator, ' reviewed', timeoutMs)
   const review = await captureNativeRoute({
@@ -58,6 +69,29 @@ export async function captureNativeSourceControlReviewBaselines({
   await tapHostedIosAccessibilityControl(emulator, 'Back to session', timeoutMs)
   await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
   return { review, sourceControl }
+}
+
+function nativePullRequestState(label) {
+  if (label === 'Create pull request') {
+    return { kind: 'create', label }
+  }
+  const number = label?.match(/^Pull request #(\d+),/)?.[1]
+  if (number) {
+    return { kind: 'ready', label, number }
+  }
+  if (label?.startsWith('Pull request unavailable:')) {
+    return { kind: 'unavailable', label }
+  }
+  return null
+}
+
+function accessibilityControlText(control, matches) {
+  for (const value of [control.label, control.value]) {
+    if (typeof value === 'string' && matches(value)) {
+      return value
+    }
+  }
+  throw new Error('Accessibility control lost its matched text')
 }
 
 export async function captureHostedSourceControlReviewScreen({

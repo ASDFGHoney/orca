@@ -81,10 +81,10 @@ export async function startHostedAndroidMetro({ mobileDir, pairingUrl, port }) {
   }
 }
 
-export async function installAndResetHostedAndroidApp(adb, apk) {
-  await runAndroidAdb(adb, ['install', '-r', '-t', apk], 120_000)
-  await runAndroidAdb(adb, ['shell', 'pm', 'clear', packageName])
-  await runAndroidAdb(adb, [
+export async function installAndResetHostedAndroidApp(adb, apk, runAdb = runAndroidAdb) {
+  await runAdb(adb, ['install', '-r', '-d', '-t', apk], 120_000)
+  await runAdb(adb, ['shell', 'pm', 'clear', packageName])
+  await runAdb(adb, [
     'shell',
     'pm',
     'grant',

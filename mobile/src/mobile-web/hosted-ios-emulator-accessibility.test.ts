@@ -8,9 +8,12 @@ import {
   tapHostedIosAccessibilityControlByLabelPrefixAtPosition,
   tapHostedIosAccessibilityControlStartingWith,
   tapHostedIosPoint,
+  typeHostedIosText,
   waitForHostedIosAccessibilityControl,
   waitForHostedIosAccessibilityControlByLabelPrefix,
   waitForHostedIosAccessibilityControlEndingWith,
+  waitForHostedIosAccessibilityControlMatching,
+  waitForHostedIosAccessibilityLabel,
   waitForHostedIosAccessibilityLabelToDisappear
 } from '../../scripts/hosted-ios-emulator-accessibility.mjs'
 
@@ -246,6 +249,62 @@ describe('hosted iOS emulator accessibility controls', () => {
     ).resolves.toEqual({ x: 0.75, y: 0.35 })
   })
 
+  it('returns metadata for a visible control matched by shape', async () => {
+    const runCommand = vi.fn().mockResolvedValueOnce({
+      stderr: '',
+      stdout: JSON.stringify({
+        ok: true,
+        result: [
+          {
+            label: 'Stable task title, 3m, Issue · orca #1, Open',
+            value: '',
+            enabled: true,
+            frame: { x: 0.1, y: 0.3, width: 0.8, height: 0.1 }
+          }
+        ]
+      })
+    })
+
+    await expect(
+      waitForHostedIosAccessibilityControlMatching(
+        emulator,
+        (node) => node.label?.endsWith(', Open'),
+        1_000,
+        runCommand
+      )
+    ).resolves.toEqual({
+      label: 'Stable task title, 3m, Issue · orca #1, Open',
+      value: '',
+      x: 0.5,
+      y: 0.35
+    })
+  })
+
+  it('accepts a tall visible label whose center is below the viewport', async () => {
+    const runCommand = vi.fn().mockResolvedValueOnce({
+      stderr: '',
+      stdout: JSON.stringify({
+        ok: true,
+        result: [
+          {
+            label: 'File preview',
+            value: '',
+            enabled: true,
+            frame: { x: 0.03, y: 0.28, width: 0.94, height: 1.52 }
+          }
+        ]
+      })
+    })
+
+    await expect(
+      waitForHostedIosAccessibilityLabel(emulator, 'File preview', 1_000, runCommand)
+    ).resolves.toEqual({
+      frame: { x: 0.03, y: 0.28, width: 0.94, height: 1.52 },
+      label: 'File preview',
+      value: ''
+    })
+  })
+
   it('rejects an invalid accessibility response', async () => {
     await expect(
       waitForHostedIosAccessibilityControl(emulator, 'Resume agent session', 1_000, async () => ({
@@ -305,6 +364,19 @@ describe('hosted iOS emulator accessibility controls', () => {
       'tap'
     ])
     expect(runCommand).toHaveBeenNthCalledWith(3, emulator, ['attach', emulator.deviceUdid])
+  })
+
+  it('types through the isolated emulator controller', async () => {
+    const runCommand = vi.fn().mockResolvedValue({
+      stderr: '',
+      stdout: JSON.stringify({ ok: true })
+    })
+
+    await typeHostedIosText(emulator, 'Hybrid Agent History Fixture', runCommand)
+
+    expect(runCommand.mock.calls.map(([, command]) => command)).toEqual(
+      Array.from('Hybrid Agent History Fixture', (character) => ['type', character])
+    )
   })
 
   it('retries transient helper failures while reattaching a point tap', async () => {

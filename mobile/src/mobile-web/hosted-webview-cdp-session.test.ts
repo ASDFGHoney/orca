@@ -51,6 +51,14 @@ const simulatorHarnessSource = readFileSync(
   new URL('../../scripts/run-hosted-webview-simulator-e2e.mjs', import.meta.url),
   'utf8'
 )
+const simulatorSecurityEvidenceSource = readFileSync(
+  new URL('../../scripts/hosted-webview-security-evidence.mjs', import.meta.url),
+  'utf8'
+)
+const simulatorReportSource = readFileSync(
+  new URL('../../scripts/hosted-webview-e2e-report.mjs', import.meta.url),
+  'utf8'
+)
 const simulatorAppBuildSource = readFileSync(
   new URL('../../scripts/hosted-ios-simulator-app-build.mjs', import.meta.url),
   'utf8'
@@ -518,6 +526,8 @@ describe('hosted WebView CDP target selection', () => {
       .map((evaluation) => evaluation.params.expression)
       .join('\n')
     expect(expressions).toContain('input[placeholder],textarea[placeholder]')
+    expect(expressions).toContain('element.getBoundingClientRect()')
+    expect(expressions).toContain('rect.top < innerHeight')
     expect(expressions).toContain('More session actions')
     expect(expressions).toContain('closest(\'button,[role="button"],a,[tabindex]\')')
     expect(expressions).toContain('getBoundingClientRect()')
@@ -704,11 +714,12 @@ describe('hosted WebView CDP target selection', () => {
     expect(simulatorHarnessSource).toContain(
       'terminalDeviceInput.photoPermissionRevocation?.sessionDocument'
     )
-    expect(simulatorHarnessSource).toContain(
+    expect(simulatorReportSource).toContain(
       'terminalDeviceInput?.terminalClipboardImagePaste?.evidence'
     )
-    expect(simulatorHarnessSource).toContain('verifyHostedWebViewExecutableIsolation')
-    expect(simulatorHarnessSource).toContain('verifyHostedWebViewPrivacyIsolation')
+    expect(simulatorHarnessSource).toContain('captureHostedWebViewSecurityEvidence')
+    expect(simulatorSecurityEvidenceSource).toContain('verifyHostedWebViewExecutableIsolation')
+    expect(simulatorSecurityEvidenceSource).toContain('verifyHostedWebViewPrivacyIsolation')
     expect(simulatorHarnessSource).toContain("await evidenceStep('Photos permission reset'")
     expect(simulatorHarnessSource).toContain('await clearHostedIosWebViewSecurityProbe(deviceUdid)')
     expect(simulatorAppBuildSource).toContain("'xcodebuild'")

@@ -7,9 +7,12 @@ import {
   appendProcessOutputTail,
   attachBoundedProcessLineReader
 } from './bounded-process-line-reader.mjs'
+import { createEmulatorPairingChildEnvironment } from './emulator-pairing-child-environment.mjs'
+import { linkEmulatorMacKeychain } from './emulator-macos-keychain-home.mjs'
 import { seedEmulatorAgentHistoryFixture } from './emulator-agent-history-fixture.mjs'
 import { pairingEndpointPortFromUrl } from './emulator-pairing-public-key.mjs'
 import {
+  currentPairingDaemonPids,
   pairingDaemonPidsFromUserData,
   pairingRuntimePidFromUserData,
   signalPairingDaemons,
@@ -45,6 +48,8 @@ export async function startHeadlessPairingRuntime({
   // home, so the pairing runtime must hand it a matching disposable HOME.
   const homeDir = path.join(runDir, 'home')
   mkdirSync(homeDir, { recursive: true, mode: 0o700 })
+  // Keep the disposable home boundary while letting macOS reuse Orca Dev's approved safeStorage item.
+  linkEmulatorMacKeychain(homeDir)
   const pairingAddress = primaryLanIp(lanIpCandidates)
   const child = spawn(
     orcaCli,
@@ -58,15 +63,12 @@ export async function startHeadlessPairingRuntime({
     ],
     {
       cwd,
-      env: {
-        ...process.env,
-        ...environment,
-        ORCA_DEV_USER_DATA_PATH: userData,
-        ORCA_E2E_USER_DATA_DIR: userData,
-        ORCA_E2E_HOME_DIR: homeDir,
-        HOME: homeDir,
-        USERPROFILE: homeDir
-      },
+      env: createEmulatorPairingChildEnvironment({
+        inheritedEnvironment: process.env,
+        environment,
+        userData,
+        homeDir
+      }),
       stdio: ['ignore', 'pipe', 'pipe']
     }
   )
@@ -151,6 +153,7 @@ async function waitForPairingRuntime({
     child.stdout?.destroy()
     child.stderr?.destroy()
     if (shutdownDaemon) {
+      daemonPids = currentPairingDaemonPids(userData, daemonPids)
       signalPairingDaemons(daemonPids)
       const gracefulTimeouts = await waitForProcessExit(daemonPids, 2_500)
       signalPairingDaemons(gracefulTimeouts, process.kill, 'SIGKILL')

@@ -97,7 +97,7 @@ export async function verifyHostedAdversarialTasks({
     try {
       workspaceDocument = await waitForVisibleHostedWebView({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: 'Host 1',
         timeoutMs: Math.min(timeoutMs, 15_000)
       })
     } catch (error) {

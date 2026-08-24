@@ -22,6 +22,7 @@ export function createMobileWebTerminalStreamRecord(args: {
     viewport: args.request.viewport,
     visible: args.request.visible,
     hostReady: false,
+    supportsQueryReply: false,
     bridgeSequence: 0,
     sentSequence: 0,
     acknowledgedSequence: 0,

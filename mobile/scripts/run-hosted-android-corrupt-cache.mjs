@@ -229,7 +229,7 @@ function parseOptions(args) {
     adb: 'adb',
     desktopPid: 0,
     devClientUrl: 'exp+orca-mobile://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
-    expectedText: 'Orca Desktop',
+    expectedText: 'Host 1',
     timeoutMs: 30_000
   }
   for (let index = 0; index < args.length; index += 1) {

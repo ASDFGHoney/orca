@@ -1,33 +1,28 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
+import type { RpcClientContextValue } from '../transport/rpc-client-context-contract'
 import type { MobileConnectionPath } from '../transport/stable-logical-rpc-client'
 import type { ConnectionState, HostProfile } from '../transport/types'
 
-export type RpcClientContextValue = {
-  acquire: (hostId: string, host?: HostProfile) => RpcClient | null
-  release: (hostId: string) => void
-  forceReconnect: (hostId: string) => Promise<void>
-  closeHost: (hostId: string) => void
-  getState: (hostId: string) => ConnectionState
-  getReconnectAttempt: (hostId: string) => number
-  getLastConnectedAt: (hostId: string) => number | null
-  getActivePath: (hostId: string) => MobileConnectionPath
-  subscribeHostState: (hostId: string, listener: (state: ConnectionState) => void) => () => void
-  getAllClients: () => { hostId: string; client: RpcClient }[]
-  subscribeAllHosts: (listener: () => void) => () => void
-  primeHosts: (hosts: HostProfile[]) => void
-}
+export type { RpcClientContextValue } from '../transport/rpc-client-context-contract'
 
 const noop = () => {}
 const value: RpcClientContextValue = {
   acquire: () => null,
   release: noop,
+  releaseAndCloseIfUnused: noop,
+  closeIfUnused: noop,
   async forceReconnect() {},
-  closeHost: noop,
+  refreshHostClient: noop,
+  forgetHostClient: noop,
+  disconnectHostClient: noop,
   getState: () => 'disconnected',
+  getKnownState: () => null,
   getReconnectAttempt: () => 0,
   getLastConnectedAt: () => null,
   getActivePath: () => 'lan',
+  getPendingPath: () => null,
+  isPairingRejected: () => false,
   subscribeHostState: () => noop,
   getAllClients: () => [],
   subscribeAllHosts: () => noop,
@@ -67,7 +62,7 @@ export function useAllHostClients(_hostIds: string[]): {
 }
 
 export function useCloseHost(): (hostId: string) => void {
-  return useRpcClientContext().closeHost
+  return useRpcClientContext().disconnectHostClient
 }
 
 export function useForceReconnect(): (hostId: string) => Promise<void> {

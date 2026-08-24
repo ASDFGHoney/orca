@@ -60,11 +60,43 @@ type DownloadMobileWebPackageOptions = {
   signal?: AbortSignal
 }
 
-export async function downloadMobileWebPackage<TCommit>(
+type DownloadMobileWebPackageWithReuseOptions = DownloadMobileWebPackageOptions & {
+  reuseVerifiedBuild: (buildId: string) => boolean | Promise<boolean>
+}
+
+type DownloadedMobileWebPackage<TCommit> = {
+  manifest: MobileWebManifest
+  commit: TCommit
+  reusedVerifiedBuild: false
+}
+
+type ReusedOrDownloadedMobileWebPackage<TCommit> =
+  | DownloadedMobileWebPackage<TCommit>
+  | {
+      manifest: MobileWebManifest
+      commit: null
+      reusedVerifiedBuild: true
+    }
+
+export function downloadMobileWebPackage<TCommit>(
+  request: MobileWebPackageRequest,
+  stager: MobileWebPackageStager<TCommit>,
+  options: DownloadMobileWebPackageWithReuseOptions
+): Promise<ReusedOrDownloadedMobileWebPackage<TCommit>>
+
+export function downloadMobileWebPackage<TCommit>(
   request: MobileWebPackageRequest,
   stager: MobileWebPackageStager<TCommit>,
   options: DownloadMobileWebPackageOptions
-): Promise<{ manifest: MobileWebManifest; commit: TCommit }> {
+): Promise<DownloadedMobileWebPackage<TCommit>>
+
+export async function downloadMobileWebPackage<TCommit>(
+  request: MobileWebPackageRequest,
+  stager: MobileWebPackageStager<TCommit>,
+  options: DownloadMobileWebPackageOptions & {
+    reuseVerifiedBuild?: (buildId: string) => boolean | Promise<boolean>
+  }
+): Promise<ReusedOrDownloadedMobileWebPackage<TCommit>> {
   throwIfAborted(options.signal)
   const manifestResponse = await requestResult(request, 'mobileWeb.package.manifest')
   throwIfAborted(options.signal)
@@ -79,6 +111,11 @@ export async function downloadMobileWebPackage<TCommit>(
   if (!supportsMobileWebBridgeVersion(manifest.bridge, options.shellBridgeVersion)) {
     throw new MobileWebPackageDownloadError('incompatible_bridge')
   }
+  if (await options.reuseVerifiedBuild?.(manifest.buildId)) {
+    throwIfAborted(options.signal)
+    return { manifest, commit: null, reusedVerifiedBuild: true }
+  }
+  throwIfAborted(options.signal)
 
   let stagingStarted = false
   try {
@@ -90,7 +127,7 @@ export async function downloadMobileWebPackage<TCommit>(
     throwIfAborted(options.signal)
     const commit = await stager.commit(manifest)
     stagingStarted = false
-    return { manifest, commit }
+    return { manifest, commit, reusedVerifiedBuild: false }
   } catch (error) {
     if (stagingStarted) {
       await stager.abort().catch(() => {})

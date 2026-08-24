@@ -19,7 +19,9 @@ describe('mobile web accounts screen binding', () => {
     expect(hostedRoute).toContain(
       "import { AccountsScreen } from '../../../app/h/[hostId]/accounts'"
     )
-    expect(hostedRoute).toContain("webHostAccountsOperations(shell.client, 'Orca Desktop')")
+    expect(hostedRoute).toContain(
+      "webHostAccountsOperations(shell.client, shell.hostDisplayName ?? 'Orca Desktop')"
+    )
     expect(hostedRoute).toContain('operations={operations}')
     expect(hostedRoute).toContain('nativeHostBinding={false}')
     expect(hostedRoute).not.toMatch(/StyleSheet|className|<View|<Text|<Pressable|<div/)

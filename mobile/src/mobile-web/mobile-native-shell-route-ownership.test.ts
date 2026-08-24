@@ -11,6 +11,14 @@ const hybridPresentation = readFileSync(
   new URL('./MobileWebHybridShellPresentation.tsx', import.meta.url),
   'utf8'
 )
+const brokerMessageHandoff = readFileSync(
+  new URL('./mobile-web-broker-message-handoff.ts', import.meta.url),
+  'utf8'
+)
+const hardwareBackHook = readFileSync(
+  new URL('./use-mobile-web-hardware-back-handoff.ts', import.meta.url),
+  'utf8'
+)
 const hostedRouteRoot = new URL('../../host-web-app', import.meta.url)
 
 const NATIVE_ROUTE_NAMES = [
@@ -40,7 +48,10 @@ describe('mobile native shell route ownership', () => {
     expect(nativeSettings).not.toContain('Open hybrid workspace UI')
     expect(nativeSettings).not.toContain('Hybrid workspace UI')
     expect(nativeSettings).not.toContain('Experimental')
-    expect(nativeLayout).not.toContain('<Stack.Screen name="h"')
+    expect(nativeLayout).toContain(
+      'isRetiredNativeWorkspaceRoute(pathname, MOBILE_NATIVE_BASELINE_MODE)'
+    )
+    expect(nativeLayout).toContain('<Stack.Screen name="h" options={{ headerShown: false }} />')
   })
 
   it('keeps host selection on the existing native Home presentation', () => {
@@ -61,9 +72,10 @@ describe('mobile native shell route ownership', () => {
     )?.[1]
     expect(settingsBranch).toContain('nativeRouteHandoffRef.current.record(requestId, destination)')
     expect(settingsBranch).not.toContain('setHostedViewActive(false)')
-    expect(hybridShell).toContain('completeMobileWebNativeRouteHandoffAfterResponse')
-    expect(hybridShell).toContain('await view.deactivateSessionView()')
-    expect(hybridShell).toContain('setHostedViewActive,')
+    expect(hybridShell).toContain('handleMobileWebBrokerMessage')
+    expect(brokerMessageHandoff).toContain('completeMobileWebNativeRouteHandoffAfterResponse')
+    expect(brokerMessageHandoff).toContain('await view.deactivateSessionView()')
+    expect(brokerMessageHandoff).toContain('setHostedViewActive: args.setHostedViewActive')
     expect(hybridShell).toContain("router.push('/terminal-settings')")
     expect(hybridShell).toContain('void view.activateSessionView(sessionId)')
     expect(hybridShell).toContain('return () => setHostedViewActive(false)')
@@ -84,6 +96,17 @@ describe('mobile native shell route ownership', () => {
     )?.[1]
     expect(readyBranch).toContain('setPageReadySessionId(current.sessionId)')
     expect(readyBranch).not.toContain('postInit')
+  })
+
+  it('returns Android hardware Back to the native host route when the page does not handle it', () => {
+    const handleBack = hybridShell.match(
+      /const handleBack = useCallback\(\(\) => \{([\s\S]*?)\n\s*\},/
+    )?.[1]
+    expect(hybridShell).toContain('useMobileWebHardwareBackHandoff')
+    expect(hybridShell).toContain('onUnhandled: handleBack')
+    expect(handleBack).toContain('leaveHostRoute(router)')
+    expect(hardwareBackHook).toContain("Platform.OS !== 'android'")
+    expect(hardwareBackHook).toContain("BackHandler.addEventListener('hardwareBackPress'")
   })
 })
 

@@ -14,12 +14,11 @@ import {
   Keyboard,
   Platform,
   ActivityIndicator,
-  type KeyboardEvent,
   type LayoutChangeEvent,
   type ListRenderItem
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect, useRouter } from 'expo-router'
 import {
   AlertTriangle,
   ArrowUp,
@@ -54,6 +53,7 @@ import {
   type MobileTerminalLinkOpenMode
 } from '../../../../src/storage/preferences'
 import { useHostClient, useForceReconnect } from '../../../../src/transport/client-context'
+import { useMobileWebRouteParams } from '../../../../src/mobile-web/use-mobile-web-route-params'
 import {
   useLastConnectedAt,
   useRelayRecoveryStatus,
@@ -92,6 +92,7 @@ import type {
 } from '../../../../src/terminal/terminal-webview-contract'
 import { computeActiveTerminalKeyboardLift } from '../../../../src/terminal/terminal-keyboard-avoidance-lift'
 import { useTerminalViewportRefit } from '../../../../src/terminal/terminal-viewport-refit'
+import { useMobileKeyboardInset } from '../../../../src/hooks/use-mobile-keyboard-inset'
 import {
   getDefaultTerminalAccessoryBuiltInIds,
   getVisibleTerminalAccessoryKeys
@@ -751,7 +752,7 @@ export function SessionScreen({
     name: routeWorktreeName,
     created,
     warning: createdWarning
-  } = useLocalSearchParams<{
+  } = useMobileWebRouteParams<{
     hostId: string
     worktreeId: string
     name?: string
@@ -1013,7 +1014,7 @@ export function SessionScreen({
     [visibleBuiltInIds]
   )
   // Why: Expo SDK 55 edge-to-edge doesn't resize the window on IME open, so track keyboard height ourselves and lift the input without resizing the desktop PTY.
-  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const keyboardHeight = useMobileKeyboardInset().height
   // Why: server-authoritative display mode per terminal, populated from subscribe responses.
   const [terminalModes, setTerminalModes] = useState<Map<string, MobileDisplayMode>>(new Map())
   const [terminalKeyboardMetrics, setTerminalKeyboardMetrics] = useState<
@@ -2519,23 +2520,8 @@ export function SessionScreen({
   })
 
   useEffect(() => {
-    const onShow = (e: KeyboardEvent) => {
-      notifyKeyboardVisibility(true)
-      setKeyboardHeight(e.endCoordinates?.height ?? 0)
-    }
-    const onHide = () => {
-      notifyKeyboardVisibility(false)
-      setKeyboardHeight(0)
-    }
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
-    const showSub = Keyboard.addListener(showEvent, onShow)
-    const hideSub = Keyboard.addListener(hideEvent, onHide)
-    return () => {
-      showSub.remove()
-      hideSub.remove()
-    }
-  }, [notifyKeyboardVisibility])
+    notifyKeyboardVisibility(keyboardHeight > 0)
+  }, [keyboardHeight, notifyKeyboardVisibility])
 
   const scrollActiveTabIntoView = useCallback((tabId: string | null, animated: boolean) => {
     if (!tabId) {

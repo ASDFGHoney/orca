@@ -8,8 +8,11 @@ const HOSTED_PAGE_HOST_ID = 'paired-orca-desktop'
 export default function HostMobileWebAccountsRoute() {
   const shell = useMobileWebNativeShell()
   const operations = useMemo(
-    () => (shell.client ? webHostAccountsOperations(shell.client, 'Orca Desktop') : undefined),
-    [shell.client]
+    () =>
+      shell.client
+        ? webHostAccountsOperations(shell.client, shell.hostDisplayName ?? 'Orca Desktop')
+        : undefined,
+    [shell.client, shell.hostDisplayName]
   )
   const connectionState =
     shell.connection === 'offline'

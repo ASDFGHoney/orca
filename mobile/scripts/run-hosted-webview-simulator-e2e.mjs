@@ -23,13 +23,9 @@ import {
 import { startHostedIosEmulatorController } from './hosted-ios-emulator-controller.mjs'
 import { createHostedIosNativeBaselineStep } from './hosted-ios-native-baseline-step.mjs'
 import {
-  activateHostedWebViewControl,
   assertNoHostedMobileWebCdpTarget,
-  verifyHostedWebViewNavigationIsolation,
-  verifyHostedWebViewNetworkIsolation,
   waitForVisibleHostedWebView
 } from './hosted-webview-cdp-session.mjs'
-import { verifyHostedWebViewExecutableIsolation } from './hosted-webview-executable-isolation.mjs'
 import { verifyHostedWebViewPrivacyIsolation } from './hosted-webview-privacy-isolation.mjs'
 import { captureNativeAgentHistoryBaseline } from './hosted-ios-agent-history-parity.mjs'
 import {
@@ -54,24 +50,28 @@ import {
   alignHostedIosSessionPoint,
   verifyHostedIosAdversarialTerminalLinks
 } from './hosted-ios-adversarial-terminal-links.mjs'
-import { tapHostedIosPoint } from './hosted-ios-emulator-accessibility.mjs'
+import {
+  tapHostedIosAccessibilityControlByLabelPrefix,
+  tapHostedIosPoint
+} from './hosted-ios-emulator-accessibility.mjs'
 import { openHostedIosHybridRoute } from './hosted-ios-hybrid-route-handoff.mjs'
 import {
   startHostedIosMobileLauncher,
   waitForHostedIosMobileLauncher
 } from './hosted-ios-mobile-launcher.mjs'
 import { verifyHostedIosNativeSettingsJourney } from './hosted-ios-native-settings-journey.mjs'
+import { verifyHostedIosNativeAlertJourney } from './hosted-ios-native-alert-journey.mjs'
 import {
   bootHostedIosSimulator,
   resolveHostedIosSimulatorUdid
 } from './hosted-ios-simulator-device.mjs'
 import { verifyHostedSourceControlReviewJourney } from './hosted-ios-source-control-review-journey.mjs'
+import { verifyHostedHostOriginSourceControlJourney } from './hosted-ios-host-origin-source-control-journey.mjs'
 import { captureNativeSourceControlReviewBaselines } from './hosted-ios-source-control-review-parity.mjs'
 import { resetHostedIosPhotosPermission } from './hosted-ios-photo-permission-denial.mjs'
 import { verifyHostedIosTerminalInputJourney } from './hosted-ios-terminal-device-input-journey.mjs'
 import { waitForHostedIosBuildActivation } from './hosted-ios-build-activation.mjs'
 import { completeHostedIosNativeOnboarding } from './hosted-ios-native-onboarding.mjs'
-import { activateHostedWorkspaceRow } from './hosted-webview-workspace-activation.mjs'
 import { resolveHostedWebViewRuntimeDirectory } from './hosted-webview-runtime-directory.mjs'
 import {
   clearHostedIosWebViewSecurityProbe,
@@ -79,6 +79,12 @@ import {
   startHostedIosWebViewSecurityProbe
 } from './hosted-ios-webview-security-probe.mjs'
 import { hostedIosSimulatorAppPreparation } from './hosted-ios-simulator-app-preparation.mjs'
+import {
+  installHostedWebViewRouteExceptionCapture,
+  readHostedWebViewRouteExceptionEvidence
+} from './hosted-webview-route-exception-evidence.mjs'
+import { captureHostedWebViewSecurityEvidence } from './hosted-webview-security-evidence.mjs'
+import { evidenceStep, printHostedWebViewE2eReport } from './hosted-webview-e2e-report.mjs'
 
 const worktree = path.resolve(import.meta.dirname, '../..')
 const options = parseHostedWebViewSimulatorE2eOptions(process.argv.slice(2))
@@ -111,6 +117,7 @@ async function main() {
   let adversarialSessionYOffset = 0
   let adversarialTerminalLinks = null
   let adversarialTerminalHandle = null
+  let hostedExceptionDocument = null
   try {
     networkProbe = await startHostedIosWebViewSecurityProbe()
     if (options.adversarialContent) {
@@ -273,9 +280,21 @@ async function main() {
     )
     let workspaceDocument = await waitForVisibleHostedWebView({
       discoveryUrl,
-      expectedText: 'Orca Desktop',
+      expectedText: expectedWorkspace,
       timeoutMs: options.timeoutMs
     })
+    hostedExceptionDocument = workspaceDocument
+    await installHostedWebViewRouteExceptionCapture(workspaceDocument)
+    const nativeAlert = await evidenceStep('native Alert bridge journey', () =>
+      verifyHostedIosNativeAlertJourney({
+        discoveryUrl,
+        emulator,
+        expectedWorkspace,
+        timeoutMs: options.timeoutMs,
+        workspaceDocument
+      })
+    )
+    workspaceDocument = nativeAlert.workspaceDocument
     if (adversarialFixture) {
       await enableHostedTerminalDiagnostics(workspaceDocument)
     }
@@ -343,6 +362,7 @@ async function main() {
               nativeBaseline: nativeAccounts,
               runtimeDirectory,
               timeoutMs: options.timeoutMs,
+              expectedWorkspace,
               workspaceDocument
             })
           )
@@ -421,18 +441,22 @@ async function main() {
       options.nativeSettingsOnly
         ? null
         : await evidenceStep('Source Control and Review journey', async () => {
+            let hostOrigin
             if (options.sourceControlOnly) {
-              await activateHostedWorkspaceRow(
-                workspaceDocument,
+              hostOrigin = await evidenceStep('host-origin Source Control journey', () =>
+                verifyHostedHostOriginSourceControlJourney({
+                  discoveryUrl,
+                  emulator,
+                  nativeBaseline: nativeSourceControlReview.sourceControl,
+                  timeoutMs: options.timeoutMs,
+                  workspaceName: expectedWorkspace
+                })
+              )
+              workspaceDocument = hostOrigin.workspaceDocument
+              await tapHostedIosAccessibilityControlByLabelPrefix(
+                emulator,
                 adversarialFixture?.workspaceRowName ?? expectedWorkspace,
-                activateHostedWebViewControl,
-                options.timeoutMs,
-                () =>
-                  waitForVisibleHostedWebView({
-                    discoveryUrl: `http://127.0.0.1:${inspectorPort}`,
-                    expectedText: adversarialFixture?.workspaceRowName ?? 'Orca Desktop',
-                    timeoutMs: options.timeoutMs
-                  })
+                options.timeoutMs
               )
             }
             let sessionDocument = await waitForVisibleHostedWebView({
@@ -459,7 +483,7 @@ async function main() {
               adversarialSessionYOffset = result.yOffset
               sessionDocument = result.sessionDocument
             }
-            return verifyHostedSourceControlReviewJourney({
+            const sessionOrigin = await verifyHostedSourceControlReviewJourney({
               deviceUdid,
               discoveryUrl: `http://127.0.0.1:${inspectorPort}`,
               emulator,
@@ -488,6 +512,7 @@ async function main() {
                 : undefined,
               timeoutMs: options.timeoutMs
             })
+            return { ...sessionOrigin, ...(hostOrigin ? { hostOrigin } : {}) }
           })
     const adversarialContent = adversarialInspector
       ? await evidenceStep('adversarial filename and diff presentation', () =>
@@ -507,72 +532,53 @@ async function main() {
               expectedHrefIncludes: options.nativeSettingsOnly ? '/session/' : '/review/',
               timeoutMs: options.timeoutMs
             })
-    const networkIsolation = await evidenceStep('network isolation probe', () =>
-      verifyHostedWebViewNetworkIsolation({
+    const { executableIsolation, navigationIsolation, networkIsolation, privacyIsolation } =
+      await captureHostedWebViewSecurityEvidence({
         document: securityDocument,
-        probeId: networkProbe.token
+        evidenceStep,
+        probeId: networkProbe.token,
+        workspacePrivacyIsolation
       })
-    )
-    const navigationIsolation = await evidenceStep('navigation isolation probe', () =>
-      verifyHostedWebViewNavigationIsolation({
-        document: securityDocument,
-        probeId: networkProbe.token
-      })
-    )
-    const executableIsolation = await evidenceStep('executable isolation probe', () =>
-      verifyHostedWebViewExecutableIsolation({
-        document: securityDocument,
-        probeId: networkProbe.token
-      })
-    )
-    const privacyIsolation =
-      workspacePrivacyIsolation ??
-      (await evidenceStep('privacy isolation probe', () =>
-        verifyHostedWebViewPrivacyIsolation({ document: securityDocument })
-      ))
-    await delay(500)
+    await new Promise((resolve) => setTimeout(resolve, 500))
     if (networkProbe.observations.length > 0) {
       throw new Error(
         `Hosted WebView reached the network probe: ${networkProbe.observations.join(', ')}`
       )
     }
     await waitForHostedIosBuildActivation(deviceUdid, options, runtimeDirectory)
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          device: deviceUdid,
-          targetId: workspaceDocument.targetId,
-          route: workspaceDocument.href,
-          nativeAppPath,
-          visibleText: expectedWorkspace,
-          interactiveControls: workspaceDocument.buttonCount,
-          networkIsolation,
-          navigationIsolation,
-          executableIsolation,
-          privacyIsolation,
-          nativeOnboarding,
-          documentUpload: terminalDeviceInput?.documentUpload?.evidence ?? null,
-          photoPermissionDenial: terminalDeviceInput?.photoPermissionDenial?.evidence ?? null,
-          photoPermissionRevocation:
-            terminalDeviceInput?.photoPermissionRevocation?.evidence ?? null,
-          terminalClipboardImagePaste:
-            terminalDeviceInput?.terminalClipboardImagePaste?.evidence ?? null,
-          terminalClipboardPaste: terminalDeviceInput?.terminalClipboardPaste.evidence ?? null,
-          workspaceParity: hostedWorkspace,
-          accountsParity: hostedAccounts?.evidence ?? null,
-          agentHistory: historyEvidence,
-          coreRouteParity: hostedCoreRoutes?.evidence ?? null,
-          filesPreviewParity: hostedFilesPreview?.evidence ?? null,
-          sourceControlReview,
-          adversarialContent,
-          adversarialProviderContent,
-          adversarialTerminalLinks
-        },
-        null,
-        2
+    printHostedWebViewE2eReport({
+      adversarialContent,
+      adversarialProviderContent,
+      adversarialTerminalLinks,
+      deviceUdid,
+      executableIsolation,
+      expectedWorkspace,
+      historyEvidence,
+      hostedAccounts,
+      hostedCoreRoutes,
+      hostedFilesPreview,
+      hostedWorkspace,
+      nativeAlert,
+      nativeAppPath,
+      nativeOnboarding,
+      navigationIsolation,
+      networkIsolation,
+      privacyIsolation,
+      sourceControlReview,
+      terminalDeviceInput,
+      workspaceDocument
+    })
+  } catch (error) {
+    const evidence = hostedExceptionDocument
+      ? await readHostedWebViewRouteExceptionEvidence(hostedExceptionDocument).catch(() => [])
+      : []
+    if (evidence.length > 0) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} Hosted exception evidence: ${JSON.stringify(evidence)}`,
+        { cause: error }
       )
-    )
+    }
+    throw error
   } finally {
     inspector?.stop()
     await stopHostedChildProcess(launcher)
@@ -583,20 +589,6 @@ async function main() {
     await clearHostedIosWebViewSecurityProbe(deviceUdid)
     await networkProbe?.stop()
   }
-}
-
-async function evidenceStep(label, run) {
-  try {
-    return await run()
-  } catch (error) {
-    throw new Error(`${label} failed: ${error instanceof Error ? error.message : String(error)}`, {
-      cause: error
-    })
-  }
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 main().catch((error) => {

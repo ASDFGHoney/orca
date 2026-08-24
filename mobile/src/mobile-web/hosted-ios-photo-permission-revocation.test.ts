@@ -15,7 +15,7 @@ const args = {
   orcaCli: './config/scripts/orca-dev.mjs',
   pairingRuntimeUserDataPath: '/tmp/pairing/userData',
   sessionDocument: {
-    href: 'orca-mobile-web://build/h/host/session/workspace?name=mobile-rearch'
+    href: 'orca-mobile-web://build/h/host/session/workspace'
   },
   terminalHandle: 'terminal-handle',
   timeoutMs: 30_000,
@@ -24,12 +24,12 @@ const args = {
 const grantedDocument = {
   href: args.sessionDocument.href
     .replace('://build/', '://grant-restart/')
-    .replace('/workspace?', '/grant-workspace?')
+    .replace('/workspace', '/grant-workspace')
 }
 const revokedDocument = {
   href: args.sessionDocument.href
     .replace('://build/', '://revocation-restart/')
-    .replace('/workspace?', '/revoked-workspace?')
+    .replace('/workspace', '/revoked-workspace')
 }
 
 function createOperations() {
@@ -231,7 +231,7 @@ describe('hosted iOS Photos permission revocation', () => {
   it('rejects opaque authority replacement across picker interruption', async () => {
     const operations = createOperations()
     const replacedAuthority = {
-      href: grantedDocument.href.replace('/grant-workspace?', '/interrupted-workspace?')
+      href: grantedDocument.href.replace('/grant-workspace', '/interrupted-workspace')
     }
     operations.waitForDocument
       .mockReset()
@@ -249,7 +249,7 @@ describe('hosted iOS Photos permission revocation', () => {
     const interruptedDocument = {
       href: grantedDocument.href
         .replace('://grant-restart/', '://interruption-restart/')
-        .replace('/grant-workspace?', '/interrupted-workspace?')
+        .replace('/grant-workspace', '/interrupted-workspace')
     }
     operations.waitForDocument
       .mockReset()

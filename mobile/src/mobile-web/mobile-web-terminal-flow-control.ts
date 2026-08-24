@@ -36,6 +36,7 @@ export type MobileWebTerminalStreamRecord = {
   viewport: { cols: number; rows: number }
   visible: boolean
   hostReady: boolean
+  supportsQueryReply: boolean
   bridgeSequence: number
   sentSequence: number
   acknowledgedSequence: number

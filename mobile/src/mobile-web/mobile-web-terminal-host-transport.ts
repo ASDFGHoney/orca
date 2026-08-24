@@ -20,7 +20,7 @@ export function sendMobileWebTerminalSubscribe(
       terminal: record.terminal,
       client: { id: clientId, type: 'mobile' },
       viewport: record.viewport,
-      capabilities: { ackOutput: 1 }
+      capabilities: { ackOutput: 1, queryReply: 1 }
     },
     0
   )

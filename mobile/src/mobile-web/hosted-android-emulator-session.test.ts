@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assertHostedAndroidBridgeLogClean,
   findHostedAndroidBridgeLogFailures,
+  installAndResetHostedAndroidApp,
   waitForHostedAndroidReactReady
 } from '../../scripts/hosted-android-emulator-session.mjs'
 
@@ -48,6 +49,22 @@ describe('hosted Android emulator session', () => {
     const runAdb = async () => responses.shift() ?? ''
 
     await expect(waitForHostedAndroidReactReady('adb', 2_000, runAdb)).resolves.toBe('7301')
+  })
+
+  it('allows an exact debug APK to replace a higher-version beta install', async () => {
+    const calls: Array<{ args: string[]; timeout?: number }> = []
+    const runAdb = async (_adb: string, args: string[], timeout?: number) => {
+      calls.push({ args, timeout })
+      return ''
+    }
+
+    await installAndResetHostedAndroidApp('adb', '/tmp/app-debug.apk', runAdb)
+
+    expect(calls[0]).toEqual({
+      args: ['install', '-r', '-d', '-t', '/tmp/app-debug.apk'],
+      timeout: 120_000
+    })
+    expect(calls[1]?.args).toEqual(['shell', 'pm', 'clear', 'com.stably.orca.mobile'])
   })
 
   it('scopes the bridge audit to the current Android app process', async () => {

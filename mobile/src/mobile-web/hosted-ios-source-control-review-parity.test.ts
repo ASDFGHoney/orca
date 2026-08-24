@@ -7,11 +7,10 @@ const mocks = vi.hoisted(() => ({
   longPressControlByPrefix: vi.fn(),
   readTextPoint: vi.fn(),
   tapControl: vi.fn(),
-  tapControlStartingWith: vi.fn(),
   waitForControl: vi.fn(),
   waitForControlByPrefix: vi.fn(),
   waitForControlEndingWith: vi.fn(),
-  waitForControlStartingWith: vi.fn()
+  waitForControlMatching: vi.fn()
 }))
 
 vi.mock('node:child_process', () => ({
@@ -22,11 +21,10 @@ vi.mock('../../scripts/emulator-developer-menu-dismissal.mjs', () => ({
 }))
 vi.mock('../../scripts/hosted-ios-emulator-accessibility.mjs', () => ({
   tapHostedIosAccessibilityControl: mocks.tapControl,
-  tapHostedIosAccessibilityControlStartingWith: mocks.tapControlStartingWith,
   waitForHostedIosAccessibilityControl: mocks.waitForControl,
   waitForHostedIosAccessibilityControlByLabelPrefix: mocks.waitForControlByPrefix,
   waitForHostedIosAccessibilityControlEndingWith: mocks.waitForControlEndingWith,
-  waitForHostedIosAccessibilityControlStartingWith: mocks.waitForControlStartingWith
+  waitForHostedIosAccessibilityControlMatching: mocks.waitForControlMatching
 }))
 vi.mock('../../scripts/hosted-ios-emulator-long-press.mjs', () => ({
   longPressHostedIosAccessibilityControlByLabelPrefix: mocks.longPressControlByPrefix
@@ -53,11 +51,22 @@ describe('hosted iOS Source Control and Review parity', () => {
     mocks.longPressControlByPrefix.mockResolvedValue({ x: 0.5, y: 0.4 })
     mocks.readTextPoint.mockResolvedValue({ x: 0.2, y: 0.1 })
     mocks.tapControl.mockResolvedValue({ x: 0.2, y: 0.1 })
-    mocks.tapControlStartingWith.mockResolvedValue({ x: 0.5, y: 0.5 })
     mocks.waitForControl.mockResolvedValue({ x: 0.2, y: 0.1 })
     mocks.waitForControlByPrefix.mockResolvedValue({ x: 0.5, y: 0.4 })
     mocks.waitForControlEndingWith.mockResolvedValue({ x: 0.5, y: 0.4 })
-    mocks.waitForControlStartingWith.mockResolvedValue({ x: 0.5, y: 0.5 })
+    mocks.waitForControlMatching
+      .mockResolvedValueOnce({
+        label: 'Open changed file mobile/app/index.tsx',
+        value: '',
+        x: 0.5,
+        y: 0.5
+      })
+      .mockResolvedValueOnce({
+        label: 'Pull request #13386, Draft, No checks. Open pull request.',
+        value: '',
+        x: 0.5,
+        y: 0.3
+      })
   })
 
   it('captures the real host-origin Source Control and standalone Review path', async () => {
@@ -79,9 +88,9 @@ describe('hosted iOS Source Control and Review parity', () => {
       'Source Control',
       30_000
     )
-    expect(mocks.tapControlStartingWith).toHaveBeenCalledWith(
+    expect(mocks.tapControl).toHaveBeenCalledWith(
       { deviceUdid: 'simulator' },
-      'Open changed file ',
+      'Open changed file mobile/app/index.tsx',
       30_000
     )
     expect(baselines).toEqual({
@@ -90,10 +99,51 @@ describe('hosted iOS Source Control and Review parity', () => {
         screenshot: '/tmp/parity/native-review-portrait.png'
       },
       sourceControl: {
+        changedFileLabel: 'Open changed file mobile/app/index.tsx',
+        pullRequestState: {
+          kind: 'ready',
+          label: 'Pull request #13386, Draft, No checks. Open pull request.',
+          number: '13386'
+        },
         screenTitlePoint: { x: 0.2, y: 0.1 },
         screenshot: '/tmp/parity/native-source-control-portrait.png'
       }
     })
+  })
+
+  it('uses value-backed accessibility text for the changed file and pull request', async () => {
+    mocks.waitForControlMatching
+      .mockReset()
+      .mockResolvedValueOnce({
+        label: 'Changed file',
+        value: 'Open changed file mobile/src/mobile-web/bridge.ts',
+        x: 0.5,
+        y: 0.5
+      })
+      .mockResolvedValueOnce({
+        label: '',
+        value: 'Pull request #13386, Draft, No checks. Open pull request.',
+        x: 0.5,
+        y: 0.3
+      })
+
+    const baselines = await captureNativeSourceControlReviewBaselines({
+      deviceUdid: 'simulator',
+      emulator: { deviceUdid: 'simulator' },
+      expectedWorkspace: 'mobile-rearch',
+      runtimeDirectory: '/tmp/parity',
+      timeoutMs: 30_000
+    })
+
+    expect(baselines.sourceControl).toMatchObject({
+      changedFileLabel: 'Open changed file mobile/src/mobile-web/bridge.ts',
+      pullRequestState: { kind: 'ready', number: '13386' }
+    })
+    expect(mocks.tapControl).toHaveBeenCalledWith(
+      { deviceUdid: 'simulator' },
+      'Open changed file mobile/src/mobile-web/bridge.ts',
+      30_000
+    )
   })
 
   it('compares a hosted route against its native screenshot and title landmark', async () => {

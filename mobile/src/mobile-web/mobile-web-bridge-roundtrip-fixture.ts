@@ -77,6 +77,7 @@ export function createMobileWebBridgeRoundtripFixture(options: {
 
 function defaultNativeAuthority(): MobileWebNativeCapabilityAuthority {
   return {
+    alert: async () => ({ kind: 'dismissed' }),
     hapticFeedback: () => {},
     clipboardAvailability: async () => ({ hasText: false, hasImage: false }),
     clipboardWrite: async () => ({ confirmation: 'in-app' }),

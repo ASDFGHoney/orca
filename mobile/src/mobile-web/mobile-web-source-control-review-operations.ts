@@ -15,6 +15,8 @@ import {
   type MobileWebSourceControlReviewTerminalSendResult
 } from '../../../src/shared/mobile-web/source-control-review-contract'
 import type { RpcClient } from '../transport/rpc-client'
+import { isMobileGitUnavailable } from '../source-control/mobile-git-status'
+import { activateMobileSessionFileTab } from '../session/mobile-session-file-tab-activation'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import { sanitizeMobileWebSourceControlDiff } from './mobile-web-source-control-read-results'
 import {
@@ -86,8 +88,22 @@ export async function executeMobileWebSourceControlReviewOperation(args: {
       staged: payload.scope === 'staged'
     })
     if (!response.ok) {
+      if (isMobileGitUnavailable(response.error?.code, response.error?.message)) {
+        throw new MobileWebBrokerError('unsupported_capability')
+      }
       throw new MobileWebBrokerError('host_error')
     }
+    await activateMobileSessionFileTab({
+      client: args.client,
+      worktreeId: hostWorkspaceId,
+      relativePath: payload.relativePath,
+      tabMode: 'diff',
+      staged: payload.scope === 'staged',
+      isCurrent: () => {
+        args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, hostWorkspaceId)
+        return true
+      }
+    })
     return null
   }
   if (args.operation === 'reviewTerminalSend') {
@@ -111,7 +127,9 @@ export async function executeMobileWebSourceControlReviewOperation(args: {
     if (accepted === null) {
       throw new MobileWebBrokerError('host_error')
     }
-    return MobileWebSourceControlReviewTerminalSendResultSchema.parse({ accepted })
+    return MobileWebSourceControlReviewTerminalSendResultSchema.parse({
+      accepted
+    })
   }
   throw new MobileWebBrokerError('unsupported_capability')
 }

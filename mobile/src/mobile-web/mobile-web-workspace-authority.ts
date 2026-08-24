@@ -15,8 +15,10 @@ export type MobileWebHostWorkspaceBinding = {
 export class MobileWebWorkspaceAuthority {
   private readonly pageWorkspaceIdByHostId = new Map<string, string>()
   private readonly hostWorkspaceIdByPageId = new Map<string, string>()
+  private hostRepoIdByHostWorkspaceId = new Map<string, string>()
   private readonly pageRepoIdByHostId = new Map<string, string>()
   private readonly hostRepoIdByPageId = new Map<string, string>()
+  private catalogRepoIds = new Set<string>()
   private readonly hostConnectionIdByPageRepoId = new Map<string, string>()
   private readonly pageProjectIdByHostId = new Map<string, string>()
   private readonly pageExecutionHostIdByHostId = new Map<string, ExecutionHostId>()
@@ -35,10 +37,14 @@ export class MobileWebWorkspaceAuthority {
         }
       }
     }
+    this.hostRepoIdByHostWorkspaceId = new Map(
+      bindings.map((binding) => [binding.workspaceId, binding.repoId])
+    )
     for (const binding of bindings) {
       this.rememberWorkspace(binding.workspaceId)
       this.rememberRepo(binding.repoId)
     }
+    this.revokeUnreferencedRepos()
   }
 
   pageWorkspaceId(hostWorkspaceId: string): string {
@@ -72,15 +78,9 @@ export class MobileWebWorkspaceAuthority {
   }
 
   synchronizeRepositories(hostRepoIds: readonly string[]): void {
-    const current = new Set(hostRepoIds)
-    for (const [hostRepoId, pageRepoId] of this.pageRepoIdByHostId) {
-      if (!current.has(hostRepoId)) {
-        this.pageRepoIdByHostId.delete(hostRepoId)
-        this.hostRepoIdByPageId.delete(pageRepoId)
-        this.hostConnectionIdByPageRepoId.delete(pageRepoId)
-      }
-    }
+    this.catalogRepoIds = new Set(hostRepoIds)
     hostRepoIds.forEach((hostRepoId) => this.rememberRepo(hostRepoId))
+    this.revokeUnreferencedRepos()
   }
 
   synchronizeCreationRepositories(repositories: readonly NewWorkspaceRepository[]): void {
@@ -135,6 +135,7 @@ export class MobileWebWorkspaceAuthority {
 
   registerWorkspace(hostWorkspaceId: string, hostRepoId: string): string {
     this.rememberWorkspace(hostWorkspaceId)
+    this.hostRepoIdByHostWorkspaceId.set(hostWorkspaceId, hostRepoId)
     this.rememberRepo(hostRepoId)
     return this.pageWorkspaceId(hostWorkspaceId)
   }
@@ -142,8 +143,10 @@ export class MobileWebWorkspaceAuthority {
   clear(): void {
     this.pageWorkspaceIdByHostId.clear()
     this.hostWorkspaceIdByPageId.clear()
+    this.hostRepoIdByHostWorkspaceId.clear()
     this.pageRepoIdByHostId.clear()
     this.hostRepoIdByPageId.clear()
+    this.catalogRepoIds.clear()
     this.hostConnectionIdByPageRepoId.clear()
     this.pageProjectIdByHostId.clear()
     this.pageExecutionHostIdByHostId.clear()
@@ -163,6 +166,18 @@ export class MobileWebWorkspaceAuthority {
       const pageRepoId = this.createHandle('repo')
       this.pageRepoIdByHostId.set(hostRepoId, pageRepoId)
       this.hostRepoIdByPageId.set(pageRepoId, hostRepoId)
+    }
+  }
+
+  private revokeUnreferencedRepos(): void {
+    const workspaceRepoIds = new Set(this.hostRepoIdByHostWorkspaceId.values())
+    for (const [hostRepoId, pageRepoId] of this.pageRepoIdByHostId) {
+      if (workspaceRepoIds.has(hostRepoId) || this.catalogRepoIds.has(hostRepoId)) {
+        continue
+      }
+      this.pageRepoIdByHostId.delete(hostRepoId)
+      this.hostRepoIdByPageId.delete(pageRepoId)
+      this.hostConnectionIdByPageRepoId.delete(pageRepoId)
     }
   }
 

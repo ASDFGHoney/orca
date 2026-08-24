@@ -203,11 +203,29 @@ describe('mobile web source-control review operations', () => {
                   id: 'tab-1',
                   type: 'terminal',
                   status: 'ready',
-                  terminal: 'host-terminal'
+                  terminal: 'host-terminal',
+                  isActive: true
+                },
+                ...Array.from({ length: 199 }, (_, index) => ({
+                  id: `filler-${index}`,
+                  type: 'file',
+                  mode: index === 0 ? 'diff' : 'edit',
+                  ...(index === 0 ? { diffSource: 'unstaged' } : {}),
+                  relativePath: index === 0 ? 'src/app.ts' : `src/filler-${index}.ts`
+                })),
+                {
+                  id: 'diff-tab',
+                  type: 'file',
+                  mode: 'diff',
+                  diffSource: 'staged',
+                  relativePath: 'src/app.ts'
                 }
               ]
             }
           }
+        }
+        if (method === 'session.tabs.activate') {
+          return { ok: true, result: { activeTabId: 'diff-tab' } }
         }
         if (method === 'terminal.send') {
           return { ok: true, result: { send: { accepted: true } } }
@@ -256,6 +274,13 @@ describe('mobile web source-control review operations', () => {
       worktree: 'id:host-workspace',
       relativePath: 'src/app.ts',
       staged: true
+    })
+    expect(client.sendRequest).toHaveBeenCalledWith('session.tabs.activate', {
+      worktree: 'id:host-workspace',
+      tabId: 'diff-tab',
+      notifyClients: false,
+      navigation: 'caller',
+      intent: 'user'
     })
 
     await expect(
@@ -317,6 +342,28 @@ describe('mobile web source-control review operations', () => {
         terminalClientId: 'mobile-client'
       })
     ).resolves.toEqual({ accepted: false })
+  })
+
+  it('preserves an unavailable diff method for the page edit fallback', async () => {
+    const client = {
+      sendRequest: vi.fn().mockResolvedValue({
+        ok: false,
+        error: { code: 'method_not_found', message: 'Method not found' }
+      })
+    } as unknown as RpcClient
+
+    await expect(
+      executeMobileWebSourceControlReviewOperation({
+        operation: 'reviewOpen',
+        payload: {
+          workspaceId: 'page-workspace',
+          relativePath: 'src/app.ts',
+          scope: 'unstaged'
+        },
+        client,
+        workspaceAuthority
+      })
+    ).rejects.toMatchObject({ code: 'unsupported_capability' })
   })
 })
 

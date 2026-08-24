@@ -1,37 +1,72 @@
-import { spawn } from 'node:child_process'
 import path from 'node:path'
 import process from 'node:process'
+import { spawnProcess } from '../../src/shared/child-process/run-process.ts'
 
 const mobileRoot = path.resolve(import.meta.dirname, '..')
-const outputArgument = process.argv.slice(2).find((value) => value !== '--')
-const outputDirectory = path.resolve(mobileRoot, outputArgument ?? '../out/mobile-web-rnw-proof')
-const packageManager = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
-const child = spawn(
-  packageManager,
-  ['exec', 'expo', 'export', '--platform', 'web', '--output-dir', outputDirectory],
-  {
-    cwd: mobileRoot,
+export function createHostMobileWebExportProcessSpec({
+  environment = process.env,
+  mobileDirectory = mobileRoot,
+  outputDirectory,
+  platform = process.platform
+}) {
+  return {
+    program: platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
+    args: ['exec', 'expo', 'export', '--platform', 'web', '--output-dir', outputDirectory],
+    cwd: mobileDirectory,
     env: {
-      ...process.env,
+      ...environment,
       NODE_ENV: 'production',
       ORCA_EXPO_ROUTER_ROOT: 'host-web-app'
-    },
-    shell: process.platform === 'win32',
-    stdio: 'inherit'
+    }
   }
-)
+}
 
-child.on('error', (error) => {
-  console.error(error instanceof Error ? error.message : String(error))
-  process.exitCode = 1
-})
+export async function runHostMobileWebExport({
+  environment = process.env,
+  mobileDirectory = mobileRoot,
+  outputDirectory,
+  platform = process.platform,
+  spawn = spawnProcess,
+  stderr = process.stderr,
+  stdout = process.stdout
+}) {
+  const child = spawn(
+    createHostMobileWebExportProcessSpec({
+      environment,
+      mobileDirectory,
+      outputDirectory,
+      platform
+    })
+  )
+  child.stdout?.pipe(stdout)
+  child.stderr?.pipe(stderr)
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    stream?.on('error', () => {})
+  }
+  child.stdin?.end()
 
-child.on('exit', (code, signal) => {
+  const { code, signal } = await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('exit', (exitCode, exitSignal) => {
+      resolve({ code: exitCode, signal: exitSignal })
+    })
+  })
   if (signal) {
-    console.error(`Expo web export terminated by ${signal}`)
-    process.exitCode = 1
-    return
+    stderr.write(`Expo web export terminated by ${signal}\n`)
+    return 1
   }
-  process.exitCode = code ?? 1
-})
+  return code ?? 1
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
+  const outputArgument = process.argv.slice(2).find((value) => value !== '--')
+  const outputDirectory = path.resolve(mobileRoot, outputArgument ?? '../out/mobile-web-rnw-proof')
+
+  try {
+    process.exitCode = await runHostMobileWebExport({ outputDirectory })
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  }
+}

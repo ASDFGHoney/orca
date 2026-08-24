@@ -1,5 +1,5 @@
-import { useLocalSearchParams } from 'expo-router'
 import { MobileFilePreviewScreen } from '../../../../../src/files/MobileFilePreviewScreen'
+import { useMobileWebRouteParams } from '../../../../../src/mobile-web/use-mobile-web-route-params'
 import type { HostFilePreviewOperations } from '../../../../../src/files/host-file-preview-operations'
 import { normalizeMobileFilePreviewRouteParams } from '../../../../../src/files/mobile-file-preview-route'
 import type { ConnectionState } from '../../../../../src/transport/types'
@@ -13,7 +13,7 @@ export function MobileFilePreviewRoute({
   connectionState?: ConnectionState
   nativeHostBinding?: boolean
 } = {}) {
-  const params = useLocalSearchParams<{
+  const params = useMobileWebRouteParams<{
     hostId?: string | string[]
     worktreeId?: string | string[]
     relativePath?: string | string[]

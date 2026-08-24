@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  currentPairingDaemonPids,
   pairingDaemonPidsFromUserData,
   pairingRuntimePidFromUserData,
   signalPairingDaemons,
@@ -51,6 +52,17 @@ describe('emulator pairing runtime process ownership', () => {
         throw new Error('missing')
       })
     ).toEqual([])
+  })
+
+  it('includes daemon pid files created after the pairing URL was emitted', () => {
+    expect(
+      currentPairingDaemonPids(
+        '/tmp/profile',
+        [5201],
+        () => ['daemon-v36.pid'],
+        () => JSON.stringify({ pid: 5202 })
+      )
+    ).toEqual([5201, 5202])
   })
 
   it('signals the Electron owner rather than relying on its CLI wrapper', () => {

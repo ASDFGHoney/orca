@@ -45,6 +45,7 @@ export async function captureHostedAccountsParity({
   deviceUdid,
   discoveryUrl,
   emulator,
+  expectedWorkspace,
   nativeBaseline,
   runtimeDirectory,
   timeoutMs,
@@ -67,7 +68,7 @@ export async function captureHostedAccountsParity({
   await tapHostedIosPoint(emulator, accountsBackPoint(accounts.screenTitlePoint))
   const returnedWorkspaceDocument = await waitForVisibleHostedWebView({
     discoveryUrl,
-    expectedText: 'Orca Desktop',
+    expectedText: expectedWorkspace,
     timeoutMs
   })
   return {

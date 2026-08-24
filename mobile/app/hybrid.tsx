@@ -25,10 +25,9 @@ import { useMobileWebUserGestureAuthority as useGestureAuthority } from '../src/
 import { useMobileWebHostCatalog } from '../src/mobile-web/use-mobile-web-host-catalog'
 import { mobileWebDiagnosticsStore } from '../src/mobile-web/mobile-web-diagnostics-store'
 import { useMobileWebBridgeRuntimeRef } from '../src/mobile-web/use-mobile-web-bridge-runtime-ref'
-import {
-  completeMobileWebNativeRouteHandoffAfterResponse,
-  MobileWebNativeRouteHandoff
-} from '../src/mobile-web/mobile-web-native-route-handoff'
+import { useMobileWebHardwareBackHandoff } from '../src/mobile-web/use-mobile-web-hardware-back-handoff'
+import { MobileWebNativeRouteHandoff } from '../src/mobile-web/mobile-web-native-route-handoff'
+import { handleMobileWebBrokerMessage } from '../src/mobile-web/mobile-web-broker-message-handoff'
 import {
   useForceReconnect,
   useForgetHostClient,
@@ -67,19 +66,20 @@ export default function HybridScreen() {
   const { client, state } = useHostClient(selectedHostId)
   const closeHostClient = useForgetHostClient()
   const forceReconnectHost = useForceReconnect()
-  const reconnectAttempts = useReconnectAttempt(selectedHostId)
-  const lastConnectedAt = useLastConnectedAt(selectedHostId)
+  const reconnects = useReconnectAttempt(selectedHostId)
+  const lastConnected = useLastConnectedAt(selectedHostId)
   const selectedHost = useMemo(
     () => hosts.find((host) => host.id === selectedHostId),
     [hosts, selectedHostId]
   )
+  const hostName = selectedHost?.name
   const {
     session,
     viewEpoch,
     packageLoading,
     packageWarning,
     markHealthy,
-    handleHealthTimeout,
+    handleHealthTimeout: onHealthTimeout,
     handleProcessTerminated,
     retryPackage,
     recoverPrevious,
@@ -96,6 +96,10 @@ export default function HybridScreen() {
     shellSessionId: session?.sessionId,
     selectHost
   })
+  const handleBack = useCallback(() => {
+    coldResumeRoute.clearRoute()
+    leaveHostRoute(router)
+  }, [coldResumeRoute.clearRoute, router])
 
   useEffect(() => {
     if (hostsLoading || selectedHost || e2eHostId) {
@@ -151,6 +155,13 @@ export default function HybridScreen() {
     }
     await view.postMessage(JSON.stringify(message))
   }, [])
+  const hardwareBackHandoff = useMobileWebHardwareBackHandoff({
+    shellSessionId: session?.sessionId,
+    buildId: session?.buildId,
+    forwardingEnabled: hostedViewActive,
+    postMessage: postToWeb,
+    onUnhandled: handleBack
+  })
 
   useEffect(() => {
     brokerRef.current?.dispose()
@@ -251,7 +262,7 @@ export default function HybridScreen() {
     initializedSessionRef.current = current.sessionId
     healthDeadlineRef.current.arm(current.sessionId, (sessionId) => {
       if (activeSessionIdRef.current === sessionId) {
-        void handleHealthTimeout(sessionId)
+        void onHealthTimeout(sessionId)
       }
     })
     await postToWeb({
@@ -260,12 +271,13 @@ export default function HybridScreen() {
       shellSessionId: current.sessionId,
       buildId: current.buildId,
       connection: mobileWebBridgeConnectionState(state),
-      reconnectAttempts,
-      lastConnectedAt,
+      hostDisplayName: hostName,
+      reconnectAttempts: reconnects,
+      lastConnectedAt: lastConnected,
       resumeRoute: resumeRouteRef.current,
       grants: [...MOBILE_WEB_PRODUCTION_GRANTS]
     })
-  }, [handleHealthTimeout, lastConnectedAt, postToWeb, reconnectAttempts, session, state])
+  }, [hostName, lastConnected, onHealthTimeout, postToWeb, reconnects, session, state])
   useEffect(() => {
     postInitRef.current = postInit
   }, [postInit])
@@ -282,10 +294,10 @@ export default function HybridScreen() {
       shellSessionId: current.sessionId,
       buildId: current.buildId,
       state: mobileWebBridgeConnectionState(state),
-      reconnectAttempts,
-      lastConnectedAt
+      reconnectAttempts: reconnects,
+      lastConnectedAt: lastConnected
     })
-  }, [lastConnectedAt, postToWeb, reconnectAttempts, session, state])
+  }, [lastConnected, postToWeb, reconnects, session, state])
 
   const handleBridgeMessage = useCallback(
     async (raw: string) => {
@@ -301,53 +313,40 @@ export default function HybridScreen() {
         return
       }
       responseDropRef.current.recordRequest(parsed.value)
+      const backMessageHandled = hardwareBackHandoff.handlePageMessage(parsed.value)
       if (parsed.value.type === 'ready') {
         // `ready` acknowledges init; echoing init here starves the health frame.
         if (activeSessionIdRef.current === current.sessionId) {
           setPageReadySessionId(current.sessionId)
         }
+      } else if (backMessageHandled) {
+        return
       } else if (parsed.value.type === 'health') {
         healthDeadlineRef.current.acknowledge(current.sessionId)
         await markHealthy(current.sessionId)
       } else if (parsed.value.type === 'routeState') {
         brokerRef.current?.rememberRoute(parsed.value.route)
       } else {
-        const broker = brokerRef.current
-        await broker?.handle(parsed.value)
-        if (
-          parsed.value.type === 'request' &&
-          broker &&
-          brokerRef.current === broker &&
-          activeSessionIdRef.current === current.sessionId
-        ) {
-          completeMobileWebNativeRouteHandoffAfterResponse({
-            handoff: nativeRouteHandoffRef.current,
-            requestId: parsed.value.requestId,
-            shouldNavigate: () =>
-              brokerRef.current === broker && activeSessionIdRef.current === current.sessionId,
-            deactivateSessionView: async () => {
-              const view = viewRef.current
-              if (!view) {
-                throw new Error('mobile_web_session_view_unavailable')
-              }
-              await view.deactivateSessionView()
-            },
-            setHostedViewActive,
-            navigate: () => {
-              router.push('/terminal-settings')
-            },
-            onFailure: () => showWarning('Terminal settings could not be opened.')
-          })
-        }
+        await handleMobileWebBrokerMessage({
+          message: parsed.value,
+          brokerRef,
+          activeSessionIdRef,
+          sessionId: current.sessionId,
+          viewRef,
+          routeHandoff: nativeRouteHandoffRef.current,
+          setHostedViewActive,
+          navigateToTerminalSettings: () => router.push('/terminal-settings'),
+          onNavigationFailure: () => showWarning('Terminal settings could not be opened.')
+        })
       }
     },
-    [markHealthy, postInit, router, session, showWarning]
+    [hardwareBackHandoff, markHealthy, postInit, router, session, showWarning]
   )
-
   const shellContext = useMemo(
     () => (session ? { sessionId: session.sessionId, buildId: session.buildId } : null),
     [session?.buildId, session?.sessionId]
   )
+
   const getBroker = useCallback(() => brokerRef.current, [])
   const rememberRoute = useCallback((route: MobileWebResumeRoute) => {
     resumeRouteRef.current = route
@@ -368,11 +367,6 @@ export default function HybridScreen() {
     onNavigationResolved: coldResumeRoute.onNavigationResolved,
     showWarning
   })
-
-  const handleBack = useCallback(() => {
-    coldResumeRoute.clearRoute()
-    leaveHostRoute(router)
-  }, [coldResumeRoute.clearRoute, router])
 
   return (
     <MobileWebHybridShellPresentation
@@ -403,9 +397,13 @@ export default function HybridScreen() {
         recentWebGestureAtRef.current = Date.now()
       }}
       onBridgeMessage={(message) => void handleBridgeMessage(message)}
-      onPageLoaded={() => void postInit()}
+      onPageLoaded={() => {
+        hardwareBackHandoff.resetPage()
+        void postInit()
+      }}
       onNavigationBlocked={() => showWarning('Navigation outside Orca was blocked.')}
       onProcessTerminated={(sessionId) => {
+        hardwareBackHandoff.resetPage()
         healthDeadlineRef.current.clear()
         void handleProcessTerminated(sessionId)
       }}

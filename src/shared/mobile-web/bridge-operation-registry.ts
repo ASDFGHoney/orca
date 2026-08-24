@@ -200,6 +200,7 @@ export const MOBILE_WEB_BRIDGE_OPERATIONS = {
     'cancel'
   ],
   native: [
+    'alert',
     'hapticSelection',
     'hapticFeedback',
     'clipboardAvailability',

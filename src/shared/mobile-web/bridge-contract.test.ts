@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import {
   MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
   MOBILE_WEB_BRIDGE_MAX_MESSAGE_BYTES,
@@ -66,6 +67,25 @@ describe('mobile web bridge page contract', () => {
     expect(
       MobileWebBridgePageMessageSchema.safeParse({
         version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'hardwareBackCapability',
+        revision: 1,
+        shellSessionId: SHELL_SESSION_ID,
+        buildId: BUILD_ID
+      }).success
+    ).toBe(true)
+    expect(
+      MobileWebBridgePageMessageSchema.safeParse({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'hardwareBackResult',
+        sequence: 4,
+        handled: true,
+        shellSessionId: SHELL_SESSION_ID,
+        buildId: BUILD_ID
+      }).success
+    ).toBe(true)
+    expect(
+      MobileWebBridgePageMessageSchema.safeParse({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
         type: 'ready',
         shellSessionId: SHELL_SESSION_ID,
         buildId: BUILD_ID
@@ -100,6 +120,51 @@ describe('mobile web bridge page contract', () => {
         state: 'loaded',
         shellSessionId: SHELL_SESSION_ID,
         buildId: BUILD_ID
+      }).success
+    ).toBe(false)
+  })
+
+  it('keeps the ready frame valid for old strict shells before declaring Back support', () => {
+    const legacyReadySchema = z
+      .object({
+        version: z.literal(MOBILE_WEB_BRIDGE_PROTOCOL_VERSION),
+        type: z.literal('ready'),
+        shellSessionId: z.literal(SHELL_SESSION_ID),
+        buildId: z.literal(BUILD_ID)
+      })
+      .strict()
+    const ready = {
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      type: 'ready',
+      shellSessionId: SHELL_SESSION_ID,
+      buildId: BUILD_ID
+    }
+    const declaration = { ...ready, type: 'hardwareBackCapability', revision: 1 }
+
+    expect(legacyReadySchema.safeParse(ready).success).toBe(true)
+    expect(legacyReadySchema.safeParse(declaration).success).toBe(false)
+    expect(MobileWebBridgePageMessageSchema.safeParse(declaration).success).toBe(true)
+  })
+
+  it('rejects unsupported Back revisions and unbounded result sequences', () => {
+    const envelope = {
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      shellSessionId: SHELL_SESSION_ID,
+      buildId: BUILD_ID
+    }
+    expect(
+      MobileWebBridgePageMessageSchema.safeParse({
+        ...envelope,
+        type: 'hardwareBackCapability',
+        revision: 2
+      }).success
+    ).toBe(false)
+    expect(
+      MobileWebBridgePageMessageSchema.safeParse({
+        ...envelope,
+        type: 'hardwareBackResult',
+        sequence: Number.MAX_SAFE_INTEGER + 1,
+        handled: false
       }).success
     ).toBe(false)
   })
@@ -215,6 +280,7 @@ describe('mobile web bridge shell contract', () => {
         shellSessionId: SHELL_SESSION_ID,
         buildId: BUILD_ID,
         connection: 'connected',
+        hostDisplayName: 'Host 1',
         reconnectAttempts: 3,
         lastConnectedAt: 1_721_234_567_890,
         resumeRoute: {
@@ -223,6 +289,36 @@ describe('mobile web bridge shell contract', () => {
           workspaceName: 'Feature'
         },
         grants: [operationGrant(), operationGrant({ capability: 'terminal', operation: 'input' })]
+      }).success
+    ).toBe(true)
+  })
+
+  it('ignores a newer same-capability grant while keeping page requests allowlisted', () => {
+    expect(
+      MobileWebBridgeShellMessageSchema.safeParse({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'init',
+        shellSessionId: SHELL_SESSION_ID,
+        buildId: BUILD_ID,
+        connection: 'connected',
+        grants: [operationGrant({ capability: 'native', operation: 'futureOperation' })]
+      }).success
+    ).toBe(true)
+    expect(
+      MobileWebBridgePageMessageSchema.safeParse(
+        pageRequest({ capability: 'native', operation: 'futureOperation' })
+      ).success
+    ).toBe(false)
+  })
+
+  it('accepts hardware Back requests without changing init or grants', () => {
+    expect(
+      MobileWebBridgeShellMessageSchema.safeParse({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'hardwareBack',
+        shellSessionId: SHELL_SESSION_ID,
+        buildId: BUILD_ID,
+        sequence: 1
       }).success
     ).toBe(true)
   })
@@ -322,6 +418,26 @@ describe('mobile web bridge shell contract', () => {
           workspaceName: 'Feature',
           hostPath: '/private/worktree'
         }
+      }).success
+    ).toBe(false)
+  })
+
+  it('bounds the optional local host display name', () => {
+    const base = {
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      type: 'init',
+      shellSessionId: SHELL_SESSION_ID,
+      buildId: BUILD_ID,
+      connection: 'connected',
+      grants: [operationGrant()]
+    }
+    expect(
+      MobileWebBridgeShellMessageSchema.safeParse({ ...base, hostDisplayName: 'Host 1' }).success
+    ).toBe(true)
+    expect(
+      MobileWebBridgeShellMessageSchema.safeParse({
+        ...base,
+        hostDisplayName: 'x'.repeat(161)
       }).success
     ).toBe(false)
   })

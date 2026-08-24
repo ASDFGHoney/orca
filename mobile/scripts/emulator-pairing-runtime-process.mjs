@@ -36,6 +36,17 @@ export function pairingDaemonPidsFromUserData(
   }
 }
 
+export function currentPairingDaemonPids(
+  userData,
+  knownPids,
+  readDirectory = (directory) => readdirSync(directory),
+  readText = (filePath) => readFileSync(filePath, 'utf8')
+) {
+  return [
+    ...new Set([...knownPids, ...pairingDaemonPidsFromUserData(userData, readDirectory, readText)])
+  ]
+}
+
 export function signalPairingRuntime(runtimePid, sendSignal = process.kill) {
   if (runtimePid) {
     sendSignal(runtimePid, 'SIGTERM')

@@ -7,6 +7,8 @@ import {
   type MobileWebClipboardAvailability,
   type MobileWebClipboardWriteResult,
   type MobileWebHapticKind,
+  type MobileWebNativeAlertPayload,
+  type MobileWebNativeAlertResult,
   type MobileWebTerminalAccessoryPreferences,
   type MobileWebTerminalCustomKey,
   type MobileWebTerminalPreferences,
@@ -47,6 +49,7 @@ import {
 } from '../components/codex-reset-credit'
 import { readCodexResetCreditCapability } from '../components/codex-reset-credit-capability'
 import type { RpcClient } from '../transport/rpc-client'
+import { presentMobileWebNativeAlert } from './mobile-web-native-alert'
 
 type MobileWebNativeDraftScope = {
   hostIdentity: string
@@ -54,6 +57,7 @@ type MobileWebNativeDraftScope = {
 }
 
 export type MobileWebNativeCapabilityAuthority = {
+  alert?: (payload: MobileWebNativeAlertPayload) => Promise<MobileWebNativeAlertResult>
   hapticFeedback: (kind: MobileWebHapticKind) => void
   clipboardAvailability: () => Promise<MobileWebClipboardAvailability>
   clipboardWrite: (text: string) => Promise<MobileWebClipboardWriteResult>
@@ -97,6 +101,7 @@ export function createMobileWebNativeCapabilityAuthority(
   draftScope: MobileWebNativeDraftScope
 ): MobileWebNativeCapabilityAuthority {
   return {
+    alert: presentMobileWebNativeAlert,
     hapticFeedback(kind) {
       if (kind === 'selection') {
         triggerSelection()

@@ -1,5 +1,5 @@
-import { useLocalSearchParams } from 'expo-router'
 import { MobileFileExplorerPanel } from '../../../../src/files/MobileFileExplorerPanel'
+import { useMobileWebRouteParams } from '../../../../src/mobile-web/use-mobile-web-route-params'
 import type { HostFileExplorerOperations } from '../../../../src/files/host-file-explorer-operations'
 import type { ConnectionState } from '../../../../src/transport/types'
 
@@ -12,7 +12,7 @@ export function MobileFileExplorerScreen({
   connectionState?: ConnectionState
   nativeHostBinding?: boolean
 } = {}) {
-  const { hostId, worktreeId, name } = useLocalSearchParams<{
+  const { hostId, worktreeId, name } = useMobileWebRouteParams<{
     hostId: string
     worktreeId: string
     name?: string

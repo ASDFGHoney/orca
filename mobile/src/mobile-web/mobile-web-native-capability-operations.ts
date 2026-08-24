@@ -5,6 +5,8 @@ import {
   MobileWebClipboardWriteResultSchema,
   MobileWebHapticFeedbackPayloadSchema,
   MobileWebHapticSelectionPayloadSchema,
+  MobileWebNativeAlertPayloadSchema,
+  MobileWebNativeAlertResultSchema,
   MobileWebOpenExternalPayloadSchema,
   MobileWebSessionChatDraftReadPayloadSchema,
   MobileWebSessionChatDraftReadResultSchema,
@@ -29,6 +31,13 @@ export async function executeMobileWebNativeCapabilityOperation(args: {
   workspaceAuthority?: MobileWebWorkspaceAuthority
   consumeRecentUserGesture: () => boolean
 }): Promise<unknown> {
+  if (args.operation === 'alert') {
+    const payload = MobileWebNativeAlertPayloadSchema.parse(args.payload)
+    if (!args.authority.alert) {
+      throw new MobileWebBrokerError('unavailable')
+    }
+    return MobileWebNativeAlertResultSchema.parse(await args.authority.alert(payload))
+  }
   if (args.operation === 'hapticSelection') {
     MobileWebHapticSelectionPayloadSchema.parse(args.payload)
     args.authority.hapticFeedback('selection')

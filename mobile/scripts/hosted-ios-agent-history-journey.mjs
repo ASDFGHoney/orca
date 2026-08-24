@@ -37,7 +37,7 @@ export async function verifyHostedAgentHistoryJourney({
       () =>
         waitForVisibleHostedWebView({
           discoveryUrl,
-          expectedText: 'Orca Desktop',
+          expectedText: expectedWorkspace,
           timeoutMs
         })
     )
@@ -94,6 +94,12 @@ export async function verifyHostedAgentHistoryJourney({
   if (!state.placeholders.includes('Search sessions, repo:, path:')) {
     throw new Error('Agent History is missing its existing search input.')
   }
+  await evidenceStep('filter Agent History to parity fixture', () =>
+    setHostedWebViewInput(activeHistoryDocument, {
+      placeholder: 'Search sessions, repo:, path:',
+      value: EMULATOR_AGENT_HISTORY_TITLE
+    })
+  )
   activeHistoryDocument = await waitForVisibleHostedWebView({
     discoveryUrl,
     expectedText: EMULATOR_AGENT_HISTORY_TITLE,
@@ -151,7 +157,17 @@ export async function verifyHostedAgentHistoryJourney({
     const connectionEntries = await waitForHostedWebViewConnectionSequence(
       activeHistoryDocument,
       ['recovering', 'connected'],
-      timeoutMs
+      timeoutMs,
+      {
+        reacquireDocument: (remainingMs) =>
+          waitForVisibleHostedWebView({
+            discoveryUrl,
+            expectedText: EMULATOR_AGENT_HISTORY_TITLE,
+            expectedHrefIncludes: '/agent-history/',
+            requireInteractiveControls: false,
+            timeoutMs: remainingMs
+          })
+      }
     )
     const recoveringEntry = connectionEntries.find((entry) => entry.state === 'recovering')
     if (!recoveringEntry?.retainedExpectedText || !recoveringEntry.retainedExpectedRoute) {

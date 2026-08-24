@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   waitForControl: vi.fn(),
   waitForControlByPrefix: vi.fn(),
   waitForControlMatch: vi.fn(),
+  waitForControlMatching: vi.fn(),
   waitForDocument: vi.fn()
 }))
 
@@ -29,7 +30,8 @@ vi.mock('../../scripts/hosted-ios-emulator-accessibility.mjs', () => ({
   tapHostedIosPoint: mocks.tapPoint,
   waitForHostedIosAccessibilityControl: mocks.waitForControl,
   waitForHostedIosAccessibilityControlByLabelPrefix: mocks.waitForControlByPrefix,
-  waitForHostedIosAccessibilityControlMatch: mocks.waitForControlMatch
+  waitForHostedIosAccessibilityControlMatch: mocks.waitForControlMatch,
+  waitForHostedIosAccessibilityControlMatching: mocks.waitForControlMatching
 }))
 vi.mock('../../scripts/hosted-ios-screenshot-parity.mjs', () => ({
   assertHostedIosScreenshotParity: mocks.compareScreenshots
@@ -70,6 +72,12 @@ describe('hosted iOS core-route parity', () => {
       x: 0.5,
       y: 0.5
     })
+    mocks.waitForControlMatching.mockResolvedValue({
+      label: 'Stable task title, 3m, Issue · orca #1, Open',
+      value: '',
+      x: 0.5,
+      y: 0.5
+    })
     mocks.waitForDocument.mockImplementation(({ expectedHrefIncludes }) => ({
       href: `orca-mobile-web://build${expectedHrefIncludes ?? '/h/host'}`
     }))
@@ -102,6 +110,30 @@ describe('hosted iOS core-route parity', () => {
       30_000
     )
     expect(baselines.session.screenshot).toBe('/tmp/parity/native-session-portrait.png')
+  })
+
+  it('captures a populated GitHub Tasks list after pagination appears', async () => {
+    mocks.waitForControlMatch.mockRejectedValueOnce(new Error('no empty state'))
+
+    const baselines = await captureNativeCoreRouteBaselines({
+      deviceUdid: 'simulator',
+      emulator: { deviceUdid: 'simulator' },
+      expectedWorkspace: 'mobile-rearch',
+      runtimeDirectory: '/tmp/parity',
+      timeoutMs: 30_000
+    })
+
+    expect(mocks.waitForControlMatch).toHaveBeenCalledWith(
+      { deviceUdid: 'simulator' },
+      expect.any(Array),
+      5_000
+    )
+    expect(mocks.waitForControlMatching).toHaveBeenCalledWith(
+      { deviceUdid: 'simulator' },
+      expect.any(Function),
+      25_000
+    )
+    expect(baselines.tasks.stableText).toBe('Stable task title')
   })
 
   it('compares hosted Tasks and Session and returns to the workspace route', async () => {

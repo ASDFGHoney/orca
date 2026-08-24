@@ -6,10 +6,12 @@ import {
   MOBILE_WEB_SOURCE_CONTROL_HISTORY_RESPONSE_MAX_BYTES
 } from '../../../src/shared/mobile-web/source-control-history-contract'
 import type { RpcClient } from '../transport/rpc-client'
-import { executeMobileWebSourceControlHistoryOperation } from './mobile-web-source-control-history-operations'
+import { MobileWebSourceControlBranchComparePager } from './mobile-web-source-control-branch-compare-pager'
+import { executeMobileWebSourceControlHistoryOperation as executeHistoryOperation } from './mobile-web-source-control-history-operations'
 import { createMobileWebWorkspaceAuthorityFixture } from './mobile-web-workspace-authority-test-fixture'
 
 const workspaceAuthority = createMobileWebWorkspaceAuthorityFixture()
+const branchComparePager = new MobileWebSourceControlBranchComparePager()
 
 const OID_A = 'a'.repeat(40)
 const OID_B = 'b'.repeat(40)
@@ -215,6 +217,14 @@ describe('mobile web source-control history operations', () => {
     expect(JSON.stringify(result)).not.toContain('/private/repository')
     expect(JSON.stringify(result)).not.toContain('errorMessage')
 
+    expect(
+      branchComparePager.claimContinuation({
+        workspaceId: 'workspace-1',
+        baseRef: 'main',
+        offset: result.nextOffset,
+        expectedRevision: result.revision
+      })
+    ).toBe(true)
     const continuation = await executeMobileWebSourceControlHistoryOperation({
       operation: 'branchCompare',
       payload: {
@@ -237,7 +247,7 @@ describe('mobile web source-control history operations', () => {
     })
   })
 
-  it('rejects a branch comparison continuation after the host revision changes', async () => {
+  it('serves a continuation from one stable host snapshot', async () => {
     const entries = Array.from(
       { length: MOBILE_WEB_SOURCE_CONTROL_COMPARE_ENTRY_LIMIT + 1 },
       (_, index) => ({ path: `src/file-${index}.ts`, status: 'modified' })
@@ -277,19 +287,22 @@ describe('mobile web source-control history operations', () => {
       }
     })
 
+    const payload = {
+      workspaceId: 'workspace-1',
+      baseRef: 'main',
+      offset: first.nextOffset,
+      expectedRevision: first.revision
+    }
+    expect(branchComparePager.claimContinuation(payload)).toBe(true)
     await expect(
       executeMobileWebSourceControlHistoryOperation({
         operation: 'branchCompare',
-        payload: {
-          workspaceId: 'workspace-1',
-          baseRef: 'main',
-          offset: first.nextOffset,
-          expectedRevision: first.revision
-        },
+        payload,
         client,
         workspaceAuthority
       })
-    ).rejects.toMatchObject({ code: 'conflict' })
+    ).resolves.toMatchObject({ revision: first.revision, nextOffset: null })
+    expect(client.sendRequest).toHaveBeenCalledOnce()
   })
 
   it('requires a full commit ID and returns request-bound comparison identity', async () => {
@@ -340,4 +353,10 @@ function rpcClient(result: unknown): RpcClient {
 
 function encodedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength
+}
+
+function executeMobileWebSourceControlHistoryOperation(
+  args: Omit<Parameters<typeof executeHistoryOperation>[0], 'branchComparePager'>
+) {
+  return executeHistoryOperation({ ...args, branchComparePager })
 }

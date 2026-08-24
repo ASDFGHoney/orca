@@ -8,6 +8,10 @@ export default function HostMobileWebDiffReviewRoute() {
   const params = useLocalSearchParams<{ worktreeId?: string | string[] }>()
   const workspaceId = firstParam(params.worktreeId)
   const shell = useMobileWebNativeShell()
+  const workspaceName =
+    shell.resumeRoute.kind === 'session' && shell.resumeRoute.workspaceId === workspaceId
+      ? shell.resumeRoute.workspaceName
+      : undefined
   const client = useMemo(
     () => (shell.client && workspaceId ? webHostDiffReviewClient(shell.client, workspaceId) : null),
     [shell.client, workspaceId]
@@ -21,6 +25,7 @@ export default function HostMobileWebDiffReviewRoute() {
 
   return (
     <MobileDiffReviewRoute
+      routeName={workspaceName}
       binding={{
         client,
         connectionState,

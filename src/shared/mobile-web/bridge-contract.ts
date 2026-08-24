@@ -78,6 +78,17 @@ const PageHealthSchema = PageEnvelopeSchema.extend({
   state: z.literal('interactive')
 }).strict()
 
+const PageHardwareBackCapabilitySchema = PageEnvelopeSchema.extend({
+  type: z.literal('hardwareBackCapability'),
+  revision: z.literal(1)
+}).strict()
+
+const PageHardwareBackResultSchema = PageEnvelopeSchema.extend({
+  type: z.literal('hardwareBackResult'),
+  sequence: SequenceSchema,
+  handled: z.boolean()
+}).strict()
+
 const MobileWebWorkspaceListRouteSchema = z.object({ kind: z.literal('workspaceList') }).strict()
 const MobileWebSessionRouteSchema = z
   .object({
@@ -142,6 +153,8 @@ const PageCancelSchema = PageEnvelopeSchema.extend({
 export const MobileWebBridgePageMessageSchema = z.union([
   PageReadySchema,
   PageHealthSchema,
+  PageHardwareBackCapabilitySchema,
+  PageHardwareBackResultSchema,
   PageRouteStateSchema,
   PageOneShotRequestSchema,
   PageSubscriptionRequestSchema,
@@ -161,7 +174,6 @@ const OperationLimitsSchema = z
 const OperationGrantSchema = z
   .object({ ...MobileWebBridgeOperationShape, limits: OperationLimitsSchema })
   .strict()
-  .superRefine(validateRequestOperation)
 
 const ShellEnvelopeSchema = z.object({
   version: z.literal(MOBILE_WEB_BRIDGE_PROTOCOL_VERSION),
@@ -179,6 +191,7 @@ const ShellInitSchema = ShellEnvelopeSchema.extend({
   type: z.literal('init'),
   connection: ConnectionStateSchema,
   grants: z.array(OperationGrantSchema).max(MOBILE_WEB_BRIDGE_MAX_GRANTS),
+  hostDisplayName: z.string().min(1).max(160).optional(),
   resumeRoute: MobileWebResumeRouteSchema.optional(),
   ...ConnectionMetricsShape
 })
@@ -195,6 +208,11 @@ const ShellNavigationSchema = ShellEnvelopeSchema.extend({
   type: z.literal('navigation'),
   sequence: SequenceSchema,
   route: MobileWebNavigationRouteSchema
+}).strict()
+
+const ShellHardwareBackSchema = ShellEnvelopeSchema.extend({
+  type: z.literal('hardwareBack'),
+  sequence: SequenceSchema
 }).strict()
 
 const ShellSuccessResponseSchema = ShellEnvelopeSchema.extend({
@@ -222,6 +240,7 @@ export const MobileWebBridgeShellMessageSchema = z.union([
   ShellInitSchema,
   ShellConnectionSchema,
   ShellNavigationSchema,
+  ShellHardwareBackSchema,
   ShellSuccessResponseSchema,
   ShellErrorResponseSchema,
   ShellEventSchema

@@ -53,23 +53,55 @@ describe('mobile web package downloader', () => {
     expect(written.byteLength).toBe(fixture.manifest.totalBytes)
   })
 
+  it('reuses an independently verified matching build before staging', async () => {
+    const fixture = createFixture()
+    const stager = createStager()
+    const reuseVerifiedBuild = vi.fn(async () => true)
+
+    const result = await downloadMobileWebPackage(fixture.request, stager, {
+      shellBridgeVersion: 1,
+      reuseVerifiedBuild
+    })
+
+    expect(result).toEqual({
+      manifest: fixture.manifest,
+      commit: null,
+      reusedVerifiedBuild: true
+    })
+    expect(reuseVerifiedBuild).toHaveBeenCalledWith(fixture.manifest.buildId)
+    expect(fixture.request).toHaveBeenCalledTimes(1)
+    expect(stager.begin).not.toHaveBeenCalled()
+    expect(stager.writeAssetChunk).not.toHaveBeenCalled()
+    expect(stager.commit).not.toHaveBeenCalled()
+  })
+
   it('rejects a non-canonical manifest build identity before staging', async () => {
     const fixture = createFixture({ invalidBuildIdentity: true })
     const stager = createStager()
+    const reuseVerifiedBuild = vi.fn(async () => true)
 
     await expect(
-      downloadMobileWebPackage(fixture.request, stager, { shellBridgeVersion: 1 })
+      downloadMobileWebPackage(fixture.request, stager, {
+        shellBridgeVersion: 1,
+        reuseVerifiedBuild
+      })
     ).rejects.toMatchObject({ code: 'invalid_manifest' })
+    expect(reuseVerifiedBuild).not.toHaveBeenCalled()
     expect(stager.begin).not.toHaveBeenCalled()
   })
 
   it('rejects a package requiring a newer native bridge before staging', async () => {
     const fixture = createFixture({ bridgeMinimum: 2 })
     const stager = createStager()
+    const reuseVerifiedBuild = vi.fn(async () => true)
 
     await expect(
-      downloadMobileWebPackage(fixture.request, stager, { shellBridgeVersion: 1 })
+      downloadMobileWebPackage(fixture.request, stager, {
+        shellBridgeVersion: 1,
+        reuseVerifiedBuild
+      })
     ).rejects.toMatchObject({ code: 'incompatible_bridge' })
+    expect(reuseVerifiedBuild).not.toHaveBeenCalled()
     expect(stager.begin).not.toHaveBeenCalled()
   })
 

@@ -4,8 +4,8 @@
 - **Status:** Simplifications integrated; release validation remains
 - **Candidate checkpoint:** `e931b2db07`
 - **Base and `origin/main` checkpoint:** `4c984d4c1b`
-- **Post-audit integration checkpoint:** `b14fe74214`
-- **Current `origin/main` checkpoint:** `b2902cb61e`
+- **Post-audit integration checkpoint:** `b8d04428c0`
+- **Current `origin/main` checkpoint:** `e50cc309c3`
 - **Decision record:** [migration record](2026-07-22-mobile-hybrid-webview-single-pr-migration.md)
 - **Release gates:** [remaining-work tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
 
@@ -30,9 +30,9 @@ files, 140,153 additions, and 8,772 deletions. Those counts describe
 `4c984d4c1b...e931b2db07`; they are not current-main release metrics.
 
 After the approved reductions, fixes, and current-main merge, the comparison is
-89 commits, 1,401 files, 134,626 additions, and 8,771 deletions relative to
-`b2902cb61e`. Documentation condensation accounts for most of the reduction;
-the explicit 224-operation bridge and shared RNW presentation remain the main
+92 commits, 1,401 files, 134,633 additions, and 8,771 deletions relative to
+`e50cc309c3`. Documentation condensation accounts for most of the reduction;
+the explicit 225-operation bridge and shared RNW presentation remain the main
 implementation span.
 
 The non-negotiable constraints were:
@@ -157,10 +157,11 @@ Tasks, Files, and Session before any broad conversion.
 | Parity and cutover seams   | `7815f3afb3`      | Preserved native host editing, made workspace routes hybrid-only, removed the hosted picker duplicate, added test-only native baselines, and negotiated host gates |
 | Subscription regression    | `ee15298704`      | Restored the shared bridge envelope used by subscriptions after the parity refactor exposed a removed-method call                                                  |
 | Parity bounds              | `2094dde1f9`      | Made native CDP exclusion fail closed above its inspection limit and expanded the bounded session-capability response allowance                                    |
+| Relay process boundary     | `c3725a60fc`      | Moved Relay Markdown discovery to the shared cross-platform process launcher and preserved the child-process import ratchet                                        |
 
 The declarative registry prototype covered Tasks, Files, and Session and proved
 that metadata, grants, and typed calls can be generated without replacing the
-handwritten authorization executors. Converting all 224 operations in this PR
+handwritten authorization executors. Converting all 225 operations in this PR
 would increase review and compatibility risk, so the registry remains a
 non-blocking follow-up.
 
@@ -180,9 +181,13 @@ non-blocking follow-up.
       presentation.
 - [x] Prototype the declarative registry on Tasks, Files, and Session and defer
       broad conversion to a follow-up.
-- [ ] Rerun package verification, typecheck/lint, bridge/cache/security suites,
-      Direct/SSH hosted E2E, emulator parity, and diff hygiene after integrated
-      simplifications.
+- [x] Rerun deterministic package verification, full mobile/root suites,
+      typecheck/lint, bridge/cache/security suites, and diff hygiene after
+      integrated simplifications.
+- [x] Rerun corrected Source Control/Review native-versus-hosted emulator parity,
+      including host-origin navigation and the second session-origin mount.
+- [ ] Complete corrected native-versus-hosted emulator parity for the remaining
+      route matrix after integrated simplifications.
 - [ ] Keep the [release-gate tracker](2026-07-27-mobile-hybrid-webview-remaining-work.md)
       current; do not promote simulator/local evidence into physical, store,
       production cloud Relay, mixed-version, performance, or App Review proof.

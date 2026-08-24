@@ -14,6 +14,7 @@ import type { MobileWebNativeChatAuthority } from './mobile-web-native-chat-auth
 import type { MobileWebNativeChatSubscriptions } from './mobile-web-native-chat-subscriptions'
 import type { MobileWebSessionSubscriptions } from './mobile-web-session-subscriptions'
 import type { MobileWebSourceControlSubscriptions } from './mobile-web-source-control-subscriptions'
+import type { MobileWebSourceControlBranchComparePager } from './mobile-web-source-control-branch-compare-pager'
 import type { MobileWebSpeechAuthority } from './mobile-web-speech-authority'
 import type { MobileWebTaskTargetAuthority } from './mobile-web-task-target-authority'
 import type { MobileWebTaskProjectTablePager } from './mobile-web-task-project-table-pager'
@@ -39,6 +40,7 @@ export type MobileWebCapabilityExecutionDependencies = {
   nativeChatSubscriptions: MobileWebNativeChatSubscriptions
   sessionSubscriptions: MobileWebSessionSubscriptions
   sourceControlSubscriptions: MobileWebSourceControlSubscriptions
+  sourceControlBranchCompare: MobileWebSourceControlBranchComparePager
   speechAuthority: MobileWebSpeechAuthority
   postSpeechEvent: (
     subscriptionId: string,

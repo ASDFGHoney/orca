@@ -23,8 +23,7 @@ import {
 } from './hosted-android-privacy-audit.mjs'
 import {
   tapHostedAndroidAccessibilityControl,
-  tapHostedAndroidPoint,
-  waitForHostedAndroidAccessibilityControlMatch
+  tapHostedAndroidPoint
 } from './hosted-android-emulator-accessibility.mjs'
 import {
   activateHostedAndroidWorkspaceControl,
@@ -43,6 +42,7 @@ import {
   waitForHostedAndroidReactReady
 } from './hosted-android-emulator-session.mjs'
 import { runAndroidAdb } from './hosted-android-mobile-web-cache.mjs'
+import { pairHostedAndroidApp } from './hosted-android-pairing.mjs'
 import { HOSTED_MOBILE_APP_ROUTE_URL } from './hosted-mobile-e2e-launch.mjs'
 import {
   activateHostedWebViewControl,
@@ -172,7 +172,7 @@ async function main() {
     await stage('React runtime', () => waitForHostedAndroidReactReady(adb, options.timeoutMs))
     const emulator = { adb }
     await stage('native pairing', () =>
-      pairAndroidApp(emulator, runtime.pairingUrl, options.timeoutMs)
+      pairHostedAndroidApp({ adb, pairingUrl: runtime.pairingUrl, timeoutMs: options.timeoutMs })
     )
     await stage('native hybrid route handoff', async () => {
       await openHostedAndroidUrl(adb, HOSTED_MOBILE_APP_ROUTE_URL)
@@ -184,7 +184,7 @@ async function main() {
     await stage('hosted workspace route', () =>
       waitForVisibleHostedWebView({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: 'Host 1',
         timeoutMs: options.timeoutMs
       })
     )
@@ -247,7 +247,7 @@ async function main() {
             lastError = error
             activeDocument = await waitForVisibleHostedWebView({
               discoveryUrl,
-              expectedText: 'Orca Desktop',
+              expectedText: 'Host 1',
               timeoutMs: options.timeoutMs
             })
           }
@@ -453,42 +453,6 @@ async function inspectAndroidAdversarialContent({ document, fixture, observation
       fixture,
       timeoutMs
     }))
-  }
-}
-
-async function pairAndroidApp(emulator, pairingUrl, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    await openHostedAndroidUrl(adb, pairingUrl)
-    try {
-      const control = await waitForHostedAndroidAccessibilityControlMatch(
-        emulator,
-        ['Close', 'Continue', 'Pair'],
-        Math.min(5_000, deadline - Date.now())
-      )
-      if (control.label === 'Pair') {
-        await tapHostedAndroidAccessibilityControl(emulator, control.label, 2_000)
-        break
-      }
-      await tapHostedAndroidAccessibilityControl(emulator, control.label, 2_000)
-    } catch {
-      // The first deep link can arrive before the development bundle mounts.
-    }
-  }
-  const destination = await waitForHostedAndroidAccessibilityControlMatch(
-    emulator,
-    [
-      'Open sessions in Chat UI',
-      'Open sessions in the terminal',
-      'Enable agent notifications',
-      'Skip notifications for now',
-      'Show paired hosts',
-      'Back to home'
-    ],
-    Math.max(1_000, deadline - Date.now())
-  )
-  if (destination.label === 'Back to home') {
-    throw new Error('Android pairing failed before reaching the onboarding flow')
   }
 }
 

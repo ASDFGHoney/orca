@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it } from 'vitest'
+import { RpcClientProvider, useRpcClientContext } from './disabled-page-client-context'
 import {
   loadHosts,
   removeHost,
@@ -31,6 +34,24 @@ describe('hosted mobile web native authority modules', () => {
     expect(hostStoreSource).not.toMatch(
       /AsyncStorage|SecureStore|scheduleHostCredentialCleanup|orca:web-host-token:/
     )
+  })
+
+  it('implements the complete inert connection context used by shared screens', async () => {
+    let context: ReturnType<typeof useRpcClientContext> | null = null
+    function Probe() {
+      context = useRpcClientContext()
+      return null
+    }
+    let renderer: ReactTestRenderer | null = null
+    await act(async () => {
+      renderer = create(createElement(RpcClientProvider, null, createElement(Probe)))
+    })
+
+    expect(context?.getKnownState('host')).toBeNull()
+    expect(context?.getPendingPath('host')).toBeNull()
+    expect(context?.isPairingRejected('host')).toBe(false)
+
+    await act(async () => renderer?.unmount())
   })
 
   it('returns no page-owned hosts and fails closed for credential mutations', async () => {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   tapPoint: vi.fn(),
   waitForControl: vi.fn(),
   waitForControlByPrefix: vi.fn(),
+  waitForLabel: vi.fn(),
   waitForDocument: vi.fn()
 }))
 
@@ -28,7 +29,8 @@ vi.mock('../../scripts/hosted-ios-emulator-accessibility.mjs', () => ({
   tapHostedIosAccessibilityControlByLabelPrefix: mocks.tapControlByPrefix,
   tapHostedIosPoint: mocks.tapPoint,
   waitForHostedIosAccessibilityControl: mocks.waitForControl,
-  waitForHostedIosAccessibilityControlByLabelPrefix: mocks.waitForControlByPrefix
+  waitForHostedIosAccessibilityControlByLabelPrefix: mocks.waitForControlByPrefix,
+  waitForHostedIosAccessibilityLabel: mocks.waitForLabel
 }))
 vi.mock('../../scripts/hosted-ios-screenshot-parity.mjs', () => ({
   assertHostedIosScreenshotParity: mocks.compareScreenshots
@@ -71,6 +73,11 @@ describe('hosted iOS Files and Preview parity', () => {
     mocks.tapPoint.mockResolvedValue(undefined)
     mocks.waitForControl.mockResolvedValue({ x: 0.2, y: 0.1 })
     mocks.waitForControlByPrefix.mockResolvedValue({ x: 0.2, y: 0.1 })
+    mocks.waitForLabel.mockResolvedValue({
+      frame: { x: 0, y: 0.3, width: 1, height: 1.5 },
+      label: 'File preview',
+      value: ''
+    })
     mocks.waitForDocument.mockImplementation(({ expectedHrefIncludes }) => ({
       href: `orca-mobile-web://build${expectedHrefIncludes ?? '/h/host'}`,
       targetId: expectedHrefIncludes ?? 'workspace'

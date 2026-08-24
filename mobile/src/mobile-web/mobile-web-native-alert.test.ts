@@ -1,0 +1,60 @@
+import type { AlertButton, AlertOptions } from 'react-native'
+import { describe, expect, it, vi } from 'vitest'
+import { presentMobileWebNativeAlert } from './mobile-web-native-alert'
+
+vi.mock('react-native', () => ({ Alert: { alert: vi.fn() } }))
+
+describe('mobile web native alert', () => {
+  it('preserves native button/options presentation and correlates the selected index', async () => {
+    let buttons: AlertButton[] = []
+    let options: AlertOptions | undefined
+    const target = {
+      alert: vi.fn((_title, _message, nextButtons, nextOptions) => {
+        buttons = nextButtons ?? []
+        options = nextOptions
+      })
+    }
+    const result = presentMobileWebNativeAlert(
+      {
+        title: 'Discard changes?',
+        message: 'Unsaved edits will be lost.',
+        buttons: [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', isPreferred: true }
+        ],
+        options: { cancelable: false, userInterfaceStyle: 'dark' }
+      },
+      target
+    )
+
+    expect(target.alert).toHaveBeenCalledWith(
+      'Discard changes?',
+      'Unsaved edits will be lost.',
+      expect.any(Array),
+      expect.objectContaining({ cancelable: false, userInterfaceStyle: 'dark' })
+    )
+    buttons[1]?.onPress?.()
+    options?.onDismiss?.()
+    await expect(result).resolves.toEqual({ kind: 'button', buttonIndex: 1 })
+  })
+
+  it('reports an outside/back dismissal when the native platform allows it', async () => {
+    let options: AlertOptions | undefined
+    const target = {
+      alert: vi.fn((_title, _message, _buttons, nextOptions) => {
+        options = nextOptions
+      })
+    }
+    const result = presentMobileWebNativeAlert(
+      {
+        title: 'Notice',
+        buttons: [{ text: 'OK' }],
+        options: { cancelable: true }
+      },
+      target
+    )
+
+    options?.onDismiss?.()
+    await expect(result).resolves.toEqual({ kind: 'dismissed' })
+  })
+})

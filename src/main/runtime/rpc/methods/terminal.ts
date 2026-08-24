@@ -138,6 +138,7 @@ type TerminalMultiplexStream = {
   ackInFlightBytes: number
   ackWindowBytes: number
   supportsOutputPause: boolean
+  supportsQueryReply: boolean
   supportsWriteUnavailable: boolean
   outputPaused: boolean
   supportsDesktopViewportClaims: boolean
@@ -1109,6 +1110,7 @@ const TerminalSubscribe = TerminalHandle.extend({
       terminalBinaryStream: z.literal(1).optional(),
       desktopViewportClaims: z.literal(1).optional(),
       mobileInputLeaseOnly: z.literal(1).optional(),
+      queryReply: z.literal(1).optional(),
       writeUnavailable: z.literal(1).optional()
     })
     .optional()
@@ -1131,6 +1133,7 @@ const TerminalMultiplexSubscribeFrame = TerminalHandle.extend({
       ackOutputSourceRanges: z.literal(1).optional(),
       desktopViewportClaims: z.literal(1).optional(),
       outputPause: z.literal(1).optional(),
+      queryReply: z.literal(1).optional(),
       writeUnavailable: z.literal(1).optional()
     })
     .optional()
@@ -2241,7 +2244,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         }
         if (
           frame.opcode === TerminalStreamOpcode.Input ||
-          frame.opcode === TerminalStreamOpcode.QueryReply
+          (frame.opcode === TerminalStreamOpcode.QueryReply && stream.supportsQueryReply)
         ) {
           const text = decodeTerminalStreamText(frame.payload)
           if (!text) {
@@ -2605,6 +2608,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           ackInFlightBytes: 0,
           ackWindowBytes: TERMINAL_MULTIPLEX_ACK_STREAM_INITIAL_WINDOW_BYTES,
           supportsOutputPause: request.capabilities?.outputPause === 1,
+          supportsQueryReply: request.capabilities?.queryReply === 1,
           supportsWriteUnavailable: request.capabilities?.writeUnavailable === 1,
           outputPaused: false,
           supportsDesktopViewportClaims: request.capabilities?.desktopViewportClaims === 1,
@@ -2734,10 +2738,13 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             rows: serialized?.rows ?? size?.rows,
             displayMode,
             seq: layoutSeq,
-            ...((stream.ackOutputSourceRanges || stream.supportsOutputPause) && {
+            ...((stream.ackOutputSourceRanges ||
+              stream.supportsOutputPause ||
+              stream.supportsQueryReply) && {
               capabilities: {
                 ...(stream.ackOutputSourceRanges ? { ackOutputSourceRanges: 1 as const } : {}),
-                ...(stream.supportsOutputPause ? { outputPause: 1 as const } : {})
+                ...(stream.supportsOutputPause ? { outputPause: 1 as const } : {}),
+                ...(stream.supportsQueryReply ? { queryReply: 1 as const } : {})
               }
             }),
             ...(stream.ackOutputSourceRanges ? { streamGeneration: stream.streamGeneration } : {}),
@@ -3023,6 +3030,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           : runtime.getRendererTerminalSerializerGeneration(ptyId)
         : 0
       const supportsDesktopViewportClaims = params.capabilities?.desktopViewportClaims === 1
+      const supportsQueryReply = params.capabilities?.queryReply === 1
       const supportsWriteUnavailable = params.capabilities?.writeUnavailable === 1
       if (mobileInputLeaseOnly && clientId) {
         let closed = false
@@ -3273,7 +3281,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           }
           if (
             frame.opcode === TerminalStreamOpcode.Input ||
-            frame.opcode === TerminalStreamOpcode.QueryReply
+            (frame.opcode === TerminalStreamOpcode.QueryReply && supportsQueryReply)
           ) {
             const text = decodeTerminalStreamText(frame.payload)
             if (!text) {
@@ -3555,7 +3563,8 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           cols: serialized?.cols ?? size?.cols,
           rows: serialized?.rows ?? size?.rows,
           displayMode,
-          seq: layoutSeq
+          seq: layoutSeq,
+          ...(supportsQueryReply ? { capabilities: { queryReply: 1 as const } } : {})
         })
         const snapshotStats = sendSnapshotFrames(sendFrame, {
           kind: 'scrollback',

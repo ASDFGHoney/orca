@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MOBILE_WEB_BRIDGE_MAX_GRANTS,
   MOBILE_WEB_BRIDGE_MAX_MESSAGE_BYTES,
   MOBILE_WEB_BRIDGE_MAX_OPERATION_BYTES,
   MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
@@ -22,6 +23,27 @@ describe('mobile web production grant limits', () => {
     ).sort()
 
     expect(granted).toEqual(registered)
+    expect(granted.length).toBeLessThan(MOBILE_WEB_BRIDGE_MAX_GRANTS)
+  })
+
+  it('leaves initial-message headroom for additive same-version grants', () => {
+    const parsed = MobileWebBridgeShellMessageSchema.safeParse({
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      type: 'init',
+      shellSessionId: 'S'.repeat(43),
+      buildId: 'a'.repeat(64),
+      connection: 'connected',
+      grants: [
+        ...MOBILE_WEB_PRODUCTION_GRANTS,
+        {
+          capability: 'native',
+          operation: 'futureOperation',
+          limits: MOBILE_WEB_PRODUCTION_GRANTS[0]!.limits
+        }
+      ]
+    })
+
+    expect(parsed.success, parsed.success ? undefined : parsed.error.message).toBe(true)
   })
 
   it('leaves bounded envelope capacity around every operation payload', () => {

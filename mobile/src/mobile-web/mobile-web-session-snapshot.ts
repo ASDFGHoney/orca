@@ -60,12 +60,10 @@ export function mobileWebSessionSnapshot(
     return binding ? [binding] : []
   })
   nativeChatAuthority.synchronizeWorkspace(hostWorkspaceId, nativeChatBindings)
-  const tabs = result.tabs
-    .slice(0, MOBILE_WEB_SESSION_TAB_LIMIT)
-    .flatMap((value): MobileWebSessionTab[] => {
-      const tab = mobileWebSessionTab(value, hostWorkspaceId, browserAuthority, nativeChatAuthority)
-      return tab ? [tab] : []
-    })
+  const tabs = boundedHostSessionTabs(result.tabs).flatMap((value): MobileWebSessionTab[] => {
+    const tab = mobileWebSessionTab(value, hostWorkspaceId, browserAuthority, nativeChatAuthority)
+    return tab ? [tab] : []
+  })
   const activeTabId =
     result.activeTabType === 'browser'
       ? (tabs.find((tab) => tab.type === 'browser' && tab.isActive)?.id ?? null)
@@ -86,6 +84,19 @@ export function mobileWebSessionSnapshot(
     throw new Error('mobile_web_session_snapshot_invalid')
   }
   return parsed.data
+}
+
+function boundedHostSessionTabs(tabs: unknown[]): unknown[] {
+  const bounded = tabs.slice(0, MOBILE_WEB_SESSION_TAB_LIMIT)
+  if (tabs.length <= MOBILE_WEB_SESSION_TAB_LIMIT || bounded.some(isActiveSessionTab)) {
+    return bounded
+  }
+  const active = tabs.find(isActiveSessionTab)
+  return active ? [...bounded.slice(0, -1), active] : bounded
+}
+
+function isActiveSessionTab(value: unknown): boolean {
+  return isRecord(value) && value.isActive === true
 }
 
 function mobileWebSessionTab(

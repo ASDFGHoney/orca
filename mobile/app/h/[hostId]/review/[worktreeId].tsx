@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useRouter } from 'expo-router'
 import { MobileDiffReviewScreenView } from '../../../../src/components/MobileDiffReviewScreenView'
+import { useMobileWebRouteParams } from '../../../../src/mobile-web/use-mobile-web-route-params'
 import {
   firstReviewParam,
   normalizeReviewFilterParam
@@ -11,11 +12,13 @@ import type { HostDiffReviewBinding } from '../../../../src/session/host-diff-re
 import { useHostDiffReviewBinding } from '../../../../src/session/use-host-diff-review-binding'
 
 export function MobileDiffReviewRoute({
-  binding
+  binding,
+  routeName
 }: {
   binding?: HostDiffReviewBinding
+  routeName?: string
 } = {}) {
-  const params = useLocalSearchParams<{
+  const params = useMobileWebRouteParams<{
     hostId?: string | string[]
     worktreeId?: string | string[]
     name?: string | string[]
@@ -25,7 +28,7 @@ export function MobileDiffReviewRoute({
   }>()
   const hostId = firstReviewParam(params.hostId)
   const worktreeId = firstReviewParam(params.worktreeId)
-  const name = firstReviewParam(params.name)
+  const name = routeName ?? firstReviewParam(params.name)
   const initialFilter = normalizeReviewFilterParam(firstReviewParam(params.scope))
   const initialFile = firstReviewParam(params.file)
   const initialArea = normalizeReviewAreaParam(firstReviewParam(params.area))

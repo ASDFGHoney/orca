@@ -8,6 +8,7 @@ import {
   type MobileWebBridgeShellMessage
 } from '../../shared/mobile-web/bridge-contract'
 import { MobileWebNativeShellProvider, useMobileWebNativeShell } from './native-shell-channel'
+import { installMobileWebHardwareBackHandler } from './mobile-web-hardware-back-handler'
 import {
   MOBILE_WEB_SHELL_LISTENING_PROPERTY,
   MOBILE_WEB_SHELL_PENDING_PROPERTY
@@ -63,6 +64,7 @@ describe('mobile web native shell channel', () => {
     expect(client).not.toBeNull()
     expect(hook.result.current.context).toEqual(CONTEXT)
     expect(hook.result.current.connection).toBe('connected')
+    expect(hook.result.current.hostDisplayName).toBe('Host 1')
     expect(hook.result.current.routeRevision).toBe(1)
     expect(hook.result.current.resumeRoute).toEqual({
       kind: 'session',
@@ -215,6 +217,49 @@ describe('mobile web native shell channel', () => {
     )
     await expect(current).resolves.toEqual({ workspaces: [], truncated: false })
   })
+
+  it('declares Back support after ready and correlates handled requests', () => {
+    const posted: MobileWebBridgePageMessage[] = []
+    const handler = vi.fn(() => true)
+    const uninstall = installMobileWebHardwareBackHandler(handler)
+    const target = window as NativeTestWindow
+    target.OrcaNative = {
+      postMessage: (raw) => posted.push(JSON.parse(raw) as MobileWebBridgePageMessage)
+    }
+    const hook = renderHook(() => useMobileWebNativeShell(), {
+      wrapper: MobileWebNativeShellProvider
+    })
+
+    act(() => dispatchShellMessage(initMessage()))
+    expect(posted.slice(0, 2)).toEqual([
+      { version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION, type: 'ready', ...CONTEXT },
+      {
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'hardwareBackCapability',
+        revision: 1,
+        ...CONTEXT
+      }
+    ])
+    act(() =>
+      dispatchShellMessage({
+        version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+        type: 'hardwareBack',
+        sequence: 7,
+        ...CONTEXT
+      })
+    )
+    expect(handler).toHaveBeenCalledOnce()
+    expect(posted.at(-1)).toEqual({
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      type: 'hardwareBackResult',
+      sequence: 7,
+      handled: true,
+      ...CONTEXT
+    })
+
+    hook.unmount()
+    uninstall()
+  })
 })
 
 function initMessage(
@@ -225,6 +270,7 @@ function initMessage(
     type: 'init',
     ...context,
     connection: 'connected',
+    hostDisplayName: 'Host 1',
     grants: [
       {
         capability: 'workspace',

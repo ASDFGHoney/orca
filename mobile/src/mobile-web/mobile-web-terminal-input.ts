@@ -31,7 +31,9 @@ export function handleMobileWebTerminalInput(args: {
         args.client,
         args.record,
         args.request.operation === 'queryReply'
-          ? TerminalStreamOpcode.QueryReply
+          ? args.record.supportsQueryReply
+            ? TerminalStreamOpcode.QueryReply
+            : TerminalStreamOpcode.Input
           : TerminalStreamOpcode.Input,
         Uint8Array.from(atob(args.request.data), (character) => character.charCodeAt(0))
       )

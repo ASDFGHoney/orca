@@ -1,16 +1,26 @@
-import { Stack } from 'expo-router'
+import { Stack, usePathname } from 'expo-router'
 import { StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-import { MobileWebNativeShellProvider } from '../../src/mobile-web/src/native-shell-channel'
+import {
+  MobileWebNativeShellProvider,
+  useMobileWebNativeShell
+} from '../../src/mobile-web/src/native-shell-channel'
 import { installMobileWebHistorySessionFragment } from '../src/mobile-web/mobile-web-history-session-fragment'
+import {
+  MobileWebNativeBehaviorAdapter,
+  installMobileWebNativeBehaviorAdapters
+} from '../src/mobile-web/mobile-web-native-behavior-adapter'
+import { installMobileWebQuerylessHistory } from '../src/mobile-web/mobile-web-queryless-history'
 import { colors } from '../src/theme/mobile-theme'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { MobileWebRouteErrorBoundary } from './mobile-web-route-error-boundary'
 import { MobileWebRouteRestorer } from './mobile-web-route-restorer'
 
 installMobileWebHistorySessionFragment()
+installMobileWebQuerylessHistory()
+installMobileWebNativeBehaviorAdapters()
 
 export default function HostMobileWebLayout() {
   return (
@@ -19,15 +29,28 @@ export default function HostMobileWebLayout() {
         <RpcClientProvider>
           <MobileWebNativeShellProvider>
             <MobileWebRouteRestorer />
-            <View style={styles.root}>
-              <MobileWebRouteErrorBoundary>
-                <Stack screenOptions={{ headerShown: false }} />
-              </MobileWebRouteErrorBoundary>
-            </View>
+            <MobileWebRouteStack />
+            <MobileWebNativeBehaviorAdapter />
           </MobileWebNativeShellProvider>
         </RpcClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  )
+}
+
+function MobileWebRouteStack() {
+  const pathname = usePathname()
+  const shell = useMobileWebNativeShell()
+  const contextKey = shell.context
+    ? `${shell.context.shellSessionId}:${shell.context.buildId}`
+    : 'pending'
+
+  return (
+    <View style={styles.root}>
+      <MobileWebRouteErrorBoundary resetKey={`${contextKey}:${pathname}`}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </MobileWebRouteErrorBoundary>
+    </View>
   )
 }
 

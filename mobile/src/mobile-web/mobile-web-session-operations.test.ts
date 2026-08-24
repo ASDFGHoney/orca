@@ -39,7 +39,7 @@ describe('mobile web session operations', () => {
     expect(sendRequest).toHaveBeenCalledWith('status.get')
   })
 
-  it('returns host gates only for the request-gated projection', async () => {
+  it('rejects the complete capability array when any entry is malformed', async () => {
     const sendRequest = vi.fn<RpcClient['sendRequest']>().mockResolvedValue({
       ok: true,
       result: {
@@ -62,7 +62,7 @@ describe('mobile web session operations', () => {
         nativeChatAuthority: createNativeChatAuthority()
       })
     ).resolves.toEqual({
-      hostCapabilities: ['aiVault.v1', 'terminal.quick-commands.v1'],
+      hostCapabilities: [],
       floatingWorkspaceEnabled: true
     })
   })

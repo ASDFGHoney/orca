@@ -6,6 +6,7 @@ import {
 } from '../../../src/shared/mobile-web/bridge-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebCapabilityBroker } from './mobile-web-capability-broker'
+import type { MobileWebNativeCapabilityAuthority } from './mobile-web-native-capability-authority'
 
 const CONTEXT = {
   shellSessionId: 'S'.repeat(43),
@@ -76,9 +77,55 @@ describe('mobile web capability broker races', () => {
       error: { code: 'invalid_request', retryable: false }
     })
   })
+
+  it('keeps a shell-owned native alert alive across Desktop client replacement', async () => {
+    const alertResult = deferredAlertResult()
+    const alert = vi.fn<NonNullable<MobileWebNativeCapabilityAuthority['alert']>>()
+    alert.mockReturnValue(alertResult.promise)
+    const harness = await createPrimedHarness(alert)
+
+    const pending = harness.broker.handle(nativeAlertRequest())
+    await vi.waitFor(() => expect(alert).toHaveBeenCalledOnce())
+    harness.broker.replaceClient(null)
+    alertResult.resolve({ kind: 'button', buttonIndex: 1 })
+    await pending
+
+    expect(responseFor(harness.messages, 'A')).toEqual([
+      expect.objectContaining({
+        status: 'success',
+        payload: { kind: 'button', buttonIndex: 1 }
+      })
+    ])
+  })
+
+  it('keeps an OS alert authoritative after page cancellation', async () => {
+    const alertResult = deferredAlertResult()
+    const alert = vi.fn<NonNullable<MobileWebNativeCapabilityAuthority['alert']>>()
+    alert.mockReturnValue(alertResult.promise)
+    const harness = await createPrimedHarness(alert)
+
+    const pending = harness.broker.handle(nativeAlertRequest())
+    await vi.waitFor(() => expect(alert).toHaveBeenCalledOnce())
+    await harness.broker.handle(requestCancel('A'))
+    await harness.broker.handle(nativeAlertRequest('B'))
+
+    expect(alert).toHaveBeenCalledOnce()
+    expect(responseFor(harness.messages, 'B')).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        error: { code: 'rate_limited', retryable: true }
+      })
+    ])
+
+    alertResult.resolve({ kind: 'button', buttonIndex: 0 })
+    await pending
+    expect(responseFor(harness.messages, 'A')).toEqual([
+      expect.objectContaining({ status: 'success' })
+    ])
+  })
 })
 
-async function createPrimedHarness() {
+async function createPrimedHarness(alert?: MobileWebNativeCapabilityAuthority['alert']) {
   const messages: MobileWebBridgeShellMessage[] = []
   const sendRequest = vi.fn<RpcClient['sendRequest']>()
   const subscribe = vi.fn<RpcClient['subscribe']>()
@@ -94,6 +141,7 @@ async function createPrimedHarness() {
     isActive: () => true,
     postMessage: (message) => messages.push(message),
     nativeAuthority: {
+      alert,
       hapticFeedback: vi.fn(),
       clipboardWrite: vi.fn(),
       openExternal: vi.fn(),
@@ -109,6 +157,34 @@ async function createPrimedHarness() {
   })
   await broker.handle(workspaceSnapshotRequest())
   return { broker, messages, sendRequest, subscribe }
+}
+
+function nativeAlertRequest(id = 'A'): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
+  return {
+    ...envelope(),
+    type: 'request',
+    mode: 'once',
+    requestId: id.repeat(22),
+    capability: 'native',
+    operation: 'alert',
+    payload: {
+      title: 'Discard changes?',
+      message: 'Unsaved edits will be lost.',
+      buttons: [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Discard', style: 'destructive' }
+      ]
+    }
+  }
+}
+
+function requestCancel(id: string): Extract<MobileWebBridgePageMessage, { type: 'cancel' }> {
+  return {
+    ...envelope(),
+    type: 'cancel',
+    target: 'request',
+    id: id.repeat(22)
+  }
 }
 
 function workspaceSnapshotRequest(): Extract<MobileWebBridgePageMessage, { type: 'request' }> {
@@ -162,6 +238,14 @@ function envelope() {
 function deferredHostResult() {
   let resolve = (_value: ReturnType<typeof terminalTabsResult>): void => {}
   const promise = new Promise<ReturnType<typeof terminalTabsResult>>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+function deferredAlertResult() {
+  let resolve = (_value: { kind: 'button'; buttonIndex: number }): void => {}
+  const promise = new Promise<{ kind: 'button'; buttonIndex: number }>((done) => {
     resolve = done
   })
   return { promise, resolve }

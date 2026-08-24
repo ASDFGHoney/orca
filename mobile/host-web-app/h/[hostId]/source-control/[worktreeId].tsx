@@ -8,6 +8,10 @@ export default function HostMobileWebSourceControlRoute() {
   const params = useLocalSearchParams<{ worktreeId?: string | string[] }>()
   const workspaceId = firstParam(params.worktreeId)
   const shell = useMobileWebNativeShell()
+  const workspaceName =
+    shell.resumeRoute.kind === 'session' && shell.resumeRoute.workspaceId === workspaceId
+      ? shell.resumeRoute.workspaceName
+      : undefined
   const client = useMemo(
     () =>
       shell.client && workspaceId ? webHostSourceControlClient(shell.client, workspaceId) : null,
@@ -22,6 +26,7 @@ export default function HostMobileWebSourceControlRoute() {
 
   return (
     <MobileSourceControlRoute
+      routeName={workspaceName}
       binding={{
         client,
         connectionState,

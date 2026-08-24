@@ -53,12 +53,14 @@ import {
   isMobileWebSourceControlReviewOperation
 } from './mobile-web-source-control-review-operations'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import type { MobileWebSourceControlBranchComparePager } from './mobile-web-source-control-branch-compare-pager'
 
 export async function executeMobileWebSourceControlOperation(args: {
   operation: string
   payload: unknown
   client: RpcClient
   workspaceAuthority: MobileWebWorkspaceAuthority
+  branchComparePager?: MobileWebSourceControlBranchComparePager
   terminalClientId?: string
 }): Promise<
   | MobileWebSourceControlStatusResult
@@ -93,7 +95,8 @@ export async function executeMobileWebSourceControlOperation(args: {
       operation: args.operation,
       payload: args.payload,
       client: args.client,
-      workspaceAuthority: args.workspaceAuthority
+      workspaceAuthority: args.workspaceAuthority,
+      branchComparePager: args.branchComparePager
     })
   }
   if (args.operation === 'status') {

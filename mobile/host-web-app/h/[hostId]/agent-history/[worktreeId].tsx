@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useRouter } from 'expo-router'
 import type { AiVaultScope } from '../../../../../src/shared/ai-vault-types'
 import type {
   MobileWebAgentHistorySession,
@@ -7,6 +7,7 @@ import type {
 } from '../../../../../src/shared/mobile-web/agent-history-operation-contract'
 import type { MobileWebBridgeClient } from '../../../../../src/mobile-web/src/mobile-web-bridge-client'
 import { useMobileWebNativeShell } from '../../../../../src/mobile-web/src/native-shell-channel'
+import { useMobileWebRouteParams } from '../../../../src/mobile-web/use-mobile-web-route-params'
 import {
   MobileAgentSessionHistoryPresentation,
   type MobileAgentHistoryPresentationState
@@ -18,7 +19,7 @@ import { getWorktreeLabel } from '../../../../src/session/worktree-label'
 export default function HostMobileWebAgentHistoryRoute() {
   const shell = useMobileWebNativeShell()
   const router = useRouter()
-  const { hostId, worktreeId, name } = useLocalSearchParams<{
+  const { hostId, worktreeId, name } = useMobileWebRouteParams<{
     hostId: string
     worktreeId: string
     name?: string
@@ -31,6 +32,11 @@ export default function HostMobileWebAgentHistoryRoute() {
   const [resumingSessionId, setResumingSessionId] = useState<string | null>(null)
   const sessionsRef = useRef<MobileWebAgentHistorySession[]>([])
   const loadGenerationRef = useRef(0)
+  const workspaceName =
+    name ??
+    (shell.resumeRoute.kind === 'session' && shell.resumeRoute.workspaceId === worktreeId
+      ? shell.resumeRoute.workspaceName
+      : undefined)
 
   const load = useCallback(
     async (force: boolean) => {
@@ -145,7 +151,7 @@ export default function HostMobileWebAgentHistoryRoute() {
 
   return (
     <MobileAgentSessionHistoryPresentation
-      worktreeLabel={getWorktreeLabel(name, worktreeId)}
+      worktreeLabel={getWorktreeLabel(workspaceName, worktreeId)}
       scope={scope}
       state={state}
       refreshing={refreshing}

@@ -115,9 +115,8 @@ export function useMobilePrFileContentCache(activeScope: string | null): {
   }
   const { cache } = currentView
   const clear = useCallback(() => {
-    const next = createMobilePrFileContentCacheView(activeScope)
-    setView((current) => (current.cache === cache ? next : current))
-  }, [activeScope, cache])
+    setView((current) => createMobilePrFileContentCacheView(current.activeScope))
+  }, [])
 
   const load = useCallback(
     async (

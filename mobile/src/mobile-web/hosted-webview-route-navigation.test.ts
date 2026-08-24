@@ -3,7 +3,7 @@ import { navigateHostedWebViewRoute } from '../../scripts/hosted-webview-route-n
 
 describe('hosted WebView route navigation', () => {
   it('moves within the authenticated hosted SPA without a document navigation', async () => {
-    const socket = cdpSocket('/h/host/review/workspace?scope=all')
+    const socket = cdpSocket('/h/host/review/workspace')
 
     await expect(
       navigateHostedWebViewRoute(

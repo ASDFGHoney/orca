@@ -64,6 +64,7 @@ describe('web host provider review requests', () => {
       ok: true,
       result: { provider: 'github', blockedReason: 'auth_required' }
     })
+    expect(bridge.sourceControlStatus).toHaveBeenCalledTimes(1)
     expect(bridge.providerReviewCreationEligibility).toHaveBeenCalledTimes(1)
 
     const review = await client.sendRequest('hostedReview.forBranch', {
@@ -75,6 +76,7 @@ describe('web host provider review requests', () => {
       ok: true,
       result: null
     })
+    expect(bridge.sourceControlStatus).toHaveBeenCalledTimes(1)
     expect(bridge.providerReview).not.toHaveBeenCalled()
   })
 

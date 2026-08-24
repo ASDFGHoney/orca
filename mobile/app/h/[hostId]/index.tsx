@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { View, Text, StyleSheet, SectionList, Pressable, Alert, RefreshControl } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 import {
   Search,
   X,
@@ -21,6 +21,7 @@ import {
   SquareTerminal
 } from 'lucide-react-native'
 import { useHostClient } from '../../../src/transport/client-context'
+import { useMobileWebRouteParams } from '../../../src/mobile-web/use-mobile-web-route-params'
 import { useWorktreeResync } from '../../../src/transport/use-worktree-resync'
 import { startHostWorktreeRefresh } from '../../../src/worktree/host-worktree-refresh'
 import {
@@ -140,7 +141,7 @@ export function HostScreen({
   hostState: hostStateProp,
   shellOperations: shellOperationsProp
 }: HostScreenProps = {}) {
-  const params = useLocalSearchParams<{ hostId: string; action?: string; notice?: string }>()
+  const params = useMobileWebRouteParams<{ hostId: string; action?: string; notice?: string }>()
   const hostId = hostIdProp ?? params.hostId
   const action = actionProp ?? params.action
   const [dismissedNotice, setDismissedNotice] = useState<string | null>(null)

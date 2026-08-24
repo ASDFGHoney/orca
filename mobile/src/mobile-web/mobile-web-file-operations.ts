@@ -24,6 +24,7 @@ import {
 import type { MobileWebFileWriteResult } from '../../../src/shared/mobile-web/file-edit-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
+import { executeMobileWebFileOpenOperation } from './mobile-web-file-open-operation'
 import { executeMobileWebFileWrite } from './mobile-web-file-write'
 import {
   compareMobileWebDirectoryEntries,
@@ -118,14 +119,13 @@ export async function executeMobileWebFileOperation(args: {
   if (args.operation === 'open') {
     const payload = MobileWebFileOpenPayloadSchema.parse(args.payload)
     const hostWorkspaceId = args.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
-    const response = await args.client.sendRequest('files.open', {
-      worktree: `id:${hostWorkspaceId}`,
-      relativePath: payload.relativePath
+    return executeMobileWebFileOpenOperation({
+      client: args.client,
+      hostWorkspaceId,
+      relativePath: payload.relativePath,
+      assertCurrent: () =>
+        args.workspaceAuthority.assertHostWorkspaceBinding(payload.workspaceId, hostWorkspaceId)
     })
-    if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
-    }
-    return null
   }
   throw new MobileWebBrokerError('unsupported_capability')
 }

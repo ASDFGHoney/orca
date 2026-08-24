@@ -2,7 +2,9 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MobileWebNativeShellState } from '../../../src/mobile-web/src/native-shell-channel'
+import type { MobileWebNavigationRoute } from '../../../src/shared/mobile-web/bridge-contract'
 import { MobileWebRouteRestorer } from '../../host-web-app/mobile-web-route-restorer'
+import { mobileWebRouteQuery } from './mobile-web-route-query-cache'
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -38,6 +40,9 @@ describe('MobileWebRouteRestorer', () => {
     expect(mocks.replace).toHaveBeenLastCalledWith(
       '/h/paired-orca-desktop/session/workspace-one?name=Workspace+one'
     )
+    expect(mobileWebRouteQuery('/h/paired-orca-desktop/session/workspace-one')).toEqual({
+      name: 'Workspace one'
+    })
 
     mocks.shell = shellState('page-owned-route', 'Page route', 1)
     renderRestorer()
@@ -70,6 +75,22 @@ describe('MobileWebRouteRestorer', () => {
     expect(mocks.replace).toHaveBeenCalledTimes(4)
   })
 
+  it('restores Tasks state and Accounts through queryless hosted history', () => {
+    mocks.shell = navigationShellState({ kind: 'tasks', taskSource: 'gitlab' }, 1)
+    renderRestorer()
+
+    expect(mocks.replace).toHaveBeenLastCalledWith('/h/paired-orca-desktop/tasks?taskSource=gitlab')
+    expect(mobileWebRouteQuery('/h/paired-orca-desktop/tasks')).toEqual({
+      taskSource: 'gitlab'
+    })
+
+    mocks.shell = navigationShellState({ kind: 'accounts' }, 2)
+    renderRestorer()
+
+    expect(mocks.replace).toHaveBeenLastCalledWith('/h/paired-orca-desktop/accounts')
+    expect(mobileWebRouteQuery('/h/paired-orca-desktop/accounts')).toEqual({})
+  })
+
   function renderRestorer(): void {
     act(() => {
       if (renderer) {
@@ -100,5 +121,16 @@ function shellState(
     resumeRoute: route,
     routeRevision,
     rememberRoute: () => true
+  }
+}
+
+function navigationShellState(
+  navigationRoute: MobileWebNavigationRoute,
+  routeRevision: number
+): MobileWebNativeShellState {
+  return {
+    ...shellState('workspace-one', 'Workspace one', routeRevision),
+    navigationRoute,
+    resumeRoute: { kind: 'workspaceList' }
   }
 }

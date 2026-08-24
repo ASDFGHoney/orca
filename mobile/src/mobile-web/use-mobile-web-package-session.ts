@@ -10,8 +10,16 @@ import {
   mobileWebPackageDownloadFailureCode
 } from './mobile-web-package-downloader'
 import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
+import {
+  createMobileWebCachedBuildProbe,
+  type MobileWebCachedBuildProbe
+} from './mobile-web-cached-build-probe'
 import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
+import { useMobileWebPackageCapability } from './use-mobile-web-package-capability'
 import { useMobileWebPackageRecovery } from './use-mobile-web-package-recovery'
+
+const MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING =
+  'Update Orca on this desktop to use its workspace interface.'
 
 export type MobileWebPackageSession = {
   session: MobileWebShellSession | null
@@ -39,6 +47,7 @@ export function useMobileWebPackageSession({
   const hostEpochRef = useRef(0)
   const activeHostIdRef = useRef<string | null>(null)
   const ownedSessionRef = useRef<MobileWebShellSession | null>(null)
+  const cachedBuildProbeRef = useRef<MobileWebCachedBuildProbe | null>(null)
   const refreshingHostEpochRef = useRef<number | null>(null)
   const processFailuresRef = useRef(new MobileWebProcessFailureTracker())
   const rejectedBuildIdsRef = useRef(new Set<string>())
@@ -47,6 +56,15 @@ export function useMobileWebPackageSession({
   const [packageLoading, setPackageLoading] = useState(false)
   const [packageWarning, setPackageWarning] = useState<string>()
   const [refreshEpoch, setRefreshEpoch] = useState(0)
+  const packageCapability = useMobileWebPackageCapability({
+    client,
+    hostId: host?.id,
+    state
+  })
+  const packageAccessAllowed =
+    packageCapability === 'offline' ||
+    packageCapability === 'supported' ||
+    (packageCapability === 'pending' && ownedSessionRef.current !== null)
 
   const publishSession = useCallback(
     async (
@@ -82,6 +100,9 @@ export function useMobileWebPackageSession({
   useEffect(() => {
     const hostEpoch = hostEpochRef.current + 1
     hostEpochRef.current = hostEpoch
+    cachedBuildProbeRef.current?.resolve(null)
+    const cachedBuildProbe = createMobileWebCachedBuildProbe(hostEpoch)
+    cachedBuildProbeRef.current = cachedBuildProbe
     activeHostIdRef.current = host?.id ?? null
     refreshingHostEpochRef.current = null
     processFailuresRef.current.reset()
@@ -96,18 +117,27 @@ export function useMobileWebPackageSession({
       void ExpoMobileWebShell.closeSession(previous.sessionId).catch(() => {})
     }
     if (!host) {
+      cachedBuildProbe.resolve(null)
       return
     }
     mobileWebDiagnosticsStore.begin(host.id)
+    if (!packageAccessAllowed) {
+      cachedBuildProbe.resolve(null)
+      return
+    }
     let disposed = false
     const cacheActivationStartedAt = Date.now()
     void ExpoMobileWebShell.openSession(host.publicKeyB64, null, MOBILE_WEB_BRIDGE_PROTOCOL_VERSION)
       .then(async (cached) => {
-        await (!disposed && !ownedSessionRef.current
+        const published = await (!disposed && !ownedSessionRef.current
           ? publishSession(cached, hostEpoch, host.id, 'verified-cache', cacheActivationStartedAt)
-          : ExpoMobileWebShell.closeSession(cached.sessionId).catch(() => {}))
+          : ExpoMobileWebShell.closeSession(cached.sessionId)
+              .catch(() => {})
+              .then(() => false))
+        cachedBuildProbe.resolve(published ? cached.buildId : null)
       })
       .catch(() => {
+        cachedBuildProbe.resolve(null)
         if (!disposed && hostEpochRef.current === hostEpoch && !ownedSessionRef.current) {
           mobileWebDiagnosticsStore.warning(host.id, 'cache_open_failed')
           if (refreshingHostEpochRef.current !== hostEpoch) {
@@ -121,6 +151,7 @@ export function useMobileWebPackageSession({
       })
     return () => {
       disposed = true
+      cachedBuildProbe.resolve(null)
       if (hostEpochRef.current !== hostEpoch) {
         return
       }
@@ -132,13 +163,25 @@ export function useMobileWebPackageSession({
         void ExpoMobileWebShell.closeSession(closing.sessionId).catch(() => {})
       }
     }
-  }, [host?.id, host?.publicKeyB64, publishSession])
+  }, [host?.id, host?.publicKeyB64, packageAccessAllowed, publishSession])
 
   useEffect(() => {
-    if (!host || !client || state !== 'connected') {
+    if (!host || packageAccessAllowed) {
+      return
+    }
+    setPackageLoading(packageCapability === 'pending')
+    if (packageCapability === 'update-required') {
+      mobileWebDiagnosticsStore.warning(host.id, 'host_update_required')
+      setPackageWarning(MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING)
+    }
+  }, [host?.id, packageAccessAllowed, packageCapability])
+
+  useEffect(() => {
+    if (!host || !client || state !== 'connected' || packageCapability !== 'supported') {
       return
     }
     const hostEpoch = hostEpochRef.current
+    const cachedBuildProbe = cachedBuildProbeRef.current
     const controller = new AbortController()
     refreshingHostEpochRef.current = hostEpoch
     setPackageLoading(true)
@@ -151,10 +194,26 @@ export function useMobileWebPackageSession({
           createMobileWebNativeStager(host.publicKeyB64),
           {
             shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-            signal: controller.signal
+            signal: controller.signal,
+            reuseVerifiedBuild: async (buildId) => {
+              const verifiedBuildId =
+                cachedBuildProbe?.hostEpoch === hostEpoch ? await cachedBuildProbe.promise : null
+              return (
+                !controller.signal.aborted &&
+                hostEpochRef.current === hostEpoch &&
+                verifiedBuildId === buildId &&
+                ownedSessionRef.current?.buildId === buildId
+              )
+            }
           }
         )
         if (controller.signal.aborted || hostEpochRef.current !== hostEpoch) {
+          return
+        }
+        if (downloaded.reusedVerifiedBuild) {
+          mobileWebDiagnosticsStore.refreshSucceeded(host.id, Date.now() - refreshStartedAt)
+          setPackageLoading(false)
+          setPackageWarning(undefined)
           return
         }
         if (ownedSessionRef.current?.buildId === downloaded.commit.buildId) {
@@ -207,7 +266,7 @@ export function useMobileWebPackageSession({
         refreshingHostEpochRef.current = null
       }
     }
-  }, [client, host?.id, host?.publicKeyB64, publishSession, refreshEpoch, state])
+  }, [client, host?.id, host?.publicKeyB64, packageCapability, publishSession, refreshEpoch, state])
 
   const {
     markHealthy,

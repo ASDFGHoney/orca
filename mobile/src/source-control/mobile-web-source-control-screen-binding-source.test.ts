@@ -30,6 +30,7 @@ describe('mobile web source control screen binding', () => {
       "import { MobileSourceControlRoute } from '../../../../app/h/[hostId]/source-control/[worktreeId]'"
     )
     expect(hostedRoute).toContain('webHostSourceControlClient(shell.client, workspaceId)')
+    expect(hostedRoute).not.toContain('routeOrigin=')
     expect(hostedRoute).toContain('binding={{')
     expect(hostedRoute).toContain('shell.client?.native.hapticSelection()')
     expect(hostedRoute).toContain("shell.client?.native.hapticFeedback('success')")

@@ -4,7 +4,7 @@ import {
   MOBILE_WEB_SOURCE_CONTROL_COMPARE_MAX_ENTRIES,
   type MobileWebSourceControlBranchCompareResult
 } from '../../../src/shared/mobile-web/source-control-history-contract'
-import { MOBILE_WEB_SOURCE_CONTROL_STATUS_LIMIT } from '../../../src/shared/mobile-web/source-control-operation-contract'
+import type { WebHostSourceControlStatusSnapshot } from './web-host-source-control-status-snapshot'
 
 type RequestParams = Record<string, unknown>
 
@@ -13,14 +13,12 @@ export async function readWebHostSourceControlRequest(args: {
   workspaceId: string
   method: string
   params: RequestParams
+  statusSnapshot: WebHostSourceControlStatusSnapshot
 }): Promise<unknown | typeof WEB_HOST_SOURCE_CONTROL_REQUEST_UNHANDLED> {
-  const { client, workspaceId, method, params } = args
+  const { client, workspaceId, method, params, statusSnapshot } = args
   if (method === 'git.status') {
     const [status, repository] = await Promise.all([
-      client.sourceControlStatus({
-        workspaceId,
-        limit: MOBILE_WEB_SOURCE_CONTROL_STATUS_LIMIT
-      }),
+      statusSnapshot.refresh(),
       client.sourceControlUpstream({ workspaceId })
     ])
     return {

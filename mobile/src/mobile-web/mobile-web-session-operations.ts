@@ -18,6 +18,7 @@ import {
   type MobileWebSessionCreateResult
 } from '../../../src/shared/mobile-web/bridge-operation-contract'
 import type { RpcClient } from '../transport/rpc-client'
+import { parseRuntimeStatusCapabilities } from '../transport/runtime-capability-probe'
 import { projectHostSessionRuntimeCapabilities } from '../session/host-session-runtime-capabilities'
 import { loadMobileNewTabAgentOptions } from '../session/mobile-new-tab-agent-loader'
 import type { MobileWebBrowserAuthority } from './mobile-web-browser-authority'
@@ -65,16 +66,10 @@ export async function executeMobileWebSessionOperation(args: {
       if (!response.ok) {
         throw new MobileWebBrokerError('host_error')
       }
-      const status = response.result as {
-        capabilities?: unknown
-        floatingWorkspaceEnabled?: unknown
-      }
-      const hostCapabilities = Array.isArray(status.capabilities)
-        ? status.capabilities.filter(
-            (value): value is string =>
-              typeof value === 'string' && value.length > 0 && value.length <= 120
-          )
-        : []
+      const status = response.result as { floatingWorkspaceEnabled?: unknown }
+      const hostCapabilities = (parseRuntimeStatusCapabilities(response.result) ?? []).filter(
+        (value) => value.length > 0 && value.length <= 120
+      )
       return MobileWebSessionHostGatesResultSchema.parse({
         hostCapabilities: hostCapabilities.slice(0, 256),
         floatingWorkspaceEnabled: status.floatingWorkspaceEnabled === true
@@ -85,10 +80,7 @@ export async function executeMobileWebSessionOperation(args: {
     if (!response.ok) {
       throw new MobileWebBrokerError('host_error')
     }
-    const result = response.result as { capabilities?: unknown }
-    const capabilities = Array.isArray(result.capabilities)
-      ? result.capabilities.filter((value): value is string => typeof value === 'string')
-      : []
+    const capabilities = parseRuntimeStatusCapabilities(response.result) ?? []
     return MobileWebSessionCapabilitiesResultSchema.parse(
       projectHostSessionRuntimeCapabilities(capabilities)
     )

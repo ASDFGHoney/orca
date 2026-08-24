@@ -6,19 +6,35 @@ import { colors, radii, spacing, typography } from '../src/theme/mobile-theme'
 
 type MobileWebRouteErrorBoundaryProps = {
   children: ReactNode
+  resetKey: string
 }
 
 type MobileWebRouteErrorBoundaryState = {
   failureCode: string | null
+  resetKey: string
 }
 
 export class MobileWebRouteErrorBoundary extends Component<
   MobileWebRouteErrorBoundaryProps,
   MobileWebRouteErrorBoundaryState
 > {
-  state: MobileWebRouteErrorBoundaryState = { failureCode: null }
+  state: MobileWebRouteErrorBoundaryState = {
+    failureCode: null,
+    resetKey: this.props.resetKey
+  }
 
-  static getDerivedStateFromError(error: unknown): MobileWebRouteErrorBoundaryState {
+  static getDerivedStateFromProps(
+    props: MobileWebRouteErrorBoundaryProps,
+    state: MobileWebRouteErrorBoundaryState
+  ): MobileWebRouteErrorBoundaryState | null {
+    return props.resetKey === state.resetKey
+      ? null
+      : { failureCode: null, resetKey: props.resetKey }
+  }
+
+  static getDerivedStateFromError(
+    error: unknown
+  ): Pick<MobileWebRouteErrorBoundaryState, 'failureCode'> {
     return {
       failureCode: mobileWebRouteFailureCode(error)
     }
@@ -37,16 +53,33 @@ export class MobileWebRouteErrorBoundary extends Component<
     }
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Workspace view stopped</Text>
-        <Text style={styles.message}>
+        <Text accessibilityRole="header" style={styles.title}>
+          Workspace view stopped
+        </Text>
+        <Text
+          accessibilityLabel={`Workspace view stopped. Reload the desktop-served interface to reconnect. Diagnostic: ${this.state.failureCode}`}
+          accessibilityLiveRegion="assertive"
+          accessibilityRole="alert"
+          style={styles.message}
+        >
           Reload the desktop-served interface to reconnect. Diagnostic: {this.state.failureCode}
         </Text>
-        <Pressable style={styles.button} onPress={() => window.location.reload()}>
+        <Pressable
+          accessibilityLabel="Reload interface"
+          accessibilityRole="button"
+          style={styles.button}
+          onPress={reloadMobileWebRoot}
+        >
           <Text style={styles.buttonText}>Reload interface</Text>
         </Pressable>
       </View>
     )
   }
+}
+
+function reloadMobileWebRoot(): void {
+  window.history.replaceState(window.history.state, '', '/')
+  window.location.reload()
 }
 
 const styles = StyleSheet.create({

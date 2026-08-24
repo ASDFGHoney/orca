@@ -183,7 +183,18 @@ export async function readHostedWebViewState(document, WebSocketCtor = WebSocket
   const expression = `JSON.stringify({
     href: String(location.href).slice(0, 2048),
     bodyText: String(document.body?.innerText ?? '').slice(0, ${HOSTED_DOCUMENT_TEXT_LIMIT}),
-    labels: Array.from(document.querySelectorAll('[aria-label]')).slice(0, 128)
+    labels: Array.from(document.querySelectorAll('[aria-label]')).filter((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < innerHeight &&
+        rect.left < innerWidth;
+    }).slice(0, 128)
       .map((element) => String(element.getAttribute('aria-label') ?? '').slice(0, 240)),
     placeholders: Array.from(document.querySelectorAll('input[placeholder],textarea[placeholder]'))
       .slice(0, 32)
@@ -381,16 +392,36 @@ export async function waitForHostedWebViewConnectionSequence(
   document,
   expectedStates,
   timeoutMs,
-  WebSocketCtor = WebSocket
+  transport = WebSocket
 ) {
+  const WebSocketCtor =
+    typeof transport === 'function' ? transport : (transport.WebSocketCtor ?? WebSocket)
+  const reacquireDocument =
+    typeof transport === 'function' ? undefined : transport.reacquireDocument
   const deadline = Date.now() + timeoutMs
   let entries = []
+  let activeDocument = document
+  const observedEntryCounts = new Map()
   const expression = `JSON.stringify(globalThis[${JSON.stringify(
     HOSTED_CONNECTION_OBSERVATION_PROPERTY
   )}]?.entries ?? [])`
   while (Date.now() < deadline) {
-    const value = await evaluateHostedDocumentWithRetry(document, expression, WebSocketCtor)
-    entries = JSON.parse(value)
+    let currentEntries
+    try {
+      const value = await evaluateHostedDocumentWithRetry(activeDocument, expression, WebSocketCtor)
+      currentEntries = JSON.parse(value)
+    } catch (error) {
+      if (!reacquireDocument) {
+        throw error
+      }
+      activeDocument = await reacquireDocument(Math.max(1, deadline - Date.now()))
+      continue
+    }
+    const documentKey = activeDocument.webSocketDebuggerUrl
+    const previousCount = observedEntryCounts.get(documentKey) ?? 0
+    const nextOffset = currentEntries.length < previousCount ? 0 : previousCount
+    entries.push(...currentEntries.slice(nextOffset))
+    observedEntryCounts.set(documentKey, currentEntries.length)
     if (hasOrderedConnectionStates(entries, expectedStates)) {
       return entries
     }
@@ -413,7 +444,11 @@ function hasOrderedConnectionStates(entries, expectedStates) {
   return expectedIndex === expectedStates.length
 }
 
-export async function evaluateHostedDocumentWithRetry(document, expression, WebSocketCtor) {
+export async function evaluateHostedDocumentWithRetry(
+  document,
+  expression,
+  WebSocketCtor = WebSocket
+) {
   let lastError = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {

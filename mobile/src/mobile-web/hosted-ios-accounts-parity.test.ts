@@ -82,6 +82,7 @@ describe('hosted iOS Accounts parity', () => {
       deviceUdid: 'simulator',
       discoveryUrl: 'http://127.0.0.1:9222',
       emulator: { deviceUdid: 'simulator' },
+      expectedWorkspace: 'mobile-rearch',
       nativeBaseline: {
         screenTitlePoint: { x: 0.2, y: 0.1 },
         screenshot: '/tmp/parity/native-accounts-portrait.png'

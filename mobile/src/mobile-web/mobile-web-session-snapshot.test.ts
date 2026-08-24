@@ -88,6 +88,45 @@ describe('mobile web session snapshot', () => {
     ).toThrow('mobile_web_session_snapshot_invalid')
   })
 
+  it('retains an active tab beyond the bounded projection', () => {
+    const tabs = Array.from({ length: MOBILE_WEB_SESSION_TAB_LIMIT + 1 }, (_, index) => ({
+      type: 'file',
+      id: `tab-${index}`,
+      title: `Tab ${index}`,
+      relativePath: `src/file-${index}.ts`,
+      mode: 'diff',
+      diffSource: 'unstaged',
+      isActive: index === MOBILE_WEB_SESSION_TAB_LIMIT
+    }))
+    const authority = authorities()
+
+    const snapshot = mobileWebSessionSnapshot(
+      {
+        worktree: 'workspace-1',
+        publicationEpoch: 'epoch-1',
+        snapshotVersion: 4,
+        activeTabId: `tab-${MOBILE_WEB_SESSION_TAB_LIMIT}`,
+        activeTabType: 'file',
+        tabs
+      },
+      'workspace-1',
+      'opaque-workspace',
+      authority.browser,
+      authority.nativeChat
+    )
+
+    expect(snapshot.tabs).toHaveLength(MOBILE_WEB_SESSION_TAB_LIMIT)
+    expect(snapshot.tabs.at(-1)).toMatchObject({
+      id: `tab-${MOBILE_WEB_SESSION_TAB_LIMIT}`,
+      relativePath: `src/file-${MOBILE_WEB_SESSION_TAB_LIMIT}.ts`,
+      isActive: true
+    })
+    expect(snapshot.tabs.some((tab) => tab.id === `tab-${MOBILE_WEB_SESSION_TAB_LIMIT - 1}`)).toBe(
+      false
+    )
+    expect(snapshot.truncated).toBe(true)
+  })
+
   it('removes browser URL credentials and local file paths', () => {
     const authority = authorities()
     const snapshot = mobileWebSessionSnapshot(

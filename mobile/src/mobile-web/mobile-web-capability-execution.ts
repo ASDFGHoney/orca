@@ -230,6 +230,7 @@ export async function executeMobileWebCapabilityRequest(
       payload: request.payload,
       client: args.connectedClient(),
       workspaceAuthority: args.workspaceAuthority,
+      branchComparePager: args.sourceControlBranchCompare,
       terminalClientId: args.terminalClientId
     })
   }

@@ -7,6 +7,7 @@ import {
   rotateHostedIosEmulator,
   tapHostedIosAccessibilityControl,
   tapHostedIosAccessibilityControlByLabelPrefix,
+  typeHostedIosText,
   waitForHostedIosAccessibilityControl,
   waitForHostedIosAccessibilityControlByLabelPrefix
 } from './hosted-ios-emulator-accessibility.mjs'
@@ -14,6 +15,8 @@ import { assertHostedIosScreenshotParity } from './hosted-ios-screenshot-parity.
 import { readHostedWebViewTextPoint } from './hosted-webview-cdp-session.mjs'
 
 const execFileAsync = promisify(execFile)
+const AGENT_HISTORY_SEARCH_PLACEHOLDER = 'Search sessions, repo:, path:'
+const AGENT_HISTORY_SEARCH_QUERY = 'hybrid agent history fixture'
 
 export async function captureNativeAgentHistoryBaseline({
   deviceUdid,
@@ -47,6 +50,15 @@ export async function openNativeAgentHistoryBaseline({ emulator, expectedWorkspa
   await tapHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
   await tapHostedIosAccessibilityControl(emulator, 'More session actions', timeoutMs)
   await tapHostedIosAccessibilityControlByLabelPrefix(emulator, 'Agent History', timeoutMs)
+  await tapHostedIosAccessibilityControl(emulator, AGENT_HISTORY_SEARCH_PLACEHOLDER, timeoutMs)
+  await delay(500)
+  await typeHostedIosText(emulator, AGENT_HISTORY_SEARCH_QUERY)
+  await waitForHostedIosAccessibilityControlByLabelPrefix(
+    emulator,
+    EMULATOR_AGENT_HISTORY_TITLE,
+    timeoutMs
+  )
+  await tapHostedIosAccessibilityControl(emulator, 'Agent Session History', timeoutMs)
 }
 
 export async function captureHostedAgentHistoryParity({

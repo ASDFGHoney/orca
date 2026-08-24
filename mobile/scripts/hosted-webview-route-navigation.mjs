@@ -15,7 +15,8 @@ export async function navigateHostedWebViewRoute(document, route, WebSocketCtor 
     })()`,
     WebSocketCtor
   )
-  if (value !== route) {
+  const expectedPath = new URL(route, 'https://orca-mobile-web.invalid').pathname
+  if (value !== expectedPath) {
     throw new Error('Hosted WebView route navigation was not retained')
   }
 }

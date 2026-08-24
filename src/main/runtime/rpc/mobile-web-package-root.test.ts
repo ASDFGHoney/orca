@@ -13,36 +13,50 @@ afterEach(async () => {
 })
 
 describe('mobile web package root', () => {
-  it('uses an explicit development package override before packaged resources', async () => {
+  it('uses an explicit development package override', async () => {
     const overrideRoot = await packageRoot('override')
     const resourcesPath = await packageRoot('resources')
     await addManifest(overrideRoot)
     await addManifest(join(resourcesPath, 'mobile-web'))
 
-    expect(resolveMobileWebPackageRoot({ overrideRoot, resourcesPath })).toBe(overrideRoot)
+    expect(resolveMobileWebPackageRoot({ isPackaged: false, overrideRoot, resourcesPath })).toBe(
+      overrideRoot
+    )
   })
 
-  it('prefers the packaged extra-resource directory', async () => {
+  it('locks packaged builds to the extra-resource directory', async () => {
+    const overrideRoot = await packageRoot('override')
     const resourcesPath = await packageRoot('resources')
     const cwd = await packageRoot('checkout')
+    await addManifest(overrideRoot)
     await addManifest(join(resourcesPath, 'mobile-web'))
     await addManifest(join(cwd, 'out', 'mobile-web-rnw'))
 
-    expect(resolveMobileWebPackageRoot({ resourcesPath, cwd })).toBe(
-      join(resourcesPath, 'mobile-web')
-    )
+    expect(
+      resolveMobileWebPackageRoot({ isPackaged: true, overrideRoot, resourcesPath, cwd })
+    ).toBe(join(resourcesPath, 'mobile-web'))
   })
 
-  it('uses the development output and fails closed when neither output exists', async () => {
+  it('does not fall back when packaged resources are missing', async () => {
+    const overrideRoot = await packageRoot('override')
+    const resourcesPath = await packageRoot('resources')
+    const cwd = await packageRoot('checkout')
+    await addManifest(overrideRoot)
+    await addManifest(join(cwd, 'out', 'mobile-web-rnw'))
+
+    expect(() =>
+      resolveMobileWebPackageRoot({ isPackaged: true, overrideRoot, resourcesPath, cwd })
+    ).toThrow('mobile_web_package_unavailable')
+  })
+
+  it('uses the development output and fails closed when no development output exists', async () => {
     const cwd = await packageRoot('checkout')
     const developmentRoot = join(cwd, 'out', 'mobile-web-rnw')
     await addManifest(developmentRoot)
-    expect(resolveMobileWebPackageRoot({ resourcesPath: join(cwd, 'missing'), cwd })).toBe(
-      developmentRoot
-    )
+    expect(resolveMobileWebPackageRoot({ isPackaged: false, cwd })).toBe(developmentRoot)
 
     const empty = await packageRoot('empty')
-    expect(() => resolveMobileWebPackageRoot({ resourcesPath: empty, cwd: empty })).toThrow(
+    expect(() => resolveMobileWebPackageRoot({ isPackaged: false, cwd: empty })).toThrow(
       'mobile_web_package_unavailable'
     )
   })

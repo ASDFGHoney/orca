@@ -36,6 +36,21 @@ export async function tapHostedIosPoint(args, point, runCommand = runHostedIosEm
   return point
 }
 
+export async function typeHostedIosText(args, value, runCommand = runHostedIosEmulatorCommand) {
+  for (const character of value) {
+    const command = ['type', character]
+    try {
+      await runCommand(args, command)
+    } catch (error) {
+      if (!isMissingActiveEmulatorError(error)) {
+        throw error
+      }
+      await restartHostedIosEmulatorController(args, runCommand)
+      await runCommand(args, command)
+    }
+  }
+}
+
 export async function tapHostedIosAccessibilityControlAtOccurrence(
   args,
   label,
@@ -219,6 +234,50 @@ export async function waitForHostedIosAccessibilityControlMatch(
   )
 }
 
+export async function waitForHostedIosAccessibilityControlMatching(
+  args,
+  matches,
+  timeoutMs,
+  runCommand = runHostedIosEmulatorCommand
+) {
+  return waitForHostedIosAccessibilityControlOccurrence(
+    args,
+    'matching accessibility control',
+    0,
+    timeoutMs,
+    runCommand,
+    matches,
+    (frame) => ({
+      x: frame.x + frame.width / 2,
+      y: frame.y + frame.height / 2
+    }),
+    (node, point) => ({ ...point, label: node.label ?? '', value: node.value ?? '' })
+  )
+}
+
+export async function waitForHostedIosAccessibilityLabel(
+  args,
+  label,
+  timeoutMs,
+  runCommand = runHostedIosEmulatorCommand
+) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const nodes = await readAccessibilityNodesUntilDeadline(args, runCommand, deadline)
+    const node = nodes.find(
+      (candidate) =>
+        (candidate.label === label || candidate.value === label) &&
+        candidate.enabled !== false &&
+        isVisibleFrame(candidate.frame)
+    )
+    if (node) {
+      return { frame: node.frame, label: node.label ?? '', value: node.value ?? '' }
+    }
+    await delay(250)
+  }
+  throw new Error(`${label} was not accessible in the visible viewport`)
+}
+
 export async function rotateHostedIosEmulator(
   args,
   orientation,
@@ -237,7 +296,8 @@ async function waitForHostedIosAccessibilityControlOccurrence(
   pointForFrame = (frame) => ({
     x: frame.x + frame.width / 2,
     y: frame.y + frame.height / 2
-  })
+  }),
+  resultForControl = (_node, point) => point
 ) {
   const deadline = Date.now() + timeoutMs
   let lastLabels = []
@@ -251,7 +311,7 @@ async function waitForHostedIosAccessibilityControlOccurrence(
     if (control) {
       const point = pointForFrame(control.frame)
       if (isNormalizedPoint(point)) {
-        return point
+        return resultForControl(control, point)
       }
     }
     await delay(250)
@@ -437,6 +497,16 @@ function isFiniteFrame(frame) {
     [frame.x, frame.y, frame.width, frame.height].every(
       (value) => typeof value === 'number' && Number.isFinite(value)
     )
+  )
+}
+
+function isVisibleFrame(frame) {
+  return (
+    isFiniteFrame(frame) &&
+    frame.x + frame.width > 0 &&
+    frame.y + frame.height > 0 &&
+    frame.x < 1 &&
+    frame.y < 1
   )
 }
 

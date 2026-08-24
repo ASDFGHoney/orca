@@ -158,8 +158,8 @@ pnpm test:e2e:hosted-mobile-webview:ssh:packaged
 ```
 
 The final recorded independently verified package was
-`121fe8682fc221fd7e6f2955fe1f246017d164db3122d71526bc3f66b19578c5`:
-51 assets, 9,151,993 raw bytes, and 2,649,166 gzip bytes. A packaged macOS arm64
+`5eda0f5c7f5265e9be2420d9178c03605dbe4c8e5ea9e669327d680f1e9c0eb3`:
+52 assets, 9,308,959 raw bytes, and 2,691,373 gzip bytes. A packaged macOS arm64
 Desktop to Docker SSH to actual iOS WKWebView journey used package
 `7c7c673deb74e158cdfb99b1ca536fd88cd3ab5dac4eb8db78c43ca12f6ce31d`
 without checkout fallback.
@@ -179,6 +179,8 @@ performance gates.
 - Shared workspace, Accounts, Tasks, Session, Files/Preview, Agent History,
   Source Control, Review, terminal, browser, attachments, and native-chat
   presentation through explicit native/web adapters.
+- Negotiated Android hardware Back and native Alert presentation so hosted
+  routes retain current shell behavior and mixed versions degrade safely.
 - Bound files, source control, provider review, tasks, agent mutations,
   terminal streams, browser controls, native chat, and continuations to opaque
   current authority.

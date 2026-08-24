@@ -2,7 +2,48 @@ import { z } from 'zod'
 import { MobileWebWorkspaceIdSchema } from './workspace-operation-contract'
 
 export const MOBILE_WEB_CLIPBOARD_TEXT_MAX_CHARACTERS = 128 * 1024
+export const MOBILE_WEB_NATIVE_ALERT_MAX_BUTTONS = 8
+export const MOBILE_WEB_NATIVE_ALERT_MAX_MESSAGE_CHARACTERS = 16 * 1024
+export const MOBILE_WEB_NATIVE_ALERT_MAX_TITLE_CHARACTERS = 4096
 export const MOBILE_WEB_SESSION_CHAT_DRAFT_MAX_CHARACTERS = 4096
+
+export const MobileWebNativeAlertButtonSchema = z
+  .object({
+    text: z.string().max(512).optional(),
+    style: z.enum(['default', 'cancel', 'destructive']).optional(),
+    isPreferred: z.boolean().optional()
+  })
+  .strict()
+export const MobileWebNativeAlertPayloadSchema = z
+  .object({
+    title: z.string().max(MOBILE_WEB_NATIVE_ALERT_MAX_TITLE_CHARACTERS),
+    message: z.string().max(MOBILE_WEB_NATIVE_ALERT_MAX_MESSAGE_CHARACTERS).optional(),
+    buttons: z
+      .array(MobileWebNativeAlertButtonSchema)
+      .min(1)
+      .max(MOBILE_WEB_NATIVE_ALERT_MAX_BUTTONS),
+    options: z
+      .object({
+        cancelable: z.boolean().optional(),
+        userInterfaceStyle: z.enum(['unspecified', 'light', 'dark']).optional()
+      })
+      .strict()
+      .optional()
+  })
+  .strict()
+export const MobileWebNativeAlertResultSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('button'),
+      buttonIndex: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(MOBILE_WEB_NATIVE_ALERT_MAX_BUTTONS - 1)
+    })
+    .strict(),
+  z.object({ kind: z.literal('dismissed') }).strict()
+])
 
 export const MobileWebHapticKindSchema = z.enum([
   'selection',
@@ -111,6 +152,8 @@ export const MobileWebSessionChatDraftWritePayloadSchema = z
 export const MobileWebSessionChatDraftWriteResultSchema = z.null()
 
 export type MobileWebHapticKind = z.infer<typeof MobileWebHapticKindSchema>
+export type MobileWebNativeAlertPayload = z.infer<typeof MobileWebNativeAlertPayloadSchema>
+export type MobileWebNativeAlertResult = z.infer<typeof MobileWebNativeAlertResultSchema>
 export type MobileWebClipboardWriteResult = z.infer<typeof MobileWebClipboardWriteResultSchema>
 export type MobileWebClipboardAvailability = z.infer<
   typeof MobileWebClipboardAvailabilityResultSchema

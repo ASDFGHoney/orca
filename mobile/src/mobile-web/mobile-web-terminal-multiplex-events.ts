@@ -18,6 +18,7 @@ export function handleMobileWebTerminalMultiplexEvent(args: {
   if (args.result.type === 'ready') {
     for (const record of args.records) {
       record.hostReady = false
+      record.supportsQueryReply = false
       record.snapshot = null
       if (record.visible) {
         args.sendSubscribe(record)
@@ -29,6 +30,7 @@ export function handleMobileWebTerminalMultiplexEvent(args: {
     const record = args.recordForHostId(args.result.streamId)
     if (record) {
       record.hostReady = true
+      record.supportsQueryReply = hasQueryReplyCapability(args.result.capabilities)
       args.post(record, {
         type: 'subscribed',
         streamId: record.pageStreamId,
@@ -57,4 +59,8 @@ export function handleMobileWebTerminalMultiplexEvent(args: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasQueryReplyCapability(value: unknown): boolean {
+  return isRecord(value) && value.queryReply === 1
 }

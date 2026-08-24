@@ -30,8 +30,12 @@ export default function HostMobileWebRoute() {
     [shell.client]
   )
   const hostState = useMemo(
-    () => webHostScreenHostState({ name: 'Orca Desktop', publicKeyB64: '' }),
-    []
+    () =>
+      webHostScreenHostState({
+        name: shell.hostDisplayName ?? 'Orca Desktop',
+        publicKeyB64: ''
+      }),
+    [shell.hostDisplayName]
   )
   const shellOperations = useMemo(
     () =>

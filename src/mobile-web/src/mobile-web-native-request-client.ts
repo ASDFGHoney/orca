@@ -7,6 +7,8 @@ import {
   MobileWebHapticResultSchema,
   MobileWebHapticSelectionPayloadSchema,
   MobileWebHapticSelectionResultSchema,
+  MobileWebNativeAlertPayloadSchema,
+  MobileWebNativeAlertResultSchema,
   MobileWebOpenExternalPayloadSchema,
   MobileWebOpenExternalResultSchema,
   MobileWebSessionChatDraftReadPayloadSchema,
@@ -24,6 +26,8 @@ import {
   type MobileWebClipboardWriteResult,
   type MobileWebClipboardAvailability,
   type MobileWebHapticKind,
+  type MobileWebNativeAlertPayload,
+  type MobileWebNativeAlertResult,
   type MobileWebSessionChatDraftReadResult,
   type MobileWebTerminalAccessoryPreferences,
   type MobileWebTerminalCustomKey,
@@ -32,8 +36,22 @@ import {
 } from '../../shared/mobile-web/bridge-operation-contract'
 import type { MobileWebOneShotRequestClient } from './mobile-web-one-shot-request-client'
 
+// Human-owned native prompts must not inherit the ordinary RPC deadline.
+const MOBILE_WEB_NATIVE_ALERT_REQUEST_TIMEOUT_MS = 2_147_483_647
+
 export class MobileWebNativeRequestClient {
   constructor(private readonly requests: MobileWebOneShotRequestClient) {}
+
+  alert(payload: MobileWebNativeAlertPayload): Promise<MobileWebNativeAlertResult> {
+    return this.requests.request(
+      'native',
+      'alert',
+      payload,
+      MobileWebNativeAlertPayloadSchema,
+      MobileWebNativeAlertResultSchema,
+      { timeoutMs: MOBILE_WEB_NATIVE_ALERT_REQUEST_TIMEOUT_MS }
+    )
+  }
 
   hapticSelection(): Promise<null> {
     return this.requests.request(

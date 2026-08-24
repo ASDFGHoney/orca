@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
+import { MobileWebBridgeClientError } from '../../../src/mobile-web/src/mobile-web-bridge-client-error'
 import { webHostSourceControlClient } from './web-host-source-control-client'
 
 const WORKSPACE_ID = 'workspace-page-1'
@@ -136,6 +137,98 @@ describe('web host source control client', () => {
       relativePath: 'src/app.ts',
       scope: 'staged'
     })
+  })
+
+  it('preserves the edit fallback when the host cannot open diffs', async () => {
+    const bridge = bridgeClient()
+    bridge.sourceControlReviewOpen.mockRejectedValue(
+      new MobileWebBridgeClientError('unsupported_capability', false)
+    )
+    bridge.fileOpen.mockResolvedValue(null)
+    const client = webHostSourceControlClient(
+      bridge as unknown as MobileWebBridgeClient,
+      WORKSPACE_ID
+    )
+
+    const diff = await client.sendRequest('files.openDiff', {
+      worktree: `id:${WORKSPACE_ID}`,
+      relativePath: 'src/app.ts',
+      staged: false
+    })
+    const file = await client.sendRequest('files.open', {
+      worktree: `id:${WORKSPACE_ID}`,
+      relativePath: 'src/app.ts'
+    })
+
+    expect(diff).toMatchObject({ ok: false, error: { code: 'method_not_found' } })
+    expect(file.ok).toBe(true)
+    expect(bridge.fileOpen).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      relativePath: 'src/app.ts'
+    })
+  })
+
+  it('reveals the opened diff through the hosted Session bridge', async () => {
+    const bridge = bridgeClient()
+    const snapshot = {
+      workspaceId: WORKSPACE_ID,
+      publicationEpoch: 'epoch-1',
+      snapshotVersion: 7,
+      activeTabId: 'diff-1',
+      activeTabType: 'file' as const,
+      tabs: [
+        {
+          id: 'diff-1',
+          title: 'app.ts',
+          type: 'file' as const,
+          relativePath: 'src/app.ts',
+          mode: 'diff' as const,
+          diffSource: 'unstaged' as const,
+          isActive: true
+        }
+      ],
+      truncated: false
+    }
+    bridge.sessionSnapshot.mockResolvedValue(snapshot)
+    bridge.sessionActivate.mockResolvedValue(snapshot)
+    const client = webHostSourceControlClient(
+      bridge as unknown as MobileWebBridgeClient,
+      WORKSPACE_ID
+    )
+
+    const listed = await client.sendRequest('session.tabs.list', {
+      worktree: `id:${WORKSPACE_ID}`
+    })
+    const activated = await client.sendRequest('session.tabs.activate', {
+      worktree: `id:${WORKSPACE_ID}`,
+      tabId: 'diff-1',
+      notifyClients: false,
+      navigation: 'caller',
+      intent: 'user'
+    })
+
+    expect(listed).toMatchObject({
+      ok: true,
+      result: {
+        worktree: WORKSPACE_ID,
+        activeTabId: 'diff-1',
+        tabs: [
+          {
+            id: 'diff-1',
+            type: 'file',
+            relativePath: 'src/app.ts',
+            mode: 'diff',
+            diffSource: 'unstaged'
+          }
+        ]
+      }
+    })
+    expect(bridge.sessionSnapshot).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID })
+    expect(bridge.sessionActivate).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      tabId: 'diff-1'
+    })
+    expect(activated).toMatchObject({ ok: true, result: { activeTabId: 'diff-1' } })
   })
 
   it('maps push through an exact repository snapshot', async () => {
@@ -346,6 +439,9 @@ function bridgeClient() {
     sourceControlReviewLink: vi.fn(),
     sourceControlReviewLinkUpdate: vi.fn(),
     sourceControlReviewOpen: vi.fn(),
+    fileOpen: vi.fn(),
+    sessionSnapshot: vi.fn(),
+    sessionActivate: vi.fn(),
     providerReviewCreationEligibility: vi.fn(),
     providerReviewCreate: vi.fn(),
     providerReviewGenerateFields: vi.fn()

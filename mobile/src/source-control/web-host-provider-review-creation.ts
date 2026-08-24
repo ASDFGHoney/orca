@@ -1,5 +1,6 @@
 import type { MobileWebBridgeClient } from '../../../src/mobile-web/src/mobile-web-bridge-client'
 import type { MobileWebProviderReviewEligibilityResult } from '../../../src/shared/mobile-web/provider-review-creation-contract'
+import type { WebHostSourceControlStatusSnapshot } from './web-host-source-control-status-snapshot'
 
 type RequestParams = Record<string, unknown>
 
@@ -18,6 +19,7 @@ export async function handleWebHostProviderReviewCreation(args: {
   method: string
   params: RequestParams
   eligibilityCache: WebHostProviderReviewEligibilityCache
+  statusSnapshot: WebHostSourceControlStatusSnapshot
 }): Promise<unknown | typeof WEB_HOST_PROVIDER_REVIEW_CREATION_UNHANDLED> {
   if (
     args.method !== 'hostedReview.getCreationEligibility' &&
@@ -26,10 +28,7 @@ export async function handleWebHostProviderReviewCreation(args: {
   ) {
     return WEB_HOST_PROVIDER_REVIEW_CREATION_UNHANDLED
   }
-  const status = await args.client.sourceControlStatus({
-    workspaceId: args.workspaceId,
-    limit: 64
-  })
+  const status = await args.statusSnapshot.read()
   if (!status.head || !status.branch) {
     throw new Error('conflict')
   }

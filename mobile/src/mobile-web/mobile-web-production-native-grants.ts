@@ -9,6 +9,17 @@ type MobileWebNativeOperationGrant = Extract<
 export const MOBILE_WEB_PRODUCTION_NATIVE_GRANTS = [
   {
     capability: 'native',
+    operation: 'alert',
+    limits: {
+      maxRequestBytes: 32 * 1024,
+      maxResponseBytes: 256,
+      maxConcurrent: 1,
+      rateCapacity: 4,
+      rateRefillPerSecond: 1
+    }
+  },
+  {
+    capability: 'native',
     operation: 'clipboardAvailability',
     limits: {
       maxRequestBytes: 256,

@@ -5,6 +5,7 @@ import {
   takeWebHostProviderReviewEligibility,
   type WebHostProviderReviewEligibilityCache
 } from './web-host-provider-review-creation'
+import type { WebHostSourceControlStatusSnapshot } from './web-host-source-control-status-snapshot'
 
 export type WebHostProviderReviewCache = {
   key: string | null
@@ -19,9 +20,10 @@ export function createWebHostProviderReviewCache(): WebHostProviderReviewCache {
 export async function readWebHostGitHubRepositoryEligibility(
   client: MobileWebBridgeClient,
   workspaceId: string,
-  cache: WebHostProviderReviewEligibilityCache
+  cache: WebHostProviderReviewEligibilityCache,
+  statusSnapshot: WebHostSourceControlStatusSnapshot
 ) {
-  const status = await client.sourceControlStatus({ workspaceId, limit: 1 })
+  const status = await statusSnapshot.read()
   if (!status.head || !status.branch) {
     throw new Error('conflict')
   }
@@ -41,9 +43,10 @@ export async function loadWebHostProviderReview(
   client: MobileWebBridgeClient,
   workspaceId: string,
   cache: WebHostProviderReviewCache,
-  eligibilityCache: WebHostProviderReviewEligibilityCache
+  eligibilityCache: WebHostProviderReviewEligibilityCache,
+  statusSnapshot: WebHostSourceControlStatusSnapshot
 ): Promise<MobileWebProviderReviewResult> {
-  const status = await client.sourceControlStatus({ workspaceId, limit: 64 })
+  const status = await statusSnapshot.read()
   if (!status.head || !status.branch) {
     throw new Error('conflict')
   }

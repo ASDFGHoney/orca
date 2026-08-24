@@ -21,35 +21,13 @@ export async function verifyHostedAndroidAgentHistoryJourney({
   sessionDocument,
   timeoutMs
 }) {
-  if (!sessionDocument.href.includes('/session/')) {
-    throw new Error('Agent History journey requires an active Session route.')
-  }
-  const actionsDocument = await evidenceStep('open Session actions', () =>
-    retryAndroidRouteActivation({
-      activate: () => tapAndroidLabel(emulator, sessionDocument, 'More session actions'),
-      wait: () =>
-        waitForVisibleHostedWebView({
-          discoveryUrl,
-          expectedText: 'Agent History',
-          expectedHrefIncludes: '/session/',
-          timeoutMs: Math.min(timeoutMs, 3_000)
-        })
-    })
-  )
-  await evidenceStep('open Agent History', () =>
-    retryAndroidRouteActivation({
-      activate: () =>
-        tapAndroidText(emulator, actionsDocument, 'Agent History', Math.min(timeoutMs, 5_000)),
-      wait: () =>
-        waitForVisibleHostedWebView({
-          discoveryUrl,
-          expectedText: 'Agent Session History',
-          expectedHrefIncludes: '/agent-history/',
-          timeoutMs: Math.min(timeoutMs, 3_000)
-        })
-    })
-  )
-  let historyDocument = await waitForVisibleHostedWebView({
+  let historyDocument = await openHostedAndroidAgentHistory({
+    discoveryUrl,
+    emulator,
+    sessionDocument,
+    timeoutMs
+  })
+  historyDocument = await waitForVisibleHostedWebView({
     discoveryUrl,
     expectedText: EMULATOR_AGENT_HISTORY_TITLE,
     expectedHrefIncludes: '/agent-history/',
@@ -140,6 +118,42 @@ export async function verifyHostedAndroidAgentHistoryJourney({
     headerControls: ['Back', 'Refresh agent sessions'],
     returnedSessionDocument: resumedSessionDocument
   }
+}
+
+export async function openHostedAndroidAgentHistory({
+  discoveryUrl,
+  emulator,
+  sessionDocument,
+  timeoutMs
+}) {
+  if (!sessionDocument.href.includes('/session/')) {
+    throw new Error('Agent History journey requires an active Session route.')
+  }
+  const actionsDocument = await evidenceStep('open Session actions', () =>
+    retryAndroidRouteActivation({
+      activate: () => tapAndroidLabel(emulator, sessionDocument, 'More session actions'),
+      wait: () =>
+        waitForVisibleHostedWebView({
+          discoveryUrl,
+          expectedText: 'Agent History',
+          expectedHrefIncludes: '/session/',
+          timeoutMs: Math.min(timeoutMs, 3_000)
+        })
+    })
+  )
+  return evidenceStep('open Agent History', () =>
+    retryAndroidRouteActivation({
+      activate: () =>
+        tapAndroidText(emulator, actionsDocument, 'Agent History', Math.min(timeoutMs, 5_000)),
+      wait: () =>
+        waitForVisibleHostedWebView({
+          discoveryUrl,
+          expectedText: 'Agent Session History',
+          expectedHrefIncludes: '/agent-history/',
+          timeoutMs: Math.min(timeoutMs, 3_000)
+        })
+    })
+  )
 }
 
 async function tapAndroidLabel(emulator, document, label) {

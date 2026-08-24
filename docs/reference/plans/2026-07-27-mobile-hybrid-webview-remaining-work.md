@@ -23,8 +23,8 @@ composition have recorded evidence. The 2026-08-21 independent OpenCode review
 was completed and its high-severity findings were fixed.
 
 Latest recorded package:
-`121fe8682fc221fd7e6f2955fe1f246017d164db3122d71526bc3f66b19578c5`,
-51 assets, 9,151,993 raw bytes, 2,649,166 gzip bytes. This summary is not a
+`015f15ca1bbbc28f25318283a2fff0ea616db868540a2e86bd3d5ce61c4a3f25`,
+52 assets, 9,310,227 raw bytes, 2,691,744 gzip bytes. This summary is not a
 production-readiness claim.
 
 ## Packaged Desktop and Signed App Matrix
@@ -43,9 +43,12 @@ production-readiness claim.
 
 ## Physical Devices and Layouts
 
+- [x] Re-run the corrected iPhone Simulator native-versus-hosted fixture for
+      Source Control/Review, including host-origin navigation and a second
+      session-origin Source Control mount.
 - [ ] Re-run the corrected iPhone Simulator native-versus-hosted fixture for
-      Workspace, Accounts, Tasks, Session, Agent History, Files/Preview, Source
-      Control/Review, host editing, Floating Workspace, and recovery. Require
+      Workspace, Accounts, Tasks, Session, Agent History, Files/Preview, host
+      editing, Floating Workspace, and recovery. Require
       CDP proof that no hosted private-origin target exists around each native
       capture and replace the invalidated historical screenshot metrics.
 - [ ] Test the oldest supported low-memory and current iPhone.
@@ -55,6 +58,13 @@ production-readiness claim.
       memory pressure, attachment permission/denial/revocation/interruption,
       notification/deep-link routing, rotation, and host/session replacement on
       those devices.
+- [x] Validate Android hardware Back from nested Agent History through Session
+      and workspace root to the native shell on the current API 36 emulator,
+      using real `KEYCODE_BACK` input and a clean bridge-log audit.
+- [ ] Validate Android hardware Back at dirty drafts, timeout, reconnect, mixed
+      Desktop/mobile versions, and on a physical device.
+- [ ] Validate native Alert button ordering, dismissal, queueing, destructive
+      actions, and old-shell fallback on iOS and Android release candidates.
 
 ## Topology and Compatibility
 

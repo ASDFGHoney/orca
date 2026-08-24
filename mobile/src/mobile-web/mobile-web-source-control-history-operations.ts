@@ -1,5 +1,4 @@
 import {
-  MobileWebSourceControlBranchComparePayloadSchema,
   MobileWebSourceControlBranchesPayloadSchema,
   MobileWebSourceControlCommitComparePayloadSchema,
   MobileWebSourceControlHistoryPayloadSchema,
@@ -11,12 +10,12 @@ import {
 import type { RpcClient } from '../transport/rpc-client'
 import { MobileWebBrokerError } from './mobile-web-broker-error'
 import {
-  sanitizeMobileWebBranchCompare,
   sanitizeMobileWebBranches,
   sanitizeMobileWebCommitCompare,
   sanitizeMobileWebHistory
 } from './mobile-web-source-control-history-sanitizers'
 import type { MobileWebWorkspaceAuthority } from './mobile-web-workspace-authority'
+import type { MobileWebSourceControlBranchComparePager } from './mobile-web-source-control-branch-compare-pager'
 
 type HistoryOperation = 'branches' | 'history' | 'branchCompare' | 'commitCompare'
 type HistoryOperationResult =
@@ -41,6 +40,7 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
   payload: unknown
   client: RpcClient
   workspaceAuthority: MobileWebWorkspaceAuthority
+  branchComparePager?: MobileWebSourceControlBranchComparePager
 }): Promise<HistoryOperationResult> {
   if (args.operation === 'branches') {
     const payload = MobileWebSourceControlBranchesPayloadSchema.parse(args.payload)
@@ -67,16 +67,10 @@ export async function executeMobileWebSourceControlHistoryOperation(args: {
     return sanitizeMobileWebHistory(response.result, payload.workspaceId, payload.limit)
   }
   if (args.operation === 'branchCompare') {
-    const payload = MobileWebSourceControlBranchComparePayloadSchema.parse(args.payload)
-    const hostWorkspaceId = args.workspaceAuthority.hostWorkspaceId(payload.workspaceId)
-    const response = await args.client.sendRequest('git.branchCompare', {
-      worktree: `id:${hostWorkspaceId}`,
-      baseRef: payload.baseRef
-    })
-    if (!response.ok) {
-      throw new MobileWebBrokerError('host_error')
+    if (!args.branchComparePager) {
+      throw new MobileWebBrokerError('internal')
     }
-    return sanitizeMobileWebBranchCompare(response.result, payload)
+    return args.branchComparePager.page(args.payload, args.client, args.workspaceAuthority)
   }
 
   const payload = MobileWebSourceControlCommitComparePayloadSchema.parse(args.payload)

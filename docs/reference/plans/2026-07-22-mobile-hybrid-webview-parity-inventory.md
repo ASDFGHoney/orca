@@ -559,8 +559,8 @@ renderer-independent, while the authoritative RNW package still verifies as
 build `f293890e…`.
 Raw bridge envelopes, including initial shell setup, now pass an exact
 unique-key, paired-surrogate, bounded JSON grammar before schema parsing. The
-generated broker corpus rejects 2,016 malformed or oversized requests across
-all 224 production grants before host or native access. Valid response
+generated broker corpus rejects 2,025 malformed or oversized requests across
+all 225 production grants before host or native access. Valid response
 envelopes also cross 157 exported result schemas and all eight subscription
 event schemas with invalid payloads; requests fail closed and invalid events
 cancel their subscriptions. Pending terminal/native-chat setup cannot register

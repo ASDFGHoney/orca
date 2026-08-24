@@ -18,6 +18,10 @@ import {
 } from '../../shared/mobile-web/bridge-contract'
 import { MobileWebBridgeClient } from './mobile-web-bridge-client'
 import {
+  dispatchMobileWebHardwareBack,
+  hasMobileWebHardwareBackHandler
+} from './mobile-web-hardware-back-handler'
+import {
   nextMobileWebShellConnectionMetrics,
   type MobileWebShellConnectionMetrics
 } from './mobile-web-shell-connection-metrics'
@@ -31,6 +35,7 @@ export type MobileWebNativeShellState = {
   client: MobileWebBridgeClient | null
   context: MobileWebBridgeMessageContext | null
   connection: 'connecting' | 'connected' | 'offline' | 'recovering'
+  hostDisplayName: string | null
   reconnectAttempts: number
   lastConnectedAt: number | null
   navigationRoute: MobileWebNavigationRoute
@@ -59,6 +64,7 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
     client: null,
     context: null,
     connection: 'connecting',
+    hostDisplayName: null,
     reconnectAttempts: 0,
     lastConnectedAt: null,
     navigationRoute: { kind: 'workspaceList' },
@@ -70,6 +76,7 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
   useEffect(() => {
     let context: MobileWebBridgeMessageContext | null = null
     let client: MobileWebBridgeClient | null = null
+    let hostDisplayName: string | null = null
     let metrics: MobileWebShellConnectionMetrics = {
       reconnectAttempts: 0,
       lastConnectedAt: null
@@ -87,6 +94,7 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
         const nextContext = { shellSessionId: init.shellSessionId, buildId: init.buildId }
         const retainsContext = sameContext(context, nextContext)
         metrics = nextMobileWebShellConnectionMetrics(metrics, init, retainsContext)
+        hostDisplayName = init.hostDisplayName ?? null
         if (!retainsContext) {
           resumeRoute = init.resumeRoute ?? { kind: 'workspaceList' }
           navigationRoute = resumeRoute
@@ -113,17 +121,14 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
             client,
             context,
             connection: init.connection,
+            hostDisplayName,
             navigationRoute,
             resumeRoute,
             routeRevision,
             rememberRoute,
             ...metrics
           })
-          postPageMessage({
-            version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-            ...nextContext,
-            type: 'ready'
-          })
+          postPageReady(nextContext)
           scheduleInteractiveHealth(nextContext)
           return
         }
@@ -138,17 +143,14 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
           client,
           context,
           connection: init.connection,
+          hostDisplayName,
           navigationRoute,
           resumeRoute,
           routeRevision,
           rememberRoute,
           ...metrics
         })
-        postPageMessage({
-          version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-          ...context,
-          type: 'ready'
-        })
+        postPageReady(context)
         scheduleInteractiveHealth(context)
         return
       }
@@ -174,6 +176,16 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
         )
         return
       }
+      if (parsed.value.type === 'hardwareBack') {
+        postPageMessage({
+          version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+          ...activeContext,
+          type: 'hardwareBackResult',
+          sequence: parsed.value.sequence,
+          handled: dispatchMobileWebHardwareBack()
+        })
+        return
+      }
       client.receive(parsed.value)
       if (parsed.value.type === 'connection') {
         metrics = nextMobileWebShellConnectionMetrics(metrics, parsed.value, true)
@@ -181,6 +193,7 @@ function useMobileWebNativeShellChannel(): MobileWebNativeShellState {
           client,
           context,
           connection: parsed.value.state,
+          hostDisplayName,
           navigationRoute,
           resumeRoute,
           routeRevision,
@@ -232,6 +245,22 @@ function postPageMessage(message: MobileWebBridgePageMessage): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+function postPageReady(context: MobileWebBridgeMessageContext): void {
+  postPageMessage({
+    version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+    ...context,
+    type: 'ready'
+  })
+  if (hasMobileWebHardwareBackHandler()) {
+    postPageMessage({
+      version: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+      ...context,
+      type: 'hardwareBackCapability',
+      revision: 1
+    })
   }
 }
 

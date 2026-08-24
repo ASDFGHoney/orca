@@ -47,7 +47,7 @@ describe('MobileWebTerminalStreams', () => {
     expect(hostRequest).toMatchObject({
       terminal: 'terminal-secret',
       client: { id: 'device-secret', type: 'mobile' },
-      capabilities: { ackOutput: 1 }
+      capabilities: { ackOutput: 1, queryReply: 1 }
     })
     expect(harness.sendRequest).toHaveBeenCalledWith('session.tabs.list', {
       worktree: `id:${HOST_WORKSPACE_ID}`
@@ -223,7 +223,7 @@ describe('MobileWebTerminalStreams', () => {
     expect(JSON.stringify(harness.resyncReasons)).not.toContain('terminal-secret')
   })
 
-  it('keeps query replies distinct from user input on the Desktop wire', async () => {
+  it('uses the query-reply opcode only after the host echoes support', async () => {
     const harness = createHarness()
     await harness.streams.start({
       requestId: 'request-query',
@@ -236,7 +236,11 @@ describe('MobileWebTerminalStreams', () => {
     const subscribe = harness.sentFrames.at(-1)!
     const hostStreamId = decodeTerminalStreamJson<Record<string, unknown>>(subscribe.payload)!
       .streamId as number
-    harness.emitMultiplex({ type: 'subscribed', streamId: hostStreamId })
+    harness.emitMultiplex({
+      type: 'subscribed',
+      streamId: hostStreamId,
+      capabilities: { queryReply: 1 }
+    })
 
     await harness.streams.handle(
       {
@@ -261,6 +265,35 @@ describe('MobileWebTerminalStreams', () => {
       TerminalStreamOpcode.Input,
       TerminalStreamOpcode.QueryReply
     ])
+    expect(decodeTerminalStreamText(harness.sentFrames.at(-1)!.payload)).toBe('\x1b[0n')
+  })
+
+  it('falls back to legacy input when an older host omits query-reply support', async () => {
+    const harness = createHarness()
+    await harness.streams.start({
+      requestId: 'request-legacy-query',
+      subscriptionId: SUBSCRIPTION_ID,
+      payload: subscribePayload(),
+      client: harness.client,
+      isRequestActive: () => true
+    })
+    harness.emitMultiplex({ type: 'ready' })
+    const subscribe = harness.sentFrames.at(-1)!
+    const hostStreamId = decodeTerminalStreamJson<Record<string, unknown>>(subscribe.payload)!
+      .streamId as number
+    harness.emitMultiplex({ type: 'subscribed', streamId: hostStreamId })
+
+    await harness.streams.handle(
+      {
+        operation: 'queryReply',
+        streamId: SUBSCRIPTION_ID,
+        sequence: 0,
+        data: Buffer.from('\x1b[0n').toString('base64')
+      },
+      harness.client
+    )
+
+    expect(harness.sentFrames.at(-1)?.opcode).toBe(TerminalStreamOpcode.Input)
     expect(decodeTerminalStreamText(harness.sentFrames.at(-1)!.payload)).toBe('\x1b[0n')
   })
 

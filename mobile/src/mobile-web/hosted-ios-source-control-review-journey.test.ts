@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   captureParityScreen: vi.fn(),
+  readBridgeErrors: vi.fn(),
   navigateRoute: vi.fn(),
   parityEvidence: vi.fn(),
   readControlPoint: vi.fn(),
   readState: vi.fn(),
   tapAccessibilityControl: vi.fn(),
   tapPoint: vi.fn(),
+  startBridgeErrorObservation: vi.fn(),
   waitForDocument: vi.fn()
 }))
 
@@ -27,6 +29,11 @@ vi.mock('../../scripts/hosted-ios-emulator-accessibility.mjs', () => ({
 
 vi.mock('../../scripts/hosted-webview-route-navigation.mjs', () => ({
   navigateHostedWebViewRoute: mocks.navigateRoute
+}))
+
+vi.mock('../../scripts/hosted-webview-bridge-error-observation.mjs', () => ({
+  readHostedWebViewBridgeErrors: mocks.readBridgeErrors,
+  startHostedWebViewBridgeErrorObservation: mocks.startBridgeErrorObservation
 }))
 
 vi.mock('../../scripts/hosted-ios-source-control-review-parity.mjs', () => ({
@@ -51,19 +58,20 @@ describe('hosted iOS Source Control and Review journey', () => {
       .mockReturnValueOnce({ screen: 'review' })
     mocks.tapAccessibilityControl.mockResolvedValue(undefined)
     mocks.tapPoint.mockResolvedValue(undefined)
+    mocks.startBridgeErrorObservation.mockResolvedValue(undefined)
     mocks.waitForDocument
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session'
+        href: 'orca-mobile-web://build/h/host/source-control/workspace'
       })
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/session/workspace?name=repo'
+        href: 'orca-mobile-web://build/h/host/session/workspace'
       })
       .mockResolvedValueOnce({
         href: 'orca-mobile-web://build/h/host/review/workspace'
       })
     mocks.readState
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session',
+        href: 'orca-mobile-web://build/h/host/source-control/workspace',
         bodyText: 'Source Control Changes Pull Request Commits Create pull request 128 on branch',
         labels: ['Refresh source control', 'Open changed file mobile/app/index.tsx']
       })
@@ -88,10 +96,9 @@ describe('hosted iOS Source Control and Review journey', () => {
         timeoutMs: 30_000
       })
     ).resolves.toEqual({
-      sourceControlRoute:
-        'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session',
+      sourceControlRoute: 'orca-mobile-web://build/h/host/source-control/workspace',
       sourceControlSegments: ['Changes', 'Pull Request', 'Commits'],
-      sessionDiffRoute: 'orca-mobile-web://build/h/host/session/workspace?name=repo',
+      sessionDiffRoute: 'orca-mobile-web://build/h/host/session/workspace',
       reviewRoute: 'orca-mobile-web://build/h/host/review/workspace',
       reviewControls: ['Back', 'Open review actions']
     })
@@ -115,8 +122,8 @@ describe('hosted iOS Source Control and Review journey', () => {
     )
     expect(mocks.tapPoint).not.toHaveBeenCalled()
     expect(mocks.navigateRoute).toHaveBeenCalledWith(
-      { href: 'orca-mobile-web://build/h/host/session/workspace?name=repo' },
-      '/h/host/review/workspace?scope=all&name=repo'
+      { href: 'orca-mobile-web://build/h/host/session/workspace' },
+      '/h/host/review/workspace?scope=all'
     )
   })
 
@@ -158,7 +165,14 @@ describe('hosted iOS Source Control and Review journey', () => {
       discoveryUrl: 'http://127.0.0.1:9222',
       emulator: { deviceUdid: 'simulator' },
       nativeBaselines: {
-        sourceControl: { screenshot: '/tmp/native-source-control.png' },
+        sourceControl: {
+          changedFileLabel: 'Open changed file mobile/app/index.tsx',
+          pullRequestState: {
+            kind: 'create',
+            label: 'Create pull request'
+          },
+          screenshot: '/tmp/native-source-control.png'
+        },
         review: { screenshot: '/tmp/native-review.png' }
       },
       runtimeDirectory: '/tmp/parity',
@@ -190,6 +204,91 @@ describe('hosted iOS Source Control and Review journey', () => {
     })
   })
 
+  it('settles parity against the existing pull request captured by native', async () => {
+    const pullRequestLabel = 'Pull request #13386, Draft, No checks. Open pull request.'
+    mocks.readState
+      .mockReset()
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/source-control/workspace',
+        bodyText: 'Source Control Changes Pull Request Commits #13386 Draft 128 on branch',
+        labels: [
+          'Refresh source control',
+          pullRequestLabel,
+          'Open changed file mobile/app/index.tsx'
+        ]
+      })
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/review/workspace',
+        bodyText: 'reviewed',
+        labels: ['Back', 'Open review actions']
+      })
+
+    await expect(
+      verifyHostedSourceControlReviewJourney({
+        deviceUdid: 'simulator',
+        discoveryUrl: 'http://127.0.0.1:9222',
+        emulator: { deviceUdid: 'simulator' },
+        nativeBaselines: {
+          sourceControl: {
+            changedFileLabel: 'Open changed file mobile/app/index.tsx',
+            pullRequestState: { kind: 'ready', label: pullRequestLabel, number: '13386' },
+            screenshot: '/tmp/native-source-control.png'
+          },
+          review: { screenshot: '/tmp/native-review.png' }
+        },
+        runtimeDirectory: '/tmp/parity',
+        sessionDocument: {
+          href: 'orca-mobile-web://build/h/host/session/workspace'
+        },
+        timeoutMs: 30_000
+      })
+    ).resolves.toMatchObject({ sourceControlSegments: ['Changes', 'Pull Request', 'Commits'] })
+  })
+
+  it('opens the exact changed file captured by the native baseline', async () => {
+    const nativeChangedFileLabel = 'Open changed file mobile/src/mobile-web/bridge.ts'
+    mocks.readState
+      .mockReset()
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/source-control/workspace',
+        bodyText: 'Source Control Changes Pull Request Commits Create pull request 128 on branch',
+        labels: [
+          'Refresh source control',
+          'Open changed file mobile/app/index.tsx',
+          nativeChangedFileLabel
+        ]
+      })
+      .mockResolvedValueOnce({
+        href: 'orca-mobile-web://build/h/host/review/workspace',
+        bodyText: 'reviewed',
+        labels: ['Back', 'Open review actions']
+      })
+
+    await verifyHostedSourceControlReviewJourney({
+      deviceUdid: 'simulator',
+      discoveryUrl: 'http://127.0.0.1:9222',
+      emulator: { deviceUdid: 'simulator' },
+      nativeBaselines: {
+        sourceControl: {
+          changedFileLabel: nativeChangedFileLabel,
+          pullRequestState: { kind: 'create', label: 'Create pull request' },
+          screenshot: '/tmp/native-source-control.png'
+        },
+        review: { screenshot: '/tmp/native-review.png' }
+      },
+      runtimeDirectory: '/tmp/parity',
+      sessionDocument: { href: 'orca-mobile-web://build/h/host/session/workspace' },
+      timeoutMs: 30_000
+    })
+
+    expect(mocks.tapAccessibilityControl).toHaveBeenNthCalledWith(
+      2,
+      { deviceUdid: 'simulator' },
+      nativeChangedFileLabel,
+      5_000
+    )
+  })
+
   it('falls back to measured points when WebKit omits accessibility descendants', async () => {
     mocks.tapAccessibilityControl.mockRejectedValue(new Error('missing descendant'))
 
@@ -214,7 +313,7 @@ describe('hosted iOS Source Control and Review journey', () => {
 
   it('uses measured native taps for duplicated Source Control segment labels', async () => {
     const sourceState = {
-      href: 'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session',
+      href: 'orca-mobile-web://build/h/host/source-control/workspace',
       bodyText: 'Source Control Changes Pull Request Commits Create pull request 128 on branch',
       labels: ['Refresh source control', 'Open changed file mobile/app/index.tsx']
     }
@@ -283,12 +382,12 @@ describe('hosted iOS Source Control and Review journey', () => {
     mocks.waitForDocument
       .mockReset()
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session'
+        href: 'orca-mobile-web://build/h/host/source-control/workspace'
       })
       .mockRejectedValueOnce(new Error('route unchanged'))
       .mockRejectedValueOnce(new Error('route unchanged'))
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/session/workspace?name=repo'
+        href: 'orca-mobile-web://build/h/host/session/workspace'
       })
       .mockResolvedValueOnce({
         href: 'orca-mobile-web://build/h/host/review/workspace'
@@ -312,12 +411,12 @@ describe('hosted iOS Source Control and Review journey', () => {
 
   it('waits for tab state after the route changes', async () => {
     const sessionDocument = {
-      href: 'orca-mobile-web://build/h/host/session/workspace?name=repo'
+      href: 'orca-mobile-web://build/h/host/session/workspace'
     }
     mocks.waitForDocument
       .mockReset()
       .mockResolvedValueOnce({
-        href: 'orca-mobile-web://build/h/host/source-control/workspace?name=repo&origin=session'
+        href: 'orca-mobile-web://build/h/host/source-control/workspace'
       })
       .mockRejectedValueOnce(new Error('tab count pending'))
       .mockResolvedValueOnce(sessionDocument)

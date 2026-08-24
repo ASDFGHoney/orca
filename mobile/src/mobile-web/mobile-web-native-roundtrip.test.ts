@@ -4,6 +4,7 @@ import { MOBILE_WEB_PRODUCTION_NATIVE_GRANTS } from './mobile-web-production-nat
 
 describe('mobile web native capability round trip', () => {
   it('keeps device effects in the shell behind typed grants and gestures', async () => {
+    const alert = vi.fn().mockResolvedValue({ kind: 'button' as const, buttonIndex: 1 })
     const hapticFeedback = vi.fn()
     const clipboardWrite = vi.fn().mockResolvedValue({ confirmation: 'in-app' as const })
     const openExternal = vi.fn().mockResolvedValue(undefined)
@@ -26,6 +27,7 @@ describe('mobile web native capability round trip', () => {
       createRequestId: () => String.fromCharCode(65 + requestIndex++).repeat(22),
       isConnected: () => false,
       nativeAuthority: {
+        alert,
         hapticFeedback,
         clipboardWrite,
         openExternal,
@@ -42,6 +44,17 @@ describe('mobile web native capability round trip', () => {
       }
     })
 
+    await expect(
+      client.native.alert({
+        title: 'Discard changes?',
+        message: 'Unsaved edits will be lost.',
+        buttons: [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Discard', style: 'destructive' }
+        ],
+        options: { cancelable: false }
+      })
+    ).resolves.toEqual({ kind: 'button', buttonIndex: 1 })
     await expect(client.native.terminalPreferences()).resolves.toEqual({
       textScale: 1.25,
       autocompleteEnabled: true,
@@ -66,6 +79,15 @@ describe('mobile web native capability round trip', () => {
     ).resolves.toBeNull()
 
     expect(hapticFeedback).toHaveBeenCalledWith('selection')
+    expect(alert).toHaveBeenCalledWith({
+      title: 'Discard changes?',
+      message: 'Unsaved edits will be lost.',
+      buttons: [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Discard', style: 'destructive' }
+      ],
+      options: { cancelable: false }
+    })
     expect(clipboardWrite).toHaveBeenCalledWith('selected text')
     expect(openExternal).toHaveBeenCalledWith('https://example.com')
     expect(openExternal).not.toHaveBeenCalledWith('javascript:alert(1)')

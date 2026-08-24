@@ -12,6 +12,12 @@ import {
   sourceControlReviewParityEvidence
 } from './hosted-ios-source-control-review-parity.mjs'
 import { navigateHostedWebViewRoute } from './hosted-webview-route-navigation.mjs'
+import {
+  readHostedWebViewBridgeErrors,
+  startHostedWebViewBridgeErrorObservation
+} from './hosted-webview-bridge-error-observation.mjs'
+
+const SOURCE_CONTROL_SETTLE_TIMEOUT_MS = 15_000
 
 export async function verifyHostedSourceControlReviewJourney({
   deviceUdid,
@@ -27,6 +33,7 @@ export async function verifyHostedSourceControlReviewJourney({
   tapPoint = tapHostedJourneyPoint,
   transformPoint = retainHostedJourneyPoint
 }) {
+  await startHostedWebViewBridgeErrorObservation(sessionDocument)
   const sourceControl = await journeyStep('wait for Source Control route', () =>
     openSourceControlRoute({
       discoveryUrl,
@@ -72,12 +79,6 @@ export async function verifyHostedSourceControlReviewJourney({
     )
   }
 
-  const changedFileLabel = sourceState.labels.find((label) =>
-    label.startsWith('Open changed file ')
-  )
-  if (!changedFileLabel) {
-    throw new Error('Source Control has no changed file available for Review.')
-  }
   if (inspectChangedContent) {
     await journeyStep('inspect Source Control content', () =>
       inspectChangedContent({ phase: 'sourceControl', document: sourceControl })
@@ -85,9 +86,15 @@ export async function verifyHostedSourceControlReviewJourney({
   }
   if (nativeBaselines) {
     sourceState = await journeyStep('wait for stable Source Control parity state', () =>
-      waitForSourceControlParityState(sourceControl, timeoutMs, sourceState)
+      waitForSourceControlParityState(
+        sourceControl,
+        timeoutMs,
+        sourceState,
+        nativeBaselines.sourceControl.pullRequestState
+      )
     )
   }
+  const changedFileLabel = selectChangedFileLabel(sourceState, nativeBaselines)
   const hostedSourceControl = nativeBaselines
     ? await journeyStep('capture Source Control parity', () =>
         captureHostedSourceControlReviewScreen({
@@ -278,20 +285,56 @@ async function waitForChangedFileState(document, timeoutMs) {
   return state ?? readHostedWebViewState(document)
 }
 
-async function waitForSourceControlParityState(document, timeoutMs, initialState) {
-  const deadline = Date.now() + timeoutMs
+async function waitForSourceControlParityState(
+  document,
+  timeoutMs,
+  initialState,
+  pullRequestState
+) {
+  const deadline = Date.now() + Math.min(timeoutMs, SOURCE_CONTROL_SETTLE_TIMEOUT_MS)
   let state = initialState
   while (Date.now() < deadline) {
-    if (
-      state.bodyText.includes('Create pull request') &&
-      /\b\d+ on branch\b/.test(state.bodyText)
-    ) {
+    if (sourceControlMatchesPullRequestState(state, pullRequestState)) {
       return state
     }
     await delay(250)
     state = await readHostedWebViewState(document)
   }
-  throw new Error('Source Control did not settle its branch and pull-request state.')
+  const bridgeErrors = await readHostedWebViewBridgeErrors(document)
+  throw new Error(
+    `Source Control did not settle its branch and pull-request state. Bridge errors: ${JSON.stringify(bridgeErrors)}`
+  )
+}
+
+function sourceControlMatchesPullRequestState(state, pullRequestState) {
+  if (!/\b\d+ on branch\b/.test(state.bodyText) || !pullRequestState) {
+    return false
+  }
+  if (state.labels.includes(pullRequestState.label)) {
+    return true
+  }
+  if (pullRequestState.kind === 'create') {
+    return state.bodyText.includes('Create pull request')
+  }
+  if (pullRequestState.kind === 'ready') {
+    return state.bodyText.includes(`#${pullRequestState.number}`)
+  }
+  return state.bodyText.includes(pullRequestState.label.replace('Pull request unavailable: ', ''))
+}
+
+function selectChangedFileLabel(sourceState, nativeBaselines) {
+  const nativeLabel = nativeBaselines?.sourceControl.changedFileLabel
+  if (nativeLabel && sourceState.labels.includes(nativeLabel)) {
+    return nativeLabel
+  }
+  if (nativeLabel) {
+    throw new Error(`Source Control is missing the native baseline file: ${nativeLabel}`)
+  }
+  const label = sourceState.labels.find((candidate) => candidate.startsWith('Open changed file '))
+  if (!label) {
+    throw new Error('Source Control has no changed file available for Review.')
+  }
+  return label
 }
 
 function standaloneReviewRoute(sourceControlHref) {

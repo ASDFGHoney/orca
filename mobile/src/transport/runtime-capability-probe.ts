@@ -18,16 +18,22 @@ export function startRuntimeCapabilityProbe(
     if (!response.ok) {
       throw new Error('runtime_capability_probe_failed')
     }
-    const result = (response as RpcSuccess).result
-    const rawCapabilities =
-      result && typeof result === 'object'
-        ? (result as { capabilities?: unknown }).capabilities
-        : null
-    return Array.isArray(rawCapabilities) &&
-      rawCapabilities.every((value) => typeof value === 'string')
-      ? rawCapabilities
-      : []
+    return parseRuntimeStatusCapabilities((response as RpcSuccess).result) ?? []
   }, onCapabilities)
+}
+
+export function parseRuntimeStatusCapabilities(result: unknown): string[] | null {
+  if (!result || typeof result !== 'object') {
+    return null
+  }
+  const capabilities = (result as { capabilities?: unknown }).capabilities
+  if (capabilities === undefined) {
+    return []
+  }
+  return Array.isArray(capabilities) &&
+    capabilities.every((capability) => typeof capability === 'string')
+    ? capabilities
+    : null
 }
 
 export function startRuntimeCapabilityRead<T>(

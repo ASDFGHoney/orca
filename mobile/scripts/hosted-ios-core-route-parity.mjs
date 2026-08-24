@@ -8,7 +8,8 @@ import {
   tapHostedIosPoint,
   waitForHostedIosAccessibilityControl,
   waitForHostedIosAccessibilityControlByLabelPrefix,
-  waitForHostedIosAccessibilityControlMatch
+  waitForHostedIosAccessibilityControlMatch,
+  waitForHostedIosAccessibilityControlMatching
 } from './hosted-ios-emulator-accessibility.mjs'
 import { assertHostedIosScreenshotParity } from './hosted-ios-screenshot-parity.mjs'
 import {
@@ -42,11 +43,7 @@ export async function captureNativeCoreRouteBaselines({
   const filterPoint = await waitForHostedIosAccessibilityControl(emulator, 'Filter', timeoutMs)
   // The existing non-embedded Tasks icon has no native accessibility label.
   await tapHostedIosPoint(emulator, { x: TASKS_TOOLBAR_X, y: filterPoint.y })
-  const taskStableState = await waitForHostedIosAccessibilityControlMatch(
-    emulator,
-    TASK_STABLE_TEXTS,
-    timeoutMs
-  )
+  const taskStableText = await waitForNativeTasksStableText(emulator, timeoutMs)
   const tasks = await captureNativeRoute({
     deviceUdid,
     emulator,
@@ -55,7 +52,7 @@ export async function captureNativeCoreRouteBaselines({
     title: 'Tasks',
     timeoutMs
   })
-  tasks.stableText = taskStableState.label
+  tasks.stableText = taskStableText
   await tapHostedIosPoint(emulator, tasksBackPoint(tasks.screenTitlePoint))
   await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
   await tapHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
@@ -71,6 +68,40 @@ export async function captureNativeCoreRouteBaselines({
   await tapHostedIosAccessibilityControl(emulator, 'Back to worktrees', timeoutMs)
   await waitForHostedIosAccessibilityControlByLabelPrefix(emulator, expectedWorkspace, timeoutMs)
   return { session, tasks }
+}
+
+async function waitForNativeTasksStableText(emulator, timeoutMs) {
+  const emptyStateTimeoutMs = Math.min(timeoutMs, 5_000)
+  try {
+    const state = await waitForHostedIosAccessibilityControlMatch(
+      emulator,
+      TASK_STABLE_TEXTS,
+      emptyStateTimeoutMs
+    )
+    return state.label
+  } catch {
+    const task = await waitForHostedIosAccessibilityControlMatching(
+      emulator,
+      (node) => nativeTaskTitleFromAccessibilityLabel(node.label) !== null,
+      Math.max(1, timeoutMs - emptyStateTimeoutMs)
+    )
+    const title = nativeTaskTitleFromAccessibilityLabel(task.label)
+    if (!title) {
+      throw new Error('Populated native Tasks row did not expose a stable title')
+    }
+    return title
+  }
+}
+
+function nativeTaskTitleFromAccessibilityLabel(label) {
+  if (typeof label !== 'string') {
+    return null
+  }
+  return (
+    label.match(
+      /^(.*), \d+[mhd], (?:Pull request|Issue|Merge request|Linear ticket|[^,]+ todo) · /
+    )?.[1] ?? null
+  )
 }
 
 export async function captureHostedCoreRouteParity({
@@ -101,7 +132,7 @@ export async function captureHostedCoreRouteParity({
   await tapHostedIosPoint(emulator, tasksBackPoint(tasks.screenTitlePoint))
   let activeWorkspaceDocument = await waitForVisibleHostedWebView({
     discoveryUrl,
-    expectedText: 'Orca Desktop',
+    expectedText: expectedWorkspace,
     timeoutMs
   })
   await activateHostedWorkspaceRow(
@@ -112,7 +143,7 @@ export async function captureHostedCoreRouteParity({
     () =>
       waitForVisibleHostedWebView({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: expectedWorkspace,
         timeoutMs
       })
   )
@@ -133,7 +164,7 @@ export async function captureHostedCoreRouteParity({
   await tapHostedSessionBack(emulator, sessionDocument, timeoutMs)
   activeWorkspaceDocument = await waitForVisibleHostedWebView({
     discoveryUrl,
-    expectedText: 'Orca Desktop',
+    expectedText: expectedWorkspace,
     timeoutMs
   })
   return {

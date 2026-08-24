@@ -14,6 +14,7 @@ import {
   handleWebHostProviderReviewMutation,
   WEB_HOST_PROVIDER_REVIEW_MUTATION_METHODS
 } from './web-host-provider-review-mutations'
+import type { WebHostSourceControlStatusSnapshot } from './web-host-source-control-status-snapshot'
 
 type RequestParams = Record<string, unknown>
 
@@ -26,8 +27,9 @@ export async function handleWebHostProviderReviewRequest(args: {
   params: RequestParams
   cache: WebHostProviderReviewCache
   eligibilityCache: WebHostProviderReviewEligibilityCache
+  statusSnapshot: WebHostSourceControlStatusSnapshot
 }): Promise<unknown | typeof WEB_HOST_PROVIDER_REVIEW_UNHANDLED> {
-  const { client, workspaceId, method, params, cache, eligibilityCache } = args
+  const { client, workspaceId, method, params, cache, eligibilityCache, statusSnapshot } = args
   if (
     !PROVIDER_READ_METHODS.has(method) &&
     !WEB_HOST_PROVIDER_REVIEW_MUTATION_METHODS.has(method)
@@ -35,9 +37,20 @@ export async function handleWebHostProviderReviewRequest(args: {
     return WEB_HOST_PROVIDER_REVIEW_UNHANDLED
   }
   if (method === 'github.repoSlug') {
-    return readWebHostGitHubRepositoryEligibility(client, workspaceId, eligibilityCache)
+    return readWebHostGitHubRepositoryEligibility(
+      client,
+      workspaceId,
+      eligibilityCache,
+      statusSnapshot
+    )
   }
-  const loaded = await loadWebHostProviderReview(client, workspaceId, cache, eligibilityCache)
+  const loaded = await loadWebHostProviderReview(
+    client,
+    workspaceId,
+    cache,
+    eligibilityCache,
+    statusSnapshot
+  )
   const review = loaded.review
   if (method === 'hostedReview.forBranch') {
     return review ? hostedReviewSummary(review) : null

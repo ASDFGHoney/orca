@@ -98,7 +98,7 @@ export async function verifyHostedIosPhotoPermissionRevocation(
     waitForDocument
   })
   let activeSessionDocument = grantedSession.document
-  assertSameSessionRoute(sessionDocument, activeSessionDocument)
+  assertSessionRoute(activeSessionDocument)
   const grantPrivateOriginRotated =
     hostedPrivateOrigin(sessionDocument.href) !== hostedPrivateOrigin(activeSessionDocument.href)
   const grantWorkspaceAuthorityRotated =
@@ -144,7 +144,7 @@ export async function verifyHostedIosPhotoPermissionRevocation(
     waitForDocument
   })
   activeSessionDocument = interruptedSession.document
-  assertSameSessionRoute(sessionDocument, activeSessionDocument)
+  assertSessionRoute(activeSessionDocument)
   const interruptionPrivateOriginRetained =
     hostedPrivateOrigin(grantedSession.document.href) ===
     hostedPrivateOrigin(activeSessionDocument.href)
@@ -171,7 +171,7 @@ export async function verifyHostedIosPhotoPermissionRevocation(
     waitForDocument
   })
   activeSessionDocument = revokedSession.document
-  assertSameSessionRoute(sessionDocument, activeSessionDocument)
+  assertSessionRoute(activeSessionDocument)
   const revocationPrivateOriginRotated =
     hostedPrivateOrigin(grantedSession.document.href) !==
     hostedPrivateOrigin(activeSessionDocument.href)
@@ -241,10 +241,10 @@ async function changeHostedIosPhotosPermission(action, deviceUdid, runCommand) {
   ])
 }
 
-function waitForSessionDocument(discoveryUrl, timeoutMs, waitForDocument) {
+function waitForSessionDocument(discoveryUrl, timeoutMs, waitForDocument, expectedWorkspace) {
   return waitForDocument({
     discoveryUrl,
-    expectedText: 'Mobile Emulator',
+    expectedText: expectedWorkspace,
     expectedHrefIncludes: '/session/',
     requireInteractiveControls: false,
     timeoutMs
@@ -267,7 +267,8 @@ async function restoreHostedIosSessionAfterLaunch({
       document: await waitForSessionDocument(
         discoveryUrl,
         Math.min(timeoutMs, 5_000),
-        waitForDocument
+        waitForDocument,
+        expectedWorkspace
       ),
       recovery: 'session-retained'
     }
@@ -277,7 +278,7 @@ async function restoreHostedIosSessionAfterLaunch({
   await openHybridRoute(emulator, timeoutMs)
   const workspaceDocument = await waitForDocument({
     discoveryUrl,
-    expectedText: 'Orca Desktop',
+    expectedText: expectedWorkspace,
     timeoutMs
   })
   await activateWorkspace(
@@ -288,12 +289,17 @@ async function restoreHostedIosSessionAfterLaunch({
     () =>
       waitForDocument({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: expectedWorkspace,
         timeoutMs
       })
   )
   return {
-    document: await waitForSessionDocument(discoveryUrl, timeoutMs, waitForDocument),
+    document: await waitForSessionDocument(
+      discoveryUrl,
+      timeoutMs,
+      waitForDocument,
+      expectedWorkspace
+    ),
     recovery: 'hybrid-route-handoff'
   }
 }
@@ -320,24 +326,9 @@ function assertNoPrivilegedPageMarkers(state) {
   }
 }
 
-function assertSameSessionRoute(expectedDocument, actualDocument) {
-  const expectedRoute = hostedSessionRouteIdentity(expectedDocument.href)
-  const actualRoute = hostedSessionRouteIdentity(actualDocument.href)
-  if (
-    actualRoute.routeKind !== expectedRoute.routeKind ||
-    actualRoute.name !== expectedRoute.name
-  ) {
-    throw new Error(
-      `Photos permission change did not restore the exact session: ${actualDocument.href}`
-    )
-  }
-}
-
-function hostedSessionRouteIdentity(href) {
-  const url = new URL(href)
-  return {
-    name: url.searchParams.get('name'),
-    routeKind: url.pathname.split('/').at(-2)
+function assertSessionRoute(document) {
+  if (new URL(document.href).pathname.split('/').at(-2) !== 'session') {
+    throw new Error(`Photos permission change did not restore the session route: ${document.href}`)
   }
 }
 

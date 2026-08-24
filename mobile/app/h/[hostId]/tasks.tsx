@@ -12,7 +12,7 @@ import {
   View
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useRouter } from 'expo-router'
 import {
   AlertTriangle,
   Check,
@@ -31,6 +31,7 @@ import {
   X
 } from 'lucide-react-native'
 import { useHostClient } from '../../../src/transport/client-context'
+import { useMobileWebRouteParams } from '../../../src/mobile-web/use-mobile-web-route-params'
 import {
   useLastConnectedAt,
   useRelayRecoveryStatus,
@@ -2144,7 +2145,7 @@ export default function MobileTasksScreen({
   connectionMetrics,
   nativeHostBinding = true
 }: MobileTasksScreenProps = {}) {
-  const params = useLocalSearchParams<{ hostId: string; taskSource?: string }>()
+  const params = useMobileWebRouteParams<{ hostId: string; taskSource?: string }>()
   const hostId = hostIdProp ?? params.hostId
   const taskSource = params.taskSource
   const router = useRouter()

@@ -16,6 +16,17 @@ afterEach(() => {
 })
 
 describe('useMobilePrFileContentCache', () => {
+  it('keeps clear stable when clearing the cache', () => {
+    renderHarness('scope-a')
+    const clear = result?.clear
+
+    act(() => clear?.())
+
+    expect(result?.clear).toBe(clear)
+    expect(result?.contents).toEqual({})
+    expect(result?.loadingPath).toBeNull()
+  })
+
   it('resets cached content synchronously when the review scope changes', async () => {
     renderHarness('scope-a')
     await loadFile('scope-a', 'a.ts', fileContents('old'))

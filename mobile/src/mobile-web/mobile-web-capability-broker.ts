@@ -35,7 +35,6 @@ import {
 type PageRequest = Extract<MobileWebBridgePageMessage, { type: 'request' }>
 type PendingRequest = { operationKey: string; subscriptionId?: string; cancelled: boolean }
 export { MOBILE_WEB_PRODUCTION_GRANTS } from './mobile-web-production-grants'
-
 export class MobileWebCapabilityBroker {
   private readonly pending = new Map<string, PendingRequest>()
   private readonly replay = new MobileWebBrokerReplayGuard()
@@ -108,6 +107,9 @@ export class MobileWebCapabilityBroker {
     this.terminalStreams.dispose(null)
     this.speechAuthority.replaceClient()
     for (const [requestId, pending] of this.pending) {
+      if (pending.operationKey === 'native.alert') {
+        continue
+      }
       pending.cancelled = true
       this.pending.delete(requestId)
       void this.messages.error(requestId, 'cancelled', false)
@@ -179,9 +181,12 @@ export class MobileWebCapabilityBroker {
       await this.messages.error(request.requestId, 'rate_limited', true)
       return
     }
+    const branchCompareContinuation =
+      this.authorities.sourceControlBranchCompare.claimRequestContinuation(request)
     if (
       !mobileWebWorkspaceSnapshotContinuation(request) &&
       !mobileWebAgentHistoryContinuation(request) &&
+      !branchCompareContinuation &&
       !this.rateLimiter.take(mobileWebOperationKey(request), grant)
     ) {
       await this.messages.error(request.requestId, 'rate_limited', true)
@@ -234,6 +239,7 @@ export class MobileWebCapabilityBroker {
       nativeChatSubscriptions: this.subscriptions.nativeChat,
       sessionSubscriptions: this.subscriptions.session,
       sourceControlSubscriptions: this.subscriptions.sourceControl,
+      sourceControlBranchCompare: this.authorities.sourceControlBranchCompare,
       speechAuthority: this.speechAuthority,
       postSpeechEvent: (subscriptionId, sequence, event) =>
         this.messages.event(subscriptionId, sequence, event),
@@ -280,6 +286,9 @@ export class MobileWebCapabilityBroker {
     }
     const pending = this.pending.get(id)
     if (!pending) {
+      return
+    }
+    if (pending.operationKey === 'native.alert') {
       return
     }
     pending.cancelled = true

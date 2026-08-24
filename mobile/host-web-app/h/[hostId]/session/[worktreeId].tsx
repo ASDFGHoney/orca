@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react'
-import { useLocalSearchParams } from 'expo-router'
 import { SessionScreen } from '../../../../app/h/[hostId]/session/[worktreeId]'
 import { useMobileWebNativeShell } from '../../../../../src/mobile-web/src/native-shell-channel'
 import { webHostSessionTabOperations } from '../../../../src/session/web-host-session-tab-operations'
@@ -14,10 +13,11 @@ import { webHostSessionDictationOperations } from '../../../../src/session/web-h
 import { webHostSessionNativeChatOperations } from '../../../../src/session/web-host-session-native-chat-operations'
 import { webHostSessionChatDraftOperations } from '../../../../src/session/web-host-session-chat-draft-operations'
 import { webHostSessionChatPendingDeliveryOperations } from '../../../../src/session/web-host-session-chat-pending-delivery-operations'
+import { useMobileWebRouteParams } from '../../../../src/mobile-web/use-mobile-web-route-params'
 
 export default function HostMobileWebSessionRoute() {
   const shell = useMobileWebNativeShell()
-  const { worktreeId, name } = useLocalSearchParams<{
+  const { worktreeId, name } = useMobileWebRouteParams<{
     worktreeId: string
     name?: string
   }>()

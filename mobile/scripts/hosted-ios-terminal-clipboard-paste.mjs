@@ -39,7 +39,7 @@ export async function verifyHostedIosTerminalClipboardPaste(
     () =>
       waitForDocument({
         discoveryUrl,
-        expectedText: 'Orca Desktop',
+        expectedText: expectedWorkspace,
         timeoutMs
       })
   )

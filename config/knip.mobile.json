@@ -23,15 +23,6 @@
     "packages/*/src/**/*.{js,jsx,ts,tsx}",
     "*.{js,ts}"
   ],
-  "ignoreFiles": [
-    "src/accounts/use-open-mobile-accounts.ts",
-    "src/components/mobile-pr-url.ts",
-    "src/notifications/use-open-notification-route.ts",
-    "src/session/mobile-native-chat-message-occurrences.ts",
-    "src/session/use-mobile-native-chat-cancel-ask.ts",
-    "src/session/use-open-mobile-session.ts",
-    "src/tasks/use-open-mobile-tasks.ts"
-  ],
   "ignoreExportsUsedInFile": true,
   "includeEntryExports": false
 }
