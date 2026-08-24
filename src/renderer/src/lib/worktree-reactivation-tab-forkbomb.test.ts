@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore, type AppState } from '@/store'
 import { activateAndRevealWorktree } from './worktree-activation'
 import { makeCreatedAgentWorktree as makeWorktree } from '@/lib/worktree-activation-created-agent-test-state'
+import { consumeQueuedStartupAndClearSleepingRecord } from '@/components/terminal-pane/use-terminal-pane-lifecycle'
 
 const initialAppStoreState = useAppStore.getState()
 
@@ -89,12 +90,26 @@ describe('STA-1111 worktree reopen does not fork-bomb tabs', () => {
       expect(state.automaticAgentResumeClaimsByTabId[tabs[0]!.id]?.providerSession).toEqual(
         providerSession
       )
-      expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
 
+      // Activation queues the replacement; the record is cleared only after
+      // its first PTY spawn consumes that startup command.
       if (reopen === 0) {
-        expect(state.consumeTabStartupCommand(tabs[0]!.id)?.resumeProviderSession).toEqual(
-          providerSession
+        expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toBeDefined()
+        const consumed = state.consumeTabStartupCommand(tabs[0]!.id)
+        expect(consumed?.resumeProviderSession).toEqual(providerSession)
+        // The real pane lifecycle invokes this on the fresh PTY boundary.
+        consumeQueuedStartupAndClearSleepingRecord(
+          tabs[0]!.id,
+          () => consumed,
+          (identityPaneKey) =>
+            useAppStore.getState().sleepingAgentSessionsByPaneKey[identityPaneKey],
+          useAppStore.getState().clearSleepingAgentSession
         )
+        expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
+      } else {
+        // Later captures are stale replays of the already claimed session and
+        // are discarded without forking another replacement tab.
+        expect(state.sleepingAgentSessionsByPaneKey[paneKey]).toBeUndefined()
       }
     }
   })
