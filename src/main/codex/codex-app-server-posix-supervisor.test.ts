@@ -27,10 +27,22 @@ describe('structured provider supervision', () => {
       expect.objectContaining({
         command: '/opt/codex',
         args: ['app-server', '--flag'],
-        cwd: '/work/repo',
-        env: childEnv
+        cwd: '/work/repo'
       })
     )
+    expect(
+      JSON.parse(Buffer.from(spec.env.ORCA_PROVIDER_SUPERVISOR_SPEC!, 'base64').toString())
+    ).not.toHaveProperty('env')
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain(
+      'delete childEnv.ORCA_PROVIDER_SUPERVISOR_SPEC'
+    )
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain('delete childEnv.ELECTRON_RUN_AS_NODE')
+    expect(spec.env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain('process.ppid !== originalParent')
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).toContain(
+      "process.stdin.once('close', scheduleOwnerShutdown)"
+    )
+    expect(POSIX_PROVIDER_SUPERVISOR_SCRIPT).not.toContain('process.ppid === 1')
   })
 
   it('uses direct provider spawning on Windows because the job owns the tree', () => {
