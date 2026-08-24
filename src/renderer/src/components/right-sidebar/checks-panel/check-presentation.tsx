@@ -43,7 +43,7 @@ export function prStateColor(state: PRInfo['state']): string {
       return 'bg-rose-500/15 text-rose-500 border-rose-500/20'
     case 'draft':
       return 'bg-muted text-muted-foreground border-border'
-    default:
+    case 'open':
       return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20'
   }
 }
