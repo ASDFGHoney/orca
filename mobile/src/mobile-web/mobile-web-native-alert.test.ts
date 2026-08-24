@@ -1,4 +1,4 @@
-import { Alert, type AlertButton } from 'react-native'
+import type { Alert, AlertButton } from 'react-native'
 import { describe, expect, it, vi } from 'vitest'
 import {
   MobileWebNativeAlertLifecycle,

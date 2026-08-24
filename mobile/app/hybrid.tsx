@@ -317,25 +317,25 @@ export default function HybridScreen() {
         if (activeSessionIdRef.current === current.sessionId) {
           setPageReadySessionId(current.sessionId)
         }
-      } else if (backMessageHandled) {
-        return
-      } else if (parsed.value.type === 'health') {
-        healthDeadlineRef.current.acknowledge(current.sessionId)
-        await markHealthy(current.sessionId)
-      } else if (parsed.value.type === 'routeState') {
-        brokerRef.current?.rememberRoute(parsed.value.route)
-      } else {
-        await handleMobileWebBrokerMessage({
-          message: parsed.value,
-          brokerRef,
-          activeSessionIdRef,
-          sessionId: current.sessionId,
-          viewRef,
-          routeHandoff: nativeRouteHandoffRef.current,
-          setHostedViewActive,
-          navigateToTerminalSettings: () => router.push('/terminal-settings'),
-          onNavigationFailure: () => showWarning('Terminal settings could not be opened.')
-        })
+      } else if (!backMessageHandled) {
+        if (parsed.value.type === 'health') {
+          healthDeadlineRef.current.acknowledge(current.sessionId)
+          await markHealthy(current.sessionId)
+        } else if (parsed.value.type === 'routeState') {
+          brokerRef.current?.rememberRoute(parsed.value.route)
+        } else {
+          await handleMobileWebBrokerMessage({
+            message: parsed.value,
+            brokerRef,
+            activeSessionIdRef,
+            sessionId: current.sessionId,
+            viewRef,
+            routeHandoff: nativeRouteHandoffRef.current,
+            setHostedViewActive,
+            navigateToTerminalSettings: () => router.push('/terminal-settings'),
+            onNavigationFailure: () => showWarning('Terminal settings could not be opened.')
+          })
+        }
       }
     },
     [hardwareBackHandoff, markHealthy, postInit, router, session, showWarning]

@@ -52,7 +52,7 @@ describe('hosted Android emulator session', () => {
   })
 
   it('allows an exact debug APK to replace a higher-version beta install', async () => {
-    const calls: Array<{ args: string[]; timeout?: number }> = []
+    const calls: { args: string[]; timeout?: number }[] = []
     const runAdb = async (_adb: string, args: string[], timeout?: number) => {
       calls.push({ args, timeout })
       return ''

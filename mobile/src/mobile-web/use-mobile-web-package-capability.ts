@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY } from '../../../src/shared/protocol-version'
 import type { RpcClient } from '../transport/rpc-client'
 import { startRuntimeCapabilityProbe } from '../transport/runtime-capability-probe'
@@ -13,7 +13,12 @@ export type MobileWebPackageCapabilityStatus =
 type ResolvedPackageCapability = {
   client: RpcClient
   hostId: string
+  connectionId: number | null
   supported: boolean
+}
+
+function currentConnectionId(client: RpcClient): number | null {
+  return typeof client.getLastConnectedAt === 'function' ? client.getLastConnectedAt() : null
 }
 
 export function useMobileWebPackageCapability(args: {
@@ -23,11 +28,6 @@ export function useMobileWebPackageCapability(args: {
 }): MobileWebPackageCapabilityStatus {
   const { client, hostId, state } = args
   const [resolved, setResolved] = useState<ResolvedPackageCapability | null>(null)
-  const verifiedConnectionRef = useRef<ResolvedPackageCapability | null>(null)
-
-  if (state !== 'connected' || !client || !hostId) {
-    verifiedConnectionRef.current = null
-  }
 
   useEffect(() => {
     if (state !== 'connected' || !client || !hostId) {
@@ -35,17 +35,14 @@ export function useMobileWebPackageCapability(args: {
     }
     const requestClient = client
     const requestHostId = hostId
+    const requestConnectionId = currentConnectionId(requestClient)
     return startRuntimeCapabilityProbe(requestClient, (capabilities) => {
       setResolved({
         client: requestClient,
         hostId: requestHostId,
+        connectionId: requestConnectionId,
         supported: capabilities.includes(MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY)
       })
-      verifiedConnectionRef.current = {
-        client: requestClient,
-        hostId: requestHostId,
-        supported: capabilities.includes(MOBILE_WEB_PACKAGE_RUNTIME_CAPABILITY)
-      }
     })
   }, [client, hostId, state])
 
@@ -55,10 +52,9 @@ export function useMobileWebPackageCapability(args: {
   if (
     !client ||
     !hostId ||
-    verifiedConnectionRef.current?.client !== client ||
-    verifiedConnectionRef.current.hostId !== hostId ||
     resolved?.client !== client ||
-    resolved.hostId !== hostId
+    resolved.hostId !== hostId ||
+    resolved.connectionId !== currentConnectionId(client)
   ) {
     return 'pending'
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { BackHandler, Platform } from 'react-native'
 import type {
@@ -23,12 +23,18 @@ export function useMobileWebHardwareBackHandoff({
   onUnhandled
 }: HardwareBackHandoffOptions): MobileWebHardwareBackHandoff {
   const [handoff] = useState(() => new MobileWebHardwareBackHandoff())
-  const forwardingEnabledRef = useRef(forwardingEnabled)
-  const postMessageRef = useRef(postMessage)
-  const onUnhandledRef = useRef(onUnhandled)
-  forwardingEnabledRef.current = forwardingEnabled
-  postMessageRef.current = postMessage
-  onUnhandledRef.current = onUnhandled
+  const handleHardwareBack = useCallback(() => {
+    const forwarded =
+      forwardingEnabled &&
+      handoff.request(
+        (message) => postMessage(message),
+        () => onUnhandled()
+      )
+    if (!forwarded) {
+      onUnhandled()
+    }
+    return true
+  }, [forwardingEnabled, handoff, onUnhandled, postMessage])
 
   useEffect(() => {
     const context: MobileWebBridgeMessageContext | null =
@@ -42,23 +48,12 @@ export function useMobileWebHardwareBackHandoff({
       if (Platform.OS !== 'android') {
         return
       }
-      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-        const forwarded =
-          forwardingEnabledRef.current &&
-          handoff.request(
-            (message) => postMessageRef.current(message),
-            () => onUnhandledRef.current()
-          )
-        if (!forwarded) {
-          onUnhandledRef.current()
-        }
-        return true
-      })
+      const subscription = BackHandler.addEventListener('hardwareBackPress', handleHardwareBack)
       return () => {
         subscription.remove()
         handoff.cancelPending()
       }
-    }, [handoff])
+    }, [handleHardwareBack, handoff])
   )
 
   return handoff

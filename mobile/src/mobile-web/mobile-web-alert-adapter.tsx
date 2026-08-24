@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
+import { useEffect, useEffectEvent, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import { Alert, type AlertButton, type AlertOptions } from 'react-native'
 import type {
   MobileWebNativeAlertPayload,
@@ -130,20 +130,21 @@ export function MobileWebAlertAdapter({
     hostedAlertController.getSnapshot
   )
   const chosenPromptRef = useRef<number | null>(null)
-  const presenterRef = useRef(presentNative)
-  presenterRef.current = presentNative
+  const presentNativeEvent = useEffectEvent((payload: MobileWebNativeAlertPayload) =>
+    presentNative?.(payload)
+  )
 
   useEffect(() => {
     const current = hostedAlertController.getSnapshot()
     if (!current || !hostedAlertController.beginNativePresentation(current.id)) {
       return
     }
-    const presenter = presenterRef.current
-    if (!presenter) {
+    const presentation = presentNativeEvent(nativeAlertPayload(current))
+    if (!presentation) {
       hostedAlertController.useFallbackPresentation(current.id)
       return
     }
-    void presenter(nativeAlertPayload(current))
+    void presentation
       .then((result) => {
         if (result.kind === 'button') {
           hostedAlertController.choose(current.id, current.buttons[result.buttonIndex], false)
