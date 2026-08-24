@@ -287,10 +287,12 @@ describe('orchestration while Structured Chat owns an agent session', () => {
     expect(writes.mock.calls.filter(([ptyId]) => ptyId === WORKER.ptyId)).toHaveLength(0)
   })
 
-  it('returns terminal.send typed refusal metadata without writing bytes', async () => {
+  it('reports a real gate refusal with typed metadata and zero bytes written', async () => {
     const response = await rpc('terminal.send', {
       terminal: WORKER.handle,
       text: 'new prompt',
+      enter: true,
+      agentPrompt: true,
       client: { id: 'test-client', type: 'desktop' }
     })
 

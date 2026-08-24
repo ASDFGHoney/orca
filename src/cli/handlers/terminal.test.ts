@@ -5,6 +5,8 @@ import { printHelp } from '../help'
 import { COMMAND_SPECS } from '../specs'
 import { TERMINAL_HANDLERS } from './terminal'
 
+const ORIGINAL_EXIT_CODE = process.exitCode
+
 describe('terminal close CLI', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -65,6 +67,7 @@ describe('terminal close CLI', () => {
 describe('terminal send CLI', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    process.exitCode = ORIGINAL_EXIT_CODE
   })
 
   it('marks combined text and Enter as an agent prompt candidate', async () => {
@@ -113,6 +116,7 @@ describe('terminal send CLI', () => {
       }
     })
     vi.spyOn(console, 'log').mockImplementation(() => {})
+    process.exitCode = undefined
 
     await TERMINAL_HANDLERS['terminal send']({
       flags: new Map<string, string | true>([
@@ -128,6 +132,7 @@ describe('terminal send CLI', () => {
     expect(console.log).toHaveBeenCalledWith(
       expect.stringMatching(/Structured Chat.*Switch it to Terminal.*orca terminal send/s)
     )
+    expect(process.exitCode).toBe(1)
   })
 
   it('keeps text-only and bare Enter sends as direct terminal input', async () => {
