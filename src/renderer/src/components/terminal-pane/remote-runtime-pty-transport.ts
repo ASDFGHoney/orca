@@ -2189,10 +2189,18 @@ export function createRemoteRuntimePtyTransport(
           ...(createdTerminal.isReattach === true ? { isReattach: true } : {})
         } satisfies PtyConnectResult
       } catch (error) {
+        let ownerUnverifiableResult: PtyConnectResult | undefined
         if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {
           connecting = false
           const message = runtimeTerminalErrorMessage(error)
-          if (isRemoteTerminalGoneMessage(message)) {
+          if (options.sessionId) {
+            recovery.markDisconnected()
+            surfaceErrorMessage(message)
+            ownerUnverifiableResult = {
+              id: options.sessionId,
+              ownerUnverifiable: true
+            }
+          } else if (isRemoteTerminalGoneMessage(message)) {
             recovery.cancel()
             handleRemoteTerminalError(error)
           } else if (
@@ -2205,7 +2213,7 @@ export function createRemoteRuntimePtyTransport(
             surfaceErrorMessage(message)
           }
         }
-        return undefined
+        return ownerUnverifiableResult
       }
     },
 

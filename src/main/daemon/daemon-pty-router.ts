@@ -12,6 +12,7 @@ import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import { shouldHandoffDaemonHistory } from './daemon-history-handoff'
 import type { DaemonPtyRouterDataEvent, DaemonPtyRouterExitEvent } from './daemon-pty-router-events'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
+import { TerminalSessionOwnerUnverifiedError } from './daemon-errors'
 
 export class DaemonPtyRouter implements IPtyProvider {
   private current: DaemonPtyAdapter
@@ -26,8 +27,8 @@ export class DaemonPtyRouter implements IPtyProvider {
     this.ownerResolver = new DaemonSessionOwnerResolver(this.allAdapters(), this.sessionAdapters)
     this.subscriptions = new DaemonPtyAdapterSubscriptionFanout(
       this.allAdapters(),
-      (id) => {
-        this.ownerResolver.forgetRoute(id)
+      (adapter, id) => {
+        this.ownerResolver.forgetRoute(id, adapter)
       },
       (adapter) => this.ownerResolver.invalidateProvider(adapter)
     )
@@ -78,15 +79,11 @@ export class DaemonPtyRouter implements IPtyProvider {
   }
 
   hasPty(id: string): boolean {
-    const routed = this.sessionAdapters.get(id)
-    if (routed) {
-      return routed.hasPty(id)
-    }
-    return this.current.hasPty(id) || this.legacy.some((adapter) => adapter.hasPty(id))
+    return this.adapterFor(id).hasPty(id)
   }
 
-  async probePtyLiveness(id: string): Promise<boolean | null> {
-    return await this.ownerResolver.probe(id)
+  async probePtyLiveness(id: string, expectedIncarnationId?: string): Promise<boolean | null> {
+    return await this.ownerResolver.probe(id, expectedIncarnationId)
   }
 
   write(id: string, data: string): boolean {
@@ -314,17 +311,18 @@ export class DaemonPtyRouter implements IPtyProvider {
   }
 
   private adapterFor(sessionId: string): DaemonPtyAdapter {
-    return this.sessionAdapters.get(sessionId) ?? this.current
+    const adapter = this.sessionAdapters.get(sessionId)
+    if (!adapter) {
+      throw new TerminalSessionOwnerUnverifiedError(sessionId)
+    }
+    return adapter
   }
 
   private adapterForInspection(sessionId: string): DaemonPtyAdapter {
-    const adapter =
-      this.sessionAdapters.get(sessionId) ??
-      this.allAdapters().find((candidate) => candidate.hasPty(sessionId))
+    const adapter = this.sessionAdapters.get(sessionId)
     if (!adapter) {
       throw new Error('terminal_gone')
     }
-    this.sessionAdapters.set(sessionId, adapter)
     return adapter
   }
 

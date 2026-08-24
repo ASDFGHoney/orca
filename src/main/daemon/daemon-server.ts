@@ -1133,6 +1133,9 @@ export class DaemonServer {
             command: p.command,
             startupCommandDelivery: p.startupCommandDelivery,
             ...(attachOnly ? { attachOnly: true } : {}),
+            ...(p.expectedIncarnationId !== undefined
+              ? { expectedIncarnationId: p.expectedIncarnationId }
+              : {}),
             // Why: RPC payloads are untrusted JSON; persist only the allowlisted routing enum, never arbitrary identity.
             ...(isTuiAgent(p.launchAgent) ? { launchAgent: p.launchAgent } : {}),
             shellOverride: p.shellOverride,

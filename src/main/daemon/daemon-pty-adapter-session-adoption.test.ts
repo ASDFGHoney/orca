@@ -173,6 +173,60 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       expect(lastSubprocess).toBe(subprocessBeforeAttach)
     })
 
+    it('forwards an authoritative expected incarnation to a current daemon', async () => {
+      const created = await adapter.spawn({
+        cols: 80,
+        rows: 24,
+        sessionId: 'incarnation-fenced-session'
+      })
+      const request = vi.spyOn(DaemonClient.prototype, 'request')
+
+      await expect(
+        adapter.spawn({
+          cols: 80,
+          rows: 24,
+          sessionId: created.id,
+          attachOnly: true,
+          expectedIncarnationId: created.incarnationId,
+          expectedIncarnationIsAuthoritative: true
+        })
+      ).resolves.toMatchObject({
+        id: created.id,
+        incarnationId: created.incarnationId,
+        isReattach: true
+      })
+
+      expect(request).toHaveBeenCalledWith(
+        'createOrAttach',
+        expect.objectContaining({
+          attachOnly: true,
+          expectedIncarnationId: created.incarnationId
+        })
+      )
+      request.mockRestore()
+    })
+
+    it('does not send an incarnation-fenced attach to a pre-fence daemon', async () => {
+      const request = vi.spyOn(DaemonClient.prototype, 'request')
+      const legacy = new DaemonPtyAdapter({ socketPath, tokenPath, protocolVersion: 36 })
+      try {
+        await expect(
+          legacy.spawn({
+            cols: 80,
+            rows: 24,
+            sessionId: 'legacy-owner-session',
+            attachOnly: true,
+            expectedIncarnationId: 'expected-incarnation',
+            expectedIncarnationIsAuthoritative: true
+          })
+        ).rejects.toMatchObject({ name: 'TerminalSessionOwnerUnverifiedError' })
+        expect(request).not.toHaveBeenCalled()
+      } finally {
+        legacy.dispose()
+        request.mockRestore()
+      }
+    })
+
     it('does not inspect cold history for attach-only ownership checks', async () => {
       const historyDir = join(dir, 'attach-only-history')
       const historyAdapter = new DaemonPtyAdapter({

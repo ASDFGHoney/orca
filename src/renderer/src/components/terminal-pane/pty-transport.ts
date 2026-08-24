@@ -50,6 +50,7 @@ import {
   type PtySideEffectGauge
 } from './pty-side-effect-pending-census'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
+import { isTerminalPaneOwnerUnverified } from '../../../../shared/terminal-pane-owner-verdict'
 
 // Re-export public API so existing consumers keep working.
 export {
@@ -856,10 +857,16 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         const resultLaunchAgent = isTuiAgent(spawnResult.launchAgent)
           ? spawnResult.launchAgent
           : undefined
-        const retireFreshSpawn = async (): Promise<void> => {
+        const retireFreshSpawn = async (): Promise<boolean> => {
           if (!spawnResult.isReattach && !spawnResult.coldRestore) {
-            await window.api.pty.kill(spawnResult.id)
+            try {
+              await window.api.pty.kill(spawnResult.id)
+            } catch (error) {
+              storedCallbacks.onError?.(error instanceof Error ? error.message : String(error))
+              return false
+            }
           }
+          return true
         }
 
         // Why: on destroy mid-connect, kill only a fresh spawn — killing a reattached session (owned by the tab lifecycle) loses a live shell.
@@ -870,8 +877,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
 
         if (options.admitPtyId && !options.admitPtyId(spawnResult.id)) {
           // Why: a rejected session-expired fallback has no owner to retire its newly created process.
-          await retireFreshSpawn()
-          return spawnResult
+          return (await retireFreshSpawn()) ? spawnResult : undefined
         }
 
         if (spawnResult.isReattach && !admittedSessionId) {
@@ -945,6 +951,13 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         return spawnResult.id
       } catch (err) {
         const msg = extractIpcErrorMessage(err, err instanceof Error ? err.message : String(err))
+        if (options.sessionId && isTerminalPaneOwnerUnverified(msg)) {
+          storedCallbacks.onError?.(msg)
+          return {
+            id: options.sessionId,
+            ownerUnverifiable: true
+          } satisfies PtyConnectResult
+        }
         if (
           connectionId &&
           options.sessionId &&
@@ -956,9 +969,17 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
             sessionExpired: true
           } satisfies PtyConnectResult
         }
-        // Why: re-spawning a Kill-All'd session throws TerminalKilledError; swallow it (pane still shows "Process exited"), don't toast (src/main/daemon/daemon-pty-adapter.ts).
         if (msg.includes('was explicitly killed')) {
-          return undefined
+          return options.sessionId
+            ? ({ id: options.sessionId, exitedBeforeAttach: true } satisfies PtyConnectResult)
+            : undefined
+        }
+        if (options.sessionId) {
+          storedCallbacks.onError?.(msg)
+          return {
+            id: options.sessionId,
+            ownerUnverifiable: true
+          } satisfies PtyConnectResult
         }
         // Why: on cold start the SSH provider isn't registered yet, so pty:spawn throws a raw IPC error; replace with a friendly message.
         if (connectionId && msg.includes('No PTY provider for connection')) {

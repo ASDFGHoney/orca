@@ -11,6 +11,7 @@ import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { PtyBindingSourceExpectation, Store } from '../persistence'
 import { retireTerminalSurfaceFromPersistence } from '../runtime/mobile-session-terminal-persistence-retirement'
 import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../shared/pty-liveness-verdict'
+import { TERMINAL_PANE_OWNER_UNVERIFIED } from '../../shared/terminal-pane-owner-verdict'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import {
@@ -103,6 +104,7 @@ import { recordDaemonStreamBacklogEvent } from '../daemon/daemon-stream-backlog-
 import {
   isDaemonEndpointGoneError,
   TerminalHostGoneError,
+  TerminalSessionExitedError,
   TerminalSessionOwnerUnverifiedError
 } from '../daemon/daemon-errors'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
@@ -311,7 +313,7 @@ const ptyIncarnationById = new Map<string, string>()
 
 export function isCurrentPtyExit(payload: { id: string; incarnationId?: string }): boolean {
   const current = ptyIncarnationById.get(payload.id)
-  return !current || payload.incarnationId === current
+  return payload.incarnationId !== undefined && (!current || payload.incarnationId === current)
 }
 // Why: mobile clients must mirror desktop PTY geometry even before the renderer can provide an xterm snapshot (e.g. right after tab creation).
 const ptySizes = new Map<string, { cols: number; rows: number }>()
@@ -881,12 +883,20 @@ async function attachStablePaneOwner(
   const { owner, provider, runtime, spawnOptions } = args
   let result: PtySpawnResult
   try {
+    if (
+      owner.hasPersistedBinding &&
+      owner.runtimeIncarnationId === undefined &&
+      owner.persistedIncarnationId === undefined
+    ) {
+      throw new TerminalSessionOwnerUnverifiedError(owner.ptyId)
+    }
     result = await provider.spawn({
       ...spawnOptions,
       sessionId: owner.ptyId,
       attachOnly: true,
       expectedIncarnationId: owner.runtimeIncarnationId ?? owner.persistedIncarnationId,
-      expectedIncarnationIsAuthoritative: owner.runtimeIncarnationId !== undefined,
+      expectedIncarnationIsAuthoritative:
+        owner.runtimeIncarnationId !== undefined || owner.hasPersistedBinding === true,
       isNewSession: undefined,
       command: undefined,
       commandDelivery: undefined,
@@ -897,15 +907,25 @@ async function attachStablePaneOwner(
       agentSessionCreateOperationId: undefined,
       onPtySpawnCommitted: undefined
     })
+    if (
+      owner.hasPersistedBinding &&
+      owner.persistedIncarnationId !== undefined &&
+      result.incarnationId !== owner.persistedIncarnationId
+    ) {
+      throw new TerminalSessionOwnerUnverifiedError(owner.ptyId)
+    }
   } catch (error) {
     if (error instanceof TerminalSessionOwnerUnverifiedError) {
-      throw new Error('terminal_pane_owner_unverified')
+      throw new Error(TERMINAL_PANE_OWNER_UNVERIFIED)
     }
     // Why: translate before paired-runtime RPC strips the socket error's code and syscall.
     if (isDaemonEndpointGoneError(error)) {
       throw new TerminalHostGoneError()
     }
-    if (!isPtyAlreadyGoneError(error)) {
+    if (!(error instanceof TerminalSessionExitedError)) {
+      if (isPtyAlreadyGoneError(error)) {
+        throw new Error(TERMINAL_PANE_OWNER_UNVERIFIED)
+      }
       throw error
     }
     const ownerBeforeRetire = args.resolveOwner?.()
@@ -7853,38 +7873,72 @@ export function registerPtyHandlers(
     }
   )
 
-  ipc.handle('pty:hasPty', async (_event, args: { id: string }): Promise<boolean | null> => {
-    if (typeof args?.id !== 'string' || args.id.startsWith('remote:')) {
-      // Why: same routing hazard pty:kill guards against — ptyOwnership never holds
-      // a runtime terminal handle and parseAppSshPtyId ignores it, so the lookup
-      // falls through to the local provider and its "not in my table" reads as an
-      // authoritative dead. That is a fabricated answer about another host's PTY.
-      return null
-    }
-    const ownedConnectionId = ptyOwnership.get(args.id)
-    const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
-    const connectionId = ownedConnectionId ?? parsedSshId?.connectionId
-    const startupPromise = getLocalPtyProviderStartupPromise(connectionId)
-    if (startupPromise) {
-      await startupPromise
-    }
-    const provider = connectionId ? sshProviders.get(connectionId) : tryGetProviderForPty(args.id)
-    if (!provider) {
-      return null
-    }
-    try {
-      if (provider.probePtyLiveness) {
-        return await provider.probePtyLiveness(args.id)
-      }
-      if (!provider.hasPty) {
+  ipc.handle(
+    'pty:hasPty',
+    async (
+      _event,
+      args: { id: string; paneKey?: string; worktreeId?: string }
+    ): Promise<boolean | null> => {
+      if (typeof args?.id !== 'string' || args.id.startsWith('remote:')) {
+        // Why: same routing hazard pty:kill guards against — ptyOwnership never holds
+        // a runtime terminal handle and parseAppSshPtyId ignores it, so the lookup
+        // falls through to the local provider and its "not in my table" reads as an
+        // authoritative dead. That is a fabricated answer about another host's PTY.
         return null
       }
-      return provider.hasPty(args.id)
-    } catch {
-      // Why: liveness is only allowed to close panes on an authoritative false.
-      return null
+      const ownedConnectionId = ptyOwnership.get(args.id)
+      const parsedSshId = ownedConnectionId === undefined ? parseAppSshPtyId(args.id) : null
+      const connectionId = ownedConnectionId ?? parsedSshId?.connectionId
+      const startupPromise = getLocalPtyProviderStartupPromise(connectionId)
+      if (startupPromise) {
+        await startupPromise
+      }
+      let expectedIncarnationId: string | undefined
+      if (args.paneKey !== undefined || args.worktreeId !== undefined) {
+        if (!args.paneKey || !args.worktreeId || connectionId) {
+          return null
+        }
+        const owner = resolvePersistedStablePaneOwner(store, args.paneKey, args.worktreeId, null)
+        if (!owner?.incarnationId || owner.ptyId !== args.id) {
+          return null
+        }
+        expectedIncarnationId = owner.incarnationId
+      }
+      const provider = connectionId ? sshProviders.get(connectionId) : tryGetProviderForPty(args.id)
+      if (!provider) {
+        return null
+      }
+      try {
+        if (provider.probePtyLiveness) {
+          const verdict = expectedIncarnationId
+            ? await provider.probePtyLiveness(args.id, expectedIncarnationId)
+            : await provider.probePtyLiveness(args.id)
+          if (expectedIncarnationId) {
+            const currentOwner = resolvePersistedStablePaneOwner(
+              store,
+              args.paneKey!,
+              args.worktreeId!,
+              null
+            )
+            if (
+              currentOwner?.ptyId !== args.id ||
+              currentOwner.incarnationId !== expectedIncarnationId
+            ) {
+              return null
+            }
+          }
+          return verdict
+        }
+        if (!provider.hasPty || expectedIncarnationId) {
+          return null
+        }
+        return provider.hasPty(args.id)
+      } catch {
+        // Why: liveness is only allowed to close panes on an authoritative false.
+        return null
+      }
     }
-  })
+  )
 
   ipc.handle('pty:hasChildProcesses', async (_event, args: { id: string }): Promise<boolean> => {
     if (!hasPtyProviderForInspection(args.id)) {

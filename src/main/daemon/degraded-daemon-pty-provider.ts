@@ -59,7 +59,9 @@ export class DegradedDaemonPtyProvider implements IPtyProvider {
       this.unsubscribers.push(
         provider.onData((payload) => this.dataListeners.forEach((listener) => listener(payload))),
         provider.onExit((payload) => {
-          this.ownerRecovery.forgetRoute(payload.id)
+          if (this.sessionProviders.get(payload.id) === provider) {
+            this.ownerRecovery.forgetRoute(payload.id)
+          }
           this.exitListeners.forEach((listener) => listener(payload))
         })
       )

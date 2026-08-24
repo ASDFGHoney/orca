@@ -1,7 +1,7 @@
 import { requestTerminalPaneRecovery } from '../terminal-pane-recovery'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
-export function recoverUnverifiableDirectSshReattach(
+export function recoverUnverifiableReattach(
   session: ConnectPanePtySession,
   ptyId: string | null | undefined
 ): void {

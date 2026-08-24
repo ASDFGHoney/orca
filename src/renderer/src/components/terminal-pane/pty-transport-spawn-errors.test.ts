@@ -52,7 +52,7 @@ describe('createIpcPtyTransport', () => {
     })
 
     expect(onError).not.toHaveBeenCalled()
-    expect(result).toBeUndefined()
+    expect(result).toEqual({ id: 'pty-dead', exitedBeforeAttach: true })
   })
 
   it('still surfaces non-kill spawn errors via onError', async () => {

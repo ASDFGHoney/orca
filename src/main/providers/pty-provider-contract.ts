@@ -135,7 +135,10 @@ export type IPtyProvider = {
   attach(id: string): Promise<Pick<PtySpawnResult, 'providerSequence'> | void>
   hasPty?: (id: string) => boolean
   /** Exact provider readback: false only when the provider answered that the PTY is absent. */
-  probePtyLiveness?: (id: string) => Promise<boolean | null>
+  probePtyLiveness?: (
+    id: string,
+    expectedIncarnationId?: PtyIncarnationId
+  ) => Promise<boolean | null>
   write(id: string, data: string): boolean | void
   writeWithSettlement?: (id: string, data: string) => Promise<boolean>
   resize(id: string, cols: number, rows: number): void

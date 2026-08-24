@@ -712,6 +712,32 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
         cause: { kind: 'exited', exitCode: 42 }
       })
     })
+
+    it('ignores an incarnation-less exit for an incarnation-fenced session', async () => {
+      const exits: { id: string; code: number; incarnationId?: string }[] = []
+      adapter.onExit((payload) => exits.push(payload))
+      const spawned = await adapter.spawn({ cols: 80, rows: 24 })
+      const client = (adapter as unknown as { client: DaemonClient }).client
+      const eventListeners = (
+        client as unknown as {
+          eventListeners: {
+            each: (visit: (listener: (event: unknown) => void) => void) => void
+          }
+        }
+      ).eventListeners
+
+      eventListeners.each((listener) =>
+        listener({
+          type: 'event',
+          event: 'exit',
+          sessionId: spawned.id,
+          payload: { code: 0 }
+        })
+      )
+
+      expect(exits).toEqual([])
+      expect(adapter.hasPty(spawned.id)).toBe(true)
+    })
   })
 
   describe('serialize / revive', () => {

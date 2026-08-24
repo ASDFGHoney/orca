@@ -5,7 +5,11 @@ import type {
   PtySpawnOptions,
   PtySpawnResult
 } from '../providers/types'
-import { SessionNotFoundError, TerminalSessionOwnerUnverifiedError } from './daemon-errors'
+import {
+  SessionNotFoundError,
+  TerminalSessionExitedError,
+  TerminalSessionOwnerUnverifiedError
+} from './daemon-errors'
 import { DaemonSessionOwnerResolver } from './daemon-session-owner-resolution'
 
 function provider(
@@ -21,7 +25,7 @@ function provider(
 }
 
 describe('DaemonSessionOwnerResolver', () => {
-  it('coalesces complete multi-provider absence without dispatching an attach', async () => {
+  it('coalesces complete inventory without treating unmapped absence as exit', async () => {
     let releaseFallback!: (processes: PtyProcessInfo[]) => void
     let releaseCurrent!: (processes: PtyProcessInfo[]) => void
     let releaseLegacy!: (processes: PtyProcessInfo[]) => void
@@ -88,11 +92,11 @@ describe('DaemonSessionOwnerResolver', () => {
     expect(results).toEqual([
       expect.objectContaining({
         status: 'rejected',
-        reason: expect.any(SessionNotFoundError)
+        reason: expect.any(TerminalSessionOwnerUnverifiedError)
       }),
       expect.objectContaining({
         status: 'rejected',
-        reason: expect.any(SessionNotFoundError)
+        reason: expect.any(TerminalSessionOwnerUnverifiedError)
       })
     ])
     expect(settled).toBe(2)
@@ -111,10 +115,10 @@ describe('DaemonSessionOwnerResolver', () => {
         cols: 80,
         rows: 24
       })
-    ).rejects.toBeInstanceOf(SessionNotFoundError)
-    expect(fallbackInventory).toHaveBeenCalledTimes(2)
-    expect(currentInventory).toHaveBeenCalledTimes(2)
-    expect(legacyInventory).toHaveBeenCalledTimes(2)
+    ).rejects.toBeInstanceOf(TerminalSessionOwnerUnverifiedError)
+    expect(fallbackInventory).toHaveBeenCalledOnce()
+    expect(currentInventory).toHaveBeenCalledOnce()
+    expect(legacyInventory).toHaveBeenCalledOnce()
     expect(fallback.spawn).not.toHaveBeenCalled()
     expect(current.spawn).not.toHaveBeenCalled()
     expect(legacy.spawn).not.toHaveBeenCalled()
@@ -364,18 +368,19 @@ describe('DaemonSessionOwnerResolver', () => {
     await expect(resolver.resolve('session', 'persisted')).resolves.toEqual({ kind: 'unknown' })
   })
 
-  it('accepts positive liveness proof from an incomplete inventory', async () => {
+  it('does not inventory possible owners for an unmapped liveness probe', async () => {
+    const firstInventory = vi.fn(async () => [{ id: 'session', cwd: '', title: 'live' }])
+    const secondInventory = vi.fn(async () => {
+      throw new Error('offline')
+    })
     const resolver = new DaemonSessionOwnerResolver(
-      [
-        provider(async () => [{ id: 'session', cwd: '', title: 'live' }]),
-        provider(async () => {
-          throw new Error('offline')
-        })
-      ],
+      [provider(firstInventory), provider(secondInventory)],
       new Map()
     )
 
-    await expect(resolver.probe('session')).resolves.toBe(true)
+    await expect(resolver.probe('session')).resolves.toBeNull()
+    expect(firstInventory).not.toHaveBeenCalled()
+    expect(secondInventory).not.toHaveBeenCalled()
   })
 
   it('does not let a replacement daemon report a historical owner session exited', async () => {
@@ -384,9 +389,7 @@ describe('DaemonSessionOwnerResolver', () => {
     const resolver = new DaemonSessionOwnerResolver([replacement], new Map())
 
     await expect(resolver.probe('session-owned-by-unregistered-daemon')).resolves.toBe(null)
-    expect(replacement.probePtyLiveness).toHaveBeenCalledExactlyOnceWith(
-      'session-owned-by-unregistered-daemon'
-    )
+    expect(replacement.probePtyLiveness).not.toHaveBeenCalled()
   })
 
   it('fails closed when duplicate owners cannot be disambiguated', async () => {
@@ -401,18 +404,27 @@ describe('DaemonSessionOwnerResolver', () => {
     expect(second.spawn).not.toHaveBeenCalled()
   })
 
-  it('reports confirmed absence from a sole owner', async () => {
+  it('reports confirmed absence only from the exact routed owner and session', async () => {
     const owner = provider(
       async () => [],
       async () => {
         throw new SessionNotFoundError('missing')
       }
     )
-    const resolver = new DaemonSessionOwnerResolver([owner], new Map())
+    const routes = new Map<string, IPtyProvider>([['missing', owner]])
+    const resolver = new DaemonSessionOwnerResolver([owner], routes)
+    resolver.recordRoute('missing', owner, 'missing-incarnation')
 
     await expect(
-      resolver.spawnAttachOnly({ sessionId: 'missing', attachOnly: true, cols: 80, rows: 24 })
-    ).rejects.toBeInstanceOf(SessionNotFoundError)
+      resolver.spawnAttachOnly({
+        sessionId: 'missing',
+        expectedIncarnationId: 'missing-incarnation',
+        expectedIncarnationIsAuthoritative: true,
+        attachOnly: true,
+        cols: 80,
+        rows: 24
+      })
+    ).rejects.toBeInstanceOf(TerminalSessionExitedError)
     expect(owner.spawn).toHaveBeenCalledOnce()
     expect(owner.listProcesses).not.toHaveBeenCalled()
   })
@@ -520,7 +532,7 @@ describe('DaemonSessionOwnerResolver', () => {
     expect(inventory).toHaveBeenCalledTimes(2)
   })
 
-  it('fails closed across identity replacement then confirms absence on retry', async () => {
+  it('keeps absence unverified after identity replacement and retry', async () => {
     let releaseCurrent!: (processes: PtyProcessInfo[]) => void
     let releaseLegacy!: (processes: PtyProcessInfo[]) => void
     const currentGate = new Promise<PtyProcessInfo[]>((resolve) => {
@@ -559,7 +571,9 @@ describe('DaemonSessionOwnerResolver', () => {
     expect(current.spawn).not.toHaveBeenCalled()
     expect(legacy.spawn).not.toHaveBeenCalled()
 
-    await expect(resolver.spawnAttachOnly(attach)).rejects.toBeInstanceOf(SessionNotFoundError)
+    await expect(resolver.spawnAttachOnly(attach)).rejects.toBeInstanceOf(
+      TerminalSessionOwnerUnverifiedError
+    )
     expect(currentInventory).toHaveBeenCalledTimes(2)
     expect(legacyInventory).toHaveBeenCalledTimes(2)
     expect(current.spawn).not.toHaveBeenCalled()

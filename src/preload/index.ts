@@ -1143,7 +1143,10 @@ const api = {
       ids: string[]
     ): Promise<{ id: string; authoritative: boolean | null }[]> =>
       ipcRenderer.invoke('pty:getAuthoritativeBufferSnapshotCapabilities', { ids }),
-    hasPty: (id: string): Promise<boolean | null> => ipcRenderer.invoke('pty:hasPty', { id }),
+    hasPty: (
+      id: string,
+      owner?: { paneKey: string; worktreeId: string }
+    ): Promise<boolean | null> => ipcRenderer.invoke('pty:hasPty', { id, ...owner }),
 
     getMainBufferSnapshot: (
       id: string,

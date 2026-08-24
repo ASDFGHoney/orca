@@ -4,7 +4,11 @@ import type {
   PtySpawnOptions,
   PtySpawnResult
 } from '../providers/types'
-import { SessionNotFoundError, TerminalSessionOwnerUnverifiedError } from './daemon-errors'
+import {
+  SessionNotFoundError,
+  TerminalSessionExitedError,
+  TerminalSessionOwnerUnverifiedError
+} from './daemon-errors'
 
 export type DaemonSessionOwnerResolution<T extends IPtyProvider> =
   | { kind: 'owner'; provider: T }
@@ -30,6 +34,7 @@ function assertClientConnected(signal: PtySpawnOptions['signal']): void {
 }
 
 export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
+  private readonly providerSet: ReadonlySet<IPtyProvider>
   private inventoryInFlight: Promise<OwnerInventory<T>> | null = null
   private cachedInventory: { value: OwnerInventory<T>; expiresAt: number } | null = null
   private readonly failedProviderCooldowns = new Map<T, number>()
@@ -39,7 +44,9 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
   constructor(
     private readonly providers: readonly T[],
     private readonly routes: Map<string, IPtyProvider>
-  ) {}
+  ) {
+    this.providerSet = new Set(providers)
+  }
 
   invalidateProvider(provider: T): void {
     this.epoch += 1
@@ -56,8 +63,9 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
 
   async spawnAttachOnly(opts: PtySpawnOptions & { sessionId: string }): Promise<PtySpawnResult> {
     assertClientConnected(opts.signal)
-    const routed = this.providers.find((provider) => provider === this.routes.get(opts.sessionId))
-    const direct = routed ?? (this.providers.length === 1 ? this.providers[0] : undefined)
+    const route = this.routes.get(opts.sessionId)
+    const routed = route && this.providerSet.has(route) ? (route as T) : undefined
+    const direct = routed
     const routedIncarnation = this.routeIncarnations.get(opts.sessionId)
     const routeNeedsAuthoritativeResolution =
       direct &&
@@ -79,8 +87,14 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
         if (!(error instanceof SessionNotFoundError)) {
           throw error
         }
-        if (this.providers.length === 1) {
-          throw error
+        if (
+          this.providers.length === 1 &&
+          opts.expectedIncarnationIsAuthoritative &&
+          routedIncarnation === opts.expectedIncarnationId &&
+          this.routes.get(opts.sessionId) === routed &&
+          this.routeIncarnations.get(opts.sessionId) === routedIncarnation
+        ) {
+          throw new TerminalSessionExitedError(opts.sessionId)
         }
         if (routed && this.routes.get(opts.sessionId) === routed) {
           this.forgetRoute(opts.sessionId, routed)
@@ -99,7 +113,7 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
       throw new TerminalSessionOwnerUnverifiedError(opts.sessionId)
     }
     if (resolution.kind === 'absent') {
-      throw new SessionNotFoundError(opts.sessionId)
+      throw new TerminalSessionExitedError(opts.sessionId)
     }
     try {
       const result = await resolution.provider.spawn(opts)
@@ -112,40 +126,43 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
       }
       return result
     } catch (error) {
-      if (error instanceof SessionNotFoundError && this.providers.length > 1) {
+      if (error instanceof SessionNotFoundError) {
+        if (
+          opts.expectedIncarnationIsAuthoritative &&
+          this.routes.get(opts.sessionId) === resolution.provider &&
+          this.routeIncarnations.get(opts.sessionId) === opts.expectedIncarnationId
+        ) {
+          throw new TerminalSessionExitedError(opts.sessionId)
+        }
         throw new TerminalSessionOwnerUnverifiedError(opts.sessionId)
       }
       throw error
     }
   }
 
-  async probe(sessionId: string): Promise<boolean | null> {
-    const routed = this.providers.find((provider) => provider === this.routes.get(sessionId))
-    const direct = routed ?? (this.providers.length === 1 ? this.providers[0] : undefined)
-    if (direct) {
-      const verdict = direct.probePtyLiveness
-        ? await direct.probePtyLiveness(sessionId)
-        : (direct.hasPty?.(sessionId) ?? null)
-      if (verdict !== false || this.providers.length === 1) {
-        return verdict
+  async probe(sessionId: string, expectedIncarnationId?: string): Promise<boolean | null> {
+    const route = this.routes.get(sessionId)
+    const routed = route && this.providerSet.has(route) ? (route as T) : undefined
+    if (routed) {
+      const routedIncarnation = this.routeIncarnations.get(sessionId)
+      if (
+        !routedIncarnation ||
+        (expectedIncarnationId !== undefined && routedIncarnation !== expectedIncarnationId)
+      ) {
+        return null
       }
-      if (this.routes.get(sessionId) === routed) {
-        this.routes.delete(sessionId)
-        this.routeIncarnations.delete(sessionId)
+      const verdict = routed.probePtyLiveness
+        ? await routed.probePtyLiveness(sessionId, routedIncarnation)
+        : (routed.hasPty?.(sessionId) ?? null)
+      if (
+        this.routes.get(sessionId) !== routed ||
+        this.routeIncarnations.get(sessionId) !== routedIncarnation
+      ) {
+        return null
       }
+      return verdict
     }
-    const inventory = await this.inventory(false)
-    if (inventory.epoch !== this.epoch) {
-      return null
-    }
-    if ((inventory.candidatesBySessionId.get(sessionId)?.length ?? 0) > 0) {
-      return true
-    }
-    const resolution = this.resolveInventory(inventory, sessionId)
-    if (resolution.kind === 'owner') {
-      return resolution.provider === routed ? null : true
-    }
-    return resolution.kind === 'absent' ? false : null
+    return null
   }
 
   async resolve(
@@ -214,27 +231,24 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
         : undefined
     const soleProvider = providers.size === 1 ? providers.values().next().value : undefined
     const provider =
-      (exactProvider && (inventory.complete || expectedIncarnationIsAuthoritative)
+      exactProvider && (inventory.complete || expectedIncarnationIsAuthoritative)
         ? exactProvider
-        : undefined) ??
-      (!expectedIncarnationIsAuthoritative && inventory.complete ? soleProvider : undefined)
+        : !expectedIncarnationIsAuthoritative && inventory.complete
+          ? soleProvider
+          : undefined
     if (provider) {
       const process = candidates.find((candidate) => candidate.provider === provider)?.process
       this.recordRoute(sessionId, provider, process?.incarnationId)
       return { kind: 'owner', provider }
     }
-    if (inventory.complete && providers.size === 0 && this.providers.length > 0) {
-      return { kind: 'absent' }
-    }
     return { kind: 'unknown' }
   }
 
-  private inventory(allowCached = true): Promise<OwnerInventory<T>> {
+  private inventory(): Promise<OwnerInventory<T>> {
     if (this.inventoryInFlight) {
       return this.inventoryInFlight
     }
     if (
-      allowCached &&
       this.cachedInventory?.value.epoch === this.epoch &&
       this.cachedInventory.expiresAt > Date.now()
     ) {

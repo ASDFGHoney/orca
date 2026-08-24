@@ -3,10 +3,9 @@ import { recordPtyConnectDiagnostic } from './pty-connect-limits'
 import { isSshSessionExpiredError } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
-import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
+import { recoverUnverifiableReattach } from './unverifiable-reattach-recovery'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
-
-const PANE_OWNER_UNVERIFIED_ERROR = 'terminal_pane_owner_unverified'
+import { isTerminalPaneOwnerUnverified } from '../../../../../shared/terminal-pane-owner-verdict'
 
 export function startDeferredSessionReattach(
   session: ConnectPanePtySession,
@@ -24,16 +23,12 @@ export function startDeferredSessionReattach(
       : window.api.pty.declarePendingPaneSerializer(session.cacheKey).catch(() => null)
 
   let expiredReattachError = false
-  let paneOwnerUnverified = false
   const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
   const outputCallbacks = session.captureTransportOutputCallbacks(
     (message) => {
       if (isSshSessionExpiredError(message)) {
         expiredReattachError = true
         return
-      }
-      if (message.includes(PANE_OWNER_UNVERIFIED_ERROR)) {
-        paneOwnerUnverified = true
       }
       if (!session.isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
         return
@@ -81,12 +76,13 @@ export function startDeferredSessionReattach(
         }
         return
       }
-      if (!result && paneOwnerUnverified) {
+      if (result && typeof result === 'object' && result.ownerUnverifiable) {
         session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
         const gen = await preSignalPromise
         if (typeof gen === 'number') {
           void window.api.pty.clearPendingPaneSerializer(session.cacheKey, gen).catch(() => {})
         }
+        recoverUnverifiableReattach(session, deferredReattachSessionId)
         return
       }
       if (!result && expiredReattachError) {
@@ -147,8 +143,9 @@ export function startDeferredSessionReattach(
       if (session.rejectObsoleteDirectSshReattach(deferredReattachSessionId)) {
         return
       }
-      if (message.includes(PANE_OWNER_UNVERIFIED_ERROR)) {
+      if (isTerminalPaneOwnerUnverified(message)) {
         session.reportError(message)
+        recoverUnverifiableReattach(session, deferredReattachSessionId)
         return
       }
       warnTerminalLifecycleAnomaly('restored PTY reattach threw', {
@@ -168,15 +165,7 @@ export function startDeferredSessionReattach(
         return
       }
       session.reportError(message)
-      if (session.connectionId) {
-        recoverUnverifiableDirectSshReattach(session, deferredReattachSessionId)
-        return
-      }
-      session.deps.clearExitedPanePtyLayoutBinding(session.pane.id, deferredReattachSessionId)
-      session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
-      session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
-        forceBlankRestoredViewport: true
-      })
+      recoverUnverifiableReattach(session, deferredReattachSessionId)
     })
   session.armDirectSshPaneRetryTimeout(trackedReattachPromise, session.directSshRetryAttempt)
 }

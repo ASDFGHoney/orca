@@ -368,18 +368,14 @@ describe('connectPanePty', () => {
     expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'stray-shell-pty')
   })
 
-  it('spawns a fresh PTY when a restored daemon split session cannot reattach', async () => {
+  it('preserves a restored binding when reattach returns no owner verdict', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()
     transport.connect.mockImplementation(async (opts: { sessionId?: string }) => {
       if (opts.sessionId) {
         return undefined
       }
-      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
-        | ((ptyId: string) => void)
-        | undefined
-      onPtySpawn?.('fresh-pty')
-      return 'fresh-pty'
+      return undefined
     })
     transportFactoryQueue.push(transport)
     mockStoreState = {
@@ -399,18 +395,14 @@ describe('connectPanePty', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(transport.connect).toHaveBeenNthCalledWith(
-      1,
+    expect(transport.connect).toHaveBeenCalledOnce()
+    expect(transport.connect).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'stale-pty' })
     )
-    expect(transport.connect).toHaveBeenNthCalledWith(
-      2,
-      expect.not.objectContaining({ sessionId: expect.any(String) })
-    )
-    expect(deps.clearExitedPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'stale-pty')
-    expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', 'stale-pty')
-    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'fresh-pty')
-    expect(deps.updateTabPtyId).toHaveBeenCalledWith('tab-1', 'fresh-pty')
+    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+    expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalled()
+    expect(deps.updateTabPtyId).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -484,50 +476,55 @@ describe('connectPanePty', () => {
       expect(mockStoreState.deferredSshSessionIdsByTabId['tab-1']).toBe(restoredPtyId)
     }
   )
-  it('preserves a restored pane binding when its daemon owner is unverifiable', async () => {
-    const { connectPanePty } = await import('./pty-connection')
-    const transport = createMockTransport()
-    transport.connect.mockImplementation(
-      async (opts: { sessionId?: string; callbacks?: ConnectCallbacks }) => {
-        opts.callbacks?.onError?.('terminal_pane_owner_unverified')
-        return undefined
-      }
-    )
-    transportFactoryQueue.push(transport)
-    mockStoreState = {
-      ...mockStoreState,
-      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: 'unverifiable-pty' }] },
-      ptyIdsByTabId: { 'tab-1': ['unverifiable-pty'] },
-      terminalLayoutsByTabId: {
-        'tab-1': {
-          root: { type: 'leaf', leafId: LEAF_2 },
-          activeLeafId: LEAF_2,
-          expandedLeafId: null,
-          ptyIdsByLeafId: { [LEAF_2]: 'unverifiable-pty' }
+  it.each(['result', 'throw'] as const)(
+    'preserves a restored pane binding when its daemon owner is unverifiable (%s)',
+    async (outcome) => {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      transport.connect.mockImplementation(
+        async (opts: { sessionId?: string; callbacks?: ConnectCallbacks }) => {
+          if (outcome === 'throw') {
+            throw new Error('terminal_pane_owner_unverified')
+          }
+          return { id: opts.sessionId!, ownerUnverifiable: true }
         }
-      }
-    } as StoreState
-    const deps = createDeps({
-      restoredLeafId: LEAF_2,
-      restoredPtyIdByLeafId: { [LEAF_2]: 'unverifiable-pty' }
-    })
+      )
+      transportFactoryQueue.push(transport)
+      mockStoreState = {
+        ...mockStoreState,
+        tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: 'unverifiable-pty' }] },
+        ptyIdsByTabId: { 'tab-1': ['unverifiable-pty'] },
+        terminalLayoutsByTabId: {
+          'tab-1': {
+            root: { type: 'leaf', leafId: LEAF_2 },
+            activeLeafId: LEAF_2,
+            expandedLeafId: null,
+            ptyIdsByLeafId: { [LEAF_2]: 'unverifiable-pty' }
+          }
+        }
+      } as StoreState
+      const deps = createDeps({
+        restoredLeafId: LEAF_2,
+        restoredPtyIdByLeafId: { [LEAF_2]: 'unverifiable-pty' }
+      })
 
-    connectPanePty(createPane(2) as never, createManager(2) as never, deps as never)
-    await flushAsyncTicks()
+      connectPanePty(createPane(2) as never, createManager(2) as never, deps as never)
+      await flushAsyncTicks()
 
-    expect(transport.connect).toHaveBeenCalledTimes(1)
-    expect(transport.connect).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: 'unverifiable-pty' })
-    )
-    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
-    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
-    expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalled()
-    expect(mockStoreState.tabsByWorktree['wt-1'][0]?.ptyId).toBe('unverifiable-pty')
-    expect(mockStoreState.ptyIdsByTabId?.['tab-1']).toEqual(['unverifiable-pty'])
-    expect(mockStoreState.terminalLayoutsByTabId?.['tab-1']?.ptyIdsByLeafId).toEqual({
-      [LEAF_2]: 'unverifiable-pty'
-    })
-  })
+      expect(transport.connect).toHaveBeenCalledTimes(1)
+      expect(transport.connect).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'unverifiable-pty' })
+      )
+      expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+      expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+      expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalled()
+      expect(mockStoreState.tabsByWorktree['wt-1'][0]?.ptyId).toBe('unverifiable-pty')
+      expect(mockStoreState.ptyIdsByTabId?.['tab-1']).toEqual(['unverifiable-pty'])
+      expect(mockStoreState.terminalLayoutsByTabId?.['tab-1']?.ptyIdsByLeafId).toEqual({
+        [LEAF_2]: 'unverifiable-pty'
+      })
+    }
+  )
 
   it('reattaches via the tab-level SSH pty id when deferred bookkeeping missed the tab', async () => {
     // Why: restore can miss the deferred maps; the tab's SSH pty id must still drive connect-then-reattach, not a fresh spawn into a missing provider.

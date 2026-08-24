@@ -14,7 +14,7 @@ import { toProcessExitStartup } from './process-exit-startup'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 import { runDeferredSessionReattachChoice } from './deferred-session-reattach-choice'
-import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
+import { recoverUnverifiableReattach } from './unverifiable-reattach-recovery'
 
 export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
   // Why: trigger the deferred SSH connect per-tab (not per-target) so multiple tabs for one target reattach independently.
@@ -205,6 +205,12 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                     }
                   : 'undefined'
               )
+              if (result && typeof result === 'object' && result.ownerUnverifiable) {
+                session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
+                await clearPreSignaledSerializer()
+                recoverUnverifiableReattach(session, pendingSessionId)
+                return
+              }
               if (!result && expiredReattachError) {
                 session.finishReattachLiveDataDeferral(false, outputCallbacks.generation)
                 await clearPreSignaledSerializer()
@@ -286,7 +292,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 return
               }
               session.reportError(err instanceof Error ? err.message : String(err))
-              recoverUnverifiableDirectSshReattach(session, pendingSessionId)
+              recoverUnverifiableReattach(session, pendingSessionId)
             })
           session.armDirectSshPaneRetryTimeout(
             trackedReattachPromise,

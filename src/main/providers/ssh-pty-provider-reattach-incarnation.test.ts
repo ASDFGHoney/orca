@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SSH_SESSION_EXPIRED_ERROR } from './ssh-pty-errors'
 import { SshPtyProvider } from './ssh-pty-provider'
+import { TerminalSessionOwnerUnverifiedError } from '../daemon/daemon-errors'
+import { TerminalSessionExitedError } from '../daemon/daemon-errors'
 
 describe('SSH PTY provider session reattach incarnation', () => {
   it('remembers the authoritative incarnation before a legacy exit arrives', async () => {
@@ -30,7 +31,7 @@ describe('SSH PTY provider session reattach incarnation', () => {
     )
   })
 
-  it('fails closed when generic reattach requires source restoration', async () => {
+  it('preserves a live PTY when generic reattach cannot restore source continuity', async () => {
     const mux = {
       request: vi.fn().mockResolvedValue({
         incarnationId: 'incarnation-reattached',
@@ -44,8 +45,62 @@ describe('SSH PTY provider session reattach incarnation', () => {
     }
     const provider = new SshPtyProvider('conn-1', mux as never)
 
-    await expect(provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })).rejects.toThrow(
-      `${SSH_SESSION_EXPIRED_ERROR}: pty-old`
+    await expect(
+      provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })
+    ).rejects.toBeInstanceOf(TerminalSessionOwnerUnverifiedError)
+  })
+
+  it('rejects a replacement incarnation before accepting the attach', async () => {
+    const mux = {
+      request: vi.fn().mockResolvedValue({ incarnationId: 'incarnation-replacement' }),
+      notify: vi.fn(),
+      onNotification: vi.fn().mockReturnValue(vi.fn())
+    }
+    const provider = new SshPtyProvider('conn-1', mux as never)
+
+    await expect(
+      provider.spawn({
+        cols: 80,
+        rows: 24,
+        sessionId: 'pty-old',
+        expectedIncarnationId: 'incarnation-original'
+      })
+    ).rejects.toBeInstanceOf(TerminalSessionOwnerUnverifiedError)
+    expect(mux.request).toHaveBeenCalledWith(
+      'pty.attach',
+      expect.objectContaining({ expectedIncarnationId: 'incarnation-original' }),
+      expect.any(Object)
     )
+  })
+
+  it('keeps relay absence owner-unverified', async () => {
+    const mux = {
+      request: vi.fn().mockRejectedValue(new Error('PTY "pty-old" not found')),
+      notify: vi.fn(),
+      onNotification: vi.fn().mockReturnValue(vi.fn())
+    }
+    const provider = new SshPtyProvider('conn-1', mux as never)
+
+    await expect(
+      provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })
+    ).rejects.toBeInstanceOf(TerminalSessionOwnerUnverifiedError)
+  })
+
+  it('accepts exact relay process-exit proof as authoritative', async () => {
+    const mux = {
+      request: vi.fn().mockRejectedValue(new Error('terminal_session_exited: pty-old')),
+      notify: vi.fn(),
+      onNotification: vi.fn().mockReturnValue(vi.fn())
+    }
+    const provider = new SshPtyProvider('conn-1', mux as never)
+
+    await expect(
+      provider.spawn({
+        cols: 80,
+        rows: 24,
+        sessionId: 'pty-old',
+        expectedIncarnationId: 'incarnation-original'
+      })
+    ).rejects.toBeInstanceOf(TerminalSessionExitedError)
   })
 })

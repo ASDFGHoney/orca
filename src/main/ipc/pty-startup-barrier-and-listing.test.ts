@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { spawnMock } from './pty-ipc-mock-registry'
 import { makeDeferred } from './pty-ipc-test-constants'
+import { makePaneKey } from '../../shared/stable-pane-id'
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import {
   registerPtyHandlers,
@@ -462,6 +463,81 @@ describe('registerPtyHandlers', () => {
 
     await expect(pending).resolves.toBe(true)
     expect(probePtyLiveness).toHaveBeenCalledWith('restored-local-pty')
+  })
+  it('qualifies renderer liveness by its persisted session incarnation', async () => {
+    const worktreeId = 'repo::/workspace'
+    const exactLeafId = '11111111-1111-4111-8111-111111111111'
+    const legacyLeafId = '22222222-2222-4222-8222-222222222222'
+    const exactPaneKey = makePaneKey('tab-exact', exactLeafId)
+    const legacyPaneKey = makePaneKey('tab-legacy', legacyLeafId)
+    const probePtyLiveness = vi.fn(async () => false)
+    installDaemonTestProvider({ probePtyLiveness })
+    registerPtyHandlers(mainWindow as never, undefined, undefined, undefined, undefined, {
+      getWorkspaceSession: () => ({
+        tabsByWorktree: {
+          [worktreeId]: [
+            { id: 'tab-exact', worktreeId },
+            { id: 'tab-legacy', worktreeId }
+          ]
+        },
+        terminalLayoutsByTabId: {
+          'tab-exact': { ptyIdsByLeafId: { [exactLeafId]: 'pty-exact' } },
+          'tab-legacy': { ptyIdsByLeafId: { [legacyLeafId]: 'pty-legacy' } }
+        },
+        terminalPtyIncarnationsByPaneKey: { [exactPaneKey]: 'incarnation-exact' }
+      })
+    } as never)
+
+    await expect(
+      handlers.get('pty:hasPty')!(null, {
+        id: 'pty-exact',
+        paneKey: exactPaneKey,
+        worktreeId
+      })
+    ).resolves.toBe(false)
+    await expect(
+      handlers.get('pty:hasPty')!(null, {
+        id: 'pty-legacy',
+        paneKey: legacyPaneKey,
+        worktreeId
+      })
+    ).resolves.toBeNull()
+
+    expect(probePtyLiveness).toHaveBeenCalledExactlyOnceWith('pty-exact', 'incarnation-exact')
+  })
+  it('discards a delayed liveness verdict after the persisted incarnation changes', async () => {
+    const worktreeId = 'repo::/workspace'
+    const leafId = '11111111-1111-4111-8111-111111111111'
+    const paneKey = makePaneKey('tab-exact', leafId)
+    const probe = makeDeferred()
+    const probePtyLiveness = vi.fn(async () => {
+      await probe.promise
+      return false
+    })
+    const workspaceSession = {
+      tabsByWorktree: { [worktreeId]: [{ id: 'tab-exact', worktreeId }] },
+      terminalLayoutsByTabId: {
+        'tab-exact': { ptyIdsByLeafId: { [leafId]: 'reused-pty' } }
+      },
+      terminalPtyIncarnationsByPaneKey: { [paneKey]: 'incarnation-a' }
+    }
+    installDaemonTestProvider({ probePtyLiveness })
+    registerPtyHandlers(mainWindow as never, undefined, undefined, undefined, undefined, {
+      getWorkspaceSession: () => workspaceSession
+    } as never)
+
+    const pending = handlers.get('pty:hasPty')!(null, {
+      id: 'reused-pty',
+      paneKey,
+      worktreeId
+    })
+    await vi.waitFor(() =>
+      expect(probePtyLiveness).toHaveBeenCalledWith('reused-pty', 'incarnation-a')
+    )
+    workspaceSession.terminalPtyIncarnationsByPaneKey[paneKey] = 'incarnation-b'
+    probe.resolve()
+
+    await expect(pending).resolves.toBeNull()
   })
   it('treats unsupported or failed single-PTY liveness as unknown', async () => {
     setLocalPtyProvider({
