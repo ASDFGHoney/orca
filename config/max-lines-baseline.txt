@@ -152,7 +152,6 @@ inline src/renderer/src/store/slices/github.ts
 inline src/renderer/src/store/slices/hosted-review.ts
 inline src/renderer/src/store/slices/jira.ts
 inline src/renderer/src/store/slices/linear.ts
-inline src/renderer/src/store/slices/repos.ts
 inline src/renderer/src/store/slices/tabs.ts
 inline src/renderer/src/store/slices/terminals.ts
 inline src/renderer/src/store/slices/ui.ts
