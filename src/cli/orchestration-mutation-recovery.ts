@@ -1,5 +1,9 @@
 import { RuntimeClientError } from './runtime-client'
 import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
+import { quoteWindowsCmdArgument } from '../shared/child-process/windows-command-line'
+import { quotePowerShellNativeArgument } from '../shared/powershell-native-argument'
+import { resolveWindowsShellStartupFamily } from '../shared/windows-terminal-shell'
+import type { AgentStartupShell } from '../shared/tui-agent-startup-shell'
 
 export function orchestrationMutationRecoveryError(error: unknown): unknown {
   if (!(error instanceof RuntimeClientError) || !isUnknownMutationOutcomeCode(error.code)) {
@@ -129,8 +133,38 @@ function parseCommandLine(value: string): string[] | undefined {
   return parts.length > 0 ? parts : undefined
 }
 
-function renderCommand(command: readonly string[]): string {
-  return command.map(shellQuote).join(' ')
+export function renderCommand(
+  command: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const shell = resolveRecoveryShell(platform, env)
+  const rendered = command.map((value) => quoteRecoveryArgument(value, shell)).join(' ')
+  return shell === 'powershell' && rendered ? `& ${rendered}` : rendered
+}
+
+function resolveRecoveryShell(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): AgentStartupShell {
+  if (platform !== 'win32') {
+    return 'posix'
+  }
+  return resolveWindowsShellStartupFamily(
+    env.ORCA_TERMINAL_WINDOWS_SHELL ?? env.ORCA_WINDOWS_SHELL ?? env.ComSpec ?? env.COMSPEC
+  )
+}
+
+function quoteRecoveryArgument(value: string, shell: AgentStartupShell): string {
+  if (shell === 'cmd') {
+    // cmd has no single-quote syntax and expands %VAR% inside double quotes;
+    // use the argv encoder that keeps quote parity and escapes percent pairs.
+    return quoteWindowsCmdArgument(value)
+  }
+  if (shell === 'powershell') {
+    return quotePowerShellNativeArgument(value)
+  }
+  return shellQuote(value)
 }
 
 function shellQuote(value: string): string {

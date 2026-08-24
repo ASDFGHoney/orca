@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { orchestrationMutationRecoveryError } from './orchestration-mutation-recovery'
+import {
+  orchestrationMutationRecoveryError,
+  renderCommand
+} from './orchestration-mutation-recovery'
 import { RuntimeClientError } from './runtime-client'
 
 describe('orchestration mutation recovery', () => {
@@ -110,5 +113,28 @@ describe('orchestration mutation recovery', () => {
       '--retry-request',
       'request_4'
     ])
+  })
+
+  it('renders Windows cmd recovery guidance without quote drift or percent expansion', () => {
+    expect(
+      renderCommand(
+        ['orca', 'orchestration', 'worker-start', '--comment', 'literal "quoted" %PATH% & safe'],
+        'win32',
+        { ComSpec: 'C:\\Windows\\System32\\cmd.exe' }
+      )
+    ).toBe(
+      '"orca" "orchestration" "worker-start" "--comment" "literal ""quoted"" "^%"PATH"^%" & safe"'
+    )
+  })
+
+  it('keeps PowerShell and POSIX recovery guidance literal', () => {
+    expect(
+      renderCommand(['orca', 'literal "quoted" $HOME'], 'win32', {
+        ComSpec: 'powershell.exe'
+      })
+    ).toBe("& 'orca' 'literal \\\"quoted\\\" $HOME'")
+    expect(renderCommand(['orca', 'literal $(do-not-run)'], 'darwin')).toBe(
+      "orca 'literal $(do-not-run)'"
+    )
   })
 })
