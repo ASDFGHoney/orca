@@ -28462,6 +28462,9 @@ export class OrcaRuntimeService {
         if (launchOpts.signal?.aborted) {
           throw new Error('client_disconnected')
         }
+        // Why: every host-created terminal must survive a renderer omission or
+        // promotion; the binding is durable regardless of attached windows.
+        const persistHostSessionBinding = true
         let result: Awaited<ReturnType<NonNullable<RuntimePtyController['spawn']>>>
         try {
           result = await this.ptyController.spawn({
