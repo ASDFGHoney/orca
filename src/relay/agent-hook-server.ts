@@ -284,15 +284,10 @@ export class RelayAgentHookServer {
     if (event.payload.state !== 'done' || event.payload.lastAssistantMessage) {
       this.retryScheduler.clearAssistantMessageRetry(event.paneKey)
     }
-    // Why: a reconnecting client receives the pane's last event as an isReplay rebuild of this
-    // cache, and after a compact that entry IS the PostCompact. Cache it stripped of its compact
-    // identity so the replay arrives as an ordinary status row the client applies normally —
-    // otherwise the only channel that can deliver the clearing `done` to a client that was offline
-    // during the compact is the one path a compact-event guard would reject.
-    const cachedEvent =
-      event.hookEventName === 'PostCompact'
-        ? { ...event, hookEventName: undefined, compactTrigger: undefined }
-        : event
+    // Why: keep PostCompact identity in the replay cache so the client can re-run ownership when
+    // it reconnects. Stripping it would let a cold relay replay a completion as an ordinary `done`
+    // row and resurrect a pane that the client had already retired.
+    const cachedEvent = event
     // Why: delete-then-set makes Map insertion order = recency, so the cap below evicts the longest-idle pane.
     this.state.lastStatusByPaneKey.delete(event.paneKey)
     this.state.lastStatusByPaneKey.set(event.paneKey, cachedEvent)
