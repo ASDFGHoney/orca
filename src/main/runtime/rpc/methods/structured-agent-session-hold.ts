@@ -40,7 +40,12 @@ export const STRUCTURED_AGENT_SESSION_HOLD_METHODS: RpcAnyMethod[] = [
         () => host.release(params.sessionId, holderKey),
         ctx.connectionId
       )
-      await host.hold(params.sessionId, holderKey)
+      try {
+        await host.hold(params.sessionId, holderKey)
+      } catch (error) {
+        ctx.runtime.cleanupSubscription(holdCleanupIdFor(params.sessionId, holderKey))
+        throw error
+      }
       return { held: true as const }
     }
   }),

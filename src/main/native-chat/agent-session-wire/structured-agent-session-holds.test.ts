@@ -119,8 +119,10 @@ describe('the release clock', () => {
 
 describe('holds', () => {
   it('resumes a session on its first hold and not on a retained one', async () => {
-    const resume = vi.fn(async () => {})
     let child = false
+    const resume = vi.fn(async () => {
+      child = true
+    })
     const holds = new StructuredAgentSessionHolds({
       resume,
       hasProviderChild: () => child,
@@ -157,6 +159,22 @@ describe('holds', () => {
 
     expect(evict).not.toHaveBeenCalled()
     expect(holds.isReleasePending('session-1')).toBe(false)
+    holds.dispose()
+  })
+
+  it('fails a write-capable hold when resume proves no provider child', async () => {
+    const holds = new StructuredAgentSessionHolds({
+      resume: async () => {},
+      hasProviderChild: () => false,
+      isTurnActive: () => false,
+      evict: async () => {},
+      graceMs: 1
+    })
+
+    await expect(holds.hold('session-1', 'chat-1')).rejects.toThrow(
+      'agent_session_ownership_unknown'
+    )
+    expect(holds.isHeld('session-1')).toBe(false)
     holds.dispose()
   })
 })

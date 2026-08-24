@@ -53,12 +53,24 @@ export class StructuredAgentSessionHolds {
     holderId: string,
     options: StructuredAgentSessionHoldOptions = {}
   ): Promise<void> {
+    const alreadyHeld = this.holders.has(sessionId, holderId)
     this.holders.add(sessionId, holderId)
     // Unconditional, not only on the first-holder edge: a second surface arriving during the grace
     // window must cancel the pending release too.
     this.clock.cancel(sessionId)
-    if (options.resume !== false && !this.deps.hasProviderChild(sessionId)) {
+    if (options.resume === false || this.deps.hasProviderChild(sessionId)) {
+      return
+    }
+    try {
       await this.deps.resume(sessionId)
+      if (!this.deps.hasProviderChild(sessionId)) {
+        throw new Error('agent_session_ownership_unknown')
+      }
+    } catch (error) {
+      if (!alreadyHeld) {
+        this.holders.remove(sessionId, holderId)
+      }
+      throw error
     }
   }
 
