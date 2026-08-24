@@ -6,9 +6,6 @@ import {
   type ExecutionHostId
 } from '../../../shared/execution-host'
 import {
-  isDefaultWorkspaceSession,
-  listPartitionHostIds,
-  readPartitionWithRecovery,
   removePartitionFilesSync,
   SAVE_DEBOUNCE_MS,
   SAVE_MAX_WAIT_MS,
@@ -19,6 +16,10 @@ import {
   type WorkspaceSessionPartitionWriteTrigger,
   type WorkspaceSessionSidecarOptions
 } from './workspace-session-sidecar-files'
+import {
+  resolveWorkspaceSessionSidecarLoad,
+  type WorkspaceSessionSidecarLoadArguments
+} from './workspace-session-sidecar-load-resolution'
 
 export abstract class WorkspaceSessionSidecarState {
   protected readonly dataFile: string
@@ -53,110 +54,20 @@ export abstract class WorkspaceSessionSidecarState {
     trigger?: WorkspaceSessionPartitionWriteTrigger
   }): Promise<void>
 
-  resolveForLoad(args: {
-    workspaceSession: WorkspaceSessionState
-    workspaceSessionsByHostId?: Partial<Record<ExecutionHostId, WorkspaceSessionState>>
-    embeddedLocalPresent: boolean
-    embeddedHostIds: ReadonlySet<ExecutionHostId>
-    embeddedPayloadPresent: boolean
-    embeddedGenerationByHostId?: Partial<Record<ExecutionHostId, number>>
-    coreRestoredFromBackup?: boolean
-    replacementPending?: boolean
-  }): LoadResolution {
-    this.sessions.clear()
-    this.generations.clear()
-    this.durableGenerations.clear()
-    this.dirty.clear()
-    this.synchronizedCoreHashes.clear()
-    this.pendingPruneHostIds.clear()
+  resolveForLoad(args: WorkspaceSessionSidecarLoadArguments): LoadResolution {
     this.embeddedPayloadPresent = args.embeddedPayloadPresent
-
-    const replacementPending =
-      args.replacementPending === true && args.coreRestoredFromBackup !== true
-    const existingSidecarHostIds = new Set(listPartitionHostIds(this.dataFile))
-    const sidecarHostIds = replacementPending
-      ? new Set<ExecutionHostId>()
-      : new Set(existingSidecarHostIds)
-    if (args.embeddedLocalPresent) {
-      sidecarHostIds.add(LOCAL_EXECUTION_HOST_ID)
-    }
-    for (const hostId of args.embeddedHostIds) {
-      sidecarHostIds.add(hostId)
-    }
-    if (replacementPending) {
-      for (const hostId of existingSidecarHostIds) {
-        if (!sidecarHostIds.has(hostId)) {
-          this.pendingPruneHostIds.add(hostId)
-        }
-      }
-    }
-
-    for (const hostId of sidecarHostIds) {
-      const loaded = readPartitionWithRecovery(this.dataFile, hostId)
-      const embedded =
-        hostId === LOCAL_EXECUTION_HOST_ID
-          ? args.workspaceSession
-          : args.workspaceSessionsByHostId?.[hostId]
-      const embeddedPresent =
-        hostId === LOCAL_EXECUTION_HOST_ID
-          ? args.embeddedLocalPresent
-          : args.embeddedHostIds.has(hostId)
-      const embeddedIsUnmaterializedLocalDefault =
-        hostId === LOCAL_EXECUTION_HOST_ID &&
-        !loaded &&
-        embeddedPresent &&
-        embedded !== undefined &&
-        isDefaultWorkspaceSession(embedded)
-      const embeddedGeneration = args.embeddedGenerationByHostId?.[hostId]
-      const embeddedHash = embedded ? workspaceSessionHash(embedded) : undefined
-      if (embeddedHash) {
-        this.synchronizedCoreHashes.set(hostId, embeddedHash)
-      } else if (loaded?.envelope.lastSynchronizedCoreHash) {
-        this.synchronizedCoreHashes.set(hostId, loaded.envelope.lastSynchronizedCoreHash)
-      }
-      const rollbackPayloadChanged =
-        embeddedGeneration === undefined &&
-        loaded?.envelope.lastSynchronizedCoreHash !== undefined &&
-        embeddedHash !== loaded.envelope.lastSynchronizedCoreHash
-      const embeddedIsNewer =
-        !embeddedIsUnmaterializedLocalDefault &&
-        embeddedPresent &&
-        embedded !== undefined &&
-        (!loaded ||
-          (!args.coreRestoredFromBackup &&
-            (replacementPending ||
-              (embeddedGeneration === undefined
-                ? loaded.envelope.lastSynchronizedCoreHash === undefined || rollbackPayloadChanged
-                : embeddedGeneration > loaded.envelope.writeGeneration))))
-      const session = embeddedIsNewer ? embedded : loaded?.envelope.session
-      if (!session) {
-        continue
-      }
-      this.sessions.set(hostId, session)
-      const generation = loaded?.envelope.writeGeneration ?? 0
-      this.generations.set(hostId, generation)
-      this.durableGenerations.set(hostId, loaded ? generation : -1)
-      if (embeddedIsNewer || loaded?.repaired || loaded?.recovered) {
-        this.dirty.set(hostId, { trigger: 'migration', migration: embeddedIsNewer })
-      }
-    }
-
-    if (!this.sessions.has(LOCAL_EXECUTION_HOST_ID)) {
-      this.sessions.set(LOCAL_EXECUTION_HOST_ID, args.workspaceSession)
-      this.generations.set(LOCAL_EXECUTION_HOST_ID, 0)
-      this.durableGenerations.set(LOCAL_EXECUTION_HOST_ID, -1)
-    }
-
-    const workspaceSessionsByHostId: Partial<Record<ExecutionHostId, WorkspaceSessionState>> = {}
-    for (const [hostId, session] of this.sessions) {
-      if (hostId !== LOCAL_EXECUTION_HOST_ID) {
-        workspaceSessionsByHostId[hostId] = session
-      }
-    }
-    return {
-      workspaceSession: this.sessions.get(LOCAL_EXECUTION_HOST_ID)!,
-      workspaceSessionsByHostId
-    }
+    return resolveWorkspaceSessionSidecarLoad(
+      {
+        dataFile: this.dataFile,
+        sessions: this.sessions,
+        generations: this.generations,
+        durableGenerations: this.durableGenerations,
+        dirty: this.dirty,
+        synchronizedCoreHashes: this.synchronizedCoreHashes,
+        pendingPruneHostIds: this.pendingPruneHostIds
+      },
+      args
+    )
   }
 
   initialize(
