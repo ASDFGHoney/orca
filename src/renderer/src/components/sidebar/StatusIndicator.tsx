@@ -53,6 +53,21 @@ const StatusIndicator = React.memo(function StatusIndicator({
     )
   }
 
+  if (status === 'interrupted') {
+    return (
+      <span
+        className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
+        title={resolvedTitle}
+        {...rest}
+      >
+        {/* Why red, and why not the emerald done dot: the turn was cancelled or died, so it needs a
+            human to restart or look — presenting it as a completion is the bug (STA-5357). Matches the
+            agent row's own interrupted treatment (AgentStateDot uses bg-red-500). */}
+        <span className="block size-1.5 rounded-full bg-red-500" />
+      </span>
+    )
+  }
+
   if (status === 'permission') {
     return (
       <span

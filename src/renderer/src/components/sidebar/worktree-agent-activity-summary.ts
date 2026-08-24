@@ -16,6 +16,9 @@ export type WorktreeAgentActivitySummary = {
   hasPermission: boolean
   hasLiveWorking: boolean
   hasLiveMonitoring: boolean
+  /** A fresh hook entry carrying `interrupted`. Separate from `hasLiveDone` because the flag only ever
+   *  rides on `done` — folding it in reports a cancelled turn as a clean finish (STA-5357). */
+  hasInterrupted: boolean
   hasLiveDone: boolean
   hasRetainedDone: boolean
   agentStatusPaneIdsByTabId: Record<string, ReadonlySet<string>>
@@ -27,6 +30,7 @@ const EMPTY_SUMMARY: WorktreeAgentActivitySummary = {
   hasPermission: false,
   hasLiveWorking: false,
   hasLiveMonitoring: false,
+  hasInterrupted: false,
   hasLiveDone: false,
   hasRetainedDone: false,
   agentStatusPaneIdsByTabId: EMPTY_AGENT_STATUS_PANE_IDS_BY_TAB_ID
@@ -180,6 +184,7 @@ function summariesEqual(
     previous.hasPermission === next.hasPermission &&
     previous.hasLiveWorking === next.hasLiveWorking &&
     previous.hasLiveMonitoring === next.hasLiveMonitoring &&
+    previous.hasInterrupted === next.hasInterrupted &&
     previous.hasLiveDone === next.hasLiveDone &&
     previous.hasRetainedDone === next.hasRetainedDone &&
     agentStatusPaneIdsByTabIdEqual(
@@ -217,10 +222,14 @@ function agentStatusPaneIdsByTabIdEqual(
 
 function applyLiveAgentState(
   summary: WorktreeAgentActivitySummary,
-  entry: Pick<AgentStatusEntry, 'state' | 'workingMode'>
+  entry: Pick<AgentStatusEntry, 'state' | 'workingMode' | 'interrupted'>
 ): void {
   if (entry.state === 'blocked' || entry.state === 'waiting') {
     summary.hasPermission = true
+  } else if (entry.interrupted === true) {
+    // Why before the `done` branch: `interrupted` is clamped to `done` at parse time, so a cancelled
+    // turn would otherwise set `hasLiveDone` and render as a completed one.
+    summary.hasInterrupted = true
   } else if (entry.state === 'working') {
     if (entry.workingMode === 'monitoring') {
       summary.hasLiveMonitoring = true

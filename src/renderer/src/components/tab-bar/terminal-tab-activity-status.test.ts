@@ -110,7 +110,11 @@ describe('resolveTerminalTabActivityStatus', () => {
     ).toBe('done')
   })
 
-  it('treats an interrupted done as done, matching the worktree card', () => {
+  // Why this flipped (STA-5357): it used to assert `done`, deliberately mirroring the worktree card,
+  // which had no interrupted state. That made a cancelled turn indistinguishable from a clean finish
+  // on every glanceable surface. The card now distinguishes it, so the tab follows rather than
+  // preserving a consistency that was consistently wrong.
+  it('reports an interrupted done as interrupted, matching the worktree card', () => {
     const interrupted = entry(FIRST_LEAF_ID, 'done', { interrupted: true })
     expect(
       resolveTerminalTabActivityStatus({
@@ -118,7 +122,22 @@ describe('resolveTerminalTabActivityStatus', () => {
         agentStatusByPaneKey: { [interrupted.paneKey]: interrupted },
         ptyIdsByTabId: LIVE_PTY
       })
-    ).toBe('done')
+    ).toBe('interrupted')
+  })
+
+  it('does not let a finished sibling mask an interrupted pane', () => {
+    const interrupted = entry(FIRST_LEAF_ID, 'done', { interrupted: true })
+    const finished = entry(SECOND_LEAF_ID, 'done')
+    expect(
+      resolveTerminalTabActivityStatus({
+        tab: TAB,
+        agentStatusByPaneKey: {
+          [interrupted.paneKey]: interrupted,
+          [finished.paneKey]: finished
+        },
+        ptyIdsByTabId: LIVE_PTY
+      })
+    ).toBe('interrupted')
   })
 
   it('falls back to a live working title when hook status is stale', () => {

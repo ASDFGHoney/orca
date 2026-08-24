@@ -16,6 +16,7 @@ export type WorktreeStatus =
   | 'working'
   | 'monitoring'
   | 'permission'
+  | 'interrupted'
   | 'done'
   | 'inactive'
 
@@ -31,6 +32,7 @@ const STATUS_LABELS: Record<WorktreeStatus, string> = {
   working: 'Working',
   monitoring: 'Monitoring background tasks',
   permission: 'Needs permission',
+  interrupted: 'Interrupted',
   done: 'Done',
   inactive: 'Inactive'
 }
@@ -143,6 +145,7 @@ export function resolveWorktreeStatus(args: {
   hasPermission: boolean
   hasLiveWorking: boolean
   hasLiveMonitoring?: boolean
+  hasInterrupted?: boolean
   hasLiveDone: boolean
   hasRetainedDone: boolean
 }): WorktreeStatus {
@@ -163,6 +166,13 @@ export function resolveWorktreeStatus(args: {
   // Why: heuristic 'permission' outranks heuristic 'working' — the user-actionable signal wins when panes in one tab disagree.
   if (heuristic === 'permission') {
     return 'permission'
+  }
+  // Why above working (STA-5357): `interrupted` only ever rides on `done`, so before this it set
+  // `hasLiveDone` and the card rendered a cancelled turn as a clean finish — and a busy sibling could
+  // hide it entirely. It sits below permission because a prompt waiting on the user is the more urgent
+  // ask, and matches SUMMARY_STATE_ORDER so the card and the expanded agent list agree.
+  if (args.hasInterrupted) {
+    return 'interrupted'
   }
   // Why: restored cards get the hook snapshot before panes mount; trust the explicit working row so they stay yellow on restart.
   if (args.hasLiveWorking || heuristic === 'working') {

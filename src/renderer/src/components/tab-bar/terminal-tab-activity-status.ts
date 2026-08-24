@@ -20,6 +20,7 @@ type TerminalTabActivityFlags = {
   hasPermission: boolean
   hasLiveWorking: boolean
   hasLiveMonitoring: boolean
+  hasInterrupted: boolean
   hasLiveDone: boolean
   paneIds: Set<string>
 }
@@ -81,10 +82,12 @@ function getTerminalTabActivityFlags(
       } else {
         flags.hasLiveWorking = true
       }
+    } else if (entry.interrupted === true) {
+      // Why before `done` (STA-5357): the flag is clamped to `done`, so folding it in reported a
+      // cancelled turn as a completed one. This used to mirror the WorktreeCard dot deliberately —
+      // that dot now distinguishes interrupted, so the tab follows rather than diverging.
+      flags.hasInterrupted = true
     } else if (entry.state === 'done') {
-      // Why: an interrupted `done` still reads as completed here, matching the
-      // WorktreeCard dot (resolveWorktreeStatus has no interrupted state); only
-      // the smart-sort ordering treats interrupts as idle.
       flags.hasLiveDone = true
     }
   }
@@ -103,6 +106,7 @@ function getOrCreateTerminalTabActivityFlags(
       hasPermission: false,
       hasLiveWorking: false,
       hasLiveMonitoring: false,
+      hasInterrupted: false,
       hasLiveDone: false,
       paneIds: new Set()
     }
@@ -164,6 +168,7 @@ export function resolveTerminalTabActivityStatus({
     hasPermission: flags?.hasPermission ?? false,
     hasLiveWorking: flags?.hasLiveWorking ?? false,
     hasLiveMonitoring: flags?.hasLiveMonitoring ?? false,
+    hasInterrupted: flags?.hasInterrupted ?? false,
     hasLiveDone: flags?.hasLiveDone ?? false,
     // Why: retained/orchestration promotions are worktree-aggregate concerns;
     // a tab reflects its own live panes and title only.
@@ -180,7 +185,13 @@ export function isTerminalTabActivityLive(status: TerminalTabActivityStatus): bo
  * Glyph-bearing attention states for a terminal tab (tab bar + Cmd+J recent chats).
  * Quiet active/inactive map to null so identity icons stay clean.
  */
-export type TerminalTabAttentionBadge = 'working' | 'monitoring' | 'permission' | 'unread' | 'done'
+export type TerminalTabAttentionBadge =
+  | 'working'
+  | 'monitoring'
+  | 'permission'
+  | 'interrupted'
+  | 'unread'
+  | 'done'
 
 /**
  * Single priority ladder shared by the tab strip and Cmd+J recent rows:
@@ -202,6 +213,10 @@ export function resolveTerminalTabAttentionBadge({
   if (status === 'monitoring') {
     return 'monitoring'
   }
+  // Why above unread and done: a cancelled turn needs a human, and an unread bell would bury it.
+  if (status === 'interrupted') {
+    return 'interrupted'
+  }
   if (hasUnread) {
     return 'unread'
   }
@@ -214,11 +229,12 @@ export function resolveTerminalTabAttentionBadge({
 /** Map a container activity status onto AgentStateDot's vocabulary (no unread — that's a bell). */
 export function terminalTabActivityToAgentDotState(
   status: TerminalTabActivityStatus
-): 'working' | 'monitoring' | 'permission' | 'done' | null {
+): 'working' | 'monitoring' | 'permission' | 'interrupted' | 'done' | null {
   switch (status) {
     case 'working':
     case 'monitoring':
     case 'permission':
+    case 'interrupted':
     case 'done':
       return status
     case 'active':
