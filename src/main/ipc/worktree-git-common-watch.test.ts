@@ -37,6 +37,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 const POLL_MS = 25
+// Native re-arm is intentionally deferred to the 15-tick reconciliation. Give
+// loaded CI shards enough wall-clock slack without changing the exact call count.
+const RECONCILIATION_WAIT_TIMEOUT_MS = 5_000
 
 const alwaysVisible: WorktreePollerWindowVisibility = {
   isWindowVisible: () => true,
@@ -522,9 +525,12 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
     await rm(worktreesDir, { recursive: true })
     await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
-    })
+    await vi.waitFor(
+      () => {
+        expect(subscribeMock).toHaveBeenCalledTimes(2)
+      },
+      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
+    )
     expect(staleSubscription.unsubscribe).toHaveBeenCalledOnce()
 
     const beforeStaleEvent = received.length
@@ -543,9 +549,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
     subscribeMock.mockImplementation(async (dir, callback, _opts, hooks = {}) => {
       const unsubscribe = vi.fn(async () => {})
       childSubscriptions.push({ dir, callback, hooks, unsubscribe })
-      return childSubscriptions.length === 2
-        ? deferredSubscribe.promise
-        : { unsubscribe }
+      return childSubscriptions.length === 2 ? deferredSubscribe.promise : { unsubscribe }
     })
     const commonDir = await makeCommonDir(true)
     const worktreesDir = join(commonDir, 'worktrees')
@@ -557,20 +561,24 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
     await rm(worktreesDir, { recursive: true })
     await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
-    })
+    await vi.waitFor(
+      () => {
+        expect(subscribeMock).toHaveBeenCalledTimes(2)
+      },
+      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
+    )
     const stalePendingSubscription = childSubscriptions[1]
 
     await rm(worktreesDir, { recursive: true })
     await mkdir(retainedEntry, { recursive: true })
-    await vi.waitFor(() => {
-      expect(
-        received
-          .flat()
-          .filter((event) => event.type === 'create' && event.path === worktreesDir)
-      ).toHaveLength(2)
-    }, { timeout: 2_000 })
+    await vi.waitFor(
+      () => {
+        expect(
+          received.flat().filter((event) => event.type === 'create' && event.path === worktreesDir)
+        ).toHaveLength(2)
+      },
+      { timeout: RECONCILIATION_WAIT_TIMEOUT_MS }
+    )
 
     const beforeStaleInterruption = received.length
     stalePendingSubscription.hooks.onInterruption?.()
@@ -697,9 +705,12 @@ describe('worktree git-common polling gate (non-darwin)', () => {
 
     // Real filesystem stats cannot be flushed by a fake clock. Two scans must
     // arrive before the ordinary 15-tick (750ms) index backstop could fire.
-    await vi.waitFor(() => {
-      expect(fullScans.mock.calls.length).toBeGreaterThanOrEqual(2)
-    }, { timeout: 500 })
+    await vi.waitFor(
+      () => {
+        expect(fullScans.mock.calls.length).toBeGreaterThanOrEqual(2)
+      },
+      { timeout: 500 }
+    )
   })
 
   it('detects linked worktree add and remove from the every-tick readdir', async () => {
