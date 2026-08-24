@@ -40,7 +40,8 @@ export async function dispatchWorktreeRemoval(args: {
       ...snapshotPruneBatch
     })
   }
-  const effectiveHostId = qualifyRuntimeCallHost(target, hostId)
+  const effectiveHostId =
+    options?.sameIdSurvivingHostId != null ? hostId : qualifyRuntimeCallHost(target, hostId)
   return callRuntimeRpc<RemoveWorktreeResult>(
     target,
     'worktree.rm',
