@@ -33,7 +33,7 @@ function resolvePopoverScroller(target: EventTarget | null, content: HTMLElement
     }
     node = node.parentNode
   }
-  return content.scrollHeight > content.clientHeight ? content : null
+  return null
 }
 
 function PopoverContent({
@@ -74,7 +74,14 @@ function PopoverContent({
       }
 
       const content = event.currentTarget
-      if (!content.classList.contains('popover-scroll-content')) {
+      // Why two markers: `popover-scroll-content` also imposes a 15rem max-height and its
+      // own overflow, which a popover that manages its own layout (a fixed-height flex
+      // column over a pinned footer) must not inherit. `popover-wheel-scroll` opts into
+      // the shim alone.
+      if (
+        !content.classList.contains('popover-scroll-content') &&
+        !content.classList.contains('popover-wheel-scroll')
+      ) {
         return
       }
 

@@ -77,18 +77,22 @@ describe('PopoverContent wheel shim', () => {
     renderPopover('popover-scroll-content', true)
     const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!
     const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
-    makeScrollable(content, 400, 400)
+    makeScrollable(content, 800, 400)
     makeScrollable(viewport, 1000, 400)
 
     wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
     flushFrames()
 
     expect(viewport.scrollTop).toBe(120)
+    expect(content.scrollTop).toBe(0)
   })
 
   it('still scrolls the content itself when it is the scroller', () => {
     renderPopover('popover-scroll-content', false)
     const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!
+    // Inline because happy-dom does not apply the stylesheet; in the app
+    // `.popover-scroll-content` already sets `overflow-y: auto` (main.css).
+    content.style.overflowY = 'auto'
     makeScrollable(content, 1000, 400)
 
     wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
@@ -106,5 +110,56 @@ describe('PopoverContent wheel shim', () => {
     flushFrames()
 
     expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('ignores vertically clipped elements and horizontal-only scrollers', () => {
+    renderPopover('popover-scroll-content', true)
+    const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    content.style.overflowY = 'hidden'
+    viewport.style.overflowY = 'hidden'
+    viewport.style.overflowX = 'auto'
+    makeScrollable(content, 1000, 400)
+    makeScrollable(viewport, 1000, 400)
+    Object.defineProperty(viewport, 'scrollWidth', { value: 1000, configurable: true })
+    Object.defineProperty(viewport, 'clientWidth', { value: 400, configurable: true })
+
+    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+    flushFrames()
+
+    expect(content.scrollTop).toBe(0)
+    expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('does nothing when no element in the target chain can scroll', () => {
+    renderPopover('popover-scroll-content', true)
+    const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    content.style.overflowY = 'hidden'
+    viewport.style.overflowY = 'hidden'
+    makeScrollable(content, 1000, 400)
+    makeScrollable(viewport, 1000, 400)
+
+    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+    flushFrames()
+
+    expect(content.scrollTop).toBe(0)
+    expect(viewport.scrollTop).toBe(0)
+  })
+
+  it('runs for the shim-only marker, which carries no styling', () => {
+    // The workspace-cleanup Filters panel needs the wheel shim but must NOT inherit
+    // `.popover-scroll-content`'s 15rem max-height, which would crush its 471px column.
+    renderPopover('popover-wheel-scroll', true)
+    const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')!
+    const viewport = document.querySelector<HTMLElement>('[data-testid="viewport"]')!
+    viewport.style.overflowY = 'auto'
+    makeScrollable(content, 400, 400)
+    makeScrollable(viewport, 1000, 400)
+
+    wheel(document.querySelector<HTMLElement>('[data-testid="inner"]')!, 120)
+    flushFrames()
+
+    expect(viewport.scrollTop).toBe(120)
   })
 })
