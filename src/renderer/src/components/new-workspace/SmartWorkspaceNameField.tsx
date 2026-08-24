@@ -61,6 +61,7 @@ import {
   getVisibleBranchResults,
   getVisibleHeldProviderResults,
   isBlockingJiraUrlIntent,
+  isBlockingTaskUrlResolution,
   type SmartNameMode,
   type SmartWorkspaceSourceRow
 } from './smart-workspace-source-results'
@@ -1387,6 +1388,12 @@ export default function SmartWorkspaceNameField({
     linearAvailable &&
     sourceIntent !== 'linear' &&
     (linearLoading || settledLinearUrlQuery !== linearQuery.trim())
+  const blockingTaskUrlResolution = isBlockingTaskUrlResolution({
+    sourceIntent: sourceIntent === 'github' || sourceIntent === 'gitlab' ? sourceIntent : null,
+    isQueryStale,
+    githubLoading,
+    gitlabLoading
+  })
 
   const resolvedCommandValue = resolveSmartWorkspaceCommandValue({
     currentValue: commandValue,
@@ -1993,7 +2000,7 @@ export default function SmartWorkspaceNameField({
                           handleEmojiSelect(selectedEmojiSuggestion)
                           return
                         }
-                        if (unresolvedLinearUrlIntent) {
+                        if (unresolvedLinearUrlIntent || blockingTaskUrlResolution) {
                           event.preventDefault()
                           return
                         }

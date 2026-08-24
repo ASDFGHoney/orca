@@ -60,8 +60,29 @@ export function isBlockingJiraUrlIntent(mode: SmartNameMode, value: string): boo
   return (mode === 'smart' || mode === 'jira') && parseJiraIssueUrl(value) !== null
 }
 
+export function isBlockingTaskUrlResolution({
+  sourceIntent,
+  isQueryStale,
+  githubLoading,
+  gitlabLoading
+}: {
+  sourceIntent: 'github' | 'gitlab' | null
+  isQueryStale: boolean
+  githubLoading: boolean
+  gitlabLoading: boolean
+}): boolean {
+  if (sourceIntent === null) {
+    return false
+  }
+  return isQueryStale || (sourceIntent === 'github' ? githubLoading : gitlabLoading)
+}
+
 function toJiraSourceRow(issue: JiraIssue): SmartWorkspaceSourceRow {
   return { kind: 'jira', value: `jira-${issue.siteId ?? ''}-${issue.key}`, issue }
+}
+
+function toGitHubSourceRow(item: GitHubWorkItem): SmartWorkspaceSourceRow {
+  return { kind: 'github', value: `github-${item.repoId}-${item.type}-${item.number}`, item }
 }
 
 export function getBranchSearchRequest({
@@ -256,13 +277,7 @@ export function buildSmartWorkspaceSourceRows({
     return nextRows
   }
   if (mode === 'smart' || mode === 'github') {
-    nextRows.push(
-      ...githubItems.map((item) => ({
-        kind: 'github' as const,
-        value: `github-${item.repoId}-${item.type}-${item.number}`,
-        item
-      }))
-    )
+    nextRows.push(...githubItems.map(toGitHubSourceRow))
   }
   if (gitlabAvailable && (mode === 'smart' || mode === 'gitlab')) {
     nextRows.push(

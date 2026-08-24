@@ -26,6 +26,10 @@ export type SmartWorkspaceUrlSourceRow =
   | { kind: 'gitlab'; value: string; item: GitLabWorkItem }
   | { kind: 'linear'; value: string; issue: LinearIssue }
 
+function toGitHubSourceRow(item: GitHubWorkItem): SmartWorkspaceUrlSourceRow {
+  return { kind: 'github', value: `github-${item.repoId}-${item.type}-${item.number}`, item }
+}
+
 function withSmartNameFallback(
   mode: SmartWorkspaceUrlSourceMode,
   name: string,
@@ -87,11 +91,7 @@ export function buildSmartWorkspaceUrlSourceRows({
   if (githubUrlIntent && (mode === 'smart' || mode === 'github')) {
     const rows = githubItems
       .filter((item) => isGitHubLinkIntentMatch(githubUrlIntent, item))
-      .map((item) => ({
-        kind: 'github' as const,
-        value: `github-${item.repoId}-${item.type}-${item.number}`,
-        item
-      }))
+      .map(toGitHubSourceRow)
       .slice(0, resultLimit)
     return withSmartNameFallback(mode, trimmed, rows)
   }
