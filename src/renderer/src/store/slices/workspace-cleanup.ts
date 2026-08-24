@@ -43,6 +43,7 @@ import {
   throwIfWorkspaceCleanupScanSuperseded
 } from './workspace-cleanup-broad-scan-registry'
 import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-agent-evidence'
+import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
 import type { PreservedBranchCleanup } from '@/lib/preserved-branch-cleanup'
 
 export type WorkspaceCleanupFailure = {
@@ -883,7 +884,12 @@ function getInitialWorkspaceCleanupGitDeferrals(state: AppState): string[] {
     const hasVisibleContext =
       openEditorWorktreeIds.has(worktreeId) ||
       (state.browserTabsByWorktree[worktreeId]?.length ?? 0) > 0
-    const lastVisitedAt = state.lastVisitedAtByWorktreeId[worktreeId] ?? 0
+    // Why: enrichment state may be a plain snapshot without slice methods.
+    const lastVisitedAt =
+      getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+        id: worktreeId,
+        hostId: state.getKnownWorktreeById?.(worktreeId)?.hostId
+      }) ?? 0
     if (
       hasVisibleContext &&
       lastVisitedAt > 0 &&
@@ -1053,7 +1059,11 @@ function getWorkspaceCleanupLocalStateSignature(
     browserTabCount: (state.browserTabsByWorktree[worktreeId] ?? []).length,
     retainedDoneAgentPaneKeys,
     agentStatuses,
-    lastVisitedAt: state.lastVisitedAtByWorktreeId[worktreeId] ?? 0,
+    lastVisitedAt:
+      getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+        id: worktreeId,
+        hostId: getWorkspaceCleanupCandidateHostId(candidate)
+      }) ?? 0,
     viewed: state.workspaceCleanupViewedCandidates[worktreeId] ?? null,
     dismissal
   })
@@ -1098,7 +1108,11 @@ async function enrichWorkspaceCleanupCandidate(
     blockers.push('terminal-liveness-unknown')
   }
 
-  const lastVisitedAt = state.lastVisitedAtByWorktreeId[candidate.worktreeId] ?? 0
+  const lastVisitedAt =
+    getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+      id: candidate.worktreeId,
+      hostId: getWorkspaceCleanupCandidateHostId(candidate)
+    }) ?? 0
   const hasVisibleContext = cleanEditorTabCount > 0 || browserTabCount > 0
   if (
     hasVisibleContext &&
