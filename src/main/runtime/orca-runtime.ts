@@ -5961,8 +5961,13 @@ export class OrcaRuntimeService {
 
   private tryGetWorkspaceSessionHostIdForWorktree(
     worktreeId: string,
-    ownerIndex?: WorkspaceExecutionOwnerIndex
+    ownerIndex?: WorkspaceExecutionOwnerIndex | null
   ): ExecutionHostId | null {
+    // Why: floating PTYs have an explicit local identity and no repo/worktree
+    // owner to resolve. Keep this sentinel path free of owner-index construction.
+    if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
+      return LOCAL_EXECUTION_HOST_ID
+    }
     const scope = parseWorkspaceKey(worktreeId)
     if (scope?.type === 'folder') {
       if (ownerIndex) {
@@ -6182,23 +6187,29 @@ export class OrcaRuntimeService {
 
   private hasAmbiguousWorkspaceExecutionOwner(
     worktreeId: string,
-    ownerIndex = this.buildWorkspaceExecutionOwnerIndex()
+    ownerIndex?: WorkspaceExecutionOwnerIndex | null
   ): boolean {
+    // Floating terminals are explicitly local and cannot have duplicate catalog
+    // owners, so checking them must not construct the owner index.
+    if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
+      return false
+    }
+    const resolvedOwnerIndex = ownerIndex ?? this.buildWorkspaceExecutionOwnerIndex()
     const workspaceScope = parseWorkspaceKey(worktreeId)
     if (workspaceScope?.type === 'folder') {
       const folderId = workspaceScope.folderWorkspaceId
       return (
-        ownerIndex.unresolvedFolderIds.has(folderId) ||
-        ownerIndex.folderHostIdsById.get(folderId)?.size !== 1
+        resolvedOwnerIndex.unresolvedFolderIds.has(folderId) ||
+        resolvedOwnerIndex.folderHostIdsById.get(folderId)?.size !== 1
       )
     }
     const parsed = splitWorktreeIdForFilesystem(worktreeId)
     if (!parsed) {
       // Unparseable IDs have no path-based owner candidates to compare.
-      return (ownerIndex.exactHostIdsByWorktreeId.get(worktreeId)?.size ?? 0) > 1
+      return (resolvedOwnerIndex.exactHostIdsByWorktreeId.get(worktreeId)?.size ?? 0) > 1
     }
-    const ownerHostIds = new Set(ownerIndex.exactHostIdsByWorktreeId.get(worktreeId) ?? [])
-    const repoOwners = ownerIndex.repoOwnersById.get(parsed.repoId) ?? []
+    const ownerHostIds = new Set(resolvedOwnerIndex.exactHostIdsByWorktreeId.get(worktreeId) ?? [])
+    const repoOwners = resolvedOwnerIndex.repoOwnersById.get(parsed.repoId) ?? []
     const pathOwners = repoOwners.filter((repo) =>
       isPathInsideOrEqual(repo.path, parsed.worktreePath)
     )
@@ -6214,7 +6225,7 @@ export class OrcaRuntimeService {
 
   private assertUnambiguousWorkspaceExecutionOwner(
     worktreeId: string,
-    ownerIndex?: WorkspaceExecutionOwnerIndex
+    ownerIndex?: WorkspaceExecutionOwnerIndex | null
   ): void {
     if (this.hasAmbiguousWorkspaceExecutionOwner(worktreeId, ownerIndex)) {
       this.mobileSessionTabsByWorktree.delete(worktreeId)
@@ -6224,7 +6235,7 @@ export class OrcaRuntimeService {
 
   private getWorkspaceSessionForWorktree(
     worktreeId: string,
-    ownerIndex?: WorkspaceExecutionOwnerIndex
+    ownerIndex?: WorkspaceExecutionOwnerIndex | null
   ): WorkspaceSessionState | null {
     const hostId = this.tryGetWorkspaceSessionHostIdForWorktree(worktreeId, ownerIndex)
     return hostId ? (this.store?.getWorkspaceSession?.(hostId) ?? null) : null
@@ -7302,13 +7313,17 @@ export class OrcaRuntimeService {
     }
     return changed
   }
-
   async listMobileSessionTabs(
     worktreeSelector: string,
     clientNavigationId?: string
   ): Promise<RuntimeMobileSessionTabsResult> {
     const explicitWorktreeId = this.getValidatedExplicitWorktreeIdSelector(worktreeSelector)
-    const ownerIndex = this.buildWorkspaceExecutionOwnerIndex()
+    // Floating PTYs are explicitly local and must not pay for the fleet owner
+    // catalog on every mobile poll.
+    const ownerIndex =
+      explicitWorktreeId === FLOATING_TERMINAL_WORKTREE_ID
+        ? null
+        : this.buildWorkspaceExecutionOwnerIndex()
     if (explicitWorktreeId) {
       this.assertUnambiguousWorkspaceExecutionOwner(explicitWorktreeId, ownerIndex)
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(explicitWorktreeId, {
@@ -7320,7 +7335,9 @@ export class OrcaRuntimeService {
       await this.refreshMobileSessionPtyRecords(explicitWorktreeId)
       this.assertUnambiguousWorkspaceExecutionOwner(
         explicitWorktreeId,
-        this.buildWorkspaceExecutionOwnerIndex()
+        explicitWorktreeId === FLOATING_TERMINAL_WORKTREE_ID
+          ? null
+          : this.buildWorkspaceExecutionOwnerIndex()
       )
       this.restoreLivePairedRendererSessionOwnedMobileTerminals(explicitWorktreeId)
       return this.getMobileSessionTabsForWorktree(explicitWorktreeId, clientNavigationId)
@@ -7377,7 +7394,7 @@ export class OrcaRuntimeService {
       onlyRuntimeOwnedTerminals?: boolean
       runtimeOwnedTerminalCandidateKnown?: boolean
       workspaceSession?: WorkspaceSessionState
-      ownerIndex?: WorkspaceExecutionOwnerIndex
+      ownerIndex?: WorkspaceExecutionOwnerIndex | null
     } = {}
   ): Set<string> {
     // Why: report which worktrees were reconciled in place so callers don't
@@ -7386,7 +7403,12 @@ export class OrcaRuntimeService {
     if (this.getAvailableAuthoritativeWindow() && options.allowAttachedWindow !== true) {
       return reconciledWorktreeIds
     }
-    const ownerIndex = options.ownerIndex ?? this.buildWorkspaceExecutionOwnerIndex()
+    // `null` is an explicit sentinel used only for floating terminal hydration:
+    // unlike `undefined`, it must not fall back to constructing the owner index.
+    const ownerIndex =
+      options.ownerIndex === null
+        ? null
+        : (options.ownerIndex ?? this.buildWorkspaceExecutionOwnerIndex())
     const session =
       options.workspaceSession ??
       (worktreeId
@@ -9510,7 +9532,7 @@ export class OrcaRuntimeService {
           : record
             ? LOCAL_EXECUTION_HOST_ID
             : null)
-      if (ptyHostId && ptyHostId !== ownerHostId) {
+      if (ptyHostId && ptyHostId !== ownerHostId && fromId === null) {
         throw new Error('terminal_host_scope_mismatch')
       }
     }
