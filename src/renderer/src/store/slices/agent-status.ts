@@ -2304,6 +2304,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           matchedSleepingLaunchConfig
         const entry: AgentStatusEntry = {
           state: payload.state,
+          workingMode: payload.workingMode,
           prompt: payload.prompt,
           updatedAt,
           stateStartedAt,
@@ -2389,6 +2390,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           existing?.state === 'done' &&
           entry.state === 'done' &&
           agentEntryCompletionAt(existing) !== agentEntryCompletionAt(entry)
+        const workingModeChanged = existing?.workingMode !== entry.workingMode
         const sortRelevantChange =
           !existing ||
           existing.state !== payload.state ||
@@ -2414,7 +2416,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             entry.providerSession !== existing.providerSession ||
             entry.interrupted !== existing.interrupted)
         const retentionRelevantChange =
-          sortRelevantChange || attributionChanged || doneRetentionFieldsChanged
+          sortRelevantChange ||
+          attributionChanged ||
+          workingModeChanged ||
+          doneRetentionFieldsChanged
         // Why: a fresh status means the agent is live again — lift its one-shot retention suppressor.
         // Clone the map only when a suppressor exists, else every high-frequency ping churns the ref.
         const hasSuppressor = paneKey in s.retentionSuppressedPaneKeys

@@ -3310,6 +3310,7 @@ export function useIpcEvents(): void {
       const ownerTabId = parsePaneKey(paneKey)?.tabId ?? data.tabId
       const payload = normalizeAgentStatusPayload({
         state: data.state,
+        workingMode: data.workingMode,
         prompt: data.prompt,
         agentType: data.agentType,
         model: data.model,

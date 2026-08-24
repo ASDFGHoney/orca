@@ -37,9 +37,13 @@ function getCompactAgentPrimary(
   return prompt || agentStateLabel(getAgentDotState(agent))
 }
 
-function getCompactAgentSecondary(agent: DashboardAgentRowData): string {
+export function getCompactAgentSecondary(agent: DashboardAgentRowData): string {
   if (agent.entry.interrupted === true) {
     return 'Interrupted by user'
+  }
+  // Why: the lead turn is over in monitoring, so its last tool line is stale; name the state instead.
+  if (agent.state === 'working' && agent.entry.workingMode === 'monitoring') {
+    return agentStateLabel('monitoring')
   }
   const toolPreview = formatAgentToolPreview(agent.entry, agent.state)
   if (toolPreview) {
