@@ -42,15 +42,13 @@ describe('AgentStateDot', () => {
     expect(markup).toContain('motion-reduce:border-t-yellow-500')
   })
 
-  it('renders monitoring as a static turquoise dot, never a spinner', () => {
+  it('renders monitoring as a static yellow radio glyph', () => {
     const markup = renderMarkup('monitoring')
 
     expect(markup).toContain('aria-label="Monitoring background tasks"')
-    expect(markup).toContain('bg-agent-monitoring')
-    // Why: the turn is over — a spinner here is the bug this state exists to fix.
+    expect(markup).toContain('lucide-radio')
+    expect(markup).toContain('text-yellow-500')
     expect(markup).not.toContain('data-agent-spinner')
-    // Why: must stay visually separable from the done/active dot.
-    expect(markup).not.toContain('bg-emerald-500')
   })
 
   it('renders done as an emerald check icon', () => {

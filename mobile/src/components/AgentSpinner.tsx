@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Radio } from 'lucide-react-native'
 import { Animated, Easing, StyleSheet, View } from 'react-native'
 import type { AgentWorkingMode } from '../../../src/shared/agent-status-types'
 
@@ -17,7 +18,6 @@ const STATUS_COLORS: Record<WorktreeStatus, string> = {
   permission: '#ef4444',
   inactive: 'rgba(115,115,115,0.4)'
 }
-const MONITORING_COLOR = '#8abeb7'
 
 export function AgentSpinner({
   status,
@@ -48,11 +48,9 @@ export function AgentSpinner({
   const color = STATUS_COLORS[status] ?? STATUS_COLORS.inactive
 
   if (monitoring) {
-    // Why: static dot, not a spinner — the lead turn is over. Keep MONITORING_COLOR
-    // in step with --agent-monitoring in the desktop main.css.
     return (
       <View style={styles.wrapper} accessibilityLabel="Monitoring background tasks">
-        <View style={[styles.dot, { backgroundColor: MONITORING_COLOR }]} />
+        <Radio size={12} color={STATUS_COLORS.working} />
       </View>
     )
   }
