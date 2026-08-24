@@ -11,6 +11,7 @@ import {
   selectNativeChatSkillStateInputs,
   type NativeChatSkillDiscoveryContext
 } from './native-chat-skill-discovery-context'
+import { isSkillSourceVisibleToAgent } from '../../../../shared/skill-install-providers'
 
 export {
   resolveNativeChatSkillDiscoveryContext,
@@ -66,7 +67,7 @@ export function isNativeChatSkillForAgent(
   const rootPaths = skill.rootPaths?.length ? skill.rootPaths : [skill.rootPath]
   return rootPaths.some((rootPath) => {
     const source = result.sources.find((entry) => entry.path === rootPath)
-    return source?.owner === null || source?.owner === profile.skillSourceOwner
+    return source ? isSkillSourceVisibleToAgent(profile.skillSourceOwner, source) : false
   })
 }
 
