@@ -29,6 +29,7 @@ export function NativeChatStructuredSession(props: {
   sessionId: string
   target: RuntimeClientTarget
   agent: AgentType
+  isVisible: boolean
   allowFileUriLinks: boolean
   onSwitchToTerminal?: () => void
   orchestrationDispatchStatus?: AgentStatusOrchestrationContext['dispatchStatus']

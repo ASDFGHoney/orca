@@ -3175,6 +3175,7 @@ function TerminalPane(
                   tabId={unifiedTabId ?? tabId}
                   sessionId={structuredSessionId}
                   agent="codex"
+                  isVisible={isRendererVisible}
                   target={{ kind: 'local' }}
                   allowFileUriLinks
                   orchestrationDispatchStatus={chatPaneDispatchStatus}

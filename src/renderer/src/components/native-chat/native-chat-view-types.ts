@@ -38,6 +38,7 @@ export type NativeChatStructuredViewProps = NativeChatOrchestrationProps & {
   sessionId: string
   target: RuntimeClientTarget
   agent: AgentType
+  isVisible: boolean
   allowFileUriLinks: boolean
   onSwitchToTerminal?: () => void
 }
