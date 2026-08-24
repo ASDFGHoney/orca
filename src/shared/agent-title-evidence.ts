@@ -20,7 +20,7 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES
 } from './synthetic-agent-title'
 import type { TuiAgent } from './tui-agent'
-import { TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
+import { ALL_TUI_AGENTS, TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
 
 /**
  * Order-independent identity evidence from a terminal title.
@@ -164,6 +164,11 @@ function agentForBareName(text: string): TuiAgent | null {
   return names.length === 1 && /^[\p{L}\p{N}]+$/u.test(bareToken) ? names[0] : null
 }
 
+function agentForOwnerSuffix(text: string): TuiAgent | null {
+  const normalized = text.toLowerCase()
+  return ALL_TUI_AGENTS.find((agent) => agent === normalized) ?? agentForBareName(text)
+}
+
 function agentForSyntheticTitle(text: string): TuiAgent | null {
   const normalized = text
     .trim()
@@ -236,7 +241,7 @@ function collectAnchoredNames(segments: readonly string[]): TuiAgent[] {
 
     const suffix = OWNER_SUFFIX_RE.exec(segment)
     if (suffix) {
-      const agent = agentForBareName(suffix[1])
+      const agent = agentForOwnerSuffix(suffix[1])
       if (agent) {
         anchored.add(agent)
       }

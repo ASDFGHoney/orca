@@ -29,6 +29,13 @@ describe('collectAgentTitleEvidence', () => {
       expect(agentFor('review-14600-codex')).toBeNull()
       expect(agentFor('codex-split-core')).toBeNull()
     })
+
+    it.each(['pi', 'omp', 'claude-agent-teams', 'qwen-code'] as const)(
+      'recognizes the reserved owner id %s',
+      (agent) => {
+        expect(agentFor(`Review another agent… - ${agent}`)).toBe(agent)
+      }
+    )
   })
 
   describe('order independence', () => {
@@ -221,6 +228,7 @@ describe('collectAgentTitleEvidence', () => {
     const wrappers = Array.from({ length: 200 }, (_, index) => `wrapper-${index}`).join(' | ')
     expect(agentFor(`${wrappers} | ⠋ Cursor Agent`)).toBe('cursor')
     expect(agentFor(`${wrappers} | OC | review the parser`)).toBe('opencode')
+    expect(agentFor(`outer-a | outer-b | OC | ${wrappers} | Cursor Agent`)).toBe('cursor')
   })
 
   it.each([
