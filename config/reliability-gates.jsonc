@@ -4015,7 +4015,7 @@
           "assertions": [
             "the measured local HTTP stream settles once and rejects a duplicate completion",
             "a hydrated restart-stuck pane reaches done with an empty roster, and a pane a runtime child owns emits nothing and keeps its row object identical",
-            "the relay forwards the completion and caches it with its compact identity neutralized so reconnect replay still delivers the clearing row",
+            "the relay forwards the completion and preserves its compact identity in the replay cache so the client re-runs ownership before applying the clearing row",
             "a relay with a cold cache still forwards the completion, and the client still refuses to mint a row it never had",
             "a legacy relay's manual envelope is stamped as a session boundary and its automatic envelope is dropped instead of minting working",
             "a promptless completion keeps the summarized turn's label with and without a trigger on the envelope",
