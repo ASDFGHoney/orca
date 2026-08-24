@@ -217,155 +217,161 @@ describe('registerPtyHandlers', () => {
     }
   })
   it.each([
-    ['the remote hook feature is off', '0', true, false],
-    ['agent status hooks are off', '1', false, true],
-    ['remote hooks are enabled', '1', true, true]
-  ])('scopes SSH identity when %s', async (_label, remoteFlag, hooksEnabled, preservesIdentity) => {
-    type RuntimeSpawnController = {
-      spawn(args: {
-        cols: number
-        rows: number
-        env?: Record<string, string>
-        worktreeId?: string
-        connectionId?: string
-        tabId?: string
-        leafId?: string
-        persistHostSessionBinding?: boolean
-      }): Promise<{ id: string }>
-    }
-    const savedRemoteHooks = process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
-    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = remoteFlag
-    const remoteSpawn = vi.fn(
-      async (_opts: {
-        env?: Record<string, string>
-        envToDelete?: string[]
-        agentStatusHooksEnabled?: boolean
-      }) => ({
-        id: 'ssh:ssh-runtime-env@@relay-pty'
-      })
-    )
-    registerSshPtyProvider('ssh-runtime-env', {
-      spawn: remoteSpawn,
-      write: vi.fn(),
-      resize: vi.fn(),
-      shutdown: vi.fn(),
-      sendSignal: vi.fn(),
-      getCwd: vi.fn(),
-      getInitialCwd: vi.fn(),
-      clearBuffer: vi.fn(),
-      acknowledgeDataEvent: vi.fn(),
-      onData: vi.fn(() => () => {}),
-      onReplay: vi.fn(() => () => {}),
-      onExit: vi.fn(() => () => {}),
-      listProcesses: vi.fn(),
-      hasChildProcesses: vi.fn(),
-      getForegroundProcess: vi.fn(),
-      serialize: vi.fn(),
-      revive: vi.fn(),
-      getDefaultShell: vi.fn(),
-      getProfiles: vi.fn()
-    } as never)
-    const store = {
-      upsertSshRemotePtyLease: vi.fn(),
-      persistPtyBinding: vi.fn()
-    }
-    let controller: RuntimeSpawnController | null = null
-    const runtime = {
-      setPtyController: vi.fn((value) => {
-        controller = value
-      }),
-      createPreAllocatedTerminalHandle: vi.fn(() => 'term_remote'),
-      registerPreAllocatedHandleForPty: vi.fn(),
-      registerPty: vi.fn(),
-      noteTerminalSpawnCommand: vi.fn(),
-      getDriver: vi.fn(() => ({ kind: 'host' })),
-      onPtySpawned: vi.fn(),
-      onPtyExit: vi.fn(),
-      onPtyData: vi.fn()
-    }
-
-    try {
-      registerPtyHandlers(
-        mainWindow as never,
-        runtime as never,
-        undefined,
-        (() => ({
-          agentStatusHooksEnabled: hooksEnabled,
-          codexSystemDefaultRealHomeEnabled: true
-        })) as never,
-        undefined,
-        store as never
-      )
-      const spawnController = controller as unknown as RuntimeSpawnController
-      const leafId = '11111111-1111-4111-8111-111111111111'
-      await spawnController.spawn({
-        cols: 80,
-        rows: 24,
-        env: {
-          FOO: 'bar',
-          ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
-          ORCA_TAB_ID: 'tab-remote',
-          ORCA_WORKTREE_ID: 'wt-remote',
-          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
-        },
-        connectionId: 'ssh-runtime-env',
-        worktreeId: 'wt-remote',
-        tabId: 'tab-remote',
-        leafId,
-        persistHostSessionBinding: true
-      })
-
-      const spawnOptions = remoteSpawn.mock.calls[0]?.[0]
-      const env = spawnOptions.env
-      expect(env).toMatchObject({ FOO: 'bar' })
-      const forwardsHookPolicy = remoteFlag === '1' && hooksEnabled
-      expect(spawnOptions.agentStatusHooksEnabled).toBe(forwardsHookPolicy ? true : undefined)
-      if (preservesIdentity) {
-        expect(env).toMatchObject({
-          ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
-          ORCA_TAB_ID: 'tab-remote',
-          ORCA_WORKTREE_ID: 'wt-remote',
-          ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
-        })
-      } else {
-        expect(env?.ORCA_PANE_KEY).toBeUndefined()
-        expect(env?.ORCA_TAB_ID).toBeUndefined()
-        expect(env?.ORCA_WORKTREE_ID).toBeUndefined()
-        expect(env?.ORCA_AGENT_LAUNCH_TOKEN).toBeUndefined()
+    ['the remote hook feature is off', '0', true, [], false],
+    ['agent status hooks are off', '1', false, [], true],
+    ['Codex status hooks are disabled', '1', true, ['codex'], true],
+    ['remote hooks are enabled', '1', true, [], true]
+  ])(
+    'scopes SSH identity when %s',
+    async (_label, remoteFlag, hooksEnabled, disabledTuiAgents, preservesIdentity) => {
+      type RuntimeSpawnController = {
+        spawn(args: {
+          cols: number
+          rows: number
+          env?: Record<string, string>
+          worktreeId?: string
+          connectionId?: string
+          tabId?: string
+          leafId?: string
+          persistHostSessionBinding?: boolean
+        }): Promise<{ id: string }>
       }
-      const hookCoordinateKeys = [
-        'ORCA_AGENT_HOOK_PORT',
-        'ORCA_AGENT_HOOK_TOKEN',
-        'ORCA_AGENT_HOOK_ENV',
-        'ORCA_AGENT_HOOK_VERSION',
-        'ORCA_AGENT_HOOK_ENDPOINT'
-      ]
-      if (forwardsHookPolicy) {
-        expect(spawnOptions.envToDelete ?? []).not.toEqual(
-          expect.arrayContaining(hookCoordinateKeys)
+      const savedRemoteHooks = process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
+      process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = remoteFlag
+      const remoteSpawn = vi.fn(
+        async (_opts: {
+          env?: Record<string, string>
+          envToDelete?: string[]
+          agentStatusHooksEnabled?: boolean
+        }) => ({
+          id: 'ssh:ssh-runtime-env@@relay-pty'
+        })
+      )
+      registerSshPtyProvider('ssh-runtime-env', {
+        spawn: remoteSpawn,
+        write: vi.fn(),
+        resize: vi.fn(),
+        shutdown: vi.fn(),
+        sendSignal: vi.fn(),
+        getCwd: vi.fn(),
+        getInitialCwd: vi.fn(),
+        clearBuffer: vi.fn(),
+        acknowledgeDataEvent: vi.fn(),
+        onData: vi.fn(() => () => {}),
+        onReplay: vi.fn(() => () => {}),
+        onExit: vi.fn(() => () => {}),
+        listProcesses: vi.fn(),
+        hasChildProcesses: vi.fn(),
+        getForegroundProcess: vi.fn(),
+        serialize: vi.fn(),
+        revive: vi.fn(),
+        getDefaultShell: vi.fn(),
+        getProfiles: vi.fn()
+      } as never)
+      const store = {
+        upsertSshRemotePtyLease: vi.fn(),
+        persistPtyBinding: vi.fn()
+      }
+      let controller: RuntimeSpawnController | null = null
+      const runtime = {
+        setPtyController: vi.fn((value) => {
+          controller = value
+        }),
+        createPreAllocatedTerminalHandle: vi.fn(() => 'term_remote'),
+        registerPreAllocatedHandleForPty: vi.fn(),
+        registerPty: vi.fn(),
+        noteTerminalSpawnCommand: vi.fn(),
+        getDriver: vi.fn(() => ({ kind: 'host' })),
+        onPtySpawned: vi.fn(),
+        onPtyExit: vi.fn(),
+        onPtyData: vi.fn()
+      }
+
+      try {
+        registerPtyHandlers(
+          mainWindow as never,
+          runtime as never,
+          undefined,
+          (() => ({
+            agentStatusHooksEnabled: hooksEnabled,
+            disabledTuiAgents,
+            codexSystemDefaultRealHomeEnabled: true
+          })) as never,
+          undefined,
+          store as never
         )
-      } else {
-        expect(spawnOptions.envToDelete).toEqual(expect.arrayContaining(hookCoordinateKeys))
-      }
-      expect(spawnOptions.envToDelete ?? []).not.toContain('CODEX_HOME')
-      expect(spawnOptions.envToDelete ?? []).not.toContain('ORCA_CODEX_HOME')
-      expect(store.upsertSshRemotePtyLease).toHaveBeenCalledWith(
-        expect.objectContaining({
-          targetId: 'ssh-runtime-env',
-          ptyId: 'relay-pty',
+        const spawnController = controller as unknown as RuntimeSpawnController
+        const leafId = '11111111-1111-4111-8111-111111111111'
+        await spawnController.spawn({
+          cols: 80,
+          rows: 24,
+          env: {
+            FOO: 'bar',
+            ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
+            ORCA_TAB_ID: 'tab-remote',
+            ORCA_WORKTREE_ID: 'wt-remote',
+            ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
+          },
+          connectionId: 'ssh-runtime-env',
+          worktreeId: 'wt-remote',
+          tabId: 'tab-remote',
           leafId,
-          state: 'attached'
+          persistHostSessionBinding: true
         })
-      )
-    } finally {
-      if (savedRemoteHooks === undefined) {
-        delete process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
-      } else {
-        process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = savedRemoteHooks
+
+        const spawnOptions = remoteSpawn.mock.calls[0]?.[0]
+        const env = spawnOptions.env
+        expect(env).toMatchObject({ FOO: 'bar' })
+        const forwardsHookPolicy =
+          remoteFlag === '1' && hooksEnabled && !disabledTuiAgents.includes('codex')
+        expect(spawnOptions.agentStatusHooksEnabled).toBe(forwardsHookPolicy ? true : undefined)
+        if (preservesIdentity) {
+          expect(env).toMatchObject({
+            ORCA_PANE_KEY: makePaneKey('tab-remote', leafId),
+            ORCA_TAB_ID: 'tab-remote',
+            ORCA_WORKTREE_ID: 'wt-remote',
+            ORCA_AGENT_LAUNCH_TOKEN: 'launch-remote'
+          })
+        } else {
+          expect(env?.ORCA_PANE_KEY).toBeUndefined()
+          expect(env?.ORCA_TAB_ID).toBeUndefined()
+          expect(env?.ORCA_WORKTREE_ID).toBeUndefined()
+          expect(env?.ORCA_AGENT_LAUNCH_TOKEN).toBeUndefined()
+        }
+        const hookCoordinateKeys = [
+          'ORCA_AGENT_HOOK_PORT',
+          'ORCA_AGENT_HOOK_TOKEN',
+          'ORCA_AGENT_HOOK_ENV',
+          'ORCA_AGENT_HOOK_VERSION',
+          'ORCA_AGENT_HOOK_ENDPOINT'
+        ]
+        if (forwardsHookPolicy) {
+          expect(spawnOptions.envToDelete ?? []).not.toEqual(
+            expect.arrayContaining(hookCoordinateKeys)
+          )
+        } else {
+          expect(spawnOptions.envToDelete).toEqual(expect.arrayContaining(hookCoordinateKeys))
+        }
+        expect(spawnOptions.envToDelete ?? []).not.toContain('CODEX_HOME')
+        expect(spawnOptions.envToDelete ?? []).not.toContain('ORCA_CODEX_HOME')
+        expect(store.upsertSshRemotePtyLease).toHaveBeenCalledWith(
+          expect.objectContaining({
+            targetId: 'ssh-runtime-env',
+            ptyId: 'relay-pty',
+            leafId,
+            state: 'attached'
+          })
+        )
+      } finally {
+        if (savedRemoteHooks === undefined) {
+          delete process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS
+        } else {
+          process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = savedRemoteHooks
+        }
+        unregisterSshPtyProvider('ssh-runtime-env')
       }
-      unregisterSshPtyProvider('ssh-runtime-env')
     }
-  })
+  )
   it('preserves adopted SSH ownership when runtime binding persistence fails', async () => {
     type RuntimeSpawnController = {
       spawn(args: {

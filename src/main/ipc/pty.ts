@@ -1696,7 +1696,7 @@ function getRemoteAgentHookEnvKeysToDelete(args: {
   settings: GlobalSettings | undefined
 }): readonly string[] {
   return args.connectionId &&
-    (!isRemoteAgentHooksEnabled() || !isAgentStatusHooksEnabled(args.settings))
+    (!isRemoteAgentHooksEnabled() || !isCodexStatusHooksEnabled(args.settings))
     ? REMOTE_AGENT_HOOK_COORDINATE_ENV_KEYS
     : []
 }
@@ -4918,7 +4918,7 @@ export function registerPtyHandlers(
       if (
         args.connectionId &&
         isRemoteAgentHooksEnabled() &&
-        isAgentStatusHooksEnabled(ptySettings)
+        isCodexStatusHooksEnabled(ptySettings)
       ) {
         spawnOptions.agentStatusHooksEnabled = true
       }
@@ -6667,7 +6667,7 @@ export function registerPtyHandlers(
         if (
           args.connectionId &&
           isRemoteAgentHooksEnabled() &&
-          isAgentStatusHooksEnabled(ptySettings)
+          isCodexStatusHooksEnabled(ptySettings)
         ) {
           spawnOptions.agentStatusHooksEnabled = true
         }

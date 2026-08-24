@@ -14217,7 +14217,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts src/main/providers/ssh-pty-provider-spawn.test.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts",
           "result": "passed",
           "durationSeconds": 10.48,
-          "summary": "The structural replacement passed all 97 client-policy, SSH request forwarding, strict recognition, complete-context, final relay feature-selection, and real bash/zsh/Fish argv contracts."
+          "summary": "The structural replacement passed all 98 client-policy, SSH request forwarding, Codex-specific disabled-agent policy, strict recognition, complete-context, final relay feature-selection, and real bash/zsh/Fish argv contracts."
         },
         {
           "date": "2026-08-23",
@@ -14226,7 +14226,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/codex-remote-hook-launch.test.ts src/relay/pty-handler-startup-command-delivery.test.ts src/relay/pty-shell-codex-hooks.live-shell.test.ts",
           "result": "failed",
           "durationSeconds": 4.85,
-          "summary": "Expected red with the shared direct-launch predicate forced false: ten deterministic assertions lost relay feature selection, version-compatible real-shell argv, and resume shell-ready delivery. Restoring the predicate returned the focused 97-test candidate suite to green."
+          "summary": "Expected red with the shared direct-launch predicate forced false: ten deterministic assertions lost relay feature selection, version-compatible real-shell argv, and resume shell-ready delivery. Restoring the predicate returned the focused 98-test candidate suite to green."
         },
         {
           "date": "2026-08-23",
@@ -14262,7 +14262,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-runtime-ssh-binding-persistence.test.ts src/renderer/src/lib/launch-agent-background-session-remote.test.ts src/main/runtime/orca-runtime.test.ts",
           "result": "passed",
           "durationSeconds": 13.69,
-          "summary": "The structural candidate passed 1,205 SSH hook-policy, background launch, and runtime ownership contracts with one existing skip."
+          "summary": "The structural candidate passed 1,206 SSH hook-policy, background launch, and runtime ownership contracts with one existing skip."
         }
       ],
       "runtimeBudget": {
@@ -14275,11 +14275,11 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "Literal origin/main 5bcbafff completed the authenticated Codex 0.149.0 response in a rendered macOS Electron -> Linux Docker SSH folder workspace with complete PTY hook coordinates and an ORCA-scrubbed pre-existing app-server, but process argv had no --enable hooks and the exact pane had no working or done entry. The structural candidate passed the byte-identical topology with separate --enable/hooks argv, exact-pane working-to-done hooks, and the rendered response. Forcing the shared recognition predicate false while keeping explicit policy and complete coordinates preserved the coordinate environment and rendered response but removed the flag and all exact-pane hook states; restoring it returned the identical journey to green. The focused contract/live-shell oracle likewise passed 97/97, failed ten causal assertions with recognition disabled, and returned to 97/97 after restoration."
+        "evidence": "Literal origin/main 5bcbafff completed the authenticated Codex 0.149.0 response in a rendered macOS Electron -> Linux Docker SSH folder workspace with complete PTY hook coordinates and an ORCA-scrubbed pre-existing app-server, but process argv had no --enable hooks and the exact pane had no working or done entry. The structural candidate passed the byte-identical topology with separate --enable/hooks argv, exact-pane working-to-done hooks, and the rendered response. Forcing the shared recognition predicate false while keeping explicit policy and complete coordinates preserved the coordinate environment and rendered response but removed the flag and all exact-pane hook states; restoring it returned the identical journey to green. The focused contract/live-shell oracle likewise passed 98/98, failed ten causal assertions with recognition disabled, and returned to 98/98 after restoration."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The client adds one optional boolean only at SSH spawn, while the shared planner and owning relay each perform one bounded token scan only while planning a launch and leave the command string unchanged. Each recognized SSH Codex launch runs one launch-only codex --version probe from the existing post-profile shell preflight; it polls at 50ms only until completion, kills the exact probe at two seconds, and leaves no resident process or timer. Live hook-enabled launches intentionally use Codex's embedded app-server instead of reusing an environment-less daemon; concurrent-pane startup and memory cost remain unmeasured. No persistent polling, retry, command wrapper, or provider fanout is added."
+        "evidence": "The client adds one optional boolean only at SSH spawn, while the shared planner and owning relay each perform one bounded token scan only while planning a launch and leave the command string unchanged. Each recognized Codex invocation in a remote hook-enabled shell runs one launch-preflight codex --version probe; it polls at 50ms only until completion, kills the exact probe at two seconds, and leaves no resident process or timer. Live hook-enabled launches intentionally use Codex's embedded app-server instead of reusing an environment-less daemon; concurrent-pane startup and memory cost remain unmeasured. No persistent polling, retry, command wrapper, or provider fanout is added."
       },
       "promotionCriteria": [
         "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake.",
