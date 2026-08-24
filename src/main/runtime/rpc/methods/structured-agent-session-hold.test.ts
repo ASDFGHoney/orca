@@ -159,6 +159,31 @@ describe('a client that disappears without cleanup', () => {
     expect(closeSession).not.toHaveBeenCalled()
     expect(host.hasSession(SESSION)).toBe(true)
   })
+
+  it('releases a desktop subscription when its renderer transport dies', async () => {
+    const transport = new AbortController()
+    await dispatcher.dispatchStreaming(
+      {
+        id: 'desktop-subscription',
+        authToken: 'token',
+        method: 'agentSession.subscribe',
+        params: { sessionId: SESSION }
+      },
+      () => {},
+      {
+        signal: transport.signal,
+        clientId: 'desktop-renderer',
+        clientKind: 'runtime',
+        clientCapabilities: CLIENT.clientCapabilities
+      }
+    )
+    expect(host.isHeld(SESSION)).toBe(true)
+
+    transport.abort()
+
+    await vi.waitFor(() => expect(host.hasSession(SESSION)).toBe(false))
+    expect(closeSession).toHaveBeenCalledWith(SESSION)
+  })
 })
 
 // Paired builds ship on their own schedule, and the ones already in the field never learned to

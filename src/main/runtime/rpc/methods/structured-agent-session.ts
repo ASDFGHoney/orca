@@ -252,15 +252,23 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
         )
       let closed = false
       let dispose = (): void => {}
-      ctx.runtime.registerSubscriptionCleanup(
+      let releaseTransportSubscription = (): void => {}
+      const onTransportAbort = (): void => releaseTransportSubscription()
+      const registration = ctx.runtime.registerOwnedSubscriptionCleanup(
         subscriptionId,
         () => {
           closed = true
+          ctx.signal?.removeEventListener('abort', onTransportAbort)
           dispose()
           host.release(params.sessionId, streamHolder)
         },
         ctx.connectionId
       )
+      releaseTransportSubscription = registration.releaseIfCurrent
+      ctx.signal?.addEventListener('abort', onTransportAbort, { once: true })
+      if (ctx.signal?.aborted) {
+        onTransportAbort()
+      }
       if (closed) {
         return
       }
