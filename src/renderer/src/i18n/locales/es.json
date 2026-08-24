@@ -3960,6 +3960,10 @@
         "SkillUpdateRow": {
           "oneLocation": "1 location",
           "manyLocations": "{{value0}} locations"
+        },
+        "host": {
+          "local": "Esta máquina",
+          "remote": "Entorno conectado"
         }
       },
       "sidebar": {

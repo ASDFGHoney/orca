@@ -9,6 +9,7 @@ import type { DiscoveredSkill, SkillDiscoveryResult } from '../../../../shared/s
 import { createCompatibleRuntimeStatusResponseIfNeeded } from '@/runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '@/runtime/runtime-rpc-client'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { ConfirmationDialogProvider } from '@/components/confirmation-dialog'
 import { useAppStore } from '@/store'
 import SkillsPage from './SkillsPage'
 
@@ -65,7 +66,9 @@ async function renderPage(): Promise<void> {
   await act(async () => {
     root?.render(
       <TooltipProvider>
-        <SkillsPage />
+        <ConfirmationDialogProvider>
+          <SkillsPage />
+        </ConfirmationDialogProvider>
       </TooltipProvider>
     )
   })

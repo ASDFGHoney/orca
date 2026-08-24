@@ -49,6 +49,7 @@ import type {
 } from '../../../shared/worktree/create-types'
 import type { WorkspaceLineage, WorktreeLineage } from '../../../shared/worktree/lineage-types'
 import type { DetectedWorktreeListResult, Worktree } from '../../../shared/worktree/types'
+import type { SkillDeletePlan, SkillDeleteResult } from '../../../shared/skill-delete-contract'
 import type { SkillDiscoveryResult } from '../../../shared/skills'
 import type { SkillFreshnessInventory } from '../../../shared/skill-freshness'
 import type { SshConnectionState, SshTarget } from '../../../shared/ssh-types'
@@ -3159,6 +3160,11 @@ function createSkillsApi(): NonNullable<Partial<PreloadApi>['skills']> {
     previewBundleInstall: () =>
       Promise.reject(new Error('Skill installation requires the desktop app.')),
     removeInstall: () => Promise.reject(new Error('Skill installation requires the desktop app.')),
+    // Why routed rather than refused: on web the "local" host IS the runtime, so
+    // delete rides the same RPC the scan already does.
+    previewDelete: (request) =>
+      callRuntimeResult<SkillDeletePlan>('skills.previewDelete', request, 60_000),
+    delete: (request) => callRuntimeResult<SkillDeleteResult>('skills.delete', request, 5 * 60_000),
     listManagedInstalls: () =>
       Promise.reject(new Error('Skill installation requires the desktop app.')),
     getPackage: () => Promise.reject(new Error('Skill installation requires the desktop app.')),
