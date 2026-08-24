@@ -297,8 +297,8 @@ export class GitHandler {
       this.fetchGitLabMergeRequestHead(p)
     )
     this.dispatcher.onRequest('git.push', (p) => this.push(p))
-    this.dispatcher.onRequest('git.pull', (p) => this.pull(p))
-    this.dispatcher.onRequest('git.fastForward', (p) => this.fastForward(p))
+    this.dispatcher.onRequest('git.pull', (p, context) => this.pull(p, context))
+    this.dispatcher.onRequest('git.fastForward', (p, context) => this.fastForward(p, context))
     this.dispatcher.onRequest('git.rebaseFromBase', (p, context) => this.rebaseFromBase(p, context))
     this.dispatcher.onRequest('git.branchDiff', (p, context) => this.branchDiff(p, context))
     this.dispatcher.onRequest('git.commitDiff', (p, context) => this.commitDiff(p, context))
@@ -1143,7 +1143,21 @@ export class GitHandler {
     }
   }
 
-  private async pullWithArgs(params: Record<string, unknown>, pullArgs: string[]) {
+  private async pullWithArgs(
+    params: Record<string, unknown>,
+    pullArgs: string[],
+    signal?: AbortSignal
+  ) {
+    const worktreePath = params.worktreePath as string
+    return runWithGitWorktreeOperationLock(worktreePath, signal, () =>
+      this.runPullWithArgsUnlocked(params, pullArgs)
+    )
+  }
+
+  private async runPullWithArgsUnlocked(
+    params: Record<string, unknown>,
+    pullArgs: string[]
+  ): Promise<void> {
     this.clearGitMutationReadCaches()
     const worktreePath = params.worktreePath as string
     const runPull = async (effectiveArgs: string[]): Promise<void> => {
@@ -1181,13 +1195,13 @@ export class GitHandler {
     }
   }
 
-  private async pull(params: Record<string, unknown>) {
+  private async pull(params: Record<string, unknown>, context?: RequestContext) {
     // Why: plain `git pull` honors user merge/rebase/ff policy.
-    await this.pullWithArgs(params, [])
+    await this.pullWithArgs(params, [], context?.signal)
   }
 
-  private async fastForward(params: Record<string, unknown>) {
-    await this.pullWithArgs(params, ['--ff-only'])
+  private async fastForward(params: Record<string, unknown>, context?: RequestContext) {
+    await this.pullWithArgs(params, ['--ff-only'], context?.signal)
   }
 
   private async rebaseFromBase(params: Record<string, unknown>, context?: RequestContext) {

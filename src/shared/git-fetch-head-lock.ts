@@ -1,12 +1,12 @@
 import * as path from 'node:path'
 import { readFile, realpath, stat } from 'node:fs/promises'
+import { runWithGitOperationLock } from './git-operation-lock'
 
-type GitFetchHeadLockLane = {
-  tail: Promise<void>
-  release: () => void
+function abortError(): Error {
+  const error = new Error('The operation was aborted.')
+  error.name = 'AbortError'
+  return error
 }
-
-const lanes = new Map<string, GitFetchHeadLockLane>()
 const GLOBAL_OPTIONS_WITH_VALUE = new Set([
   '-c',
   '-C',
@@ -127,36 +127,6 @@ async function fetchLockPath(
   return path.join(canonicalGitDir, 'FETCH_HEAD')
 }
 
-function abortError(): Error {
-  const error = new Error('The operation was aborted.')
-  error.name = 'AbortError'
-  return error
-}
-
-async function waitForPredecessor(
-  predecessor: Promise<void>,
-  signal: AbortSignal | undefined
-): Promise<void> {
-  if (!signal) {
-    await predecessor.catch(() => undefined)
-    return
-  }
-  if (signal.aborted) {
-    throw abortError()
-  }
-  let rejectAbort!: (error: Error) => void
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-  })
-  const onAbort = () => rejectAbort(abortError())
-  signal.addEventListener('abort', onAbort, { once: true })
-  try {
-    await Promise.race([predecessor.catch(() => undefined), aborted])
-  } finally {
-    signal.removeEventListener('abort', onAbort)
-  }
-}
-
 export async function runWithGitFetchHeadLock<T>(
   worktreePath: string,
   signal: AbortSignal | undefined,
@@ -164,23 +134,5 @@ export async function runWithGitFetchHeadLock<T>(
   explicitGitDir?: string
 ): Promise<T> {
   const key = await fetchLockPath(worktreePath, signal, explicitGitDir)
-  const predecessor = lanes.get(key)?.tail ?? Promise.resolve()
-  let release!: () => void
-  const current = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const lane = { tail: predecessor.catch(() => undefined).then(() => current), release }
-  lanes.set(key, lane)
-  void lane.tail.then(() => {
-    if (lanes.get(key) === lane) {
-      lanes.delete(key)
-    }
-  })
-
-  try {
-    await waitForPredecessor(predecessor, signal)
-    return await run()
-  } finally {
-    lane.release()
-  }
+  return runWithGitOperationLock(key, signal, run)
 }

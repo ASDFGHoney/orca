@@ -10,6 +10,7 @@ import { gitOptionsForWorktree } from './git-runtime-options'
 import { validateGitPushTarget } from './push-target-validation'
 import { gitExecFileAsync } from './runner'
 import { runWithGitReadCacheInvalidation } from './status'
+import { runWithGitWorktreeOperationLock } from '../../shared/git-worktree-operation-lock'
 
 export { gitPullRebaseFromBase } from './remote-rebase'
 
@@ -258,8 +259,8 @@ export async function gitPull(
   // Why: plain `git pull` uses the user's configured pull strategy (merge by
   // default) so diverged branches reconcile instead of erroring out. Conflicts
   // surface through the existing conflict-resolution flow.
-  await runWithGitReadCacheInvalidation(() =>
-    gitPullWithArgs(worktreePath, [], pushTarget, options)
+  await runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
+    runWithGitReadCacheInvalidation(() => gitPullWithArgs(worktreePath, [], pushTarget, options))
   )
 }
 
@@ -268,8 +269,10 @@ export async function gitFastForward(
   pushTarget?: GitPushTarget,
   options: GitRuntimeOptions = {}
 ): Promise<void> {
-  await runWithGitReadCacheInvalidation(() =>
-    gitPullWithArgs(worktreePath, ['--ff-only'], pushTarget, options)
+  await runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
+    runWithGitReadCacheInvalidation(() =>
+      gitPullWithArgs(worktreePath, ['--ff-only'], pushTarget, options)
+    )
   )
 }
 
