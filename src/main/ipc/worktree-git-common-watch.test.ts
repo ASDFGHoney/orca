@@ -606,8 +606,13 @@ describe('worktree git-common narrow watch (darwin)', () => {
         }
       })
       await vi.advanceTimersByTimeAsync(POLL_MS)
-      expect(subscribeMock).toHaveBeenCalledTimes(3)
-      expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
+      await vi.waitFor(
+        () => {
+          expect(subscribeMock).toHaveBeenCalledTimes(3)
+          expect(stalePendingSubscription.unsubscribe).toHaveBeenCalledOnce()
+        },
+        { timeout: 1_000 }
+      )
 
       const immediateEntry = join(worktreesDir, 'current-generation')
       childSubscriptions[2].callback(null, [{ type: 'create', path: immediateEntry }])
