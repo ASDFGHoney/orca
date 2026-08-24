@@ -16,6 +16,7 @@ import type {
   PtyProcessEvidenceEntry,
   PtyProcessLivenessBrokerOptions
 } from './pty-process-liveness-broker-types'
+import { waitForPtyProcessProbe } from './pty-process-liveness-broker-wait'
 export type { PtyProcessLivenessBrokerOptions } from './pty-process-liveness-broker-types'
 export type {
   PtyProcessInspectionSource,
@@ -263,27 +264,7 @@ export class PtyProcessLivenessBroker {
     entry: PtyProcessEvidenceEntry,
     timeoutMs: number | null
   ): Promise<PtyProcessLivenessEvidence> {
-    const probe = entry.probe
-    if (!probe) {
-      return Promise.resolve(
-        entry.evidence ?? { status: 'unverifiable', reason: 'process inspection unavailable' }
-      )
-    }
-    if (timeoutMs === null) {
-      return probe
-    }
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        if (this.entries.get(ptyId) === entry && entry.probe === probe) {
-          entry.timedOut = true
-        }
-        resolve({ status: 'unverifiable', reason: 'process inspection timed out' })
-      }, timeoutMs)
-      void probe.then((evidence) => {
-        clearTimeout(timeout)
-        resolve(evidence)
-      })
-    })
+    return waitForPtyProcessProbe(this.entries, ptyId, entry, timeoutMs)
   }
   private unavailableBackoffMs(failureCount: number): number {
     const base = this.options.unavailableBackoffBaseMs ?? DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS
