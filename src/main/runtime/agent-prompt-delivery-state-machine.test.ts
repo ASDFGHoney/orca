@@ -218,16 +218,50 @@ describe('agent prompt delivery state machine', () => {
     expect(writes).toEqual([])
   })
 
-  it('rejects an authoritative missing foreground before writing', async () => {
+  it('rejects a null foreground observation instead of trusting launch metadata', async () => {
+    vi.useFakeTimers()
     const { runtime, handle, writes } = await createPromptRuntime({
       launchAgent: 'opencode',
-      inspectProcess: () => ({ foregroundProcess: null, hasChildProcesses: false })
+      inspectProcess: () => ({ foregroundProcess: null, hasChildProcesses: false }),
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+        if (data === '\r') {
+          runtime.onPtyData('pty-prompt', '\x1b]0;OpenCode working\x07', Date.now())
+        }
+      }
     })
 
     await expect(runtime.sendTerminalAgentPrompt(handle, 'review this')).rejects.toThrow(
       'agent_prompt_target_changed'
     )
     expect(writes).toEqual([])
+  })
+
+  it('uses launch metadata only when inspection is explicitly unavailable', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle, writes } = await createPromptRuntime({
+      launchAgent: 'opencode',
+      inspectProcess: () => ({
+        foregroundProcess: null,
+        hasChildProcesses: true,
+        unavailable: true
+      }),
+      onWrite: (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData('pty-prompt', '\x1b[?25h', Date.now())
+        }
+        if (data === '\r') {
+          runtime.onPtyData('pty-prompt', '\x1b]0;OpenCode working\x07', Date.now())
+        }
+      }
+    })
+
+    const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
+    await vi.runAllTimersAsync()
+    await expect(submission).resolves.toMatchObject({ accepted: true })
+    expect(writes).toContain('\r')
   })
 
   it('does not submit after the agent returns to a shell', async () => {

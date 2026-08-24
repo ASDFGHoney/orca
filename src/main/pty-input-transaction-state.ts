@@ -40,6 +40,25 @@ export function flushQueryReplies(
   state.pendingQueryReplyCodeUnits = 0
   return true
 }
+export function writeQueuedQueryReply(
+  state: PendingQueryReplyState,
+  data: string,
+  write: (data: string) => boolean
+): boolean {
+  if (state.pendingQueryReplies.length > 0 && !flushQueryReplies(state, write)) {
+    if (canQueueQueryReply(state, data)) {
+      enqueueQueryReply(state, data)
+      return true
+    }
+    return false
+  }
+  const wrote = write(data)
+  if (!wrote && canQueueQueryReply(state, data)) {
+    enqueueQueryReply(state, data)
+    return true
+  }
+  return wrote
+}
 export function nextPasteState(initial: boolean, data: string): boolean {
   let open = initial
   let cursor = 0

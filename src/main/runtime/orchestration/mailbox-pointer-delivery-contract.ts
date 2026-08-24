@@ -12,7 +12,7 @@ export type PointerDeliveryDependencies<TWaiter extends OrchestrationMessageWait
   getLiveLeafForHandle: (handle: string) => OrchestrationMailboxLeaf
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   getTabTitle: (tabId: string) => string | null | undefined
-  getTerminalHandleForLeaf: (leaf: OrchestrationMailboxLeaf) => string
+  getTerminalHandleForLeaf: (leaf: OrchestrationMailboxLeaf) => string | undefined
   redriveMailbox: (mailboxHandle: string, reservedTypes?: ReadonlySet<string>) => void
   sendPrompt: (
     handle: string,

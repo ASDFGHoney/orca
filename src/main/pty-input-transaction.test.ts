@@ -212,6 +212,78 @@ describe('PTY input transaction owner', () => {
     expect(prompt.active).toBe(true)
   })
 
+  it('rejects a concurrent direct client while a renderer transaction owns the PTY', () => {
+    const writer = vi.fn(() => true)
+    const owner = new PtyInputTransactionOwner(writer)
+    const renderer = owner.beginUnversionedInteractive('pty-1')
+
+    expect(renderer.write('first chunk')).toBe(true)
+    expect(owner.write('pty-1', 'concurrent client')).toBe(false)
+    expect(writer).toHaveBeenCalledOnce()
+  })
+
+  it('queues terminal query replies behind an interactive paste transaction', () => {
+    const writes: string[] = []
+    const owner = new PtyInputTransactionOwner((_ptyId, data) => {
+      writes.push(data)
+      return true
+    })
+    const renderer = owner.beginUnversionedInteractive('pty-1')
+
+    expect(renderer.write(`${START}chunk`)).toBe(true)
+    expect(owner.write('pty-1', '\x1b[6n')).toBe(true)
+    expect(owner.write('pty-1', 'concurrent client')).toBe(false)
+    expect(renderer.write(END)).toBe(true)
+    renderer.release()
+
+    expect(writes).toEqual([`${START}chunk`, END, '\x1b[6n'])
+  })
+
+  it('retries a deferred query reply before admitting a replacement transaction', () => {
+    let failReply = true
+    const writer = vi.fn((_ptyId: string, data: string) => {
+      if (data === '\x1b[6n' && failReply) {
+        return false
+      }
+      return true
+    })
+    const owner = new PtyInputTransactionOwner(writer)
+    const prompt = owner.begin('pty-1', 1, 'agent-prompt')!
+    expect(prompt.write(`${START}prompt`)).toBe(true)
+    expect(owner.write('pty-1', '\x1b[6n')).toBe(true)
+    expect(prompt.write(END)).toBe(true)
+    prompt.release()
+
+    failReply = false
+    const replacement = owner.begin('pty-1', 1, 'agent-prompt')
+    expect(replacement).not.toBeNull()
+    expect(writer.mock.calls).toEqual([
+      ['pty-1', `${START}prompt`],
+      ['pty-1', END],
+      ['pty-1', '\x1b[6n'],
+      ['pty-1', '\x1b[6n'],
+      ['pty-1', '\x1b[6n']
+    ])
+  })
+
+  it('keeps a newly arrived query reply behind a deferred reply', () => {
+    let failReply = true
+    const writes: string[] = []
+    const owner = new PtyInputTransactionOwner((_ptyId, data) => {
+      writes.push(data)
+      return !failReply || data !== '\x1b[6n'
+    })
+    const prompt = owner.begin('pty-1', 1, 'agent-prompt')!
+    prompt.write(`${START}prompt`)
+    owner.write('pty-1', '\x1b[6n')
+    prompt.write(END)
+    prompt.release()
+    expect(owner.write('pty-1', '\x1b[5n')).toBe(true)
+    failReply = false
+    expect(owner.begin('pty-1', 1, 'agent-prompt')).not.toBeNull()
+    expect(writes.slice(-2)).toEqual(['\x1b[6n', '\x1b[5n'])
+  })
+
   it('joins interactive transactions only when each attempts a write', () => {
     const owner = new PtyInputTransactionOwner(() => true)
     const first = owner.begin('pty-1', 1, 'interactive')!

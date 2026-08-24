@@ -88,6 +88,7 @@ describe('orchestration mailbox prompt settlement', () => {
     }
 
     expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    expect(db.getMessageById(message.id)?.delivery_state).toBe('unknown')
     const restarted = createRuntime(db)
     await driveToLiveIdle(restarted.runtime)
     expect(pointerCount(restarted.write)).toBe(0)
@@ -106,7 +107,7 @@ describe('orchestration mailbox prompt settlement', () => {
     })
     const run = createBoundRun(db, 'Staging failure Run')
     const message = insertDirectRunMessage(db, run.id, 'Must remain explicit')
-    vi.spyOn(db, 'markAsDelivered').mockImplementation(() => {
+    vi.spyOn(db, 'markAsDeliveryStaged').mockImplementation(() => {
       throw new Error('disk unavailable')
     })
 

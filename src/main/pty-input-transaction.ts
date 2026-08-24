@@ -3,6 +3,7 @@ import {
   canQueueQueryReply,
   enqueueQueryReply,
   flushQueryReplies,
+  writeQueuedQueryReply,
   nextPasteState,
   isPtyInputTransactionQueryReply
 } from './pty-input-transaction-state'
@@ -14,7 +15,9 @@ import {
   pruneLazyTokens,
   releaseLazyToken,
   releaseOwnerToken,
-  transactionForToken
+  releaseDormantOwner,
+  transactionForToken,
+  invalidateTransactionToken
 } from './pty-input-transaction-lifecycle'
 import type { TransactionToken } from './pty-input-transaction-lifecycle'
 export type PtyInputTransactionKind = 'agent-prompt' | 'automation' | 'interactive'
@@ -29,11 +32,10 @@ export type PtyInputTransaction = Readonly<{
 }>
 type PtyInputWriter = (ptyId: string, data: string) => boolean
 type SettledPtyInputWriter = (ptyId: string, data: string) => PtyInputWriteResult
-type InputToken = TransactionToken
 type InputOwner = {
   generation: number | null
   kind: PtyInputTransactionKind
-  tokens: Set<InputToken>
+  tokens: Set<TransactionToken>
   pasteOpen: boolean
   pasteMutationPending: boolean
   pendingQueryReplies: string[]
@@ -41,24 +43,27 @@ type InputOwner = {
 }
 export class PtyInputTransactionOwner {
   private readonly ownerByPtyId = new Map<string, InputOwner>()
-  private readonly lazyInteractiveByPtyId = new Map<string, Set<InputToken>>()
+  private readonly lazyInteractiveByPtyId = new Map<string, Set<TransactionToken>>()
   constructor(
     private readonly writeInput: PtyInputWriter,
     private readonly writeInputWithSettlement: SettledPtyInputWriter = writeInput
   ) {}
   write(ptyId: string, data: string): boolean {
     const owner = this.ownerByPtyId.get(ptyId)
-    if (!owner || owner.kind === 'interactive') {
+    if (!owner) {
       return this.writeInput(ptyId, data)
     }
     if (isPtyInputTransactionQueryReply(data)) {
       if (!owner.pasteOpen && !owner.pasteMutationPending) {
-        return this.writeInput(ptyId, data)
+        return writeQueuedQueryReply(owner, data, (reply) => this.writeInput(ptyId, reply))
       }
       if (canQueueQueryReply(owner, data)) {
         enqueueQueryReply(owner, data)
         return true
       }
+    }
+    if (owner.kind === 'interactive') {
+      return false
     }
     if (!this.interruptOwner(ptyId, owner)) {
       return false
@@ -77,11 +82,20 @@ export class PtyInputTransactionOwner {
           ptyId,
           generation,
           undefined,
-          (token, reason) => this.invalidateToken(token, reason),
+          invalidateTransactionToken,
           'terminal_handle_stale'
         )
       }
       return this.beginLazyInteractive(ptyId, generation)
+    }
+    const existing = this.ownerByPtyId.get(ptyId)
+    if (
+      existing &&
+      releaseDormantOwner(existing, (state) =>
+        flushQueryReplies(state, (reply) => this.writeInput(ptyId, reply))
+      )
+    ) {
+      this.ownerByPtyId.delete(ptyId)
     }
     if (this.ownerByPtyId.has(ptyId)) {
       return null
@@ -91,7 +105,7 @@ export class PtyInputTransactionOwner {
       ptyId,
       generation,
       undefined,
-      (token, reason) => this.invalidateToken(token, reason),
+      invalidateTransactionToken,
       'terminal_handle_stale'
     )
     const owner: InputOwner = {
@@ -113,19 +127,19 @@ export class PtyInputTransactionOwner {
     const owner = this.ownerByPtyId.get(ptyId)
     if (owner && (owner.generation === null || owner.generation !== generation)) {
       invalidateOwner(this.ownerByPtyId, ptyId, owner, 'terminal_handle_stale', (token, reason) =>
-        this.invalidateToken(token, reason)
+        invalidateTransactionToken(token, reason)
       )
     }
     for (const token of this.lazyInteractiveByPtyId.get(ptyId) ?? []) {
       if (token.active && (token.generation === null || token.generation !== generation)) {
-        this.invalidateToken(token, 'terminal_handle_stale')
+        invalidateTransactionToken(token, 'terminal_handle_stale')
       }
     }
     pruneLazyTokens(this.lazyInteractiveByPtyId, ptyId)
   }
   private beginLazyInteractive(ptyId: string, generation: number | null): PtyInputTransaction {
     const token = createTransactionToken(generation)
-    const lazy = this.lazyInteractiveByPtyId.get(ptyId) ?? new Set<InputToken>()
+    const lazy = this.lazyInteractiveByPtyId.get(ptyId) ?? new Set<TransactionToken>()
     lazy.add(token)
     this.lazyInteractiveByPtyId.set(ptyId, lazy)
     let joinedOwner: InputOwner | null = null
@@ -154,7 +168,7 @@ export class PtyInputTransactionOwner {
   private claimInteractive(
     ptyId: string,
     generation: number | null,
-    lazyToken: InputToken
+    lazyToken: TransactionToken
   ): InputOwner | null {
     const current = this.ownerByPtyId.get(ptyId)
     if (
@@ -164,7 +178,7 @@ export class PtyInputTransactionOwner {
       current.generation !== generation
     ) {
       releaseLazyToken(this.lazyInteractiveByPtyId, ptyId, lazyToken, false)
-      this.invalidateToken(lazyToken, 'terminal_handle_stale')
+      invalidateTransactionToken(lazyToken, 'terminal_handle_stale')
       return null
     }
     if (current && current.kind !== 'interactive' && !this.interruptOwner(ptyId, current)) {
@@ -188,7 +202,7 @@ export class PtyInputTransactionOwner {
           ptyId,
           generation,
           lazyToken,
-          (token, reason) => this.invalidateToken(token, reason),
+          invalidateTransactionToken,
           'terminal_handle_stale'
         )
       }
@@ -214,7 +228,7 @@ export class PtyInputTransactionOwner {
   private writeOwned(
     ptyId: string,
     owner: InputOwner,
-    token: InputToken,
+    token: TransactionToken,
     data: string
   ): PtyInputWriteResult {
     if (!token.active || this.ownerByPtyId.get(ptyId) !== owner || !owner.tokens.has(token)) {
@@ -275,21 +289,12 @@ export class PtyInputTransactionOwner {
       return false
     }
     invalidateOwner(this.ownerByPtyId, ptyId, owner, 'terminal_input_superseded', (token, reason) =>
-      this.invalidateToken(token, reason)
+      invalidateTransactionToken(token, reason)
     )
     return true
   }
-  private releaseOwnerToken(ptyId: string, owner: InputOwner, token: InputToken): void {
+  private releaseOwnerToken = (ptyId: string, owner: InputOwner, token: TransactionToken): void =>
     releaseOwnerToken(this.ownerByPtyId, ptyId, owner, token, (current) =>
       flushQueryReplies(current, (reply) => this.writeInput(ptyId, reply))
     )
-  }
-  private invalidateToken(token: InputToken, reason: PtyInputInvalidationReason): void {
-    if (!token.active) {
-      return
-    }
-    token.active = false
-    token.reason = reason
-    token.invalidate(reason)
-  }
 }

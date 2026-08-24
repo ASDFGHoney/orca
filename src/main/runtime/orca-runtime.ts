@@ -3237,19 +3237,26 @@ export class OrcaRuntimeService {
       getLiveLeafForHandle: (handle) => this.getLiveLeafForHandle(handle).leaf,
       getMessageWaiters: (mailboxHandle) => this.messageWaitersByHandle.get(mailboxHandle),
       getTabTitle: (tabId) => this.tabs.get(tabId)?.title,
-      getTerminalHandleForLeaf: (leaf) => this.issueHandle(leaf as RuntimeLeafRecord),
+      getTerminalHandleForLeaf: (leaf) =>
+        this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId)),
       redriveMailbox: (mailboxHandle, reservedTypes) =>
         this.deliverPendingMessagesForHandle(mailboxHandle, reservedTypes),
       sendPrompt: async (handle, prompt, options) => {
+        let providerAttempted = false
         try {
           await this.sendTerminalAgentPrompt(handle, prompt, {
             signal: options.signal,
             beforeWrite: options.beforeWrite,
-            beforeAttempt: options.beforeAttempt
+            beforeAttempt: () => {
+              options.beforeAttempt()
+              providerAttempted = true
+            }
           })
           return 'delivered'
         } catch (error) {
-          return isAgentPromptDeliveryUnknownError(error) ? 'unknown' : 'rejected'
+          return providerAttempted || isAgentPromptDeliveryUnknownError(error)
+            ? 'unknown'
+            : 'rejected'
         }
       }
     })
@@ -6209,7 +6216,10 @@ export class OrcaRuntimeService {
     // Why: CLI terminal writes must go through the main-owned PTY registry
     // instead of tunneling back through renderer IPC, or live handles could
     // drift from the process they are supposed to control during reloads.
-    if (controller && !controller.beginInputTransaction) {
+    if (
+      controller &&
+      (!controller.beginInputTransaction || !controller.invalidateInputTransactions)
+    ) {
       const write = controller.write.bind(controller)
       const writeWithSettlement = controller.writeWithSettlement?.bind(controller)
       const inputOwner = new PtyInputTransactionOwner(
@@ -19807,6 +19817,7 @@ export class OrcaRuntimeService {
       try {
         const inspection = await controller.inspectProcess(ptyId)
         return {
+          // Null is a valid idle-shell observation; only the explicit unavailable bit permits fallback.
           available: inspection.unavailable !== true,
           process: inspection.foregroundProcess
         }

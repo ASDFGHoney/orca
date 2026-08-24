@@ -3,6 +3,8 @@ import type { OrchestrationMailboxLeaf } from './mailbox-owner'
 export type OrchestrationMailboxDeliveryFlight = {
   abortController: AbortController
   mutated: boolean
+  messageIds: string[]
+  usedLegacyDeliveredTransition: boolean
   redriveMailbox: string | null
 }
 
@@ -29,7 +31,13 @@ export class OrchestrationMailboxPointerState {
   }
 
   beginFlight(ptyId: string): OrchestrationMailboxDeliveryFlight {
-    const flight = { abortController: new AbortController(), mutated: false, redriveMailbox: null }
+    const flight = {
+      abortController: new AbortController(),
+      mutated: false,
+      messageIds: [],
+      usedLegacyDeliveredTransition: false,
+      redriveMailbox: null
+    }
     this.flightsByPtyId.set(ptyId, flight)
     return flight
   }
@@ -75,15 +83,20 @@ export class OrchestrationMailboxPointerState {
     return this.watermarkByMailbox.get(mailboxHandle)?.active === true
   }
 
-  releaseSupersededWatermark(mailboxHandle: string, newestSequence: number): boolean {
+  releaseSupersededWatermark(
+    mailboxHandle: string,
+    newestSequence: number,
+    ptyId: string | undefined,
+    leafKey: string
+  ): boolean {
     const owner = this.watermarkByMailbox.get(mailboxHandle)
-    if (owner && !owner.active) {
-      return false
-    }
-    if (newestSequence > (owner?.sequence ?? -1)) {
+    if (!owner) {
       return true
     }
-    return false
+    if (newestSequence <= owner.sequence) {
+      return false
+    }
+    return owner.active || owner.ptyId !== ptyId || owner.leafKey !== leafKey
   }
 
   setWatermark(mailbox: string, sequence: number, ptyId: string, leafKey: string): void {
@@ -153,17 +166,11 @@ export class OrchestrationMailboxPointerState {
       if (!owner || owner.ptyId !== ptyId) {
         continue
       }
-      if (flight?.mutated || !owner.active) {
-        owner.active = false
-        continue
-      }
       if (this.clearWatermark(mailboxHandle, owner.sequence, ptyId)) {
         releasedMailboxes.push(mailboxHandle)
       }
     }
-    if (!flight?.mutated) {
-      this.watermarkMailboxesByPtyId.delete(ptyId)
-    }
+    this.watermarkMailboxesByPtyId.delete(ptyId)
     return { flight, releasedMailboxes }
   }
 

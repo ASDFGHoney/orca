@@ -80,6 +80,13 @@ export function releaseOwnerToken<T extends GenerationToken>(
     ownerByPtyId.delete(ptyId)
   }
 }
+
+export function releaseDormantOwner<T extends GenerationToken>(
+  owner: OwnedTokenState<T>,
+  flush: (owner: OwnedTokenState<T>) => boolean
+): boolean {
+  return owner.tokens.size === 0 && !owner.pasteOpen && !owner.pasteMutationPending && flush(owner)
+}
 export function invalidateOwner<T extends GenerationToken, R extends string>(
   ownerByPtyId: Map<string, OwnedTokenState<T>>,
   ptyId: string,
@@ -98,6 +105,17 @@ export function invalidateOwner<T extends GenerationToken, R extends string>(
 }
 export function createTransactionToken(generation: number | null): TransactionToken {
   return { generation, active: true, reason: null, invalidate: () => undefined }
+}
+export function invalidateTransactionToken(
+  token: TransactionToken,
+  reason: PtyInputInvalidationReason
+): void {
+  if (!token.active) {
+    return
+  }
+  token.active = false
+  token.reason = reason
+  token.invalidate(reason)
 }
 export function transactionForToken(
   token: TransactionToken,
