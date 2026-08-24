@@ -36,9 +36,13 @@ describe('orchestration mutation recovery', () => {
         workerDeathInferred: false
       }
     })
-    expect(result.message.indexOf('worker-show')).toBeLessThan(
-      result.message.indexOf('exact original')
+    expect(result.message.indexOf('orca orchestration worker-show')).toBeLessThan(
+      result.message.indexOf('orca orchestration worker-start')
     )
+    expect((result.data as { nextSteps?: string[] }).nextSteps).toEqual([
+      'Run orca orchestration worker-show --dispatch dispatch_1 --json before retrying.',
+      'Run orca orchestration worker-start --task task_1 --retry-request request_1.'
+    ])
   })
 
   it('does not invent a dispatch for an old-client-shaped error', () => {
@@ -58,5 +62,53 @@ describe('orchestration mutation recovery', () => {
     })
     expect((result.data as Record<string, unknown>).recovery).not.toHaveProperty('dispatchId')
     expect(result.message).not.toContain('worker death')
+  })
+
+  it('renders the exact executable and safely quotes original arguments', () => {
+    const result = orchestrationMutationRecoveryError(
+      new RuntimeClientError('runtime_timeout', 'request timed out', {
+        orchestrationRequestId: 'request_3',
+        dispatchId: 'dispatch_3',
+        originalCommand: [
+          'orca-dev',
+          'orchestration',
+          'worker-start',
+          '--task',
+          'task 3',
+          '--comment',
+          'literal $(do-not-run)'
+        ]
+      })
+    ) as RuntimeClientError
+
+    expect((result.data as { nextSteps?: string[] }).nextSteps).toEqual([
+      'Run orca-dev orchestration worker-show --dispatch dispatch_3 --json before retrying.',
+      "Run orca-dev orchestration worker-start --task 'task 3' --comment 'literal $(do-not-run)' --retry-request request_3."
+    ])
+    expect(result.message).toContain("'literal $(do-not-run)'")
+  })
+
+  it('parses legacy command text without losing quoted arguments', () => {
+    const result = orchestrationMutationRecoveryError(
+      new RuntimeClientError('runtime_timeout', 'request timed out', {
+        orchestrationRequestId: 'request_4',
+        originalCommand:
+          'orca-ide orchestration worker-stop --dispatch dispatch_4 --comment "quoted value"'
+      })
+    ) as RuntimeClientError
+
+    expect(
+      (result.data as { recovery?: { retryCommand?: string[] } }).recovery?.retryCommand
+    ).toEqual([
+      'orca-ide',
+      'orchestration',
+      'worker-stop',
+      '--dispatch',
+      'dispatch_4',
+      '--comment',
+      'quoted value',
+      '--retry-request',
+      'request_4'
+    ])
   })
 })

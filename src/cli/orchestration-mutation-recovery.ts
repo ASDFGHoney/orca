@@ -1,4 +1,5 @@
 import { RuntimeClientError } from './runtime-client'
+import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
 
 export function orchestrationMutationRecoveryError(error: unknown): unknown {
   if (!(error instanceof RuntimeClientError) || !isUnknownMutationOutcomeCode(error.code)) {
@@ -14,8 +15,9 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
   const retryCommand = originalCommand
     ? [...originalCommand, '--retry-request', requestId]
     : undefined
+  const executable = originalCommand?.[0] ?? resolveOrchestrationCliExecutable()
   const queryCommand = dispatchId
-    ? ['orca', 'orchestration', 'worker-show', '--dispatch', dispatchId, '--json']
+    ? [executable, 'orchestration', 'worker-show', '--dispatch', dispatchId, '--json']
     : undefined
   const recovery = {
     orchestrationRequestId: requestId,
@@ -27,10 +29,10 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
     workerDeathInferred: false
   }
   const retryStep = retryCommand
-    ? `Then re-issue the exact original command with --retry-request ${requestId}.`
-    : `Recovery is blocked until the exact original command is available; if it is, re-issue it with --retry-request ${requestId}.`
+    ? `Run ${renderCommand(retryCommand)}.`
+    : 'Recovery is blocked until the exact original command is available; no retry command was emitted.'
   const nextSteps = queryCommand
-    ? [`Run ${queryCommand.join(' ')} before retrying.`, retryStep]
+    ? [`Run ${renderCommand(queryCommand)} before retrying.`, retryStep]
     : [retryStep]
   const message = [
     stripUnsafeRetryAdvice(error.message, requestId),
@@ -69,9 +71,73 @@ function commandParts(value: unknown): string[] | undefined {
     return [...value]
   }
   if (typeof value === 'string' && value.length > 0) {
-    return value.trim().split(/\s+/)
+    return parseCommandLine(value)
   }
   return undefined
+}
+
+function parseCommandLine(value: string): string[] | undefined {
+  const parts: string[] = []
+  let part = ''
+  let quote: "'" | '"' | undefined
+  let tokenStarted = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote === "'") {
+      if (character === "'") {
+        quote = undefined
+      } else {
+        part += character
+      }
+      tokenStarted = true
+      continue
+    }
+    if (quote === '"') {
+      if (character === '"') {
+        quote = undefined
+      } else if (character === '\\' && ['"', '\\'].includes(value[index + 1] ?? '')) {
+        part += value[++index]
+      } else {
+        part += character
+      }
+      tokenStarted = true
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      tokenStarted = true
+    } else if (/\s/.test(character)) {
+      if (tokenStarted) {
+        parts.push(part)
+        part = ''
+        tokenStarted = false
+      }
+    } else if (character === '\\' && [' ', '\\', "'", '"'].includes(value[index + 1] ?? '')) {
+      part += value[++index]
+      tokenStarted = true
+    } else {
+      part += character
+      tokenStarted = true
+    }
+  }
+  if (quote !== undefined) {
+    return undefined
+  }
+  if (tokenStarted) {
+    parts.push(part)
+  }
+  return parts.length > 0 ? parts : undefined
+}
+
+function renderCommand(command: readonly string[]): string {
+  return command.map(shellQuote).join(' ')
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value
+  }
+  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`
 }
 
 function stripUnsafeRetryAdvice(message: string, requestId: string): string {

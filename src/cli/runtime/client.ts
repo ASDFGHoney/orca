@@ -20,7 +20,10 @@ import { RemoteRuntimeCompatGate } from './remote-runtime-compat-gate'
 import { createOrchestrationCompatibilityEnvelope } from './orchestration-compatibility-envelope'
 import { getTimeoutMsParam, isWaitingCheck } from './runtime-request-timeout'
 import { resolveWorkerStartClientTimeoutMs } from '../../shared/orchestration-timing-budgets'
-import { buildOrchestrationRecoveryCommand } from './orchestration-recovery-command'
+import {
+  buildOrchestrationRecoveryCommand,
+  resolveOrchestrationCliExecutable
+} from './orchestration-recovery-command'
 
 // Why: for long-poll methods the caller's method-level
 // `params.timeoutMs` is the inner waiter budget; we extend the client-side
@@ -42,6 +45,8 @@ export class RuntimeClient {
   private readonly requestTimeoutMs: number
   private readonly remotePairing: PairingOffer | null
   private readonly environmentSelector: string | null
+  private readonly cliExecutable: string
+  private readonly originalArgs: readonly string[] | undefined
   private readonly remoteCompat: RemoteRuntimeCompatGate
   private orchestrationContractCheck: Promise<void> | null = null
   private readonly orchestrationCompatibility = createOrchestrationCompatibilityEnvelope(
@@ -55,11 +60,15 @@ export class RuntimeClient {
     userDataPath = getDefaultUserDataPath(),
     requestTimeoutMs = 60_000,
     remotePairingCode = process.env.ORCA_PAIRING_CODE ?? process.env.ORCA_REMOTE_PAIRING ?? null,
-    environmentSelector = process.env.ORCA_ENVIRONMENT ?? null
+    environmentSelector = process.env.ORCA_ENVIRONMENT ?? null,
+    cliExecutable = resolveOrchestrationCliExecutable(),
+    originalArgs?: readonly string[]
   ) {
     this.userDataPath = userDataPath
     this.requestTimeoutMs = requestTimeoutMs
     this.environmentSelector = environmentSelector
+    this.cliExecutable = cliExecutable
+    this.originalArgs = originalArgs ? [...originalArgs] : undefined
     this.remotePairing = resolveRemotePairing(userDataPath, remotePairingCode, environmentSelector)
     this.remoteCompat = new RemoteRuntimeCompatGate(userDataPath, environmentSelector)
   }
@@ -82,7 +91,7 @@ export class RuntimeClient {
       ? (options?.orchestrationRequestId ?? randomUUID())
       : undefined
     const originalCommand = orchestrationMutation
-      ? buildOrchestrationRecoveryCommand(method, params)
+      ? buildOrchestrationRecoveryCommand(method, params, this.cliExecutable, this.originalArgs)
       : undefined
     const compatibilityEnvelope = method.startsWith('orchestration.')
       ? {
@@ -272,10 +281,7 @@ function attachMutationRecovery(
     {
       ...(error.data && typeof error.data === 'object' ? error.data : {}),
       orchestrationRequestId: requestId,
-      ...(originalCommand &&
-      !(error.data && typeof error.data === 'object' && 'originalCommand' in error.data)
-        ? { originalCommand }
-        : {})
+      ...(originalCommand ? { originalCommand } : {})
     }
   )
 }
