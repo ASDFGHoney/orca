@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
-import type * as NodePerfHooks from 'node:perf_hooks'
+import { performance as nodePerformance } from 'node:perf_hooks'
 import { chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,16 +33,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     stat: (...args: Parameters<typeof actual.stat>) => {
       statCalls.push(String(args[0]))
       return actual.stat(...args)
-    }
-  }
-})
-vi.mock('node:perf_hooks', async (importOriginal) => {
-  const actual = await importOriginal<typeof NodePerfHooks>()
-  return {
-    ...actual,
-    performance: {
-      ...actual.performance,
-      now: () => Date.now()
     }
   }
 })
@@ -527,6 +517,9 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   it('re-arms the native stream when the root is replaced with the same child names', async () => {
     vi.useFakeTimers()
+    const restorePerformanceNow = vi
+      .spyOn(nodePerformance, 'now')
+      .mockImplementation(() => Date.now())
     try {
       installSubscribeMock()
       const commonDir = await makeCommonDir(true)
@@ -552,12 +545,16 @@ describe('worktree git-common narrow watch (darwin)', () => {
       expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
     } finally {
       await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+      restorePerformanceNow.mockRestore()
       vi.useRealTimers()
     }
   })
 
   it('disposes an in-flight stale resubscribe and fences its interruption hook', async () => {
     vi.useFakeTimers()
+    const restorePerformanceNow = vi
+      .spyOn(nodePerformance, 'now')
+      .mockImplementation(() => Date.now())
     try {
       const deferredSubscribe = Promise.withResolvers<{
         unsubscribe: () => Promise<void>
@@ -607,6 +604,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       expect(received.flat()).toContainEqual({ type: 'create', path: immediateEntry })
     } finally {
       await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+      restorePerformanceNow.mockRestore()
       vi.useRealTimers()
     }
   })
