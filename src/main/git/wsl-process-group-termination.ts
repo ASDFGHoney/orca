@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ProcessTerminationBarrier } from '../../shared/child-process/run-process'
-import { runProcess } from '../../shared/child-process/run-process'
-import { buildWslExecArgs, quotePosixShell } from '../../shared/wsl-login-shell-command'
+import { quotePosixShell } from '../../shared/wsl-login-shell-command'
+import { runWslProcess } from '../wsl/wsl-runner'
 
 const GUEST_TERMINATION_ATTEMPTS = 40
 const GUEST_TERMINATION_INTERVAL_SECONDS = '0.025'
@@ -41,15 +41,13 @@ export function createWslProcessGroupTermination(distro: string): WslProcessGrou
       `  sleep ${GUEST_TERMINATION_INTERVAL_SECONDS}`,
       'done'
     ].join('\n')
-    const result = await runProcess({
-      program: 'wsl.exe',
-      args: buildWslExecArgs(distro, [
-        'sh',
-        '-c',
-        script,
-        'orca-wsl-process-group-termination',
-        String(processGroupId)
-      ]),
+    // loginPath 'none': the payload is builtins and coreutils on the default
+    // PATH, so a login probe would only add latency to a kill.
+    const result = await runWslProcess({
+      script,
+      args: [String(processGroupId)],
+      distro,
+      loginPath: 'none',
       timeoutMs: GUEST_TERMINATION_COMMAND_TIMEOUT_MS,
       maxOutputBytes: 1_024
     })
