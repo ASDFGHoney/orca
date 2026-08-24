@@ -214,7 +214,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:hasChildProcesses',
     async (_event, args: { id: string }): Promise<boolean> => {
-      if (!hasPtyProviderForInspection(args.id)) {
+      if (typeof args?.id !== 'string' || !hasPtyProviderForInspection(args.id)) {
         return false
       }
       return getProviderForPty(args.id).hasChildProcesses(args.id)
@@ -224,7 +224,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:getForegroundProcess',
     async (_event, args: { id: string }): Promise<string | null> => {
-      if (!hasPtyProviderForInspection(args.id)) {
+      if (typeof args?.id !== 'string' || !hasPtyProviderForInspection(args.id)) {
         return null
       }
       return getProviderForPty(args.id).getForegroundProcess(args.id)
@@ -247,7 +247,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:confirmForegroundProcess',
     async (_event, args: { id: string }): Promise<string | null> => {
-      if (!hasPtyProviderForInspection(args.id)) {
+      if (typeof args?.id !== 'string' || !hasPtyProviderForInspection(args.id)) {
         return null
       }
       const provider = getProviderForPty(args.id)
@@ -259,7 +259,7 @@ export function installPtyInspectIpcHandlers(deps: {
   // Why: Cmd+D split needs the live shell cwd so the new pane inherits it (not the worktree root); '' means unknown/unresolvable (Windows) → renderer falls through.
   ipcMain.handle('pty:getCwd', async (_event, args: { id: string }): Promise<string> => {
     try {
-      return await getProviderForPty(args.id).getCwd(args.id)
+      return await getProviderForPty(args?.id).getCwd(args.id)
     } catch {
       return ''
     }
@@ -269,7 +269,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:getSize',
     async (_event, args: { id: string }): Promise<{ cols: number; rows: number } | null> => {
-      const provider = tryGetProviderForPty(args.id)
+      const provider = tryGetProviderForPty(args?.id)
       try {
         if (provider?.getAppliedSize) {
           // Why: a provider-owned null means it could not verify the applied
@@ -280,7 +280,7 @@ export function installPtyInspectIpcHandlers(deps: {
       } catch {
         // Fall through to the requested-size cache so a dead daemon/relay can't throw across the IPC boundary.
       }
-      return ptySizes.get(args.id) ?? null
+      return ptySizes.get(args?.id) ?? null
     }
   )
 
@@ -288,7 +288,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:declarePendingPaneSerializer',
     async (event, args: { paneKey?: unknown }): Promise<number> => {
-      if (!isValidPaneKey(args.paneKey)) {
+      if (!isValidPaneKey(args?.paneKey)) {
         throw new Error('Invalid paneKey')
       }
       return declarePendingPaneSerializer(args.paneKey, event?.sender)
@@ -298,7 +298,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:settlePaneSerializer',
     async (_event, args: { paneKey?: unknown; gen?: unknown }): Promise<void> => {
-      if (!isValidPaneKey(args.paneKey) || typeof args.gen !== 'number') {
+      if (!isValidPaneKey(args?.paneKey) || typeof args.gen !== 'number') {
         return
       }
       const ptyId = pendingPtyIdBySerializerGeneration.get(args.gen)
@@ -314,7 +314,7 @@ export function installPtyInspectIpcHandlers(deps: {
   ipcMain.handle(
     'pty:clearPendingPaneSerializer',
     async (_event, args: { paneKey?: unknown; gen?: unknown }): Promise<void> => {
-      if (!isValidPaneKey(args.paneKey) || typeof args.gen !== 'number') {
+      if (!isValidPaneKey(args?.paneKey) || typeof args.gen !== 'number') {
         return
       }
       settlePendingPaneSerializer(args.paneKey, args.gen)
@@ -326,7 +326,7 @@ export function installPtyInspectIpcHandlers(deps: {
     'pty:reportRendererSerializerReady',
     async (_event, args: { ptyId?: unknown }): Promise<void> => {
       if (
-        typeof args.ptyId !== 'string' ||
+        typeof args?.ptyId !== 'string' ||
         !args.ptyId.startsWith('remote:') ||
         args.ptyId.length > 512
       ) {
