@@ -149,6 +149,7 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
       [CODEX_SPAWN_TOKEN_ENV]: 'spawn-9',
       CODEX_HOME: '/codex/home'
     })
+    expect(codex.connections[0].launch.cwd).toBe('/work/repo')
     expect(codex.connections[0].calls[0]).toEqual({
       method: 'thread/start',
       params: { cwd: '/work/repo' }

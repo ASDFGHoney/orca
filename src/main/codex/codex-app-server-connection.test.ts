@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { spawnProcess } from '../../shared/child-process/run-process'
@@ -35,6 +37,9 @@ const FAKE_APP_SERVER = String.raw`
     if (message.method === 'test/env') {
       return send({ id: message.id, result: { codexHome: process.env.CODEX_HOME ?? null } })
     }
+    if (message.method === 'test/cwd') {
+      return send({ id: message.id, result: { cwd: process.cwd() } })
+    }
     if (message.method === 'test/notify') {
       send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-7' } } })
       return send({ id: message.id, result: {} })
@@ -57,10 +62,11 @@ const FAKE_APP_SERVER = String.raw`
 async function openFakeServer(
   handlers: CodexAppServerConnectionHandlers = {},
   env?: Record<string, string>,
-  envToDelete?: string[]
+  envToDelete?: string[],
+  cwd?: string
 ): Promise<CodexAppServerConnection> {
   return openCodexAppServerConnection(
-    { command: process.execPath, args: ['-e', FAKE_APP_SERVER], env, envToDelete },
+    { command: process.execPath, args: ['-e', FAKE_APP_SERVER], env, envToDelete, cwd },
     handlers
   )
 }
@@ -83,7 +89,9 @@ function stubChild(options: { exitOnStdinEnd?: boolean } = {}): {
   child.stdout = new PassThrough()
   child.stderr = new PassThrough()
   child.stdin = new PassThrough()
-  child.pid = 4242
+  // Keep the synthetic pid outside any real process table so teardown never
+  // mistakes an unrelated process for this stub.
+  child.pid = 9_999_999
   child.kill = vi.fn()
   const written: Record<string, unknown>[] = []
   child.stdin.on('data', (chunk: Buffer) => {
@@ -167,6 +175,14 @@ describe('openCodexAppServerConnection', () => {
     const stripped = await openFakeServer({}, undefined, ['CODEX_HOME'])
     expect(await stripped.request('test/env')).toEqual({ codexHome: null })
     await stripped.close()
+  })
+
+  it('starts the provider in the resolved workspace directory', async () => {
+    const workspace = realpathSync(tmpdir())
+    const connection = await openFakeServer({}, undefined, undefined, workspace)
+
+    await expect(connection.request('test/cwd')).resolves.toEqual({ cwd: workspace })
+    await connection.close()
   })
 
   it('routes a server request to the handler and writes the reply back', async () => {

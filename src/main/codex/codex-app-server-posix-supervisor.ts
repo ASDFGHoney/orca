@@ -16,6 +16,10 @@ const timer = setInterval(() => {
   }
 }, 100)
 timer.unref()
+child.once('error', () => {
+  clearInterval(timer)
+  process.exit(127)
+})
 child.once('exit', (code, signal) => {
   clearInterval(timer)
   if (signal) process.kill(process.pid, signal)
@@ -25,13 +29,14 @@ child.once('exit', (code, signal) => {
 
 export function supervisedPosixLaunch(
   launch: CodexAppServerLaunch,
-  childEnv: NodeJS.ProcessEnv
+  childEnv: NodeJS.ProcessEnv,
+  cwd = launch.cwd ?? process.cwd()
 ): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
   const supervisorSpec = Buffer.from(
     JSON.stringify({
       command: launch.command,
       args: launch.args,
-      cwd: process.cwd(),
+      cwd,
       env: childEnv
     })
   ).toString('base64')
@@ -52,7 +57,7 @@ export function createProviderSpawnSpec(
     program: supervised?.command ?? launch.command,
     args: supervised?.args ?? launch.args,
     env: supervised?.env ?? childEnv,
-    cwd: process.cwd(),
+    cwd: launch.cwd ?? process.cwd(),
     detached: platform !== 'win32'
   }
 }

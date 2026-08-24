@@ -93,6 +93,7 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
         {
           command: launch.command,
           args: launch.args,
+          cwd: launch.cwd,
           env: buildCodexStructuredChildEnvironment(launch, input.spawnToken)
         },
         {

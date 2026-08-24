@@ -328,7 +328,7 @@ beforeEach(async () => {
         openCodexConnection: codex.openConnection,
         readProcessStartTime: async () => 1_700_000_000_000
       }).then(() => undefined),
-    registerOwnedSubscriptionCleanup: vi.fn((id: string, dispose: () => void) => {
+    registerOwnedSubscriptionCleanup: vi.fn((_id: string, dispose: () => void) => {
       return {
         releaseIfCurrent: dispose
       }

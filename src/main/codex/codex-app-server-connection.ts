@@ -33,6 +33,8 @@ export {
 export type CodexAppServerLaunch = {
   command: string
   args: string[]
+  /** Workspace directory used by the provider process itself. */
+  cwd?: string
   /** Overlay on the inherited environment — the pinned CODEX_HOME lives here. */
   env?: Record<string, string>
   /** Keys stripped after the overlay, matching `CodexAppServerInvocation`. */
