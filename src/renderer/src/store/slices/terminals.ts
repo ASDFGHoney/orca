@@ -566,6 +566,8 @@ export type TerminalSlice = {
       envToDelete?: string[]
       launchConfig?: SleepingAgentLaunchConfig
       resumeProviderSession?: AgentProviderSessionMetadata
+      /** Stable identity of the sleeping record held until a fresh resume PTY spawns. */
+      sleepingAgentResumeIdentity?: { paneKey: string; capturedAt: number }
       launchToken?: string
       launchAgent?: TuiAgent
       /** Explicit CLI override for host-owned agent launches; omission uses host settings. */
@@ -748,6 +750,8 @@ export type TerminalSlice = {
       envToDelete?: string[]
       launchConfig?: SleepingAgentLaunchConfig
       resumeProviderSession?: AgentProviderSessionMetadata
+      /** Stable identity of the sleeping record held until a fresh resume PTY spawns. */
+      sleepingAgentResumeIdentity?: { paneKey: string; capturedAt: number }
       launchToken?: string
       launchAgent?: TuiAgent
       agentArgsOverride?: string | null
@@ -768,6 +772,8 @@ export type TerminalSlice = {
     envToDelete?: string[]
     launchConfig?: SleepingAgentLaunchConfig
     resumeProviderSession?: AgentProviderSessionMetadata
+    /** Stable identity of the sleeping record held until a fresh resume PTY spawns. */
+    sleepingAgentResumeIdentity?: { paneKey: string; capturedAt: number }
     launchToken?: string
     launchAgent?: TuiAgent
     agentArgsOverride?: string | null

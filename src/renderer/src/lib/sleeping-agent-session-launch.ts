@@ -109,6 +109,10 @@ export function launchSleepingAgentSession(
     resumeProviderSession: record.providerSession,
     launchAgent: record.agent,
     ...(launchConfig ? { agentArgsOverride: launchConfig.agentArgs } : {}),
+    sleepingAgentResumeIdentity: {
+      paneKey: record.paneKey,
+      capturedAt: record.capturedAt
+    },
     ...(startupPlan.startupCommandDelivery
       ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
       : {}),
@@ -124,7 +128,6 @@ export function launchSleepingAgentSession(
     launchAgent: record.agent,
     providerSession: record.providerSession
   })
-  state.clearSleepingAgentSession(record.paneKey)
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
   }

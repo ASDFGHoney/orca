@@ -132,6 +132,29 @@ function activeOrQueuedResumeClaimsProviderSession(
   return false
 }
 
+function isSleepingResumeStartupInFlight(
+  record: SleepingAgentSessionRecord,
+  state: ReturnType<typeof useAppStore.getState>
+): boolean {
+  const worktreeTabIds = new Set(
+    (state.tabsByWorktree[record.worktreeId] ?? []).map((tab) => tab.id)
+  )
+  return Object.entries(state.pendingStartupByTabId).some(([tabId, startup]) => {
+    const identity = startup.sleepingAgentResumeIdentity
+    return (
+      worktreeTabIds.has(tabId) &&
+      identity?.paneKey === record.paneKey &&
+      identity.capturedAt === record.capturedAt &&
+      startup.launchAgent === record.agent &&
+      agentProviderSessionsEqual(
+        record.agent,
+        startup.resumeProviderSession,
+        record.providerSession
+      )
+    )
+  })
+}
+
 // Why: an interrupted turn is still resumable — `claude --resume` reopens the transcript at the
 // prompt — so discarding those records only stranded the session across wake and restart.
 function isInvalidWorktreeActivationRecord(record: SleepingAgentSessionRecord): boolean {
@@ -223,6 +246,11 @@ export function resumeSleepingAgentSessionsForWorktree(
       if (!isPaneOwned || activeClaimKeys.has(claimKey)) {
         state.clearSleepingAgentSession(record.paneKey)
       }
+      continue
+    }
+    if (isSleepingResumeStartupInFlight(record, currentState)) {
+      // The queued startup is the retry path while the execution host has not
+      // proved a fresh PTY; preserve the record for a later spawn or retry.
       continue
     }
     if (activeOrQueuedResumeClaimsProviderSession(record, currentState, isPaneOwned)) {

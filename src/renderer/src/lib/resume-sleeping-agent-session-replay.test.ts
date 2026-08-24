@@ -34,6 +34,23 @@ function makeTerminalTab(id: string): Record<string, unknown> {
 }
 
 describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
+  it('keeps a sleeping record retryable when the first resume spawn never arrives', () => {
+    const record = makeRecord()
+    useAppStore.setState({
+      tabsByWorktree: { 'wt-1': [] },
+      sleepingAgentSessionsByPaneKey: { [record.paneKey]: record }
+    } as never)
+
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(1)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
+
+    // A second activation can observe the failed/in-flight attempt, but must not
+    // clear the record or launch a duplicate before the execution host answers.
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
+  })
+
   it('stores provider-session metadata in the queued startup and runtime claim', () => {
     const record = makeRecord()
     useAppStore.setState({
@@ -47,6 +64,10 @@ describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
     expect(state.pendingStartupByTabId[resumedTab.id]?.resumeProviderSession).toEqual(
       record.providerSession
     )
+    expect(state.pendingStartupByTabId[resumedTab.id]?.sleepingAgentResumeIdentity).toEqual({
+      paneKey: record.paneKey,
+      capturedAt: record.capturedAt
+    })
     expect(state.automaticAgentResumeClaimsByTabId[resumedTab.id]).toEqual({
       worktreeId: record.worktreeId,
       launchAgent: record.agent,
@@ -71,7 +92,7 @@ describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
 
     expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
     expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
-    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBeUndefined()
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
   })
 
   it('does not fork after startup is consumed but before hooks report live status', () => {
