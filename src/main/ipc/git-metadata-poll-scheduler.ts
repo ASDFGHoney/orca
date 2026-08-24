@@ -67,6 +67,7 @@ export class GitMetadataPollScheduler {
   private nextId = 1
   private activePolls = 0
   private activeFilesystemOperations = 0
+  private resetGeneration = 0
 
   constructor(
     private readonly concurrency = GIT_METADATA_FILESYSTEM_CONCURRENCY,
@@ -158,6 +159,24 @@ export class GitMetadataPollScheduler {
     })
     this.drainFilesystemQueue()
     return promise
+  }
+
+  resetForTests(): void {
+    this.resetGeneration++
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    for (const poll of this.polls.values()) {
+      poll.disposed = true
+      poll.unsubscribeVisibility()
+      poll.queued = false
+    }
+    this.polls.clear()
+    this.pollQueue.length = 0
+    this.filesystemQueue.length = 0
+    this.activePolls = 0
+    this.activeFilesystemOperations = 0
   }
 
   private unsubscribePoll(poll: ScheduledPoll): void {
@@ -252,6 +271,7 @@ export class GitMetadataPollScheduler {
       }
       const isVisibilityCatchUp = poll.pendingVisibilityCatchUp
       poll.pendingVisibilityCatchUp = false
+      const resetGeneration = this.resetGeneration
       poll.running = true
       this.activePolls++
       let result: void | Promise<void>
@@ -265,6 +285,9 @@ export class GitMetadataPollScheduler {
           // Each poller owns its transient-error policy; keep the host scheduler alive.
         })
         .finally(() => {
+          if (resetGeneration !== this.resetGeneration) {
+            return
+          }
           poll.running = false
           this.activePolls--
           if (!poll.disposed && poll.rerunPending) {
@@ -281,8 +304,12 @@ export class GitMetadataPollScheduler {
   private drainFilesystemQueue(): void {
     while (this.activeFilesystemOperations < this.concurrency && this.filesystemQueue.length > 0) {
       const operation = this.filesystemQueue.shift()!
+      const resetGeneration = this.resetGeneration
       this.activeFilesystemOperations++
       void operation.execute().finally(() => {
+        if (resetGeneration !== this.resetGeneration) {
+          return
+        }
         this.activeFilesystemOperations--
         this.drainFilesystemQueue()
       })

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
 import { performance as nodePerformance } from 'node:perf_hooks'
@@ -18,10 +18,15 @@ import type {
 } from './worktree-base-directory-poller'
 import { startGitCommonWatch } from './worktree-git-common-watch'
 import { startGitCommonPolling } from './worktree-git-common-polling'
+import { gitMetadataPollScheduler } from './git-metadata-poll-scheduler'
 
 vi.mock('./parcel-watcher-process', () => ({
   subscribeViaWatcherProcess: vi.fn()
 }))
+
+beforeEach(() => {
+  gitMetadataPollScheduler.resetForTests()
+})
 
 // Records every stat target so a test can assert which paths a parked poll stopped touching.
 const { statCalls } = vi.hoisted(() => ({ statCalls: [] as string[] }))
@@ -94,6 +99,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+    gitMetadataPollScheduler.resetForTests()
     childSubscriptions = []
     statCalls.length = 0
     subscribeMock.mockReset()
@@ -662,6 +668,7 @@ describe('worktree git-common polling gate (non-darwin)', () => {
 
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+    gitMetadataPollScheduler.resetForTests()
   })
 
   async function makePollingCommonDir(): Promise<string> {
