@@ -9,13 +9,14 @@ const WSL_STUB_BACKUP_PATH = '/usr/local/bin/golden-stub-agent.orca-e2e-backup'
 /** mkdir is atomic in the distro, so the lock dir serializes overlapping invocations. */
 const WSL_STUB_LOCK_PATH = '/usr/local/bin/golden-stub-agent.orca-e2e-lock'
 const WSL_STUB_LINK_MARKER = `${WSL_STUB_LOCK_PATH}/created-codex-link`
+const WSL_STUB_STAGED_MARKER = `${WSL_STUB_LOCK_PATH}/staged-stub`
 const WSL_STUB_LOCK_STALE_MINUTES = 10
 const WSL_STUB_LOCK_WAIT_SECONDS = 60
 
 // Undoes a lock holder that died mid-run, so its leftovers cannot poison later invocations.
 const RECLAIM_STALE_LOCK_SCRIPT =
   `if [ -e ${WSL_STUB_LINK_MARKER} ]; then rm -f ${WSL_STUB_AGENT_LINK}; fi; ` +
-  `rm -f ${WSL_STUB_PATH}; ` +
+  `if [ -e ${WSL_STUB_STAGED_MARKER} ]; then rm -f ${WSL_STUB_PATH}; fi; ` +
   `if [ -e ${WSL_STUB_BACKUP_PATH} ] || [ -L ${WSL_STUB_BACKUP_PATH} ]; then ` +
   `mv ${WSL_STUB_BACKUP_PATH} ${WSL_STUB_PATH}; fi; ` +
   `rm -rf ${WSL_STUB_LOCK_PATH}`
@@ -37,8 +38,9 @@ const BACKUP_EXISTING_STUB_SCRIPT =
   `mv ${WSL_STUB_PATH} ${WSL_STUB_BACKUP_PATH} && ` +
   `printf backed-up; else printf none; fi`
 
+// The marker is written first so stale-lock recovery only removes a stub this helper wrote.
 const STAGE_SCRIPT =
-  `mkdir -p /usr/local/bin && ` +
+  `mkdir -p /usr/local/bin && : > ${WSL_STUB_STAGED_MARKER} && ` +
   `printf '#!/bin/sh\\necho GOLDEN_STUB_AGENT_READY\\nexec sleep 3600\\n' > ${WSL_STUB_PATH} && ` +
   `chmod 0755 ${WSL_STUB_PATH}`
 
