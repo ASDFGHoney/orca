@@ -322,8 +322,9 @@ describe('registerPtyHandlers', () => {
         const spawnOptions = remoteSpawn.mock.calls[0]?.[0]
         const env = spawnOptions.env
         expect(env).toMatchObject({ FOO: 'bar' })
+        const preservesRemoteHookCoordinates = remoteFlag === '1' && hooksEnabled
         const forwardsHookPolicy =
-          remoteFlag === '1' && hooksEnabled && !disabledTuiAgents.includes('codex')
+          preservesRemoteHookCoordinates && !disabledTuiAgents.includes('codex')
         expect(spawnOptions.agentStatusHooksEnabled).toBe(forwardsHookPolicy ? true : undefined)
         if (preservesIdentity) {
           expect(env).toMatchObject({
@@ -345,7 +346,7 @@ describe('registerPtyHandlers', () => {
           'ORCA_AGENT_HOOK_VERSION',
           'ORCA_AGENT_HOOK_ENDPOINT'
         ]
-        if (forwardsHookPolicy) {
+        if (preservesRemoteHookCoordinates) {
           expect(spawnOptions.envToDelete ?? []).not.toEqual(
             expect.arrayContaining(hookCoordinateKeys)
           )

@@ -14289,6 +14289,7 @@
       "knownGaps": [
         "Orca's enabled status-hook setting intentionally supplies a launch-scoped override to persistent config.toml; explicit launch arguments remain the per-launch opt-out.",
         "The SSH spawn request has one optional additive policy field. An older relay ignores it and preserves ordinary startup behavior; its absence from an older client defaults off in a newer relay, so mixed versions never enable hooks without explicit client policy.",
+        "The shared ORCA_AGENT_HOOK_* coordinates remain governed by the global remote-hook policy for every provider; disabling Codex specifically suppresses only Codex's launch intent. A profile that mutates Orca-owned coordinates after relay admission is not supported and remains an unproved fail-open edge.",
         "Unmodelable shell command overrides fail open without hook argv rather than risking a broken launch.",
         "Copied AI Vault commands remain byte-identical because they can run outside an Orca-owned PTY with no authoritative coordinate boundary.",
         "AI Vault spawn planning is limited to SSH POSIX and preserves scanner-authored command arguments; remote Windows and non-SSH runtime sessions remain unchanged.",

@@ -1696,7 +1696,7 @@ function getRemoteAgentHookEnvKeysToDelete(args: {
   settings: GlobalSettings | undefined
 }): readonly string[] {
   return args.connectionId &&
-    (!isRemoteAgentHooksEnabled() || !isCodexStatusHooksEnabled(args.settings))
+    (!isRemoteAgentHooksEnabled() || !isAgentStatusHooksEnabled(args.settings))
     ? REMOTE_AGENT_HOOK_COORDINATE_ENV_KEYS
     : []
 }
