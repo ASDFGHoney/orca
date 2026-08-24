@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createHookListenerState,
-  normalizeHookPayload,
-  resolveCachedClaudeCompactOwnership,
-  type AgentHookEventPayload,
   type HookListenerState
-} from './agent-hook-listener'
+} from './agent-hook-listener/listener-state'
+import { normalizeHookPayload } from './agent-hook-listener'
+import { resolveCachedClaudeCompactOwnership } from './agent-hook-listener/claude-compact-ownership'
+import type { AgentHookEventPayload } from './agent-hook-listener/listener-event'
 import type { AgentHookSource } from './agent-hook-relay'
 import { makePaneKey } from './stable-pane-id'
 
