@@ -39,7 +39,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const POLL_MS = 25
 // Native re-arm is intentionally deferred to the 15-tick reconciliation. Give
 // loaded CI shards enough wall-clock slack without changing the exact call count.
-const RECONCILIATION_WAIT_TIMEOUT_MS = 5_000
+const RECONCILIATION_WAIT_TIMEOUT_MS = 30_000
 
 const alwaysVisible: WorktreePollerWindowVisibility = {
   isWindowVisible: () => true,
