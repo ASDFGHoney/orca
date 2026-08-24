@@ -1,4 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnProcess } from '../../shared/child-process/run-process'
+import { assignHostProcessToKillOnCloseJob } from '../windows/windows-pty-job'
+import { createProviderSpawnSpec } from '../codex/codex-app-server-posix-supervisor'
 import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
 import { buildClaudeChildProcessEnv } from './claude-child-process-environment'
@@ -76,14 +78,28 @@ function exitError(stderrTail: string, cause?: Error): Error {
 export async function openClaudeStreamJsonConnection(
   launch: ClaudeStreamJsonLaunch,
   handlers: ClaudeStreamJsonConnectionHandlers = {},
-  spawnImpl: typeof spawn = spawn
+  spawnImpl?: unknown
 ): Promise<ClaudeStreamJsonConnection> {
-  const child = spawnImpl(launch.command, launch.args, {
-    cwd: launch.cwd,
-    env: buildClaudeChildProcessEnv(launch.env),
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
-  }) as ChildProcessWithoutNullStreams
+  const childEnv = buildClaudeChildProcessEnv(launch.env)
+  const child = (
+    spawnImpl
+      ? (
+          spawnImpl as (
+            command: string,
+            args: string[],
+            options: Record<string, unknown>
+          ) => unknown
+        )(launch.command, launch.args, {
+          cwd: launch.cwd,
+          env: childEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true
+        })
+      : spawnProcess(createProviderSpawnSpec(launch, childEnv, process.platform))
+  ) as ReturnType<typeof spawnProcess>
+  if (process.platform === 'win32') {
+    assignHostProcessToKillOnCloseJob()
+  }
   const pending = new Map<string, PendingRequest>()
   let nextRequestId = 1
   let stderrTail = ''

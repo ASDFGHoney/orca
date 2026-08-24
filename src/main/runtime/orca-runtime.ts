@@ -101,6 +101,7 @@ import {
   scopedAgentSessionClaimsEqual
 } from '../../shared/claimed-agent-pty-owner-snapshot'
 import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
+import { resolveClaudeCommand } from '../codex-cli/command'
 import {
   beginAdoptedCodexReadinessWatch,
   type AdoptedCodexReadinessEvent,
@@ -10644,6 +10645,9 @@ export class OrcaRuntimeService {
       resolveLaunchArgs: () => this.resolveConfiguredCodexStructuredArgs(),
       resolveLaunchEnvOverlay: () =>
         resolveTuiAgentLaunchEnv('codex', this.requireStore().getSettings().agentDefaultEnv),
+      resolveClaudeCommand: () => resolveClaudeCommand(),
+      resolveClaudeLaunchEnv: () =>
+        resolveTuiAgentLaunchEnv('claude', this.requireStore().getSettings().agentDefaultEnv),
       handoffTransport: this.createStructuredAgentSessionHandoffTransport()
     })
   }
@@ -11440,9 +11444,9 @@ export class OrcaRuntimeService {
 
   async getStructuredAgentSessionCreateSupport(
     worktreeSelector: string,
-    agent: 'codex'
+    agent: 'claude' | 'codex'
   ): Promise<{ supported: boolean; reason?: 'agent' | 'remote' | 'wsl' }> {
-    if (agent !== 'codex') {
+    if (agent !== 'codex' && agent !== 'claude') {
       return { supported: false, reason: 'agent' }
     }
     const location = await this.resolveStructuredAgentSessionLocation(worktreeSelector)
@@ -11742,8 +11746,14 @@ export class OrcaRuntimeService {
   async resolveStructuredAgentSessionCreateIntent(input: {
     envelope: { sessionId: string; clientOperationId: string }
     worktree: string
-    agent: 'codex'
+    agent: 'claude' | 'codex'
   }): Promise<AgentSessionAttachParams> {
+    if (input.agent === 'claude') {
+      return this.resolveStructuredAgentSessionIntent(
+        input,
+        ({ launchEnv }) => launchEnv.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      )
+    }
     return this.resolveStructuredAgentSessionIntent(input, ({ workspacePath, launchEnv }) => {
       // A create has no process yet, so the current selection is what it must follow.
       const preparedHome = this.prepareCodexStructuredLaunchFn?.({ workspacePath, launchEnv })
@@ -11791,7 +11801,7 @@ export class OrcaRuntimeService {
     input: {
       envelope: { sessionId: string; clientOperationId: string }
       worktree: string
-      agent: 'codex'
+      agent: 'claude' | 'codex'
     },
     resolveAccountHomePath: (context: {
       workspacePath: string
@@ -11803,7 +11813,7 @@ export class OrcaRuntimeService {
       throw new Error('structured_agent_session_unsupported')
     }
     const settings = this.requireStore().getSettings()
-    const launchEnv = resolveTuiAgentLaunchEnv('codex', settings.agentDefaultEnv)
+    const launchEnv = resolveTuiAgentLaunchEnv(input.agent, settings.agentDefaultEnv)
     const location = await this.resolveStructuredAgentSessionLocation(input.worktree)
     const workspacePath = (await this.resolveRuntimeFileTarget(input.worktree)).worktree.path
     return {
@@ -11814,10 +11824,10 @@ export class OrcaRuntimeService {
         payloadFingerprint: ''
       },
       location,
-      provider: 'codex',
-      agent: 'codex',
+      provider: input.agent,
+      agent: input.agent,
       accountHome: {
-        variable: 'CODEX_HOME',
+        variable: input.agent === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
         path: resolveAccountHomePath({ workspacePath, launchEnv })
       },
       runtimeKind: 'native'
