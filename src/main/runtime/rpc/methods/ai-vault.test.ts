@@ -248,6 +248,25 @@ describe('aiVault.listSessions handler + shared cache', () => {
     })
   })
 
+  it('preserves structured runtime error metadata while humanizing its message', async () => {
+    const error = Object.assign(new Error('AI Vault service restart circuit is open.'), {
+      code: 'runtime_timeout',
+      data: { retryAfterMs: 5000 }
+    })
+    const dispatcher = makeFailingDispatcher(error)
+
+    await expect(
+      dispatcher.dispatch(makeRequest('aiVault.listSessions', { limit: 500 }))
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'runtime_timeout',
+        message: 'Session scanning paused after repeated failures. Refresh to try again.',
+        data: { retryAfterMs: 5000 }
+      }
+    })
+  })
+
   it('passes only the first 64 scopePaths to the scanner when a request exceeds the cap', async () => {
     const dispatcher = makeDispatcher()
     const scopePaths = Array.from({ length: 65 }, (_, index) => `/p/${index}`)

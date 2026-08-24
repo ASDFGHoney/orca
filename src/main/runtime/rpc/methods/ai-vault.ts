@@ -93,8 +93,11 @@ export const AI_VAULT_METHODS: RpcMethod[] = [
           scopePaths: params.scopePaths
         })
       } catch (error) {
-        const raw = error instanceof Error ? error.message : String(error)
-        throw new Error(describeAiVaultScanError(raw))
+        if (error instanceof Error) {
+          error.message = describeAiVaultScanError(error.message)
+          throw error
+        }
+        throw new Error(describeAiVaultScanError(String(error)))
       }
       // Why: web clients consume this response directly (no parent-side retag),
       // so sessions must come back stamped as the runtime host they addressed.
