@@ -101,8 +101,21 @@ export async function proveCodexTuiRollout(input: {
   }
 
   const deadline = Date.now() + (input.timeoutMs ?? 15_000)
+  const retrySubmitAt = Date.now() + 750
+  let retriedSubmit = false
   while (Date.now() < deadline) {
     const output = input.readOutput()
+    if (
+      !retriedSubmit &&
+      Date.now() >= retrySubmitAt &&
+      output.text.includes('/status') &&
+      !parseCodexTuiStatusSessionId(output.text)
+    ) {
+      retriedSubmit = true
+      if (!input.write(probe.submit)) {
+        throw new Error('The agent terminal could not finish Codex session verification.')
+      }
+    }
     if (output.lastOutputAt !== baselineOutputAt) {
       const observedThreadId = parseCodexTuiStatusSessionId(output.text)
       if (observedThreadId && observedThreadId !== input.threadId) {
