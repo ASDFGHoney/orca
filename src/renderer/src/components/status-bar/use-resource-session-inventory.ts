@@ -269,13 +269,13 @@ export function useResourceSessionInventory(
     }
   }, [authoritativeInventoryRequested, ready, refreshSessions, removeSession])
 
-  const sessions = useMemo(
-    () =>
-      ready && authoritativeInventoryRequested
-        ? sessionRowsRef.current.toArray()
-        : EMPTY_DAEMON_SESSION_ROWS,
-    [authoritativeInventoryRequested, ready, state.sessionRowsRevision]
-  )
+  const sessions = useMemo(() => {
+    // The rows live in a ref; this revision invalidates their materialized snapshot.
+    void state.sessionRowsRevision
+    return ready && authoritativeInventoryRequested
+      ? sessionRowsRef.current.toArray()
+      : EMPTY_DAEMON_SESSION_ROWS
+  }, [authoritativeInventoryRequested, ready, state.sessionRowsRevision])
   const sessionInventory = useMemo(
     () => ({ sessions, count: state.sessionCount }),
     [sessions, state.sessionCount]
