@@ -126,8 +126,7 @@ export function getWorktreeStatusLabel(status: WorktreeStatus): string {
 }
 
 /**
- * Apply the WorktreeCard priority overlay (permission > working > done >
- * heuristic) on top of the title-heuristic base. Explicit agent rows may
+ * Apply the WorktreeCard priority overlay on top of the title-heuristic base. Explicit agent rows may
  * promote the dot; sleep cleanup owns removing stale retained rows.
  *
  * Map args are narrowed to this worktree. `hasPermission`/`hasLiveWorking`/
@@ -174,16 +173,12 @@ export function resolveWorktreeStatus(args: {
   if (args.hasLiveMonitoring || heuristic === 'monitoring') {
     return 'monitoring'
   }
-  if (args.hasLiveDone || args.hasRetainedDone) {
-    return 'done'
-  }
-  // Why LAST (STA-5357): `interrupted` means the user pressed Esc or Ctrl+C, so they already know —
-  // it is the least attention-demanding state, exactly as smart-attention classes it (Class 4, idle,
-  // below both done and working). It still needs its own branch rather than folding into `done`,
-  // because the flag rides on `done` and rendering it as a completion is the bug this fixes: a
-  // cancelled turn is not a finished one.
+  // Terminal outcomes follow live states, but an interrupted outcome must not collapse into success.
   if (args.hasInterrupted) {
     return 'interrupted'
+  }
+  if (args.hasLiveDone || args.hasRetainedDone) {
+    return 'done'
   }
   return heuristic
 }

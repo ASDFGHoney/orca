@@ -110,10 +110,6 @@ describe('resolveTerminalTabActivityStatus', () => {
     ).toBe('done')
   })
 
-  // Why this flipped (STA-5357): it used to assert `done`, deliberately mirroring the worktree card,
-  // which had no interrupted state. That made a cancelled turn indistinguishable from a clean finish
-  // on every glanceable surface. The card now distinguishes it, so the tab follows rather than
-  // preserving a consistency that was consistently wrong.
   it('reports an interrupted done as interrupted, matching the worktree card', () => {
     const interrupted = entry(FIRST_LEAF_ID, 'done', { interrupted: true })
     expect(
@@ -125,9 +121,7 @@ describe('resolveTerminalTabActivityStatus', () => {
     ).toBe('interrupted')
   })
 
-  it('lets a finished sibling win — interrupted is the quietest state', () => {
-    // Why: Esc / Ctrl+C is deliberate, so the user already knows. Interrupted must be
-    // DISTINGUISHABLE from done (that is the bug) without being LOUDER than anything live.
+  it('does not let a finished sibling mask an interrupted outcome', () => {
     const interrupted = entry(FIRST_LEAF_ID, 'done', { interrupted: true })
     const finished = entry(SECOND_LEAF_ID, 'done')
     expect(
@@ -139,7 +133,7 @@ describe('resolveTerminalTabActivityStatus', () => {
         },
         ptyIdsByTabId: LIVE_PTY
       })
-    ).toBe('done')
+    ).toBe('interrupted')
   })
 
   it('falls back to a live working title when hook status is stale', () => {
@@ -294,6 +288,9 @@ describe('resolveTerminalTabAttentionBadge', () => {
     )
     expect(resolveTerminalTabAttentionBadge({ status: 'done', hasUnread: true })).toBe('unread')
     expect(resolveTerminalTabAttentionBadge({ status: 'done', hasUnread: false })).toBe('done')
+    expect(resolveTerminalTabAttentionBadge({ status: 'interrupted', hasUnread: false })).toBe(
+      'interrupted'
+    )
     expect(resolveTerminalTabAttentionBadge({ status: 'active', hasUnread: false })).toBeNull()
   })
 })
@@ -323,6 +320,7 @@ describe('terminalTabActivityToAgentDotState', () => {
     expect(terminalTabActivityToAgentDotState('monitoring')).toBe('monitoring')
     expect(terminalTabActivityToAgentDotState('permission')).toBe('permission')
     expect(terminalTabActivityToAgentDotState('done')).toBe('done')
+    expect(terminalTabActivityToAgentDotState('interrupted')).toBe('interrupted')
     expect(terminalTabActivityToAgentDotState('active')).toBeNull()
     expect(terminalTabActivityToAgentDotState('inactive')).toBeNull()
   })

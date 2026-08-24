@@ -83,9 +83,7 @@ function getTerminalTabActivityFlags(
         flags.hasLiveWorking = true
       }
     } else if (entry.interrupted === true) {
-      // Why before `done` (STA-5357): the flag is clamped to `done`, so folding it in reported a
-      // cancelled turn as a completed one. This used to mirror the WorktreeCard dot deliberately —
-      // that dot now distinguishes interrupted, so the tab follows rather than diverging.
+      // Interrupted is encoded as done, so it must be checked first.
       flags.hasInterrupted = true
     } else if (entry.state === 'done') {
       flags.hasLiveDone = true
@@ -219,8 +217,6 @@ export function resolveTerminalTabAttentionBadge({
   if (status === 'done') {
     return 'done'
   }
-  // Why last (STA-5357): the user pressed Esc / Ctrl+C, so this is the least attention-demanding
-  // signal — it must be distinguishable from `done`, but it must not outrank anything live.
   if (status === 'interrupted') {
     return 'interrupted'
   }

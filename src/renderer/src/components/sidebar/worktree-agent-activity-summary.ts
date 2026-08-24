@@ -16,8 +16,7 @@ export type WorktreeAgentActivitySummary = {
   hasPermission: boolean
   hasLiveWorking: boolean
   hasLiveMonitoring: boolean
-  /** A fresh hook entry carrying `interrupted`. Separate from `hasLiveDone` because the flag only ever
-   *  rides on `done` — folding it in reports a cancelled turn as a clean finish (STA-5357). */
+  /** Fresh interrupted completion, kept separate from clean done outcomes. */
   hasInterrupted: boolean
   hasLiveDone: boolean
   hasRetainedDone: boolean
@@ -227,8 +226,7 @@ function applyLiveAgentState(
   if (entry.state === 'blocked' || entry.state === 'waiting') {
     summary.hasPermission = true
   } else if (entry.interrupted === true) {
-    // Why before the `done` branch: `interrupted` is clamped to `done` at parse time, so a cancelled
-    // turn would otherwise set `hasLiveDone` and render as a completed one.
+    // Interrupted is encoded as done, so it must be checked first.
     summary.hasInterrupted = true
   } else if (entry.state === 'working') {
     if (entry.workingMode === 'monitoring') {

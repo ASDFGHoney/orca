@@ -8,15 +8,13 @@ export type SummaryAgentGroup = {
   agents: DashboardAgentRowData[]
 }
 
-// Why interrupted sits below done (STA-5357): Esc / Ctrl+C is a deliberate act, so the user already
-// knows — it demands the least attention of any live-ish state, matching smart-attention's Class 4.
 const SUMMARY_STATE_ORDER: AgentDotState[] = [
   'waiting',
   'blocked',
   'working',
   'monitoring',
-  'done',
   'interrupted',
+  'done',
   'idle'
 ]
 
