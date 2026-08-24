@@ -39,6 +39,23 @@ export function composeWorktreeHostIdentity(
 }
 
 /**
+ * The host back out of an identity, when the identity names one.
+ *
+ * An empty prefix (`|<worktreeId>`) stays undefined rather than defaulting to
+ * `local`: an unqualified row may be on any host, and callers use this to pick
+ * the host a destructive action runs against.
+ */
+export function getExecutionHostIdFromWorktreeHostIdentity(
+  identity: string
+): ExecutionHostId | undefined {
+  const separatorIndex = identity.indexOf(HOST_SEPARATOR)
+  if (separatorIndex <= 0) {
+    return undefined
+  }
+  return parseExecutionHostId(identity.slice(0, separatorIndex))?.id
+}
+
+/**
  * The workspace id back out of an identity.
  *
  * Exact, not best-effort: the host cannot contain the separator (see above), so
