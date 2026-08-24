@@ -32,6 +32,13 @@ export type HydrationResult =
 
 let cached: Promise<HydrationResult> | null = null
 let probeQueue = Promise.resolve()
+// Why: patchPackagedProcessPath seeds a version manager's newest install dir
+// ahead of PATH before we probe. nvm's startup `use` honors whatever node is
+// already on PATH over the user's `default` alias, so a probe that inherits the
+// seed comes back pinned to that version and every terminal loses the global
+// CLIs installed under `default`. Probe with the launch PATH; Windows gets the
+// same protection from WindowsShellPathOwnership.
+let launchPath: string | null = null
 let configuredWindowsShell = 'powershell.exe'
 let configuredWindowsGitBashPath: string | null = null
 let configuredWindowsFallbackShell: string | null = null
@@ -42,6 +49,7 @@ const windowsPathOwnership = new WindowsShellPathOwnership()
 export function _resetHydrateShellPathCache(): void {
   cached = null
   probeQueue = Promise.resolve()
+  launchPath = null
   configuredWindowsShell = 'powershell.exe'
   configuredWindowsGitBashPath = null
   configuredWindowsFallbackShell = null
@@ -94,6 +102,18 @@ function parseCapturedPath(stdout: string, pathDelimiter: string = delimiter): s
   ]
 }
 
+/** Records PATH as the process was launched with, before Orca seeds fallbacks onto it. */
+export function recordLaunchPath(pathValue: string): void {
+  launchPath = pathValue
+}
+
+function shellProbeEnv(): NodeJS.ProcessEnv {
+  if (process.platform === 'win32' || launchPath === null) {
+    return process.env
+  }
+  return { ...process.env, PATH: launchPath }
+}
+
 function shellPathProbe(shell: string): { args: string[]; pathDelimiter: string } {
   if (process.platform !== 'win32') {
     const command = `printf '%s' '${DELIMITER}'; printf '%s' "$PATH"; printf '%s' '${DELIMITER}'`
@@ -125,7 +145,7 @@ function spawnShellAndReadPath(shell: string): Promise<HydrationResult> {
       // it layer its own rc files on top. Do NOT forward stdio — some shells
       // (oh-my-zsh setups, powerlevel10k) print a lot to stderr on startup,
       // and we don't want that in Orca's console.
-      env: process.env,
+      env: shellProbeEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
       detached: false,
       windowsHide: true

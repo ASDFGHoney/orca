@@ -3,6 +3,10 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('./hydrate-shell-path', () => ({
+  recordLaunchPath: vi.fn()
+}))
+
 vi.mock('electron', () => {
   const paths = new Map<string, string>([['appData', '/tmp/app-data']])
   return {
@@ -54,6 +58,25 @@ describe('patchPackagedProcessPath', () => {
     } else {
       process.env.PATH = originalPath
     }
+  })
+
+  it('records the pre-seed PATH so the login-shell probe cannot inherit a seeded nvm version dir', async () => {
+    const { app } = await import('electron')
+    const { patchPackagedProcessPath } = await import('./configure-process')
+    const { recordLaunchPath } = await import('./hydrate-shell-path')
+    const recorded = vi.mocked(recordLaunchPath)
+
+    setPlatform('darwin')
+    Object.defineProperty(app, 'isPackaged', { configurable: true, value: true })
+    process.env.HOME = '/Users/tester'
+    process.env.PATH = '/usr/bin:/bin'
+    recorded.mockClear()
+
+    patchPackagedProcessPath()
+
+    expect(recorded).toHaveBeenCalledWith('/usr/bin:/bin')
+    // Why: recording must happen before the seeds land, or the probe sees them anyway.
+    expect(process.env.PATH).not.toBe('/usr/bin:/bin')
   })
 
   it('prepends agent-CLI install dirs (~/.opencode/bin, ~/.vite-plus/bin) for packaged darwin runs', async () => {

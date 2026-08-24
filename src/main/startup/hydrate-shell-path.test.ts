@@ -6,6 +6,7 @@ import {
   _resetHydrateShellPathCache,
   hydrateShellPath,
   mergePathSegments,
+  recordLaunchPath,
   type HydrationResult
 } from './hydrate-shell-path'
 
@@ -176,6 +177,33 @@ describe('hydrateShellPath', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('probes with the recorded launch PATH so seeded fallbacks cannot pin nvm', async () => {
+    const proc = createMockShellProcess()
+    spawnMock.mockReturnValue(proc)
+    process.env.PATH = `/home/u/.nvm/versions/node/v26.7.0/bin${delimiter}/usr/bin`
+    recordLaunchPath('/usr/bin')
+
+    const resultPromise = hydrateShellPath({ shellOverride: '/bin/bash', force: true })
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled())
+    proc.emit('close', 0)
+    await resultPromise
+
+    expect(spawnMock.mock.calls[0][2].env.PATH).toBe('/usr/bin')
+  })
+
+  it('falls back to process.env when no launch PATH was recorded', async () => {
+    const proc = createMockShellProcess()
+    spawnMock.mockReturnValue(proc)
+    process.env.PATH = '/seeded/bin'
+
+    const resultPromise = hydrateShellPath({ shellOverride: '/bin/bash', force: true })
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled())
+    proc.emit('close', 0)
+    await resultPromise
+
+    expect(spawnMock.mock.calls[0][2].env.PATH).toBe('/seeded/bin')
   })
 })
 
