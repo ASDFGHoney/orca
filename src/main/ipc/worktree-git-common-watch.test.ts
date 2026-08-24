@@ -26,6 +26,7 @@ vi.mock('./parcel-watcher-process', () => ({
 
 beforeEach(() => {
   gitMetadataPollScheduler.resetForTests()
+  gitMetadataPollScheduler.setNowForTests(() => Date.now())
 })
 
 // Records every stat target so a test can assert which paths a parked poll stopped touching.
@@ -540,6 +541,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
+      await vi.runOnlyPendingTimersAsync()
       // Native filesystem promises settle outside the fake timer callback; wait for the
       // re-subscribe observable rather than relying on timer advancement to flush them.
       await vi.waitFor(
@@ -590,6 +592,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       await rm(worktreesDir, { recursive: true })
       await mkdir(retainedEntry, { recursive: true })
       await vi.advanceTimersByTimeAsync(POLL_MS * RECONCILIATION_TICKS * 4)
+      await vi.runOnlyPendingTimersAsync()
       await vi.waitFor(
         () => {
           expect(subscribeMock).toHaveBeenCalledTimes(2)

@@ -68,11 +68,13 @@ export class GitMetadataPollScheduler {
   private activePolls = 0
   private activeFilesystemOperations = 0
   private resetGeneration = 0
+  private now: () => number
 
   constructor(
     private readonly concurrency = GIT_METADATA_FILESYSTEM_CONCURRENCY,
-    private readonly now: () => number = () => performance.now()
+    now: () => number = () => performance.now()
   ) {
+    this.now = now
     if (!Number.isInteger(concurrency) || concurrency < 1) {
       throw new Error('Git metadata scheduler concurrency must be a positive integer')
     }
@@ -159,6 +161,10 @@ export class GitMetadataPollScheduler {
     })
     this.drainFilesystemQueue()
     return promise
+  }
+
+  setNowForTests(now: () => number): void {
+    this.now = now
   }
 
   resetForTests(): void {
