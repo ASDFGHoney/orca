@@ -6,6 +6,27 @@ import { buildWslExecArgs } from '../../../src/shared/wsl-login-shell-command'
 const WSL_STUB_PATH = '/usr/local/bin/golden-stub-agent'
 const WSL_STUB_AGENT_LINK = '/usr/local/bin/codex'
 const WSL_STUB_BACKUP_PATH = '/usr/local/bin/golden-stub-agent.orca-e2e-backup'
+/** mkdir is atomic in the distro, so the lock dir serializes overlapping invocations. */
+const WSL_STUB_LOCK_PATH = '/usr/local/bin/golden-stub-agent.orca-e2e-lock'
+const WSL_STUB_LINK_MARKER = `${WSL_STUB_LOCK_PATH}/created-codex-link`
+const WSL_STUB_LOCK_STALE_MINUTES = 10
+const WSL_STUB_LOCK_WAIT_SECONDS = 60
+
+// Undoes a lock holder that died mid-run, so its leftovers cannot poison later invocations.
+const RECLAIM_STALE_LOCK_SCRIPT =
+  `if [ -e ${WSL_STUB_LINK_MARKER} ]; then rm -f ${WSL_STUB_AGENT_LINK}; fi; ` +
+  `rm -f ${WSL_STUB_PATH}; ` +
+  `if [ -e ${WSL_STUB_BACKUP_PATH} ] || [ -L ${WSL_STUB_BACKUP_PATH} ]; then ` +
+  `mv ${WSL_STUB_BACKUP_PATH} ${WSL_STUB_PATH}; fi; ` +
+  `rm -rf ${WSL_STUB_LOCK_PATH}`
+
+const ACQUIRE_LOCK_SCRIPT =
+  `mkdir -p /usr/local/bin || exit 1; i=0; ` +
+  `while [ $i -lt ${WSL_STUB_LOCK_WAIT_SECONDS} ]; do ` +
+  `if mkdir ${WSL_STUB_LOCK_PATH} 2>/dev/null; then printf acquired; exit 0; fi; ` +
+  `if [ -n "$(find ${WSL_STUB_LOCK_PATH} -maxdepth 0 -mmin +${WSL_STUB_LOCK_STALE_MINUTES} ` +
+  `2>/dev/null)" ]; then ${RECLAIM_STALE_LOCK_SCRIPT}; else sleep 1; fi; i=$((i+1)); ` +
+  `done; printf timeout`
 
 // Keep the cross-boundary script newline-free to avoid Windows argv-encoding surprises.
 // Moving the entry avoids following and overwriting a pre-existing symlink.
@@ -21,14 +42,28 @@ const STAGE_SCRIPT =
   `printf '#!/bin/sh\\necho GOLDEN_STUB_AGENT_READY\\nexec sleep 3600\\n' > ${WSL_STUB_PATH} && ` +
   `chmod 0755 ${WSL_STUB_PATH}`
 
+// The marker is written before the link so a crashed run over-reports rather than leaks a link.
 const STAGE_CODEX_LINK_IF_MISSING_SCRIPT =
   `if [ -e ${WSL_STUB_AGENT_LINK} ] || [ -L ${WSL_STUB_AGENT_LINK} ]; then ` +
-  `printf existing; else ln -s ${WSL_STUB_PATH} ${WSL_STUB_AGENT_LINK} && printf created; fi`
+  `printf existing; else : > ${WSL_STUB_LINK_MARKER} && ` +
+  `ln -s ${WSL_STUB_PATH} ${WSL_STUB_AGENT_LINK} && printf created; fi`
 
+// `;` between steps so the lock is released even when a restore step fails.
 function buildRestoreScript(stage: WslGoldenStubAgentStage): string {
-  const removed = stage.createdCodexLink ? `${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}` : WSL_STUB_PATH
-  const restore = stage.backedUpStub ? ` && mv ${WSL_STUB_BACKUP_PATH} ${WSL_STUB_PATH}` : ''
-  return `rm -f ${removed}${restore}`
+  const steps: string[] = []
+  if (stage.ownsStubPath) {
+    const removed = stage.createdCodexLink
+      ? `${WSL_STUB_AGENT_LINK} ${WSL_STUB_PATH}`
+      : WSL_STUB_PATH
+    steps.push(`rm -f ${removed}`)
+    if (stage.backedUpStub) {
+      steps.push(`mv ${WSL_STUB_BACKUP_PATH} ${WSL_STUB_PATH}`)
+    }
+  }
+  if (stage.heldLock) {
+    steps.push(`rm -rf ${WSL_STUB_LOCK_PATH}`)
+  }
+  return steps.join(' ; ')
 }
 
 // --exec prevents wsl.exe from expanding shell variables in argv.
@@ -52,16 +87,22 @@ export type WslGoldenStubAgentStage = {
   createdCodexLink: boolean
   backedUpStub: boolean
   ownsStubPath: boolean
+  heldLock: boolean
 }
 
-/** Returns null when the distro cannot stage the stub. */
+/** Returns null when the distro cannot stage the stub. Holds a distro lock until cleanup. */
 export function stageWslGoldenStubAgent(distro: string): WslGoldenStubAgentStage | null {
   const stage: WslGoldenStubAgentStage = {
     createdCodexLink: false,
     backedUpStub: false,
-    ownsStubPath: false
+    ownsStubPath: false,
+    heldLock: false
   }
   try {
+    if (runInWslAsRoot(distro, ACQUIRE_LOCK_SCRIPT).trim() !== 'acquired') {
+      return null
+    }
+    stage.heldLock = true
     stage.backedUpStub = runInWslAsRoot(distro, BACKUP_EXISTING_STUB_SCRIPT).trim() === 'backed-up'
     stage.ownsStubPath = true
     runInWslAsRoot(distro, STAGE_SCRIPT)
@@ -75,11 +116,14 @@ export function stageWslGoldenStubAgent(distro: string): WslGoldenStubAgentStage
 }
 
 export function removeWslGoldenStubAgent(distro: string, stage: WslGoldenStubAgentStage): void {
-  if (!stage.ownsStubPath) {
+  const script = buildRestoreScript(stage)
+  if (!script) {
     return
   }
   try {
-    runInWslAsRoot(distro, buildRestoreScript(stage))
+    runInWslAsRoot(distro, script)
+    stage.heldLock = false
+    stage.ownsStubPath = false
   } catch {
     // Best-effort cleanup; a leftover stub only affects this fixture's own name.
   }
