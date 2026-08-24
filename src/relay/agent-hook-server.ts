@@ -1,9 +1,4 @@
-// Relay-side adapter for the shared agent-hook listener: hosts a loopback HTTP server and
-// forwards each parsed payload via a callback so `relay.ts` re-emits it as an `agent.hook`
-// JSON-RPC notification over the SSH channel. Replay cache is bounded one-entry-per-paneKey: a
-// reattaching Orca only needs each pane's current status, never its history, and the bound keeps a
-// long-lived relay from growing with every event.
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
@@ -16,7 +11,6 @@ import {
   HOOK_REQUEST_SLOWLORIS_MS,
   normalizeHookPayload,
   readRequestBody,
-  resolveCachedClaudeCompactOwnership,
   resolveHookSource,
   writeEndpointFile,
   type AgentHookEventPayload,
@@ -35,12 +29,17 @@ import {
 import { buildRelayHookPtyEnv, defaultEndpointDir } from './agent-hook-endpoint-coordinates'
 import { buildRelayHookEnvelope, hookBodyEnv, hookBodyVersion } from './agent-hook-envelope-build'
 import { AgentHookResultRetryScheduler } from './agent-hook-result-retry-scheduler'
-
+import { listenRelayHttpServer } from './relay-http-listener'
+import {
+  hydrateRelayHookStatusCache,
+  applyRelayHookEvent,
+  persistRelayHookStatusCache,
+  createRelayCodexReconciler,
+  reconcileRelayCodexEvent
+} from './agent-hook-status-cache'
 export type RelayHookForward = (envelope: AgentHookRelayEnvelope) => void
 
-// Why: WSL lacks per-pane teardown, so cap replay-cache recency.
-const MAX_CACHED_PANES = 256
-
+const HOOK_STATUS_CACHE_FILE = 'hook-status-cache.json'
 export type RelayHookServerOptions = {
   /** Where to put endpoint.env / endpoint.cmd. Defaults to `$HOME/.orca-relay/agent-hooks`. */
   endpointDir?: string
@@ -57,21 +56,19 @@ export type RelayHookServerOptions = {
 export type RelayHookServerStartOptions = {
   publishEndpoint?: boolean
 }
-
 export class RelayAgentHookServer {
-  private server: ReturnType<typeof createServer> | null = null
+  private server: Server | null = null
   private port = 0
   private token = ''
   private env: string
   private endpointDir: string
   private endpointFilePath: string
   private endpointFileWritten = false
+  private cacheFilePath: string
   private state: HookListenerState = createHookListenerState()
   private transportInterference = createHookTransportInterferenceTracker((report) => {
     process.stderr.write(`${describeHookTransportInterference(report)}\n`)
   })
-  // Why: retain envelope metadata so replays match live POSTs.
-  // Invariant: keys mirror state.lastStatusByPaneKey, populated/cleared in lockstep.
   private lastEnvelopeMetaByPaneKey = new Map<
     string,
     { source: AgentHookSource; env?: string; version?: string }
@@ -81,11 +78,13 @@ export class RelayAgentHookServer {
   private preferredPort: number
   private portFallbackApplied = false
   private retryScheduler: AgentHookResultRetryScheduler
-
+  private codexRestartReconcileTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private scheduleCodexRestartReconciliation: (paneKey: string) => void
   constructor(options: RelayHookServerOptions) {
     this.env = options.env ?? REMOTE_AGENT_HOOK_ENV
     this.endpointDir = options.endpointDir ?? defaultEndpointDir()
     this.endpointFilePath = join(this.endpointDir, getEndpointFileName())
+    this.cacheFilePath = join(this.endpointDir, HOOK_STATUS_CACHE_FILE)
     this.fixedToken = options.token
     this.preferredPort = options.preferredPort ?? 0
     this.forward = options.forward
@@ -97,8 +96,16 @@ export class RelayAgentHookServer {
         this.applyEvent(event, source, env, version)
       }
     })
+    this.scheduleCodexRestartReconciliation = createRelayCodexReconciler({
+      state: this.state,
+      isListening: () => this.server !== null,
+      timers: this.codexRestartReconcileTimers,
+      reconcile: (event) => reconcileRelayCodexEvent(this.state, event),
+      metadata: this.lastEnvelopeMetaByPaneKey,
+      forward: this.forward,
+      persist: () => this.persistStatusCache()
+    })
   }
-
   async start(options: RelayHookServerStartOptions = {}): Promise<void> {
     if (this.server) {
       return
@@ -109,7 +116,6 @@ export class RelayAgentHookServer {
     try {
       await this.listenOn(this.preferredPort)
     } catch (err) {
-      // Why: fall back to an ephemeral port on EADDRINUSE; clients use the endpoint file.
       if (this.preferredPort > 0 && (err as NodeJS.ErrnoException)?.code === 'EADDRINUSE') {
         this.portFallbackApplied = true
         await this.listenOn(0)
@@ -117,42 +123,31 @@ export class RelayAgentHookServer {
         throw err
       }
     }
+    const hydratedMetadata = hydrateRelayHookStatusCache(
+      this.cacheFilePath,
+      this.state,
+      (paneKey) => this.scheduleCodexRestartReconciliation(paneKey)
+    )
+    this.lastEnvelopeMetaByPaneKey.clear()
+    for (const [paneKey, metadata] of hydratedMetadata) {
+      this.lastEnvelopeMetaByPaneKey.set(paneKey, metadata)
+    }
+    this.persistStatusCache()
     if (options.publishEndpoint !== false) {
       this.publishEndpointFile()
     }
   }
-
-  /** True when the preferred port was occupied and the server fell back to an ephemeral bind. */
   get usedPortFallback(): boolean {
     return this.portFallbackApplied
   }
-
   private listenOn(port: number): Promise<void> {
-    this.server = createServer((req, res) => this.handleRequest(req, res))
-    return new Promise<void>((resolve, reject) => {
-      const onStartupError = (err: Error): void => {
-        this.server?.off('listening', onListening)
-        // Why: clear failed server refs so later start() calls can retry.
-        this.server = null
-        reject(err)
+    return listenRelayHttpServer(port, (req, res) => this.handleRequest(req, res)).then(
+      (result) => {
+        this.server = result.server
+        this.port = result.port
       }
-      const onListening = (): void => {
-        this.server?.off('error', onStartupError)
-        this.server?.on('error', (err) => {
-          process.stderr.write(`[relay-hook-server] server error: ${err.message}\n`)
-        })
-        const address = this.server!.address()
-        if (address && typeof address === 'object') {
-          this.port = address.port
-        }
-        resolve()
-      }
-      this.server!.once('error', onStartupError)
-      // Why: loopback only — reachable by the in-box agent CLI (127.0.0.1), not from outside the box.
-      this.server!.listen(port, '127.0.0.1', onListening)
-    })
+    )
   }
-
   publishEndpointFile(): boolean {
     if (this.port <= 0 || !this.token) {
       this.endpointFileWritten = false
@@ -166,7 +161,6 @@ export class RelayAgentHookServer {
     })
     return this.endpointFileWritten
   }
-
   stop(): void {
     this.server?.close()
     this.server = null
@@ -174,17 +168,25 @@ export class RelayAgentHookServer {
     this.token = ''
     this.endpointFileWritten = false
     this.retryScheduler.clearAll()
+    for (const timer of this.codexRestartReconcileTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.codexRestartReconcileTimers.clear()
     clearAllListenerCaches(this.state)
     this.lastEnvelopeMetaByPaneKey.clear()
   }
-
-  /** Request-driven replay: re-forwards each cached paneKey payload as a fresh notification. Forwards are
-   *  issued before the request handler returns, so the response trails all replayed notifications. */
+  private persistStatusCache(): void {
+    persistRelayHookStatusCache(
+      this.endpointDir,
+      this.cacheFilePath,
+      this.state,
+      this.lastEnvelopeMetaByPaneKey
+    )
+  }
   replayCachedPayloadsForPanes(): number {
     let count = 0
     for (const [paneKey, event] of this.state.lastStatusByPaneKey.entries()) {
       const meta = this.lastEnvelopeMetaByPaneKey.get(paneKey)
-      // Why: invariant — status-cache keys always have meta; if it drifted, skip rather than guess a source that mis-tags downstream.
       if (!meta) {
         continue
       }
@@ -195,16 +197,18 @@ export class RelayAgentHookServer {
     }
     return count
   }
-
-  /** Drop a paneKey's cached entries on PTY exit so a terminated pane can't resurface as a ghost event on reconnect. */
   clearPaneState(paneKey: string): void {
     this.retryScheduler.clearAssistantMessageRetry(paneKey)
     this.retryScheduler.clearCodexSubagentPoll(paneKey)
     clearPaneCacheState(this.state, paneKey)
     this.lastEnvelopeMetaByPaneKey.delete(paneKey)
+    const timer = this.codexRestartReconcileTimers.get(paneKey)
+    if (timer) {
+      clearTimeout(timer)
+      this.codexRestartReconcileTimers.delete(paneKey)
+    }
+    this.persistStatusCache()
   }
-
-  /** Env vars to inject into relay-spawned PTYs so the hook script/plugin POSTs back to this loopback server. */
   buildPtyEnv(): Record<string, string> {
     return buildRelayHookPtyEnv({
       port: this.port,
@@ -214,13 +218,9 @@ export class RelayAgentHookServer {
       endpointFileWritten: this.endpointFileWritten
     })
   }
-
-  /** Test-only / diagnostics accessor. */
   getCoordinates(): { port: number; token: string; endpointFilePath: string } {
     return { port: this.port, token: this.token, endpointFilePath: this.endpointFilePath }
   }
-
-  // ─── Private ──────────────────────────────────────────────────────
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'POST') {
@@ -233,7 +233,6 @@ export class RelayAgentHookServer {
       res.end()
       return
     }
-    // Why: track our own destroy so the slowloris cap can't be misread as outside interference.
     let destroyedBySlowlorisCap = false
     req.setTimeout(HOOK_REQUEST_SLOWLORIS_MS, () => {
       destroyedBySlowlorisCap = true
@@ -253,7 +252,6 @@ export class RelayAgentHookServer {
         allowUnanchoredPostCompact: true
       })
       if (event) {
-        // TODO: once normalizeHookPayload returns validated env/version, drop bodyEnv/bodyVersion and source them from the listener result.
         const env = hookBodyEnv(body)
         const version = hookBodyVersion(body)
         this.applyEvent(event, source, env, version)
@@ -263,12 +261,9 @@ export class RelayAgentHookServer {
       res.writeHead(204)
       res.end()
     } catch (err) {
-      // Why (#11217): a remote host can run the same IDS; count truncations here so a blocked SSH
-      // relay reports the cause instead of an anonymous "hook request failed".
       if (isHookRequestTruncatedError(err) && !destroyedBySlowlorisCap) {
         this.transportInterference.record({ source: null, error: err })
       }
-      // Why: hooks fail open (204 on any error) so a buggy agent never blocks the run; still log so the 204 doesn't mask bugs.
       process.stderr.write(
         `[relay-hook-server] hook request failed: ${err instanceof Error ? err.message : String(err)}\n`
       )
@@ -287,19 +282,28 @@ export class RelayAgentHookServer {
       this.retryScheduler.clearAssistantMessageRetry(event.paneKey)
     }
     const previous = this.state.lastStatusByPaneKey.get(event.paneKey)
-    const cachedEvent = resolveCachedClaudeCompactOwnership(previous, event)
-    // Why: delete-then-set makes Map insertion order = recency, so the cap below evicts the longest-idle pane.
-    this.state.lastStatusByPaneKey.delete(event.paneKey)
-    this.state.lastStatusByPaneKey.set(event.paneKey, cachedEvent)
-    this.lastEnvelopeMetaByPaneKey.delete(event.paneKey)
-    this.lastEnvelopeMetaByPaneKey.set(event.paneKey, { source, env, version })
-    while (this.state.lastStatusByPaneKey.size > MAX_CACHED_PANES) {
-      const oldest = this.state.lastStatusByPaneKey.keys().next().value
-      if (oldest === undefined) {
-        break
-      }
-      this.clearPaneState(oldest)
+    const diagnosticAware =
+      event.reconcileDiagnostic === undefined && previous?.reconcileDiagnostic !== undefined
+        ? { ...event, reconcileDiagnostic: previous.reconcileDiagnostic }
+        : event
+    const reconciled =
+      diagnosticAware.payload.agentType === 'codex'
+        ? reconcileRelayCodexEvent(this.state, diagnosticAware)
+        : diagnosticAware
+    applyRelayHookEvent({
+      state: this.state,
+      event: reconciled,
+      previous,
+      source,
+      env,
+      version,
+      metadata: this.lastEnvelopeMetaByPaneKey,
+      persist: () => this.persistStatusCache(),
+      clearPaneState: (paneKey) => this.clearPaneState(paneKey),
+      forward: this.forward
+    })
+    if (reconciled.payload.agentType === 'codex') {
+      this.scheduleCodexRestartReconciliation(reconciled.paneKey)
     }
-    this.forward(buildRelayHookEnvelope(event, source, env, version))
   }
 }
