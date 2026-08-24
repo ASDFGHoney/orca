@@ -14,8 +14,6 @@ import type { AgentSessionRecordStore } from '../runtime/agent-session-record-st
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 
-const CODEX_APP_SERVER_ARGS = ['app-server']
-
 export type CodexStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   /** Absolute path of a workspace on this host. Rejects when the workspace no
@@ -58,11 +56,12 @@ export function createCodexStructuredLaunchResolver(
       pathEnv,
       ...(homePath ? { homePath } : {})
     })
+    const args = [...(record.launchArgs ?? []), 'app-server']
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
     return {
       command,
-      args: CODEX_APP_SERVER_ARGS,
+      args,
       cwd: await deps.resolveWorkspacePath(location.workspaceId),
       codexHome: accountHome.path,
       ...(environment ? { env: { ...environment } as Record<string, string> } : {}),

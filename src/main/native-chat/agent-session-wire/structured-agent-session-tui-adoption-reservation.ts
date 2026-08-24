@@ -14,6 +14,7 @@ import type { AgentSessionOwnerProbe } from '../../../shared/agent-session-lease
 import type {
   AgentSessionAccountHome,
   AgentSessionExecutionLocation,
+  AgentSessionLaunchArgs,
   AgentSessionLaunchEnv,
   AgentSessionRecord
 } from '../../../shared/agent-session-record'
@@ -36,6 +37,7 @@ export type StructuredTuiAdoptionReservationRequest = {
   accountHome: AgentSessionAccountHome
   spawnToken: string
   claimKeyId: string
+  launchArgs?: AgentSessionLaunchArgs
   launchEnv?: AgentSessionLaunchEnv
 }
 
@@ -84,6 +86,7 @@ export async function reserveStructuredTuiAdoption(
       location: input.location,
       provider: input.provider,
       accountHome: input.accountHome,
+      ...(input.launchArgs ? { launchArgs: input.launchArgs } : {}),
       ...(input.launchEnv ? { launchEnv: input.launchEnv } : {}),
       runtimeKind: 'tui',
       // An adoption never declares a fence, so the compare-and-swap runs against what the store

@@ -37,6 +37,7 @@ export function resolveCodexPaneLaunchAccount(args: {
   environmentHomeOverride?: CodexEnvironmentHomeOverride
   systemCodexHomePath: string
   settings: CodexPaneLaunchAccountSettings
+  selectedAccountId?: string | null
   target: CodexAccountSelectionTarget
 }): CodexPaneAccountRecord | null {
   const selectionKey = getCodexSelectionLaneKey(args.target)
@@ -48,7 +49,10 @@ export function resolveCodexPaneLaunchAccount(args: {
   if (!args.pinnedByResume) {
     return {
       selectionKey,
-      accountId: getSelectedCodexAccountIdForTarget(args.settings, args.target),
+      accountId:
+        args.selectedAccountId !== undefined
+          ? args.selectedAccountId
+          : getSelectedCodexAccountIdForTarget(args.settings, args.target),
       ...(homeRoute ? { homeRoute } : {}),
       ...(args.shellStartupHomeOverride
         ? { shellStartupHomeOverride: args.shellStartupHomeOverride }

@@ -16,9 +16,11 @@ import type { AgentSessionOwnerProbe } from '../../shared/agent-session-lease-ad
 import {
   AGENT_SESSION_RECORD_SCHEMA_VERSION,
   agentSessionExecutionLocationsEqual,
+  isAgentSessionLaunchArgs,
   isAgentSessionLaunchEnv,
   type AgentSessionAccountHome,
   type AgentSessionExecutionLocation,
+  type AgentSessionLaunchArgs,
   type AgentSessionLaunchEnv,
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
@@ -35,6 +37,7 @@ export type AgentSessionReserveRequest = {
   provider: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
   /** Legacy internal input accepted for compatibility and deliberately discarded. */
+  launchArgs?: AgentSessionLaunchArgs
   launchEnv?: AgentSessionLaunchEnv
   runtimeKind: AgentSessionReservation['runtimeKind']
   /** Null when the session does not exist yet; otherwise the fence the caller last observed. */
@@ -100,6 +103,9 @@ export function applyAgentSessionReservation(
   if (request.launchEnv && !isAgentSessionLaunchEnv(request.launchEnv)) {
     throw new Error('agent_session_launch_env_invalid')
   }
+  if (request.launchArgs && !isAgentSessionLaunchArgs(request.launchArgs)) {
+    throw new Error('agent_session_launch_args_invalid')
+  }
   const reservation: AgentSessionReservation = {
     runtimeKind: request.runtimeKind,
     spawnToken: request.spawnToken,
@@ -130,7 +136,11 @@ export function applyAgentSessionReservation(
   if (request.expectedFence === null) {
     throw new Error('agent_session_conflict')
   }
-  const { launchEnv: _discarded, ...pinned } = existing
+  const pinned = {
+    ...existing,
+    ...(!existing.launchArgs && request.launchArgs ? { launchArgs: [...request.launchArgs] } : {}),
+    ...(!existing.launchArgs && request.launchArgs ? { updatedAt: request.now } : {})
+  }
   return reserveAgentSessionOwner({
     record: pinned,
     expectedFence: request.expectedFence,
@@ -150,6 +160,7 @@ function createAgentSessionRecord(
     provider: request.provider,
     providerHandleChain: [],
     accountHome: request.accountHome,
+    ...(request.launchArgs ? { launchArgs: [...request.launchArgs] } : {}),
     createdAt: request.now,
     updatedAt: request.now,
     lease: {

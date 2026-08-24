@@ -212,7 +212,6 @@ function createIntentParams() {
 let codex: CodexScript
 let root: string
 let dispatcher: RpcDispatcher
-let cleanups: Map<string, () => void>
 let bootEnvironmentReads: number
 let codexOverrideReads: number
 let configuredCodexProfile: string
@@ -292,7 +291,6 @@ beforeEach(async () => {
   operations = 0
   root = await mkdtemp(join(tmpdir(), 'orca-structured-integration-'))
   codex = fakeCodex()
-  cleanups = new Map()
   bootEnvironmentReads = 0
   codexOverrideReads = 0
   configuredCodexProfile = 'configured'
@@ -330,19 +328,9 @@ beforeEach(async () => {
         openCodexConnection: codex.openConnection,
         readProcessStartTime: async () => 1_700_000_000_000
       }).then(() => undefined),
-    registerSubscriptionCleanup: vi.fn((id: string, dispose: () => void) =>
-      cleanups.set(id, dispose)
-    ),
-    cleanupSubscription: vi.fn((id: string) => {
-      cleanups.get(id)?.()
-      cleanups.delete(id)
-    }),
-    cleanupSubscriptionsByPrefix: vi.fn((prefix: string) => {
-      for (const [id, dispose] of cleanups) {
-        if (id.startsWith(prefix)) {
-          dispose()
-          cleanups.delete(id)
-        }
+    registerOwnedSubscriptionCleanup: vi.fn((id: string, dispose: () => void) => {
+      return {
+        releaseIfCurrent: dispose
       }
     })
   }

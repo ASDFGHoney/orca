@@ -48,6 +48,9 @@ export type StructuredAgentSessionRuntimeDeps = {
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
   /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
   readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
+  resolveLaunchArgs?: () => Promise<string[]> | string[]
+  resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
+  resolveLaunchEnvOverlay?: () => Promise<Record<string, string>> | Record<string, string>
   resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
   resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
@@ -97,6 +100,8 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
   const bootEnvironment = (deps.resolveEnvironment ?? resolveLoginShellEnvironment)()
   const resolveEnvironment = async (): Promise<NodeJS.ProcessEnv> => ({
     ...(await bootEnvironment),
+    ...(await deps.resolveLaunchEnv?.()),
+    ...(await deps.resolveLaunchEnvOverlay?.()),
     ...deps.resolveCodexOverrides?.()
   })
   const store = await AgentSessionRecordStore.open({
@@ -122,6 +127,9 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       claimKeyId: deps.claimKeyId,
       probeOwner: createStructuredAgentSessionOwnerProbe(deps.hostId),
       probeOwners: createStructuredAgentSessionOwnerProbes(deps.hostId),
+      ...(deps.resolveLaunchArgs
+        ? { resolveLaunchArgs: async () => await deps.resolveLaunchArgs!() }
+        : {}),
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
       ...(deps.handoffTransport ? { handoffTransport: deps.handoffTransport } : {})
