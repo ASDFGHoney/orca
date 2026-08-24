@@ -148,6 +148,10 @@ export type HookListenerState = {
   claudeActiveSessionCronPaneKeys: Set<string>
   /** Compact whose completion each pane already applied, so relay duplicates can't refresh the row. */
   claudeConsumedCompactPromptIdByPaneKey: Map<string, string>
+  /** Claude `session_id` that last reported on the pane from a LEAD event. A different id means the
+   *  conversation was replaced (/clear, relaunch, resume), so claims the old session owned are void
+   *  even when no SessionStart arrives — the backstop for the exits that emit no terminating hook. */
+  claudeSessionOwnerByPaneKey: Map<string, string>
   /** Live thread-spawn children per Codex pane. */
   codexSubagentRosterByPaneKey: Map<string, CodexSubagentRoster>
   /** Incremental parent/child rollout cursors for Codex collaboration v2. */
@@ -189,6 +193,7 @@ export function createHookListenerState(): HookListenerState {
     claudeRunningNonAgentTaskPaneKeys: new Set(),
     claudeActiveSessionCronPaneKeys: new Set(),
     claudeConsumedCompactPromptIdByPaneKey: new Map(),
+    claudeSessionOwnerByPaneKey: new Map(),
     codexSubagentRosterByPaneKey: new Map(),
     codexSubagentTranscriptByPaneKey: new Map(),
     codexLeadStateByPaneKey: new Map()
@@ -207,9 +212,30 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  state.claudeSessionOwnerByPaneKey.delete(paneKey)
   state.codexSubagentRosterByPaneKey.delete(paneKey)
   state.codexSubagentTranscriptByPaneKey.delete(paneKey)
   state.codexLeadStateByPaneKey.delete(paneKey)
+}
+
+/** Does this pane still hold anything that can ASSERT a state — a stored row, or a Claude latch that
+ *  `resolveClaudePaneState` would re-gate `working` from on the pane's next event?
+ *
+ *  Deliberately lives next to `clearPaneCacheState` above and enumerates the claim-bearing subset of
+ *  what that function deletes: the two must be edited together, and keeping them three lines apart in
+ *  one file is what makes that obvious. Prompt/tool/transcript caches are excluded — they render a
+ *  row, they never create one. */
+export function paneHasStateClaims(state: HookListenerState, paneKey: string): boolean {
+  return (
+    state.lastStatusByPaneKey.has(paneKey) ||
+    state.claudeSubagentRosterByPaneKey.has(paneKey) ||
+    state.claudeLeadStateByPaneKey.has(paneKey) ||
+    state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+    state.claudeActiveSessionCronPaneKeys.has(paneKey) ||
+    state.claudeSessionOwnerByPaneKey.has(paneKey) ||
+    state.codexSubagentRosterByPaneKey.has(paneKey) ||
+    state.codexLeadStateByPaneKey.has(paneKey)
+  )
 }
 
 function movePaneScopedMapEntries<T>(
@@ -255,6 +281,7 @@ export function movePaneCacheState(
   movePaneScopedSetEntries(state.claudeUnconfirmedRestoredStatusPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeRunningNonAgentTaskPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeActiveSessionCronPaneKeys, fromPaneKey, toPaneKey)
+  movePaneScopedMapEntries(state.claudeSessionOwnerByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentTranscriptByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexLeadStateByPaneKey, fromPaneKey, toPaneKey)
@@ -301,6 +328,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.claudeUnconfirmedRestoredStatusPaneKeys.clear()
   state.claudeRunningNonAgentTaskPaneKeys.clear()
   state.claudeActiveSessionCronPaneKeys.clear()
+  state.claudeSessionOwnerByPaneKey.clear()
   state.codexSubagentRosterByPaneKey.clear()
   state.codexSubagentTranscriptByPaneKey.clear()
   state.codexLeadStateByPaneKey.clear()
@@ -1713,9 +1741,10 @@ function extractAmpToolFields(
 
 /**
  * Retires any cached tool fields. PermissionRequest is the only OpenCode-family event that
- * carries them, and isNewTurnEvent is false for this family, so nothing else ever resets the
- * cache — without an explicit retire, resolveToolState inherits one answered permission onto
- * every later frame in the pane and the row reads a resolved command as the live tool.
+ * carries them, and the only isNewTurnEvent boundary this family has is opencode's
+ * SessionStart — which a resumed session never re-emits — so nothing else resets the cache
+ * mid-session. Without an explicit retire, resolveToolState inherits one answered permission
+ * onto every later frame in the pane and the row reads a resolved command as the live tool.
  */
 const OPENCODE_TOOL_FIELDS_RETIRED: ToolSnapshot = {
   hasToolUpdate: true,
@@ -2419,6 +2448,7 @@ export function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boo
     case 'amp':
       return eventName === 'agent.start'
     case 'opencode':
+      return eventName === 'SessionStart'
     case 'mimo-code':
       return false
     case 'cursor':
@@ -2553,6 +2583,9 @@ function updateClaudeRunningNonAgentTask(
   state: HookListenerState,
   paneKey: string,
   hasRunningNonAgentTask: boolean,
+  /** Lead-turn property. Pass `false` from any non-lead fold: an interrupt clears the gate even when
+   *  the inventory positively reports a running shell, which is a live-shell judgement no new call
+   *  site may inherit by copying this signature. */
   interrupted: boolean
 ): void {
   if (hasRunningNonAgentTask && !interrupted) {
@@ -2836,6 +2869,84 @@ function buildClaudeCachedLeadStatusPayload(
   })
 }
 
+/** Lead events that may re-anchor a pane's owning session. Allow-list, not a deny-list: a payload we
+ *  can't attribute (unknown name, child event missing its agent_id) must void nothing. */
+const CLAUDE_SESSION_OWNER_EVENTS: ReadonlySet<string> = new Set([
+  'SessionStart',
+  'UserPromptSubmit',
+  'Stop',
+  'StopFailure',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PermissionRequest'
+])
+
+/** A pane whose `session_id` changed is running a different conversation, so claims the previous one
+ *  owned are void — the hook-independent backstop for /clear, relaunch and resume, which emit no
+ *  terminating hook (SessionEnd covers about a third of exit paths).
+ *
+ *  Voids only what the replaced session provably owned. Deliberately NOT voided:
+ *  - `claudeRunningNonAgentTaskPaneKeys`: a background shell is an OS process that survives /clear,
+ *    and the previous inventory is positive evidence it was running. Only a fresh inventory or a
+ *    certified process death may retire it.
+ *  - `confirmedTeammate` roster rows: persistent in-process teammates a lead replacement can't end.
+ *  - `claudeLeadStateByPaneKey`: the caller's own fold overwrites it anyway. */
+function voidClaimsOfReplacedClaudeSession(
+  state: HookListenerState,
+  eventName: unknown,
+  eventAgentId: string | undefined,
+  paneKey: string,
+  hookPayload: Record<string, unknown>
+): void {
+  if (
+    eventAgentId !== undefined ||
+    typeof eventName !== 'string' ||
+    !CLAUDE_SESSION_OWNER_EVENTS.has(eventName)
+  ) {
+    return
+  }
+  // Compact/unknown SessionStart events are intentionally ignored by the status fold; do not let
+  // them advance the owner anchor or the next real lead event will miss the replacement.
+  if (
+    eventName === 'SessionStart' &&
+    hookPayload['source'] !== 'startup' &&
+    hookPayload['source'] !== 'resume' &&
+    hookPayload['source'] !== 'clear'
+  ) {
+    return
+  }
+  const sessionId = readString(hookPayload, 'session_id')
+  if (!sessionId) {
+    return
+  }
+  const previousOwner = state.claudeSessionOwnerByPaneKey.get(paneKey)
+  state.claudeSessionOwnerByPaneKey.set(paneKey, sessionId)
+  if (previousOwner === undefined || previousOwner === sessionId) {
+    return
+  }
+  // Why: a compact restart mints a SessionStart mid-turn under the same conversation; the existing
+  // handler already fails closed on non-idle sources, and this must not undercut it. No other
+  // allow-listed event carries a compact `trigger`, so SessionStart is the whole guard — if a
+  // compact event is ever added to CLAUDE_SESSION_OWNER_EVENTS, re-derive one for it deliberately.
+  if (eventName === 'SessionStart') {
+    return
+  }
+  state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
+  if (!roster) {
+    return
+  }
+  for (const [id, tracked] of roster) {
+    if (tracked.confirmedTeammate !== true) {
+      roster.delete(id)
+    }
+  }
+  if (roster.size === 0) {
+    state.claudeSubagentRosterByPaneKey.delete(paneKey)
+  }
+}
+
 function normalizeClaudeEvent(
   state: HookListenerState,
   eventName: unknown,
@@ -2851,6 +2962,7 @@ function normalizeClaudeEvent(
   ) {
     return normalizeClaudeSubagentLifecycleEvent(state, eventName, paneKey, hookPayload)
   }
+  voidClaimsOfReplacedClaudeSession(state, eventName, eventAgentId, paneKey, hookPayload)
   if (eventName === 'SessionStart') {
     // Why: SessionStart is the only signal a resumed session emits before its first prompt
     // (STA-3386). Land it as a session-boundary 'done' row: 'working' would show a phantom
@@ -3854,14 +3966,19 @@ function normalizeOpenCodeFamilyEvent(
   paneKey: string,
   hookPayload: Record<string, unknown>
 ): ParsedAgentStatusPayload | null {
+  const resetsTurn =
+    isNewTurnEvent(source, eventName) ||
+    (eventName === 'MessagePart' && hookPayload.role === 'user')
   const stateName =
     eventName === 'SessionBusy' || eventName === 'MessagePart'
       ? 'working'
       : eventName === 'SessionIdle'
         ? 'done'
-        : eventName === 'PermissionRequest' || eventName === 'AskUserQuestion'
-          ? 'waiting'
-          : null
+        : source === 'opencode' && eventName === 'SessionStart'
+          ? 'done'
+          : eventName === 'PermissionRequest' || eventName === 'AskUserQuestion'
+            ? 'waiting'
+            : null
 
   if (!stateName) {
     return null
@@ -3871,19 +3988,20 @@ function normalizeOpenCodeFamilyEvent(
     state,
     paneKey,
     extractToolFields(source, eventName, hookPayload),
-    { resetOnNewTurn: isNewTurnEvent(source, eventName) }
+    { resetOnNewTurn: resetsTurn }
   )
 
   return normalizeAgentStatusPayload({
     state: stateName,
     prompt: resolvePrompt(state, paneKey, promptText, {
-      resetOnNewTurn: isNewTurnEvent(source, eventName)
+      resetOnNewTurn: resetsTurn
     }),
     agentType: source,
     toolName: snapshot.toolName,
     toolInput: snapshot.toolInput,
     interactivePrompt: snapshot.interactivePrompt,
-    lastAssistantMessage: snapshot.lastAssistantMessage
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    sessionBoundary: source === 'opencode' && eventName === 'SessionStart' ? true : undefined
   })
 }
 
@@ -4306,44 +4424,6 @@ function readStringField(record: Record<string, unknown>, key: string): string |
   return trimmed.length > 0 ? trimmed : undefined
 }
 
-/**
- * The provider session id a raw hook body reports, read exactly as
- * `normalizeHookPayload` reads it (same JSON guard, same per-source extractor,
- * same Codex child carve-out).
- *
- * Why it is exposed: pane attribution has to run BEFORE normalization.
- * `normalizeHookPayload` keys its prompt/compaction state machine on the posted
- * pane key, so correcting the key afterwards would leave that state on the
- * wrong pane. Callers that re-derive the session id themselves drift from this
- * parser the moment a source changes shape.
- */
-export function readHookBodyProviderSessionId(
-  source: AgentHookSource,
-  body: unknown
-): string | null {
-  if (typeof body !== 'object' || body === null) {
-    return null
-  }
-  const rawPayload = (body as Record<string, unknown>).payload
-  let hookPayload: unknown = rawPayload
-  if (typeof rawPayload === 'string') {
-    try {
-      hookPayload = parseAgentHookJson(rawPayload)
-    } catch {
-      return null
-    }
-  }
-  if (typeof hookPayload !== 'object' || hookPayload === null) {
-    return null
-  }
-  const record = hookPayload as Record<string, unknown>
-  // Why: Codex child hooks expose the child's session_id on the parent's pane.
-  if (source === 'codex' && readString(record, 'agent_id')) {
-    return null
-  }
-  return extractAgentProviderSession(source, record)?.id ?? null
-}
-
 export function normalizeHookPayload(
   state: HookListenerState,
   source: AgentHookSource,
@@ -4359,8 +4439,16 @@ export function normalizeHookPayload(
   const paneKey = typeof record.paneKey === 'string' ? record.paneKey.trim() : ''
   const parsedPaneKey = parsePaneKey(paneKey)
   const rawPayload = record.payload
-  const hookPayload =
-    typeof rawPayload === 'string'
+  // Why (#15117): some Antigravity events fire with no stdin at all, yet still carry a status
+  // transition in `hook_event_name`. The POSIX script substitutes `{}` before posting; on
+  // Windows curl omits the form field entirely when stdin is empty, so the event arrives with
+  // no `payload` key at all. Accept both shapes rather than dropping the transition.
+  const antigravityPayloadAbsent =
+    source === 'antigravity' &&
+    (rawPayload === undefined || (typeof rawPayload === 'string' && rawPayload.trim() === ''))
+  const hookPayload = antigravityPayloadAbsent
+    ? {}
+    : typeof rawPayload === 'string'
       ? (() => {
           try {
             return parseAgentHookJson(rawPayload)

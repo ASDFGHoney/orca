@@ -12,6 +12,7 @@ import { ORCA_HOOK_PROTOCOL_VERSION } from '../../shared/agent-hook-types'
 import {
   clearAllListenerCaches,
   clearPaneCacheState,
+  paneHasStateClaims,
   clearClaudeAnsweredQuestionWait,
   createHookListenerState,
   getEndpointFileName,
@@ -31,7 +32,6 @@ import {
   reconcileRemoteCodexState,
   resolveHookSource,
   preparePendingGrokResultDiscovery,
-  readHookBodyProviderSessionId,
   seedClaudeLeadTurnFromPersistedStatus,
   seedClaudeSubagentRosterFromSnapshots,
   seedCodexStateFromSnapshot,
@@ -103,10 +103,6 @@ import {
   type AgentProviderSessionMetadata
 } from '../../shared/agent-session-resume'
 import { isCommandCodeNewTurnWhileWorking } from '../../shared/command-code-turn-boundary'
-import {
-  AgentSessionPaneBindings,
-  type AgentSessionPaneBinding
-} from './agent-session-pane-bindings'
 
 export type { AgentHookSource }
 
@@ -728,9 +724,6 @@ export class AgentHookServer {
   })
   // Why: hydrated rows give UI continuity but aren't evidence of live agent work in this runtime.
   private runtimeObservedStatusPaneKeys = new Set<string>()
-  // Why: a daemon-hosted session's hooks post the daemon's inherited pane key.
-  // Spawn-time session pins are the only evidence of the true pane.
-  private agentSessionPaneBindings = new AgentSessionPaneBindings()
   private hydratedAuthorityCommitments: readonly AgentHookAuthorityEvidence[] = Object.freeze([])
   private hydratedLaunchTokenHashByPaneKey = new Map<string, string>()
   private persistedAuthorityCommitmentsByPaneKey = new Map<string, AgentHookAuthorityEvidence>()
@@ -753,6 +746,7 @@ export class AgentHookServer {
   private promptSentHashSalt = randomBytes(16).toString('hex')
   private closedAgentStatusTabIds = new Set<string>()
   private closedAgentStatusPaneKeys = new Set<string>()
+  private restartedStatusLaunchTokenHashByPaneKey = new Map<string, string>()
   private connectionTimestampWatermarkById = new Map<string, number>()
   // Why: skip disk writes when the JSON exactly matches the last write; guards against re-firing trailing timers when nothing changed.
   private lastWrittenJson: string | null = null
@@ -1135,7 +1129,15 @@ export class AgentHookServer {
 
   private getAgentStatusDisposition(
     paneKey: string,
-    event?: { hookEventName?: string; isReplay?: boolean }
+    event?: {
+      source?: AgentHookSource
+      /** Raw wire value, so the gate can tell "field absent" from "field present but unknown". */
+      rawSource?: unknown
+      hookEventName?: string
+      isReplay?: boolean
+      hasExplicitPrompt?: boolean
+      launchToken?: string
+    }
   ): 'accept' | 'restart' | 'suppress' {
     const ownerPaneKey = this.resolvePaneKeyAlias(paneKey)
     const paneRetired =
@@ -1146,17 +1148,75 @@ export class AgentHookServer {
       return 'suppress'
     }
     if (!paneRetired) {
+      const tokenFence = this.restartedStatusLaunchTokenHashByPaneKey.get(ownerPaneKey)
+      // Why: deferred retirement lets a new process start in a still-authorized pane, so
+      // its tokened SessionStart re-fences; prompts recur, so a stale process would win.
+      if (
+        event?.hookEventName === 'SessionStart' &&
+        event.isReplay !== true &&
+        tokenFence !== undefined
+      ) {
+        const startedLaunchToken = event.launchToken?.trim()
+        if (startedLaunchToken) {
+          this.restartedStatusLaunchTokenHashByPaneKey.set(
+            ownerPaneKey,
+            createHash('sha256').update(startedLaunchToken).digest('hex')
+          )
+          return 'accept'
+        }
+      }
+      if (event && tokenFence) {
+        const launchToken = event.launchToken?.trim()
+        if (!launchToken || createHash('sha256').update(launchToken).digest('hex') !== tokenFence) {
+          return 'suppress'
+        }
+      }
       return 'accept'
     }
     // Why: command completion retires launch authority but leaves its shell pane reusable.
-    // A live SessionStart proves a new agent process owns the retired pane just like a
+    // A live new-turn event proves a new agent process owns the retired pane just like a
     // fresh prompt does — without it, a session resumed in a reused pane stays rowless (STA-3386).
-    if (
-      (event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart') &&
-      event.isReplay !== true
-    ) {
+    // Why the classifier, not literals: only 5 of 18 sources name their boundary
+    // `UserPromptSubmit`/`SessionStart`; the rest stayed retired forever.
+    // Why four branches: `source` collapses to undefined when an older relay omits the field,
+    // when a newer host sends an unknown string, and when the wire value is malformed. Only an
+    // unknown string is valid future-provider evidence. Unreachable from the local path, which
+    // 404s an unresolvable source.
+    const isNewTurn =
+      event?.source !== undefined
+        ? isNewTurnEvent(event.source, event.hookEventName)
+        : typeof event?.rawSource === 'string' && event.rawSource.trim().length > 0
+          ? // Why fail OPEN for an unknown provider: its boundary event is unknowable here, and
+            // the costs are asymmetric — a stranded pane is invisible and permanent with no user
+            // recovery, while a spurious revive decays after AGENT_STATUS_STALE_AFTER_MS.
+            true
+          : event?.rawSource === undefined
+            ? // Why literals here: an older relay omits `source` entirely. Legacy shim only — it
+              // cannot revive a provider whose boundary event is named anything else.
+              event?.hookEventName === 'UserPromptSubmit' || event?.hookEventName === 'SessionStart'
+            : false
+    // Why in addition to the classifier: the OpenCode family carries its mid-session boundary in
+    // an explicit-prompt MessagePart, which isNewTurnEvent cannot name — and mimo-code has no
+    // SessionStart at all, so without this its retired panes never come back.
+    const freshOpenCodeFamilyPrompt =
+      (event?.source === 'opencode' || event?.source === 'mimo-code') &&
+      event.hookEventName === 'MessagePart' &&
+      event.hasExplicitPrompt === true
+    // Why the token is minted here: a revive proves a live lifecycle, and fencing follow-up
+    // status on that launch token stops a stale process reclaiming the pane's row without
+    // restoring retired orchestration authority.
+    if ((isNewTurn || freshOpenCodeFamilyPrompt) && event?.isReplay !== true) {
       this.closedAgentStatusPaneKeys.delete(paneKey)
       this.closedAgentStatusPaneKeys.delete(ownerPaneKey)
+      const launchToken = event?.launchToken?.trim()
+      if (launchToken) {
+        this.restartedStatusLaunchTokenHashByPaneKey.set(
+          ownerPaneKey,
+          createHash('sha256').update(launchToken).digest('hex')
+        )
+      } else {
+        this.restartedStatusLaunchTokenHashByPaneKey.delete(ownerPaneKey)
+      }
       return 'restart'
     }
     return 'suppress'
@@ -1813,6 +1873,13 @@ export class AgentHookServer {
     if (this.runtimeObservedStatusPaneKeys.delete(previousOwnerPaneKey)) {
       this.runtimeObservedStatusPaneKeys.add(toPaneKey)
     }
+    const restartedTokenHash =
+      this.restartedStatusLaunchTokenHashByPaneKey.get(previousOwnerPaneKey)
+    this.restartedStatusLaunchTokenHashByPaneKey.delete(previousOwnerPaneKey)
+    this.restartedStatusLaunchTokenHashByPaneKey.delete(toPaneKey)
+    if (restartedTokenHash) {
+      this.restartedStatusLaunchTokenHashByPaneKey.set(toPaneKey, restartedTokenHash)
+    }
     const activeTurnCompletedAt = this.activeHookTurnCompletedAtByPaneKey.get(previousOwnerPaneKey)
     if (activeTurnCompletedAt !== undefined) {
       this.activeHookTurnCompletedAtByPaneKey.delete(previousOwnerPaneKey)
@@ -1873,6 +1940,7 @@ export class AgentHookServer {
     const hadStatus = [...paneKeys].some((key) => this.state.lastStatusByPaneKey.has(key))
     for (const key of paneKeys) {
       this.markPaneClosedForAgentStatus(key)
+      this.restartedStatusLaunchTokenHashByPaneKey.delete(key)
       this.clearAssistantMessageRetry(key)
       this.clearCodexSubagentPoll(key)
       clearPaneCacheState(this.state, key)
@@ -2022,66 +2090,6 @@ export class AgentHookServer {
       changed = this.persistedAuthorityCommitmentsByPaneKey.delete(resolvedPaneKey) || changed
     }
     return changed
-  }
-
-  /** Records the pane a freshly spawned agent session belongs to. Called from
-   * the spawn path, which is the last place both halves are known: the session
-   * id Orca minted into the launch command, and the pane it launched into. */
-  bindAgentSessionPane(
-    source: AgentHookSource,
-    sessionId: string,
-    binding: AgentSessionPaneBinding
-  ): void {
-    if (!isValidPaneKey(binding.paneKey)) {
-      return
-    }
-    this.agentSessionPaneBindings.bind(source, sessionId, binding)
-  }
-
-  clearAgentSessionPaneBindingsForPty(ptyId: string): void {
-    this.agentSessionPaneBindings.clearForPty(ptyId)
-  }
-
-  /** The pane a session was spawned into, when it differs from the key the
-   * event posted. Null means "no correction" — an unpinned session (a
-   * hand-typed `claude`, an agent Orca never launched) keeps today's behavior,
-   * so this can only ever move status ONTO a pane Orca itself started. */
-  private resolveBoundPaneOverride(
-    source: AgentHookSource,
-    sessionId: string | null,
-    postedPaneKey: unknown
-  ): AgentSessionPaneBinding | null {
-    const bound = this.agentSessionPaneBindings.resolve(source, sessionId)
-    if (!bound || bound.paneKey === postedPaneKey) {
-      return null
-    }
-    return bound
-  }
-
-  private normalizeHookBodyAgentSessionPane(source: AgentHookSource, body: unknown): unknown {
-    if (typeof body !== 'object' || body === null) {
-      return body
-    }
-    const record = body as Record<string, unknown>
-    const bound = this.resolveBoundPaneOverride(
-      source,
-      readHookBodyProviderSessionId(source, body),
-      typeof record.paneKey === 'string' ? record.paneKey.trim() : ''
-    )
-    if (!bound) {
-      return body
-    }
-    // Why: the posted key came from the worker's inherited env; the spawn-time
-    // binding names the pane that actually owns this session. Rewrite tabId
-    // with it too, or normalizeHookPayload's tabId/paneKey agreement check
-    // rejects the event outright — and the worktree, since the same inherited
-    // env named the daemon's workspace.
-    return {
-      ...record,
-      paneKey: bound.paneKey,
-      tabId: parsePaneKey(bound.paneKey)?.tabId,
-      ...(bound.worktreeId ? { worktreeId: bound.worktreeId } : {})
-    }
   }
 
   private normalizeHookBodyPaneKeyAlias(body: unknown): unknown {
@@ -2276,18 +2284,7 @@ export class AgentHookServer {
     }
     // Why: trim paneKey to match the HTTP path, else remote-vs-local events for one pane diverge.
     const physicalPaneKey = envelope.paneKey.trim()
-    const source = isAgentHookSource(envelope.source) ? envelope.source : undefined
-    // Why: a remote host's shared agent daemon inherits a stale ORCA_PANE_KEY
-    // exactly like a local one, so SSH/WSL panes need the same spawn-time
-    // session binding, resolved before pane-migration aliasing applies on top.
-    const boundPane = source
-      ? this.resolveBoundPaneOverride(
-          source,
-          normalizeAgentProviderSession(envelope.providerSession)?.id ?? null,
-          physicalPaneKey
-        )
-      : null
-    const paneKey = this.resolvePaneKeyAlias(boundPane?.paneKey ?? physicalPaneKey)
+    const paneKey = this.resolvePaneKeyAlias(physicalPaneKey)
     const parsedPaneKey = parsePaneKey(paneKey)
     if (paneKey.length === 0) {
       track('agent_hook_unattributed', { reason: 'empty_pane_key' })
@@ -2322,6 +2319,7 @@ export class AgentHookServer {
       typeof envelope.hookEventName === 'string' && envelope.hookEventName.trim().length > 0
         ? envelope.hookEventName.trim()
         : undefined
+    const source = isAgentHookSource(envelope.source) ? envelope.source : undefined
     const providerPromptId =
       source === 'claude' ? normalizeClaudePromptId(envelope.providerPromptId) : undefined
     const compactTrigger =
@@ -2330,25 +2328,26 @@ export class AgentHookServer {
         ? envelope.compactTrigger
         : undefined
     const statusDisposition = this.getAgentStatusDisposition(paneKey, {
+      source,
+      rawSource: envelope.source,
       hookEventName,
-      isReplay: envelope.isReplay === true
+      isReplay: envelope.isReplay === true,
+      hasExplicitPrompt: envelope.hasExplicitPrompt === true,
+      launchToken: envelope.launchToken
     })
     if (statusDisposition === 'suppress') {
       return
     }
     if (statusDisposition === 'restart') {
       // Why: same rebind as the HTTP path — a retired pane taking a new turn is a new session.
-      // Why paneKey, not envelope.paneKey: it is already corrected to the session's
-      // true pane, so the rebind cannot land on the daemon's inherited key.
+      // Why paneKey, not envelope.paneKey: alias resolution already mapped it to the
+      // stable pane, so the rebind cannot land on a legacy key.
       this.observations.rebind(paneKey)
     }
-    // Why: a corrected pane brings its own workspace — the envelope's came from
-    // the same inherited env that named the wrong pane.
     const worktreeId =
-      boundPane?.worktreeId ??
-      (envelope.worktreeId !== undefined && envelope.worktreeId.trim().length > 0
+      envelope.worktreeId !== undefined && envelope.worktreeId.trim().length > 0
         ? envelope.worktreeId.trim()
-        : undefined)
+        : undefined
     const promptInteractionKey =
       typeof envelope.promptInteractionKey === 'string' &&
       envelope.promptInteractionKey.trim().length > 0
@@ -2567,15 +2566,15 @@ export class AgentHookServer {
         }
 
         trackEmptyPaneKeyHook(body)
-        // Why: session attribution runs first — it corrects an inherited key to
-        // the real pane, and pane-migration aliasing then applies on top of it.
-        const attributedBody = this.normalizeHookBodyAgentSessionPane(source, body)
-        const aliasedBody = this.normalizeHookBodyPaneKeyAlias(attributedBody)
+        const aliasedBody = this.normalizeHookBodyPaneKeyAlias(body)
         const normalized = this.normalizeLocalHookPayload(source, aliasedBody)
         const statusDisposition = normalized.event
           ? this.getAgentStatusDisposition(normalized.event.paneKey, {
+              source,
               hookEventName: normalized.event.hookEventName,
-              isReplay: normalized.event.isReplay
+              isReplay: normalized.event.isReplay,
+              hasExplicitPrompt: normalized.event.hasExplicitPrompt,
+              launchToken: normalized.event.launchToken
             })
           : 'suppress'
         if (normalized.event && statusDisposition !== 'suppress') {
@@ -2669,11 +2668,29 @@ export class AgentHookServer {
     this.promptSentDedupeByPaneKey.clear()
     this.closedAgentStatusTabIds.clear()
     this.closedAgentStatusPaneKeys.clear()
+    this.restartedStatusLaunchTokenHashByPaneKey.clear()
     this.retiredPaneFencesByKey.clear()
     this.connectionTimestampWatermarkById.clear()
     this.legacyPaneKeyAliases.clear()
     clearAllListenerCaches(this.state)
     this.notifyStatusChangeListeners()
+  }
+
+  /** The resume-identity remnant of a dropped row: a `providerSessionOnly` entry carries no state
+   *  claim — it cannot gate a pane `working` — so it survives teardowns that end the pane's live
+   *  claims. Returns null when the row has no resumable session to keep. */
+  private toRetainedProviderSessionRow(
+    entry: EnrichedAgentHookEventPayload | null | undefined
+  ): EnrichedAgentHookEventPayload | null {
+    if (
+      !entry?.providerSession ||
+      !entry.payload.agentType ||
+      entry.payload.agentType === 'unknown'
+    ) {
+      return null
+    }
+    const { launchToken: _launchToken, ...resumeIdentity } = entry
+    return { ...resumeIdentity, providerSessionOnly: true, retainedForLiveness: true }
   }
 
   /** Drop only the status row (user dismissal); do NOT wipe prompt/tool caches since the pane's agent may still be alive. Use clearPaneState for PTY-teardown. */
@@ -2682,20 +2699,62 @@ export class AgentHookServer {
     if (!deleted) {
       return
     }
-    if (
-      deleted.providerSession &&
-      deleted.payload.agentType &&
-      deleted.payload.agentType !== 'unknown'
-    ) {
-      const retained: EnrichedAgentHookEventPayload = {
-        ...deleted,
-        providerSessionOnly: true,
-        retainedForLiveness: true
-      }
+    const retained = this.toRetainedProviderSessionRow(deleted)
+    if (retained) {
       this.state.lastStatusByPaneKey.set(deleted.paneKey, retained)
     }
     this.scheduleStatusPersist()
     this.notifyStatusChangeListeners()
+  }
+
+  /** Retire panes whose owning process is certifiably dead.
+   *
+   *  The ordinary teardown already does this: every attributable PTY exit reaches
+   *  `clearProviderPtyState`, which resolves the pane key and calls `clearPaneState`. But that
+   *  resolution depends on the spawn-time `ptyPaneKey` mapping, which a restored/reattached PTY may
+   *  never rebuild — so those panes keep a `working` row and its latches for good, with no hook left
+   *  to retire them. This is the same operation reached from the runtime's own pane-key knowledge,
+   *  so a dead pane is cleaned up identically however its keys were resolved. */
+  reconcileEndedProcessForPaneKeys(
+    paneKeys: Iterable<string>,
+    options?: {
+      /** The pane's PTY outlived its agent (a confirmed shell foreground), so the session can still
+       *  be resumed in place — keep the `providerSessionOnly` remnant the paired `agentStatus:drop`
+       *  minted for exactly this case. A certified PTY exit passes nothing: there is no pane left to
+       *  resume into, and dropping it matches what `clearProviderPtyState` already does. */
+      preserveResumeIdentity?: boolean
+    }
+  ): number {
+    let cleared = 0
+    for (const paneKey of paneKeys) {
+      const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
+      if (!this.hasLiveClaimsForPaneKey(resolvedPaneKey)) {
+        continue
+      }
+      const retained = options?.preserveResumeIdentity
+        ? this.toRetainedProviderSessionRow(
+            this.state.lastStatusByPaneKey.get(resolvedPaneKey) as
+              | EnrichedAgentHookEventPayload
+              | undefined
+          )
+        : null
+      this.clearPaneState(resolvedPaneKey)
+      if (retained) {
+        this.state.lastStatusByPaneKey.set(resolvedPaneKey, retained)
+        this.scheduleStatusPersist()
+        this.notifyStatusChangeListeners()
+      }
+      cleared += 1
+    }
+    return cleared
+  }
+
+  /** Anything a dead pane could still be asserting: a row, or a latch that would re-gate one through
+   *  `resolveClaudePaneState` on the pane's next event even after the row reads `done`. The list
+   *  itself lives beside `clearPaneCacheState`, so adding a latch cannot leave this behind in a
+   *  different file. */
+  private hasLiveClaimsForPaneKey(paneKey: string): boolean {
+    return paneHasStateClaims(this.state, paneKey)
   }
 
   /** Clear statuses proven to belong to one lost SSH transport. */
@@ -2728,6 +2787,7 @@ export class AgentHookServer {
           this.state.claudeLeadStateByPaneKey.delete(paneKey)
           this.state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
           this.state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+          this.state.claudeSessionOwnerByPaneKey.delete(paneKey)
         }
       }
     }
@@ -2846,6 +2906,7 @@ export class AgentHookServer {
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
       this.currentAuthorityObservations.delete(paneKey)
       this.promptSentDedupeByPaneKey.delete(paneKey)
+      this.restartedStatusLaunchTokenHashByPaneKey.delete(paneKey)
     }
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
@@ -2867,6 +2928,7 @@ export class AgentHookServer {
     this.activeHookTurnCompletedAtByPaneKey.delete(resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
+    this.restartedStatusLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
     let clearedAlias = false
     for (const [legacyPaneKey, stablePaneKey] of this.legacyPaneKeyAliases) {
       if (stablePaneKey.stablePaneKey === resolvedPaneKey) {
@@ -2877,6 +2939,7 @@ export class AgentHookServer {
         this.activeHookTurnCompletedAtByPaneKey.delete(legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
+        this.restartedStatusLaunchTokenHashByPaneKey.delete(legacyPaneKey)
         clearedAlias = true
       }
     }
@@ -2915,9 +2978,15 @@ export class AgentHookServer {
         enriched.payload.agentType === 'claude' &&
         enriched.connectionId === null &&
         isLocalExecutionHost(enriched.worktreeId) &&
-        claudeRosterHasRestoredSnapshotSubagent(
+        // Why: a restored roster is only one shape of stranded claim. A lead row left non-terminal,
+        // or a background-task/cron latch nothing will refresh, strands the pane just as
+        // permanently — and unlike the roster case there is no child event left to reap it.
+        (claudeRosterHasRestoredSnapshotSubagent(
           this.state.claudeSubagentRosterByPaneKey.get(paneKey)
-        ) &&
+        ) ||
+          enriched.payload.state !== 'done' ||
+          this.state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+          this.state.claudeActiveSessionCronPaneKeys.has(paneKey)) &&
         !this.runtimeObservedStatusPaneKeys.has(paneKey)
       ) {
         candidates.push({ paneKey, entry: enriched })
@@ -2945,6 +3014,20 @@ export class AgentHookServer {
         continue
       }
       if (!reapRestoredClaudeSubagentsForDeadPane(this.state, paneKey)) {
+        // Why: the roster reap only speaks for restored child rows. A pane whose PTY is provably
+        // gone and whose claim is a lead row or a latch has nothing for it to reap, so retire the
+        // pane the same way an observed exit would — otherwise the widened candidate set is inert.
+        //
+        // Why delete rather than downgrade to `done` like the reap branch below: that branch has a
+        // real turn to describe — a parent whose children it just reaped — while these panes' only
+        // claim IS the stale non-terminal row. Rewriting a `waiting`/`blocked` row to `done` would
+        // invent a completion that never happened, and leaving it non-terminal keeps the bug. This
+        // sweep stands in for the exit Orca never observed, so it does what that exit does:
+        // `clearProviderPtyState` -> `clearPaneState`.
+        if (this.hasLiveClaimsForPaneKey(paneKey)) {
+          this.clearPaneState(paneKey)
+          changedPanes += 1
+        }
         continue
       }
       changedPanes += 1
