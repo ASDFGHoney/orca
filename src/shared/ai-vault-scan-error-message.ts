@@ -8,8 +8,8 @@ const RETRY = 'Refresh to try again.'
 
 /** Electron wraps every rejected `ipcMain.handle` before the renderer sees it. */
 const IPC_INVOKE_PREFIX = /^Error invoking remote method '[^']*': (?:\w*Error: )?/
-/** Relay-hosted scan errors carry a transport-only `Relay ` prefix. */
-const RELAY_PREFIX = /^Relay /
+/** Relay-hosted scanner errors carry a transport-only `Relay ` prefix. */
+const RELAY_PREFIX = /^Relay (?=AI Vault )/
 /** Both the fork-based service and the legacy worker thread emit this family. */
 const SCANNER = String.raw`AI Vault (?:service|scanner worker)`
 
