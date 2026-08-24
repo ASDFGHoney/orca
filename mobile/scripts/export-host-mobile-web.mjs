@@ -1,18 +1,22 @@
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
 import { spawnProcess } from '../../src/shared/child-process/run-process.ts'
 
 const mobileRoot = path.resolve(import.meta.dirname, '..')
+const require = createRequire(import.meta.url)
+const expoCliPath = require.resolve('expo/bin/cli')
 
 export function createHostMobileWebExportProcessSpec({
   environment = process.env,
+  expoCli = expoCliPath,
   mobileDirectory = mobileRoot,
-  outputDirectory,
-  platform = process.platform
+  nodeExecutable = process.execPath,
+  outputDirectory
 }) {
   return {
-    program: platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
-    args: ['exec', 'expo', 'export', '--platform', 'web', '--output-dir', outputDirectory],
+    program: nodeExecutable,
+    args: [expoCli, 'export', '--platform', 'web', '--output-dir', outputDirectory],
     cwd: mobileDirectory,
     env: {
       ...environment,
