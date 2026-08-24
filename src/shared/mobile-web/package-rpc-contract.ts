@@ -11,6 +11,10 @@ export const MOBILE_WEB_PACKAGE_MAX_IN_FLIGHT_BYTES =
   MOBILE_WEB_PACKAGE_MAX_CONCURRENT_READS * MOBILE_WEB_PACKAGE_CHUNK_BYTES
 export const MOBILE_WEB_PACKAGE_CHUNK_BASE64_CHARS =
   Math.ceil(MOBILE_WEB_PACKAGE_CHUNK_BYTES / 3) * 4
+// Deflate can add a small stored-block header to incompressible chunks.
+export const MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES = MOBILE_WEB_PACKAGE_CHUNK_BYTES + 64
+export const MOBILE_WEB_PACKAGE_GZIP_CHUNK_BASE64_CHARS =
+  Math.ceil(MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES / 3) * 4
 
 export const MOBILE_WEB_PACKAGE_ERROR_CODES = [
   'mobile_web_package_unavailable',
@@ -66,11 +70,35 @@ export const MobileWebPackageAssetChunkSchema = z
     }
   })
 
+export const MobileWebPackageGzipAssetChunkSchema = z
+  .object({
+    buildId: z.string().refine(isMobileWebSha256),
+    path: AssetPathSchema,
+    offset: z.number().int().nonnegative(),
+    sourceByteLength: z.number().int().positive().max(MOBILE_WEB_PACKAGE_CHUNK_BYTES),
+    byteLength: z.number().int().positive().max(MOBILE_WEB_PACKAGE_GZIP_CHUNK_BYTES),
+    sha256: z.string().refine(isMobileWebSha256),
+    dataBase64: z
+      .string()
+      .min(4)
+      .max(MOBILE_WEB_PACKAGE_GZIP_CHUNK_BASE64_CHARS)
+      .refine(isMobileWebBase64),
+    eof: z.boolean(),
+    encoding: z.literal('gzip')
+  })
+  .strict()
+  .superRefine((chunk, context) => {
+    if (decodedBase64Length(chunk.dataBase64) !== chunk.byteLength) {
+      context.addIssue({ code: 'custom', message: 'Chunk byte length must match gzip data' })
+    }
+  })
+
 export type MobileWebPackageManifestResponse = z.infer<
   typeof MobileWebPackageManifestResponseSchema
 >
 export type MobileWebPackageAssetParams = z.infer<typeof MobileWebPackageAssetParamsSchema>
 export type MobileWebPackageAssetChunk = z.infer<typeof MobileWebPackageAssetChunkSchema>
+export type MobileWebPackageGzipAssetChunk = z.infer<typeof MobileWebPackageGzipAssetChunkSchema>
 export type MobileWebPackageErrorCode = (typeof MOBILE_WEB_PACKAGE_ERROR_CODES)[number]
 
 const MOBILE_WEB_PACKAGE_ERROR_CODE_SET: ReadonlySet<string> = new Set(

@@ -11,10 +11,12 @@ import { colors } from '../theme/mobile-theme'
 import type { HostProfile } from '../transport/types'
 import { hybridShellStyles as styles } from './hybrid-shell-styles'
 import { MobileWebRecoveryActions } from './MobileWebRecoveryActions'
+import { MobileWebPackageProgress } from './MobileWebPackageProgress'
 import {
   mobileWebShellPresentationState,
   mobileWebShellShowsNativeChrome
 } from './mobile-web-shell-presentation-state'
+import type { MobileWebPackageDownloadProgress } from './mobile-web-package-downloader'
 
 type MobileWebHybridShellPresentationProps = {
   viewRef: RefObject<MobileWebShellViewRef | null>
@@ -22,6 +24,7 @@ type MobileWebHybridShellPresentationProps = {
   session: MobileWebShellSession | null
   viewEpoch: number
   packageLoading: boolean
+  packageProgress: MobileWebPackageDownloadProgress | undefined
   packageWarning: string | undefined
   hostedViewActive: boolean
   onBack: () => void
@@ -43,6 +46,7 @@ export function MobileWebHybridShellPresentation({
   session,
   viewEpoch,
   packageLoading,
+  packageProgress,
   packageWarning,
   hostedViewActive,
   onBack,
@@ -99,6 +103,9 @@ export function MobileWebHybridShellPresentation({
 
       {presentationState === 'hosted-interface' && session ? (
         <View style={styles.webContainer} onTouchStart={onTouch}>
+          {packageLoading && packageProgress ? (
+            <MobileWebPackageProgress progress={packageProgress} />
+          ) : null}
           {packageWarning ? (
             <>
               <Text accessibilityRole="alert" style={styles.warning}>
@@ -141,6 +148,9 @@ export function MobileWebHybridShellPresentation({
               ? 'Preparing verified interface…'
               : 'Workspace interface unavailable'}
           </Text>
+          {packageLoading && packageProgress ? (
+            <MobileWebPackageProgress progress={packageProgress} />
+          ) : null}
           {packageWarning ? (
             <>
               <Text accessibilityRole="alert" style={styles.loadingBody}>

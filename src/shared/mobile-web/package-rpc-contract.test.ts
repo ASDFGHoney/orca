@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   MOBILE_WEB_PACKAGE_CHUNK_BASE64_CHARS,
   MobileWebPackageAssetChunkSchema,
-  MobileWebPackageAssetParamsSchema
+  MobileWebPackageAssetParamsSchema,
+  MobileWebPackageGzipAssetChunkSchema
 } from './package-rpc-contract'
 
 const BUILD_ID = 'a'.repeat(64)
@@ -25,6 +26,22 @@ describe('mobile web package RPC contract', () => {
         sha256: 'c'.repeat(64),
         dataBase64: Buffer.from('abc').toString('base64'),
         eof: true
+      }).success
+    ).toBe(true)
+  })
+
+  it('accepts a gzip chunk with separate source and wire lengths', () => {
+    expect(
+      MobileWebPackageGzipAssetChunkSchema.safeParse({
+        buildId: BUILD_ID,
+        path: 'index.html',
+        offset: 0,
+        sourceByteLength: 3,
+        byteLength: 23,
+        sha256: 'c'.repeat(64),
+        dataBase64: Buffer.alloc(23).toString('base64'),
+        eof: true,
+        encoding: 'gzip'
       }).success
     ).toBe(true)
   })
@@ -98,6 +115,26 @@ describe('mobile web package RPC contract', () => {
   ])('rejects %s', (_case, mutation) => {
     expect(
       MobileWebPackageAssetChunkSchema.safeParse({ ...validChunk(), ...mutation }).success
+    ).toBe(false)
+  })
+
+  it('requires the encoding marker and a positive source length', () => {
+    const chunk = {
+      buildId: BUILD_ID,
+      path: 'index.html',
+      offset: 0,
+      sourceByteLength: 3,
+      byteLength: 3,
+      sha256: 'c'.repeat(64),
+      dataBase64: Buffer.from('abc').toString('base64'),
+      eof: true,
+      encoding: 'gzip'
+    }
+    expect(
+      MobileWebPackageGzipAssetChunkSchema.safeParse({ ...chunk, encoding: 'raw' }).success
+    ).toBe(false)
+    expect(
+      MobileWebPackageGzipAssetChunkSchema.safeParse({ ...chunk, sourceByteLength: 0 }).success
     ).toBe(false)
   })
 })

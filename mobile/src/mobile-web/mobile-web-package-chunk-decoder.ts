@@ -1,0 +1,80 @@
+import { Buffer } from 'buffer/'
+import { sha256 } from '@noble/hashes/sha256'
+import { gunzipSync } from 'fflate'
+import {
+  MobileWebPackageAssetChunkSchema,
+  MobileWebPackageGzipAssetChunkSchema
+} from '../../../src/shared/mobile-web/package-rpc-contract'
+import { MOBILE_WEB_PACKAGE_CHUNK_BYTES } from '../../../src/shared/mobile-web/manifest-contract'
+
+export function decodeRawMobileWebPackageChunk(
+  result: unknown,
+  buildId: string,
+  path: string,
+  offset: number,
+  expectedLength: number,
+  assetByteLength: number
+): Uint8Array | null {
+  const chunk = MobileWebPackageAssetChunkSchema.safeParse(result)
+  if (
+    !chunk.success ||
+    chunk.data.buildId !== buildId ||
+    chunk.data.path !== path ||
+    chunk.data.offset !== offset ||
+    chunk.data.byteLength !== expectedLength ||
+    chunk.data.eof !== (offset + expectedLength === assetByteLength)
+  ) {
+    return null
+  }
+  const bytes = decodeCanonicalBase64(chunk.data.dataBase64)
+  return bytes?.byteLength === expectedLength && sha256Hex(bytes) === chunk.data.sha256
+    ? bytes
+    : null
+}
+
+export function decodeGzipMobileWebPackageChunk(
+  result: unknown,
+  buildId: string,
+  path: string,
+  offset: number,
+  expectedLength: number,
+  assetByteLength: number
+): Uint8Array | null {
+  const chunk = MobileWebPackageGzipAssetChunkSchema.safeParse(result)
+  if (
+    !chunk.success ||
+    chunk.data.encoding !== 'gzip' ||
+    chunk.data.buildId !== buildId ||
+    chunk.data.path !== path ||
+    chunk.data.offset !== offset ||
+    chunk.data.sourceByteLength !== expectedLength ||
+    chunk.data.eof !== (offset + expectedLength === assetByteLength)
+  ) {
+    return null
+  }
+  const compressed = decodeCanonicalBase64(chunk.data.dataBase64)
+  if (
+    !compressed ||
+    compressed.byteLength !== chunk.data.byteLength ||
+    sha256Hex(compressed) !== chunk.data.sha256
+  ) {
+    return null
+  }
+  try {
+    const bytes = gunzipSync(compressed)
+    return bytes.byteLength === expectedLength && bytes.byteLength <= MOBILE_WEB_PACKAGE_CHUNK_BYTES
+      ? bytes
+      : null
+  } catch {
+    return null
+  }
+}
+
+function decodeCanonicalBase64(value: string): Uint8Array | null {
+  const bytes = Buffer.from(value, 'base64')
+  return bytes.toString('base64') === value ? bytes : null
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return Buffer.from(sha256(bytes)).toString('hex')
+}

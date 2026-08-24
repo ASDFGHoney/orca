@@ -18,6 +18,7 @@ const MOBILE_DYNAMIC_RPC_METHODS = [
   // Production asset requests will also pass through the native package
   // downloader rather than literal feature call sites.
   'mobileWeb.package.asset',
+  'mobileWeb.package.asset.gzip',
   'mobileWeb.package.manifest',
   // PR-sidebar reads/mutations: the mobile github-pr-rpc/mutations wrappers pass
   // the method name as a positional arg to sendGithubPrRead/sendMutation, so the

@@ -97,6 +97,16 @@ production-readiness claim.
 
 ## Performance and Endurance
 
+- [x] Implement capability-negotiated per-chunk gzip delivery with raw-chunk
+      fallback for older Desktop/mobile combinations. The current 9,310,634
+      byte package measured 2,813,625 compressed asset bytes and approximately
+      3,833,990 bytes of gzip JSON responses (240 chunks), before E2EE framing.
+      Focused downloader, provider, contract, and real local-Relay integration
+      tests pass. Binary framing and Brotli remain deferred follow-ups.
+- [x] Report verified source-byte download progress through the native loading
+      state, including accessible percentage/byte labels and verification /
+      activation phases. Background refreshes retain the current interface while
+      showing progress unobtrusively.
 - [ ] Measure cached startup and route restoration on low-memory physical iOS
       and Android devices against the current native baseline.
 - [ ] Measure terminal input latency, output frame pacing, ACK/backpressure,

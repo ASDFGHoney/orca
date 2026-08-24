@@ -75,6 +75,7 @@ export default function HybridScreen() {
     session,
     viewEpoch,
     packageLoading,
+    packageProgress,
     packageWarning,
     markHealthy,
     handleHealthTimeout: onHealthTimeout,
@@ -373,6 +374,7 @@ export default function HybridScreen() {
       session={session}
       viewEpoch={viewEpoch}
       packageLoading={packageLoading || !selectedHost}
+      packageProgress={packageProgress}
       packageWarning={packageWarning}
       hostedViewActive={hostedViewActive}
       onBack={handleBack}

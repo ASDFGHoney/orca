@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer/'
+import { gzipSync } from 'node:zlib'
 import { sha256 } from '@noble/hashes/sha256'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -51,6 +52,69 @@ describe('mobile web package downloader', () => {
       stager.writeAssetChunk.mock.calls.map((call) => Buffer.from(call[2]))
     )
     expect(written.byteLength).toBe(fixture.manifest.totalBytes)
+  })
+
+  it('decodes and stages gzip package chunks when the host advertises gzip', async () => {
+    const fixture = createFixture()
+    const stager = createStager()
+
+    const result = await downloadMobileWebPackage(fixture.request, stager, {
+      shellBridgeVersion: 1,
+      useGzip: true
+    })
+
+    expect(result.commit).toEqual({ generation: fixture.manifest.buildId })
+    expect(fixture.request).toHaveBeenCalledWith(
+      'mobileWeb.package.asset.gzip',
+      expect.objectContaining({ path: 'index.html', offset: 0 })
+    )
+    expect(stager.writeAssetChunk).toHaveBeenCalledTimes(3)
+  })
+
+  it('reports source-byte progress through verification and activation', async () => {
+    const fixture = createFixture()
+    const stager = createStager()
+    const progress: string[] = []
+
+    await downloadMobileWebPackage(fixture.request, stager, {
+      shellBridgeVersion: 1,
+      onProgress: ({ phase, completedBytes, totalBytes }) =>
+        progress.push(`${phase}:${completedBytes}/${totalBytes}`)
+    })
+
+    expect(progress[0]).toBe(`downloading:0/${fixture.manifest.totalBytes}`)
+    expect(progress.at(-2)).toBe(
+      `verifying:${fixture.manifest.totalBytes}/${fixture.manifest.totalBytes}`
+    )
+    expect(progress.at(-1)).toBe(
+      `activating:${fixture.manifest.totalBytes}/${fixture.manifest.totalBytes}`
+    )
+  })
+
+  it('rejects gzip chunks with corrupt compressed bytes', async () => {
+    const fixture = createFixture({ corruptGzipChunk: true })
+    const stager = createStager()
+
+    await expect(
+      downloadMobileWebPackage(fixture.request, stager, {
+        shellBridgeVersion: 1,
+        useGzip: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_chunk' })
+    expect(stager.abort).toHaveBeenCalledOnce()
+  })
+
+  it('rejects gzip output that exceeds the advertised raw chunk', async () => {
+    const fixture = createFixture({ gzipOversizedOutput: true })
+    const stager = createStager()
+
+    await expect(
+      downloadMobileWebPackage(fixture.request, stager, {
+        shellBridgeVersion: 1,
+        useGzip: true
+      })
+    ).rejects.toMatchObject({ code: 'invalid_chunk' })
+    expect(stager.abort).toHaveBeenCalledOnce()
   })
 
   it('reuses an independently verified matching build before staging', async () => {
@@ -204,6 +268,8 @@ function createFixture(
     bridgeTestedThrough?: number
     corruptFirstChunk?: boolean
     alterFirstChunkWithMatchingHash?: boolean
+    corruptGzipChunk?: boolean
+    gzipOversizedOutput?: boolean
     invalidBuildIdentity?: boolean
     afterFirstChunk?: () => void
   } = {}
@@ -256,15 +322,39 @@ function createFixture(
         : options.alterFirstChunkWithMatchingHash && chunkCount === 1
           ? Buffer.from(chunk).fill(0x62, 0, 1)
           : chunk
-    const response = success({
-      buildId: assetParams.buildId,
-      path: assetParams.path,
-      offset: assetParams.offset,
-      byteLength: chunk.byteLength,
-      sha256: sha256Hex(options.alterFirstChunkWithMatchingHash && chunkCount === 1 ? data : chunk),
-      dataBase64: Buffer.from(data).toString('base64'),
-      eof: assetParams.offset + chunk.byteLength === bytes.byteLength
-    })
+    const isGzip = method === 'mobileWeb.package.asset.gzip'
+    const gzipSource =
+      options.gzipOversizedOutput && chunkCount === 1
+        ? Buffer.alloc(MOBILE_WEB_PACKAGE_CHUNK_BYTES + 1, 0x61)
+        : data
+    const encoded = isGzip ? gzipSync(gzipSource, { mtime: 0 }) : data
+    const response = success(
+      isGzip
+        ? {
+            buildId: assetParams.buildId,
+            path: assetParams.path,
+            offset: assetParams.offset,
+            sourceByteLength: chunk.byteLength,
+            byteLength: encoded.byteLength,
+            sha256: sha256Hex(encoded),
+            dataBase64: Buffer.from(
+              options.corruptGzipChunk && chunkCount === 1 ? Buffer.from(encoded).fill(0) : encoded
+            ).toString('base64'),
+            eof: assetParams.offset + chunk.byteLength === bytes.byteLength,
+            encoding: 'gzip'
+          }
+        : {
+            buildId: assetParams.buildId,
+            path: assetParams.path,
+            offset: assetParams.offset,
+            byteLength: chunk.byteLength,
+            sha256: sha256Hex(
+              options.alterFirstChunkWithMatchingHash && chunkCount === 1 ? data : chunk
+            ),
+            dataBase64: Buffer.from(data).toString('base64'),
+            eof: assetParams.offset + chunk.byteLength === bytes.byteLength
+          }
+    )
     if (chunkCount === 1) {
       options.afterFirstChunk?.()
     }

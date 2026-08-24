@@ -356,6 +356,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'markdown.readTab',
   'markdown.saveTab',
   'mobileWeb.package.asset',
+  'mobileWeb.package.asset.gzip',
   'mobileWeb.package.manifest',
   'notifications.getMissedSince',
   'notifications.subscribe',

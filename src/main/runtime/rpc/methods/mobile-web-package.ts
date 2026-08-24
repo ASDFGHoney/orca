@@ -18,6 +18,14 @@ export const MOBILE_WEB_PACKAGE_METHODS: RpcMethod[] = [
       runPackageOperation(() =>
         mobileWebPackageAssets.getAssetChunk(params, { connectionId, signal })
       )
+  }),
+  defineMethod({
+    name: 'mobileWeb.package.asset.gzip',
+    params: MobileWebPackageAssetParamsSchema,
+    handler: async (params, { connectionId, signal }) =>
+      runPackageOperation(() =>
+        mobileWebPackageAssets.getAssetGzipChunk(params, { connectionId, signal })
+      )
   })
 ]
 

@@ -1,0 +1,159 @@
+import { useEffect, type MutableRefObject } from 'react'
+import ExpoMobileWebShell, { type MobileWebShellSession } from '@orca/expo-mobile-web-shell'
+import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from '../../../src/shared/mobile-web/bridge-contract'
+import type { RpcClient } from '../transport/rpc-client'
+import type { ConnectionState, HostProfile } from '../transport/types'
+import { createMobileWebNativeStager } from './mobile-web-native-stager'
+import {
+  downloadMobileWebPackage,
+  mobileWebPackageDownloadFailureCode,
+  type MobileWebPackageDownloadProgress
+} from './mobile-web-package-downloader'
+import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
+import type { MobileWebCachedBuildProbe } from './mobile-web-cached-build-probe'
+import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
+import type { MobileWebPackageCapability } from './use-mobile-web-package-capability'
+
+type PublishSession = (
+  next: MobileWebShellSession,
+  hostEpoch: number,
+  hostId: string,
+  source: 'verified-cache' | 'desktop-refresh',
+  activationStartedAt: number
+) => Promise<boolean>
+
+export function useMobileWebPackageRefresh(args: {
+  client: RpcClient | null
+  host: HostProfile | undefined
+  state: ConnectionState
+  packageCapability: MobileWebPackageCapability
+  cachedBuildProbeRef: MutableRefObject<MobileWebCachedBuildProbe | null>
+  hostEpochRef: MutableRefObject<number>
+  ownedSessionRef: MutableRefObject<MobileWebShellSession | null>
+  rejectedBuildIdsRef: MutableRefObject<Set<string>>
+  refreshingHostEpochRef: MutableRefObject<number | null>
+  publishSession: PublishSession
+  refreshEpoch: number
+  setPackageLoading: (loading: boolean) => void
+  setPackageWarning: (warning: string | undefined) => void
+  setPackageProgress: (progress: MobileWebPackageDownloadProgress | undefined) => void
+}) {
+  const {
+    client,
+    host,
+    state,
+    packageCapability,
+    cachedBuildProbeRef,
+    hostEpochRef,
+    ownedSessionRef,
+    rejectedBuildIdsRef,
+    refreshingHostEpochRef,
+    publishSession,
+    refreshEpoch,
+    setPackageLoading,
+    setPackageWarning,
+    setPackageProgress
+  } = args
+
+  useEffect(() => {
+    if (!host || !client || state !== 'connected' || packageCapability.status !== 'supported') {
+      return
+    }
+    const hostEpoch = hostEpochRef.current
+    const cachedBuildProbe = cachedBuildProbeRef.current
+    const controller = new AbortController()
+    refreshingHostEpochRef.current = hostEpoch
+    setPackageLoading(true)
+    setPackageWarning(undefined)
+    setPackageProgress(undefined)
+    void (async () => {
+      const refreshStartedAt = Date.now()
+      try {
+        const downloaded = await downloadMobileWebPackage(
+          (method, params) => client.sendRequest(method, params),
+          createMobileWebNativeStager(host.publicKeyB64),
+          {
+            shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
+            useGzip: packageCapability.gzip,
+            signal: controller.signal,
+            onProgress: setPackageProgress,
+            reuseVerifiedBuild: async (buildId) => {
+              const verifiedBuildId =
+                cachedBuildProbe?.hostEpoch === hostEpoch ? await cachedBuildProbe.promise : null
+              return (
+                !controller.signal.aborted &&
+                hostEpochRef.current === hostEpoch &&
+                verifiedBuildId === buildId &&
+                ownedSessionRef.current?.buildId === buildId
+              )
+            }
+          }
+        )
+        if (controller.signal.aborted || hostEpochRef.current !== hostEpoch) {
+          return
+        }
+        if (downloaded.reusedVerifiedBuild) {
+          completeRefresh(host.id, refreshStartedAt)
+          return
+        }
+        if (ownedSessionRef.current?.buildId === downloaded.commit.buildId) {
+          completeRefresh(host.id, refreshStartedAt)
+          return
+        }
+        if (rejectedBuildIdsRef.current.has(downloaded.commit.buildId)) {
+          mobileWebDiagnosticsStore.warning(host.id, 'rejected_build')
+          finishPackage(
+            false,
+            'Using the previous verified interface until the desktop build changes.'
+          )
+          return
+        }
+        const activationStartedAt = Date.now()
+        const next = await ExpoMobileWebShell.openSession(
+          host.publicKeyB64,
+          downloaded.commit.buildId,
+          MOBILE_WEB_BRIDGE_PROTOCOL_VERSION
+        )
+        if (
+          await publishSession(next, hostEpoch, host.id, 'desktop-refresh', activationStartedAt)
+        ) {
+          mobileWebDiagnosticsStore.refreshSucceeded(host.id, Date.now() - refreshStartedAt)
+          setPackageWarning(undefined)
+        }
+      } catch (error) {
+        if (!controller.signal.aborted && hostEpochRef.current === hostEpoch) {
+          const failureCode = mobileWebPackageDownloadFailureCode(error)
+          mobileWebDiagnosticsStore.warning(host.id, failureCode)
+          console.warn('[mobile-web] package refresh failed', { code: failureCode })
+          finishPackage(
+            false,
+            mobileWebPackageRefreshWarning(failureCode, Boolean(ownedSessionRef.current))
+          )
+        }
+      }
+    })().finally(() => {
+      if (refreshingHostEpochRef.current === hostEpoch) {
+        refreshingHostEpochRef.current = null
+      }
+    })
+    return () => {
+      controller.abort()
+      if (refreshingHostEpochRef.current === hostEpoch) {
+        refreshingHostEpochRef.current = null
+      }
+    }
+
+    function completeRefresh(hostId: string, startedAt: number): void {
+      mobileWebDiagnosticsStore.refreshSucceeded(hostId, Date.now() - startedAt)
+      finishPackage(true)
+    }
+
+    function finishPackage(success: boolean, warning?: string): void {
+      setPackageLoading(false)
+      setPackageProgress(undefined)
+      if (success || warning) {
+        setPackageWarning(warning)
+      }
+    }
+  }, [client, host?.id, host?.publicKeyB64, packageCapability, publishSession, refreshEpoch, state])
+}

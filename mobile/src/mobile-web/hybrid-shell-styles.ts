@@ -69,5 +69,23 @@ export const hybridShellStyles = StyleSheet.create({
     fontSize: typography.metaSize,
     lineHeight: 18,
     textAlign: 'center'
-  }
+  },
+  packageProgress: { width: '100%', maxWidth: 320, gap: spacing.xs },
+  packageProgressLabel: {
+    color: colors.textSecondary,
+    fontSize: typography.metaSize,
+    textAlign: 'center'
+  },
+  packageProgressTrack: {
+    height: 6,
+    overflow: 'hidden',
+    borderRadius: radii.button,
+    backgroundColor: colors.bgRaised
+  },
+  packageProgressFill: {
+    height: '100%',
+    borderRadius: radii.button,
+    backgroundColor: colors.textSecondary
+  },
+  packageProgressBytes: { color: colors.textMuted, fontSize: 11, textAlign: 'center' }
 })

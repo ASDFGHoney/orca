@@ -195,6 +195,21 @@ describe('useMobileWebPackageSession', () => {
     expect(sendRequest).toHaveBeenCalledWith('status.get')
   })
 
+  it('does not restart package refresh when a connected render has no capability change', async () => {
+    native.openSession.mockResolvedValue(SESSION_A)
+    downloadPackage.mockResolvedValue({ commit: { buildId: SESSION_B.buildId } })
+    await mount('connected')
+    const refreshCount = downloadPackage.mock.calls.length
+    expect(refreshCount).toBeGreaterThan(0)
+
+    await act(async () => {
+      renderer?.update(createElement(Harness, { state: 'connected' }))
+      await flushPromises()
+    })
+
+    expect(downloadPackage).toHaveBeenCalledTimes(refreshCount)
+  })
+
   it('removes cached UI and surfaces update-required for an unsupported connected host', async () => {
     native.openSession.mockResolvedValue(SESSION_A)
     await mount('disconnected')
@@ -377,14 +392,30 @@ describe('useMobileWebPackageSession', () => {
 
   it('keeps the loading state while a first desktop refresh is active', async () => {
     const refresh = deferred<{ commit: { buildId: string } }>()
+    let reportProgress:
+      | ((progress: { phase: 'downloading'; completedBytes: number; totalBytes: number }) => void)
+      | undefined
     native.openSession.mockRejectedValue(new Error('cache unavailable'))
-    downloadPackage.mockReturnValue(refresh.promise)
+    downloadPackage.mockImplementation((_request, _stager, options) => {
+      reportProgress = options.onProgress
+      return refresh.promise
+    })
 
     await mount('connected')
 
     expect(packageSession?.session).toBeNull()
     expect(packageSession?.packageLoading).toBe(true)
     expect(packageSession?.packageWarning).toBeUndefined()
+
+    await act(async () => {
+      reportProgress?.({ phase: 'downloading', completedBytes: 50, totalBytes: 100 })
+      await flushPromises()
+    })
+    expect(packageSession?.packageProgress).toEqual({
+      phase: 'downloading',
+      completedBytes: 50,
+      totalBytes: 100
+    })
 
     await act(async () => {
       refresh.reject(new Error('refresh failed'))

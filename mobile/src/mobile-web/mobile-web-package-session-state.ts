@@ -1,9 +1,11 @@
 import type { MobileWebShellSession } from '@orca/expo-mobile-web-shell'
+import type { MobileWebPackageDownloadProgress } from './mobile-web-package-downloader'
 
 export type MobileWebPackageSession = {
   session: MobileWebShellSession | null
   viewEpoch: number
   packageLoading: boolean
+  packageProgress: MobileWebPackageDownloadProgress | undefined
   packageWarning: string | undefined
   markHealthy: (sessionId: string) => Promise<void>
   handleHealthTimeout: (sessionId: string) => Promise<void>

@@ -1,7 +1,6 @@
 import { Buffer } from 'buffer/'
 import { sha256 } from '@noble/hashes/sha256'
 import {
-  MobileWebPackageAssetChunkSchema,
   MobileWebPackageManifestResponseSchema,
   isMobileWebPackageErrorCode,
   type MobileWebPackageErrorCode
@@ -15,6 +14,10 @@ import {
   supportsMobileWebBridgeVersion
 } from '../../../src/shared/mobile-web/manifest-contract'
 import type { RpcResponse } from '../transport/types'
+import {
+  decodeGzipMobileWebPackageChunk,
+  decodeRawMobileWebPackageChunk
+} from './mobile-web-package-chunk-decoder'
 
 export const MOBILE_WEB_PACKAGE_DOWNLOAD_ERROR_CODES = [
   'cancelled',
@@ -47,6 +50,12 @@ export function mobileWebPackageDownloadFailureCode(error: unknown): string {
 
 export type MobileWebPackageRequest = (method: string, params?: unknown) => Promise<RpcResponse>
 
+export type MobileWebPackageDownloadProgress = {
+  phase: 'downloading' | 'verifying' | 'activating'
+  completedBytes: number
+  totalBytes: number
+}
+
 export type MobileWebPackageStager<TCommit> = {
   begin(manifest: MobileWebManifest): Promise<void>
   writeAssetChunk(asset: MobileWebAsset, offset: number, bytes: Uint8Array): Promise<void>
@@ -58,6 +67,8 @@ export type MobileWebPackageStager<TCommit> = {
 type DownloadMobileWebPackageOptions = {
   shellBridgeVersion: number
   signal?: AbortSignal
+  useGzip?: boolean
+  onProgress?: (progress: MobileWebPackageDownloadProgress) => void
 }
 
 type DownloadMobileWebPackageWithReuseOptions = DownloadMobileWebPackageOptions & {
@@ -105,6 +116,11 @@ export async function downloadMobileWebPackage<TCommit>(
     throw new MobileWebPackageDownloadError('invalid_manifest')
   }
   const { manifest, chunkBytes } = parsedManifest.data
+  options.onProgress?.({
+    phase: 'downloading',
+    completedBytes: 0,
+    totalBytes: manifest.totalBytes
+  })
   if (sha256Hex(Buffer.from(serializeMobileWebManifestForBuildId(manifest))) !== manifest.buildId) {
     throw new MobileWebPackageDownloadError('invalid_manifest')
   }
@@ -121,11 +137,38 @@ export async function downloadMobileWebPackage<TCommit>(
   try {
     await stager.begin(manifest)
     stagingStarted = true
+    let completedBytes = 0
     for (const asset of manifest.assets) {
-      await downloadAsset(request, stager, manifest, asset, chunkBytes, options.signal)
+      await downloadAsset(
+        request,
+        stager,
+        manifest,
+        asset,
+        chunkBytes,
+        options.signal,
+        options.useGzip,
+        (writtenBytes) => {
+          completedBytes += writtenBytes
+          options.onProgress?.({
+            phase: 'downloading',
+            completedBytes,
+            totalBytes: manifest.totalBytes
+          })
+        }
+      )
     }
     throwIfAborted(options.signal)
+    options.onProgress?.({
+      phase: 'verifying',
+      completedBytes: manifest.totalBytes,
+      totalBytes: manifest.totalBytes
+    })
     const commit = await stager.commit(manifest)
+    options.onProgress?.({
+      phase: 'activating',
+      completedBytes: manifest.totalBytes,
+      totalBytes: manifest.totalBytes
+    })
     stagingStarted = false
     return { manifest, commit, reusedVerifiedBuild: false }
   } catch (error) {
@@ -145,35 +188,47 @@ async function downloadAsset<TCommit>(
   manifest: MobileWebManifest,
   asset: MobileWebAsset,
   chunkBytes: number,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  useGzip = false,
+  onChunkWritten?: (bytes: number) => void
 ): Promise<void> {
   const assetHash = sha256.create()
   for (let offset = 0; offset < asset.byteLength; offset += chunkBytes) {
     throwIfAborted(signal)
-    const result = await requestResult(request, 'mobileWeb.package.asset', {
-      buildId: manifest.buildId,
-      path: asset.path,
-      offset
-    })
+    const result = await requestResult(
+      request,
+      useGzip ? 'mobileWeb.package.asset.gzip' : 'mobileWeb.package.asset',
+      {
+        buildId: manifest.buildId,
+        path: asset.path,
+        offset
+      }
+    )
     throwIfAborted(signal)
-    const chunk = MobileWebPackageAssetChunkSchema.safeParse(result)
     const expectedLength = Math.min(chunkBytes, asset.byteLength - offset)
-    if (
-      !chunk.success ||
-      chunk.data.buildId !== manifest.buildId ||
-      chunk.data.path !== asset.path ||
-      chunk.data.offset !== offset ||
-      chunk.data.byteLength !== expectedLength ||
-      chunk.data.eof !== (offset + expectedLength === asset.byteLength)
-    ) {
-      throw new MobileWebPackageDownloadError('invalid_chunk')
-    }
-    const bytes = decodeCanonicalBase64(chunk.data.dataBase64)
-    if (sha256Hex(bytes) !== chunk.data.sha256) {
+    const bytes = useGzip
+      ? decodeGzipMobileWebPackageChunk(
+          result,
+          manifest.buildId,
+          asset.path,
+          offset,
+          expectedLength,
+          asset.byteLength
+        )
+      : decodeRawMobileWebPackageChunk(
+          result,
+          manifest.buildId,
+          asset.path,
+          offset,
+          expectedLength,
+          asset.byteLength
+        )
+    if (!bytes) {
       throw new MobileWebPackageDownloadError('invalid_chunk')
     }
     assetHash.update(bytes)
     await stager.writeAssetChunk(asset, offset, bytes)
+    onChunkWritten?.(bytes.byteLength)
   }
   if (Buffer.from(assetHash.digest()).toString('hex') !== asset.sha256) {
     throw new MobileWebPackageDownloadError('asset_integrity_failed')
@@ -203,6 +258,10 @@ async function requestResult(
   return response.result
 }
 
+function sha256Hex(bytes: Uint8Array): string {
+  return Buffer.from(sha256(bytes)).toString('hex')
+}
+
 function mobileWebPackageHostFailureCode(code: string): MobileWebPackageDownloadErrorCode {
   switch (code) {
     case 'forbidden':
@@ -218,18 +277,6 @@ function mobileWebPackageHostFailureCode(code: string): MobileWebPackageDownload
     default:
       return 'host_error'
   }
-}
-
-function decodeCanonicalBase64(value: string): Uint8Array {
-  const bytes = Buffer.from(value, 'base64')
-  if (bytes.toString('base64') !== value) {
-    throw new MobileWebPackageDownloadError('invalid_chunk')
-  }
-  return bytes
-}
-
-function sha256Hex(bytes: Uint8Array): string {
-  return Buffer.from(sha256(bytes)).toString('hex')
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

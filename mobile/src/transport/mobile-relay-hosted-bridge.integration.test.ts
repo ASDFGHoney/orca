@@ -185,6 +185,16 @@ describe('hosted mobile bridge over cloud Relay transport', () => {
           )
           return
         }
+        if (request.method === 'mobileWeb.package.asset.gzip') {
+          replyPackageOperation(
+            request.id,
+            packageAssets.getAssetGzipChunk(request.params as MobileWebPackageAssetParams, {
+              connectionId: socket.connectionId
+            }),
+            reply
+          )
+          return
+        }
         reply(rpcSuccess(request.id, {}))
       },
       onBinary: vi.fn(),
@@ -371,15 +381,15 @@ describe('hosted mobile bridge over cloud Relay transport', () => {
     const downloaded = await downloadMobileWebPackage(
       (method, params) => session.sendRequest(method, params),
       stager,
-      { shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION }
+      { shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION, useGzip: true }
     )
     expect(downloaded.manifest).toEqual(packageFixture.manifest)
     expect(downloaded.commit).toEqual({ buildId: packageFixture.manifest.buildId })
     expect(observedMethods.slice(-4)).toEqual([
       'mobileWeb.package.manifest',
-      'mobileWeb.package.asset',
-      'mobileWeb.package.asset',
-      'mobileWeb.package.asset'
+      'mobileWeb.package.asset.gzip',
+      'mobileWeb.package.asset.gzip',
+      'mobileWeb.package.asset.gzip'
     ])
     expectPackageStaging(packageFixture.manifest, packageFixture.bytesByPath, stager)
 

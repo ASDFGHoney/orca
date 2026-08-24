@@ -4,26 +4,20 @@ import { MOBILE_WEB_BRIDGE_PROTOCOL_VERSION } from '../../../src/shared/mobile-w
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState, HostProfile } from '../transport/types'
 import { MobileWebProcessFailureTracker } from './mobile-web-process-failure-tracker'
-import { createMobileWebNativeStager } from './mobile-web-native-stager'
-import {
-  downloadMobileWebPackage,
-  mobileWebPackageDownloadFailureCode
-} from './mobile-web-package-downloader'
+import type { MobileWebPackageDownloadProgress } from './mobile-web-package-downloader'
 import { mobileWebDiagnosticsStore } from './mobile-web-diagnostics-store'
 import {
   createMobileWebCachedBuildProbe,
   type MobileWebCachedBuildProbe
 } from './mobile-web-cached-build-probe'
-import { mobileWebPackageRefreshWarning } from './mobile-web-package-refresh-warning'
 import { useMobileWebPackageCapability } from './use-mobile-web-package-capability'
 import { useMobileWebPackageRecovery } from './use-mobile-web-package-recovery'
+import { useMobileWebPackageRefresh } from './use-mobile-web-package-refresh'
 import type { MobileWebPackageSession } from './mobile-web-package-session-state'
 
 export type { MobileWebPackageSession } from './mobile-web-package-session-state'
-
 const MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING =
   'Update Orca on this desktop to use its workspace interface.'
-
 export function useMobileWebPackageSession({
   client,
   host,
@@ -45,6 +39,7 @@ export function useMobileWebPackageSession({
   const [session, setSession] = useState<MobileWebShellSession | null>(null)
   const [viewEpoch, setViewEpoch] = useState(0)
   const [packageLoading, setPackageLoading] = useState(false)
+  const [packageProgress, setPackageProgress] = useState<MobileWebPackageDownloadProgress>()
   const [packageWarning, setPackageWarning] = useState<string>()
   const [refreshEpoch, setRefreshEpoch] = useState(0)
   const packageCapability = useMobileWebPackageCapability({
@@ -53,13 +48,14 @@ export function useMobileWebPackageSession({
     state
   })
   const packageAccessAllowed =
-    packageCapability === 'offline' ||
-    packageCapability === 'supported' ||
-    (packageCapability === 'pending' && ownedSessionRef.current !== null)
-  const effectivePackageLoading = packageCapability === 'update-required' ? false : packageLoading
+    packageCapability.status === 'offline' ||
+    packageCapability.status === 'supported' ||
+    (packageCapability.status === 'pending' && ownedSessionRef.current !== null)
+  const effectivePackageLoading =
+    packageCapability.status === 'update-required' ? false : packageLoading
   const effectivePackageWarning =
     packageWarning ??
-    (packageCapability === 'update-required'
+    (packageCapability.status === 'update-required'
       ? MOBILE_WEB_PACKAGE_UPDATE_REQUIRED_WARNING
       : undefined)
 
@@ -87,6 +83,7 @@ export function useMobileWebPackageSession({
       setSession(next)
       setViewEpoch(0)
       setPackageLoading(false)
+      setPackageProgress(undefined)
       mobileWebDiagnosticsStore.sessionReady(
         hostId,
         next.buildId,
@@ -117,6 +114,7 @@ export function useMobileWebPackageSession({
     setViewEpoch(0)
     setPackageWarning(undefined)
     setPackageLoading(Boolean(host))
+    setPackageProgress(undefined)
     if (previous) {
       void ExpoMobileWebShell.closeSession(previous.sessionId).catch(() => {})
     }
@@ -173,102 +171,27 @@ export function useMobileWebPackageSession({
     if (!host || packageAccessAllowed) {
       return
     }
-    if (packageCapability === 'update-required') {
+    if (packageCapability.status === 'update-required') {
       mobileWebDiagnosticsStore.warning(host.id, 'host_update_required')
     }
   }, [host?.id, packageAccessAllowed, packageCapability])
 
-  useEffect(() => {
-    if (!host || !client || state !== 'connected' || packageCapability !== 'supported') {
-      return
-    }
-    const hostEpoch = hostEpochRef.current
-    const cachedBuildProbe = cachedBuildProbeRef.current
-    const controller = new AbortController()
-    refreshingHostEpochRef.current = hostEpoch
-    setPackageLoading(true)
-    setPackageWarning(undefined)
-    void (async () => {
-      const refreshStartedAt = Date.now()
-      try {
-        const downloaded = await downloadMobileWebPackage(
-          (method, params) => client.sendRequest(method, params),
-          createMobileWebNativeStager(host.publicKeyB64),
-          {
-            shellBridgeVersion: MOBILE_WEB_BRIDGE_PROTOCOL_VERSION,
-            signal: controller.signal,
-            reuseVerifiedBuild: async (buildId) => {
-              const verifiedBuildId =
-                cachedBuildProbe?.hostEpoch === hostEpoch ? await cachedBuildProbe.promise : null
-              return (
-                !controller.signal.aborted &&
-                hostEpochRef.current === hostEpoch &&
-                verifiedBuildId === buildId &&
-                ownedSessionRef.current?.buildId === buildId
-              )
-            }
-          }
-        )
-        if (controller.signal.aborted || hostEpochRef.current !== hostEpoch) {
-          return
-        }
-        if (downloaded.reusedVerifiedBuild) {
-          mobileWebDiagnosticsStore.refreshSucceeded(host.id, Date.now() - refreshStartedAt)
-          setPackageLoading(false)
-          setPackageWarning(undefined)
-          return
-        }
-        if (ownedSessionRef.current?.buildId === downloaded.commit.buildId) {
-          mobileWebDiagnosticsStore.refreshSucceeded(host.id, Date.now() - refreshStartedAt)
-          setPackageLoading(false)
-          setPackageWarning(undefined)
-          return
-        }
-        if (rejectedBuildIdsRef.current.has(downloaded.commit.buildId)) {
-          mobileWebDiagnosticsStore.warning(host.id, 'rejected_build')
-          setPackageLoading(false)
-          setPackageWarning(
-            'Using the previous verified interface until the desktop build changes.'
-          )
-          return
-        }
-        const activationStartedAt = Date.now()
-        const next = await ExpoMobileWebShell.openSession(
-          host.publicKeyB64,
-          downloaded.commit.buildId,
-          MOBILE_WEB_BRIDGE_PROTOCOL_VERSION
-        )
-        if (
-          await publishSession(next, hostEpoch, host.id, 'desktop-refresh', activationStartedAt)
-        ) {
-          mobileWebDiagnosticsStore.refreshSucceeded(host.id, Date.now() - refreshStartedAt)
-          setPackageWarning(undefined)
-        }
-      } catch (error) {
-        if (!controller.signal.aborted && hostEpochRef.current === hostEpoch) {
-          const failureCode = mobileWebPackageDownloadFailureCode(error)
-          mobileWebDiagnosticsStore.warning(host.id, failureCode)
-          console.warn('[mobile-web] package refresh failed', {
-            code: failureCode
-          })
-          setPackageLoading(false)
-          setPackageWarning(
-            mobileWebPackageRefreshWarning(failureCode, Boolean(ownedSessionRef.current))
-          )
-        }
-      }
-    })().finally(() => {
-      if (refreshingHostEpochRef.current === hostEpoch) {
-        refreshingHostEpochRef.current = null
-      }
-    })
-    return () => {
-      controller.abort()
-      if (refreshingHostEpochRef.current === hostEpoch) {
-        refreshingHostEpochRef.current = null
-      }
-    }
-  }, [client, host?.id, host?.publicKeyB64, packageCapability, publishSession, refreshEpoch, state])
+  useMobileWebPackageRefresh({
+    client,
+    host,
+    state,
+    packageCapability,
+    cachedBuildProbeRef,
+    hostEpochRef,
+    ownedSessionRef,
+    rejectedBuildIdsRef,
+    refreshingHostEpochRef,
+    publishSession,
+    refreshEpoch,
+    setPackageLoading,
+    setPackageWarning,
+    setPackageProgress
+  })
 
   const {
     markHealthy,
@@ -295,6 +218,7 @@ export function useMobileWebPackageSession({
     session,
     viewEpoch,
     packageLoading: effectivePackageLoading,
+    packageProgress,
     packageWarning: effectivePackageWarning,
     markHealthy,
     handleHealthTimeout,

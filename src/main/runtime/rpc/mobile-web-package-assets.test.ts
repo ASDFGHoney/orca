@@ -50,6 +50,51 @@ describe('mobile web package assets', () => {
     }
   })
 
+  it('serves gzip chunks that round-trip to the manifest bytes', async () => {
+    const fixture = await createPackageFixture()
+    const assets = new MobileWebPackageAssets({ resolveRoot: () => fixture.root })
+    const asset = fixture.manifest.assets.find((candidate) => candidate.role === 'script')!
+    const chunks: Buffer[] = []
+
+    for (let offset = 0; offset < asset.byteLength; offset += MOBILE_WEB_PACKAGE_CHUNK_BYTES) {
+      const chunk = await assets.getAssetGzipChunk({
+        buildId: fixture.manifest.buildId,
+        path: asset.path,
+        offset
+      })
+      expect(chunk.encoding).toBe('gzip')
+      const compressed = Buffer.from(chunk.dataBase64, 'base64')
+      expect(chunk.sha256).toBe(sha256(compressed))
+      expect(chunk.byteLength).toBe(compressed.byteLength)
+      expect(chunk.sourceByteLength).toBe(
+        Math.min(MOBILE_WEB_PACKAGE_CHUNK_BYTES, asset.byteLength - offset)
+      )
+      chunks.push(compressed)
+    }
+
+    const { gunzipSync } = await import('node:zlib')
+    expect(sha256(Buffer.concat(chunks.map((chunk) => gunzipSync(chunk))))).toBe(asset.sha256)
+  })
+
+  it('validates gzip cache keys and detects changed files', async () => {
+    const fixture = await createPackageFixture()
+    const assets = new MobileWebPackageAssets({ resolveRoot: () => fixture.root })
+    const asset = fixture.manifest.assets[0]!
+    const request = { buildId: fixture.manifest.buildId, path: asset.path, offset: 0 }
+
+    await assets.getAssetGzipChunk(request)
+    await expect(assets.getAssetGzipChunk({ ...request, offset: 1 })).rejects.toThrow(
+      'mobile_web_package_offset_invalid'
+    )
+    await writeFile(
+      join(fixture.root, ...asset.path.split('/')),
+      Buffer.alloc(asset.byteLength, 0x62)
+    )
+    await expect(assets.getAssetGzipChunk(request)).rejects.toThrow(
+      'mobile_web_package_asset_changed'
+    )
+  })
+
   it('rejects stale builds, undeclared paths, unaligned offsets, and cancelled reads', async () => {
     const fixture = await createPackageFixture()
     const assets = new MobileWebPackageAssets({ resolveRoot: () => fixture.root })
