@@ -7,12 +7,7 @@ export type AmphetamineFailureBackoffOptions = {
   onRetryDue: () => void
 }
 
-/**
- * Rate-limits Amphetamine retries and collapses a repeating failure into one warning.
- *
- * Kept apart from the assertion because the assertion's job is session ownership;
- * how often a broken Apple event is retried and how loudly it is logged is not that.
- */
+/** Rate-limits observation retries and collapses a repeating failure into one warning. */
 export class AmphetamineFailureBackoff {
   private readonly logger: Logger
   private readonly now: () => number
@@ -42,11 +37,11 @@ export class AmphetamineFailureBackoff {
   record(failureKey: string, reason: string, details: unknown): void {
     const payload = { reason, details }
     if (this.lastFailureKey === failureKey && this.warnedForLastFailure) {
-      this.logger.debug('[agent-awake] Amphetamine session command failed repeatedly', payload)
+      this.logger.debug('[agent-awake] Amphetamine session observation failed repeatedly', payload)
     } else {
       this.lastFailureKey = failureKey
       this.warnedForLastFailure = true
-      this.logger.warn('[agent-awake] Amphetamine session command failed', payload)
+      this.logger.warn('[agent-awake] Amphetamine session observation failed', payload)
     }
     this.retryNotBefore = this.now() + this.retryMs
     this.scheduleRetry()

@@ -10,11 +10,11 @@ import { AgentAwakePowerSaveBlocker, type PowerSaveBlocker } from './agent-awake
 import { LinuxLidSleepAssertion } from './linux-lid-sleep-assertion'
 import {
   MacosAwakeEngineRouter,
-  type AmphetamineAwakeAssertion,
+  type AmphetamineSessionObserver,
   type PlatformAwakeAssertion
 } from './macos-awake-engine'
 
-export type { AmphetamineAwakeAssertion, PlatformAwakeAssertion }
+export type { AmphetamineSessionObserver, PlatformAwakeAssertion }
 
 export const AGENT_AWAKE_STATUS_STALE_AFTER_MS = 2 * 60 * 60 * 1000
 
@@ -33,10 +33,10 @@ type Logger = Pick<Console, 'debug' | 'warn'>
 
 export type AgentAwakeServiceOptions = {
   blocker?: PowerSaveBlocker
-  detectAmphetamine?: () => Promise<boolean | undefined>
+  detectAmphetamine?: (signal?: AbortSignal) => Promise<boolean | undefined>
   linuxAssertion?: PlatformAwakeAssertion
   logger?: Logger
-  macosAmphetamineAssertion?: AmphetamineAwakeAssertion
+  macosAmphetamineObserver?: AmphetamineSessionObserver
   macosAssertion?: PlatformAwakeAssertion
   now?: () => number
   platform?: NodeJS.Platform
@@ -44,6 +44,7 @@ export type AgentAwakeServiceOptions = {
 }
 
 export class AgentAwakeService {
+  private disposed = false
   private mode: ComputerAwakeMode = 'off'
   private statuses: AgentAwakeStatus[] = []
   private staleTimer: ReturnType<typeof setTimeout> | null = null
@@ -70,7 +71,7 @@ export class AgentAwakeService {
         onUnexpectedFailure: (reason) => this.refresh(reason)
       })
     this.macos = new MacosAwakeEngineRouter({
-      amphetamineAssertion: options.macosAmphetamineAssertion,
+      amphetamineObserver: options.macosAmphetamineObserver,
       caffeinateAssertion: options.macosAssertion,
       detectAmphetamine: options.detectAmphetamine,
       logger: this.logger,
@@ -93,6 +94,9 @@ export class AgentAwakeService {
   }
 
   setMode(mode: ComputerAwakeMode): void {
+    if (this.disposed) {
+      return
+    }
     const normalized = normalizeComputerAwakeMode(mode)
     if (this.mode === normalized) {
       return
@@ -102,16 +106,25 @@ export class AgentAwakeService {
   }
 
   setMacosEngine(engine: MacosAwakeEngine): void {
+    if (this.disposed) {
+      return
+    }
     if (this.macos.setEngine(engine)) {
       this.refresh('macos-engine-change')
     }
   }
 
   probeAmphetamine(): Promise<boolean | undefined> {
-    return this.macos.probeInstalled()
+    if (this.disposed) {
+      return Promise.resolve(undefined)
+    }
+    return this.macos.retryUnavailable()
   }
 
   setStatuses(statuses: AgentAwakeStatus[]): void {
+    if (this.disposed) {
+      return
+    }
     this.statuses = statuses.map((status) => ({ ...status }))
     this.refresh('status-change')
   }
@@ -119,7 +132,9 @@ export class AgentAwakeService {
   getStatus(): ComputerAwakeStatus {
     // The picker asks for status when it first renders; that is the cheapest
     // moment to learn whether Amphetamine exists, rather than at every launch.
-    void this.macos.probeInstalledIfUnknown()
+    if (!this.disposed) {
+      void this.macos.probeInstalledIfUnknown()
+    }
     const workingAgentCount = this.getEligibleRunningStatusCount()
     return this.decorateStatus({
       mode: this.mode,
@@ -128,19 +143,30 @@ export class AgentAwakeService {
   }
 
   subscribe(listener: (status: ComputerAwakeStatus) => void): () => void {
+    if (this.disposed) {
+      return () => {}
+    }
     this.statusListeners.add(listener)
     return () => this.statusListeners.delete(listener)
   }
 
   dispose(): void {
+    if (this.disposed) {
+      return
+    }
+    this.disposed = true
     this.clearStaleTimer()
     this.unsubscribeResume?.()
     this.stopBlocker('dispose')
     this.macos.dispose()
     this.linuxAssertion.dispose()
+    this.statusListeners.clear()
   }
 
   private refresh(reason: string): void {
+    if (this.disposed) {
+      return
+    }
     this.scheduleStaleTimer()
     const runningStatusCount = this.getEligibleRunningStatusCount()
     const shouldBlock = this.mode === 'on' || (this.mode === 'auto' && runningStatusCount > 0)
@@ -163,7 +189,9 @@ export class AgentAwakeService {
       this.lastPublishedStatus.active === status.active &&
       this.lastPublishedStatus.macosEngine === status.macosEngine &&
       this.lastPublishedStatus.amphetamineInstalled === status.amphetamineInstalled &&
-      this.lastPublishedStatus.amphetamineUnavailableReason === status.amphetamineUnavailableReason
+      this.lastPublishedStatus.amphetamineUnavailableReason ===
+        status.amphetamineUnavailableReason &&
+      this.lastPublishedStatus.amphetamineActive === status.amphetamineActive
     ) {
       return
     }

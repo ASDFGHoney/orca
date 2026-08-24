@@ -1,122 +1,240 @@
-import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment happy-dom
+
+import '@testing-library/jest-dom/vitest'
+import { act, cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
 import type { ComputerAwakeStatus } from '../../../../shared/computer-awake-mode'
+import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 
-const platformMock = vi.hoisted(() => ({ platform: 'darwin' as NodeJS.Platform }))
-
-vi.mock('@/lib/renderer-app-platform', () => ({
-  getRendererAppPlatform: () => platformMock.platform
+const mocks = vi.hoisted(() => ({
+  platform: 'darwin' as NodeJS.Platform,
+  openListing: vi.fn<() => Promise<void>>(),
+  refreshInstallation: vi.fn<() => Promise<boolean | undefined>>()
 }))
 
-type ReactElementLike = { props: Record<string, unknown>; type?: unknown }
+vi.mock('@/i18n/i18n', () => ({
+  i18n: { language: 'en' },
+  translate: (_key: string, fallback: string) => fallback
+}))
 
-function visit(node: unknown, onElement: (element: ReactElementLike) => void): void {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      visit(child, onElement)
-    }
-    return
-  }
-  if (!node || typeof node !== 'object' || !('props' in node)) {
-    return
-  }
-  const element = node as ReactElementLike
-  onElement(element)
-  visit((element.props as { children?: unknown }).children, onElement)
+vi.mock('@/lib/renderer-app-platform', () => ({
+  getRendererAppPlatform: () => mocks.platform
+}))
+
+vi.mock('@/lib/amphetamine-installation', () => ({
+  openAmphetamineListing: mocks.openListing,
+  refreshAmphetamineInstallation: mocks.refreshInstallation
+}))
+
+vi.mock('./SearchableSetting', () => ({
+  SearchableSetting: ({ children }: { children: React.ReactNode }) => children
+}))
+
+type UpdateSettingsMock = Mock<(updates: Partial<GlobalSettings>) => void>
+
+function renderSetting({
+  awakeStatus,
+  engine = 'caffeinate',
+  updateSettings = vi.fn<(updates: Partial<GlobalSettings>) => void>()
+}: {
+  awakeStatus?: ComputerAwakeStatus
+  engine?: 'caffeinate' | 'amphetamine'
+  updateSettings?: UpdateSettingsMock
+} = {}): UpdateSettingsMock {
+  render(
+    <AgentAwakeSetting
+      settings={{ ...getDefaultSettings('/tmp'), computerAwakeMacosEngine: engine }}
+      updateSettings={updateSettings}
+      awakeStatus={awakeStatus}
+    />
+  )
+  return updateSettings
 }
 
-function findSegmentedControl(node: unknown, ariaLabel: string): ReactElementLike | null {
-  let found: ReactElementLike | null = null
-  visit(node, (element) => {
-    if (element.props.ariaLabel === ariaLabel && typeof element.props.onChange === 'function') {
-      found = element
-    }
-  })
-  return found
-}
-
-const ENGINE_LABEL = 'Keep awake engine'
-
-function renderSetting(
-  awakeStatus?: ComputerAwakeStatus,
-  updateSettings = vi.fn()
-): { element: React.JSX.Element; updateSettings: ReturnType<typeof vi.fn> } {
-  const element = AgentAwakeSetting({
-    settings: getDefaultSettings('/tmp'),
-    updateSettings,
-    awakeStatus
-  })
-  return { element, updateSettings }
-}
-
-describe('AgentAwakeSetting engine picker', () => {
-  it('offers the engine choice on macOS and defaults to Caffeinate', () => {
-    platformMock.platform = 'darwin'
-    const { element } = renderSetting()
-
-    const control = findSegmentedControl(element, ENGINE_LABEL)
-    expect(control?.props.value).toBe('caffeinate')
+describe('AgentAwakeSetting Amphetamine integration', () => {
+  beforeEach(() => {
+    mocks.platform = 'darwin'
+    mocks.openListing.mockReset().mockResolvedValue(undefined)
+    mocks.refreshInstallation.mockReset().mockResolvedValue(false)
   })
 
-  it('hides the engine choice off macOS', () => {
-    platformMock.platform = 'linux'
-    const { element } = renderSetting()
+  afterEach(cleanup)
 
-    expect(findSegmentedControl(element, ENGINE_LABEL)).toBeNull()
-    platformMock.platform = 'darwin'
+  it('shows the integration on macOS and defaults to Built-in only', () => {
+    renderSetting()
+
+    expect(screen.getByText('Amphetamine integration')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Built-in only' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Add Amphetamine' })).not.toBeChecked()
+    expect(screen.getByText(/When keep-awake is active, Orca uses Caffeinate/)).toBeInTheDocument()
   })
 
-  it('persists the Amphetamine choice', () => {
-    platformMock.platform = 'darwin'
-    const { element, updateSettings } = renderSetting({
-      mode: 'auto',
-      active: false,
-      macosEngine: 'caffeinate',
-      amphetamineInstalled: true
+  it('hides the integration off macOS', () => {
+    mocks.platform = 'linux'
+    renderSetting()
+
+    expect(screen.queryByText('Amphetamine integration')).not.toBeInTheDocument()
+  })
+
+  it('persists the installed Amphetamine choice immediately', async () => {
+    const user = userEvent.setup()
+    const updateSettings = renderSetting({
+      awakeStatus: {
+        mode: 'auto',
+        active: false,
+        amphetamineInstalled: true
+      }
     })
 
-    const control = findSegmentedControl(element, ENGINE_LABEL)
-    expect(control).not.toBeNull()
-    const onChange = control?.props.onChange as (engine: string) => void
-    onChange('amphetamine')
+    await user.click(screen.getByRole('radio', { name: 'Add Amphetamine' }))
 
     expect(updateSettings).toHaveBeenCalledWith({ computerAwakeMacosEngine: 'amphetamine' })
   })
 
-  it('disables Amphetamine and says why when it is not installed', () => {
-    platformMock.platform = 'darwin'
-    const { element } = renderSetting({
-      mode: 'auto',
-      active: false,
-      macosEngine: 'caffeinate',
-      amphetamineInstalled: false
-    })
+  it('keeps an unknown installation inert and exposes a retry', async () => {
+    const user = userEvent.setup()
+    const updateSettings = renderSetting()
+    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
 
-    const control = findSegmentedControl(element, ENGINE_LABEL)
-    expect(control).not.toBeNull()
-    const options = control?.props.options as { value: string; disabled?: boolean }[]
-    expect(options.find((option) => option.value === 'amphetamine')?.disabled).toBe(true)
-    expect(options.find((option) => option.value === 'caffeinate')?.disabled).toBeUndefined()
+    expect(amphetamine).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByRole('button', { name: 'Get Amphetamine…' })).not.toBeInTheDocument()
+    await user.click(amphetamine)
+    expect(updateSettings).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
   })
 
-  it('explains the caffeinate fallback when the Automation grant was refused', () => {
-    platformMock.platform = 'darwin'
-    const { element } = renderSetting({
-      mode: 'auto',
-      active: true,
-      macosEngine: 'amphetamine',
-      amphetamineInstalled: true,
-      amphetamineUnavailableReason: 'automation-denied'
-    })
+  it('stacks the integration control at narrow window widths', () => {
+    renderSetting({ awakeStatus: { mode: 'auto', active: false, amphetamineInstalled: true } })
 
-    let description = ''
-    visit(element, (node) => {
-      const title = node.props.title
-      if (title === ENGINE_LABEL && typeof node.props.description === 'string') {
-        description = node.props.description
+    expect(
+      screen.getByRole('radiogroup', { name: 'Amphetamine integration' }).parentElement
+    ).toHaveClass('flex-col', 'sm:flex-row')
+  })
+
+  it('keeps an unavailable choice inert and exposes separate install and retry actions', async () => {
+    const user = userEvent.setup()
+    const updateSettings = renderSetting({
+      awakeStatus: {
+        mode: 'auto',
+        active: false,
+        amphetamineInstalled: false
       }
     })
-    expect(description).toContain('Automation')
+    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
+
+    expect(amphetamine).toHaveAttribute('aria-disabled', 'true')
+    await user.click(amphetamine)
+    expect(updateSettings).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Get Amphetamine…' }))
+    expect(mocks.openListing).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
+  })
+
+  it('leaves a successful Automation retry to the main process', async () => {
+    const user = userEvent.setup()
+    mocks.refreshInstallation.mockResolvedValue(true)
+    const updateSettings = renderSetting({
+      engine: 'amphetamine',
+      awakeStatus: {
+        mode: 'auto',
+        active: false,
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
+    expect(updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not undo a Built-in only choice made during an Automation check', async () => {
+    const user = userEvent.setup()
+    let resolveCheck!: (installed: boolean | undefined) => void
+    const pendingCheck = new Promise<boolean | undefined>((resolve) => {
+      resolveCheck = resolve
+    })
+    mocks.refreshInstallation.mockReturnValue(pendingCheck)
+    const updateSettings = renderSetting({
+      engine: 'amphetamine',
+      awakeStatus: {
+        mode: 'auto',
+        active: false,
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    await user.click(screen.getByRole('radio', { name: 'Built-in only' }))
+    await act(async () => {
+      resolveCheck(true)
+      await pendingCheck
+    })
+
+    expect(updateSettings).toHaveBeenCalledTimes(1)
+    expect(updateSettings).toHaveBeenCalledWith({ computerAwakeMacosEngine: 'caffeinate' })
+  })
+
+  it('reports an indeterminate probe as a check failure', async () => {
+    const user = userEvent.setup()
+    mocks.refreshInstallation.mockResolvedValue(undefined)
+    renderSetting({
+      awakeStatus: { mode: 'auto', active: false, amphetamineInstalled: false }
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t check for Amphetamine. Try again.'
+    )
+  })
+
+  it('reports an App Store open failure accurately', async () => {
+    const user = userEvent.setup()
+    mocks.openListing.mockRejectedValue(new Error('open failed'))
+    renderSetting({
+      awakeStatus: { mode: 'auto', active: false, amphetamineInstalled: false }
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Get Amphetamine…' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t open the Amphetamine listing. Try again.'
+    )
+  })
+
+  it('shows Automation guidance and a visible retry', () => {
+    renderSetting({
+      engine: 'amphetamine',
+      awakeStatus: {
+        mode: 'auto',
+        active: false,
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
+    })
+
+    expect(screen.getByText(/Privacy & Security › Automation/)).toBeInTheDocument()
+    expect(screen.getByText(/only observes Amphetamine session activity/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
+  })
+
+  it('does not promise unconditional closed-lid behavior or use tooltips', () => {
+    renderSetting({
+      awakeStatus: { mode: 'auto', active: false, amphetamineInstalled: true }
+    })
+
+    expect(document.body).not.toHaveTextContent('Works with the lid shut')
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull()
   })
 })

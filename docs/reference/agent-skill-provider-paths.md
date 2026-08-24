@@ -5,10 +5,10 @@ Last verified: 2026-08-11.
 V1 supports only providers whose paths are independently established by official documentation.
 The registry is deliberately small; it is not copied or synchronized from a community path table.
 
-| Provider    | Detection                                                   | Global canonical support              | Workspace support                                                                                                           | Orca placement                                                                                            |
-| ----------- | ----------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Codex       | `codex` CLI found through Orca's host-owned PATH detection  | Reads `$HOME/.agents/skills` directly | Reads `.agents/skills` from the current directory through the repository root                                               | Canonical copy only                                                                                       |
-| Claude Code | `claude` CLI found through Orca's host-owned PATH detection | Reads `$HOME/.claude/skills`          | Reads `.claude/skills` from the launch directory through the repository root, plus nested directories as files are accessed | Relative directory symlink on POSIX, directory junction on Windows, or verified independent-copy fallback |
+| Provider | Detection | Global canonical support | Workspace support | Orca placement |
+| --- | --- | --- | --- | --- |
+| Codex | `codex` CLI found through Orca's host-owned PATH detection | Reads `$HOME/.agents/skills` directly | Reads `.agents/skills` from the current directory through the repository root | Canonical copy only |
+| Claude Code | `claude` CLI found through Orca's host-owned PATH detection | Reads `$HOME/.claude/skills` | Reads `.claude/skills` from the launch directory through the repository root, plus nested directories as files are accessed | Relative directory symlink on POSIX, directory junction on Windows, or verified independent-copy fallback |
 
 Codex locations and symlink behavior are documented in the official OpenAI documentation:
 [Build skills](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).

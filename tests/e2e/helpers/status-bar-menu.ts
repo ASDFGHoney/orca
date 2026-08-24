@@ -1,12 +1,6 @@
 import type { Page } from '@stablyai/playwright-test'
 
-/**
- * Wait for the composer's post-startup autofocus before opening a status-bar menu.
- *
- * The status-bar dropdowns are non-modal, so the late focus grab closes one that
- * is already open. Letting focus settle first removes the race instead of
- * papering over it with a fixed delay.
- */
+/** Wait for composer autofocus, which closes non-modal status menus opened too early. */
 export async function waitForStartupFocusToSettle(page: Page): Promise<void> {
   await page
     .waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA', undefined, {

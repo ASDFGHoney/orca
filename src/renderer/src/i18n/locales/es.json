@@ -7672,10 +7672,9 @@
             "agentPermissionsDescription": "Cambia los permisos predeterminados de los agentes entre Yolo y Manual.",
             "agentRuntime": "Runtime del agente",
             "agentRuntimeDescription": "Elige si los agentes se detectan y ejecutan en Windows o en WSL de forma predeterminada.",
-            "caffeinate": "caffeinate",
-            "amphetamine": "amphetamine",
-            "engine": "motor",
-            "macos": "macos"
+            "caffeinate": "Caffeinate",
+            "amphetamine": "Amphetamine",
+            "macos": "macOS"
           }
         },
         "appearance": {

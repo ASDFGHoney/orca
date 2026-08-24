@@ -1,103 +1,255 @@
-import { describe, expect, it, vi } from 'vitest'
-import { AMPHETAMINE_APP_STORE_URL, AwakeEnginePicker } from './AwakeEnginePicker'
-import type { ComputerAwakeStatus } from '../../../../shared/computer-awake-mode'
+// @vitest-environment happy-dom
 
-type ReactElementLike = { props: Record<string, unknown> }
+import '@testing-library/jest-dom/vitest'
+import type { ReactNode } from 'react'
+import { act, cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import type { ComputerAwakeStatus, MacosAwakeEngine } from '../../../../shared/computer-awake-mode'
+import { AwakeEnginePicker } from './AwakeEnginePicker'
 
-function visit(node: unknown, onElement: (element: ReactElementLike) => void): void {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      visit(child, onElement)
-    }
-    return
-  }
-  if (!node || typeof node !== 'object' || !('props' in node)) {
-    return
-  }
-  const element = node as ReactElementLike
-  onElement(element)
-  visit((element.props as { children?: unknown }).children, onElement)
-}
+const mocks = vi.hoisted(() => ({
+  openListing: vi.fn<() => Promise<void>>(),
+  refreshInstallation: vi.fn<() => Promise<boolean | undefined>>()
+}))
 
-function findOption(node: unknown, label: string): ReactElementLike {
-  let found: ReactElementLike | null = null
-  visit(node, (element) => {
-    if (element.props.label === label) {
-      found = element
-    }
-  })
-  if (!found) {
-    throw new Error(`no engine option labelled ${label}`)
-  }
-  return found
-}
+vi.mock('@/i18n/i18n', () => ({
+  translate: (_key: string, fallback: string) => fallback
+}))
 
-function render(status: Partial<ComputerAwakeStatus>, onChange = vi.fn()) {
-  const element = AwakeEnginePicker({
-    engine: 'caffeinate',
-    status: { mode: 'auto', active: false, ...status },
-    onChange
-  })
-  // The options are rendered through a helper component, so read its props.
-  const options = (element.props as { children: unknown }).children
-  return { options, onChange }
+vi.mock('@/lib/amphetamine-installation', () => ({
+  openAmphetamineListing: mocks.openListing,
+  refreshAmphetamineInstallation: mocks.refreshInstallation
+}))
+
+vi.mock('@/components/ui/dropdown-menu', () => ({
+  DropdownMenuLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuRadioGroup: ({
+    children,
+    value,
+    ...props
+  }: {
+    children: ReactNode
+    value: string
+    'aria-label'?: string
+  }) => (
+    <div role="radiogroup" data-value={value} {...props}>
+      {children}
+    </div>
+  ),
+  DropdownMenuRadioItem: ({
+    children,
+    disabled,
+    onSelect,
+    value,
+    ...props
+  }: {
+    children: ReactNode
+    disabled?: boolean
+    onSelect?: (event: { preventDefault: () => void }) => void
+    value: string
+    'aria-label'?: string
+  }) => (
+    <button
+      type="button"
+      role="radio"
+      disabled={disabled}
+      data-value={value}
+      onClick={() => onSelect?.({ preventDefault: () => {} })}
+      {...props}
+    >
+      {children}
+    </button>
+  ),
+  DropdownMenuItem: ({
+    children,
+    disabled,
+    onSelect
+  }: {
+    children: ReactNode
+    disabled?: boolean
+    onSelect?: (event: { preventDefault: () => void }) => void
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect?.({ preventDefault: () => {} })}
+    >
+      {children}
+    </button>
+  ),
+  DropdownMenuSeparator: () => <hr />
+}))
+
+type ChangeMock = Mock<(engine: MacosAwakeEngine) => void>
+
+function renderPicker({
+  engine = 'caffeinate',
+  status = {},
+  onChange = vi.fn<(engine: MacosAwakeEngine) => void>()
+}: {
+  engine?: MacosAwakeEngine
+  status?: Partial<ComputerAwakeStatus>
+  onChange?: ChangeMock
+} = {}): ChangeMock {
+  render(
+    <AwakeEnginePicker
+      engine={engine}
+      status={{ mode: 'auto', active: false, ...status }}
+      onChange={onChange}
+    />
+  )
+  return onChange
 }
 
 describe('AwakeEnginePicker', () => {
-  it('selects Amphetamine when it is installed', () => {
-    const { options, onChange } = render({ amphetamineInstalled: true })
+  beforeEach(() => {
+    mocks.openListing.mockReset().mockResolvedValue(undefined)
+    mocks.refreshInstallation.mockReset().mockResolvedValue(false)
+  })
 
-    const amphetamine = findOption(options, 'Amphetamine')
-    expect(amphetamine.props.unavailable).toBeFalsy()
-    ;(amphetamine.props.onSelect as () => void)()
+  afterEach(cleanup)
+
+  it('selects the installed integration without a warning flow', async () => {
+    const user = userEvent.setup()
+    const onChange = renderPicker({ status: { amphetamineInstalled: true } })
+
+    await user.click(screen.getByRole('radio', { name: 'Add Amphetamine' }))
 
     expect(onChange).toHaveBeenCalledWith('amphetamine')
   })
 
-  it('sends an uninstalled user to the App Store instead of selecting a dead engine', () => {
-    const openUrl = vi.fn()
-    vi.stubGlobal('window', { api: { shell: { openUrl } } })
-    const { options, onChange } = render({ amphetamineInstalled: false })
+  it('keeps an unknown installation inert and exposes a retry', async () => {
+    const user = userEvent.setup()
+    const onChange = renderPicker()
+    const amphetamine = screen.getByRole('radio', { name: 'Add Amphetamine' })
 
-    const amphetamine = findOption(options, 'Amphetamine')
-    expect(amphetamine.props.unavailable).toBe(true)
-    expect(amphetamine.props.hint).toContain('Mac App Store')
-    ;(amphetamine.props.onSelect as () => void)()
-
+    expect(amphetamine).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Get Amphetamine…' })).not.toBeInTheDocument()
+    await user.click(amphetamine)
     expect(onChange).not.toHaveBeenCalled()
-    expect(openUrl).toHaveBeenCalledWith(AMPHETAMINE_APP_STORE_URL)
-    vi.unstubAllGlobals()
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
   })
 
-  it('explains what Amphetamine adds when it is missing', () => {
-    const { options } = render({ amphetamineInstalled: false })
+  it('separates the disabled integration choice from the keyboard-reachable install action', async () => {
+    const user = userEvent.setup()
+    const onChange = renderPicker({ status: { amphetamineInstalled: false } })
 
-    expect(findOption(options, 'Amphetamine').props.body).toContain('lid shut')
+    expect(screen.getByRole('radio', { name: 'Add Amphetamine' })).toBeDisabled()
+    const getAction = screen.getByRole('button', { name: 'Get Amphetamine…' })
+    expect(getAction).toBeEnabled()
+
+    await user.click(getAction)
+
+    expect(mocks.openListing).toHaveBeenCalledOnce()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('describes adoption without promising a guarantee the API cannot make', () => {
-    const { options } = render({ amphetamineInstalled: true })
-
-    const hint = findOption(options, 'Amphetamine').props.hint as string
-    expect(hint).toContain('rather than replacing it')
-    // Amphetamine offers no compare-and-swap, so "never" would overclaim.
-    expect(hint).not.toContain('never')
-  })
-
-  it('names the caffeinate fallback when the Automation grant was refused', () => {
-    const { options } = render({
-      amphetamineInstalled: true,
-      amphetamineUnavailableReason: 'automation-denied'
+  it('leaves a denied integration retry to the main process', async () => {
+    const user = userEvent.setup()
+    mocks.refreshInstallation.mockResolvedValue(true)
+    const onChange = renderPicker({
+      engine: 'amphetamine',
+      status: {
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
     })
 
-    const hint = findOption(options, 'Amphetamine').props.hint as string
-    expect(hint).toContain('Automation')
-    expect(hint).toContain('Caffeinate')
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('describes caffeinate as needing no install', () => {
-    const { options } = render({})
+  it('does not re-pick after a missing installation probe succeeds', async () => {
+    const user = userEvent.setup()
+    mocks.refreshInstallation.mockResolvedValue(true)
+    const onChange = renderPicker({
+      engine: 'amphetamine',
+      status: { amphetamineInstalled: false }
+    })
 
-    expect(findOption(options, 'Caffeinate').props.body).toContain('Nothing to install')
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+
+    expect(mocks.refreshInstallation).toHaveBeenCalledOnce()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('does not undo Built-in only when an Automation check finishes late', async () => {
+    const user = userEvent.setup()
+    let resolveCheck!: (installed: boolean | undefined) => void
+    const pendingCheck = new Promise<boolean | undefined>((resolve) => {
+      resolveCheck = resolve
+    })
+    mocks.refreshInstallation.mockReturnValue(pendingCheck)
+    const onChange = renderPicker({
+      engine: 'amphetamine',
+      status: {
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    await user.click(screen.getByRole('radio', { name: 'Built-in only' }))
+    await act(async () => {
+      resolveCheck(true)
+      await pendingCheck
+    })
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith('caffeinate')
+  })
+
+  it('reports an indeterminate probe as a check failure', async () => {
+    const user = userEvent.setup()
+    mocks.refreshInstallation.mockResolvedValue(undefined)
+    renderPicker({ status: { amphetamineInstalled: false } })
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t check for Amphetamine. Try again.'
+    )
+  })
+
+  it('reports an App Store open failure accurately', async () => {
+    const user = userEvent.setup()
+    mocks.openListing.mockRejectedValue(new Error('open failed'))
+    renderPicker({ status: { amphetamineInstalled: false } })
+
+    await user.click(screen.getByRole('button', { name: 'Get Amphetamine…' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t open the Amphetamine listing. Try again.'
+    )
+  })
+
+  it('shows the Automation recovery guidance visibly', () => {
+    renderPicker({
+      engine: 'amphetamine',
+      status: {
+        amphetamineInstalled: true,
+        amphetamineUnavailableReason: 'automation-denied'
+      }
+    })
+
+    expect(screen.getByText(/Privacy & Security › Automation/)).toBeInTheDocument()
+    expect(screen.getByText(/only observes Amphetamine session activity/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
+  })
+
+  it('describes the read-only integration without tooltips or lid guarantees', () => {
+    renderPicker({ status: { amphetamineInstalled: true } })
+
+    expect(screen.getByText('When keep-awake is active, Orca uses Caffeinate.')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Observes a session you start manually or with a Trigger/)
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('Works with the lid shut')
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull()
   })
 })

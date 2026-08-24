@@ -396,6 +396,13 @@ let pluginMarketplaceService: PluginMarketplaceService | null = null
 let pluginMarketplaceInstaller: PluginMarketplaceInstaller | null = null
 let keybindings: KeybindingService | null = null
 
+function disposeAgentAwakeService(): void {
+  unsubscribeAgentAwakeStatusChanges?.()
+  unsubscribeAgentAwakeStatusChanges = null
+  agentAwakeService?.dispose()
+  agentAwakeService = null
+}
+
 function emitPluginWorktreeLifecycle(event: RuntimeWorktreeLifecycleEvent): void {
   pluginService?.emitEvent(
     event.kind === 'created' ? 'worktree.created' : 'worktree.removed',
@@ -2356,12 +2363,12 @@ void app.whenReady().then(async () => {
       store.getSettings().keepComputerAwakeWhileAgentsRun
     )
   )
-  agentAwakeService.setMacosEngine(
-    normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine)
-  )
-  // No probe here: setMacosEngine already starts one when Amphetamine is the
-  // configured engine, and getStatus() triggers it lazily otherwise. Calling it
-  // again would spawn a second concurrent osascript.
+  // Paired web cannot consume observation status, so headless serve keeps private assertions only.
+  if (!isServeMode) {
+    agentAwakeService.setMacosEngine(
+      normalizeMacosAwakeEngine(store.getSettings().computerAwakeMacosEngine)
+    )
+  }
   // Why: start from empty — disk-hydrated status rows are UI continuity only; only this runtime's hook events keep the computer awake.
   agentAwakeService.setStatuses([])
   const collectChangedProviderSessionWorktrees = createHookProviderSessionInvalidator()
@@ -3298,6 +3305,8 @@ void app.whenReady().then(async () => {
 
 // Why: app.exit() skips Electron quit events, so keep its log child from surviving forced exits.
 process.once('exit', stopTccPromptNotice)
+// Why: app.exit() also skips the committed quit phase; synchronous assertion cleanup is safe here.
+process.once('exit', disposeAgentAwakeService)
 
 app.on('before-quit', () => {
   if (isQuittingForUpdate()) {
@@ -3308,10 +3317,6 @@ app.on('before-quit', () => {
   isQuitting = true
   desktopRelayService?.fenceAndCloseNow()
   runtimeRpc?.setMobileRelayPairingProvider(null)
-  unsubscribeAgentAwakeStatusChanges?.()
-  unsubscribeAgentAwakeStatusChanges = null
-  agentAwakeService?.dispose()
-  agentAwakeService = null
   // Why: defer PTY cleanup to will-quit so the renderer captures scrollback before PTY-exit events unmount TerminalPane (dropping its capture callbacks).
   rateLimits?.stop()
 })
@@ -3333,6 +3338,7 @@ app.on('will-quit', (e) => {
   if (!quitTeardownStartGate.tryStart(e)) {
     return
   }
+  disposeAgentAwakeService()
   unsubscribeSystemResumeBroadcast?.()
   unsubscribeSystemResumeBroadcast = null
   // Why: renderer guards can still cancel before this committed phase; `log stream` must survive those vetoes.

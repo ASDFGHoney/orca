@@ -314,6 +314,24 @@ describe('AgentAwakeService', () => {
     expect(linuxAssertion.dispose).toHaveBeenCalledTimes(1)
   })
 
+  it('cannot restart resources or dispose twice after teardown', () => {
+    const blocker = createBlocker()
+    const macosAssertion = createMacosAssertion()
+    const linuxAssertion = createLinuxAssertion()
+    const service = createService(() => 1_000, blocker, macosAssertion, linuxAssertion)
+
+    service.dispose()
+    service.setMode('on')
+    service.setStatuses([workingStatus()])
+    service.dispose()
+
+    expect(blocker.start).not.toHaveBeenCalled()
+    expect(macosAssertion.start).not.toHaveBeenCalled()
+    expect(linuxAssertion.start).not.toHaveBeenCalled()
+    expect(macosAssertion.dispose).toHaveBeenCalledTimes(1)
+    expect(linuxAssertion.dispose).toHaveBeenCalledTimes(1)
+  })
+
   it('reconciles assertions on power resume while work is still eligible', () => {
     const blocker = createBlocker()
     const macosAssertion = createMacosAssertion()

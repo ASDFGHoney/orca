@@ -41,9 +41,12 @@ function activityLabel(active: boolean): string {
     : translate('auto.components.status.bar.CaffeinateStatusSegment.inactive', 'Inactive')
 }
 
-function engineLabel(engine: MacosAwakeEngine): string {
-  return engine === 'amphetamine'
-    ? translate('auto.components.status.bar.CaffeinateStatusSegment.amphetamine', 'Amphetamine')
+function effectiveEngineLabel(amphetamineActive: boolean): string {
+  return amphetamineActive
+    ? translate(
+        'auto.components.status.bar.CaffeinateStatusSegment.caffeinateWithAmphetamine',
+        'Caffeinate + Amphetamine'
+      )
     : translate('auto.components.status.bar.CaffeinateStatusSegment.title', 'Caffeinate')
 }
 
@@ -69,15 +72,18 @@ export function CaffeinateStatusSegment({
   const mode = serviceStatus.mode === configuredMode ? serviceStatus.mode : configuredMode
   const active =
     serviceStatus.mode === configuredMode ? serviceStatus.active : configuredMode === 'on'
-  // Only macOS runs an engine; everywhere else the segment keeps its Caffeinate identity.
-  const engine = isMac ? configuredEngine : 'caffeinate'
+  const effectiveAmphetamineActive = isMac && serviceStatus.amphetamineActive === true
   const statusText = `${modeLabel(mode)} · ${activityLabel(active)}`
+  const keepAwakeLabel = translate(
+    'auto.components.status.bar.CaffeinateStatusSegment.keepAwake',
+    'Keep awake'
+  )
   const ariaLabel = translate(
     'auto.components.status.bar.CaffeinateStatusSegment.ariaLabelEngine',
     '{{engine}}, {{status}}',
-    { engine: engineLabel(engine), status: statusText }
+    { engine: effectiveEngineLabel(effectiveAmphetamineActive), status: statusText }
   )
-  const EngineIcon = engine === 'amphetamine' ? Pill : Coffee
+  const EffectiveEngineIcon = effectiveAmphetamineActive ? Pill : Coffee
 
   const setMode = (nextMode: string): void => {
     void updateSettings(computerAwakeSettingsForMode(normalizeComputerAwakeMode(nextMode)))
@@ -98,7 +104,7 @@ export function CaffeinateStatusSegment({
               className="inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
               aria-label={ariaLabel}
             >
-              <EngineIcon className={`size-3 ${active ? 'text-foreground' : ''}`} />
+              <EffectiveEngineIcon className={`size-3 ${active ? 'text-foreground' : ''}`} />
               {!iconOnly ? (
                 <span className="text-[11px] font-medium">{modeLabel(mode)}</span>
               ) : null}
@@ -123,19 +129,15 @@ export function CaffeinateStatusSegment({
         className="w-64"
       >
         <DropdownMenuLabel className="flex items-center justify-between gap-3">
-          <span>
-            {translate(
-              'auto.components.status.bar.CaffeinateStatusSegment.keepAwake',
-              'Keep awake'
-            )}
+          <span className="flex flex-col">
+            <span>{keepAwakeLabel}</span>
+            <span className="font-normal text-muted-foreground">
+              {effectiveEngineLabel(effectiveAmphetamineActive)}
+            </span>
           </span>
           <span className="font-normal text-muted-foreground">{statusText}</span>
         </DropdownMenuLabel>
-        {isMac ? (
-          <AwakeEnginePicker engine={engine} status={serviceStatus} onChange={setEngine} />
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup value={mode} onValueChange={setMode}>
+        <DropdownMenuRadioGroup value={mode} onValueChange={setMode} aria-label={keepAwakeLabel}>
           <DropdownMenuRadioItem value="on" className="py-1.5">
             <span className="flex flex-col">
               <span>{modeLabel('on')}</span>
@@ -170,6 +172,16 @@ export function CaffeinateStatusSegment({
             </span>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+        {isMac ? (
+          <>
+            <DropdownMenuSeparator />
+            <AwakeEnginePicker
+              engine={configuredEngine}
+              status={serviceStatus}
+              onChange={setEngine}
+            />
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )

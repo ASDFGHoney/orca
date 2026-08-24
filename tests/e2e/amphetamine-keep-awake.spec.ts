@@ -1,21 +1,32 @@
 import { randomUUID } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
-import { test, expect } from './helpers/orca-app'
-import { waitForSessionReady } from './helpers/store'
+import { runProcessSync } from '../../src/shared/child-process/run-process'
 import type { GlobalSettings } from '../../src/shared/global-settings-types'
+import { test, expect } from './helpers/orca-app'
 import { readHookEndpoint } from './helpers/agent-hook-endpoint'
+import { waitForSessionReady } from './helpers/store'
 
 const BUNDLE_ID = 'com.if.Amphetamine'
+const REAL_AMPHETAMINE_OPTED_IN = process.env.ORCA_E2E_REAL_AMPHETAMINE === 'dedicated-account'
+
+type CleanupOutcome = 'ended' | 'foreign' | 'gone'
+type CleanupSession = 'timed-fixture'
 
 function amphetamine(script: string): string {
-  return execFileSync('/usr/bin/osascript', ['-e', script], { encoding: 'utf8' }).trim()
+  const result = runProcessSync({
+    program: '/usr/bin/osascript',
+    args: ['-e', script],
+    timeoutMs: 10_000
+  })
+  if (result.code !== 0 || result.timedOut) {
+    throw new Error(
+      `Amphetamine AppleScript failed: ${result.stderr.trim() || `exit ${String(result.code)}`}`
+    )
+  }
+  return result.stdout.trim()
 }
 
 function amphetamineInstalled(): boolean {
-  if (process.platform !== 'darwin') {
-    return false
-  }
   try {
     return amphetamine(`POSIX path of (path to application id "${BUNDLE_ID}")`).length > 0
   } catch {
@@ -23,7 +34,10 @@ function amphetamineInstalled(): boolean {
   }
 }
 
-/** Mirrors the probe Orca uses: presence|secondsRemaining|isTrigger|displaySleepAllowed. */
+const AMPHETAMINE_INSTALLED =
+  process.platform === 'darwin' && REAL_AMPHETAMINE_OPTED_IN ? amphetamineInstalled() : false
+
+/** presence|secondsRemaining|isTrigger|displaySleepAllowed */
 function readSession(): string {
   return amphetamine(`if application id "${BUNDLE_ID}" is running then
 	tell application id "${BUNDLE_ID}"
@@ -37,29 +51,59 @@ else
 end if`)
 }
 
-/**
- * Refuse to run against a machine that already has a session.
- *
- * Amphetamine's session is global, so a cleanup here would end a real one the
- * developer started — exactly the thing this feature promises never to do.
- */
-function requireIdleAmphetamine(): void {
-  const state = readSession()
-  expect(state, 'Amphetamine already has an active session; end it before running this suite').toBe(
-    'idle|-3|false|false'
+function isTimedFixtureSession(state: string): boolean {
+  const [presence, secondsText, trigger, displaySleep] = state.split('|')
+  const secondsRemaining = Number.parseInt(secondsText ?? '', 10)
+  return (
+    presence === 'active' &&
+    secondsRemaining > 0 &&
+    secondsRemaining <= 1800 &&
+    trigger === 'false' &&
+    displaySleep === 'false'
   )
 }
 
-/** Only ever ends a session this test created. */
-function endSessionCreatedByTest(): void {
-  try {
-    amphetamine(`tell application id "${BUNDLE_ID}" to end session`)
-  } catch {
-    // Nothing to end.
-  }
+function requireIdleAmphetamine(): void {
+  const state = readSession()
+  expect(
+    state === 'idle|-3|false|false' || state === 'absent|-3|false|false',
+    'Amphetamine already has an active session; use a dedicated idle account'
+  ).toBe(true)
 }
 
-async function selectAmphetamineEngine(page: Page): Promise<void> {
+function startTimedFixture(): string {
+  return amphetamine(`tell application id "${BUNDLE_ID}"
+	if session is active then return "busy"
+	start new session with options {duration:30, interval:minutes, displaySleepAllowed:false}
+	return "started"
+end tell`)
+}
+
+/** Shape narrows cleanup risk but cannot prove identity; Amphetamine exposes none. */
+function cleanupTimedFixture(): CleanupOutcome {
+  const outcome = amphetamine(`if application id "${BUNDLE_ID}" is running then
+	tell application id "${BUNDLE_ID}"
+		if not (session is active) then return "gone"
+		set secondsRemaining to (session time remaining)
+		set triggerSession to (session is Trigger)
+		set allowsDisplaySleep to (display sleep allowed)
+		if triggerSession then return "foreign"
+		if secondsRemaining is less than or equal to 0 then return "foreign"
+		if secondsRemaining is greater than 1800 then return "foreign"
+		if allowsDisplaySleep then return "foreign"
+		end session
+		return "ended"
+	end tell
+else
+	return "gone"
+end if`)
+  if (outcome === 'ended' || outcome === 'foreign' || outcome === 'gone') {
+    return outcome
+  }
+  throw new Error(`Unexpected Amphetamine cleanup outcome: ${outcome}`)
+}
+
+async function selectAmphetamineIntegration(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const next = await window.api.settings.set({
       computerAwakeMacosEngine: 'amphetamine',
@@ -94,86 +138,91 @@ async function postCodexHookEvent(
   expect(response.status).toBe(204)
 }
 
-test.describe('Amphetamine keep-awake engine', () => {
-  test.skip(() => !amphetamineInstalled(), 'requires Amphetamine to be installed on the test host')
+test.describe('Amphetamine keep-awake observation', () => {
+  test.describe.configure({ mode: 'serial' })
+  test.skip(process.platform !== 'darwin', 'requires macOS')
+  test.skip(
+    !REAL_AMPHETAMINE_OPTED_IN,
+    'set ORCA_E2E_REAL_AMPHETAMINE=dedicated-account on a dedicated macOS account'
+  )
+  test.skip(
+    process.platform === 'darwin' && REAL_AMPHETAMINE_OPTED_IN && !AMPHETAMINE_INSTALLED,
+    'requires Amphetamine to be installed on the test host'
+  )
 
-  /** Set by a test once it has created a session, so cleanup ends only that one. */
-  let createdSession = false
+  let cleanupSession: CleanupSession | null = null
 
   test.beforeEach(() => {
-    createdSession = false
+    cleanupSession = null
   })
 
   test.afterEach(() => {
-    if (createdSession) {
-      endSessionCreatedByTest()
+    if (!cleanupSession) {
+      return
     }
+    const outcome = cleanupTimedFixture()
+    if (outcome === 'ended') {
+      cleanupSession = null
+    }
+    expect(
+      outcome,
+      'The timed fixture disappeared or changed shape; it was not ended by cleanup'
+    ).toBe('ended')
   })
 
-  test('holds and releases a real Amphetamine session for a working agent', async ({
-    electronApp,
-    orcaPage
-  }) => {
+  test('observes but never mutates a real timed session', async ({ electronApp, orcaPage }) => {
     await waitForSessionReady(orcaPage)
     requireIdleAmphetamine()
-    await selectAmphetamineEngine(orcaPage)
-
-    const paneKey = `e2e-amphetamine-tab:${randomUUID()}`
-    createdSession = true
-    await postCodexHookEvent(electronApp, paneKey, 'UserPromptSubmit')
-
-    // secondsRemaining 0 is Amphetamine's indefinite session: it cannot expire
-    // out from under a long agent run.
+    const startOutcome = startTimedFixture()
+    expect(startOutcome, 'Amphetamine became active before the fixture started').toBe('started')
+    cleanupSession = 'timed-fixture'
     await expect
-      .poll(() => readSession(), {
+      .poll(() => isTimedFixtureSession(readSession()), {
         timeout: 15_000,
-        message: 'Orca did not start an indefinite Amphetamine session'
+        message: 'Amphetamine did not start the timed fixture session'
       })
-      .toBe('active|0|false|true')
+      .toBe(true)
 
-    await postCodexHookEvent(electronApp, paneKey, 'Stop')
-    await expect
-      .poll(() => readSession(), {
-        timeout: 15_000,
-        message: 'Orca did not end its Amphetamine session'
-      })
-      .toBe('idle|-3|false|false')
-  })
+    await selectAmphetamineIntegration(orcaPage)
+    const caffeinateInactive = orcaPage.getByRole('button', {
+      name: 'Caffeinate, Agent · Inactive'
+    })
+    await expect(caffeinateInactive).toBeVisible({ timeout: 15_000 })
 
-  test('adopts a session the user already started instead of replacing it', async ({
-    electronApp,
-    orcaPage
-  }) => {
-    await waitForSessionReady(orcaPage)
-    requireIdleAmphetamine()
-    await selectAmphetamineEngine(orcaPage)
+    const firstPaneKey = `e2e-amphetamine-tab:${randomUUID()}`
+    await postCodexHookEvent(electronApp, firstPaneKey, 'UserPromptSubmit')
+    const combinedActive = orcaPage.getByRole('button', {
+      name: 'Caffeinate + Amphetamine, Agent · Active'
+    })
+    await expect(combinedActive).toBeVisible({ timeout: 15_000 })
+    expect(
+      isTimedFixtureSession(readSession()),
+      'Orca replaced or ended the timed Amphetamine session while observing it'
+    ).toBe(true)
 
-    // A hand-started 30-minute session that blocks display sleep.
-    createdSession = true
-    amphetamine(
-      `tell application id "${BUNDLE_ID}" to start new session with options {duration:30, interval:minutes, displaySleepAllowed:false}`
-    )
-    const before = readSession()
-    expect(before.startsWith('active|')).toBe(true)
-    expect(before.endsWith('|false|false')).toBe(true)
+    await postCodexHookEvent(electronApp, firstPaneKey, 'Stop')
+    await expect(caffeinateInactive).toBeVisible({ timeout: 15_000 })
+    expect(
+      isTimedFixtureSession(readSession()),
+      'Orca ended the timed Amphetamine session when the agent stopped'
+    ).toBe(true)
 
-    const paneKey = `e2e-amphetamine-tab:${randomUUID()}`
-    await postCodexHookEvent(electronApp, paneKey, 'UserPromptSubmit')
-    // Without this the assertions below could pass simply because Orca never
-    // processed the hook at all.
-    await expect(
-      orcaPage.getByRole('button', { name: /^Amphetamine, Agent · Active/ })
-    ).toBeVisible({ timeout: 15_000 })
-    await postCodexHookEvent(electronApp, paneKey, 'Stop')
-    await expect(
-      orcaPage.getByRole('button', { name: /^Amphetamine, Agent · Inactive/ })
-    ).toBeVisible({ timeout: 15_000 })
+    const secondPaneKey = `e2e-amphetamine-tab:${randomUUID()}`
+    await postCodexHookEvent(electronApp, secondPaneKey, 'UserPromptSubmit')
+    await expect(combinedActive).toBeVisible({ timeout: 15_000 })
 
-    // Still the user's timed, display-sleep-blocking session: neither replaced
-    // by Orca's indefinite one, nor ended when Orca stopped.
-    const after = readSession()
-    expect(after.endsWith('|false|false')).toBe(true)
-    const remaining = Number.parseInt(after.split('|')[1] ?? '', 10)
-    expect(remaining).toBeGreaterThan(0)
+    const cleanupOutcome = cleanupTimedFixture()
+    if (cleanupOutcome === 'ended') {
+      cleanupSession = null
+    }
+    expect(cleanupOutcome).toBe('ended')
+
+    const caffeinateActive = orcaPage.getByRole('button', {
+      name: 'Caffeinate, Agent · Active'
+    })
+    await expect(caffeinateActive).toBeVisible({ timeout: 45_000 })
+
+    await postCodexHookEvent(electronApp, secondPaneKey, 'Stop')
+    await expect(caffeinateInactive).toBeVisible({ timeout: 15_000 })
   })
 })

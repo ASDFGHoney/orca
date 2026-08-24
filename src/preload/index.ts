@@ -2147,6 +2147,8 @@ const api = {
 
   agentAwake: {
     getStatus: (): Promise<ComputerAwakeStatus> => ipcRenderer.invoke('agentAwake:getStatus'),
+    probeAmphetamine: (): Promise<boolean | undefined> =>
+      ipcRenderer.invoke('agentAwake:probeAmphetamine'),
     onChanged: (callback: (status: ComputerAwakeStatus) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, status: ComputerAwakeStatus): void =>
         callback(status)

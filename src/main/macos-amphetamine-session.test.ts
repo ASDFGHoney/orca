@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  AMPHETAMINE_ACQUIRE_SCRIPT,
-  AMPHETAMINE_RELEASE_SCRIPT,
+  AMPHETAMINE_SESSION_STATUS_SCRIPT,
   classifyAmphetamineFailure,
   detectAmphetamineInstalled,
-  parseAcquireOutcome,
-  parseReleaseOutcome,
+  parseAmphetamineSessionStatus,
   type OsascriptResult
 } from './macos-amphetamine-session'
 
@@ -17,97 +15,82 @@ function failure(stderr: string, code = 1): OsascriptResult {
   return { code, stdout: '', stderr, timedOut: false }
 }
 
-describe('Amphetamine scripts', () => {
-  it('checks and starts from a single osascript invocation', () => {
-    // Not a transaction — AppleScript sends each read and command as its own
-    // Apple event — but it removes the process-spawn gap between check and write.
-    expect(AMPHETAMINE_ACQUIRE_SCRIPT.match(/tell application id/g)).toHaveLength(1)
-    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('if session is active then')
-    // The shape test must sit inside the same tell block as the start.
-    expect(AMPHETAMINE_ACQUIRE_SCRIPT.indexOf('display sleep allowed')).toBeLessThan(
-      AMPHETAMINE_ACQUIRE_SCRIPT.indexOf('start new session')
-    )
-  })
-
-  it('asks for an indefinite session explicitly', () => {
-    // Omitting options inherits the user's default duration, which silently expires.
-    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('duration:0')
-    expect(AMPHETAMINE_ACQUIRE_SCRIPT).toContain('interval:0')
-  })
-
-  it('verifies every foreign-session shape immediately before ending', () => {
-    for (const guard of [
-      'if not (session is active) then return "gone"',
-      'if session is Trigger then return "foreign"',
-      'if (session time remaining) is not 0 then return "foreign"',
-      'if not (display sleep allowed) then return "foreign"'
+describe('Amphetamine session status script', () => {
+  it('only reads session state and never launches the app to do so', () => {
+    expect(AMPHETAMINE_SESSION_STATUS_SCRIPT).toContain('is running')
+    expect(AMPHETAMINE_SESSION_STATUS_SCRIPT).toContain('session is active')
+    for (const write of [
+      'start new session',
+      'end session',
+      'allow display sleep',
+      'prevent display sleep',
+      'enable closed display mode'
     ]) {
-      expect(AMPHETAMINE_RELEASE_SCRIPT).toContain(guard)
+      expect(AMPHETAMINE_SESSION_STATUS_SCRIPT).not.toContain(write)
     }
-    // The last shape check must be the Apple event right before the destructive
-    // one; that ordering is the smallest window this API allows.
-    expect(AMPHETAMINE_RELEASE_SCRIPT.indexOf('display sleep allowed')).toBeLessThan(
-      AMPHETAMINE_RELEASE_SCRIPT.indexOf('end session')
-    )
-  })
-
-  it('never launches Amphetamine just to release', () => {
-    expect(AMPHETAMINE_RELEASE_SCRIPT).toContain('is running')
   })
 })
 
-describe('outcome parsing', () => {
+describe('Amphetamine session status parsing', () => {
   it.each([
-    ['started', 'started'],
-    ['orca-shaped\n', 'orca-shaped'],
-    ['foreign', 'foreign']
-  ])('parses acquire %s', (stdout, expected) => {
-    expect(parseAcquireOutcome(stdout)).toBe(expected)
+    ['active', 'active'],
+    ['inactive\n', 'inactive']
+  ])('parses %s', (stdout, expected) => {
+    expect(parseAmphetamineSessionStatus(stdout)).toBe(expected)
   })
 
-  it.each([
-    ['ended', 'ended'],
-    ['foreign\n', 'foreign'],
-    ['gone', 'gone']
-  ])('parses release %s', (stdout, expected) => {
-    expect(parseReleaseOutcome(stdout)).toBe(expected)
-  })
-
-  it.each(['', 'what', 'true'])('rejects unrecognized output %s', (stdout) => {
-    expect(parseAcquireOutcome(stdout)).toBeNull()
-    expect(parseReleaseOutcome(stdout)).toBeNull()
+  it.each(['', 'started', 'foreign', 'true'])('rejects unrecognized output %s', (stdout) => {
+    expect(parseAmphetamineSessionStatus(stdout)).toBeNull()
   })
 })
 
 describe('detectAmphetamineInstalled', () => {
   it('reports installed when Launch Services resolves the bundle', async () => {
-    const run = vi.fn(async (_script: string) => ok('/Applications/Amphetamine.app\n'))
+    const run = vi.fn(async () => ok('/Applications/Amphetamine.app\n'))
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBe(true)
   })
 
+  it('forwards cancellation to the Launch Services lookup', async () => {
+    const abort = new AbortController()
+    const run = vi.fn(async (_script: string, signal?: AbortSignal) => {
+      expect(signal).toBe(abort.signal)
+      return ok('/Applications/Amphetamine.app\n')
+    })
+
+    await expect(detectAmphetamineInstalled(run, 'darwin', abort.signal)).resolves.toBe(true)
+  })
+
   it('reports not installed only when Launch Services says so', async () => {
-    const run = vi.fn(async (_script: string) => failure('execution error: ... (-1728)'))
+    const run = vi.fn(async () => failure('execution error: ... (-1728)'))
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBe(false)
   })
 
   it.each([
     ['a transient error', failure('some other problem')],
-    ['a timeout', { code: null, stdout: '', stderr: '', timedOut: true }]
+    ['a timeout', { code: null, stdout: '', stderr: '', timedOut: true }],
+    [
+      'a timeout with partial success output',
+      {
+        code: 0,
+        stdout: '/Applications/Amphetamine.app',
+        stderr: '',
+        timedOut: true
+      }
+    ]
   ])('reports unknown for %s rather than not-installed', async (_label, result) => {
-    // Recording false here would disable an engine whose app is installed.
-    const run = vi.fn(async (_script: string) => result as OsascriptResult)
+    const run = vi.fn(async () => result as OsascriptResult)
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBeUndefined()
   })
 
   it('reports unknown when the probe cannot be spawned', async () => {
-    const run = vi.fn(async (_script: string) => {
+    const run = vi.fn(async () => {
       throw new Error('spawn failed')
     })
     await expect(detectAmphetamineInstalled(run, 'darwin')).resolves.toBeUndefined()
   })
 
   it('never probes off macOS', async () => {
-    const run = vi.fn(async (_script: string) => ok('/Applications/Amphetamine.app'))
+    const run = vi.fn(async () => ok('/Applications/Amphetamine.app'))
     await expect(detectAmphetamineInstalled(run, 'linux')).resolves.toBe(false)
     expect(run).not.toHaveBeenCalled()
   })

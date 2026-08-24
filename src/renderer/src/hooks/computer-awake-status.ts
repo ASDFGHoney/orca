@@ -6,7 +6,7 @@ const INACTIVE_STATUS: ComputerAwakeStatus = {
   active: false
 }
 
-/** Live main-process view of the awake assertion: mode, activity, and macOS engine availability. */
+/** Live main-process view of awake mode, activity, and macOS integration status. */
 export function useComputerAwakeStatus(): ComputerAwakeStatus {
   const [status, setStatus] = useState<ComputerAwakeStatus>(INACTIVE_STATUS)
 

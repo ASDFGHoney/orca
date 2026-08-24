@@ -796,6 +796,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           macosEngine: normalizeMacosAwakeEngine(settings.computerAwakeMacosEngine)
         }
       },
+      probeAmphetamine: () => Promise.resolve(undefined),
       onChanged: () => noopUnsubscribe
     },
     keybindings: createWebKeybindingsApi(),

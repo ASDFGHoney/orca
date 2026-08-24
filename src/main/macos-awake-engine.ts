@@ -5,7 +5,7 @@ import {
   type MacosAwakeEngine
 } from '../shared/computer-awake-mode'
 import { detectAmphetamineInstalled } from './macos-amphetamine-session'
-import { MacosAmphetamineSleepAssertion } from './macos-amphetamine-sleep-assertion'
+import { MacosAmphetamineSessionObserver } from './macos-amphetamine-session-observer'
 import { MacosSystemSleepAssertion } from './macos-system-sleep-assertion'
 
 type Logger = Pick<Console, 'debug' | 'warn'>
@@ -16,23 +16,27 @@ export type PlatformAwakeAssertion = {
   dispose: () => void
 }
 
-export type AmphetamineAwakeAssertion = PlatformAwakeAssertion & {
+export type AmphetamineSessionObserver = {
+  start: (reason: string) => void
+  stop: (reason: string) => void
+  dispose: () => void
   isUnavailable: () => boolean
   getUnavailableReason: () => AmphetamineUnavailableReason | null
   clearUnavailable: () => void
-  getHold: () => 'owned' | 'adopted' | null
+  isActive: () => boolean
 }
 
 export type MacosAwakeEngineStatusFields = {
   macosEngine?: MacosAwakeEngine
   amphetamineInstalled?: boolean
   amphetamineUnavailableReason?: AmphetamineUnavailableReason
+  amphetamineActive?: boolean
 }
 
 export type MacosAwakeEngineRouterOptions = {
-  amphetamineAssertion?: AmphetamineAwakeAssertion
+  amphetamineObserver?: AmphetamineSessionObserver
   caffeinateAssertion?: PlatformAwakeAssertion
-  detectAmphetamine?: () => Promise<boolean | undefined>
+  detectAmphetamine?: (signal?: AbortSignal) => Promise<boolean | undefined>
   logger?: Logger
   now?: () => number
   /** Re-run the awake decision now, rather than waiting for the next status change. */
@@ -40,32 +44,29 @@ export type MacosAwakeEngineRouterOptions = {
   platform?: NodeJS.Platform
 }
 
-/**
- * Runs the macOS wake assertions.
- *
- * Caffeinate is unconditional whenever Orca wants the Mac awake; Amphetamine is
- * additive on top of it when selected. Deliberately not a handover — see start()
- * for why one cannot be made safe. Neither engine is guaranteed to start: a
- * failure is logged, and the Electron power-save blocker held elsewhere for the
- * whole session is what remains.
- */
+/** Owns caffeinate and routes the optional read-only Amphetamine observation. */
 export class MacosAwakeEngineRouter {
-  private readonly amphetamineAssertion: AmphetamineAwakeAssertion
+  private readonly amphetamineObserver: AmphetamineSessionObserver
   private readonly caffeinateAssertion: PlatformAwakeAssertion
-  private readonly detectAmphetamine: () => Promise<boolean | undefined>
+  private readonly detectAmphetamine: (signal?: AbortSignal) => Promise<boolean | undefined>
   private readonly logger: Logger
   private readonly onNeedsRefresh: (reason: string) => void
   private readonly platform: NodeJS.Platform
   private engine: MacosAwakeEngine = DEFAULT_MACOS_AWAKE_ENGINE
   private amphetamineInstalled: boolean | undefined
-  private probing = false
+  private disposed = false
+  private implicitProbeAttempted = false
+  private probeAbort: AbortController | null = null
   private probeAgain = false
+  private probePromise: Promise<boolean | undefined> | null = null
 
   constructor(options: MacosAwakeEngineRouterOptions = {}) {
     this.logger = options.logger ?? console
     this.onNeedsRefresh = options.onNeedsRefresh ?? (() => {})
     this.platform = options.platform ?? process.platform
-    this.detectAmphetamine = options.detectAmphetamine ?? (() => detectAmphetamineInstalled())
+    this.detectAmphetamine =
+      options.detectAmphetamine ??
+      ((signal) => detectAmphetamineInstalled(undefined, this.platform, signal))
     const now = options.now ?? Date.now
     this.caffeinateAssertion =
       options.caffeinateAssertion ??
@@ -74,106 +75,160 @@ export class MacosAwakeEngineRouter {
         now,
         onUnexpectedFailure: (reason) => this.onNeedsRefresh(reason)
       })
-    this.amphetamineAssertion =
-      options.amphetamineAssertion ??
-      new MacosAmphetamineSleepAssertion({
+    this.amphetamineObserver =
+      options.amphetamineObserver ??
+      new MacosAmphetamineSessionObserver({
         logger: this.logger,
         now,
-        onUnexpectedFailure: (reason) => this.onNeedsRefresh(reason),
-        // Why refresh rather than just record: the picker reads this verdict, and
-        // Amphetamine must stop being attempted until it is usable again.
+        onUnexpectedFailure: (reason) => this.requestRefresh(reason),
+        onStateChanged: () => this.requestRefresh('amphetamine-state'),
+        // The picker reads this verdict, and observation must stop until the
+        // user explicitly retries after fixing installation or Automation.
         onUnavailable: (unavailableReason) => {
+          if (this.disposed) {
+            return
+          }
           if (unavailableReason === 'not-installed') {
             this.amphetamineInstalled = false
           }
-          this.onNeedsRefresh('amphetamine-unavailable')
+          this.requestRefresh('amphetamine-unavailable')
         }
       })
   }
 
   /** Returns true when the caller should refresh. */
   setEngine(engine: MacosAwakeEngine): boolean {
+    if (this.disposed) {
+      return false
+    }
     const normalized = normalizeMacosAwakeEngine(engine)
     if (normalized === 'amphetamine') {
       // Re-picking Amphetamine is the user's retry gesture after fixing a
       // refused Automation grant, so it must clear the verdict even when the
       // engine is unchanged.
-      this.amphetamineAssertion.clearUnavailable()
+      this.amphetamineObserver.clearUnavailable()
       void this.probeInstalled()
     }
     if (this.engine === normalized) {
       return normalized === 'amphetamine'
     }
     this.engine = normalized
-    // start() decides what runs; caffeinate is unconditional, so nothing here
-    // has to sequence a release against it.
     return true
   }
 
   /** Probe once, lazily, the first time anything asks for status. */
   async probeInstalledIfUnknown(): Promise<boolean | undefined> {
+    if (this.disposed || this.platform !== 'darwin') {
+      return undefined
+    }
+    if (this.probePromise) {
+      return this.probePromise
+    }
     if (this.amphetamineInstalled !== undefined) {
       return this.amphetamineInstalled
     }
+    if (this.implicitProbeAttempted) {
+      return this.amphetamineInstalled
+    }
+    this.implicitProbeAttempted = true
     return this.probeInstalled()
   }
 
   /** Refresh the installed probe so the picker can disable Amphetamine before it is ever selected. */
-  async probeInstalled(): Promise<boolean | undefined> {
-    if (this.platform !== 'darwin') {
-      return undefined
+  probeInstalled(): Promise<boolean | undefined> {
+    if (this.platform !== 'darwin' || this.disposed) {
+      return Promise.resolve(undefined)
     }
-    if (this.probing) {
-      // Concurrent probes can resolve out of order and clobber each other, but
-      // dropping the request would strand a re-pick made just after an older
-      // probe sampled absence. Queue exactly one follow-up instead.
+    this.implicitProbeAttempted = true
+    if (this.probePromise) {
+      // The refresh must sample after the older probe, not return its stale verdict.
       this.probeAgain = true
-      return this.amphetamineInstalled
+      return this.probePromise
     }
-    this.probing = true
+    this.probePromise = this.runInstalledProbeLoop()
+    return this.probePromise
+  }
+
+  /** Retry availability without letting a stale renderer rewrite the current preference. */
+  async retryUnavailable(): Promise<boolean | undefined> {
+    const installed = await this.probeInstalled()
+    if (
+      installed === true &&
+      !this.disposed &&
+      this.engine === 'amphetamine' &&
+      this.amphetamineObserver.getUnavailableReason() === 'automation-denied'
+    ) {
+      this.amphetamineObserver.clearUnavailable()
+      this.requestRefresh('amphetamine-retry')
+    }
+    return installed
+  }
+
+  private async runInstalledProbeLoop(): Promise<boolean | undefined> {
     try {
       let installed = await this.runInstalledProbe()
-      while (this.probeAgain) {
+      while (this.probeAgain && !this.disposed) {
         this.probeAgain = false
         installed = await this.runInstalledProbe()
       }
       return installed
     } finally {
-      this.probing = false
       this.probeAgain = false
+      this.probePromise = null
     }
   }
 
   private async runInstalledProbe(): Promise<boolean | undefined> {
     try {
-      const installed = await this.detectAmphetamine()
-      if (installed === undefined || this.amphetamineInstalled === installed) {
-        // undefined means the probe could not tell; keep whatever is known
-        // rather than recording a false negative that disables the engine.
-        return this.amphetamineInstalled
+      const abort = new AbortController()
+      this.probeAbort = abort
+      let installed: boolean | undefined
+      try {
+        installed = await this.detectAmphetamine(abort.signal)
+      } finally {
+        if (this.probeAbort === abort) {
+          this.probeAbort = null
+        }
       }
-      this.amphetamineInstalled = installed
-      this.onNeedsRefresh('amphetamine-probe')
+      if (this.disposed) {
+        return undefined
+      }
+      if (installed === undefined) {
+        return undefined
+      }
+      let shouldRefresh = false
+      if (installed && this.amphetamineObserver.getUnavailableReason() === 'not-installed') {
+        this.amphetamineObserver.clearUnavailable()
+        shouldRefresh = true
+      }
+      if (this.amphetamineInstalled !== installed) {
+        this.amphetamineInstalled = installed
+        shouldRefresh = true
+      }
+      if (shouldRefresh) {
+        this.requestRefresh('amphetamine-probe')
+      }
       return installed
     } catch (err) {
-      this.logger.warn('[agent-awake] failed to probe for Amphetamine', { error: err })
-      return this.amphetamineInstalled
+      if (!this.disposed) {
+        this.logger.warn('[agent-awake] failed to probe for Amphetamine', { error: err })
+      }
+      return undefined
     }
   }
 
   start(reason: string): void {
-    // Caffeinate always runs. There is no handover, because a handover cannot be
-    // made safe: any liveness answer about caffeinate is stale the instant it is
-    // read — the spawn can fail asynchronously and the child can exit at any
-    // moment — so releasing the other engine on it is always a gamble. Three
-    // separate review rounds each found a different sequence ending with nothing
-    // held, and each fix produced another. Holding both costs one small child
-    // process; holding neither is the bug this exists to prevent.
+    if (this.disposed) {
+      return
+    }
+    // Caffeinate is Orca's assertion. The optional Amphetamine integration only
+    // observes a session the user already started; the global scripting API has
+    // no identity or atomic write that could make automatic ownership safe.
     this.startAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
     if (this.usesAmphetamine()) {
-      this.startAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      this.startAmphetamineObservation(reason)
     } else {
-      this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+      this.stopAmphetamineObservation(reason)
     }
   }
 
@@ -186,15 +241,23 @@ export class MacosAwakeEngineRouter {
   }
 
   stop(reason: string): void {
+    if (this.disposed) {
+      return
+    }
     this.stopAssertion(this.caffeinateAssertion, 'macOS system sleep', reason)
-    this.stopAssertion(this.amphetamineAssertion, 'Amphetamine', reason)
+    this.stopAmphetamineObservation(reason)
   }
 
   dispose(): void {
-    // Isolated: a throwing caffeinate dispose must not skip Amphetamine's, which
-    // is the one that can outlive the process.
+    if (this.disposed) {
+      return
+    }
+    this.disposed = true
+    this.probeAbort?.abort()
+    this.probeAbort = null
+    // Isolate cleanup so one integration cannot skip the other.
     this.disposeAssertion(this.caffeinateAssertion, 'macOS system sleep')
-    this.disposeAssertion(this.amphetamineAssertion, 'Amphetamine')
+    this.disposeAmphetamineObservation()
   }
 
   private disposeAssertion(assertion: PlatformAwakeAssertion, label: string): void {
@@ -209,17 +272,19 @@ export class MacosAwakeEngineRouter {
     if (this.platform !== 'darwin') {
       return {}
     }
-    const unavailableReason = this.amphetamineAssertion.getUnavailableReason()
+    const unavailableReason =
+      this.engine === 'amphetamine' ? this.amphetamineObserver.getUnavailableReason() : null
     return {
       macosEngine: this.engine,
       ...(this.amphetamineInstalled === undefined
         ? {}
         : { amphetamineInstalled: this.amphetamineInstalled }),
-      ...(unavailableReason ? { amphetamineUnavailableReason: unavailableReason } : {})
+      ...(unavailableReason ? { amphetamineUnavailableReason: unavailableReason } : {}),
+      amphetamineActive: this.usesAmphetamine() && this.amphetamineObserver.isActive()
     }
   }
 
-  /** Amphetamine only when it is both chosen and proven usable; caffeinate is the always-available fallback. */
+  /** Observe Amphetamine only when selected and usable; caffeinate always owns Orca's assertion. */
   private usesAmphetamine(): boolean {
     return (
       // The engine setting is writable on every platform, so gate on the host too.
@@ -227,8 +292,38 @@ export class MacosAwakeEngineRouter {
       this.engine === 'amphetamine' &&
       // A known-missing app would otherwise cost a failed Apple event per refresh.
       this.amphetamineInstalled !== false &&
-      !this.amphetamineAssertion.isUnavailable()
+      !this.amphetamineObserver.isUnavailable()
     )
+  }
+
+  private startAmphetamineObservation(reason: string): void {
+    try {
+      this.amphetamineObserver.start(reason)
+    } catch (err) {
+      this.logger.warn('[agent-awake] failed to start Amphetamine observation', {
+        reason,
+        error: err
+      })
+    }
+  }
+
+  private stopAmphetamineObservation(reason: string): void {
+    try {
+      this.amphetamineObserver.stop(reason)
+    } catch (err) {
+      this.logger.warn('[agent-awake] failed to stop Amphetamine observation', {
+        reason,
+        error: err
+      })
+    }
+  }
+
+  private disposeAmphetamineObservation(): void {
+    try {
+      this.amphetamineObserver.dispose()
+    } catch (err) {
+      this.logger.warn('[agent-awake] failed to dispose Amphetamine observation', { error: err })
+    }
   }
 
   private stopAssertion(assertion: PlatformAwakeAssertion, label: string, reason: string): void {
@@ -236,6 +331,12 @@ export class MacosAwakeEngineRouter {
       assertion.stop(reason)
     } catch (err) {
       this.logger.warn(`[agent-awake] failed to stop ${label} assertion`, { reason, error: err })
+    }
+  }
+
+  private requestRefresh(reason: string): void {
+    if (!this.disposed) {
+      this.onNeedsRefresh(reason)
     }
   }
 }

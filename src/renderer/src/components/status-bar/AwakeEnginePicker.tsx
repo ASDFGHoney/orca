@@ -1,75 +1,18 @@
-import { Coffee, Pill } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useState } from 'react'
+import { Coffee, ExternalLink, Pill, RefreshCw } from 'lucide-react'
+import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu'
 import { translate } from '@/i18n/i18n'
+import {
+  openAmphetamineListing,
+  refreshAmphetamineInstallation
+} from '@/lib/amphetamine-installation'
 import type { ComputerAwakeStatus, MacosAwakeEngine } from '../../../../shared/computer-awake-mode'
-
-export const AMPHETAMINE_APP_STORE_URL = 'https://apps.apple.com/app/amphetamine/id937984704'
-
-function openAmphetamineListing(): void {
-  void window.api.shell.openUrl(AMPHETAMINE_APP_STORE_URL)
-}
-
-type EngineOptionProps = {
-  icon: LucideIcon
-  value: MacosAwakeEngine
-  label: string
-  title: string
-  body: string
-  hint?: string
-  selected: boolean
-  /** Present the option but route the click to installing it instead of selecting it. */
-  unavailable?: boolean
-  onSelect: () => void
-}
-
-function EngineOption({
-  icon: Icon,
-  value,
-  label,
-  title,
-  body,
-  hint,
-  selected,
-  unavailable,
-  onSelect
-}: EngineOptionProps): React.JSX.Element {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* A menu item, not a bare button: Radix's roving focus only reaches
-            registered items, so plain buttons here are unreachable by keyboard
-            and role=radiogroup is not valid inside role=menu. preventDefault
-            keeps the menu open so engine and mode are one visit. */}
-        <DropdownMenuRadioItem
-          value={value}
-          aria-label={label}
-          onSelect={(event) => {
-            event.preventDefault()
-            onSelect()
-          }}
-          className={`flex flex-1 cursor-pointer flex-col items-center gap-1 rounded-md border py-2 pr-2 pl-2 transition-colors [&>span:first-child]:hidden ${
-            selected
-              ? 'border-border bg-accent text-foreground'
-              : 'border-transparent text-muted-foreground'
-          } ${unavailable ? 'opacity-60' : ''}`}
-        >
-          <Icon className="size-4" />
-          <span className="text-[11px] font-medium">{label}</span>
-        </DropdownMenuRadioItem>
-      </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6} className="max-w-64 py-2">
-        <span className="block font-medium">{title}</span>
-        {/* Why not text-muted-foreground: the tooltip surface is inverted
-            (bg-foreground), so a light-surface grey renders unreadable on it.
-            De-emphasize with opacity of the inherited color instead. */}
-        <span className="mt-0.5 block text-background/75">{body}</span>
-        {hint ? <span className="mt-1.5 block text-background/75">{hint}</span> : null}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
 
 export function AwakeEnginePicker({
   engine,
@@ -80,72 +23,161 @@ export function AwakeEnginePicker({
   status: ComputerAwakeStatus
   onChange: (engine: MacosAwakeEngine) => void
 }): React.JSX.Element {
-  const notInstalled = status.amphetamineInstalled === false
+  const [checking, setChecking] = useState(false)
+  const [actionFailure, setActionFailure] = useState<'check' | 'open' | null>(null)
+  const notInstalled =
+    status.amphetamineInstalled === false || status.amphetamineUnavailableReason === 'not-installed'
   const automationDenied = status.amphetamineUnavailableReason === 'automation-denied'
+  const amphetamineSelectable = status.amphetamineInstalled === true
+  const canRetryAvailability = !amphetamineSelectable || automationDenied
+  const title = translate(
+    'auto.components.status.bar.AwakeEnginePicker.label',
+    'Amphetamine integration'
+  )
 
-  const amphetamineBody = notInstalled
-    ? translate(
-        'auto.components.status.bar.AwakeEnginePicker.amphetamineMissingBody',
-        'Keep running with the lid shut. Auto-start on power or an app. Control the display and screen saver.'
-      )
-    : translate(
-        'auto.components.status.bar.AwakeEnginePicker.amphetamineBody',
-        'Adds the Amphetamine Mac app on top: control the display and screen saver, and auto-start on power or an app.'
-      )
+  const checkAgain = async (): Promise<void> => {
+    setChecking(true)
+    setActionFailure(null)
+    try {
+      const installed = await refreshAmphetamineInstallation()
+      if (installed === undefined) {
+        setActionFailure('check')
+      }
+    } catch {
+      setActionFailure('check')
+    } finally {
+      setChecking(false)
+    }
+  }
 
-  const amphetamineHint = notInstalled
-    ? translate(
-        'auto.components.status.bar.AwakeEnginePicker.amphetamineGet',
-        "Click to open the Mac App Store. It's free."
-      )
-    : automationDenied
-      ? translate(
-          'auto.components.status.bar.AwakeEnginePicker.amphetamineDenied',
-          'Orca is using Caffeinate. Allow Orca in System Settings › Privacy & Security › Automation.'
-        )
-      : translate(
-          'auto.components.status.bar.AwakeEnginePicker.amphetamineSafety',
-          'Orca uses a session you already started rather than replacing it.'
-        )
+  const openListing = async (): Promise<void> => {
+    setActionFailure(null)
+    try {
+      await openAmphetamineListing()
+    } catch {
+      setActionFailure('open')
+    }
+  }
 
   return (
-    <DropdownMenuRadioGroup
-      value={engine}
-      aria-label={translate(
-        'auto.components.status.bar.AwakeEnginePicker.label',
-        'Keep awake engine'
-      )}
-      className="flex gap-1 px-1 pb-1"
-    >
-      <EngineOption
-        icon={Coffee}
-        value="caffeinate"
-        label={translate('auto.components.status.bar.AwakeEnginePicker.caffeinate', 'Caffeinate')}
-        title={translate(
-          'auto.components.status.bar.AwakeEnginePicker.caffeinateTitle',
-          'Built into macOS'
-        )}
-        body={translate(
-          'auto.components.status.bar.AwakeEnginePicker.caffeinateBody',
-          'A private macOS process Orca starts and stops. Nothing to install, and it touches nothing else.'
-        )}
-        selected={engine === 'caffeinate'}
-        onSelect={() => onChange('caffeinate')}
-      />
-      <EngineOption
-        icon={Pill}
-        value="amphetamine"
-        label={translate('auto.components.status.bar.AwakeEnginePicker.amphetamine', 'Amphetamine')}
-        title={translate(
-          'auto.components.status.bar.AwakeEnginePicker.amphetamineTitle',
-          'Works with the lid shut'
-        )}
-        body={amphetamineBody}
-        hint={amphetamineHint}
-        selected={engine === 'amphetamine'}
-        unavailable={notInstalled}
-        onSelect={() => (notInstalled ? openAmphetamineListing() : onChange('amphetamine'))}
-      />
-    </DropdownMenuRadioGroup>
+    <>
+      <DropdownMenuLabel>{title}</DropdownMenuLabel>
+      <DropdownMenuRadioGroup value={engine} aria-label={title}>
+        <DropdownMenuRadioItem
+          value="caffeinate"
+          aria-label={translate(
+            'auto.components.status.bar.AwakeEnginePicker.builtInOnly',
+            'Built-in only'
+          )}
+          className="items-start py-1.5"
+          onSelect={(event) => {
+            event.preventDefault()
+            onChange('caffeinate')
+          }}
+        >
+          <Coffee className="mt-0.5 size-3.5" />
+          <span className="flex flex-col">
+            <span>
+              {translate(
+                'auto.components.status.bar.AwakeEnginePicker.builtInOnly',
+                'Built-in only'
+              )}
+            </span>
+            <span className="text-[11px] font-normal text-muted-foreground">
+              {translate(
+                'auto.components.status.bar.AwakeEnginePicker.caffeinateDescription',
+                'When keep-awake is active, Orca uses Caffeinate.'
+              )}
+            </span>
+          </span>
+        </DropdownMenuRadioItem>
+        <DropdownMenuRadioItem
+          value="amphetamine"
+          aria-label={translate(
+            'auto.components.status.bar.AwakeEnginePicker.addAmphetamine',
+            'Add Amphetamine'
+          )}
+          className="items-start py-1.5"
+          disabled={!amphetamineSelectable}
+          onSelect={(event) => {
+            event.preventDefault()
+            onChange('amphetamine')
+          }}
+        >
+          <Pill className="mt-0.5 size-3.5" />
+          <span className="flex flex-col">
+            <span>
+              {translate(
+                'auto.components.status.bar.AwakeEnginePicker.addAmphetamine',
+                'Add Amphetamine'
+              )}
+            </span>
+            <span className="text-[11px] font-normal text-muted-foreground">
+              {translate(
+                'auto.components.status.bar.AwakeEnginePicker.amphetamineDescription',
+                'Observes a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+              )}
+            </span>
+          </span>
+        </DropdownMenuRadioItem>
+      </DropdownMenuRadioGroup>
+      {notInstalled ? (
+        <p className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
+          {translate(
+            'auto.components.status.bar.AwakeEnginePicker.missingDescription',
+            'Install Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
+          )}
+        </p>
+      ) : automationDenied ? (
+        <p className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
+          {translate(
+            'auto.components.status.bar.AwakeEnginePicker.automationDenied',
+            'When keep-awake is active, Orca uses Caffeinate. Orca only observes Amphetamine session activity. Allow Orca in System Settings › Privacy & Security › Automation, then check again.'
+          )}
+        </p>
+      ) : null}
+      {canRetryAvailability ? <DropdownMenuSeparator /> : null}
+      {notInstalled ? (
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            void openListing()
+          }}
+        >
+          <ExternalLink />
+          {translate(
+            'auto.components.status.bar.AwakeEnginePicker.getAmphetamine',
+            'Get Amphetamine…'
+          )}
+        </DropdownMenuItem>
+      ) : null}
+      {canRetryAvailability ? (
+        <DropdownMenuItem
+          disabled={checking}
+          onSelect={(event) => {
+            event.preventDefault()
+            void checkAgain()
+          }}
+        >
+          <RefreshCw className={checking ? 'animate-spin' : undefined} />
+          {checking
+            ? translate('auto.components.status.bar.AwakeEnginePicker.checking', 'Checking…')
+            : translate('auto.components.status.bar.AwakeEnginePicker.checkAgain', 'Check again')}
+        </DropdownMenuItem>
+      ) : null}
+      {actionFailure ? (
+        <p role="alert" className="px-2 py-1 text-[11px] leading-4 text-destructive">
+          {actionFailure === 'open'
+            ? translate(
+                'auto.components.status.bar.AwakeEnginePicker.openFailed',
+                'Couldn’t open the Amphetamine listing. Try again.'
+              )
+            : translate(
+                'auto.components.status.bar.AwakeEnginePicker.checkFailed',
+                'Couldn’t check for Amphetamine. Try again.'
+              )}
+        </p>
+      ) : null}
+    </>
   )
 }

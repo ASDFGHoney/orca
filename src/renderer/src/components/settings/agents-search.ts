@@ -1,9 +1,9 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
 import {
   getAgentAwakeDescription,
-  getAgentAwakeEngineDescription,
-  getAgentAwakeEngineSearchKeywords,
-  getAgentAwakeEngineTitle,
+  getAmphetamineIntegrationDescription,
+  getAmphetamineIntegrationSearchKeywords,
+  getAmphetamineIntegrationTitle,
   getAgentAwakeSearchKeywords,
   getAgentAwakeTitle
 } from './agent-awake-copy'
@@ -64,12 +64,12 @@ function expandAgentSearchText(value: string): string[] {
 
 type AgentsPaneSearchOptions = {
   includeAgentAwake?: boolean
-  includeAgentAwakeEngine?: boolean
+  includeAmphetamineIntegration?: boolean
   includeAgentRuntime?: boolean
 }
 
 const AGENT_AWAKE_SEARCH_ENTRY_ID = 'agent-awake'
-const AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID = 'agent-awake-engine'
+const AMPHETAMINE_INTEGRATION_SEARCH_ENTRY_ID = 'amphetamine-integration'
 const AGENT_RUNTIME_SEARCH_ENTRY_ID = 'agent-runtime'
 
 const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
@@ -125,10 +125,10 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
     keywords: getAgentAwakeSearchKeywords()
   },
   {
-    title: getAgentAwakeEngineTitle(),
-    id: AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID,
-    description: getAgentAwakeEngineDescription(),
-    keywords: getAgentAwakeEngineSearchKeywords()
+    title: getAmphetamineIntegrationTitle(),
+    id: AMPHETAMINE_INTEGRATION_SEARCH_ENTRY_ID,
+    description: getAmphetamineIntegrationDescription(),
+    keywords: getAmphetamineIntegrationSearchKeywords()
   },
   {
     title: translate(
@@ -156,8 +156,8 @@ const getAllAgentsPaneSearchEntries = createLocalizedCatalog(() => [
 
 export function getAgentsPaneSearchEntries({
   includeAgentAwake = true,
-  // The engine is a sub-setting of keep-awake: hiding the parent must hide it too.
-  includeAgentAwakeEngine = includeAgentAwake,
+  // The integration is a sub-setting of keep-awake, so they share visibility.
+  includeAmphetamineIntegration = includeAgentAwake,
   includeAgentRuntime = true
 }: AgentsPaneSearchOptions = {}) {
   const excluded = new Set<string>()
@@ -167,8 +167,8 @@ export function getAgentsPaneSearchEntries({
   if (!includeAgentAwake) {
     excluded.add(AGENT_AWAKE_SEARCH_ENTRY_ID)
   }
-  if (!includeAgentAwakeEngine) {
-    excluded.add(AGENT_AWAKE_ENGINE_SEARCH_ENTRY_ID)
+  if (!includeAmphetamineIntegration) {
+    excluded.add(AMPHETAMINE_INTEGRATION_SEARCH_ENTRY_ID)
   }
   return getAllAgentsPaneSearchEntries().filter(
     (entry) => !('id' in entry) || !excluded.has(entry.id)

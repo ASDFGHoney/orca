@@ -175,8 +175,8 @@ export function buildSettingsNavigationMetadata({
       icon: Bot,
       searchEntries: getAgentsPaneSearchEntries({
         includeAgentAwake: !isWebClient,
-        // The engine choice is macOS-only, so it must not surface in search elsewhere.
-        includeAgentAwakeEngine: isMac && !isWebClient,
+        // The integration is macOS-only, so hide its search entry elsewhere.
+        includeAmphetamineIntegration: isMac && !isWebClient,
         includeAgentRuntime: isLocalWindowsHost
       }),
       group: 'capabilities'

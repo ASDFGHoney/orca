@@ -2,14 +2,14 @@ export const COMPUTER_AWAKE_MODES = ['on', 'off', 'auto'] as const
 
 export type ComputerAwakeMode = (typeof COMPUTER_AWAKE_MODES)[number]
 
-/** Which macOS tool holds the wake assertion. Amphetamine is opt-in and only usable when installed. */
+/** Persisted macOS integration preference. Caffeinate still runs in both modes. */
 export const MACOS_AWAKE_ENGINES = ['caffeinate', 'amphetamine'] as const
 
 export type MacosAwakeEngine = (typeof MACOS_AWAKE_ENGINES)[number]
 
 export const DEFAULT_MACOS_AWAKE_ENGINE: MacosAwakeEngine = 'caffeinate'
 
-/** Why Orca fell back to caffeinate: the app is missing, or its Automation grant was refused. */
+/** Why the optional Amphetamine integration is unavailable. */
 export type AmphetamineUnavailableReason = 'not-installed' | 'automation-denied'
 
 export type ComputerAwakeStatus = {
@@ -19,8 +19,10 @@ export type ComputerAwakeStatus = {
   macosEngine?: MacosAwakeEngine
   /** Undefined until the host probes, and on every non-macOS host. */
   amphetamineInstalled?: boolean
-  /** Set once Amphetamine was selected but could not hold the session; Orca is running caffeinate instead. */
+  /** Set once the selected Amphetamine integration could not be used. */
   amphetamineUnavailableReason?: AmphetamineUnavailableReason
+  /** Optional for mixed versions: true after the selected integration observes an active session. */
+  amphetamineActive?: boolean
 }
 
 export function normalizeComputerAwakeMode(

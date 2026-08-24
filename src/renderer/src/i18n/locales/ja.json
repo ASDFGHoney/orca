@@ -7694,10 +7694,9 @@
             "agentPermissionsDescription": "Agent の権限の既定値を Yolo と Manual で切り替えます。",
             "agentRuntime": "Agent のランタイム",
             "agentRuntimeDescription": "デフォルトで Agent を Windows または WSL のどちらで検出および起動するかを選択します。",
-            "caffeinate": "caffeinate",
-            "amphetamine": "amphetamine",
-            "engine": "エンジン",
-            "macos": "macos"
+            "caffeinate": "Caffeinate",
+            "amphetamine": "Amphetamine",
+            "macos": "macOS"
           }
         },
         "appearance": {

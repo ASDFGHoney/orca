@@ -375,7 +375,7 @@ export type GlobalSettings = {
   keepComputerAwakeWhileAgentsRun: boolean
   /** Optional for mixed-version compatibility; the legacy boolean maps true to Auto. */
   computerAwakeMode?: ComputerAwakeMode
-  /** macOS only: which tool holds the assertion. Amphetamine is opt-in and needs the app installed. */
+  /** macOS only: whether to observe an existing Amphetamine session alongside caffeinate. */
   computerAwakeMacosEngine?: MacosAwakeEngine
   /** macOS Option key: compose layout chars (@ German, € French) vs act as Meta/Esc for readline.
    *  'auto' (default) = layout-aware via navigator.keyboard.getLayoutMap() (US → Meta, else compose);

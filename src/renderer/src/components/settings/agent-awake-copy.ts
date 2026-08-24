@@ -52,40 +52,41 @@ export function getAgentAwakeSearchKeywords(
     : keywords
 }
 
-export function getAgentAwakeEngineTitle(): string {
-  return translate('auto.components.settings.AgentAwakeSetting.engineTitle', 'Keep awake engine')
+export function getAmphetamineIntegrationTitle(): string {
+  return translate(
+    'auto.components.settings.AgentAwakeSetting.integrationTitle',
+    'Amphetamine integration'
+  )
 }
 
-/** Why not one string: a missing app and a refused Automation grant need different next steps. */
-export function getAgentAwakeEngineDescription(
+export function getAmphetamineIntegrationDescription(
   amphetamineInstalled?: boolean,
   unavailableReason?: AmphetamineUnavailableReason
 ): string {
-  if (amphetamineInstalled === false) {
+  if (amphetamineInstalled === false || unavailableReason === 'not-installed') {
     return translate(
-      'auto.components.settings.AgentAwakeSetting.engineDescriptionMissing',
-      'Caffeinate is built into macOS. Install Amphetamine to keep awake through an Amphetamine session instead.'
+      'auto.components.settings.AgentAwakeSetting.integrationDescriptionMissing',
+      'When keep-awake is active, Orca uses Caffeinate. Install Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
     )
   }
   if (unavailableReason === 'automation-denied') {
     return translate(
-      'auto.components.settings.AgentAwakeSetting.engineDescriptionDenied',
-      'Orca is running Caffeinate because Amphetamine control was refused. Allow Orca under Privacy & Security › Automation.'
+      'auto.components.settings.AgentAwakeSetting.integrationDescriptionDenied',
+      'When keep-awake is active, Orca uses Caffeinate. Orca only observes Amphetamine session activity. Allow Orca in System Settings › Privacy & Security › Automation, then check again.'
     )
   }
   return translate(
-    'auto.components.settings.AgentAwakeSetting.engineDescription',
-    'Caffeinate is built into macOS. Amphetamine keeps awake through an Amphetamine session, and uses one you already started rather than replacing it.'
+    'auto.components.settings.AgentAwakeSetting.integrationDescription',
+    'When keep-awake is active, Orca uses Caffeinate. Add Amphetamine to observe a session you start manually or with a Trigger. Closed-display behavior depends on Amphetamine and macOS settings.'
   )
 }
 
-export function getAgentAwakeEngineSearchKeywords(): string[] {
+export function getAmphetamineIntegrationSearchKeywords(): string[] {
   return searchKeywords([
     { key: 'auto.components.settings.agents.search.66b6b82eb4', fallback: 'awake' },
     { key: 'auto.components.settings.agents.search.845ad9128a', fallback: 'power' },
-    { key: 'auto.components.settings.agents.search.caffeinate', fallback: 'caffeinate' },
-    { key: 'auto.components.settings.agents.search.amphetamine', fallback: 'amphetamine' },
-    { key: 'auto.components.settings.agents.search.engine', fallback: 'engine' },
-    { key: 'auto.components.settings.agents.search.macos', fallback: 'macos' }
+    { key: 'auto.components.settings.agents.search.caffeinate', fallback: 'Caffeinate' },
+    { key: 'auto.components.settings.agents.search.amphetamine', fallback: 'Amphetamine' },
+    { key: 'auto.components.settings.agents.search.macos', fallback: 'macOS' }
   ])
 }

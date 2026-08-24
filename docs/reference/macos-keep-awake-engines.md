@@ -1,191 +1,104 @@
-# macOS keep-awake engines
+# macOS keep-awake integrations
 
-Orca can hold its macOS wake assertion two ways. The engine is a user setting
-(`computerAwakeMacosEngine`), exposed in the status-bar segment and in
-Settings → Agents. It is independent of the On / Agent / Off mode, which decides
-_whether_ Orca wants the Mac awake at all.
+The On / Agent / Off setting decides when Orca wants the Mac awake. Orca owns
+that assertion through Electron's `powerSaveBlocker` and `/usr/bin/caffeinate
+-i -s`.
 
-| Engine                 | Mechanism                                 | Ownership model                                                                         |
-| ---------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `caffeinate` (default) | `/usr/bin/caffeinate -i -s` child process | Private to Orca. Refcounted by the kernel; other processes' assertions are independent. |
-| `amphetamine`          | Apple events to `com.if.Amphetamine`      | **Shared and singular.** One global session for the whole machine.                      |
+The macOS integration preference controls whether Orca also observes
+Amphetamine:
 
-Orca always also holds Electron's `powerSaveBlocker`, on every platform and with
-either engine. The engine is an addition, never a replacement.
+| Preference    | Orca-owned mechanism | Amphetamine behavior                         |
+| ------------- | -------------------- | -------------------------------------------- |
+| `caffeinate`  | `caffeinate -i -s`   | None                                         |
+| `amphetamine` | `caffeinate -i -s`   | Read-only observation of an existing session |
 
-## Why Amphetamine needs an ownership policy and caffeinate does not
+Amphetamine is additive. Caffeinate remains active in both modes and is the
+only process-level assertion Orca starts and stops.
 
-`caffeinate` is a process Orca spawns and kills. Nothing else on the system can
-see or disturb it, and killing it cannot affect anyone else.
+## Why the integration is read-only
 
-Amphetamine is the opposite. Its scripting dictionary documents that
-`start new session` "ends any existing sessions, including Trigger-based
-sessions, before starting a new session", and that `end session` ends whatever
-session is current regardless of who started it. There is exactly one session,
-it has no identity, and every write is destructive.
+Amphetamine exposes one global session for the machine. Its scripting API has
+`start new session` and `end session`, but no session id, owner, tag, targeted
+end command, or compare-and-swap operation.
 
-Left naive, that produces two silent data-loss bugs:
+Both writes can destroy another actor's state:
 
-1. Orca starting its session destroys the user's running session — their timer,
-   their Trigger, their display-sleep choice.
-2. Orca ending "its" session destroys whatever session is current, which may by
-   then be one the user started.
+- `start new session` ends the current session, including Trigger sessions.
+- `end session` ends whichever session is current when the command arrives.
 
-## The rule: the user always wins
+Session shape cannot establish provenance. An indefinite session that permits
+display sleep may have been created by the user, another Orca runtime, or an
+older build. A check immediately before a write is also insufficient because
+AppleScript sends separate Apple events; another session can replace it between
+the read and the write.
 
-Orca is a co-tenant of the session, never its owner by default.
+Therefore Orca never sends either session write and never infers ownership from
+shape or an ambiguous command result. It also never changes Amphetamine's
+display-sleep, screen-saver, closed-display, Trigger, or Drive Alive
+preferences.
 
-- **Check and act from one osascript invocation.** Two invocations leave a wide
-  window — a whole process spawn — in which the user can create or replace a
-  session between the read and the write, and the write would then destroy it.
-  Both commands are single scripts that decide and act in one `tell` block, so
-  the check and the write are consecutive Apple events instead. See the limits
-  below: this narrows the race, it does not remove it.
-- **Adopt, don't replace.** If the acquire script finds a session that is not
-  Orca-shaped it returns `foreign`, having issued no command. Orca records an
-  `adopted` hold; its goal is already met and the user's session is untouched.
-- **Reclaim, don't adopt, what looks like Orca's.** An Orca-shaped session found
-  at acquire time is recorded as `owned`, not `adopted` — after a crash it _is_
-  Orca's leaked session, and adopting it would mean never cleaning it up.
-- **End only what still looks like its own.** An `adopted` hold is dropped
-  without a command. The release script re-tests the shape and ends the session
-  only if it still matches; otherwise it reports `foreign` and leaves it.
-- **Never end what it cannot read.** If the release command fails, Orca keeps
-  the hold and lets the backoff retry rather than guessing. The trade is
-  deliberate: a leaked Orca session is visible in Amphetamine's menu bar and
-  ends in one click, while silently ending the user's session is neither
-  visible nor reliably recoverable.
-- **Never touch global preferences.** `allow/prevent display sleep`,
-  `allow/prevent screen saver`, `enable/disable closed display mode` and the
-  Trigger and Drive Alive commands all mutate the user's _preferences_ when no
-  session is active. Orca calls none of them.
+This is a deliberate feature tradeoff. Users who select the Amphetamine
+integration must start a session or configure a Trigger in Amphetamine. If no
+session is active, Orca still keeps the Mac awake through caffeinate, but
+Amphetamine-specific behavior is not active. Closed-display behavior remains
+subject to Amphetamine and macOS configuration.
 
-### What this cannot guarantee
+## Observation lifecycle
 
-A `tell` block is not a transaction. `tell` is client-side routing, and
-AppleScript sends every property read and every command as a separate Apple
-event; Amphetamine exposes no session identity and no compare-and-swap. A change
-can therefore interleave between the last check and the write, in both
-directions:
+When the integration is selected and awake mode is active, Orca runs a
+read-only AppleScript that:
 
-- Acquire reads no session, the user starts one, and Orca's `start new session`
-  then ends it.
-- Release confirms Orca's shape, the user replaces the session, and Orca's
-  `end session` then ends theirs.
+1. checks whether Amphetamine is already running, without launching it;
+2. reads whether its global session is active;
+3. returns `active` or `inactive`.
 
-Every shape test in these scripts is a check, not a guarantee. The invariant
-"Orca never destroys a session the user started" is therefore not something this
-integration can promise — only something it can make very unlikely, which is why
-no comment, doc or piece of UI copy here states it as a promise.
+The observation is repeated every 30 seconds because a user-controlled session
+can start, expire, or be replaced. `amphetamineActive` is true only after a
+successful `active` observation in the current lifecycle. An inactive,
+unparseable, failed, timed-out, stopped, or disposed observation publishes
+false.
 
-The window is sub-millisecond rather than the tens of milliseconds a second
-process spawn would cost, and every check sits as close to its write as the API
-allows. That is the ceiling this integration can reach; anything stronger would
-need an API Amphetamine does not offer. Callers who cannot tolerate the residual
-race should use the caffeinate engine, which is private to Orca and shares
-nothing.
+Stopping or disposing the service aborts an in-flight observation, clears local
+state, and sends no Amphetamine command. A late result is generation-fenced and
+cannot restore state or publish after teardown. A second Orca runtime and a
+runtime restarted after a crash independently observe the same session; neither
+can alter it.
 
-### Quit racing an in-flight acquire
+## Failure and retry policy
 
-If quit lands while an acquire is in flight, Orca aborts it and then runs the
-synchronous release. Neither step is ordering: aborting only _requests_ a kill,
-and an Apple event the acquire already sent is processed by Amphetamine on its
-own schedule. So a session can appear immediately after a release that found
-nothing to end.
+- `not-installed` and `automation-denied` are terminal until an explicit user
+  retry. They cancel periodic and backoff timers.
+- Other observation failures publish inactive, back off for 30 seconds, and
+  then retry. Successful observation restores the periodic timer.
+- An Automation denial is cleared only by Check again or re-selecting the
+  integration after the permission is fixed.
+- A positive explicit installation probe clears a stale `not-installed`
+  verdict and resumes observation. It does not clear `automation-denied`.
 
-A second release runs whenever an acquire was in flight, whatever the first pass
-reported, with the spawn itself supplying the delay. Gating it on `gone` was
-wrong: the first pass can end the existing session and the acquire can then
-create another, which is the same leak by a different route. It is still not a proof: a sufficiently late Apple
-event outlives both passes, and nothing can retry once the process has exited.
+Installation detection resolves the bundle through Launch Services and is
+separate from session observation. Status rendering performs at most one lazy
+probe per runtime, including when that probe is inconclusive. The explicit
+probe action is the retry path after installation and may run again. Disposal
+aborts an in-flight installation lookup as well as session observation.
 
-### A session held when the grant is revoked
+## Status and mixed versions
 
-Revoking Automation does not end a running Amphetamine session, so Orca keeps
-the `owned` classification: restoring the grant and re-picking Amphetamine is
-the path that cleans it up. Until then the session persists and the Mac stays
-awake. That is visible — Amphetamine's menu bar shows the active session and
-ends it in one click — so it is left as a user-recoverable state rather than
-given a background retry loop of its own.
+The host publishes optional `macosEngine`, `amphetamineInstalled`,
+`amphetamineUnavailableReason`, and `amphetamineActive` fields. Optional fields
+preserve compatibility with clients and hosts that update independently.
 
-### Recovering from an unusable engine
+`macosEngine: "amphetamine"` records the preference; it does not mean
+Amphetamine currently backs the session. Consumers should display Caffeinate as
+the effective assertion while `amphetamineActive` is false, and Caffeinate plus
+Amphetamine only while it is true.
 
-`not-installed` and `automation-denied` stop the engine being used, but the
-verdict is not permanent: re-picking Amphetamine in the picker clears it and
-retries. That matters because the automation-denied hint tells the user to grant
-the permission, and without a retry path nothing would change until relaunch.
+## Remote and paired-web boundary
 
-### No handover: caffeinate always runs
+Keep-awake assertions stay on the host running the service and are never
+forwarded across SSH or a relay. Amphetamine observation runs only in a desktop
+window runtime; headless serve keeps Caffeinate but skips the unused observer.
+The host's `process.platform` decides whether the macOS integration can run.
 
-Caffeinate is held whenever Orca wants the Mac awake, whatever the engine
-setting. Amphetamine is additive on top of it, not a replacement.
-
-This is deliberate, and it replaced an earlier design that released caffeinate
-once Amphetamine reported a hold. Three review rounds each found a different
-sequence in which that handover left nothing held, and each fix produced
-another. The reason is structural: any liveness answer about caffeinate is stale
-the instant it is read — `spawn()` returns before an asynchronous failure is
-delivered, and the child can exit at any moment — so releasing the other engine
-on it is always a gamble. Removing the handover removes the whole class.
-
-The cost is one extra small child process while Amphetamine is selected. It buys
-nothing back for the user in lost behaviour, because macOS power assertions are
-additive and never subtractive: both tools assert through IOKit, the system stays
-awake while any assertion is held, and neither can cancel the other's. Orca's
-caffeinate is `-i -s` with no `-d`, so it asserts idle and system sleep only and
-does not override Amphetamine's display-sleep or screen-saver policy. Holding
-both is what several other tools do deliberately — VS Code's tunnel holds two
-assertions simultaneously rather than choosing between them.
-
-### Session shape, not session identity
-
-Amphetamine exposes no session id, so "is this still mine?" is a shape match:
-indefinite (`session time remaining` = 0), not Trigger-driven, display sleep
-allowed. Every other shape — timed, Trigger, app-based, date-based, or
-display-sleep-blocking — is treated as someone else's and left alone.
-
-The one case this cannot resolve: a user who replaces Orca's session with an
-identically shaped indefinite session is indistinguishable from Orca's own, and
-Orca may end it on stop. That is accepted deliberately; the alternative is never
-cleaning up, which leaves the Mac awake forever after a crash.
-
-An acquire whose outcome is unknown widens that slightly. The command may have
-started a session before failing to report it, so Orca claims responsibility for
-one even when it had previously adopted the user's — otherwise a session it just
-created would never be released. If the user's session is timed, Trigger-driven
-or display-sleep-blocking the shape check still protects it; only an identically
-shaped indefinite one is at risk, which is the same limit as above reached by a
-second route.
-
-### Duration must be explicit
-
-`start new session` without options inherits the user's _default duration_
-preference. A user whose default is one hour would get a wake assertion that
-expires after an hour while agents are still working. Orca always passes
-`{duration:0, interval:0, displaySleepAllowed:true}` — Amphetamine's documented
-indefinite form. `displaySleepAllowed:true` matches `caffeinate -i -s`, which
-also permits display sleep.
-
-### Adopted sessions can expire
-
-An adopted session may be a 20-minute timer. While Orca wants the Mac awake and
-does not own the session, it re-probes on an interval and starts its own session
-once the adopted one is gone.
-
-## Failure handling
-
-Amphetamine is optional, so every failure degrades to caffeinate rather than to
-nothing:
-
-- **Not installed** (`-1728`/`-10814`) and **Automation refused**
-  (`-1743`) are terminal: the engine is marked unavailable, the reason is
-  published to the UI, and the awake service starts caffeinate for the live
-  session immediately.
-- Any other failure is transient: it backs off and retries, and the awake
-  service is asked to refresh.
-- Install detection resolves the bundle id through Launch Services, which sends
-  no Apple event and therefore cannot trigger a consent prompt just to render
-  the picker.
-- On quit, an owned session is ended **synchronously**, because the event loop
-  is gone before an awaited `osascript` could report back and a missed
-  `end session` leaves the Mac awake indefinitely.
+Paired-web clients hide these controls. Their web preload reports an inactive
+status and makes the installation probe a no-op, so a browser client cannot
+open the App Store or send Apple events on either machine.

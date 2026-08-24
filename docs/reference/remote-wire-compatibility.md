@@ -113,7 +113,7 @@ getting that wrong turns a skew into a false "nothing is blocked".
   unverifiable, the pane was unreadable, or the agent probe did not answer in time.
 
 A new client against an old host sees the field absent, which is why absence must read as
-_unknown_ and never as _not waiting_. Collapsing absent into `null` at any hop — including a
+*unknown* and never as *not waiting*. Collapsing absent into `null` at any hop — including a
 convenience `?? null` in an RPC handler — makes an old or unreachable peer indistinguishable
 from a healthy idle worker, which is the exact failure the field exists to remove.
 

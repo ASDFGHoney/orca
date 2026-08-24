@@ -76,6 +76,7 @@ export function registerSettingsHandlers(
     'agentAwake:getStatus',
     () => agentAwakeService?.getStatus() ?? { mode: 'off', active: false }
   )
+  ipcMain.handle('agentAwake:probeAmphetamine', () => agentAwakeService?.probeAmphetamine())
   agentAwakeService?.subscribe?.((status) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {

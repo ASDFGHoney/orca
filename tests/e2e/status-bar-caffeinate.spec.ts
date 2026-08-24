@@ -1,9 +1,33 @@
 import { randomUUID } from 'node:crypto'
-import type { ElectronApplication, Locator, Page } from '@stablyai/playwright-test'
+import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
 import { waitForStartupFocusToSettle } from './helpers/status-bar-menu'
 import { readHookEndpoint } from './helpers/agent-hook-endpoint'
+import type { GlobalSettings } from '../../src/shared/global-settings-types'
+
+async function readAmphetamineInstalled(page: Page): Promise<boolean> {
+  await page.evaluate(() => window.api.agentAwake.probeAmphetamine())
+  const installed = await page.evaluate(async () => {
+    const status = await window.api.agentAwake.getStatus()
+    return status.amphetamineInstalled
+  })
+  if (typeof installed !== 'boolean') {
+    throw new Error('Amphetamine installation status remained unknown after an explicit probe')
+  }
+  return installed
+}
+
+async function selectInactiveAmphetamineIntegration(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const settings = await window.api.settings.set({
+      computerAwakeMacosEngine: 'amphetamine',
+      computerAwakeMode: 'off',
+      keepComputerAwakeWhileAgentsRun: false
+    })
+    window.__store?.setState({ settings: settings as GlobalSettings })
+  })
+}
 
 async function postCodexHookEvent(
   electronApp: ElectronApplication,
@@ -29,7 +53,7 @@ async function postCodexHookEvent(
   expect(response.status).toBe(204)
 }
 
-test('shows Caffeinate mode and Agent activity in the status bar', async ({
+test('shows the effective Caffeinate identity and Agent activity in the status bar', async ({
   electronApp,
   orcaPage
 }) => {
@@ -43,6 +67,11 @@ test('shows Caffeinate mode and Agent activity in the status bar', async ({
   await expect(orcaPage.getByRole('menuitemradio', { name: /^On/ })).toBeVisible()
   await expect(orcaPage.getByRole('menuitemradio', { name: /^Agent/ })).toBeVisible()
   await expect(orcaPage.getByRole('menuitemradio', { name: /^Off/ })).toBeVisible()
+  const effectiveStatus = orcaPage
+    .getByRole('menu')
+    .locator('[data-slot="dropdown-menu-label"]')
+    .filter({ hasText: 'Keep awake' })
+  await expect(effectiveStatus).toContainText('Caffeinate')
   const menuProofPath = process.env.ORCA_CAFFEINATE_MENU_PROOF_PATH
   if (menuProofPath) {
     await orcaPage.getByRole('menu').screenshot({ path: menuProofPath, animations: 'disabled' })
@@ -71,110 +100,91 @@ test('shows Caffeinate mode and Agent activity in the status bar', async ({
   await expect(agentInactiveStatus).toBeVisible()
 })
 
-/** Radix scales the tooltip in, so measure only once its box stops changing. */
-async function waitForStableBox(locator: Locator): Promise<void> {
-  let previous = ''
-  await expect
-    .poll(
-      async () => {
-        const box = JSON.stringify(await locator.boundingBox())
-        const stable = box === previous
-        previous = box
-        return stable
-      },
-      { timeout: 5_000 }
+test.describe('macOS Amphetamine status-bar integration', () => {
+  test.skip(process.platform !== 'darwin', 'the Amphetamine integration is macOS only')
+
+  test.beforeEach(async ({ orcaPage }) => {
+    await waitForSessionReady(orcaPage)
+  })
+
+  test('shows read-only choices and visible inline explanations', async ({ orcaPage }) => {
+    const installed = await readAmphetamineInstalled(orcaPage)
+    await waitForStartupFocusToSettle(orcaPage)
+    await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
+
+    const menu = orcaPage.getByRole('menu')
+    const builtInOnly = menu.getByRole('menuitemradio', { name: 'Built-in only' })
+    const addAmphetamine = menu.getByRole('menuitemradio', { name: 'Add Amphetamine' })
+    await expect(menu.getByText('Amphetamine integration', { exact: true })).toBeVisible()
+    await expect(builtInOnly).toHaveAttribute('aria-checked', 'true')
+    await expect(addAmphetamine).toBeVisible()
+    await expect(
+      menu.getByText('When keep-awake is active, Orca uses Caffeinate.', { exact: true })
+    ).toBeVisible()
+    await expect(
+      menu.getByText(/Observes a session you start manually or with a Trigger/)
+    ).toBeVisible()
+    await expect(menu).toContainText(
+      'Closed-display behavior depends on Amphetamine and macOS settings.'
     )
-    .toBe(true)
-}
 
-/**
- * Region around the open menu, widened up and left to take in a tooltip.
- *
- * Anchored on the menu rather than the tooltip's own box: Radix portals the
- * tooltip and transforms it into place, so its reported geometry lags the paint.
- */
-async function menuWithTooltipClip(
-  page: Page
-): Promise<{ x: number; y: number; width: number; height: number }> {
-  const menu = await page.getByRole('menu').boundingBox()
-  if (!menu) {
-    throw new Error('menu is not open')
-  }
-  const growLeft = 330
-  const growUp = 200
-  const growRight = 90
-  const pad = 10
-  return {
-    x: Math.max(0, menu.x - growLeft),
-    y: Math.max(0, menu.y - growUp),
-    width: menu.width + growLeft + growRight,
-    height: menu.height + growUp + pad
-  }
-}
+    if (installed) {
+      await expect(addAmphetamine).toBeEnabled()
+      await addAmphetamine.click()
+      await expect(addAmphetamine).toHaveAttribute('aria-checked', 'true')
+      await expect(menu).toBeVisible()
+      await expect
+        .poll(
+          async () =>
+            (await orcaPage.evaluate(() => window.api.settings.get())).computerAwakeMacosEngine,
+          { timeout: 5_000, message: 'Amphetamine integration choice did not persist' }
+        )
+        .toBe('amphetamine')
+    } else {
+      await expect(addAmphetamine).toBeDisabled()
+      await expect(
+        menu.getByText(/Install Amphetamine to observe a session you start manually/)
+      ).toBeVisible()
+      // Avoid opening the real App Store during E2E.
+      await expect(menu.getByRole('menuitem', { name: 'Get Amphetamine…' })).toBeVisible()
+      await expect(menu.getByRole('menuitem', { name: 'Check again' })).toBeVisible()
+    }
 
-// Amphetamine is a macOS-only engine, so the picker only exists there.
-test('offers the macOS keep-awake engine picker in the status bar', async ({ orcaPage }) => {
-  test.skip(process.platform !== 'darwin', 'the engine picker is macOS only')
-  await waitForSessionReady(orcaPage)
+    const proofPath = process.env.ORCA_AMPHETAMINE_MENU_PROOF_PATH
+    if (proofPath) {
+      await menu.screenshot({ path: proofPath, animations: 'disabled' })
+    }
+  })
 
-  await waitForStartupFocusToSettle(orcaPage)
-  await orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' }).click()
-  // Menu items, not bare buttons, so Radix roving focus reaches them by keyboard.
-  const caffeinateEngine = orcaPage.getByRole('menuitemradio', { name: 'Caffeinate' })
-  const amphetamineEngine = orcaPage.getByRole('menuitemradio', { name: 'Amphetamine' })
-  await expect(caffeinateEngine).toBeVisible()
-  await expect(amphetamineEngine).toBeVisible()
-  await expect(caffeinateEngine).toHaveAttribute('aria-checked', 'true')
+  test('shows Caffeinate as the effective assertion while the integration is inactive', async ({
+    orcaPage
+  }) => {
+    await selectInactiveAmphetamineIntegration(orcaPage)
+    await expect
+      .poll(async () => orcaPage.evaluate(() => window.api.agentAwake.getStatus()), {
+        timeout: 5_000,
+        message: 'Amphetamine preference did not reach the awake service'
+      })
+      .toEqual(
+        expect.objectContaining({
+          macosEngine: 'amphetamine',
+          amphetamineActive: false
+        })
+      )
 
-  // Keyboard reachability is the point of using menu items here.
-  await orcaPage.keyboard.press('ArrowDown')
-  await expect(orcaPage.locator('[data-highlighted]')).toHaveCount(1)
+    await waitForStartupFocusToSettle(orcaPage)
+    const trigger = orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' })
+    await expect(trigger).toBeVisible()
+    await trigger.click()
 
-  // The tooltips are how the two engines explain themselves, so assert their
-  // substance rather than just their presence.
-  await amphetamineEngine.hover()
-  const amphetamineTip = orcaPage.getByRole('tooltip').filter({ hasText: 'Amphetamine' })
-  await expect(amphetamineTip).toBeVisible()
-  await expect(amphetamineTip).toContainText('Amphetamine Mac app')
-  await expect(amphetamineTip).toContainText('rather than replacing it')
-
-  const tooltipProof = process.env.ORCA_AWAKE_ENGINE_TOOLTIP_PROOF_PATH
-  if (tooltipProof) {
-    await waitForStableBox(amphetamineTip)
-    await orcaPage.screenshot({
-      path: tooltipProof,
-      clip: await menuWithTooltipClip(orcaPage),
-      animations: 'disabled'
-    })
-  }
-
-  // Only the Amphetamine tooltip is asserted here: it is the one carrying the
-  // unfamiliar explanation. Caffeinate's copy is covered in
-  // AwakeEnginePicker.test.tsx, and hopping between two adjacent Radix triggers
-  // mid-test proved to assert the harness more than the product.
-
-  const enginePathProof = process.env.ORCA_AWAKE_ENGINE_MENU_PROOF_PATH
-  if (enginePathProof) {
-    // Screenshot the menu itself: it is taller than the viewport leaves room for.
-    await orcaPage.getByRole('menu').screenshot({ path: enginePathProof, animations: 'disabled' })
-  }
-
-  // A host without Amphetamine installed routes the click to the App Store
-  // listing instead of selecting a dead engine, so stop here.
-  if (!(await amphetamineEngine.isEnabled())) {
-    return
-  }
-  await amphetamineEngine.click()
-  // The engine buttons are not menu items, so switching engine leaves the menu
-  // open and the mode is still one click away.
-  await expect(amphetamineEngine).toHaveAttribute('aria-checked', 'true')
-  await expect(orcaPage.getByRole('menu')).toBeVisible()
-  await expect(orcaPage.getByRole('button', { name: /^Amphetamine, Off/ })).toBeVisible()
-
-  const engineSelectedProof = process.env.ORCA_AWAKE_ENGINE_SELECTED_PROOF_PATH
-  if (engineSelectedProof) {
-    await orcaPage
-      .getByRole('menu')
-      .screenshot({ path: engineSelectedProof, animations: 'disabled' })
-  }
+    const menu = orcaPage.getByRole('menu')
+    const effectiveStatus = menu
+      .locator('[data-slot="dropdown-menu-label"]')
+      .filter({ hasText: 'Keep awake' })
+    await expect(effectiveStatus).toContainText('Caffeinate')
+    await expect(menu.getByRole('menuitemradio', { name: 'Add Amphetamine' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
+  })
 })

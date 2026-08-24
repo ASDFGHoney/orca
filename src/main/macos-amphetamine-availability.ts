@@ -1,12 +1,6 @@
 import type { AmphetamineUnavailableReason } from '../shared/computer-awake-mode'
 
-/**
- * Whether Amphetamine is usable, and why not.
- *
- * Kept apart from the assertion because the verdict is sticky and recoverable in
- * its own right: the assertion decides what a failure means for the session it
- * holds, this decides whether the engine may be attempted at all.
- */
+/** Sticky availability verdict cleared only by an explicit retry. */
 export class AmphetamineAvailability {
   private reason: AmphetamineUnavailableReason | null = null
 
