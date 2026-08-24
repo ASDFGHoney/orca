@@ -21,6 +21,7 @@ import { CODEX_SHELL_READY_TIMEOUT_MS } from './session-shell-ready-barrier'
 import {
   CLEAN_DISCONNECT_PROTOCOL_VERSION,
   COMPLETION_PROCESS_INSPECTION_PROTOCOL_VERSION,
+  CONFIRM_FOREGROUND_PROCESS_PROTOCOL_VERSION,
   GET_FOREGROUND_PROCESS_PROTOCOL_VERSION,
   AGENT_SESSION_CLAIM_DAEMON_PROTOCOL_VERSION,
   AGENT_SESSION_CREATE_OPERATION_DAEMON_PROTOCOL_VERSION,
@@ -1622,6 +1623,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
   }
 
   async confirmForegroundProcess(id: string): Promise<string | null> {
+    if (this.protocolVersion < CONFIRM_FOREGROUND_PROCESS_PROTOCOL_VERSION) {
+      return null
+    }
     try {
       const result = await this.client.request<{ foregroundProcess: string | null }>(
         'confirmForegroundProcess',

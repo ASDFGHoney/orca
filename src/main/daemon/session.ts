@@ -250,7 +250,7 @@ export class Session {
   }
 
   async confirmForegroundProcess(): Promise<string | null> {
-    return this.subprocess.confirmForegroundProcess?.() ?? this.subprocess.getForegroundProcess()
+    return (await this.subprocess.confirmForegroundProcess?.()) ?? null
   }
 
   clearScrollback(): void {

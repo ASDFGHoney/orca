@@ -5,6 +5,7 @@ import { DaemonClient } from './client'
 import { DaemonPtyAdapter, LIVENESS_PROBE_TIMEOUT_MS } from './daemon-pty-adapter'
 import {
   COMPLETION_PROCESS_INSPECTION_PROTOCOL_VERSION,
+  CONFIRM_FOREGROUND_PROCESS_PROTOCOL_VERSION,
   GET_FOREGROUND_PROCESS_PROTOCOL_VERSION,
   GET_SIZE_PROTOCOL_VERSION,
   PROTOCOL_VERSION
@@ -608,6 +609,19 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       })
       await expect(legacy.getForegroundProcess('sess-a')).resolves.toBeNull()
       await expect(legacy.hasChildProcesses('sess-a')).resolves.toBe(true)
+      expect(request).not.toHaveBeenCalled()
+
+      legacy.dispose()
+    })
+
+    it('does not send fresh confirmation to a stale daemon', async () => {
+      const request = vi.fn(async () => ({ foregroundProcess: 'zsh' }))
+      const legacy = createInspectionAdapter(
+        CONFIRM_FOREGROUND_PROCESS_PROTOCOL_VERSION - 1,
+        request
+      )
+
+      await expect(legacy.confirmForegroundProcess('sess-a')).resolves.toBeNull()
       expect(request).not.toHaveBeenCalled()
 
       legacy.dispose()

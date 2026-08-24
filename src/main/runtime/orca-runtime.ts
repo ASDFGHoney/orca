@@ -2328,7 +2328,7 @@ type CommandFinishedLaunchAuthorityAttempt = Readonly<{
   launchIncarnationId: PtyIncarnationId | null
   incarnationId: PtyIncarnationId | null
   restoredReceipt: RestoredOrchestrationAuthorityReceipt | null
-  hookAuthorityState: AgentHookPaneAuthorityStateReceipt
+  hookAuthorityState: AgentHookPaneAuthorityStateReceipt | null
 }>
 
 type OrchestrationCompatibilitySshAttachmentAuthority = Extract<
@@ -14073,8 +14073,14 @@ export class OrcaRuntimeService {
     }
     const paneKey =
       (pty.paneKey && parsePaneKey(pty.paneKey) ? pty.paneKey : null) ?? restoredReceipt?.paneKey
-    const hookAuthorityState = paneKey ? this.captureAgentHookPaneAuthorityStateFn?.(paneKey) : null
-    if (!hookAuthorityState) {
+    const hookAuthoritySeamAvailable =
+      this.captureAgentHookPaneAuthorityStateFn !== null &&
+      this.retireAgentHookPaneAuthorityIfCurrentFn !== null
+    const hookAuthorityState =
+      hookAuthoritySeamAvailable && paneKey
+        ? (this.captureAgentHookPaneAuthorityStateFn?.(paneKey) ?? null)
+        : null
+    if (hookAuthoritySeamAvailable && !hookAuthorityState) {
       return
     }
     const attempt: CommandFinishedLaunchAuthorityAttempt = Object.freeze({
@@ -14095,7 +14101,9 @@ export class OrcaRuntimeService {
     })
     if (
       !this.isCommandFinishedLaunchAuthorityAttemptCurrent(ptyId, attempt) ||
-      !this.isAgentHookPaneAuthorityStateCurrent(attempt.hookAuthorityState)
+      (hookAuthoritySeamAvailable &&
+        (!attempt.hookAuthorityState ||
+          !this.isAgentHookPaneAuthorityStateCurrent(attempt.hookAuthorityState)))
     ) {
       return
     }
@@ -14111,13 +14119,19 @@ export class OrcaRuntimeService {
     if (!shouldRetireLaunchAuthorityOnCommandFinished(foregroundProcess)) {
       return
     }
-    if (!this.retireAgentHookPaneAuthorityIfCurrentFn?.(attempt.hookAuthorityState)) {
+    if (
+      hookAuthoritySeamAvailable &&
+      (!attempt.hookAuthorityState ||
+        !this.retireAgentHookPaneAuthorityIfCurrentFn?.(attempt.hookAuthorityState))
+    ) {
       return
     }
     if (!this.isCommandFinishedLaunchAuthorityAttemptCurrent(ptyId, attempt)) {
       return
     }
-    this.retirePtyAgentLaunchAuthority(ptyId, { hookAuthorityAlreadyRetired: true })
+    this.retirePtyAgentLaunchAuthority(ptyId, {
+      hookAuthorityAlreadyRetired: hookAuthoritySeamAvailable
+    })
   }
 
   async resolveTerminalCwd(handle: string): Promise<string | null> {

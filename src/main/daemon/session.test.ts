@@ -41,6 +41,7 @@ function createMockSubprocess() {
     getForegroundProcess(): string | null {
       return this.foregroundProcess
     },
+    confirmForegroundProcess: undefined as (() => Promise<string | null>) | undefined,
     write(data: string) {
       written.push(data)
     },
@@ -306,6 +307,17 @@ describe('Session', () => {
       createSession({ shellReadySupported: false })
       session.write('ls\n')
       expect(subprocess.written).toEqual(['ls\n'])
+    })
+  })
+
+  describe('foreground confirmation', () => {
+    it('does not fall back to cached foreground evidence', async () => {
+      createSession({ shellReadySupported: false })
+      subprocess.foregroundProcess = 'codex'
+      subprocess.confirmForegroundProcess = vi.fn(async () => null)
+
+      await expect(session.confirmForegroundProcess()).resolves.toBeNull()
+      expect(subprocess.confirmForegroundProcess).toHaveBeenCalledOnce()
     })
   })
 

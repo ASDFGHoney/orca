@@ -13314,6 +13314,32 @@ describe('OrcaRuntimeService', () => {
     ).toBeUndefined()
   })
 
+  it('retires runtime authority in a dependency-free host without hook state', async () => {
+    const harness = await createCommandFinishedRuntimeHarness({
+      ptyId: 'pty-headless-authority',
+      confirmForegroundProcess: async () => 'zsh',
+      authorityDeps: {
+        captureAgentHookPaneAuthorityState: undefined,
+        retireAgentHookPaneAuthorityIfCurrent: undefined
+      }
+    })
+
+    vi.useFakeTimers()
+    try {
+      harness.runtime.onPtyData('pty-headless-authority', '\x1b]133;D;0\x07', 100)
+      await vi.advanceTimersByTimeAsync(COMMAND_FINISHED_LAUNCH_AUTHORITY_SETTLE_MS)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(harness.confirmForegroundProcess).toHaveBeenCalledOnce()
+    expect(
+      harness.runtime.getAgentStatusLaunchConfigForPaneKey(harness.paneKey, {
+        launchToken: harness.launchToken
+      })
+    ).toBeUndefined()
+  })
+
   it('conditionally retires canonical AgentHookServer authority before clearing runtime launch authority', async () => {
     const spawn = vi
       .fn()

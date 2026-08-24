@@ -15,4 +15,8 @@ describe('isShellProcess', () => {
   it('does not classify an unknown foreground process as a shell', () => {
     expect(isShellProcess('node')).toBe(false)
   })
+
+  it.each(['', '/'])('does not classify %j as a shell', (processName) => {
+    expect(isShellProcess(processName)).toBe(false)
+  })
 })
