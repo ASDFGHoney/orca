@@ -71,8 +71,43 @@ describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
     expect(state.automaticAgentResumeClaimsByTabId[resumedTab.id]).toEqual({
       worktreeId: record.worktreeId,
       launchAgent: record.agent,
-      providerSession: record.providerSession
+      providerSession: record.providerSession,
+      sleepingAgentResumeIdentity: {
+        paneKey: record.paneKey,
+        capturedAt: record.capturedAt
+      }
     })
+  })
+
+  it('retains a same-pane replacement while a stale resume sweep claim is in flight', () => {
+    const original = makeRecord({ capturedAt: 1, updatedAt: 1 })
+    const replacement = makeRecord({ capturedAt: 2, updatedAt: 2 })
+    useAppStore.setState({
+      tabsByWorktree: { 'wt-1': [] },
+      sleepingAgentSessionsByPaneKey: { [original.paneKey]: original }
+    } as never)
+
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(1)
+    const resumedTab = useAppStore.getState().tabsByWorktree['wt-1']![0]!
+    useAppStore.setState({
+      sleepingAgentSessionsByPaneKey: { [replacement.paneKey]: replacement }
+    } as never)
+
+    // The marked startup matches the provider session but belongs to the
+    // replaced capture; it must dedupe without deleting the replacement.
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[replacement.paneKey]).toBe(
+      replacement
+    )
+
+    // Once startup is consumed, the runtime claim is the remaining dedupe
+    // evidence and must preserve the replacement for a later fresh spawn.
+    expect(useAppStore.getState().consumeTabStartupCommand(resumedTab.id)).not.toBeNull()
+    expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[replacement.paneKey]).toBe(
+      replacement
+    )
   })
 
   it('does not fork a provider session that is already queued', () => {
@@ -112,7 +147,7 @@ describe('resumeSleepingAgentSessionsForWorktree replay protection', () => {
     } as never)
     expect(resumeSleepingAgentSessionsForWorktree('wt-1')).toBe(0)
     expect(useAppStore.getState().tabsByWorktree['wt-1']).toHaveLength(1)
-    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBeUndefined()
+    expect(useAppStore.getState().sleepingAgentSessionsByPaneKey[record.paneKey]).toBe(record)
   })
 
   it('does not fork when the same provider session is already live', () => {

@@ -81,11 +81,19 @@ function getAgentStatusTabId(entry: {
   return separatorIndex === -1 ? null : entry.paneKey.slice(0, separatorIndex)
 }
 
+type ResumeClaimResult = {
+  claimed: boolean
+  /** A marker ties the claim to this pane incarnation; retain until spawn. */
+  preserveRecord: boolean
+}
+
 function activeOrQueuedResumeClaimsProviderSession(
   record: SleepingAgentSessionRecord,
   state: ReturnType<typeof useAppStore.getState>,
   samePaneOwnsRecovery: boolean
-): boolean {
+): ResumeClaimResult {
+  let sawClaim = false
+  let preserveRecord = false
   const worktreeTabIds = new Set(
     (state.tabsByWorktree[record.worktreeId] ?? []).map((tab) => tab.id)
   )
@@ -101,7 +109,7 @@ function activeOrQueuedResumeClaimsProviderSession(
       entry.state !== 'done' &&
       agentProviderSessionsEqual(record.agent, entry.providerSession, record.providerSession)
     ) {
-      return true
+      sawClaim = true
     }
   }
 
@@ -115,7 +123,11 @@ function activeOrQueuedResumeClaimsProviderSession(
         record.providerSession
       )
     ) {
-      return true
+      sawClaim = true
+      const identity = startup.sleepingAgentResumeIdentity
+      if (identity?.paneKey === record.paneKey) {
+        preserveRecord = true
+      }
     }
   }
 
@@ -126,10 +138,14 @@ function activeOrQueuedResumeClaimsProviderSession(
       claim.launchAgent === record.agent &&
       agentProviderSessionsEqual(record.agent, claim.providerSession, record.providerSession)
     ) {
-      return true
+      sawClaim = true
+      const identity = claim.sleepingAgentResumeIdentity
+      if (identity?.paneKey === record.paneKey) {
+        preserveRecord = true
+      }
     }
   }
-  return false
+  return { claimed: sawClaim, preserveRecord }
 }
 
 function isSleepingResumeStartupInFlight(
@@ -253,10 +269,14 @@ export function resumeSleepingAgentSessionsForWorktree(
       // proved a fresh PTY; preserve the record for a later spawn or retry.
       continue
     }
-    if (activeOrQueuedResumeClaimsProviderSession(record, currentState, isPaneOwned)) {
+    const resumeClaim = activeOrQueuedResumeClaimsProviderSession(record, currentState, isPaneOwned)
+    if (resumeClaim.claimed) {
       // Why: main can replay the old wake record after the same provider
-      // session was already queued in a fresh tab; clear the stale replay.
-      state.clearSleepingAgentSession(record.paneKey)
+      // session was already queued in a fresh tab; clear an unmarked stale
+      // replay, but retain marked records until their fresh PTY spawn.
+      if (!resumeClaim.preserveRecord) {
+        state.clearSleepingAgentSession(record.paneKey)
+      }
       continue
     }
     const paneOwnedClaimKeys = getCurrentPaneOwnedClaimKeys(activeWorktreeRecords)

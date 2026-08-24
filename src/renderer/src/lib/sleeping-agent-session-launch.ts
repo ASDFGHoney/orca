@@ -126,7 +126,11 @@ export function launchSleepingAgentSession(
   state.claimAutomaticAgentResume(tab.id, {
     worktreeId: record.worktreeId,
     launchAgent: record.agent,
-    providerSession: record.providerSession
+    providerSession: record.providerSession,
+    sleepingAgentResumeIdentity: {
+      paneKey: record.paneKey,
+      capturedAt: record.capturedAt
+    }
   })
   if (!options?.suppressNavigation) {
     state.setActiveTabType('terminal')
