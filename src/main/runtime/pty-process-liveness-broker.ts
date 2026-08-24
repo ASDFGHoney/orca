@@ -12,12 +12,10 @@ import {
   maxConcurrentUnscopedProbes,
   processEvidenceKey
 } from './pty-process-liveness-broker-state'
-
 export type {
   PtyProcessInspectionSource,
   PtyProcessLivenessEvidence
 } from './pty-process-inspection'
-
 type PtyProcessEvidenceEntry = {
   source: PtyProcessInspectionSource
   identity: string
@@ -32,7 +30,6 @@ type PtyProcessEvidenceEntry = {
   timedOut: boolean
   probe: Promise<PtyProcessLivenessEvidence> | null
 }
-
 export type PtyProcessLivenessBrokerOptions = {
   timeoutMs: number
   maxConcurrentProbes?: number
@@ -43,17 +40,14 @@ export type PtyProcessLivenessBrokerOptions = {
   now?: () => number
   onInspectionError?: (ptyId: string, error: unknown) => void
 }
-
 export class PtyProcessLivenessBroker {
   private readonly entries = new Map<string, PtyProcessEvidenceEntry>()
   private readonly now: () => number
   private activeProbeCount = 0
   private activeUnscopedProbeCount = 0
-
   constructor(private readonly options: PtyProcessLivenessBrokerOptions) {
     this.now = options.now ?? Date.now
   }
-
   inspect(args: {
     source: PtyProcessInspectionSource
     ptyId: string
@@ -208,23 +202,34 @@ export class PtyProcessLivenessBroker {
         return { status: 'unverifiable', reason: describeProcessInspectionError(error) }
       })
     entry.probe = probe.finally(() => {
-      this.activeProbeCount -= 1
-      if (entry.unscopedProbe) {
-        this.activeUnscopedProbeCount -= 1
+      if (this.entries.get(args.ptyId) === entry) {
+        this.activeProbeCount -= 1
+        if (entry.unscopedProbe) {
+          this.activeUnscopedProbeCount -= 1
+        }
       }
     })
     this.entries.set(args.ptyId, entry)
     return this.waitForProbe(args.ptyId, entry, waitMs)
   }
-
   invalidate(ptyId: string): void {
+    const entry = this.entries.get(ptyId)
+    if (!entry) {
+      return
+    }
     this.entries.delete(ptyId)
+    if (entry.probe) {
+      this.activeProbeCount -= 1
+      if (entry.unscopedProbe) {
+        this.activeUnscopedProbeCount -= 1
+      }
+    }
   }
-
   invalidateAll(): void {
     this.entries.clear()
+    this.activeProbeCount = 0
+    this.activeUnscopedProbeCount = 0
   }
-
   retainConsumerEvidence(
     consumerId: string,
     retained: readonly Readonly<{ ptyId: string; identity: string }>[]
@@ -241,11 +246,10 @@ export class PtyProcessLivenessBroker {
       }
       entry.consumerIds.delete(consumerId)
       if (!entry.hasUnscopedConsumer && entry.consumerIds.size === 0) {
-        this.entries.delete(ptyId)
+        this.invalidate(ptyId)
       }
     }
   }
-
   getPendingCount(): number {
     let count = 0
     for (const entry of this.entries.values()) {
@@ -255,19 +259,15 @@ export class PtyProcessLivenessBroker {
     }
     return count
   }
-
   getActiveProbeCount(): number {
     return this.activeProbeCount
   }
-
   getActiveUnscopedProbeCount(): number {
     return this.activeUnscopedProbeCount
   }
-
   getEntryCount(): number {
     return this.entries.size
   }
-
   private waitForProbe(
     ptyId: string,
     entry: PtyProcessEvidenceEntry,
@@ -295,13 +295,11 @@ export class PtyProcessLivenessBroker {
       })
     })
   }
-
   private unavailableBackoffMs(failureCount: number): number {
     const base = this.options.unavailableBackoffBaseMs ?? DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS
     const max = this.options.unavailableBackoffMaxMs ?? DEFAULT_UNAVAILABLE_BACKOFF_MAX_MS
     return Math.min(max, base * 2 ** Math.max(0, failureCount - 1))
   }
-
   private rememberConsumer(entry: PtyProcessEvidenceEntry, consumerId: string | undefined): void {
     if (consumerId === undefined) {
       entry.hasUnscopedConsumer = true
@@ -309,7 +307,6 @@ export class PtyProcessLivenessBroker {
       entry.consumerIds.add(consumerId)
     }
   }
-
   private storeUnverifiable(entry: PtyProcessEvidenceEntry, reason: string): void {
     entry.failureCount += 1
     entry.evidence = { status: 'unverifiable', reason }

@@ -48,6 +48,31 @@ describe('PtyProcessLivenessBroker', () => {
     expect(inspectProcess).toHaveBeenCalledOnce()
   })
 
+  it('releases admission slots when an in-flight controller probe is invalidated', async () => {
+    const oldInspection = new Promise<{ foregroundProcess: string; hasChildProcesses: boolean }>(
+      () => {}
+    )
+    const inspectProcess = vi
+      .fn()
+      .mockReturnValueOnce(oldInspection)
+      .mockResolvedValue({ foregroundProcess: 'codex', hasChildProcesses: true })
+    const source = { getForegroundProcess: vi.fn(async () => null), inspectProcess }
+    const broker = new PtyProcessLivenessBroker({ timeoutMs: 100, maxConcurrentProbes: 1 })
+
+    void broker.inspect({ source, ptyId: 'old-pty', identity: 'old-incarnation' })
+    expect(broker.getActiveProbeCount()).toBe(1)
+    broker.invalidateAll()
+
+    await expect(
+      broker.inspect({ source, ptyId: 'new-pty', identity: 'new-incarnation' })
+    ).resolves.toEqual({
+      status: 'live',
+      foregroundProcess: 'codex',
+      hasChildProcesses: true
+    })
+    expect(broker.getActiveProbeCount()).toBe(0)
+  })
+
   it('bounds hanging probes across PTYs and prunes retired consumer entries', async () => {
     vi.useFakeTimers()
     const resolvers: ((value: {
@@ -80,7 +105,7 @@ describe('PtyProcessLivenessBroker', () => {
 
     broker.retainConsumerEvidence('restored-agent', [])
     expect(broker.getEntryCount()).toBe(0)
-    expect(broker.getActiveProbeCount()).toBe(2)
+    expect(broker.getActiveProbeCount()).toBe(0)
 
     for (const resolve of resolvers) {
       resolve({ foregroundProcess: 'codex', hasChildProcesses: true })
