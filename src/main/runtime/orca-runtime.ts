@@ -13459,6 +13459,12 @@ export class OrcaRuntimeService {
       read.tail.length === 0 &&
       !recoveredWorkerFallback &&
       this.isKnownUnattachedLocalDaemonPty(ptyId)
+    if (
+      (recoveredWorkerFallback || neverAttachedProviderFallback) &&
+      (this.providerVisibleRetryAtByPtyId.get(ptyId) ?? 0) > Date.now()
+    ) {
+      return read
+    }
     if (recoveredWorkerFallback || neverAttachedProviderFallback) {
       const providerLines = await this.readProviderTerminalTailLines(
         ptyId,
@@ -13503,15 +13509,33 @@ export class OrcaRuntimeService {
   private async readProviderTerminalTailLines(
     ptyId: string,
     limit: number | undefined,
-    wait: { timeoutMs?: number; retireOnTimeout?: boolean } = {}
+    wait: { timeoutMs?: number; retireOnTimeout?: boolean } = {},
+    visibleOnly = false
   ): Promise<string[]> {
-    const lineLimit = terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
+    const lineLimit = visibleOnly ? 0 : terminalReadLimit(limit, DEFAULT_TERMINAL_READ_LIMIT)
     const snapshot = await this.serializeProviderTerminalBuffer(
       ptyId,
       { scrollbackRows: lineLimit },
       wait
     )
-    const data = snapshot ? `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}` : ''
+    if (!snapshot && wait.retireOnTimeout) {
+      this.providerVisibleRetryAtByPtyId.set(
+        ptyId,
+        Date.now() + VISIBLE_TERMINAL_SNAPSHOT_RETRY_MS
+      )
+    }
+    if (
+      snapshot &&
+      this.getPtyOutputSequence(ptyId) > snapshot.seq &&
+      !this.providerSnapshotsWithLiveModeTransition.has(snapshot)
+    ) {
+      return []
+    }
+    const data = snapshot
+      ? visibleOnly
+        ? snapshot.data
+        : `${snapshot.scrollbackAnsi ?? ''}${snapshot.data}`
+      : ''
     if (!snapshot || data.length === 0) {
       return []
     }
@@ -13522,7 +13546,9 @@ export class OrcaRuntimeService {
     })
     try {
       await emulator.write(data)
-      return visibleNonBlankTerminalLines(emulator.getBufferTailLines(lineLimit))
+      return visibleNonBlankTerminalLines(
+        visibleOnly ? emulator.getVisibleLines() : emulator.getBufferTailLines(lineLimit)
+      )
     } finally {
       emulator.dispose()
     }
@@ -13589,7 +13615,13 @@ export class OrcaRuntimeService {
       return null
     }
     this.providerVisibleRetryAtByPtyId.delete(ptyId)
-    if (this.providerSnapshotsWithLiveModeTransition.has(snapshot)) {
+    const snapshotHasLiveModeTransition = this.providerSnapshotsWithLiveModeTransition.has(snapshot)
+    if (this.getPtyOutputSequence(ptyId) > snapshot.seq && !snapshotHasLiveModeTransition) {
+      // A provider frame without a live mode transition is stale as soon as
+      // newer bytes have entered the runtime stream.
+      return null
+    }
+    if (snapshotHasLiveModeTransition) {
       // Why: the provider frame can predate a mode switch observed while its
       // RPC was pending; the ordered live emulator owns the post-switch grid.
       const liveState = await this.readHeadlessVisibleTerminalState(ptyId)
@@ -18578,7 +18610,7 @@ export class OrcaRuntimeService {
     if (pty) {
       const read = this.readPtyTerminal(handle, pty.pty, opts)
       const visibleRead = opts.screen
-        ? await this.readRenderedScreen(pty.pty.ptyId, read, opts)
+        ? await this.readRenderedScreen(pty.pty.ptyId, read, opts, providerWait)
         : await this.withVisibleSnapshotFallback(pty.pty.ptyId, read, opts, providerWait)
       this.assertLiveTerminalHandleTargetsPty(handle, pty.pty.ptyId)
       return labelTerminalReadSource(visibleRead)
@@ -18600,7 +18632,7 @@ export class OrcaRuntimeService {
       return { ...read, source: opts.screen ? 'screen-unavailable' : 'stream' }
     }
     const visibleRead = opts.screen
-      ? await this.readRenderedScreen(leaf.ptyId, read, opts)
+      ? await this.readRenderedScreen(leaf.ptyId, read, opts, providerWait)
       : await this.withVisibleSnapshotFallback(leaf.ptyId, read, opts, providerWait)
     this.assertLiveTerminalHandleTargetsPty(handle, leaf.ptyId)
     return labelTerminalReadSource(visibleRead)
@@ -18618,11 +18650,22 @@ export class OrcaRuntimeService {
   private async readRenderedScreen(
     ptyId: string,
     read: RuntimeTerminalRead,
-    opts: { limit?: number } = {}
+    opts: { limit?: number } = {},
+    providerWait: { timeoutMs?: number; retireOnTimeout?: boolean } = {}
   ): Promise<RuntimeTerminalRead> {
-    const visibleState = await this.readVisibleTerminalState(ptyId)
-    const lines =
-      visibleState?.lines ?? (await this.readProviderTerminalTailLines(ptyId, opts.limit))
+    const recoveredWorker = this.legacyWorkerRecoveredPtys.has(ptyId)
+    const visibleState = recoveredWorker ? null : await this.readVisibleTerminalState(ptyId)
+    let lines =
+      visibleState?.lines ??
+      (await this.readProviderTerminalTailLines(
+        ptyId,
+        opts.limit,
+        providerWait,
+        recoveredWorker
+      ))
+    if (lines.length === 0) {
+      lines = await this.readRendererVisibleSnapshotLines(ptyId)
+    }
     if (lines.length === 0) {
       return { ...read, source: 'screen-unavailable' }
     }
@@ -19742,11 +19785,18 @@ export class OrcaRuntimeService {
       if (condition === 'tui-idle' && ptyBlockedReason) {
         return buildPtyTerminalWaitBlockedResult(handle, condition, pty.pty, ptyBlockedReason)
       }
-      if (condition === 'tui-idle' && pty.pty.lastAgentStatus === 'idle') {
+      const providerIdleProbeRequired = this.requiresProviderTuiIdleProbe(pty.pty.ptyId)
+      if (
+        condition === 'tui-idle' &&
+        pty.pty.lastAgentStatus === 'idle' &&
+        pty.pty.lastAgentStatusObservedLive &&
+        !providerIdleProbeRequired
+      ) {
         return buildPtyTerminalWaitResult(handle, condition, pty.pty)
       }
       if (
         condition === 'tui-idle' &&
+        !providerIdleProbeRequired &&
         (this.getAdoptedPtyExplicitIdleStatus(pty.pty) === 'idle' ||
           isKnownReadyPromptPreview(ptyWaitText))
       ) {
@@ -19802,11 +19852,17 @@ export class OrcaRuntimeService {
               waiter,
               buildPtyTerminalWaitBlockedResult(handle, condition, live.pty, blockedReason)
             )
-          } else if (live.pty.lastAgentStatus === 'idle') {
+          } else if (
+            live.pty.lastAgentStatus === 'idle' &&
+            live.pty.lastAgentStatusObservedLive &&
+            !this.requiresProviderTuiIdleProbe(live.pty.ptyId)
+          ) {
             this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else if (
-            this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle' ||
-            isKnownReadyPromptPreview(livePtyWaitText)
+            (!this.requiresProviderTuiIdleProbe(live.pty.ptyId) &&
+              this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle') ||
+            (!this.requiresProviderTuiIdleProbe(live.pty.ptyId) &&
+              isKnownReadyPromptPreview(livePtyWaitText))
           ) {
             this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else {
@@ -19832,14 +19888,23 @@ export class OrcaRuntimeService {
     // detection that powers the renderer's "Task complete" notifications.
     // Why: only 'idle' satisfies tui-idle, not 'permission'. Permission means the
     // agent is blocked on user approval, not finished with its task.
-    if (condition === 'tui-idle' && leaf.lastAgentStatus === 'idle') {
+    const providerIdleProbeRequired = leaf.ptyId
+      ? this.requiresProviderTuiIdleProbe(leaf.ptyId)
+      : false
+    if (
+      condition === 'tui-idle' &&
+      leaf.lastAgentStatus === 'idle' &&
+      leaf.lastAgentStatusObservedLive &&
+      !providerIdleProbeRequired
+    ) {
       return buildTerminalWaitResult(handle, condition, leaf)
     }
     if (condition === 'tui-idle') {
       const fastPathTitle = leaf.paneTitle ?? this.tabs.get(leaf.tabId)?.title
       if (
-        (fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
-        isKnownReadyPromptPreview(leafWaitText)
+        !providerIdleProbeRequired &&
+        ((fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
+          isKnownReadyPromptPreview(leafWaitText))
       ) {
         return buildTerminalWaitResult(handle, condition, leaf)
       }
@@ -19904,7 +19969,11 @@ export class OrcaRuntimeService {
               waiter,
               buildTerminalWaitBlockedResult(handle, condition, live.leaf, blockedReason)
             )
-          } else if (live.leaf.lastAgentStatus === 'idle') {
+          } else if (
+            live.leaf.lastAgentStatus === 'idle' &&
+            live.leaf.lastAgentStatusObservedLive &&
+            !(live.leaf.ptyId && this.requiresProviderTuiIdleProbe(live.leaf.ptyId))
+          ) {
             // Why: don't clear lastAgentStatus here. It's a factual record of the
             // last detected OSC state, not a one-shot signal. Clearing it causes
             // subsequent tui-idle waiters to hang even though the agent is idle —
@@ -19915,9 +19984,13 @@ export class OrcaRuntimeService {
             // while the last OSC title is still "working"; keep polling the
             // preview/title until the waiter resolves or hits its timeout.
             const fastPathTitle = live.leaf.paneTitle ?? this.tabs.get(live.leaf.tabId)?.title
+            const liveProviderIdleProbeRequired = live.leaf.ptyId
+              ? this.requiresProviderTuiIdleProbe(live.leaf.ptyId)
+              : false
             if (
-              (fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
-              isKnownReadyPromptPreview(liveLeafWaitText)
+              !liveProviderIdleProbeRequired &&
+              ((fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
+                isKnownReadyPromptPreview(liveLeafWaitText))
             ) {
               this.resolveWaiter(waiter, buildTerminalWaitResult(handle, condition, live.leaf))
             } else {
@@ -35519,7 +35592,14 @@ export class OrcaRuntimeService {
       }
       let startedForegroundPoll = false
       try {
-        if (leaf.lastAgentStatus === 'idle') {
+        const providerIdleProbeRequired = leaf.ptyId
+          ? this.requiresProviderTuiIdleProbe(leaf.ptyId)
+          : false
+        if (
+          leaf.lastAgentStatus === 'idle' &&
+          leaf.lastAgentStatusObservedLive &&
+          !providerIdleProbeRequired
+        ) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -35557,7 +35637,7 @@ export class OrcaRuntimeService {
           )
           return
         }
-        if (isKnownReadyPromptPreview(leafWaitText)) {
+        if (!providerIdleProbeRequired && isKnownReadyPromptPreview(leafWaitText)) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -35599,7 +35679,11 @@ export class OrcaRuntimeService {
       leaf.tailPartialLine,
       leaf.preview
     )
-    if (leaf.lastAgentStatus === null && retainedWaitText.length === 0) {
+    if (
+      (leaf.lastAgentStatus === null ||
+        (leaf.ptyId ? this.requiresProviderTuiIdleProbe(leaf.ptyId) : false)) &&
+      retainedWaitText.length === 0
+    ) {
       this.startTuiIdleVisibleReadProbe(waiter, waiterTimeoutMs)
     }
   }
@@ -35616,7 +35700,12 @@ export class OrcaRuntimeService {
       }
       let startedForegroundPoll = false
       try {
-        if (pty.lastAgentStatus === 'idle') {
+      const providerIdleProbeRequired = this.requiresProviderTuiIdleProbe(pty.ptyId)
+        if (
+          pty.lastAgentStatus === 'idle' &&
+          pty.lastAgentStatusObservedLive &&
+          !providerIdleProbeRequired
+        ) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -35639,8 +35728,8 @@ export class OrcaRuntimeService {
         }
         // Why: adopted background PTY handles use their live xterm title as the same readiness signal as leaf handles.
         if (
-          this.getAdoptedPtyExplicitIdleStatus(pty) === 'idle' ||
-          isKnownReadyPromptPreview(ptyWaitText)
+          (!providerIdleProbeRequired && this.getAdoptedPtyExplicitIdleStatus(pty) === 'idle') ||
+          (!providerIdleProbeRequired && isKnownReadyPromptPreview(ptyWaitText))
         ) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
@@ -35673,7 +35762,10 @@ export class OrcaRuntimeService {
       }
     }, TUI_IDLE_POLL_INTERVAL_MS)
     const retainedWaitText = buildTerminalWaitText(pty.tailBuffer, pty.tailPartialLine, pty.preview)
-    if (pty.lastAgentStatus === null && retainedWaitText.length === 0) {
+    if (
+      (pty.lastAgentStatus === null || this.requiresProviderTuiIdleProbe(pty.ptyId)) &&
+      retainedWaitText.length === 0
+    ) {
       this.startTuiIdleVisibleReadProbe(waiter, waiterTimeoutMs)
     }
   }
@@ -35686,7 +35778,7 @@ export class OrcaRuntimeService {
     void withTimeout(
       this.readTerminal(
         waiter.handle,
-        {},
+        this.shouldUseProviderTuiIdleScreenProbe(waiter.handle) ? { screen: true } : {},
         {
           timeoutMs: snapshotTimeoutMs,
           retireOnTimeout: true
@@ -35748,6 +35840,25 @@ export class OrcaRuntimeService {
       }
     }
     return null
+  }
+
+  private requiresProviderTuiIdleProbe(ptyId: string): boolean {
+    return (
+      this.providerSnapshotPreferredPtys.has(ptyId) || this.legacyWorkerRecoveredPtys.has(ptyId)
+    )
+  }
+
+  private shouldUseProviderTuiIdleScreenProbe(handle: string): boolean {
+    const pty = this.getLivePtyForHandle(handle)
+    if (pty) {
+      return this.requiresProviderTuiIdleProbe(pty.pty.ptyId)
+    }
+    try {
+      const { leaf } = this.getLiveLeafForHandle(handle)
+      return leaf.ptyId ? this.requiresProviderTuiIdleProbe(leaf.ptyId) : false
+    } catch {
+      return false
+    }
   }
 
   private resolveWaiter(waiter: TerminalWaiter, result: RuntimeTerminalWait): void {
