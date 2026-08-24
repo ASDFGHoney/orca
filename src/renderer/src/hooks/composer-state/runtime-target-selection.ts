@@ -1,6 +1,6 @@
 import type { ComposerRuntimeTargetSelectionInput } from './composer-target-input-contracts'
 
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { getFolderSourceRepos } from '@/components/sidebar/folder-workspace-composer-helpers'
 import { parseExecutionHostId, getRepoExecutionHostId } from '../../../../shared/execution-host'
 import { getSelectedRepoSshGate } from '@/lib/new-workspace-ssh-gate'
@@ -240,7 +240,9 @@ export function useComposerRuntimeTargetSelection(input: ComposerRuntimeTargetSe
 
   const repoIdRef = useRef(repoId)
 
-  repoIdRef.current = repoId
+  useEffect(() => {
+    repoIdRef.current = repoId
+  }, [repoId])
 
   return {
     isProjectGroupTarget,

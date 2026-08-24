@@ -82,7 +82,9 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const setupAgentStartupPolicyRef = useRef(setupAgentStartupPolicy)
 
-  setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
+  useEffect(() => {
+    setupAgentStartupPolicyRef.current = setupAgentStartupPolicy
+  }, [setupAgentStartupPolicy])
 
   const setupAgentStartupPolicySaveRef = useRef<{
     repoId: string
@@ -137,8 +139,6 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const nameRef = useRef<string>(name)
 
-  nameRef.current = name
-
   const branchAutoNameRef = useRef<string>('')
 
   // Why: the note we auto-prefilled from a Start-from PR pick, so a later PR change can replace it without clobbering user-typed text.
@@ -147,7 +147,10 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   // Why: let handleBaseBranchPrSelect read the latest note without adding it to deps (would rebuild the callback on every keystroke).
   const noteRef = useRef<string>(note)
 
-  noteRef.current = note
+  useEffect(() => {
+    nameRef.current = name
+    noteRef.current = note
+  }, [name, note])
 
   // Why: PR checkout refs resolve async, so submit can still see the linked PR as a checkout source if Create fires before the resolver settles.
   const smartGitHubPrStartPointSelectionRef = useRef<SmartGitHubPrStartPointSelection | null>(
@@ -187,15 +190,9 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
   // Why: mirror agentPrompt into a ref so the once-mounted file-drop listener reads it fresh without re-subscribing, which would reorder composerDropStack.
   const agentPromptRef = useRef(agentPrompt)
 
-  agentPromptRef.current = agentPrompt
-
   const connectionIdRef = useRef(connectionId)
 
-  connectionIdRef.current = connectionId
-
   const selectedRepoConnectionIdRef = useRef(selectedRepoConnectionId)
-
-  selectedRepoConnectionIdRef.current = selectedRepoConnectionId
 
   // Why: compare the full host-aware identity before linking a pasted PR URL to this repo.
   const [selectedRepoSlug, setSelectedRepoSlug] = useState<GitHubRepositoryIdentity | null>(null)
@@ -204,11 +201,15 @@ export function useComposerAsyncState(input: ComposerAsyncStateInput) {
 
   const selectedRepoPathRef = useRef<string | undefined>(selectedRepoPath)
 
-  selectedRepoPathRef.current = selectedRepoPath
-
   const selectedRepoSettingsRef = useRef(selectedRepoSettings)
 
-  selectedRepoSettingsRef.current = selectedRepoSettings
+  useEffect(() => {
+    agentPromptRef.current = agentPrompt
+    connectionIdRef.current = connectionId
+    selectedRepoConnectionIdRef.current = selectedRepoConnectionId
+    selectedRepoPathRef.current = selectedRepoPath
+    selectedRepoSettingsRef.current = selectedRepoSettings
+  }, [agentPrompt, connectionId, selectedRepoConnectionId, selectedRepoPath, selectedRepoSettings])
 
   return {
     yamlHooks,

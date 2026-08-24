@@ -7,7 +7,9 @@ export function useComposerDropListener(
   applyDrop: (paths: string[], isCurrentOwner: () => boolean) => void
 ): void {
   const applyDropRef = useRef(applyDrop)
-  applyDropRef.current = applyDrop
+  useEffect(() => {
+    applyDropRef.current = applyDrop
+  }, [applyDrop])
   const instanceIdRef = useRef(Symbol('composer'))
 
   useEffect(() => {

@@ -131,15 +131,11 @@ export function useComposerInitialTargetState(input: ComposerInitialTargetStateI
     [actionableHostIds, projectGroups, selectedProjectGroupId]
   )
 
-  useEffect(() => {
-    if (selectedProjectGroupId && !selectedProjectGroup) {
-      setSelectedProjectGroupId(null)
-    }
-  }, [selectedProjectGroup, selectedProjectGroupId])
+  const effectiveSelectedProjectGroupId = selectedProjectGroup ? selectedProjectGroupId : null
 
   useEffect(() => {
     if (
-      selectedProjectGroupId ||
+      effectiveSelectedProjectGroupId ||
       !initialFolderProjectGroupId ||
       initialProjectGroupAppliedRef.current
     ) {
@@ -154,7 +150,12 @@ export function useComposerInitialTargetState(input: ComposerInitialTargetStateI
       initialProjectGroupAppliedRef.current = true
       setSelectedProjectGroupId(nextGroup.id)
     }
-  }, [actionableHostIds, initialFolderProjectGroupId, projectGroups, selectedProjectGroupId])
+  }, [
+    actionableHostIds,
+    effectiveSelectedProjectGroupId,
+    initialFolderProjectGroupId,
+    projectGroups
+  ])
 
   return {
     draftRepoId,
@@ -172,7 +173,7 @@ export function useComposerInitialTargetState(input: ComposerInitialTargetStateI
     setSelectedProjectHostSetupOverrideId,
     initialFolderProjectGroupId,
     initialFolderProjectGroup,
-    selectedProjectGroupId,
+    selectedProjectGroupId: effectiveSelectedProjectGroupId,
     setSelectedProjectGroupId,
     initialProjectGroupAppliedRef,
     projectError,

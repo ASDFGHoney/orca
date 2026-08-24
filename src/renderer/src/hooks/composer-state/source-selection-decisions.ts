@@ -1,13 +1,11 @@
-import type { GitHubPrStartPoint } from '../../../../shared/worktree/types'
+import type { GitHubPrStartPoint, GitPushTarget } from '../../../../shared/worktree/types'
 import type { GitHubWorkItem } from '../../../../shared/github/work-item-types'
-import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
+import { getLinkedWorkItemProvider, type LinkedWorkItemSummary } from '@/lib/new-workspace'
 import type { SmartGitHubSubmitResolution } from '@/lib/smart-github-submit'
 import {
   resolveGitHubWorkItemIdentity,
   type GitHubWorkItemIdentity
 } from '@/lib/github-work-item-identity'
-import { getLinkedWorkItemProvider } from '@/lib/new-workspace'
-import type { GitPushTarget } from '../../../../shared/worktree/types'
 
 export type PendingSmartGitHubSubmitResolution =
   | { kind: 'none' }

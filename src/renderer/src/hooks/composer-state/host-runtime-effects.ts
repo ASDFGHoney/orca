@@ -170,8 +170,6 @@ export function useHostRuntimeEffects(input: HostRuntimeEffectsInput) {
     return () => {
       cancelled = true
     }
-    // Why: repo identity fields stay stable when updateRepo replaces the repo object by reference.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     commitHookCheckIfCurrent,
     createGateMode,
