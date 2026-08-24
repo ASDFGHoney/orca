@@ -63,4 +63,25 @@ describe('worktree host identity', () => {
   it('rejects identities without a host separator', () => {
     expect(getExecutionHostIdFromWorktreeHostIdentity('ssh:build-box')).toBeUndefined()
   })
+
+  // An unqualified row must not be assumed local: a destructive action keyed off
+  // this would then run against the wrong host.
+  it('leaves an unqualified identity without a host', () => {
+    expect(
+      getExecutionHostIdFromWorktreeHostIdentity(
+        composeWorktreeHostIdentity(undefined, WORKTREE_ID)
+      )
+    ).toBeUndefined()
+  })
+
+  it('recovers the host from a qualified identity', () => {
+    expect(
+      getExecutionHostIdFromWorktreeHostIdentity(composeWorktreeHostIdentity('local', WORKTREE_ID))
+    ).toBe('local')
+    expect(
+      getExecutionHostIdFromWorktreeHostIdentity(
+        composeWorktreeHostIdentity(toSshExecutionHostId('build-box'), WORKTREE_ID)
+      )
+    ).toBe(toSshExecutionHostId('build-box'))
+  })
 })
