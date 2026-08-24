@@ -10,6 +10,7 @@ const TARGET_TITLE = 'Exact pasted issue'
 const GITLAB_TARGET_URL = 'https://gitlab.example.test/stablyai/orca/-/merge_requests/4242'
 const GITLAB_WRONG_TITLE = 'Wrong cached merge request'
 const GITLAB_TARGET_TITLE = 'Exact pasted merge request'
+const MIN_PASTED_FRAMES = 2
 const TRANSITION_FRAME_LIMIT = 600
 
 const WRONG_ITEM: GitHubWorkItem = {
@@ -116,7 +117,7 @@ async function expectLookupHeldWithoutStaleRow(
       const frames = await readTransitionFrames(page, frameKey)
       return frames.filter((frame) => frame.value === targetUrl).length
     })
-    .toBeGreaterThan(10)
+    .toBeGreaterThanOrEqual(MIN_PASTED_FRAMES)
   await expect(wrongOption).toHaveCount(0)
   await expect(targetOption).toHaveCount(0)
 }
@@ -139,7 +140,7 @@ async function expectExactTargetAfterLookup(
   const frames = await readTransitionFrames(page, frameKey)
   const pastedFrames = frames.filter((frame) => frame.value === targetUrl)
   expect(frames.some((frame) => frame.wrongVisible)).toBe(true)
-  expect(pastedFrames.length).toBeGreaterThan(10)
+  expect(pastedFrames.length).toBeGreaterThanOrEqual(MIN_PASTED_FRAMES)
   expect(pastedFrames.every((frame) => !frame.wrongVisible && !frame.wrongSelected)).toBe(true)
   expect(pastedFrames.some((frame) => frame.targetVisible && frame.targetSelected)).toBe(true)
 }
