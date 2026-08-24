@@ -71,6 +71,14 @@ export const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
  * caller the same dead promise.
  */
 const PROCESS_EXIT_GRACE_MS = 2_000
+/**
+ * Last resort for a barrier caller once tree termination could not be verified.
+ *
+ * Why bounded: waiting for the root's exit is what stops an unverified caller
+ * mutating shared state under a live child, but a tree that neither dies nor
+ * reports would otherwise leave the promise pending for the app's lifetime.
+ */
+const BARRIER_UNVERIFIED_EXIT_GRACE_MS = 10_000
 
 export type ResolvedSpawn = {
   file: string
@@ -198,6 +206,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       settled = true
       clearTimeout(timer)
       clearTimeout(graceTimer)
+      clearTimeout(barrierDeadlineTimer)
       spec.signal?.removeEventListener('abort', onAbort)
       act()
     }
@@ -220,6 +229,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
     }
 
     let graceTimer: ReturnType<typeof setTimeout> | undefined
+    let barrierDeadlineTimer: ReturnType<typeof setTimeout> | undefined
     const signalBarrierTree = (signal?: NodeJS.Signals): Promise<boolean> =>
       (typeof spec.terminationBarrier === 'object'
         ? spec.terminationBarrier.signal(child, signal)
@@ -236,22 +246,37 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
         resolve({ code, signal, stdout: stdout.text(), stderr: stderr.text(), timedOut })
       )
 
+    const settleBarrierOutcome = (): void => {
+      const rootExit = deferredClose ?? deferredExit
+      if (deferredError) {
+        settle(() => reject(deferredError))
+        return
+      }
+      resolveFromClose(rootExit?.code ?? null, rootExit?.signal ?? null)
+    }
+
     const resolveBarrierIfSafe = (): void => {
       const rootExit = deferredClose ?? deferredExit
       if (barrierTerminationVerified || (barrierAttemptComplete && rootExit)) {
-        if (deferredError) {
-          settle(() => reject(deferredError))
-        } else {
-          resolveFromClose(rootExit?.code ?? null, rootExit?.signal ?? null)
-        }
+        settleBarrierOutcome()
+        return
       }
+      if (!barrierAttemptComplete) {
+        return
+      }
+      // Why a second deadline: the tree survived every attempt and the root has
+      // gone silent, so nothing else will ever settle this promise.
+      barrierDeadlineTimer ??= setTimeout(settleBarrierOutcome, BARRIER_UNVERIFIED_EXIT_GRACE_MS)
+      barrierDeadlineTimer.unref?.()
     }
 
     /**
-     * Stop the child, then settle whether or not it complies.
+     * Stop the child, then settle.
      *
-     * Why bounded: a descendant can keep `close` pending after the root exits,
-     * but failed termination verification must not let callers mutate shared state.
+     * Without a barrier, settle whether or not the child complies. With one, wait
+     * for verified tree termination or a root exit first — a descendant can keep
+     * `close` pending after the root exits, but failed verification must not let
+     * callers mutate shared state — then settle on the deadline regardless.
      */
     const stopAndSettle = (): void => {
       if (spec.terminationBarrier) {

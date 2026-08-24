@@ -55,14 +55,33 @@ describe('runProcess termination failure', () => {
     await expect(pending).resolves.toMatchObject({ timedOut: true })
   })
 
-  it('settles without close after forced tree termination is verified', async () => {
-    forceTerminateProcessTreeMock.mockResolvedValue(true)
+  // Windows takes the taskkill branch, which never consults forceTerminateProcessTree.
+  it.skipIf(process.platform === 'win32')(
+    'settles without close after forced tree termination is verified',
+    async () => {
+      forceTerminateProcessTreeMock.mockResolvedValue(true)
+      spawnMock.mockReturnValue(mockChild())
+      const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
+
+      await vi.advanceTimersByTimeAsync(2_010)
+
+      await expect(pending).resolves.toMatchObject({ timedOut: true })
+    }
+  )
+
+  it('settles on the barrier deadline when the root never reports', async () => {
     spawnMock.mockReturnValue(mockChild())
     const pending = runProcess({ program: 'git', timeoutMs: 10, terminationBarrier: true })
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
 
     await vi.advanceTimersByTimeAsync(2_010)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(10_000)
 
-    await expect(pending).resolves.toMatchObject({ timedOut: true })
+    await expect(pending).resolves.toMatchObject({ code: null, timedOut: true })
   })
 
   it('retains a root exit observed before barrier shutdown', async () => {

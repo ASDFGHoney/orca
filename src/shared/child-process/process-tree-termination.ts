@@ -4,6 +4,13 @@ const PROBE_INTERVAL_MS = 25
 const SUBPROCESS_TIMEOUT_MS = 2_000
 const MAX_PS_OUTPUT_BYTES = 8 * 1024 * 1024
 
+/**
+ * Signal the child's whole tree.
+ *
+ * POSIX precondition: the child must have been spawned `detached`. The signal
+ * goes to the process group `-child.pid`, so a child that is not its own group
+ * leader would hand it to whatever group it inherited instead.
+ */
 export function signalProcessTree(child: ChildProcess, signal?: NodeJS.Signals): Promise<boolean> {
   if (!child.pid) {
     killRoot(child, signal)

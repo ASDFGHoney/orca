@@ -687,7 +687,7 @@ async function execFileCaptureToTermination(
       ? `${command} timed out.`
       : options.signal?.aborted
         ? 'The operation was aborted.'
-        : result.stderr.trim() || `${command} exited with ${result.code}.`
+        : cleanStderr.trim() || `${command} exited with ${result.code}.`
   )
   if (options.signal?.aborted) {
     error.name = 'AbortError'

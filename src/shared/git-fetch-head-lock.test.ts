@@ -112,46 +112,50 @@ describe('runWithGitFetchHeadLock', () => {
     }
   })
 
-  it('serializes root, nested, and symlink aliases of one worktree', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'fetch-head-lock-'))
-    const repo = path.join(root, 'repo')
-    const nested = path.join(repo, 'nested')
-    const alias = path.join(root, 'alias')
-    await mkdir(path.join(repo, '.git'), { recursive: true })
-    await mkdir(nested)
-    await symlink(repo, alias)
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let markFirstStarted!: () => void
-    const firstStarted = new Promise<void>((resolve) => {
-      markFirstStarted = resolve
-    })
-    const order: string[] = []
-    try {
-      const first = runWithGitFetchHeadLock(repo, undefined, async () => {
-        order.push('root')
-        markFirstStarted()
-        await gate
+  // Windows CI agents usually lack the elevation `symlink` needs.
+  it.skipIf(process.platform === 'win32')(
+    'serializes root, nested, and symlink aliases of one worktree',
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'fetch-head-lock-'))
+      const repo = path.join(root, 'repo')
+      const nested = path.join(repo, 'nested')
+      const alias = path.join(root, 'alias')
+      await mkdir(path.join(repo, '.git'), { recursive: true })
+      await mkdir(nested)
+      await symlink(repo, alias)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
       })
-      await firstStarted
-      const nestedRun = runWithGitFetchHeadLock(nested, undefined, async () => {
-        order.push('nested')
+      let markFirstStarted!: () => void
+      const firstStarted = new Promise<void>((resolve) => {
+        markFirstStarted = resolve
       })
-      const aliasRun = runWithGitFetchHeadLock(alias, undefined, async () => {
-        order.push('alias')
-      })
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(order).toEqual(['root'])
-      release()
-      await Promise.all([first, nestedRun, aliasRun])
-      expect(order[0]).toBe('root')
-      expect(new Set(order.slice(1))).toEqual(new Set(['nested', 'alias']))
-    } finally {
-      await rm(root, { recursive: true, force: true })
+      const order: string[] = []
+      try {
+        const first = runWithGitFetchHeadLock(repo, undefined, async () => {
+          order.push('root')
+          markFirstStarted()
+          await gate
+        })
+        await firstStarted
+        const nestedRun = runWithGitFetchHeadLock(nested, undefined, async () => {
+          order.push('nested')
+        })
+        const aliasRun = runWithGitFetchHeadLock(alias, undefined, async () => {
+          order.push('alias')
+        })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(order).toEqual(['root'])
+        release()
+        await Promise.all([first, nestedRun, aliasRun])
+        expect(order[0]).toBe('root')
+        expect(new Set(order.slice(1))).toEqual(new Set(['nested', 'alias']))
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   it('serializes linked worktrees through their shared Git directory', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'fetch-head-linked-lock-'))

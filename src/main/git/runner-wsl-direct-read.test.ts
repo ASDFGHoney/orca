@@ -280,7 +280,7 @@ describe('WSL direct Git reads', () => {
         })
       ).resolves.toEqual({ stdout: 'fork-point\n', stderr: '' })
 
-      expect(spawnMock.mock.calls[0]?.[1]).toContain('setsid')
+      expect(spawnMock.mock.calls[0]?.[1]?.join(' ')).toContain('setsid --wait')
       expect(spawnMock.mock.calls[0]?.[1]?.join(' ')).toContain('__ORCA_WSL_CAPTURE_BEGIN_')
     })
   })

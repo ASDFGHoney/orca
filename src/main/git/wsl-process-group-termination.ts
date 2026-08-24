@@ -5,7 +5,7 @@ import { buildWslExecArgs, quotePosixShell } from '../../shared/wsl-login-shell-
 
 const GUEST_TERMINATION_ATTEMPTS = 40
 const GUEST_TERMINATION_INTERVAL_SECONDS = '0.025'
-const GUEST_TERMINATION_COMMAND_TIMEOUT_MS = 1_500
+const GUEST_TERMINATION_COMMAND_TIMEOUT_MS = 5_000
 
 export type WslProcessGroupTermination = ProcessTerminationBarrier & {
   wrapGuestArgs: (args: readonly string[]) => string[]
@@ -19,7 +19,7 @@ export function createWslProcessGroupTermination(distro: string): WslProcessGrou
 
   const observeStderr = (chunk: Buffer | string): void => {
     const combined = `${stderrTail}${chunk.toString()}`
-    const match = combined.match(new RegExp(`${marker}(\\d+)`))
+    const match = combined.match(new RegExp(`${marker}(\\d+)\\r?\\n`))
     stderrTail = combined.slice(-512)
     const parsed = match ? Number(match[1]) : 0
     if (Number.isSafeInteger(parsed) && parsed > 1) {
@@ -61,10 +61,21 @@ export function createWslProcessGroupTermination(distro: string): WslProcessGrou
     signal: () => terminate('TERM'),
     force: () => terminate('KILL'),
     wrapGuestArgs: (args) => {
-      const wrapper = [`printf '%s%s\\n' ${quotePosixShell(marker)} "$$" >&2`, 'exec "$@"'].join(
-        '\n'
-      )
-      return ['setsid', '--wait', 'sh', '-c', wrapper, 'orca-wsl-process-group', ...args]
+      const reportGroup = [
+        `printf '%s%s\\n' ${quotePosixShell(marker)} "$$" >&2`,
+        'exec "$@"'
+      ].join('\n')
+      // Why probe rather than assume: BusyBox `setsid` has no `--wait`, so there
+      // the wrapper would fail the Git command outright. Without a new session the
+      // reported group is not ours to kill, so the fallback reports no identity
+      // and the caller falls back to waiting for the root exit.
+      const script = [
+        'if setsid --wait true 2>/dev/null; then',
+        `  exec setsid --wait sh -c ${quotePosixShell(reportGroup)} orca-wsl-process-group "$@"`,
+        'fi',
+        'exec "$@"'
+      ].join('\n')
+      return ['sh', '-c', script, 'orca-wsl-process-group', ...args]
     },
     stripControlOutput: (stderr) => stderr.replace(new RegExp(`${marker}\\d+\\r?\\n?`, 'g'), '')
   }

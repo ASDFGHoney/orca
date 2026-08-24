@@ -17,9 +17,18 @@ describe('WSL process-group termination', () => {
     const termination = createWslProcessGroupTermination('Ubuntu')
     const args = termination.wrapGuestArgs(['git', 'fetch'])
 
-    expect(args.slice(0, 3)).toEqual(['setsid', '--wait', 'sh'])
+    expect(args.slice(0, 2)).toEqual(['sh', '-c'])
     expect(args.slice(-2)).toEqual(['git', 'fetch'])
     expect(args.join(' ')).toContain('__ORCA_WSL_PROCESS_GROUP_')
+    expect(args[2]).toContain('setsid --wait sh -c')
+  })
+
+  it('runs the guest command unwrapped where setsid --wait is unsupported', () => {
+    const termination = createWslProcessGroupTermination('Ubuntu')
+    const script = termination.wrapGuestArgs(['git', 'fetch'])[2] ?? ''
+
+    expect(script).toContain('if setsid --wait true 2>/dev/null; then')
+    expect(script.trimEnd().endsWith('exec "$@"')).toBe(true)
   })
 
   it('forces and verifies the reported guest process group', async () => {
@@ -27,6 +36,8 @@ describe('WSL process-group termination', () => {
     const wrapped = termination.wrapGuestArgs(['git', 'fetch']).join(' ')
     const marker = wrapped.match(/(__ORCA_WSL_PROCESS_GROUP_[0-9a-f-]+__=)/)?.[1]
     termination.observeStderr?.(Buffer.from(`${marker}43`))
+    // The marker line is still truncated; committing 43 would target a stranger.
+    await expect(termination.signal({} as ChildProcess)).resolves.toBe(false)
     termination.observeStderr?.(Buffer.from('21\n'))
 
     await expect(termination.force({} as ChildProcess)).resolves.toBe(true)
