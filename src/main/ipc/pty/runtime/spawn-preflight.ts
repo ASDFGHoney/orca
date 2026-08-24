@@ -36,6 +36,7 @@ import { resolveLocalProjectRuntimeForWorktreeId } from '../../../local-project-
 import { resolvePathEnvKey } from '../../../pty/windows-environment-path'
 import { stampWslOrchestrationCompatibilityHost } from '../../../pty/wsl-orca-env'
 import { ensureCodexStateDbBackfillRecoveryStarted } from '../../../codex/codex-state-db-backfill-recovery'
+import { clearProviderPtyState } from '../provider/state-cleanup'
 import type { RuntimePtySpawnState } from './spawn-state'
 
 export async function prepareRuntimePtySpawn(
@@ -243,29 +244,37 @@ export async function prepareRuntimePtySpawn(
     if (!isSafePtySessionId(ctx.sessionId, getAppEnvironment().getPath('userData'))) {
       throw new Error('Invalid PTY session id')
     }
-    ctx.env = buildPtyHostEnv(ctx.sessionId, ctx.env ?? {}, {
-      isPackaged: getAppEnvironment().isPackaged(),
-      resourcesPath: process.resourcesPath,
-      userDataPath: getAppEnvironment().getPath('userData'),
-      selectedCodexHomePath: ctx.selectedCodexHomePath,
-      skipCodexHomeEnv: ctx.skipCodexHomeEnv,
-      stripInheritedOrcaCodexHome: ctx.stripInheritedOrcaCodexHome,
-      launchCommand: ctx.launchCommand,
-      launchAgent: isTuiAgent(args.launchAgent) ? args.launchAgent : undefined,
-      isWsl: shouldSkipCodexHomeEnvForWindowsShell(ctx.daemonShellOverride, ctx.cwd),
-      wslDistro: ctx.codexSelectionTarget.runtime === 'wsl' ? ctx.expectedWslDistro : null,
-      agentStatusHooksEnabled: isAgentStatusHooksEnabled(ptySettings),
-      codexStatusHooksEnabled: isCodexStatusHooksEnabled(ptySettings),
-      networkProxySettings: ptySettings,
-      deferGitConfigGuardToDaemon:
-        ctx.provider.supportsGitCredentialGuardHost?.(ctx.sessionId) === true
-    })
-    stampWslOrchestrationCompatibilityHost(
-      ctx.env,
-      ctx.deps.runtime?.getOrchestrationCompatibilityHostId?.(),
-      ctx.codexSelectionTarget.runtime === 'wsl' ? ctx.expectedWslDistro : null
-    )
-    promoteAgentTeamsShimPath(ctx.env, ctx.requestedAgentTeamsPath)
+    try {
+      ctx.env = buildPtyHostEnv(ctx.sessionId, ctx.env ?? {}, {
+        isPackaged: getAppEnvironment().isPackaged(),
+        resourcesPath: process.resourcesPath,
+        userDataPath: getAppEnvironment().getPath('userData'),
+        selectedCodexHomePath: ctx.selectedCodexHomePath,
+        skipCodexHomeEnv: ctx.skipCodexHomeEnv,
+        stripInheritedOrcaCodexHome: ctx.stripInheritedOrcaCodexHome,
+        launchCommand: ctx.launchCommand,
+        launchAgent: isTuiAgent(args.launchAgent) ? args.launchAgent : undefined,
+        isWsl: shouldSkipCodexHomeEnvForWindowsShell(ctx.daemonShellOverride, ctx.cwd),
+        wslDistro: ctx.codexSelectionTarget.runtime === 'wsl' ? ctx.expectedWslDistro : null,
+        agentStatusHooksEnabled: isAgentStatusHooksEnabled(ptySettings),
+        codexStatusHooksEnabled: isCodexStatusHooksEnabled(ptySettings),
+        networkProxySettings: ptySettings,
+        deferGitConfigGuardToDaemon:
+          ctx.provider.supportsGitCredentialGuardHost?.(ctx.sessionId) === true
+      })
+      stampWslOrchestrationCompatibilityHost(
+        ctx.env,
+        ctx.deps.runtime?.getOrchestrationCompatibilityHostId?.(),
+        ctx.codexSelectionTarget.runtime === 'wsl' ? ctx.expectedWslDistro : null
+      )
+      promoteAgentTeamsShimPath(ctx.env, ctx.requestedAgentTeamsPath)
+    } catch (error) {
+      // Why: host-env setup can materialize agent hooks/extensions before failing.
+      if (ctx.requestedSessionId === undefined) {
+        clearProviderPtyState(ctx.sessionId)
+      }
+      throw error
+    }
   }
 
   return null

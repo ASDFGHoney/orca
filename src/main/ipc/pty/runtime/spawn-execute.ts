@@ -220,19 +220,24 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
     const spawnError = normalizeNodePtySpawnError(err)
     const isIdentityMismatch =
       isSshPtyIdentityMismatchError(spawnError) || isSshPtyIdentityMismatchError(rawMessage)
+    const isExpiredSshSession =
+      Boolean(args.connectionId) &&
+      (spawnError.message.includes(SSH_SESSION_EXPIRED_ERROR) ||
+        rawMessage.includes(SSH_SESSION_EXPIRED_ERROR))
+    const exitedBeforeSpawnReply =
+      ctx.rejectedRegistrationCandidate?.exitedBeforeSpawnReply === true
     if (ctx.effectiveSessionAppId !== undefined) {
-      if (isIdentityMismatch && ctx.hadSessionSizeBeforeAttach && ctx.sessionSizeBeforeAttach) {
+      if (
+        ctx.hadSessionSizeBeforeAttach &&
+        ctx.sessionSizeBeforeAttach &&
+        (isIdentityMismatch || (!isExpiredSshSession && !exitedBeforeSpawnReply))
+      ) {
         ptySizes.set(ctx.effectiveSessionAppId, ctx.sessionSizeBeforeAttach)
       } else {
         ptySizes.delete(ctx.effectiveSessionAppId)
       }
     }
-    if (
-      args.connectionId &&
-      ctx.effectiveSessionRelayId !== undefined &&
-      (spawnError.message.includes(SSH_SESSION_EXPIRED_ERROR) ||
-        rawMessage.includes(SSH_SESSION_EXPIRED_ERROR))
-    ) {
+    if (args.connectionId && ctx.effectiveSessionRelayId !== undefined && isExpiredSshSession) {
       if (ctx.effectiveSessionAppId !== undefined && !isIdentityMismatch) {
         clearProviderPtyState(ctx.effectiveSessionAppId)
         deletePtyOwnership(ctx.effectiveSessionAppId)
