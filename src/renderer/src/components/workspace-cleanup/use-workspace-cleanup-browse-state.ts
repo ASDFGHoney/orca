@@ -60,12 +60,11 @@ export function useWorkspaceCleanupBrowseState(): WorkspaceCleanupBrowseControll
     [updateBrowse]
   )
 
-  // Why read the store rather than the rendered `browse`: a chip click and any other
-  // filter write can land in the same tick, and the rendered snapshot would drop one.
+  // Same updater form as patchFilters: a chip clear and a facet patch can land in one
+  // tick, and whichever read the render snapshot would undo the other.
   const replaceFilters = useCallback<WorkspaceCleanupBrowseController['replaceFilters']>(
     (transform) => {
-      const current = useAppStore.getState().workspaceCleanupBrowse
-      updateBrowse({ ...current, filters: transform(current.filters) })
+      updateBrowse((current) => ({ ...current, filters: transform(current.filters) }))
     },
     [updateBrowse]
   )

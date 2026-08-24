@@ -105,7 +105,6 @@ describe('useWorkspaceCleanupBrowseState', () => {
       field: 'size',
       direction: 'desc'
     })
-  })
 })
 
   it('keeps a cleared chip cleared when a facet patch lands in the same tick', () => {
