@@ -19,8 +19,10 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { getPrCommentAudienceFilters } from '@/lib/pr-comment-audience-labels'
-import { getPRCommentAudienceEmptyLabel } from '@/lib/pr-comment-audience-labels'
+import {
+  getPRCommentAudienceEmptyLabel,
+  getPrCommentAudienceFilters
+} from '@/lib/pr-comment-audience-labels'
 import { translate } from '@/i18n/i18n'
 import { ResolvedCommentGroupsSection } from './comment-group'
 import {
