@@ -131,4 +131,94 @@ describe('PtyProcessLivenessBroker', () => {
     ).resolves.toMatchObject({ status: 'live', foregroundProcess: 'zsh' })
     expect(inspectProcess).toHaveBeenCalledTimes(2)
   })
+
+  it('does not replay cached absence after owning inventory re-observes the PTY', async () => {
+    let now = 0
+    const inspectProcess = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('terminal_gone'))
+      .mockRejectedValueOnce(new Error('socket_closed'))
+    const source = { getForegroundProcess: vi.fn(async () => null), inspectProcess }
+    const broker = new PtyProcessLivenessBroker({
+      timeoutMs: 100,
+      unavailableBackoffBaseMs: 100,
+      now: () => now
+    })
+
+    await expect(
+      broker.inspect({ source, ptyId: 'pty-1', identity: 'incarnation-a' })
+    ).resolves.toEqual({ status: 'exited' })
+    await expect(
+      broker.inspect({
+        source,
+        ptyId: 'pty-1',
+        identity: 'incarnation-a',
+        owningInventoryObservedPty: true
+      })
+    ).resolves.toMatchObject({ status: 'unverifiable' })
+    now = 201
+    await expect(
+      broker.inspect({ source, ptyId: 'pty-1', identity: 'incarnation-a' })
+    ).resolves.toEqual({ status: 'unverifiable', reason: 'socket_closed' })
+  })
+
+  it('lets completion-sensitive readers await a shared probe past the catalog timeout', async () => {
+    vi.useFakeTimers()
+    let resolveInspection!: (value: {
+      foregroundProcess: string
+      hasChildProcesses: boolean
+    }) => void
+    const inspection = new Promise<{ foregroundProcess: string; hasChildProcesses: boolean }>(
+      (resolve) => {
+        resolveInspection = resolve
+      }
+    )
+    const source = {
+      getForegroundProcess: vi.fn(async () => null),
+      inspectProcess: vi.fn(() => inspection)
+    }
+    const broker = new PtyProcessLivenessBroker({ timeoutMs: 100 })
+
+    const catalog = broker.inspect({ source, ptyId: 'pty-1', identity: 'incarnation-a' })
+    await vi.advanceTimersByTimeAsync(100)
+    await expect(catalog).resolves.toMatchObject({ status: 'unverifiable' })
+    const completion = broker.inspect({
+      source,
+      ptyId: 'pty-1',
+      identity: 'incarnation-a',
+      waitForSettlement: true,
+      reuseSettled: false
+    })
+    let settled = false
+    void completion.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(settled).toBe(false)
+
+    resolveInspection({ foregroundProcess: 'codex', hasChildProcesses: true })
+    await expect(completion).resolves.toMatchObject({ status: 'live', foregroundProcess: 'codex' })
+  })
+
+  it('contains failures from diagnostic observers', async () => {
+    const broker = new PtyProcessLivenessBroker({
+      timeoutMs: 100,
+      onInspectionError: () => {
+        throw new Error('logger failed')
+      }
+    })
+
+    await expect(
+      broker.inspect({
+        source: {
+          getForegroundProcess: vi.fn(async () => null),
+          inspectProcess: vi.fn(async () => {
+            throw new Error('socket_closed')
+          })
+        },
+        ptyId: 'pty-1',
+        identity: 'incarnation-a'
+      })
+    ).resolves.toEqual({ status: 'unverifiable', reason: 'socket_closed' })
+  })
 })

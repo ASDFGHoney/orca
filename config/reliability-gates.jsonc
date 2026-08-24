@@ -10293,7 +10293,7 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts",
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts --fileParallelism=false --maxWorkers=1 src/main/runtime/restored-agent-authority-resolver.test.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
         "cd mobile && pnpm exec vitest run src/worktree/agent-row-display.test.ts src/transport/stable-logical-rpc-client.test.ts",
         "pnpm run test:e2e -- tests/e2e/orchestration-worker-terminal-visibility.spec.ts --workers=1",
         "pnpm run test:e2e -- tests/e2e/orchestration-legacy-worker-restart-recovery.spec.ts --workers=1",
@@ -10305,6 +10305,7 @@
         "src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
         "src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
+        "src/main/runtime/restored-agent-authority-resolver.test.ts",
         "src/main/runtime/pty-process-liveness-broker.test.ts",
         "src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts",
         "src/cli/handlers/orchestration.test.ts",
@@ -10322,7 +10323,8 @@
         "src/main/ssh/ssh-remote-orca-cli.test.ts",
         "tests/e2e/orchestration-worker-terminal-visibility.spec.ts",
         "tests/e2e/orchestration-legacy-worker-restart-recovery.spec.ts",
-        "tests/e2e/orchestration-worker-settlement-release-cli.spec.ts"
+        "tests/e2e/orchestration-worker-settlement-release-cli.spec.ts",
+        "tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts"
       ],
       "assertionRefs": [
         {
@@ -10350,6 +10352,15 @@
           ]
         },
         {
+          "file": "src/main/runtime/restored-agent-authority-resolver.test.ts",
+          "assertions": [
+            "one restored hook cannot borrow a replacement PTY incarnation or another execution host",
+            "conflicting current and persisted bindings remain unverifiable",
+            "incarnation identity survives local lifecycle-generation changes",
+            "retired hook commitments are released without unbounded growth"
+          ]
+        },
+        {
           "file": "src/main/runtime/orca-runtime.test.ts",
           "assertions": [
             "one exact live legacy worker is adopted into its original background pane without input or signals",
@@ -10359,7 +10370,10 @@
             "a connected live PTY remains inventoried when its user-visible tab is missing",
             "legacy clients retain the exact restored-row suppression",
             "inspection timeout, transport loss, missing bindings, and stale incarnations remain unverifiable",
+            "a handle-qualified cold binding remains visible when owning inventory loses contact",
             "terminal_gone is the only inspection rejection that retires the exact restored row",
+            "fresh exact inventory cannot be overwritten by older cached terminal_gone evidence after later contact loss",
+            "slow foreground inspection cannot manufacture agent exit or certify a replacement incarnation",
             "sequential inventory clients reuse bounded process evidence instead of polling each restored row"
           ]
         },
@@ -10508,10 +10522,10 @@
           "date": "2026-08-23",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts --fileParallelism=false --maxWorkers=1 src/main/runtime/restored-agent-authority-resolver.test.ts src/main/runtime/pty-process-liveness-broker.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/worktree-catalog-snapshot-method.test.ts src/renderer/src/web/web-runtime-client.test.ts src/shared/remote-runtime-client.test.ts src/shared/remote-runtime-request-connection.test.ts src/shared/remote-runtime-shared-control-connection.test.ts src/cli/runtime/websocket-transport.test.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts",
           "result": "passed",
-          "durationSeconds": 15.33,
-          "summary": "Eight focused runtime and wire files passed 1,273 tests with one skip, including bounded inspection timeout, exact terminal_gone absence, cold persisted binding, incarnation and hook replacement races, sequential-client call counts, live/unverifiable/exited/hidden-tab/legacy projection, and encrypted desktop/CLI capability advertisement. Mobile typecheck and 25 focused mobile tests passed separately."
+          "durationSeconds": 49.44,
+          "summary": "Ten focused runtime and wire files passed 1,292 tests with one skip, including bounded inspection timeout, exact terminal_gone absence, three-poll fresh-presence reconciliation, cold handle-qualified contact loss, incarnation/host/hook replacement fencing, slow foreground completion, callback isolation, sequential-client call counts, live/unverifiable/exited/hidden-tab/legacy projection, encrypted desktop/CLI capability advertisement, and cross-version terminal wire compatibility. Full mobile typecheck and 3,674 tests passed separately."
         },
         {
           "date": "2026-08-13",

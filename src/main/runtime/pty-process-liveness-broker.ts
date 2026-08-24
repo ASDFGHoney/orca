@@ -21,6 +21,7 @@ type PtyProcessEvidenceEntry = {
   source: PtyProcessInspectionSource
   identity: string
   freshness: number
+  owningInventoryObservedPty: boolean
   failureCount: number
   evidence: PtyProcessLivenessEvidence | null
   expiresAt: number
@@ -56,16 +57,30 @@ export class PtyProcessLivenessBroker {
     freshness?: number
     reuseSettled?: boolean
     deadline?: number
+    waitForSettlement?: boolean
+    owningInventoryObservedPty?: boolean
   }): Promise<PtyProcessLivenessEvidence> {
     const freshness = args.freshness ?? 0
-    const waitMs = Math.max(
-      0,
-      Math.min(
-        this.options.timeoutMs,
-        args.deadline === undefined ? this.options.timeoutMs : args.deadline - this.now()
-      )
-    )
+    const waitMs = args.waitForSettlement
+      ? null
+      : Math.max(
+          0,
+          Math.min(
+            this.options.timeoutMs,
+            args.deadline === undefined ? this.options.timeoutMs : args.deadline - this.now()
+          )
+        )
     const existing = this.entries.get(args.ptyId)
+    if (
+      existing?.source === args.source &&
+      existing.identity === args.identity &&
+      args.owningInventoryObservedPty === true
+    ) {
+      existing.owningInventoryObservedPty = true
+      if (existing.evidence?.status === 'exited') {
+        this.storeUnverifiable(existing, 'owning inventory re-observed PTY')
+      }
+    }
     if (
       existing?.source === args.source &&
       existing.identity === args.identity &&
@@ -90,7 +105,7 @@ export class PtyProcessLivenessBroker {
       existing.freshness >= freshness
     ) {
       if (existing.probe) {
-        return existing.timedOut
+        return !args.waitForSettlement && existing.timedOut
           ? Promise.resolve({ status: 'unverifiable', reason: 'process inspection timed out' })
           : waitMs === 0
             ? Promise.resolve({
@@ -115,6 +130,7 @@ export class PtyProcessLivenessBroker {
       source: args.source,
       identity: args.identity,
       freshness,
+      owningInventoryObservedPty: args.owningInventoryObservedPty === true,
       failureCount,
       evidence: null,
       expiresAt: 0,
@@ -123,23 +139,30 @@ export class PtyProcessLivenessBroker {
     }
     const probe = this.runProbe(args.source, args.ptyId)
       .then((evidence) => {
+        const reconciled =
+          evidence.status === 'exited' && entry.owningInventoryObservedPty
+            ? {
+                status: 'unverifiable' as const,
+                reason: 'owning inventory re-observed PTY'
+              }
+            : evidence
         if (this.entries.get(args.ptyId) !== entry) {
-          return evidence
+          return reconciled
         }
         entry.probe = null
         entry.timedOut = false
-        entry.evidence = evidence
-        if (evidence.status === 'unverifiable') {
+        entry.evidence = reconciled
+        if (reconciled.status === 'unverifiable') {
           entry.failureCount += 1
           entry.expiresAt = this.now() + this.unavailableBackoffMs(entry.failureCount)
-        } else if (evidence.status === 'live') {
+        } else if (reconciled.status === 'live') {
           entry.failureCount = 0
           entry.expiresAt = this.now() + (this.options.liveTtlMs ?? DEFAULT_LIVE_TTL_MS)
         } else {
           entry.failureCount = 0
           entry.expiresAt = Number.POSITIVE_INFINITY
         }
-        return evidence
+        return reconciled
       })
       .catch((error): PtyProcessLivenessEvidence => {
         if (this.entries.get(args.ptyId) === entry) {
@@ -149,7 +172,11 @@ export class PtyProcessLivenessBroker {
           entry.evidence = { status: 'unverifiable', reason: describeError(error) }
           entry.expiresAt = this.now() + this.unavailableBackoffMs(entry.failureCount)
         }
-        this.options.onInspectionError?.(args.ptyId, error)
+        try {
+          this.options.onInspectionError?.(args.ptyId, error)
+        } catch {
+          // Diagnostic observers cannot change the authority verdict.
+        }
         return { status: 'unverifiable', reason: describeError(error) }
       })
     entry.probe = probe
@@ -207,13 +234,16 @@ export class PtyProcessLivenessBroker {
   private waitForProbe(
     ptyId: string,
     entry: PtyProcessEvidenceEntry,
-    timeoutMs: number
+    timeoutMs: number | null
   ): Promise<PtyProcessLivenessEvidence> {
     const probe = entry.probe
     if (!probe) {
       return Promise.resolve(
         entry.evidence ?? { status: 'unverifiable', reason: 'process inspection unavailable' }
       )
+    }
+    if (timeoutMs === null) {
+      return probe
     }
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
@@ -233,6 +263,12 @@ export class PtyProcessLivenessBroker {
     const base = this.options.unavailableBackoffBaseMs ?? DEFAULT_UNAVAILABLE_BACKOFF_BASE_MS
     const max = this.options.unavailableBackoffMaxMs ?? DEFAULT_UNAVAILABLE_BACKOFF_MAX_MS
     return Math.min(max, base * 2 ** Math.max(0, failureCount - 1))
+  }
+
+  private storeUnverifiable(entry: PtyProcessEvidenceEntry, reason: string): void {
+    entry.failureCount += 1
+    entry.evidence = { status: 'unverifiable', reason }
+    entry.expiresAt = this.now() + this.unavailableBackoffMs(entry.failureCount)
   }
 }
 
