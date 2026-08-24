@@ -23,13 +23,13 @@ import {
   normalizeBrowserHistoryEntries,
   normalizeBrowserHistoryUrl
 } from '../../../../shared/workspace-session-browser-history'
-import { pickNeighbor } from './tab-group-state'
 import { destroyWorkspaceWebviews } from './browser-webview-cleanup'
 import {
   getRecentlyClosedTabPosition,
   restoreRecentlyClosedTabPosition,
   pushRecentlyClosedTabKind
 } from './recently-closed-tabs'
+import { pickNeighbor } from './tab-group-state'
 import type { RecentlyClosedTabPosition } from './recently-closed-tabs'
 import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
@@ -846,13 +846,14 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         delete nextRemoteBrowserPageHandlesByPageId[page.id]
       }
 
-      const nextActiveBrowserTabIdByWorktree = { ...s.activeBrowserTabIdByWorktree }
       const remainingBrowserTabs = nextBrowserTabsByWorktree[owningWorktreeId] ?? []
-      const tabBarOrder = s.tabBarOrderByWorktree[owningWorktreeId] ?? []
-      const neighborTabId = pickNeighbor(tabBarOrder, tabId)
+      const nextActiveBrowserTabIdByWorktree = { ...s.activeBrowserTabIdByWorktree }
       if (nextActiveBrowserTabIdByWorktree[owningWorktreeId] === tabId) {
+        const neighborId = pickNeighbor(s.tabBarOrderByWorktree[owningWorktreeId] ?? [], tabId)
         nextActiveBrowserTabIdByWorktree[owningWorktreeId] =
-          neighborTabId ?? remainingBrowserTabs[0]?.id ?? null
+          (neighborId && remainingBrowserTabs.some((tab) => tab.id === neighborId)
+            ? neighborId
+            : remainingBrowserTabs[0]?.id) ?? null
       }
 
       const nextTabBarOrder = {
@@ -916,7 +917,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         browserPagesByWorkspace: nextBrowserPagesByWorkspace,
         activeBrowserTabId:
           s.activeBrowserTabId === tabId
-            ? (neighborTabId ?? remainingBrowserTabs[0]?.id ?? null)
+            ? (nextActiveBrowserTabIdByWorktree[owningWorktreeId] ?? null)
             : s.activeBrowserTabId,
         activeBrowserTabIdByWorktree: nextActiveBrowserTabIdByWorktree,
         tabBarOrderByWorktree: nextTabBarOrder,
