@@ -57,6 +57,13 @@ export function activateBrowserPagePaletteResult({
   }
 
   const state = useAppStore.getState()
+  const matchingUnifiedTab = (state.unifiedTabsByWorktree[worktree.id] ?? []).find(
+    (candidate) => candidate.contentType === 'browser' && candidate.entityId === workspace.id
+  )
+  if (matchingUnifiedTab) {
+    state.focusGroup(worktree.id, matchingUnifiedTab.groupId)
+    state.activateTab(matchingUnifiedTab.id)
+  }
   state.setActiveBrowserTab(workspace.id)
   state.setActiveBrowserPage(workspace.id, pageId)
   return { status: 'activated', pageId, focusTarget }

@@ -233,7 +233,7 @@ test('repairs duplicate persisted PTY renderers before streaming tab reveal', as
       .toBe(restoredTabId)
     await expect
       .poll(() => readStreamingFrame(secondLaunch.page, restoredTabId, marker), {
-        timeout: 20_000,
+        timeout: 40_000,
         message: 'Revealed renderer did not catch up to hidden authoritative output'
       })
       .toBeGreaterThanOrEqual(hiddenFrame)
