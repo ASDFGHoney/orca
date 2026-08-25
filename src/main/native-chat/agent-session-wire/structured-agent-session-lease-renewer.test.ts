@@ -70,7 +70,7 @@ afterEach(async () => {
 })
 
 describe('structured agent-session lease renewal', () => {
-  it('commits one store transaction for the whole live-record sweep', async () => {
+  it('isolates renewal failures per live record', async () => {
     const records = ['a', 'b'].map((suffix, index) => {
       const sessionId = `session-${suffix}`
       return agentSessionRecordFixture(
@@ -90,7 +90,10 @@ describe('structured agent-session lease renewal', () => {
         })
       )
     })
-    const renewLeases = vi.fn(async (_renewals: readonly unknown[]) => records)
+    const renewLease = vi.fn(
+      async (renewal: { sessionId: string }) =>
+        records.find((record) => record.sessionId === renewal.sessionId)!
+    )
     const probeMany = vi.fn(
       async () =>
         new Map(
@@ -101,7 +104,7 @@ describe('structured agent-session lease renewal', () => {
         )
     )
     const renewer = new StructuredAgentSessionLeaseRenewer({
-      store: { listRecords: () => records, renewLeases } as unknown as AgentSessionRecordStore,
+      store: { listRecords: () => records, renewLease } as unknown as AgentSessionRecordStore,
       probe: vi.fn(),
       probeMany,
       now: () => NOW + 10_000
@@ -110,8 +113,55 @@ describe('structured agent-session lease renewal', () => {
     await renewer.renewNow()
 
     expect(probeMany).toHaveBeenCalledOnce()
-    expect(renewLeases).toHaveBeenCalledOnce()
-    expect(renewLeases.mock.calls[0]?.[0]).toHaveLength(2)
+    expect(renewLease).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a healthy lease alive when a sibling renewal is superseded', async () => {
+    const records = ['a', 'b'].map((suffix, index) =>
+      agentSessionRecordFixture(
+        agentSessionLeaseFixture({
+          sessionId: `session-${suffix}`,
+          runtimeKind: 'native',
+          runtimeFence: index + 1,
+          ownerProcess: {
+            hostId: 'local',
+            pid: 4200 + index,
+            processStartTimeMs: NOW - 1_000,
+            spawnToken: `spawn-${suffix}`
+          },
+          reservedSpawnToken: `spawn-${suffix}`,
+          lastRenewedAt: NOW,
+          leaseDeadlineAt: NOW + 30_000
+        })
+      )
+    )
+    const renewLease = vi.fn(async (renewal: { sessionId: string }) => {
+      if (renewal.sessionId === 'session-b') {
+        throw new Error('agent_session_checkpoint_stale')
+      }
+      return records[0]!
+    })
+    const onRenewed = vi.fn()
+    const onError = vi.fn()
+    const renewer = new StructuredAgentSessionLeaseRenewer({
+      store: { listRecords: () => records, renewLease } as unknown as AgentSessionRecordStore,
+      probe: async () => ({
+        outcome: 'identity-matched' as const,
+        matchedOn: ['spawn-token' as const]
+      }),
+      now: () => NOW + 10_000,
+      onRenewed,
+      onError
+    })
+
+    await renewer.renewNow()
+
+    expect(onRenewed).toHaveBeenCalledOnce()
+    expect(onRenewed).toHaveBeenCalledWith(records[0])
+    expect(onError).toHaveBeenCalledWith({
+      sessionId: 'session-b',
+      error: expect.objectContaining({ message: 'agent_session_checkpoint_stale' })
+    })
   })
 
   it('drives renewal on the production interval', async () => {
