@@ -35,6 +35,8 @@ const CONCURRENT_PROCESS_DEATHS = 'concurrent-process-deaths'
 // Why: one incident produces a handful of events; a deeper ring would only let
 // a pre-existing child crash loop outlive the window.
 const MAX_TRACKED_CHILD_DEATHS = 16
+// Per-renderer dedupe allows concurrent reports from many webContents.
+const MAX_PENDING_RENDERER_REPORTS = 16
 
 // Why: sanitizeCrashReportDetails caps a generic detail at 240 chars and would cut
 // the list mid-token; drop whole entries instead and say how many were dropped.
@@ -65,7 +67,7 @@ export type PendingRendererCrashReport = {
 }
 
 type TrackedRendererCrashReport = PendingRendererCrashReport & {
-  attachedDeaths: string
+  siblingDeaths: ChildProcessDeath[]
   lateAttaches: number
 }
 
@@ -75,8 +77,6 @@ export type LateSiblingAttribution = {
 }
 
 let childDeaths: ChildProcessDeath[] = []
-// Why: bounded by the window prune alone — the 2s renderer dedupe key admits at
-// most one renderer report at a time, so this never accumulates.
 let pendingRendererReports: TrackedRendererCrashReport[] = []
 
 function isSiblingOfRendererDeath(childAt: number, rendererAt: number): boolean {
@@ -128,15 +128,14 @@ export function findSiblingChildDeaths({
 
 export function trackRendererCrashReport(
   pending: PendingRendererCrashReport,
-  attachedDeaths = ''
+  siblingDeaths: ChildProcessDeath[] = []
 ): void {
+  const liveReports = pendingRendererReports
+    .filter((report) => pending.at - report.at <= SIBLING_DEATH_LOOKAHEAD_MS)
+    .slice(-(MAX_PENDING_RENDERER_REPORTS - 1))
   pendingRendererReports = [
-    // A report is reachable only while a future child death can still fall inside
-    // its lookahead.
-    ...pendingRendererReports.filter(
-      (report) => pending.at - report.at <= SIBLING_DEATH_LOOKAHEAD_MS
-    ),
-    { ...pending, attachedDeaths, lateAttaches: 0 }
+    ...liveReports,
+    { ...pending, siblingDeaths: [...siblingDeaths], lateAttaches: 0 }
   ]
 }
 
@@ -205,20 +204,18 @@ export function collectLateSiblingAttributions(death: ChildProcessDeath): LateSi
   )
   const attributions: LateSiblingAttribution[] = []
   for (const pending of pendingRendererReports) {
-    if (pending.lateAttaches >= MAX_LATE_SIBLING_ATTACHES) {
+    if (
+      pending.lateAttaches >= MAX_LATE_SIBLING_ATTACHES ||
+      !hasMatchingFailureSignature(death, pending.reason, pending.exitCode)
+    ) {
       continue
     }
-    const siblings = findSiblingChildDeaths(pending)
-    const attribution = siblingProcessDeathDetails(siblings, pending.at)
-    const described = String(attribution.siblingProcessDeaths ?? '')
-    // Only a changed rendering carries evidence the record does not already hold;
-    // the count alone is not worth a full read-modify-write of the store.
-    if (described === pending.attachedDeaths) {
-      continue
-    }
-    pending.attachedDeaths = described
+    pending.siblingDeaths.push(death)
     pending.lateAttaches += 1
-    attributions.push({ pending, attribution })
+    attributions.push({
+      pending,
+      attribution: siblingProcessDeathDetails(pending.siblingDeaths, pending.at)
+    })
   }
   return attributions
 }

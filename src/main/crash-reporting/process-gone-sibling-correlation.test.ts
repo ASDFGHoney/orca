@@ -218,6 +218,47 @@ describe('sibling process-death attribution', () => {
     expect(siblingAttaches(store)[1]).not.toHaveProperty('crashAttribution')
   })
 
+  it('does not erase recorded sibling evidence during unrelated child churn', async () => {
+    const store = recorderStore()
+    const churnStore = recorderStore()
+    const rendererAt = 1_786_995_438_107
+
+    at(rendererAt - 21)
+    record(store, networkServiceCrash)
+    at(rendererAt)
+    record(store, event())
+    for (let index = 1; index <= 16; index += 1) {
+      at(rendererAt + index)
+      record(churnStore, event({ ...gpuCrash, reason: 'killed' }))
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(recordedDetails(store)).toMatchObject({
+      crashAttribution: CONCURRENT,
+      siblingProcessDeathCount: 1
+    })
+    expect(siblingAttaches(store)).toEqual([])
+  })
+
+  it('bounds pending reports during a multi-renderer crash storm', async () => {
+    const stores = Array.from({ length: 32 }, recorderStore)
+    const childStore = recorderStore()
+    const rendererAt = 1_786_995_438_107
+
+    at(rendererAt)
+    stores.forEach((store, index) => {
+      record(store, event({ webContentsId: index + 1 }))
+    })
+    at(rendererAt + 100)
+    record(childStore, gpuCrash)
+
+    await vi.waitFor(() =>
+      expect(stores.flatMap((store) => siblingAttaches(store))).toHaveLength(16)
+    )
+    expect(stores.slice(0, 16).flatMap((store) => siblingAttaches(store))).toEqual([])
+    expect(stores.slice(16).flatMap((store) => siblingAttaches(store))).toHaveLength(16)
+  })
+
   it('drops whole entries rather than letting the detail cap cut one mid-token', () => {
     const store = recorderStore()
     const rendererAt = 1_786_995_438_107
@@ -287,7 +328,7 @@ describe('sibling process-death attribution', () => {
     })
   })
 
-  it('leaves a breadcrumb when the late amend cannot be written', async () => {
+  it('scopes a late-amend failure to the reporting renderer', async () => {
     const store = recorderStore()
     store.attachDetails.mockRejectedValue(new Error('EPERM'))
     const rendererAt = 1_787_017_254_450
@@ -295,16 +336,21 @@ describe('sibling process-death attribution', () => {
     at(rendererAt - 2)
     record(store, audioServiceCrash)
     at(rendererAt)
-    record(store, event())
+    record(store, event({ webContentsId: 11 }))
     at(rendererAt + 180)
     record(store, gpuCrash)
 
     await vi.waitFor(() =>
-      expect(getCrashBreadcrumbSnapshot()).toEqual(
+      expect(getCrashBreadcrumbSnapshot('renderer:11')).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ name: 'sibling_attribution_attach_failed' })
         ])
       )
+    )
+    expect(getCrashBreadcrumbSnapshot('renderer:22')).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'sibling_attribution_attach_failed' })
+      ])
     )
   })
 

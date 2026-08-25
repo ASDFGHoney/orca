@@ -3,6 +3,7 @@ import type {
   AgentStatusEntry,
   AgentStatusOrchestrationContext,
   AgentStatusState,
+  AgentWorkingMode,
   AgentType
 } from './agent-status-types'
 import type {
@@ -64,6 +65,64 @@ export type RuntimeTerminalDriverState =
 
 export type RuntimeBrowserDriverState = RuntimeTerminalDriverState
 
+export const BROWSER_UNAVAILABLE_ERROR_CODE = 'browser_unavailable' as const
+
+/**
+ * Why a host declined browser automation. Members are opaque to clients: new ones
+ * ship without a protocol bump, so render `message` and never switch exhaustively
+ * (same contract as RuntimeTerminalWaitBlockedReason).
+ */
+export type RuntimeBrowserUnavailableReason =
+  | 'unconfigured'
+  | 'driver_missing'
+  | 'executable_not_found'
+  | 'executable_not_executable'
+  | 'electron_start_failed'
+  | 'chromium_start_failed'
+  | 'provider_unhealthy'
+  | 'desktop_window_unavailable'
+  | 'unknown'
+
+// Why: one sentence per cause, each naming the thing the operator can change. The host
+// renders these so an older client still shows an accurate reason it cannot decode.
+const BROWSER_UNAVAILABLE_MESSAGES: Record<RuntimeBrowserUnavailableReason, string> = {
+  unconfigured:
+    'Browser automation has no backend on this host. Install the Orca desktop app, or set ORCA_BROWSER_EXECUTABLE to a Chromium executable.',
+  driver_missing:
+    'ORCA_BROWSER_EXECUTABLE is set, but the bundled agent-browser driver is missing or not executable on this host, so Chromium cannot be driven.',
+  executable_not_found: 'ORCA_BROWSER_EXECUTABLE points at a path that does not exist.',
+  executable_not_executable:
+    'ORCA_BROWSER_EXECUTABLE points at a file that is not executable by this host.',
+  electron_start_failed: 'The installed Electron browser provider failed to start.',
+  chromium_start_failed:
+    'The Chromium browser provider named by ORCA_BROWSER_EXECUTABLE failed to start.',
+  provider_unhealthy: 'The browser provider started but is no longer answering health checks.',
+  desktop_window_unavailable:
+    'Browser automation on this host needs a desktop window, and none is available.',
+  unknown: 'Browser automation is unavailable on this host, and the cause could not be determined.'
+}
+
+export function browserUnavailableMessage(
+  reason: RuntimeBrowserUnavailableReason,
+  detail?: string
+): string {
+  const base = BROWSER_UNAVAILABLE_MESSAGES[reason]
+  return detail ? `${base} (${detail})` : base
+}
+
+export type RuntimeDegradation = {
+  code: typeof BROWSER_UNAVAILABLE_ERROR_CODE
+  capability: 'browser.headless.v1'
+  message: string
+  /**
+   * Machine-readable cause. Optional for mixed-version peers: absence means the host
+   * predates structured causes, NOT that the cause is 'unconfigured'.
+   */
+  reason?: RuntimeBrowserUnavailableReason
+  /** Underlying error text when the host has one. Diagnostic only; never load-bearing. */
+  detail?: string
+}
+
 export type RuntimeStatus = {
   runtimeId: string
   /** Authenticated requester identity. Missing for in-process callers and older hosts. */
@@ -79,6 +138,11 @@ export type RuntimeStatus = {
   runtimeProtocolVersion?: number
   minCompatibleRuntimeClientVersion?: number
   capabilities?: RuntimeCapability[]
+  /**
+   * Optional for mixed-version peers. Absence means the host predates structured
+   * degradation reporting, not that the host proved every optional feature available.
+   */
+  degradations?: RuntimeDegradation[]
   // Why: optional fields let updated clients inventory both new and legacy paired servers.
   appVersion?: string
   remoteUpdateSupport?: RemoteServerUpdateSupport
@@ -105,8 +169,13 @@ export type CliRuntimeState =
   | 'stale_bootstrap'
 
 export type CliStatusResult = {
+  // Why: every field below describes ONE machine. When the CLI targets a paired server the
+  // whole result is about that server, and callers were reading `app` as if it described their
+  // own laptop. Naming the subject removes the ambiguity; absent means local.
+  target?: { kind: 'local' } | { kind: 'environment'; environment: string }
   app: {
     running: boolean
+    // Null whenever the pid is not knowable, which includes every remote target.
     pid: number | null
     desktopWindowStatus?: RuntimeDesktopWindowStatus
   }
@@ -117,6 +186,7 @@ export type CliStatusResult = {
     appVersion?: string
     remoteUpdateSupport?: RemoteServerUpdateSupport
     capabilities?: RuntimeCapability[]
+    degradations?: RuntimeDegradation[]
   }
   graph: {
     state: RuntimeGraphStatus | 'not_running' | 'starting'
@@ -381,6 +451,7 @@ export type RuntimeFileListResult = {
   files: RuntimeFileListEntry[]
   totalCount: number
   truncated: boolean
+  quickOpenSearchVersion?: number
 }
 
 export type RuntimeFileOpenResult = {
@@ -608,10 +679,29 @@ export type RuntimeWorktreeTerminalSleepResult = {
     }
 )
 
+/** Evidence class that proved a pane is parked on a prompt only a human can answer.
+ *  Never inferred from silence: `hook` is an agent-reported blocked/waiting state,
+ *  `prompt-text` is a matched prompt in the retained tail, `title` is a live OSC title. */
+export type RuntimeTerminalInteractiveWaitSource = 'hook' | 'prompt-text' | 'title'
+
+/** Present only while the wait is live. A `null` field means the pane was evaluated and nothing
+ *  proves a wait; an absent field means it was never evaluated — an older host, an unverifiable
+ *  worker identity, an unreadable pane, or an agent probe that did not answer in time. Absence
+ *  is never "not waiting". */
+export type RuntimeTerminalInteractiveWait = {
+  source: RuntimeTerminalInteractiveWaitSource
+  /** Named prompt when the tail identified one. Absent for hook and title evidence. */
+  reason?: RuntimeTerminalWaitBlockedReason
+  /** ms epoch the wait was first observed, when the evidence carries a timestamp. */
+  since?: number
+}
+
 export type RuntimeTerminalShow = RuntimeTerminalSummary & {
   paneRuntimeId: number
   ptyId: string | null
   rendererGraphEpoch: number
+  /** Null when nothing proves an interactive wait. Absent on hosts that predate the field. */
+  agentWait?: RuntimeTerminalInteractiveWait | null
 }
 
 export type RuntimeTerminalState = 'running' | 'exited' | 'unknown'
@@ -626,6 +716,13 @@ export type RuntimeTerminalRead = {
   nextCursor: string | null
   latestCursor?: string
   returnedLineCount?: number
+  // Why: these are two different questions and they disagree whenever a program repaints.
+  // `stream` is the accumulated pty output with escapes stripped, so a redrawn line arrives as
+  // stacked fragments; `screen` is what the terminal actually renders. Naming the source keeps
+  // a caller that asked for one and got the other from reading the answer as the wrong thing.
+  // `screen-unavailable` means a screen was asked for, none could be rendered, and this is the
+  // stream instead — distinct from `stream`, which is the caller getting what they asked for.
+  source?: 'stream' | 'screen' | 'screen-unavailable'
 }
 
 export type RuntimeTerminalRename = {
@@ -750,6 +847,8 @@ export type RuntimeTerminalClose = {
 }
 
 export type RuntimeTerminalWaitCondition = 'exit' | 'tui-idle'
+/** The `codex-` prefixes are historical: these startup prompts are matched by shape, not by
+ *  vendor, so they also fire for Claude and Cursor. Renaming them would break paired hosts. */
 export type RuntimeTerminalWaitBlockedReason =
   | 'codex-update-prompt'
   | 'codex-trust-workspace'
@@ -757,6 +856,7 @@ export type RuntimeTerminalWaitBlockedReason =
   | 'codex-model-migration-prompt'
   | 'codex-hooks-review-prompt'
   | 'codex-interactive-prompt'
+  | 'agent-approval-prompt'
 
 export type RuntimeTerminalWait = {
   handle: string
@@ -777,6 +877,7 @@ export type RuntimeWorktreeAgentRow = {
   /** paneKey of the orchestration parent, or null for a root agent. */
   parentPaneKey: string | null
   state: AgentStatusState
+  workingMode?: AgentWorkingMode
   agentType: AgentType | null
   /** Raw hook-reported prompt. Display surfaces can prefer displayName. */
   prompt: string
@@ -836,6 +937,8 @@ export type RuntimeWorktreePsSummary = {
   lastOutputAt: number | null
   preview: string
   status: RuntimeWorktreeStatus
+  /** Optional discriminator for a working workspace; older clients fall back to ordinary working. */
+  workingMode?: AgentWorkingMode
   /** Live agents in this worktree, newest-state-first. Empty for shell-only
    *  worktrees. Mirrors desktop's inline agent list (WorktreeCardAgents). */
   agents: RuntimeWorktreeAgentRow[]
@@ -1258,6 +1361,11 @@ export type BrowserTabCreateResult = {
 }
 
 export type BrowserErrorCode =
+  | typeof BROWSER_UNAVAILABLE_ERROR_CODE
+  | 'browser_command_unavailable'
+  | 'browser_profile_unavailable'
+  | 'browser_screencast_unavailable'
+  | 'browser_certificate_trust_unavailable'
   | 'browser_no_tab'
   | 'browser_tab_not_found'
   | 'browser_tab_closed'

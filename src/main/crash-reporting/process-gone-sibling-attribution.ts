@@ -10,6 +10,7 @@ import {
   collectLateSiblingAttributions,
   observeChildProcessDeath,
   SIBLING_DEATH_LOOKBACK_MS,
+  trackRendererCrashReport,
   type ChildProcessDeath
 } from './process-gone-sibling-correlation'
 
@@ -31,6 +32,29 @@ export function correlateChildProcessDeath(death: ChildProcessDeath): void {
   }
 }
 
+export function trackRendererSiblingAttribution(
+  event: Pick<ChildProcessDeath, 'reason' | 'exitCode'> & { source: string },
+  at: number,
+  siblingDeaths: ChildProcessDeath[],
+  attachDetails: (reportId: string, details: AttributionDetails) => Promise<unknown>,
+  recorded: Promise<{ id: string }>,
+  breadcrumbData: CrashReportBreadcrumbData,
+  origin?: string
+): void {
+  if (event.source !== 'renderer') {
+    return
+  }
+  trackRendererCrashReport(
+    {
+      at,
+      reason: event.reason,
+      exitCode: event.exitCode,
+      attachAttribution: siblingAttributionAttacher(attachDetails, recorded, breadcrumbData, origin)
+    },
+    siblingDeaths
+  )
+}
+
 /**
  * Folds a sibling death that arrived late into the report already on disk.
  *
@@ -41,7 +65,8 @@ export function correlateChildProcessDeath(death: ChildProcessDeath): void {
 export function siblingAttributionAttacher(
   attachDetails: (reportId: string, details: AttributionDetails) => Promise<unknown>,
   recorded: Promise<{ id: string }>,
-  breadcrumbData: CrashReportBreadcrumbData
+  breadcrumbData: CrashReportBreadcrumbData,
+  origin?: string
 ): (details: AttributionDetails) => void {
   return (details) => {
     void recorded
@@ -53,7 +78,8 @@ export function siblingAttributionAttacher(
           recordDurableCrashBreadcrumb(
             'sibling_attribution_attach_failed',
             breadcrumbData,
-            error instanceof Error ? error.message : String(error)
+            error instanceof Error ? error.message : String(error),
+            origin
           )
         })
       )
