@@ -1,4 +1,5 @@
 import { resolveActiveTabOwnerWorktreeId } from '../slices/active-tab-owner-worktree'
+import { getTerminalTabOwnerWorktreeId } from '../slices/terminal-tab-owner-index'
 import type { TerminalSlice, TerminalStoreGet, TerminalStoreSet } from './terminal-state'
 
 export function createTerminalTabNavigationActions(
@@ -6,7 +7,11 @@ export function createTerminalTabNavigationActions(
   get: TerminalStoreGet
 ): Pick<
   TerminalSlice,
-  'reorderTabs' | 'setTabBarOrder' | 'setActiveTab' | 'setActiveTabForWorktree'
+  | 'reorderTabs'
+  | 'setTabBarOrder'
+  | 'setActiveTab'
+  | 'setActiveTabForWorktree'
+  | 'getTerminalTabOwnerWorktreeId'
 > {
   return {
     reorderTabs: (worktreeId, tabIds) => {
@@ -102,6 +107,8 @@ export function createTerminalTabNavigationActions(
         )
       }
     },
+    getTerminalTabOwnerWorktreeId: (tabId) =>
+      getTerminalTabOwnerWorktreeId(get().tabsByWorktree, tabId),
     setActiveTabForWorktree: (worktreeId, tabId) => {
       set((s) => ({
         activeTabIdByWorktree: {

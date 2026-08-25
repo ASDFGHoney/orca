@@ -5,9 +5,6 @@ import { parseLegacyNumericPaneKey, parsePaneKey } from '../../../../shared/stab
 import { parseRemoteRuntimePtyId } from '@/runtime/runtime-terminal-stream'
 import { resolveDirectSshTerminalWorkspaceKeys } from '../slices/direct-ssh-terminal-workspace-scope'
 
-let terminalTabOwnerCacheSource: Record<string, TerminalTab[]> | null = null
-let terminalTabOwnerCache = new Map<string, string>()
-
 export function isRemoteRuntimePtyId(ptyId: string | null | undefined): boolean {
   return typeof ptyId === 'string' && parseRemoteRuntimePtyId(ptyId) !== null
 }
@@ -56,23 +53,6 @@ export function consumePendingActivationSpawn(
     return undefined
   }
   return count === 2 ? true : count - 1
-}
-
-export function getTerminalTabOwnerWorktreeId(
-  tabsByWorktree: Record<string, TerminalTab[]>,
-  tabId: string
-): string | null {
-  if (terminalTabOwnerCacheSource !== tabsByWorktree) {
-    const nextCache = new Map<string, string>()
-    for (const [worktreeId, tabs] of Object.entries(tabsByWorktree)) {
-      for (const tab of tabs) {
-        nextCache.set(tab.id, worktreeId)
-      }
-    }
-    terminalTabOwnerCacheSource = tabsByWorktree
-    terminalTabOwnerCache = nextCache
-  }
-  return terminalTabOwnerCache.get(tabId) ?? null
 }
 
 export function getTabIdFromPaneKey(paneKey: string): string | null {

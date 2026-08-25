@@ -5,7 +5,11 @@ import {
   applyGeneratedTabTitleUpdates,
   applyTerminalTabTitleUpdates
 } from '../slices/terminal-tab-title-batch'
-import { getTabIdFromPaneKey, getTerminalTabOwnerWorktreeId } from './terminal-pty-identities'
+import {
+  adoptTerminalTabOwnerMetadataOnlyBuckets,
+  getTerminalTabOwnerWorktreeId
+} from '../slices/terminal-tab-owner-index'
+import { getTabIdFromPaneKey } from './terminal-pty-identities'
 import type { TerminalSlice, TerminalStoreGet, TerminalStoreSet } from './terminal-state'
 
 export function createTerminalTabPresentationActions(
@@ -25,11 +29,7 @@ export function createTerminalTabPresentationActions(
   return {
     updateTabTitle: (tabId, title) => {
       set((state) => {
-        const ownerWorktreeId = getTerminalTabOwnerWorktreeId(state.tabsByWorktree, tabId)
-        const ownerByTabId = ownerWorktreeId
-          ? new Map([[tabId, ownerWorktreeId]])
-          : new Map<string, string>()
-        const result = applyTerminalTabTitleUpdates(state, [{ tabId, title }], ownerByTabId)
+        const result = applyTerminalTabTitleUpdates(state, [{ tabId, title }])
         if (result.runtimeGraphChanged) {
           scheduleRuntimeGraphSync()
         }
@@ -64,13 +64,17 @@ export function createTerminalTabPresentationActions(
           return s
         }
         const ownerTabs = tabs.map((tab) => (tab.id === tabId ? { ...tab, aiVaultTitle } : tab))
+        const nextTabsByWorktree = { ...s.tabsByWorktree, [ownerWorktreeId]: ownerTabs }
         const unifiedTabs = s.unifiedTabsByWorktree[ownerWorktreeId] ?? []
         const nextUnifiedTabs = unifiedTabs.map((tab) =>
           tab.contentType === 'terminal' && tab.entityId === tabId ? { ...tab, aiVaultTitle } : tab
         )
+        adoptTerminalTabOwnerMetadataOnlyBuckets(s.tabsByWorktree, nextTabsByWorktree, [
+          ownerWorktreeId
+        ])
         scheduleRuntimeGraphSync()
         return {
-          tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: ownerTabs },
+          tabsByWorktree: nextTabsByWorktree,
           unifiedTabsByWorktree: {
             ...s.unifiedTabsByWorktree,
             [ownerWorktreeId]: nextUnifiedTabs
@@ -99,11 +103,7 @@ export function createTerminalTabPresentationActions(
         return
       }
       set((latestState) => {
-        const result = applyGeneratedTabTitleUpdates(
-          latestState,
-          [{ paneKey, prompt, options }],
-          new Map([[tabId, ownerWorktreeId]])
-        )
+        const result = applyGeneratedTabTitleUpdates(latestState, [{ paneKey, prompt, options }])
         if (result.runtimeGraphChanged) {
           scheduleRuntimeGraphSync()
         }
