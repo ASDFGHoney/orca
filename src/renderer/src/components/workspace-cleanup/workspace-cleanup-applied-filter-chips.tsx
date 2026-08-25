@@ -142,10 +142,7 @@ function getChipKindLabel(kind: string): string {
     case 'ticket':
       return translate('components.workspace.cleanup.browse.chip.kind.ticket', 'Ticket')
     case 'ticketSource':
-      return translate(
-        'components.workspace.cleanup.browse.chip.kind.ticketSource',
-        'Ticket source'
-      )
+      return translate('components.workspace.cleanup.browse.chip.kind.ticketSource', 'Ticket source')
     case 'context':
       return translate('components.workspace.cleanup.browse.chip.kind.context', 'Context')
     case 'host':
