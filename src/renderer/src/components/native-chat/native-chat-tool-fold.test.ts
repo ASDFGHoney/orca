@@ -82,6 +82,7 @@ describe('foldToolMessages', () => {
     )
 
     expect(folded.map((message) => message.id)).toEqual(['c'])
+    expect(folded[0]?.blocks).toEqual([{ type: 'tool-call', name: 'Bash', input: {} }])
   })
 
   it('removes a result folded into assistant prose without mutating the source', () => {
@@ -143,6 +144,35 @@ describe('foldToolMessages', () => {
       expect.objectContaining({
         id: 'u',
         blocks: [{ type: 'text', text: '<system-reminder>continue</system-reminder>' }]
+      })
+    ])
+  })
+
+  it('does not traverse an interruption sidecar carrying a stale result', () => {
+    const folded = foldToolMessages([
+      msg({
+        id: 'a',
+        role: 'assistant',
+        blocks: [{ type: 'tool-call', name: 'Read', input: {} }]
+      }),
+      msg({
+        id: 'i',
+        role: 'user',
+        blocks: [
+          { type: 'tool-result', output: 'stale' },
+          { type: 'text', text: '[Request interrupted by user]' }
+        ]
+      })
+    ])
+
+    expect(folded).toEqual([
+      expect.objectContaining({
+        id: 'a',
+        blocks: [{ type: 'tool-call', name: 'Read', input: {} }]
+      }),
+      expect.objectContaining({
+        id: 'i',
+        blocks: [{ type: 'text', text: '[Request interrupted by user]' }]
       })
     ])
   })

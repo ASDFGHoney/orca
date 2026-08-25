@@ -257,5 +257,8 @@ describe('foldMobileNativeChatMessages', () => {
     ])
 
     expect(folded.map((message) => message.id)).toEqual(['c1'])
+    expect(folded[0]?.blocks).toEqual([
+      { type: 'tool-call', name: 'Bash', input: { command: 'command -v orca-ide' } }
+    ])
   })
 })

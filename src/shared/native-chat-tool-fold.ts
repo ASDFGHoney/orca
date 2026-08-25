@@ -17,7 +17,11 @@ function isToolOnlyMessage(message: NativeChatMessage): boolean {
 }
 
 function isHarnessSidecarToolMessage(message: NativeChatMessage): boolean {
-  if (message.role !== 'user' || !message.blocks.some(isToolResultBlock)) {
+  if (
+    message.role !== 'user' ||
+    isInterruptionBoundary(message) ||
+    !message.blocks.some(isToolResultBlock)
+  ) {
     return false
   }
   const textBlocks = message.blocks.filter((block) => block.type === 'text')
@@ -28,6 +32,13 @@ function isHarnessSidecarToolMessage(message: NativeChatMessage): boolean {
         isToolResultBlock(block) ||
         (block.type === 'text' && isKnownHarnessInjectedUserTurnText(block.text))
     )
+  )
+}
+
+function isInterruptionBoundary(message: NativeChatMessage): boolean {
+  return message.blocks.some(
+    (block) =>
+      block.type === 'text' && block.text.trim().toLowerCase().startsWith('[request interrupted')
   )
 }
 
@@ -93,7 +104,7 @@ export function foldToolMessages(messages: readonly NativeChatMessage[]): Native
     if (message.role === 'assistant') {
       mutableAssistantIndex = output.length - 1
       clonedAssistantIndex = -1
-    } else if (!isNoiseMessage(message)) {
+    } else if (!isNoiseMessage(message) || isInterruptionBoundary(message)) {
       mutableAssistantIndex = -1
       clonedAssistantIndex = -1
     }
