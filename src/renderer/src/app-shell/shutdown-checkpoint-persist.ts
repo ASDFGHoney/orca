@@ -75,9 +75,12 @@ export function createShutdownCheckpointPersist(deps: ShutdownCheckpointPersistD
       // Why retry-then-degrade: the first staging failure stays a visible,
       // retryable error — degrading immediately would silently drop just-captured
       // scrollback that a retry may well save. Only a repeat failure trades the
-      // full snapshot for an unblocked shutdown.
+      // full snapshot for an unblocked shutdown. Non-degradable failures never
+      // arm the flag, so an unrelated unload can't burn a later restart's retry.
       const keepBlocking = !fullStagingFailedOnPriorAttempt || !canDegradeToDurableSession()
-      fullStagingFailedOnPriorAttempt = true
+      if (canDegradeToDurableSession()) {
+        fullStagingFailedOnPriorAttempt = true
+      }
       if (keepBlocking) {
         throw error
       }
