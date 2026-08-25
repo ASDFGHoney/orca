@@ -498,20 +498,17 @@ describe('renderer startup runtime routing', () => {
     expect(checkpointEnd).toBeGreaterThan(checkpointStart)
     const checkpointBlock = source.slice(checkpointStart, checkpointEnd)
 
+    expect(checkpointBlock).toContain('runShutdownCheckpointPersist({')
     expect(checkpointBlock).toContain(
-      'let sessionSnapshots: ReturnType<typeof buildWorkspaceSessionHostSnapshots> = []'
+      'buildWorkspaceSessionHostSnapshots(\n            buildWorkspaceSessionPayload(freshState),\n            freshState\n          )'
+    )
+    expect(checkpointBlock).toContain('buildUiPatch: () => buildActiveViewUnloadPatch(')
+    expect(checkpointBlock).toContain('isIntentionalAppRestartInProgress')
+    expect(checkpointBlock).toContain(
+      'useAppStore.getState().openFiles.some((file) => file.isDirty)'
     )
     expect(checkpointBlock).toContain(
-      'buildWorkspaceSessionHostSnapshots(buildWorkspaceSessionPayload(freshState), freshState)'
-    )
-    expect(checkpointBlock).toContain('window.api.app.stageBeforeUnloadSync({')
-    expect(checkpointBlock).toContain('sessions: sessionSnapshots')
-    expect(checkpointBlock).toContain('ui: buildActiveViewUnloadPatch(freshState)')
-    expect(checkpointBlock).toContain('!isIntentionalAppRestartInProgress()')
-    expect(checkpointBlock).toContain('freshState.openFiles.some((file) => file.isDirty)')
-    expect(checkpointBlock).toContain('sessions: []')
-    expect(checkpointBlock).toContain(
-      'return\n      }\n      window.api.app.stageBeforeUnloadSync({\n        sessions: sessionSnapshots'
+      'stageBeforeUnloadSync: (args) => window.api.app.stageBeforeUnloadSync(args)'
     )
     expect(source).toContain(
       'window.addEventListener(ORCA_APP_RESTART_ABORTED_EVENT, shutdownCheckpoint.reset)'
