@@ -131,6 +131,10 @@ export type CrashReportCopyDiagnosticsArgs = {
   submissionFailure?: CrashReportCopySubmissionFailure
 }
 
+// Shared so the renderer's report-key memory expires exactly when the main process will accept the
+// same signature again; a renderer that forgets later silences every recurrence for the session.
+export const RENDERER_ERROR_DEDUPE_MS = 10 * 60 * 1000
+
 // User notes need a prose budget, separate from 240-character telemetry values.
 export const MAX_USER_NOTES_LENGTH = 8_000
 // Bound redaction work while allowing redacted input to contract into the output budget.

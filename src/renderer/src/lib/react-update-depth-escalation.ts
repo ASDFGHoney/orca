@@ -10,13 +10,18 @@
  * boundary that catches it names a bystander picked by commit order.
  */
 
+import { RENDERER_ERROR_DEDUPE_MS } from '../../../shared/crash-reporting'
 import { isReactUpdateDepthError } from '../../../shared/react-update-depth-attribution'
 import { reportReactErrorBoundaryCrash } from './react-error-boundary-reporting'
 
 // Marks the report as a swallowing catch rather than a mounted boundary; boundaryId caps at 120 chars.
 const ASYNC_CATCH_BOUNDARY_PREFIX = 'async-catch:'
 
-const escalatedSiteIds = new Set<string>()
+// The report-key windows downstream expire on the same clock, so a re-escalation is never dropped as
+// a duplicate; `observedAt` below keeps the awaits in between from shifting them apart.
+const ESCALATION_SUPPRESSION_MS = RENDERER_ERROR_DEDUPE_MS
+
+const lastEscalationAtBySiteId = new Map<string, number>()
 const pendingEscalations = new Set<Promise<void>>()
 
 /**
@@ -33,14 +38,19 @@ export function escalateReactUpdateDepthError(error: unknown, siteId: string): b
   if (!isReactUpdateDepthError(error)) {
     return false
   }
-  // Why once per site: the loop that produced this re-enters the same catch thousands of times a second.
-  if (escalatedSiteIds.has(siteId)) {
+  // Why throttled per site: the loop that produced this re-enters the same catch thousands of times a
+  // second. Why not once per site: a later, unrelated runaway at the same catch must not be silent.
+  const now = Date.now()
+  const sinceLastEscalation = now - (lastEscalationAtBySiteId.get(siteId) ?? -Infinity)
+  // A backwards clock jump reads as negative; escalate rather than suppress until the clock catches up.
+  if (sinceLastEscalation >= 0 && sinceLastEscalation < ESCALATION_SUPPRESSION_MS) {
     return true
   }
-  escalatedSiteIds.add(siteId)
+  forgetExpiredEscalations(now)
+  lastEscalationAtBySiteId.set(siteId, now)
   try {
     // Why unconditional: the web client stubs crash reporting to a no-op, so without this the
-    // guard would trade a mislabeled digest for total silence. Once per site, like the report.
+    // guard would trade a mislabeled digest for total silence. Throttled with the report.
     console.error(
       `[react-update-depth] React #185 (nested update limit) surfaced in the catch at ${siteId}; that site is a bystander, not the cause:`,
       error
@@ -50,7 +60,11 @@ export function escalateReactUpdateDepthError(error: unknown, siteId: string): b
         boundaryId: `${ASYNC_CATCH_BOUNDARY_PREFIX}${siteId}`,
         // No boundary caught this, so no boundary surface describes it; siteId carries the identity.
         surface: 'app-root',
-        error
+        error,
+        observedAt: now,
+        // Off by default so a recurring boundary crash cannot re-open the modal crash dialog; this
+        // site self-throttles on the same window, so opting in re-reports at most once per window.
+        repeatAfterDedupeWindow: true
       })
     )
     dispatchToHostErrorHandler(error, siteId)
@@ -59,6 +73,14 @@ export function escalateReactUpdateDepthError(error: unknown, siteId: string): b
     console.warn('[react-update-depth] Failed to escalate a swallowed #185:', escalationError)
   }
   return true
+}
+
+function forgetExpiredEscalations(now: number): void {
+  for (const [expiredSiteId, escalatedAt] of lastEscalationAtBySiteId) {
+    if (now - escalatedAt >= ESCALATION_SUPPRESSION_MS) {
+      lastEscalationAtBySiteId.delete(expiredSiteId)
+    }
+  }
 }
 
 function trackEscalation(escalation: Promise<void>): void {
@@ -86,6 +108,6 @@ export async function flushReactUpdateDepthEscalationsForTest(): Promise<void> {
 }
 
 export function resetReactUpdateDepthEscalationForTest(): void {
-  escalatedSiteIds.clear()
+  lastEscalationAtBySiteId.clear()
   pendingEscalations.clear()
 }

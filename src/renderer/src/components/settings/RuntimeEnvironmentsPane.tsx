@@ -95,6 +95,24 @@ export function evaluateHostDetails(status: RuntimeStatus): RuntimeCompatVerdict
   })
 }
 
+function buildReadyHostDetails(runtimeStatus: RuntimeStatus): RuntimeHostDetails {
+  return {
+    status: 'ready',
+    runtimeStatus,
+    compatibility: evaluateHostDetails(runtimeStatus),
+    error: null
+  }
+}
+
+// Reads as "Status unavailable" with no description. Not 'loading' (nothing is checking) and not the
+// store's status:null either — a local render loop is no evidence about the host.
+const UNVERIFIED_HOST_DETAILS: RuntimeHostDetails = {
+  status: 'error',
+  runtimeStatus: null,
+  compatibility: null,
+  error: null
+}
+
 export function getHostDetailsSummary(details: RuntimeHostDetails | undefined): string {
   if (!details || details.status === 'loading') {
     return translate('auto.components.settings.RuntimeEnvironmentsPane.5120beaac6', 'Checking…')
@@ -298,6 +316,8 @@ export function RuntimeEnvironmentsPane({
     (state) => state.setRemoteServerUpdateDialogOpen
   )
   const consumedAddServerIntentSignalRef = useRef(0)
+  // The finally below needs these even when the setState that seeded them threw.
+  const probedEnvironmentIdsRef = useRef<string[]>([])
   const mountedRef = useMountedRef()
   const updateCheckHint = getUpdateCheckHint()
   const activeValue =
@@ -316,6 +336,24 @@ export function RuntimeEnvironmentsPane({
     ? getRuntimeEnvironmentsSearchEntry()
     : getWebRuntimeEnvironmentsSearchEntry()
 
+  // Every probe has settled by the time this runs, so a row still on its 'loading' seed has no check
+  // in flight — an escalated #185 (or any early return) left it there. Spinning "Checking…" forever
+  // asserts a probe that is not running; the manual refresh is the only other writer.
+  const settleUnprobedHostRows = useCallback(() => {
+    setDetailsByEnvironmentId((current) => {
+      const stranded = probedEnvironmentIdsRef.current.filter(
+        (environmentId) => (current[environmentId]?.status ?? 'loading') === 'loading'
+      )
+      if (stranded.length === 0) {
+        return current
+      }
+      return {
+        ...current,
+        ...Object.fromEntries(stranded.map((id) => [id, UNVERIFIED_HOST_DETAILS]))
+      }
+    })
+  }, [])
+
   const loadEnvironments = useCallback(
     async (verified?: { environmentId: string; runtimeStatus: RuntimeStatus }): Promise<void> => {
       if (mountedRef.current) {
@@ -324,6 +362,7 @@ export function RuntimeEnvironmentsPane({
       try {
         const nextEnvironments = await window.api.runtimeEnvironments.list()
         const visibleEnvironments = nextEnvironments.filter(isUserManagedRuntimeEnvironment)
+        probedEnvironmentIdsRef.current = visibleEnvironments.map((environment) => environment.id)
         // Why: drop store status for servers no longer saved so stale hosts don't
         // linger in the sidebar registry.
         useAppStore.getState().setRuntimeEnvironments(nextEnvironments)
@@ -340,12 +379,7 @@ export function RuntimeEnvironmentsPane({
             for (const environment of visibleEnvironments) {
               next[environment.id] =
                 verified?.environmentId === environment.id
-                  ? {
-                      status: 'ready',
-                      runtimeStatus: verified.runtimeStatus,
-                      compatibility: evaluateHostDetails(verified.runtimeStatus),
-                      error: null
-                    }
+                  ? buildReadyHostDetails(verified.runtimeStatus)
                   : (current[environment.id] ?? {
                       status: 'loading',
                       runtimeStatus: null,
@@ -360,12 +394,14 @@ export function RuntimeEnvironmentsPane({
           visibleEnvironments
             .filter((environment) => environment.id !== verified?.environmentId)
             .map(async (environment) => {
+              let probedRuntimeStatus: RuntimeStatus | null = null
               try {
                 const response = await window.api.runtimeEnvironments.getStatus({
                   selector: environment.id,
                   timeoutMs: 10_000
                 })
                 const runtimeStatus = unwrapRuntimeRpcResult<RuntimeStatus>(response)
+                probedRuntimeStatus = runtimeStatus
                 // Why: feed the live status into the store so sidebar host pickers
                 // reflect manual refreshes, not just the settings pane.
                 useAppStore.getState().setRuntimeEnvironmentStatus(environment.id, {
@@ -377,18 +413,22 @@ export function RuntimeEnvironmentsPane({
                 }
                 setDetailsByEnvironmentId((current) => ({
                   ...current,
-                  [environment.id]: {
-                    status: 'ready',
-                    runtimeStatus,
-                    compatibility: evaluateHostDetails(runtimeStatus),
-                    error: null
-                  }
+                  [environment.id]: buildReadyHostDetails(runtimeStatus)
                 }))
               } catch (error) {
                 // Why first: allSettled would swallow a #185 a second time, and the probe
                 // itself succeeded — status:null here blames the host for a local render
                 // loop and marks a reachable server unverifiable.
                 if (escalateReactUpdateDepthError(error, RUNTIME_PROBE_CATCH)) {
+                  // The probe already answered; keep its verdict rather than let the finally below
+                  // settle the row on "Status unavailable" for a failure that was never the host's.
+                  if (probedRuntimeStatus && mountedRef.current) {
+                    const readyDetails = buildReadyHostDetails(probedRuntimeStatus)
+                    setDetailsByEnvironmentId((current) => ({
+                      ...current,
+                      [environment.id]: readyDetails
+                    }))
+                  }
                   return
                 }
                 // Why: record the failed probe (null status) so the sidebar can
@@ -429,10 +469,11 @@ export function RuntimeEnvironmentsPane({
       } finally {
         if (mountedRef.current) {
           setIsLoading(false)
+          settleUnprobedHostRows()
         }
       }
     },
-    [mountedRef]
+    [mountedRef, settleUnprobedHostRows]
   )
 
   useEffect(() => {

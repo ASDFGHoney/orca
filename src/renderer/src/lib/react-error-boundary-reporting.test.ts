@@ -4,7 +4,7 @@ import {
   clearReactErrorBoundaryReportingForTest,
   reportReactErrorBoundaryCrash
 } from './react-error-boundary-reporting'
-import type { CrashReportRecord } from '../../../shared/crash-reporting'
+import { RENDERER_ERROR_DEDUPE_MS, type CrashReportRecord } from '../../../shared/crash-reporting'
 
 const mocks = vi.hoisted(() => ({
   recordRendererError: vi.fn(),
@@ -146,5 +146,57 @@ describe('react error boundary reporting', () => {
         hasActiveWorktree: true
       })
     )
+  })
+
+  it('re-reports an identical signature once the main-process dedupe window elapses', async () => {
+    vi.useFakeTimers()
+    try {
+      const report = () =>
+        reportReactErrorBoundaryCrash({
+          boundaryId: 'page.settings',
+          surface: 'page',
+          error: new Error('render failed'),
+          repeatAfterDedupeWindow: true
+        })
+      await report()
+      vi.setSystemTime(Date.now() + RENDERER_ERROR_DEDUPE_MS - 1)
+      await report()
+      expect(mocks.recordRendererError).toHaveBeenCalledTimes(1)
+
+      // Past the window the main process accepts the report again, so the renderer must not withhold it:
+      // its key set only evicts after 50 *distinct* other errors, which one recurring crash never produces.
+      vi.setSystemTime(Date.now() + 1)
+      await report()
+      expect(mocks.recordRendererError).toHaveBeenCalledTimes(2)
+      expect(mocks.dispatchEvent).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a mounted boundary at one report per session so the crash dialog cannot re-open', async () => {
+    vi.useFakeTimers()
+    try {
+      // CrashReportDialog opens the modal for every non-deduped report, with no per-launch guard on
+      // that path; a resetKey-driven boundary re-catches the same signature indefinitely.
+      const report = () =>
+        reportReactErrorBoundaryCrash({
+          boundaryId: 'modal.quick-open',
+          surface: 'modal',
+          error: new Error('render failed')
+        })
+      await report()
+      for (let hour = 0; hour < 3; hour++) {
+        for (let tick = 0; tick < 6; tick++) {
+          vi.setSystemTime(Date.now() + RENDERER_ERROR_DEDUPE_MS)
+          await report()
+        }
+      }
+
+      expect(mocks.recordRendererError).toHaveBeenCalledTimes(1)
+      expect(mocks.dispatchEvent).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

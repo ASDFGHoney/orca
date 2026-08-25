@@ -1,8 +1,9 @@
 import os from 'node:os'
 import { app } from 'electron'
-import type {
-  ReactErrorBoundaryReportArgs,
-  ReactErrorBoundaryReportResult
+import {
+  RENDERER_ERROR_DEDUPE_MS,
+  type ReactErrorBoundaryReportArgs,
+  type ReactErrorBoundaryReportResult
 } from '../../shared/crash-reporting'
 import {
   CRASH_REPORT_ATTRIBUTION_DETAIL_KEY,
@@ -16,7 +17,6 @@ import { getCrashBreadcrumbSnapshot } from '../crash-reporting/crash-breadcrumb-
 
 export const recentRendererErrorReportKeys = new Map<string, number>()
 
-const RENDERER_ERROR_DEDUPE_MS = 10 * 60 * 1000
 const MAX_RENDERER_ERROR_KEY_AGE_MS = RENDERER_ERROR_DEDUPE_MS * 2
 const MAX_RECENT_RENDERER_ERROR_REPORT_KEYS = 256
 

@@ -6,7 +6,10 @@ import {
   flushReactUpdateDepthEscalationsForTest,
   resetReactUpdateDepthEscalationForTest
 } from './react-update-depth-escalation'
-import { clearReactErrorBoundaryReportingForTest } from './react-error-boundary-reporting'
+import {
+  clearReactErrorBoundaryReportingForTest,
+  REACT_ERROR_BOUNDARY_REPORT_AVAILABLE_EVENT
+} from './react-error-boundary-reporting'
 
 const REACT_185_MINIFIED =
   'Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.'
@@ -101,6 +104,46 @@ describe('react update depth escalation', () => {
     await flushReactUpdateDepthEscalationsForTest()
     expect(recordRendererError).toHaveBeenCalledTimes(1)
     expect(captured).toHaveLength(1)
+  })
+
+  it('re-escalates the same site once the suppression window elapses', async () => {
+    vi.useFakeTimers()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    // A report the user can send is the surface the guard exists to feed, so count the dialog signal too.
+    recordRendererError.mockResolvedValue({
+      ok: true,
+      report: { id: 'react-report-1' },
+      deduped: false
+    })
+    const reportsAvailable = vi.fn()
+    window.addEventListener(REACT_ERROR_BOUNDARY_REPORT_AVAILABLE_EVENT, reportsAvailable)
+    try {
+      expect(escalateReactUpdateDepthError(new Error(REACT_185_MINIFIED), SITE)).toBe(true)
+      await flushReactUpdateDepthEscalationsForTest()
+      expect(recordRendererError).toHaveBeenCalledTimes(1)
+
+      // Inside the window the runaway loop's own re-entries stay suppressed.
+      vi.setSystemTime(Date.now() + 9 * 60 * 1000)
+      expect(escalateReactUpdateDepthError(new Error(REACT_185_MINIFIED), SITE)).toBe(true)
+      await flushReactUpdateDepthEscalationsForTest()
+      expect(recordRendererError).toHaveBeenCalledTimes(1)
+      expect(captured).toHaveLength(1)
+      expect(consoleError).toHaveBeenCalledTimes(1)
+
+      // A later, unrelated runaway at the same catch must not be silent. Nothing is cleared here:
+      // the report-key dedupe downstream has to expire on its own, or the window is decorative.
+      vi.setSystemTime(Date.now() + 2 * 60 * 1000)
+      expect(escalateReactUpdateDepthError(new Error(REACT_185_MINIFIED), SITE)).toBe(true)
+      await flushReactUpdateDepthEscalationsForTest()
+      expect(recordRendererError).toHaveBeenCalledTimes(2)
+      expect(captured).toHaveLength(2)
+      expect(consoleError).toHaveBeenCalledTimes(2)
+      expect(reportsAvailable).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener(REACT_ERROR_BOUNDARY_REPORT_AVAILABLE_EVENT, reportsAvailable)
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it('still escalates a second, distinct catching site', async () => {

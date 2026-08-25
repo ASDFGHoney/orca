@@ -1,7 +1,8 @@
 import type React from 'react'
-import type {
-  CrashReportRecord,
-  ReactErrorBoundaryReportArgs
+import {
+  RENDERER_ERROR_DEDUPE_MS,
+  type CrashReportRecord,
+  type ReactErrorBoundaryReportArgs
 } from '../../../shared/crash-reporting'
 import { getReactErrorBoundaryAttribution } from '../../../shared/react-update-depth-attribution'
 
@@ -16,10 +17,18 @@ type BuildReportArgsInput = {
   error: unknown
   errorInfo?: React.ErrorInfo
   context?: RendererErrorContext
+  /** When the crash was observed; callers that throttle themselves pass their own instant so the two windows cannot drift. */
+  observedAt?: number
+  /**
+   * Opt in to re-reporting an identical signature once RENDERER_ERROR_DEDUPE_MS has passed. Off by
+   * default because a non-deduped report re-opens the modal crash dialog, and a mounted boundary
+   * with a resetKey re-catches the same signature for as long as the user keeps reopening its
+   * surface. Only self-throttled callers that need a runaway to stay visible should set it.
+   */
+  repeatAfterDedupeWindow?: boolean
 }
 
-const reportedRendererErrorKeys: string[] = []
-const reportedRendererErrorKeySet = new Set<string>()
+const reportedRendererErrorKeyTimes = new Map<string, number>()
 const MAX_REPORTED_RENDERER_ERROR_KEYS = 50
 let pendingReactErrorBoundaryReport: CrashReportRecord | null = null
 
@@ -88,17 +97,35 @@ export function buildReactErrorBoundaryReportArgs({
   }
 }
 
-function rememberRendererErrorKey(key: string): boolean {
-  if (reportedRendererErrorKeySet.has(key)) {
-    return false
-  }
-  reportedRendererErrorKeySet.add(key)
-  reportedRendererErrorKeys.push(key)
-  if (reportedRendererErrorKeys.length > MAX_REPORTED_RENDERER_ERROR_KEYS) {
-    const expiredKey = reportedRendererErrorKeys.shift()
-    if (expiredKey) {
-      reportedRendererErrorKeySet.delete(expiredKey)
+/**
+ * Default is once per session (the count cap is the only eviction), because every non-deduped report
+ * opens the modal crash dialog. `repeatAfterDedupeWindow` callers get the main process's own window
+ * instead, so a self-throttled runaway is never silently dropped on this side.
+ */
+function rememberRendererErrorKey(
+  key: string,
+  observedAt: number,
+  repeatAfterDedupeWindow: boolean
+): boolean {
+  const rememberedAt = reportedRendererErrorKeyTimes.get(key)
+  if (rememberedAt !== undefined) {
+    if (!repeatAfterDedupeWindow) {
+      return false
     }
+    const elapsed = observedAt - rememberedAt
+    // A backwards clock jump reads as negative; report rather than stay silent until the clock catches up.
+    if (elapsed >= 0 && elapsed < RENDERER_ERROR_DEDUPE_MS) {
+      return false
+    }
+  }
+  reportedRendererErrorKeyTimes.delete(key) // re-insert so the count cap evicts by last report, not first
+  reportedRendererErrorKeyTimes.set(key, observedAt)
+  while (reportedRendererErrorKeyTimes.size > MAX_REPORTED_RENDERER_ERROR_KEYS) {
+    const oldestKey = reportedRendererErrorKeyTimes.keys().next().value
+    if (oldestKey === undefined) {
+      return true
+    }
+    reportedRendererErrorKeyTimes.delete(oldestKey)
   }
   return true
 }
@@ -127,9 +154,16 @@ function notifyReactErrorBoundaryReportAvailable(report: CrashReportRecord): voi
 export async function reportReactErrorBoundaryCrash(
   input: Omit<BuildReportArgsInput, 'context'>
 ): Promise<void> {
+  const observedAt = input.observedAt ?? Date.now()
   const context = await collectRendererErrorContext()
   const args = buildReactErrorBoundaryReportArgs({ ...input, context })
-  if (!rememberRendererErrorKey(getRendererErrorKey(args))) {
+  if (
+    !rememberRendererErrorKey(
+      getRendererErrorKey(args),
+      observedAt,
+      input.repeatAfterDedupeWindow === true
+    )
+  ) {
     return
   }
 
@@ -148,7 +182,6 @@ export async function reportReactErrorBoundaryCrash(
 }
 
 export function clearReactErrorBoundaryReportingForTest(): void {
-  reportedRendererErrorKeys.length = 0
-  reportedRendererErrorKeySet.clear()
+  reportedRendererErrorKeyTimes.clear()
   pendingReactErrorBoundaryReport = null
 }
