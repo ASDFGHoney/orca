@@ -99,7 +99,12 @@ function limitSkillsAcrossScopes(
   const byScope = new Map<SkillSourceKind, Extract<NativeChatPickerItem, { kind: 'skill' }>[]>()
   for (const item of skills) {
     const scope = item.sources[0].sourceKind
-    byScope.set(scope, [...(byScope.get(scope) ?? []), item])
+    const queue = byScope.get(scope)
+    if (queue) {
+      queue.push(item)
+    } else {
+      byScope.set(scope, [item])
+    }
   }
   const queues = [...byScope.values()]
   const picked: Extract<NativeChatPickerItem, { kind: 'skill' }>[] = []
