@@ -45,7 +45,10 @@ function writtenFrames(child: FakeChild): Promise<Record<string, unknown>[]> {
 }
 
 describe('Claude stream-json connection', () => {
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+  })
 
   it('spawns in the pinned workspace and routes acknowledged control requests', async () => {
     const process = fakeSpawn()
@@ -164,7 +167,23 @@ describe('Claude stream-json connection', () => {
     expect(env?.CLAUDE_CODE_CHILD_SESSION).toBeUndefined()
   })
 
-  it('settles concurrent and repeated closes after a spawn failure', async () => {
+  it('does not treat a process error as exit proof', async () => {
+    vi.useFakeTimers()
+    const process = fakeSpawn()
+    const connection = await openClaudeStreamJsonConnection(
+      { command: 'claude', args: [], cwd: '/work' },
+      {},
+      process.spawnImpl
+    )
+    process.child.emit('error', new Error('provider transport failed'))
+
+    const closing = connection.close()
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    await expect(closing).resolves.toBe(false)
+  })
+
+  it('settles concurrent and repeated closes after spawn failure exit proof', async () => {
     const process = fakeSpawn()
     const connection = await openClaudeStreamJsonConnection(
       { command: 'missing-claude', args: [], cwd: '/work' },
@@ -172,6 +191,7 @@ describe('Claude stream-json connection', () => {
       process.spawnImpl
     )
     process.child.emit('error', new Error('spawn missing-claude ENOENT'))
+    process.child.emit('close')
 
     await expect(Promise.all([connection.close(), connection.close()])).resolves.toEqual([
       true,

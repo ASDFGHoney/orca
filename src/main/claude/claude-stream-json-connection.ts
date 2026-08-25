@@ -202,7 +202,6 @@ export async function openClaudeStreamJsonConnection(
     stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_BYTES)
   })
   child.on('error', (error) => {
-    markExited()
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
