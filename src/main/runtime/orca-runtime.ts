@@ -16100,7 +16100,8 @@ export class OrcaRuntimeService {
     return false
   }
 
-  // Why: explicit take-back supersedes delayed mutations, revoking soft-leave grace admission for mobile input floors.
+  // Why: teardown and desktop reclaim supersede delayed mobile mutations,
+  // revoking soft-leave grace admission for input floors.
   private cancelPendingDriverMutations(ptyId: string): void {
     const pendingRestore = this.pendingRestoreTimers.get(ptyId)
     if (pendingRestore) {
