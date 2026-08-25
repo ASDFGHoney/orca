@@ -40,6 +40,7 @@ describe('hydrateShellPath', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     if (originalPath === undefined) {
       delete process.env.PATH
     } else {
@@ -180,6 +181,9 @@ describe('hydrateShellPath', () => {
   })
 
   it('probes with the recorded launch PATH so seeded fallbacks cannot pin nvm', async () => {
+    // Why: shellProbeEnv short-circuits on win32, so pin the platform or this
+    // POSIX-only assertion fails for anyone running the suite on Windows.
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const proc = createMockShellProcess()
     spawnMock.mockReturnValue(proc)
     process.env.PATH = `/home/u/.nvm/versions/node/v26.7.0/bin${delimiter}/usr/bin`

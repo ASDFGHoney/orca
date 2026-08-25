@@ -36,8 +36,8 @@ let probeQueue = Promise.resolve()
 // ahead of PATH before we probe. nvm's startup `use` honors whatever node is
 // already on PATH over the user's `default` alias, so a probe that inherits the
 // seed comes back pinned to that version and every terminal loses the global
-// CLIs installed under `default`. Probe with the launch PATH; Windows gets the
-// same protection from WindowsShellPathOwnership.
+// CLIs installed under `default`. Probe with the launch PATH instead. win32 is
+// exempt: it keys PATH as `Path`, and no Windows seed pins a node version.
 let launchPath: string | null = null
 let configuredWindowsShell = 'powershell.exe'
 let configuredWindowsGitBashPath: string | null = null
