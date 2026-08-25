@@ -513,6 +513,32 @@ describe('resolveAgentForegroundProcess', () => {
     ).resolves.toEqual({ available: true, processName: 'droid' })
   })
 
+  it('fails closed when console attachment cannot be read', async () => {
+    // The filter exists to DROP descendants that left the console. If it cannot
+    // tell which ones those are, publishing the unfiltered list would grant a
+    // detached process the pane's identity. #16419 briefly made this fall open
+    // and nothing caught it, because no test drove the null.
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    mockWindowsRows([
+      { pid: 200, ppid: 199, name: 'powershell.exe', commandLine: 'powershell.exe' },
+      { pid: 201, ppid: 200, name: 'droid.exe', commandLine: 'droid' },
+      { pid: 202, ppid: 200, name: 'agy.exe', commandLine: 'agy' }
+    ])
+
+    const reader = vi.fn(async () => null)
+
+    const resolution = await resolveAgentForegroundProcessWithAvailability(200, 'powershell.exe', {
+      fresh: true,
+      readWindowsConsoleAttachedProcessIds: reader
+    })
+
+    expect(reader).toHaveBeenCalledTimes(1)
+    // available:false is the fail-closed signal; the wrapper then substitutes
+    // the shell fallback rather than publishing an unverified agent identity.
+    expect(resolution.available).toBe(false)
+    expect(resolution.processName).not.toBe('droid')
+  })
+
   it('recognizes a Windows shell-rooted agent when only one candidate matches the worktree path', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' })
     mockWindowsRows([

@@ -150,8 +150,10 @@ export function createPtyForegroundProcessTracker(args: {
         }
         if (!processName || !recognizeAgentProcess(processName)) {
           if (process.platform === 'win32' && fallbackIsShell && cachedAgentForeground !== null) {
-            const consoleProcessIds = readWindowsConptyProcessIds(proc)
-            if (consoleProcessIds === null || consoleProcessIds.size > 1) {
+            // Job, not console: "is anything besides the shell alive?" needs no
+            // console attachment, so it needs no forked helper (#10857).
+            const paneProcessIds = readWindowsConptyProcessIds(proc)
+            if (paneProcessIds === null || paneProcessIds.size > 1) {
               return
             }
             retireStaleForegroundIdentity()

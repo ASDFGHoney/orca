@@ -1408,23 +1408,26 @@ export class LocalPtyProvider implements IPtyProvider {
       ptyShellName.get(id)
     )
     const cachedAgent = ptyLastRecognizedForeground.get(id) ?? null
-    let consoleMembershipUnavailable = false
-    // Why: console membership preserves a live cached agent without the whole-table scan (incomplete under Windows load).
+    let paneMembershipUnavailable = false
+    // Why: job membership preserves a live cached agent without the whole-table
+    // scan (incomplete under Windows load). Job, not console: this asks "is
+    // anything besides the shell alive?", which needs no console attachment and
+    // so needs no forked helper (#10857).
     if (
       process.platform === 'win32' &&
       canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
     ) {
       try {
-        const consoleProcessIds = readWindowsConptyProcessIds(proc)
+        const paneProcessIds = readWindowsConptyProcessIds(proc)
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
-        if (consoleProcessIds !== null && consoleProcessIds.size > 1 && cachedAgent !== null) {
+        if (paneProcessIds !== null && paneProcessIds.size > 1 && cachedAgent !== null) {
           return cachedAgent
         }
-        consoleMembershipUnavailable = consoleProcessIds === null
+        paneMembershipUnavailable = paneProcessIds === null
       } catch {
-        consoleMembershipUnavailable = true
+        paneMembershipUnavailable = true
       }
     }
     try {
@@ -1446,7 +1449,7 @@ export class LocalPtyProvider implements IPtyProvider {
         : null
       // Why: incomplete snapshot + unavailable console probe isn't exit proof; only shell-only membership may clear the cache.
       const stable = resolveStableForegroundProcess(
-        consoleMembershipUnavailable && resolvedAgent === null
+        paneMembershipUnavailable && resolvedAgent === null
           ? { ...resolution, available: false }
           : resolution,
         lastRecognizedAgent

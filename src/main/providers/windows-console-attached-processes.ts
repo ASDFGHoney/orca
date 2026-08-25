@@ -4,7 +4,7 @@ const CONPTY_PROCESS_LIST_TIMEOUT_MS = 3_000
 
 type ProcessListMessage = { consoleProcessList?: unknown }
 
-type WindowsConptyMembershipDeps = {
+type WindowsConsoleAttachedProcessDeps = {
   forkProcess?: typeof fork
   resolveAgentPath?: () => string
   timeoutMs?: number
@@ -33,7 +33,7 @@ function resolveNodePtyConsoleListAgent(): string {
  */
 export function readWindowsConsoleAttachedProcessIds(
   rootPid: number,
-  deps: WindowsConptyMembershipDeps = {}
+  deps: WindowsConsoleAttachedProcessDeps = {}
 ): Promise<ReadonlySet<number> | null> {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0) {
     return Promise.resolve(null)
