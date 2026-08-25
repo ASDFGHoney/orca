@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@vscode/windows-process-tree@0.8.0':
-    hash: dcb7e0355a8162da66b8bfe0852d664e445b18b6a3d813b6703b932f8d410591
+    hash: 0607d57bdcfae210e89511603140bf9089dc86e171adfa3fee5cb35aa82abe9e
     path: config/patches/@vscode__windows-process-tree@0.8.0.patch
   '@xterm/addon-ligatures@0.11.0-beta.287':
     hash: 47405b9994b5acf1b4e90b49250358c1ca03649854d59560e7732b72fe336920
@@ -413,7 +413,7 @@ importers:
     optionalDependencies:
       '@vscode/windows-process-tree':
         specifier: 0.8.0
-        version: 0.8.0(patch_hash=dcb7e0355a8162da66b8bfe0852d664e445b18b6a3d813b6703b932f8d410591)
+        version: 0.8.0(patch_hash=0607d57bdcfae210e89511603140bf9089dc86e171adfa3fee5cb35aa82abe9e)
       sherpa-onnx-darwin-arm64:
         specifier: 1.12.37
         version: 1.12.37
@@ -3399,7 +3399,6 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
-
   '@xterm/addon-fit@0.12.0-beta.287':
     resolution: {integrity: sha512-2MDj+J4x67bjOS/SuBPxSYEWH38NbX6ENV18RbKVOhfRYCX3yERnuHBOrgH9hYdY8rCtsLQmuVgF6cmvCJiV2w==}
     peerDependencies:
@@ -9618,7 +9617,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
-  '@vscode/windows-process-tree@0.8.0(patch_hash=dcb7e0355a8162da66b8bfe0852d664e445b18b6a3d813b6703b932f8d410591)':
+  '@vscode/windows-process-tree@0.8.0(patch_hash=0607d57bdcfae210e89511603140bf9089dc86e171adfa3fee5cb35aa82abe9e)':
     dependencies:
       node-addon-api: 7.1.0
     optional: true
