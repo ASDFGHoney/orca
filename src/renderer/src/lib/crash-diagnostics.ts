@@ -3,13 +3,16 @@ import type {
   CrashReportDetailValue
 } from '../../../shared/crash-reporting'
 import {
+  RENDERER_MEMORY_HEARTBEAT_BREADCRUMB,
+  RENDERER_MEMORY_HEARTBEAT_INTERVAL_MS
+} from '../../../shared/renderer-memory-heartbeat'
+import {
   getBrowserWebviewMemoryProfile,
   type BrowserWebviewMemoryProfile
 } from '../components/browser-pane/host-guest/webview-registry'
 import { recordRendererCrashBreadcrumb } from './crash-breadcrumb-recorder'
 import { collectRendererMemoryProfileCounts } from './renderer-memory-profile'
 
-const RENDERER_MEMORY_SAMPLE_INTERVAL_MS = 60_000
 const BYTES_PER_MEGABYTE = 1024 * 1024
 const BYTES_PER_KILOBYTE = 1024
 // Why: one detailed breadcrumb per threshold names what grew before an OOM.
@@ -54,7 +57,7 @@ export function installRendererCrashDiagnostics(surface: RendererSurface = 'main
     recordRendererMemory('startup')
     rendererMemoryInterval = window.setInterval(
       () => recordRendererMemory('interval'),
-      RENDERER_MEMORY_SAMPLE_INTERVAL_MS
+      RENDERER_MEMORY_HEARTBEAT_INTERVAL_MS
     )
   }
 }
@@ -119,7 +122,7 @@ function recordRendererMemory(reason: string): void {
   const browserWebviews = getBrowserWebviewMemoryProfile()
 
   recordRendererCrashBreadcrumb(
-    'renderer_memory',
+    RENDERER_MEMORY_HEARTBEAT_BREADCRUMB,
     compactBreadcrumbData({
       reason,
       usedHeapMB: toMegabytes(memory.usedJSHeapSize),
