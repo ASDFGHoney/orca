@@ -121,6 +121,49 @@ describe('recovering pairing relay candidate', () => {
     expect(persistMove).not.toHaveBeenCalled()
   })
 
+  it('keeps recovery bounded when the authoritative-cell constructor throws', async () => {
+    const stale = client(Promise.reject(new RelayOuterError(1006)))
+    const target = client(Promise.resolve(success()))
+    const entries: ConnectionLogEntry[] = []
+    let connects = 0
+    const candidate = createRecoveringPairingRelayCandidate({
+      journal,
+      connect: () => {
+        connects++
+        if (connects === 1) {
+          return stale
+        }
+        if (connects === 2) {
+          throw new Error('relay constructor failed')
+        }
+        return target
+      },
+      resolveDirector: async (relay) => {
+        throw new RelayDirectorMoveNotNewerError({
+          cellUrl: relay.cellUrl,
+          assignmentEpoch: relay.assignmentEpoch,
+          currentCellUrl: relay.cellUrl,
+          currentAssignmentEpoch: relay.assignmentEpoch
+        })
+      },
+      persistMove: vi.fn(),
+      now: () => 1,
+      random: () => 0,
+      sleep: async () => {},
+      onLog: (entry) => entries.push(entry)
+    })
+
+    await expect(candidate.sendRequest('status.get')).resolves.toEqual(success())
+    expect(connects).toBe(3)
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        message: 'Relay: recovery attempt 1 failed',
+        detail: 'Error: relay constructor failed'
+      })
+    )
+  })
+
   it('does not retry a same-epoch move to a different cell', async () => {
     const stale = client(Promise.reject(new RelayOuterError(1006)))
     const resolveDirector = vi.fn(async (relay) => {

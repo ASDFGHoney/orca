@@ -100,8 +100,8 @@ export function createRecoveringPairingRelayCandidate(args: {
           if (closed) {
             throw new Error('relay pairing client closed')
           }
-          client = args.connect(relay, args.onLog)
           try {
+            client = args.connect(relay, args.onLog)
             return await client.sendRequest(method, params)
           } catch (retryError) {
             lastError = retryError
