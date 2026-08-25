@@ -1,9 +1,6 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  gitMetadataPollScheduler,
-  runGitMetadataFilesystemIo
-} from './git-metadata-poll-scheduler'
+import { gitMetadataPollScheduler, runGitMetadataFilesystemIo } from './git-metadata-poll-scheduler'
 import type {
   WorktreeBasePollEvent,
   WorktreeBaseSubscription,

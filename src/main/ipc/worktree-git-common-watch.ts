@@ -8,16 +8,20 @@ import { startGitCommonNarrowWatch } from './worktree-git-common-narrow-watch'
 import { startGitCommonPrimaryWatch } from './worktree-git-common-primary-watch'
 import { startGitCommonPolling } from './worktree-git-common-polling'
 
-// Watches a repo's `<common>/.git/worktrees` metadata plus the primary
-// checkout's shallow branch/index files — the only paths the git-common event
-// filter consumes.
-// macOS: a narrow native stream rooted at `worktrees/` — a tiny, rare-churn
-// tree — gives instant detection with zero idle cost and zero wide-scope
-// fseventsd delivery; the primary files are covered by a few stat calls per
-// tick (a native stream would have to span the whole common dir, objects
-// included). Other platforms: dir-listing poll (no fseventsd to protect, and
-// on Windows an open directory handle on `worktrees/` could interfere with
-// `git worktree prune` removing it).
+// Local macOS, Linux, and Windows use the crash-isolated native stream for the
+// narrow `worktrees/` tree and primary metadata leaves. Selected upstream refs
+// stay on the scheduler's bounded stat path. Unsupported platforms retain the
+// full polling fallback.
+
+const NARROW_WATCH_PLATFORMS: Partial<Record<NodeJS.Platform, true>> = {
+  darwin: true,
+  linux: true,
+  win32: true
+}
+
+function supportsNarrowWatch(platform: NodeJS.Platform): boolean {
+  return NARROW_WATCH_PLATFORMS[platform] === true
+}
 
 export async function startGitCommonWatch(
   target: WorktreeBaseWatchTarget,

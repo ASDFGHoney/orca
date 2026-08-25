@@ -20,11 +20,13 @@ export async function startGitCommonNarrowWatch(
   target: WorktreeBaseWatchTarget,
   onEvents: (events: WorktreeBasePollEvent[]) => void,
   pollIntervalMs: number,
+  platform: NodeJS.Platform,
   visibility: WorktreePollerWindowVisibility,
   onFullScan?: () => void,
   onWatchError?: (error: Error) => void
 ): Promise<WorktreeBaseSubscription> {
   const worktreesDir = join(target.path, 'worktrees')
+  const watcherOptions = platform === 'win32' ? { backend: 'windows' as const } : {}
   let disposed = false
   let subscription: WorktreeBaseSubscription | null = null
   let existenceTimer: ReturnType<typeof setInterval> | null = null
@@ -209,7 +211,7 @@ export async function startGitCommonNarrowWatch(
             }
           }
         },
-        {},
+        watcherOptions,
         {
           // Why: a watcher-child crash drops events during the automatic
           // resubscribe gap; report a structural change so worktrees re-sync.
