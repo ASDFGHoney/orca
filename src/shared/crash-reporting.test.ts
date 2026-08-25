@@ -223,6 +223,62 @@ describe('crash-reporting shared helpers', () => {
     expect(text.indexOf('Check failure:')).toBeLessThan(text.indexOf('Details:'))
   })
 
+  it('carries the exception-address caveat onto the faulting module line', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-unidentified-platform',
+      createdAt: '2026-08-24T05:42:53.692Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 139,
+      appVersion: '1.4.188',
+      platform: 'linux',
+      osRelease: '7.0.0-30-generic',
+      arch: 'x64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpFaultingModule: 'libffmpeg.so',
+        minidumpFaultingModuleOffset: '0x0',
+        minidumpFaultingModuleCaveat: 'named from the exception address'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain('Faulting module: libffmpeg.so+0x0 (named from the exception address)')
+  })
+
+  it('states the faulting module is unavailable instead of dropping the line', () => {
+    const report: CrashReportRecord = {
+      id: 'crash-posix-sigsegv',
+      createdAt: '2026-08-24T05:42:53.692Z',
+      status: 'pending',
+      source: 'renderer',
+      processType: 'renderer',
+      reason: 'crashed',
+      exitCode: 139,
+      appVersion: '1.4.188',
+      platform: 'linux',
+      osRelease: '7.0.0-30-generic',
+      arch: 'x64',
+      electronVersion: '43.1.0',
+      chromeVersion: '150.0.7871.47',
+      details: {
+        minidumpExceptionCode: '0xb',
+        minidumpExceptionAddress: '0x27d787ec0000',
+        minidumpFaultingModuleUnavailable: 'no thread context in the dump'
+      },
+      breadcrumbs: []
+    }
+
+    const text = formatCrashReportText(report)
+
+    expect(text).toContain('Faulting module: unavailable (no thread context in the dump)')
+  })
+
   it('decodes POSIX wait statuses in the exit code line and leaves Windows codes raw', () => {
     const report = (overrides: Partial<CrashReportRecord>): CrashReportRecord => ({
       id: 'crash-wait-status',

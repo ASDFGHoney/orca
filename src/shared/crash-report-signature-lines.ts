@@ -18,6 +18,12 @@ export function appendMinidumpSignatureLines(
   if (typeof details.minidumpFaultingModule === 'string') {
     const offset = details.minidumpFaultingModuleOffset
     const suffix = typeof offset === 'string' ? `+${offset}` : ''
-    lines.push(`Faulting module: ${details.minidumpFaultingModule}${suffix}`)
+    const caveat = details.minidumpFaultingModuleCaveat
+    // Published, not dropped: an uncertain attribution read as certain is the bug.
+    const note = typeof caveat === 'string' ? ` (${caveat})` : ''
+    lines.push(`Faulting module: ${details.minidumpFaultingModule}${suffix}${note}`)
+  } else if (typeof details.minidumpFaultingModuleUnavailable === 'string') {
+    // Stated, not omitted: silence reads as "no module was involved".
+    lines.push(`Faulting module: unavailable (${details.minidumpFaultingModuleUnavailable})`)
   }
 }
