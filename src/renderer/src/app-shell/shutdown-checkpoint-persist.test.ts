@@ -14,7 +14,7 @@ function makeDeps(
     buildSessionSnapshots: () => [{ state: { activeTabId: 't1' } }] as never,
     buildUiPatch: () => ({ activeView: 'workspace' }) as never,
     hasDirtyOpenFiles: () => false,
-    isIntentionalAppRestartInProgress: () => true,
+    isDegradableShutdownInProgress: () => true,
     stageBeforeUnloadSync: vi.fn(),
     ...overrides
   }
@@ -68,9 +68,9 @@ describe('runShutdownCheckpointPersist', () => {
     expect(() => runShutdownCheckpointPersist(deps)).toThrow('sync IPC staging failed')
   })
 
-  it('still fails the checkpoint when staging throws outside an intentional restart', () => {
+  it('still fails the checkpoint when staging throws outside a degradable shutdown', () => {
     const deps = makeDeps({
-      isIntentionalAppRestartInProgress: () => false,
+      isDegradableShutdownInProgress: () => false,
       stageBeforeUnloadSync: vi.fn(() => {
         throw new Error('sync IPC staging failed')
       })

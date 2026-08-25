@@ -143,7 +143,11 @@ import {
 } from './terminal-pane/terminal-parked-tab-watchers'
 import { isMainTerminalSideEffectAuthorityForPty } from './terminal-pane/terminal-side-effect-facts-handler'
 import { appendUniqueOpenFileIds } from './terminal/unsaved-close-queue'
-import { setWindowCloseRequestHandler } from './window-close-request-coordinator'
+import {
+  runWithWindowCloseCheckpointScope,
+  setWindowCloseRequestHandler
+} from './window-close-request-coordinator'
+import { consumeShutdownCheckpointFailureReason } from '../../../shared/renderer-shutdown-events'
 import {
   findActivityTerminalPortal,
   useActivityTerminalPortals,
@@ -526,8 +530,17 @@ function Terminal(): React.JSX.Element | null {
   const confirmNativeWindowClose = useCallback(() => {
     // Why: capture only after every close guard has committed. A canceled child-
     // process prompt must not consume App's synthetic/native unload guard.
-    const accepted = window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
+    const accepted = runWithWindowCloseCheckpointScope(() =>
+      window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
+    )
     if (!accepted) {
+      // Why: a checkpoint-vetoed quit used to die here with no dialog and no log,
+      // leaving SIGKILL as the only exit (#15352). The dirty-file veto publishes
+      // no reason — its deferred dialog flow already gives the user a surface.
+      const reason = consumeShutdownCheckpointFailureReason()
+      if (reason) {
+        toast.error(`Quit canceled: the session snapshot could not be saved (${reason}).`)
+      }
       return
     }
     window.api.ui.confirmWindowClose()

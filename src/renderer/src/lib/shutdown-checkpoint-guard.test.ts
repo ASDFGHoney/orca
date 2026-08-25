@@ -148,6 +148,23 @@ describe('createShutdownCheckpointGuard', () => {
     expect(persist).toHaveBeenCalledTimes(2)
   })
 
+  it('runs the quit checkpoint inside the window-close scope and surfaces a vetoed quit (STA-5505/#15352)', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/renderer/src/components/Terminal.tsx'),
+      'utf8'
+    )
+    const closeStart = source.indexOf('const confirmNativeWindowClose = useCallback(() => {')
+    const closeEnd = source.indexOf('window.api.ui.confirmWindowClose()', closeStart)
+    expect(closeStart).toBeGreaterThanOrEqual(0)
+    expect(closeEnd).toBeGreaterThan(closeStart)
+    const closeBlock = source.slice(closeStart, closeEnd)
+    // Why pin: without the scope, a persist failure blocks quit with no degradable
+    // tier; without the toast, the vetoed quit is silent and SIGKILL-only (#15352).
+    expect(closeBlock).toContain('runWithWindowCloseCheckpointScope(() =>')
+    expect(closeBlock).toContain('consumeShutdownCheckpointFailureReason()')
+    expect(closeBlock).toContain('toast.error(')
+  })
+
   it('wires dirty editor unload vetoes to the paired-web checkpoint reset', () => {
     const source = readFileSync(
       join(process.cwd(), 'src/renderer/src/components/Terminal.tsx'),

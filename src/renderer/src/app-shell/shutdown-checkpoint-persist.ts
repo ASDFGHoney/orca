@@ -14,7 +14,9 @@ export type ShutdownCheckpointPersistDeps = {
   buildSessionSnapshots: () => WorkspaceSessionHostSnapshot[]
   buildUiPatch: () => Partial<PersistedUIState>
   hasDirtyOpenFiles: () => boolean
-  isIntentionalAppRestartInProgress: () => boolean
+  /** True during an intentional restart or an app-level quit/close — the unloads
+   *  where losing the full snapshot beats blocking the shutdown outright. */
+  isDegradableShutdownInProgress: () => boolean
   stageBeforeUnloadSync: (args: ShutdownCheckpointStageArgs) => void
 }
 
@@ -36,7 +38,7 @@ export function runShutdownCheckpointPersist(deps: ShutdownCheckpointPersistDeps
   // Why: dirty drafts exist only in the full session snapshot, so their loss is the
   // one thing this checkpoint may never trade away for an update.
   const canDegradeToDurableSession = (): boolean =>
-    deps.isIntentionalAppRestartInProgress() && !deps.hasDirtyOpenFiles()
+    deps.isDegradableShutdownInProgress() && !deps.hasDirtyOpenFiles()
   let sessionSnapshots: WorkspaceSessionHostSnapshot[] = []
   let degraded = false
   try {

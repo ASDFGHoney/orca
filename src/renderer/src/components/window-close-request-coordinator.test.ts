@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   dispatchWindowCloseRequest,
   getWindowCloseRequestHandler,
+  isWindowCloseCheckpointInProgress,
   registerWindowCloseGuard,
+  runWithWindowCloseCheckpointScope,
   setWindowCloseRequestHandler
 } from './window-close-request-coordinator'
 
@@ -126,5 +128,21 @@ describe('window-close-request-coordinator', () => {
 
     expect(guard).not.toHaveBeenCalled()
     expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('scopes the window-close checkpoint flag to the wrapped dispatch (STA-5505)', () => {
+    expect(isWindowCloseCheckpointInProgress()).toBe(false)
+    const seen = runWithWindowCloseCheckpointScope(() => isWindowCloseCheckpointInProgress())
+    expect(seen).toBe(true)
+    expect(isWindowCloseCheckpointInProgress()).toBe(false)
+  })
+
+  it('clears the window-close checkpoint flag when the wrapped dispatch throws', () => {
+    expect(() =>
+      runWithWindowCloseCheckpointScope(() => {
+        throw new Error('listener exploded')
+      })
+    ).toThrow('listener exploded')
+    expect(isWindowCloseCheckpointInProgress()).toBe(false)
   })
 })

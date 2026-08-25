@@ -22,7 +22,10 @@ import {
 } from '../lib/shutdown-checkpoint-guard'
 import { runShutdownCheckpointPersist } from './shutdown-checkpoint-persist'
 import { shutdownBufferCaptures } from '../components/terminal-pane/shutdown-buffer-captures'
-import { dispatchWindowCloseRequest } from '../components/window-close-request-coordinator'
+import {
+  dispatchWindowCloseRequest,
+  isWindowCloseCheckpointInProgress
+} from '../components/window-close-request-coordinator'
 import {
   ORCA_APP_RESTART_ABORTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT
@@ -148,7 +151,10 @@ export function useAppSessionPersistence(): void {
         },
         buildUiPatch: () => buildActiveViewUnloadPatch(useAppStore.getState()),
         hasDirtyOpenFiles: () => useAppStore.getState().openFiles.some((file) => file.isDirty),
-        isIntentionalAppRestartInProgress,
+        // Why: an app-level quit degrades too — the pre-fix alternative was a quit
+        // the user could only complete with SIGKILL, which loses strictly more (#15352).
+        isDegradableShutdownInProgress: () =>
+          isIntentionalAppRestartInProgress() || isWindowCloseCheckpointInProgress(),
         stageBeforeUnloadSync: (args) => window.api.app.stageBeforeUnloadSync(args)
       })
     )

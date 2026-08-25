@@ -16,6 +16,23 @@ export type WindowCloseRequestHandler = (data: { isQuitting: boolean }) => void
 export type WindowCloseGuard = () => boolean | Promise<boolean>
 
 let activeHandler: WindowCloseRequestHandler | null = null
+// Why: lets the shutdown checkpoint tell an app-level quit/close (durable-session
+// degradation is acceptable — the alternative is a quit the user can only complete
+// with SIGKILL, #15352) from an arbitrary unload, where it must stay strict.
+let windowCloseCheckpointInProgress = false
+
+export function isWindowCloseCheckpointInProgress(): boolean {
+  return windowCloseCheckpointInProgress
+}
+
+export function runWithWindowCloseCheckpointScope<T>(fn: () => T): T {
+  windowCloseCheckpointInProgress = true
+  try {
+    return fn()
+  } finally {
+    windowCloseCheckpointInProgress = false
+  }
+}
 const closeGuards = new Set<WindowCloseGuard>()
 // Why: a guard can await a dialog; ignore re-entrant close requests (main resends
 // 'window:close-requested' on each attempt) so we don't stack duplicate prompts.
