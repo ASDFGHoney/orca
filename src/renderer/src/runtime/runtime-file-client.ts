@@ -63,6 +63,8 @@ export type RuntimeFileReadArgs = {
   connectionId?: string
   expectedExternalSshTargetId?: string
   includeLocalLogMetadata?: boolean
+  /** The user overruled the size refusal; only the local transport honours it. */
+  allowLargeFile?: boolean
 }
 
 export type RuntimeFileOperationArgs = {
@@ -256,15 +258,17 @@ export async function readRuntimeFileContent({
   worktreeId,
   connectionId,
   expectedExternalSshTargetId,
-  includeLocalLogMetadata
+  includeLocalLogMetadata,
+  allowLargeFile
 }: RuntimeFileReadArgs): Promise<RuntimeReadableFileContent> {
   assertExternalSshReadOwnership(settings, connectionId, expectedExternalSshTargetId)
   const target = getActiveRuntimeTarget(settings)
+  const readArgs = { filePath, connectionId, includeLocalLogMetadata, allowLargeFile }
   if (target.kind !== 'environment') {
-    return window.api.fs.readFile({ filePath, connectionId, includeLocalLogMetadata })
+    return window.api.fs.readFile(readArgs)
   }
   if (!worktreeId) {
-    return window.api.fs.readFile({ filePath, connectionId, includeLocalLogMetadata })
+    return window.api.fs.readFile(readArgs)
   }
   if (!canReadRelativeRuntimeFile(relativePath)) {
     throw new Error('Remote file is outside the owning runtime worktree')
@@ -296,15 +300,14 @@ export async function readRuntimeFileContent({
   if (result.truncated) {
     // Why: the runtime file RPC is preview-sized today; treating a truncated
     // payload as editable content would make saves overwrite the rest of the file.
-    // Older hosts do not report the budget, so only name a limit we were told.
+    // `byteLength` is only the capped prefix the host read, so the size comes from
+    // its stat or not at all; older hosts report neither and the message says so.
     throw new Error(
-      typeof result.maxByteLength === 'number'
-        ? formatFileTooLargeMessage({
-            byteLength: result.byteLength,
-            limitBytes: result.maxByteLength,
-            scope: 'runtime'
-          })
-        : `Remote file is too large to open in the editor (${result.byteLength} bytes)`
+      formatFileTooLargeMessage({
+        byteLength: result.totalByteLength,
+        limitBytes: result.maxByteLength,
+        scope: 'runtime'
+      })
     )
   }
   return { content: result.content, isBinary: false }

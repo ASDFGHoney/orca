@@ -1,13 +1,31 @@
+import { FileWarning } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
-import type { FileTooLargeDetail } from '../../../../shared/editor-file-read-limit'
+import {
+  EDITOR_READ_OVERRIDE_CEILING_BYTES,
+  formatFileReadBytes,
+  type FileTooLargeDetail
+} from '../../../../shared/editor-file-read-limit'
 
-const numberFormatter = new Intl.NumberFormat()
-
-function formatMegabytes(bytes: number): string {
-  return `${numberFormatter.format(Math.round((bytes / 1024 / 1024) * 10) / 10)} MB`
+// Why: a refusal that already names the ceiling as the limit it applied is the
+// second refusal — the budget was lifted and the read still would not fit.
+function refusedAtOverrideCeiling(detail: FileTooLargeDetail): boolean {
+  return (
+    detail.scope === 'local' &&
+    detail.limitBytes !== undefined &&
+    detail.limitBytes >= EDITOR_READ_OVERRIDE_CEILING_BYTES
+  )
 }
 
-function describeLimitOwner(scope: FileTooLargeDetail['scope']): string {
+// Why: no scope means the refusal arrived as the bare protocol token, so there
+// is no transport to attribute the budget to. The local paragraph is assembled
+// from what this render actually shows: promising the override in prose while
+// the button is withheld is a claim the same render just contradicted.
+function describeLimitOwner(detail: FileTooLargeDetail, canOpenAnyway: boolean): string | null {
+  const { scope } = detail
+  if (scope === undefined) {
+    return null
+  }
   if (scope === 'ssh') {
     return translate(
       'auto.components.editor.LargeFileFallback.scopeSsh',
@@ -20,19 +38,36 @@ function describeLimitOwner(scope: FileTooLargeDetail['scope']): string {
       'Files read from a remote workspace travel over the workspace connection, so they use a smaller budget than local files.'
     )
   }
-  return translate(
+  const budget = translate(
     'auto.components.editor.LargeFileFallback.scopeLocal',
-    'Local files use the largest budget Orca offers; beyond it the editor cannot hold the whole file in memory safely.'
+    'Local files use the largest budget Orca opens without asking.'
   )
+  if (canOpenAnyway) {
+    return `${budget} ${translate(
+      'auto.components.editor.LargeFileFallback.localOverridable',
+      'You can open it anyway, but the editor may become slow.'
+    )}`
+  }
+  if (refusedAtOverrideCeiling(detail)) {
+    return `${budget} ${translate(
+      'auto.components.editor.LargeFileFallback.localAtCeiling',
+      'This file is past the largest size the editor can hold, so opening it anyway would refuse again.'
+    )}`
+  }
+  return budget
 }
 
 export function LargeFileFallback({
   filePath,
-  detail
+  detail,
+  onOpenAnyway
 }: {
   filePath: string
   detail: FileTooLargeDetail
+  /** Absent when the transport that refused cannot honour an override. */
+  onOpenAnyway?: () => void
 }): React.JSX.Element {
+  const limitOwner = describeLimitOwner(detail, onOpenAnyway !== undefined)
   return (
     <div
       data-testid="large-file-fallback"
@@ -47,16 +82,26 @@ export function LargeFileFallback({
         </div>
         <div className="break-all text-xs">{filePath}</div>
         <div className="grid gap-1 text-xs sm:grid-cols-2 sm:text-left">
-          <div>
-            {translate('auto.components.editor.LargeFileFallback.size', 'File size')}:{' '}
-            {formatMegabytes(detail.byteLength)}
-          </div>
-          <div>
-            {translate('auto.components.editor.LargeFileFallback.limit', 'Read limit')}:{' '}
-            {formatMegabytes(detail.limitBytes)}
-          </div>
+          {detail.byteLength !== undefined && (
+            <div>
+              {translate('auto.components.editor.LargeFileFallback.size', 'File size')}:{' '}
+              {formatFileReadBytes(detail.byteLength)}
+            </div>
+          )}
+          {detail.limitBytes !== undefined && (
+            <div>
+              {translate('auto.components.editor.LargeFileFallback.limit', 'Read limit')}:{' '}
+              {formatFileReadBytes(detail.limitBytes)}
+            </div>
+          )}
         </div>
-        <div className="text-[11px]">{describeLimitOwner(detail.scope)}</div>
+        {limitOwner !== null && <div className="text-[11px]">{limitOwner}</div>}
+        {onOpenAnyway && (
+          <Button type="button" variant="outline" size="sm" onClick={onOpenAnyway}>
+            <FileWarning className="size-3.5" />
+            {translate('auto.components.editor.LargeFileFallback.openAnyway', 'Open Anyway')}
+          </Button>
+        )}
       </div>
     </div>
   )

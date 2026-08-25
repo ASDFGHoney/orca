@@ -13,7 +13,7 @@ import {
 } from './editor-lazy-views'
 import type { EditorConflictNavigation } from './useEditorConflictNavigation'
 import { EditorFileLoadErrorView } from './EditorFileLoadErrorView'
-import type { FileContent } from './editor-panel-content-types'
+import type { EditorContentReloadOptions, FileContent } from './editor-panel-content-types'
 import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
 import { EditorMarkdownFileSurface } from './EditorMarkdownFileSurface'
@@ -82,7 +82,7 @@ export function EditorEditFileSurface({
   handleContentChange: (content: string) => void
   handleDirtyStateHint: (dirty: boolean) => void
   handleSave: (content: string) => Promise<boolean>
-  reloadContent: (file: OpenFile) => void
+  reloadContent: (file: OpenFile, options?: EditorContentReloadOptions) => void
 }): React.JSX.Element {
   if (activeFile.conflict?.kind === 'conflict-placeholder') {
     return <ConflictPlaceholderView file={activeFile} />
@@ -100,6 +100,7 @@ export function EditorEditFileSurface({
         message={fileContent.loadError}
         filePath={activeFile.filePath}
         onRetry={() => reloadContent(activeFile)}
+        onOpenAnyway={() => reloadContent(activeFile, { allowLargeFile: true })}
       />
     )
   }

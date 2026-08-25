@@ -1,7 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { OpenFile } from '@/store/slices/editor'
 import type { useAppStore } from '@/store'
-import type { DiffContent, FileContent } from './editor-panel-content-types'
+import type {
+  DiffContent,
+  EditorContentReloadOptions,
+  FileContent
+} from './editor-panel-content-types'
 import {
   useEditorPanelExternalContentEvents,
   usePruneClosedEditorContent
@@ -28,7 +32,7 @@ type UseEditorPanelContentStateParams = {
 type UseEditorPanelContentStateResult = {
   fileContents: Record<string, FileContent>
   diffContents: Record<string, DiffContent>
-  reloadContent: (file: OpenFile) => void
+  reloadContent: (file: OpenFile, options?: EditorContentReloadOptions) => void
 }
 
 export function useEditorPanelContentState({
@@ -43,6 +47,9 @@ export function useEditorPanelContentState({
   const [diffContents, setDiffContents] = useState<Record<string, DiffContent>>({})
   const diffContentsRef = useRef(diffContents)
   const fileLoadRetryAttemptsRef = useRef<Record<string, number>>({})
+  // Why: the size override belongs to the tab, not to the click that made it —
+  // reloads carry no options, so the loader reads it from here.
+  const largeFileOverrideIdsRef = useRef<Set<string>>(new Set())
   // Why: per-tab read generations let a forced/external reload supersede an
   // older in-flight read so a slower stale promise cannot overwrite fresh state.
   const fileReadGenerationRef = useRef<Record<string, number>>({})
@@ -123,6 +130,7 @@ export function useEditorPanelContentState({
 
   const loadFileContent = useEditorPanelFileContentLoader({
     fileLoadRetryAttemptsRef,
+    largeFileOverrideIdsRef,
     fileReadGenerationCounterRef,
     fileReadGenerationRef,
     openFilesRef,
@@ -141,7 +149,7 @@ export function useEditorPanelContentState({
   // must refetch the diff body, not the plain file content — one entry point
   // branches on the tab mode so every consumer reloads the right store.
   const reloadContent = useCallback(
-    (file: OpenFile): void => {
+    (file: OpenFile, options?: EditorContentReloadOptions): void => {
       if (file.mode === 'diff') {
         setDiffContents((prev) => {
           if (!prev[file.id]) {
@@ -164,7 +172,8 @@ export function useEditorPanelContentState({
         return next
       })
       void loadFileContent(file.filePath, file.id, file.worktreeId, file.relativePath, {
-        force: true
+        force: true,
+        allowLargeFile: options?.allowLargeFile
       })
     },
     [loadDiffContent, loadFileContent]
@@ -225,6 +234,7 @@ export function useEditorPanelContentState({
   usePruneClosedEditorContent(
     openFiles,
     fileLoadRetryAttemptsRef,
+    largeFileOverrideIdsRef,
     fileReadGenerationRef,
     diffReadGenerationRef,
     setFileContents,

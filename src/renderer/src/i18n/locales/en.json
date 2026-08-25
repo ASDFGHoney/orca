@@ -14519,7 +14519,10 @@
           "title": "This file is too large to open in the editor.",
           "size": "File size",
           "limit": "Read limit",
-          "scopeLocal": "Local files use the largest budget Orca offers; beyond it the editor cannot hold the whole file in memory safely.",
+          "openAnyway": "Open Anyway",
+          "scopeLocal": "Local files use the largest budget Orca opens without asking.",
+          "localOverridable": "You can open it anyway, but the editor may become slow.",
+          "localAtCeiling": "This file is past the largest size the editor can hold, so opening it anyway would refuse again.",
           "scopeSsh": "Files read over SSH share the connection with your terminals, so they use a smaller budget than local files.",
           "scopeRuntime": "Files read from a remote workspace travel over the workspace connection, so they use a smaller budget than local files."
         },

@@ -1,22 +1,36 @@
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
-import { parseFileTooLargeMessage } from '../../../../shared/editor-file-read-limit'
+import {
+  isOverridableFileTooLarge,
+  parseFileTooLargeMessage
+} from '../../../../shared/editor-file-read-limit'
 import { LargeFileFallback } from './LargeFileFallback'
 
 export function EditorFileLoadErrorView({
   message,
   filePath,
-  onRetry
+  onRetry,
+  onOpenAnyway
 }: {
   message: string
   filePath?: string
   onRetry: () => void
+  onOpenAnyway?: () => void
 }): React.JSX.Element {
   // Why: a size refusal is deterministic, so the generic retry box is a dead end.
   const tooLarge = parseFileTooLargeMessage(message)
   if (tooLarge) {
-    return <LargeFileFallback filePath={filePath ?? ''} detail={tooLarge} />
+    // Why: the override is only offered where the refusal says it could land —
+    // an unhonoured transport or a limit already at the ceiling is a button that
+    // silently refuses again.
+    return (
+      <LargeFileFallback
+        filePath={filePath ?? ''}
+        detail={tooLarge}
+        onOpenAnyway={isOverridableFileTooLarge(tooLarge) ? onOpenAnyway : undefined}
+      />
+    )
   }
 
   return (

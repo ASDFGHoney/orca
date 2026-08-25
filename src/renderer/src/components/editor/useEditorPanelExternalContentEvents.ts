@@ -16,6 +16,8 @@ type EditorViewModeByFile = ReturnType<typeof useAppStore.getState>['editorViewM
 export type EditorPanelContentLoadOptions = {
   force?: boolean
   externalEventGeneration?: number
+  /** The user overruled the size refusal for this one read. */
+  allowLargeFile?: boolean
 }
 
 type UseEditorPanelExternalContentEventsParams = {
@@ -182,6 +184,7 @@ function updateSavedPreviewTabs(
 export function usePruneClosedEditorContent(
   openFiles: OpenFile[],
   fileLoadRetryAttemptsRef: MutableRefObject<Record<string, number>>,
+  largeFileOverrideIdsRef: MutableRefObject<Set<string>>,
   fileReadGenerationRef: MutableRefObject<Record<string, number>>,
   diffReadGenerationRef: MutableRefObject<Record<string, number>>,
   setFileContents: Dispatch<SetStateAction<Record<string, FileContent>>>,
@@ -201,6 +204,12 @@ export function usePruneClosedEditorContent(
     }
     // Why: conflict-review entry loads use absolute paths as content ids; only
     // ids that have belonged to tabs are safe to prune as closed tabs.
+    // Reopening a closed tab is a fresh decision, so its override asks again.
+    for (const fileId of largeFileOverrideIdsRef.current) {
+      if (knownOpenFileIdsRef.current.has(fileId) && !openIds.has(fileId)) {
+        largeFileOverrideIdsRef.current.delete(fileId)
+      }
+    }
     for (const fileId of Object.keys(fileReadGenerationRef.current)) {
       if (knownOpenFileIdsRef.current.has(fileId) && !openIds.has(fileId)) {
         delete fileReadGenerationRef.current[fileId]
@@ -220,6 +229,7 @@ export function usePruneClosedEditorContent(
   }, [
     diffReadGenerationRef,
     fileLoadRetryAttemptsRef,
+    largeFileOverrideIdsRef,
     fileReadGenerationRef,
     knownOpenFileIdsRef,
     openFiles,
