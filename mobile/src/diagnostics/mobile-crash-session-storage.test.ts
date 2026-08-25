@@ -68,8 +68,8 @@ describe('mobile crash session storage', () => {
   it('preserves all seven previous crash breadcrumbs before trimming the live session', () => {
     const serialized = serializeMobileCrashJournal(
       makeJournal(
-        makeLargeBreadcrumbs('active', 7, 2_500),
-        makeLargeBreadcrumbs('previous', 7, 2_500)
+        makeLargeBreadcrumbs('active', 7, 2_800),
+        makeLargeBreadcrumbs('previous', 7, 2_800)
       )
     )
     const parsed = parseMobileCrashJournal(serialized)
