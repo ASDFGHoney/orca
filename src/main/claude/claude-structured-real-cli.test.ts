@@ -21,6 +21,9 @@ const realClaudeAvailable =
     windowsHide: true,
     timeout: 5_000
   }).status === 0
+// Credentials are intentionally caller-owned; keep the binary probe separate from an explicit
+// opt-in so an installed but signed-out CLI does not make ordinary test runs fail.
+const runRealClaudeTests = process.env.ORCA_RUN_REAL_CLAUDE_TESTS === '1'
 
 function realAdapter(
   providerSessionId: string,
@@ -59,50 +62,53 @@ function identity(providerSessionId: string): AgentSessionJournalIdentity {
   }
 }
 
-describe.skipIf(!realClaudeAvailable)('Claude structured real CLI handshake', () => {
-  it('proves a pre-minted session before the first user message', async () => {
-    const providerSessionId = randomUUID()
-    const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
-    const events: ClaudeStructuredSessionEvent[] = []
-    const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
+describe.skipIf(!realClaudeAvailable || !runRealClaudeTests)(
+  'Claude structured real CLI handshake',
+  () => {
+    it('proves a pre-minted session before the first user message', async () => {
+      const providerSessionId = randomUUID()
+      const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+      const events: ClaudeStructuredSessionEvent[] = []
+      const adapter = realAdapter(providerSessionId, claudeConfigDir, events)
 
-    try {
-      const acquisition = await adapter.acquire({
-        identity: identity(providerSessionId),
-        fence: 1,
-        spawnToken: 'real-cli'
-      })
-      const observedSubtypes = events.flatMap((event) =>
-        event.type === 'message' ? [event.message.subtype] : []
-      )
-
-      expect(acquisition.link.handle).toMatchObject({
-        provider: 'claude',
-        sessionId: providerSessionId,
-        leafUuid: expect.any(String)
-      })
-      expect(observedSubtypes).toContain('hook_started')
-    } finally {
-      await adapter.closeAll()
-    }
-  }, 10_000)
-
-  it('turns a real silent unauthenticated startup into sign-in guidance', async () => {
-    const claudeConfigDir = await mkdtemp(join(tmpdir(), 'orca-claude-no-auth-'))
-    const providerSessionId = randomUUID()
-    const adapter = realAdapter(providerSessionId, claudeConfigDir)
-
-    try {
-      await expect(
-        adapter.acquire({
+      try {
+        const acquisition = await adapter.acquire({
           identity: identity(providerSessionId),
           fence: 1,
-          spawnToken: 'real-cli-no-auth'
+          spawnToken: 'real-cli'
         })
-      ).rejects.toThrow(/not signed in.*Claude CLI.*CLAUDE_CONFIG_DIR/s)
-    } finally {
-      await adapter.closeAll()
-      await rm(claudeConfigDir, { recursive: true, force: true })
-    }
-  }, 10_000)
-})
+        const observedSubtypes = events.flatMap((event) =>
+          event.type === 'message' ? [event.message.subtype] : []
+        )
+
+        expect(acquisition.link.handle).toMatchObject({
+          provider: 'claude',
+          sessionId: providerSessionId,
+          leafUuid: expect.any(String)
+        })
+        expect(observedSubtypes).toContain('hook_started')
+      } finally {
+        await adapter.closeAll()
+      }
+    }, 10_000)
+
+    it('turns a real silent unauthenticated startup into sign-in guidance', async () => {
+      const claudeConfigDir = await mkdtemp(join(tmpdir(), 'orca-claude-no-auth-'))
+      const providerSessionId = randomUUID()
+      const adapter = realAdapter(providerSessionId, claudeConfigDir)
+
+      try {
+        await expect(
+          adapter.acquire({
+            identity: identity(providerSessionId),
+            fence: 1,
+            spawnToken: 'real-cli-no-auth'
+          })
+        ).rejects.toThrow(/not signed in.*Claude CLI.*CLAUDE_CONFIG_DIR/s)
+      } finally {
+        await adapter.closeAll()
+        await rm(claudeConfigDir, { recursive: true, force: true })
+      }
+    }, 10_000)
+  }
+)
