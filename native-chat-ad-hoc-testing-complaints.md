@@ -70,6 +70,12 @@ Updated during the same release effort:
 | Claude native-chat parity | Blocked by provider-proof fixes | The renderer/provider and tool-result dispatch fixes are present, but review found durable leaf tracking still accepts arbitrary frame UUIDs, deterministic session-id collision handling is incomplete, and the real signed-in Claude cycle remains unverified. Claude cannot be declared parity-safe from Codex evidence. |
 | Next ad-hoc release | Blocked pending correctness and packaging proof | Structural review is complete, but the Codex renderer/readiness race, Claude leaf/proof hardening, Windows process-table/start-time proof, provider cycles, and visible live-agent Electron validation remain. |
 
+## Remote validation progress (2026-08-25)
+
+- The pushed branch head `a357915cd1` is checked out through Orca CLI on the Windows high-spec host at `native-chat-validation-windows-high`. Repository setup completed. That host's running Orca app is still `1.4.186-hourly.202608200132` and does not advertise `agent-session.structured.*`, so it cannot yet prove native-chat behavior until the host app is updated.
+- An Orca-managed SSH worktree was created on OpenClaw Linux at `/home/brennan/orca-native-chat-validation-openclaw-ssh` at the same branch head. The SSH worktree was created successfully; remote runtime terminal control still needs a live SSH/Orca runtime connection before Electron proof can be claimed.
+- A supervised Grok Electron-validation dispatch is active. Its prompt explicitly requires invoking `$electron`/`/electron`, Playwright CDP only, and no computer-use or OS-level automation. It is responsible for visible local and remote checks and must report exact branch identity and blockers.
+
 ## Latest implementation progress (2026-08-25)
 
 - Claude close/persist failure now preserves the live provider session until its durable handle is saved. A failed persistence attempt no longer deletes the in-memory session or closes the provider, so the native owner remains retryable and the handoff checkpoint stays recoverable. Adapter and flow-level regression tests cover this boundary.
@@ -86,6 +92,17 @@ Updated during the same release effort:
   created native Codex successfully, but the test prompt invoked a long-running provider turn;
   the handoff was correctly refused while that turn remained running, so no new clean cycle is
   claimed yet.
+
+## Latest visible Electron validation (2026-08-25)
+
+- A source-backed Electron instance was verified as
+  `brennanb2025/native-chat-restructure-recovery` on CDP port 9350.
+- Creating a normal workspace terminal through the rendered UI and entering `codex` visibly
+  launched Codex v0.149.1 to its interactive prompt in the target worktree; evidence is
+  `/tmp/orca-native-chat-codex-launch.png`.
+- This confirms ordinary terminal creation/provider startup on the current source. It does not
+  prove native chat ownership transfer, a clean native → TUI → native cycle, Claude, or any
+  Windows/Linux/WSL/SSH path.
 
 ## Latest live Electron reproduction (2026-08-24)
 
