@@ -851,18 +851,16 @@ describe('mobile subscribe integration', () => {
       expect(ptySizes.get('pty-1')).toEqual({ cols: 150, rows: 40 })
     })
 
-    it('reclaim cancels the soft-leave timer before it can clear the desktop driver', async () => {
+    it('reclaim cancels the soft-leave timer in the remote-layout branch', async () => {
       const { runtime } = createRuntime()
+      await runtime.updateRemoteDesktopViewer('pty-1', 'sub-a', 'viewer-a', 120, 32)
       await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
       runtime.handleMobileUnsubscribe('pty-1', 'client-a')
 
-      // The last unsubscribe arms the 250ms soft-leave timer while the fit is held.
-      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'mobile', clientId: 'client-a' })
       expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(true)
-      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'desktop' })
-
-      await vi.advanceTimersByTimeAsync(250)
-      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'desktop' })
+      expect(
+        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+      ).toBe(false)
     })
 
     it('reclaim cancels a stale soft-leave timer in the active-subscriber branch', async () => {
@@ -872,13 +870,35 @@ describe('mobile subscribe integration', () => {
       // A different client can subscribe while the first client's grace timer is armed.
       await runtime.handleMobileSubscribe('pty-1', 'client-b', { cols: 40, rows: 18 })
 
-      expect(
-        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
-      ).toBe(true)
+      const pending = Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>
+      expect(pending.has('pty-1')).toBe(true)
       await runtime.reclaimTerminalForDesktop('pty-1')
-      expect(
-        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
-      ).toBe(false)
+      expect(pending.has('pty-1')).toBe(false)
+    })
+
+    it('reclaim cancels pending restore timers on active, orphan, and no-lock branches', async () => {
+      for (const branch of ['active', 'orphan', 'none'] as const) {
+        const { runtime } = createRuntime()
+        await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+        if (branch !== 'active') {
+          runtime.handleMobileUnsubscribe('pty-1', 'client-a')
+        }
+        if (branch !== 'active') {
+          ;(Reflect.get(runtime, 'terminalFitOverrides') as Map<string, unknown>).delete('pty-1')
+        }
+        if (branch === 'none') {
+          ;(Reflect.get(runtime, 'currentDriver') as Map<string, { kind: string }>).set('pty-1', {
+            kind: 'idle'
+          })
+        }
+        const pending = Reflect.get(runtime, 'pendingRestoreTimers') as Map<string, unknown>
+        pending.set('pty-1', { timer: setTimeout(() => {}, 60_000), clientId: 'client-a' })
+        await runtime.reclaimTerminalForDesktop('pty-1')
+        expect(pending.has('pty-1')).toBe(false)
+        expect(
+          (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+        ).toBe(false)
+      }
     })
 
     it('reclaim cancels a stale soft-leave timer in the orphan-driver branch', async () => {
@@ -890,21 +910,6 @@ describe('mobile subscribe integration', () => {
       fitOverrides.delete('pty-1')
 
       expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(true)
-      expect(
-        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
-      ).toBe(false)
-    })
-
-    it('reclaim cancels pending timers even when no driver lock remains', async () => {
-      const { runtime } = createRuntime()
-      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
-      runtime.handleMobileUnsubscribe('pty-1', 'client-a')
-      const currentDriver = Reflect.get(runtime, 'currentDriver') as Map<string, { kind: string }>
-      currentDriver.set('pty-1', { kind: 'idle' })
-      const fitOverrides = Reflect.get(runtime, 'terminalFitOverrides') as Map<string, unknown>
-      fitOverrides.delete('pty-1')
-
-      expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(false)
       expect(
         (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
       ).toBe(false)

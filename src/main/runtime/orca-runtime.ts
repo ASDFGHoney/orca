@@ -15387,16 +15387,7 @@ export class OrcaRuntimeService {
     this.layouts.delete(ptyId)
     this.layoutQueues.delete(ptyId)
     this.freshSubscribeGuard.delete(ptyId)
-    const pendingRestore = this.pendingRestoreTimers.get(ptyId)
-    if (pendingRestore) {
-      clearTimeout(pendingRestore.timer)
-      this.pendingRestoreTimers.delete(ptyId)
-    }
-    const pendingSoft = this.pendingSoftLeavers.get(ptyId)
-    if (pendingSoft) {
-      clearTimeout(pendingSoft.timer)
-      this.pendingSoftLeavers.delete(ptyId)
-    }
+    this.cancelPendingDriverMutations(ptyId)
     // Why: a cold restore can respawn under the same session id within the
     // delayed-Enter window; the armed Enter would inject \r into the
     // replacement and stamp rows it never received.
@@ -16109,7 +16100,7 @@ export class OrcaRuntimeService {
     return false
   }
 
-  // Why: an explicit desktop take-back supersedes every delayed driver mutation.
+  // Why: explicit take-back supersedes delayed mutations, revoking soft-leave grace admission for mobile input floors.
   private cancelPendingDriverMutations(ptyId: string): void {
     const pendingRestore = this.pendingRestoreTimers.get(ptyId)
     if (pendingRestore) {
