@@ -666,7 +666,7 @@ function NewWorktreeModalContent({
             workspaceName: trimmedName || undefined,
             note: trimmedNote,
             nameIsAutoManaged: composer.isNameAutoManaged,
-            supportsIdempotentCutoverRetry: getWorktreeCreateCutoverSupport()
+            worktreeCreateIdempotency: getWorktreeCreateCutoverSupport()
           })
         : await createBlankWorkspace({
             client,
@@ -678,7 +678,7 @@ function NewWorktreeModalContent({
             createdWithAgentId,
             comment: trimmedNote,
             setupDecision,
-            supportsIdempotentCutoverRetry: getWorktreeCreateCutoverSupport()
+            worktreeCreateIdempotency: getWorktreeCreateCutoverSupport()
           })
       if ('error' in result) {
         setError(result.error)
