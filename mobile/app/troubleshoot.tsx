@@ -10,6 +10,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import * as Clipboard from 'expo-clipboard'
 import {
   ChevronLeft,
   ChevronDown,
@@ -32,6 +33,7 @@ import {
   unreachableHostDetail
 } from '../src/diagnostics/host-reachability'
 import { troubleshootCommonIssues } from '../src/diagnostics/troubleshoot-common-issues'
+import { buildMobileCrashDiagnosticsReport } from '../src/diagnostics/mobile-crash-diagnostics'
 
 type DiagnosticStatus = 'idle' | 'running' | 'done'
 
@@ -61,6 +63,7 @@ export default function TroubleshootScreen() {
   const abortRef = useRef(false)
   const diagnosticRunRef = useRef(0)
   const activeInternetCheckRef = useRef<DiagnosticFetchTimeout | null>(null)
+  const [crashDiagnosticsCopied, setCrashDiagnosticsCopied] = useState(false)
 
   const setTroubleshootRootRef = useCallback((node: View | null): void => {
     if (node !== null) {
@@ -174,6 +177,11 @@ export default function TroubleshootScreen() {
     setDiagnosticStatus('done')
   }, [])
 
+  const copyCrashDiagnostics = useCallback(async () => {
+    await Clipboard.setStringAsync(await buildMobileCrashDiagnosticsReport())
+    setCrashDiagnosticsCopied(true)
+  }, [])
+
   return (
     <View
       ref={setTroubleshootRootRef}
@@ -223,6 +231,19 @@ export default function TroubleshootScreen() {
         >
           <ScrollText size={16} color={colors.textPrimary} />
           <Text style={styles.diagnosticButtonLabel}>View connection log</Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.diagnosticButton,
+            pressed && styles.diagnosticButtonPressed
+          ]}
+          onPress={() => void copyCrashDiagnostics()}
+        >
+          <ScrollText size={16} color={colors.textPrimary} />
+          <Text style={styles.diagnosticButtonLabel}>
+            {crashDiagnosticsCopied ? 'Crash diagnostics copied' : 'Copy crash diagnostics'}
+          </Text>
         </Pressable>
 
         {checks.length > 0 && (

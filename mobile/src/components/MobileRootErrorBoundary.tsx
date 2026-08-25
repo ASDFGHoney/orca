@@ -1,7 +1,11 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react-native'
+import { AlertTriangle, ArrowLeft, Bug, RefreshCw } from 'lucide-react-native'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
+import {
+  recordMobileRenderError,
+  shareMobileCrashDiagnostics
+} from '../diagnostics/mobile-crash-diagnostics'
 
 type Props = {
   children: ReactNode
@@ -26,6 +30,7 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
       error,
       errorInfo
     )
+    void recordMobileRenderError(error, errorInfo.componentStack)
   }
 
   handleRetry = (): void => {
@@ -37,9 +42,21 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
     this.handleRetry()
   }
 
+  handleReport = (): void => {
+    void shareMobileCrashDiagnostics().catch((error: unknown) => {
+      console.warn('[mobile-root-error-boundary] diagnostics share failed', error)
+    })
+  }
+
   render(): ReactNode {
     if (this.state.error) {
-      return <MobileRootErrorFallback onRetry={this.handleRetry} onGoBack={this.handleGoBack} />
+      return (
+        <MobileRootErrorFallback
+          onRetry={this.handleRetry}
+          onGoBack={this.handleGoBack}
+          onReport={this.handleReport}
+        />
+      )
     }
 
     return <Fragment key={this.state.resetKey}>{this.props.children}</Fragment>
@@ -48,10 +65,12 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
 
 function MobileRootErrorFallback({
   onRetry,
-  onGoBack
+  onGoBack,
+  onReport
 }: {
   onRetry: () => void
   onGoBack: () => void
+  onReport: () => void
 }): ReactNode {
   return (
     <View style={styles.container} accessibilityRole="alert" testID="mobile-root-error-boundary">
@@ -61,7 +80,7 @@ function MobileRootErrorFallback({
       <View style={styles.copy}>
         <Text style={styles.title}>This part of Orca hit an error.</Text>
         <Text style={styles.description}>
-          The app is still running. Retry this screen or go back and continue elsewhere.
+          The app is still running. Retry this screen, go back, or share diagnostic details.
         </Text>
       </View>
       <View style={styles.actions}>
@@ -82,6 +101,15 @@ function MobileRootErrorFallback({
         >
           <ArrowLeft size={16} color={colors.textSecondary} />
           <Text style={styles.secondaryButtonText}>Go back</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Report error"
+          accessibilityRole="button"
+          style={styles.secondaryButton}
+          onPress={onReport}
+        >
+          <Bug size={16} color={colors.textSecondary} />
+          <Text style={styles.secondaryButtonText}>Report error</Text>
         </Pressable>
       </View>
     </View>

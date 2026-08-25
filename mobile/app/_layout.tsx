@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { View, StyleSheet } from 'react-native'
-import { Stack, useRouter } from 'expo-router'
+import { AppState, View, StyleSheet } from 'react-native'
+import { Stack, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import * as Notifications from 'expo-notifications'
@@ -14,6 +14,11 @@ import { useOpenNotificationRoute } from '../src/notifications/use-open-notifica
 import { loadHostCatalog } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
+import {
+  recordMobileAppState,
+  recordMobileRouteBreadcrumb,
+  startMobileCrashSession
+} from '../src/diagnostics/mobile-crash-diagnostics'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
@@ -34,10 +39,27 @@ Notifications.setNotificationHandler({
   })
 })
 
+// Why: the open marker must land before the first route can fail during render.
+void startMobileCrashSession()
+
 function RootLayoutContents() {
   const router = useRouter()
+  const segments = useSegments()
+  const routeKey = segments.join('\u0000')
   const openNotificationRoute = useOpenNotificationRoute()
   const handledNotificationIdsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      // Why: background is mobile's last reliable clean handoff before the OS may terminate us.
+      void recordMobileAppState(state)
+    })
+    return () => subscription.remove()
+  }, [])
+
+  useEffect(() => {
+    void recordMobileRouteBreadcrumb(routeKey ? routeKey.split('\u0000') : [])
+  }, [routeKey])
 
   useEffect(() => {
     // Why: pairing publication is journaled across process death; startup must

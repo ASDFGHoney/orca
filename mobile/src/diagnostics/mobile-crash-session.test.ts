@@ -1,0 +1,132 @@
+import { describe, expect, it } from 'vitest'
+import {
+  MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS,
+  MOBILE_CRASH_SESSION_STORAGE_KEY,
+  MobileCrashSessionJournal,
+  type MobileCrashStorage
+} from './mobile-crash-session'
+
+class MemoryStorage implements MobileCrashStorage {
+  values = new Map<string, string>()
+
+  async getItem(key: string): Promise<string | null> {
+    return this.values.get(key) ?? null
+  }
+
+  async setItem(key: string, value: string): Promise<void> {
+    this.values.set(key, value)
+  }
+}
+
+const FIRST_SESSION_AT = Date.UTC(2026, 7, 24, 18, 0, 0)
+const SECOND_SESSION_AT = FIRST_SESSION_AT + 30_000
+
+describe('mobile crash session journal', () => {
+  it('surfaces durable breadcrumbs after a simulated abnormal termination', async () => {
+    const storage = new MemoryStorage()
+    const first = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+
+    await first.start()
+    await first.recordRoute(['h', 'private-host-id', 'session', 'private-worktree-id'])
+    await first.recordRenderError(
+      new Error('prompt contents from /Users/example/private-repo secret=do-not-store'),
+      '\n    at PrivateScreen (/Users/example/private-repo/screen.tsx:1:1)'
+    )
+    // No background transition: the first process disappears with its marker open.
+
+    const second = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT,
+      createSessionId: () => 'session-two'
+    })
+    const previous = await second.start()
+    const report = await second.buildReport({ version: '0.0.29', platform: 'ios 26.5' })
+    const persisted = storage.values.get(MOBILE_CRASH_SESSION_STORAGE_KEY) ?? ''
+
+    expect(previous?.breadcrumbs.map((breadcrumb) => breadcrumb.name)).toEqual([
+      'session_started',
+      'route_changed',
+      'render_error_contained'
+    ])
+    expect(report).toContain('Previous session ended abnormally')
+    expect(report).toContain('h > [dynamic] > session > [dynamic]')
+    expect(report).toContain('errorFingerprint')
+    expect(report).not.toContain('private-host-id')
+    expect(report).not.toContain('private-worktree-id')
+    expect(report).not.toContain('prompt contents')
+    expect(report).not.toContain('do-not-store')
+    expect(report).not.toContain('/Users/example/private-repo')
+    expect(persisted).not.toContain('private-host-id')
+    expect(persisted).not.toContain('private-worktree-id')
+    expect(persisted).not.toContain('prompt contents')
+    expect(persisted).not.toContain('do-not-store')
+    expect(persisted).not.toContain('/Users/example/private-repo')
+    expect(persisted.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
+  })
+
+  it('does not classify a session backgrounded cleanly as a crash', async () => {
+    const storage = new MemoryStorage()
+    const first = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    await first.start()
+    await first.recordRoute(['settings'])
+    await first.recordAppState('background')
+
+    const second = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT,
+      createSessionId: () => 'session-two'
+    })
+
+    await expect(second.start()).resolves.toBeNull()
+    await expect(
+      second.buildReport({ version: '0.0.29', platform: 'android 15' })
+    ).resolves.toContain('No previous abnormal session recorded.')
+  })
+
+  it('reopens the marker when a backgrounded process becomes active again', async () => {
+    const storage = new MemoryStorage()
+    const first = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    await first.start()
+    await first.recordAppState('inactive')
+    await first.recordAppState('background')
+    await first.recordAppState('active')
+
+    const second = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT,
+      createSessionId: () => 'session-two'
+    })
+
+    await expect(second.start()).resolves.toMatchObject({
+      breadcrumbs: [
+        expect.objectContaining({ name: 'session_started' }),
+        expect.objectContaining({ name: 'app_state_changed', data: { state: 'inactive' } }),
+        expect.objectContaining({ name: 'app_state_changed', data: { state: 'background' } }),
+        expect.objectContaining({ name: 'app_state_changed', data: { state: 'active' } })
+      ]
+    })
+  })
+
+  it('caps the persisted breadcrumb ring and payload', async () => {
+    const storage = new MemoryStorage()
+    const journal = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    await journal.start()
+
+    for (let index = 0; index < 80; index += 1) {
+      await journal.recordRoute(['h', `host-${index}`, 'session', `worktree-${index}`])
+    }
+
+    const raw = storage.values.get(MOBILE_CRASH_SESSION_STORAGE_KEY)
+    expect(raw?.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
+    expect(JSON.parse(raw ?? '{}').activeSession.breadcrumbs).toHaveLength(30)
+  })
+})
