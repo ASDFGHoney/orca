@@ -19,6 +19,7 @@ describe('terminal owner identity', () => {
     expect(isTerminalOwnerIdentity(identity)).toBe(true)
     expect(isTerminalOwnerIdentity({ ...identity, ownerIncarnationId: '' })).toBe(false)
     expect(isTerminalOwnerIdentity({ ...identity, protocolVersion: 0 })).toBe(false)
+    expect(isTerminalOwnerIdentity({ ...identity, ownerKind: 'unknown' })).toBe(false)
   })
 
   it('does not treat a replacement owner as the same authority', () => {

@@ -118,7 +118,10 @@ import {
   type RetiredNameRegistry
 } from '../../../shared/worktree/retired-name-registry'
 import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../../../shared/worktree/id'
-import type { TerminalOwnerIdentity } from '../../../shared/terminal-owner-identity'
+import {
+  sameTerminalOwnerIdentity,
+  type TerminalOwnerIdentity
+} from '../../../shared/terminal-owner-identity'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../worktree-removal-repo-owner'
 import { isPathInsideOrEqual } from '../../../shared/cross-platform-path'
 import { normalizeTerminalQuickCommands } from '../../../shared/terminal-quick-commands'
@@ -3230,7 +3233,12 @@ export class Store {
       incarnationId?: string
       ownerIdentity?: TerminalOwnerIdentity
       startupCwd?: string
-      expectedBinding?: { ptyId: string; incarnationId?: string }
+      expectedBinding?: {
+        ptyId: string
+        incarnationId?: string
+        /** Present (including null) to compare the persisted owner tuple. */
+        ownerIdentity?: TerminalOwnerIdentity | null
+      }
       expectedSourceBinding?: PtyBindingSourceExpectation
       /** Set by host-initiated creates, which have no renderer session writer behind them. */
       hostAdmittedMembership?: boolean
@@ -3266,10 +3274,20 @@ export class Store {
         (candidate) => candidate.id === args.tabId && candidate.worktreeId === bindingWorktreeId
       )
       const boundPtyId = session.terminalLayoutsByTabId?.[args.tabId]?.ptyIdsByLeafId?.[args.leafId]
+      const expectedOwnerMatches =
+        !('ownerIdentity' in args.expectedBinding) ||
+        (args.expectedBinding.ownerIdentity === null
+          ? session.terminalPtyOwnersByPaneKey?.[paneKey] === undefined
+          : sameTerminalOwnerIdentity(
+              session.terminalPtyOwnersByPaneKey?.[paneKey],
+              args.expectedBinding.ownerIdentity
+            ))
       if (
         !tab ||
         boundPtyId !== args.expectedBinding.ptyId ||
-        session.terminalPtyIncarnationsByPaneKey?.[paneKey] !== args.expectedBinding.incarnationId
+        session.terminalPtyIncarnationsByPaneKey?.[paneKey] !==
+          args.expectedBinding.incarnationId ||
+        !expectedOwnerMatches
       ) {
         return false
       }

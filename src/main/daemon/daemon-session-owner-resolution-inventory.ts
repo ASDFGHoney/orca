@@ -40,7 +40,10 @@ export function resolveDaemonSessionOwnerInventory<T extends IPtyProvider>(
     (!ownerProviders || ownerProviders.has(exactProvider)) &&
     (inventory.complete || expectedIncarnationIsAuthoritative)
       ? exactProvider
-      : !expectedIncarnationIsAuthoritative && inventory.complete
+      : !expectedIncarnationIsAuthoritative &&
+          inventory.complete &&
+          (!expectedOwnerIdentity ||
+            (soleProvider !== undefined && ownerProviders?.has(soleProvider)))
         ? soleProvider
         : undefined
   if (!provider) {

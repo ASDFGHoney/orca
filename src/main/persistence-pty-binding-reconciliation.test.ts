@@ -355,6 +355,21 @@ describe('Store', () => {
     expect(
       store.getWorkspaceSession().terminalPtyOwnersByPaneKey?.[`tab-owner:${TEST_LEAF_1}`]
     ).toEqual(ownerIdentity)
+    expect(
+      store.persistPtyBinding({
+        worktreeId: 'wt1',
+        tabId: 'tab-owner',
+        leafId: TEST_LEAF_1,
+        ptyId: 'pty-owner',
+        incarnationId: 'session-a',
+        ownerIdentity: { ...ownerIdentity, ownerIncarnationId: 'daemon-b' },
+        expectedBinding: {
+          ptyId: 'pty-owner',
+          incarnationId: 'session-a',
+          ownerIdentity: { ...ownerIdentity, ownerIncarnationId: 'daemon-b' }
+        }
+      })
+    ).toBe(false)
   })
 
   it('reconciles only the incarnation of an unchanged durable PTY binding', async () => {

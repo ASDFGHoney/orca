@@ -106,7 +106,7 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
           }
         }
         if (routed && this.routes.get(opts.sessionId) === routed) {
-          this.forgetRoute(opts.sessionId, routed)
+          this.forgetRoute(opts.sessionId, routed, routedIncarnation)
         }
       }
     }
@@ -170,7 +170,9 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
         return null
       }
       const verdict = routed.probePtyLiveness
-        ? await routed.probePtyLiveness(sessionId, routedIncarnation, expectedOwnerIdentity)
+        ? await (expectedOwnerIdentity === undefined
+            ? routed.probePtyLiveness(sessionId, routedIncarnation)
+            : routed.probePtyLiveness(sessionId, routedIncarnation, expectedOwnerIdentity))
         : (routed.hasPty?.(sessionId) ?? null)
       if (
         this.routes.get(sessionId) !== routed ||
@@ -224,8 +226,11 @@ export class DaemonSessionOwnerResolver<T extends IPtyProvider> {
     this.routeIncarnations.set(sessionId, incarnationId)
   }
 
-  forgetRoute(sessionId: string, provider?: T): void {
+  forgetRoute(sessionId: string, provider?: T, incarnationId?: string): void {
     if (provider && this.routes.get(sessionId) !== provider) {
+      return
+    }
+    if (incarnationId !== undefined && this.routeIncarnations.get(sessionId) !== incarnationId) {
       return
     }
     this.routes.delete(sessionId)

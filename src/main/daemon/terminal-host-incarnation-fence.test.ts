@@ -112,4 +112,21 @@ describe('TerminalHost incarnation fencing', () => {
     expect(initialClient.onData).toHaveBeenCalledWith('still-owned-by-current-client')
     expect(staleClient.onData).not.toHaveBeenCalled()
   })
+
+  it('rejects stale writes and resizes before reaching a replacement session', async () => {
+    const created = await host.createOrAttach({
+      sessionId: 'session-1',
+      cols: 80,
+      rows: 24,
+      streamClient: { onData: vi.fn(), onExit: vi.fn() }
+    })
+    expect(() => host.write('session-1', 'stale', 'old-incarnation')).toThrow()
+    expect(subprocess.write).not.toHaveBeenCalled()
+    expect(() => host.resize('session-1', 120, 40, 'old-incarnation')).toThrow()
+    expect(subprocess.resize).not.toHaveBeenCalled()
+    host.write('session-1', 'current', created.incarnationId)
+    host.resize('session-1', 120, 40, created.incarnationId)
+    expect(subprocess.write).toHaveBeenCalledWith('current')
+    expect(subprocess.resize).toHaveBeenCalledWith(120, 40)
+  })
 })

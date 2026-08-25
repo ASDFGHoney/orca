@@ -59,7 +59,12 @@ import { resolveLeafCloseCopyKind } from '../terminal/terminal-close-copy-kind'
 import { RUNNING_CLOSE_PROBE_TIMEOUT_MS } from '../terminal/running-terminal-close-guard'
 import CodexRestartChip from '../CodexRestartChip'
 import { MobileDriverOverlay } from './MobileDriverOverlay'
-import { stripSshReconnectOwnedErrorLines, TerminalErrorToast } from './TerminalErrorToast'
+import {
+  isPaneOwnerUnverifiedError,
+  stripSshReconnectOwnedErrorLines,
+  TerminalErrorToast
+} from './TerminalErrorToast'
+import { TERMINAL_PANE_OWNER_UNVERIFIED } from '../../../../shared/terminal-pane-owner-verdict'
 import { TerminalProcessExitOverlay } from './TerminalProcessExitOverlay'
 import { TerminalSessionStateSaveFailureDialog } from './TerminalSessionStateSaveFailureDialog'
 import TerminalContextMenu from './TerminalContextMenu'
@@ -501,6 +506,10 @@ function TerminalPane(
       transport.notifyErrorSurfaceDismissed?.()
     }
   }, [])
+  const retryTerminalConnection = useCallback(() => {
+    setTerminalError(null)
+    useAppStore.getState().remountTerminalTabForRecovery(tabId)
+  }, [tabId])
   const onPtyRecoveryStateRef = useRef(
     (paneId: number, state: PtyTransportRecoveryState | null) => {
       setPtyRecoveryStatesByPaneId((previous) =>
@@ -2923,6 +2932,32 @@ function TerminalPane(
 
   const activePane = managerRef.current?.getActivePane()
   const managedPanes = managerRef.current?.getPanes() ?? []
+  // A daemon handoff can leave the renderer waiting on a preserved PTY without
+  // producing an IPC error. Surface the same explicit retry state instead of
+  // leaving the user with an unexplained blank pane.
+  useEffect(() => {
+    const currentPanes = managerRef.current?.getPanes() ?? []
+    if (!isActive || !isVisible || currentPanes.length === 0) {
+      return
+    }
+    const savedPtyIds = Object.values(savedLayout.ptyIdsByLeafId ?? {}).filter(Boolean)
+    if (savedPtyIds.length === 0) {
+      return
+    }
+    const hasUnboundPane = currentPanes.some(
+      (pane) => paneTransportsRef.current.get(pane.id)?.getPtyId() == null
+    )
+    if (!hasUnboundPane) {
+      if (terminalError && isPaneOwnerUnverifiedError(terminalError)) {
+        setTerminalError(null)
+      }
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setTerminalError((current) => current ?? TERMINAL_PANE_OWNER_UNVERIFIED)
+    }, 1_500)
+    return () => window.clearTimeout(timer)
+  }, [isActive, isVisible, managerRef, paneCount, paneLayoutRevision, savedLayout, terminalError])
   const showSshReconnectOverlay = Boolean(
     isActive &&
     isVisible &&
@@ -3076,6 +3111,8 @@ function TerminalPane(
         <TerminalErrorToast
           error={terminalError}
           onDismiss={dismissTerminalError}
+          onRetry={isPaneOwnerUnverifiedError(terminalError) ? retryTerminalConnection : undefined}
+          terminalLabel={terminalTab?.title ?? 'Terminal session'}
           onRestartDaemon={() => daemonActions.setPending('restart')}
         />
       ) : null}

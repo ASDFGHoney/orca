@@ -1263,7 +1263,11 @@ export class DaemonServer {
       case 'write':
         try {
           this.lastInputAtBySessionId.set(request.payload.sessionId, performance.now())
-          this.host.write(request.payload.sessionId, request.payload.data)
+          this.host.write(
+            request.payload.sessionId,
+            request.payload.data,
+            request.payload.expectedIncarnationId
+          )
         } catch (err) {
           this.lastInputAtBySessionId.delete(request.payload.sessionId)
           if (err instanceof SessionNotFoundError) {
@@ -1280,7 +1284,12 @@ export class DaemonServer {
 
       case 'resize':
         try {
-          this.host.resize(request.payload.sessionId, request.payload.cols, request.payload.rows)
+          this.host.resize(
+            request.payload.sessionId,
+            request.payload.cols,
+            request.payload.rows,
+            request.payload.expectedIncarnationId
+          )
         } catch (err) {
           if (err instanceof SessionNotFoundError) {
             this.sendExitEvent(

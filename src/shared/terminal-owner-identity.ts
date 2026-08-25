@@ -33,7 +33,12 @@ export function isTerminalOwnerIdentity(value: unknown): value is TerminalOwnerI
   return (
     typeof candidate.executionHostId === 'string' &&
     normalizeExecutionHostId(candidate.executionHostId) !== null &&
-    typeof candidate.ownerKind === 'string' &&
+    (candidate.ownerKind === 'daemon' ||
+      candidate.ownerKind === 'ssh' ||
+      candidate.ownerKind === 'wsl' ||
+      candidate.ownerKind === 'relay' ||
+      candidate.ownerKind === 'paired-runtime' ||
+      candidate.ownerKind === 'local-direct') &&
     typeof candidate.ownerIncarnationId === 'string' &&
     candidate.ownerIncarnationId.length > 0 &&
     typeof candidate.sessionIncarnationId === 'string' &&

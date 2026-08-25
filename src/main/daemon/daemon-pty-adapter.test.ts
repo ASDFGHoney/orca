@@ -300,6 +300,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
         pendingClaimSpawnOperations: Set<typeof pendingClaim>
         sessionIncarnations: Map<string, string>
       }
+      const originalIdentity = internals.lastAuthenticatedIdentity
       internals.lastAuthenticatedIdentity = {
         ...internals.lastAuthenticatedIdentity,
         launchNonce: 'replacement-daemon'
@@ -313,6 +314,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       expect(exits).toEqual([])
       expect(internals.activeSessionIds.has(sessionId)).toBe(true)
       expect(internals.sessionIncarnations.get(sessionId)).toBe(created.incarnationId)
+      internals.lastAuthenticatedIdentity = originalIdentity
       internals.pendingClaimSpawnOperations.delete(pendingClaim)
     })
 
@@ -780,6 +782,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
         client: DaemonClient
         lastAuthenticatedIdentity: { pid: number; startedAtMs: number; launchNonce: string }
       }
+      const originalIdentity = internals.lastAuthenticatedIdentity
       internals.lastAuthenticatedIdentity = {
         pid: process.pid,
         startedAtMs: Date.now() + 10_000,
@@ -804,6 +807,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
 
       expect(exits).toEqual([])
       expect(adapter.hasPty(spawned.id)).toBe(true)
+      internals.lastAuthenticatedIdentity = originalIdentity
     })
   })
 

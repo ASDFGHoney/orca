@@ -74,7 +74,7 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
     }
 
     if (connectResult?.exitedBeforeAttach) {
-      // Why: the transport already delivered the dead session's final frame + exit; treat as terminal state, not a failed reattach.
+      // Ordinary terminal exits are final; do not replace them with a new shell.
       return true
     }
 

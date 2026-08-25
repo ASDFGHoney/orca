@@ -965,7 +965,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         return spawnResult.id
       } catch (err) {
         const msg = extractIpcErrorMessage(err, err instanceof Error ? err.message : String(err))
-        if (options.sessionId && isTerminalSessionExited(msg)) {
+        if (options.sessionId && (isTerminalSessionExited(err) || isTerminalSessionExited(msg))) {
           return {
             id: options.sessionId,
             exitedBeforeAttach: true

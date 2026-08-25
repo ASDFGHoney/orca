@@ -123,6 +123,32 @@ describe('createIpcPtyTransport', () => {
     }
   )
 
+  it('preserves a named TerminalSessionExitedError before IPC message extraction', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const error = new Error('transport closed')
+    error.name = 'TerminalSessionExitedError'
+    const spawnMock = vi.fn().mockRejectedValue(error)
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+    await expect(
+      createIpcPtyTransport().connect({ url: '', sessionId: 'pty-dead', callbacks: {} })
+    ).resolves.toEqual({ id: 'pty-dead', exitedBeforeAttach: true })
+  })
+
   it('does not reinterpret an unexpected reattach failure as an ownership verdict', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const spawnMock = vi.fn().mockRejectedValue(new Error('unexpected provider failure'))

@@ -433,6 +433,9 @@ export class DaemonPtyAdapter implements IPtyProvider {
   }
 
   getTerminalOwnerIdentity(id: string): TerminalOwnerIdentity | null {
+    if (!this.hasExactSessionAuthority(id)) {
+      return null
+    }
     return this.ownerIdentity(this.sessionIncarnations.get(id)) ?? null
   }
 

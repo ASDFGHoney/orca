@@ -2930,7 +2930,10 @@
             "a7e2fd2699": "file an issue",
             "5c8ce20be6": "If this persists, please",
             "cc6d997c65": "Restart the terminal daemon from here to clear stale daemon state.",
-            "7ee11bc0db": "Orca couldn't confirm whether this terminal's previous session is still running, so it left the session untouched. Reopen this pane to retry.",
+            "7ee11bc0db": "Orca couldn't confirm whether this terminal's previous session is still running, so it left the session and history untouched.",
+            "retryConnection": "Retry connection",
+            "ownerUnavailableTitle": "Terminal session unavailable",
+            "ownerUnavailableDetail": "Orca couldn't confirm whether the previous session is still running. The tab and session are preserved; retry when the owner is available.",
             "e16012e31e": "The terminal daemon that owned this session exited, so the session and its scrollback could not be recovered. Open a new terminal to continue.",
             "sessionUnavailable": "Orca couldn't reattach to this pane's terminal session on the host. Open a new terminal to continue."
           },

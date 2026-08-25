@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SshPtyProvider } from './ssh-pty-provider'
-import { TerminalSessionOwnerUnverifiedError } from '../daemon/daemon-errors'
-import { TerminalSessionExitedError } from '../daemon/daemon-errors'
+import {
+  TerminalSessionExitedError,
+  TerminalSessionOwnerUnverifiedError
+} from '../daemon/daemon-errors'
 
 describe('SSH PTY provider session reattach incarnation', () => {
   it('remembers the authoritative incarnation before a legacy exit arrives', async () => {

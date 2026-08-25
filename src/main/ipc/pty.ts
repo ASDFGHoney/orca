@@ -315,7 +315,11 @@ const ptyIncarnationById = new Map<string, string>()
 
 export function isCurrentPtyExit(payload: { id: string; incarnationId?: string }): boolean {
   const current = ptyIncarnationById.get(payload.id)
-  return payload.incarnationId !== undefined && (!current || payload.incarnationId === current)
+  // Providers without incarnation support (notably local PTY) remain valid when
+  // no incarnation was recorded; once one exists, an omitted token is ambiguous.
+  return current === undefined
+    ? payload.incarnationId === undefined
+    : payload.incarnationId === current
 }
 // Why: mobile clients must mirror desktop PTY geometry even before the renderer can provide an xterm snapshot (e.g. right after tab creation).
 const ptySizes = new Map<string, { cols: number; rows: number }>()
@@ -842,13 +846,18 @@ type StablePaneSpawnContext = {
   onFreshSpawn?: (result: PtySpawnResult) => void
 }
 
-function stablePanePersistenceFence(
-  owner: StablePaneOwner | null
-): { ptyId: string; incarnationId?: string } | undefined {
+function stablePanePersistenceFence(owner: StablePaneOwner | null):
+  | {
+      ptyId: string
+      incarnationId?: string
+      ownerIdentity?: TerminalOwnerIdentity | null
+    }
+  | undefined {
   return owner?.hasPersistedBinding
     ? {
         ptyId: owner.ptyId,
-        ...(owner.persistedIncarnationId ? { incarnationId: owner.persistedIncarnationId } : {})
+        ...(owner.persistedIncarnationId ? { incarnationId: owner.persistedIncarnationId } : {}),
+        ownerIdentity: owner.ownerIdentity ?? null
       }
     : undefined
 }
@@ -2606,6 +2615,11 @@ export function registerPtyHandlers(
         ptyOwnership.delete(id)
         markClaudePtyExited(id)
         runtime?.onPtyExit(id, code, incarnationId, cause ? { cause } : undefined)
+        sendPtyExitToRenderer({
+          id,
+          code,
+          ...(incarnationId ? { incarnationId } : {})
+        })
       },
       onData: (id, data, timestamp, sequenceChars, transformed) =>
         runtime?.onPtyData(id, data, timestamp, sequenceChars ?? data.length, transformed)
@@ -4136,23 +4150,25 @@ export function registerPtyHandlers(
       acceptPtyDataForRenderer(payload, outputSeq)
     })
     localExitUnsub = localProvider.onExit((payload) => {
+      // Fence local exits in configure().onExit before cleanup removes their incarnation.
+      if (isLocalProvider) {
+        return
+      }
       if (!isCurrentPtyExit(payload)) {
         return
       }
       if (consumeSyntheticKillExit(payload.id)) {
         return
       }
-      if (!isLocalProvider) {
-        clearProviderPtyState(payload.id)
-        ptyOwnership.delete(payload.id)
-        markClaudePtyExited(payload.id)
-        runtime?.onPtyExit(
-          payload.id,
-          payload.code,
-          payload.incarnationId,
-          payload.cause ? { cause: payload.cause } : undefined
-        )
-      }
+      clearProviderPtyState(payload.id)
+      ptyOwnership.delete(payload.id)
+      markClaudePtyExited(payload.id)
+      runtime?.onPtyExit(
+        payload.id,
+        payload.code,
+        payload.incarnationId,
+        payload.cause ? { cause: payload.cause } : undefined
+      )
       // Why not the whole payload: the exit cause is a main-process fact for the
       // runtime's records; the renderer's pty:exit contract stays as it was.
       sendPtyExitToRenderer({
@@ -5807,9 +5823,8 @@ export function registerPtyHandlers(
         provider = connectionId ? getProvider(connectionId) : getProviderForPty(ptyId)
       } catch {
         if (connectionId) {
-          // Why: the relay lease must still be tombstoned, but an absent SSH
-          // provider is lost contact — the remote PTY is designed to survive it,
-          // so nothing here observed an exit to report as a confirmed stop.
+          // Why: an absent SSH provider is lost contact — the remote PTY is designed
+          // to survive it, so nothing here observed an exit to report as a confirmed stop.
           runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
         }
         return false
@@ -7890,7 +7905,12 @@ export function registerPtyHandlers(
       _event,
       args: { id: string; paneKey?: string; worktreeId?: string }
     ): Promise<boolean | null> => {
-      if (typeof args?.id !== 'string' || args.id.startsWith('remote:')) {
+      if (
+        typeof args?.id !== 'string' ||
+        args.id.length === 0 ||
+        args.id.length > 512 ||
+        args.id.startsWith('remote:')
+      ) {
         // Why: same routing hazard pty:kill guards against — ptyOwnership never holds
         // a runtime terminal handle and parseAppSshPtyId ignores it, so the lookup
         // falls through to the local provider and its "not in my table" reads as an

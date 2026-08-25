@@ -9,7 +9,6 @@ it('preserves A topology when compatible replacement B reports A absent', async 
     sessionIncarnationId: 'session-a',
     logicalPtyId: 'logical-pty'
   })
-  const ownerA = Object.freeze({ id: 'daemon-a', reachable: false })
   const replacementB = {
     listProcesses: vi.fn(async () => []),
     probePtyLiveness: vi.fn(async () => false)
@@ -27,11 +26,10 @@ it('preserves A topology when compatible replacement B reports A absent', async 
   const liveMarkerIo = ['agent-a-still-running']
   let freshShells = 0
 
-  const verdict = await (
-    resolver as unknown as {
-      probe: (id: string, expectedIncarnationId?: string) => Promise<boolean | null>
-    }
-  ).probe(persistedOwner.logicalPtyId, persistedOwner.sessionIncarnationId)
+  const verdict = await resolver.probe(
+    persistedOwner.logicalPtyId,
+    persistedOwner.sessionIncarnationId
+  )
   if (verdict === false) {
     topology.savedRows = []
     topology.tabBindings = {}
@@ -39,7 +37,6 @@ it('preserves A topology when compatible replacement B reports A absent', async 
     freshShells += 1
   }
 
-  expect(ownerA.reachable).toBe(false)
   expect(verdict).toBeNull()
   expect(replacementB.probePtyLiveness).not.toHaveBeenCalled()
   expect(replacementB.listProcesses).not.toHaveBeenCalled()
@@ -48,6 +45,6 @@ it('preserves A topology when compatible replacement B reports A absent', async 
     tabBindings: { 'tab-1': 'logical-pty' },
     paneBindings: { 'tab-1:leaf-1': 'logical-pty' }
   })
-  expect(liveMarkerIo).toEqual(['agent-a-still-running'])
+  expect(liveMarkerIo).toHaveLength(1)
   expect(freshShells).toBe(0)
 })

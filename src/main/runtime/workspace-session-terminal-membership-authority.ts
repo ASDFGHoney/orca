@@ -299,7 +299,13 @@ function rebaseOwnerBindings(
   session: WorkspaceSessionState,
   prior: WorkspaceSessionState
 ): WorkspaceSessionState['terminalPtyOwnersByPaneKey'] {
-  const allowed = new Set(Object.keys(rebaseIncarnationBindings(session, prior) ?? {}))
+  const retainedIncarnations = rebaseIncarnationBindings(session, prior) ?? {}
   const merged = { ...session.terminalPtyOwnersByPaneKey, ...prior.terminalPtyOwnersByPaneKey }
-  return Object.fromEntries(Object.entries(merged).filter(([paneKey]) => allowed.has(paneKey)))
+  return Object.fromEntries(
+    Object.entries(merged).filter(
+      ([paneKey, owner]) =>
+        retainedIncarnations[paneKey] !== undefined &&
+        owner.sessionIncarnationId === retainedIncarnations[paneKey]
+    )
+  )
 }

@@ -137,9 +137,11 @@ export function extractSessionForTransfer(
     })
   )
   transferred.terminalPtyOwnersByPaneKey = Object.fromEntries(
-    Object.entries(source.terminalPtyOwnersByPaneKey ?? {}).filter(([paneKey]) => {
+    Object.entries(source.terminalPtyOwnersByPaneKey ?? {}).flatMap(([paneKey, owner]) => {
       const separator = paneKey.lastIndexOf(':')
       return separator > 0 && copiedTerminalTabIds.has(paneKey.slice(0, separator))
+        ? [[paneKey, structuredClone(owner)] as const]
+        : []
     })
   )
   transferred.terminalSurfaceTombstonesByPaneKey = Object.fromEntries(
