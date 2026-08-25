@@ -190,7 +190,7 @@ describe('createShutdownCheckpointPersist', () => {
     const persist = createShutdownCheckpointPersist(makeDeps({ stageBeforeUnloadSync }))
 
     expect(persist.run).toThrow('sync IPC staging failed')
-    persist.reset()
+    persist.abandonAttempt()
     expect(persist.run).toThrow('sync IPC staging failed')
     expect(stageBeforeUnloadSync).toHaveBeenCalledTimes(2)
   })

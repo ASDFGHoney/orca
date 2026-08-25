@@ -9,7 +9,8 @@ import { recordRendererCrashBreadcrumb } from './crash-breadcrumb-recorder'
 
 export type ShutdownCheckpointGuard = {
   persistOnce: () => boolean
-  reset: () => void
+  abortAfterCheckpointFailure: () => void
+  abandonAttempt: () => void
 }
 
 // Why: without this, a reproducible checkpoint failure strands the user on an old
@@ -23,7 +24,7 @@ function reportShutdownCheckpointFailure(error: unknown): void {
 
 export function createShutdownCheckpointGuard(
   persist: () => void,
-  resetPersistAttempt?: () => void
+  abandonPersistAttempt?: () => void
 ): ShutdownCheckpointGuard {
   let persisted = false
   return {
@@ -43,9 +44,12 @@ export function createShutdownCheckpointGuard(
       clearShutdownCheckpointFailureReason()
       return true
     },
-    reset(): void {
+    abortAfterCheckpointFailure(): void {
       persisted = false
-      resetPersistAttempt?.()
+    },
+    abandonAttempt(): void {
+      persisted = false
+      abandonPersistAttempt?.()
     }
   }
 }

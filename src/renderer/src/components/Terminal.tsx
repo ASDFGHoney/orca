@@ -147,7 +147,7 @@ import {
   runWithWindowCloseCheckpointScope,
   setWindowCloseRequestHandler
 } from './window-close-request-coordinator'
-import { consumeShutdownCheckpointFailureReason } from '../../../shared/renderer-shutdown-events'
+import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
 import {
   findActivityTerminalPortal,
   useActivityTerminalPortals,
@@ -537,16 +537,7 @@ function Terminal(): React.JSX.Element | null {
       // Why: a checkpoint-vetoed quit used to die here with no dialog and no log,
       // leaving SIGKILL as the only exit (#15352). The dirty-file veto publishes
       // no reason — its deferred dialog flow already gives the user a surface.
-      const reason = consumeShutdownCheckpointFailureReason()
-      if (reason) {
-        toast.error(
-          translate(
-            'auto.components.Terminal.quitSnapshotSaveFailed',
-            'Quit canceled: the session snapshot could not be saved ({{value0}}).',
-            { value0: reason }
-          )
-        )
-      }
+      showShutdownCheckpointFailureToast()
       return
     }
     window.api.ui.confirmWindowClose()

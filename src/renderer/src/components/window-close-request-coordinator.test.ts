@@ -1,4 +1,10 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import {
+  consumeShutdownCheckpointFailureReason,
+  publishShutdownCheckpointFailureReason
+} from '../../../shared/renderer-shutdown-events'
 import {
   dispatchWindowCloseRequest,
   getWindowCloseRequestHandler,
@@ -7,6 +13,8 @@ import {
   runWithWindowCloseCheckpointScope,
   setWindowCloseRequestHandler
 } from './window-close-request-coordinator'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 describe('window-close-request-coordinator', () => {
   const confirmWindowClose = vi.fn()
@@ -18,6 +26,7 @@ describe('window-close-request-coordinator', () => {
 
   beforeEach(() => {
     confirmWindowClose.mockClear()
+    vi.mocked(toast.error).mockClear()
     // Why: dispatch falls back to the preload bridge when no rich handler is
     // registered; stub just the surface it touches.
     const windowTarget = new EventTarget() as EventTarget & {
@@ -30,6 +39,7 @@ describe('window-close-request-coordinator', () => {
   afterEach(() => {
     setWindowCloseRequestHandler(null)
     unregisterFns.splice(0).forEach((fn) => fn())
+    consumeShutdownCheckpointFailureReason()
   })
 
   it('has no handler by default, so the App root falls back to confirming the close', () => {
@@ -68,7 +78,27 @@ describe('window-close-request-coordinator', () => {
 
     expect(beforeUnload).toHaveBeenCalledTimes(1)
     expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
     expect(isWindowCloseCheckpointInProgress()).toBe(false)
+  })
+
+  it('surfaces the checkpoint failure reason when the Terminal-less close is vetoed', async () => {
+    window.addEventListener(
+      'beforeunload',
+      (event) => {
+        publishShutdownCheckpointFailureReason('sendSync payload rejected')
+        event.preventDefault()
+      },
+      { once: true }
+    )
+
+    await dispatchWindowCloseRequest({ isQuitting: true })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(
+      'Quit canceled: the session snapshot could not be saved (sendSync payload rejected).'
+    )
+    expect(consumeShutdownCheckpointFailureReason()).toBeNull()
   })
 
   it('delegates to the rich handler and does NOT confirm directly when one is registered', async () => {
@@ -93,6 +123,7 @@ describe('window-close-request-coordinator', () => {
 
     expect(confirmWindowClose).not.toHaveBeenCalled()
     expect(handler).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('proceeds to confirm when all guards allow the close', async () => {

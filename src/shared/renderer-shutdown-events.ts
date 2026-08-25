@@ -1,6 +1,8 @@
 export const ORCA_RENDERER_UNLOAD_PREVENTED_EVENT = 'orca:renderer-unload-prevented'
 export const ORCA_RENDERER_SHUTDOWN_CHECKPOINT_FAILED_EVENT =
   'orca:renderer-shutdown-checkpoint-failed'
+export const ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT =
+  'orca:renderer-shutdown-checkpoint-aborted'
 
 // Why a DOM attribute: the checkpoint guard runs in the renderer's main world while
 // prepareRendererForAppRestart runs in the context-isolated preload world. Events

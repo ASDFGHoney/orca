@@ -30,7 +30,10 @@ import {
   ORCA_APP_RESTART_ABORTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT
 } from '../../../shared/updater-renderer-events'
-import { ORCA_RENDERER_UNLOAD_PREVENTED_EVENT } from '../../../shared/renderer-shutdown-events'
+import {
+  ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT,
+  ORCA_RENDERER_UNLOAD_PREVENTED_EVENT
+} from '../../../shared/renderer-shutdown-events'
 import type { RemoteWorkspacePatchResult } from '../../../shared/remote-workspace-types'
 
 // Why: bound the resume-record loss window on a hard kill to ~1 min; capture skips unchanged records so per-tick cost is negligible.
@@ -158,21 +161,35 @@ export function useAppSessionPersistence(): void {
     })
     const shutdownCheckpoint = createShutdownCheckpointGuard(
       shutdownCheckpointPersist.run,
-      shutdownCheckpointPersist.reset
+      shutdownCheckpointPersist.abandonAttempt
     )
     const persistBeforeUnload = createShutdownCheckpointBeforeUnloadHandler(shutdownCheckpoint)
     window.addEventListener('beforeunload', persistBeforeUnload)
-    window.addEventListener(ORCA_APP_RESTART_ABORTED_EVENT, shutdownCheckpoint.reset)
-    window.addEventListener(ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT, shutdownCheckpoint.reset)
-    window.addEventListener(ORCA_RENDERER_UNLOAD_PREVENTED_EVENT, shutdownCheckpoint.reset)
+    window.addEventListener(
+      ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT,
+      shutdownCheckpoint.abortAfterCheckpointFailure
+    )
+    window.addEventListener(ORCA_APP_RESTART_ABORTED_EVENT, shutdownCheckpoint.abandonAttempt)
+    window.addEventListener(
+      ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
+      shutdownCheckpoint.abandonAttempt
+    )
+    window.addEventListener(ORCA_RENDERER_UNLOAD_PREVENTED_EVENT, shutdownCheckpoint.abandonAttempt)
     return () => {
       window.removeEventListener('beforeunload', persistBeforeUnload)
-      window.removeEventListener(ORCA_APP_RESTART_ABORTED_EVENT, shutdownCheckpoint.reset)
+      window.removeEventListener(
+        ORCA_RENDERER_SHUTDOWN_CHECKPOINT_ABORTED_EVENT,
+        shutdownCheckpoint.abortAfterCheckpointFailure
+      )
+      window.removeEventListener(ORCA_APP_RESTART_ABORTED_EVENT, shutdownCheckpoint.abandonAttempt)
       window.removeEventListener(
         ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
-        shutdownCheckpoint.reset
+        shutdownCheckpoint.abandonAttempt
       )
-      window.removeEventListener(ORCA_RENDERER_UNLOAD_PREVENTED_EVENT, shutdownCheckpoint.reset)
+      window.removeEventListener(
+        ORCA_RENDERER_UNLOAD_PREVENTED_EVENT,
+        shutdownCheckpoint.abandonAttempt
+      )
     }
   }, [])
 

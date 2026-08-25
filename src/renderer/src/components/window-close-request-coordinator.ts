@@ -9,6 +9,8 @@
 // Git AI Author prompt editors) register a guard so quitting prompts the user to
 // save/discard instead of being silently vetoed by a beforeunload handler.
 
+import { showShutdownCheckpointFailureToast } from '@/lib/shutdown-checkpoint-failure-toast'
+
 export type WindowCloseRequestHandler = (data: { isQuitting: boolean }) => void
 
 /** Returns true to allow the close to proceed, false to cancel it (e.g. the user
@@ -91,5 +93,7 @@ export async function dispatchWindowCloseRequest(data: { isQuitting: boolean }):
   )
   if (accepted) {
     window.api.ui.confirmWindowClose()
+    return
   }
+  showShutdownCheckpointFailureToast()
 }

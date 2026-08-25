@@ -24,12 +24,13 @@ export type ShutdownCheckpointPersistDeps = {
 
 export type ShutdownCheckpointPersist = {
   run: () => void
-  reset: () => void
+  abandonAttempt: () => void
 }
 
 /** Returns the shutdown checkpoint attempt lifecycle. Running it captures renderer-owned
- *  state, then stages everything durable through one main-process call; reset discards
- *  retry state when that shutdown attempt is abandoned. Only unstageable data may throw.
+ *  state, then stages everything durable through one main-process call;
+ *  abandonAttempt discards retry state when a shutdown is independently canceled.
+ *  Only unstageable data may throw.
  *
  *  A factory rather than a bare function so full-session staging failures can stay
  *  visible-and-retryable on the first attempt and only degrade on a repeat: a
@@ -102,7 +103,7 @@ export function createShutdownCheckpointPersist(
   }
   return {
     run,
-    reset: () => {
+    abandonAttempt: () => {
       fullStagingFailedOnPriorAttempt = false
     }
   }

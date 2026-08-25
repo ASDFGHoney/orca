@@ -35,7 +35,7 @@ describe('createShutdownCheckpointGuard', () => {
     const guard = createShutdownCheckpointGuard(persist)
 
     expect(guard.persistOnce()).toBe(true)
-    guard.reset()
+    guard.abandonAttempt()
     expect(guard.persistOnce()).toBe(true)
 
     expect(persist).toHaveBeenCalledTimes(2)
@@ -95,12 +95,21 @@ describe('createShutdownCheckpointGuard', () => {
   })
 
   it('resets state owned by the persist attempt lifecycle', () => {
-    const resetPersistAttempt = vi.fn()
-    const guard = createShutdownCheckpointGuard(vi.fn(), resetPersistAttempt)
+    const abandonPersistAttempt = vi.fn()
+    const guard = createShutdownCheckpointGuard(vi.fn(), abandonPersistAttempt)
 
-    guard.reset()
+    guard.abandonAttempt()
 
-    expect(resetPersistAttempt).toHaveBeenCalledTimes(1)
+    expect(abandonPersistAttempt).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves persist retry state when the checkpoint itself aborts the restart', () => {
+    const abandonPersistAttempt = vi.fn()
+    const guard = createShutdownCheckpointGuard(vi.fn(), abandonPersistAttempt)
+
+    guard.abortAfterCheckpointFailure()
+
+    expect(abandonPersistAttempt).not.toHaveBeenCalled()
   })
 
   it('reports checkpoint failure separately from the unload verdict', () => {
@@ -126,7 +135,7 @@ describe('createShutdownCheckpointGuard', () => {
     eventTarget.addEventListener('beforeunload', preventReload)
 
     expect(eventTarget.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false)
-    guard.reset()
+    guard.abandonAttempt()
     eventTarget.removeEventListener('beforeunload', preventReload)
     expect(eventTarget.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true)
 
@@ -157,7 +166,7 @@ describe('createShutdownCheckpointGuard', () => {
     }
     eventTarget.addEventListener('beforeunload', preventReload)
     eventTarget.addEventListener('beforeunload', createShutdownCheckpointBeforeUnloadHandler(guard))
-    eventTarget.addEventListener(ORCA_RENDERER_UNLOAD_PREVENTED_EVENT, guard.reset)
+    eventTarget.addEventListener(ORCA_RENDERER_UNLOAD_PREVENTED_EVENT, guard.abandonAttempt)
 
     expect(eventTarget.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false)
     await Promise.resolve()
@@ -180,8 +189,7 @@ describe('createShutdownCheckpointGuard', () => {
     // Why pin: without the scope, a persist failure blocks quit with no degradable
     // tier; without the toast, the vetoed quit is silent and SIGKILL-only (#15352).
     expect(closeBlock).toContain('runWithWindowCloseCheckpointScope(() =>')
-    expect(closeBlock).toContain('consumeShutdownCheckpointFailureReason()')
-    expect(closeBlock).toContain('toast.error(')
+    expect(closeBlock).toContain('showShutdownCheckpointFailureToast()')
   })
 
   it('wires dirty editor unload vetoes to the paired-web checkpoint reset', () => {
