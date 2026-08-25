@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -147,7 +147,7 @@ describe('replay', () => {
     expect(reopened.snapshot().items).toHaveLength(0)
   })
 
-  it('rolls the epoch when the log lost a row', async () => {
+  it('preserves the intact prefix and quarantines a corrupt suffix', async () => {
     const journal = await open()
     for (let index = 0; index < 4; index += 1) {
       await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
@@ -158,12 +158,123 @@ describe('replay', () => {
     await writeFile(logPath, `${[...lines.slice(0, 2), ...lines.slice(3)].join('\n')}\n`, 'utf-8')
 
     const reopened = await open()
-    expect(reopened.epoch).not.toBe(before)
-    expect(reopened.snapshot().items).toHaveLength(0)
+    expect(reopened.epoch).toBe(before)
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('m0')])
+    const files = await readdir(root)
+    expect(files.some((name) => name.startsWith('quarantine-'))).toBe(true)
+  })
+})
+
+describe('automatic compaction', () => {
+  // Production passes no policy and never called compact(), so the log only
+  // ever grew — until the size bound refused every append for good.
+  it('compacts on append once the retention window has rows to shed', async () => {
+    const policy = { minTailRows: 2, retainTailMs: 0 }
+    const journal = await open({ compaction: policy })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBeGreaterThan(0)
+    // The log sheds instead of growing with every append (7 = epoch row + 6).
+    const log = await readFile(join(root, JOURNAL_LOG_FILE), 'utf-8')
+    expect(log.trim().split('\n').length).toBeLessThan(7)
+    // Nothing is lost: the folded prefix is served from the snapshot.
+    expect(journal.snapshot().items).toHaveLength(6)
+  })
+
+  it('does not rewrite the log while every row is inside the retention window', async () => {
+    const journal = await open({ compaction: { minTailRows: 2, retainTailMs: 60_000 } })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBe(0)
+  })
+
+  it('can be turned off explicitly', async () => {
+    const journal = await open({
+      autoCompact: false,
+      compaction: { minTailRows: 2, retainTailMs: 0 }
+    })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    expect(journal.compactionBoundary).toBe(0)
+  })
+
+  it('sheds a tail shorter than the row floor before the size bound refuses the append', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      // The tail never reaches the floor, so honouring it would shed nothing.
+      compaction: { minTailRows: 512, retainTailMs: 10_000 }
+    })
+    for (let index = 0; index < 20; index += 1) {
+      await expect(
+        journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+      ).resolves.toBeDefined()
+    }
+    expect(journal.compactionBoundary).toBeGreaterThan(0)
+    expect(journal.snapshot().items).toHaveLength(20)
+  })
+
+  it('sheds a tail that is entirely inside the retention window rather than refusing every append', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
+    })
+    let rejected = 0
+    for (let index = 0; index < 50; index += 1) {
+      try {
+        await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'journal_bound_exceeded' })
+        rejected += 1
+      }
+    }
+
+    expect(rejected).toBe(0)
+    // Shed rows are folded into the snapshot, so the conversation is intact.
+    expect(journal.snapshot().items).toHaveLength(50)
+    expect(journal.compactionBoundary).toBeGreaterThan(0)
+  })
+
+  it('keeps the newest rows resumable while shedding under budget pressure', async () => {
+    const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 900 },
+      compaction: { minTailRows: 10, retainTailMs: 2 * 60 * 60 * 1000 }
+    })
+    for (let index = 0; index < 50; index += 1) {
+      await journal.appendItem(item(index), body('x'.repeat(96)), { fence: 1 })
+    }
+
+    // The window yields oldest-first, never wholesale: the latest append is
+    // still in the log, so a client resuming from it does not reload.
+    const log = (await readFile(join(root, JOURNAL_LOG_FILE), 'utf-8')).trim().split('\n')
+    expect(log.length).toBeGreaterThan(0)
+    expect(log.at(-1)).toContain('"seq"')
   })
 })
 
 describe('compaction and retention', () => {
+  it('preserves the highest fence across compaction and reopen', async () => {
+    const journal = await open({ compaction: { minTailRows: 1, retainTailMs: 0 } })
+    await journal.appendItem(item(0), body('a'), { fence: 7 })
+    await journal.compact()
+    const reopened = await open({ compaction: { minTailRows: 1, retainTailMs: 0 } })
+    await expect(reopened.appendItem(item(1), body('stale'), { fence: 6 })).rejects.toMatchObject({
+      code: 'journal_stale_fence'
+    })
+  })
+
+  it('preserves tombstones across compaction and reopen', async () => {
+    const journal = await open({ compaction: { minTailRows: 1, retainTailMs: 0 } })
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    await journal.appendTombstone(item(0), { fence: 1 })
+    await journal.compact()
+    const reopened = await open({ compaction: { minTailRows: 1, retainTailMs: 0 } })
+    await reopened.appendItem(item(0), body('stale'), { fence: 1 })
+    expect(reopened.snapshot().items).toHaveLength(0)
+  })
+
   it('folds the prefix into the snapshot and keeps serving the retained tail', async () => {
     const journal = await open({ compaction: { minTailRows: 2, retainTailMs: 0 } })
     for (let index = 0; index < 6; index += 1) {
@@ -194,6 +305,10 @@ describe('compaction and retention', () => {
     const rendered = journal.snapshot()
     const logBefore = await readFile(join(root, JOURNAL_LOG_FILE), 'utf-8')
     await journal.compact()
+    const persistedSnapshot = JSON.parse(
+      await readFile(join(root, JOURNAL_SNAPSHOT_FILE), 'utf-8')
+    ) as { tail: unknown[] }
+    expect(persistedSnapshot.tail).toHaveLength(2)
     // Simulate the crash: the snapshot landed, the truncation did not.
     await writeFile(join(root, JOURNAL_LOG_FILE), logBefore, 'utf-8')
 
@@ -261,8 +376,19 @@ describe('bounds', () => {
     expect(boundInlineText('small', DEFAULT_JOURNAL_PAYLOAD_LIMITS).text).toBe('small')
   })
 
-  it('refuses an append past the per-session size bound', async () => {
+  it('refuses a single row larger than the per-session size bound', async () => {
     const journal = await open({
+      limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 400 }
+    })
+    // Shedding the whole tail still cannot make room, so the bound holds.
+    await expect(
+      journal.appendItem(item(0), body('x'.repeat(4_096)), { fence: 1 })
+    ).rejects.toMatchObject({ code: 'journal_bound_exceeded' })
+  })
+
+  it('refuses an append past the per-session size bound when compaction is off', async () => {
+    const journal = await open({
+      autoCompact: false,
       limits: { ...DEFAULT_JOURNAL_PAYLOAD_LIMITS, maxSessionBytes: 400 }
     })
     await expect(
@@ -289,6 +415,30 @@ describe('bounds', () => {
 })
 
 describe('schema', () => {
+  it('quarantines an invalid compacted snapshot without replacing its tail', async () => {
+    const journal = await open({ compaction: { minTailRows: 2, retainTailMs: 0 } })
+    for (let index = 0; index < 6; index += 1) {
+      await journal.appendItem(item(index), body(`m${index}`), { fence: 1 })
+    }
+    await journal.compact()
+    const epoch = journal.epoch
+    const snapshotPath = join(root, JOURNAL_SNAPSHOT_FILE)
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    const invalidSnapshot = '{"folded history":'
+    await writeFile(snapshotPath, invalidSnapshot, 'utf-8')
+    const retainedTail = await readFile(logPath, 'utf-8')
+    expect(retainedTail).not.toContain('"kind":"epoch"')
+
+    const reopened = await open()
+    expect(reopened.epoch).toBe(epoch)
+    expect(await readFile(logPath, 'utf-8')).toBe(retainedTail)
+    const quarantined = (await readdir(root)).find((name) =>
+      name.startsWith('quarantine-snapshot-')
+    )
+    expect(quarantined).toBeDefined()
+    expect(await readFile(join(root, quarantined!), 'utf-8')).toBe(invalidSnapshot)
+  })
+
   it('degrades to read-only on a row from a newer build, without skipping or deleting it', async () => {
     const journal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })
@@ -321,7 +471,7 @@ describe('schema', () => {
     expect(await readFile(logPath, 'utf-8')).toContain('"v":99')
   })
 
-  it('skips a malformed line without giving up the journal', async () => {
+  it('skips a malformed line without giving up the journal, and discloses the skip', async () => {
     const journal = await open()
     await journal.appendItem(item(0), body('a'), { fence: 1 })
     const logPath = join(root, JOURNAL_LOG_FILE)
@@ -329,7 +479,116 @@ describe('schema', () => {
 
     const reopened = await open()
     expect(reopened.isReadOnly).toBe(false)
-    expect(reopened.snapshot().items).toHaveLength(1)
+    const items = reopened.snapshot().items
+    // The surviving row is untouched…
+    expect(items.some((entry) => entry.body.kind === 'message')).toBe(true)
+    // …and the skip is visible in the timeline instead of silently swallowed.
+    expect(
+      items.some(
+        (entry) => entry.body.kind === 'status' && entry.body.text.includes('could not be read')
+      )
+    ).toBe(true)
+  })
+
+  it('keeps one disclosure row across reopens instead of stacking duplicates', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    await writeFile(logPath, `${await readFile(logPath, 'utf-8')}{not json\n`, 'utf-8')
+
+    await open()
+    const reopened = await open()
+    expect(
+      reopened
+        .snapshot()
+        .items.filter(
+          (entry) => entry.body.kind === 'status' && entry.body.text.includes('could not be read')
+        )
+    ).toHaveLength(1)
+  })
+
+  it('repairs a torn tail before acknowledging the next append', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    const intact = await readFile(logPath, 'utf-8')
+    await writeFile(logPath, intact.slice(0, -1), 'utf-8')
+
+    await journal.appendItem(item(1), body('b'), { fence: 1 })
+    const reopened = await open()
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([body('a'), body('b')])
+  })
+
+  // Transcripts are full of emoji and CJK, so the repair's file offsets must be
+  // bytes: string indices would truncate mid-character and corrupt the prefix.
+  it('repairs a torn tail whose rows contain multi-byte characters', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('안녕하세요 🌊 café'), { fence: 1 })
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    const intact = await readFile(logPath)
+    // Kill mid-row: keep the complete first row plus a fragment of the second.
+    const torn = Buffer.concat([intact, Buffer.from('{"seq":2,"kind":"it', 'utf-8')])
+    await writeFile(logPath, torn)
+
+    await journal.appendItem(item(1), body('b'), { fence: 1 })
+    const reopened = await open()
+    expect(reopened.snapshot().items.map((entry) => entry.body)).toEqual([
+      body('안녕하세요 🌊 café'),
+      body('b')
+    ])
+  })
+
+  it('degrades to read-only when the snapshot comes from a newer schema', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const snapshotPath = join(root, JOURNAL_SNAPSHOT_FILE)
+    const snapshot = JSON.parse(await readFile(snapshotPath, 'utf-8')) as Record<string, unknown>
+    snapshot.v = 99
+    await writeFile(snapshotPath, JSON.stringify(snapshot), 'utf-8')
+
+    const reopened = await open()
+    expect(reopened.isReadOnly).toBe(true)
+    await expect(reopened.appendItem(item(1), body('b'), { fence: 1 })).rejects.toMatchObject({
+      code: 'journal_read_only'
+    })
+  })
+
+  it('allows the explicit schema-unreadable epoch escape hatch while preserving the old files', async () => {
+    const journal = await open()
+    await journal.appendItem(item(0), body('a'), { fence: 1 })
+    const snapshotPath = join(root, JOURNAL_SNAPSHOT_FILE)
+    const snapshot = JSON.parse(await readFile(snapshotPath, 'utf-8')) as Record<string, unknown>
+    snapshot.v = 99
+    await writeFile(snapshotPath, JSON.stringify(snapshot), 'utf-8')
+    const reopened = await open()
+
+    await reopened.rollEpoch('schema_unreadable', 2)
+    expect(reopened.isReadOnly).toBe(false)
+    expect(reopened.snapshot().items).toHaveLength(0)
+    expect((await readdir(root)).some((name) => name.startsWith('quarantine-'))).toBe(true)
+  })
+
+  it('keeps the unreadable log suffix in the schema escape quarantine', async () => {
+    const journal = await open()
+    const logPath = join(root, JOURNAL_LOG_FILE)
+    const future = JSON.stringify({
+      v: 99,
+      kind: 'item',
+      epoch: journal.epoch,
+      seq: 2,
+      fence: 1,
+      ts: 1,
+      itemId: 'future',
+      revision: 1,
+      body: { kind: 'status', text: 'preserve these bytes' }
+    })
+    await writeFile(logPath, `${await readFile(logPath, 'utf-8')}${future}\n`, 'utf-8')
+    const reopened = await open()
+
+    await reopened.rollEpoch('schema_unreadable', 2)
+    const quarantine = (await readdir(root)).find((name) => name.startsWith('quarantine-'))
+    expect(quarantine).toBeDefined()
+    expect(await readFile(join(root, quarantine!), 'utf-8')).toContain('preserve these bytes')
   })
 })
 

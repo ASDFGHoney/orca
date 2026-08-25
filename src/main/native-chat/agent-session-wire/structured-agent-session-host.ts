@@ -20,7 +20,6 @@ import type {
   AgentSessionSendResult,
   AgentSessionWireRefusal
 } from '../../../shared/agent-session-wire'
-import { readAgentSessionHistory } from './agent-session-history-page'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
 import { performAttach } from './structured-agent-session-attach-flow'
 import {
@@ -50,13 +49,13 @@ import {
 } from './structured-agent-session-host-handoff'
 import { StructuredAgentSessionHostRuntimeState } from './structured-agent-session-host-runtime-state'
 import { listStructuredAgentSessionTabs } from './structured-agent-session-host-tabs'
-import { pinnedAgentSessionLaunchEnv } from './structured-agent-session-launch-env'
 import { StructuredAgentSessionReadableRestorer } from './structured-agent-session-readable-restorer'
 import type {
   StructuredAgentSessionCaller,
   StructuredAgentSessionHostDeps,
   StructuredAgentSessionHostSession
 } from './structured-agent-session-host-types'
+import { readStructuredAgentSessionHistoryResult } from './structured-agent-session-history-result'
 export type { StructuredAgentSessionHostDeps } from './structured-agent-session-host-types'
 
 export class StructuredAgentSessionHost {
@@ -98,6 +97,7 @@ export class StructuredAgentSessionHost {
       journalRoot: deps.journalRoot,
       supportsRecord: (record) => providerSupport.adapterSupportsRecord(deps.adapter, record),
       reconcile: this.reconcileLeases,
+      resolveRecovery: (sessionId) => this.runtimeState.resolveRecovery(sessionId),
       resume: (params) =>
         this.attach({ callerKey: 'trusted-local:host-restart' }, params).then(
           (result) => result.ok
@@ -106,6 +106,7 @@ export class StructuredAgentSessionHost {
       hasSession: (sessionId) => this.sessions.has(sessionId),
       onReadable: (sessionId, restored) => this.sessions.set(sessionId, restored),
       restoreHandoff: (sessionId) => this.handoffs.restore(sessionId),
+      reapOrphanChildren: () => this.runtimeState.reapOrphanChildren(),
       now: this.now
     })
     this.runtimeState.startLeaseRenewal()
@@ -149,6 +150,7 @@ export class StructuredAgentSessionHost {
       if (unreconciled) {
         return refuseAgentSessionMutation(unreconciled)
       }
+      await this.runtimeState.resolveRecovery(sessionId)
       const eventSink = this.runtimeState.eventSinkFor(sessionId)
       const attached = await performAttach({
         store: this.deps.store,
@@ -164,8 +166,7 @@ export class StructuredAgentSessionHost {
           spawnToken: this.deps.mintSpawnToken?.() ?? randomUUID(),
           claimKeyId: this.deps.claimKeyId,
           handoffOperationId: params.envelope.clientOperationId,
-          probe: await this.runtimeState.probeOwner(sessionId),
-          ...(await pinnedAgentSessionLaunchEnv(this.deps.resolveLaunchEnv, params))
+          probe: await this.runtimeState.probeOwner(sessionId)
         },
         callerKey: caller.callerKey,
         params,
@@ -294,12 +295,11 @@ export class StructuredAgentSessionHost {
   }
 
   history(request: AgentSessionHistoryRequest): AgentSessionHistoryResult {
-    const result = readAgentSessionHistory(this.requireSession(request.sessionId).journal, request)
-    const fence = this.deps.store.getRecord(request.sessionId)?.lease.runtimeFence
-    if (fence === undefined) {
-      return result
-    }
-    return result.ok ? { ...result, page: { ...result.page, fence } } : { ...result, fence }
+    return readStructuredAgentSessionHistoryResult({
+      journal: this.requireSession(request.sessionId).journal,
+      record: this.deps.store.getRecord(request.sessionId),
+      request
+    })
   }
 
   subscribe(input: AgentSessionSubscribeInput): () => void {

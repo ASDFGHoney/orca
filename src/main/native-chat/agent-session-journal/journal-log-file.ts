@@ -9,8 +9,9 @@
 // superset of the tail, and recovery unions the two by sequence — never a hole.
 
 import { appendFile, mkdir, open, readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { durableWriteTempPath, writeFileDurable } from '../../durable-file-write'
+import { durableWriteTempPath, renameDurable, writeFileDurable } from '../../durable-file-write'
 import type {
   AgentJournalRenderItem,
   AgentJournalSubmission
@@ -25,6 +26,8 @@ export type JournalSnapshotFile = {
   epoch: string
   /** Highest sequence folded into `items`; the tail starts after it. */
   compactedThrough: number
+  /** Fence monotonicity survives compaction and restart. */
+  highestFence: number
   items: AgentJournalRenderItem[]
   submissions: AgentJournalSubmission[]
   /** Receipts outlive the rows that minted them: a client reconnecting after
@@ -39,6 +42,7 @@ export type JournalSnapshotFile = {
   /** Provider item id → submission slot, preserved so a post-compaction echo
    *  still reconciles into the bubble it belongs to. */
   aliases: { providerItemId: string; itemId: string }[]
+  tombstones: { itemId: string; revision: number }[]
   tail: JournalRow[]
 }
 
@@ -50,7 +54,18 @@ export type JournalReadResult = {
   unreadable: boolean
   /** Lines that failed to parse for reasons other than schema version. */
   malformed: number
+  /** Raw suffix beginning at the first malformed line, if any. */
+  remainder?: string
+  /** Distinguishes an absent/empty log from bytes that could not name an epoch. */
+  hasBytes: boolean
 }
+
+export type JournalSnapshotReadResult =
+  | { status: 'missing' }
+  | { status: 'valid'; snapshot: JournalSnapshotFile }
+  | { status: 'invalid' }
+
+const NEWLINE_BYTE = 0x0a
 
 export async function ensureJournalDir(journalDir: string): Promise<void> {
   await mkdir(journalDir, { recursive: true })
@@ -59,13 +74,33 @@ export async function ensureJournalDir(journalDir: string): Promise<void> {
 export async function readJournalSnapshotFile(
   journalDir: string
 ): Promise<JournalSnapshotFile | null> {
+  const result = await readJournalSnapshot(journalDir)
+  return result.status === 'valid' ? result.snapshot : null
+}
+
+export async function readJournalSnapshot(journalDir: string): Promise<JournalSnapshotReadResult> {
   try {
     const raw = await readFile(join(journalDir, JOURNAL_SNAPSHOT_FILE), 'utf-8')
-    const parsed = JSON.parse(raw) as JournalSnapshotFile
-    return typeof parsed?.epoch === 'string' ? parsed : null
-  } catch {
-    return null
+    const parsed: unknown = JSON.parse(raw)
+    return isJournalSnapshotFile(parsed)
+      ? { status: 'valid', snapshot: parsed }
+      : { status: 'invalid' }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'missing' }
+    }
+    if (error instanceof SyntaxError) {
+      return { status: 'invalid' }
+    }
+    throw error
   }
+}
+
+export async function quarantineInvalidJournalSnapshot(journalDir: string): Promise<string> {
+  const source = join(journalDir, JOURNAL_SNAPSHOT_FILE)
+  const target = join(journalDir, `quarantine-snapshot-${Date.now()}-${randomUUID()}.json`)
+  await renameDurable(source, target)
+  return target
 }
 
 export async function writeJournalSnapshotFile(
@@ -80,28 +115,99 @@ export async function readJournalLog(journalDir: string): Promise<JournalReadRes
   let raw: string
   try {
     raw = await readFile(join(journalDir, JOURNAL_LOG_FILE), 'utf-8')
-  } catch {
-    return { rows: [], unreadable: false, malformed: 0 }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { rows: [], unreadable: false, malformed: 0, hasBytes: false }
+    }
+    throw error
   }
   const rows: JournalRow[] = []
   let unreadable = false
   let malformed = 0
-  for (const line of raw.split('\n')) {
+  const lines = raw.split('\n')
+  let offset = 0
+  for (const line of lines) {
     if (!line.trim()) {
+      offset += line.length + 1
       continue
     }
     const parsed = parseJournalRow(line)
     if (parsed.ok) {
       rows.push(parsed.row)
+      offset += line.length + 1
       continue
     }
     if (parsed.unreadable) {
       unreadable = true
-      break
+      return { rows, unreadable, malformed, remainder: raw.slice(offset), hasBytes: raw.length > 0 }
     }
     malformed += 1
+    return { rows, unreadable, malformed, remainder: raw.slice(offset), hasBytes: raw.length > 0 }
   }
-  return { rows, unreadable, malformed }
+  return { rows, unreadable, malformed, hasBytes: raw.length > 0 }
+}
+
+function isJournalSnapshotFile(value: unknown): value is JournalSnapshotFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const snapshot = value as Record<string, unknown>
+  return (
+    typeof snapshot.v === 'number' &&
+    typeof snapshot.epoch === 'string' &&
+    snapshot.epoch.length > 0 &&
+    typeof snapshot.compactedThrough === 'number' &&
+    typeof snapshot.highestFence === 'number' &&
+    arrayOf(snapshot.items, isRenderItem) &&
+    arrayOf(snapshot.submissions, isSubmission) &&
+    arrayOf(snapshot.receipts, isReceipt) &&
+    arrayOf(snapshot.aliases, isAlias) &&
+    arrayOf(snapshot.tail, (row) => parseJournalRow(JSON.stringify(row)).ok)
+  )
+}
+
+function arrayOf(value: unknown, predicate: (entry: unknown) => boolean): value is unknown[] {
+  return Array.isArray(value) && value.every(predicate)
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function isRenderItem(value: unknown): boolean {
+  const item = recordOf(value)
+  return Boolean(
+    item &&
+    typeof item.itemId === 'string' &&
+    typeof item.revision === 'number' &&
+    recordOf(item.body)
+  )
+}
+
+function isSubmission(value: unknown): boolean {
+  const submission = recordOf(value)
+  return Boolean(submission && typeof submission.clientMessageId === 'string')
+}
+
+function isReceipt(value: unknown): boolean {
+  const receipt = recordOf(value)
+  return Boolean(
+    receipt &&
+    typeof receipt.clientMessageId === 'string' &&
+    typeof receipt.providerItemId === 'string' &&
+    typeof receipt.epoch === 'string' &&
+    typeof receipt.sequence === 'number' &&
+    typeof receipt.acceptedAt === 'number'
+  )
+}
+
+function isAlias(value: unknown): boolean {
+  const alias = recordOf(value)
+  return Boolean(
+    alias && typeof alias.providerItemId === 'string' && typeof alias.itemId === 'string'
+  )
 }
 
 /**
@@ -117,6 +223,32 @@ export async function appendJournalRows(
     return
   }
   const path = join(journalDir, JOURNAL_LOG_FILE)
+  // A process death can leave a final JSON fragment without its newline. Never
+  // concatenate a new durable row onto that fragment: truncate the torn tail
+  // first, then fsync the repair before acknowledging this append.
+  try {
+    // Read as bytes, not text: `truncate`/`write` take byte offsets, and a
+    // transcript's multi-byte characters make string indices the wrong unit.
+    const existing = await readFile(path)
+    if (existing.length > 0 && existing.at(-1) !== NEWLINE_BYTE) {
+      const boundary = existing.lastIndexOf(NEWLINE_BYTE)
+      const finalLine = existing.subarray(boundary + 1).toString('utf-8')
+      // A whole row that merely lost its newline is kept; a real fragment goes.
+      const complete = parseJournalRow(finalLine).ok
+      const handle = await open(path, 'r+')
+      try {
+        await (complete ? handle.write('\n', existing.length) : handle.truncate(boundary + 1))
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+    // The append below creates a missing log.
+  }
   const payload = `${rows.map(serializeJournalRow).join('\n')}\n`
   await appendFile(path, payload, 'utf-8')
   const handle = await open(path, 'r+')
@@ -125,6 +257,22 @@ export async function appendJournalRows(
   } finally {
     await handle.close()
   }
+  try {
+    const directory = await open(journalDir, 'r')
+    await directory.sync()
+    await directory.close()
+  } catch {
+    // Directory fsync is unavailable on some platforms (notably Windows).
+  }
+}
+
+export async function quarantineJournalRemainder(
+  journalDir: string,
+  remainder: string
+): Promise<string> {
+  const path = join(journalDir, `quarantine-${Date.now()}-${randomUUID()}.jsonl`)
+  await writeFileDurable(durableWriteTempPath(path), path, remainder)
+  return path
 }
 
 /** Replace the log with exactly the retained tail. Runs only after the snapshot

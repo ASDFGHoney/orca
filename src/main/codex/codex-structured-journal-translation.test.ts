@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalItemBody,
   AgentJournalItemIdentity
@@ -6,6 +6,7 @@ import type {
 import { agentJournalItemKey } from '../../shared/agent-session-journal-item-key'
 import { projectStructuredItemsToNativeChat } from '../../shared/structured-agent-session-projection'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { CodexTurnOrdinals } from './codex-structured-item-translation'
 import {
   createCodexJournalTranslator,
   MAX_CODEX_GENERIC_ROWS_PER_TURN
@@ -462,6 +463,18 @@ describe('codex journal translation', () => {
     expect(tap.publishes()).toBe(1)
   })
 
+  it('releases a turn ordinal map when the turn completes', () => {
+    const spy = vi.spyOn(CodexTurnOrdinals.prototype, 'forgetTurn')
+    try {
+      const { translator } = translatorWith()
+      translator.handle(TURN_STARTED)
+      translator.handle(notification('turn/completed', { turn: { id: TURN_ID } }))
+      expect(spy).toHaveBeenCalledWith(THREAD_ID, TURN_ID)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('journals malformed item events but never malformed deltas', () => {
     const { translator, tap, window } = translatorWith()
 
@@ -502,7 +515,7 @@ describe('codex journal translation', () => {
     ).toEqual(['notification:future/notification', 'request:future/request', 'frame:unclassified'])
   })
 
-  it('bounds generic rows per turn while preserving unknown non-delta evidence', () => {
+  it('bounds generic rows per turn while keeping the suppression visible and countable', () => {
     const { translator, tap } = translatorWith()
     translator.handle(TURN_STARTED)
     for (let index = 0; index < MAX_CODEX_GENERIC_ROWS_PER_TURN + 20; index += 1) {
@@ -510,10 +523,25 @@ describe('codex journal translation', () => {
     }
     translator.handle(notification('item/future/outputDelta', { itemId: 'future', delta: 'x' }))
 
-    expect(tap.rows).toHaveLength(MAX_CODEX_GENERIC_ROWS_PER_TURN)
-    expect(tap.rows[0]?.body).toMatchObject({
+    const generic = tap.rows.filter(
+      (row) => row.body.kind === 'status' && row.body.providerFrame !== undefined
+    )
+    expect(generic).toHaveLength(MAX_CODEX_GENERIC_ROWS_PER_TURN)
+    expect(generic[0]?.body).toMatchObject({
       kind: 'status',
       providerFrame: { kind: 'notification:future/notification' }
+    })
+    // The 20 capped frames reduce to ONE summary row whose count is exact, so
+    // suppressed provider activity is never invisible.
+    const summaries = new Map(
+      tap.rows
+        .filter((row) => row.key.includes('provider-frame-suppressed'))
+        .map((row) => [row.key, row.body])
+    )
+    expect(summaries.size).toBe(1)
+    expect([...summaries.values()][0]).toEqual({
+      kind: 'status',
+      text: '20 more provider notifications not shown for this turn'
     })
     expect(
       tap.rows.some(
@@ -522,6 +550,23 @@ describe('codex journal translation', () => {
           row.body.providerFrame?.kind === 'notification:item/future/outputDelta'
       )
     ).toBe(false)
+  })
+
+  it('never lets the generic-row cap hide an error frame', () => {
+    const { translator, tap } = translatorWith()
+    translator.handle(TURN_STARTED)
+    for (let index = 0; index < MAX_CODEX_GENERIC_ROWS_PER_TURN + 3; index += 1) {
+      translator.handle(notification('future/notification', { value: index }))
+    }
+    translator.handle(notification('future/failure', { error: 'provider exploded' }))
+
+    expect(
+      tap.rows.some(
+        (row) =>
+          row.body.kind === 'status' &&
+          row.body.providerFrame?.kind === 'notification:future/failure'
+      )
+    ).toBe(true)
   })
 
   it('keeps a fresh session timeline empty through startup and status notifications', () => {

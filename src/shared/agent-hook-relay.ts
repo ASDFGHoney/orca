@@ -24,7 +24,8 @@
 
 import { createHash } from 'node:crypto'
 
-import type { AgentSubagentSnapshot, ParsedAgentStatusPayload } from './agent-status-types'
+import type { ParsedAgentStatusPayload } from './agent-status-types'
+import type { AgentSubagentSnapshot } from './agent-subagent-snapshot'
 import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { AgentHookTarget } from './agent-hook-types'
 
@@ -93,6 +94,8 @@ export type AgentHookRelayEnvelope = {
   toolUseId?: string
   /** Claude subagent identity, when the source hook provides one. */
   toolAgentId?: string
+  /** Claude teammate name carried by TeammateIdle. */
+  teammateName?: string
   /** Claude agent type, used only as a lower-confidence identity fallback. */
   toolAgentType?: string
   /** Provider-owned conversation/session id needed to resume a sleeping agent. */

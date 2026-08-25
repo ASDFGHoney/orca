@@ -16,21 +16,23 @@ import {
   shouldShowNativeChatWorking
 } from './native-chat-working-suppression'
 import {
-  applyCommandMarkerBoundaries,
   appendPendingSendCache,
-  commandMarkersAsMessages,
-  appendCommandMarkerCache,
   launchPromptAsMessage,
   pendingSendsAsMessages,
   nextNativeChatPendingSendId,
   prunePendingSends,
-  readCommandMarkerCache,
   readPendingSendCache,
   shouldPruneLaunchPrompt,
   writePendingSendCache,
-  type NativeChatCommandMarker,
   type NativeChatPendingSend
 } from './native-chat-pending'
+import {
+  appendCommandMarkerCache,
+  applyCommandMarkerBoundaries,
+  commandMarkersAsMessages,
+  readCommandMarkerCache,
+  type NativeChatCommandMarker
+} from './native-chat-command-marker'
 import {
   deriveNativeChatStreamingText,
   nativeChatStreamingMessage
@@ -358,6 +360,7 @@ function NativeChatResolvedView({
     <div
       ref={rootRef}
       data-native-chat-root="true"
+      data-native-chat-working={isWorking ? 'true' : 'false'}
       tabIndex={-1}
       onPointerDownCapture={(event) => {
         if (event.button === 2) {

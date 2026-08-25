@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryResult } from '../../../../shared/agent-session-wire'
+import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import {
   projectStructuredAgentSessionStatus,
   structuredAgentSessionPaneKey
@@ -32,7 +33,11 @@ function latestPrompt(state: StructuredAgentSessionState): string {
   return ''
 }
 
-function projectStatus(tab: StructuredTab, state: StructuredAgentSessionState): void {
+function projectStatus(
+  tab: StructuredTab,
+  state: StructuredAgentSessionState,
+  providerSession: AgentProviderSessionMetadata | undefined
+): void {
   const projection = projectStructuredAgentSessionStatus(state.items)
   const store = useAppStore.getState()
   store.setAgentStatus(
@@ -46,7 +51,10 @@ function projectStatus(tab: StructuredTab, state: StructuredAgentSessionState): 
     tab.label,
     undefined,
     { tabId: tab.id, worktreeId: tab.worktreeId },
-    { providerSession: { key: 'session_id', id: tab.entityId } }
+    {
+      ...(providerSession ? { providerSession } : {}),
+      terminalResumeEligible: false
+    }
   )
 }
 
@@ -57,9 +65,10 @@ function startStatusProjection(tab: StructuredTab, target: RuntimeClientTarget):
   let opening = false
   let unsubscribe = (): void => {}
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let providerSession: AgentProviderSessionMetadata | undefined
   const apply = (action: Parameters<typeof reduceStructuredAgentSession>[1]): void => {
     state = reduceStructuredAgentSession(state, action)
-    projectStatus(tab, state)
+    projectStatus(tab, state, providerSession)
   }
   const scheduleReconnect = (): void => {
     if (stopped || connected || reconnectTimer) {
@@ -136,6 +145,7 @@ function startStatusProjection(tab: StructuredTab, target: RuntimeClientTarget):
       if (stopped) {
         return
       }
+      providerSession = result.providerSession
       if (result.ok) {
         apply({ type: 'tail-page', page: result.page })
       } else {

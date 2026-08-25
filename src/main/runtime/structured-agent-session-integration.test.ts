@@ -6,7 +6,7 @@
 // that ship. The fake app-server answers the same JSON-RPC calls the real one
 // does and pushes the same notifications and blocking requests back.
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -213,6 +213,9 @@ let codex: CodexScript
 let root: string
 let dispatcher: RpcDispatcher
 let cleanups: Map<string, () => void>
+let bootEnvironmentReads: number
+let codexOverrideReads: number
+let configuredCodexProfile: string
 
 /** Runs a one-shot method and returns its decoded reply. */
 async function call(method: string, params: unknown): Promise<RpcResponse> {
@@ -290,6 +293,9 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'orca-structured-integration-'))
   codex = fakeCodex()
   cleanups = new Map()
+  bootEnvironmentReads = 0
+  codexOverrideReads = 0
+  configuredCodexProfile = 'configured'
   const runtime = {
     getRuntimeId: () => 'runtime-1',
     getStructuredAgentSessionCreateSupport: async () => ({ supported: true }),
@@ -309,11 +315,20 @@ beforeEach(async () => {
         claimKeyId: 'key-1',
         resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
         resolveCodexCommand: () => '/usr/local/bin/codex',
-        resolveLaunchEnv: async () => ({
-          EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
-          CODEX_HOME: '/shell/home'
-        }),
-        openCodexConnection: codex.openConnection
+        resolveEnvironment: async () => {
+          bootEnvironmentReads += 1
+          return {
+            PATH: '/shell/bin:/usr/bin',
+            EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
+            CODEX_HOME: '/shell/home'
+          }
+        },
+        resolveCodexOverrides: () => {
+          codexOverrideReads += 1
+          return { CODEX_PROFILE: configuredCodexProfile }
+        },
+        openCodexConnection: codex.openConnection,
+        readProcessStartTime: async () => 1_700_000_000_000
       }).then(() => undefined),
     registerSubscriptionCleanup: vi.fn((id: string, dispose: () => void) =>
       cleanups.set(id, dispose)
@@ -393,9 +408,13 @@ describe('a structured codex session over agentSession.*', () => {
     )
     expect(created.snapshot.items).toEqual([])
     expect(codex.live().launch.env).toMatchObject({
+      CODEX_PROFILE: 'configured',
       EXAMPLE_GATEWAY_TOKEN: 'shell-exported',
       CODEX_HOME: '/home/dev/.codex'
     })
+    const store = await readFile(join(root, 'agent-sessions', 'agent-sessions.json'), 'utf-8')
+    expect(store).not.toContain('EXAMPLE_GATEWAY_TOKEN')
+    expect(store).not.toContain('"launchEnv"')
     const stream = await subscribe('sub-first-send')
     const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hi' }] }
 
@@ -641,6 +660,25 @@ describe('a structured codex session over agentSession.*', () => {
     ])
   })
 
+  it('caches shell exports but re-reads configured overrides for a resume', async () => {
+    const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    expect({ bootEnvironmentReads, codexOverrideReads }).toEqual({
+      bootEnvironmentReads: 1,
+      codexOverrideReads: 1
+    })
+
+    configuredCodexProfile = 'updated'
+    const resumed = await ok<{ fence: number }>('agentSession.ensure', attachParams(created.fence))
+
+    expect(resumed.fence).toBe(created.fence + 1)
+    expect(codex.live().resumedThreadId).toBe(THREAD)
+    expect(codex.live().launch.env).toMatchObject({ CODEX_PROFILE: 'updated' })
+    expect({ bootEnvironmentReads, codexOverrideReads }).toEqual({
+      bootEnvironmentReads: 1,
+      codexOverrideReads: 2
+    })
+  })
+
   it('refuses to build a host for a client that never advertised the capability', async () => {
     const replies: RpcResponse[] = []
     await dispatcher.dispatchStreaming(
@@ -779,7 +817,8 @@ describe('a structured codex session over agentSession.*', () => {
       claimKeyId: 'key-1',
       resolveWorkspacePath: async (workspaceId) => `/repos/${workspaceId}`,
       resolveCodexCommand: () => '/usr/local/bin/codex',
-      openCodexConnection: codex.openConnection
+      openCodexConnection: codex.openConnection,
+      readProcessStartTime: async () => 1_700_000_000_000
     })
     const adapter = (host as unknown as { deps: { adapter: CodexStructuredSessionAdapter } }).deps
       .adapter

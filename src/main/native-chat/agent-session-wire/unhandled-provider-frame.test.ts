@@ -40,12 +40,13 @@ describe('unhandled provider frame journal fallback', () => {
     ])
   })
 
-  it('turns an unserializable payload into an explicit visible value', () => {
-    const cyclic: { self?: unknown } = {}
-    cyclic.self = cyclic
+  it('turns an unserializable message-shaped payload into an explicit visible value', () => {
+    const cyclic: { warning?: unknown } = {}
+    cyclic.warning = cyclic
 
     const item = unhandledProviderFrameJournalItem('codex', 'frame', cyclic)
 
+    expect(item?.body.text).toBe('codex · frame')
     expect(item?.body.providerFrame?.payload.head).toContain('unserializable payload')
   })
 
@@ -72,7 +73,7 @@ describe('unhandled provider frame journal fallback', () => {
     ).toBeNull()
   })
 
-  it('never creates generic rows for known or unknown delta-shaped frames', () => {
+  it('never creates generic rows for delta-shaped frames that report no failure', () => {
     expect(
       unhandledProviderFrameJournalItem('codex', 'notification:item/commandExecution/outputDelta', {
         itemId: 'exec-1',
@@ -81,9 +82,23 @@ describe('unhandled provider frame journal fallback', () => {
     ).toBeNull()
     expect(
       unhandledProviderFrameJournalItem('codex', 'notification:item/future/outputDelta', {
-        error: 'still a delta'
+        itemId: 'future-1',
+        delta: 'y'
       })
     ).toBeNull()
+  })
+
+  it('surfaces an unknown delta-shaped frame whose payload reports an error', () => {
+    const row = unhandledProviderFrameJournalItem('codex', 'notification:item/future/outputDelta', {
+      error: 'stream broke mid-item'
+    })
+
+    expect(row).not.toBeNull()
+    expect(row?.classification).toBe('error-surface')
+    expect(row?.body.providerFrame).toMatchObject({
+      provider: 'codex',
+      kind: 'notification:item/future/outputDelta'
+    })
   })
 
   it('renders codex systemError and Claude error result variants', () => {
@@ -166,5 +181,73 @@ describe('unhandled provider frame journal fallback', () => {
       unhandledProviderFrameJournalItem('codex', 'notification:future/event', {})
     ).not.toBeNull()
     expect(unhandledProviderFrameJournalItem('claude', 'message:future/event', {})).not.toBeNull()
+  })
+
+  it('leads with the provider sentence instead of naming the opcode', () => {
+    const row = unhandledProviderFrameJournalItem('codex', 'notification:warning', {
+      message: 'Your plan limit resets in 2 hours.'
+    })
+    expect(row?.body.text).toBe('Your plan limit resets in 2 hours.')
+    // The raw frame stays available behind the row's disclosure.
+    expect(row?.body.providerFrame?.kind).toBe('notification:warning')
+  })
+
+  it('bounds a provider sentence inline', () => {
+    const message = 'abcdefghij'
+    const row = unhandledProviderFrameJournalItem(
+      'codex',
+      'notification:warning',
+      { message },
+      {
+        inlineHeadBytes: 8,
+        maxSessionBytes: 1024,
+        maxAppendsPerWindow: 10,
+        appendWindowMs: 1000
+      }
+    )
+
+    expect(row?.body.text).toContain('abcdefgh')
+    expect(row?.body.text).toContain('[Orca: output truncated')
+  })
+
+  it('unwraps a nested sentence and falls back to the opcode when there is none', () => {
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'notification:warning', {
+        warning: { text: 'Sandbox is degraded.' }
+      })?.body.text
+    ).toBe('Sandbox is degraded.')
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'notification:future/event', { count: 3 })?.body
+        .text
+    ).toBe('codex \u00b7 notification:future/event')
+  })
+})
+
+describe('a failed provider dependency', () => {
+  it('leads with the failure the provider reported, not the method name', () => {
+    const item = unhandledProviderFrameJournalItem(
+      'codex',
+      'notification:mcpServer/startupStatus/updated',
+      {
+        threadId: 'thread-1',
+        name: 'codex_apps',
+        status: 'failed',
+        error: 'MCP client for `codex_apps` failed to start: authentication token invalidated',
+        failureReason: 'reauthenticationRequired'
+      }
+    )
+    expect(item?.classification).toBe('error-surface')
+    expect(item?.body.text).toContain('failed to start')
+    expect(item?.body.text).not.toContain('notification:mcpServer')
+  })
+
+  it('stays out of the timeline while the dependency is merely starting', () => {
+    expect(
+      unhandledProviderFrameJournalItem('codex', 'notification:mcpServer/startupStatus/updated', {
+        threadId: 'thread-1',
+        name: 'codex_apps',
+        status: 'starting'
+      })
+    ).toBeNull()
   })
 })

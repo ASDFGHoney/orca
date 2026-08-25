@@ -19,7 +19,12 @@ import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/st
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import { AgentSessionRecordStore } from './agent-session-record-store'
-import { probeAgentSessionProcessIdentity } from './agent-session-process-identity-probe'
+import {
+  probeAgentSessionProcessIdentity,
+  probeAgentSessionReservation
+} from './agent-session-process-identity-probe'
+import { findAgentSessionSpawnTokenProcesses } from './agent-session-spawn-token-process-scan'
+import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-readback'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 
@@ -36,11 +41,14 @@ export type StructuredAgentSessionRuntimeDeps = {
   /** Key id this host's claims are minted under. */
   claimKeyId: string
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
-  resolveCodexCommand?: () => string
+  resolveCodexCommand?: (options?: { pathEnv?: string | null; homePath?: string }) => string
   /** Transport for the Codex child. Overridden only to drive the whole runtime
    *  against a scripted app-server; production spawns the real one. */
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
-  resolveLaunchEnv?: () => Promise<NodeJS.ProcessEnv>
+  /** Scripted app-servers carry fake pids the real start-time read cannot answer for. */
+  readProcessStartTime?: CodexStructuredSessionAdapterDeps['readProcessStartTime']
+  resolveEnvironment?: () => Promise<NodeJS.ProcessEnv>
+  resolveCodexOverrides?: () => NodeJS.ProcessEnv
   onError?: (input: { scope: string; error: unknown }) => void
   handoffTransport?: StructuredAgentSessionHandoffTransport
 }
@@ -85,6 +93,11 @@ export async function stopStructuredAgentSessionRuntime(): Promise<void> {
 }
 
 async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<InstalledRuntime> {
+  const bootEnvironment = (deps.resolveEnvironment ?? resolveLoginShellEnvironment)()
+  const resolveEnvironment = async (): Promise<NodeJS.ProcessEnv> => ({
+    ...(await bootEnvironment),
+    ...deps.resolveCodexOverrides?.()
+  })
   const store = await AgentSessionRecordStore.open({
     directory: join(deps.stateDirectory, RECORD_STORE_DIR_NAME),
     hostId: deps.hostId
@@ -95,9 +108,11 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       resolveLaunch: createCodexStructuredLaunchResolver({
         store,
         resolveWorkspacePath: deps.resolveWorkspacePath,
+        resolveEnvironment,
         ...(deps.resolveCodexCommand ? { resolveCommand: deps.resolveCodexCommand } : {})
       }),
-      ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {})
+      ...(deps.openCodexConnection ? { openConnection: deps.openCodexConnection } : {}),
+      ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {})
     })
     const host = new StructuredAgentSessionHost({
       store,
@@ -105,8 +120,6 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       journalRoot: deps.stateDirectory,
       claimKeyId: deps.claimKeyId,
       probeOwner: createStructuredAgentSessionOwnerProbe(deps.hostId),
-      resolveLaunchEnv: async () =>
-        (await (deps.resolveLaunchEnv ?? resolveLoginShellEnvironment)()) as Record<string, string>,
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
       ...(deps.handoffTransport ? { handoffTransport: deps.handoffTransport } : {})
@@ -126,7 +139,8 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
  */
 export function createStructuredAgentSessionOwnerProbe(
   hostId: string,
-  probe = probeAgentSessionProcessIdentity
+  probe = probeAgentSessionProcessIdentity,
+  findSpawnTokenProcesses = findAgentSessionSpawnTokenProcesses
 ): (record: AgentSessionRecord) => Promise<AgentSessionOwnerProbe> {
   return async (record) => {
     const owner = record.lease.ownerProcess
@@ -134,12 +148,27 @@ export function createStructuredAgentSessionOwnerProbe(
       if (record.lease.processlessAt !== undefined && record.lease.processlessAt !== null) {
         return { outcome: 'reservation-unused' }
       }
-      // Freeing a reservation needs positive proof that nothing spawned under
-      // its token, and this host has no spawn-token process scan yet.
-      return {
-        outcome: 'indeterminate',
-        reason: 'reservation named no process, and this host cannot scan for its spawn token'
+      const spawnToken = record.lease.reservedSpawnToken
+      if (spawnToken === null) {
+        if (record.lease.claimStatus === 'reserved') {
+          return {
+            outcome: 'indeterminate',
+            reason: 'reservation recorded no spawn token to scan for'
+          }
+        }
+        // The token is minted before the child and is the only thing a child could be carrying.
+        // No owner and no token means nothing on any host can be holding this lease — answering
+        // `indeterminate` here is what latches an already-free record into recovery forever.
+        return { outcome: 'reservation-unused' }
       }
+      // Freeing a reservation needs positive proof that nothing spawned under its token. The scan
+      // answers null where the platform cannot read another process's environment.
+      return probeAgentSessionReservation({
+        spawnToken,
+        findProcessesWithSpawnToken: (token) => findSpawnTokenProcesses(token),
+        hasProviderActivitySinceReservation: async () =>
+          agentSessionReservationTouchedProvider(record)
+      })
     }
     if (owner.hostId !== hostId) {
       // Checking a remote host's pid against this machine's process table is
@@ -149,6 +178,22 @@ export function createStructuredAgentSessionOwnerProbe(
         reason: `owner runs on ${owner.hostId}, which this host cannot probe`
       }
     }
-    return probe({ identity: owner })
+    // The env read-back answers on hosts that expose it and null elsewhere, giving the
+    // probe a PID-reuse-safe element even when no start time was recorded.
+    return probe({
+      identity: owner,
+      deps: { readEchoedSpawnToken: readEchoedAgentSessionSpawnToken }
+    })
   }
+}
+
+/**
+ * The only provider-side trace a reservation can leave in its own record: a handle link minted at
+ * this fence. `proveAgentSessionOwner` refuses to append one before an identity is committed, so a
+ * link at the reservation's fence means a child got far enough to resume the provider thread. It
+ * cannot see activity the child produced without proving a handle, which is why it is paired with
+ * the token scan rather than trusted alone.
+ */
+function agentSessionReservationTouchedProvider(record: AgentSessionRecord): boolean {
+  return record.providerHandleChain.at(-1)?.mintedAtFence === record.lease.runtimeFence
 }

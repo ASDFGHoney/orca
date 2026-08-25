@@ -13,6 +13,7 @@ import type {
   AgentJournalSubmission
 } from './agent-session-journal-types'
 import type { AgentSessionHandoffStage, AgentSessionOwnerRuntimeKind } from './agent-session-record'
+import type { AgentProviderSessionMetadata } from './agent-session-resume'
 
 export type AgentSessionHandoffDirection = 'to-tui' | 'to-native'
 export type AgentSessionHandoffMode = 'now' | 'after-turn' | 'stop-turn'
@@ -94,7 +95,7 @@ export type AgentSessionHistoryPage = {
 }
 
 export type AgentSessionHistoryResult =
-  | { ok: true; page: AgentSessionHistoryPage }
+  | { ok: true; page: AgentSessionHistoryPage; providerSession?: AgentProviderSessionMetadata }
   /** Every reset forces a clean reload; the snapshot is inlined so the client
    *  never has to make a second call to recover. */
   | {
@@ -102,6 +103,7 @@ export type AgentSessionHistoryResult =
       reset: AgentJournalResetReason
       snapshot: AgentJournalSnapshot
       fence?: number
+      providerSession?: AgentProviderSessionMetadata
     }
 
 /** Cursor-qualified incremental publication. Items and submissions carry their

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-resume'
+import { LEGACY_AGENT_SESSION_ID } from '../../../shared/agent-session-record-legacy.test-fixture'
+import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
 import type { PtyListedSession } from '../../../shared/pty-listed-session'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
@@ -245,6 +247,17 @@ describe('worktree agent activation gate', () => {
     const { deps, createTab, resume } = testDeps({ structured: true })
 
     await expect(runWorktreeAgentActivationGate(WORKTREE_ID, deps)).resolves.toBe('structured')
+
+    expect(createTab).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('does not activate a terminal for a legacy structured sleeping projection', async () => {
+    const tabId = structuredAgentSessionTabId(LEGACY_AGENT_SESSION_ID)
+    const legacy = sleepingRecord(tabId, LIVE_LEAF_ID, LEGACY_AGENT_SESSION_ID)
+    const { deps, createTab, resume } = testDeps({ structured: true, sleeping: [legacy] })
+
+    await expect(runWorktreeAgentActivationGate(WORKTREE_ID, deps)).resolves.toBe('blocked')
 
     expect(createTab).not.toHaveBeenCalled()
     expect(resume).not.toHaveBeenCalled()

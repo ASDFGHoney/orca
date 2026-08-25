@@ -35,7 +35,8 @@ export function createRestartReconciler(deps: {
     } catch (error) {
       return classifyStoreFailure(
         error,
-        deps.store.getRecord(sessionId)?.lease.runtimeFence ?? null
+        deps.store.getRecord(sessionId)?.lease.runtimeFence ?? null,
+        deps.store.getRecord(sessionId)
       )
     }
   }

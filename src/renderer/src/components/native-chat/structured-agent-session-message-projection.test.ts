@@ -53,29 +53,38 @@ describe('structured agent session message projection', () => {
     )
   })
 
-  it('renders a WAL-published pending send once, as the optimistic bubble', () => {
+  it('renders one bubble while the submission is still dispatching', () => {
     const outbox = [
       createStructuredAgentSessionOutboxEntry({
-        clientMessageId: 'client-0',
+        clientMessageId: 'client-pending',
         sessionId: 'session-1',
-        text: 'pending send',
+        text: 'Ok thanks',
         attachments: [],
         queuedAt: 1
       })
     ]
+    // The host's WAL row is on screen while the provider round trip is in flight.
     const walItem: AgentJournalRenderItem = {
-      itemId: agentJournalSubmissionKey('client-0'),
+      itemId: agentJournalSubmissionKey('client-pending'),
       revision: 0,
-      sequence: 7,
+      sequence: 1,
       observedAt: 1,
-      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'pending send' }] }
+      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Ok thanks' }] }
     }
-    const pending: AgentJournalSubmission = { ...submission(0), dispatchState: 'pending' }
+    const pending: AgentJournalSubmission = {
+      ...submission(0),
+      clientMessageId: 'client-pending',
+      dispatchState: 'pending',
+      providerItemId: null,
+      resolvedAt: null
+    }
 
     const messages = projectStructuredAgentSessionMessages([walItem], outbox, [pending])
+    const optimistic = projectStructuredAgentSessionMessages([], outbox, [])
 
     expect(messages.filter((message) => message.role === 'user')).toHaveLength(1)
-    expect(messages[0]?.id).toBe('client-0')
+    expect(messages.map((message) => message.id)).toEqual([walItem.itemId])
+    expect(optimistic[0]?.id).toBe(messages[0]?.id)
   })
 
   it('keeps an optimistic send until its acceptance arrives', () => {
@@ -90,7 +99,7 @@ describe('structured agent session message projection', () => {
     ]
 
     expect(projectStructuredAgentSessionMessages([], outbox, [])).toMatchObject([
-      { id: 'client-pending', role: 'user' }
+      { id: agentJournalSubmissionKey('client-pending'), role: 'user' }
     ])
   })
 })

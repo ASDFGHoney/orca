@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnProcess } from '../../shared/child-process/run-process'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
 import { waitForProcessExitUntil } from './codex-process-exit-deadline'
@@ -70,22 +70,24 @@ type PendingRequest = {
 export async function openCodexAppServerConnection(
   launch: CodexAppServerLaunch,
   handlers: CodexAppServerConnectionHandlers = {},
-  spawnImpl: typeof spawn = spawn
+  spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<CodexAppServerConnection> {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, ...launch.env }
   for (const key of launch.envToDelete ?? []) {
     delete childEnv[key]
   }
-  const child = spawnImpl(launch.command, launch.args, {
+  const child = spawnImpl({
+    program: launch.command,
+    args: launch.args,
     env: childEnv,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
-  }) as ChildProcessWithoutNullStreams
+    cwd: process.cwd()
+  })
 
   const pending = new Map<number, PendingRequest>()
   let stderrTail = ''
   let nextRequestId = 1
   let exited = false
+  let exitObserved = false
   let closing = false
   /** First terminal cause, or null while the transport is still usable. Set once:
    *  a child that dies reaches us through several listeners, and the specific
@@ -95,6 +97,7 @@ export async function openCodexAppServerConnection(
   const exitPromise = new Promise<void>((resolve) => {
     child.on('exit', () => {
       exited = true
+      exitObserved = true
       resolve()
     })
   })
@@ -127,7 +130,6 @@ export async function openCodexAppServerConnection(
   }
 
   child.on('error', (error) => {
-    exited = true
     handleUnexpectedEnd(error)
   })
   // Why: 'close' rather than 'exit' guarantees the stderr tail is complete, so
@@ -291,10 +293,9 @@ export async function openCodexAppServerConnection(
     }
   }
 
-  async function close(): Promise<void> {
+  async function close(): Promise<boolean> {
     if (closing) {
-      await exitPromise
-      return
+      return exitObserved
     }
     closing = true
     try {
@@ -310,6 +311,7 @@ export async function openCodexAppServerConnection(
       }
     }
     failPending(new Error('codex app-server connection closed'))
+    return exitObserved
   }
 
   const connection: CodexAppServerConnection = {

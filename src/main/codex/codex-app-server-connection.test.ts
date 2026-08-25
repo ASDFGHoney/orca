@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import type { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { spawnProcess } from '../../shared/child-process/run-process'
 import {
   isCodexAppServerRequestError,
   openCodexAppServerConnection,
@@ -76,7 +76,7 @@ type StubChild = EventEmitter & {
 /** Full control over framing and death, which a real child cannot give. */
 function stubChild(options: { exitOnStdinEnd?: boolean } = {}): {
   child: StubChild
-  spawnImpl: typeof spawn
+  spawnImpl: typeof spawnProcess
   written: Record<string, unknown>[]
 } {
   const child = new EventEmitter() as StubChild
@@ -96,7 +96,7 @@ function stubChild(options: { exitOnStdinEnd?: boolean } = {}): {
   if (options.exitOnStdinEnd !== false) {
     child.stdin.on('finish', () => child.emit('exit', 0, null))
   }
-  return { child, spawnImpl: (() => child) as unknown as typeof spawn, written }
+  return { child, spawnImpl: (() => child) as unknown as typeof spawnProcess, written }
 }
 
 /** Answers the handshake so `openCodexAppServerConnection` can resolve. */
@@ -305,6 +305,22 @@ describe('openCodexAppServerConnection', () => {
     await closing
 
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+
+  it('reports unproven close when forced termination did not produce an exit event', async () => {
+    vi.useFakeTimers()
+    const { child, spawnImpl } = stubChild({ exitOnStdinEnd: false })
+    answerInitialize(child)
+    const connection = await openCodexAppServerConnection(
+      { command: 'codex', args: ['app-server'] },
+      {},
+      spawnImpl
+    )
+
+    const closing = connection.close()
+    await vi.advanceTimersByTimeAsync(2_600)
+
+    await expect(closing).resolves.toBe(false)
   })
 
   it('ends the connection rather than buffering an oversized line', async () => {

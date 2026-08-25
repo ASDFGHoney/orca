@@ -112,6 +112,7 @@ export function NativeChatStructuredSession(props: {
   return (
     <div
       data-native-chat-root="true"
+      data-native-chat-working={controller.isWorking ? 'true' : 'false'}
       tabIndex={-1}
       className="flex h-full min-h-0 w-full flex-col bg-background focus:outline-none"
     >

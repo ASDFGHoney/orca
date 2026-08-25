@@ -33,7 +33,7 @@ describe('provider frame classification catalog', () => {
     }
   })
 
-  it('suppresses benign hook lifecycle and Codex rate-limit frames', () => {
+  it('suppresses benign hook lifecycle and Codex progress frames', () => {
     expect(classifyProviderFrame('codex', 'notification:hook/started', {})).toBe(
       'suppressed-benign'
     )
@@ -41,6 +41,9 @@ describe('provider frame classification catalog', () => {
       'suppressed-benign'
     )
     expect(classifyProviderFrame('codex', 'notification:account/rateLimits/updated', {})).toBe(
+      'suppressed-benign'
+    )
+    expect(classifyProviderFrame('codex', 'notification:turn/diff/updated', {})).toBe(
       'suppressed-benign'
     )
     expect(classifyProviderFrame('claude', 'message:system:hook_started', {})).toBe(
@@ -74,5 +77,16 @@ describe('provider frame classification catalog', () => {
       'stream-into-item'
     )
     expect(classifyProviderFrame('claude', 'message:future_delta', {})).toBe('stream-into-item')
+  })
+
+  it('dispositions codex item-form frames, which the method catalog never matches', () => {
+    // `thread/compacted` is already chrome; its item form is the same event and
+    // must not leak `codex · item:contextCompaction` into the transcript.
+    expect(classifyProviderFrame('codex', 'item:contextCompaction', {})).toBe('status-chrome')
+    expect(classifyProviderFrame('codex', 'notification:thread/compacted', {})).toBe(
+      'status-chrome'
+    )
+    // An item type nobody has dispositioned still falls through visibly.
+    expect(classifyProviderFrame('codex', 'item:futureThing', {})).toBe('timeline-substantive')
   })
 })

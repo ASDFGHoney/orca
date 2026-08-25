@@ -2,7 +2,6 @@ import { useAppStore } from '@/store'
 import type { PtyListedSession } from '../../../shared/pty-listed-session'
 import { parsePtySessionId, PTY_SESSION_ID_SEPARATOR } from '../../../shared/pty-session-id-format'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
-import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import {
   resumeSleepingAgentSessionsForWorktree,
@@ -10,6 +9,7 @@ import {
 } from './resume-sleeping-agent-session'
 import { getProviderSessionClaimKey } from './sleeping-agent-pane-ownership'
 import { bindLivePtyToExactSurface } from './worktree-agent-live-surface-adoption'
+import { isStructuredAgentSyntheticSleepingRecord } from './structured-agent-synthetic-sleeping-record'
 import {
   readWorktreeStructuredActivationInventory,
   type StructuredActivationInventory
@@ -121,10 +121,7 @@ function liveSleepingAgentClaimKeys(
       : undefined
     const tabPtyIds = tabId ? store.ptyIdsByTabId[tabId] : undefined
     const structuredOwner =
-      stable &&
-      record.agent === 'codex' &&
-      record.providerSession.key === 'session_id' &&
-      structuredAgentSessionTabId(record.providerSession.id) === stable.tabId
+      stable && isStructuredAgentSyntheticSleepingRecord(record)
         ? structuredInventory?.ownerBySessionId.get(record.providerSession.id)
         : undefined
     if (structuredOwner?.owner === 'native') {

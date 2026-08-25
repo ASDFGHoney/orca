@@ -16,24 +16,23 @@ export function projectStructuredAgentSessionMessages(
   submissions: readonly AgentJournalSubmission[]
 ): NativeChatMessage[] {
   const optimistic = reconcileStructuredAgentSessionOutbox(outbox, submissions)
-  // The WAL row publishes before the provider accepts, so a live outbox entry
-  // can coexist with its canonical submission item; the optimistic bubble wins
-  // until acceptance removes it.
-  const optimisticItemIds = new Set(
-    optimistic.map((entry) => agentJournalSubmissionKey(entry.clientMessageId))
-  )
+  // Why: the host renders its own bubble off the submission WAL row, which lands
+  // while the dispatch is still `pending`. Reconciliation only retires the echo on
+  // `accepted`, so keying visibility on that alone double-rendered the bubble for
+  // the whole provider round trip. The entry itself stays for retry/unconfirmed.
+  const journalled = new Set(items.map((item) => item.itemId))
   return [
-    ...projectStructuredItemsToNativeChat(
-      items.filter((item) => !optimisticItemIds.has(item.itemId))
-    ),
-    ...optimistic.map(
-      (entry): NativeChatMessage => ({
-        id: entry.clientMessageId,
-        role: 'user',
-        source: 'transcript',
-        timestamp: entry.queuedAt,
-        blocks: entry.body.blocks
-      })
-    )
+    ...projectStructuredItemsToNativeChat(items),
+    ...optimistic
+      .filter((entry) => !journalled.has(agentJournalSubmissionKey(entry.clientMessageId)))
+      .map(
+        (entry): NativeChatMessage => ({
+          id: agentJournalSubmissionKey(entry.clientMessageId),
+          role: 'user',
+          source: 'transcript',
+          timestamp: entry.queuedAt,
+          blocks: entry.body.blocks
+        })
+      )
   ]
 }

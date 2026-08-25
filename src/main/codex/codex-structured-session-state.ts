@@ -5,6 +5,7 @@ import type {
 } from './codex-app-server-connection'
 import { CodexAcquisitionWindow } from './codex-structured-acquisition-window'
 import type { CodexJournalTranslator } from './codex-structured-journal-translation'
+import type { CodexTurnProcessSnapshot } from './codex-structured-turn-processes'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -40,6 +41,11 @@ export type CodexStructuredSessionAdapterDeps = {
   mintLinkId?: () => string
   now?: () => number
   requestTimeoutMs?: number
+  captureTurnProcesses?: (rootPid: number) => Promise<CodexTurnProcessSnapshot | null>
+  terminateTurnProcesses?: (
+    rootPid: number,
+    baseline: CodexTurnProcessSnapshot | null
+  ) => Promise<boolean>
 }
 
 export type CodexSession = {

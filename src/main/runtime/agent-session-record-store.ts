@@ -23,7 +23,6 @@ import {
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
 import {
-  applyAgentSessionRestartAdjudication,
   commitAgentSessionProcessIdentity,
   evictAgentSessionOwner,
   proveAgentSessionOwner,
@@ -31,6 +30,7 @@ import {
   setAgentSessionJournalCheckpoint,
   type AgentSessionProcessIdentityCommit
 } from './agent-session-lease-transitions'
+import { applyAgentSessionRestartAdjudication } from './agent-session-restart-lease-transitions'
 import { agentSessionReconciliationTargetMatches } from './agent-session-reconciliation-target'
 import { replaceAgentSessionRecordOptions } from './agent-session-record-options'
 import {
@@ -47,9 +47,9 @@ import {
 import {
   agentSessionStoreRevision,
   agentSessionStorePath,
-  loadAgentSessionStore,
   type AgentSessionStoreState
 } from './agent-session-record-store-file'
+import { loadProtectedAgentSessionStore } from './agent-session-record-store-security'
 import {
   AgentSessionStoreTransactionQueue,
   markAgentSessionStoreLeasesUnreconciled
@@ -65,22 +65,21 @@ export class AgentSessionRecordStore {
 
   static async open(args: { directory: string; hostId: string }): Promise<AgentSessionRecordStore> {
     const filePath = agentSessionStorePath(args.directory)
-    const loaded = await loadAgentSessionStore(filePath, args.hostId)
+    const loaded = await loadProtectedAgentSessionStore(filePath, args.hostId)
     // Why: every persisted lease is unreconciled until this host adjudicates it, so a restart
     // grants no writer on the strength of what the previous process wrote.
     const diskRevision = agentSessionStoreRevision(loaded.state)
     markAgentSessionStoreLeasesUnreconciled(loaded.state)
-    return new AgentSessionRecordStore(
-      new AgentSessionStoreTransactionQueue(
-        filePath,
-        args.hostId,
-        loaded.readOnly,
-        loaded.recoveredFromBackup,
-        loaded.storeFound,
-        loaded.state,
-        diskRevision
-      )
+    const transactions = AgentSessionStoreTransactionQueue.fromLoadedStore(
+      filePath,
+      args.hostId,
+      loaded,
+      diskRevision
     )
+    if (loaded.needsRewrite && !loaded.readOnly && !loaded.recoveredFromBackup) {
+      await transactions.persistLoadedMigration()
+    }
+    return new AgentSessionRecordStore(transactions)
   }
 
   private get state(): AgentSessionStoreState {

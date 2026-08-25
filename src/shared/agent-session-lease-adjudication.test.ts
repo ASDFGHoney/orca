@@ -183,10 +183,22 @@ describe('acquisition compare-and-swap', () => {
 })
 
 describe('restart reconciliation', () => {
-  it('re-adopts a proven-live owner without moving the fence', () => {
+  it('re-adopts a proven-live TUI owner without moving the fence', () => {
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ runtimeKind: 'tui' }),
+        probe: MATCHED,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'readopt' })
+  })
+
+  it('routes a surviving native owner to recovery instead of readopting a dead transport', () => {
+    // The native child's stdio belonged to the runtime that died; readoption would extend
+    // a lease no process can drive. Recovery stops the orphan and respawns at fence + 1.
     expect(
       adjudicateAgentSessionRestart({ lease: lease(), probe: MATCHED, observedAt: 9_000 })
-    ).toEqual({ disposition: 'readopt' })
+    ).toMatchObject({ disposition: 'recovering', stage: 'recovering' })
   })
 
   it('bumps the fence exactly once for a proven-dead owner and records the evidence', () => {
@@ -216,18 +228,71 @@ describe('restart reconciliation', () => {
     ).toEqual({ disposition: 'recovering', stage: 'recovering', reason: 'no answer' })
   })
 
-  it('keeps a pre-restart conflict conflicted', () => {
+  it('keeps a pre-restart conflict conflicted while its owner cannot be proven gone', () => {
     expect(
       adjudicateAgentSessionRestart({
         lease: lease({ claimStatus: 'conflicted' }),
+        probe: INDETERMINATE,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'conflicted', reason: 'claim conflicted before restart' })
+  })
+
+  it('keeps a conflict conflicted when it names no process to prove anything about', () => {
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ claimStatus: 'conflicted', ownerProcess: null }),
         probe: { outcome: 'pid-absent' },
         observedAt: 9_000
       })
     ).toEqual({ disposition: 'conflicted', reason: 'claim conflicted before restart' })
   })
 
-  it('frees a reservation only when nothing ever spawned', () => {
+  it('frees a conflict whose named owner is proven gone', () => {
+    // Why: the conflict protects one specific process. Once that process is proven gone there is
+    // no claimant left, and a conflict with no exit is a session nobody can ever open again.
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({ claimStatus: 'conflicted' }),
+        probe: { outcome: 'pid-absent' },
+        observedAt: 9_000
+      })
+    ).toEqual({
+      disposition: 'evicted',
+      nextFence: 8,
+      evidence: { kind: 'pid-absent', detail: 'recorded pid absent on host', observedAt: 9_000 }
+    })
+  })
+
+  it('frees a lease that names neither an owner nor a reservation, without moving the fence', () => {
+    // Why: an evicted lease has no owner and no token, so a restart has nothing to probe.
+    // Calling that an unproven reservation re-latched every released record on every boot.
+    expect(
+      adjudicateAgentSessionRestart({
+        lease: lease({
+          ownerProcess: null,
+          reservedSpawnToken: null,
+          claimStatus: 'released',
+          handoffStage: 'recovering'
+        }),
+        probe: INDETERMINATE,
+        observedAt: 9_000
+      })
+    ).toEqual({ disposition: 'free', reason: 'lease has no owner and no reservation' })
+  })
+
+  it('frees an abandoned native reservation even without a spawn-token scan', () => {
+    // Restart proves the reserving runtime is gone, and a never-proven native child lost
+    // its only request channel with it — nothing under this token can write again.
     const reserved = lease({ ownerProcess: null, claimStatus: 'reserved' })
+    expect(
+      adjudicateAgentSessionRestart({ lease: reserved, probe: INDETERMINATE, observedAt: 9_000 })
+    ).toMatchObject({ disposition: 'evicted', nextFence: 8 })
+  })
+
+  it('frees a TUI reservation only when a probe proves nothing ever spawned', () => {
+    // A TUI child lives in a terminal that outlives the runtime, so absence needs proof.
+    const reserved = lease({ ownerProcess: null, claimStatus: 'reserved', runtimeKind: 'tui' })
     expect(
       adjudicateAgentSessionRestart({
         lease: reserved,

@@ -1,10 +1,9 @@
 import {
   AGENT_MODEL_MAX_LENGTH,
-  AGENT_STATUS_MAX_SUBAGENTS,
   AGENT_STATUS_TOOL_INPUT_MAX_LENGTH,
-  AGENT_TYPE_MAX_LENGTH,
-  type AgentSubagentSnapshot
+  AGENT_TYPE_MAX_LENGTH
 } from './agent-status-types'
+import { AGENT_STATUS_MAX_SUBAGENTS, type AgentSubagentSnapshot } from './agent-subagent-snapshot'
 import { normalizeOptionalField } from './agent-status-field-normalization'
 
 const CODEX_SUBAGENT_ID_MAX_LENGTH = 64
@@ -59,6 +58,28 @@ export function upsertCodexSubagent(
 
 export function finishCodexSubagent(roster: CodexSubagentRoster, id: string): void {
   roster.delete(id.trim())
+}
+
+/**
+ * Record the model a already-tracked child is running. Deliberately narrower
+ * than `upsertCodexSubagent`: it never creates a roster entry and never touches
+ * `state`, so late model discovery from a child rollout cannot resurrect a
+ * finished child nor move any child's lifecycle.
+ */
+export function setCodexSubagentModel(
+  roster: CodexSubagentRoster,
+  id: string,
+  model: string | undefined
+): void {
+  const normalizedModel = normalizeOptionalField(model, AGENT_MODEL_MAX_LENGTH)
+  if (!normalizedModel) {
+    return
+  }
+  const existing = roster.get(id.trim())
+  if (!existing) {
+    return
+  }
+  existing.model = normalizedModel
 }
 
 export function seedCodexSubagentRoster(

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   store: null as null | {
     setState: (state: Record<string, unknown>) => void
   },
+  setAgentStatus: vi.fn(),
   subscribe: vi.fn(),
   unsubscribe: vi.fn()
 }))
@@ -18,7 +19,7 @@ vi.mock('@/store', async () => {
   const useAppStore = create(() => ({
     unifiedTabsByWorktree: {},
     testRuntimeOwner: null,
-    setAgentStatus: vi.fn(),
+    setAgentStatus: mocks.setAgentStatus,
     removeAgentStatus: vi.fn()
   }))
   mocks.store = useAppStore
@@ -54,6 +55,7 @@ const structuredTab = {
 
 const historyResult = {
   ok: true,
+  providerSession: { key: 'session_id', id: '01a002e9-9a1c-7d42-a642-e481f64446f1' },
   page: {
     sessionId: 'session-1',
     epoch: 'epoch-1',
@@ -110,5 +112,26 @@ describe('StructuredAgentSessionStatusBridge', () => {
     act(() => onClose?.())
 
     await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(2), { timeout: 1_500 })
+  })
+
+  it('publishes only provider identity and makes structured status non-terminal', async () => {
+    render(<StructuredAgentSessionStatusBridge />)
+
+    await waitFor(() => expect(mocks.setAgentStatus).toHaveBeenCalled())
+    expect(mocks.setAgentStatus.mock.calls.at(-1)?.[5]).toEqual({
+      providerSession: { key: 'session_id', id: '01a002e9-9a1c-7d42-a642-e481f64446f1' },
+      terminalResumeEligible: false
+    })
+    expect(mocks.setAgentStatus.mock.calls.at(-1)?.[5]?.providerSession?.id).not.toBe('session-1')
+  })
+
+  it('omits resume identity instead of substituting the desktop id on an older host', async () => {
+    mocks.call.mockResolvedValueOnce({ ...historyResult, providerSession: undefined })
+    render(<StructuredAgentSessionStatusBridge />)
+
+    await waitFor(() => expect(mocks.setAgentStatus).toHaveBeenCalled())
+    expect(mocks.setAgentStatus.mock.calls.at(-1)?.[5]).toEqual({
+      terminalResumeEligible: false
+    })
   })
 })

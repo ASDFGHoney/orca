@@ -124,6 +124,7 @@ export function NativeChatComposerActions({
         </Tooltip>
         <Button
           type="button"
+          data-native-chat-critical-action={isWorking ? 'stop' : undefined}
           aria-label={
             isWorking
               ? translate('components.native-chat.stop', 'Stop the agent')

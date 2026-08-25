@@ -8,6 +8,7 @@
  * refuses an adoption, a wrong answer here creates two writers on one provider session.
  */
 
+import { nextAgentSessionFence } from './agent-session-next-fence'
 import type {
   AgentSessionDeathEvidence,
   AgentSessionHandoffStage,
@@ -45,6 +46,8 @@ export type AgentSessionAcquisitionDecision =
 
 export type AgentSessionRestartAdjudication =
   | { disposition: 'readopt' }
+  /** Nothing is outstanding — no owner, no reservation. Clear any latched stage; the fence stays. */
+  | { disposition: 'free'; reason: string }
   | { disposition: 'evicted'; nextFence: number; evidence: AgentSessionDeathEvidence }
   | { disposition: 'recovering'; stage: AgentSessionHandoffStage; reason: string }
   | { disposition: 'conflicted'; reason: string }
@@ -158,14 +161,14 @@ export function evaluateAgentSessionAcquisition(args: {
           : 'agent_session_ownership_unknown'
       }
     }
-    return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+    return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
   }
   if (lease.claimStatus === 'reserved' && probe.outcome !== 'reservation-unused') {
     // Why: a reservation with no proven process is not a free lease — the crash may have lost
     // the race with the spawn rather than beaten it.
     return { decision: 'refused', code: 'agent_session_ownership_unknown' }
   }
-  return { decision: 'granted', nextFence: lease.runtimeFence + 1 }
+  return { decision: 'granted', nextFence: nextAgentSessionFence(lease) }
 }
 
 /**
@@ -179,16 +182,47 @@ export function adjudicateAgentSessionRestart(args: {
 }): AgentSessionRestartAdjudication {
   const { lease, probe, observedAt } = args
   if (lease.claimStatus === 'conflicted') {
-    // Why: the conflict outlives the process that observed it; resolving to free would hand the
-    // provider session to whichever side restarted first.
+    const conflictedOwnerDeath =
+      lease.ownerProcess === null ? null : deathEvidenceFor(probe, observedAt)
+    if (conflictedOwnerDeath) {
+      // Why: the conflict names one specific process. Present-time proof that THAT process is gone
+      // leaves no claimant to protect, and a conflict with no exit is a session the user can never
+      // open again. Without such proof the conflict still outlives the process that observed it.
+      return {
+        disposition: 'evicted',
+        nextFence: nextAgentSessionFence(lease),
+        evidence: conflictedOwnerDeath
+      }
+    }
     return { disposition: 'conflicted', reason: 'claim conflicted before restart' }
   }
   if (lease.ownerProcess === null) {
+    if (lease.reservedSpawnToken === null && lease.claimStatus !== 'reserved') {
+      // Why: the spawn token is minted before the child and is the only thing a child could be
+      // carrying. With no owner and no token nothing can hold this lease, so it is already free —
+      // treating it as an unproven reservation is what re-latches every released record on restart.
+      return { disposition: 'free', reason: 'lease has no owner and no reservation' }
+    }
     if (probe.outcome === 'reservation-unused') {
       return {
         disposition: 'evicted',
-        nextFence: lease.runtimeFence + 1,
+        nextFence: nextAgentSessionFence(lease),
         evidence: { kind: 'pid-absent', detail: 'reservation never spawned', observedAt }
+      }
+    }
+    if (lease.runtimeKind === 'native' && lease.claimStatus === 'reserved') {
+      // Why: adjudication itself proves the reserving runtime died before an owner was
+      // proven, and a never-proven native child lost its only request channel with that
+      // runtime — nothing under this token can reach the provider session again. A TUI
+      // child outlives the runtime inside its terminal, so it stays latched below.
+      return {
+        disposition: 'evicted',
+        nextFence: nextAgentSessionFence(lease),
+        evidence: {
+          kind: 'pid-absent',
+          detail: 'native reservation abandoned before an owner was proven',
+          observedAt
+        }
       }
     }
     return {
@@ -198,12 +232,21 @@ export function adjudicateAgentSessionRestart(args: {
     }
   }
   if (isProvenAliveProbe(probe)) {
+    if (lease.runtimeKind === 'native') {
+      // Why: the surviving child's stdio died with the previous runtime, so readoption
+      // would renew a lease no host can drive. Recovery stops it and respawns at fence + 1.
+      return {
+        disposition: 'recovering',
+        stage: 'recovering',
+        reason: 'native owner outlived the runtime that held its transport'
+      }
+    }
     // Why: re-adoption is not a new generation, so the fence does not move.
     return { disposition: 'readopt' }
   }
   const evidence = deathEvidenceFor(probe, observedAt)
   if (evidence) {
-    return { disposition: 'evicted', nextFence: lease.runtimeFence + 1, evidence }
+    return { disposition: 'evicted', nextFence: nextAgentSessionFence(lease), evidence }
   }
   return {
     disposition: 'recovering',

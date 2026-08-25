@@ -34,7 +34,7 @@ export const PROVIDER_FRAME_CLASSIFICATIONS = {
     'hook/started': 'suppressed-benign',
     'turn/completed': 'status-chrome',
     'hook/completed': 'suppressed-benign',
-    'turn/diff/updated': 'timeline-substantive',
+    'turn/diff/updated': 'suppressed-benign',
     'turn/plan/updated': 'timeline-substantive',
     'item/started': 'timeline-substantive',
     'item/autoApprovalReview/started': 'status-chrome',
@@ -180,8 +180,21 @@ function hasProviderError(payload: unknown): boolean {
   return false
 }
 
+/** Codex thread-item types with no typed renderer, dispositioned by hand so a
+ *  new item type cannot leak `codex · item:<type>` into the transcript. The
+ *  notification catalog above is keyed by METHOD and never matches these. */
+const CODEX_ITEM_CLASSIFICATIONS: Record<string, ProviderFrameClassification> = {
+  // The `thread/compacted` notification is already chrome; its item form is the
+  // same event and must not read as a mysterious opcode row.
+  contextCompaction: 'status-chrome'
+}
+
 function notificationKind(kind: string): string {
   return kind.startsWith('notification:') ? kind.slice('notification:'.length) : kind
+}
+
+function itemKind(kind: string): string | null {
+  return kind.startsWith('item:') ? kind.slice('item:'.length) : null
 }
 
 export function isDeltaShapedProviderFrameKind(kind: string): boolean {
@@ -193,6 +206,10 @@ function catalogClassification(
   kind: string
 ): ProviderFrameClassification | undefined {
   if (provider === 'codex') {
+    const item = itemKind(kind)
+    if (item !== null) {
+      return CODEX_ITEM_CLASSIFICATIONS[item]
+    }
     return PROVIDER_FRAME_CLASSIFICATIONS.codex[
       notificationKind(kind) as CodexAppServerNotificationMethod
     ]
@@ -208,11 +225,14 @@ export function classifyProviderFrame(
   kind: string,
   payload: unknown
 ): ProviderFrameClassification {
-  if (isDeltaShapedProviderFrameKind(kind)) {
-    return 'stream-into-item'
-  }
+  // Payload failure inspection outranks the name-shape heuristic below: an
+  // unknown frame that reports an error must reach the user even when its
+  // method name happens to look like a stream delta.
   if (hasProviderError(payload)) {
     return 'error-surface'
+  }
+  if (isDeltaShapedProviderFrameKind(kind)) {
+    return 'stream-into-item'
   }
   if (provider === 'claude' && kind === 'message:result') {
     const subtype =

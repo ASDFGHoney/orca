@@ -1,4 +1,15 @@
 import { REMOTE_SERVER_UPDATE_CAPABILITY } from './remote-server-update'
+import {
+  SKILL_BUNDLE_INSTALL_CAPABILITY,
+  SKILL_INSTALL_CAPABILITY,
+  SKILL_INSTALL_CANCEL_CAPABILITY,
+  SKILL_INSTALL_PROGRESS_CAPABILITY,
+  SKILL_INSTALL_PROVIDERS_CAPABILITY,
+  SKILL_INSTALL_RESULT_V2_CAPABILITY,
+  SKILL_MANAGEMENT_CAPABILITY,
+  SKILL_UPLOAD_CAPABILITY
+} from './skill-install-capability'
+export { SKILL_INSTALL_RESULT_V2_CAPABILITY } from './skill-install-capability'
 
 // Why: declares the Orca runtime RPC compatibility contract. Desktop,
 // headless server, CLI, and mobile builds may drift in app version, but
@@ -34,6 +45,8 @@ export const ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY =
   'orchestration.federation-control-mail.v1' as const
 export const ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY =
   'orchestration.federation-lifecycle-settlement.v1' as const
+export const ORCHESTRATION_WORKER_STOP_VERDICT_RUNTIME_CAPABILITY =
+  'orchestration.worker-stop-verdict.v1' as const
 export const ORCHESTRATION_WORKER_LAUNCH_PREFERENCES_RUNTIME_CAPABILITY =
   'orchestration.worker-launch-preferences.v1' as const
 export const ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION = 2 as const
@@ -96,6 +109,10 @@ export const STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY = 'agent-session.struct
 // Why: the first structured mobile client hardcoded Codex rendering, so hosts may publish Claude tabs only after this narrower capability is negotiated.
 export const CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY =
   'agent-session.structured.claude.v1' as const
+// Why: adding kimi to RESUMABLE_TUI_AGENTS grows terminal.ensureAgentSession's enum, and an
+// older host answers the unknown member with invalid_argument — a code the launch fallback does
+// not retry on — so clients must probe before taking the host-authority path.
+export const AGENT_SESSION_KIMI_RESUME_RUNTIME_CAPABILITY = 'agent-session.kimi-resume.v1' as const
 // Why: older runtimes strip mutation owner fields, so clients must fence writes before RPC.
 export const FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY = 'files.mutation-ownership.v1' as const
 export const FILE_MUTATION_OWNERSHIP_UPDATE_REQUIRED_MESSAGE =
@@ -112,6 +129,7 @@ export const RUNTIME_CAPABILITIES = [
   ORCHESTRATION_FEDERATION_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY,
+  ORCHESTRATION_WORKER_STOP_VERDICT_RUNTIME_CAPABILITY,
   ORCHESTRATION_WORKER_LAUNCH_PREFERENCES_RUNTIME_CAPABILITY,
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
   BROWSER_SCREENCAST_RUNTIME_CAPABILITY,
@@ -140,11 +158,20 @@ export const RUNTIME_CAPABILITIES = [
   AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
+  AGENT_SESSION_KIMI_RESUME_RUNTIME_CAPABILITY,
   FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY,
   WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
   WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY,
   ACCOUNT_IMPORT_RUNTIME_CAPABILITY,
-  CODEX_RESET_CREDIT_RUNTIME_CAPABILITY
+  CODEX_RESET_CREDIT_RUNTIME_CAPABILITY,
+  SKILL_INSTALL_CAPABILITY,
+  SKILL_BUNDLE_INSTALL_CAPABILITY,
+  SKILL_INSTALL_CANCEL_CAPABILITY,
+  SKILL_INSTALL_PROGRESS_CAPABILITY,
+  SKILL_INSTALL_RESULT_V2_CAPABILITY,
+  SKILL_UPLOAD_CAPABILITY,
+  SKILL_MANAGEMENT_CAPABILITY,
+  SKILL_INSTALL_PROVIDERS_CAPABILITY
 ] as const
 
 export type RuntimeCapability = (typeof RUNTIME_CAPABILITIES)[number] | (string & {})
