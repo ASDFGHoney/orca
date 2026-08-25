@@ -23,7 +23,7 @@ export type AgentForegroundResolutionOptions = {
   /** Force confirmation scans even when node-pty reports a recognized name. */
   forceProcessScan?: boolean
   /** Lazily proves which global descendants still belong to this ConPTY. */
-  readWindowsConptyProcessIds?: () => ReadonlySet<number> | null
+  readWindowsConsoleAttachedProcessIds?: () => Promise<ReadonlySet<number> | null>
 }
 
 export type WindowsAgentForegroundResolution = {
@@ -71,15 +71,17 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
     options.contextPaths
   )
   let filteredCandidates = candidates
-  if (hasRecognizedCandidate && options.readWindowsConptyProcessIds) {
-    const conptyProcessIds = options.readWindowsConptyProcessIds()
-    // Why not bail on null: membership only ever NARROWED the candidates. When
-    // it cannot answer, the unfiltered list is still a usable answer, and
-    // failing the whole resolution instead reported "unavailable" exactly while
-    // an agent was recognized -- disabling the callers that gate on it.
-    if (conptyProcessIds) {
-      filteredCandidates = candidates.filter((candidate) => conptyProcessIds.has(candidate.pid))
+  if (hasRecognizedCandidate && options.readWindowsConsoleAttachedProcessIds) {
+    // Why console attachment and not the job: this filter exists to DROP a
+    // descendant that detached from the console, and the job still contains
+    // those by design. Answering it from the job would re-admit precisely what
+    // the filter is for -- granting byte authority to a detached `Start-Process
+    // droid`, or making an attached agent look ambiguous.
+    const consoleProcessIds = await options.readWindowsConsoleAttachedProcessIds()
+    if (!consoleProcessIds) {
+      return { available: false, processName: null }
     }
+    filteredCandidates = candidates.filter((candidate) => consoleProcessIds.has(candidate.pid))
   }
   return {
     available: true,

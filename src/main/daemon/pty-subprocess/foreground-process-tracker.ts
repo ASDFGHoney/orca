@@ -3,6 +3,7 @@ import { win32 as pathWin32 } from 'node:path'
 import { getAgentForegroundContextPaths } from '../../providers/agent-foreground-context-paths'
 import { resolveAgentForegroundProcessWithAvailability } from '../../providers/agent-foreground-process'
 import { readWindowsConptyProcessIds } from '../../providers/windows-conpty-process-membership'
+import { readWindowsConsoleAttachedProcessIds } from '../../providers/windows-console-attached-processes'
 import {
   isAgentForegroundWrapperProcess,
   recognizeAgentProcess,
@@ -247,7 +248,8 @@ export function createPtyForegroundProcessTracker(args: {
             ...(process.platform === 'win32'
               ? {
                   forceProcessScan: true,
-                  readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc)
+                  readWindowsConsoleAttachedProcessIds: () =>
+                    readWindowsConsoleAttachedProcessIds(proc.pid)
                 }
               : {})
           }

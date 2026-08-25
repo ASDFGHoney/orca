@@ -65,6 +65,7 @@ import { getAgentForegroundContextPaths } from './agent-foreground-context-paths
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 import { killWithDescendantSweep } from '../pty-descendant-termination'
 import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
+import { readWindowsConsoleAttachedProcessIds } from './windows-console-attached-processes'
 import { terminatePtyJob } from '../windows/windows-pty-job'
 import { canConfirmAgentFromConsolePresence } from './windows-console-foreground'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
@@ -1480,7 +1481,8 @@ export class LocalPtyProvider implements IPtyProvider {
           ...(process.platform === 'win32'
             ? {
                 forceProcessScan: true,
-                readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc)
+                readWindowsConsoleAttachedProcessIds: () =>
+                  readWindowsConsoleAttachedProcessIds(proc.pid)
               }
             : {})
         }

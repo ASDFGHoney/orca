@@ -67,3 +67,24 @@ describe('readWindowsConptyProcessIds', () => {
     expect(membership).toEqual(new Set([100, 200]))
   })
 })
+
+describe('why the filter does NOT use this', () => {
+  it('documents that job membership keeps console-detached descendants', () => {
+    // The candidate filter in windows-agent-foreground-process.ts exists to DROP
+    // a descendant that left the console (`Start-Process droid`, a GUI child).
+    // The job still contains those by design, so answering that filter from the
+    // job would re-admit exactly what it is for -- granting byte authority to a
+    // pane no agent owns, or making an attached agent look ambiguous.
+    // docs/windows-wsl-root-cause-plan.html calls this out as "Use B".
+    //
+    // Measured on Windows 11 against a real WSL pane: job [40980,104068,4888,69908]
+    // vs console [69908,40980] -- the job is a superset. Harmless for the
+    // `size > 1` callers, wrong for the filter.
+    const detachedChild = 104068
+    const membership = readWindowsConptyProcessIds(pty(40980), {
+      listJobProcessIds: () => [40980, detachedChild]
+    })
+
+    expect(membership?.has(detachedChild)).toBe(true)
+  })
+})

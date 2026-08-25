@@ -508,7 +508,7 @@ describe('resolveAgentForegroundProcess', () => {
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds: () => new Set([100, 101])
+        readWindowsConsoleAttachedProcessIds: async () => new Set([100, 101])
       })
     ).resolves.toEqual({ available: true, processName: 'droid' })
   })
@@ -655,15 +655,15 @@ describe('resolveAgentForegroundProcess', () => {
         commandLine: 'droid'
       }
     ])
-    const readWindowsConptyProcessIds = vi.fn(() => new Set([100, 101, 999]))
+    const readWindowsConsoleAttachedProcessIds = vi.fn(async () => new Set([100, 101, 999]))
 
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds
+        readWindowsConsoleAttachedProcessIds
       })
     ).resolves.toEqual({ available: true, processName: 'droid' })
-    expect(readWindowsConptyProcessIds).toHaveBeenCalledTimes(1)
+    expect(readWindowsConsoleAttachedProcessIds).toHaveBeenCalledTimes(1)
   })
 
   it('excludes a detached Windows Droid descendant from byte authority', async () => {
@@ -686,7 +686,7 @@ describe('resolveAgentForegroundProcess', () => {
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds: () => new Set([100, 999])
+        readWindowsConsoleAttachedProcessIds: async () => new Set([100, 999])
       })
     ).resolves.toEqual({ available: true, processName: 'powershell.exe' })
   })
@@ -701,14 +701,14 @@ describe('resolveAgentForegroundProcess', () => {
         commandLine: 'powershell.exe'
       }
     ])
-    const readWindowsConptyProcessIds = vi.fn(() => new Set([100, 999]))
+    const readWindowsConsoleAttachedProcessIds = vi.fn(async () => new Set([100, 999]))
 
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds
+        readWindowsConsoleAttachedProcessIds
       })
     ).resolves.toEqual({ available: true, processName: 'powershell.exe' })
-    expect(readWindowsConptyProcessIds).not.toHaveBeenCalled()
+    expect(readWindowsConsoleAttachedProcessIds).not.toHaveBeenCalled()
   })
 })
