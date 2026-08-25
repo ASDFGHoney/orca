@@ -83,12 +83,10 @@ export function resumePaneRendering(
     releaseHiddenWebglRetention(retentionOwner)
   }
   for (const pane of panes) {
-    // Why: resume (worktree foreground, window wake) is the WebGL retry
-    // boundary — Chromium may have restored the GPU process since a context
-    // loss, and bounding retries to resume events cannot loop on live loss.
     clearTerminalWebglAttachBackoff(pane)
     const rebuildDeferred = pane.webglRebuildDeferred === true
     pane.webglAttachmentDeferred = false
+    // Reveal can retry before the next resume, so both paths share the bounded loss policy.
     clearPaneWebglContextLossForRetry(pane)
     pane.webglRebuildDeferred = false
     if (pane.webglAddon && isPaneWebglContextLost(pane)) {

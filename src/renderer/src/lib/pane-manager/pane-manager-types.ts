@@ -143,7 +143,7 @@ export type ManagedPaneInternal = {
   gpuRenderingEnabled: boolean
   webglAttachmentDeferred: boolean
   webglDisabledAfterContextLoss: boolean
-  // Context losses are retained for a bounded reveal retry policy.
+  // Shared history bounds context-loss retries across resume and settled reveal.
   webglContextLossTimestamps?: number[]
   // Hidden retained renderers rebuild at the resume boundary, never behind the hidden surface.
   webglRebuildDeferred?: boolean
