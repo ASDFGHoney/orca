@@ -105,6 +105,72 @@ describe('session tab browser placement mutations', () => {
     expect(runtime.listMobileSessionTabs).not.toHaveBeenCalled()
     expect(runtime.closeMobileSessionTab).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    ['incapable caller', caller],
+    [
+      'mixed-version caller',
+      { clientKind: 'runtime', pairedDeviceId: 'legacy' } satisfies RpcDispatchStreamingOptions
+    ]
+  ])('refuses a %s lifecycle close for a projected-out browser page', async (_label, context) => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      listMobileSessionTabs: vi.fn().mockResolvedValue(mixedPlacementSnapshot()),
+      closeMobileSessionTab: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: SESSION_TAB_METHODS })
+
+    const response = await dispatch(
+      dispatcher,
+      'session.tabs.closeLifecycle',
+      {
+        worktree: 'id:wt-1',
+        tabId: 'hidden-page',
+        reason: 'cleanup',
+        publicationEpoch: 'epoch-1',
+        terminal: 'pty-hidden-page'
+      },
+      context
+    )
+
+    expect(response).toMatchObject({ ok: false, error: { message: 'tab_not_found' } })
+    expect(runtime.closeMobileSessionTab).not.toHaveBeenCalled()
+  })
+
+  it('lets a capable caller close a client-hosted lifecycle row', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      listMobileSessionTabs: vi.fn(),
+      closeMobileSessionTab: vi.fn().mockResolvedValue({ closed: true })
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: SESSION_TAB_METHODS })
+
+    const response = await dispatch(
+      dispatcher,
+      'session.tabs.closeLifecycle',
+      {
+        worktree: 'id:wt-1',
+        tabId: 'hidden-page',
+        reason: 'cleanup',
+        publicationEpoch: 'epoch-1',
+        terminal: 'pty-hidden-page'
+      },
+      {
+        clientKind: 'runtime',
+        pairedDeviceId: 'current',
+        clientCapabilities: [BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY]
+      }
+    )
+
+    expect(response.ok).toBe(true)
+    expect(runtime.listMobileSessionTabs).not.toHaveBeenCalled()
+    expect(runtime.closeMobileSessionTab).toHaveBeenCalledWith('id:wt-1', 'hidden-page', {
+      reason: 'cleanup',
+      expectedPublicationEpoch: 'epoch-1',
+      expectedTerminalHandle: 'pty-hidden-page',
+      clientNavigationId: 'current'
+    })
+  })
 })
 
 async function dispatch(

@@ -1,6 +1,6 @@
 import { withSpan } from '../../../observability/tracer'
 import { SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
-import { defineMethod, type RpcAnyMethod } from '../core'
+import { defineMethod, type RpcAnyMethod, type RpcContext } from '../core'
 import { CloseLifecycleTab, CloseTab } from './session-tabs-schemas'
 import {
   assertProjectedSessionTabVisible,
@@ -13,16 +13,7 @@ export const SESSION_TAB_CLOSE_METHODS: RpcAnyMethod[] = [
     name: 'session.tabs.close',
     params: CloseTab,
     handler: async (params, context) => {
-      if (
-        context.clientKind &&
-        !clientCanObserveClientHostedBrowserPages(context.clientCapabilities)
-      ) {
-        const visible = projectSessionTabBrowserPlacements(
-          await context.runtime.listMobileSessionTabs(params.worktree, context.pairedDeviceId),
-          context.clientCapabilities
-        )
-        assertProjectedSessionTabVisible(visible, params.tabId)
-      }
+      await assertCloseTabVisible(params, context)
       const requiresIntent =
         context.clientKind === undefined ||
         (context.clientKind === 'runtime' &&
@@ -80,8 +71,9 @@ export const SESSION_TAB_CLOSE_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'session.tabs.closeLifecycle',
     params: CloseLifecycleTab,
-    handler: async (params, context) =>
-      withSpan(
+    handler: async (params, context) => {
+      await assertCloseTabVisible(params, context)
+      return withSpan(
         'runtime.session-tabs.close-lifecycle',
         async (span) => {
           const result = await context.runtime.closeMobileSessionTab(
@@ -117,5 +109,20 @@ export const SESSION_TAB_CLOSE_METHODS: RpcAnyMethod[] = [
           }
         }
       )
+    }
   })
 ]
+
+async function assertCloseTabVisible(
+  params: { worktree: string; tabId: string },
+  context: RpcContext
+): Promise<void> {
+  if (!context.clientKind || clientCanObserveClientHostedBrowserPages(context.clientCapabilities)) {
+    return
+  }
+  const visible = projectSessionTabBrowserPlacements(
+    await context.runtime.listMobileSessionTabs(params.worktree, context.pairedDeviceId),
+    context.clientCapabilities
+  )
+  assertProjectedSessionTabVisible(visible, params.tabId)
+}
