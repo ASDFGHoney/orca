@@ -15,6 +15,14 @@ const PRIMARY_WATCH_OPTIONS = {
   include: PRIMARY_CHECKOUT_METADATA_FILES
 }
 
+// Why: the shallow watcher can stop reporting without ever erroring — a lossy
+// notification path (network mount, inotify queue overflow in the shared child),
+// a dropped event batch, or a binding that went deaf between rebind sweeps. None
+// of those raise, so the error-driven fallback never fires. A bounded re-stat is
+// the only thing that turns "silently stale forever" into "stale for one tick".
+// At 15 ticks this is ~0.2 stats/s/repo against the 3/s the old poll cost.
+const PRIMARY_BACKSTOP_TICKS = 15
+
 function primaryMetadataEvents(commonDirPath: string): WorktreeBasePollEvent[] {
   return PRIMARY_CHECKOUT_METADATA_FILES.map((name) => ({
     type: 'update',
@@ -34,6 +42,7 @@ export async function startGitCommonPrimaryWatch(
   let disposed = false
   let watcher: WatcherProcessSubscription | null = null
   let statusRefPolling: WorktreeBaseSubscription | null = null
+  let backstopPolling: WorktreeBaseSubscription | null = null
   let fallback: WorktreeBaseSubscription | null = null
   const fallbackFlight = createSingleFlight()
 
@@ -47,20 +56,26 @@ export async function startGitCommonPrimaryWatch(
         visibility,
         onFullScan
       ).then(async (nextFallback) => {
-        if (disposed || watcher || statusRefPolling) {
+        // `statusRefPolling` deliberately excluded: it covers only status refs,
+        // so its presence is not evidence that primary metadata is covered.
+        if (disposed || watcher) {
           await nextFallback.unsubscribe()
           return
         }
+        void stopWatcherSidePolling()
         fallback = nextFallback
       })
     )
 
-  const stopStatusRefPolling = async (): Promise<void> => {
+  const stopWatcherSidePolling = async (): Promise<void> => {
     const current = statusRefPolling
+    const currentBackstop = backstopPolling
     statusRefPolling = null
-    if (current) {
-      await current.unsubscribe().catch(() => {})
-    }
+    backstopPolling = null
+    await Promise.all([
+      current?.unsubscribe().catch(() => {}),
+      currentBackstop?.unsubscribe().catch(() => {})
+    ])
   }
 
   const handleWatcherError = (error: Error): void => {
@@ -76,7 +91,7 @@ export async function startGitCommonPrimaryWatch(
     if (current) {
       void current.unsubscribe().catch(() => {})
     }
-    void stopStatusRefPolling()
+    void stopWatcherSidePolling()
       .then(() => startFallback())
       .catch(() => {})
   }
@@ -108,15 +123,41 @@ export async function startGitCommonPrimaryWatch(
       }
     )
     if (watcher && !disposed && !fallbackFlight.pending()) {
-      statusRefPolling = await startGitCommonPrimaryPolling(
-        commonDirPath,
-        getStatusRefPaths,
-        onEvents,
-        pollIntervalMs,
-        visibility,
-        undefined,
-        false
-      )
+      const [nextStatusRefPolling, nextBackstop] = await Promise.all([
+        startGitCommonPrimaryPolling(
+          commonDirPath,
+          getStatusRefPaths,
+          onEvents,
+          pollIntervalMs,
+          visibility,
+          undefined,
+          false
+        ),
+        startGitCommonPrimaryPolling(
+          commonDirPath,
+          () => [],
+          onEvents,
+          pollIntervalMs * PRIMARY_BACKSTOP_TICKS,
+          visibility,
+          undefined,
+          true
+        )
+      ])
+      // Why: a terminal watch error can land while the two polls above are still
+      // starting. handleWatcherError already ran its teardown against nulls, so
+      // adopting these now would strand the repo with status-ref coverage only.
+      if (disposed || !watcher) {
+        await Promise.all([
+          nextStatusRefPolling.unsubscribe().catch(() => {}),
+          nextBackstop.unsubscribe().catch(() => {})
+        ])
+        if (!disposed) {
+          await startFallback()
+        }
+      } else {
+        statusRefPolling = nextStatusRefPolling
+        backstopPolling = nextBackstop
+      }
     }
   } catch (error) {
     handleWatcherError(error instanceof Error ? error : new Error(String(error)))
@@ -130,7 +171,7 @@ export async function startGitCommonPrimaryWatch(
       if (current) {
         await current.unsubscribe().catch(() => {})
       }
-      await stopStatusRefPolling()
+      await stopWatcherSidePolling()
       await fallbackFlight.pending()?.catch(() => {})
       if (fallback) {
         await fallback.unsubscribe().catch(() => {})

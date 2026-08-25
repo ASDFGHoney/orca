@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from 'node:fs'
+import { statSync, watch, type FSWatcher } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Event as ParcelWatcherEvent } from '@parcel/watcher'
@@ -110,6 +110,15 @@ export function startShallowWatcher(
     }
   }
 
+  const directoryIdentitySync = (parent: string): string | null => {
+    try {
+      const entry = statSync(join(rootPath, parent))
+      return entry.isDirectory() ? `${entry.dev}:${entry.ino}` : null
+    } catch {
+      return null
+    }
+  }
+
   const directoryIdentity = async (parent: string): Promise<string | null> => {
     try {
       const entry = await stat(join(rootPath, parent))
@@ -148,13 +157,14 @@ export function startShallowWatcher(
   rebindTimer.unref?.()
 
   for (const [parent, fileNames] of pathsByDirectory) {
+    // Why: read identity BEFORE binding. If the directory is replaced in the gap,
+    // the recorded identity is stale and the first sweep rebinds — the harmless
+    // direction. Reading after would pin the dead inode's watcher to the new
+    // identity, and the sweep would then never rebind it.
+    const identityBeforeBind = directoryIdentitySync(parent)
     watchDirectory(parent, fileNames)
-    if (watchers.has(parent)) {
-      void directoryIdentity(parent).then((identity) => {
-        if (!disposed && identity !== null) {
-          boundIdentities.set(parent, identity)
-        }
-      })
+    if (watchers.has(parent) && identityBeforeBind !== null) {
+      boundIdentities.set(parent, identityBeforeBind)
     }
   }
 

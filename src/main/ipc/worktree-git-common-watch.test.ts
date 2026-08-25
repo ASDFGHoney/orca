@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { appendFile, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type * as NodeFsPromises from 'node:fs/promises'
 import { performance as nodePerformance } from 'node:perf_hooks'
 import { tmpdir } from 'node:os'
@@ -52,15 +52,22 @@ async function replaceWorktreesRoot(
   worktreesDir: string,
   retainedEntry: string
 ): Promise<void> {
+  const previousInode = (await stat(worktreesDir)).ino
   await rm(worktreesDir, { recursive: true })
-  // Linux reuses just-deleted directory inodes. Park each freed inode in a
-  // sibling that is HELD for the rest of the test — releasing it would return it
-  // to the free list, so a later replacement could land back on it and look
-  // unchanged to reconciliation. The dirs are siblings of `worktrees`, which no
-  // poll or watch path enumerates.
-  const inodeReservation = join(commonDir, `worktrees-replacement-inode-${++inodeReservationCount}`)
-  await mkdir(inodeReservation)
-  await mkdir(retainedEntry, { recursive: true })
+  // Linux reuses freed directory inodes, and removing the tree frees several at
+  // once, so the recreated root can land back on its own old inode and look
+  // unchanged to reconciliation. Park inodes in HELD siblings until the root
+  // genuinely differs — verifying beats guessing how many to reserve. The
+  // siblings live next to `worktrees`, which no poll or watch path enumerates.
+  for (let attempt = 0; attempt < 16; attempt++) {
+    await mkdir(retainedEntry, { recursive: true })
+    if ((await stat(worktreesDir)).ino !== previousInode) {
+      return
+    }
+    await rm(worktreesDir, { recursive: true })
+    await mkdir(join(commonDir, `worktrees-inode-hold-${++inodeReservationCount}`))
+  }
+  throw new Error('could not obtain a fresh inode for the replaced worktrees root')
 }
 
 function createVisibilityHarness(): {
@@ -233,7 +240,7 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
     })
   })
 
-  it('leaves primary metadata stats to the shallow child on the healthy path', async () => {
+  it('keeps primary metadata off the per-tick path but re-stats it on the backstop', async () => {
     installSubscribeMock()
     const commonDir = await makeCommonDir(true)
     const headPath = join(commonDir, 'HEAD')
@@ -242,14 +249,37 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
       writeFile(headPath, 'ref: refs/heads/main'),
       writeFile(configPath, '[core]\n')
     ])
-    statCalls.length = 0
 
     const received: WorktreeBasePollEvent[][] = []
     await startWatch(commonDir, received)
-
-    expect(statCalls).not.toContain(headPath)
-    expect(statCalls).not.toContain(configPath)
     expect(primarySubscription().dir).toBe(commonDir)
+
+    // The shallow child owns the fast path: ordinary ticks must not re-stat these.
+    statCalls.length = 0
+    await vi
+      .waitFor(
+        () => {
+          expect(statCalls.length).toBeGreaterThan(0)
+        },
+        { timeout: 2_000 }
+      )
+      .catch(() => {})
+    const duringOrdinaryTicks = statCalls.filter(
+      (path) => path === headPath || path === configPath
+    ).length
+
+    // ...but a bounded backstop must still re-stat them, or a watcher that goes
+    // silently lossy would leave primary metadata stale forever.
+    statCalls.length = 0
+    await vi.waitFor(
+      () => {
+        expect(statCalls).toContain(headPath)
+        expect(statCalls).toContain(configPath)
+      },
+      { timeout: POLL_MS * RECONCILIATION_TICKS * 6 }
+    )
+    const backstopSamples = statCalls.filter((path) => path === headPath).length
+    expect(duringOrdinaryTicks).toBeLessThan(backstopSamples * RECONCILIATION_TICKS)
   })
 
   it('polls only the accepted upstream ref and rebinds without synthetic events', async () => {
@@ -376,9 +406,12 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
       ),
       []
     )
+    // Narrow fallback + selected-ref polling + primary backstop, with the narrow
+    // existence poll retired. Waiting on the exact count is what guarantees the
+    // fallback has baselined before the entry below is created.
     await vi.waitFor(() => {
       expect(narrowSubscription().unsubscribe).toHaveBeenCalledOnce()
-      expect(visibility.listenerCount()).toBe(3)
+      expect(visibility.listenerCount()).toBe(4)
     })
 
     const entryPath = join(worktreesDir, 'fallback-entry')
@@ -547,8 +580,9 @@ describe('worktree git-common narrow watch (local native platforms)', () => {
       visibility.source
     )
 
-    // Narrow existence + selected-ref polling each park on window visibility.
-    expect(visibility.listenerCount()).toBe(2)
+    // Narrow existence, selected-ref polling, and the primary backstop each park
+    // on window visibility.
+    expect(visibility.listenerCount()).toBe(3)
     await watch.unsubscribe()
     expect(visibility.listenerCount()).toBe(0)
   })

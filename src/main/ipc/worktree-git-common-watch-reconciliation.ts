@@ -60,12 +60,22 @@ export function createGitCommonWatchReconciliation({
           const rootWasReplaced =
             events.some((event) => event.type === 'delete' && event.path === worktreesDir) &&
             events.some((event) => event.type === 'create' && event.path === worktreesDir)
-          const coarseRootReplacement = events.some(
-            (event) =>
-              event.type === 'create' &&
-              event.path !== worktreesDir &&
-              dirname(event.path) === worktreesDir
+          // Why: this backstop lags the native stream by up to 15 ticks, so it
+          // routinely reports entry creates the stream already delivered. Only
+          // treat them as a replacement when the root itself was also recreated
+          // — otherwise every ordinary `git worktree add` would tear down a
+          // healthy stream and open a deaf window while it resubscribes.
+          const rootRecreated = events.some(
+            (event) => event.type === 'create' && event.path === worktreesDir
           )
+          const coarseRootReplacement =
+            rootRecreated &&
+            events.some(
+              (event) =>
+                event.type === 'create' &&
+                event.path !== worktreesDir &&
+                dirname(event.path) === worktreesDir
+            )
           if (rootWasReplaced || coarseRootReplacement) {
             onRootReplacement()
           }
