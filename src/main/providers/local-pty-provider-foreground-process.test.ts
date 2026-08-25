@@ -281,6 +281,32 @@ describe('LocalPtyProvider', () => {
       }
     })
 
+    it('does not refresh the agent age after a degraded revalidation scan', async () => {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'powershell.exe'
+      resolveAgentForegroundProcessMock
+        .mockResolvedValueOnce({ available: true, processName: 'claude' })
+        .mockResolvedValueOnce({ available: false, processName: null })
+        .mockResolvedValue({ available: true, processName: 'powershell.exe' })
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000_000)
+        const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+
+        vi.setSystemTime(1_000_000 + 40_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+
+        vi.setSystemTime(1_000_000 + 41_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('powershell.exe')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(3)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('keeps short-circuiting a live agent instead of scanning on every call', async () => {
       // The age bound must mean "time since we last confirmed the agent", not
       // "how long the agent has run". Stamping only on a CHANGE of name makes a

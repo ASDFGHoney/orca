@@ -536,7 +536,7 @@ describe('resolveAgentForegroundProcess', () => {
     // available:false is the fail-closed signal; the wrapper then substitutes
     // the shell fallback rather than publishing an unverified agent identity.
     expect(resolution.available).toBe(false)
-    expect(resolution.processName).not.toBe('droid')
+    expect(resolution.processName).toBe('powershell.exe')
   })
 
   it('recognizes a Windows shell-rooted agent when only one candidate matches the worktree path', async () => {

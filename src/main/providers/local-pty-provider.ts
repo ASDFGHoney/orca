@@ -1461,18 +1461,15 @@ export class LocalPtyProvider implements IPtyProvider {
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
       // Why: incomplete snapshot + unavailable job read isn't exit proof; only shell-only membership may clear the cache.
-      const stable = resolveStableForegroundProcess(
+      const stableResolution =
         paneMembershipUnavailable && resolvedAgent === null
           ? { ...resolution, available: false }
-          : resolution,
-        lastRecognizedAgent
-      )
-      if (stable.lastRecognizedAgent) {
-        // Every confirmation restarts the clock: the bound is "time since we last
-        // saw the agent", not "how long it ran". Stamping only on a name change
-        // would expire a live agent that keeps being recognized.
+          : resolution
+      const stable = resolveStableForegroundProcess(stableResolution, lastRecognizedAgent)
+      if (stable.lastRecognizedAgent && stableResolution.available) {
+        // Only a positive recognition restarts the age bound.
         ptyLastRecognizedForeground.set(id, { name: stable.lastRecognizedAgent, at: Date.now() })
-      } else {
+      } else if (!stable.lastRecognizedAgent) {
         ptyLastRecognizedForeground.delete(id)
       }
       return stable.processName

@@ -43,7 +43,7 @@ vi.mock('../providers/agent-foreground-process', () => ({
 }))
 
 vi.mock('../providers/windows-pty-job-membership', () => ({
-  readWindowsPtyJobProcessIds: () => Promise.resolve(new Set([12345]))
+  readWindowsPtyJobProcessIds: () => new Set([12345])
 }))
 
 import { createPtySubprocess } from './pty-subprocess'
