@@ -1,145 +1,285 @@
 import { describe, expect, it } from 'vitest'
 import {
-  PANE_AGENT_EVIDENCE_SOURCES,
+  PANE_AGENT_DISPLAY_POLICIES,
   type PaneAgentEvidence,
-  resolvePaneAgentIdentity
+  type PaneAgentRun,
+  resolvePaneAgentDisplayIdentity
 } from './pane-agent-identity-resolver'
 
-const resolve = (evidence: PaneAgentEvidence[], extra = {}) =>
-  resolvePaneAgentIdentity({ evidence, ...extra })
+const currentRun: PaneAgentRun = { hostAuthorityId: 'host-1', generation: 8 }
+const previousRun: PaneAgentRun = { hostAuthorityId: 'host-1', generation: 7 }
+const otherHostRun: PaneAgentRun = { hostAuthorityId: 'host-2', generation: 8 }
 
-describe('resolvePaneAgentIdentity', () => {
-  describe('a display title is the last thing consulted', () => {
-    it.each(PANE_AGENT_EVIDENCE_SOURCES.filter((s) => s !== 'title' && s !== 'sibling'))(
-      'lets %s outrank a conflicting title',
+const resolveFocused = (evidence: PaneAgentEvidence[], extra = {}) =>
+  resolvePaneAgentDisplayIdentity({ policy: 'focused-pane', evidence, ...extra })
+
+describe('resolvePaneAgentDisplayIdentity', () => {
+  describe('named display policies', () => {
+    it.each(PANE_AGENT_DISPLAY_POLICIES['focused-pane'].filter((s) => s !== 'title'))(
+      'lets focused-pane %s outrank a conflicting title',
       (source) => {
-        const result = resolve([
-          { source: 'title', agent: 'codex' },
-          { source, agent: 'grok' }
-        ])
-        expect(result.agent).toBe('grok')
-        expect(result.source).toBe(source)
+        expect(
+          resolveFocused([
+            { source: 'title', agent: 'codex' },
+            { source, agent: 'grok' }
+          ])
+        ).toMatchObject({ kind: 'resolved', agent: 'grok', source })
       }
     )
 
-    it('uses the title only when nothing else is eligible', () => {
-      expect(resolve([{ source: 'title', agent: 'codex' }])).toMatchObject({
-        agent: 'codex',
-        source: 'title'
+    it('lets a host-observed process override Orca launch intent', () => {
+      expect(
+        resolveFocused([
+          { source: 'launch', agent: 'claude' },
+          { source: 'process', agent: 'codex' }
+        ])
+      ).toMatchObject({ kind: 'resolved', agent: 'codex', source: 'process' })
+    })
+
+    it('keeps sibling evidence out of focused-pane identity', () => {
+      expect(resolveFocused([{ source: 'sibling', agent: 'codex' }])).toEqual({
+        kind: 'unresolved',
+        reason: 'no-evidence'
       })
     })
 
-    it('outranks the launch record with nothing weaker than the launch record', () => {
-      // The tab ladder currently puts the parsed title ABOVE activeLaunchAgent, so a string Orca
-      // parsed beats a fact Orca owns. That inversion cannot be expressed here.
-      const result = resolve([
-        { source: 'launch', agent: 'claude' },
-        { source: 'title', agent: 'gemini' }
-      ])
-      expect(result.agent).toBe('claude')
+    it('uses sibling only after the active pane title for a tab aggregate', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'tab-aggregate',
+          evidence: [
+            { source: 'sibling', agent: 'codex' },
+            { source: 'title', agent: 'grok' }
+          ]
+        })
+      ).toMatchObject({ kind: 'resolved', agent: 'grok', source: 'title' })
     })
   })
 
-  describe('run generation separates the bug from the legitimate reclaim', () => {
-    // Both shapes are `completed hook = A, title = B`. Ordering alone cannot tell them apart.
-    const shape = (hookRun: number, titleRun: number): PaneAgentEvidence[] => [
-      { source: 'completed-hook', agent: 'claude', runId: hookRun },
-      { source: 'title', agent: 'codex', runId: titleRun }
+  describe('host-owned agent-run identity', () => {
+    const shape = (hookRun: PaneAgentRun, titleRun: PaneAgentRun): PaneAgentEvidence[] => [
+      { source: 'completed-hook', agent: 'claude', run: hookRun },
+      { source: 'title', agent: 'codex', run: titleRun }
     ]
 
-    it('keeps the completed hook when both belong to the current run', () => {
-      // The reported bug: nothing new started, so the hook is still the truth.
-      const result = resolvePaneAgentIdentity({ evidence: shape(7, 7), currentRunId: 7 })
-      expect(result).toMatchObject({ agent: 'claude', source: 'completed-hook' })
-      expect(result.supersededSources).toEqual([])
-    })
-
-    it('drops the completed hook once a new run has started', () => {
-      // The legitimate reclaim: the pane was reused, so run 7's hook describes an agent that is
-      // no longer there. It is ineligible, not merely outranked.
-      const result = resolvePaneAgentIdentity({ evidence: shape(7, 8), currentRunId: 8 })
-      expect(result).toMatchObject({ agent: 'codex', source: 'title' })
-      expect(result.supersededSources).toEqual(['completed-hook'])
-    })
-
-    it('produces opposite answers from identical evidence, given only the run ids', () => {
-      // The whole point, stated as one assertion.
-      const bug = resolvePaneAgentIdentity({ evidence: shape(7, 7), currentRunId: 7 })
-      const reclaim = resolvePaneAgentIdentity({ evidence: shape(7, 8), currentRunId: 8 })
-      expect(bug.agent).not.toBe(reclaim.agent)
-    })
-  })
-
-  describe('mixed-version peers', () => {
-    it('treats evidence with no run id as eligible', () => {
-      // An old host publishes no run ids. Treating unknown as stale would blank every row.
-      const result = resolvePaneAgentIdentity({
-        evidence: [{ source: 'completed-hook', agent: 'claude' }],
-        currentRunId: 9
+    it('keeps the completed hook when both observations belong to the current run', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: shape(currentRun, currentRun),
+          currentRun
+        })
+      ).toEqual({
+        kind: 'resolved',
+        agent: 'claude',
+        source: 'completed-hook',
+        runScope: 'current'
       })
-      expect(result.agent).toBe('claude')
     })
 
-    it('disables run filtering entirely when the pane has no current run', () => {
-      const result = resolvePaneAgentIdentity({
-        evidence: [{ source: 'completed-hook', agent: 'claude', runId: 3 }]
+    it('drops the completed hook after positive evidence advances the agent run', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: shape(previousRun, currentRun),
+          currentRun
+        })
+      ).toEqual({
+        kind: 'resolved',
+        agent: 'codex',
+        source: 'title',
+        runScope: 'current'
       })
-      expect(result).toMatchObject({ agent: 'claude', supersededSources: [] })
+    })
+
+    it('includes host authority rather than comparing naked generation numbers', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [
+            { source: 'completed-hook', agent: 'claude', run: otherHostRun },
+            { source: 'title', agent: 'codex', run: currentRun }
+          ],
+          currentRun
+        })
+      ).toMatchObject({ kind: 'resolved', agent: 'codex', source: 'title' })
     })
   })
 
-  describe('siblings are tab-scoped', () => {
-    it('ignores a sibling by default', () => {
-      expect(resolve([{ source: 'sibling', agent: 'codex' }]).agent).toBeNull()
-    })
-
-    it('accepts a sibling when the caller opts in', () => {
-      expect(resolve([{ source: 'sibling', agent: 'codex' }], { allowSibling: true }).agent).toBe(
-        'codex'
-      )
-    })
-
-    it('still ranks a sibling above a title', () => {
-      const result = resolve(
-        [
-          { source: 'title', agent: 'grok' },
-          { source: 'sibling', agent: 'codex' }
-        ],
-        { allowSibling: true }
-      )
-      expect(result.source).toBe('sibling')
-    })
-  })
-
-  describe('no eligible evidence', () => {
-    it('returns null rather than guessing', () => {
-      expect(resolve([])).toMatchObject({ agent: null, source: null })
-    })
-
-    it('returns null when every source belongs to a superseded run', () => {
-      const result = resolvePaneAgentIdentity({
-        evidence: [
-          { source: 'live-hook', agent: 'claude', runId: 1 },
-          { source: 'title', agent: 'codex', runId: 1 }
-        ],
-        currentRunId: 2
+  describe('mixed-version display evidence', () => {
+    it('preserves source authority when a stronger source cannot publish a run', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [
+            { source: 'live-hook', agent: 'claude' },
+            { source: 'title', agent: 'codex', run: currentRun }
+          ],
+          currentRun
+        })
+      ).toEqual({
+        kind: 'resolved',
+        agent: 'claude',
+        source: 'live-hook',
+        runScope: 'compatibility'
       })
-      expect(result.agent).toBeNull()
-      expect(result.supersededSources).toEqual(['live-hook', 'title'])
+    })
+
+    it('uses exact current-run scope as a tie-breaker within one source', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [
+            { source: 'live-hook', agent: 'claude', run: currentRun },
+            { source: 'live-hook', agent: 'codex' }
+          ],
+          currentRun
+        })
+      ).toEqual({
+        kind: 'resolved',
+        agent: 'claude',
+        source: 'live-hook',
+        runScope: 'current'
+      })
+    })
+
+    it('disables run filtering when the peer has no current run identity', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [{ source: 'completed-hook', agent: 'claude', run: previousRun }]
+        })
+      ).toMatchObject({ kind: 'resolved', agent: 'claude', runScope: 'compatibility' })
     })
   })
 
-  describe('input order does not decide the answer', () => {
-    it('resolves the same regardless of how evidence is listed', () => {
+  describe('equal-source ordering', () => {
+    const conflict: PaneAgentEvidence[] = [
+      { source: 'live-hook', agent: 'claude' },
+      { source: 'live-hook', agent: 'codex' },
+      { source: 'title', agent: 'grok' }
+    ]
+
+    it('refuses incomparable claims instead of letting a weaker source decide', () => {
+      expect(resolveFocused(conflict)).toEqual({
+        kind: 'unresolved',
+        reason: 'conflicting-evidence',
+        source: 'live-hook'
+      })
+    })
+
+    it('does not let input order break an incomparable tie', () => {
+      expect(resolveFocused(conflict)).toEqual(resolveFocused(conflict.toReversed()))
+    })
+
+    it('chooses the newest observation sequenced by one authority', () => {
       const evidence: PaneAgentEvidence[] = [
-        { source: 'title', agent: 'codex' },
-        { source: 'launch', agent: 'grok' },
-        { source: 'live-hook', agent: 'claude' }
+        {
+          source: 'process',
+          agent: 'claude',
+          order: { authorityId: 'main', revision: 4 }
+        },
+        {
+          source: 'process',
+          agent: 'codex',
+          order: { authorityId: 'main', revision: 5 }
+        }
       ]
-      const forward = resolve([...evidence])
-      const reverse = resolve(evidence.toReversed())
-      expect(forward).toEqual(reverse)
-      expect(forward.source).toBe('live-hook')
+      expect(resolveFocused(evidence)).toMatchObject({
+        kind: 'resolved',
+        agent: 'codex',
+        source: 'process'
+      })
+      expect(resolveFocused(evidence)).toEqual(resolveFocused(evidence.toReversed()))
+    })
+
+    it('refuses ordering claims from different authorities', () => {
+      expect(
+        resolveFocused([
+          {
+            source: 'process',
+            agent: 'claude',
+            order: { authorityId: 'main', revision: 5 }
+          },
+          {
+            source: 'process',
+            agent: 'codex',
+            order: { authorityId: 'renderer', revision: 6 }
+          }
+        ])
+      ).toMatchObject({ kind: 'unresolved', reason: 'conflicting-evidence' })
+    })
+
+    it('refuses different agents tied at the same authoritative revision', () => {
+      expect(
+        resolveFocused([
+          {
+            source: 'live-hook',
+            agent: 'claude',
+            order: { authorityId: 'main', revision: 5 }
+          },
+          {
+            source: 'live-hook',
+            agent: 'codex',
+            order: { authorityId: 'main', revision: 5 }
+          }
+        ])
+      ).toMatchObject({ kind: 'unresolved', reason: 'conflicting-evidence' })
+    })
+
+    it('accepts duplicate observations that agree', () => {
+      expect(
+        resolveFocused([
+          { source: 'process', agent: 'codex' },
+          { source: 'process', agent: 'codex' }
+        ])
+      ).toMatchObject({ kind: 'resolved', agent: 'codex', source: 'process' })
+    })
+  })
+
+  describe('unresolved and run-boundary states', () => {
+    it('returns no-evidence for an empty display input', () => {
+      expect(resolveFocused([])).toEqual({ kind: 'unresolved', reason: 'no-evidence' })
+    })
+
+    it('returns run-transition when every ranked observation is superseded', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [
+            { source: 'live-hook', agent: 'claude', run: previousRun },
+            { source: 'title', agent: 'codex', run: previousRun }
+          ],
+          currentRun
+        })
+      ).toEqual({ kind: 'unresolved', reason: 'run-transition' })
+    })
+
+    it('resolves as soon as the positive evidence for the new run is present', () => {
+      expect(
+        resolvePaneAgentDisplayIdentity({
+          policy: 'focused-pane',
+          evidence: [
+            { source: 'completed-hook', agent: 'claude', run: previousRun },
+            { source: 'launch', agent: 'codex', run: currentRun }
+          ],
+          currentRun
+        })
+      ).toMatchObject({ kind: 'resolved', agent: 'codex', source: 'launch' })
+    })
+  })
+
+  it('does not let input order decide between different sources', () => {
+    const evidence: PaneAgentEvidence[] = [
+      { source: 'title', agent: 'codex' },
+      { source: 'launch', agent: 'grok' },
+      { source: 'live-hook', agent: 'claude' }
+    ]
+    expect(resolveFocused(evidence)).toEqual(resolveFocused(evidence.toReversed()))
+    expect(resolveFocused(evidence)).toMatchObject({
+      kind: 'resolved',
+      agent: 'claude',
+      source: 'live-hook'
     })
   })
 })

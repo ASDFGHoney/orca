@@ -1,109 +1,164 @@
+import type { AgentStatusObservation } from './agent-status-observation'
 import type { TuiAgent } from './tui-agent'
 
-/**
- * One place that answers "which agent is in this pane".
- *
- * Today four ladders answer it independently — the tab icon, the open-tab/search occupant, the
- * sidebar title rows, and the sidebar hook-row fallback — and they disagree. Two of them consult
- * the terminal title before the launch record, so a string Orca parsed outranks a fact Orca owns.
- *
- * Two rules make this resolvable where reordering alone could not:
- *
- * 1. Evidence is ranked by how directly it observes the process, and a display title is last.
- * 2. Every observation carries the `runId` of the agent run it belongs to. Evidence from a run
- *    that has since been replaced is INELIGIBLE rather than merely outranked.
- *
- * Rule 2 is what separates two situations that are otherwise identical. A completed hook naming
- * A plus a title naming B is either a bug (the hook is right, the title is stale) or a legitimate
- * reclaim (the pane was reused and B really is there). Same signals, opposite answers. With run
- * ids they are different facts: in the bug both belong to the current run, and in the reclaim the
- * hook belongs to a previous one.
- *
- * A run is advanced only on positive evidence that a new agent started in the pane — an accepted
- * launch, a recognized command at a shell prompt, a host-confirmed foreground change, a new
- * provider session. Never by a title changing, and never by transport loss.
- */
-export const PANE_AGENT_EVIDENCE_SOURCES = [
-  /** A live provider hook for a turn in progress. The agent is running and said so. */
-  'live-hook',
-  /** The pane's foreground process, as read on the execution host. */
-  'process',
-  /** Orca launched, resumed, or accepted a command for this agent. A fact Orca owns. */
-  'launch',
-  /** A provider hook from a turn that finished. Still authoritative about identity. */
-  'completed-hook',
-  /** A sleeping session record restored for this pane. */
-  'sleeping-session',
-  /** Another pane in the same tab. Tab-level surfaces only; never pane-scoped routing. */
-  'sibling',
-  /** Parsed from the terminal title. A decoration channel; anyone can type an agent's name. */
-  'title'
-] as const
-export type PaneAgentEvidenceSource = (typeof PANE_AGENT_EVIDENCE_SOURCES)[number]
+export const PANE_AGENT_DISPLAY_POLICIES = {
+  'focused-pane': ['live-hook', 'process', 'launch', 'completed-hook', 'sleeping-session', 'title'],
+  'tab-aggregate': [
+    'live-hook',
+    'process',
+    'launch',
+    'completed-hook',
+    'sleeping-session',
+    'title',
+    'sibling'
+  ]
+} as const
 
-/** Authority order, strongest first. Position here is the ONLY place precedence is expressed. */
-const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = PANE_AGENT_EVIDENCE_SOURCES
+export type PaneAgentDisplayPolicy = keyof typeof PANE_AGENT_DISPLAY_POLICIES
+export type PaneAgentEvidenceSource =
+  (typeof PANE_AGENT_DISPLAY_POLICIES)[PaneAgentDisplayPolicy][number]
+
+/** Execution-host-owned identity of one agent run behind a pane key. */
+export type PaneAgentRun = {
+  hostAuthorityId: string
+  generation: number
+}
+
+/** Comparable only when both observations carry the same authority id. */
+export type PaneAgentEvidenceOrder = Readonly<
+  Pick<AgentStatusObservation, 'authorityId' | 'revision'>
+>
 
 export type PaneAgentEvidence = {
   source: PaneAgentEvidenceSource
   agent: TuiAgent
-  /**
-   * The agent run this evidence describes. Evidence whose run is not the pane's current run is
-   * ineligible. Undefined means unknown — from an old peer that does not publish run ids, or an
-   * ingress not yet stamped — and is treated as eligible, so a missing field never blanks a row.
-   */
-  runId?: number
+  /** Absent when an older peer or unstamped ingress cannot identify the agent run. */
+  run?: PaneAgentRun
+  /** Used only to settle equal-source claims that one authority sequenced. */
+  order?: PaneAgentEvidenceOrder
 }
 
-export type PaneAgentIdentityInput = {
+export type PaneAgentDisplayIdentityInput = {
+  policy: PaneAgentDisplayPolicy
   evidence: readonly PaneAgentEvidence[]
-  /** The pane's current run. Undefined disables run filtering entirely (old peer, mixed version). */
-  currentRunId?: number
-  /**
-   * Pane-scoped consumers must not inherit another pane's agent. Sibling evidence is dropped
-   * unless the caller is a tab-level surface that opted in.
-   */
-  allowSibling?: boolean
+  /** Absent on older peers; display resolution then preserves compatibility. */
+  currentRun?: PaneAgentRun
 }
 
-export type PaneAgentIdentity = {
-  agent: TuiAgent | null
-  /** Which class of evidence decided it. Null when nothing eligible remained. */
-  source: PaneAgentEvidenceSource | null
-  /** Evidence discarded because it belongs to a superseded run. Surfaced for diagnostics. */
-  supersededSources: readonly PaneAgentEvidenceSource[]
+export type ResolvedPaneAgentDisplayIdentity = {
+  kind: 'resolved'
+  agent: TuiAgent
+  source: PaneAgentEvidenceSource
+  /** Compatibility means one side cannot publish agent-run identity. */
+  runScope: 'current' | 'compatibility'
 }
+
+export type UnresolvedPaneAgentDisplayIdentity = {
+  kind: 'unresolved'
+  reason: 'no-evidence' | 'run-transition' | 'conflicting-evidence'
+  /** Present when equally ranked, incomparable evidence names different agents. */
+  source?: PaneAgentEvidenceSource
+}
+
+export type PaneAgentDisplayIdentity =
+  | ResolvedPaneAgentDisplayIdentity
+  | UnresolvedPaneAgentDisplayIdentity
 
 /**
- * Resolves one pane's agent from ranked evidence.
- *
- * Returns null rather than guessing. A pane with no eligible evidence shows no agent, which is
- * recoverable; showing the wrong agent is not, and at the action surfaces (orchestration routing,
- * mailbox delivery, prompt-cache timers) it is a misdelivery rather than a cosmetic slip.
+ * Display-only identity resolution. Write authorization requires proof-bearing process, hook, or
+ * launch capabilities and deliberately has no resolver in this module.
  */
-export function resolvePaneAgentIdentity(input: PaneAgentIdentityInput): PaneAgentIdentity {
-  const superseded: PaneAgentEvidenceSource[] = []
-  const eligible = input.evidence.filter((item) => {
-    if (item.source === 'sibling' && input.allowSibling !== true) {
-      return false
-    }
-    // Why undefined is eligible: absence means "this peer does not publish run ids", not "this
-    // belongs to an old run". Treating unknown as stale would blank every row from an old host.
-    if (input.currentRunId === undefined || item.runId === undefined) {
-      return true
-    }
-    if (item.runId === input.currentRunId) {
-      return true
-    }
-    superseded.push(item.source)
-    return false
-  })
+export function resolvePaneAgentDisplayIdentity(
+  input: PaneAgentDisplayIdentityInput
+): PaneAgentDisplayIdentity {
+  const sources = PANE_AGENT_DISPLAY_POLICIES[input.policy]
+  let rejectedSupersededRun = false
 
-  for (const source of SOURCE_RANK) {
-    const match = eligible.find((item) => item.source === source)
-    if (match) {
-      return { agent: match.agent, source, supersededSources: superseded }
+  for (const source of sources) {
+    const eligible: PaneAgentEvidence[] = []
+    for (const item of input.evidence) {
+      if (item.source !== source) {
+        continue
+      }
+      if (isSupersededRun(item.run, input.currentRun)) {
+        rejectedSupersededRun = true
+        continue
+      }
+      eligible.push(item)
+    }
+    if (eligible.length === 0) {
+      continue
+    }
+
+    const exactCurrent = eligible.filter((item) => isSameRun(item.run, input.currentRun))
+    const candidates = exactCurrent.length > 0 ? exactCurrent : eligible
+    const selected = selectEqualSourceCandidate(candidates)
+    if (selected === null) {
+      return { kind: 'unresolved', reason: 'conflicting-evidence', source }
+    }
+    return {
+      kind: 'resolved',
+      agent: selected.agent,
+      source,
+      runScope: isSameRun(selected.run, input.currentRun) ? 'current' : 'compatibility'
     }
   }
-  return { agent: null, source: null, supersededSources: superseded }
+
+  return {
+    kind: 'unresolved',
+    reason: rejectedSupersededRun ? 'run-transition' : 'no-evidence'
+  }
+}
+
+function selectEqualSourceCandidate(
+  candidates: readonly PaneAgentEvidence[]
+): PaneAgentEvidence | null {
+  const first = candidates[0]
+  if (candidates.every((item) => item.agent === first.agent)) {
+    return first
+  }
+
+  const firstOrder = first.order
+  if (
+    firstOrder === undefined ||
+    candidates.some(
+      (item) => item.order === undefined || item.order.authorityId !== firstOrder.authorityId
+    )
+  ) {
+    return null
+  }
+
+  let newest = first
+  for (const candidate of candidates.slice(1)) {
+    if (
+      candidate.order !== undefined &&
+      newest.order !== undefined &&
+      candidate.order.revision > newest.order.revision
+    ) {
+      newest = candidate
+    }
+  }
+  if (newest.order === undefined) {
+    return null
+  }
+  const sameRevision = candidates.filter((item) => item.order?.revision === newest.order?.revision)
+  return sameRevision.every((item) => item.agent === newest.agent) ? newest : null
+}
+
+function isSupersededRun(
+  evidenceRun: PaneAgentRun | undefined,
+  currentRun: PaneAgentRun | undefined
+): boolean {
+  return (
+    evidenceRun !== undefined && currentRun !== undefined && !isSameRun(evidenceRun, currentRun)
+  )
+}
+
+function isSameRun(left: PaneAgentRun | undefined, right: PaneAgentRun | undefined): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.hostAuthorityId === right.hostAuthorityId &&
+    left.generation === right.generation
+  )
 }
