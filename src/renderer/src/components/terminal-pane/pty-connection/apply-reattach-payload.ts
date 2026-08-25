@@ -14,6 +14,10 @@ import {
 } from '../terminal-snapshot-replay-paint'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
+import {
+  lastAlternateScreenTransition,
+  sshReconnectPaintsFromModel
+} from '../ssh-reattach-model-restore'
 import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
 
 import type { ReattachPayloadContext } from './reattach-payload-context'
@@ -110,10 +114,35 @@ export function createReattachPayloadHandlers(
       // model still holds, but an in-place reattach (network reconnect, wake,
       // reload) already has that replay in hand, so probing would only delay its
       // paint by the timeout. Memoized, so this is never a second probe.
-      const modelSnapshot = ctx.revealFollowsTerminalPark
+      // An SSH reconnect may use the model only under sshReconnectPaintsFromModel: the reconnect
+      // replay reaches the renderer without passing through main's model (forwardReattachReplay
+      // and the inline attach replay both bypass onPtyData), so the model is stale by exactly
+      // the outage and the replay is the only witness to it. A park has no such hole, so it
+      // keeps using the model either way.
+      const revealSnapshot = ctx.revealFollowsTerminalPark
         ? (ctx.prefetchedParkModelSnapshot ??
           (isRemoteRuntimePtyId(ctx.ptyId) ? null : await ctx.fetchSshMainModelReattachSnapshot()))
         : null
+      // Asked before the probe, not after: if the replay shows the app left the alternate
+      // screen, no snapshot can be used no matter what it says, so fetching one only spends the
+      // 750ms timeout to throw the answer away — and spends it inside the coordinator, with live
+      // PTY bytes deferred and the payload still able to be superseded.
+      const replayTransition = lastAlternateScreenTransition(ctx.connectResult?.replay)
+      const replayVetoesModel = replayTransition === 'exited'
+      const reconnectSnapshot =
+        !revealSnapshot && ctx.reconnectMayUseModel && !replayVetoesModel
+          ? await ctx.fetchSshMainModelReattachSnapshot()
+          : null
+      const paintsReconnectFromModel = sshReconnectPaintsFromModel({
+        snapshot: reconnectSnapshot,
+        hasReplay: Boolean(ctx.connectResult?.replay),
+        replayTransition,
+        altFrameWouldBeSkipped: shouldSkipAltFrameForWidthMismatch(
+          reconnectSnapshot?.cols,
+          readProposedTerminalCols(session.pane)
+        )
+      })
+      const modelSnapshot = revealSnapshot ?? (paintsReconnectFromModel ? reconnectSnapshot : null)
       if (!ctx.isCurrentReattachPayload()) {
         return
       }
@@ -142,6 +171,13 @@ export function createReattachPayloadHandlers(
           kittyKeyboardFlags: modelSnapshot.kittyKeyboardFlags,
           snapshotSeq: modelSnapshot.seq
         })
+        if (paintsReconnectFromModel && ctx.connectResult?.replay) {
+          // Why after the snapshot: painting the model discards the replay, but the app's kitty
+          // pushes during the outage exist ONLY there. Snapshot first for the pre-outage
+          // baseline, then the replay layers the outage on top — otherwise Option/Alt chords
+          // encode against a stale flag stack.
+          session.kittyKeyboardModes.scanReplay(ctx.connectResult.replay)
+        }
         // Why shared: park+reveal of an alt-screen TUI needs the same
         // ?1049l/?1049h rebuild as applyMainBufferSnapshot (main strips
         // the ?1049h marker when splitting scrollbackAnsi) — inlined here
