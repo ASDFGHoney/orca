@@ -38,7 +38,9 @@ export type NativeChatSkillDiscoverySnapshot = {
 // Why: a safety valve against pathological catalogs, not a display policy. The
 // menu scrolls, so a low cap only hid skills — and because rows are scope-sorted,
 // one large scope silently erased every smaller one (#14690).
-const PICKER_RESULT_LIMIT = 500
+const SKILL_RESULT_LIMIT = 500
+/** Commands are a small curated catalog; keep their original bound. */
+const COMMAND_RESULT_LIMIT = 50
 const SCOPE_PRIORITY: Record<SkillSourceKind, number> = {
   repo: 0,
   home: 1,
@@ -77,12 +79,12 @@ export function buildNativeChatPickerItems(
     query
   )
   return [
-    ...commandItems.slice(0, PICKER_RESULT_LIMIT),
+    ...commandItems.slice(0, COMMAND_RESULT_LIMIT),
     // Ranked results are ordered by relevance, so a plain slice keeps the best
     // matches; the unfiltered list is scope-ordered and needs a fair budget.
     ...(query
-      ? skillItems.slice(0, PICKER_RESULT_LIMIT)
-      : limitSkillsAcrossScopes(skillItems, PICKER_RESULT_LIMIT))
+      ? skillItems.slice(0, SKILL_RESULT_LIMIT)
+      : limitSkillsAcrossScopes(skillItems, SKILL_RESULT_LIMIT))
   ]
 }
 

@@ -326,18 +326,29 @@ describe('native skill and command picker', () => {
     expect(names).toContain('home-skill-2')
   })
 
-  it('keeps ranked order when a query narrows a catalog past the cap', () => {
-    const skills = Array.from({ length: 600 }, (_, index) =>
-      skill({
-        name: `deploy-${String(index).padStart(4, '0')}`,
-        sourceKind: 'repo',
-        skillFilePath: `/repo/.agents/skills/deploy-${index}/SKILL.md`
-      })
-    )
-    const names = buildNativeChatPickerItems([], skills, 'deploy-0001', '/').map(
-      (item) => item.name
-    )
-    expect(names[0]).toBe('deploy-0001')
+  it('keeps a queried catalog in rank order rather than spreading it across scopes', () => {
+    // 600 prefix matches (rank 1) in repo vs 10 substring matches (rank 2) in home:
+    // rank order fills the cap with repo rows, a scope budget would interleave home rows.
+    const skills = [
+      ...Array.from({ length: 600 }, (_, index) =>
+        skill({
+          name: `deploy-${String(index).padStart(4, '0')}`,
+          sourceKind: 'repo',
+          skillFilePath: `/repo/.agents/skills/deploy-${index}/SKILL.md`
+        })
+      ),
+      ...Array.from({ length: 10 }, (_, index) =>
+        skill({
+          name: `alpha-deploy-${index}`,
+          sourceKind: 'home',
+          skillFilePath: `/home/.claude/skills/alpha-deploy-${index}/SKILL.md`
+        })
+      )
+    ]
+    const names = buildNativeChatPickerItems([], skills, 'deploy', '/').map((item) => item.name)
+    expect(names).toHaveLength(500)
+    expect(names.every((name) => name.startsWith('deploy-'))).toBe(true)
+    expect(names).not.toContain('alpha-deploy-0')
   })
 
   it('keeps a long token-safe name intact for insertion instead of truncating it', () => {
