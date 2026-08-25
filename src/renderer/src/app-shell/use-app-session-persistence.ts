@@ -20,7 +20,7 @@ import {
   createShutdownCheckpointBeforeUnloadHandler,
   createShutdownCheckpointGuard
 } from '../lib/shutdown-checkpoint-guard'
-import { runShutdownCheckpointPersist } from './shutdown-checkpoint-persist'
+import { createShutdownCheckpointPersist } from './shutdown-checkpoint-persist'
 import { shutdownBufferCaptures } from '../components/terminal-pane/shutdown-buffer-captures'
 import {
   dispatchWindowCloseRequest,
@@ -121,8 +121,8 @@ export function useAppSessionPersistence(): void {
     // two firings, PTY exit events can arrive and unmount TerminalPanes,
     // emptying shutdownBufferCaptures. The guard prevents the second call
     // from overwriting the good session data with an empty snapshot.
-    const shutdownCheckpoint = createShutdownCheckpointGuard(() =>
-      runShutdownCheckpointPersist({
+    const shutdownCheckpoint = createShutdownCheckpointGuard(
+      createShutdownCheckpointPersist({
         shouldCaptureSession: () => shouldPersistWorkspaceSession(useAppStore.getState()),
         captureTerminalBuffers: () => {
           for (const capture of shutdownBufferCaptures.values()) {

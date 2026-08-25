@@ -498,12 +498,16 @@ describe('renderer startup runtime routing', () => {
     expect(checkpointEnd).toBeGreaterThan(checkpointStart)
     const checkpointBlock = source.slice(checkpointStart, checkpointEnd)
 
-    expect(checkpointBlock).toContain('runShutdownCheckpointPersist({')
+    expect(checkpointBlock).toContain('createShutdownCheckpointPersist({')
     expect(checkpointBlock).toContain(
       'buildWorkspaceSessionHostSnapshots(\n            buildWorkspaceSessionPayload(freshState),\n            freshState\n          )'
     )
     expect(checkpointBlock).toContain('buildUiPatch: () => buildActiveViewUnloadPatch(')
-    expect(checkpointBlock).toContain('isIntentionalAppRestartInProgress')
+    // Why pin the exact gate: the degrade tiers must arm only for intentional
+    // restarts and app-level closes, never for arbitrary unloads.
+    expect(checkpointBlock).toContain(
+      'isIntentionalAppRestartInProgress() || isWindowCloseCheckpointInProgress()'
+    )
     expect(checkpointBlock).toContain(
       'useAppStore.getState().openFiles.some((file) => file.isDirty)'
     )
