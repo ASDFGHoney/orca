@@ -79,10 +79,27 @@ export function resolveClaudeReplayWaiter(
     return
   }
   const uuid = readClaudeFrameString(message, 'uuid')
-  const waiter = uuid ? session.dispatchWaiters.shift() : undefined
+  const waiter = uuid ? session.dispatchWaiters[0] : undefined
+  if (waiter?.expectedContent && !sameClaudeReplayContent(waiter.expectedContent, content)) {
+    return
+  }
+  if (waiter) {
+    session.dispatchWaiters.shift()
+  }
   if (waiter && uuid) {
     clearTimeout(waiter.timer)
     waiter.resolve(uuid)
+  }
+}
+
+function sameClaudeReplayContent(expected: unknown[], actual: unknown): boolean {
+  if (!Array.isArray(actual)) {
+    return false
+  }
+  try {
+    return JSON.stringify(expected) === JSON.stringify(actual)
+  } catch {
+    return false
   }
 }
 
@@ -138,7 +155,11 @@ async function messageContent(body: AgentJournalMessageItem): Promise<unknown[]>
   return content
 }
 
-function waitForReplay(session: ClaudeSession, timeoutMs: number): Promise<string | null> {
+function waitForReplay(
+  session: ClaudeSession,
+  timeoutMs: number,
+  expectedContent: unknown[]
+): Promise<string | null> {
   return new Promise((resolve) => {
     const waiter = {
       resolve,
@@ -148,7 +169,8 @@ function waitForReplay(session: ClaudeSession, timeoutMs: number): Promise<strin
           session.dispatchWaiters.splice(index, 1)
         }
         resolve(null)
-      }, timeoutMs)
+      }, timeoutMs),
+      expectedContent
     }
     waiter.timer.unref?.()
     session.dispatchWaiters.push(waiter)
@@ -166,7 +188,7 @@ export async function dispatchClaudeTurn(
   } catch (error) {
     return { state: 'rejected', reason: (error as Error).message }
   }
-  const replayed = waitForReplay(session, timeoutMs)
+  const replayed = waitForReplay(session, timeoutMs, content)
   try {
     await session.connection.send({
       type: 'user',

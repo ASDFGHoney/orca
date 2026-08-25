@@ -48,6 +48,45 @@ describe('Claude structured dispatch image limits', () => {
     clearTimeout(timer)
   })
 
+  it('does not accept an unrelated root user replay as this send', async () => {
+    const send = vi.fn(async (outbound: Record<string, unknown>) => {
+      const body = outbound.message as { content: unknown[] }
+      resolveClaudeReplayWaiter(session, {
+        type: 'user',
+        session_id: 'provider-session',
+        uuid: 'stale-root-uuid',
+        parent_tool_use_id: null,
+        message: { role: 'user', content: [{ type: 'text', text: 'an earlier prompt' }] }
+      })
+      resolveClaudeReplayWaiter(session, {
+        type: 'user',
+        session_id: 'provider-session',
+        uuid: 'current-root-uuid',
+        parent_tool_use_id: null,
+        message: { role: 'user', content: body.content }
+      })
+    })
+    const session = sessionFor(send)
+
+    await expect(
+      dispatchClaudeTurn(
+        session,
+        {
+          clientMessageId: 'client-1',
+          body: userMessage([{ type: 'text', text: 'the current prompt' }])
+        },
+        100
+      )
+    ).resolves.toEqual({
+      state: 'accepted',
+      providerIdentity: {
+        provider: 'claude',
+        sessionId: 'provider-session',
+        uuid: 'current-root-uuid'
+      }
+    })
+  })
+
   it('rejects more than twenty URL images before sending', async () => {
     const session = sessionFor()
     const body = userMessage(

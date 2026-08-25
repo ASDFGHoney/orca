@@ -54,6 +54,8 @@ export type ClaudeStructuredSessionAdapterDeps = {
 export type ClaudeDispatchWaiter = {
   resolve: (uuid: string | null) => void
   timer: ReturnType<typeof setTimeout>
+  /** The provider replay must identify the exact user payload we submitted. */
+  expectedContent?: unknown[]
 }
 
 export type ClaudeSession = {
