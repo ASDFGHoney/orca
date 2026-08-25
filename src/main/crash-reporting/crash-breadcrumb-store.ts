@@ -42,8 +42,14 @@ function retainedBreadcrumbKey(breadcrumb: CrashReportBreadcrumb): string | null
     return null
   }
   const surface = breadcrumb.data?.rendererSurface
-  const threshold = breadcrumb.data?.thresholdPct
-  return `${breadcrumb.name}:${String(surface)}:${String(threshold)}:${breadcrumb.origin ?? 'global'}`
+  // Why both: the heap-ratio marks and the private-footprint marks are separate
+  // one-shot ladders. Keying only on `thresholdPct` collapses every footprint
+  // crumb onto one `undefined` slot, so the second mark evicts the first.
+  const threshold =
+    breadcrumb.data?.thresholdPct !== undefined
+      ? `pct${String(breadcrumb.data.thresholdPct)}`
+      : `privMB${String(breadcrumb.data?.thresholdPrivateMB)}`
+  return `${breadcrumb.name}:${String(surface)}:${threshold}:${breadcrumb.origin ?? 'global'}`
 }
 
 /** Returns the stored breadcrumb so coalescing can refresh the entry it owns. */
