@@ -403,7 +403,7 @@ describe('folder workspace owner-routed mutations', () => {
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
-  it('deletes every colliding workspace ID after routing through the selected owner', async () => {
+  it('deletes only the selected owner row when workspace IDs collide', async () => {
     const localFolder = makeFolderWorkspace({ executionHostId: 'local' })
     const runtimeFolder = makeFolderWorkspace({
       name: 'Runtime collision',
@@ -429,8 +429,8 @@ describe('folder workspace owner-routed mutations', () => {
       folderWorkspaceId: localFolder.id
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
-    // Current contract: delete has no owner option and purges all rows sharing the bare ID.
-    expect(store.getState().folderWorkspaces).toEqual([])
+    // Delete is owner-scoped: the sibling host's row keeps the bare ID alive.
+    expect(store.getState().folderWorkspaces).toEqual([runtimeFolder])
   })
 
   it('deletes a runtime folder through its owner instead of the focused runtime', async () => {

@@ -395,9 +395,10 @@ describe('repo slice host identity routing', () => {
     await store.getState().removeProject('same-repo', { hostId: 'local' })
 
     expect(store.getState().worktreesByRepo['same-repo']).toEqual([remoteWorktree])
-    // Current contract: terminal/editor maps are keyed by hostless worktree ID and are purged.
+    // Terminal/editor maps are keyed by hostless worktree ID and are purged, but the
+    // host-scoped purge deliberately leaves the sibling's legacy bare recency key intact.
     expect(store.getState().tabsByWorktree[sharedWorktreeId]).toBeUndefined()
-    expect(store.getState().lastVisitedAtByWorktreeId[sharedWorktreeId]).toBeUndefined()
+    expect(store.getState().lastVisitedAtByWorktreeId[sharedWorktreeId]).toBe(10)
   })
 
   it('allows two removals of the same owner row to overlap', async () => {
