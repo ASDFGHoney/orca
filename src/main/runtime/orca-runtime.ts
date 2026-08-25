@@ -94,7 +94,10 @@ import {
   type StructuredTuiOwner
 } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
-import { agentSessionProviderHandlesEqual } from '../../shared/agent-session-provider-handle'
+import {
+  agentSessionProviderHandleRoot,
+  agentSessionProviderHandlesEqual
+} from '../../shared/agent-session-provider-handle'
 import { SESSION_TAB_NOT_FOUND_ERROR } from '../../shared/session-tab-close'
 import {
   agentSessionOwnerBindingsEqual,
@@ -10738,11 +10741,14 @@ export class OrcaRuntimeService {
           { spawnToken, providerRoot: record.accountHome.path, sessionId: record.sessionId }
         )
         const terminal = launched.terminal
+        let spawnedOwner: StructuredTuiOwner | null = null
+        let ptyId: string | undefined
         try {
           if (!terminal.processId || !terminal.paneKey || !terminal.tabId || !terminal.ptyId) {
             throw new Error('The resumed terminal did not publish a process identity.')
           }
-          const spawnedOwner = this.refreshStructuredTuiOwnerBinding({
+          ptyId = terminal.ptyId
+          spawnedOwner = this.refreshStructuredTuiOwnerBinding({
             terminal: {
               handle: terminal.handle,
               tabId: terminal.tabId,
@@ -10791,7 +10797,6 @@ export class OrcaRuntimeService {
                   paneKey: terminal.paneKey,
                   sessionId: head.handle.sessionId,
                   projectsDir: join(record.accountHome.path, 'projects'),
-                  expectedLeafUuid: head.handle.leafUuid,
                   spawnToken,
                   minimumProviderSessionReceivedAt: launchStartedAt
                 })
@@ -10819,14 +10824,33 @@ export class OrcaRuntimeService {
             historySource: 'provider-resume'
           })
         } catch (error) {
+          let closeError: unknown = null
           try {
             await this.closeTerminal(terminal.handle)
-            await this.waitForTerminal(terminal.handle, {
-              condition: 'exit',
-              timeoutMs: 15_000
-            })
-          } catch (cleanupError) {
-            throw new StructuredTuiLaunchCleanupError(error, cleanupError)
+          } catch (cleanupFailure) {
+            closeError = cleanupFailure
+          }
+          try {
+            // closeTerminal may retire the renderer handle before the PTY exit is
+            // observed. Prove the provider child (or, before identity publication,
+            // the PTY) through the same exit path used by handoff recovery.
+            if (spawnedOwner) {
+              await this.waitForStructuredTuiOwnerExit(spawnedOwner)
+            } else if (ptyId) {
+              await this.waitForStructuredTuiPtyExit(ptyId)
+            } else {
+              throw new Error('The failed terminal did not publish a PTY identity.')
+            }
+          } catch (exitFailure) {
+            throw new StructuredTuiLaunchCleanupError(
+              error,
+              closeError === null
+                ? exitFailure
+                : new AggregateError(
+                    [closeError, exitFailure],
+                    'Structured TUI cleanup could not prove process exit.'
+                  )
+            )
           }
           throw error
         }
@@ -10857,12 +10881,21 @@ export class OrcaRuntimeService {
           )
         }
         const head = record.providerHandleChain.at(-1)
-        if (
-          !head ||
-          (record.lease.provenHandleLinkId !== null &&
-            current.link.linkId !== record.lease.provenHandleLinkId) ||
-          !agentSessionProviderHandlesEqual(current.link.handle, head.handle)
-        ) {
+        const provenLink = record.providerHandleChain.find(
+          (link) => link.linkId === record.lease.provenHandleLinkId
+        )
+        const sameProviderIdentity =
+          head &&
+          (current.link.handle.provider === 'claude'
+            ? agentSessionProviderHandleRoot(current.link.handle) ===
+                agentSessionProviderHandleRoot(head.handle) &&
+              (provenLink === undefined ||
+                agentSessionProviderHandleRoot(current.link.handle) ===
+                  agentSessionProviderHandleRoot(provenLink.handle))
+            : (record.lease.provenHandleLinkId === null ||
+                current.link.linkId === record.lease.provenHandleLinkId) &&
+              agentSessionProviderHandlesEqual(current.link.handle, head.handle))
+        if (!sameProviderIdentity) {
           throw new Error('agent_session_identity_required')
         }
         if (current.link.handle.provider === 'claude' && head.handle.provider === 'claude') {
@@ -11341,7 +11374,6 @@ export class OrcaRuntimeService {
               paneKey: owner.terminal.paneKey,
               sessionId: head.handle.sessionId,
               projectsDir: join(input.record.accountHome.path, 'projects'),
-              expectedLeafUuid: head.handle.leafUuid,
               spawnToken: input.spawnToken,
               minimumProviderSessionReceivedAt: proofStartedAt
             })
@@ -11604,7 +11636,6 @@ export class OrcaRuntimeService {
     paneKey: string
     sessionId: string
     projectsDir: string
-    expectedLeafUuid?: string | null
     /** Set when this call launched a new Claude process; a cached transcript marker is not enough. */
     spawnToken?: string
     minimumProviderSessionReceivedAt?: number
@@ -11644,9 +11675,6 @@ export class OrcaRuntimeService {
         const leafUuid = await readClaudeTranscriptLeafUuid(transcriptPath)
         if (!leafUuid) {
           throw new Error('The Claude terminal did not prove its transcript leaf.')
-        }
-        if (input.expectedLeafUuid && leafUuid !== input.expectedLeafUuid) {
-          throw new Error('The Claude terminal resumed a different conversation leaf.')
         }
         return { transcriptPath, leafUuid }
       }

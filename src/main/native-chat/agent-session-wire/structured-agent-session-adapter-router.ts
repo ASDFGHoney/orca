@@ -39,6 +39,20 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
     }
   }
 
+  async closeSession(sessionId: string): Promise<void | boolean> {
+    const adapter = this.owners.get(sessionId)
+    if (!adapter?.closeSession) {
+      // Handoff must not launch another provider writer when this router cannot
+      // prove that the current owner stopped.
+      return false
+    }
+    const stopped = await adapter.closeSession(sessionId)
+    if (stopped !== false) {
+      this.owners.delete(sessionId)
+    }
+    return stopped
+  }
+
   dispatch: StructuredAgentSessionAdapter['dispatch'] = (input) =>
     this.owner(input.sessionId).dispatch(input)
 

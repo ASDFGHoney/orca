@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Native Chat Rollout: What Users See</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #141414; color: #f5f5f5; }
+      body { margin: 0; padding: 40px 20px 56px; }
+      main { max-width: 980px; margin: 0 auto; }
+      h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+      h2 { margin: 0; font-size: 21px; }
+      .intro { max-width: 760px; color: #c1c1c1; font-size: 16px; line-height: 1.55; margin: 14px 0 32px; }
+      .walkthrough { display: grid; gap: 22px; }
+      .step { display: grid; grid-template-columns: 76px 1fr; gap: 20px; align-items: start; }
+      .number { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: #315d43; border: 1px solid #72ad85; font-size: 24px; font-weight: 700; }
+      .card { background: #202020; border: 1px solid #414141; border-radius: 14px; overflow: hidden; }
+      .card-head { padding: 18px 22px; border-bottom: 1px solid #414141; }
+      .card-head p { margin: 8px 0 0; color: #bdbdbd; line-height: 1.45; }
+      .body { padding: 20px 22px 22px; display: grid; grid-template-columns: minmax(260px, 1fr) minmax(240px, .9fr); gap: 22px; }
+      .who, .happens { line-height: 1.5; }
+      .label { color: #8f8f8f; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 700; margin-bottom: 5px; }
+      .who p, .happens p { margin: 0; color: #d0d0d0; }
+      .screen { grid-column: 1 / -1; background: #2b2b2b; border: 1px solid #505050; border-radius: 9px; padding: 14px; }
+      .screen-title { display: flex; justify-content: space-between; gap: 12px; font-weight: 650; padding-bottom: 11px; border-bottom: 1px solid #4a4a4a; }
+      .muted { color: #aaa; font-size: 13px; }
+      .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid #454545; }
+      .row:last-child { border-bottom: 0; }
+      button { border: 1px solid #707070; border-radius: 7px; background: #373737; color: #fff; padding: 8px 11px; font: inherit; font-size: 13px; }
+      .primary { background: #396c4d; border-color: #79b58c; }
+      .warning { color: #f0d49b; background: #4c3b23; border: 1px solid #8e6d37; border-radius: 7px; padding: 11px; font-size: 13px; margin: 12px 0; }
+      .connector { width: 2px; height: 22px; background: #4c4c4c; margin: -22px 0 0 26px; }
+      .footer { margin-top: 34px; padding: 16px 18px; border: 1px solid #806532; border-radius: 10px; color: #ead49e; line-height: 1.5; }
+      @media (max-width: 720px) { body { padding: 28px 14px 44px; } h1 { font-size: 27px; } .step { grid-template-columns: 1fr; gap: 10px; } .number { width: 42px; height: 42px; font-size: 19px; } .body { grid-template-columns: 1fr; gap: 14px; } .connector { display: none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>What changes for users in each rollout step</h1>
+      <p class="intro">Proposal walkthrough, not an implementation. The normal terminal experience remains available. Native chat appears only for a developer who has explicitly opted into the existing experimental setting and whose host/provider passes its capability checks.</p>
+      <section class="walkthrough">
+        <article class="step"><div class="number">1</div><div class="card"><div class="card-head"><h2>Existing user: nothing changes</h2><p>Current terminal-owned sessions remain compatible.</p></div><div class="body"><div class="who"><div class="label">Who sees this</div><p>Everyone, including users who never enabled experimental features.</p></div><div class="happens"><div class="label">What happens</div><p>Open a worktree and use the normal agent terminal exactly as today.</p></div><div class="screen"><div class="screen-title"><span>Codex terminal</span><span class="muted">Current behavior</span></div><p class="muted">Your terminal transcript and composer stay the primary surface.</p><button>Open workspace terminal</button></div></div></div></article>
+        <div class="connector"></div>
+        <article class="step"><div class="number">2</div><div class="card"><div class="card-head"><h2>Developer opt-in: native chat becomes an option</h2><p>No new toggle is proposed; the existing opt-in and host capability decide eligibility.</p></div><div class="body"><div class="who"><div class="label">Who sees this</div><p>A developer who deliberately enabled <code>experimentalNativeChat</code>, on a host/provider that advertises structured chat.</p></div><div class="happens"><div class="label">What happens</div><p>The user can choose native chat or continue using the terminal. Unsupported hosts stay on the normal path.</p></div><div class="screen"><div class="screen-title"><span>Choose an agent surface</span><span class="muted">Opted in</span></div><div class="row"><span>Native agent chat</span><button class="primary">Try native chat</button></div><div class="row"><span>Agent terminal</span><button>Use terminal</button></div></div></div></div></article>
+        <div class="connector"></div>
+        <article class="step"><div class="number">3</div><div class="card"><div class="card-head"><h2>Native chat: structured operations</h2><p>The host owns the durable session; the workspace shell remains available alongside it.</p></div><div class="body"><div class="who"><div class="label">Who sees this</div><p>A user who selected native chat in step 2 and completed a proven structured launch.</p></div><div class="happens"><div class="label">What happens</div><p>Prompts, approvals, questions, cancellation, images, and options use the structured session rather than a PTY write.</p></div><div class="screen"><div class="screen-title"><span>Native agent chat</span><span class="muted">Host-owned</span></div><p class="muted">Conversation history is replayable after reconnect. Workspace terminal remains a separate action.</p><button>Open workspace terminal</button></div></div></div></article>
+        <div class="connector"></div>
+        <article class="step"><div class="number">4</div><div class="card"><div class="card-head"><h2>If structured launch fails: stay recoverable</h2><p>No silent runtime switch and no lost prompt when delivery is uncertain.</p></div><div class="body"><div class="who"><div class="label">Who sees this</div><p>A developer who opted in, but the host/provider could not prove a safe structured owner.</p></div><div class="happens"><div class="label">What happens</div><p>The app explains the failure and preserves a recoverable owner. An explicit terminal fallback may be offered only after this proposal is approved.</p></div><div class="screen"><div class="warning"><strong>Native chat could not be started safely.</strong><br />Your session was not silently moved and your prompt was not resent.</div><div class="row"><span class="muted">Choose what to do next</span><button>Keep current session</button></div></div></div></div></article>
+        <div class="connector"></div>
+        <article class="step"><div class="number">5</div><div class="card"><div class="card-head"><h2>Qualified handoff: switch only while idle</h2><p>A real TUI ↔ native cycle is enabled only after provider-specific proof.</p></div><div class="body"><div class="who"><div class="label">Who sees this</div><p>An opted-in developer using a provider and host that passed the full handoff capability probe.</p></div><div class="happens"><div class="label">What happens</div><p>Pending approvals, questions, background work, and unsaved composer text block the switch. The user can keep using the current surface.</p></div><div class="screen"><div class="screen-title"><span>Switch agent surface</span><span class="muted">Idle required</span></div><div class="warning">The session must be idle before ownership can move safely.</div><div class="row"><button>Keep using terminal</button><button class="primary">Switch to native chat</button></div></div></div></div></article>
+      </section>
+      <p class="footer"><strong>Approval gate:</strong> This preview is only a shared visual proposal. Do not implement the fallback action, new copy, toggle, or other user-facing change based on this file until Brennan explicitly approves the flow.</p>
+    </main>
+  </body>
+</html>

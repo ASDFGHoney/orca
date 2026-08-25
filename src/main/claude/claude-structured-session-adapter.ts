@@ -15,6 +15,7 @@ import {
   claudeAuthDiagnostic,
   readClaudeFrameString,
   readClaudeInit,
+  readClaudeRootUserFrameUuid,
   readClaudeModels
 } from './claude-structured-init-proof'
 import {
@@ -79,7 +80,9 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       if (init) {
         initDeadline.resolve(init)
       }
-      observedLeafUuid = readClaudeFrameString(message, 'uuid') ?? observedLeafUuid
+      observedLeafUuid = liveSession
+        ? (readClaudeRootUserFrameUuid(message, liveSession.providerSessionId) ?? observedLeafUuid)
+        : (readClaudeFrameString(message, 'uuid') ?? observedLeafUuid)
       if (liveSession) {
         liveSession.leafUuid = observedLeafUuid
         resolveClaudeReplayWaiter(liveSession, message)

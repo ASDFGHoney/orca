@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-session-mutation-envelope'
+import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import { setStoredAgentSessionHandoffStage } from '../../runtime/agent-session-handoff-record-transitions'
@@ -21,17 +22,18 @@ const LOCATION = {
   wslDistro: null,
   workspaceId: 'workspace-1',
   workspaceKind: 'folder' as const
-}
+} satisfies AgentSessionExecutionLocation
 
 let root: string
 let store: AgentSessionRecordStore
 let journal: Awaited<ReturnType<typeof openAgentSessionJournal>>
 let coordinator: StructuredAgentSessionHandoffCoordinator
-let launchTui: ReturnType<typeof vi.fn>
-let reproveTuiOwner: ReturnType<typeof vi.fn>
-let closeTuiOwner: ReturnType<typeof vi.fn>
-let stopRecoveredOwner: ReturnType<typeof vi.fn>
-let acquireNativeStop: ReturnType<typeof vi.fn>
+let launchTui: Mock<StructuredAgentSessionHandoffTransport['launchTui']>
+let reproveTuiOwner: Mock<StructuredAgentSessionHandoffTransport['reproveTuiOwner']>
+let closeTuiOwner: Mock<NonNullable<StructuredAgentSessionHandoffTransport['closeTuiOwner']>>
+let stopRecoveredOwner: Mock<StructuredAgentSessionHandoffTransport['stopRecoveredOwner']>
+let suspendNative: Mock<(sessionId: string) => Promise<void | boolean>>
+let acquireNativeStop: Mock<(turnId: string) => Promise<boolean>>
 let acquireNativeCalls: number
 
 function operationId(sequence: number): string {
@@ -134,15 +136,20 @@ function createCoordinator(): void {
       launchTui,
       reproveTuiOwner,
       closeTuiOwner,
-      waitForTuiExit: vi.fn(async () => ({})),
-      waitForTuiIdleOrExit: vi.fn(async () => 'idle'),
+      waitForTuiExit: vi.fn<StructuredAgentSessionHandoffTransport['waitForTuiExit']>(
+        async () => ({})
+      ),
+      waitForTuiIdleOrExit: vi.fn<StructuredAgentSessionHandoffTransport['waitForTuiIdleOrExit']>(
+        async () => 'idle'
+      ),
       tuiStatus: () => 'idle',
-      recoverTuiOwner: vi.fn(async (record) =>
-        tuiOwner(
-          record.lease.runtimeFence,
-          record.lease.ownerProcess?.spawnToken ?? 'recovered',
-          join(root, 'rollout.jsonl')
-        )
+      recoverTuiOwner: vi.fn<StructuredAgentSessionHandoffTransport['recoverTuiOwner']>(
+        async (record) =>
+          tuiOwner(
+            record.lease.runtimeFence,
+            record.lease.ownerProcess?.spawnToken ?? 'recovered',
+            join(root, 'rollout.jsonl')
+          )
       ),
       probeRecoveredOwner: async () => 'dead',
       stopRecoveredOwner
@@ -151,7 +158,7 @@ function createCoordinator(): void {
       journal,
       fence: store.getRecord(SESSION)?.lease.runtimeFence ?? 1
     }),
-    suspendNative: vi.fn(async () => undefined),
+    suspendNative,
     acquireNative: async ({ fence, spawnToken }) => {
       acquireNativeCalls += 1
       await store.commitProcessIdentity({
@@ -188,11 +195,20 @@ beforeEach(async () => {
     },
     journalDir: join(root, 'journal')
   })
-  launchTui = vi.fn(async ({ fence, spawnToken }) => tuiOwner(fence, spawnToken))
-  reproveTuiOwner = vi.fn(async ({ owner }) => owner)
-  closeTuiOwner = vi.fn(async (owner) => ({ transcriptPath: owner.transcriptPath }))
-  stopRecoveredOwner = vi.fn(async () => undefined)
-  acquireNativeStop = vi.fn(async () => true)
+  launchTui = vi.fn<StructuredAgentSessionHandoffTransport['launchTui']>(
+    async ({ fence, spawnToken }) => tuiOwner(fence, spawnToken)
+  )
+  reproveTuiOwner = vi.fn<StructuredAgentSessionHandoffTransport['reproveTuiOwner']>(
+    async ({ owner }) => owner
+  )
+  closeTuiOwner = vi.fn<NonNullable<StructuredAgentSessionHandoffTransport['closeTuiOwner']>>(
+    async (owner) => ({ transcriptPath: owner.transcriptPath })
+  )
+  stopRecoveredOwner = vi.fn<StructuredAgentSessionHandoffTransport['stopRecoveredOwner']>(
+    async () => undefined
+  )
+  suspendNative = vi.fn(async () => undefined)
+  acquireNativeStop = vi.fn<(turnId: string) => Promise<boolean>>(async () => true)
   acquireNativeCalls = 0
   await establishNativeOwner()
   createCoordinator()
@@ -204,6 +220,28 @@ afterEach(async () => {
 })
 
 describe('structured handoff failure injection', () => {
+  it('leaves the native owner and preparing checkpoint when provider close fails', async () => {
+    suspendNative.mockRejectedValueOnce(new Error('durable handle unavailable'))
+
+    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+
+    expect(launchTui).not.toHaveBeenCalled()
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      claimStatus: 'live',
+      handoffStage: 'preparing',
+      handoffOperationId: expect.any(String)
+    })
+    expect(coordinator.status(SESSION)).toMatchObject({
+      owner: 'native',
+      phase: 'failed',
+      error: { recoverableOwner: 'native' }
+    })
+  })
+
   it('keeps the native owner when cancellation is not acknowledged', async () => {
     await appendRunningTurn()
     acquireNativeStop.mockResolvedValueOnce(false)

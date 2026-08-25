@@ -4,7 +4,7 @@ import type { AgentJournalMessageItem } from '../../shared/agent-session-journal
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeSession } from './claude-structured-session-state'
-import { readClaudeFrameString } from './claude-structured-init-proof'
+import { readClaudeRootUserFrameUuid } from './claude-structured-init-proof'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -54,11 +54,8 @@ export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  if (
-    message.type !== 'user' ||
-    message.parent_tool_use_id !== null ||
-    readClaudeFrameString(message, 'session_id') !== session.providerSessionId
-  ) {
+  const uuid = readClaudeRootUserFrameUuid(message, session.providerSessionId)
+  if (!uuid) {
     return
   }
   const body = message.message
@@ -66,20 +63,7 @@ export function resolveClaudeReplayWaiter(
     return
   }
   const content = (body as { content?: unknown }).content
-  if (
-    Array.isArray(content) &&
-    content.length > 0 &&
-    content.every(
-      (block) =>
-        typeof block === 'object' &&
-        block !== null &&
-        (block as { type?: unknown }).type === 'tool_result'
-    )
-  ) {
-    return
-  }
-  const uuid = readClaudeFrameString(message, 'uuid')
-  const waiter = uuid ? session.dispatchWaiters[0] : undefined
+  const waiter = session.dispatchWaiters[0]
   if (waiter?.expectedContent && !sameClaudeReplayContent(waiter.expectedContent, content)) {
     return
   }

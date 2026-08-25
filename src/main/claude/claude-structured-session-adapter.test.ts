@@ -643,7 +643,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     })
   })
 
-  it('persists the last observed leaf before graceful close', async () => {
+  it('persists the latest root prompt leaf before graceful close', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const persistedHandles: unknown[] = []
@@ -654,6 +654,18 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       session_id: PROVIDER_SESSION_ID,
       uuid: 'final-leaf'
     })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'user',
+      session_id: PROVIDER_SESSION_ID,
+      parent_tool_use_id: null,
+      uuid: 'prompt-leaf',
+      message: { role: 'user', content: [{ type: 'text', text: 'next prompt' }] }
+    })
+    claude.connections[0].handlers.onMessage?.({
+      type: 'result',
+      session_id: PROVIDER_SESSION_ID,
+      uuid: 'assistant-result-item'
+    })
 
     await adapter.closeSession('session-1')
 
@@ -661,7 +673,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       {
         sessionId: 'session-1',
         providerSessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'final-leaf',
+        leafUuid: 'prompt-leaf',
         fence: 7
       }
     ])
@@ -669,13 +681,13 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       type: 'handle',
       sessionId: 'session-1',
       providerSessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'final-leaf',
+      leafUuid: 'prompt-leaf',
       fence: 7
     })
     expect(claude.connections[0].closeCount).toBe(1)
   })
 
-  it('closes the provider even when durable handle persistence fails', async () => {
+  it('keeps the provider live when durable handle persistence fails', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const adapter = adapterFor(claude, {}, events, [], undefined, new Error('journal unavailable'))
@@ -683,12 +695,8 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
 
     await expect(adapter.closeSession('session-1')).rejects.toThrow('journal unavailable')
 
-    expect(claude.connections[0].closeCount).toBe(1)
-    expect(events.at(-1)).toEqual({
-      type: 'ended',
-      sessionId: 'session-1',
-      reason: 'claude session closed'
-    })
-    await expect(adapter.closeSession('session-1')).resolves.toBeUndefined()
+    expect(claude.connections[0].closeCount).toBe(0)
+    expect(events.some((event) => event.type === 'ended')).toBe(false)
+    await expect(adapter.closeSession('session-1')).rejects.toThrow('journal unavailable')
   })
 })

@@ -17,6 +17,42 @@ export function readClaudeFrameString(source: Record<string, unknown>, key: stri
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+/**
+ * The durable Claude branch marker is the UUID on a root user prompt. Result,
+ * assistant, and tool-result frames also carry UUIDs, but those are item
+ * identities rather than the transcript's resumable leaf.
+ */
+export function readClaudeRootUserFrameUuid(
+  message: Record<string, unknown>,
+  sessionId?: string
+): string | null {
+  if (
+    message.type !== 'user' ||
+    message.parent_tool_use_id !== null ||
+    (sessionId !== undefined && readClaudeFrameString(message, 'session_id') !== sessionId)
+  ) {
+    return null
+  }
+  const body = message.message
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return null
+  }
+  const content = (body as { content?: unknown }).content
+  if (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every(
+      (block) =>
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: unknown }).type === 'tool_result'
+    )
+  ) {
+    return null
+  }
+  return readClaudeFrameString(message, 'uuid')
+}
+
 export function readClaudeInit(message: Record<string, unknown>): ClaudeInitObservation | null {
   const hookName = readClaudeFrameString(message, 'hook_name')
   const isInit = message.type === 'system' && message.subtype === 'init'

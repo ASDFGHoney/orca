@@ -264,7 +264,7 @@ describe('structured Claude legacy adoption', () => {
     expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
   })
 
-  it('does not let a stale last-prompt marker prove a newly launched Claude process', async () => {
+  it('requires a fresh provider observation while accepting an advanced transcript leaf', async () => {
     const internal = runtime as unknown as {
       getLivePtyForHandle(): { pty: { connected: boolean; paneKey: string; launchAgent: string } }
       waitForStructuredClaudeTuiProof(input: {
@@ -272,7 +272,6 @@ describe('structured Claude legacy adoption', () => {
         paneKey: string
         sessionId: string
         projectsDir: string
-        expectedLeafUuid: string
         spawnToken: string
         minimumProviderSessionReceivedAt: number
       }): Promise<{ leafUuid: string }>
@@ -280,18 +279,18 @@ describe('structured Claude legacy adoption', () => {
     const pty = { connected: true, paneKey: PANE_KEY, launchAgent: 'claude' }
     internal.getLivePtyForHandle = vi.fn(() => ({ pty }))
     const staleAt = Date.now() - 1_000
+    await writeTranscript('leaf-advanced')
     rows = [providerRow({ launchToken: 'new-launch', receivedAt: staleAt })]
     const proof = internal.waitForStructuredClaudeTuiProof({
       handle: 'term-claude-adopt',
       paneKey: PANE_KEY,
       sessionId: PROVIDER_SESSION_ID,
       projectsDir: join(accountHome, 'projects'),
-      expectedLeafUuid: LEAF_UUID,
       spawnToken: 'new-launch',
       minimumProviderSessionReceivedAt: Date.now()
     })
     await new Promise((resolve) => setTimeout(resolve, 150))
     rows = [providerRow({ launchToken: 'new-launch', receivedAt: Date.now() })]
-    await expect(proof).resolves.toMatchObject({ leafUuid: LEAF_UUID })
+    await expect(proof).resolves.toMatchObject({ leafUuid: 'leaf-advanced' })
   }, 5_000)
 })

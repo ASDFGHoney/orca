@@ -28,6 +28,13 @@ export async function closeClaudePublishedSession(input: {
   if (!session) {
     return
   }
+  // Keep the live session intact when its durable handoff handle cannot be saved.
+  await input.persistHandle?.({
+    sessionId: input.sessionId,
+    providerSessionId: session.providerSessionId,
+    leafUuid: session.leafUuid,
+    fence: session.fence
+  })
   input.sessions.delete(input.sessionId)
   settleClaudeDispatchWaiters(session)
   const pending = session.prompts.clear()
@@ -41,35 +48,20 @@ export async function closeClaudePublishedSession(input: {
       })
     )
   )
-  let persistenceError: unknown
-  try {
-    await input.persistHandle?.({
-      sessionId: input.sessionId,
-      providerSessionId: session.providerSessionId,
-      leafUuid: session.leafUuid,
-      fence: session.fence
-    })
-    input.onEvent?.({
-      type: 'handle',
-      sessionId: input.sessionId,
-      providerSessionId: session.providerSessionId,
-      leafUuid: session.leafUuid,
-      fence: session.fence
-    })
-  } catch (error) {
-    persistenceError = error
-  } finally {
-    const ended = {
-      type: 'ended',
-      sessionId: input.sessionId,
-      reason: 'claude session closed'
-    } as const
-    session.translator?.handle(ended)
-    input.onEvent?.(ended)
-    session.translator?.dispose()
-    await session.connection.close()
-  }
-  if (persistenceError) {
-    throw persistenceError
-  }
+  input.onEvent?.({
+    type: 'handle',
+    sessionId: input.sessionId,
+    providerSessionId: session.providerSessionId,
+    leafUuid: session.leafUuid,
+    fence: session.fence
+  })
+  const ended = {
+    type: 'ended',
+    sessionId: input.sessionId,
+    reason: 'claude session closed'
+  } as const
+  session.translator?.handle(ended)
+  input.onEvent?.(ended)
+  session.translator?.dispose()
+  await session.connection.close()
 }
