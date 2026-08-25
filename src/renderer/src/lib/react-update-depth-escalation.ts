@@ -20,8 +20,8 @@ const escalatedSiteIds = new Set<string>()
 const pendingEscalations = new Set<Promise<void>>()
 
 /**
- * Returns true when `error` is React's nested-update-limit throw, after routing it to the crash
- * reporter and the host error handler. Callers should then bail out of their catch rather than
+ * Returns true when `error` is React's nested-update-limit throw, after logging it and routing it
+ * to the crash reporter and the host error handler. Callers should then bail out of their catch rather than
  * apply their normal failure handling: the message is not a user-facing status, and the extra
  * setState calls would feed the same loop.
  *
@@ -39,6 +39,12 @@ export function escalateReactUpdateDepthError(error: unknown, siteId: string): b
   }
   escalatedSiteIds.add(siteId)
   try {
+    // Why unconditional: the web client stubs crash reporting to a no-op, so without this the
+    // guard would trade a mislabeled digest for total silence. Once per site, like the report.
+    console.error(
+      `[react-update-depth] React #185 (nested update limit) surfaced in the catch at ${siteId}; that site is a bystander, not the cause:`,
+      error
+    )
     trackEscalation(
       reportReactErrorBoundaryCrash({
         boundaryId: `${ASYNC_CATCH_BOUNDARY_PREFIX}${siteId}`,

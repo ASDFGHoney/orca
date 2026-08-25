@@ -111,6 +111,23 @@ describe('react update depth escalation', () => {
     expect(captured).toHaveLength(2)
   })
 
+  it('leaves console evidence when the host cannot surface the report', async () => {
+    // The web preload shim answers every recordRendererError with report: null, deduped: true,
+    // and its recordBreadcrumb is a no-op, so the console is the only surface web users have.
+    const { createWebDiagnosticsApi } = await import('../web/preload-api/web-diagnostics-api')
+    window.api = createWebDiagnosticsApi() as unknown as typeof window.api
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    expect(escalateReactUpdateDepthError(new Error(REACT_185_MINIFIED), SITE)).toBe(true)
+    await flushReactUpdateDepthEscalationsForTest()
+
+    expect(consoleError).toHaveBeenCalledTimes(1)
+    const logged = consoleError.mock.calls[0]?.map(String).join(' ') ?? ''
+    expect(logged).toContain(SITE)
+    expect(logged).toContain('#185')
+    consoleError.mockRestore()
+  })
+
   it('never throws when the crash-report bridge is missing or fails', () => {
     window.api = undefined as unknown as typeof window.api
     expect(() => escalateReactUpdateDepthError(new Error(REACT_185_MINIFIED), SITE)).not.toThrow()

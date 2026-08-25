@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 
 const PRE_INSTALL_NOTICE_CATCH = 'settings.AgentSkillSetupPanel.applyPreInstallNotice'
+const OPEN_TERMINAL_CATCH = 'settings.AgentSkillSetupPanel.openSetupTerminal'
 
 export function AgentSkillSetupPanel({
   title,
@@ -97,7 +98,9 @@ export function AgentSkillSetupPanel({
         await onBeforeOpenTerminal?.()
         await refreshPreInstallNotice()
         shouldOpenTerminal = true
-      } catch {
+      } catch (error) {
+        // onBeforeOpenTerminal is caller-supplied setState-bearing work, so #185 lands here too.
+        escalateReactUpdateDepthError(error, OPEN_TERMINAL_CATCH)
         shouldOpenTerminal = false
       } finally {
         if (mountedRef.current) {
@@ -151,7 +154,7 @@ export function AgentSkillSetupPanel({
           setPreInstallNoticeVisible(!isPrerequisiteAvailable(status))
         }
       } catch (error) {
-        // Why first: openSetupTerminal awaits this too, and its catch would swallow it again.
+        // Why first: the notice below is a setState that would feed the same runaway loop.
         if (escalateReactUpdateDepthError(error, PRE_INSTALL_NOTICE_CATCH)) {
           return
         }
