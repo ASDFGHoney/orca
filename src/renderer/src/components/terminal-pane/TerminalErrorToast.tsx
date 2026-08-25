@@ -146,9 +146,8 @@ export function TerminalErrorToast({
   const ssh = isSshError(error)
   const ownerUnavailable = isPaneOwnerUnverifiedError(error)
   const showDaemonRestart = !ssh && onRestartDaemon && shouldOfferDaemonRestart(error)
-  const showRetry = ownerUnavailable && onRetry !== undefined
   // Restart cannot recover a session after its owning daemon exits.
-  const showIssueLink = !ssh && !showDaemonRestart && !showRetry && !isExplainedTerminalError(error)
+  const showIssueLink = !ssh && !showDaemonRestart && !isExplainedTerminalError(error)
   const displayError = humanizeTerminalError(error)
   const [environmentFooter, setEnvironmentFooter] = useState<{
     error: string
@@ -295,28 +294,6 @@ export function TerminalErrorToast({
             {translate(
               'auto.components.terminal.pane.TerminalErrorToast.e4aa243f8c',
               'Restart daemon'
-            )}
-          </button>
-        ) : null}
-        {showRetry ? (
-          <button
-            onClick={onRetry}
-            style={{
-              marginLeft: 12,
-              border: '1px solid rgba(252, 165, 165, 0.45)',
-              borderRadius: 6,
-              background: 'rgba(127, 29, 29, 0.35)',
-              color: '#fecaca',
-              cursor: 'pointer',
-              fontSize: 12,
-              padding: '4px 8px',
-              whiteSpace: 'nowrap',
-              flexShrink: 0
-            }}
-          >
-            {translate(
-              'auto.components.terminal.pane.TerminalErrorToast.retryConnection',
-              'Retry connection'
             )}
           </button>
         ) : null}
