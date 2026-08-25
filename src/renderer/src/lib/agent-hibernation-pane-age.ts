@@ -63,7 +63,10 @@ export function observeHibernationPtyBindings(args: {
   }
   for (const paneKey of boundaryResolvedAtByPaneKey.keys()) {
     const tabId = paneKey.slice(0, paneKey.indexOf(':'))
-    if (!liveTabIds.has(tabId)) {
+    // Why: closed split panes mint fresh leaf ids when reopened. Once their
+    // retained binding expires, keeping the boundary stamp would leak one map
+    // entry per closed pane for the renderer's lifetime.
+    if (!liveTabIds.has(tabId) || !ptyBindingByPaneKey.has(paneKey)) {
       boundaryResolvedAtByPaneKey.delete(paneKey)
     }
   }

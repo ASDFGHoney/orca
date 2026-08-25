@@ -543,6 +543,53 @@ describe('agent sleep coordinator', () => {
     ).toHaveLength(3)
   })
 
+  it('revalidates a confirmed pane without listing unrelated runtime worktrees', async () => {
+    installRuntimeListResponses(...Array.from({ length: 5 }, () => runtimeListResult(['pty-1'])))
+    const shutdown = installEligibleState(vi.fn().mockResolvedValue(undefined), {
+      settings: {
+        experimentalAgentHibernation: true,
+        agentHibernationIdleMs: DEFAULT_AGENT_HIBERNATION_IDLE_MS,
+        activeRuntimeEnvironmentId: 'runtime-1'
+      } as never,
+      worktreesByRepo: {
+        'fixture-repo': [
+          {
+            id: 'wt-bg',
+            repoId: 'fixture-repo',
+            hostId: 'runtime:runtime-1',
+            runtimeOwnerEnvironmentId: 'runtime-1'
+          },
+          {
+            id: 'wt-unrelated',
+            repoId: 'fixture-repo',
+            hostId: 'runtime:runtime-2',
+            runtimeOwnerEnvironmentId: 'runtime-2'
+          }
+        ]
+      } as never,
+      tabsByWorktree: {
+        'wt-bg': [tab()],
+        'wt-unrelated': [{ ...tab(), id: 'tab-2', worktreeId: 'wt-unrelated' }]
+      },
+      ptyIdsByTabId: { 'tab-1': [] }
+    })
+
+    await runAgentHibernationTick()
+    await runAgentHibernationTick()
+
+    expect(shutdown).toHaveBeenCalledTimes(1)
+    const listCalls = mockRuntimeEnvironmentCall.mock.calls.filter(
+      ([args]) => args.method === 'terminal.list'
+    )
+    // Two global confirmation samples list both worktrees; the destructive
+    // recheck lists only the candidate's owner: 2W + C, not 2W + C×W.
+    expect(listCalls).toHaveLength(5)
+    expect(listCalls.at(-1)?.[0]).toMatchObject({
+      selector: 'runtime-1',
+      params: { worktree: expect.anything() }
+    })
+  })
+
   it('uses fresh store state after awaiting runtime liveness before shutdown', async () => {
     vi.useFakeTimers()
     const delayed = deferred<ReturnType<typeof runtimeListResult>>()
