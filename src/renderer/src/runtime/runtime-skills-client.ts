@@ -66,13 +66,18 @@ export async function runtimeTargetSupportsSkillDelete(
     return false
   }
   if (runtimeTarget.kind === 'local') {
-    return true
+    // Desktop answers true immediately; on web the "local" host is a remote
+    // server that updates independently, so the preload probes its capability.
+    return window.api.skills.deleteSupported()
   }
   return runtimeEnvironmentSupportsCapability(runtimeTarget.environmentId, SKILL_DELETE_CAPABILITY)
 }
 
 async function assertSkillDeleteSupported(runtimeTarget: RuntimeClientTarget): Promise<void> {
   if (runtimeTarget.kind === 'local') {
+    if (!(await window.api.skills.deleteSupported())) {
+      throw new Error(SKILL_DELETE_UPDATE_REQUIRED_MESSAGE)
+    }
     return
   }
   try {

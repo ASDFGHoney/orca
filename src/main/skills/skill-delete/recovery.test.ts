@@ -175,6 +175,57 @@ describe('recoverSkillDeleteTransaction', () => {
     expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(false)
   })
 
+  it('clears the journal when the recorded move was never performed', async () => {
+    // The journal records intent before each rename, so a crash in that window
+    // leaves a move whose staged path never existed. Rollback must read that as
+    // already restored, not fail it and retry the same journal at every startup.
+    const { stateDirectory, root } = await fixture()
+    const canonicalPath = join(root, 'demo')
+    await mkdir(canonicalPath, { recursive: true })
+    await writeSkillDeleteJournal(
+      stateDirectory,
+      journal(root, canonicalPath, { phase: 'staging' })
+    )
+
+    await recoverSkillDeleteTransaction(stateDirectory, canonicalPath)
+    expect(await exists(canonicalPath)).toBe(true)
+    expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(false)
+  })
+
+  it('clears the journal on retry after an earlier pass already restored a move', async () => {
+    const { home, stateDirectory, root } = await fixture()
+    const canonicalPath = join(root, 'demo')
+    const aliasRoot = join(home, '.claude', 'skills', 'demo')
+    await mkdir(aliasRoot, { recursive: true })
+    const entry = journal(root, canonicalPath, {
+      phase: 'staging',
+      movedCount: 2,
+      allowedRoots: [root, join(home, '.claude', 'skills')],
+      moves: [
+        {
+          sourcePath: join(aliasRoot, 'SKILL.md'),
+          stagedPath: join(aliasRoot, skillDeleteStagedName('SKILL.md', 'id-2')),
+          kind: 'alias-file'
+        },
+        {
+          sourcePath: canonicalPath,
+          stagedPath: join(root, skillDeleteStagedName('demo', 'id-1')),
+          kind: 'canonical'
+        }
+      ]
+    })
+    // The canonical move came back in an interrupted earlier pass; only the
+    // alias-file is still parked at its staged path.
+    await mkdir(canonicalPath, { recursive: true })
+    await writeFile(entry.moves[0].stagedPath, 'link-stand-in')
+    await writeSkillDeleteJournal(stateDirectory, entry)
+
+    await recoverSkillDeleteTransaction(stateDirectory, canonicalPath)
+    expect(await exists(join(aliasRoot, 'SKILL.md'))).toBe(true)
+    expect(await exists(canonicalPath)).toBe(true)
+    expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(false)
+  })
+
   it('restores canonical before alias-file, so no alias dangles mid-recovery', async () => {
     const { home, stateDirectory, root } = await fixture()
     const canonicalPath = join(root, 'demo')

@@ -45,6 +45,14 @@ describe('parseWslListEntriesOutput', () => {
       WslEnumerationProtocolError
     )
   })
+
+  it('refuses an unreadable directory rather than reporting it empty', () => {
+    // An empty listing tells the planner "nothing left here"; the guest marks
+    // an unreadable directory with `X` so it fails like native EACCES instead.
+    expect(() => parseWslListEntriesOutput(records('D', '0', 'X'), ['/a'])).toThrow(
+      WslEnumerationProtocolError
+    )
+  })
 })
 
 describe('parseWslInspectPathsOutput', () => {
@@ -88,5 +96,10 @@ describe('guest scripts', () => {
   it('takes every path positionally rather than interpolating it into the script', () => {
     expect(WSL_LIST_ENTRIES_SCRIPT).toContain('for dir in "$@"; do')
     expect(WSL_INSPECT_PATHS_SCRIPT).toContain('for path in "$@"; do')
+  })
+
+  it('marks an unreadable directory instead of listing it as empty', () => {
+    expect(WSL_LIST_ENTRIES_SCRIPT).toContain('if ! [ -r "$dir" ]; then')
+    expect(WSL_LIST_ENTRIES_SCRIPT).toContain(`printf 'X\\0'`)
   })
 })

@@ -40,7 +40,11 @@ function discoveryResult(names: string[]): SkillDiscoveryResult {
 }
 
 function skillsApi(discover: ReturnType<typeof vi.fn>) {
-  return { discover, onInstallProgress: () => () => undefined }
+  return {
+    discover,
+    deleteSupported: () => Promise.resolve(true),
+    onInstallProgress: () => () => undefined
+  }
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

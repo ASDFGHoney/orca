@@ -29,18 +29,32 @@ const REQUEST: SkillDeleteRequest = {
 
 const localDelete = vi.fn()
 const localPreview = vi.fn()
+const localDeleteSupported = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localDeleteSupported.mockResolvedValue(true)
   vi.stubGlobal('window', {
-    api: { skills: { delete: localDelete, previewDelete: localPreview } }
+    api: {
+      skills: {
+        delete: localDelete,
+        previewDelete: localPreview,
+        deleteSupported: localDeleteSupported
+      }
+    }
   })
 })
 
 describe('runtimeTargetSupportsSkillDelete', () => {
-  it('never probes the local target', async () => {
+  it('asks the preload, not the environment probe, for the local target', async () => {
     expect(await runtimeTargetSupportsSkillDelete({ kind: 'local' })).toBe(true)
+    expect(localDeleteSupported).toHaveBeenCalled()
     expect(runtimeEnvironmentSupportsCapability).not.toHaveBeenCalled()
+  })
+
+  it('is unsupported when the web "local" host predates the capability', async () => {
+    localDeleteSupported.mockResolvedValue(false)
+    expect(await runtimeTargetSupportsSkillDelete({ kind: 'local' })).toBe(false)
   })
 
   it('is unsupported while the runtime target is still unresolved', async () => {
@@ -74,6 +88,14 @@ describe('delete routing', () => {
     expect(localDelete).toHaveBeenCalledWith(REQUEST)
     expect(callRuntimeRpc).not.toHaveBeenCalled()
     expect(assertRuntimeEnvironmentCapability).not.toHaveBeenCalled()
+  })
+
+  it('refuses a local delete when the web "local" host lacks the capability', async () => {
+    localDeleteSupported.mockResolvedValue(false)
+    await expect(deleteSkillsOnRuntimeTarget({ kind: 'local' }, REQUEST)).rejects.toThrow(
+      SKILL_DELETE_UPDATE_REQUIRED_MESSAGE
+    )
+    expect(localDelete).not.toHaveBeenCalled()
   })
 
   it('sends the whole request to a capable remote host', async () => {

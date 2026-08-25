@@ -168,12 +168,30 @@ export async function recoverSkillDeleteTransaction(
     let restoredEvery = true
     for (let index = staged.length - 1; index >= 0; index -= 1) {
       const move = staged[index]
-      // Keep going past a failure so the other moves still come back, but keep
-      // the journal: dropping it here strands the staged path with no record
-      // that startup could retry from. Restores are idempotent.
-      await filesystem.rename(move.stagedPath, move.sourcePath).catch(() => {
-        restoredEvery = false
-      })
+      try {
+        await filesystem.rename(move.stagedPath, move.sourcePath)
+      } catch {
+        // The journal records intent before each rename, so a recorded move may
+        // never have been performed — and a retry re-walks moves an earlier
+        // pass already restored. Both leave the staged path gone with nothing
+        // to move back; counting that as failure would pin the journal forever
+        // on the exact crash it exists to recover from. Any other failure keeps
+        // the journal (with the other moves still restored): dropping it would
+        // strand the staged path with no record startup could retry from.
+        if (!(await skillStagedPathGone(move.stagedPath, filesystem))) {
+          restoredEvery = false
+        }
+      }
+
+      /** True only on positive proof of absence: an unanswerable inspection must keep
+       *  the journal, never clear it. */
+      async function skillStagedPathGone(
+        stagedPath: string,
+        filesystem: SkillInstallFilesystem
+      ): Promise<boolean> {
+        const inspections = await filesystem.inspectPaths?.([stagedPath]).catch(() => null)
+        return inspections?.get(stagedPath)?.kind === 'missing'
+      }
     }
     if (!restoredEvery) {
       return

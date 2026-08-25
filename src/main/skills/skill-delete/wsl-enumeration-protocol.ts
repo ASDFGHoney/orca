@@ -16,6 +16,13 @@ import type {
 export const WSL_LIST_ENTRIES_SCRIPT = [
   'set -u',
   'index=0',
+  // An unreadable directory must fail the whole call, matching the native
+  // listEntries: silently reporting it empty would let the planner treat
+  // unenumerated contents as "nothing left here" and remove the parent.
+  '  if ! [ -r "$dir" ]; then',
+  `    printf 'X\\0'`,
+  '    continue',
+  '  fi',
   'for dir in "$@"; do',
   `  printf 'D\\0%s\\0' "$index"`,
   '  index=$((index + 1))',
@@ -93,6 +100,9 @@ export function parseWslListEntriesOutput(
       const directory = directories[Number.parseInt(fields[index++] ?? '', 10)]
       if (directory === undefined) {
         throw new WslEnumerationProtocolError()
+        // `X`: the guest could not read the directory. Refusing the whole call is
+        // the same contract as the native listEntries throwing on EACCES — only a
+        // confirmed absence may read as an empty directory.
       }
       current = listings.get(directory)
       continue
