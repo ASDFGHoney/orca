@@ -45,18 +45,22 @@ const alwaysVisible: WorktreePollerWindowVisibility = {
   onWindowBecameVisible: () => () => {}
 }
 
+let inodeReservationCount = 0
+
 async function replaceWorktreesRoot(
   commonDir: string,
   worktreesDir: string,
   retainedEntry: string
 ): Promise<void> {
   await rm(worktreesDir, { recursive: true })
-  // Linux can reuse a just-deleted directory inode. Reserve that inode with a
-  // sibling before recreating the watched root so reconciliation sees a replacement.
-  const inodeReservation = join(commonDir, 'worktrees-replacement-inode')
+  // Linux reuses just-deleted directory inodes. Park each freed inode in a
+  // sibling that is HELD for the rest of the test — releasing it would return it
+  // to the free list, so a later replacement could land back on it and look
+  // unchanged to reconciliation. The dirs are siblings of `worktrees`, which no
+  // poll or watch path enumerates.
+  const inodeReservation = join(commonDir, `worktrees-replacement-inode-${++inodeReservationCount}`)
   await mkdir(inodeReservation)
   await mkdir(retainedEntry, { recursive: true })
-  await rm(inodeReservation, { recursive: true, force: true })
 }
 
 function createVisibilityHarness(): {
