@@ -31,16 +31,17 @@ import { createClaudeSessionJournalTranslator } from './claude-structured-journa
 import {
   cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
-  closeClaudeSessionsUntilStopped,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
   type ClaudeStructuredSessionAdapterDeps,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
+import { settleClaudeExitedSession } from './claude-structured-session-close'
 import {
-  closeClaudePublishedSession,
-  settleClaudeExitedSession
-} from './claude-structured-session-close'
+  closeAllClaudeSessions,
+  closeClaudeSession,
+  closePublishedClaudeSession
+} from './claude-structured-session-shutdown'
 
 export type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
 export type {
@@ -111,7 +112,14 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         throw new Error(`claude acquisition for session ${sessionId} could not be stopped`)
       }
       this.acquisitions.assertCurrent(sessionId, attempt)
-      if ((await this.closePublishedSession(sessionId)) === false) {
+      if (
+        (await closePublishedClaudeSession({
+          sessions: this.sessions,
+          sessionId,
+          ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
+          ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
+        })) === false
+      ) {
         throw new Error(`claude stream-json for session ${sessionId} could not be stopped`)
       }
       this.acquisitions.assertCurrent(sessionId, attempt)
@@ -274,41 +282,28 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   cancelTurn: StructuredAgentSessionAdapter['cancelTurn'] = (input) =>
     cancelClaudeTurn(this.session(input.sessionId), this.deps.requestTimeoutMs)
-
   answerPrompt: StructuredAgentSessionAdapter['answerPrompt'] = (input) =>
     answerClaudePrompt(this.session(input.sessionId), input)
-
   setOption: StructuredAgentSessionAdapter['setOption'] = (input) =>
     setClaudeStructuredOption(this.session(input.sessionId), input, this.deps.requestTimeoutMs)
-
   readOptions = (input: { sessionId: string; fence: number }) =>
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
-  releaseAcquisition(input: { sessionId: string }): Promise<void> {
-    return this.closeSession(input.sessionId).then(() => undefined)
-  }
+  releaseAcquisition = (input: { sessionId: string }): Promise<void> =>
+    this.closeSession(input.sessionId).then(() => undefined)
 
-  async closeSession(sessionId: string): Promise<boolean> {
-    if (!(await cancelClaudeAcquisitionAttempt(this.acquisitions.get(sessionId)))) {
-      return false
-    }
-    return this.closePublishedSession(sessionId)
-  }
-  private closePublishedSession(sessionId: string): Promise<boolean> {
-    return closeClaudePublishedSession({
-      sessions: this.sessions,
+  closeSession = (sessionId: string): Promise<boolean> =>
+    closeClaudeSession({
       sessionId,
-      ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),
-      ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
+      deps: this.deps
     })
-  }
-  async closeAll(): Promise<void> {
-    this.acquisitions.close()
-    await closeClaudeSessionsUntilStopped(
-      () => this.sessions.size > 0 || this.acquisitions.size > 0,
-      () => new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()]),
-      (sessionId) => this.closeSession(sessionId)
-    )
-  }
+  closeAll = (): Promise<void> =>
+    closeAllClaudeSessions({
+      sessions: this.sessions,
+      acquisitions: this.acquisitions,
+      close: (sessionId) => this.closeSession(sessionId)
+    })
   private session(sessionId: string): ClaudeSession {
     const session = this.sessions.get(sessionId)
     if (!session) {

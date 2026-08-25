@@ -192,3 +192,39 @@ The structural audit still has an unresolved platform finding: `agent-session-pr
 - The provider adapter contract now requires `closeSession()` to return explicit `true` exit proof. The router, native handoff, and eviction paths fail closed for `false` or an unknown result, retaining ownership for a retry rather than launching a second writer.
 - Codex and Claude `closeAll()` shutdown is bounded to three attempts and reports manual-recovery failure if a child remains indexed, preventing an unbounded shutdown loop when provider exit cannot be proven.
 - Focused Codex/router/eviction/handoff suites pass (73 tests); Node and web typechecks pass after the runtime narrowing fix. The full Claude adapter suite still has one pre-existing failure while the in-progress leaf refactor drops the expected persisted `prompt-leaf` to `null`; this remains a Claude identity blocker, not a release-ready result.
+
+## Exact-head Claude audit (2026-08-24, HEAD `4fc103cd0e`)
+
+- The focused Claude adapter, integration, and legacy-adoption suites pass (28/28), but their
+  fixtures model a synthetic root-user UUID as the durable leaf. They do not exercise the real
+  transcript marker shape.
+- A sample of 200 real Claude JSONL transcripts found that the final `last-prompt.leafUuid`
+  pointed to `assistant` (58), `system` (76), `user` (39), or `attachment` (27) records; none
+  matched the latest root-user UUID. The adapter's root-user tracking and the TUI proof's
+  `last-prompt` tracking therefore identify different cursors.
+- This is still a Claude release blocker. Dispatch replay may use a root-user UUID as the
+  per-submission item identity, but owner/handoff continuity must persist the authoritative
+  transcript cursor and validate `parentUuid` ancestry (descendant accepted; sibling, missing,
+  malformed, or cyclic chain refused).
+- The current real-CLI handshake test expects a non-null leaf immediately after a pre-minted
+  `--session-id` startup, but no user frame exists at that point; it remains credential-gated and
+  has not supplied release proof.
+- Exact-head review also retains these blockers: direct structured launch can publish a hidden tab
+  without focus intent (visible no-op), Claude launch args lack Codex's semantic allowlist, and
+  Claude's deterministic pre-minted session id has no crash/collision healing path.
+- A new P0 process-proof finding applies to both provider handoff and Claude specifically: the
+  Claude stream connection marks itself exited on an `error` event before `exit`/`close` is
+  observed. An error is not proof that the child stopped, so an error-only failure could launch a
+  second writer. A failing-first regression must keep the session indexed and return `false` until
+  exit/close or an independent PID-safe host probe proves death.
+- Claude's journal translator still has a separate lifecycle predicate from dispatch replay: a
+  top-level `user` frame with `parent_tool_use_id: null` starts a turn even when its content is
+  entirely `tool_result`. This can churn turn state during tool activity; the predicate must be
+  shared and covered with a real transcript-shaped regression.
+
+## Codex failure-matrix review (2026-08-25)
+
+- The Codex-side failure matrix is recorded at `~/orca-qa/codex-native-chat-failure-matrix-review-2026-08-25.md`.
+- The shared handoff state machine can remain provider-neutral if ownership compares a stable provider root and history reconciliation carries an advisory provider cursor. Claude's session id is the root; transcript `last-prompt.leafUuid` is a cursor and must not be conflated with a root-user item UUID or a process-owner identity.
+- Current focused Claude adapter/connection/launch/journal tests pass 36/36, and Node/web typechecks plus formatting pass. These are necessary checks, not release proof: the new error-without-exit case, real transcript ancestry, and visible Electron activation/handoff cases remain to be added or exercised.
+- The Claude reviewer independently reported the same root/cursor conflation, so this is now a converged structural blocker rather than a provider-specific style preference.
